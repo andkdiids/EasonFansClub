@@ -4,16 +4,12 @@ import type { UserRole, UserStatus } from '@prisma/client'
 import { deleteUserPermanently, getUserDeletionPreview } from '@/lib/admin-user-deletion'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { invalidateCurrentUserCache } from '@/lib/auth'
-import { MySqlAdvisoryLockBusyError, withMySqlAdvisoryLocks } from '@/lib/mysql-advisory-lock'
+import { MySqlAdvisoryLockBusyError } from '@/lib/mysql-advisory-lock'
+import { updateAdminUserContact } from '@/lib/admin-user-contact'
 import { prisma } from '@/lib/prisma'
 import { adjustRegistrationFeeBalance } from '@/lib/registration-fee'
 import { requireAdmin, sanitizeText } from '@/lib/security'
-import { getPhoneLookupVariants } from '@/lib/phone-number'
 import {
-  canonicalEmailValue,
-  canonicalPhoneValue,
-  getUserContactAdvisoryLockNames,
-  maskContactValue,
   normalizeUserContactPatch,
   UserContactValidationError,
 } from '@/lib/user-contact'
@@ -88,119 +84,12 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     try {
-      const result = await prisma.$transaction(async (tx) => withMySqlAdvisoryLocks(
-        tx,
-        getUserContactAdvisoryLockNames(userId, contactPatch),
-        async () => {
-          const target = await tx.user.findUnique({
-            where: { id: userId },
-            select: {
-              id: true,
-              uid: true,
-              email: true,
-              phone: true,
-              emailVerifiedAt: true,
-              phoneVerifiedAt: true,
-              verificationStatus: true,
-            },
-          })
-          if (!target) throw new Error('USER_NOT_FOUND')
-
-          const nextEmail = contactPatch.email === undefined ? target.email : contactPatch.email
-          const nextPhone = contactPatch.phone === undefined ? target.phone : contactPatch.phone
-          const currentEmail = canonicalEmailValue(target.email)
-          const currentPhone = canonicalPhoneValue(target.phone, contactPatch.phoneCountry)
-          const canonicalNextEmail = canonicalEmailValue(nextEmail)
-          const canonicalNextPhone = canonicalPhoneValue(nextPhone, contactPatch.phoneCountry)
-          const emailChanged = contactPatch.email !== undefined && canonicalNextEmail !== currentEmail
-          const phoneChanged = contactPatch.phone !== undefined && canonicalNextPhone !== currentPhone
-
-          const phoneVariants = canonicalNextPhone
-            ? getPhoneLookupVariants(canonicalNextPhone, contactPatch.phoneCountry)
-            : []
-          const contactFilters = [
-            ...(canonicalNextEmail ? [{ email: canonicalNextEmail }] : []),
-            ...phoneVariants.map((phone) => ({ phone })),
-          ]
-          if (contactFilters.length) {
-            const conflict = await tx.user.findFirst({
-              where: { isDeleted: false, NOT: { id: userId }, OR: contactFilters },
-              select: { id: true, email: true, phone: true },
-            })
-            if (conflict) {
-              if (canonicalNextEmail && canonicalEmailValue(conflict.email) === canonicalNextEmail) throw new Error('EMAIL_ALREADY_EXISTS')
-              if (canonicalNextPhone && phoneVariants.includes(canonicalPhoneValue(conflict.phone, contactPatch.phoneCountry) || '')) throw new Error('PHONE_ALREADY_EXISTS')
-            }
-          }
-
-          const data: Prisma.UserUpdateInput = {}
-          if (contactPatch.email !== undefined) {
-            data.email = nextEmail
-            if (emailChanged) {
-              data.emailVerifiedAt = null
-              data.verificationStatus = nextEmail ? 'PENDING' : 'NONE'
-            }
-          }
-          if (contactPatch.phone !== undefined) {
-            data.phone = nextPhone
-            if (phoneChanged) data.phoneVerifiedAt = null
-          }
-
-          const storedValueChanged = target.email !== nextEmail || target.phone !== nextPhone
-          if (emailChanged) {
-            const now = new Date()
-            await tx.emailVerification.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } })
-            if (canonicalNextEmail) {
-              await tx.emailVerification.updateMany({ where: { email: canonicalNextEmail, usedAt: null }, data: { usedAt: now } })
-            }
-          }
-          if (phoneChanged) {
-            const invalidatedPhones = new Set<string>([
-              ...getPhoneLookupVariants(target.phone, contactPatch.phoneCountry),
-              ...phoneVariants,
-            ])
-            if (invalidatedPhones.size) {
-              await tx.smsCode.updateMany({ where: { phone: { in: [...invalidatedPhones] }, usedAt: null }, data: { usedAt: new Date() } })
-            }
-          }
-
-          const user = await tx.user.update({
-            where: { id: userId },
-            data,
-            select: {
-              id: true,
-              uid: true,
-              email: true,
-              phone: true,
-              emailVerifiedAt: true,
-              phoneVerifiedAt: true,
-              verificationStatus: true,
-              updatedAt: true,
-            },
-          })
-
-          if (storedValueChanged || emailChanged || phoneChanged) {
-            await tx.adminActionLog.create({
-              data: {
-                adminId: guard.user.id,
-                targetUserId: userId,
-                action: 'UPDATE_USER_CONTACT',
-                detail: {
-                  previousPhone: maskContactValue(target.phone),
-                  newPhone: maskContactValue(user.phone),
-                  previousEmail: maskContactValue(target.email),
-                  newEmail: maskContactValue(user.email),
-                  phoneChanged,
-                  emailChanged,
-                  reason: sanitizeText(body?.reason, 180) || '管理员修改用户联系方式',
-                },
-              },
-            })
-          }
-
-          return { changed: storedValueChanged || emailChanged || phoneChanged, user }
-        },
-      ))
+      const result = await prisma.$transaction((tx) => updateAdminUserContact(tx, {
+        userId,
+        adminId: guard.user.id,
+        patch: contactPatch,
+        reason: sanitizeText(body?.reason, 180) || '管理员修改用户联系方式',
+      }))
 
       invalidateCurrentUserCache(userId)
       const message = action === 'updateEmail'
@@ -212,10 +101,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     } catch (error) {
       const code = error instanceof Error ? error.message : ''
       if (code === 'USER_NOT_FOUND') return NextResponse.json({ message: '用户不存在' }, { status: 404 })
-      if (code === 'EMAIL_ALREADY_EXISTS') return NextResponse.json({ message: '该邮箱已被其他用户绑定', code }, { status: 409 })
-      if (code === 'PHONE_ALREADY_EXISTS') return NextResponse.json({ message: '该手机号已被其他用户绑定', code }, { status: 409 })
+      if (code === 'EMAIL_ALREADY_EXISTS') return NextResponse.json({ message: '该邮箱已绑定其他账号', code }, { status: 409 })
+      if (code === 'PHONE_ALREADY_EXISTS') return NextResponse.json({ message: '该手机号已绑定其他账号', code }, { status: 409 })
       if (error instanceof MySqlAdvisoryLockBusyError) return NextResponse.json({ message: '已有联系方式修改正在处理中，请稍后重试', code: 'CONTACT_UPDATE_IN_PROGRESS' }, { status: 409 })
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = String(error.meta?.target || '')
+        if (target.includes('phone')) return NextResponse.json({ message: '该手机号已绑定其他账号', code: 'PHONE_ALREADY_EXISTS' }, { status: 409 })
+        if (target.includes('email')) return NextResponse.json({ message: '该邮箱已绑定其他账号', code: 'EMAIL_ALREADY_EXISTS' }, { status: 409 })
         return NextResponse.json({ message: '手机号或邮箱已被其他用户绑定', code: 'CONTACT_ALREADY_EXISTS' }, { status: 409 })
       }
       throw error

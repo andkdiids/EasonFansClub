@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createFriendRequest } from '@/lib/friends'
-import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { validateFriendRequestReason } from '@/lib/friend-request-validation'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 
 export async function POST(request: Request) {
   const guard = await requireUser()
@@ -17,7 +18,12 @@ export async function POST(request: Request) {
   const targetUid = Number(body?.uid ?? body?.receiverUid)
   if (!Number.isInteger(targetUid)) return NextResponse.json({ message: '请输入正确 UID' }, { status: 400 })
 
-  const result = await createFriendRequest(user, targetUid, sanitizeText(body?.message, 120) || null)
+  const reason = validateFriendRequestReason(body?.reason ?? body?.message)
+  if (!reason.ok) {
+    return NextResponse.json({ ok: false, code: reason.code, message: reason.message }, { status: 400 })
+  }
+
+  const result = await createFriendRequest(user, targetUid, reason.reason)
   return NextResponse.json(result.body, {
     status: result.status,
     headers: { 'Cache-Control': 'private, no-store, max-age=0' },

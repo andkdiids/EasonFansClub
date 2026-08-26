@@ -51,7 +51,7 @@ export default async function MusicSongPage({ params }: { params: Promise<{ id: 
         <p className="mt-5 text-xl font-black text-slate-200">{song.artist}</p>
         <p className="mt-3 text-sm font-bold text-slate-300/65">《{song.MusicAlbum.name}》 · {releaseLabel}</p>
         {tags.length ? <div className="mt-5 flex flex-wrap gap-2">{tags.map((tag) => <span key={tag} className="rounded-full border border-sky-200/15 bg-sky-300/[0.08] px-3 py-1.5 text-xs font-black text-sky-100/75">{tag}</span>)}</div> : null}
-        <div className="mt-7 flex flex-wrap gap-3"><a href="#song-preview" className="rounded-full bg-white px-6 py-3 text-sm font-black text-[#07182d]">▶ 播放试听</a><Link href={`/music/album/${song.albumId}`} className="rounded-full border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-md transition hover:bg-white/15">返回专辑</Link></div>
+        <div className="mt-7 flex flex-wrap gap-3"><a href="#song-preview" className="easmusic-preview-button rounded-full bg-white px-6 py-3 text-sm font-black text-[#07182d]">▶ 播放试听</a><Link href={`/music/album/${song.albumId}`} className="rounded-full border border-white/15 bg-white/[0.08] px-6 py-3 text-sm font-black text-white backdrop-blur-md transition hover:bg-white/15">返回专辑</Link></div>
       </MusicDetailReveal>
     </section>
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { startOfLocalDay, startOfYesterday } from '@/lib/checkin'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -102,7 +102,6 @@ export async function GET(request: Request) {
       ...visibleRows.map((row) => row.User.id),
       ...visibleRows.flatMap((row) => row.DailyMessageComment.map((comment) => comment.User.id)),
     ]
-    const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
     const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
     const messages = visibleRows.map(({ User, DailyMessageComment, ...message }) => ({
       ...message,
@@ -119,12 +118,7 @@ export async function GET(request: Request) {
         profile: User.Profile ? {
           ...User.Profile,
           avatarUrl: publicImageUrl(User.Profile.avatarUrl),
-          displayName: resolveFriendDisplayName({
-            viewerId: viewer?.id,
-            targetUserId: User.id,
-            fallbackName: getPublicUserDisplayName(User),
-            remarkMap,
-          }),
+          displayName: getPublicUserDisplayName(User),
         } : User.Profile,
       },
       comments: DailyMessageComment.map(({ User: commentUser, ...comment }) => ({
@@ -141,12 +135,7 @@ export async function GET(request: Request) {
           profile: commentUser.Profile ? {
             ...commentUser.Profile,
             avatarUrl: publicImageUrl(commentUser.Profile.avatarUrl),
-            displayName: resolveFriendDisplayName({
-              viewerId: viewer?.id,
-              targetUserId: commentUser.id,
-              fallbackName: getPublicUserDisplayName(commentUser),
-              remarkMap,
-            }),
+            displayName: getPublicUserDisplayName(commentUser),
           } : commentUser.Profile,
         },
       })),

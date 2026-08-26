@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  appendUniqueDiscoveryPosts,
   getForumDiscoveryCoverFit,
   mergeRecentRecommendedPostIds,
   normalizeDiscoveryIds,
@@ -55,6 +56,21 @@ test('推荐流排除 ID 会去重并限制输入规模', () => {
   assert.doesNotMatch(route, /ORDER\s+BY\s+RAND\s*\(/i)
 })
 
+test('小臣书追加按 post.id 保持旧顺序，并保留已显示帖子的对象', () => {
+  const page1 = [{ id: 'p1', title: '第一页-1' }, { id: 'p2', title: '第一页-2' }]
+  const page2 = [{ id: 'p2', title: '重复但不应覆盖' }, { id: 'p3', title: '第二页-1' }]
+  const page3 = [{ id: 'p4', title: '第三页-1' }]
+
+  const afterPage2 = appendUniqueDiscoveryPosts(page1, page2)
+  const afterPage3 = appendUniqueDiscoveryPosts(afterPage2, page3)
+
+  assert.deepEqual(afterPage2.map((post) => post.id), ['p1', 'p2', 'p3'])
+  assert.deepEqual(afterPage3.map((post) => post.id), ['p1', 'p2', 'p3', 'p4'])
+  assert.strictEqual(afterPage2[0], page1[0])
+  assert.strictEqual(afterPage2[1], page1[1])
+  assert.equal(afterPage2[1]?.title, '第一页-2')
+})
+
 test('主题切换和发现详情只在移动端边界启用', () => {
   const home = readFileSync('components/ForumHome.tsx', 'utf8')
   const detail = readFileSync('components/ForumDiscoveryDetailController.tsx', 'utf8')
@@ -104,6 +120,8 @@ test('system discovery tabs use server-side sorting and never expose post-card I
 
   assert.match(route, /mode === 'hot'/)
   assert.match(route, /likeCount: 'desc'[\s\S]*replyCount: 'desc'[\s\S]*createdAt: 'desc'[\s\S]*id: 'desc'/)
+  assert.match(route, /createdAt: \{ lt: cursor\.date \}/)
+  assert.match(route, /createdAt: cursor\.date, id: \{ lt: cursor\.id \}/)
   assert.match(route, /buildHotCursor/)
   assert.match(route, /take: limit \+ 1/)
   assert.match(route, /isPinned: false/)
@@ -130,7 +148,7 @@ test('小臣书首页只挂载一个 feed，请求具备取消、去重和错误
   assert.match(discovery, /requestRef\.current\?\.controller\.abort\(\)/)
   assert.match(discovery, /requestSequence\.current \+= 1/)
   assert.match(discovery, /postsRef\.current/)
-  assert.match(discovery, /mergeDiscoveryPosts/)
+  assert.match(discovery, /appendUniqueDiscoveryPosts/)
   assert.match(discovery, /recentRecommendedPostIds/)
   assert.match(discovery, /autoLoadBlockedRef/)
   assert.match(discovery, /loadPage\(false, true\)/)
@@ -142,6 +160,7 @@ test('小臣书首页只挂载一个 feed，请求具备取消、去重和错误
   assert.match(discovery, /storedAge <= DISCOVERY_SESSION_MAX_AGE_MS/)
   assert.match(discovery, /savedAt: Date\.now\(\)/)
   assert.doesNotMatch(discovery, /setPosts\(\[\]\)/)
+  assert.doesNotMatch(discovery, /ForumDiscoveryCard key=\{index\}/)
   assert.doesNotMatch(discovery, /setInterval|SWR|mutate\(|addEventListener\(['"](?:focus|online|reconnect)/i)
 })
 
@@ -169,13 +188,20 @@ test('recommendation updates stay keyed by post id and interactions do not refre
   const discovery = readFileSync('components/ForumDiscoveryHome.tsx', 'utf8')
   const card = readFileSync('components/ForumDiscoveryCard.tsx', 'utf8')
   const actions = readFileSync('components/PostActions.tsx', 'utf8')
-  assert.match(discovery, /new Map\(payload\.posts\.map\(\(post\) => \[post\.id, post\]\)\)/)
+  const css = readFileSync('app/globals.css', 'utf8')
+  assert.match(discovery, /appendUniqueDiscoveryPosts\(\[\], payload\.posts, true\)/)
+  assert.match(discovery, /appendUniqueDiscoveryPosts\(currentPosts, incoming, reset\)/)
+  assert.doesNotMatch(discovery, /new Map\(payload\.posts/)
   assert.match(discovery, /posts\.map\(\(post\) => post\.id\)/)
   assert.match(discovery, /ecfc:post-interaction/)
   assert.match(discovery, /ecfc:post-reply-count/)
   assert.match(discovery, /post\.id !== detail\.postId/)
   assert.match(discovery, /ForumDiscoveryCard key=\{post\.id\}/)
+  assert.match(css, /@media \(max-width:767px\)[\s\S]*\.forum-discovery-grid \{[\s\S]*display:grid;[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/)
+  assert.doesNotMatch(css, /\.forum-discovery-grid\s*\{\s*column-count:2/)
   assert.match(card, /refreshOnSuccess=\{false\}/)
+  assert.doesNotMatch(card, /useState\(post\)/)
+  assert.match(card, /onLoad=\{\(event\) => setFit/)
   assert.match(actions, /post\.id === detail\.postId/)
 })
 

@@ -1,73 +1,116 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { FriendRequestReasonDialog, type FriendRequestSubmitResult } from '@/components/FriendRequestReasonDialog'
 
 type AddFriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
 export function AddFriendButton({
   uid,
   initialStatus,
-}: Readonly<{ uid: number; initialStatus: AddFriendStatus }>) {
+  targetName = '对方',
+  onStatusChange,
+}: Readonly<{
+  uid: number
+  initialStatus: AddFriendStatus
+  targetName?: string
+  onStatusChange?: (status: AddFriendStatus) => void
+}>) {
   const router = useRouter()
   const [status, setStatus] = useState<AddFriendStatus>(initialStatus)
   const [error, setError] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [reasonDialogOpen, setReasonDialogOpen] = useState(false)
+  const conflictStatusRef = useRef<AddFriendStatus | null>(null)
+
+  const applyStatus = (nextStatus: AddFriendStatus) => {
+    setStatus(nextStatus)
+    onStatusChange?.(nextStatus)
+  }
 
   if (status === 'FRIEND') return null
 
-  async function sendRequest() {
-    if (isSubmitting || status !== 'NONE') return
+  async function sendRequest(reason: string): Promise<FriendRequestSubmitResult> {
+    if (status !== 'NONE') return { ok: false, message: '好友申请状态已更新，请刷新后重试' }
     setError('')
-    setIsSubmitting(true)
+    try {
+      const response = await fetch('/api/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, message: reason }),
+      })
+      const data = await response.json().catch(() => ({}))
 
-    const response = await fetch('/api/friends/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid }),
-    })
-    const data = await response.json().catch(() => ({}))
-    setIsSubmitting(false)
+      if (!response.ok) {
+        if (response.status === 409 && data.status) {
+          conflictStatusRef.current = data.status === 'FRIEND' ? 'FRIEND' : data.status === 'INCOMING_PENDING' ? 'RECEIVED' : 'PENDING'
+        }
+        const message = typeof data.message === 'string' ? data.message : '发送失败，请稍后重试'
+        setError(message)
+        return { ok: false, message, code: typeof data.code === 'string' ? data.code : undefined }
+      }
 
-    if (!response.ok && response.status !== 409) {
-      setError(data.message || '发送失败')
-      return
+      applyStatus('PENDING')
+      window.dispatchEvent(new Event('friend-dock:refresh'))
+      window.dispatchEvent(new Event('unread-summary:refresh'))
+      router.refresh()
+      return { ok: true }
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '发送失败，请稍后重试'
+      setError(message)
+      return { ok: false, message }
     }
-
-    setStatus(data.status === 'FRIEND' ? 'FRIEND' : data.status === 'INCOMING_PENDING' ? 'RECEIVED' : 'PENDING')
-    window.dispatchEvent(new Event('friend-dock:refresh'))
-    window.dispatchEvent(new Event('unread-summary:refresh'))
-    router.refresh()
   }
 
   const label =
     status === 'PENDING'
-        ? '等待通过'
+        ? '已发送申请'
         : status === 'RECEIVED'
           ? '对方已申请你'
-          : isSubmitting
-            ? '发送中...'
-            : '添加好友'
+          : '添加好友'
 
   return (
-    <div>
-      <button
-        onClick={sendRequest}
-        disabled={isSubmitting || status !== 'NONE'}
-        className={`rounded-full px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-70 ${
-          status === 'NONE'
-            ? 'border border-sky-100 bg-brand-950 text-white shadow-sm hover:bg-brand-800'
-            : 'border border-sky-100 bg-sky-50 text-brand-700 shadow-sm'
-        }`}
-      >
-        {label}
-      </button>
-      {error ? <p className="mt-2 text-xs font-bold text-red-600">{error}</p> : null}
-    </div>
+    <>
+      <div>
+        <button
+          type="button"
+          onClick={() => {
+            conflictStatusRef.current = null
+            setReasonDialogOpen(true)
+          }}
+          disabled={status !== 'NONE'}
+          className={`rounded-full px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-70 ${
+            status === 'NONE'
+              ? 'border border-sky-100 bg-brand-950 text-white shadow-sm hover:bg-brand-800'
+              : 'border border-sky-100 bg-sky-50 text-brand-700 shadow-sm'
+          }`}
+        >
+          {label}
+        </button>
+        {error ? <p className="mt-2 text-xs font-bold text-red-600">{error}</p> : null}
+      </div>
+      <FriendRequestReasonDialog
+        open={reasonDialogOpen}
+        targetName={targetName}
+        onClose={() => {
+          setReasonDialogOpen(false)
+          const nextStatus = conflictStatusRef.current
+          conflictStatusRef.current = null
+          if (nextStatus) {
+            setStatus(nextStatus)
+            onStatusChange?.(nextStatus)
+          } else if (status !== 'NONE') onStatusChange?.(status)
+        }}
+        onSubmit={sendRequest}
+      />
+    </>
   )
 }
 
-export function FriendRequestDecision({ requestId }: Readonly<{ requestId: string }>) {
+export function FriendRequestDecision({ requestId, onCompleted }: Readonly<{
+  requestId: string
+  onCompleted?: (action: 'accept' | 'reject') => void
+}>) {
   const router = useRouter()
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -90,6 +133,7 @@ export function FriendRequestDecision({ requestId }: Readonly<{ requestId: strin
 
     window.dispatchEvent(new Event('friend-dock:refresh'))
     window.dispatchEvent(new Event('unread-summary:refresh'))
+    onCompleted?.(action)
     router.refresh()
   }
 

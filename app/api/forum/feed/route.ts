@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { clampForumPage, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
@@ -77,7 +77,6 @@ export async function GET(request: Request) {
 
   const announcement = selectedBoard?.slug === 'announcements'
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
-  const remarkMap = await loadFriendRemarkMap(user?.id, rows.map((row) => row.User.id))
   const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.User.id))
   return NextResponse.json({
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
@@ -93,12 +92,7 @@ export async function GET(request: Request) {
         profile: User.Profile ? {
           ...User.Profile,
           avatarUrl: publicImageUrl(User.Profile.avatarUrl),
-          displayName: resolveFriendDisplayName({
-            viewerId: user?.id,
-            targetUserId: User.id,
-            fallbackName: getPublicUserDisplayName(User),
-            remarkMap,
-          }),
+          displayName: getPublicUserDisplayName(User),
         } : User.Profile,
       },
       board: Board,

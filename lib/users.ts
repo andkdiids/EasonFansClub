@@ -54,6 +54,19 @@ export function getLoginIdentifierWhere(identifier: string, phoneCountry: PhoneC
   }
 }
 
+/** The login API deliberately resolves contact credentials against User.email
+ * or User.phone only; the internal account is not a phone/email fallback. */
+export function getContactLoginWhere(
+  identifierType: 'phone' | 'email',
+  identifier: string,
+  phoneCountry: PhoneCountryCode = 'CN',
+): Prisma.UserWhereInput {
+  const normalized = identifier.trim()
+  if (identifierType === 'email') return { email: normalized.toLowerCase() }
+  const phoneVariants = getPhoneLookupVariants(identifier, phoneCountry)
+  return { phone: { in: phoneVariants.length ? phoneVariants : [normalized] } }
+}
+
 export async function findCompleteActiveUserByIdentifier(identifier: string) {
   const normalized = identifier.trim()
   const lower = normalized.toLowerCase()
@@ -84,13 +97,11 @@ export async function findCompleteActiveUserByIdentifier(identifier: string) {
 
 export async function findCompleteUserByLoginIdentifier(identifierType: 'phone' | 'email', identifier: string, phoneCountry: PhoneCountryCode = 'CN') {
   const normalized = identifier.trim()
-  const lookup = identifierType === 'email' ? normalized.toLowerCase() : normalized
-  const phoneVariants = identifierType === 'phone' ? getPhoneLookupVariants(identifier, phoneCountry) : []
 
   const user = await prisma.user.findFirst({
     where: {
       isDeleted: false,
-      ...(identifierType === 'email' ? { email: lookup } : { phone: { in: phoneVariants.length ? phoneVariants : [lookup] } }),
+      ...getContactLoginWhere(identifierType, normalized, phoneCountry),
     },
     select: {
       id: true,

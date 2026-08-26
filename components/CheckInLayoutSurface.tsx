@@ -46,7 +46,7 @@ export type CheckInLayoutModuleProps = {
   checkinMoodEnabled?: boolean
   focusMessageId?: string
   focusCommentId?: string
-  focusErrorKind?: 'load' | 'deleted' | 'unavailable'
+  focusErrorKind?: 'load' | 'deleted' | 'not-found' | 'unavailable'
   previewMode?: boolean
 }
 
@@ -74,7 +74,7 @@ function CheckInStatsCard({
   totalCheckIns: number
 }>) {
   const items = [
-    ['医院人数', activeUsers],
+    ['E院人数', activeUsers],
     ['今日挂号', todayCount],
     ['连续天数', consecutiveDays],
     ['累计天数', totalCheckIns],

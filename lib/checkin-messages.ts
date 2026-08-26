@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import type { LikeAvatarUser } from '@/components/LikeAvatars'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { planFriendCheckInMessagePage } from '@/lib/checkin-message-order'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -27,6 +27,45 @@ export type CheckInMessagePagination = {
 export type CheckInMessagesPage = {
   messages: CheckInMessageItem[]
   pagination: CheckInMessagePagination
+}
+
+export type CheckInNotificationTarget = {
+  messageId: string | null
+  commentId: string | null
+  date: Date | null
+}
+
+/**
+ * Resolve a notification target from durable database IDs, not from the
+ * current date, sort order, or pagination. A reply is authoritative about
+ * both its parent message and the business date, which also makes reply-only
+ * legacy links recoverable when the reply ID was persisted in the URL.
+ */
+export async function resolveCheckInNotificationTarget({
+  messageId,
+  commentId,
+}: {
+  messageId?: string | null
+  commentId?: string | null
+}): Promise<CheckInNotificationTarget> {
+  const safeMessageId = messageId?.trim() || null
+  const safeCommentId = commentId?.trim() || null
+  if (!safeMessageId && !safeCommentId) return { messageId: null, commentId: null, date: null }
+
+  const comment = safeCommentId
+    ? await prisma.dailyMessageComment.findUnique({
+        where: { id: safeCommentId },
+        select: { messageId: true, DailyMessage: { select: { date: true } } },
+      })
+    : null
+  if (comment) {
+    return { messageId: comment.messageId, commentId: safeCommentId, date: comment.DailyMessage.date }
+  }
+
+  const message = safeMessageId
+    ? await prisma.dailyMessage.findUnique({ where: { id: safeMessageId }, select: { date: true } })
+    : null
+  return { messageId: safeMessageId, commentId: safeCommentId, date: message?.date || null }
 }
 
 export type AnonymousCheckInMessageItem = {
@@ -515,7 +554,6 @@ async function getCheckInMessagesUncached({
     ...rowsWithFocus.flatMap((item) => item.DailyMessageLike.map((like) => like.userId)),
     ...rowsWithFocus.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
   ]
-  const remarkMap = await loadFriendRemarkMap(viewerId, displayNameUserIds)
   const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
 
   return rowsWithFocus.map((item) => {
@@ -547,12 +585,7 @@ async function getCheckInMessagesUncached({
         Profile: comment.User.Profile ? { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) } : comment.User.Profile,
       },
     }))
-    const authorName = resolveFriendDisplayName({
-      viewerId,
-      targetUserId: item.userId,
-      fallbackName: getPublicUserDisplayName(item.User),
-      remarkMap,
-    })
+    const authorName = getPublicUserDisplayName(item.User)
     return {
       ...item,
       content: publicModerationText(item.content, item.moderationStatus),
@@ -567,12 +600,7 @@ async function getCheckInMessagesUncached({
       likers: item.DailyMessageLike.map((like) => ({
         uid: like.User.uid,
         nickname: getPublicUserDisplayName(like.User),
-        displayName: resolveFriendDisplayName({
-          viewerId,
-          targetUserId: like.userId,
-          fallbackName: getPublicUserDisplayName(like.User),
-          remarkMap,
-        }),
+            displayName: getPublicUserDisplayName(like.User),
         avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl || null),
         equippedBadge: equippedBadgeMap.get(like.User.id) || null,
       })),
@@ -590,12 +618,7 @@ async function getCheckInMessagesUncached({
           profile: comment.User.Profile ? {
             ...comment.User.Profile,
             avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl),
-            displayName: resolveFriendDisplayName({
-              viewerId,
-              targetUserId: comment.User.id,
-              fallbackName: getPublicUserDisplayName(comment.User),
-              remarkMap,
-            }),
+            displayName: getPublicUserDisplayName(comment.User),
           } : comment.User.Profile,
         },
         canDelete: viewerCanModerate || comment.User.id === viewerId,
@@ -607,7 +630,7 @@ async function getCheckInMessagesUncached({
   })
 }
 
-export type CheckInReplyStatus = 'visible' | 'deleted' | 'unavailable'
+export type CheckInReplyStatus = 'visible' | 'deleted' | 'not-found' | 'unavailable'
 
 export async function getCheckInReplyStatus({ messageId, commentId }: { messageId: string; commentId: string }): Promise<CheckInReplyStatus> {
   const comment = await prisma.dailyMessageComment.findUnique({
@@ -619,8 +642,7 @@ export async function getCheckInReplyStatus({ messageId, commentId }: { messageI
     },
   })
 
-  if (!comment || comment.messageId !== messageId || comment.DailyMessage.isDeleted || !['APPROVED', 'VIOLATION'].includes(comment.DailyMessage.moderationStatus)) {
-    return 'unavailable'
-  }
+  if (!comment || comment.messageId !== messageId) return 'not-found'
+  if (comment.DailyMessage.isDeleted || !['APPROVED', 'VIOLATION'].includes(comment.DailyMessage.moderationStatus)) return 'unavailable'
   return comment.isDeleted ? 'deleted' : 'visible'
 }

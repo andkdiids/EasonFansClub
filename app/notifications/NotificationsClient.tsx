@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { SystemNotificationDialog } from '@/components/SystemNotificationDialog'
 import { NotificationReplyComposer, type NotificationReplyPayload } from '@/components/NotificationReplyComposer'
+import { FriendProfileCard } from '@/components/FriendProfileCard'
+import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
@@ -13,8 +15,8 @@ import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { parseNotificationCategory, type NotificationCategory, type UnifiedNotification, type UnreadSummary } from '@/lib/notifications'
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
-import { UserDisplayName } from '@/components/UserDisplayName'
 import { safeInternalPathOrNull } from '@/lib/url-safety'
+import type { FriendDockUser } from '@/lib/friend-types'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
 const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
@@ -114,6 +116,31 @@ function formatTime(value: Date | string) {
 
 function getInitial(uid?: number | null) {
   return uid ? String(uid).padStart(5, '0').slice(0, 1) : 'E'
+}
+
+function getNotificationActorCardFriend(item: UnifiedNotification): FriendDockUser | null {
+  if (item.actorProfile) return item.actorProfile
+  if (!item.actorUnavailable || item.actorUid === null) return null
+  // Keep a deleted/disabled actor as a safe placeholder so the shared card
+  // can explain the state without exposing internal account fields.
+  const createdAt = item.createdAt instanceof Date ? item.createdAt.toISOString() : new Date(item.createdAt).toISOString()
+  return {
+    id: `notification-actor:${item.actorUid}`,
+    uid: item.actorUid,
+    nickname: item.actorName || 'E院用户',
+    displayName: item.actorName || 'E院用户',
+    friendRemark: null,
+    avatarUrl: item.actorAvatarUrl,
+    bio: null,
+    isOnline: false,
+    lastActiveAt: null,
+    createdAt,
+    level: 1,
+    levelName: '初入E院',
+    equippedBadge: item.actorBadge,
+    profile: null,
+    relationshipStatus: 'NONE',
+  }
 }
 
 type NotificationReadResponse = {
@@ -274,6 +301,7 @@ export function NotificationsClient({
   const [loadError, setLoadError] = useState(initialLoadError || '')
   const [loadWarning, setLoadWarning] = useState(initialLoadWarning || '')
   const [selectedSystemNotification, setSelectedSystemNotification] = useState<UnifiedNotification | null>(null)
+  const [selectedActor, setSelectedActor] = useState<{ friend: FriendDockUser; unavailable: boolean } | null>(null)
 
   const mergeServerNotifications = useCallback((serverNotifications: UnifiedNotification[], nextPagination?: NotificationPagination) => {
     const merged = filterDismissedSystemNotifications(serverNotifications).map((item) => {
@@ -775,6 +803,7 @@ export function NotificationsClient({
     const systemNotification = isSystemNotification(item)
     const target = systemNotification ? null : getNotificationTarget(item)
     const systemLike = isSystemLikeNotification(item)
+    const actorCardFriend = !systemLike ? getNotificationActorCardFriend(item) : null
     const isBirthday = isBirthdayNotification(item)
     const isUserReward = item.key?.startsWith('user-reward:') === true
     const isReplyNotification = item.type === 'REPLY' || item.category === 'feedback'
@@ -787,8 +816,10 @@ export function NotificationsClient({
     const emphasisClass = isBirthday && !isNotificationRead(item) ? 'border-l-4 border-l-sky-400 bg-sky-50/70' : ''
     const titleClass = isNotificationRead(item) ? 'font-bold text-slate-700' : 'font-black text-slate-950'
     // 生日通知分类文字显示为「今日」（仅前端展示，不动数据库枚举）
-    const displayLabel = isBirthday ? '今日' : item.typeLabel
+    const displayLabel = (isBirthday ? '今日' : item.typeLabel)?.trim() || null
     const hasDisplayLabel = Boolean(displayLabel?.trim())
+    const unreadLabel = isNotificationRead(item) ? null : '未读'
+    const displayActorName = item.actorName?.trim() || null
 
     // 整卡可点击跳转；无跳转目标时仅标记已读。键盘可达。
     function handleCardActivate() {
@@ -823,6 +854,22 @@ export function NotificationsClient({
                   <span className="ecfc-brand-icon" aria-hidden>Ｅ</span>
                 )}
               </span>
+            ) : actorCardFriend ? (
+              <button
+                type="button"
+                className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-xl bg-brand-950 p-0 text-xs font-black text-white sm:h-9 sm:w-9"
+                aria-label={`查看${item.actorName || '该用户'}的资料卡`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  void markRead(item)
+                  setSelectedActor({ friend: actorCardFriend, unavailable: item.actorUnavailable })
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                <SafeAvatar src={item.actorAvatarUrl} name={item.actorName || item.title} uid={item.actorUid} className="h-full w-full" textClassName="text-xs" />
+              </button>
             ) : (
               <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-xl bg-brand-950 text-xs font-black text-white sm:h-9 sm:w-9">
                 {profileImageUrl(item.actorAvatarUrl) ? <img src={publicImageVariantUrl(item.actorAvatarUrl, 'avatar-md') || profileImageUrl(item.actorAvatarUrl)!} alt={item.actorName || item.title} className="h-full w-full object-cover" loading="lazy" /> : getInitial(item.actorUid)}
@@ -840,12 +887,12 @@ export function NotificationsClient({
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex flex-wrap items-center gap-1.5">
               {hasDisplayLabel ? <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span> : null}
-              {!isNotificationRead(item) ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">未读</span> : null}
+              {unreadLabel ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">{unreadLabel}</span> : null}
             </div>
-            <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.actorBadge ? <UserDisplayName name="" uid={item.actorUid} badge={item.actorBadge} compact /> : null}{item.title}</h2>
+            <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
             {isReplyNotification && displayReplyPreview ? (
               <p className="notification-reply-preview mt-0.5 break-words text-xs font-bold leading-4 text-slate-600">
-                {replyPreview && item.actorName ? <span className="font-black text-slate-700"><UserDisplayName name={item.actorName} uid={item.actorUid} badge={item.actorBadge} compact />：</span> : null}
+                {replyPreview && displayActorName ? <span className="font-black text-slate-700">{displayActorName}：</span> : null}
                 {displayReplyPreview}
               </p>
             ) : !isReplyNotification && fallbackContent ? (
@@ -1068,6 +1115,18 @@ export function NotificationsClient({
           }}
         />
       ) : null}
+      {selectedActor ? <FriendProfileCard
+        friend={selectedActor.friend}
+        unavailableMessage={selectedActor.unavailable ? '该用户已不存在' : undefined}
+        showMessage={selectedActor.friend.relationshipStatus === 'FRIEND'}
+        onClose={() => setSelectedActor(null)}
+        onNavigate={() => setSelectedActor(null)}
+        onMessage={() => {
+          const friend = selectedActor.friend
+          setSelectedActor(null)
+          window.dispatchEvent(new CustomEvent('friend-dock:open', { detail: { action: 'chat', friend } }))
+        }}
+      /> : null}
       <ConfirmDialog
         open={Boolean(clearConfirm)}
         title={clearConfirm?.title || ''}

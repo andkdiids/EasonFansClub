@@ -4,7 +4,7 @@ import { PageContainer } from '@/components/PageContainer'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
@@ -115,10 +115,6 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const sentIds = new Set(sentRequests.map((item) => item.receiverId))
   const receivedIds = new Set(receivedRequests.map((item) => item.senderId))
   const receivedRequestBySender = new Map(receivedRequests.map((item) => [item.senderId, item.id]))
-  const remarkMap = await loadFriendRemarkMap(viewer?.id, [
-    ...friendIds,
-    ...posts.map((post) => post.User.id),
-  ])
   const equippedBadgeMap = await getEquippedBadgesForUsers([
     ...users.map((item) => item.id),
     ...posts.map((post) => post.User.id),
@@ -158,23 +154,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
                 <p className="font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
                 <p className="mt-2 text-sm text-slate-500">
-                  {post.Board.name} · <UserDisplayName name={resolveFriendDisplayName({
-                    viewerId: viewer?.id,
-                    targetUserId: post.User.id,
-                    fallbackName: getPublicUserDisplayName(post.User),
-                    remarkMap,
-                  })} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · 回复 {post.replyCount}
+                  {post.Board.name} · <UserDisplayName name={getPublicUserDisplayName(post.User)} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · 回复 {post.replyCount}
                 </p>
               </Link>
             ))}
             {users.length ? <h2 className="pt-3 text-lg font-black text-brand-950">用户</h2> : null}
             {users.map((item) => {
-              const name = resolveFriendDisplayName({
-                viewerId: viewer?.id,
-                targetUserId: item.id,
-                fallbackName: getPublicUserDisplayName(item),
-                remarkMap,
-              })
+              const name = getPublicUserDisplayName(item)
               const avatar = profileImageUrl(item.Profile?.avatarUrl || item.avatarUrl)
               const growth = calculateGrowthSummary(item.experience, growthLevels)
               const status = friendIds.has(item.id) ? 'FRIEND' : sentIds.has(item.id) ? 'PENDING' : receivedIds.has(item.id) ? 'RECEIVED' : 'NONE'

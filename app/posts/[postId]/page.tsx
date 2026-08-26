@@ -14,7 +14,7 @@ import { ForumDiscoveryDetailController } from '@/components/ForumDiscoveryDetai
 import { ForumDiscoveryDetailTopbar } from '@/components/ForumDiscoveryDetailTopbar'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -240,15 +240,22 @@ const replyDetailSelect = {
   },
 } satisfies Prisma.ReplySelect
 
-async function loadPostReplies(postId: string, sort: PostReplySort, requestedPage: number) {
+async function loadPostReplies(postId: string, sort: PostReplySort, requestedPage: number, viewerId?: string | null) {
   return prisma.$transaction(async (tx) => {
-    const [pinnedReply, normalTotal] = await Promise.all([
+    const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
       tx.reply.findFirst({
         where: { postId, isDeleted: false, parentId: null, isPinned: true },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: replyDetailSelect,
       }),
       tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false } }),
+      viewerId
+        ? tx.reply.findMany({
+            where: { postId, authorId: viewerId, isDeleted: false, parentId: null },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            select: replyDetailSelect,
+          })
+        : Promise.resolve([]),
     ])
     const totalPages = getPostReplyTotalPages(normalTotal)
     const page = clampPostReplyPage(requestedPage, totalPages)
@@ -261,7 +268,9 @@ async function loadPostReplies(postId: string, sort: PostReplySort, requestedPag
     })
 
     const rootIds = [pinnedReply?.id, ...normalRoots.map((reply) => reply.id)].filter((id): id is string => Boolean(id))
-    const childRows = rootIds.length
+    const viewerRootIds = myRootReplies.map((reply) => reply.id)
+    const childRootIds = Array.from(new Set([...rootIds, ...viewerRootIds]))
+    const childRows = childRootIds.length
       ? await tx.reply.findMany({
           where: { postId, isDeleted: false, parentId: { not: null } },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -269,12 +278,17 @@ async function loadPostReplies(postId: string, sort: PostReplySort, requestedPag
         })
       : []
     const includedRootIds = new Set(rootIds)
+    const includedViewerRootIds = new Set(viewerRootIds)
     let added = true
     while (added) {
       added = false
       for (const child of childRows) {
         if (child.parentId && includedRootIds.has(child.parentId) && !includedRootIds.has(child.id)) {
           includedRootIds.add(child.id)
+          added = true
+        }
+        if (child.parentId && includedViewerRootIds.has(child.parentId) && !includedViewerRootIds.has(child.id)) {
+          includedViewerRootIds.add(child.id)
           added = true
         }
       }
@@ -285,6 +299,10 @@ async function loadPostReplies(postId: string, sort: PostReplySort, requestedPag
         ...(pinnedReply ? [pinnedReply] : []),
         ...normalRoots,
         ...childRows.filter((reply) => includedRootIds.has(reply.id)),
+      ],
+      myRows: [
+        ...myRootReplies,
+        ...childRows.filter((reply) => includedViewerRootIds.has(reply.id)),
       ],
       total: normalTotal,
       totalPages,
@@ -468,11 +486,13 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
   let commentsLoadError = false
   let postReplies: Awaited<ReturnType<typeof loadPostReplies>>['rows'] = []
+  let myPostReplies: Awaited<ReturnType<typeof loadPostReplies>>['myRows'] = []
   let commentPage = 1
   let commentTotalPages = 1
   try {
-    const loadedReplies = await loadPostReplies(postId, commentSort, requestedCommentPage)
+    const loadedReplies = await loadPostReplies(postId, commentSort, requestedCommentPage, user?.id)
     postReplies = loadedReplies.rows
+    myPostReplies = loadedReplies.myRows
     commentPage = loadedReplies.page
     commentTotalPages = loadedReplies.totalPages
   } catch (error) {
@@ -530,16 +550,16 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     if (markedNotifications > 0) emitRealtime(user.id, 'notification')
   }
 
-  const displayNameUserIds = [
+  const allLoadedReplies = [...postReplies, ...myPostReplies]
+  const displayNameUserIds = Array.from(new Set([
     post.User.id,
     ...post.Like.map((like) => like.userId),
-    ...postReplies.flatMap((reply) => [
+    ...allLoadedReplies.flatMap((reply) => [
       reply.User.id,
       ...reply.ReplyLike.map((like) => like.userId),
       ...reply.ReplyMention.map((mention) => mention.User_ReplyMention_mentionedUserIdToUser.id),
     ]),
-  ]
-  const remarkMap = await loadFriendRemarkMap(user?.id, displayNameUserIds)
+  ]))
   const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
 
   // 当前用户的点赞状态：两次恒定数量的批量查询（避免 N+1）；点赞用户头像列表由 Like / ReplyLike include 提供。
@@ -547,10 +567,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const viewerLikedReplyIds = new Set<string>()
   if (user) {
     try {
+      const replyIds = Array.from(new Set(allLoadedReplies.map((reply) => reply.id)))
       const [viewerPostLike, viewerReplyLikes] = await Promise.all([
         prisma.like.findUnique({ where: { postId_userId: { postId, userId: user.id } }, select: { id: true } }),
         prisma.replyLike.findMany({
-          where: { userId: user.id, replyId: { in: postReplies.map((reply) => reply.id) } },
+          where: { userId: user.id, replyId: { in: replyIds } },
           select: { replyId: true },
         }),
       ])
@@ -564,12 +585,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const liked = viewerPostLiked
   const favorited = Array.isArray(post.PostFavorite) && post.PostFavorite.length > 0
   const authorAvatar = publicImageVariantUrl(profileImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl), 'avatar-md')
-  const authorName = resolveFriendDisplayName({
-    viewerId: user?.id,
-    targetUserId: post.User.id,
-    fallbackName: getPublicUserDisplayName(post.User),
-    remarkMap,
-  })
+  const authorName = getPublicUserDisplayName(post.User)
   const isArchivedAuthor = post.User.uid === 0
   const canManagePost = Boolean(user && await hasAdminPermission(user, 'post_manage'))
   const canManageReplies = Boolean(user && await hasAdminPermission(user, 'reply_manage'))
@@ -578,7 +594,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const publicPostContent = publicContentImageMarkers(post.content)
   const publicPostTitle = publicModerationText(post.title, post.moderationStatus)
   const safePublicPostContent = publicModerationText(publicPostContent, post.moderationStatus)
-  const replyRows = postReplies.map(({ ReplyLike, ReplyMention, User, ...reply }) => ({
+  const serializeReply = ({ ReplyLike, ReplyMention, User, ...reply }: (typeof postReplies)[number]) => ({
     ...reply,
     content: publicModerationText(publicContentImageMarkers(reply.content), reply.moderationStatus),
     stickerId: reply.stickerId ?? null,
@@ -586,12 +602,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     author: User.status === 'ACTIVE' && !User.isDeleted
       ? { ...User, nickname: getPublicUserDisplayName(User), equippedBadge: equippedBadgeMap.get(User.id) || null, profile: User.Profile ? {
           ...User.Profile,
-          displayName: resolveFriendDisplayName({
-            viewerId: user?.id,
-            targetUserId: User.id,
-            fallbackName: getPublicUserDisplayName(User),
-            remarkMap,
-          }),
+          displayName: getPublicUserDisplayName(User),
         } : User.Profile }
       : { id: '', uid: 0, nickname: '已注销用户', level: 0, avatarUrl: null, profile: null },
     liked: viewerLikedReplyIds.has(reply.id),
@@ -599,12 +610,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       ? ReplyLike.map((like) => ({
           uid: like.User.uid,
           nickname: getPublicUserDisplayName(like.User),
-          displayName: resolveFriendDisplayName({
-            viewerId: user?.id,
-            targetUserId: like.userId,
-            fallbackName: getPublicUserDisplayName(like.User),
-            remarkMap,
-          }),
+          displayName: getPublicUserDisplayName(like.User),
           avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
           equippedBadge: equippedBadgeMap.get(like.User.id) || null,
         }))
@@ -614,21 +620,19 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       user: {
         id: mentionedUser.id,
         uid: mentionedUser.uid,
-        name: resolveFriendDisplayName({
-          viewerId: user?.id,
-          targetUserId: mentionedUser.id,
-          fallbackName: getPublicUserDisplayName(mentionedUser),
-          remarkMap,
-        }),
+        name: getPublicUserDisplayName(mentionedUser),
       },
     })),
-  }))
+  })
+  const replyRows = postReplies.map(serializeReply)
+  const myReplyRows = myPostReplies.map(serializeReply)
+  const myRootReplyIds = new Set(myReplyRows.filter((reply) => !reply.parentId).map((reply) => reply.id))
   const directReplyCount = new Map<string, number>()
   replyRows.forEach((reply) => {
     if (reply.parentId) directReplyCount.set(reply.parentId, (directReplyCount.get(reply.parentId) || 0) + 1)
   })
   const hotReplyIds = replyRows
-    .filter((reply) => !reply.parentId && (reply.likeCount >= 3 || (directReplyCount.get(reply.id) || 0) >= 2))
+    .filter((reply) => !reply.parentId && !myRootReplyIds.has(reply.id) && (reply.likeCount >= 3 || (directReplyCount.get(reply.id) || 0) >= 2))
     .sort((a, b) => {
       const aReplies = directReplyCount.get(a.id) || 0
       const bReplies = directReplyCount.get(b.id) || 0
@@ -754,6 +758,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             key={`${commentSort}:${commentPage}`}
             postId={post.id}
             initialReplies={replyRows}
+            initialMyReplies={myReplyRows}
             initialReplyCount={post.replyCount}
             currentUserId={user?.id}
             canManageReplies={canManageReplies}

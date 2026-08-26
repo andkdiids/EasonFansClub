@@ -4,7 +4,7 @@ import { ProfileWall } from '@/components/ProfileWall'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { BackButton } from '@/components/BackButton'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getEquippedBadgeForUser } from '@/lib/badge-service'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -37,17 +37,8 @@ export default async function ProfileWallPage({ params, searchParams }: { params
     })
     if (markedNotifications > 0) emitRealtime(viewer.id, 'notification')
   }
-  const [remarkMap, equippedBadge] = await Promise.all([
-    loadFriendRemarkMap(viewer?.id, [target.id]),
-    getEquippedBadgeForUser(target.id),
-  ])
-  const name = resolveFriendDisplayName({
-    viewerId: viewer?.id,
-    targetUserId: target.id,
-    fallbackName: getPublicUserDisplayName(target),
-    remarkMap,
-    context: 'default',
-  })
+  const equippedBadge = await getEquippedBadgeForUser(target.id)
+  const name = getPublicUserDisplayName(target)
 
   return (
     <>

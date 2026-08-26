@@ -5,7 +5,7 @@ import { AlbumReviewActions } from '@/components/music/AlbumReviewActions'
 import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { getCurrentUser } from '@/lib/auth'
 import { readAlbumReviewImages } from '@/lib/album-reviews'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -32,14 +32,8 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
     prisma.albumReviewLike.findUnique({ where: { reviewId_userId: { reviewId, userId: user.id } } }),
     prisma.albumReviewFavorite.findUnique({ where: { reviewId_userId: { reviewId, userId: user.id } } }),
   ]) : [null, null]
-  const remarkMap = await loadFriendRemarkMap(user?.id, [review.User.id])
   const equippedBadgeMap = await getEquippedBadgesForUsers([review.User.id])
-  const reviewAuthorName = resolveFriendDisplayName({
-    viewerId: user?.id,
-    targetUserId: review.User.id,
-    fallbackName: getPublicUserDisplayName(review.User),
-    remarkMap,
-  })
+  const reviewAuthorName = getPublicUserDisplayName(review.User)
   const images = readAlbumReviewImages(review.images).map((url) => publicImageVariantUrl(url, 'large') || url)
   const albumCoverForHero = publicImageVariantUrl(review.MusicAlbum.coverUrl, 'large')
   review.coverUrl = publicImageVariantUrl(review.coverUrl, 'large')

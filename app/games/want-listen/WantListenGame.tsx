@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { isSessionDefinitivelyInvalid } from '@/lib/client-auth'
+import { canGoToNextQuestion, getWantListenQuestionPhase } from '@/lib/want-listen-client-state'
 import { WANT_LISTEN_MODE_LABELS, type WantListenMode } from '@/lib/want-listen-config'
 
 type QuestionResult = {
@@ -119,6 +120,7 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const [answering, setAnswering] = useState(false)
   const [hinting, setHinting] = useState(false)
   const [nexting, setNexting] = useState(false)
+  const nextingRef = useRef(false)
   const [finishing, setFinishing] = useState(false)
   const [paused, setPaused] = useState(false)
   const [error, setError] = useState('')
@@ -126,15 +128,10 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const [recovering, setRecovering] = useState(false)
   const [recoveryFailed, setRecoveryFailed] = useState(false)
   const [exitOpen, setExitOpen] = useState(false)
-  // 答案揭晓守卫：进入新题（question.id 变化）时强制重置为 false，
-  // 只有在当前题作答成功后才置为 true。这样上一题的作答/反馈/选项高亮
-  // 绝不会残留到下一题（防不胜防模式下杜绝答案闪现）。
-  const [revealed, setRevealed] = useState(false)
-
   // 区分真实鉴权错误与普通接口/网络错误：
   //  - 权威 Session 确认失效 → 提示重新认证，但不清空游戏状态
   //  - 普通接口 401 且权威 Session 仍有效 → 按请求失败处理
-  //  - 500/网络错误 → 「网络波动，正在恢复…」，自动重试，不结束当前局
+  //  - 500/网络错误 → 「网络波动，正在恢复…」，按请求幂等性恢复，不结束当前局
   function handleRequestError(reason: unknown, fallback: string) {
     const apiError = reason as ApiRequestError
     if (apiError?.code === 'AUTH_REQUIRED') {
@@ -208,7 +205,6 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
         body: JSON.stringify({ questionId: session.question.id, optionKey }),
       })
       setSession(data.state)
-      setRevealed(true)
     } catch (reason) {
       handleRequestError(reason, '答案提交失败，请稍后重试。')
     } finally {
@@ -231,15 +227,39 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   }
 
   async function nextQuestion() {
-    if (!session || !session.question?.result || nexting || session.status !== 'IN_PROGRESS') return
+    const questionId = session?.question?.id
+    if (!session || !questionId || !canGoToNextQuestion(session.status, session.question) || nextingRef.current) return
+    nextingRef.current = true
     setNexting(true)
     setError('')
     setAuthError('')
     try {
-      setSession(await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}/next`, { method: 'POST' }))
+      setSession(await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}/next`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionId }),
+      }, 0))
     } catch (reason) {
+      // /next 会推进服务端状态。响应丢失或服务端在提交后报错时，
+      // 不能再次重放同一个 POST；改用幂等 GET 对齐服务端当前题目。
+      const apiError = reason as ApiRequestError
+      const shouldReconcile = apiError?.code === 'NETWORK_ERROR'
+        || apiError?.status === 409
+        || Boolean(apiError?.status && apiError.status >= 500)
+      if (shouldReconcile) {
+        try {
+          const recovered = await request<SessionState>(`/api/entertainment/want-listen/sessions/${encodeURIComponent(session.id)}`, { cache: 'no-store' }, 5)
+          setSession(recovered)
+          setError('')
+          setAuthError('')
+          return
+        } catch {
+          // 继续显示原始错误，并保留当前题结果，用户可以稍后重试。
+        }
+      }
       handleRequestError(reason, '下一题加载失败，请稍后重试。')
     } finally {
+      nextingRef.current = false
       setNexting(false)
     }
   }
@@ -260,12 +280,6 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
     }
   }
 
-  // 进入新题时重置揭晓状态：题目 id 变化即清空上一题的作答/反馈/高亮。
-  // 恢复已答题目时（resume）会随之把 revealed 设为 true，正常展示既有结果。
-  useEffect(() => {
-    setRevealed(Boolean(session?.question?.result))
-  }, [session?.question?.id, session?.question?.result])
-
   async function abandon() {
     if (!session) return router.push('/games/want-listen')
     try {
@@ -283,6 +297,9 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
   const result = question?.result
   const isSettlement = session.status === 'COMPLETED'
   const isExpired = session.status === 'EXPIRED'
+  // 本题是否完成只由服务端返回的 question.result 决定；结果展示、选项锁定、下一题资格共用这一来源。
+  const questionPhase = getWantListenQuestionPhase({ status: session.status, question, answering, nexting })
+  const canGoNext = canGoToNextQuestion(session.status, question)
 
   return (
     <main className={`want-listen-game${session.status === 'IN_PROGRESS' ? ' has-top-controls' : ''}`}>
@@ -323,19 +340,19 @@ export function WantListenGame({ initialSessionId }: Readonly<{ initialSessionId
           ) : <h1>正在恢复当前题目…</h1>}
         </section>
       ) : question ? (
-        <section className="want-listen-question-panel">
+        <section className="want-listen-question-panel" data-question-phase={questionPhase}>
           <div className="want-listen-question-intro"><span>第 {String(question.position).padStart(2, '0')} 题</span><p>{session.mode === 'WANT_LISTEN' ? '线索会逐步出现，答案由服务端判定。' : session.mode === 'CANTONESE_FRAGMENT' ? '选择歌词中消失的那一段。' : '六个歌名里，只有一个不存在。'}</p></div>
           {session.mode === 'WANT_LISTEN' ? <div className="want-listen-hints" aria-label="歌曲线索">{question.hints.map((hint, index) => <div key={index} className={`want-listen-hint hint-${index + 1}`}>{hint.type === 'album-cover' && typeof hint.coverUrl === 'string' ? <><img src={hint.coverUrl} alt="专辑封面线索" /><span>{hintText(hint)}</span></> : <><span className="want-listen-hint-index">0{index + 1}</span><strong>{hintText(hint)}</strong></>}</div>)}</div> : null}
           {session.mode === 'CANTONESE_FRAGMENT' && question.context ? <pre className="want-listen-lyric-context">{question.context}</pre> : null}
           <div className={`want-listen-options mode-${session.mode.toLowerCase()}`}>
             {question.options.map((option) => {
-              const selected = revealed && result?.selectedOptionKey === option.key
-              const correct = revealed && result?.correctOptionKey === option.key
+              const selected = result?.selectedOptionKey === option.key
+              const correct = result?.correctOptionKey === option.key
               const incorrect = selected && !correct
               return <button key={option.key} type="button" onClick={() => void answer(option.key)} disabled={Boolean(result) || answering} className={`${selected ? 'is-selected ' : ''}${correct ? 'is-correct ' : ''}${incorrect ? 'is-incorrect' : ''}`}>{option.label}</button>
             })}
           </div>
-          {revealed && result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>你的答案：{question.options.find((option) => option.key === result.selectedOptionKey)?.label || '—'}</span><span>正确答案：{result.correctAnswer}</span><span>本题得分：{result.awardedScore}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}{result.songTitle ? <small>歌曲：{result.songTitle}</small> : null}{session.status === 'IN_PROGRESS' ? <button type="button" onClick={() => void nextQuestion()} disabled={nexting}>{nexting ? '加载中…' : '下一题 →'}</button> : null}</div> : null}
+          {result ? <div className={`want-listen-answer-result ${result.correct ? 'is-correct' : 'is-wrong'}`}><b>{result.correct ? '回答正确' : '回答错误'}</b><span>你的答案：{question.options.find((option) => option.key === result.selectedOptionKey)?.label || '—'}</span><span>正确答案：{result.correctAnswer}</span><span>本题得分：{result.awardedScore}</span>{result.completeContext ? <pre>{result.completeContext}</pre> : null}{result.songTitle ? <small>歌曲：{result.songTitle}</small> : null}{canGoNext ? <button type="button" onClick={() => void nextQuestion()} disabled={nexting}>{nexting ? '加载中…' : '下一题 →'}</button> : null}</div> : null}
           {!result && session.mode === 'WANT_LISTEN' ? (
             <>
               <p className="want-listen-hint-score-note" style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 8px' }}>

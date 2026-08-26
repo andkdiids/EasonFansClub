@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { normalizedCityKey } from '@/lib/music-personal-live'
 import { myLivePhotoOrderBy, myLivePhotoSelect, serializeMyLivePhotos } from '@/lib/my-live-photo-data'
 import { publicImageUrl } from '@/lib/images'
@@ -48,13 +48,7 @@ export async function GET(_request: Request, { params }: Context) {
     },
   })
   if (!user || !user.Profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
-  const remarkMap = await loadFriendRemarkMap(viewer?.id, [user.id])
-  const displayName = resolveFriendDisplayName({
-    viewerId: viewer?.id,
-    targetUserId: user.id,
-    fallbackName: getPublicUserDisplayName(user),
-    remarkMap,
-  })
+  const displayName = getPublicUserDisplayName(user)
   const tours = new Set(user.UserMusicConcert.map((record) => record.MusicConcert.MusicTour.id))
   const cities = new Set(user.UserMusicConcert.map((record) => normalizedCityKey(record.MusicConcert.city)).filter(Boolean))
   return NextResponse.json({

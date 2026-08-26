@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { publicModerationText } from '@/lib/content-moderation'
 import { splitContentImages } from '@/lib/content-images'
@@ -13,11 +13,16 @@ import { normalizeActionUrl, normalizeStoredInternalPath } from '@/lib/url-safet
 import { logNotificationError } from '@/lib/notification-errors'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import type { FriendDockUser } from '@/lib/friend-types'
+import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 export { getNotificationTarget } from '@/lib/notification-target'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
 const CONTENT_IMAGE_MARKER = /\[\[content-image:[^\]]+\]\]/g
 const REPLY_UNAVAILABLE_TEXT = '该回复已被删除或不可查看'
+const REPLY_NOT_FOUND_TEXT = '该回复不存在或已失效'
+const REPLY_DELETED_TEXT = '该回复已被删除'
+const REPLY_NO_PERMISSION_TEXT = '你暂时无法查看这条回复'
 export const notificationCategoryValues = ['all', 'reply', 'like', 'friend', 'messages', 'feedback', 'system', 'wall'] as const
 export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
@@ -230,6 +235,10 @@ export type UnifiedNotification = {
   actorUid: number | null
   actorAvatarUrl: string | null
   actorBadge: EquippedBadgeView | null
+  /** 当前登录用户可见的公开资料卡数据；系统通知和无 actor 通知为 null。 */
+  actorProfile: FriendDockUser | null
+  /** actor 已被注销/停用时保留占位卡片，但不暴露内部状态。 */
+  actorUnavailable: boolean
   likeCount?: number | null
   likeTargetKind?: LikeNotificationTargetKind | null
   popup: boolean
@@ -278,7 +287,7 @@ type DailyCommentNotificationRow = {
   content: string
   moderationStatus: string
   isDeleted: boolean
-  DailyMessage: { isDeleted: boolean }
+  DailyMessage: { isDeleted: boolean; moderationStatus: string }
 }
 
 async function loadDailyNotificationComments(
@@ -296,7 +305,7 @@ async function loadDailyNotificationComments(
         content: true,
         moderationStatus: true,
         isDeleted: true,
-        DailyMessage: { select: { isDeleted: true } },
+        DailyMessage: { select: { isDeleted: true, moderationStatus: true } },
       },
     })
     return { rows, failed: false }
@@ -401,7 +410,7 @@ async function reconcileStalePersonalNotifications(userId: string) {
 
     if (!target) continue
     if (target.kind === 'post' && !postReplies.some((reply) => reply.id === target.parentId && reply.postId === target.resourceId)) staleIds.add(item.id)
-    if (target.kind === 'daily-message' && !dailyCommentLookup.failed && !dailyComments.some((comment) => comment.id === target.parentId && comment.messageId === target.resourceId && !comment.isDeleted && !comment.DailyMessage.isDeleted)) staleIds.add(item.id)
+    if (target.kind === 'daily-message' && !dailyCommentLookup.failed && !dailyComments.some((comment) => comment.id === target.parentId && !comment.isDeleted && !comment.DailyMessage.isDeleted && ['APPROVED', 'VIOLATION'].includes(comment.DailyMessage.moderationStatus))) staleIds.add(item.id)
     if (target.kind === 'feedback' && !feedbacks.some((feedback) => feedback.id === target.resourceId)) staleIds.add(item.id)
     if (target.kind === 'profile-wall' && !wallMessages.some((message) => message.id === target.parentId && String(message.User_ProfileWallMessage_receiverIdToUser.uid) === String(Number(target.resourceId)))) staleIds.add(item.id)
   }
@@ -744,7 +753,15 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
             nicknameModerationStatus: true,
             nicknameViolationDisplay: true,
             avatarUrl: true,
-            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+            bio: true,
+            bioModerationStatus: true,
+            experience: true,
+            isOnline: true,
+            lastActiveAt: true,
+            createdAt: true,
+            status: true,
+            isDeleted: true,
+            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
           },
         },
       },
@@ -787,10 +804,22 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     const target = parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
     return target ? [target] : []
   })
-  const [remarkResult, likeCountResult, actorBadgeResult] = await Promise.allSettled([
+  const [remarkResult, likeCountResult, actorBadgeResult, friendshipResult, growthLevelResult] = await Promise.allSettled([
     loadFriendRemarkMap(userId, actorIds),
     loadLikeNotificationStats(likeTargets),
     getEquippedBadgesForUsers(actorIds),
+    actorIds.length
+      ? prisma.friendship.findMany({
+          where: {
+            OR: [
+              { userAId: userId, userBId: { in: actorIds } },
+              { userBId: userId, userAId: { in: actorIds } },
+            ],
+          },
+          select: { userAId: true, userBId: true },
+        })
+      : Promise.resolve([]),
+    actorIds.length ? listGrowthLevels() : Promise.resolve([...defaultGrowthLevels]),
   ])
   // 好友备注与点赞统计属于「增强数据」：即使查询失败，通知条目本身仍可正常渲染
   // （好友名回退到展示名、点赞通知回退到存储时生成的标题）。这类失败不应把整页
@@ -813,6 +842,19 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         logNotificationError('list.actor-badge', { userId, page, pageSize, category }, actorBadgeResult.reason)
         return new Map<string, EquippedBadgeView>()
       })()
+  const actorFriendshipRows = friendshipResult.status === 'fulfilled'
+    ? friendshipResult.value
+    : (() => {
+        logNotificationError('list.actor-friendships', { userId, page, pageSize, category }, friendshipResult.reason)
+        return []
+      })()
+  const actorFriendIds = new Set(actorFriendshipRows.flatMap((row) => [row.userAId, row.userBId]).filter((id) => id !== userId))
+  const growthLevels = growthLevelResult.status === 'fulfilled'
+    ? growthLevelResult.value
+    : (() => {
+        logNotificationError('list.actor-growth-levels', { userId, page, pageSize, category }, growthLevelResult.reason)
+        return [...defaultGrowthLevels]
+      })()
   const personalById = new Map(personal.map((item) => [item.id, item]))
   const systemById = new Map(system.map((item) => [item.id, item]))
   const merged: UnifiedNotification[] = rows.flatMap((row): UnifiedNotification[] => {
@@ -821,13 +863,46 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       if (!item) return []
       const link = normalizeStoredInternalPath(item.link)
       const actor = item.User_Notification_actorIdToUser
-      const actorName = actor
-        ? resolveFriendDisplayName({
-            viewerId: userId,
-            targetUserId: actor.id,
-            fallbackName: getPublicUserDisplayName(actor),
-            remarkMap,
-        })
+      const actorNickname = actor ? getPublicUserDisplayName(actor) : null
+      const actorRemark = actor ? (remarkMap.get(actor.id) || null) : null
+      const actorDisplayName = actor
+        ? getFriendDisplayName({
+            nickname: actorNickname,
+            friendRemark: actorRemark,
+            isFriendContext: actorFriendIds.has(actor.id),
+          })
+        : null
+      const actorName = actorDisplayName
+      const actorProfile = actor && actor.status === 'ACTIVE' && !actor.isDeleted
+        ? (() => {
+            const growth = calculateGrowthSummary(actor.experience, growthLevels)
+            const bio = publicModerationText(actor.Profile?.bio || actor.bio, actor.Profile?.bioModerationStatus || actor.bioModerationStatus)
+            return {
+              id: actor.id,
+              uid: actor.uid,
+              nickname: actorNickname || 'E院用户',
+              friendRemark: actorRemark,
+              displayName: actorDisplayName || actorNickname || 'E院用户',
+              avatarUrl: publicImageUrl(actor.avatarUrl),
+              bio,
+              isOnline: actor.isOnline,
+              lastActiveAt: actor.lastActiveAt?.toISOString() || null,
+              createdAt: actor.createdAt.toISOString(),
+              level: growth.level,
+              levelName: growth.levelName,
+              equippedBadge: actorBadgeMap.get(actor.id) || null,
+              profile: actor.Profile
+                ? {
+                    // Keep the public profile field public; the private
+                    // contact name lives in the DTO's displayName field.
+                    displayName: actor.Profile.displayName || null,
+                    avatarUrl: publicImageUrl(actor.Profile.avatarUrl),
+                    bio,
+                  }
+                : null,
+              relationshipStatus: actor.id === userId ? 'SELF' as const : actorFriendIds.has(actor.id) ? 'FRIEND' as const : 'NONE' as const,
+            } satisfies FriendDockUser
+          })()
         : null
       const likeTarget = item.type === 'LIKE'
         ? parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
@@ -847,10 +922,12 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         key: item.key,
         link,
         targetUrl: link,
-        actorName,
+        actorName: actorDisplayName,
         actorUid: actor?.uid || null,
         actorAvatarUrl: publicImageUrl(actor?.Profile?.avatarUrl || actor?.avatarUrl),
         actorBadge: actor ? actorBadgeMap.get(actor.id) || null : null,
+        actorProfile,
+        actorUnavailable: Boolean(actor && !actorProfile),
         likeCount,
         likeTargetKind: likeTarget?.kind || null,
         popup: false,
@@ -888,6 +965,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       actorUid: null,
       actorAvatarUrl: null,
       actorBadge: null,
+      actorProfile: null,
+      actorUnavailable: false,
       popup: item.popup,
       sticky: item.sticky,
       isRead,
@@ -1000,10 +1079,20 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         fallbackItemIds.push(item.id)
         return { ...item, replyDisabledReason: '暂时无法加载回复，请稍后重试', replyPreview: '暂时无法加载回复，请稍后重试' }
       }
-      const comment = dailyComments.find((row) => row.id === target.parentId && row.messageId === target.resourceId)
-      if (!comment || comment.isDeleted || comment.DailyMessage.isDeleted) {
+      // The reply ID is the durable identity. Its messageId is authoritative
+      // for old links whose duplicated message parameter was stale or malformed.
+      const comment = dailyComments.find((row) => row.id === target.parentId)
+      if (!comment) {
         fallbackItemIds.push(item.id)
-        return { ...item, replyDisabledReason: REPLY_UNAVAILABLE_TEXT, replyPreview: REPLY_UNAVAILABLE_TEXT }
+        return { ...item, replyDisabledReason: REPLY_NOT_FOUND_TEXT, replyPreview: REPLY_NOT_FOUND_TEXT }
+      }
+      if (comment.isDeleted) {
+        fallbackItemIds.push(item.id)
+        return { ...item, replyDisabledReason: REPLY_DELETED_TEXT, replyPreview: REPLY_DELETED_TEXT }
+      }
+      if (comment.DailyMessage.isDeleted || !['APPROVED', 'VIOLATION'].includes(comment.DailyMessage.moderationStatus)) {
+        fallbackItemIds.push(item.id)
+        return { ...item, replyDisabledReason: REPLY_NO_PERMISSION_TEXT, replyPreview: REPLY_NO_PERMISSION_TEXT }
       }
       return {
         ...item,
@@ -1126,6 +1215,8 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       actorUid: null,
       actorAvatarUrl: null,
       actorBadge: null,
+      actorProfile: null,
+      actorUnavailable: false,
       popup: item.popup,
       sticky: item.sticky,
       isRead: false,

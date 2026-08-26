@@ -13,6 +13,7 @@ import { cleanLyrics, hasSufficientLyricContext, isValidLyricContext, lyricConte
 import { difficultyForQuestion, scoreForWantListenAnswer } from '../lib/want-listen-config'
 import { compareWantListenScores } from '../lib/want-listen-period'
 import { normalizeWantListenTitle } from '../lib/want-listen-title'
+import { canGoToNextQuestion, getWantListenQuestionPhase } from '../lib/want-listen-client-state'
 
 const root = join(process.cwd())
 
@@ -494,20 +495,71 @@ test('顶部控制：左侧退出 / 右侧暂停（复用听听浮动控制，�
   assert.match(css, /\.want-listen-game-exit-button,.want-listen-game-pause-button \{[^}]*top:max\(10px,env\(safe-area-inset-top\)\)[^}]*min-height:40px/)
 })
 
-test('防不胜防进入新题会重置揭晓状态，未答题不泄露答案', () => {
+test('答题结果与下一题资格共用服务端状态，未答题不泄露答案', () => {
   const game = source('app/games/want-listen/WantListenGame.tsx')
   const service = source('lib/want-listen.ts')
-  // 客户端：题目 id 变化即重置 reveal 守卫，作答成功后才显示答案与高亮，
-  // 上一题的作答/反馈/选项颜色绝不残留到下一题（杜绝答案闪现）。
-  assert.match(game, /const \[revealed, setRevealed\] = useState\(false\)/)
-  assert.match(game, /setRevealed\(Boolean\(session\?\.question\?\.result\)\)\s*\}, \[session\?\.question\?\.id(?:\s*,\s*session\?\.question\?\.result)?\]\)/)
-  assert.match(game, /setRevealed\(true\)/)
-  assert.match(game, /revealed && result \? <div className={`want-listen-answer-result/)
+  // 客户端：结果展示、选项高亮、下一题资格都只使用服务端 question.result，
+  // 不再维护一个可能与提交状态分叉的 revealed boolean。
+  assert.match(game, /const canGoNext = canGoToNextQuestion\(session\.status, question\)/)
+  assert.doesNotMatch(game, /revealed|setRevealed/)
+  assert.match(game, /const selected = result\?\.selectedOptionKey === option\.key/)
+  assert.match(game, /\{canGoNext \? <button type="button" onClick=\{\(\) => void nextQuestion\(\)\}/)
   // 服务端：未答题的 question 不携带 correctOptionKey / correctAnswer，
   // 仅在已作答（answeredAt）时随 result 一并返回正确答案。
   assert.match(service, /const answered = Boolean\(question\.answeredAt\)/)
   assert.match(service, /const result = answered\s*\?/)
   assert.doesNotMatch(service, /correctOptionKey: question\.correctOptionKey,\s*\n\s*options:/)
+})
+
+test('统一答题状态机：结果展示与下一题资格都绑定服务端 result', () => {
+  const unanswered = { result: null }
+  const correct = { result: { correct: true } }
+  const wrong = { result: { correct: false } }
+
+  assert.equal(getWantListenQuestionPhase({ status: 'IN_PROGRESS', question: null, answering: false, nexting: false }), 'QUESTION_LOADING')
+  assert.equal(getWantListenQuestionPhase({ status: 'IN_PROGRESS', question: unanswered, answering: false, nexting: false }), 'QUESTION_READY')
+  assert.equal(getWantListenQuestionPhase({ status: 'IN_PROGRESS', question: unanswered, answering: true, nexting: false }), 'ANSWER_SUBMITTING')
+  assert.equal(getWantListenQuestionPhase({ status: 'IN_PROGRESS', question: correct, answering: false, nexting: false }), 'ANSWER_SUBMITTED')
+  assert.equal(getWantListenQuestionPhase({ status: 'IN_PROGRESS', question: wrong, answering: false, nexting: false }), 'ANSWER_SUBMITTED')
+  assert.equal(getWantListenQuestionPhase({ status: 'IN_PROGRESS', question: correct, answering: false, nexting: true }), 'NEXT_LOADING')
+  assert.equal(canGoToNextQuestion('IN_PROGRESS', correct), true)
+  assert.equal(canGoToNextQuestion('IN_PROGRESS', wrong), true)
+  assert.equal(canGoToNextQuestion('IN_PROGRESS', unanswered), false)
+  assert.equal(canGoToNextQuestion('COMPLETED', correct), false)
+})
+
+test('提示、跨题和三种模式不重置已提交状态来源', () => {
+  const game = source('app/games/want-listen/WantListenGame.tsx')
+  const service = source('lib/want-listen.ts')
+  assert.match(game, /data-question-phase=\{questionPhase\}/)
+  assert.match(game, /disabled=\{Boolean\(result\) \|\| answering\}/)
+  assert.match(game, /!result && session\.mode === 'WANT_LISTEN'/)
+  assert.doesNotMatch(game, /setRevealed|useEffect\(\(\) => \{\s*set.*Submitted|set.*Submitted\(false\)/)
+  assert.match(service, /where: \{ id: current\.id, answeredAt: null \}/)
+  assert.match(service, /WANT_LISTEN_MODES/)
+})
+
+test('下一题请求绑定已完成题目，并对响应丢失后的重放保持幂等', () => {
+  const game = source('app/games/want-listen/WantListenGame.tsx')
+  const route = source('app/api/entertainment/want-listen/sessions/[sessionId]/next/route.ts')
+  const service = source('lib/want-listen.ts')
+  assert.match(game, /const questionId = session\?\.question\?\.id/)
+  assert.match(game, /body: JSON\.stringify\(\{ questionId \}\)/)
+  assert.match(game, /sessions\/\$\{encodeURIComponent\(session\.id\)\}\/next[\s\S]{0,260}\}, 0\)/)
+  assert.match(game, /nextingRef\.current/)
+  assert.match(game, /对齐服务端当前题目/)
+  assert.match(route, /sanitizeText\(body\?\.questionId, 200\)/)
+  assert.match(route, /nextWantListenQuestion\(guard\.user\.id, sessionId, sanitizeText\(body\?\.questionId, 200\)\)/)
+  assert.match(service, /publicQuestionId\?: string/)
+  assert.match(service, /submitted\.answeredAt && submitted\.position < session\.currentQuestion/)
+  assert.match(service, /return toPublicState\(session\)/)
+})
+
+test('下一题 POST 不自动重放，失败后只用 GET 对齐状态', () => {
+  const game = source('app/games/want-listen/WantListenGame.tsx')
+  assert.match(game, /async function nextQuestion\(\)[\s\S]{0,1800}\}, 0\)/)
+  assert.match(game, /async function nextQuestion\(\)[\s\S]{0,1800}request<SessionState>\(`\/api\/entertainment\/want-listen\/sessions\/\$\{encodeURIComponent\(session\.id\)\}`/)
+  assert.doesNotMatch(game.match(/async function nextQuestion\(\)[\s\S]{0,1800}/)?.[0] || '', /await delay\(|retries = 3/)
 })
 
 test('错误日志：服务端记录 operation / userId / mode / device / stack，数据库迁移失配返回明确 code', () => {

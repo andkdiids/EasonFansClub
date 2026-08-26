@@ -1,5 +1,5 @@
 import { profileImageUrl } from '@/lib/images'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 
@@ -77,15 +77,7 @@ export function getProfileRecordPagination(total: number, requestedPage: number,
   return { page, pageSize: safePageSize, total: safeTotal, totalPages, hasMore: page < totalPages }
 }
 
-async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], viewerId?: string | null): Promise<ProfileRecentMessage[]> {
-  const remarkTargetIds = rows.flatMap((row) => row.DailyMessageComment.map((comment) => comment.User.id))
-  let remarkMap: ReadonlyMap<string, string> = new Map()
-  try {
-    remarkMap = await loadFriendRemarkMap(viewerId, remarkTargetIds)
-  } catch (error) {
-    console.error('[profile-page.recentMessages.remarks]', error)
-  }
-
+async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[]): Promise<ProfileRecentMessage[]> {
   return rows.map((message) => ({
     id: message.id,
     mood: message.mood,
@@ -105,12 +97,7 @@ async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], viewerI
       moderationStatus: comment.moderationStatus,
       createdAt: comment.createdAt.toISOString(),
       ipRegion: comment.ipRegion,
-      authorName: resolveFriendDisplayName({
-        viewerId,
-        targetUserId: comment.User.id,
-        fallbackName: getPublicUserDisplayName(comment.User),
-        remarkMap,
-      }),
+      authorName: getPublicUserDisplayName(comment.User),
       authorAvatarUrl: profileImageUrl(comment.User.Profile?.avatarUrl || comment.User.avatarUrl),
     })),
   }))

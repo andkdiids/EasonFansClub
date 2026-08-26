@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicModerationText } from '@/lib/content-moderation'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
@@ -173,10 +173,7 @@ export async function GET(request: Request, context: RouteContext) {
       [],
     )
     const authorIds = favorites.map((item) => item.Post.User.id)
-    const [remarkMap, equippedBadgeMap] = await Promise.all([
-      loadFriendRemarkMap(viewer.id, authorIds),
-      getEquippedBadgesForUsers(authorIds),
-    ])
+    const equippedBadgeMap = await getEquippedBadgesForUsers(authorIds)
     return NextResponse.json({
       items: favorites.map(({ Post, ...favorite }) => ({
         ...favorite,
@@ -190,12 +187,7 @@ export async function GET(request: Request, context: RouteContext) {
             equippedBadge: equippedBadgeMap.get(Post.User.id) || null,
             profile: Post.User.Profile ? {
               ...Post.User.Profile,
-              displayName: resolveFriendDisplayName({
-                viewerId: viewer.id,
-                targetUserId: Post.User.id,
-                fallbackName: getPublicUserDisplayName(Post.User),
-                remarkMap,
-              }),
+              displayName: getPublicUserDisplayName(Post.User),
             } : Post.User.Profile,
           },
         },

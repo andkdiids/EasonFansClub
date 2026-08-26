@@ -5,7 +5,7 @@ import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
@@ -157,7 +157,6 @@ export async function GET(request: Request) {
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
-    const remarkMap = await loadFriendRemarkMap(viewer?.id, pageRows.map((row) => row.User.id))
     const equippedBadgeMap = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id))
     const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, ...post }) => ({
       ...post,
@@ -170,12 +169,7 @@ export async function GET(request: Request) {
         profile: User.Profile ? {
           ...User.Profile,
           avatarUrl: publicImageUrl(User.Profile.avatarUrl),
-          displayName: resolveFriendDisplayName({
-            viewerId: viewer?.id,
-            targetUserId: User.id,
-            fallbackName: getPublicUserDisplayName(User),
-            remarkMap,
-          }),
+          displayName: getPublicUserDisplayName(User),
         } : User.Profile,
       },
       board: Board,

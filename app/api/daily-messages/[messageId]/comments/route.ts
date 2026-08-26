@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
 import { formatBeijingDate } from '@/lib/checkin'
@@ -48,7 +48,7 @@ function serializeComment(comment: {
     level: number
     Profile: { displayName: string | null; displayNameModerationStatus: string; avatarUrl: string | null } | null
   }
-}, viewerId: string, remarkMap: ReadonlyMap<string, string>, equippedBadge?: EquippedBadgeView | null) {
+}, equippedBadge?: EquippedBadgeView | null) {
   const { User, ...row } = comment
   const publicName = getPublicUserDisplayName(User)
   return {
@@ -64,12 +64,7 @@ function serializeComment(comment: {
       level: User.level,
       equippedBadge: equippedBadge || null,
       Profile: User.Profile ? {
-        displayName: resolveFriendDisplayName({
-          viewerId,
-          targetUserId: User.id,
-          fallbackName: publicName,
-          remarkMap,
-        }),
+        displayName: publicName,
         avatarUrl: publicImageUrl(User.Profile.avatarUrl),
       } : null,
     },
@@ -101,9 +96,8 @@ export async function GET(request: Request, context: RouteContext) {
     },
   })
 
-  const remarkMap = await loadFriendRemarkMap(viewer?.id, comments.map((comment) => comment.User.id))
   const equippedBadgeMap = await getEquippedBadgesForUsers(comments.map((comment) => comment.User.id))
-  return NextResponse.json({ comments: comments.map((comment) => serializeComment(comment, viewer?.id || '', remarkMap, equippedBadgeMap.get(comment.User.id) || null)) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
+  return NextResponse.json({ comments: comments.map((comment) => serializeComment(comment, equippedBadgeMap.get(comment.User.id) || null)) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }
 
 export async function POST(request: Request, context: RouteContext) {
@@ -197,6 +191,6 @@ export async function POST(request: Request, context: RouteContext) {
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
   const equippedBadge = await getEquippedBadgesForUsers([guard.user.id])
   return NextResponse.json({
-    comment: serializeComment(comment, guard.user.id, new Map(), equippedBadge.get(guard.user.id) || null),
+    comment: serializeComment(comment, equippedBadge.get(guard.user.id) || null),
   }, { status: 201 })
 }

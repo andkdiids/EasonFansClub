@@ -11,7 +11,7 @@ import { hasTooManyContentImages, MAX_CONTENT_IMAGES, publicContentImageMarkers 
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
@@ -298,7 +298,6 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   const { User, Board, Reply, PostMedia, ...postData } = post
-  const remarkMap = await loadFriendRemarkMap(viewer?.id, [User.id, ...Reply.map((reply) => reply.User.id)])
   const author = User.Profile ? {
     ...User,
     nickname: getPublicUserDisplayName(User),
@@ -306,12 +305,7 @@ export async function GET(_request: Request, { params }: Params) {
     Profile: {
       ...User.Profile,
       avatarUrl: publicImageUrl(User.Profile.avatarUrl),
-      displayName: resolveFriendDisplayName({
-        viewerId: viewer?.id,
-        targetUserId: User.id,
-        fallbackName: getPublicUserDisplayName(User),
-        remarkMap,
-      }),
+      displayName: getPublicUserDisplayName(User),
     },
   } : { ...User, nickname: getPublicUserDisplayName(User), avatarUrl: publicImageUrl(User.avatarUrl) }
   return NextResponse.json({
@@ -336,12 +330,7 @@ export async function GET(_request: Request, { params }: Params) {
           Profile: {
             ...replyAuthor.Profile,
             avatarUrl: publicImageUrl(replyAuthor.Profile.avatarUrl),
-            displayName: resolveFriendDisplayName({
-              viewerId: viewer?.id,
-              targetUserId: replyAuthor.id,
-              fallbackName: getPublicUserDisplayName(replyAuthor),
-              remarkMap,
-            }),
+            displayName: getPublicUserDisplayName(replyAuthor),
           },
         } : { ...replyAuthor, nickname: getPublicUserDisplayName(replyAuthor), avatarUrl: publicImageUrl(replyAuthor.avatarUrl) },
       })),

@@ -26,25 +26,25 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
   const nickname = user.nickname?.trim() || 'E院用户'
   if (user.Profile) user.Profile.avatarUrl = publicImageVariantUrl(user.Profile.avatarUrl, 'avatar-md')
   const details = [
-    ['昵称', nickname],
-    ['UID', formatUid(user.uid)],
-    ['内部账号', user.username],
-    ['角色', user.role],
-    ['状态', user.status],
-    ['邮箱', user.email || '未绑定'],
-    ['邮箱验证', user.email ? (user.emailVerifiedAt ? '已验证' : '未验证') : '未绑定'],
-    ['手机', user.phone || '未绑定'],
-    ['手机验证', user.phone ? (user.phoneVerifiedAt ? '已验证' : '未验证') : '未绑定'],
-    ['整体验证状态', user.verificationStatus],
-    ['等级', `Lv.${user.level}`],
-    ['挂号费', String(user.points)],
+    { field: 'nickname', label: '昵称', value: nickname },
+    { field: 'uid', label: 'UID', value: formatUid(user.uid) },
+    { field: 'username', label: '内部账号', value: user.username },
+    { field: 'role', label: '角色', value: user.role },
+    { field: 'status', label: '状态', value: user.status },
+    { field: 'email', label: '邮箱', value: user.email || '未绑定' },
+    { field: 'emailVerifiedAt', label: '邮箱验证', value: user.email ? (user.emailVerifiedAt ? '已验证' : '未验证') : '未绑定' },
+    { field: 'phone', label: '手机', value: user.phone || '未绑定' },
+    { field: 'phoneVerifiedAt', label: '手机验证', value: user.phone ? (user.phoneVerifiedAt ? '已验证' : '未验证') : '未绑定' },
+    { field: 'verificationStatus', label: '整体验证状态', value: user.verificationStatus },
+    { field: 'level', label: '等级', value: `Lv.${user.level}` },
+    { field: 'points', label: '挂号费', value: String(user.points) },
   ]
 
   return <><main className="mx-auto max-w-5xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
     <Link href="/admin/users" className="text-sm font-black text-brand-700">← 返回用户管理</Link>
     <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center"><div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">{user.Profile?.avatarUrl ? <img src={user.Profile.avatarUrl} alt="" className="size-full object-cover" /> : formatUid(user.uid).slice(0, 1)}</div><div><h1 className="text-3xl font-black text-brand-950 sm:text-4xl">{nickname}</h1><p className="mt-2 text-sm font-bold text-slate-500">UID {formatUid(user.uid)} · 注册于 {user.createdAt.toLocaleString('zh-CN', { hour12: false })}</p></div></div>
-      <dl className="mt-7 grid gap-3 sm:grid-cols-2 md:grid-cols-4">{details.map(([label, value]) => <div key={label} className="rounded-2xl bg-sky-50 p-4"><dt className="text-xs font-black text-brand-700">{label}</dt><dd className="mt-2 break-all font-black text-brand-950">{value}</dd></div>)}</dl>
+      <dl className="mt-7 grid gap-3 sm:grid-cols-2 md:grid-cols-4">{details.map(({ field, label, value }) => <div key={field} data-user-field={field} className="rounded-2xl bg-sky-50 p-4"><dt className="text-xs font-black text-brand-700">{label}</dt><dd className="mt-2 break-all font-black text-brand-950">{value}</dd></div>)}</dl>
       <div className="mt-5 grid gap-3 sm:grid-cols-5">{Object.entries(user._count).map(([label, value]) => <div key={label} className="rounded-2xl border border-sky-100 p-4 text-center"><p className="text-2xl font-black text-brand-950">{value}</p><p className="mt-1 text-xs font-bold text-slate-400">{label}</p></div>)}</div>
       {user.mustSetupSecurity ? <p className="mt-5 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black text-amber-700">该用户需要重新确认密保设置。</p> : null}
     </section>

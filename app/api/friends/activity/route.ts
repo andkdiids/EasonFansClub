@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/security'
 import { getFriendIds } from '@/lib/friends'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -102,17 +102,17 @@ export async function GET(request: Request) {
       actor: {
         ...item.User,
         nickname: getPublicUserDisplayName(item.User),
+        friendRemark: remarkMap.get(item.actorId) || null,
+        displayName: getFriendDisplayName({
+          nickname: getPublicUserDisplayName(item.User),
+          friendRemark: remarkMap.get(item.actorId),
+          isFriendContext: true,
+        }),
         equippedBadge: equippedBadgeMap.get(item.actorId) || null,
         avatarUrl: publicImageUrl(item.User.avatarUrl),
         profile: item.User.Profile ? {
           ...item.User.Profile,
           avatarUrl: publicImageUrl(item.User.Profile.avatarUrl),
-          displayName: resolveFriendDisplayName({
-            viewerId: viewer.id,
-            targetUserId: item.actorId,
-            fallbackName: getPublicUserDisplayName(item.User),
-            remarkMap,
-          }),
         } : item.User.Profile,
       },
     })),

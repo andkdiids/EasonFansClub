@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { ImageViewer } from '@/components/ImageViewer'
 import { postModerationStatuses, type PostModerationStatus } from '@/lib/post-moderation'
 
 export type ReviewPost = {
@@ -144,6 +145,7 @@ export function PostReviewManager({ initialPosts, initialHasMore }: { initialPos
     <div className="mt-5 divide-y divide-sky-100">
       {posts.map((post) => {
         const isReviewing = reviewingId === post.id
+        const imageItems = post.PostMedia.flatMap((media, index) => media.url ? [{ id: media.id, src: media.url, previewSrc: media.thumbnail || undefined, alt: `帖子图片 ${index + 1}` }] : [])
         return <article key={post.id} className="grid gap-5 py-6 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500"><span className="rounded-full bg-sky-50 px-3 py-1 text-brand-700">[{post.Board.name}]</span><span>{post.User.nickname || 'E院用户'}</span><span>UID {post.User.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time>{post.reviewedAt ? <time>审核时间：{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.reviewedAt))}</time> : null}{post.reviewedAt ? <span>审核人：{post.ReviewedBy ? `${post.ReviewedBy.name} · UID ${post.ReviewedBy.uid}` : '原管理员账号已不存在'}</span> : null}</div>
@@ -151,7 +153,7 @@ export function PostReviewManager({ initialPosts, initialHasMore }: { initialPos
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{post.content}</p>
             {queueStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">拒绝原因：{post.rejectionReason}</p> : null}
             {post.PostModerationHistory.length ? <details className="mt-4 rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-2"><summary className="cursor-pointer text-xs font-black text-brand-700">查看审核历史（{post.PostModerationHistory.length}）</summary><div className="mt-3 space-y-2">{post.PostModerationHistory.map((item) => <div key={item.id} className="border-t border-sky-100 pt-2 text-xs font-bold text-slate-600"><p>{item.action} · {item.status} · {item.actorName || '原账号已不存在'}{item.actorUid ? ` · UID ${item.actorUid}` : ''}</p><p className="mt-1 text-slate-500">{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.createdAt))}{item.rejectionReason ? ` · ${item.rejectionReason}` : ''}</p></div>)}</div></details> : null}
-            {post.PostMedia.length ? <div className="mt-4 flex flex-wrap gap-3">{post.PostMedia.map((media) => media.url ? <img key={media.id} src={media.thumbnail || media.url} alt="帖子图片" className="h-28 w-40 rounded-xl object-cover" /> : null)}</div> : null}
+            {imageItems.length ? <div className="mt-4 flex flex-wrap gap-3" aria-label={`帖子图片，共 ${imageItems.length} 张`}>{imageItems.map((item, index) => <ImageViewer key={item.id} src={item.src} previewSrc={item.previewSrc} alt={item.alt} gallery={imageItems} initialIndex={index} imageClassName="h-28 w-40 rounded-xl object-cover" buttonClassName="block h-28 w-40 cursor-zoom-in overflow-hidden rounded-xl bg-slate-100 text-left" />)}</div> : null}
           </div>
           <div className="flex flex-wrap items-start gap-2 md:w-32 md:flex-col">
             {queueStatus === 'PENDING' ? <><button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60">通过</button><button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-60">拒绝</button></> : null}

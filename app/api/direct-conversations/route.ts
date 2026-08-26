@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -91,14 +91,15 @@ export async function GET(request: Request) {
       ? {
           uid: other.User.uid,
           nickname: getPublicUserDisplayName(other.User),
+          friendRemark: other.User.id ? (remarkMap.get(other.User.id) || null) : null,
+          displayName: getFriendDisplayName({
+            nickname: getPublicUserDisplayName(other.User),
+            friendRemark: other.User.id ? remarkMap.get(other.User.id) : null,
+            isFriendContext: Boolean(other.User.id && remarkMap.has(other.User.id)),
+          }),
           avatarUrl: publicImageUrl(other.User.avatarUrl),
           Profile: other.User.Profile ? {
-            displayName: resolveFriendDisplayName({
-              viewerId: user.id,
-              targetUserId: other.User.id,
-              fallbackName: getPublicUserDisplayName(other.User),
-              remarkMap,
-            }),
+            ...other.User.Profile,
             avatarUrl: publicImageUrl(other.User.Profile.avatarUrl),
           } : other.User.Profile,
         }

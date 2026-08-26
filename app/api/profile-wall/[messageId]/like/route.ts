@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
@@ -46,18 +46,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
       },
     },
   })
-  const remarkMap = await loadFriendRemarkMap(user.id, likes.map((like) => like.userId))
   const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.userId))
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
       nickname: getPublicUserDisplayName(like.User),
-      displayName: resolveFriendDisplayName({
-        viewerId: user.id,
-        targetUserId: like.userId,
-        fallbackName: getPublicUserDisplayName(like.User),
-        remarkMap,
-      }),
+      displayName: getPublicUserDisplayName(like.User),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
       equippedBadge: equippedBadgeMap.get(like.userId) || null,
     })),

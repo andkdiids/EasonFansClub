@@ -10,7 +10,7 @@ export type NotificationTargetInput = {
 
 export type NotificationReplyTarget =
   | { kind: 'post'; resourceId: string; parentId: string }
-  | { kind: 'daily-message'; resourceId: string; parentId: string }
+  | { kind: 'daily-message'; resourceId: string; parentId: string; date?: string }
   | { kind: 'feedback'; resourceId: string; parentId: string }
   | { kind: 'profile-wall'; resourceId: string; parentId: string }
 
@@ -22,14 +22,25 @@ export function parseNotificationReplyTarget(input: NotificationTargetInput): No
   const target = getNotificationTarget(input)
   if (!target?.startsWith('/')) return null
   const url = new URL(target, 'https://local.invalid')
+  // `focus` is the current canonical parameter. The aliases keep older or
+  // hand-crafted notification links actionable without relying on a page or
+  // sort position that can change over time.
   const focus = url.searchParams.get('focus')
+    || url.searchParams.get('replyId')
+    || url.searchParams.get('commentId')
+    || url.searchParams.get('reply')
   if (!focus) return null
 
   const post = url.pathname.match(/^\/posts\/([^/]+)$/)
   if (post) return { kind: 'post', resourceId: post[1], parentId: focus }
   if (url.pathname === '/checkin') {
     const messageId = url.searchParams.get('message')
-    if (messageId) return { kind: 'daily-message', resourceId: messageId, parentId: focus }
+      || url.searchParams.get('messageId')
+      || url.searchParams.get('dailyMessageId')
+    if (messageId) {
+      const date = url.searchParams.get('date') || undefined
+      return { kind: 'daily-message', resourceId: messageId, parentId: focus, ...(date ? { date } : {}) }
+    }
   }
   const feedback = url.pathname.match(/^\/feedback\/([^/]+)$/)
   if (feedback) return { kind: 'feedback', resourceId: feedback[1], parentId: focus }

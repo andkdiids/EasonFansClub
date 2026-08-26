@@ -1,4 +1,4 @@
-import { consumeRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { consumeRateLimit, rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
 import { nextWantListenQuestion } from '@/lib/want-listen'
 import { handleWantListenError, wantListenError, wantListenOk } from '@/lib/want-listen-api'
 
@@ -12,8 +12,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
   const limit = await consumeRateLimit(guard.user.id, 'want-listen-next', 60, 60)
   if (limit.limited) return wantListenError('操作过于频繁，请稍后再试。', 429, 'RATE_LIMITED')
   const { sessionId } = await params
+  const body = await request.json().catch(() => null) as { questionId?: unknown } | null
   try {
-    return wantListenOk(await nextWantListenQuestion(guard.user.id, sessionId))
+    return wantListenOk(await nextWantListenQuestion(guard.user.id, sessionId, sanitizeText(body?.questionId, 200)))
   } catch (error) {
     return handleWantListenError(error, 'sessions.next')
   }

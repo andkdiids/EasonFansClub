@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { emitRealtime, emitRealtimeToAdmins } from '@/lib/realtime'
 import { toPublicMediaUrl } from '@/lib/media-url'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing'
 import type { Prisma, StickerReportReason } from '@prisma/client'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
@@ -653,8 +653,6 @@ export async function getStorePacks(opts: {
 
   const agg = await aggregatePackUsage(packs.map((p) => p.id))
   const addedSet = await getUserAddedPackIds(opts.userId, packs.map((p) => p.id))
-  const remarkMap = await loadFriendRemarkMap(opts.userId, packs.flatMap((pack) => pack.creator ? [pack.creator.id] : []))
-
   // 热门顺序已经由数据库在 skip/take 之前完成；其他分类继续使用创建时间顺序。
   let ordered = packs
   if (sort === 'official') {
@@ -674,12 +672,7 @@ export async function getStorePacks(opts: {
     creator: pack.creator ? {
       id: pack.creator.id,
       uid: pack.creator.uid,
-      nickname: resolveFriendDisplayName({
-        viewerId: opts.userId,
-        targetUserId: pack.creator.id,
-        fallbackName: getPublicUserDisplayName(pack.creator),
-        remarkMap,
-      }),
+      nickname: getPublicUserDisplayName(pack.creator),
     } : null,
     stickerCount: agg.get(pack.id)?.stickerCount ?? 0,
     downloadCount: agg.get(pack.id)?.downloadCount ?? 0,
@@ -732,7 +725,6 @@ export async function getStorePackDetail(packId: string, userId: string | null):
   if (!pack) return null
   const agg = await aggregatePackUsage([pack.id])
   const addedSet = userId ? await getUserAddedPackIds(userId, [pack.id]) : new Set<string>()
-  const remarkMap = await loadFriendRemarkMap(userId, pack.creator ? [pack.creator.id] : [])
   return {
     id: pack.id,
     name: pack.name,
@@ -745,12 +737,7 @@ export async function getStorePackDetail(packId: string, userId: string | null):
     creator: pack.creator ? {
       id: pack.creator.id,
       uid: pack.creator.uid,
-      nickname: resolveFriendDisplayName({
-        viewerId: userId,
-        targetUserId: pack.creator.id,
-        fallbackName: getPublicUserDisplayName(pack.creator),
-        remarkMap,
-      }),
+      nickname: getPublicUserDisplayName(pack.creator),
     } : null,
     copyright: null,
     stickerCount: pack.stickers.length,

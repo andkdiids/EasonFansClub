@@ -179,18 +179,23 @@ test('不同歌曲按songId去重', () => {
   assert.equal(stats.unlockedSongCount, 1)
 })
 
-test('累计现场听歌次数包含重复歌单项', () => {
+test('累计现场听歌次数按同一场次去重', () => {
   const stats = summarizePersonalLiveRows([row({ setlist: [linkedSong(), linkedSong()] })])
-  assert.equal(stats.totalLiveSongCount, 2)
+  assert.equal(stats.totalLiveSongCount, 1)
 })
 
-test('同一场同一歌出现两次累计为2', () => {
-  assert.equal(buildPersonalSongAtlas([row({ setlist: [linkedSong(), linkedSong()] })])[0].occurrenceCount, 2)
+test('同一场同一歌重复歌单项只计一次', () => {
+  const song = buildPersonalSongAtlas([row({ setlist: [linkedSong(), linkedSong()] })])[0]
+  assert.equal(song.occurrenceCount, 1)
+  assert.equal(song.concertCount, 1)
 })
 
-test('未关联纯文本曲目不计入正式歌曲数', () => {
-  const stats = summarizePersonalLiveRows([row({ setlist: [{ songId: null, displayName: '清唱', section: 'SPECIAL', MusicSong: null }] })])
-  assert.equal(stats.unlockedSongCount, 0)
+test('历史未关联纯文本曲目仍进入歌曲图鉴并保留兼容展示', () => {
+  const atlas = buildPersonalSongAtlas([row({ setlist: [{ songId: null, displayName: '清唱', section: 'SPECIAL', MusicSong: null }] })])
+  assert.equal(atlas.length, 1)
+  assert.equal(atlas[0].songId, null)
+  assert.equal(atlas[0].title, '清唱')
+  assert.equal(atlas[0].isStructured, false)
 })
 
 test('纯文本曲目计入累计歌单次数', () => {
@@ -210,9 +215,67 @@ test('首次和最近听到日期正确', () => {
 })
 
 test('关联场次数与出现次数区分正确', () => {
-  const atlas = buildPersonalSongAtlas([row({ setlist: [linkedSong(), linkedSong()] })])[0]
+  const atlas = buildPersonalSongAtlas([
+    row({ setlist: [linkedSong()] }),
+    row({ id: 'r2', concertId: 'c2', date: '2026-01-01', setlist: [linkedSong()] }),
+  ])[0]
   assert.equal(atlas.occurrenceCount, 2)
-  assert.equal(atlas.concertCount, 1)
+  assert.equal(atlas.listenCount, 2)
+  assert.equal(atlas.concertCount, 2)
+  assert.deepEqual([...atlas.showIds].sort(), ['c2', 'concert-1'])
+})
+
+test('一场有20首正式歌曲时图鉴显示20条', () => {
+  const setlist = Array.from({ length: 20 }, (_, index) => linkedSong(`song-${index + 1}`, `歌曲${index + 1}`))
+  assert.equal(buildPersonalSongAtlas([row({ setlist })]).length, 20)
+})
+
+test('两场同一首歌只显示一条并按场次统计听过次数', () => {
+  const atlas = buildPersonalSongAtlas([
+    row({ setlist: [linkedSong()] }),
+    row({ id: 'r2', concertId: 'c2', date: '2026-01-01', setlist: [linkedSong()] }),
+  ])
+  assert.equal(atlas.length, 1)
+  assert.equal(atlas[0].listenCount, 2)
+})
+
+test('用户先标记、后来补录正式歌单时重新聚合即可出现歌曲', () => {
+  const beforeSetlist = buildPersonalSongAtlas([row()])
+  const afterSetlist = buildPersonalSongAtlas([row({ setlist: [linkedSong()] })])
+  assert.equal(beforeSetlist.length, 0)
+  assert.equal(afterSetlist.length, 1)
+})
+
+test('PENDING投稿不在正式歌单关系中，APPROVED写入正式歌单后可聚合', () => {
+  const contributions = read('lib/music-contributions.ts')
+  assert.match(contributions, /current\.status !== 'PENDING'/)
+  assert.match(contributions, /musicConcertSetlistItem\.createMany/)
+  assert.equal(buildPersonalSongAtlas([row()]).length, 0)
+  assert.equal(buildPersonalSongAtlas([row({ setlist: [linkedSong()] })]).length, 1)
+})
+
+test('取消一场后同一首歌仍在另一场时只减少一次', () => {
+  const twoShows = [
+    row({ setlist: [linkedSong()] }),
+    row({ id: 'r2', concertId: 'c2', date: '2026-01-01', setlist: [linkedSong()] }),
+  ]
+  assert.equal(buildPersonalSongAtlas(twoShows)[0].listenCount, 2)
+  assert.equal(buildPersonalSongAtlas(twoShows.slice(0, 1))[0].listenCount, 1)
+})
+
+test('稳定songId优先于标题，两个同名曲目不会被错误合并', () => {
+  const atlas = buildPersonalSongAtlas([row({ setlist: [linkedSong('song-1', '同名'), linkedSong('song-2', '同名')] })])
+  assert.deepEqual(atlas.map((song) => song.songId).sort(), ['song-1', 'song-2'])
+})
+
+test('同一歌曲历史关联失效但后续恢复时仍使用稳定曲库信息', () => {
+  const atlas = buildPersonalSongAtlas([
+    row({ setlist: [{ songId: 'song-1', displayName: '历史名称', section: 'MAIN', MusicSong: null }] }),
+    row({ id: 'r2', concertId: 'c2', date: '2026-01-01', setlist: [linkedSong()] }),
+  ])
+  assert.equal(atlas[0].title, '任我行')
+  assert.equal(atlas[0].album?.id, 'album-1')
+  assert.equal(atlas[0].isStructured, true)
 })
 
 test('他人只能看到isPublic true记录', () => {
@@ -270,8 +333,37 @@ test('歌曲图鉴链接进入现有歌曲详情', () => {
   assert.match(read('components/music/live/MyLiveDashboard.tsx'), /href=\{`\/music\/song\/\$\{song\.songId\}`\}/)
 })
 
-test('未关联曲目不会进入歌曲图鉴', () => {
-  assert.equal(buildPersonalSongAtlas([row({ setlist: [{ songId: null, displayName: '翻唱', section: 'MAIN', MusicSong: null }] })]).length, 0)
+test('图鉴空状态区分未标记与已标记但暂无歌单', () => {
+  const dashboard = read('components/music/live/MyLiveDashboard.tsx')
+  assert.match(dashboard, /标记看过的演唱会后，现场歌曲会自动出现在这里/)
+  assert.match(dashboard, /你已标记现场，但相关场次暂未收录歌单/)
+})
+
+test('歌曲筛选和最常听排序使用实时聚合字段', () => {
+  const api = read('app/api/music/live/me/songs/route.ts')
+  const dashboard = read('components/music/live/MyLiveDashboard.tsx')
+  assert.match(api, /song\.album\?\.id === albumId/)
+  assert.match(api, /song\.concerts\.some\(\(concert\) => concert\.tourId === tourId\)/)
+  assert.match(dashboard, /按专辑筛选/)
+  assert.match(dashboard, /按巡演筛选歌曲/)
+  assert.match(dashboard, /按听过次数筛选/)
+  assert.match(dashboard, /song\.listenCount/)
+})
+
+test('标记变化会刷新My Live且个人接口禁止缓存，补录歌单可直接生效', () => {
+  const dashboard = read('components/music/live/MyLiveDashboard.tsx')
+  const helper = read('lib/music-personal-live.ts')
+  const api = read('app/api/music/live/me/route.ts')
+  assert.match(dashboard, /window\.addEventListener\('music-live:attendance-updated'/)
+  assert.match(helper, /'Cache-Control': 'private, no-store, max-age=0'/)
+  assert.match(api, /dynamic = 'force-dynamic'/)
+})
+
+test('个人场次与歌单一次关系查询，避免按场次N+1读取', () => {
+  const helper = read('lib/music-personal-live.ts')
+  const queryBlock = helper.slice(helper.indexOf('const personalConcertSelect'), helper.indexOf('async function getPersonalPosterFallbacks'))
+  assert.equal((queryBlock.match(/prisma\.userMusicConcert\.findMany/g) || []).length, 1)
+  assert.match(queryBlock, /MusicConcertSetlistItem/)
 })
 
 test('320px布局不使用固定宽度主面板', () => {

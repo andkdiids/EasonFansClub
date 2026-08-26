@@ -10,11 +10,15 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { FriendGroupDialog, type FriendGroupDialogMode } from '@/components/FriendGroupDialog'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
+import { AddFriendButton } from '@/components/FriendRequestActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import type { FriendDockUser, RelationshipStatus, UndercoverPresence } from '@/lib/friend-types'
 import { profileImageUrl } from '@/lib/images'
@@ -130,6 +134,12 @@ export function FriendDock({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
+  const [friendGroupDialog, setFriendGroupDialog] = useState<{ mode: FriendGroupDialogMode; group: FriendGroup | null } | null>(null)
+  const [friendGroupDialogName, setFriendGroupDialogName] = useState('')
+  const [friendGroupDialogError, setFriendGroupDialogError] = useState('')
+  const [friendGroupDialogBusy, setFriendGroupDialogBusy] = useState(false)
+  const [deleteFriendGroupTarget, setDeleteFriendGroupTarget] = useState<FriendGroup | null>(null)
+  const [deletingFriendGroupId, setDeletingFriendGroupId] = useState<string | null>(null)
   const [newMessageNotice, setNewMessageNotice] = useState(false)
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -152,6 +162,9 @@ export function FriendDock({
   const friendListRestorePendingRef = useRef(false)
   const friendListReturnStateRef = useRef<FriendListReturnState | null>(null)
   const groupRequestRef = useRef(new Map<string, number>())
+  const friendGroupDialogSubmittingRef = useRef(false)
+  const friendGroupDialogComposingRef = useRef(false)
+  const openChatRef = useRef<(friend: FriendDockUser) => void>(() => {})
 
   const clearFriendListReturnState = useCallback(() => {
     friendListRestorePendingRef.current = false
@@ -226,6 +239,10 @@ export function FriendDock({
     clearFriendListReturnState()
     setOpen(false)
     setProfileFriend(null)
+    setFriendGroupDialog(null)
+    setFriendGroupDialogName('')
+    setFriendGroupDialogError('')
+    setDeleteFriendGroupTarget(null)
     resetChat()
     window.requestAnimationFrame(() => toggleRef.current?.focus())
   }, [clearFriendListReturnState, resetChat])
@@ -240,6 +257,10 @@ export function FriendDock({
     setLoadingGroupIds(new Set())
     setGroupFriends({})
     setGroupPagination({})
+    setFriendGroupDialog(null)
+    setFriendGroupDialogName('')
+    setFriendGroupDialogError('')
+    setDeleteFriendGroupTarget(null)
     setOpen(true)
   }, [clearFriendListReturnState, resetChat])
 
@@ -379,73 +400,116 @@ export function FriendDock({
     }
   }, [])
 
-  async function createFriendGroup() {
-    const prompted = window.prompt('请输入分组名称（最多30个字符）')
-    if (prompted === null) return
-    const name = prompted.trim()
-    if (!name) {
-      setError('分组名不能为空')
-      return
-    }
-    const response = await fetch('/api/friend-groups', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok || !data.group) {
-      setError(data.message || '新建分组失败')
-      return
-    }
-    setFriendGroups((current) => [...current, data.group as FriendGroup])
-    notifyClients('friends')
+  function openFriendGroupDialog(mode: FriendGroupDialogMode, group: FriendGroup | null = null) {
+    setError('')
+    setFriendGroupDialogError('')
+    setFriendGroupDialogName(mode === 'rename' ? group?.name || '' : '')
+    friendGroupDialogComposingRef.current = false
+    setFriendGroupDialog({ mode, group })
   }
 
-  async function renameFriendGroup(group: FriendGroup) {
-    const prompted = window.prompt('请输入新的分组名称（最多30个字符）', group.name)
-    if (prompted === null) return
-    const name = prompted.trim()
+  function closeFriendGroupDialog() {
+    if (friendGroupDialogBusy || friendGroupDialogSubmittingRef.current) return
+    setFriendGroupDialog(null)
+    setFriendGroupDialogName('')
+    setFriendGroupDialogError('')
+    friendGroupDialogComposingRef.current = false
+  }
+
+  function handleFriendGroupDialogCompositionStart() {
+    friendGroupDialogComposingRef.current = true
+  }
+
+  function handleFriendGroupDialogCompositionEnd() {
+    friendGroupDialogComposingRef.current = false
+  }
+
+  function handleFriendGroupDialogKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter' && (event.nativeEvent.isComposing || friendGroupDialogComposingRef.current)) event.preventDefault()
+  }
+
+  async function submitFriendGroupDialog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const dialog = friendGroupDialog
+    if (!dialog || friendGroupDialogSubmittingRef.current) return
+    const name = friendGroupDialogName.trim()
     if (!name) {
-      setError('分组名不能为空')
+      setFriendGroupDialogError('请输入分组名称')
       return
     }
-    const response = await fetch(`/api/friend-groups/${group.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      setError(data.message || '重命名分组失败')
+    if (name.length > 30) {
+      setFriendGroupDialogError('分组名称最多 30 个字符')
       return
     }
-    setFriendGroups((current) => current.map((item) => item.id === group.id ? { ...item, name } : item))
-    notifyClients('friends')
+
+    friendGroupDialogSubmittingRef.current = true
+    setFriendGroupDialogBusy(true)
+    setFriendGroupDialogError('')
+    const isCreate = dialog.mode === 'create'
+    const group = dialog.group
+    try {
+      const response = await fetch(isCreate ? '/api/friend-groups' : `/api/friend-groups/${group?.id || ''}`, {
+        method: isCreate ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({ name }),
+      })
+      const data = await response.json().catch(() => ({})) as { group?: FriendGroup; message?: string }
+      if (!response.ok || !data.group) {
+        setFriendGroupDialogError(data.message || (isCreate ? '创建失败，请重试' : '保存失败，请重试'))
+        return
+      }
+      if (isCreate) {
+        setFriendGroups((current) => current.some((item) => item.id === data.group?.id) ? current : [...current, data.group as FriendGroup])
+      } else if (group) {
+        setFriendGroups((current) => current.map((item) => item.id === group.id ? { ...item, name: data.group?.name || name } : item))
+      }
+      setFriendGroupDialog(null)
+      setFriendGroupDialogName('')
+      setFriendGroupDialogError('')
+      friendGroupDialogComposingRef.current = false
+      notifyClients('friends')
+    } catch (requestError) {
+      setFriendGroupDialogError(requestError instanceof TypeError ? '网络连接中断，请重试' : '操作失败，请稍后重试')
+    } finally {
+      friendGroupDialogSubmittingRef.current = false
+      setFriendGroupDialogBusy(false)
+    }
   }
 
   async function deleteFriendGroup(group: FriendGroup) {
-    if (!window.confirm('删除该分组后，其中好友将移回未分组，是否继续？')) return
-    const response = await fetch(`/api/friend-groups/${group.id}`, { method: 'DELETE' })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      setError(data.message || '删除分组失败')
-      return
+    if (deletingFriendGroupId) return
+    setDeletingFriendGroupId(group.id)
+    setError('')
+    try {
+      const response = await fetch(`/api/friend-groups/${group.id}`, { method: 'DELETE', credentials: 'same-origin', cache: 'no-store' })
+      const data = await response.json().catch(() => ({})) as { message?: string }
+      if (!response.ok) {
+        setError(data.message || '删除分组失败，请重试')
+        return
+      }
+      const update = (items: FriendDockUser[]) => items.map((item) => item.groupId === group.id ? { ...item, groupId: null } : item)
+      setFriends((current) => {
+        const next = update(current)
+        friendsRef.current = next
+        return next
+      })
+      setSearchResults(update)
+      setFriendGroups((current) => current.filter((item) => item.id !== group.id))
+      setUngroupedCount((current) => current + group.count)
+      setCollapsedGroupIds((current) => {
+        const next = new Set(current)
+        next.delete(group.id)
+        return next
+      })
+      setDeleteFriendGroupTarget(null)
+      notifyClients('friends')
+    } catch (requestError) {
+      setError(requestError instanceof TypeError ? '网络连接中断，请重试' : '删除分组失败，请稍后重试')
+    } finally {
+      setDeletingFriendGroupId(null)
     }
-    const update = (items: FriendDockUser[]) => items.map((item) => item.groupId === group.id ? { ...item, groupId: null } : item)
-    setFriends((current) => {
-      const next = update(current)
-      friendsRef.current = next
-      return next
-    })
-    setSearchResults(update)
-    setFriendGroups((current) => current.filter((item) => item.id !== group.id))
-    setUngroupedCount((current) => current + group.count)
-    setCollapsedGroupIds((current) => {
-      const next = new Set(current)
-      next.delete(group.id)
-      return next
-    })
-    notifyClients('friends')
   }
 
   async function moveFriendToGroup(friend: FriendDockUser, nextGroupId: string | null) {
@@ -633,16 +697,25 @@ export function FriendDock({
   }, [clearFriendListReturnState, pathname, currentUserId, resetChat])
 
   useEffect(() => {
-    const openDock = () => openFriendList()
+    const openDock = (event: Event) => {
+      const detail = (event as CustomEvent<{ action?: string; friend?: FriendDockUser }>).detail
+      openFriendList()
+      if (detail?.action === 'chat' && detail.friend) void openChatRef.current(detail.friend)
+    }
     const closeFromOtherOverlay = () => closeDock()
     const updateRemark = (event: Event) => {
-      const detail = (event as CustomEvent<{ targetUserId?: string; displayName?: string }>).detail
+      const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null; displayName?: string }>).detail
       if (!detail?.targetUserId || typeof detail.displayName !== 'string') return
       const update = (items: FriendDockUser[]) => items.map((item) => item.id === detail.targetUserId
-        ? { ...item, profile: item.profile ? { ...item.profile, displayName: detail.displayName! } : item.profile }
+        ? { ...item, friendRemark: detail.remark?.trim() || null, displayName: detail.displayName! }
         : item)
-      setFriends(update)
+      const updatedFriends = update(friendsRef.current)
+      friendsRef.current = updatedFriends
+      setFriends(updatedFriends)
       setSearchResults(update)
+      setGroupFriends((groups) => Object.fromEntries(
+        Object.entries(groups).map(([groupId, items]) => [groupId, update(items)]),
+      ))
       setChatFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
       setProfileFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
     }
@@ -747,6 +820,14 @@ export function FriendDock({
       if (event.key !== 'Escape') return
       if (profileFriend) {
         setProfileFriend(null)
+        return
+      }
+      if (friendGroupDialog) {
+        closeFriendGroupDialog()
+        return
+      }
+      if (deleteFriendGroupTarget) {
+        if (!deletingFriendGroupId) setDeleteFriendGroupTarget(null)
         return
       }
       closeDock()
@@ -942,6 +1023,10 @@ export function FriendDock({
     window.requestAnimationFrame(() => scrollToBottom('auto'))
   }
 
+  // Keep the event listener stable while still invoking the latest chat
+  // closure (which contains the current conversation/session state).
+  openChatRef.current = openChat
+
   function promoteFriendConversation(id: string, message: Message) {
     setFriends((current) => {
       const index = current.findIndex((friend) => friend.conversationId === id)
@@ -1083,7 +1168,7 @@ export function FriendDock({
     setError('')
     let password = ''
     if (presence.requiresPassword) {
-      const prompted = window.prompt(`输入「${friend.nickname || 'E院用户'}」的房间密码以加入`) as string | null
+      const prompted = window.prompt(`输入「${friend.displayName || friend.nickname || 'E院用户'}」的房间密码以加入`) as string | null
       if (prompted === null) return
       password = prompted
     }
@@ -1105,21 +1190,23 @@ export function FriendDock({
     }
   }
 
-  async function sendFriendRequest(friend: FriendDockUser) {
-    const response = await fetch('/api/friends/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid: friend.uid }),
+  function updateFriendRelationship(friendId: string, relationshipStatus: RelationshipStatus) {
+    const update = (items: FriendDockUser[]) => items.map((item) => item.id === friendId
+      ? {
+          ...item,
+          relationshipStatus,
+          requestId: relationshipStatus === 'INCOMING_PENDING' ? item.requestId || null : null,
+        }
+      : item)
+    setFriends((current) => {
+      const next = update(current)
+      friendsRef.current = next
+      return next
     })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok && response.status !== 409) {
-      setError(data.message || '好友申请发送失败')
-      return
-    }
-    setSearchResults((current) => current.map((item) => item.id === friend.id
-      ? { ...item, relationshipStatus: data.status === 'INCOMING_PENDING' ? 'INCOMING_PENDING' : data.status === 'FRIEND' ? 'FRIEND' : 'OUTGOING_PENDING' }
-      : item))
-    notifyClients('friends')
+    setSearchResults(update)
+    setProfileFriend((current) => current && current.id === friendId
+      ? { ...update([current])[0], relationshipStatus }
+      : current)
   }
 
   async function decideRequest(friend: FriendDockUser, action: 'accept' | 'reject') {
@@ -1130,9 +1217,7 @@ export function FriendDock({
       setError(data.message || '好友申请处理失败')
       return
     }
-    setSearchResults((current) => current.map((item) => item.id === friend.id
-      ? { ...item, relationshipStatus: action === 'accept' ? 'FRIEND' : 'NONE', requestId: null }
-      : item))
+    updateFriendRelationship(friend.id, action === 'accept' ? 'FRIEND' : 'NONE')
     notifyClients('friends')
   }
 
@@ -1182,8 +1267,8 @@ export function FriendDock({
             <>
               <button type="button" onClick={leaveChat} aria-label="返回好友列表">←</button>
               <button type="button" className="friend-dock-chat-person" onClick={() => setProfileFriend(chatFriend)}>
-                <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.nickname || 'E院用户'} className="h-8 w-8" />
-                <span><strong><UserDisplayName name={chatFriend.nickname || 'E院用户'} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
+                <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={chatFriend.displayName || chatFriend.nickname || 'E院用户'} className="h-8 w-8" />
+                <span><strong><UserDisplayName name={chatFriend.displayName || chatFriend.nickname || 'E院用户'} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
@@ -1382,7 +1467,7 @@ export function FriendDock({
             {!debouncedQuery ? (
               <div className="friend-dock-group-toolbar">
                 <span>好友分组</span>
-                <button type="button" onClick={() => void createFriendGroup()}>新建分组</button>
+                <button type="button" onClick={() => openFriendGroupDialog('create')}>新建分组</button>
               </div>
             ) : null}
             <div ref={friendListRef} className="friend-dock-list">
@@ -1395,8 +1480,8 @@ export function FriendDock({
                   onProfile={() => setProfileFriend(friend)}
                   onChat={() => void openChat(friend)}
                   onMove={(groupId) => void moveFriendToGroup(friend, groupId)}
-                  onAdd={() => void sendFriendRequest(friend)}
                   onDecide={(action) => void decideRequest(friend, action)}
+                  onRelationshipChange={(status) => updateFriendRelationship(friend.id, status)}
                   onFollow={() => void followFriendToRoom(friend)}
                 />
               )) : groupedFriendSections.map((group) => {
@@ -1410,8 +1495,8 @@ export function FriendDock({
                       </button>
                       {group.id !== '__ungrouped__' ? (
                         <div className="friend-dock-group-actions">
-                          <button type="button" onClick={() => void renameFriendGroup(group)} aria-label={`重命名${group.name}`}>重命名</button>
-                          <button type="button" onClick={() => void deleteFriendGroup(group)} aria-label={`删除${group.name}`}>删除</button>
+                          <button type="button" onClick={() => openFriendGroupDialog('rename', group)} aria-label={`重命名${group.name}`}>重命名</button>
+                          <button type="button" onClick={() => setDeleteFriendGroupTarget(group)} aria-label={`删除${group.name}`}>删除</button>
                         </div>
                       ) : null}
                     </div>
@@ -1424,8 +1509,8 @@ export function FriendDock({
                         onProfile={() => setProfileFriend(friend)}
                         onChat={() => void openChat(friend)}
                         onMove={(groupId) => void moveFriendToGroup(friend, groupId)}
-                        onAdd={() => void sendFriendRequest(friend)}
                         onDecide={(action) => void decideRequest(friend, action)}
+                        onRelationshipChange={(status) => updateFriendRelationship(friend.id, status)}
                         onFollow={() => void followFriendToRoom(friend)}
                       />
                     )) : null}
@@ -1461,8 +1546,38 @@ export function FriendDock({
           onClose={() => setProfileFriend(null)}
           onNavigate={closeDock}
           onMessage={() => void openChat(profileFriend)}
+          onRelationshipChange={(status) => updateFriendRelationship(profileFriend.id, status)}
         /> : null}
+        <ConfirmDialog
+          open={Boolean(deleteFriendGroupTarget)}
+          title="删除分组？"
+          description="删除分组不会删除好友，好友将移回未分组。"
+          confirmLabel="确认删除"
+          loading={Boolean(deletingFriendGroupId)}
+          onConfirm={() => {
+            if (deleteFriendGroupTarget) void deleteFriendGroup(deleteFriendGroupTarget)
+          }}
+          onCancel={() => {
+            if (!deletingFriendGroupId) setDeleteFriendGroupTarget(null)
+          }}
+        />
       </section>
+      <FriendGroupDialog
+        open={Boolean(friendGroupDialog)}
+        mode={friendGroupDialog?.mode || 'create'}
+        name={friendGroupDialogName}
+        error={friendGroupDialogError}
+        busy={friendGroupDialogBusy}
+        onNameChange={(event) => {
+          setFriendGroupDialogName(event.target.value)
+          if (friendGroupDialogError) setFriendGroupDialogError('')
+        }}
+        onSubmit={(event) => void submitFriendGroupDialog(event)}
+        onCancel={closeFriendGroupDialog}
+        onCompositionStart={handleFriendGroupDialogCompositionStart}
+        onCompositionEnd={handleFriendGroupDialogCompositionEnd}
+        onKeyDown={handleFriendGroupDialogKeyDown}
+      />
     </>,
     document.body,
   ) : null
@@ -1493,8 +1608,8 @@ function FriendRow({
   onProfile,
   onChat,
   onMove,
-  onAdd,
   onDecide,
+  onRelationshipChange,
   onFollow,
 }: {
   friend: FriendDockUser
@@ -1503,23 +1618,22 @@ function FriendRow({
   onProfile: () => void
   onChat: () => void
   onMove: (groupId: string | null) => void
-  onAdd: () => void
   onDecide: (action: 'accept' | 'reject') => void
+  onRelationshipChange: (status: RelationshipStatus) => void
   onFollow: () => void
 }) {
   const [actionsOpen, setActionsOpen] = useState(false)
-  const name = friend.nickname || 'E院用户'
+  const name = friend.displayName || friend.nickname || 'E院用户'
   const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const status = friend.relationshipStatus || 'FRIEND'
-  const canOpenProfile = status === 'FRIEND'
   const presence = friend.undercoverPresence
   return (
     <article data-friend-id={friend.id} className={`friend-dock-row ${friend.unreadCount ? 'has-unread' : ''}`}>
-      <button type="button" className="friend-dock-avatar-button" onClick={canOpenProfile ? onProfile : undefined} disabled={!canOpenProfile} aria-label={canOpenProfile ? `查看${name}的资料卡` : undefined}>
+      <button type="button" className="friend-dock-avatar-button" onClick={onProfile} aria-label={`查看${name}的资料卡`}>
         <SafeAvatar src={avatar} name={name} className="h-full w-full" />
       </button>
       <div className="friend-dock-row-main">
-        <button type="button" className="friend-dock-row-name" onClick={status === 'FRIEND' ? onChat : undefined} disabled={status !== 'FRIEND'}>
+        <button type="button" className="friend-dock-row-name" onClick={status === 'FRIEND' ? onChat : onProfile}>
           <strong><UserDisplayName name={name} uid={friend.uid} badge={friend.equippedBadge} compact /></strong>
           <small>UID {formatUid(friend.uid)} · {friend.levelName || '初入E院'}</small>
         </button>
@@ -1532,7 +1646,7 @@ function FriendRow({
               {friend.lastMessageAt ? <time>{formatConversationTime(friend.lastMessageAt)}</time> : null}
             </button>
           )
-        ) : <RelationshipActions status={status} onChat={onChat} onAdd={onAdd} onDecide={onDecide} />}
+        ) : <RelationshipActions uid={friend.uid} targetName={name} status={status} onChat={onChat} onDecide={onDecide} onStatusChange={onRelationshipChange} />}
       </div>
       {friend.unreadCount ? <b className="friend-dock-row-unread">{friend.unreadCount > 99 ? '99+' : friend.unreadCount}</b> : null}
       {status === 'FRIEND' ? (
@@ -1577,22 +1691,26 @@ function UndercoverPresenceLine({ presence, onFollow }: { presence: UndercoverPr
 }
 
 function RelationshipActions({
+  uid,
+  targetName,
   status,
   onChat,
-  onAdd,
   onDecide,
+  onStatusChange,
 }: {
+  uid: number
+  targetName: string
   status: RelationshipStatus
   onChat: () => void
-  onAdd: () => void
   onDecide: (action: 'accept' | 'reject') => void
+  onStatusChange: (status: RelationshipStatus) => void
 }) {
   if (status === 'FRIEND') return <div className="friend-relationship-actions"><span>已是好友</span><button type="button" onClick={onChat}>发私信</button></div>
-  if (status === 'OUTGOING_PENDING') return <div className="friend-relationship-actions"><span>还不是好友</span><button type="button" disabled>已发送</button></div>
+  if (status === 'OUTGOING_PENDING') return <div className="friend-relationship-actions"><span>还不是好友</span><button type="button" disabled>已发送申请</button></div>
   if (status === 'INCOMING_PENDING') return <div className="friend-relationship-actions"><span>对方申请添加你</span><button type="button" onClick={() => onDecide('accept')}>同意</button><button type="button" onClick={() => onDecide('reject')}>拒绝</button></div>
   if (status === 'SELF') return <div className="friend-relationship-actions"><span>这是你自己</span></div>
   if (status === 'BLOCKED') return <div className="friend-relationship-actions"><span>无法添加</span></div>
-  return <div className="friend-relationship-actions"><span>还不是好友</span><button type="button" onClick={onAdd}>添加好友</button></div>
+  return <div className="friend-relationship-actions"><span>还不是好友</span><AddFriendButton uid={uid} targetName={targetName} initialStatus="NONE" onStatusChange={(next) => onStatusChange(next === 'PENDING' ? 'OUTGOING_PENDING' : next === 'RECEIVED' ? 'INCOMING_PENDING' : next)} /></div>
 }
 
 function MessageTicks({ status }: { status: MessageStatus }) {

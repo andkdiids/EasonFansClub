@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { awardCommunityCommentRewards } from '@/lib/community-rewards'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
@@ -282,8 +282,6 @@ export async function POST(request: Request, { params }: Params) {
   emitRealtimeMany(reply.notificationRecipientIds, 'notification')
   const { User: replyAuthor, sticker: replySticker, ...serializedReply } = createdReply
   const mentionUserById = new Map(mentionedFriends.map((friend) => [friend.id, friend]))
-  const remarkMap = await loadFriendRemarkMap(user.id, mentionedFriends.map((friend) => friend.id))
-
   if (stickerId) {
     await recordStickerUsage(user.id, stickerId)
   }
@@ -317,12 +315,7 @@ export async function POST(request: Request, { params }: Params) {
           user: {
             id: friend.id,
             uid: friend.uid,
-            name: resolveFriendDisplayName({
-              viewerId: user.id,
-              targetUserId: friend.id,
-              fallbackName: getPublicUserDisplayName(friend),
-              remarkMap,
-            }),
+            name: getPublicUserDisplayName(friend),
           },
         }]
       }),

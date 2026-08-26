@@ -28,7 +28,7 @@ const reviewSelect = {
   User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
   ReviewedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
   Board: { select: { name: true, slug: true } },
-  PostMedia: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, type: true, url: true, thumbnail: true } },
+  PostMedia: { where: { type: 'IMAGE' as const }, orderBy: { sortOrder: 'asc' as const }, select: { id: true, type: true, url: true, thumbnail: true } },
 } as const
 
 type ReviewPostRow = Prisma.PostGetPayload<{ select: typeof reviewSelect }>

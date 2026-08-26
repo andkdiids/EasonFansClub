@@ -36,7 +36,8 @@ test('帖子、评论、通知、排行榜和投稿 API 的公开身份链路使
 
   assert.match(postRoute, /nickname: getPublicUserDisplayName\(User\)/)
   assert.match(replyRoute, /nickname: getPublicUserDisplayName\(replyAuthor\)/)
-  assert.match(notifications, /fallbackName: getPublicUserDisplayName\(actor\)/)
+  assert.match(notifications, /const actorNickname = actor \? getPublicUserDisplayName\(actor\)/)
+  assert.match(notifications, /getFriendDisplayName\(/)
   assert.match(notifications, /const displayActorName = actorName \|\| '有人'/)
   assert.match(likeNotifications, /getPublicUserDisplayName\(latest\.User\)/)
   assert.match(leaderboard, /getPublicUserDisplayName/)

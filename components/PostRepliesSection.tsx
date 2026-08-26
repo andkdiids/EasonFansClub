@@ -18,7 +18,7 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { splitContentImages } from '@/lib/content-images'
-import { canPinPostReply, type PostReplySort } from '@/lib/post-replies'
+import { canPinPostReply, splitViewerPostReplyRoots, type PostReplySort } from '@/lib/post-replies'
 import { Pagination } from '@/components/ui/Pagination'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
@@ -101,6 +101,7 @@ function buildReplyMap(replies: ReplyItem[]) {
 export function PostRepliesSection({
   postId,
   initialReplies,
+  initialMyReplies,
   initialReplyCount,
   currentUserId,
   canManageReplies,
@@ -114,6 +115,7 @@ export function PostRepliesSection({
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
+  initialMyReplies?: ReplyItem[]
   initialReplyCount: number
   currentUserId?: string
   canManageReplies?: boolean
@@ -129,6 +131,7 @@ export function PostRepliesSection({
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [replies, setReplies] = useState(() => initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
+  const [myReplies, setMyReplies] = useState(() => (initialMyReplies || []).map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   const [replyCount, setReplyCount] = useState(() => Math.max(initialReplyCount, 0))
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
   const [mobileReplySheetOpen, setMobileReplySheetOpen] = useState(false)
@@ -141,11 +144,22 @@ export function PostRepliesSection({
   }, [])
   useEffect(() => {
     setReplies(initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
+    setMyReplies((initialMyReplies || []).map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
     setReplyCount(Math.max(initialReplyCount, 0))
-  }, [initialReplies, initialReplyCount])
-  const tree = useMemo(() => buildReplyTree(replies), [replies])
-  const replyMap = useMemo(() => buildReplyMap(replies), [replies])
-  const rootReplies = tree.get(null) || []
+  }, [initialReplies, initialMyReplies, initialReplyCount])
+  const allReplies = useMemo(() => {
+    const byId = new Map<string, ReplyItem>()
+    replies.forEach((reply) => byId.set(reply.id, reply))
+    myReplies.forEach((reply) => byId.set(reply.id, reply))
+    return Array.from(byId.values())
+  }, [myReplies, replies])
+  const tree = useMemo(() => buildReplyTree(allReplies), [allReplies])
+  const replyMap = useMemo(() => buildReplyMap(allReplies), [allReplies])
+  const rootReplies = useMemo(() => tree.get(null) || [], [tree])
+  const { my: myRootReplies, visible: visibleRootReplies } = useMemo(
+    () => splitViewerPostReplyRoots(rootReplies, myReplies),
+    [myReplies, rootReplies],
+  )
 
   function buildCommentHref(nextSort: PostReplySort, nextPage: number) {
     const params = new URLSearchParams(searchParams.toString())
@@ -170,9 +184,11 @@ export function PostRepliesSection({
     if (await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/replies/${replyId}/like`)) return
     const data = await response.json().catch(() => ({}))
     if (!response.ok) return
-    setReplies((current) => current.map((reply) => reply.id === replyId
+    const updateLike = (current: ReplyItem[]) => current.map((reply) => reply.id === replyId
       ? { ...reply, liked: Boolean(data.isLiked), likeCount: Number(data.likeCount) || 0 }
-      : reply))
+      : reply)
+    setReplies(updateLike)
+    setMyReplies(updateLike)
     if (sort === 'hot') router.refresh()
   }
 
@@ -202,6 +218,9 @@ export function PostRepliesSection({
         const pinnedReply = updated.find((item) => item.id === reply.id)
         return pinnedReply ? [pinnedReply, ...updated.filter((item) => item.id !== reply.id)] : updated
       })
+      setMyReplies((current) => current.map((item) => item.id === reply.id
+        ? { ...item, isPinned: pinned }
+        : pinned && item.parentId === null ? { ...item, isPinned: false } : item))
       router.refresh()
     }
     setPinningReplyId(null)
@@ -218,6 +237,14 @@ export function PostRepliesSection({
   function openReplyComposer(target: { id: string; name: string }) {
     setReplyTo(target)
     if (window.matchMedia('(max-width: 767px)').matches) setMobileReplySheetOpen(true)
+  }
+
+  function scrollToMyComments() {
+    const target = document.getElementById(`post-my-comments-${postId}`)
+    if (!target) return
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    target.classList.add('notification-focus-target')
+    window.setTimeout(() => target.classList.remove('notification-focus-target'), 2000)
   }
 
   useEffect(() => {
@@ -295,6 +322,9 @@ export function PostRepliesSection({
     const created = normalizeReply(reply)
     if (!created) return
     setReplies((current) => current.some((item) => item.id === created.id) ? current : [...current, created])
+    if (!created.parentId && currentUserId === created.author.id) {
+      setMyReplies((current) => current.some((item) => item.id === created.id) ? current : [created, ...current])
+    }
     const nextReplyCount = replyCount + 1
     setReplyCount(nextReplyCount)
     const rootId = created.parentId ? findRootReplyId(created.parentId) : null
@@ -304,10 +334,11 @@ export function PostRepliesSection({
   }
 
   function removeReply(replyId: string, result: DeleteCommentResult) {
-    const byParent = buildReplyTree(replies)
+    const byParent = buildReplyTree(allReplies)
     const collectIds = (parentId: string): string[] => (byParent.get(parentId) || []).flatMap((reply) => [reply.id, ...collectIds(reply.id)])
     const removeIds = new Set([replyId, ...collectIds(replyId)])
     setReplies((current) => current.filter((reply) => !removeIds.has(reply.id)))
+    setMyReplies((current) => current.filter((reply) => !removeIds.has(reply.id)))
     const nextReplyCount = typeof result.replyCount === 'number'
       ? Math.max(result.replyCount, 0)
       : Math.max(replyCount - removeIds.size, 0)
@@ -515,9 +546,34 @@ export function PostRepliesSection({
               {'\u5199\u4e0b\u4f60\u7684\u56de\u590d\uff0c\u8f93\u5165 @ \u63d0\u53ca\u597d\u53cb\u2026'}
             </button>
           </div>
+          {myRootReplies.length ? (
+            <button
+              type="button"
+              onClick={scrollToMyComments}
+              className="text-left text-xs font-black text-brand-700"
+            >
+              你已经评论过这个帖子 · 查看我的评论
+            </button>
+          ) : null}
         </div>
       ) : !currentUserId ? (
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
+      ) : null}
+
+      {myRootReplies.length ? (
+        <section
+          id={`post-my-comments-${postId}`}
+          aria-labelledby={`post-my-comments-title-${postId}`}
+          className="post-replies-my-comments scroll-mt-20 space-y-3 rounded-xl border border-sky-100 bg-sky-50/40 p-3 sm:p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 id={`post-my-comments-title-${postId}`} className="text-base font-black text-brand-950">我的评论（{myRootReplies.length}）</h3>
+            <button type="button" onClick={scrollToMyComments} className="text-xs font-black text-brand-700">查看我的评论</button>
+          </div>
+          <div className="space-y-3">
+            {myRootReplies.map((reply, index) => renderReply(reply, index))}
+          </div>
+        </section>
       ) : null}
 
       <h2 className="text-2xl font-black text-brand-950">回复 {replyCount}</h2>
@@ -553,13 +609,13 @@ export function PostRepliesSection({
         </div>
       ) : null}
       {focusId && !replyMap.has(focusId) ? <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">该内容已被删除或无法查看</p> : null}
-      {rootReplies.length === 0 ? (
+      {visibleRootReplies.length === 0 && myRootReplies.length === 0 ? (
         <div className="post-replies-empty rounded-xl border-dashed p-8 text-center text-slate-500">还没有回复。</div>
-      ) : (
+      ) : visibleRootReplies.length ? (
         <div className="space-y-3">
-          {rootReplies.map((reply, index) => renderReply(reply, index))}
+          {visibleRootReplies.map((reply, index) => renderReply(reply, index))}
         </div>
-      )}
+      ) : null}
       {totalPages > 1 ? (
         <Pagination
           currentPage={page}

@@ -2,7 +2,7 @@ import { notFound, redirect } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -36,7 +36,6 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
   })
   if (!item) notFound()
   item.coverUrl = publicImageVariantUrl(item.coverUrl, 'large')
-  const remarkMap = await loadFriendRemarkMap(user.id, item.CultureComment.map((comment) => comment.User.id))
   const equippedBadgeMap = await getEquippedBadgesForUsers(item.CultureComment.map((comment) => comment.User.id))
 
   const facts = [
@@ -90,12 +89,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
             {item.CultureComment.map((comment) => (
               <div key={comment.id} className="rounded-2xl bg-sky-50/80 p-4">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <p className="text-sm font-black text-brand-950"><UserDisplayName name={resolveFriendDisplayName({
-                  viewerId: user.id,
-                  targetUserId: comment.User.id,
-                  fallbackName: getPublicUserDisplayName(comment.User),
-                  remarkMap,
-                  })} uid={comment.User.uid} badge={equippedBadgeMap.get(comment.User.id) || null} compact /></p>
+                  <p className="text-sm font-black text-brand-950"><UserDisplayName name={getPublicUserDisplayName(comment.User)} uid={comment.User.uid} badge={equippedBadgeMap.get(comment.User.id) || null} compact /></p>
                   <time className="text-xs font-bold text-slate-400" dateTime={comment.createdAt.toISOString()}>{comment.createdAt.toLocaleString('zh-CN')}</time>
                   <IpRegionLabel ipRegion={comment.ipRegion} />
                 </div>

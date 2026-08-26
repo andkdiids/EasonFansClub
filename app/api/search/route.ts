@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -172,10 +172,6 @@ export async function GET(request: Request) {
     }),
   ])
 
-  const remarkMap = await loadFriendRemarkMap(user?.id, [
-    ...users.map((item) => item.id),
-    ...posts.map((item) => item.User.id),
-  ])
   const equippedBadgeMap = await getEquippedBadgesForUsers([
     ...users.map((item) => item.id),
     ...posts.map((item) => item.User.id),
@@ -188,12 +184,7 @@ export async function GET(request: Request) {
       equippedBadge: equippedBadgeMap.get(item.id) || null,
       avatarUrl: toPublicMediaUrl(item.avatarUrl),
       profile: Profile ? {
-        displayName: resolveFriendDisplayName({
-          viewerId: user?.id,
-          targetUserId: item.id,
-          fallbackName: getPublicUserDisplayName({ ...item, Profile }),
-          remarkMap,
-        }),
+        displayName: getPublicUserDisplayName({ ...item, Profile }),
         avatarUrl: toPublicMediaUrl(Profile.avatarUrl),
         bio: publicModerationText(Profile.bio, Profile.bioModerationStatus),
       } : Profile,
@@ -225,12 +216,7 @@ export async function GET(request: Request) {
         equippedBadge: equippedBadgeMap.get(User.id) || null,
         avatarUrl: toPublicMediaUrl(User.avatarUrl),
         Profile: User.Profile ? {
-          displayName: resolveFriendDisplayName({
-            viewerId: user?.id,
-            targetUserId: User.id,
-            fallbackName: getPublicUserDisplayName(User),
-            remarkMap,
-          }),
+          displayName: getPublicUserDisplayName(User),
           avatarUrl: toPublicMediaUrl(User.Profile.avatarUrl),
         } : User.Profile,
       },

@@ -3517,8 +3517,11 @@ model Task {
 
 model User {
   id                                                     String                         @id @default(cuid())
+  /// 后台显示为“内部账号”；手机号、邮箱编辑不得写入此字段。
   username                                               String
+  /// canonical 联系邮箱；后台编辑只更新此字段。
   email                                                  String?
+  /// canonical E.164 手机号；后台编辑只更新此字段。
   phone                                                  String?
   passwordHash                                           String
   nickname                                               String

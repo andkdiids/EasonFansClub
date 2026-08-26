@@ -2,7 +2,7 @@ import { calculateCheckinStreaks } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { isAdminRole } from '@/lib/security'
 import { redirect } from 'next/navigation'
@@ -53,20 +53,11 @@ export default async function RankingsPage() {
     select: { id: true, uid: true, nickname: true, level: true, Profile: { select: { displayName: true } } },
   })
   const userById = new Map(streakUsers.map((item) => [item.id, item]))
-  const remarkMap = await loadFriendRemarkMap(user.id, [
-    ...points.map((item) => item.id),
-    ...streakTop.map((item) => item.userId),
-  ])
   const equippedBadgeMap = await getEquippedBadgesForUsers([
     ...points.map((item) => item.id),
     ...streakTop.map((item) => item.userId),
   ])
-  const displayName = (item: { id: string; nickname: string; Profile?: { displayName: string | null } | null }) => resolveFriendDisplayName({
-    viewerId: user.id,
-    targetUserId: item.id,
-    fallbackName: getPublicUserDisplayName(item),
-    remarkMap,
-  })
+  const displayName = (item: { id: string; nickname: string; Profile?: { displayName: string | null } | null }) => getPublicUserDisplayName(item)
 
   const streakRows: RankingRow[] = streakTop.flatMap((item) => {
     const u = userById.get(item.userId)

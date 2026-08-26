@@ -8,6 +8,7 @@ import {
   getPostReplyOrderBy,
   getPostReplyTotalPages,
   parsePostReplySort,
+  splitViewerPostReplyRoots,
 } from '../lib/post-replies'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -84,6 +85,44 @@ test('评论区显示置顶标识、作者置顶按钮、最新/最热切换与�
   assert.ok(replySection.includes("['hot', '最热']"))
   assert.match(replySection, /<Pagination/)
 })
+
+test('当前用户的一级评论单独置顶，真实置顶不变且不会重复展示', () => {
+  const pinned = { id: 'pinned', parentId: null, isPinned: true }
+  const normal = { id: 'normal', parentId: null, isPinned: false }
+  const myLatest = { id: 'my-latest', parentId: null, isPinned: false }
+  const myPinned = { id: 'my-pinned', parentId: null, isPinned: true }
+  const myNested = { id: 'my-nested', parentId: 'my-latest', isPinned: false }
+
+  const result = splitViewerPostReplyRoots([pinned, myPinned, normal], [myLatest, myPinned, myNested, myLatest])
+  assert.deepEqual(result.my.map((reply) => reply.id), ['my-latest', 'my-pinned'])
+  assert.deepEqual(result.visible.map((reply) => reply.id), ['pinned', 'normal'])
+  assert.deepEqual(result.pinned.map((reply) => reply.id), ['pinned'])
+  assert.deepEqual(result.normal.map((reply) => reply.id), ['normal'])
+  assert.equal(result.visible.some((reply) => reply.id === 'my-pinned'), false)
+})
+
+test('我的评论使用独立查询，不改变普通评论分页，未登录不查询', () => {
+  assert.match(detailPage, /viewerId?: string \\| null/)
+  assert.match(detailPage, /authorId: viewerId, isDeleted: false, parentId: null/)
+  assert.ok(detailPage.includes('orderBy: [{ createdAt: \'desc\' }, { id: \'desc\' }]'))
+  assert.ok(detailPage.includes('const childRootIds = Array.from(new Set([...rootIds, ...viewerRootIds]))'))
+  assert.ok(detailPage.includes('const includedRootIds = new Set(rootIds)'))
+  assert.ok(detailPage.includes('myRows:'))
+  assert.ok(detailPage.includes('loadPostReplies(postId, commentSort, requestedCommentPage, user?.id)'))
+  assert.ok(detailPage.includes('initialMyReplies={myReplyRows}'))
+  assert.ok(replySection.includes('initialMyReplies?: ReplyItem[]'))
+  assert.ok(replySection.includes('你已经评论过这个帖子 · 查看我的评论'))
+  assert.ok(replySection.includes('post-my-comments-${postId}'))
+  assert.ok(replySection.includes('splitViewerPostReplyRoots(rootReplies, myReplies)'))
+  assert.ok(replySection.includes('setMyReplies((current) => current.filter'))
+  assert.equal(splitViewerPostReplyRoots([pinnedReplyFixture()], []).my.length, 0)
+  assert.equal(getPostReplyTotalPages(41, 20), 3)
+  assert.equal(getPostReplyOffset(2, 20), 20)
+})
+
+function pinnedReplyFixture() {
+  return { id: 'pinned', parentId: null, isPinned: true }
+}
 
 test('E院广场搜索通过 form submit 复用同一搜索逻辑，并重置页码', () => {
   assert.ok(forumHome.includes('<form'))

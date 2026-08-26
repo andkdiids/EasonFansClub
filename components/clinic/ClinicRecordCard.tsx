@@ -9,6 +9,7 @@ export function ClinicRecordCard({
   isAuthenticated,
   isAspirinPending,
   returnHref,
+  onOpenDetail,
   onAspirin,
   onReport,
 }: Readonly<{
@@ -16,6 +17,7 @@ export function ClinicRecordCard({
   isAuthenticated: boolean
   isAspirinPending: boolean
   returnHref?: string
+  onOpenDetail: (recordId: string) => void
   onAspirin: (record: ClinicPublicRecord) => void
   onReport: (target: { recordId: string }) => void
 }>) {
@@ -23,13 +25,13 @@ export function ClinicRecordCard({
   const detailHref = returnHref ? `/clinic/${record.id}?from=${encodeURIComponent(returnHref)}` : `/clinic/${record.id}`
   const consultationHref = `${detailHref}#consultations`
   return (
-    <article className="clinic-record-card" data-clinic-record-card>
+    <article className="clinic-record-card" data-clinic-record-card data-post-id={record.id}>
       <header className="clinic-record-card-header">
         <ClinicIdentityBadge identity={record.author} />
         <span className="clinic-record-time"><ClinicTime value={record.createdAt} /></span>
         <button type="button" className="clinic-more-button" aria-label="病历更多操作" onClick={() => onReport({ recordId: record.id })}>···</button>
       </header>
-      <Link href={detailHref} className="clinic-record-card-main">
+      <Link href={detailHref} className="clinic-record-card-main" onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) onOpenDetail(record.id) }}>
         <div className="clinic-record-meta"><span className="clinic-category-label">{record.categoryLabel}</span><span>患者诉求：{record.needLabel}</span></div>
         <p className="clinic-record-content">{record.content}</p>
       </Link>
@@ -45,7 +47,7 @@ export function ClinicRecordCard({
           <span>{record.viewerHasAspirin ? '已经给药' : '给颗阿士匹灵'}</span>
           <b>{record.aspirinCount}</b>
         </button>
-        <Link href={consultationHref} className="clinic-action-button">
+        <Link href={consultationHref} className="clinic-action-button" onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) onOpenDetail(record.id) }}>
           <UiIcon name="stethoscope" />
           <span>会诊</span>
           <b>{record.consultationCount}</b>

@@ -11,7 +11,7 @@ test('post detail primary composer is before the comment list while thread repli
   const primaryGateCount = replySection.split(primaryGate).length - 1
   const composerIndex = replySection.indexOf(primaryGate)
   const headingIndex = replySection.indexOf('<h2 className="text-2xl font-black text-brand-950">', composerIndex)
-  const listIndex = replySection.indexOf('{rootReplies.length === 0 ? (', headingIndex)
+  const listIndex = replySection.indexOf('{visibleRootReplies.length === 0 && myRootReplies.length === 0 ? (', headingIndex)
 
   assert.equal(primaryGateCount, 1)
   assert.ok(composerIndex >= 0 && composerIndex < headingIndex)

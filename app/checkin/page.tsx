@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
+import { CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, resolveCheckInNotificationTarget, type CheckInMessagePagination, type CheckInMessageSort } from '@/lib/checkin-messages'
 import { getCheckInPublicStats } from '@/lib/checkin-stats'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
@@ -26,26 +26,36 @@ function parseDate(value?: string) {
   return date
 }
 
-export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string; page?: string; message?: string; focus?: string }> }) {
+export default async function CheckInPage({ searchParams }: { searchParams: Promise<{ date?: string; sort?: string; page?: string; message?: string; messageId?: string; dailyMessageId?: string; focus?: string; replyId?: string; commentId?: string; reply?: string }> }) {
   const sessionUser = await getCurrentUser()
   if (!sessionUser) redirect('/login')
 
   const params = await searchParams
   let selectedDate = parseDate(params.date)
   let notificationTargetDate: Date | null = null
-  const notificationMessageId = params.message?.slice(0, 80) || ''
-  const notificationFocusId = params.focus?.slice(0, 80) || ''
+  const rawNotificationMessageId = (params.message || params.messageId || params.dailyMessageId)?.slice(0, 80) || ''
+  const rawNotificationFocusId = (params.focus || params.replyId || params.commentId || params.reply)?.slice(0, 80) || ''
+  let notificationTarget = { messageId: null as string | null, commentId: null as string | null, date: null as Date | null }
+  let notificationTargetResolutionFailed = false
+  if (rawNotificationMessageId || rawNotificationFocusId) {
+    try {
+      notificationTarget = await resolveCheckInNotificationTarget({ messageId: rawNotificationMessageId, commentId: rawNotificationFocusId })
+    } catch {
+      // Keep the page usable when the durable-target lookup itself times out;
+      // the focus UI reports a load failure instead of misclassifying it as
+      // missing or unauthorized content.
+      notificationTargetResolutionFailed = true
+    }
+  }
+  // Prefer the reply's own parent message/date. This handles links opened on a
+  // different day, legacy replyId-only links, and replies outside page one.
+  const notificationMessageId = notificationTarget.messageId || rawNotificationMessageId
+  const notificationFocusId = rawNotificationFocusId
   // 通知点赞跳转到 /checkin?message=<id> 时，目标留言可能不在「今天」：
   // 先按 id 查出其所属日期并作为选中日期加载，确保留言进入列表后能被定位高亮。
-  if (params.message) {
-    const targetMessage = await prisma.dailyMessage.findUnique({
-      where: { id: notificationMessageId },
-      select: { date: true },
-    })
-    if (targetMessage) {
-      selectedDate = parseDate(formatBeijingDate(targetMessage.date))
-      notificationTargetDate = targetMessage.date
-    }
+  if (notificationTarget.date) {
+    selectedDate = parseDate(formatBeijingDate(notificationTarget.date))
+    notificationTargetDate = notificationTarget.date
   }
   if (notificationTargetDate && notificationMessageId) {
     const dateKey = formatBeijingDate(notificationTargetDate)
@@ -132,8 +142,9 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   )
   const selectedMessages = selectedMessagePage.messages
   let messagesForDisplay = selectedMessages
-  let focusErrorKind: 'load' | 'deleted' | 'unavailable' | undefined
-  if (notificationMessageId) {
+  let focusErrorKind: 'load' | 'deleted' | 'not-found' | 'unavailable' | undefined
+  if (notificationTargetResolutionFailed) focusErrorKind = 'load'
+  if (notificationMessageId && focusErrorKind !== 'load') {
     try {
       const focusedMessage = await getCheckInMessage({
         messageId: notificationMessageId,
@@ -151,6 +162,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       if (notificationFocusId) {
         const replyStatus = await getCheckInReplyStatus({ messageId: notificationMessageId, commentId: notificationFocusId })
         if (replyStatus === 'deleted') focusErrorKind = 'deleted'
+        if (replyStatus === 'not-found') focusErrorKind = 'not-found'
         if (replyStatus === 'unavailable' || (replyStatus === 'visible' && !focusedMessage)) focusErrorKind = 'unavailable'
       }
     } catch (error) {
@@ -202,8 +214,8 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
           checkinMoodEnabled={user.checkinMoodEnabled}
           sessionUserId={sessionUser.id}
           sessionUserRole={sessionUser.role}
-          focusMessageId={params.message?.slice(0, 80)}
-          focusCommentId={params.focus?.slice(0, 80)}
+          focusMessageId={notificationMessageId || undefined}
+          focusCommentId={notificationFocusId || undefined}
           focusErrorKind={focusErrorKind}
         />
       </main>

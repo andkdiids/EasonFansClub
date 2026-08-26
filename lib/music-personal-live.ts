@@ -129,6 +129,7 @@ export function summarizePersonalLiveSummaryRows(rows: PersonalLiveSummaryRow[])
 }
 
 export type PersonalSetlistItem = {
+  id?: string
   songId: string | null
   displayName: string | null
   section: string
@@ -186,10 +187,64 @@ function isPublishedRow(row: PersonalLiveRow) {
   return row.MusicConcert.status === 'PUBLISHED' && row.MusicConcert.MusicTour.status === 'PUBLISHED'
 }
 
+export type PersonalSongAlbum = {
+  id: string
+  name: string
+  coverUrl: string | null
+} | null
+
+export type PersonalSongAtlasItem = {
+  /** Stable MusicSong identity; legacy display-name-only rows intentionally have no songId. */
+  songId: string | null
+  /** Internal/API key that also keeps unstructured historical rows visible. */
+  identityKey: string
+  title: string
+  album: PersonalSongAlbum
+  isStructured: boolean
+  occurrenceCount: number
+  /** Alias used by consumers that call the metric listenCount. */
+  listenCount: number
+  concertCount: number
+  showIds: string[]
+  first: PersonalSongHistoryConcert
+  latest: PersonalSongHistoryConcert
+  concerts: PersonalSongHistoryConcert[]
+}
+
+export type PersonalSongHistoryConcert = {
+  concertId: string
+  date: Date
+  city: string
+  venue: string | null
+  tourId: string
+  tourName: string
+  stageType: 'NORMAL' | 'ENCORE' | 'FINAL'
+}
+
+type PersonalSetlistIdentity = {
+  key: string
+  songId: string | null
+}
+
+function normalizeLegacySetlistName(value: string) {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('zh-CN')
+}
+
+/**
+ * Formal setlist rows are stored directly on MusicConcertSetlistItem. Pending
+ * contributions are not in this relation yet. Prefer the stable songId; only
+ * legacy displayName-only rows need a compatibility identity.
+ */
+function personalSetlistIdentity(item: PersonalSetlistItem): PersonalSetlistIdentity | null {
+  if (item.section === 'TALK') return null
+  const songId = item.songId?.trim()
+  if (songId) return { key: `song:${songId}`, songId }
+  const displayName = item.displayName ? normalizeLegacySetlistName(item.displayName) : ''
+  return displayName ? { key: `legacy:${displayName}`, songId: null } : null
+}
+
 function isCountableSetlistItem(item: PersonalSetlistItem) {
-  const hasContent = Boolean(item.songId || item.displayName?.trim())
-  if (!hasContent) return false
-  return item.section !== 'TALK' || hasContent
+  return personalSetlistIdentity(item) !== null
 }
 
 export function summarizePersonalLiveRows(rows: PersonalLiveRow[]) {
@@ -209,7 +264,7 @@ export function summarizePersonalLiveRows(rows: PersonalLiveRow[]) {
   const availableRows = uniqueRows.filter(isPublishedRow)
   const tourIds = new Set<string>()
   const cities = new Map<string, { name: string; count: number }>()
-  const songIds = new Set<string>()
+  const songKeys = new Set<string>()
   let totalLiveSongCount = 0
 
   for (const row of uniqueRows) {
@@ -223,11 +278,14 @@ export function summarizePersonalLiveRows(rows: PersonalLiveRow[]) {
       console.warn('[music.live.me] ignored blank city', { concertId: row.MusicConcert.id })
     }
     if (!isPublishedRow(row)) continue
+    const rowSongKeys = new Set<string>()
     for (const item of row.MusicConcert.MusicConcertSetlistItem) {
-      if (!isCountableSetlistItem(item)) continue
-      totalLiveSongCount += 1
-      if (item.songId) songIds.add(item.songId)
+      const identity = personalSetlistIdentity(item)
+      if (!identity) continue
+      rowSongKeys.add(identity.key)
+      songKeys.add(identity.key)
     }
+    totalLiveSongCount += rowSongKeys.size
   }
 
   return {
@@ -235,37 +293,53 @@ export function summarizePersonalLiveRows(rows: PersonalLiveRow[]) {
     tourCount: tourIds.size,
     cityCount: cities.size,
     latestAttendedShow: summary.latestAttendedShow,
-    unlockedSongCount: songIds.size,
+    unlockedSongCount: songKeys.size,
     totalLiveSongCount,
     unavailableCount: uniqueRows.length - availableRows.length,
+    setlistShowCount: availableRows.filter((row) => row.MusicConcert.MusicConcertSetlistItem.some(isCountableSetlistItem)).length,
     cities: [...cities.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN')),
   }
 }
 
-export function buildPersonalSongAtlas(rows: PersonalLiveRow[]) {
+export function buildPersonalSongAtlas(rows: PersonalLiveRow[]): PersonalSongAtlasItem[] {
   const songs = new Map<string, {
-    songId: string
+    identityKey: string
+    songId: string | null
     title: string
-    album: { id: string; name: string; coverUrl: string | null }
+    album: PersonalSongAlbum
+    isStructured: boolean
     occurrenceCount: number
-    concerts: Map<string, { concertId: string; date: Date; city: string; venue: string | null; tourId: string; tourName: string }>
+    concerts: Map<string, PersonalSongHistoryConcert>
   }>()
 
   for (const row of rows.filter(isPublishedRow)) {
     const concert = row.MusicConcert
     for (const item of concert.MusicConcertSetlistItem) {
-      if (!item.songId || !item.MusicSong) continue
-      const current = songs.get(item.songId) || {
-        songId: item.songId,
-        title: item.MusicSong.title,
-        album: {
+      const identity = personalSetlistIdentity(item)
+      if (!identity) continue
+      const current = songs.get(identity.key) || {
+        identityKey: identity.key,
+        songId: identity.songId,
+        title: item.MusicSong?.title || item.displayName?.trim() || '未命名歌曲',
+        album: item.MusicSong ? {
           ...item.MusicSong.MusicAlbum,
           coverUrl: toPublicMediaUrl(item.MusicSong.MusicAlbum.coverUrl),
-        },
+        } : null,
+        isStructured: Boolean(identity.songId && item.MusicSong),
         occurrenceCount: 0,
         concerts: new Map(),
       }
-      current.occurrenceCount += 1
+      if (!current.isStructured && identity.songId && item.MusicSong) {
+        current.title = item.MusicSong.title
+        current.album = {
+          ...item.MusicSong.MusicAlbum,
+          coverUrl: toPublicMediaUrl(item.MusicSong.MusicAlbum.coverUrl),
+        }
+        current.isStructured = true
+      }
+      // A song is heard once per attended show, even if a malformed/legacy
+      // setlist contains the same row more than once for that show.
+      if (current.concerts.has(concert.id)) continue
       current.concerts.set(concert.id, {
         concertId: concert.id,
         date: concert.concertDate,
@@ -275,7 +349,8 @@ export function buildPersonalSongAtlas(rows: PersonalLiveRow[]) {
         tourName: concert.MusicTour.name,
         stageType: concert.stageType,
       })
-      songs.set(item.songId, current)
+      current.occurrenceCount = current.concerts.size
+      songs.set(identity.key, current)
     }
   }
 
@@ -283,12 +358,16 @@ export function buildPersonalSongAtlas(rows: PersonalLiveRow[]) {
     const concerts = [...song.concerts.values()].sort((a, b) => a.date.getTime() - b.date.getTime())
     return {
       songId: song.songId,
+      identityKey: song.identityKey,
       title: song.title,
       album: song.album,
+      isStructured: song.isStructured,
       occurrenceCount: song.occurrenceCount,
+      listenCount: song.occurrenceCount,
       concertCount: concerts.length,
-      first: concerts[0],
-      latest: concerts.at(-1),
+      showIds: concerts.map((concert) => concert.concertId),
+      first: concerts[0]!,
+      latest: concerts.at(-1)!,
       concerts,
     }
   })
@@ -313,7 +392,8 @@ export function buildTourStats(rows: PersonalLiveRow[], fallbacks: PersonalPoste
     }
     current.dates.push(concert.concertDate)
     concert.MusicConcertSetlistItem.forEach((item) => {
-      if (item.songId) current.songs.add(item.songId)
+      const identity = personalSetlistIdentity(item)
+      if (identity) current.songs.add(identity.key)
     })
     tours.set(concert.tourId, current)
   }
@@ -356,6 +436,7 @@ const personalConcertSelect = {
       MusicConcertSetlistItem: {
         orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
         select: {
+          id: true,
           songId: true,
           displayName: true,
           section: true,

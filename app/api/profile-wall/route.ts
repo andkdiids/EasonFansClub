@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { normalizeFriendPair } from '@/lib/friends'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -127,16 +127,11 @@ function buildWallTree(rows: WallRow[]) {
     .map((row) => buildNode(row, new Set()))
 }
 
-function serializeWallLikers(likes: WallLiker[], viewerId: string | null, remarkMap: ReadonlyMap<string, string>, equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>) {
+function serializeWallLikers(likes: WallLiker[], equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>) {
   return likes.map((like) => ({
     uid: like.User.uid,
     nickname: getPublicUserDisplayName(like.User),
-    displayName: resolveFriendDisplayName({
-      viewerId: viewerId || undefined,
-      targetUserId: like.userId,
-      fallbackName: getPublicUserDisplayName(like.User),
-      remarkMap,
-    }),
+    displayName: getPublicUserDisplayName(like.User),
     avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
     equippedBadge: equippedBadgeMap.get(like.userId) || null,
   }))
@@ -148,16 +143,10 @@ function serializeWallNode(
   receiverId: string,
   isOwner: boolean,
   viewerLikedIds: ReadonlySet<string>,
-  remarkMap: ReadonlyMap<string, string>,
   equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>,
 ): SerializedWallMessage {
   const sender = node.row.User_ProfileWallMessage_senderIdToUser
-  const displayName = resolveFriendDisplayName({
-    viewerId: viewer?.id,
-    targetUserId: node.row.senderId,
-    fallbackName: getPublicUserDisplayName(sender),
-    remarkMap,
-  })
+  const displayName = getPublicUserDisplayName(sender)
 
   return {
     id: node.row.id,
@@ -169,7 +158,7 @@ function serializeWallNode(
     canDelete: canManageWallMessage(viewer, node.row.senderId, receiverId),
     liked: viewerLikedIds.has(node.row.id),
     likeCount: node.row.likeCount,
-    likers: isOwner ? serializeWallLikers(node.row.ProfileWallLike, viewer?.id || null, remarkMap, equippedBadgeMap) : [],
+    likers: isOwner ? serializeWallLikers(node.row.ProfileWallLike, equippedBadgeMap) : [],
     commentCount: node.commentCount,
     sender: {
       uid: sender.uid,
@@ -178,7 +167,7 @@ function serializeWallNode(
       equippedBadge: equippedBadgeMap.get(node.row.senderId) || null,
       profile: sender.Profile ? { ...sender.Profile, avatarUrl: publicImageUrl(sender.Profile.avatarUrl), displayName } : null,
     },
-    children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, remarkMap, equippedBadgeMap)),
+    children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, equippedBadgeMap)),
   }
 }
 
@@ -278,14 +267,13 @@ export async function GET(request: Request) {
     ...rows.map((row) => row.senderId),
     ...rows.flatMap((row) => row.ProfileWallLike.map((like) => like.userId)),
   ]
-  const remarkMap = await loadFriendRemarkMap(viewer?.id, displayNameUserIds)
   const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
   const tree = buildWallTree(rows)
 
   return NextResponse.json({
     visibility: receiver.Profile?.wallVisibility || 'PUBLIC',
     canPost: Boolean(viewer && receiver.Profile?.wallVisibility !== 'CLOSED'),
-    messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, remarkMap, equippedBadgeMap)),
+    messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, equippedBadgeMap)),
     pagination: {
       page,
       pageSize: PROFILE_WALL_PAGE_SIZE,
@@ -385,7 +373,6 @@ export async function POST(request: Request) {
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
   const createdRow = await loadWallMessage(message.id)
   if (!createdRow) return NextResponse.json({ message: '留言已保存，但读取新留言失败' }, { status: 500 })
-  const remarkMap = await loadFriendRemarkMap(viewer.id, [createdRow.senderId])
   const equippedBadgeMap = await getEquippedBadgesForUsers([
     createdRow.senderId,
     ...createdRow.ProfileWallLike.map((like) => like.userId),
@@ -396,7 +383,6 @@ export async function POST(request: Request) {
     receiver.id,
     viewer.id === receiver.id,
     new Set<string>(),
-    remarkMap,
     equippedBadgeMap,
   )
 

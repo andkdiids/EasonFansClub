@@ -46,6 +46,25 @@ export function getPublicUserDisplayName(user: PublicNameUser | SerializedNameUs
   return user.nickname?.trim() || PUBLIC_USER_FALLBACK_NAME
 }
 
+/**
+ * Resolve a name only when the caller is explicitly rendering a private
+ * friend/contact context.  `nickname` remains the public name; a remark is a
+ * viewer-owned alias and must never be written back into a public user DTO.
+ */
+export function getFriendDisplayName({
+  nickname,
+  friendRemark,
+  isFriendContext,
+}: {
+  nickname?: string | null
+  friendRemark?: string | null
+  isFriendContext: boolean
+}) {
+  const publicName = nickname?.trim() || PUBLIC_USER_FALLBACK_NAME
+  const remark = friendRemark?.trim()
+  return isFriendContext && remark ? remark : publicName
+}
+
 export function resolveFriendDisplayName({
   viewerId,
   targetUserId,
@@ -60,8 +79,11 @@ export function resolveFriendDisplayName({
   context?: 'default' | 'profile'
 }) {
   if (fallbackName === '违规用户') return fallbackName
-  if (context === 'profile' || !viewerId || !targetUserId) return fallbackName
-  return remarkMap?.get(targetUserId) || fallbackName
+  return getFriendDisplayName({
+    nickname: fallbackName,
+    friendRemark: targetUserId ? remarkMap?.get(targetUserId) : null,
+    isFriendContext: context !== 'profile' && Boolean(viewerId && targetUserId),
+  })
 }
 
 export function withPrismaDisplayName<T extends { Profile: { displayName: string | null } | null }>(user: T, displayName: string): T {
@@ -111,7 +133,8 @@ export async function loadFriendRemarkMap(viewerId: string | null | undefined, t
   const friendIds = new Set(friendships.map((row) => row.userAId === viewerId ? row.userBId : row.userAId))
   const blockedIds = new Set(blocks.map((row) => row.blockerId === viewerId ? row.blockedId : row.blockerId))
   remarks.forEach((row) => {
-    if (friendIds.has(row.friendId) && !blockedIds.has(row.friendId)) result.set(row.friendId, row.remark)
+    const remark = row.remark.trim()
+    if (remark && friendIds.has(row.friendId) && !blockedIds.has(row.friendId)) result.set(row.friendId, remark)
   })
   return result
 }

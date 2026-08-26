@@ -10,7 +10,7 @@ import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { getPublicUserDisplayNameFromNickname } from '@/lib/public-user-name'
 
-type Friend = { id: string; nickname?: string; avatarUrl?: string | null; profile?: { displayName?: string | null } | null; equippedBadge?: EquippedBadgeView | null }
+type Friend = { id: string; nickname?: string; displayName?: string | null; friendRemark?: string | null; avatarUrl?: string | null; profile?: { displayName?: string | null } | null; equippedBadge?: EquippedBadgeView | null }
 type DuelStats = { wins: number; participations: number; winRate: number }
 type DuelHistoryItem = { result: DuelMatchResult; roomCode: string }
 type ApiPayload = { ok?: boolean; message?: string; code?: string; [key: string]: unknown }
@@ -39,7 +39,7 @@ function avatar(user: { name: string; avatarUrl: string | null }) {
 }
 
 function friendName(friend: Friend) {
-  return getPublicUserDisplayNameFromNickname(friend.nickname, '好友')
+  return friend.displayName?.trim() || getPublicUserDisplayNameFromNickname(friend.nickname, '好友')
 }
 
 function formatDuration(startedAt: string, finishedAt: string | null) {
@@ -90,6 +90,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const [joinPassword, setJoinPassword] = useState('')
   const [pendingJoinRoom, setPendingJoinRoom] = useState<DuelRoomState | null>(null)
   const [friends, setFriends] = useState<Friend[]>([])
+  const [privateFriendDisplayNames, setPrivateFriendDisplayNames] = useState<Record<string, string>>({})
   const [inviteOpen, setInviteOpen] = useState(false)
   const [selectedFriendId, setSelectedFriendId] = useState('')
   const [audioBlocked, setAudioBlocked] = useState(false)
@@ -129,6 +130,8 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   // 记录已播放音频的题目 token，保证每道题只播放一次，且不会在题目切换残留。
   const playedAudioTokenRef = useRef<string | null>(null)
   const answerPendingRef = useRef<string | null>(null)
+  const privateFriendDisplayNamesRef = useRef<Record<string, string>>({})
+  const privateFriendNameLookupsRef = useRef(new Set<string>())
   const syncSequenceRef = useRef(0)
   const requestGenerationRef = useRef(0)
   const latestMatchRef = useRef<DuelMatchState | null>(null)
@@ -151,6 +154,27 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     audioAttemptedTokenRef.current = null
     playedAudioTokenRef.current = null
   }, [])
+
+  const hydratePrivateFriendDisplayNames = useCallback(async (userIds: string[]) => {
+    const ids = [...new Set(userIds.filter((id) => id && id !== userId))]
+      .filter((id) => !privateFriendNameLookupsRef.current.has(id))
+    if (!ids.length) return
+    ids.forEach((id) => privateFriendNameLookupsRef.current.add(id))
+    try {
+      const data = await api<{ friends: Array<{ id: string; displayName?: string | null }> }>(
+        `/api/friends/display-names?ids=${encodeURIComponent(ids.join(','))}`,
+      )
+      const next = Object.fromEntries((data.friends || [])
+        .filter((friend) => friend.id && friend.displayName?.trim())
+        .map((friend) => [friend.id, friend.displayName!.trim()]))
+      if (!Object.keys(next).length) return
+      Object.assign(privateFriendDisplayNamesRef.current, next)
+      setPrivateFriendDisplayNames((current) => ({ ...current, ...next }))
+    } catch {
+      // Public nickname remains the safe fallback if the private lookup is
+      // unavailable.  The duel protocol itself never carries friend remarks.
+    }
+  }, [userId])
 
   const setDuelError = useCallback((reason: unknown) => {
     setError(reason instanceof Error ? reason.message : '对决请求失败')
@@ -200,6 +224,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
   const applyMatchSnapshot = useCallback((next: DuelMatchState) => {
     if (!canApplyDuelMatchSnapshot(matchIdRef.current, latestMatchRef.current, next)) return false
+    void hydratePrivateFriendDisplayNames(next.players.map((player) => player.userId))
     const previous = latestMatchRef.current
     const questionChanged = !previous || !sameDuelQuestionIdentity(getDuelQuestionIdentity(previous), getDuelQuestionIdentity(next))
     latestMatchRef.current = next
@@ -240,7 +265,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       setView('match')
     }
     return true
-  }, [clearQuestionLocalState, loadLobby, userId])
+  }, [clearQuestionLocalState, hydratePrivateFriendDisplayNames, loadLobby, userId])
 
   const openRoom = useCallback((nextRoom: DuelRoomState) => {
     requestGenerationRef.current += 1
@@ -266,8 +291,9 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     setMatch(null)
     setQuestionResult(null)
     setView(nextRoom.matchId ? 'match' : 'room')
+    void hydratePrivateFriendDisplayNames([nextRoom.host.id, nextRoom.challenger?.id || ''])
     router.replace(`/games/guess-song/duel?room=${encodeURIComponent(nextRoom.id)}`)
-  }, [resetToLobby, router])
+  }, [hydratePrivateFriendDisplayNames, resetToLobby, router])
 
   useEffect(() => {
     roomIdRef.current = roomId
@@ -301,6 +327,19 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     void boot()
   }, [initialInviteToken, loadLobby, openRoom, router, setDuelError, userId])
 
+  useEffect(() => {
+    const updatePrivateFriendDisplayName = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetUserId?: string; displayName?: string }>).detail
+      if (!detail?.targetUserId || !detail.displayName?.trim()) return
+      const displayName = detail.displayName.trim()
+      privateFriendNameLookupsRef.current.add(detail.targetUserId)
+      privateFriendDisplayNamesRef.current[detail.targetUserId] = displayName
+      setPrivateFriendDisplayNames((current) => ({ ...current, [detail.targetUserId!]: displayName }))
+    }
+    window.addEventListener('friend-remark:updated', updatePrivateFriendDisplayName)
+    return () => window.removeEventListener('friend-remark:updated', updatePrivateFriendDisplayName)
+  }, [])
+
   const syncDuelState = useCallback((force = false) => {
     const currentRoomId = roomIdRef.current
     const currentMatchId = matchIdRef.current
@@ -326,6 +365,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         const roomData = await api<{ room: DuelRoomState }>(`/api/entertainment/guess-song/duel/rooms/${encodeURIComponent(currentRoomId || '')}`, { signal: controller.signal })
         if (!isCurrentRoom()) return
         const nextRoom = roomData.room
+        void hydratePrivateFriendDisplayNames([nextRoom.host.id, nextRoom.challenger?.id || ''])
         setRoom(nextRoom)
         if (nextRoom.status === 'CLOSED' && !nextRoom.matchId) {
           resetToLobby(new Error('房间已过期或已关闭'))
@@ -362,7 +402,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
     })()
     syncRequestRef.current = { key, generation, controller, promise }
     return promise
-  }, [applyMatchSnapshot, resetToLobby])
+  }, [applyMatchSnapshot, hydratePrivateFriendDisplayNames, resetToLobby])
 
   useEffect(() => {
     if (room?.status === 'PLAYING' && view !== 'match' && view !== 'result') setView('match')
@@ -376,6 +416,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       return
     }
     if (event.type === 'ROOM_STATE') {
+      void hydratePrivateFriendDisplayNames([event.state.host.id, event.state.challenger?.id || ''])
       setRoom(event.state)
       if (event.state.status === 'CLOSED' && !event.state.matchId) {
         resetToLobby(new Error('房主已离开，房间已关闭'))
@@ -453,7 +494,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
       if (event.code === 'STALE_ROUND' || event.code === 'MATCH_FINISHED') void syncDuelState()
       else setError(event.message)
     }
-  }, [applyMatchSnapshot, resetToLobby, syncDuelState, userId])
+  }, [applyMatchSnapshot, hydratePrivateFriendDisplayNames, resetToLobby, syncDuelState, userId])
 
   useEffect(() => {
     if (!roomId && !matchId) return
@@ -728,6 +769,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
   const currentQuestion = match?.question
   const activeMode = match?.mode || room?.mode || selectedMode
+  const getDuelDisplayName = (player: { id?: string; userId?: string; name: string }) => privateFriendDisplayNames[player.id || player.userId || ''] || player.name
   const currentQuestionIdentity = match && currentQuestion ? getDuelQuestionIdentity(match) : null
   const visibleAnswerFeedback = currentQuestionIdentity && answerFeedback && sameDuelQuestionIdentity(answerFeedback.identity, currentQuestionIdentity) ? answerFeedback : null
   const questionInteractionKey = currentQuestionIdentity ? duelQuestionIdentityKey(currentQuestionIdentity) : match ? `${match.matchId}:${match.currentQuestionIndex}:waiting` : 'no-question'
@@ -738,7 +780,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const lastRoundVisible = activeMode === 'BUZZER' && Boolean(match?.lastQuestionResult && currentQuestion && new Date(currentQuestion.serverStartedAt).getTime() > clockTick + offsetRef.current)
   const lastRoundSummary = lastRoundVisible ? match?.lastQuestionResult?.answers.map((answer) => {
     const player = match.players.find((item) => item.userId === answer.userId)
-    return `${player?.name || '玩家'} ${answer.selectedOptionKey || '未作答'}（${answer.correct ? '正确' : '错误'}）`
+    return `${player ? getDuelDisplayName(player) : '玩家'} ${answer.selectedOptionKey || '未作答'}（${answer.correct ? '正确' : '错误'}）`
   }).join(' · ') : null
 
   async function createRoom() {
@@ -949,7 +991,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
   const myReady = room ? room.host.id === userId ? room.hostReady : room.challengerReady : false
   const canStart = Boolean(room && room.host.id === userId && room.challenger && room.hostReady && room.challengerReady)
   const result = match?.result
-  const resultWinnerName = result?.winnerId ? result.players.find((player) => player.userId === result.winnerId)?.name : null
+  const resultWinnerName = result?.winnerId ? result.players.find((player) => player.userId === result.winnerId) : null
   const activeModeLabel = getDuelModeLabel(activeMode)
   const questionProgress = currentQuestion?.isOvertime
     ? `加赛 ${currentQuestion.overtimeIndex || 1}`
@@ -1021,9 +1063,9 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
         <section className="duel-room-hall">
           <div className="duel-hall-title"><div><h1>听听 · 对决</h1><p className="duel-mode-badge">{getDuelModeLabel(room.mode)}</p><p className="duel-muted">两位玩家都准备后，房主才能开始。</p></div><button type="button" className="duel-ghost-button" onClick={() => void leaveRoomOrMatch()} disabled={busy}>退出房间</button></div>
           <div className="duel-players-card">
-            <div className="duel-room-player"><div className="duel-large-avatar">{avatar(room.host)}</div><span className="duel-player-role">房主</span><h2><UserDisplayName name={room.host.name} uid={room.host.uid} badge={room.host.equippedBadge} showBadgeName /></h2><p className={room.hostReady ? 'is-ready' : ''}>{room.hostReady ? '✓ 已准备' : '○ 未准备'}</p></div>
+            <div className="duel-room-player"><div className="duel-large-avatar">{avatar(room.host)}</div><span className="duel-player-role">房主</span><h2><UserDisplayName name={getDuelDisplayName(room.host)} uid={room.host.uid} badge={room.host.equippedBadge} showBadgeName /></h2><p className={room.hostReady ? 'is-ready' : ''}>{room.hostReady ? '✓ 已准备' : '○ 未准备'}</p></div>
             <div className="duel-versus">VS</div>
-            <div className="duel-room-player">{room.challenger ? <><div className="duel-large-avatar">{avatar(room.challenger)}</div><span className="duel-player-role">挑战者</span><h2><UserDisplayName name={room.challenger.name} uid={room.challenger.uid} badge={room.challenger.equippedBadge} showBadgeName /></h2><p className={room.challengerReady ? 'is-ready' : ''}>{room.challengerReady ? '✓ 已准备' : '○ 未准备'}</p></> : <><div className="duel-large-avatar duel-empty-avatar">+</div><span className="duel-player-role">等待加入</span><h2>等待挑战者</h2><p>分享房间号或邀请好友</p></>}</div>
+            <div className="duel-room-player">{room.challenger ? <><div className="duel-large-avatar">{avatar(room.challenger)}</div><span className="duel-player-role">挑战者</span><h2><UserDisplayName name={getDuelDisplayName(room.challenger)} uid={room.challenger.uid} badge={room.challenger.equippedBadge} showBadgeName /></h2><p className={room.challengerReady ? 'is-ready' : ''}>{room.challengerReady ? '✓ 已准备' : '○ 未准备'}</p></> : <><div className="duel-large-avatar duel-empty-avatar">+</div><span className="duel-player-role">等待加入</span><h2>等待挑战者</h2><p>分享房间号或邀请好友</p></>}</div>
           </div>
           <div className="duel-hall-actions"><button type="button" className="duel-primary-button" onClick={() => void updateReady(!myReady)} disabled={busy || !room.challenger}>{myReady ? '取消准备' : '准备'}</button>{room.host.id === userId ? <button type="button" className="duel-start-button" onClick={() => void startMatch()} disabled={!canStart || busy}>{canStart ? '开始游戏' : '等待双方准备'}</button> : null}<button type="button" className="duel-ghost-button" onClick={() => void openInvites()} disabled={busy || Boolean(room.challenger)}>邀请好友</button></div>
           <p className="duel-rule-note">{DUEL_MODE_RULES[room.mode]} 题目与规则由服务端锁定，重新进入房间也不会改变模式。</p>
@@ -1042,7 +1084,7 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
       {view === 'match' && match ? (
         <section className="duel-match-screen">
-          <div className="duel-scoreboard"><div className="duel-score-player"><span className="duel-score-avatar">{me ? avatar(me) : null}</span><span>{me ? <UserDisplayName name={me.name} uid={me.uid} badge={me.equippedBadge} compact /> : '我'}</span><strong>{me?.correctCount || 0}</strong><small>{me?.isOnline ? '在线' : '重连中'}</small></div><div className="duel-score-center"><b>{me?.correctCount || 0} <i>:</i> {opponent?.correctCount || 0}</b><span>{activeModeLabel} · {questionProgress}</span></div><div className="duel-score-player is-opponent"><span className="duel-score-avatar">{opponent ? avatar(opponent) : null}</span><span>{opponent ? <UserDisplayName name={opponent.name} uid={opponent.uid} badge={opponent.equippedBadge} compact /> : '对手'}</span><strong>{opponent?.correctCount || 0}</strong><small>{opponent?.isOnline ? '在线' : '等待重连'}</small></div></div>
+          <div className="duel-scoreboard"><div className="duel-score-player"><span className="duel-score-avatar">{me ? avatar(me) : null}</span><span>{me ? <UserDisplayName name={getDuelDisplayName(me)} uid={me.uid} badge={me.equippedBadge} compact /> : '我'}</span><strong>{me?.correctCount || 0}</strong><small>{me?.isOnline ? '在线' : '重连中'}</small></div><div className="duel-score-center"><b>{me?.correctCount || 0} <i>:</i> {opponent?.correctCount || 0}</b><span>{activeModeLabel} · {questionProgress}</span></div><div className="duel-score-player is-opponent"><span className="duel-score-avatar">{opponent ? avatar(opponent) : null}</span><span>{opponent ? <UserDisplayName name={getDuelDisplayName(opponent)} uid={opponent.uid} badge={opponent.equippedBadge} compact /> : '对手'}</span><strong>{opponent?.correctCount || 0}</strong><small>{opponent?.isOnline ? '在线' : '等待重连'}</small></div></div>
           <div className="duel-question-card">
             {activeMode === 'SCORE' && match.status === 'PLAYING' && me?.submitted && !currentQuestion ? (
               <div className="duel-score-waiting" role="status" aria-live="polite">
@@ -1090,11 +1132,11 @@ export function GuessSongDuel({ userId, initialInviteToken }: Readonly<{ userId:
 
       {view === 'result' && result ? (
         <section className="duel-result-screen">
-          <h1>{result.status === 'INVALID' ? '比赛无效' : result.isDraw ? '平局' : result.winnerId === userId ? '🏆 你赢了' : `${resultWinnerName || '对手'}获胜`}</h1>
+          <h1>{result.status === 'INVALID' ? '比赛无效' : result.isDraw ? '平局' : result.winnerId === userId ? '🏆 你赢了' : `${resultWinnerName ? getDuelDisplayName(resultWinnerName) : '对手'}获胜`}</h1>
           <div className="duel-result-score">
             {result.players.map((player) => (
               <div key={player.userId} className={player.userId === result.winnerId ? 'is-winner' : ''}>
-                <span><UserDisplayName name={player.name} uid={player.userId === userId ? me?.uid : opponent?.uid} badge={player.userId === userId ? me?.equippedBadge : opponent?.equippedBadge} compact /></span>
+                <span><UserDisplayName name={getDuelDisplayName(player)} uid={player.userId === userId ? me?.uid : opponent?.uid} badge={player.userId === userId ? me?.equippedBadge : opponent?.equippedBadge} compact /></span>
                 <strong>{result.mode === 'SCORE' ? player.baseCorrectCount : player.correctCount}</strong>
                 <small>{result.mode === 'SCORE' ? `基础正确题数 ${player.baseCorrectCount} / ${result.baseTotalQuestions}` : '最终比分'}</small>
               </div>

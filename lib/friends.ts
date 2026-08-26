@@ -1,8 +1,10 @@
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getFriendRequestAcceptedNotificationKey, getFriendRequestNotificationKey } from '@/lib/notifications'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
+import { validateFriendRequestReason } from '@/lib/friend-request-validation'
 
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
@@ -64,8 +66,11 @@ export const friendUserSelect = {
 export async function createFriendRequest(
   currentUser: { id: string; nickname: string },
   receiverUid: number,
-  message?: string | null,
+  message: string,
 ) {
+  const reason = validateFriendRequestReason(message)
+  if (!reason.ok) return { status: 400 as const, body: { ok: false, code: reason.code, message: reason.message } }
+
   const receiver = await prisma.user.findFirst({
     where: { uid: receiverUid, ...activeUserWhere },
     select: { id: true, uid: true, nickname: true, Profile: true },
@@ -79,6 +84,17 @@ export async function createFriendRequest(
     where: { userAId_userBId: { userAId, userBId } },
   })
   if (friendship) return { status: 409 as const, body: { message: '你们已经是好友', status: 'FRIEND' } }
+
+  const block = await prisma.block.findFirst({
+    where: {
+      OR: [
+        { blockerId: currentUser.id, blockedId: receiver.id },
+        { blockerId: receiver.id, blockedId: currentUser.id },
+      ],
+    },
+    select: { id: true },
+  })
+  if (block) return { status: 403 as const, body: { code: 'FRIEND_REQUEST_BLOCKED', message: '无法向该用户发送好友申请' } }
 
   const existing = await prisma.friendRequest.findFirst({
     where: {
@@ -105,22 +121,42 @@ export async function createFriendRequest(
     }
   }
 
-  const friendRequest = await prisma.$transaction(async (tx) => {
-    const request = await tx.friendRequest.create({
-      data: {
-        senderId: currentUser.id,
-        receiverId: receiver.id,
-        status: 'PENDING',
-        message: message || null,
-      },
+  let friendRequest
+  try {
+    friendRequest = await prisma.$transaction(async (tx) => {
+      const request = await tx.friendRequest.create({
+        data: {
+          senderId: currentUser.id,
+          receiverId: receiver.id,
+          status: 'PENDING',
+          message: reason.reason,
+        },
+        include: {
+          User_FriendRequest_senderIdToUser: { select: friendUserSelect },
+          User_FriendRequest_receiverIdToUser: { select: friendUserSelect },
+        },
+      })
+
+      return request
+    }, { timeout: 15_000, maxWait: 5_000 })
+  } catch (error) {
+    // The composite unique key is the final race-safe guard when two tabs
+    // submit the same pair at the same time. Return the same idempotent state
+    // as the normal pending-request check instead of leaking a 500.
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error
+    const concurrent = await prisma.friendRequest.findFirst({
+      where: { senderId: currentUser.id, receiverId: receiver.id, status: 'PENDING' },
       include: {
         User_FriendRequest_senderIdToUser: { select: friendUserSelect },
         User_FriendRequest_receiverIdToUser: { select: friendUserSelect },
       },
     })
-
-    return request
-  }, { timeout: 15_000, maxWait: 5_000 })
+    if (!concurrent) throw error
+    return {
+      status: 409 as const,
+      body: { message: '好友申请已发送，请等待对方处理', status: 'OUTGOING_PENDING', request: concurrent },
+    }
+  }
 
   await safeNotificationWrite(
     () => createNotification({

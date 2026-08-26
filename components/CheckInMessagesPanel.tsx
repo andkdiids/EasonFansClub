@@ -164,7 +164,7 @@ export function CheckInMessagesPanel({
   previewMode?: boolean
   focusMessageId?: string
   focusCommentId?: string
-  focusErrorKind?: 'load' | 'deleted' | 'unavailable'
+  focusErrorKind?: 'load' | 'deleted' | 'not-found' | 'unavailable'
   /** 服务端根据当前登录用户角色计算的管理员标记：是否显示留言删除入口（接口侧仍独立鉴权）。 */
   canManageMessages?: boolean
 }>) {
@@ -364,8 +364,10 @@ export function CheckInMessagesPanel({
       setFocusError(focusCommentId ? '暂时无法加载回复，请稍后重试' : '暂时无法加载留言，请稍后重试')
       return
     }
-    if (focusCommentId && (focusErrorKind === 'deleted' || focusErrorKind === 'unavailable')) {
-      setFocusError(focusErrorKind === 'deleted' ? '该回复已被删除' : '你暂时无法查看这条回复')
+    if (focusCommentId && (focusErrorKind === 'deleted' || focusErrorKind === 'not-found' || focusErrorKind === 'unavailable')) {
+      setFocusError(focusErrorKind === 'deleted'
+        ? '该回复已被删除'
+        : focusErrorKind === 'not-found' ? '该回复不存在或已失效' : '你暂时无法查看这条回复')
       return
     }
     const messageIndex = messages.findIndex((item) =>
@@ -373,7 +375,7 @@ export function CheckInMessagesPanel({
     )
     if (messageIndex < 0) {
       setFocusError(focusCommentId
-        ? focusErrorKind === 'deleted' ? '该回复已被删除' : '你暂时无法查看这条回复'
+        ? focusErrorKind === 'deleted' ? '该回复已被删除' : focusErrorKind === 'not-found' ? '该回复不存在或已失效' : '你暂时无法查看这条回复'
         : '该内容已被删除或无法查看')
       return
     }

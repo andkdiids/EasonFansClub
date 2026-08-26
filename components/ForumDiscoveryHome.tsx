@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ForumDiscoveryCard } from '@/components/ForumDiscoveryCard'
 import {
   buildForumDiscoveryTabs,
+  appendUniqueDiscoveryPosts,
   FORUM_DISCOVERY_PAGE_SIZE,
   FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT,
   mergeRecentRecommendedPostIds,
@@ -70,20 +71,7 @@ function writeRecentRecommendedPostIds(values: ReadonlyArray<string>) {
   }
 }
 
-function mergeDiscoveryPosts(current: ReadonlyArray<ForumDiscoveryPost>, incoming: ReadonlyArray<ForumDiscoveryPost>, reset: boolean) {
-  const next = reset ? [] : [...current]
-  const indexById = new Map(next.map((post, index) => [post.id, index]))
-  incoming.forEach((post) => {
-    const existingIndex = indexById.get(post.id)
-    if (existingIndex === undefined) {
-      indexById.set(post.id, next.length)
-      next.push(post)
-    } else {
-      next[existingIndex] = { ...next[existingIndex], ...post }
-    }
-  })
-  return next
-}
+const DISCOVERY_SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six'] as const
 
 export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: Readonly<{ onSwitchToPlaza?: () => void; showModeSwitch?: boolean }>) {
   const router = useRouter()
@@ -192,7 +180,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: R
         if (!response.ok || !payload || !('posts' in payload)) throw new Error(payload && 'message' in payload ? payload.message : '内容加载失败')
         if (sequence !== requestSequence.current) return
 
-        const incoming = [...new Map(payload.posts.map((post) => [post.id, post])).values()]
+        const incoming = appendUniqueDiscoveryPosts([], payload.posts, true)
         const currentPosts = postsRef.current
         const newIncoming = reset
           ? incoming
@@ -202,7 +190,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: R
           setError('加载更多没有返回新内容，请重试')
           return
         }
-        const merged = mergeDiscoveryPosts(currentPosts, incoming, reset)
+        const merged = appendUniqueDiscoveryPosts(currentPosts, incoming, reset)
         const nextSeenPostIds = reset ? new Set<string>() : new Set(seenPostIdsRef.current)
         const nextSeenAuthorIds = reset ? new Set<string>() : new Set(seenAuthorIdsRef.current)
         incoming.forEach((post) => {
@@ -531,7 +519,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: R
       ) : null}
       {loading && !posts.length ? (
         <div className="forum-discovery-grid" aria-label="正在加载">
-          {Array.from({ length: 6 }, (_, index) => <div key={index} className="forum-discovery-skeleton" />)}
+          {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`skeleton-${key}`} className="forum-discovery-skeleton" />)}
         </div>
       ) : null}
       {!loading && !error && !posts.length ? <p className="forum-discovery-empty">暂时没有可展示的帖子</p> : null}

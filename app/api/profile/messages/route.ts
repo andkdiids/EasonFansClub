@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { withDbTimeout } from '@/lib/db-timeout'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { getProfileRecordPagination } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
@@ -76,7 +76,6 @@ export async function GET(request: Request) {
     )
   }
 
-  const remarkMap = await loadFriendRemarkMap(user.id, messages.flatMap((message) => message.DailyMessageComment.map((comment) => comment.User.id)))
   const mapped = messages.map((message) => ({
     id: message.id,
     mood: message.mood,
@@ -95,12 +94,7 @@ export async function GET(request: Request) {
       createdAt: comment.createdAt,
       ipRegion: comment.ipRegion,
       authorName: comment.User
-        ? resolveFriendDisplayName({
-            viewerId: user.id,
-            targetUserId: comment.User.id,
-            fallbackName: getPublicUserDisplayName(comment.User),
-            remarkMap,
-          })
+        ? getPublicUserDisplayName(comment.User)
         : '匿名用户',
       authorAvatarUrl: publicImageUrl(comment.User?.Profile?.avatarUrl || comment.User?.avatarUrl),
     })),

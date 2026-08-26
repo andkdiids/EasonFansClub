@@ -15,15 +15,15 @@ export async function GET(request: Request) {
   const frequency = params.get('frequency')
   const sort = params.get('sort')
   let songs = buildPersonalSongAtlas(await getPersonalLiveRows(guard.user.id))
-  if (albumId) songs = songs.filter((song) => song.album.id === albumId)
+  if (albumId) songs = songs.filter((song) => song.album?.id === albumId)
   if (tourId) songs = songs.filter((song) => song.concerts.some((concert) => concert.tourId === tourId))
-  if (frequency === 'once') songs = songs.filter((song) => song.occurrenceCount === 1)
-  if (frequency === 'multiple') songs = songs.filter((song) => song.occurrenceCount > 1)
+  if (frequency === 'once') songs = songs.filter((song) => song.listenCount === 1)
+  if (frequency === 'multiple') songs = songs.filter((song) => song.listenCount > 1)
   songs.sort((a, b) => {
     if (sort === 'recent') return b.latest!.date.getTime() - a.latest!.date.getTime()
     if (sort === 'first') return b.first.date.getTime() - a.first.date.getTime()
     if (sort === 'name') return a.title.localeCompare(b.title, 'zh-CN')
-    return b.occurrenceCount - a.occurrenceCount || b.concertCount - a.concertCount || a.title.localeCompare(b.title, 'zh-CN')
+    return b.listenCount - a.listenCount || b.concertCount - a.concertCount || a.title.localeCompare(b.title, 'zh-CN')
   })
   const total = songs.length
   return NextResponse.json({

@@ -25,6 +25,8 @@ type FriendActivity = {
   actor: {
     uid: number
     nickname: string
+    displayName?: string | null
+    friendRemark?: string | null
     equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
     avatarUrl: string | null
     profile: { displayName: string | null; avatarUrl: string | null } | null
@@ -146,7 +148,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
         {!loading && !failed && !activities.length ? <p className="rounded-2xl bg-sky-50 p-5 text-center text-sm font-black text-slate-500">该筛选条件下暂无好友动态</p> : null}
         {!loading && !failed ? activities.map((item) => {
           const mood = item.type === 'CHECKIN' ? getMoodDisplay(item) : null
-          const name = item.actor.nickname || 'E院用户'
+          const name = item.actor.displayName || item.actor.nickname || 'E院用户'
           const avatar = profileImageUrl(item.actor.profile?.avatarUrl || item.actor.avatarUrl)
           const typeLabel = item.type === 'CHECKIN' ? '今日挂号' : item.type === 'BADGE' ? '获得勋章' : '最近发帖'
           const targetUrl = normalizeStoredInternalPath(item.targetUrl)

@@ -1,10 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { UiIcon } from '@/components/UiIcon'
 import { confirmSessionForAction } from '@/lib/client-auth'
 import { parseClinicIdentityMode } from '@/lib/clinic-config'
+import { appendAspirinClinicListRestoreParam, updateAspirinClinicListHistoryState } from '@/lib/clinic-scroll-state'
 import type { ClinicPublicConsultation, ClinicPublicRecordDetail } from '@/lib/clinic-service'
 import { ClinicIdentityBadge } from './ClinicIdentityBadge'
 import { ClinicReportDialog } from './ClinicReportDialog'
@@ -29,6 +31,7 @@ function findParentName(items: ClinicPublicConsultation[], id: string) {
 }
 
 export function ClinicDetailClient({ record: initialRecord, isAuthenticated, initialFocusId, returnHref }: Readonly<{ record: ClinicPublicRecordDetail; isAuthenticated: boolean; initialFocusId?: string | null; returnHref?: string | null }>) {
+  const router = useRouter()
   const [record, setRecord] = useState(initialRecord)
   const [identityMode, setIdentityMode] = useState<'PUBLIC' | 'ANONYMOUS'>('PUBLIC')
   const [draft, setDraft] = useState('')
@@ -38,6 +41,19 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   const [actionError, setActionError] = useState('')
   const [reportTarget, setReportTarget] = useState<{ recordId: string } | { consultationId: string } | null>(null)
   const focusId = useMemo(() => initialFocusId || '', [initialFocusId])
+  const returnLinkHref = returnHref ? appendAspirinClinicListRestoreParam(returnHref) : '/clinic'
+
+  useEffect(() => {
+    // Do not let a custom list state copied by a router implementation leak into
+    // the detail history entry or into a later fresh visit to /clinic.
+    window.history.replaceState(updateAspirinClinicListHistoryState(window.history.state, null), '', window.location.href)
+  }, [])
+
+  function handleReturnToClinic(event: MouseEvent<HTMLAnchorElement>) {
+    if (!returnHref || window.history.length <= 1 || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    router.back()
+  }
 
   async function requireLogin() {
     if (isAuthenticated) return true
@@ -154,7 +170,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
 
   return (
     <main className="clinic-page-shell clinic-detail-page">
-      <div className="clinic-detail-back"><Link href={returnHref || '/clinic'}>← 返回候诊大厅</Link></div>
+      <div className="clinic-detail-back"><Link href={returnLinkHref} onClick={handleReturnToClinic}>← 返回候诊大厅</Link></div>
       <article className="clinic-detail-record">
         <header className="clinic-detail-header"><div><span className="clinic-category-label">{record.categoryLabel}</span><span className="clinic-record-time"><ClinicTime value={record.createdAt} /></span></div><div className="clinic-detail-header-actions"><button type="button" className="clinic-more-button" aria-label="病历举报" onClick={() => { void openReport({ recordId: record.id }) }}>···</button>{record.canDelete ? <button type="button" className="clinic-danger-link" onClick={() => void deleteRecord()}>烧掉这份病历</button> : null}</div></header>
         <div className="clinic-detail-author"><ClinicIdentityBadge identity={record.author} /><span className="clinic-detail-separator">·</span><span>患者诉求：{record.needLabel}</span></div>

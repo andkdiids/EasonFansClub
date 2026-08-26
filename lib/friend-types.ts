@@ -18,6 +18,9 @@ export type FriendDockUser = {
   id: string
   uid: number
   nickname: string
+  /** 当前用户在好友/联系人语境下看到的名称；公开昵称仍保留在 nickname。 */
+  displayName: string
+  friendRemark?: string | null
   avatarUrl: string | null
   bio: string | null
   isOnline: boolean

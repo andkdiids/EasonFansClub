@@ -7,7 +7,7 @@ import { normalizedCityKey } from '@/lib/music-personal-live'
 import { myLivePhotoOrderBy, myLivePhotoSelect, serializeMyLivePhotos } from '@/lib/my-live-photo-data'
 import { MyLivePhotoPanel } from '@/components/music/live/MyLivePhotoPanel'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { getSiteAppearance } from '@/lib/site-config'
 import { parseUidParam } from '@/lib/uid'
@@ -45,13 +45,7 @@ export default async function PublicUserLivePage({ params }: { params: Promise<{
     getSiteAppearance(),
   ])
   if (!user || !user.Profile) notFound()
-  const remarkMap = await loadFriendRemarkMap(viewer?.id, [user.id])
-  const name = resolveFriendDisplayName({
-    viewerId: viewer?.id,
-    targetUserId: user.id,
-    fallbackName: getPublicUserDisplayName(user),
-    remarkMap,
-  })
+  const name = getPublicUserDisplayName(user)
   const tours = new Set(user.UserMusicConcert.map((record) => record.MusicConcert.MusicTour.id))
   const cities = new Set(user.UserMusicConcert.map((record) => normalizedCityKey(record.MusicConcert.city)).filter(Boolean))
   return <MusicArchiveShell maxWidth="max-w-5xl" backgroundVisual={config.heroVisuals.music}>

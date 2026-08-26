@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { formatBeijingDate } from '@/lib/checkin'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
@@ -33,16 +33,12 @@ type LikerRow = {
   }
 }
 
-function serializeLiker(row: LikerRow, viewerId: string, remarkMap: ReadonlyMap<string, string>, equippedBadgeMap: ReadonlyMap<string, import('@/lib/badge-types').EquippedBadgeView>) {
+function serializeLiker(row: LikerRow, equippedBadgeMap: ReadonlyMap<string, import('@/lib/badge-types').EquippedBadgeView>) {
+  const nickname = getPublicUserDisplayName(row.User)
   return {
     uid: row.User.uid,
-    nickname: getPublicUserDisplayName(row.User),
-    displayName: resolveFriendDisplayName({
-      viewerId,
-      targetUserId: row.User.id,
-      fallbackName: getPublicUserDisplayName(row.User),
-      remarkMap,
-    }),
+    nickname,
+    displayName: nickname,
     avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
     equippedBadge: equippedBadgeMap.get(row.User.id) || null,
   }
@@ -65,9 +61,8 @@ export async function GET(_request: Request, context: RouteContext) {
     take: 50,
     select: { User: { select: likerUserSelect } },
   })
-  const remarkMap = await loadFriendRemarkMap(guard.user.id, likes.map((like) => like.User.id))
   const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
-  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, guard.user.id, remarkMap, equippedBadgeMap)) })
+  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, equippedBadgeMap)) })
 }
 
 export async function POST(_request: Request, context: RouteContext) {

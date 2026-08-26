@@ -4,8 +4,7 @@ import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { getTrendingPosts, type TrendingRange } from '@/lib/trending-posts'
-import { getCurrentUser } from '@/lib/auth'
-import { loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,16 +20,10 @@ export default async function TrendingPostsPage({
   const query = await searchParams
   const range: TrendingRange = query.range === '30' ? 30 : 7
   const page = Math.min(100, Math.max(1, Number(query.page) || 1))
-  const [data, viewer] = await Promise.all([getTrendingPosts(range, page), getCurrentUser()])
-  const remarkMap = await loadFriendRemarkMap(viewer?.id, data.posts.map((post) => post.authorId))
+  const data = await getTrendingPosts(range, page)
   const posts = data.posts.map((post) => ({
     ...post,
-    authorName: resolveFriendDisplayName({
-      viewerId: viewer?.id,
-      targetUserId: post.authorId,
-      fallbackName: post.authorName,
-      remarkMap,
-    }),
+    authorName: getPublicUserDisplayName({ nickname: post.authorName }),
   }))
 
   return (

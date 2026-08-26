@@ -30,7 +30,7 @@ export default async function AdminPostReviewPage() {
         User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
         ReviewedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
         Board: { select: { name: true } },
-        PostMedia: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
+        PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
       },
     })
     initialHasMore = pageRows.length > POST_REVIEW_PAGE_SIZE

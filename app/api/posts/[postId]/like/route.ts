@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
@@ -42,18 +42,12 @@ export async function GET(request: Request, { params }: Params) {
       },
     },
   })
-  const remarkMap = await loadFriendRemarkMap(user.id, likes.map((like) => like.User.id))
   const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
   return NextResponse.json({
     likers: likes.map((like) => ({
       uid: like.User.uid,
       nickname: getPublicUserDisplayName(like.User),
-      displayName: resolveFriendDisplayName({
-        viewerId: user.id,
-        targetUserId: like.User.id,
-        fallbackName: getPublicUserDisplayName(like.User),
-        remarkMap,
-      }),
+      displayName: getPublicUserDisplayName(like.User),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
       equippedBadge: equippedBadgeMap.get(like.User.id) || null,
     })),

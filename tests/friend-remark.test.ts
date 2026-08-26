@@ -31,7 +31,8 @@ test('显示名解析按 viewer 读取备注，profile context 保留公开昵�
   const resolver = read('lib/friend-remarks.ts')
   const profilePage = read('app/user/[uid]/page.tsx')
 
-  assert.match(resolver, /context === 'profile'/)
+  assert.match(resolver, /export function getFriendDisplayName\(/)
+  assert.match(resolver, /context !== 'profile'/)
   assert.match(resolver, /loadFriendRemarkMap/)
   assert.match(resolver, /user\.nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
   assert.match(profilePage, /const name = getPublicUserDisplayName\(user\)/)
@@ -44,7 +45,8 @@ test('备注显示出口使用批量 map，mention 仍返回真实 userId', () =
   const notifications = read('lib/notifications.ts')
 
   assert.match(mentions, /loadFriendRemarkMap\(user\.id, friendIds\)/)
-  assert.match(replyPage, /loadFriendRemarkMap\(user\?\.id, displayNameUserIds\)/)
+  assert.doesNotMatch(replyPage, /loadFriendRemarkMap/)
+  assert.match(replyPage, /const authorName = getPublicUserDisplayName\(post\.User\)/)
   assert.match(replyPage, /id: mentionedUser\.id/)
   assert.match(notifications, /loadFriendRemarkMap\(userId, actorIds\)/)
 })

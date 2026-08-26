@@ -33,10 +33,20 @@
 
 ## User 用户表
 
+后台用户详情页中的“内部账号”对应 Prisma 的 `username` 字段；项目没有重复的
+`internalAccount` 列。联系方式字段与内部账号严格分离：
+
+| 业务字段 | Prisma 字段 | 说明 |
+| --- | --- | --- |
+| 内部账号 | `username` | 登录账号/后台展示身份；联系方式编辑禁止修改 |
+| 手机号 | `phone` | canonical E.164 手机号；后台修改只写入 `User.phone` |
+| 邮箱 | `email` | canonical 小写邮箱；后台修改只写入 `User.email` |
+| 昵称 | `nickname` | 页面展示名称；联系方式编辑禁止修改 |
+
 - `id`：用户唯一 ID。
-- `username`：登录用户名，唯一。
-- `email`：邮箱，可为空，唯一。
-- `phone`：手机号，可为空，唯一。
+- `username`：内部登录账号，规范化值保存在 `usernameNormalized`，与手机号、邮箱独立。
+- `email`：邮箱，可为空；应用层在注册和后台编辑时检查唯一性。
+- `phone`：手机号，可为空；应用层在注册和后台编辑时检查唯一性。
 - `passwordHash`：加密后的密码，不保存明文密码。
 - `nickname`：用户昵称，用于页面展示。
 - `avatarUrl`：头像地址。

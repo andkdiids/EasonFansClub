@@ -82,6 +82,27 @@ export type ForumDiscoveryResponse = {
   mode: ForumDiscoveryMode
 }
 
+/**
+ * Append discovery results without changing the identity or position of an
+ * already-rendered post. A later page may repeat an id because of a cursor
+ * boundary or a recommendation exclusion fallback; that duplicate must not
+ * replace the object currently backing the visible card.
+ */
+export function appendUniqueDiscoveryPosts<T extends { id: string }>(
+  current: ReadonlyArray<T>,
+  incoming: ReadonlyArray<T>,
+  reset = false,
+) {
+  const next = reset ? [] : [...current]
+  const knownIds = new Set(next.map((post) => post.id))
+  for (const post of incoming) {
+    if (knownIds.has(post.id)) continue
+    knownIds.add(post.id)
+    next.push(post)
+  }
+  return next
+}
+
 export function normalizeDiscoveryIds(values: unknown, max = 500) {
   if (!Array.isArray(values)) return []
   return [...new Set(values

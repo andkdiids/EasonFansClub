@@ -62,6 +62,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
         senderId: true,
         receiverId: true,
         status: true,
+        message: true,
         createdAt: true,
         updatedAt: true,
         User_FriendRequest_senderIdToUser: { select: friendRequestUserSelect },
@@ -106,6 +107,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
               user={requestUser}
               createdAt={request.createdAt}
               updatedAt={request.updatedAt}
+              message={request.message}
               direction={incoming ? 'received' : 'sent'}
               equippedBadge={equippedBadgeMap.get(requestUser.id) || null}
               action={incoming
@@ -148,6 +150,7 @@ function RequestCard({
   user,
   createdAt,
   updatedAt,
+  message,
   direction,
   equippedBadge,
   action,
@@ -155,6 +158,7 @@ function RequestCard({
   user: FriendUser
   createdAt: Date
   updatedAt: Date
+  message: string | null
   direction: 'received' | 'sent'
   equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
   action?: ReactNode
@@ -179,6 +183,12 @@ function RequestCard({
         <span>{direction === 'received' ? '收到申请 · 等待你的确认' : '发出申请 · 等待对方确认'}</span>
         <time>更新于 {formatDate(updatedAt || createdAt)}</time>
       </div>
+      {message?.trim() ? (
+        <div className="mt-3 rounded-sm border border-sky-100 bg-white/70 p-3 text-sm leading-6 text-slate-700">
+          <p className="text-xs font-black text-brand-700">申请理由</p>
+          <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message}</p>
+        </div>
+      ) : null}
       {action}
     </article>
   )

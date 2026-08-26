@@ -6,6 +6,16 @@ import { Pagination } from '@/components/ui/Pagination'
 import { UiIcon } from '@/components/UiIcon'
 import { clinicCategoryOptions, type ClinicSort } from '@/lib/clinic-config'
 import { confirmSessionForAction } from '@/lib/client-auth'
+import {
+  clearAspirinClinicListScrollStateFromStorage,
+  createAspirinClinicListScrollState,
+  getAspirinClinicListSessionStorage,
+  matchesAspirinClinicListContext,
+  readAspirinClinicListScrollStateFromHistory,
+  readAspirinClinicListScrollStateFromStorage,
+  updateAspirinClinicListHistoryState,
+  writeAspirinClinicListScrollStateToStorage,
+} from '@/lib/clinic-scroll-state'
 import type { ClinicCategory } from '@prisma/client'
 import type { ClinicPublicRecord } from '@/lib/clinic-service'
 import { ClinicRecordCard } from './ClinicRecordCard'
@@ -29,9 +39,10 @@ function buildClinicListHref(page: number, category: ClinicCategory | undefined,
   return `/clinic?${params.toString()}`
 }
 
-function syncClinicListUrl(href: string) {
+function syncClinicListUrl(href: string, clearScrollState = false) {
   if (typeof window === 'undefined') return
-  window.history.replaceState(null, '', href)
+  window.history.replaceState(updateAspirinClinicListHistoryState(window.history.state, clearScrollState ? null : readAspirinClinicListScrollStateFromHistory(window.history.state)), '', href)
+  if (clearScrollState) clearAspirinClinicListScrollStateFromStorage(getAspirinClinicListSessionStorage())
 }
 
 export function ClinicHomeClient({
@@ -39,11 +50,13 @@ export function ClinicHomeClient({
   initialCategory,
   initialSort,
   isAuthenticated,
+  restoreOnMount = false,
 }: Readonly<{
   initialData: ClinicListData
   initialCategory?: ClinicCategory
   initialSort: ClinicSort
   isAuthenticated: boolean
+  restoreOnMount?: boolean
 }>) {
   const [data, setData] = useState(initialData)
   const [category, setCategory] = useState<ClinicCategory | undefined>(initialCategory)
@@ -54,8 +67,11 @@ export function ClinicHomeClient({
   const [aspirinPendingId, setAspirinPendingId] = useState<string | null>(null)
   const [reportTarget, setReportTarget] = useState<{ recordId: string } | null>(null)
   const skipFirstReload = useRef(true)
+  const listTopRef = useRef<HTMLElement | null>(null)
+  const pendingScrollTopRef = useRef(false)
+  const restoreAttemptedRef = useRef(false)
 
-  async function load(page = 1, nextCategory = category, nextSort = sort) {
+  async function load(page = 1, nextCategory = category, nextSort = sort, options: { scrollToTop?: boolean } = {}) {
     setLoading(true)
     setError('')
     const params = new URLSearchParams({ page: String(page), sort: nextSort })
@@ -64,6 +80,7 @@ export function ClinicHomeClient({
       const response = await fetch(`/api/clinic/records?${params.toString()}`, { cache: 'no-store' })
       const body = await response.json().catch(() => null) as { ok?: boolean; data?: ClinicListData; message?: string }
       if (!response.ok || !body?.ok || !body.data) throw new Error(body?.message || '门诊系统暂时有点忙，请稍后再试。')
+      if (options.scrollToTop) pendingScrollTopRef.current = true
       setData(body.data)
     } catch (requestError) {
       if (!(requestError instanceof DOMException && requestError.name === 'AbortError')) setError(requestError instanceof Error ? requestError.message : '门诊系统暂时有点忙，请稍后再试。')
@@ -77,11 +94,55 @@ export function ClinicHomeClient({
       skipFirstReload.current = false
       return
     }
-    void load(1)
-    syncClinicListUrl(buildClinicListHref(1, category, sort))
+    void load(1, category, sort, { scrollToTop: true })
+    syncClinicListUrl(buildClinicListHref(1, category, sort), true)
     // category and sort intentionally trigger one stable reload path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, sort])
+
+  useEffect(() => {
+    if (!pendingScrollTopRef.current) return
+    pendingScrollTopRef.current = false
+    const frame = window.requestAnimationFrame(() => {
+      listTopRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [data])
+
+  useEffect(() => {
+    if (restoreAttemptedRef.current) return
+    restoreAttemptedRef.current = true
+
+    const navigationEntries = typeof window.performance?.getEntriesByType === 'function'
+      ? window.performance.getEntriesByType('navigation')
+      : []
+    const navigationEntry = navigationEntries[0] as PerformanceNavigationTiming | undefined
+    if (navigationEntry?.type === 'reload') {
+      window.history.replaceState(updateAspirinClinicListHistoryState(window.history.state, null), '', window.location.href)
+      clearAspirinClinicListScrollStateFromStorage(getAspirinClinicListSessionStorage())
+      return
+    }
+
+    const context = { pathname: '/clinic', page: data.page, filter: category || '', sort, search: '', tab: 'records' }
+    const storage = getAspirinClinicListSessionStorage()
+    const candidates = [
+      readAspirinClinicListScrollStateFromHistory(window.history.state),
+      restoreOnMount ? readAspirinClinicListScrollStateFromStorage(storage) : null,
+    ]
+    const pending = candidates.find((value) => value && matchesAspirinClinicListContext(value, context))
+    if (!pending) return
+
+    const frame = window.requestAnimationFrame(() => {
+      const target = pending.anchorPostId
+        ? Array.from(document.querySelectorAll<HTMLElement>('[data-post-id]')).find((element) => element.dataset.postId === pending.anchorPostId)
+        : null
+      if (target) target.scrollIntoView({ behavior: 'auto', block: 'center' })
+      else window.scrollTo({ top: pending.scrollY, behavior: 'auto' })
+      window.history.replaceState(updateAspirinClinicListHistoryState(window.history.state, null), '', window.location.href)
+      clearAspirinClinicListScrollStateFromStorage(storage)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [category, data.page, restoreOnMount, sort])
 
   async function requireLogin() {
     if (isAuthenticated) return true
@@ -113,6 +174,24 @@ export function ClinicHomeClient({
 
   function changeCategory(next: ClinicCategory | undefined) {
     setCategory(next)
+  }
+
+  function saveScrollStateBeforeDetail(anchorPostId: string) {
+    if (typeof window === 'undefined') return
+    const state = createAspirinClinicListScrollState({
+      pathname: window.location.pathname,
+      page: data.page,
+      filter: category || '',
+      sort,
+      search: '',
+      tab: 'records',
+      anchorPostId,
+      scrollY: window.scrollY,
+      listHref: buildClinicListHref(data.page, category, sort),
+      savedAt: Date.now(),
+    })
+    window.history.replaceState(updateAspirinClinicListHistoryState(window.history.state, state), '', window.location.href)
+    writeAspirinClinicListScrollStateToStorage(getAspirinClinicListSessionStorage(), state)
   }
 
   // 当前列表 URL（含页码/筛选/排序），用于帖子详情返回时精准恢复。
@@ -157,11 +236,11 @@ export function ClinicHomeClient({
       {error ? <p className="clinic-inline-message clinic-list-error" role="alert">{error}<button type="button" onClick={() => void load(data.page)}>重试</button></p> : null}
       {loading && !data.items.length ? <div className="clinic-loading-state">正在读取候诊记录…</div> : null}
       {!loading && !data.items.length ? <section className="clinic-empty-state"><UiIcon name="stethoscope" /><p>今天这里还没有患者挂号。</p><Link href="/clinic/new" className="clinic-secondary-button">来做第一位患者</Link></section> : null}
-      <section className="clinic-record-list" aria-live="polite">
-        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} isAspirinPending={aspirinPendingId === record.id} returnHref={listReturnHref} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { void openReport(target) }} />)}
+      <section ref={listTopRef} className="clinic-record-list" aria-live="polite">
+        {data.items.map((record) => <ClinicRecordCard key={record.id} record={record} isAuthenticated={isAuthenticated} isAspirinPending={aspirinPendingId === record.id} returnHref={listReturnHref} onOpenDetail={saveScrollStateBeforeDetail} onAspirin={(item) => void handleAspirin(item)} onReport={(target) => { void openReport(target) }} />)}
       </section>
       {actionMessage ? <p className="clinic-inline-message clinic-action-message" role="status">{actionMessage}</p> : null}
-      {data.totalPages > 1 ? <Pagination currentPage={data.page} totalPages={data.totalPages} onPageChange={(page) => { syncClinicListUrl(buildClinicListHref(page, category, sort)); void load(page) }} disabled={loading} ariaLabel="门诊病历分页" className="clinic-pagination" /> : null}
+      {data.totalPages > 1 ? <Pagination currentPage={data.page} totalPages={data.totalPages} onPageChange={(page) => { syncClinicListUrl(buildClinicListHref(page, category, sort), true); void load(page, category, sort, { scrollToTop: true }) }} disabled={loading} ariaLabel="门诊病历分页" className="clinic-pagination" /> : null}
 
       <footer className="clinic-disclaimer">阿士匹灵门诊部是病友交流与情绪树洞，不提供专业医疗或心理诊断。如遇真实身体或心理健康问题，请及时寻求专业帮助。</footer>
       {reportTarget ? <ClinicReportDialog target={reportTarget} onClose={() => setReportTarget(null)} /> : null}

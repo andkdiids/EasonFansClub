@@ -40,11 +40,15 @@ type RecordItem = {
   }
 }
 type SongItem = {
-  songId: string
+  songId: string | null
+  identityKey: string
   title: string
-  album: { id: string; name: string; coverUrl: string | null }
+  album: { id: string; name: string; coverUrl: string | null } | null
+  isStructured: boolean
   occurrenceCount: number
+  listenCount: number
   concertCount: number
+  showIds: string[]
   first: { date: string; city: string; tourId: string }
   latest: { date: string; city: string; tourId: string }
   concerts: Array<{ tourId: string }>
@@ -67,6 +71,7 @@ type DashboardData = {
     unlockedSongCount: number
     totalLiveSongCount: number
     unavailableCount: number
+    setlistShowCount: number
     cities: Array<{ name: string; count: number }>
   }
   records: RecordItem[]
@@ -87,6 +92,11 @@ export function MyLiveDashboard({ data, batchTourId }: Readonly<{ data: Dashboar
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchMessage, setBatchMessage] = useState('')
   useEffect(() => setRecords(data.records), [data.records])
+  useEffect(() => {
+    const refresh = () => router.refresh()
+    window.addEventListener('music-live:attendance-updated', refresh)
+    return () => window.removeEventListener('music-live:attendance-updated', refresh)
+  }, [router])
   const availableRecords = records.filter((record) => !record.unavailable && record.concert)
   const filteredRecords = useMemo(() => {
     const rows = availableRecords.filter((record) => {
@@ -103,14 +113,14 @@ export function MyLiveDashboard({ data, batchTourId }: Readonly<{ data: Dashboar
     })
   }, [availableRecords, concertFilters])
   const filteredSongs = useMemo(() => {
-    const rows = data.songs.filter((song) => (!songFilters.albumId || song.album.id === songFilters.albumId)
+    const rows = data.songs.filter((song) => (!songFilters.albumId || song.album?.id === songFilters.albumId)
       && (!songFilters.tourId || song.concerts.some((concert) => concert.tourId === songFilters.tourId))
-      && (!songFilters.frequency || (songFilters.frequency === 'once' ? song.occurrenceCount === 1 : song.occurrenceCount > 1)))
+      && (!songFilters.frequency || (songFilters.frequency === 'once' ? song.listenCount === 1 : song.listenCount > 1)))
     return [...rows].sort((a, b) => {
       if (songFilters.sort === 'recent') return new Date(b.latest.date).getTime() - new Date(a.latest.date).getTime()
       if (songFilters.sort === 'first') return new Date(b.first.date).getTime() - new Date(a.first.date).getTime()
       if (songFilters.sort === 'name') return a.title.localeCompare(b.title, 'zh-CN')
-      return b.occurrenceCount - a.occurrenceCount || a.title.localeCompare(b.title, 'zh-CN')
+      return b.listenCount - a.listenCount || a.title.localeCompare(b.title, 'zh-CN')
     })
   }, [data.songs, songFilters])
   const timeline = useMemo(() => {
@@ -122,9 +132,17 @@ export function MyLiveDashboard({ data, batchTourId }: Readonly<{ data: Dashboar
     return [...groups.entries()]
   }, [availableRecords])
   const tours = [...new Map(availableRecords.map((record) => [record.concert!.tour.id, record.concert!.tour])).values()]
-  const albums = [...new Map(data.songs.map((song) => [song.album.id, song.album])).values()]
+  const albums = [...new Map(data.songs.flatMap((song) => song.album ? [[song.album.id, song.album] as const] : [])).values()]
   const years = [...new Set(availableRecords.map((record) => String(new Date(record.concert!.concertDate).getFullYear())))].sort().reverse()
   const cities = [...new Set(availableRecords.map((record) => record.concert!.city.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+  const hasSongFilters = Boolean(songFilters.albumId || songFilters.tourId || songFilters.frequency)
+  const songEmptyMessage = hasSongFilters
+    ? '没有符合当前筛选条件的现场歌曲。'
+    : !data.stats.concertCount
+      ? '标记看过的演唱会后，现场歌曲会自动出现在这里'
+      : !data.stats.setlistShowCount
+        ? '你已标记现场，但相关场次暂未收录歌单'
+        : '当前没有可展示的现场歌曲。'
 
   async function remove(record: RecordItem) {
     if (!window.confirm('取消后，该场演唱会将从你的观演记录和歌曲解锁统计中移除。是否继续？')) return
@@ -133,7 +151,6 @@ export function MyLiveDashboard({ data, batchTourId }: Readonly<{ data: Dashboar
     if (!response.ok) return setError(body?.message || '取消失败，请稍后重试')
     setError('')
     window.dispatchEvent(new CustomEvent('music-live:attendance-updated'))
-    router.refresh()
   }
 
   return <div className="my-live-dashboard">
@@ -164,7 +181,7 @@ export function MyLiveDashboard({ data, batchTourId }: Readonly<{ data: Dashboar
 
     {tab === 'concerts' ? <section className="mt-8"><h2 className="text-3xl font-black text-white">全部观演场次</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-5"><select aria-label="按巡演筛选" value={concertFilters.tourId} onChange={(event) => setConcertFilters({ ...concertFilters, tourId: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部巡演</option>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select><select aria-label="按年份筛选" value={concertFilters.year} onChange={(event) => setConcertFilters({ ...concertFilters, year: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部年份</option>{years.map((year) => <option key={year}>{year}</option>)}</select><select aria-label="按城市筛选" value={concertFilters.city} onChange={(event) => setConcertFilters({ ...concertFilters, city: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部城市</option>{cities.map((city) => <option key={city}>{city}</option>)}</select><select aria-label="按公开状态筛选" value={concertFilters.visibility} onChange={(event) => setConcertFilters({ ...concertFilters, visibility: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部状态</option><option value="public">公开</option><option value="private">仅自己</option></select><select aria-label="场次排序" value={concertFilters.sort} onChange={(event) => setConcertFilters({ ...concertFilters, sort: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="newest">演出日期从新到旧</option><option value="oldest">演出日期从旧到新</option><option value="added">最近添加</option></select></div><div className="my-live-poster-grid mt-6 grid min-w-0 gap-3 sm:grid-cols-2 md:grid-cols-3">{filteredRecords.map((record) => <ConcertCard key={record.id} record={record} onRemove={remove} />)}</div>{!filteredRecords.length ? <p className="mt-6 border border-white/10 p-6 text-sm font-bold text-slate-300">没有符合筛选条件的观演记录。</p> : null}{records.filter((record) => record.unavailable).map((record) => <article key={record.id} className="mt-3 border border-amber-200/15 bg-amber-200/[0.05] p-4 text-sm font-bold text-amber-100">该场次资料暂未公开，个人观演记录仍已保留。</article>)}</section> : null}
 
-    {tab === 'songs' ? <section className="mt-8"><h2 className="text-3xl font-black text-white">现场歌曲图鉴</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-4"><select aria-label="按专辑筛选" value={songFilters.albumId} onChange={(event) => setSongFilters({ ...songFilters, albumId: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部专辑</option>{albums.map((album) => <option key={album.id} value={album.id}>{album.name}</option>)}</select><select aria-label="按巡演筛选歌曲" value={songFilters.tourId} onChange={(event) => setSongFilters({ ...songFilters, tourId: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部巡演</option>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select><select aria-label="按听过次数筛选" value={songFilters.frequency} onChange={(event) => setSongFilters({ ...songFilters, frequency: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部次数</option><option value="once">只听过一次</option><option value="multiple">听过多次</option></select><select aria-label="歌曲排序" value={songFilters.sort} onChange={(event) => setSongFilters({ ...songFilters, sort: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="popular">最常听</option><option value="recent">最近听到</option><option value="first">首次听到</option><option value="name">歌曲名称</option></select></div>{!filteredSongs.length ? <p className="mt-6 border border-white/10 p-6 text-sm font-bold text-slate-300">标记看过的演唱会后，现场歌曲会自动出现在这里</p> : <div className="mt-6 grid min-w-0 grid-cols-2 gap-3 md:grid-cols-4">{filteredSongs.map((song) => <Link key={song.songId} href={`/music/song/${song.songId}`} className="min-w-0 border border-white/10 bg-white/[0.04] p-3 hover:bg-white/[0.08]"><div className="relative aspect-square bg-[#0b2038]">{song.album.coverUrl ? <Image src={publicImageVariantUrl(song.album.coverUrl, 'thumb-sm') || song.album.coverUrl} alt={`${song.album.name}专辑封面`} fill sizes="(max-width: 768px) 50vw, 25vw" loading="lazy" className="object-cover" /> : null}</div><h3 className="mt-3 line-clamp-2 break-words font-black text-white">{song.title}</h3><p className="mt-1 truncate text-xs text-slate-400">《{song.album.name}》</p><p className="mt-3 text-sm font-black text-sky-200">现场听过 {song.occurrenceCount} 次</p><p className="mt-1 text-xs text-slate-300/65">出现在 {song.concertCount} 场</p><p className="mt-3 text-[11px] leading-5 text-slate-400">首次：{dateLabel(song.first.date)} · {song.first.city}<br />最近：{dateLabel(song.latest.date)} · {song.latest.city}</p></Link>)}</div>}</section> : null}
+    {tab === 'songs' ? <section className="mt-8"><h2 className="text-3xl font-black text-white">现场歌曲图鉴</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-4"><select aria-label="按专辑筛选" value={songFilters.albumId} onChange={(event) => setSongFilters({ ...songFilters, albumId: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部专辑</option>{albums.map((album) => <option key={album.id} value={album.id}>{album.name}</option>)}</select><select aria-label="按巡演筛选歌曲" value={songFilters.tourId} onChange={(event) => setSongFilters({ ...songFilters, tourId: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部巡演</option>{tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select><select aria-label="按听过次数筛选" value={songFilters.frequency} onChange={(event) => setSongFilters({ ...songFilters, frequency: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="">全部次数</option><option value="once">只听过一次</option><option value="multiple">听过多次</option></select><select aria-label="歌曲排序" value={songFilters.sort} onChange={(event) => setSongFilters({ ...songFilters, sort: event.target.value })} className="bg-[#0b2038] p-3 text-sm text-white"><option value="popular">最常听</option><option value="recent">最近听到</option><option value="first">首次听到</option><option value="name">歌曲名称</option></select></div>{!filteredSongs.length ? <p className="mt-6 border border-white/10 p-6 text-sm font-bold text-slate-300">{songEmptyMessage}</p> : <div className="mt-6 grid min-w-0 grid-cols-2 gap-3 md:grid-cols-4">{filteredSongs.map((song) => { const card = <div className="min-w-0 border border-white/10 bg-white/[0.04] p-3 hover:bg-white/[0.08]"><div className="relative aspect-square bg-[#0b2038]">{song.album?.coverUrl ? <Image src={publicImageVariantUrl(song.album.coverUrl, 'thumb-sm') || song.album.coverUrl} alt={`${song.album.name}专辑封面`} fill sizes="(max-width: 768px) 50vw, 25vw" loading="lazy" className="object-cover" /> : <span className="grid size-full place-items-center text-4xl font-black text-sky-200/50">♪</span>}</div><h3 className="mt-3 line-clamp-2 break-words font-black text-white">{song.title}</h3><p className="mt-1 truncate text-xs text-slate-400">{song.album ? `《${song.album.name}》` : '历史未关联专辑'}</p><p className="mt-3 text-sm font-black text-sky-200">现场听过 {song.listenCount} 次</p><p className="mt-1 text-xs text-slate-300/65">出现在 {song.concertCount} 场</p><p className="mt-3 text-[11px] leading-5 text-slate-400">首次：{dateLabel(song.first.date)} · {song.first.city}<br />最近：{dateLabel(song.latest.date)} · {song.latest.city}</p></div>; return song.songId ? <Link key={song.identityKey} href={`/music/song/${song.songId}`} className="min-w-0">{card}</Link> : <article key={song.identityKey}>{card}</article> })}</div>}</section> : null}
 
     {tab === 'timeline' ? <section className="mt-8"><h2 className="text-3xl font-black text-white">观演时间线</h2>{!timeline.length ? <p className="mt-6 border border-white/10 p-6 text-sm font-bold text-slate-300">还没有记录看过的演唱会</p> : <div className="mt-8 space-y-10">{timeline.map(([year, records]) => <section key={year}><h3 className="text-4xl font-black text-sky-100">{year}</h3><div className="mt-4 border-l border-sky-300/30 pl-4 sm:pl-6">{records.map((record) => <Link key={record.id} href={buildConcertSlugPath(record.concert!.tour.name, record.concert!.city, record.concert!.concertDate, record.concert!.stageType)} className="relative block min-w-0 border-b border-white/10 py-5 before:absolute before:-left-[21px] before:top-7 before:h-2 before:w-2 before:bg-sky-200 sm:before:-left-[29px]"><time className="text-sm font-black text-sky-200">{dateLabel(record.concert!.concertDate)}</time><h4 className="mt-1 break-words text-xl font-black text-white">{record.concert!.city}{record.concert!.sessionNumber ? ` · ${record.concert!.sessionNumber}` : ''}</h4><p className="mt-1 break-words text-sm text-slate-300/65">{record.concert!.venue || '场馆待整理'} · {record.concert!.tour.name}</p><p className="mt-2 text-xs font-bold text-slate-400">{record.mood ? `心情：${record.mood} · ` : ''}{record.isPublic ? '公开' : '仅自己'}</p></Link>)}</div></section>)}</div>}</section> : null}
     <BatchAttendancePanel open={batchOpen} tourId={batchTourId} onClose={() => setBatchOpen(false)} onSaved={(message) => { setBatchMessage(message); router.refresh() }} />

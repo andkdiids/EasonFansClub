@@ -2,7 +2,7 @@ import { Prisma, type GuessSongMode, type GuessSongPeriodType } from '@prisma/cl
 import type { GuessSongPublicMode } from '@/lib/guess-song-config'
 import { getGuessSongDatabaseModes, GUESS_SONG_PUBLIC_MODES, GUESS_SONG_SIMPLE_MODE, toPublicGuessSongMode } from '@/lib/guess-song-config'
 import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -120,18 +120,10 @@ function serializeModeHighScore(
     }
   },
   publicMode: GuessSongPublicMode,
-  viewerId: string | undefined,
-  remarkMap: ReadonlyMap<string, string>,
   equippedBadge: EquippedBadgeView | null,
 ): GuessSongModeHighScore | null {
   if (!row.completedAt) return null
   const safeName = getPublicUserDisplayName(row.User)
-  const name = resolveFriendDisplayName({
-    viewerId,
-    targetUserId: row.User.id,
-    fallbackName: getPublicUserDisplayName(row.User),
-    remarkMap,
-  })
   const avatarUrl = publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl)
   return {
     mode: publicMode,
@@ -143,7 +135,7 @@ function serializeModeHighScore(
     userId: row.User.id,
     uid: row.User.uid,
     displayName: safeName,
-    nickname: name,
+    nickname: safeName,
     avatarUrl,
     user: {
       id: row.User.id,
@@ -163,7 +155,7 @@ function serializeModeHighScore(
  * leaderboard ordering and the query is deliberately uncached so fresh scores
  * and profile changes appear on the next homepage refresh.
  */
-export async function getGuessSongModeHighScores(viewerId?: string): Promise<GuessSongModeHighScores> {
+export async function getGuessSongModeHighScores(): Promise<GuessSongModeHighScores> {
   try {
     const deletedSessionIds = await getGuessSongDeletedYearSessionIds()
     const deletedSessionFilter = deletedSessionIds.size > 0
@@ -213,10 +205,9 @@ export async function getGuessSongModeHighScores(viewerId?: string): Promise<Gue
     }))
 
     const availableRows = rows.filter((item): item is NonNullable<typeof item> => item !== null && item.row.completedAt !== null)
-    const remarkMap = await loadFriendRemarkMap(viewerId, availableRows.map(({ row }) => row.User.id))
     const equippedBadgeMap = await getEquippedBadgesForUsers(availableRows.map(({ row }) => row.User.id))
     const serializedRows = availableRows
-      .map(({ publicMode, row }) => serializeModeHighScore(row, publicMode, viewerId, remarkMap, equippedBadgeMap.get(row.User.id) || null))
+      .map(({ publicMode, row }) => serializeModeHighScore(row, publicMode, equippedBadgeMap.get(row.User.id) || null))
       .filter((row): row is GuessSongModeHighScore => row !== null)
     return buildGuessSongModeHighScores(serializedRows)
   } catch (error) {
@@ -303,17 +294,12 @@ type LeaderboardRow = ScoreRecord & {
   }
 }
 
-function serializeRow(row: LeaderboardRow, rank: number, viewerId: string, remarkMap: ReadonlyMap<string, string>, equippedBadge?: EquippedBadgeView | null) {
+function serializeRow(row: LeaderboardRow, rank: number, equippedBadge?: EquippedBadgeView | null) {
   return {
     rank,
     userId: row.userId,
     uid: row.User.uid,
-    nickname: resolveFriendDisplayName({
-      viewerId,
-      targetUserId: row.User.id,
-      fallbackName: getPublicUserDisplayName(row.User),
-      remarkMap,
-    }),
+    nickname: getPublicUserDisplayName(row.User),
     avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
     equippedBadge: equippedBadge || null,
     mode: row.mode ? toPublicGuessSongMode(row.mode) : undefined,
@@ -370,7 +356,6 @@ export async function getGuessSongPersonalBest(input: {
   })
   if (!session?.completedAt) return null
 
-  const remarkMap = await loadFriendRemarkMap(input.userId, [session.User.id])
   const equippedBadgeMap = await getEquippedBadgesForUsers([session.User.id])
   return serializeRow({
     userId: session.userId,
@@ -381,7 +366,7 @@ export async function getGuessSongPersonalBest(input: {
     totalPlayCount: session.totalPlayCount,
     achievedAt: session.completedAt,
     User: session.User,
-  }, 1, input.userId, remarkMap, equippedBadgeMap.get(session.User.id) || null)
+  }, 1, equippedBadgeMap.get(session.User.id) || null)
 }
 
 type YearLeaderboardQueryRow = {
@@ -538,17 +523,16 @@ async function getYearGuessSongLeaderboard(input: {
   const rankedRows = selectedRows.map(toYearLeaderboardRow)
   const topRows = rankedRows.filter((item) => item.rank <= 10)
   const ownRow = input.userId ? rankedRows.find((item) => item.row.userId === input.userId) || null : null
-  const remarkTargets = [...topRows, ...(ownRow && ownRow.rank > 10 ? [ownRow] : [])]
-  const remarkMap = await loadFriendRemarkMap(input.userId, remarkTargets.map((item) => item.row.userId))
-  const equippedBadgeMap = await getEquippedBadgesForUsers(remarkTargets.map((item) => item.row.userId))
+  const badgeTargets = [...topRows, ...(ownRow && ownRow.rank > 10 ? [ownRow] : [])]
+  const equippedBadgeMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId))
 
   return {
     periodType: 'YEAR' as const,
     periodKey: input.periodKey,
     mode: input.mode,
     algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
-    rows: topRows.map((item) => serializeRow(item.row, item.rank, input.userId, remarkMap, equippedBadgeMap.get(item.row.userId) || null)),
-    currentUser: ownRow ? serializeRow(ownRow.row, ownRow.rank, input.userId, remarkMap, equippedBadgeMap.get(ownRow.row.userId) || null) : null,
+    rows: topRows.map((item) => serializeRow(item.row, item.rank, equippedBadgeMap.get(item.row.userId) || null)),
+    currentUser: ownRow ? serializeRow(ownRow.row, ownRow.rank, equippedBadgeMap.get(ownRow.row.userId) || null) : null,
   }
 }
 
@@ -611,7 +595,6 @@ export async function getGuessSongLeaderboard(input: {
   const rows = [...bestByUser.values()]
 
   rows.sort(compareGuessSongScores)
-  const remarkMap = await loadFriendRemarkMap(input.userId, rows.map((row) => row.userId))
   const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.userId))
   const ownIndex = rows.findIndex((row) => row.userId === input.userId)
   return {
@@ -619,8 +602,8 @@ export async function getGuessSongLeaderboard(input: {
     periodKey,
     mode: input.mode,
     algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
-    rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1, input.userId, remarkMap, equippedBadgeMap.get(row.userId) || null)),
-    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1), input.userId, remarkMap, equippedBadgeMap.get(rows[ownIndex].userId) || null) : null,
+    rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1, equippedBadgeMap.get(row.userId) || null)),
+    currentUser: ownIndex >= 0 ? serializeRow(rows[ownIndex], Math.max(1, ownIndex + 1), equippedBadgeMap.get(rows[ownIndex].userId) || null) : null,
   }
 }
 

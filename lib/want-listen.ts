@@ -823,13 +823,24 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
   }
 }
 
-export async function nextWantListenQuestion(userId: string, sessionId: string) {
+export async function nextWantListenQuestion(userId: string, sessionId: string, publicQuestionId?: string) {
   await expireSessionIfNeeded(userId, sessionId)
-  const session = await loadSession(userId, sessionId)
+  let session = await loadSession(userId, sessionId)
   if (!session) throw sessionNotFound()
   if (session.status === 'EXPIRED') throw new WantListenServiceError('本局游戏已结束，请重新开始。', 410, 'SESSION_EXPIRED')
   if (session.status === 'COMPLETED') return toPublicState(session)
+  session = await ensureCurrentQuestionExists(session)
   const current = session.WantListenSessionQuestion.find((question) => question.position === session.currentQuestion)
+  const submitted = publicQuestionId
+    ? session.WantListenSessionQuestion.find((question) => question.publicId === publicQuestionId)
+    : current
+  if (publicQuestionId && !submitted) throw new WantListenServiceError('当前题目已变化，请刷新后继续。', 409, 'QUESTION_MISMATCH')
+  if (publicQuestionId && submitted && submitted.position !== session.currentQuestion) {
+    // 客户端可能在上一条 /next 已提交成功、但响应丢失后重放请求。
+    // 只要请求绑定的题目已经完成且服务端已进入后续题，直接返回当前状态，保证 /next 幂等。
+    if (submitted.answeredAt && submitted.position < session.currentQuestion) return toPublicState(session)
+    throw new WantListenServiceError('当前题目已变化，请刷新后继续。', 409, 'QUESTION_MISMATCH')
+  }
   if (!current?.answeredAt) throw new WantListenServiceError('请先提交当前题目。', 409, 'QUESTION_NOT_ANSWERED')
   // 历史固定题数模式：答完最后一题后不再推进
   if (session.questionCount !== null && session.currentQuestion >= session.questionCount) return toPublicState(session)

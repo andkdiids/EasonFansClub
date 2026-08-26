@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { splitContentImages } from '@/lib/content-images'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import {
   parseForumDiscoveryLimit,
@@ -128,7 +128,7 @@ function buildHotCursor(row: Pick<DiscoveryRow, 'likeCount' | 'replyCount' | 'cr
   return `h|${row.likeCount}|${row.replyCount}|${row.createdAt.toISOString()}|${row.id}`
 }
 
-function serializePost(row: DiscoveryRow, userId: string | undefined, remarkMap: ReadonlyMap<string, string>) {
+function serializePost(row: DiscoveryRow) {
   const contentImages = splitContentImages(row.content).images
   const media = row.PostMedia[0]
   const coverSource = contentImages[0] || media?.thumbnail || media?.url || row.sticker?.url || null
@@ -155,12 +155,7 @@ function serializePost(row: DiscoveryRow, userId: string | undefined, remarkMap:
       id: row.User.id,
       uid: row.User.uid,
       nickname: getPublicUserDisplayName(row.User),
-      displayName: resolveFriendDisplayName({
-        viewerId: userId,
-        targetUserId: row.User.id,
-        fallbackName: getPublicUserDisplayName(row.User),
-        remarkMap,
-      }),
+      displayName: getPublicUserDisplayName(row.User),
       avatarUrl: publicImageVariantUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl, 'avatar-sm'),
       level: row.User.level,
     },
@@ -439,11 +434,10 @@ export async function POST(request: Request) {
     nextCursor = last ? buildCursor(last) : null
   }
 
-  const remarkMap = await loadFriendRemarkMap(user?.id, rows.map((row) => row.User.id))
   const announcement = selectedBoard?.slug === 'announcements'
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
   return NextResponse.json({
-    posts: rows.map((row) => serializePost(row, user?.id, remarkMap)),
+    posts: rows.map((row) => serializePost(row)),
     boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
     nextCursor,

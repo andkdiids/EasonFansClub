@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { activeUserWhere } from '@/lib/friends'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
@@ -75,18 +75,15 @@ export async function GET(request: Request) {
 
   const results = friends
     .map(({ user: friend, friendshipCreatedAt }) => {
-      const name = resolveFriendDisplayName({
-        viewerId: user.id,
-        targetUserId: friend.id,
-        fallbackName: getPublicUserDisplayName(friend),
-        remarkMap,
-      })
+      const nickname = getPublicUserDisplayName(friend)
+      const friendRemark = remarkMap.get(friend.id) || null
+      const displayName = getFriendDisplayName({ nickname, friendRemark, isFriendContext: true })
       const normalized = {
         uid: formatUid(friend.uid).toLocaleLowerCase('zh-CN'),
         rawUid: String(friend.uid),
         nickname: friend.nickname.toLocaleLowerCase('zh-CN'),
         displayName: (friend.Profile?.displayName || '').toLocaleLowerCase('zh-CN'),
-        remark: (remarkMap.get(friend.id) || '').toLocaleLowerCase('zh-CN'),
+        remark: (friendRemark || '').toLocaleLowerCase('zh-CN'),
       }
       const matchRank = !q ? 0
         : normalized.uid === q || normalized.rawUid === q ? 1
@@ -98,7 +95,10 @@ export async function GET(request: Request) {
       return {
         id: friend.id,
         uid: friend.uid,
-        name,
+        name: displayName,
+        nickname,
+        friendRemark,
+        displayName,
         avatarUrl: publicImageUrl(friend.Profile?.avatarUrl || friend.avatarUrl),
         matchRank,
         mentionCount: stat?.count || 0,
@@ -119,6 +119,9 @@ export async function GET(request: Request) {
       id: item.id,
       uid: item.uid,
       name: item.name,
+      nickname: item.nickname,
+      friendRemark: item.friendRemark,
+      displayName: item.displayName,
       avatarUrl: item.avatarUrl,
     }))
 

@@ -32,6 +32,7 @@
     "migration:baseline:check": "tsx scripts/audit-baseline.ts",
     "checkin:explain": "tsx scripts/checkin-explain.ts",
     "checkin:reconcile": "tsx scripts/reconcile-checkin-derived-state.ts",
+    "audit:user-contact-mappings": "tsx scripts/audit-internal-account-phone.ts",
     "midnight:diagnostics": "tsx scripts/midnight-diagnostics.ts",
     "midnight:mysql-analyze": "tsx scripts/analyze-midnight-mysql.ts",
     "anti-cheat:scan": "tsx scripts/scan-entertainment-anti-cheat.ts",

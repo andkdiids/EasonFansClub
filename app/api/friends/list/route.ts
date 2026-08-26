@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { activeUserWhere } from '@/lib/friends'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { getUndercoverPresenceForUsers } from '@/lib/undercover-star'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
@@ -154,14 +154,8 @@ export async function GET(request: Request) {
 
   const friends = visibleRows.map(({ friend, conversation }) => {
     const growth = calculateGrowthSummary(friend.experience, growthLevels)
-    const displayName = resolveFriendDisplayName({
-      viewerId: user.id,
-      targetUserId: friend.id,
-      fallbackName: getPublicUserDisplayName(friend),
-      remarkMap,
-    })
     return {
-      ...serializePublicUser(friend, growth.level, growth.levelName, displayName, equippedBadgeMap.get(friend.id) || null),
+      ...serializePublicUser(friend, growth.level, growth.levelName, remarkMap.get(friend.id) || null, equippedBadgeMap.get(friend.id) || null, true),
       groupId: groupByFriend.get(friend.id) || null,
       conversationId: conversation?.id || null,
       lastMessage: conversation?.DirectMessage[0] || null,
@@ -257,14 +251,10 @@ async function searchUsers(currentUserId: string, q: string) {
                 : request ? 'INCOMING_PENDING'
                   : 'NONE'
       const growth = calculateGrowthSummary(item.experience, growthLevels)
-      const displayName = resolveFriendDisplayName({
-        viewerId: currentUserId,
-        targetUserId: item.id,
-        fallbackName: getPublicUserDisplayName(item),
-        remarkMap,
-      })
       return {
-        ...serializePublicUser(item, growth.level, growth.levelName, displayName, equippedBadgeMap.get(item.id) || null),
+        // This branch is site-wide public-user search.  The relationship
+        // status is private, but the primary name is never viewer-specific.
+        ...serializePublicUser(item, growth.level, growth.levelName, remarkMap.get(item.id) || null, equippedBadgeMap.get(item.id) || null, false),
         groupId: groupByFriend.get(item.id) || null,
         relationshipStatus,
         requestId: relationshipStatus === 'INCOMING_PENDING' ? request?.id : null,
@@ -348,13 +338,18 @@ function serializePublicUser(
   },
   level: number,
   levelName: string,
-  displayName = getPublicUserDisplayName(friend),
+  friendRemark: string | null = null,
   equippedBadge: EquippedBadgeView | null = null,
+  isFriendContext = Boolean(friendRemark),
 ) {
+  const nickname = getPublicUserDisplayName(friend)
+  const normalizedRemark = friendRemark?.trim() || null
   return {
     id: friend.id,
     uid: friend.uid,
-    nickname: getPublicUserDisplayName(friend),
+    nickname,
+    friendRemark: normalizedRemark,
+    displayName: getFriendDisplayName({ nickname, friendRemark: normalizedRemark, isFriendContext }),
     avatarUrl: publicImageUrl(friend.avatarUrl),
     bio: publicModerationText(friend.Profile?.bio || friend.bio, friend.Profile?.bioModerationStatus || friend.bioModerationStatus),
     isOnline: friend.isOnline,
@@ -363,6 +358,8 @@ function serializePublicUser(
     level,
     levelName,
     equippedBadge,
-    profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl), displayName } : friend.Profile,
+    // Profile.displayName is a public profile field.  Never replace it with a
+    // viewer-owned friend remark.
+    profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl) } : friend.Profile,
   }
 }

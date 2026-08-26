@@ -6,7 +6,7 @@ import { ClinicHomeClient } from '@/components/clinic/ClinicHomeClient'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export default async function ClinicPage({ searchParams }: { searchParams: Promise<{ page?: string; category?: string; sort?: string }> }) {
+export default async function ClinicPage({ searchParams }: { searchParams: Promise<{ page?: string; category?: string; sort?: string; restore?: string }> }) {
   const params = await searchParams
   // AuthServiceUnavailableError must surface as a server error, not as an
   // anonymous page that later sends a valid user to /login on click.
@@ -19,5 +19,5 @@ export default async function ClinicPage({ searchParams }: { searchParams: Promi
     sort,
     viewerId: user?.id || null,
   })
-  return <ClinicHomeClient initialData={initialData} initialCategory={category} initialSort={sort} isAuthenticated={Boolean(user)} />
+  return <ClinicHomeClient initialData={initialData} initialCategory={category} initialSort={sort} isAuthenticated={Boolean(user)} restoreOnMount={params.restore === '1'} />
 }

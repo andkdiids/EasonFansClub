@@ -4,7 +4,7 @@ import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getGuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
-import { getPublicUserDisplayName, loadFriendRemarkMap, resolveFriendDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { prisma } from '@/lib/prisma'
@@ -49,7 +49,6 @@ const publicPostModerationStatuses: Array<'APPROVED' | 'VIOLATION'> = ['APPROVED
 
 export async function getHomePosts(userId?: string) {
   const posts = await getHomePostsUncached()
-  const remarkMap = await loadFriendRemarkMap(userId, posts.map((post) => post.author.id))
   const equippedBadgeMap = await getEquippedBadgesForUsers(posts.map((post) => post.author.id))
   const displayPosts = posts.map((post) => ({
     ...post,
@@ -58,12 +57,7 @@ export async function getHomePosts(userId?: string) {
       equippedBadge: equippedBadgeMap.get(post.author.id) || null,
       profile: post.author.profile ? {
         ...post.author.profile,
-        displayName: resolveFriendDisplayName({
-          viewerId: userId,
-          targetUserId: post.author.id,
-          fallbackName: getPublicUserDisplayName(post.author),
-          remarkMap,
-        }),
+        displayName: getPublicUserDisplayName(post.author),
       } : post.author.profile,
     },
   }))
@@ -144,27 +138,11 @@ async function getHomePostsUncached() {
   }))
 }
 
-export async function getHomeDailyMessages(userId?: string) {
+export async function getHomeDailyMessages() {
   const messages = await cachedHomeData('home.dailyMessages', getHomeDailyMessagesUncached)
-  const remarkMap = await loadFriendRemarkMap(userId, messages.map((message) => message.user.id))
   const equippedBadgeMap = await getEquippedBadgesForUsers(messages.map((message) => message.user.id))
   const withBadges = messages.map((message) => ({ ...message, user: { ...message.user, equippedBadge: equippedBadgeMap.get(message.user.id) || null } }))
-  if (!userId || messages.length === 0) return withBadges
-  return withBadges.map((message) => ({
-    ...message,
-    user: message.user.profile ? {
-      ...message.user,
-      profile: {
-        ...message.user.profile,
-        displayName: resolveFriendDisplayName({
-          viewerId: userId,
-          targetUserId: message.user.id,
-          fallbackName: getPublicUserDisplayName(message.user),
-          remarkMap,
-        }),
-      },
-    } : message.user,
-  }))
+  return withBadges
 }
 
 async function getHomeDailyMessagesUncached() {
@@ -316,7 +294,8 @@ export async function getHomeTodayEvents() {
 }
 
 export async function getHomeEntertainmentRanking(userId?: string) {
-  return getGuessSongModeHighScores(userId)
+  void userId
+  return getGuessSongModeHighScores()
 }
 
 export async function getHomeSiteStats() {
