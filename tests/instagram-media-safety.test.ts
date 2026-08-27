@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import sharp from 'sharp'
-import { inspectInstagramMediaUrl, InstagramMediaSafetyError, isAllowedMediaHostname, isRestrictedIp, SafeExternalInstagramMediaLocalizer } from '@/lib/instagram/media'
+import { DEFAULT_ALLOWED_MEDIA_HOSTS, inspectInstagramMediaUrl, InstagramMediaSafetyError, isAllowedMediaHostname, isRestrictedIp, SafeExternalInstagramMediaLocalizer } from '@/lib/instagram/media'
 
 test('media safety rejects non-HTTPS, credential-bearing and unallowlisted URLs before fetch', async () => {
   const cases = [
@@ -25,6 +25,26 @@ test('media suffix allowlist enforces a label boundary', () => {
   assert.equal(isAllowedMediaHostname('evil.fbcdn.net.example', '.fbcdn.net'), false)
   assert.equal(isAllowedMediaHostname('scontent-gru1.cdninstagram.com', 'scontent-gru1.cdninstagram.com'), true)
   assert.equal(isAllowedMediaHostname('scontent-gru2.cdninstagram.com', 'scontent-gru1.cdninstagram.com'), false)
+})
+
+test('the reviewed production default accepts the real Dataset CDN host and rejects broad domains', () => {
+  const env = process.env as Record<string, string | undefined>
+  const previousNodeEnv = env.NODE_ENV
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  env.NODE_ENV = 'production'
+  delete process.env.IG_ALLOWED_MEDIA_HOSTS
+  try {
+    assert.equal(isAllowedMediaHostname('instagram.fmgf7-1.fna.fbcdn.net'), true)
+    assert.equal(isAllowedMediaHostname('scontent-dus1-1.cdninstagram.com'), true)
+    assert.equal(isAllowedMediaHostname('evilcdninstagram.com'), false)
+    assert.equal(isAllowedMediaHostname('anything.example.com'), false)
+    assert.equal(isAllowedMediaHostname('instagram.fmgf7-1.fna.fbcdn.net', DEFAULT_ALLOWED_MEDIA_HOSTS), true)
+  } finally {
+    if (previousNodeEnv === undefined) delete env.NODE_ENV
+    else env.NODE_ENV = previousNodeEnv
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
 })
 
 test('media safety rejects restricted IPv4 and IPv6 addresses', () => {
@@ -76,6 +96,43 @@ test('media inspection revalidates every redirect and falls back to a bounded Ra
       ),
       (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'MEDIA_HOST_NOT_ALLOWED',
     )
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('media redirect to a private-resolving host is rejected after the redirect hop', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  try {
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://origin.example.test/image.jpg', type: 'IMAGE' },
+        {
+          lookupImpl: (async (hostname: string) => [{ address: hostname.startsWith('private.') ? '10.0.0.7' : '8.8.8.8', family: 4 }]) as unknown as typeof import('node:dns/promises').lookup,
+          fetchImpl: (async () => new Response(null, { status: 302, headers: { location: 'https://private.example.test/image.jpg' } })) as typeof fetch,
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'UNSAFE_URL',
+    )
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('the real Dataset media host fixture passes the media gate without contacting the network', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = DEFAULT_ALLOWED_MEDIA_HOSTS
+  const lookupImpl = (async () => [{ address: '8.8.8.8', family: 4 }]) as unknown as typeof import('node:dns/promises').lookup
+  try {
+    const result = await inspectInstagramMediaUrl(
+      { sourceUrl: 'https://instagram.fmgf7-1.fna.fbcdn.net/v/t51.82787-15/media.jpg', type: 'IMAGE' },
+      { lookupImpl, fetchImpl: (async () => new Response('jpeg', { status: 200, headers: { 'content-type': 'image/jpeg', 'content-length': '4' } })) as typeof fetch },
+    )
+    assert.equal(result.hostname, 'instagram.fmgf7-1.fna.fbcdn.net')
+    assert.equal(result.status, 200)
   } finally {
     if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
     else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist

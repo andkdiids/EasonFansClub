@@ -51,6 +51,14 @@ export class InstagramMediaSafetyError extends Error {
 
 type MediaHostRule = { exact: string | null; suffix: string | null }
 
+/**
+ * The current Apify Dataset contains Meta-hosted Instagram media only. Keep
+ * this reviewed set deliberately small: a missing or malformed environment
+ * value must never turn the media downloader into an arbitrary HTTPS proxy.
+ */
+export const APPROVED_MEDIA_HOST_SUFFIXES = ['cdninstagram.com', 'fbcdn.net'] as const
+export const DEFAULT_ALLOWED_MEDIA_HOSTS = '.cdninstagram.com,.fbcdn.net'
+
 function configuredHosts(value = process.env.IG_ALLOWED_MEDIA_HOSTS || ''): MediaHostRule[] {
   return value
     .split(',')
@@ -154,10 +162,14 @@ export function isRestrictedIp(value: string) {
   return true
 }
 
-export function isAllowedMediaHostname(hostname: string, allowlist = process.env.IG_ALLOWED_MEDIA_HOSTS || '') {
+export function isAllowedMediaHostname(hostname: string, allowlist?: string) {
   const normalized = hostname.trim().toLowerCase().replace(/\.$/, '')
   if (!normalized || isIP(normalized)) return false
-  return configuredHosts(allowlist).some((rule) => rule.exact === normalized || Boolean(rule.suffix && (normalized === rule.suffix || normalized.endsWith(`.${rule.suffix}`))))
+  const configured = configuredHosts(allowlist ?? (process.env.IG_ALLOWED_MEDIA_HOSTS || DEFAULT_ALLOWED_MEDIA_HOSTS))
+  const rules = process.env.NODE_ENV === 'production' && allowlist === undefined
+    ? configured.filter((rule) => rule.suffix && APPROVED_MEDIA_HOST_SUFFIXES.includes(rule.suffix as typeof APPROVED_MEDIA_HOST_SUFFIXES[number]))
+    : configured
+  return rules.some((rule) => rule.exact === normalized || Boolean(rule.suffix && (normalized === rule.suffix || normalized.endsWith(`.${rule.suffix}`))))
 }
 
 async function assertPublicMediaUrl(sourceUrl: string, options: MediaRequestOptions = {}) {

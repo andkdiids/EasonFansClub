@@ -6,7 +6,7 @@ import { createInstagramProvider } from '@/lib/instagram/factory'
 import { InstagramMediaSafetyError, type InstagramMediaLocalizer, type LocalizedInstagramMedia } from '@/lib/instagram/media'
 import { createInstagramMediaLocalizer, assertProductionMediaLocalizer } from '@/lib/instagram/localizer'
 import { dedupeAndSortInstagramPosts, normalizeInstagramPost } from '@/lib/instagram/normalize'
-import { InstagramProviderError, normalizeInstagramUsername, normalizeProviderLimit, type InstagramPost, type InstagramProvider, type InstagramProviderDiagnostics, type InstagramProviderTrace } from '@/lib/instagram/types'
+import { InstagramProviderError, normalizeInstagramUsername, normalizeProviderLimit, type InstagramMedia, type InstagramPost, type InstagramProvider, type InstagramProviderDiagnostics, type InstagramProviderTrace } from '@/lib/instagram/types'
 
 const DEFAULT_TARGET = 'mreasonchan'
 const DEFAULT_LIMIT = 3
@@ -121,6 +121,21 @@ function traceData(trace: InstagramProviderTrace | null | undefined) {
   }
 }
 
+/**
+ * A FAILED post has no trustworthy localized media set and must be retried in
+ * place. READY/HIDDEN media can be reused only when the ordered media shape is
+ * unchanged; the unique (platform, externalId) upsert prevents duplicates.
+ */
+export function canReuseInstagramMedia(
+  existing: { status: string; media: readonly Pick<InstagramMedia, 'type' | 'sortOrder'>[] } | null | undefined,
+  post: Pick<InstagramPost, 'media'>,
+) {
+  return Boolean(existing
+    && (existing.status === 'READY' || existing.status === 'HIDDEN')
+    && existing.media.length === post.media.length
+    && existing.media.every((media, index) => media.sortOrder === index && media.type === post.media[index]?.type))
+}
+
 export function buildSocialPostNotificationBatch(postIds: string[], target: string, recipientIds: string[]) {
   const sortedIds = [...new Set(postIds)].sort()
   const batchKey = createHash('sha256').update(`${target}\u0000${sortedIds.join(',')}`).digest('hex').slice(0, 48)
@@ -154,10 +169,7 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
     where: { platform_externalId: { platform: 'INSTAGRAM', externalId: post.externalId } },
     include: { media: { orderBy: { sortOrder: 'asc' } } },
   })
-  const canReuseMedia = Boolean(existing
-    && (existing.status === 'READY' || existing.status === 'HIDDEN')
-    && existing.media.length === post.media.length
-    && existing.media.every((media, index) => media.sortOrder === index && media.type === post.media[index]?.type))
+  const canReuseMedia = canReuseInstagramMedia(existing, post)
   const localizedMedia: LocalizedInstagramMedia[] = []
 
   try {
