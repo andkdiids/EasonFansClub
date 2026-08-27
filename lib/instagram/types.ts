@@ -45,11 +45,31 @@ export type InstagramProviderTrace = {
   billableResults: number | null
 }
 
+/** Safe, provider-neutral diagnostics for contract and target validation. */
+export type InstagramProviderDiagnostics = {
+  requestedTarget: string | null
+  datasetId: string | null
+  actorRunId: string | null
+  resolvedDatasetTarget: string | null
+  recognizedOwners: string[]
+  ownerResolutionSource: Record<string, number>
+  itemCount: number
+  validOwnerItemCount: number
+  unknownOwnerItemCount: number
+  mismatchedOwnerItemCount: number
+  /** Apify-specific relationship counts; other providers may omit them. */
+  directOwnerItemCount?: number
+  collaboratorItemCount?: number
+  foreignItemCount?: number
+  unknownItemCount?: number
+}
+
 export interface InstagramProvider {
   readonly name: InstagramProviderName
   readonly proxyUrl: string | null
   getLatestPosts(username: string, limit: number): Promise<InstagramPost[]>
   getTrace?(): InstagramProviderTrace | null
+  getDiagnostics?(): InstagramProviderDiagnostics | null
 }
 
 export type InstagramProviderErrorCode =
@@ -62,6 +82,8 @@ export type InstagramProviderErrorCode =
   | 'PROVIDER_RUN_FAILED'
   | 'PROVIDER_EMPTY_RESULT'
   | 'PROVIDER_TARGET_MISMATCH'
+  | 'APIFY_DATASET_MIXED_OWNERS'
+  | 'APIFY_DATASET_TARGET_UNVERIFIABLE'
   | 'PROVIDER_CONTRACT_FAILED'
   | 'PROVIDER_REQUEST_FAILED'
   | 'PROVIDER_TIMEOUT'

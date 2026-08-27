@@ -6,7 +6,7 @@ import { createInstagramProvider } from '@/lib/instagram/factory'
 import { InstagramMediaSafetyError, type InstagramMediaLocalizer, type LocalizedInstagramMedia } from '@/lib/instagram/media'
 import { createInstagramMediaLocalizer, assertProductionMediaLocalizer } from '@/lib/instagram/localizer'
 import { dedupeAndSortInstagramPosts, normalizeInstagramPost } from '@/lib/instagram/normalize'
-import { InstagramProviderError, normalizeInstagramUsername, normalizeProviderLimit, type InstagramPost, type InstagramProvider, type InstagramProviderTrace } from '@/lib/instagram/types'
+import { InstagramProviderError, normalizeInstagramUsername, normalizeProviderLimit, type InstagramPost, type InstagramProvider, type InstagramProviderDiagnostics, type InstagramProviderTrace } from '@/lib/instagram/types'
 
 const DEFAULT_TARGET = 'mreasonchan'
 const DEFAULT_LIMIT = 3
@@ -52,14 +52,55 @@ function syncStatusForError(error: unknown): SyncInstagramPostsResult['status'] 
     || error.code === 'PROVIDER_NOT_CONFIGURED'
     || error.code === 'PROVIDER_AUTH_ERROR'
     || error.code === 'PROVIDER_TARGET_MISMATCH'
+    || error.code === 'APIFY_DATASET_MIXED_OWNERS'
+    || error.code === 'APIFY_DATASET_TARGET_UNVERIFIABLE'
   ) return 'BLOCKED'
   return 'FAILED'
 }
 
-function safeErrorMessage(error: unknown) {
-  if (error instanceof InstagramProviderError) return error.message.slice(0, 500)
-  if (error instanceof Error) return error.message.slice(0, 500)
-  return '同步失败'
+function safeProviderDiagnostics(provider: InstagramProvider): InstagramProviderDiagnostics | null {
+  let diagnostics: InstagramProviderDiagnostics | null = null
+  try {
+    diagnostics = provider.getDiagnostics?.() || null
+  } catch {
+    return null
+  }
+  if (!diagnostics) return null
+  return {
+    requestedTarget: typeof diagnostics.requestedTarget === 'string' ? diagnostics.requestedTarget : null,
+    datasetId: typeof diagnostics.datasetId === 'string' ? diagnostics.datasetId : null,
+    actorRunId: typeof diagnostics.actorRunId === 'string' ? diagnostics.actorRunId : null,
+    resolvedDatasetTarget: typeof diagnostics.resolvedDatasetTarget === 'string' ? diagnostics.resolvedDatasetTarget : null,
+    recognizedOwners: Array.isArray(diagnostics.recognizedOwners)
+      ? diagnostics.recognizedOwners.filter((owner): owner is string => typeof owner === 'string').slice(0, 20)
+      : [],
+    ownerResolutionSource: Object.fromEntries(Object.entries(diagnostics.ownerResolutionSource || {}).filter(([, count]) => Number.isFinite(count))),
+    itemCount: Number.isFinite(diagnostics.itemCount) ? diagnostics.itemCount : 0,
+    validOwnerItemCount: Number.isFinite(diagnostics.validOwnerItemCount) ? diagnostics.validOwnerItemCount : 0,
+    unknownOwnerItemCount: Number.isFinite(diagnostics.unknownOwnerItemCount) ? diagnostics.unknownOwnerItemCount : 0,
+    mismatchedOwnerItemCount: Number.isFinite(diagnostics.mismatchedOwnerItemCount) ? diagnostics.mismatchedOwnerItemCount : 0,
+    directOwnerItemCount: Number.isFinite(diagnostics.directOwnerItemCount) ? diagnostics.directOwnerItemCount : 0,
+    collaboratorItemCount: Number.isFinite(diagnostics.collaboratorItemCount) ? diagnostics.collaboratorItemCount : 0,
+    foreignItemCount: Number.isFinite(diagnostics.foreignItemCount) ? diagnostics.foreignItemCount : 0,
+    unknownItemCount: Number.isFinite(diagnostics.unknownItemCount) ? diagnostics.unknownItemCount : 0,
+  }
+}
+
+function logProviderDiagnostics(provider: InstagramProvider, event: 'success' | 'failure') {
+  const diagnostics = safeProviderDiagnostics(provider)
+  if (diagnostics) console.info('[instagram.provider.contract]', { event, ...diagnostics })
+  return diagnostics
+}
+
+function safeErrorMessage(error: unknown, diagnostics: InstagramProviderDiagnostics | null = null) {
+  const base = error instanceof InstagramProviderError
+    ? error.message
+    : error instanceof Error ? error.message : '同步失败'
+  if (!diagnostics || !(error instanceof InstagramProviderError)) return base.slice(0, 500)
+  if (!['APIFY_DATASET_MIXED_OWNERS', 'APIFY_DATASET_TARGET_UNVERIFIABLE', 'PROVIDER_TARGET_MISMATCH'].includes(error.code)) return base.slice(0, 500)
+  const owners = diagnostics.recognizedOwners.length ? diagnostics.recognizedOwners.join(',') : 'none'
+  const sources = Object.entries(diagnostics.ownerResolutionSource).map(([source, count]) => `${source}:${count}`).join(',') || 'none'
+  return `${base}；requestedTarget=${diagnostics.requestedTarget || 'unknown'}, resolvedDatasetTarget=${diagnostics.resolvedDatasetTarget || 'unknown'}, items=${diagnostics.itemCount}, directOwnerItems=${diagnostics.directOwnerItemCount ?? 0}, collaboratorItems=${diagnostics.collaboratorItemCount ?? 0}, foreignItems=${diagnostics.foreignItemCount ?? 0}, unknownItems=${diagnostics.unknownItemCount ?? 0}, validOwnerItems=${diagnostics.validOwnerItemCount}, unknownOwnerItems=${diagnostics.unknownOwnerItemCount}, mismatchedOwnerItems=${diagnostics.mismatchedOwnerItemCount}, owners=${owners}, sources=${sources}`.slice(0, 500)
 }
 
 function errorCode(error: unknown) {
@@ -200,6 +241,7 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
   let mediaCount = 0
   try {
     const rawPosts = await provider.getLatestPosts(target, limit)
+    logProviderDiagnostics(provider, 'success')
     const trace = options.trace || provider.getTrace?.() || initialTrace
     await prisma.socialSyncLog.update({ where: { id: syncLog.id }, data: traceData(trace) })
     const posts = dedupeAndSortInstagramPosts(rawPosts.map(normalizeInstagramPost), limit)
@@ -228,6 +270,7 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
     return { syncLogId: syncLog.id, provider: provider.name, target, status: 'SUCCEEDED', foundCount, createdCount, updatedCount, mediaCount, notifiedCount, errorCode: null, newExternalIds, latestExternalId: posts[0]?.externalId || null, retryAfterSeconds: null }
   } catch (error) {
     const status = syncStatusForError(error)
+    const diagnostics = logProviderDiagnostics(provider, 'failure')
     const trace = options.trace || provider.getTrace?.() || initialTrace
     await prisma.socialSyncLog.update({
       where: { id: syncLog.id },
@@ -235,7 +278,7 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
         ...traceData(trace),
         status, foundCount, createdCount, updatedCount, mediaCount,
         finishedAt: new Date(), durationMs: Date.now() - startedAt.getTime(),
-        errorCode: errorCode(error), errorMessage: safeErrorMessage(error), baselineImport: Boolean(options.baseline),
+        errorCode: errorCode(error), errorMessage: safeErrorMessage(error, diagnostics), baselineImport: Boolean(options.baseline),
       },
     }).catch(() => undefined)
     return { syncLogId: syncLog.id, provider: provider.name, target, status, foundCount, createdCount, updatedCount, mediaCount, notifiedCount: 0, errorCode: errorCode(error), newExternalIds: [], latestExternalId: null, retryAfterSeconds: error instanceof InstagramProviderError ? error.retryAfterSeconds || null : null }

@@ -12,6 +12,7 @@ const friendDock = read('components/FriendDock.tsx')
 const profileCard = read('components/FriendProfileCard.tsx')
 const requestActions = read('components/FriendRequestActions.tsx')
 const reasonDialog = read('components/FriendRequestReasonDialog.tsx')
+const globalCss = read('app/globals.css')
 const requestRoute = read('app/api/friends/requests/route.ts')
 const friendService = read('lib/friends.ts')
 const friendsPage = read('app/friends/page.tsx')
@@ -66,6 +67,15 @@ test('点击添加好友只打开统一申请理由弹窗，不直接发送', ()
   assert.match(requestActions, /body: JSON\.stringify\(\{ uid, message: reason \}\)/)
   assert.match(reasonDialog, /validateFriendRequestReason\(reason\)/)
   assert.match(reasonDialog, /maxLength={FRIEND_REQUEST_REASON_MAX_LENGTH}/)
+})
+
+test('申请理由弹窗通过 body portal 脱离入口 stacking context，并使用独立顶层层级', () => {
+  assert.match(reasonDialog, /createPortal\(content, document\.body\)/)
+  assert.match(reasonDialog, /className="friend-request-reason-layer"/)
+  assert.doesNotMatch(reasonDialog, /z-\[120\]/)
+  assert.match(globalCss, /--layer-friend-request-reason:\s*calc\(var\(--layer-friend-profile\) \+ 1\)/)
+  assert.match(globalCss, /\.friend-request-reason-layer \{[^}]*position:fixed;[^}]*z-index:var\(--layer-friend-request-reason\);[^}]*isolation:isolate;/)
+  assert.match(globalCss, /\.friend-request-reason-dialog \{[^}]*max-height:calc\(100dvh/)
 })
 
 test('申请理由 API 缺失、过短或超长时返回明确 400 错误码', () => {

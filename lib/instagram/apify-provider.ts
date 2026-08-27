@@ -8,6 +8,7 @@ import {
   normalizeProviderLimit,
   type InstagramPost,
   type InstagramProvider,
+  type InstagramProviderDiagnostics,
   type InstagramProviderOptions,
   type InstagramProviderTrace,
 } from '@/lib/instagram/types'
@@ -19,11 +20,28 @@ export const APIFY_REQUEST_TIMEOUT_MS = 20_000
 export const APIFY_RUN_TIMEOUT_MS = 300_000
 export const APIFY_RUN_POLL_INTERVAL_MS = 5_000
 export const APIFY_COST_SETTLE_DELAY_MS = 10_000
+export const APIFY_DATASET_INSPECTION_LIMIT = 50
 
 type UnknownRecord = Record<string, unknown>
 type FetchImplementation = typeof fetch
 
-export type ApifyProviderDiagnostics = {
+export type InstagramOwnerResolutionSource =
+  | 'ownerUsername'
+  | 'owner.username'
+  | 'username'
+  | 'profileUsername'
+  | 'inputUrl'
+  | 'profileUrl'
+  | 'url'
+
+export type InstagramOwnerResolution = {
+  username: string | null
+  source: InstagramOwnerResolutionSource | null
+}
+
+export type InstagramTargetRelationship = 'DIRECT_OWNER' | 'COLLABORATOR' | 'FOREIGN' | 'UNVERIFIABLE'
+
+export type ApifyProviderDiagnostics = InstagramProviderDiagnostics & {
   actor: typeof APIFY_INSTAGRAM_SCRAPER_ACTOR
   actorRuns: number
   apiRequests: number
@@ -57,6 +75,7 @@ type ApifyRun = {
   finishedAt: Date | null
   usageTotalUsd: number | null
   billableResults: number | null
+  inputTarget: string | null
 }
 
 const TERMINAL_RUN_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'TIMING-OUT', 'TIMED-OUT', 'ABORTING', 'ABORTED'])
@@ -81,6 +100,16 @@ function stringValue(value: unknown) {
   if (typeof value !== 'string') return null
   const normalized = value.trim()
   return normalized || null
+}
+
+function normalizedUsernameCandidate(value: unknown) {
+  const candidate = stringValue(value)
+  if (!candidate) return null
+  try {
+    return normalizeInstagramUsername(candidate)
+  } catch {
+    return null
+  }
 }
 
 function identifierValue(value: unknown) {
@@ -181,7 +210,13 @@ function isConcreteInstagramPermalink(value: string | null) {
   }
 }
 
-function profileUsernameFromInputUrl(value: unknown) {
+const NON_PROFILE_INSTAGRAM_PATHS = new Set([
+  'about', 'accounts', 'api', 'ar', 'challenge', 'create', 'direct', 'directory',
+  'emails', 'explore', 'graphql', 'legal', 'oauth', 'p', 'privacy', 'reel', 'reels',
+  'recommendations', 'session', 'settings', 'stories', 'terms', 'tv', 'web',
+])
+
+function profileUsernameFromUrl(value: unknown) {
   const candidate = stringValue(value)
   if (!candidate) return null
   try {
@@ -193,6 +228,7 @@ function profileUsernameFromInputUrl(value: unknown) {
       || url.password) return null
     const segments = url.pathname.split('/').filter(Boolean)
     if (segments.length !== 1) return null
+    if (NON_PROFILE_INSTAGRAM_PATHS.has(segments[0]!.toLowerCase())) return null
     try {
       return normalizeInstagramUsername(segments[0] || '')
     } catch {
@@ -201,6 +237,127 @@ function profileUsernameFromInputUrl(value: unknown) {
   } catch {
     return null
   }
+}
+
+function profileUsernameFromInputValue(value: unknown) {
+  if (typeof value === 'string') return profileUsernameFromUrl(value)
+  return profileUsernameFromUrl(firstUrl(value))
+}
+
+/**
+ * Resolves the post owner from actual Apify fields without ever defaulting to
+ * the requested target. URL fallback is accepted only for a canonical
+ * one-segment Instagram profile URL, never for a post URL or a mention.
+ */
+export function resolveInstagramOwnerUsername(value: unknown): InstagramOwnerResolution {
+  const item = asRecord(value)
+  if (!item) return { username: null, source: null }
+
+  const directCandidates: Array<{ source: Extract<InstagramOwnerResolutionSource, 'ownerUsername' | 'owner.username' | 'username' | 'profileUsername'>; value: unknown }> = [
+    { source: 'ownerUsername', value: item.ownerUsername },
+    { source: 'owner.username', value: asRecord(item.owner)?.username },
+    { source: 'username', value: item.username },
+    { source: 'profileUsername', value: item.profileUsername },
+  ]
+  for (const candidate of directCandidates) {
+    const username = normalizedUsernameCandidate(candidate.value)
+    if (username) return { username, source: candidate.source }
+  }
+
+  const urlCandidates: Array<{ source: Extract<InstagramOwnerResolutionSource, 'inputUrl' | 'profileUrl' | 'url'>; value: unknown }> = [
+    { source: 'inputUrl', value: item.inputUrl },
+    { source: 'profileUrl', value: item.profileUrl },
+    { source: 'url', value: item.url },
+  ]
+  for (const candidate of urlCandidates) {
+    const username = profileUsernameFromInputValue(candidate.value)
+    if (username) return { username, source: candidate.source }
+  }
+
+  return { username: null, source: null }
+}
+
+const COLLABORATION_FIELDS = ['coauthorProducers', 'coauthors', 'collaborators'] as const
+
+function collaborationEntries(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  const record = asRecord(value)
+  if (!record) return value === undefined || value === null ? [] : [value]
+  for (const key of ['users', 'items', 'data']) {
+    if (Array.isArray(record[key])) return record[key]
+  }
+  return [value]
+}
+
+function collaborationUsername(value: unknown) {
+  const direct = normalizedUsernameCandidate(value)
+  if (direct) return direct
+  const record = asRecord(value)
+  if (!record) return null
+
+  for (const key of ['username', 'userName', 'profileUsername', 'handle']) {
+    const username = normalizedUsernameCandidate(record[key])
+    if (username) return username
+  }
+
+  const nestedUser = asRecord(record.user)
+  for (const key of ['username', 'userName', 'profileUsername', 'handle']) {
+    const username = normalizedUsernameCandidate(nestedUser?.[key])
+    if (username) return username
+  }
+
+  return profileUsernameFromInputValue(record.profileUrl)
+    || profileUsernameFromInputValue(record.profile_url)
+}
+
+/**
+ * Resolves only explicit collaboration/coauthor fields. Tags, mentions,
+ * captions, and comments are intentionally excluded because they do not prove
+ * that the target account is a coauthor of the post.
+ */
+export function resolveInstagramCollaborationUsernames(value: unknown) {
+  const item = asRecord(value)
+  if (!item) return []
+  const usernames = new Set<string>()
+  for (const field of COLLABORATION_FIELDS) {
+    for (const entry of collaborationEntries(item[field])) {
+      const username = collaborationUsername(entry)
+      if (username) usernames.add(username)
+    }
+  }
+  return [...usernames].sort()
+}
+
+/**
+ * Classifies a Dataset item without treating a tagged/mentioned account as a
+ * collaborator. Missing ownership remains unverifiable even if a malformed
+ * collaboration field happens to contain the requested username.
+ */
+export function classifyInstagramTargetRelationship(value: unknown, target: string): InstagramTargetRelationship {
+  const requestedTarget = normalizeInstagramUsername(target)
+  const owner = resolveInstagramOwnerUsername(value).username
+  if (!owner) return 'UNVERIFIABLE'
+  if (owner === requestedTarget) return 'DIRECT_OWNER'
+  return resolveInstagramCollaborationUsernames(value).includes(requestedTarget)
+    ? 'COLLABORATOR'
+    : 'FOREIGN'
+}
+
+function resolveApifyRunInputTarget(value: unknown) {
+  const input = asRecord(value)
+  if (!input) return null
+
+  for (const key of ['directUrls', 'startUrls', 'profileUrls', 'profileUrl', 'inputUrl']) {
+    const username = profileUsernameFromInputValue(input[key])
+    if (username) return username
+  }
+  for (const key of ['username', 'targetUsername', 'usernames']) {
+    const values = Array.isArray(input[key]) ? input[key] : [input[key]]
+    const usernames = [...new Set(values.map(normalizedUsernameCandidate).filter((username): username is string => Boolean(username)))]
+    const username = usernames.length === 1 ? usernames[0] : null
+    if (username) return username
+  }
+  return null
 }
 
 function permalinkFor(item: UnknownRecord, shortcode: string) {
@@ -247,9 +404,7 @@ export function normalizeApifyInstagramItem(value: unknown): InstagramPost {
 
   const externalId = identifierValue(item.id ?? item.externalId)
   const shortcode = identifierValue(item.shortCode ?? item.shortcode)
-  const username = stringValue(item.ownerUsername)
-    || stringValue(item.username)
-    || stringValue(asRecord(item.owner)?.username)
+  const username = resolveInstagramOwnerUsername(item).username
   const publishedAt = timestampFor(item.timestamp ?? item.takenAtIso ?? item.takenAt)
   if (!externalId || !shortcode || !username || publishedAt === undefined || publishedAt === null) {
     throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Dataset item 缺少统一 contract 字段')
@@ -287,6 +442,108 @@ export function normalizeApifyInstagramItem(value: unknown): InstagramPost {
   }
 }
 
+export type ApifyDatasetOwnerValidation = {
+  requestedTarget: string
+  resolvedDatasetTarget: string | null
+  recognizedOwners: string[]
+  ownerResolutionSource: Record<string, number>
+  itemCount: number
+  validOwnerItemCount: number
+  unknownOwnerItemCount: number
+  mismatchedOwnerItemCount: number
+  directOwnerItemCount: number
+  collaboratorItemCount: number
+  foreignItemCount: number
+  unknownItemCount: number
+  resolvedOwners: Array<string | null>
+  relationships: InstagramTargetRelationship[]
+}
+
+function inspectApifyDatasetOwners(items: readonly unknown[], target: string): ApifyDatasetOwnerValidation {
+  const requestedTarget = normalizeInstagramUsername(target)
+  const resolutions = items.map(resolveInstagramOwnerUsername)
+  const resolvedOwners = resolutions.map((resolution) => resolution.username)
+  const relationships = items.map((item) => classifyInstagramTargetRelationship(item, requestedTarget))
+  const recognizedOwners = [...new Set(resolvedOwners.filter((owner): owner is string => Boolean(owner)))].sort()
+  const ownerResolutionSource: Record<string, number> = {}
+  for (const resolution of resolutions) {
+    if (resolution.source) ownerResolutionSource[resolution.source] = (ownerResolutionSource[resolution.source] || 0) + 1
+  }
+  const directOwnerItemCount = relationships.filter((relationship) => relationship === 'DIRECT_OWNER').length
+  const collaboratorItemCount = relationships.filter((relationship) => relationship === 'COLLABORATOR').length
+  const foreignItemCount = relationships.filter((relationship) => relationship === 'FOREIGN').length
+  const unknownItemCount = relationships.filter((relationship) => relationship === 'UNVERIFIABLE').length
+  return {
+    requestedTarget,
+    resolvedDatasetTarget: recognizedOwners.length === 1 ? recognizedOwners[0]! : null,
+    recognizedOwners,
+    ownerResolutionSource,
+    itemCount: items.length,
+    validOwnerItemCount: resolvedOwners.filter((owner): owner is string => Boolean(owner)).length,
+    unknownOwnerItemCount: resolvedOwners.filter((owner) => !owner).length,
+    mismatchedOwnerItemCount: resolvedOwners.filter((owner) => Boolean(owner) && owner !== requestedTarget).length,
+    directOwnerItemCount,
+    collaboratorItemCount,
+    foreignItemCount,
+    unknownItemCount,
+    resolvedOwners,
+    relationships,
+  }
+}
+
+function profileFeedSourceUsername(value: unknown) {
+  const item = asRecord(value)
+  if (!item) return null
+  for (const key of ['inputUrl', 'profileUrl', 'url']) {
+    const username = profileUsernameFromInputValue(item[key])
+    if (username) return username
+  }
+  return null
+}
+
+function assertApifyDatasetTarget(validation: ApifyDatasetOwnerValidation, runInputTarget?: string | null, items: readonly unknown[] = []) {
+  const normalizedRunInputTarget = runInputTarget ? normalizedUsernameCandidate(runInputTarget) : null
+  if (runInputTarget && !normalizedRunInputTarget) {
+    throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Run input target 无法识别')
+  }
+  if (normalizedRunInputTarget && normalizedRunInputTarget !== validation.requestedTarget) {
+    throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Run input target 与请求账号不一致')
+  }
+  const profileSources = items.map(profileFeedSourceUsername)
+  if (profileSources.some((source) => source !== null && source !== validation.requestedTarget)) {
+    throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Dataset profile feed 来源与请求账号不一致')
+  }
+  const runConfirmsProfileSource = normalizedRunInputTarget === validation.requestedTarget
+  const collaboratorWithoutSourceEvidence = validation.relationships.some((relationship, index) => (
+    relationship === 'COLLABORATOR'
+      && !runConfirmsProfileSource
+      && profileSources[index] !== validation.requestedTarget
+  ))
+  if (collaboratorWithoutSourceEvidence) {
+    throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify 联名帖缺少目标 profile feed 来源证据')
+  }
+  if (!validation.recognizedOwners.length || validation.unknownItemCount > 0) {
+    throw new InstagramProviderError('APIFY_DATASET_TARGET_UNVERIFIABLE', 'Apify Dataset 存在无法确认 owner 的帖子')
+  }
+  if (validation.foreignItemCount > 0) {
+    throw new InstagramProviderError('APIFY_DATASET_MIXED_OWNERS', 'Apify Dataset 包含未授权的 foreign owner 帖子')
+  }
+  if (validation.directOwnerItemCount + validation.collaboratorItemCount === 0) {
+    throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Dataset 未包含目标账号帖子或目标联名帖')
+  }
+}
+
+/**
+ * Validates every returned post row before any row can enter the shared
+ * normalizer. Foreign and unverifiable rows remain fail-closed, while a
+ * strong coauthor/collaborator relationship is accepted as target content.
+ */
+export function validateApifyDatasetTarget(items: readonly unknown[], target: string, runInputTarget?: string | null) {
+  const validation = inspectApifyDatasetOwners(items, target)
+  assertApifyDatasetTarget(validation, runInputTarget, items)
+  return validation
+}
+
 function finiteNonNegative(value: unknown) {
   const number = numberValue(value)
   return number !== null && number >= 0 ? number : null
@@ -314,6 +571,7 @@ function parseRun(value: unknown): ApifyRun {
     finishedAt: dateValue(item?.finishedAt),
     usageTotalUsd: finiteNonNegative(item?.usageTotalUsd),
     billableResults: finiteNonNegative(item?.billableResults) ?? finiteNonNegative(stats?.billableResults),
+    inputTarget: resolveApifyRunInputTarget(item?.input ?? item?.runInput),
   }
 }
 
@@ -359,6 +617,8 @@ function cloneDiagnostics(value: ApifyProviderDiagnostics | null) {
   if (!value) return null
   return {
     ...value,
+    recognizedOwners: [...value.recognizedOwners],
+    ownerResolutionSource: { ...value.ownerResolutionSource },
     rawItemKeys: value.rawItemKeys.map((keys) => [...keys]),
     rawItemTypes: [...value.rawItemTypes],
     childPostsCounts: [...value.childPostsCounts],
@@ -456,13 +716,19 @@ export class ApifyInstagramProvider implements InstagramProvider {
       usageTotalUsd: run?.usageTotalUsd ?? null,
       billableResults: run?.billableResults ?? null,
     }
+    if (this.diagnostics) {
+      this.diagnostics.actorRunId = run?.id || null
+      this.diagnostics.datasetId = datasetId || run?.defaultDatasetId || null
+    }
   }
 
-  private async readAndNormalizeDataset(datasetId: string, target: string, requestedLimit: number) {
+  private async readAndNormalizeDataset(datasetId: string, target: string, requestedLimit: number, runInputTarget?: string | null) {
     if (!/^[a-zA-Z0-9_-]{1,191}$/.test(datasetId)) throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Dataset ID 格式无效')
     const datasetUrl = new URL(`${APIFY_API_BASE_URL}/datasets/${encodeURIComponent(datasetId)}/items`)
     datasetUrl.searchParams.set('format', 'json')
-    datasetUrl.searchParams.set('limit', String(requestedLimit))
+    // Inspect the full bounded Dataset sample for mixed-owner safety, then
+    // return only the caller's requested number of normalized posts.
+    datasetUrl.searchParams.set('limit', String(Math.max(requestedLimit, APIFY_DATASET_INSPECTION_LIMIT)))
     const rawItems = readDatasetItems(await this.requestJson(datasetUrl))
     if (this.diagnostics) {
       this.diagnostics.datasetItems = rawItems.length
@@ -480,8 +746,29 @@ export class ApifyInstagramProvider implements InstagramProvider {
     if (!postItems.length) throw new InstagramProviderError('PROVIDER_EMPTY_RESULT', 'Apify 返回空帖子结果')
     if (this.diagnostics) this.diagnostics.postItems = postItems.length
 
-    const inputUrlUsernames = rawItems
-      .map((item) => profileUsernameFromInputUrl(asRecord(item)?.inputUrl))
+    const ownerValidation = inspectApifyDatasetOwners(postItems, target)
+    if (this.diagnostics) {
+      this.diagnostics.requestedTarget = ownerValidation.requestedTarget
+      this.diagnostics.resolvedDatasetTarget = ownerValidation.resolvedDatasetTarget
+      this.diagnostics.recognizedOwners = [...ownerValidation.recognizedOwners]
+      this.diagnostics.ownerResolutionSource = { ...ownerValidation.ownerResolutionSource }
+      this.diagnostics.itemCount = ownerValidation.itemCount
+      this.diagnostics.validOwnerItemCount = ownerValidation.validOwnerItemCount
+      this.diagnostics.unknownOwnerItemCount = ownerValidation.unknownOwnerItemCount
+      this.diagnostics.mismatchedOwnerItemCount = ownerValidation.mismatchedOwnerItemCount
+      this.diagnostics.directOwnerItemCount = ownerValidation.directOwnerItemCount
+      this.diagnostics.collaboratorItemCount = ownerValidation.collaboratorItemCount
+      this.diagnostics.foreignItemCount = ownerValidation.foreignItemCount
+      this.diagnostics.unknownItemCount = ownerValidation.unknownItemCount
+      this.diagnostics.targetPosts = ownerValidation.directOwnerItemCount + ownerValidation.collaboratorItemCount
+      // Kept for backwards-compatible diagnostics; foreign rows are never
+      // silently skipped because the dataset remains fail-closed.
+      this.diagnostics.foreignOwnerSkipped = 0
+    }
+    assertApifyDatasetTarget(ownerValidation, runInputTarget, postItems)
+
+    const inputUrlUsernames = postItems
+      .map((item) => profileUsernameFromUrl(asRecord(item)?.inputUrl))
       .filter((username): username is string => Boolean(username))
     if (inputUrlUsernames.some((username) => username.toLowerCase() !== target.toLowerCase())) {
       throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Dataset inputUrl 与请求账号不一致')
@@ -494,19 +781,13 @@ export class ApifyInstagramProvider implements InstagramProvider {
       if (error instanceof InstagramProviderError && error.code === 'PROVIDER_CONTRACT_FAILED') throw error
       throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Dataset 无法 normalize', { cause: error })
     }
-    const targetPosts = normalized.filter((post) => post.username.toLowerCase() === target.toLowerCase())
-    const foreignOwnerSkipped = normalized.length - targetPosts.length
     if (this.diagnostics) {
-      this.diagnostics.targetPosts = targetPosts.length
-      this.diagnostics.foreignOwnerSkipped = foreignOwnerSkipped
-    }
-    if (!targetPosts.length) {
-      throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Dataset 未包含目标账号帖子')
+      this.diagnostics.targetPosts = normalized.length
     }
 
-    const uniqueIds = new Set(targetPosts.map((post) => post.externalId))
-    if (this.diagnostics) this.diagnostics.duplicateExternalIds = targetPosts.length - uniqueIds.size
-    return dedupeAndSortInstagramPosts(targetPosts, requestedLimit)
+    const uniqueIds = new Set(normalized.map((post) => post.externalId))
+    if (this.diagnostics) this.diagnostics.duplicateExternalIds = normalized.length - uniqueIds.size
+    return dedupeAndSortInstagramPosts(normalized, requestedLimit)
   }
 
   private async waitForRun(initialRun: ApifyRun) {
@@ -528,6 +809,20 @@ export class ApifyInstagramProvider implements InstagramProvider {
     this.apiRequests = 0
     this.diagnostics = {
       actor: APIFY_INSTAGRAM_SCRAPER_ACTOR,
+      requestedTarget: target,
+      datasetId: null,
+      actorRunId: null,
+      resolvedDatasetTarget: null,
+      recognizedOwners: [],
+      ownerResolutionSource: {},
+      itemCount: 0,
+      validOwnerItemCount: 0,
+      unknownOwnerItemCount: 0,
+      mismatchedOwnerItemCount: 0,
+      directOwnerItemCount: 0,
+      collaboratorItemCount: 0,
+      foreignItemCount: 0,
+      unknownItemCount: 0,
       actorRuns: 1,
       apiRequests: 0,
       datasetItems: 0,
@@ -554,6 +849,9 @@ export class ApifyInstagramProvider implements InstagramProvider {
       method: 'POST',
       body: JSON.stringify({
         directUrls: [`https://www.instagram.com/${target}/`],
+        // Keep the Actor in profile/user mode even when a task has a stale
+        // search default. No search query or tagged-feed URL is supplied.
+        searchType: 'user',
         resultsType: 'posts',
         resultsLimit: requestedLimit,
         skipPinnedPosts: false,
@@ -569,7 +867,7 @@ export class ApifyInstagramProvider implements InstagramProvider {
     }
     if (!run.defaultDatasetId) throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Run 缺少 defaultDatasetId')
 
-    const normalized = await this.readAndNormalizeDataset(run.defaultDatasetId, target, requestedLimit)
+    const normalized = await this.readAndNormalizeDataset(run.defaultDatasetId, target, requestedLimit, run.inputTarget)
 
     if (this.diagnostics.usageTotalUsd === null && this.costSettleDelayMs > 0) {
       await this.sleep(this.costSettleDelayMs)
@@ -594,6 +892,20 @@ export class ApifyInstagramProvider implements InstagramProvider {
     this.trace = null
     this.diagnostics = {
       actor: APIFY_INSTAGRAM_SCRAPER_ACTOR,
+      requestedTarget: target,
+      datasetId,
+      actorRunId: null,
+      resolvedDatasetTarget: null,
+      recognizedOwners: [],
+      ownerResolutionSource: {},
+      itemCount: 0,
+      validOwnerItemCount: 0,
+      unknownOwnerItemCount: 0,
+      mismatchedOwnerItemCount: 0,
+      directOwnerItemCount: 0,
+      collaboratorItemCount: 0,
+      foreignItemCount: 0,
+      unknownItemCount: 0,
       actorRuns: 0,
       apiRequests: 0,
       datasetItems: 0,

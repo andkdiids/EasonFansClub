@@ -1,5 +1,6 @@
 'use client'
 
+import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
 import {
   FRIEND_REQUEST_REASON_MAX_LENGTH,
@@ -34,6 +35,9 @@ export function FriendRequestReasonDialog({
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => setMounted(true), [])
 
   useEffect(() => {
     if (!open) return
@@ -76,7 +80,7 @@ export function FriendRequestReasonDialog({
     }
   }, [open])
 
-  if (!open) return null
+  if (!open || !mounted || typeof document === 'undefined') return null
 
   async function submit() {
     if (submitting) return
@@ -101,9 +105,9 @@ export function FriendRequestReasonDialog({
     }
   }
 
-  return (
+  const content = (
     <div
-      className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4"
+      className="friend-request-reason-layer"
       role="presentation"
       onClick={(event) => {
         if (event.target === event.currentTarget && !submitting) onClose()
@@ -113,7 +117,7 @@ export function FriendRequestReasonDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="friend-request-reason-title"
-        className="w-full max-w-md rounded-t-2xl border border-sky-100 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl"
+        className="friend-request-reason-dialog w-full max-w-md rounded-t-2xl border border-sky-100 bg-white p-5 shadow-2xl sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
@@ -174,4 +178,6 @@ export function FriendRequestReasonDialog({
       </section>
     </div>
   )
+
+  return createPortal(content, document.body)
 }
