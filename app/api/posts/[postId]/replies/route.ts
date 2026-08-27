@@ -233,8 +233,23 @@ export async function POST(request: Request, { params }: Params) {
       postAuthorId: post.authorId,
     })
 
+    const floorNumber = createdReply.parentId === null
+      ? await tx.reply.count({
+          where: {
+            postId,
+            isDeleted: false,
+            parentId: null,
+            OR: [
+              { createdAt: { lt: createdReply.createdAt } },
+              { createdAt: createdReply.createdAt, id: { lte: createdReply.id } },
+            ],
+          },
+        })
+      : null
+
     return {
       createdReply,
+      floorNumber,
       rewardPoints: communityReward.commenterRewardPoints,
       notificationRecipientIds: [
         ...requestedMentions.map((mention) => mention.userId),
@@ -250,7 +265,7 @@ export async function POST(request: Request, { params }: Params) {
     }, { status: 409 })
   }
 
-  const { createdReply, rewardPoints } = reply
+  const { createdReply, floorNumber, rewardPoints } = reply
   const notificationData = [
     ...requestedMentions.map((mention) => ({
       recipientId: mention.userId,
@@ -292,6 +307,7 @@ export async function POST(request: Request, { params }: Params) {
     reply: {
       ...serializedReply,
       content: publicContentImageMarkers(serializedReply.content),
+      floorNumber,
       stickerId: createdReply.stickerId || null,
       stickerUrl: publicImageUrl(replySticker?.url),
       createdAt: serializedReply.createdAt.toISOString(),

@@ -31,12 +31,16 @@ import { emitRealtime } from '@/lib/realtime'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import {
+  buildPostReplyFloorMap,
   clampPostReplyPage,
   getPostReplyOffset,
   getPostReplyOrderBy,
   getPostReplyTotalPages,
+  parsePostReplyDirection,
   parsePostReplySort,
   POST_REPLY_PAGE_SIZE,
+  type PostReplyDirection,
+  type PostReplyPagination,
   type PostReplySort,
 } from '@/lib/post-replies'
 
@@ -471,9 +475,15 @@ async function loadVisibleReplyDescendants(tx: Prisma.TransactionClient, postId:
   return descendants
 }
 
-async function loadPostReplies(postId: string, sort: PostReplySort, requestedPage: number, viewerId?: string | null) {
+async function loadPostReplies(
+  postId: string,
+  sort: PostReplySort,
+  direction: PostReplyDirection,
+  requestedPage: number,
+  viewerId?: string | null,
+) {
   return prisma.$transaction(async (tx) => {
-    const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
+    const [pinnedReply, normalTotal, myRootReplies, canonicalRootReplies] = await Promise.all([
       tx.reply.findFirst({
         where: { postId, isDeleted: false, parentId: null, isPinned: true },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -487,12 +497,18 @@ async function loadPostReplies(postId: string, sort: PostReplySort, requestedPag
             select: replyDetailSelect,
           })
         : Promise.resolve([]),
+      tx.reply.findMany({
+        where: { postId, isDeleted: false, parentId: null },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true },
+      }),
     ])
+    const floorNumberByReplyId = buildPostReplyFloorMap(canonicalRootReplies)
     const totalPages = getPostReplyTotalPages(normalTotal)
     const page = clampPostReplyPage(requestedPage, totalPages)
     const normalRoots = await tx.reply.findMany({
       where: { postId, isDeleted: false, parentId: null, isPinned: false },
-      orderBy: getPostReplyOrderBy(sort),
+      orderBy: getPostReplyOrderBy(sort, direction),
       skip: getPostReplyOffset(page),
       take: POST_REPLY_PAGE_SIZE,
       select: replyDetailSelect,
@@ -521,19 +537,28 @@ async function loadPostReplies(postId: string, sort: PostReplySort, requestedPag
       }
     }
 
+    const withFloorNumber = <T extends { id: string; parentId: string | null }>(reply: T) => ({
+      ...reply,
+      floorNumber: reply.parentId === null ? floorNumberByReplyId.get(reply.id) ?? null : null,
+    })
+
     return {
       rows: [
         ...(pinnedReply ? [pinnedReply] : []),
         ...normalRoots,
         ...childRows.filter((reply) => includedRootIds.has(reply.id)),
-      ],
+      ].map(withFloorNumber),
       myRows: [
         ...myRootReplies,
         ...childRows.filter((reply) => includedViewerRootIds.has(reply.id)),
-      ],
-      total: normalTotal,
-      totalPages,
-      page,
+      ].map(withFloorNumber),
+      floorNumberByReplyId,
+      pagination: {
+        page,
+        pageSize: POST_REPLY_PAGE_SIZE,
+        total: normalTotal,
+        totalPages,
+      } satisfies PostReplyPagination,
     }
   })
 }
@@ -659,11 +684,13 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentSort?: string; commentPage?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string }> }>) {
   const { postId } = await params
   const query = await searchParams
-  const focusId = query.focus?.slice(0, 80)
-  const commentSort = parsePostReplySort(query.commentSort)
+  const focusId = (query.focus ?? query.replyId ?? query.commentId ?? query.reply)?.slice(0, 80)
+  const rawCommentSort = query.commentSort ?? query.sort
+  const commentSort = parsePostReplySort(rawCommentSort)
+  const commentDirection = parsePostReplyDirection(query.direction, rawCommentSort)
   const requestedCommentPage = Math.max(1, Number.parseInt(query.commentPage || '1', 10) || 1)
   let postCore: Awaited<ReturnType<typeof loadPost>>
   const postLoadStartedAt = Date.now()
@@ -747,15 +774,20 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   let commentsLoadError = false
   let postReplies: Awaited<ReturnType<typeof loadPostReplies>>['rows'] = []
   let myPostReplies: Awaited<ReturnType<typeof loadPostReplies>>['myRows'] = []
-  let commentPage = 1
-  let commentTotalPages = 1
+  let postReplyFloorMap = new Map<string, number>()
+  let commentPagination: PostReplyPagination = {
+    page: 1,
+    pageSize: POST_REPLY_PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  }
   const commentsStartedAt = Date.now()
   try {
-    const loadedReplies = await loadPostReplies(postId, commentSort, requestedCommentPage, user?.id)
+    const loadedReplies = await loadPostReplies(postId, commentSort, commentDirection, requestedCommentPage, user?.id)
     postReplies = loadedReplies.rows
     myPostReplies = loadedReplies.myRows
-    commentPage = loadedReplies.page
-    commentTotalPages = loadedReplies.totalPages
+    postReplyFloorMap = loadedReplies.floorNumberByReplyId
+    commentPagination = loadedReplies.pagination
   } catch (error) {
     commentsLoadError = true
     logPostDetailReadError({
@@ -780,6 +812,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         parentId: reply.parentId,
         likeCount: reply.likeCount,
         isPinned: reply.isPinned,
+        floorNumber: reply.parentId === null ? postReplyFloorMap.get(reply.id) ?? null : null,
         ipRegion: reply.ipRegion,
         createdAt: reply.createdAt,
         stickerId: reply.stickerId,
@@ -1072,7 +1105,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
         <CommentSectionBoundary>
           <PostRepliesSection
-            key={`${commentSort}:${commentPage}`}
             postId={post.id}
             initialReplies={replyRows}
             initialMyReplies={myReplyRows}
@@ -1082,8 +1114,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             postAuthorId={post.User.id}
             focusId={focusId}
             sort={commentSort}
-            page={commentPage}
-            totalPages={commentTotalPages}
+            direction={commentDirection}
+            pagination={commentPagination}
             hotReplyIds={hotReplyIds}
             commentsLoadError={commentsLoadError}
           />

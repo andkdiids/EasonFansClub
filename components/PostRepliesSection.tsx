@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { DeleteReplyButton, type DeleteCommentResult } from '@/components/DeleteCommentButton'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
@@ -18,7 +18,15 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { splitContentImages } from '@/lib/content-images'
-import { canPinPostReply, splitViewerPostReplyRoots, type PostReplySort } from '@/lib/post-replies'
+import {
+  canPinPostReply,
+  shouldScrollToPostRepliesTop,
+  splitViewerPostReplyRoots,
+  type PostReplyDirection,
+  type PostReplyNavigationReason,
+  type PostReplyPagination,
+  type PostReplySort,
+} from '@/lib/post-replies'
 import { Pagination } from '@/components/ui/Pagination'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
@@ -27,6 +35,7 @@ type ReplyItem = {
   id: string
   content: string
   parentId: string | null
+  floorNumber: number | null
   likeCount: number
   isPinned: boolean
   liked: boolean
@@ -65,6 +74,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
     id: reply.id,
     content: reply.content,
     parentId: typeof reply.parentId === 'string' ? reply.parentId : null,
+    floorNumber: typeof reply.floorNumber === 'number' && Number.isInteger(reply.floorNumber) && reply.floorNumber > 0 ? reply.floorNumber : null,
     likeCount: Number(reply.likeCount) || 0,
     isPinned: Boolean(reply.isPinned),
     liked: Boolean(reply.liked),
@@ -108,8 +118,8 @@ export function PostRepliesSection({
   postAuthorId,
   focusId,
   sort,
-  page,
-  totalPages,
+  direction,
+  pagination,
   hotReplyIds,
   commentsLoadError,
 }: Readonly<{
@@ -122,8 +132,8 @@ export function PostRepliesSection({
   postAuthorId: string
   focusId?: string
   sort: PostReplySort
-  page: number
-  totalPages: number
+  direction: PostReplyDirection
+  pagination: PostReplyPagination
   hotReplyIds?: string[]
   commentsLoadError?: boolean
 }>) {
@@ -138,6 +148,9 @@ export function PostRepliesSection({
   const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
   const activeReplyId = replyTo?.id
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
+  const commentsTopRef = useRef<HTMLDivElement | null>(null)
+  const navigationReasonRef = useRef<PostReplyNavigationReason>(null)
+  const previousCommentViewRef = useRef({ page: pagination.page, sort, direction })
   const closeMobileReplySheet = useCallback(() => {
     setMobileReplySheetOpen(false)
     setReplyTo(null)
@@ -147,6 +160,27 @@ export function PostRepliesSection({
     setMyReplies((initialMyReplies || []).map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
     setReplyCount(Math.max(initialReplyCount, 0))
   }, [initialReplies, initialMyReplies, initialReplyCount])
+  useEffect(() => {
+    const previous = previousCommentViewRef.current
+    const current = { page: pagination.page, sort, direction }
+    previousCommentViewRef.current = current
+    const reason = navigationReasonRef.current
+    if (!reason) return
+    navigationReasonRef.current = null
+    const viewChanged = previous.page !== current.page || previous.sort !== current.sort || previous.direction !== current.direction
+    if (!viewChanged || !shouldScrollToPostRepliesTop(reason, Boolean(focusId))) return
+
+    let settleFrame: number | null = null
+    const frame = window.requestAnimationFrame(() => {
+      settleFrame = window.requestAnimationFrame(() => {
+        commentsTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+    }
+  }, [direction, focusId, initialReplies, pagination.page, sort])
   const allReplies = useMemo(() => {
     const byId = new Map<string, ReplyItem>()
     replies.forEach((reply) => byId.set(reply.id, reply))
@@ -161,10 +195,16 @@ export function PostRepliesSection({
     [myReplies, rootReplies],
   )
 
-  function buildCommentHref(nextSort: PostReplySort, nextPage: number) {
+  function buildCommentHref(nextSort: PostReplySort, nextDirection: PostReplyDirection, nextPage: number) {
     const params = new URLSearchParams(searchParams.toString())
-    if (nextSort === 'latest') params.delete('commentSort')
-    else params.set('commentSort', nextSort)
+    params.delete('sort')
+    params.delete('focus')
+    params.delete('commentId')
+    params.delete('replyId')
+    params.delete('reply')
+    params.set('commentSort', nextSort)
+    if (nextSort === 'floor') params.set('direction', nextDirection)
+    else params.delete('direction')
     if (nextPage <= 1) params.delete('commentPage')
     else params.set('commentPage', String(nextPage))
     const query = params.toString()
@@ -172,11 +212,18 @@ export function PostRepliesSection({
   }
 
   function changeCommentSort(nextSort: PostReplySort) {
-    router.push(buildCommentHref(nextSort, 1), { scroll: false })
+    if (nextSort === 'hot' && sort === 'hot') return
+    const nextDirection = nextSort === 'floor' && sort === 'floor'
+      ? (direction === 'asc' ? 'desc' : 'asc')
+      : 'asc'
+    navigationReasonRef.current = 'sort'
+    router.push(buildCommentHref(nextSort, nextDirection, 1), { scroll: false })
   }
 
   function changeCommentPage(nextPage: number) {
-    router.push(buildCommentHref(sort, nextPage), { scroll: false })
+    if (nextPage === pagination.page) return
+    navigationReasonRef.current = 'pagination'
+    router.push(buildCommentHref(sort, direction, nextPage), { scroll: false })
   }
 
   async function toggleLike(replyId: string) {
@@ -189,7 +236,6 @@ export function PostRepliesSection({
       : reply)
     setReplies(updateLike)
     setMyReplies(updateLike)
-    if (sort === 'hot') router.refresh()
   }
 
   async function togglePin(reply: ReplyItem) {
@@ -432,8 +478,8 @@ export function PostRepliesSection({
     )
   }
 
-  function renderReply(reply: ReplyItem, index: number) {
-      const name = reply.author.nickname || 'E院用户'
+  function renderReply(reply: ReplyItem) {
+    const name = reply.author.nickname || 'E院用户'
     const avatar = profileImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
     const children = collectThreadReplies(reply.id)
     const showAll = Boolean(expandedReplies[reply.id])
@@ -452,7 +498,7 @@ export function PostRepliesSection({
               <span><UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /> · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
             </Link>
             {reply.isPinned ? <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
-            <span>#{index + 1} · {formatDate(new Date(reply.createdAt))}</span>
+            <span>{reply.parentId === null && reply.floorNumber !== null ? `${reply.floorNumber}楼 · ` : ''}{formatDate(new Date(reply.createdAt))}</span>
             <IpRegionLabel ipRegion={reply.ipRegion} />
           </div>
           <p className="whitespace-pre-wrap leading-7 text-slate-700">
@@ -571,28 +617,39 @@ export function PostRepliesSection({
             <button type="button" onClick={scrollToMyComments} className="text-xs font-black text-brand-700">查看我的评论</button>
           </div>
           <div className="space-y-3">
-            {myRootReplies.map((reply, index) => renderReply(reply, index))}
+            {myRootReplies.map((reply) => renderReply(reply))}
           </div>
         </section>
       ) : null}
 
-      <h2 className="text-2xl font-black text-brand-950">回复 {replyCount}</h2>
+      <div ref={commentsTopRef} className="post-replies-top">
+        <h2 className="text-2xl font-black text-brand-950">回复 {replyCount}</h2>
+      </div>
       {commentsLoadError ? <p role="alert" className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">评论加载失败，请刷新评论区重试。帖子正文仍可正常浏览。</p> : null}
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-bold text-slate-500">排序</span>
         <div role="tablist" aria-label="评论排序" className="post-replies-sort-tabs inline-flex rounded-full bg-slate-100 p-1">
-          {([['latest', '最新'], ['hot', '最热']] as const).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={sort === value}
-              data-selected={sort === value ? 'true' : 'false'}
-              onClick={() => changeCommentSort(value)}
-              className={`post-replies-sort-tab rounded-full px-3 py-1 text-xs font-black transition ${sort === value ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
-            >
-              {label}
-            </button>
-          ))}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sort === 'floor'}
+            data-selected={sort === 'floor' ? 'true' : 'false'}
+            aria-label={`楼层${sort === 'floor' ? (direction === 'asc' ? '正序' : '倒序') : '正序'}`}
+            onClick={() => changeCommentSort('floor')}
+            className={`post-replies-sort-tab rounded-full px-3 py-1 text-xs font-black transition ${sort === 'floor' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
+          >
+            楼层{sort === 'floor' ? (direction === 'asc' ? ' ↑' : ' ↓') : ''}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sort === 'hot'}
+            data-selected={sort === 'hot' ? 'true' : 'false'}
+            onClick={() => changeCommentSort('hot')}
+            className={`post-replies-sort-tab rounded-full px-3 py-1 text-xs font-black transition ${sort === 'hot' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-brand-700'}`}
+          >
+            最热
+          </button>
         </div>
       </div>
       {hotReplyIds?.length ? (
@@ -613,13 +670,13 @@ export function PostRepliesSection({
         <div className="post-replies-empty rounded-xl border-dashed p-8 text-center text-slate-500">还没有回复。</div>
       ) : visibleRootReplies.length ? (
         <div className="space-y-3">
-          {visibleRootReplies.map((reply, index) => renderReply(reply, index))}
+          {visibleRootReplies.map((reply) => renderReply(reply))}
         </div>
       ) : null}
-      {totalPages > 1 ? (
+      {pagination.totalPages > 1 ? (
         <Pagination
-          currentPage={page}
-          totalPages={totalPages}
+          currentPage={pagination.page}
+          totalPages={pagination.totalPages}
           onPageChange={changeCommentPage}
           ariaLabel="评论分页"
           className="post-replies-pagination"

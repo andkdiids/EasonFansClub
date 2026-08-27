@@ -2,12 +2,16 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  buildPostReplyFloorMap,
   canPinPostReply,
   clampPostReplyPage,
+  getCommentFloor,
   getPostReplyOffset,
   getPostReplyOrderBy,
   getPostReplyTotalPages,
+  parsePostReplyDirection,
   parsePostReplySort,
+  shouldScrollToPostRepliesTop,
   splitViewerPostReplyRoots,
 } from '../lib/post-replies'
 
@@ -16,6 +20,7 @@ const pinRoute = read('app/api/replies/[replyId]/pin/route.ts')
 const deleteRoute = read('app/api/replies/[replyId]/route.ts')
 const detailPage = read('app/posts/[postId]/page.tsx')
 const replySection = read('components/PostRepliesSection.tsx')
+const replyApi = read('app/api/posts/[postId]/replies/route.ts')
 const forumHome = read('components/ForumHome.tsx')
 const forumFeed = read('app/api/forum/feed/route.ts')
 const schema = read('prisma/schema.prisma')
@@ -48,26 +53,71 @@ test('置顶状态由 Reply.isPinned 保存，删除整棵评论线程时清理�
   assert.ok(deleteRoute.includes('data: { isDeleted: true, isPinned: false, deletedAt: new Date() }'))
 })
 
-test('最新排序按 createdAt DESC、id DESC，最热排序按 likeCount/createdAt/id DESC', () => {
-  assert.equal(parsePostReplySort(null), 'latest')
-  assert.deepEqual(getPostReplyOrderBy('latest'), [{ createdAt: 'desc' }, { id: 'desc' }])
-  assert.deepEqual(getPostReplyOrderBy('hot'), [{ likeCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }])
+test('楼层排序支持正序/倒序，最热使用点赞数和稳定次级排序', () => {
+  assert.equal(parsePostReplySort(null), 'floor')
+  assert.equal(parsePostReplySort('latest'), 'floor')
+  assert.equal(parsePostReplySort('unknown'), 'floor')
+  assert.equal(parsePostReplyDirection(null), 'asc')
+  assert.equal(parsePostReplyDirection('desc'), 'desc')
+  assert.equal(parsePostReplyDirection('asc', 'latest'), 'desc')
+  assert.deepEqual(getPostReplyOrderBy('floor', 'asc'), [{ createdAt: 'asc' }, { id: 'asc' }])
+  assert.deepEqual(getPostReplyOrderBy('floor', 'desc'), [{ createdAt: 'desc' }, { id: 'desc' }])
+  assert.deepEqual(getPostReplyOrderBy('hot'), [{ likeCount: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }])
 
   const rows = [
     { id: 'a', createdAt: '2026-08-14T10:00:00.000Z', likeCount: 3 },
     { id: 'b', createdAt: '2026-08-14T12:00:00.000Z', likeCount: 18 },
     { id: 'c', createdAt: '2026-08-14T11:00:00.000Z', likeCount: 9 },
   ]
-  assert.deepEqual([...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((row) => row.id), ['b', 'c', 'a'])
+  assert.deepEqual([...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((row) => row.id), ['a', 'c', 'b'])
   assert.deepEqual([...rows].sort((a, b) => b.likeCount - a.likeCount).map((row) => row.id), ['b', 'c', 'a'])
+})
+
+test('楼层按完整一级评论序列计算，分页/置顶/楼中楼不改变评论自身 floorNumber', () => {
+  assert.equal(getCommentFloor({ page: 1, pageSize: 20, index: 0 }), 1)
+  assert.equal(getCommentFloor({ page: 1, pageSize: 20, index: 19 }), 20)
+  assert.equal(getCommentFloor({ page: 2, pageSize: 20, index: 0 }), 21)
+  assert.equal(getCommentFloor({ page: 2, pageSize: 20, index: 19 }), 40)
+  assert.equal(getCommentFloor({ page: 3, pageSize: 20, index: 0 }), 41)
+
+  const floorMap = buildPostReplyFloorMap([
+    { id: 'root-1' },
+    { id: 'root-2' },
+    { id: 'pinned-root' },
+    { id: 'root-4' },
+  ])
+  assert.equal(floorMap.get('pinned-root'), 3)
+  assert.equal(floorMap.get('root-4'), 4)
+  const rootOnlyFloorMap = buildPostReplyFloorMap([
+    { id: 'root', parentId: null },
+    { id: 'reply', parentId: 'root' },
+  ])
+  assert.equal(rootOnlyFloorMap.get('root'), 1)
+  assert.equal(rootOnlyFloorMap.get('reply'), undefined)
+
+  const hundredFloorMap = buildPostReplyFloorMap(Array.from({ length: 100 }, (_, index) => ({ id: `root-${index + 1}` })))
+  const descendingPageOne = [100, 99, 81].map((floor) => hundredFloorMap.get(`root-${floor}`))
+  const descendingPageTwo = [80, 61].map((floor) => hundredFloorMap.get(`root-${floor}`))
+  assert.deepEqual(descendingPageOne, [100, 99, 81])
+  assert.deepEqual(descendingPageTwo, [80, 61])
+
+  assert.match(detailPage, /orderBy: \[\{ createdAt: 'asc' \}, \{ id: 'asc' \}\]/)
+  assert.match(detailPage, /parentId: null, isDeleted: false|isDeleted: false, parentId: null/)
+  assert.ok(detailPage.includes('buildPostReplyFloorMap(canonicalRootReplies)'))
+  assert.ok(detailPage.includes('floorNumber: reply.parentId === null'))
+  assert.match(replyApi, /floorNumber = createdReply\.parentId === null/)
+  assert.match(replyApi, /parentId: null,[\s\S]*createdAt: \{ lt: createdReply\.createdAt \}/)
+  assert.doesNotMatch(replySection, /<span>#\{index \+ 1\} ·/)
 })
 
 test('置顶评论单独查询，普通分页排除置顶并在数据库排序后 skip/take', () => {
   assert.match(detailPage, /isPinned: true/)
   assert.match(detailPage, /parentId: null, isPinned: false/)
-  assert.ok(detailPage.includes('orderBy: getPostReplyOrderBy(sort)'))
+  assert.ok(detailPage.includes('orderBy: getPostReplyOrderBy(sort, direction)'))
   assert.ok(detailPage.includes('skip: getPostReplyOffset(page)'))
   assert.ok(detailPage.includes('take: POST_REPLY_PAGE_SIZE'))
+  assert.ok(detailPage.includes('pageSize: POST_REPLY_PAGE_SIZE'))
+  assert.ok(detailPage.includes('pagination:'))
   assert.ok(detailPage.includes('...(pinnedReply ? [pinnedReply] : [])'))
   assert.ok(detailPage.includes('...normalRoots'))
   assert.ok(detailPage.includes('parentId: { in: frontier }'))
@@ -77,14 +127,41 @@ test('置顶评论单独查询，普通分页排除置顶并在数据库排序�
   assert.equal(getPostReplyOffset(2, 20), 20)
 })
 
-test('评论区显示置顶标识、作者置顶按钮、最新/最热切换与服务端分页', () => {
+test('评论区只显示楼层方向和最热，排序/分页完成后回评论区顶部', () => {
   assert.ok(replySection.includes('reply.isPinned ? <span'))
   assert.ok(replySection.includes('canPinPostReply({ currentUserId, postAuthorId, parentId: reply.parentId })'))
   assert.ok(replySection.includes('togglePin(reply)'))
   assert.ok(replySection.includes('取消置顶'))
-  assert.ok(replySection.includes("['latest', '最新']"))
-  assert.ok(replySection.includes("['hot', '最热']"))
+  assert.ok(replySection.includes("sort === 'floor'"))
+  assert.ok(replySection.includes('楼层'))
+  assert.ok(replySection.includes('最热'))
+  assert.doesNotMatch(replySection, /最新/)
+  assert.ok(replySection.includes("navigationReasonRef.current = 'pagination'"))
+  assert.ok(replySection.includes("navigationReasonRef.current = 'sort'"))
+  assert.ok(replySection.includes('shouldScrollToPostRepliesTop(reason, Boolean(focusId))'))
+  assert.ok(replySection.includes('commentsTopRef.current?.scrollIntoView'))
+  assert.ok(replySection.includes("params.delete('sort')"))
+  assert.ok(replySection.includes("params.delete('focus')"))
+  assert.ok(replySection.includes("params.delete('commentId')"))
+  assert.ok(replySection.includes("params.delete('replyId')"))
+  assert.ok(replySection.includes("params.set('commentSort', nextSort)"))
+  assert.ok(replySection.includes("params.set('direction', nextDirection)"))
+  assert.ok(replySection.includes('buildCommentHref(nextSort, nextDirection, 1)'))
+  assert.ok(replySection.includes('post-replies-top'))
+  const toggleLikeStart = replySection.indexOf('async function toggleLike')
+  const toggleLikeEnd = replySection.indexOf('async function togglePin', toggleLikeStart)
+  assert.doesNotMatch(replySection.slice(toggleLikeStart, toggleLikeEnd), /router\.refresh\(\)/)
   assert.match(replySection, /<Pagination/)
+})
+
+test('只有普通分页和排序会滚到评论顶部，目标评论/回复定位优先', () => {
+  assert.equal(shouldScrollToPostRepliesTop('pagination', false), true)
+  assert.equal(shouldScrollToPostRepliesTop('sort', false), true)
+  assert.equal(shouldScrollToPostRepliesTop('pagination', true), false)
+  assert.equal(shouldScrollToPostRepliesTop('sort', true), false)
+  assert.equal(shouldScrollToPostRepliesTop('target-comment', false), false)
+  assert.equal(shouldScrollToPostRepliesTop('target-reply', false), false)
+  assert.equal(shouldScrollToPostRepliesTop(null, false), false)
 })
 
 test('当前用户的一级评论单独置顶，真实置顶不变且不会重复展示', () => {
@@ -109,8 +186,10 @@ test('我的评论使用独立查询，不改变普通评论分页，未登录�
   assert.ok(detailPage.includes('const childRootIds = Array.from(new Set([...rootIds, ...viewerRootIds]))'))
   assert.ok(detailPage.includes('const includedRootIds = new Set(rootIds)'))
   assert.ok(detailPage.includes('myRows:'))
-  assert.ok(detailPage.includes('loadPostReplies(postId, commentSort, requestedCommentPage, user?.id)'))
+  assert.ok(detailPage.includes('loadPostReplies(postId, commentSort, commentDirection, requestedCommentPage, user?.id)'))
   assert.ok(detailPage.includes('initialMyReplies={myReplyRows}'))
+  assert.ok(detailPage.includes('direction={commentDirection}'))
+  assert.ok(detailPage.includes('pagination={commentPagination}'))
   assert.ok(replySection.includes('initialMyReplies?: ReplyItem[]'))
   assert.ok(replySection.includes('你已经评论过这个帖子 · 查看我的评论'))
   assert.ok(replySection.includes('post-my-comments-${postId}'))

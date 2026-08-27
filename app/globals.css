@@ -905,7 +905,7 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   html[data-forum-detail-discover='true'] .post-detail-article .bg-slate-50 { background:var(--surface) !important; color:var(--foreground-muted); }
   html[data-forum-detail-discover='true'] .post-detail-article > :where(.whitespace-pre-wrap,.post-detail-body) { margin-top:16px; color:var(--foreground); font-size:16px; line-height:1.9; }
   html[data-forum-detail-discover='true'] .post-replies-section { padding:0 16px 20px; }
-  html[data-forum-detail-discover='true'] .post-replies-section > h2 { margin-top:18px; color:var(--foreground); font-size:17px; }
+  html[data-forum-detail-discover='true'] .post-replies-section > .post-replies-top > h2 { margin-top:18px; color:var(--foreground); font-size:17px; }
   html[data-forum-detail-discover='true'] .post-reply-form { border:0; border-radius:0; padding:12px 0; background:transparent; box-shadow:none; }
   html[data-forum-detail-discover='true'] .post-reply-form label > span { display:none; }
   html[data-forum-detail-discover='true'] .post-reply-form textarea { min-height:44px; border:0; border-radius:22px; padding:12px 15px; background:var(--surface-subtle); }
@@ -1747,6 +1747,7 @@ flex-direction:column;
 .post-replies-section .post-reply-thread { background:transparent; border:0; box-shadow:none; outline:none; }
 .checkin-messages-empty { background:var(--surface-subtle); }
 .post-replies-section .post-reply-card,.post-reply-form { border-color:var(--border); color:var(--foreground); background:var(--surface-elevated); }
+.post-replies-top { scroll-margin-top:max(64px,calc(52px + env(safe-area-inset-top,0px))); }
 .post-replies-hot-list { border:1px solid var(--border); color:var(--foreground); background:var(--surface-subtle); }
 .post-replies-hot-link { display:inline-block; border:1px solid var(--border); color:var(--primary); background:var(--surface); }
 .post-replies-empty,.post-replies-login { border:1px solid var(--border); color:var(--foreground-muted); background:var(--surface-elevated); }
