@@ -17,6 +17,9 @@ backups/
 tsconfig.tsbuildinfo
 public/uploads/
 tmp/easmusic-live-visual/
+tmp/instagram-login/
+tmp/instagram-provider/
+tmp/PRODUCTION_INCREMENTAL_CANDIDATE.sql
 supabase/.temp/
 .codex-start-8000.cmd
 .env.supabase.backup

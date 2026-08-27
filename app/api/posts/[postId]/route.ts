@@ -15,6 +15,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
+import { extractPlainText, validateRichPostContent } from '@/lib/rich-text'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -298,6 +299,10 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   const { User, Board, Reply, PostMedia, ...postData } = post
+  const richContentResult = validateRichPostContent(postData.richContent)
+  if (postData.richContent !== null && !richContentResult.valid) {
+    console.warn('[posts.detail:invalid-rich-content]', { postId, errors: richContentResult.errors })
+  }
   const author = User.Profile ? {
     ...User,
     nickname: getPublicUserDisplayName(User),
@@ -313,6 +318,7 @@ export async function GET(_request: Request, { params }: Params) {
       ...postData,
       title: publicModerationText(postData.title, postData.moderationStatus),
       content: publicModerationText(publicContentImageMarkers(postData.content), postData.moderationStatus),
+      richContent: richContentResult.valid ? richContentResult.value : null,
       author,
       board: Board,
       media: PostMedia.map((media) => ({
@@ -383,6 +389,7 @@ export async function PATCH(request: Request, { params }: Params) {
         isFeatured: true,
         title: true,
         content: true,
+        richContent: true,
         stickerId: true,
         moderationStatus: true,
       },
@@ -398,6 +405,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const wantsEdit =
       typeof body.title === 'string' ||
       typeof body.content === 'string' ||
+      Object.prototype.hasOwnProperty.call(body, 'richContent') ||
       typeof body.boardId === 'string' ||
       Array.isArray(body.keepMediaIds) ||
       Array.isArray(body.addImageUrls)
@@ -582,6 +590,7 @@ type EditContext = {
     status: string
     title: string
     content: string
+    richContent: Prisma.JsonValue | null
     stickerId: string | null
     moderationStatus: string
   }
@@ -604,7 +613,25 @@ async function handleEditPost(
   }
 
   const rawTitle = sanitizeText(typeof body.title === 'string' ? body.title : existing.title, 120)
-  const rawContent = stripUnsafeHtml(sanitizeText(typeof body.content === 'string' ? body.content : existing.content, 20000))
+  const hasRichContentField = Object.prototype.hasOwnProperty.call(body, 'richContent')
+  const hasPlainContentField = typeof body.content === 'string'
+  let nextRichContent: Prisma.JsonValue | null = hasRichContentField || hasPlainContentField ? null : existing.richContent
+  let rawContent = stripUnsafeHtml(sanitizeText(typeof body.content === 'string' ? body.content : existing.content, 20000))
+  if (hasRichContentField && body.richContent !== null) {
+    const richContentResult = validateRichPostContent(body.richContent)
+    if (!richContentResult.valid) {
+      return NextResponse.json({
+        message: '正文格式无效，请刷新后重试',
+        errors: { content: '正文格式无效' },
+        details: richContentResult.errors,
+      }, { status: 400 })
+    }
+    nextRichContent = richContentResult.value
+    // The validated document contains text nodes only; preserve literal
+    // angle brackets in that text while keeping the legacy HTML sanitizer for
+    // old plain-text clients.
+    rawContent = sanitizeText(extractPlainText(richContentResult.value), 20000)
+  }
   const hasSticker = Boolean(existing.stickerId)
   const nextBoardId = typeof body.boardId === 'string' ? sanitizeText(body.boardId, 80) : existing.boardId
 
@@ -632,7 +659,7 @@ async function handleEditPost(
 
   const errors: Record<string, string> = {}
   if (rawTitle.length < 3) errors.title = '标题至少需要 3 个字符'
-  if (!hasSticker && rawContent.length < 5) errors.content = '正文至少需要 5 个字符'
+  if (!hasSticker && rawContent.trim().length < 5) errors.content = '正文至少需要 5 个字符'
 
   // 解析并校验媒体变更。
   const keepMediaIds = Array.isArray(body.keepMediaIds)
@@ -657,7 +684,8 @@ async function handleEditPost(
   const mediaChanged = addImageUrls.length > 0
     || keptIds.length !== currentMediaIds.length
     || keptIds.some((id, index) => id !== currentMediaIds[index])
-  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || nextBoardId !== existing.boardId || mediaChanged
+  const richContentChanged = JSON.stringify(existing.richContent) !== JSON.stringify(nextRichContent)
+  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || richContentChanged || nextBoardId !== existing.boardId || mediaChanged
   const removedCount = currentMedia.length - keptIds.length
   const keptCount = keptIds.length
   if (hasTooManyContentImages(body.addImageUrls) || keptCount + addImageUrls.length > MAX_CONTENT_IMAGES) {
@@ -667,8 +695,15 @@ async function handleEditPost(
     return NextResponse.json({ message: '请检查帖子内容', errors }, { status: 400 })
   }
   if (!contentChanged) {
+    const richContentResult = validateRichPostContent(existing.richContent)
     return NextResponse.json({
-      post: { id: existing.id, title: existing.title, content: publicContentImageMarkers(existing.content), moderationStatus: existing.moderationStatus },
+      post: {
+        id: existing.id,
+        title: existing.title,
+        content: publicContentImageMarkers(existing.content),
+        richContent: richContentResult.valid ? richContentResult.value : null,
+        moderationStatus: existing.moderationStatus,
+      },
       moderationStatus: existing.moderationStatus,
       message: '没有检测到内容变化',
     })
@@ -696,6 +731,7 @@ async function handleEditPost(
       data: {
         title: rawTitle,
         content: rawContent,
+        richContent: nextRichContent === null ? Prisma.DbNull : nextRichContent as Prisma.InputJsonValue,
         summary: createSummary(rawContent),
         boardId: nextBoardId,
         // 管理员编辑沿用现有直接发布豁免；普通用户编辑始终开启新的审核周期。
@@ -708,7 +744,7 @@ async function handleEditPost(
           rejectionReason: null,
         } : {}),
       },
-      select: { id: true, title: true, content: true, moderationStatus: true, updatedAt: true },
+      select: { id: true, title: true, content: true, richContent: true, moderationStatus: true, updatedAt: true },
     })
 
     // 删除被移除的图片（keepMediaIds 显式排除的）。
@@ -858,8 +894,20 @@ async function handleEditPost(
     })
   }
 
+  const richContentResult = validateRichPostContent(transactionResult.post.richContent)
+  if (transactionResult.post.richContent !== null && !richContentResult.valid) {
+    console.warn('[posts.edit:invalid-rich-content-after-save]', { postId, errors: richContentResult.errors })
+  }
+
   return NextResponse.json({
-    post: { id: transactionResult.post.id, title: transactionResult.post.title, content: publicContentImageMarkers(transactionResult.post.content), moderationStatus: transactionResult.post.moderationStatus, updatedAt: transactionResult.post.updatedAt },
+    post: {
+      id: transactionResult.post.id,
+      title: transactionResult.post.title,
+      content: publicContentImageMarkers(transactionResult.post.content),
+      richContent: richContentResult.valid ? richContentResult.value : null,
+      moderationStatus: transactionResult.post.moderationStatus,
+      updatedAt: transactionResult.post.updatedAt,
+    },
     moderationStatus: transactionResult.post.moderationStatus,
     message: canManagePosts ? '帖子已保存' : '修改已保存，正在等待审核，审核通过后会重新展示。',
   })

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
@@ -16,6 +17,7 @@ import { publicPostWhere } from '@/lib/post-moderation'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
+import { extractPlainText, validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -226,7 +228,24 @@ export async function POST(request: Request) {
   }
 
   const rawTitle = sanitizeText(body.title, 120)
-  const rawContent = stripUnsafeHtml(sanitizeText(body.content, 20000))
+  const hasRichContent = Object.prototype.hasOwnProperty.call(body, 'richContent')
+  let normalizedRichContent: RichTextContent | null = null
+  let rawContent = stripUnsafeHtml(sanitizeText(body.content, 20000))
+  if (hasRichContent && body.richContent !== null) {
+    const richContentResult = validateRichPostContent(body.richContent)
+    if (!richContentResult.valid) {
+      return NextResponse.json({
+        message: '正文格式无效，请刷新后重试',
+        errors: { content: '正文格式无效' },
+        details: richContentResult.errors,
+      }, { status: 400 })
+    }
+    normalizedRichContent = richContentResult.value
+    // Rich content has already been reduced to text nodes by the whitelist
+    // validator. Keep literal angle brackets as text so search/SEO/content
+    // moderation see the same plain content that the renderer displays.
+    rawContent = sanitizeText(extractPlainText(richContentResult.value), 20000)
+  }
   const rawStickerId = typeof body.stickerId === 'string' && body.stickerId ? body.stickerId.trim().slice(0, 191) : null
   const isAdmin = shouldBypassForbiddenWords(user)
   const input = {
@@ -265,7 +284,7 @@ export async function POST(request: Request) {
     if (!input.boardId) errors.boardId = '\u8bf7\u9009\u62e9\u6709\u6548\u677f\u5757'
     if (input.title.length < 3) errors.title = '\u6807\u9898\u4e0d\u80fd\u5c11\u4e8e 3 \u4e2a\u5b57'
     // 缂備胶铏庨崹鐢稿Υ閸愵喖绠氶柛娑卞幘閻燁垶鏌ㄥ☉妯煎缂侇喖閰ｅ畷锝夊箣閿旂懓浜惧ù锝咁潟閳ь剙鍟撮獮鍡涘川椤撶偟妯侀梺闈涙閻掞箑螞閵堝拋娼伴柨婵嗘閻庮噣鏌ㄥ☉姗嗘Ц闁告ɑ鍨归幏瀣矙閸喚宀涢柣銏╁灠閸犳稓妲愰柆宥呯闁哄牏鏁哥粙鍥煙椤栨碍鍣归柛鐘茶嫰椤垽鏁愰崱妯尖偓顕€鏌ゅ畡鏉挎毐闁?5 婵炴垶鎼╂禍婊堟偤瑜忕划顓㈡晜鐞涒€充壕?
-    if (!rawStickerId && input.content.length < 5) errors.content = '\u6b63\u6587\u4e0d\u80fd\u5c11\u4e8e 5 \u4e2a\u5b57'
+    if (!rawStickerId && input.content.trim().length < 5) errors.content = '\u6b63\u6587\u4e0d\u80fd\u5c11\u4e8e 5 \u4e2a\u5b57'
     if (Object.keys(errors).length > 0) {
       return NextResponse.json({ message: '\u8bf7\u68c0\u67e5\u5e16\u5b50\u5185\u5bb9', errors }, { status: 400 })
     }
@@ -315,6 +334,7 @@ export async function POST(request: Request) {
           authorId: user.id,
           title: input.title,
           content: input.content,
+          ...(normalizedRichContent ? { richContent: normalizedRichContent as Prisma.InputJsonValue } : {}),
           ipRegion,
           summary: createSummary(input.content),
           status: 'PUBLISHED',

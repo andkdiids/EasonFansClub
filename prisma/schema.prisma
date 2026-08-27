@@ -2784,6 +2784,7 @@ model Post {
   id                    String                  @id @default(cuid())
   title                 String
   content               String
+  richContent           Json?
   ipRegion              String?
   viewCount             Int                     @default(0)
   likeCount             Int                     @default(0)
@@ -3665,6 +3666,8 @@ model User {
   GuessSongDuelInvite_GuessSongDuelInviteInviter         GuessSongDuelInvite[]          @relation("GuessSongDuelInviteInviter")
   GuessSongDuelInvite_GuessSongDuelInviteInvitee         GuessSongDuelInvite[]          @relation("GuessSongDuelInviteInvitee")
   Like                                                   Like[]
+  SocialPostLikes                                        SocialPostLike[]
+  SocialPostComments                                     SocialPostComment[]           @relation("SocialPostCommentAuthor")
   LoginDevice                                            LoginDevice[]
   LotteryEntry                                           LotteryEntry[]
   LyricCard                                              LyricCard[]
@@ -4537,4 +4540,163 @@ model LeaderboardAdminLog {
 
   @@index([adminId, createdAt])
   @@index([action, createdAt])
+}
+
+model SocialPost {
+  id             String           @id @default(cuid())
+  platform       SocialPlatform   @default(INSTAGRAM)
+  externalId     String           @db.VarChar(191)
+  shortcode      String?          @db.VarChar(191)
+  authorUsername String           @db.VarChar(191)
+  authorDisplayName String?
+  caption        String?          @db.Text
+  permalink      String?          @db.Text
+  publishedAt    DateTime
+  syncedAt       DateTime         @default(now())
+  mediaType      SocialPostMediaType
+  status         SocialPostStatus @default(DISCOVERED)
+  provider       String           @db.VarChar(64)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  media          SocialPostMedia[]
+  likes          SocialPostLike[]
+  comments       SocialPostComment[]
+
+  @@unique([platform, externalId])
+  @@index([status, publishedAt])
+  @@index([authorUsername, publishedAt])
+}
+
+model SocialPostMedia {
+  id           String         @id @default(cuid())
+  postId       String
+  type         SocialMediaType
+  storageUrl   String         @db.Text
+  thumbnailUrl String?        @db.Text
+  width        Int?
+  height       Int?
+  durationMs   Int?
+  sortOrder    Int
+  createdAt    DateTime       @default(now())
+  post          SocialPost     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, sortOrder])
+  @@index([postId, sortOrder])
+}
+
+model SocialPostLike {
+  id        String     @id @default(cuid())
+  userId    String
+  postId    String
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([postId, createdAt])
+}
+
+model SocialPostComment {
+  id        String              @id @default(cuid())
+  postId    String
+  authorId  String
+  parentId  String?
+  content   String              @db.Text
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  deletedAt DateTime?
+  post      SocialPost          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User                @relation("SocialPostCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  parent    SocialPostComment?  @relation("SocialPostCommentThread", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies   SocialPostComment[] @relation("SocialPostCommentThread")
+
+  @@index([postId, parentId, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model SocialSyncLog {
+  id          String             @id @default(cuid())
+  provider    String             @db.VarChar(64)
+  actor       String?            @db.VarChar(191)
+  runId       String?            @db.VarChar(191)
+  datasetId   String?            @db.VarChar(191)
+  runStatus   String?            @db.VarChar(64)
+  runStartedAt DateTime?
+  runFinishedAt DateTime?
+  usageTotalUsd Float?
+  billableResults Int?
+  target      String             @db.VarChar(191)
+  startedAt   DateTime
+  finishedAt  DateTime?
+  status      SocialSyncLogStatus @default(RUNNING)
+  foundCount  Int                @default(0)
+  createdCount Int               @default(0)
+  updatedCount Int               @default(0)
+  mediaCount  Int                @default(0)
+  notificationCount Int          @default(0)
+  baselineImport Boolean          @default(false)
+  durationMs  Int?
+  errorCode   String?            @db.VarChar(64)
+  errorMessage String?           @db.Text
+
+  @@index([target, startedAt])
+  @@index([status, startedAt])
+}
+
+model SocialSyncState {
+  id                    String         @id @default(cuid())
+  platform              SocialPlatform @default(INSTAGRAM)
+  target                String         @db.VarChar(191)
+  lastCheckedAt         DateTime?
+  lastSuccessfulSyncAt  DateTime?
+  lastChangedAt         DateTime?
+  lastExternalId        String?        @db.VarChar(191)
+  consecutiveFailures   Int            @default(0)
+  nextAllowedSyncAt     DateTime?
+  lastErrorCode         String?        @db.VarChar(64)
+  lastErrorAt           DateTime?
+  baselineCompletedAt   DateTime?
+  syncRequestedAt       DateTime?
+  lockToken             String?        @db.VarChar(64)
+  lockUntil             DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@unique([platform, target])
+  @@index([nextAllowedSyncAt])
+  @@index([lastSuccessfulSyncAt])
+}
+
+enum SocialPlatform {
+  INSTAGRAM
+}
+
+enum SocialPostStatus {
+  DISCOVERED
+  DOWNLOADING
+  READY
+  FAILED
+  HIDDEN
+  SOURCE_DELETED
+}
+
+enum SocialPostMediaType {
+  IMAGE
+  VIDEO
+  CAROUSEL
+  REEL
+}
+
+enum SocialMediaType {
+  IMAGE
+  VIDEO
+}
+
+enum SocialSyncLogStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  BLOCKED
+  RATE_LIMITED
+  CHALLENGE_REQUIRED
 }

@@ -2,6 +2,7 @@ export const adminPermissionGroups = [
   { key: 'user_delete', label: '永久删除用户', description: '永久删除用户账号、私有数据，并处理公开内容归属。' },
   { key: 'user_manage', label: '用户管理', description: '查看、编辑、封禁和删除用户。' },
   { key: 'post_manage', label: '帖子管理', description: '删除、置顶、精华、推荐和锁定帖子。' },
+  { key: 'social_manage', label: '随意门管理', description: '管理 Instagram Provider、同步日志和已同步动态。' },
   { key: 'reply_manage', label: '回复管理', description: '删除、恢复和屏蔽回复。' },
   { key: 'clinic_manage', label: '阿士匹灵门诊部管理', description: '查看匿名原始身份、处理举报并管理门诊病历与会诊。' },
   { key: 'board_manage', label: '板块管理', description: '创建、编辑、隐藏和排序论坛板块。' },
@@ -90,4 +91,5 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/activities': 'activity_manage',
   '/admin/material-redemptions': 'material_redemption_manage',
   '/admin/banned-words': 'banned_word_manage',
+  '/admin/anywhere-door': 'social_manage',
 }

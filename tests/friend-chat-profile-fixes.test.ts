@@ -6,10 +6,12 @@ import { resolveGrowthLevelName } from '../lib/growth-display'
 const read = (path: string) => readFileSync(path, 'utf8')
 const profile = read('app/profile/page.tsx')
 const publicProfile = read('app/user/[uid]/page.tsx')
+const profileSurface = read('components/ProfilePageSurface.tsx')
 const profileSummary = read('components/ProfileSummary.tsx')
 const sidebarSummary = read('components/UserProfileSummary.tsx')
 const friendDock = read('components/FriendDock.tsx')
 const friendCard = read('components/FriendProfileCard.tsx')
+const friendRequestActions = read('components/FriendRequestActions.tsx')
 const friendList = read('app/api/friends/list/route.ts')
 const conversations = read('app/api/direct-conversations/route.ts')
 const messages = read('app/api/direct-conversations/[conversationId]/messages/route.ts')
@@ -31,15 +33,16 @@ test('统一成长等级优先配置且缺失时安全回退', () => {
 
 test('本人和他人主页都传入真实等级称号且不显示 Lv', () => {
   assert.match(profile, /getGrowthSummarySafe\(profile\.experience\)/)
-  assert.match(profile, /levelName=\{growth\.levelName\}/)
+  assert.match(profile, /growth=\{growth\}/)
   assert.match(publicProfile, /getGrowthSummarySafe\(user\.experience\)/)
-  assert.match(publicProfile, /levelName=\{growth\.levelName\}/)
+  assert.match(publicProfile, /growth=\{growth\}/)
+  assert.match(profileSurface, /levelName=\{growth\.levelName\}/)
   assert.match(profileSummary, /resolveGrowthLevelName\(level, levelName\)/)
   assert.doesNotMatch(profileSummary + sidebarSummary, /Lv\./)
 })
 
 test('个人主页身份信息不再使用会形成方框的胶囊背景且支持换行', () => {
-  assert.equal((profileSummary.match(/className="[^"]*profile-identity-badge/g) || []).length, 2)
+  assert.equal((profileSummary.match(/className="[^"]*profile-identity-badge(?:\s|")/g) || []).length, 2)
   assert.match(css, /\.profile-identity-badge \{[^}]*min-height:0;[^}]*border:0;[^}]*border-radius:0;[^}]*padding:0;[^}]*color:inherit;[^}]*background:transparent;[^}]*box-shadow:none/)
   assert.match(profileSummary, /profile-identity-badges[\s\S]*flex-wrap/)
 })
@@ -47,7 +50,7 @@ test('个人主页身份信息不再使用会形成方框的胶囊背景且支�
 test('他人主页不查询或渲染帖子回复好友统计', () => {
   assert.doesNotMatch(publicProfile, /ProfileStatsGrid|friendCount|_count\.Post|_count\.Reply|Friendship_Friendship/)
   assert.match(publicProfile, /viewer\?\.id === user\.id/)
-  assert.match(profile, /PublicUserModules/)
+  assert.match(profileSurface, /PublicUserModules/)
 })
 
 test('好友头像打开安全资料卡且资料卡提供主页和私信', () => {
@@ -61,7 +64,8 @@ test('好友头像打开安全资料卡且资料卡提供主页和私信', () =>
 
 test('好友列表独立滚动、分页加载且保留末尾 padding', () => {
   assert.match(css, /\.friend-dock-list \{[^}]*min-height:0;[^}]*flex:1;[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain/)
-  assert.match(friendDock, /加载更多好友/)
+  assert.match(friendDock, /friendListViewMode === 'groups'/)
+  assert.match(friendDock, /加载分组成员|加载更多\$\{group\.name\}好友/)
   assert.match(friendDock, /friend-dock-list-end/)
   assert.match(friendList, /const pageStart = \(page - 1\) \* pageSize/)
   assert.match(friendList, /const visibleRows = orderedFriendRows\.slice\(pageStart, pageStart \+ pageSize\)/)
@@ -69,13 +73,14 @@ test('好友列表独立滚动、分页加载且保留末尾 padding', () => {
 })
 
 test('同一搜索栏返回统一好友关系状态且不返回登录账号', () => {
+  const relationshipActions = friendDock + friendRequestActions
   for (const status of ['FRIEND', 'OUTGOING_PENDING', 'INCOMING_PENDING', 'NONE', 'SELF', 'BLOCKED']) {
     assert.match(friendList, new RegExp(`'${status}'`))
   }
   assert.match(friendDock, /搜索好友或其他用户/)
-  assert.match(friendDock, /还不是好友/)
-  assert.match(friendDock, /添加好友/)
-  assert.match(friendDock, /对方申请添加你/)
+  assert.match(relationshipActions, /还不是好友/)
+  assert.match(relationshipActions, /添加好友/)
+  assert.match(relationshipActions, /对方申请添加你/)
   assert.doesNotMatch(friendList, /username: true|email: true|phone: true|passwordHash/)
 })
 

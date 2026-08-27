@@ -17,12 +17,13 @@ export class SiteMediaStorageError extends Error {
 function getConfig() {
   const secretId = readCosEnv('TENCENT_COS_SECRET_ID', 'COS_SECRET_ID')
   const secretKey = readCosEnv('TENCENT_COS_SECRET_KEY', 'COS_SECRET_KEY')
+  const sessionToken = readCosEnv('TENCENT_COS_SESSION_TOKEN', 'COS_SESSION_TOKEN')
   const bucket = readCosEnv('TENCENT_COS_BUCKET', 'COS_BUCKET')
   const region = readCosEnv('TENCENT_COS_REGION', 'COS_REGION')
   if (!secretId || !secretKey || !bucket || !region) {
     throw new SiteMediaStorageError('腾讯云 COS 图片存储尚未配置完整')
   }
-  return { secretId, secretKey, bucket, region }
+  return { secretId, secretKey, sessionToken: sessionToken || undefined, bucket, region }
 }
 
 export async function uploadSiteImage(params: { key: string; body: Buffer; contentType?: string }) {
@@ -30,7 +31,11 @@ export async function uploadSiteImage(params: { key: string; body: Buffer; conte
   const key = params.key.trim().replace(/^\/+/, '')
   if (!key || key.includes('..')) throw new SiteMediaStorageError('图片对象路径无效')
 
-  const client = new COS({ SecretId: config.secretId, SecretKey: config.secretKey })
+  const client = new COS({
+    SecretId: config.secretId,
+    SecretKey: config.secretKey,
+    ...(config.sessionToken ? { SecurityToken: config.sessionToken } : {}),
+  })
   const contentType = params.contentType?.trim() || 'image/webp'
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {

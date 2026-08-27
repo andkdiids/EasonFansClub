@@ -75,10 +75,33 @@ test('资料卡主页文案统一为查看主页并保持关系按钮规则', ()
   assert.match(card, /status === 'OUTGOING_PENDING'/)
   assert.match(card, /status === 'INCOMING_PENDING'/)
   assert.match(card, /status === 'SELF'/)
-  assert.match(card, /friend\.friendRemark\?\.trim\(\) \|\| friend\.displayName \|\| friend\.nickname/)
+  assert.match(card, /getFriendDisplayName\(\{ nickname: friend\.nickname, friendRemark: friend\.friendRemark/)
   assert.match(service, /status: 'PENDING'/)
   assert.match(service, /relationshipStatus[\s\S]*OUTGOING_PENDING[\s\S]*INCOMING_PENDING/)
   assert.match(service, /requestId: relationshipStatus === 'INCOMING_PENDING'/)
+})
+
+test('资料卡五种关系状态使用统一的状态文案和操作入口', () => {
+  const card = read('components/FriendProfileCard.tsx')
+  const requestActions = read('components/FriendRequestActions.tsx')
+
+  assert.match(card, /status === 'SELF'\n\s+\? '本人'/)
+  assert.match(card, /status === 'OUTGOING_PENDING'\n\s+\? '已发送好友申请'/)
+  assert.match(card, /status === 'INCOMING_PENDING'\n\s+\? '收到好友申请'/)
+  assert.match(card, /buttonClassName="friend-profile-card-action friend-profile-card-action-primary"/)
+  assert.match(card, /<FriendRequestDecision requestId=\{friend\.requestId\} layout="inline"/)
+  assert.match(requestActions, /layout === 'inline'/)
+  assert.match(requestActions, /friend-profile-card-request-error/)
+})
+
+test('资料卡在移动端保持紧凑宽度，申请操作不会被一列撑大', () => {
+  const css = read('app/globals.css')
+
+  assert.match(css, /\.friend-profile-card \{[^}]*width:min\(380px,calc\(100vw - 40px\)\)/)
+  assert.match(css, /\.friend-profile-card \{[^}]*max-width:100%;[^}]*min-width:0/)
+  assert.match(css, /\.friend-profile-card-actions \{[^}]*display:flex;[^}]*justify-content:center/)
+  assert.match(css, /\.friend-profile-card-actions\.is-three-actions \{[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/)
+  assert.doesNotMatch(css, /\.friend-profile-card-actions[^}]*flex:1(?:\s|;)/)
 })
 
 test('通知、好友 Dock 和搜索页都只保留查看主页文案', () => {

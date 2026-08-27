@@ -4,6 +4,7 @@ import {
   type NavigationFeatureKey,
   type NavigationRegistryItem,
 } from '@/lib/navigation-registry'
+import { isAnywhereDoorEnabled } from '@/lib/anywhere-door/config'
 
 export { NAVIGATION_REGISTRY }
 
@@ -115,6 +116,7 @@ export function filterEcenterFeaturesForUser(features: readonly EcenterFeatureIt
     feature.showInCenter
     && feature.isEnabled
     && (!feature.requiresAdmin || canAccessAdmin)
+    && (feature.featureKey !== 'ANYWHERE_DOOR' || isAnywhereDoorEnabled() || canAccessAdmin)
   ))
 }
 
@@ -128,6 +130,7 @@ export function filterEcenterFeaturesForEditor(features: readonly EcenterFeature
     (feature.showInCenter || feature.showInDesktopSidebar)
     && feature.isEnabled
     && (!feature.requiresAdmin || canAccessAdmin)
+    && (feature.featureKey !== 'ANYWHERE_DOOR' || isAnywhereDoorEnabled() || canAccessAdmin)
   ))
 }
 

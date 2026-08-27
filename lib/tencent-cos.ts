@@ -3,6 +3,7 @@ import COS from 'cos-nodejs-sdk-v5'
 type CosConfig = {
   secretId: string
   secretKey: string
+  sessionToken?: string
   bucket: string
   region: string
 }
@@ -40,6 +41,7 @@ function getCosClient() {
   const config: CosConfig = {
     secretId: readCosEnv('TENCENT_COS_SECRET_ID', 'COS_SECRET_ID'),
     secretKey: readCosEnv('TENCENT_COS_SECRET_KEY', 'COS_SECRET_KEY'),
+    sessionToken: readCosEnv('TENCENT_COS_SESSION_TOKEN', 'COS_SESSION_TOKEN') || undefined,
     bucket: readCosEnv('TENCENT_COS_BUCKET', 'COS_BUCKET'),
     region: readCosEnv('TENCENT_COS_REGION', 'COS_REGION'),
   }
@@ -48,6 +50,7 @@ function getCosClient() {
   cachedClient = new COS({
     SecretId: config.secretId,
     SecretKey: config.secretKey,
+    ...(config.sessionToken ? { SecurityToken: config.sessionToken } : {}),
   })
   return { cos: cachedClient, config }
 }

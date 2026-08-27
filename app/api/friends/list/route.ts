@@ -31,6 +31,7 @@ export async function GET(request: Request) {
   }
   const rawPage = Number(params.get('page'))
   const rawPageSize = Number(params.get('pageSize'))
+  const directory = params.get('directory') === '1'
   const page = Math.min(10_000, Math.max(1, Number.isFinite(rawPage) ? rawPage : 1))
   const pageSize = Math.min(50, Math.max(10, Number.isFinite(rawPageSize) ? rawPageSize : 30))
   const requestedGroupId = params.get('groupId')?.trim() || null
@@ -143,8 +144,11 @@ export async function GET(request: Request) {
 
   const pageStart = (page - 1) * pageSize
   const visibleRows = orderedFriendRows.slice(pageStart, pageStart + pageSize)
-  const visibleFriendIds = visibleRows.map(({ friend }) => friend.id)
-  const visibleConversationIds = visibleRows.flatMap(({ conversation }) => conversation ? [conversation.id] : [])
+  // The A-Z directory needs the complete friendship population in one response.
+  // Keep the existing paged contract for the group view and other callers.
+  const directoryRows = directory ? orderedFriendRows : visibleRows
+  const visibleFriendIds = directoryRows.map(({ friend }) => friend.id)
+  const visibleConversationIds = directoryRows.flatMap(({ conversation }) => conversation ? [conversation.id] : [])
   const [unreadByConversation, remarkMap, presenceByFriend, equippedBadgeMap] = await Promise.all([
     getUnreadCounts(user.id, visibleConversationIds),
     loadFriendRemarkMap(user.id, visibleFriendIds),
@@ -152,7 +156,7 @@ export async function GET(request: Request) {
     getEquippedBadgesForUsers(visibleFriendIds),
   ])
 
-  const friends = visibleRows.map(({ friend, conversation }) => {
+  const friends = directoryRows.map(({ friend, conversation }) => {
     const growth = calculateGrowthSummary(friend.experience, growthLevels)
     return {
       ...serializePublicUser(friend, growth.level, growth.levelName, remarkMap.get(friend.id) || null, equippedBadgeMap.get(friend.id) || null, true),
@@ -173,10 +177,10 @@ export async function GET(request: Request) {
     friends,
     groups,
     ungroupedCount,
-    page,
+    page: directory ? 1 : page,
     total: scopedTotal,
     friendTotal: total,
-    hasMore: pageStart + pageSize < scopedTotal,
+    hasMore: directory ? false : pageStart + pageSize < scopedTotal,
   }, { headers: privateHeaders })
 }
 

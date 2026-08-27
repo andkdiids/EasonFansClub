@@ -105,7 +105,7 @@ test('a 25-member group loads 20 then 5 with a group-specific continuation', () 
   assert.match(dock, /pageSize: '20'/)
   assert.match(dock, /groupPagination/)
   assert.match(dock, /加载更多\$\{group\.name\}好友/)
-  assert.match(listRoute, /hasMore: pageStart \+ pageSize < scopedTotal/)
+  assert.match(listRoute, /hasMore: directory \? false : pageStart \+ pageSize < scopedTotal/)
 })
 
 test('count and list use the same valid friendship population, not displayed page length', () => {

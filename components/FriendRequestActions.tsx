@@ -11,11 +11,13 @@ export function AddFriendButton({
   initialStatus,
   targetName = '对方',
   onStatusChange,
+  buttonClassName,
 }: Readonly<{
   uid: number
   initialStatus: AddFriendStatus
   targetName?: string
   onStatusChange?: (status: AddFriendStatus) => void
+  buttonClassName?: string
 }>) {
   const router = useRouter()
   const [status, setStatus] = useState<AddFriendStatus>(initialStatus)
@@ -79,11 +81,11 @@ export function AddFriendButton({
             setReasonDialogOpen(true)
           }}
           disabled={status !== 'NONE'}
-          className={`rounded-full px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-70 ${
-            status === 'NONE'
-              ? 'border border-sky-100 bg-brand-950 text-white shadow-sm hover:bg-brand-800'
-              : 'border border-sky-100 bg-sky-50 text-brand-700 shadow-sm'
-          }`}
+          className={buttonClassName ?? `rounded-full px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-70 ${
+              status === 'NONE'
+                ? 'border border-sky-100 bg-brand-950 text-white shadow-sm hover:bg-brand-800'
+                : 'border border-sky-100 bg-sky-50 text-brand-700 shadow-sm'
+            }`}
         >
           {label}
         </button>
@@ -107,9 +109,10 @@ export function AddFriendButton({
   )
 }
 
-export function FriendRequestDecision({ requestId, onCompleted }: Readonly<{
+export function FriendRequestDecision({ requestId, onCompleted, layout = 'stacked' }: Readonly<{
   requestId: string
   onCompleted?: (action: 'accept' | 'reject') => void
+  layout?: 'stacked' | 'inline'
 }>) {
   const router = useRouter()
   const [error, setError] = useState('')
@@ -137,23 +140,40 @@ export function FriendRequestDecision({ requestId, onCompleted }: Readonly<{
     router.refresh()
   }
 
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
+  const buttons = (
+    <>
       <button
+        type="button"
         onClick={() => decide('accept')}
         disabled={isSubmitting}
-        className="rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-60"
+        className={layout === 'inline' ? 'friend-profile-card-action friend-profile-card-action-primary' : 'rounded-full bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-60'}
       >
         接受
       </button>
       <button
+        type="button"
         onClick={() => decide('reject')}
         disabled={isSubmitting}
-        className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-60"
+        className={layout === 'inline' ? 'friend-profile-card-action friend-profile-card-action-secondary' : 'rounded-full bg-white px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-60'}
       >
         拒绝
       </button>
-      {error ? <p className="w-full text-xs font-bold text-red-600">{error}</p> : null}
+    </>
+  )
+
+  if (layout === 'inline') {
+    return (
+      <>
+        {buttons}
+        {error ? <p className="friend-profile-card-request-error" role="alert">{error}</p> : null}
+      </>
+    )
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      {buttons}
+      {error ? <p className="w-full text-xs font-bold text-red-600" role="alert">{error}</p> : null}
     </div>
   )
 }

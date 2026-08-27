@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton, PostManagementMenu } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
 import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
+import { RichPostContent } from '@/components/posts/RichPostContent'
 import { PostMediaCarousel } from '@/components/PostMediaCarousel'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
@@ -707,7 +708,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <PostViewCounter postId={post.id} initialCount={post.viewCount} />
             <span>回复 {post.replyCount}</span>
           </div>
-          <div className="mt-8 whitespace-pre-wrap text-lg leading-9 text-slate-700 post-detail-body">{safePublicPostContent}</div>
+          <RichPostContent
+            richContent={post.moderationStatus === 'VIOLATION' ? null : post.richContent}
+            fallbackContent={safePublicPostContent}
+            className="mt-8 text-lg leading-9 text-slate-700 post-detail-body"
+          />
           {post.sticker?.url ? (
             <div className="mt-6 post-detail-sticker">
               {/* eslint-disable-next-line @next/next/no-img-element */}

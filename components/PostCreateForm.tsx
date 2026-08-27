@@ -3,35 +3,25 @@
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
+import { RichTextEditor, type RichTextEditorHandle } from '@/components/posts/RichTextEditor'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import type { RichTextContent } from '@/lib/rich-text'
 
 type Board = { id: string; name: string; slug: string }
 
 export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: Board[]; initialBoardSlug?: string }>) {
   const router = useRouter()
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<RichTextEditorHandle>(null)
   const [boardId, setBoardId] = useState(boards.find((board) => board.slug === initialBoardSlug)?.id || boards[0]?.id || '')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [richContent, setRichContent] = useState<RichTextContent | null>(null)
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  function insertEmoji(emoji: string) {
-    const input = textareaRef.current
-    const start = input?.selectionStart ?? content.length
-    const end = input?.selectionEnd ?? content.length
-    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`
-    const cursor = Math.min(start + emoji.length, next.length)
-    setContent(next)
-    window.requestAnimationFrame(() => {
-      input?.focus()
-      input?.setSelectionRange(cursor, cursor)
-    })
-  }
 
   async function submitPost(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -42,7 +32,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       const response = await fetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boardId, title, content, imageUrls, stickerId: pendingSticker?.id || undefined }),
+        body: JSON.stringify({ boardId, title, content, richContent, imageUrls, stickerId: pendingSticker?.id || undefined }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -94,7 +84,15 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       </label>
       <label className="block">
         <span className="text-sm font-black text-slate-700">正文</span>
-        <textarea ref={textareaRef} value={content} onChange={(event) => setContent(event.target.value)} rows={10} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2" placeholder="分享你的想法..." />
+        <div className="mt-2">
+          <RichTextEditor
+            ref={editorRef}
+            onChange={(nextRichContent, plainText) => {
+              setRichContent(nextRichContent)
+              setContent(plainText)
+            }}
+          />
+        </div>
         {errors.content ? <p className="mt-2 text-sm font-bold text-red-600">{errors.content}</p> : null}
       </label>
       {pendingSticker ? (
@@ -128,8 +126,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
             setPendingSticker(sticker)
             setPickerOpen(false)
           }}
-          onSelectEmoji={insertEmoji}
-          composerRef={textareaRef}
+          onSelectEmoji={(emoji) => editorRef.current?.insertText(emoji)}
         />
       </div>
     </form>

@@ -4,8 +4,10 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
+import { RichTextEditor } from '@/components/posts/RichTextEditor'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
 
 export type ExistingMedia = { id: string; url: string; broken: boolean }
 export type EditableBoard = { id: string; name: string; slug: string }
@@ -32,6 +34,7 @@ export function PostEditForm({
   postId,
   initialTitle,
   initialContent,
+  initialRichContent,
   initialBoardId,
   boards,
   initialMedia,
@@ -39,6 +42,7 @@ export function PostEditForm({
   postId: string
   initialTitle: string
   initialContent: string
+  initialRichContent?: unknown | null
   initialBoardId: string
   boards: EditableBoard[]
   initialMedia: ExistingMedia[]
@@ -46,6 +50,11 @@ export function PostEditForm({
   const router = useRouter()
   const [title, setTitle] = useState(initialTitle)
   const [content, setContent] = useState(initialContent)
+  const [richContent, setRichContent] = useState<RichTextContent | null>(() => {
+    if (initialRichContent === null || initialRichContent === undefined) return null
+    const result = validateRichPostContent(initialRichContent)
+    return result.valid ? result.value : null
+  })
   const [boardId, setBoardId] = useState(initialBoardId)
   const [media, setMedia] = useState(initialMedia.map((item) => ({ ...item, removed: false })))
   const [addImageUrls, setAddImageUrls] = useState<string[]>([])
@@ -73,7 +82,7 @@ export function PostEditForm({
       const response = await fetch(`/api/posts/${postId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content, boardId, keepMediaIds, addImageUrls }),
+        body: JSON.stringify({ title, content, richContent, boardId, keepMediaIds, addImageUrls }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -113,13 +122,16 @@ export function PostEditForm({
 
       <label className="block">
         <span className="text-sm font-black text-slate-700">正文</span>
-        <textarea
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          rows={12}
-          className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2"
-          placeholder="分享你的想法..."
-        />
+        <div className="mt-2">
+          <RichTextEditor
+            initialContent={initialContent}
+            initialRichContent={initialRichContent}
+            onChange={(nextRichContent, plainText) => {
+              setRichContent(nextRichContent)
+              setContent(plainText)
+            }}
+          />
+        </div>
       </label>
 
       <section className="space-y-3">

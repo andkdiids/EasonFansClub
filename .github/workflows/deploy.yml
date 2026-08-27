@@ -497,7 +497,7 @@ jobs:
           echo "SHA256_OK"
           echo "Upload finished at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-      - name: Build release, migrate, switch, and reload
+      - name: Build release, verify manual migration gate, switch, and reload
         uses: appleboy/ssh-action@v1
         env:
           APP_DIR: ${{ env.APP_DIR }}
@@ -630,9 +630,14 @@ jobs:
             free -h || true
             echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
-            log_step "6/8" "Apply backward-compatible migrations after build"
+            log_step "6/8" "Verify manual production migration gate after build"
             pnpm migration:check:mysql
-            NODE_ENV=production pnpm prisma migrate deploy
+            migration_mode="${PRODUCTION_MIGRATION_MODE:-manual}"
+            if [ "${migration_mode}" != "manual" ]; then
+              echo "Unsupported production migration mode: ${migration_mode}. Automatic migration is disabled." >&2
+              exit 1
+            fi
+            echo "Production migration is intentionally skipped; run the separately reviewed manual SQL procedure before enabling schema-dependent features."
 
             atomic_switch() {
               local target="$1"
@@ -763,7 +768,7 @@ jobs:
               test -f ecosystem.config.js
               echo "Recreating PM2 ${PM2_APP_NAME} from ecosystem.config.js after current switch."
               pm2 delete "${PM2_APP_NAME}" || true
-              pm2 start ecosystem.config.js --update-env
+              pm2 start ecosystem.config.js --only "${PM2_APP_NAME}" --update-env
               pm2 save || true
               sleep 10
               echo "PM2 description after ecosystem operation:"

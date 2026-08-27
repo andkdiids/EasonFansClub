@@ -17,6 +17,7 @@ import {
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { FriendGroupDialog, type FriendGroupDialogMode } from '@/components/FriendGroupDialog'
+import { FriendAlphabetIndex } from '@/components/FriendAlphabetIndex'
 import { FriendProfileCard } from '@/components/FriendProfileCard'
 import { AddFriendButton } from '@/components/FriendRequestActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
@@ -25,6 +26,11 @@ import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { mergeUniqueFriendPage, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
 import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
+import {
+  groupFriendsByLetter,
+  resolveFriendIndexTarget,
+  type FriendDirectoryLetter,
+} from '@/lib/friend-directory'
 import {
   calculateFriendListRestoredScrollTop,
   createFriendListReturnState,
@@ -37,6 +43,7 @@ import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
+type FriendListViewMode = 'alphabetical' | 'groups'
 type Message = {
   id: string
   content: string
@@ -119,6 +126,8 @@ export function FriendDock({
   const [friendListReady, setFriendListReady] = useState(false)
   const [ungroupedCount, setUngroupedCount] = useState(0)
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set())
+  const [friendListViewMode, setFriendListViewMode] = useState<FriendListViewMode>('alphabetical')
+  const [activeAlphabetLetter, setActiveAlphabetLetter] = useState<FriendDirectoryLetter | null>(null)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [friendTotal, setFriendTotal] = useState(0)
@@ -162,10 +171,13 @@ export function FriendDock({
   const friendListPageRef = useRef(1)
   const friendListRestorePendingRef = useRef(false)
   const friendListReturnStateRef = useRef<FriendListReturnState | null>(null)
+  const friendListScrollTopByModeRef = useRef<Record<FriendListViewMode, number>>({ alphabetical: 0, groups: 0 })
+  const previousFriendListViewModeRef = useRef<FriendListViewMode>('alphabetical')
   const groupRequestRef = useRef(new Map<string, number>())
   const friendGroupDialogSubmittingRef = useRef(false)
   const friendGroupDialogComposingRef = useRef(false)
   const openChatRef = useRef<(friend: FriendDockUser) => void>(() => {})
+  const isSearchMode = query.trim().length > 0
 
   const clearFriendListReturnState = useCallback(() => {
     friendListRestorePendingRef.current = false
@@ -352,11 +364,12 @@ export function FriendDock({
     setGroupPagination({})
   }, [])
 
-  const loadFriends = useCallback(async (nextPage = 1, append = false, signal?: AbortSignal, silent = false) => {
+  const loadFriends = useCallback(async (nextPage = 1, append = false, signal?: AbortSignal, silent = false, directory = false) => {
     const requestId = ++friendListRequestRef.current
     if (!silent) setLoadingList(true)
     try {
       const params = new URLSearchParams({ page: String(nextPage), pageSize: '30' })
+      if (directory) params.set('directory', '1')
       const response = await fetch(`/api/friends/list?${params}`, { signal, credentials: 'same-origin', cache: 'no-store' })
       const data = await response.json().catch(() => ({}))
       if (requestId !== friendListRequestRef.current) return
@@ -367,9 +380,10 @@ export function FriendDock({
       const incoming = Array.isArray(data.friends) ? data.friends as FriendDockUser[] : []
       if (Array.isArray(data.groups)) setFriendGroups(data.groups as FriendGroup[])
       if (Number.isSafeInteger(data.ungroupedCount) && data.ungroupedCount >= 0) setUngroupedCount(data.ungroupedCount)
-      if (Number.isSafeInteger(data.total) && data.total >= 0) setFriendTotal(data.total)
+      if (Number.isSafeInteger(data.friendTotal) && data.friendTotal >= 0) setFriendTotal(data.friendTotal)
+      else if (Number.isSafeInteger(data.total) && data.total >= 0) setFriendTotal(data.total)
       setFriendListReady(true)
-      const preserveLoadedPages = silent && friendListPageRef.current > 1 && !append
+      const preserveLoadedPages = !directory && silent && friendListPageRef.current > 1 && !append
       if (preserveLoadedPages) {
         const current = friendsRef.current
         // A full first page means that the previously loaded later pages can
@@ -390,7 +404,7 @@ export function FriendDock({
         : incoming
       friendsRef.current = nextFriends
       setFriends(nextFriends)
-      friendListPageRef.current = nextPage
+      friendListPageRef.current = directory ? 1 : nextPage
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === 'AbortError') return
       if (requestId === friendListRequestRef.current) {
@@ -554,6 +568,60 @@ export function FriendDock({
     if (opening && groupFriends[groupId] === undefined) void loadGroupFriends(groupId)
   }
 
+  const updateActiveAlphabetLetter = useCallback(() => {
+    const list = friendListRef.current
+    if (!list || friendListViewMode !== 'alphabetical' || isSearchMode) {
+      setActiveAlphabetLetter(null)
+      return
+    }
+
+    const sections = Array.from(list.querySelectorAll<HTMLElement>('[data-friend-section]'))
+    if (!sections.length) {
+      setActiveAlphabetLetter(null)
+      return
+    }
+
+    const listTop = list.getBoundingClientRect().top
+    let currentLetter = sections[0].dataset.friendSection as FriendDirectoryLetter | undefined
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= listTop + 12) {
+        currentLetter = section.dataset.friendSection as FriendDirectoryLetter
+      } else {
+        break
+      }
+    }
+    setActiveAlphabetLetter((current) => current === currentLetter ? current : currentLetter || null)
+  }, [friendListViewMode, isSearchMode])
+
+  const handleFriendListScroll = useCallback(() => {
+    const list = friendListRef.current
+    if (!list) return
+    friendListScrollTopByModeRef.current[friendListViewMode] = list.scrollTop
+    updateActiveAlphabetLetter()
+  }, [friendListViewMode, updateActiveAlphabetLetter])
+
+  const changeFriendListViewMode = useCallback((mode: FriendListViewMode) => {
+    if (mode === friendListViewMode) return
+    const list = friendListRef.current
+    if (list) friendListScrollTopByModeRef.current[friendListViewMode] = list.scrollTop
+    setFriendListReady(false)
+    setLoadingList(true)
+    setActiveAlphabetLetter(null)
+    setFriendListViewMode(mode)
+    try {
+      window.localStorage.setItem(FRIEND_LIST_VIEW_MODE_STORAGE_KEY, mode)
+    } catch {
+      // A blocked storage area should not disable the view switch.
+    }
+  }, [friendListViewMode])
+
+  const handleFriendSearchChange = useCallback((nextValue: string) => {
+    setQuery(nextValue)
+    setSearchResults([])
+    setError('')
+    setLoadingList(Boolean(nextValue.trim()))
+  }, [])
+
   useEffect(() => {
     friendsRef.current = friends
   }, [friends])
@@ -561,6 +629,41 @@ export function FriendDock({
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(`friend-dock:collapsed:${currentUserId}`) === '1')
   }, [currentUserId])
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(FRIEND_LIST_VIEW_MODE_STORAGE_KEY)
+      if (stored === 'alphabetical' || stored === 'groups') setFriendListViewMode(stored)
+    } catch {
+      // A blocked storage area keeps the default A-Z view.
+    }
+  }, [currentUserId])
+
+  useEffect(() => {
+    const list = friendListRef.current
+    if (!list) return
+    list.addEventListener('scroll', handleFriendListScroll, { passive: true })
+    return () => list.removeEventListener('scroll', handleFriendListScroll)
+  }, [handleFriendListScroll])
+
+  useEffect(() => {
+    const previousMode = previousFriendListViewModeRef.current
+    previousFriendListViewModeRef.current = friendListViewMode
+    if (previousMode === friendListViewMode || !open || chatFriend || isSearchMode) return
+    const frame = window.requestAnimationFrame(() => {
+      const list = friendListRef.current
+      if (!list) return
+      list.scrollTop = friendListScrollTopByModeRef.current[friendListViewMode]
+      updateActiveAlphabetLetter()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [chatFriend, friendListViewMode, isSearchMode, open, updateActiveAlphabetLetter])
+
+  useEffect(() => {
+    if (!open || chatFriend) return
+    const frame = window.requestAnimationFrame(updateActiveAlphabetLetter)
+    return () => window.cancelAnimationFrame(frame)
+  }, [chatFriend, friends, friendListViewMode, isSearchMode, open, updateActiveAlphabetLetter])
 
   useEffect(() => () => window.clearTimeout(backdropCloseTimerRef.current), [])
 
@@ -588,7 +691,7 @@ export function FriendDock({
     const controller = new AbortController()
     if (!debouncedQuery) {
       setSearchResults([])
-      void loadFriends(1, false, controller.signal)
+      void loadFriends(1, false, controller.signal, false, friendListViewMode === 'alphabetical')
     } else if (debouncedQuery.length < 2) {
       setSearchResults([])
       setLoadingList(false)
@@ -609,10 +712,10 @@ export function FriendDock({
         })
     }
     return () => controller.abort()
-  }, [open, chatFriend, debouncedQuery, loadFriends])
+  }, [open, chatFriend, debouncedQuery, friendListViewMode, loadFriends])
 
   useEffect(() => {
-    if (!open || chatFriend || debouncedQuery || !friendListReady) return
+    if (!open || chatFriend || isSearchMode || friendListViewMode !== 'groups' || !friendListReady) return
     const scopes = [
       { id: UNGROUPED_FRIEND_GROUP_ID, count: ungroupedCount },
       ...friendGroups.map((group) => ({ id: group.id, count: group.count })),
@@ -626,10 +729,11 @@ export function FriendDock({
       }
       void loadGroupFriends(scope.id)
     })
-  }, [chatFriend, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, groupFriends, loadingGroupIds, loadGroupFriends, open, ungroupedCount])
+  }, [chatFriend, collapsedGroupIds, friendGroups, friendListReady, friendListViewMode, groupFriends, isSearchMode, loadingGroupIds, loadGroupFriends, open, ungroupedCount])
 
   useEffect(() => {
     if (!open || chatFriend || loadingList || loadingGroupIds.size > 0 || refreshingFriendList || !friendListRestorePendingRef.current) return
+    if (isSearchMode) return
     let state: ReturnType<typeof parseFriendListReturnState> = null
     try {
       const raw = window.sessionStorage.getItem(FRIEND_LIST_RETURN_STATE_KEY)
@@ -657,9 +761,11 @@ export function FriendDock({
     ]
     const listDataReady = debouncedQuery
       ? true
-      : friendListReady && groupScopes.every((scope) => (
-        collapsedGroupIds.has(scope.id) || scope.count === 0 || groupFriends[scope.id] !== undefined
-      ))
+      : friendListViewMode === 'alphabetical'
+        ? friendListReady
+        : friendListReady && groupScopes.every((scope) => (
+          collapsedGroupIds.has(scope.id) || scope.count === 0 || groupFriends[scope.id] !== undefined
+        ))
     if (!listDataReady) return
 
     let frame = 0
@@ -688,7 +794,7 @@ export function FriendDock({
     }
     frame = window.requestAnimationFrame(restore)
     return () => window.cancelAnimationFrame(frame)
-  }, [chatFriend, clearFriendListReturnState, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, groupFriends, loadingGroupIds, loadingList, open, refreshingFriendList, ungroupedCount])
+  }, [chatFriend, clearFriendListReturnState, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, friendListViewMode, groupFriends, isSearchMode, loadingGroupIds, loadingList, open, refreshingFriendList, ungroupedCount])
 
   useEffect(() => {
     clearFriendListReturnState()
@@ -730,13 +836,13 @@ export function FriendDock({
       setProfileFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
     }
     const refresh = (event?: Event) => {
-      if (open && !chatFriend && !debouncedQuery) {
+      if (open && !chatFriend && !isSearchMode) {
         const type = (event as CustomEvent<{ type?: string }> | undefined)?.detail?.type
         if (type !== 'unread') {
           invalidateAllGroupCaches()
           setFriendListReady(false)
         }
-        void loadFriends(1)
+        void loadFriends(1, false, undefined, false, friendListViewMode === 'alphabetical')
       }
     }
     const refreshFromRealtime = (event: Event) => {
@@ -756,7 +862,7 @@ export function FriendDock({
       channel.onmessage = (event) => {
         if (event.data?.userId !== currentUserId) return
         if (event.data?.type === 'unread') {
-          if (open && !chatFriend && !debouncedQuery) void loadFriends(1)
+          if (open && !chatFriend && !isSearchMode) void loadFriends(1, false, undefined, false, friendListViewMode === 'alphabetical')
           return
         }
         refresh()
@@ -770,7 +876,7 @@ export function FriendDock({
       window.removeEventListener('friend-dock:refresh', refresh)
       window.removeEventListener('realtime:event', refreshFromRealtime)
     }
-  }, [currentUserId, open, chatFriend, debouncedQuery, invalidateAllGroupCaches, loadFriends, openFriendList, closeDock])
+  }, [currentUserId, open, chatFriend, friendListViewMode, invalidateAllGroupCaches, isSearchMode, loadFriends, openFriendList, closeDock])
 
   useEffect(() => {
     if (!open || !isMobileDrawer) return
@@ -1237,7 +1343,35 @@ export function FriendDock({
     setNewMessageNotice(false)
   }
 
-  const visibleUsers = debouncedQuery ? searchResults : friends
+  const visibleUsers = isSearchMode ? searchResults : friends
+  const alphabeticalFriendSections = useMemo(() => groupFriendsByLetter(
+    friends,
+    (friend) => getFriendDisplayName({
+      nickname: friend.nickname,
+      friendRemark: friend.friendRemark,
+      isFriendContext: friend.relationshipStatus === undefined || friend.relationshipStatus === 'FRIEND',
+    }),
+  ), [friends])
+  const alphabeticalLetters = useMemo(
+    () => alphabeticalFriendSections.map((section) => section.letter),
+    [alphabeticalFriendSections],
+  )
+  const scrollToAlphabetLetter = useCallback((requestedLetter: FriendDirectoryLetter) => {
+    const list = friendListRef.current
+    const targetLetter = resolveFriendIndexTarget(requestedLetter, alphabeticalLetters)
+    if (!list || !targetLetter) return
+    const section = Array.from(list.querySelectorAll<HTMLElement>('[data-friend-section]'))
+      .find((item) => item.dataset.friendSection === targetLetter)
+    if (!section) return
+    const listRect = list.getBoundingClientRect()
+    const sectionRect = section.getBoundingClientRect()
+    list.scrollTo({
+      top: Math.max(0, list.scrollTop + sectionRect.top - listRect.top),
+      left: 0,
+      behavior: 'auto',
+    })
+    setActiveAlphabetLetter(targetLetter)
+  }, [alphabeticalLetters])
   const groupedFriendSections = useMemo<Array<FriendGroup & { friends: FriendDockUser[] }>>(() => [
     {
       id: UNGROUPED_FRIEND_GROUP_ID,
@@ -1471,17 +1605,31 @@ export function FriendDock({
           ) : (
             <div className="friend-list-layout">
             <div className="friend-dock-search">
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索好友或其他用户" aria-label="搜索好友或其他用户" />
-              {query ? <button type="button" onClick={() => setQuery('')} aria-label="清空搜索">×</button> : null}
+              <input value={query} onChange={(event) => handleFriendSearchChange(event.target.value)} placeholder="搜索好友或其他用户" aria-label="搜索好友或其他用户" />
+              {query ? <button type="button" onClick={() => handleFriendSearchChange('')} aria-label="清空搜索">×</button> : null}
             </div>
-            {!debouncedQuery ? (
+            {!isSearchMode ? (
               <div className="friend-dock-group-toolbar">
-                <span>好友分组</span>
+                <div className="friend-dock-view-switch" role="group" aria-label="好友列表查看方式">
+                  <button
+                    type="button"
+                    className={friendListViewMode === 'alphabetical' ? 'is-active' : undefined}
+                    aria-pressed={friendListViewMode === 'alphabetical'}
+                    onClick={() => changeFriendListViewMode('alphabetical')}
+                  >A-Z</button>
+                  <button
+                    type="button"
+                    className={friendListViewMode === 'groups' ? 'is-active' : undefined}
+                    aria-pressed={friendListViewMode === 'groups'}
+                    onClick={() => changeFriendListViewMode('groups')}
+                  >分组</button>
+                </div>
                 <button type="button" onClick={() => openFriendGroupDialog('create')}>新建分组</button>
               </div>
             ) : null}
+            <div className="friend-dock-list-region">
             <div ref={friendListRef} className="friend-dock-list">
-              {debouncedQuery ? visibleUsers.map((friend) => (
+              {isSearchMode ? visibleUsers.map((friend) => (
                 <FriendRow
                   key={friend.id}
                   friend={friend}
@@ -1494,7 +1642,27 @@ export function FriendDock({
                   onRelationshipChange={(status) => updateFriendRelationship(friend.id, status)}
                   onFollow={() => void followFriendToRoom(friend)}
                 />
-              )) : groupedFriendSections.map((group) => {
+              )) : friendListViewMode === 'alphabetical' ? (
+                friendListReady ? alphabeticalFriendSections.map((section) => (
+                <section key={section.letter} className="friend-dock-alpha-section" data-friend-section={section.letter}>
+                  <h3 className="friend-dock-alpha-header">{section.letter}</h3>
+                  {section.friends.map((friend) => (
+                    <FriendRow
+                      key={friend.id}
+                      friend={friend}
+                      groups={friendGroups}
+                      searching={false}
+                      onProfile={() => setProfileFriend(friend)}
+                      onChat={() => void openChat(friend)}
+                      onMove={(groupId) => void moveFriendToGroup(friend, groupId)}
+                      onDecide={(action) => void decideRequest(friend, action)}
+                      onRelationshipChange={(status) => updateFriendRelationship(friend.id, status)}
+                      onFollow={() => void followFriendToRoom(friend)}
+                    />
+                  ))}
+                </section>
+                )) : null
+              ) : groupedFriendSections.map((group) => {
                 const collapsed = collapsedGroupIds.has(group.id)
                 return (
                   <section key={group.id} className="friend-dock-group">
@@ -1544,8 +1712,12 @@ export function FriendDock({
                 )
               })}
               {loadingList ? <p className="friend-dock-empty">加载中…</p> : null}
-              {!loadingList && !visibleUsers.length ? <p className="friend-dock-empty">{debouncedQuery ? '没有找到匹配用户' : '暂无好友'}</p> : null}
+              {!loadingList && !visibleUsers.length ? <p className="friend-dock-empty">{isSearchMode ? (query.trim().length < 2 ? '请输入至少 2 个字符' : '没有找到匹配用户') : '暂无好友'}</p> : null}
               <div className="friend-dock-list-end" aria-hidden="true" />
+            </div>
+            {!isSearchMode && friendListViewMode === 'alphabetical' && friendListReady && alphabeticalFriendSections.length ? (
+              <FriendAlphabetIndex activeLetter={activeAlphabetLetter} onSelect={scrollToAlphabetLetter} />
+            ) : null}
             </div>
             </div>
           )}
@@ -1722,6 +1894,8 @@ function RelationshipActions({
   if (status === 'BLOCKED') return <div className="friend-relationship-actions"><span>无法添加</span></div>
   return <div className="friend-relationship-actions"><span>还不是好友</span><AddFriendButton uid={uid} targetName={targetName} initialStatus="NONE" onStatusChange={(next) => onStatusChange(next === 'PENDING' ? 'OUTGOING_PENDING' : next === 'RECEIVED' ? 'INCOMING_PENDING' : next)} /></div>
 }
+
+const FRIEND_LIST_VIEW_MODE_STORAGE_KEY = 'friendListViewMode'
 
 function MessageTicks({ status }: { status: MessageStatus }) {
   if (status === 'SENDING') return <span title="发送中" aria-label="发送中">…</span>

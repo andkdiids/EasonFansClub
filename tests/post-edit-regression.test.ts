@@ -22,7 +22,7 @@ test('post detail management menu exposes the existing edit flow in permission o
 test('帖子编辑使用真实 PATCH 路由、白名单字段并保留帖子身份', () => {
   assert.match(route, /export async function PATCH\(request: Request, \{ params \}: Params\)/)
   assert.match(form, /fetch\(`\/api\/posts\/\$\{postId\}`,[\s\S]*method: 'PATCH'/)
-  assert.match(form, /JSON\.stringify\(\{ title, content, boardId, keepMediaIds, addImageUrls \}\)/)
+  assert.match(form, /JSON\.stringify\(\{ title, content, richContent, boardId, keepMediaIds, addImageUrls \}\)/)
   assert.match(form, /removePendingPostFromDiscoverySessions/)
   assert.match(form, /data\?\.moderationStatus === 'PENDING'/)
   assert.doesNotMatch(editHandler, /body\.(id|authorId|createdAt|updatedAt|likeCount|replyCount|ipRegion|moderationStatus)/)
@@ -35,7 +35,7 @@ test('普通用户编辑沿用审核规则，但不会把附属功能失败升�
   assert.match(editHandler, /reviewedById: null/)
   assert.match(editHandler, /checkPostForbiddenWords\(\{ title: rawTitle, content: rawContent \}, user\)/)
   assert.match(editHandler, /await createPostModerationHistory\(prisma,/)
-  assert.match(editHandler, /await prisma\.notification\.createMany\(/)
+  assert.match(editHandler, /await createManyNotifications\(/)
   assert.match(editHandler, /await createAdminActionAudit\(prisma, transactionResult\.audit\)/)
   assert.doesNotMatch(editHandler, /createPostModerationHistory\(tx,/)
   assert.doesNotMatch(editHandler, /createAdminActionAudit\(tx,/)

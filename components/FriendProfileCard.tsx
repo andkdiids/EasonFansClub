@@ -109,11 +109,11 @@ export function FriendProfileCard({
   const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const bio = friend.profile?.bio || friend.bio || '这个成员还没有填写个人简介。'
   const statusLabel = status === 'SELF'
-    ? '这是你'
+    ? '本人'
     : status === 'FRIEND'
       ? '好友'
       : status === 'OUTGOING_PENDING'
-        ? '已发送申请'
+        ? '已发送好友申请'
         : status === 'INCOMING_PENDING'
           ? '收到好友申请'
           : status === 'BLOCKED'
@@ -153,24 +153,25 @@ export function FriendProfileCard({
           {onRetry ? <button type="button" className="friend-profile-card-retry" onClick={onRetry}>重试</button> : null}
         </> : unavailableMessage ? <p className="friend-profile-card-bio">{unavailableMessage}</p> : <>
           <p className="friend-profile-card-bio">{bio}</p>
-          <p className="friend-profile-card-status">{friend.isOnline ? '当前在线' : statusLabel}</p>
-          <div className="friend-profile-card-actions">
-            <Link href={`/user/${formatUid(friend.uid)}`} onClick={onNavigate}>查看主页</Link>
-            {status === 'FRIEND' && showMessage && onMessage ? <button type="button" onClick={onMessage}>发私信</button> : null}
+          <p className="friend-profile-card-status">{statusLabel}</p>
+          <div className={`friend-profile-card-actions${status === 'INCOMING_PENDING' && friend.requestId ? ' is-three-actions' : ''}`}>
+            <Link className="friend-profile-card-action friend-profile-card-action-secondary" href={`/user/${formatUid(friend.uid)}`} onClick={onNavigate}>查看主页</Link>
+            {status === 'FRIEND' && showMessage && onMessage ? <button className="friend-profile-card-action friend-profile-card-action-primary" type="button" onClick={onMessage}>发私信</button> : null}
             {status === 'NONE' ? (
               <AddFriendButton
                 uid={friend.uid}
                 initialStatus="NONE"
                 targetName={name}
+                buttonClassName="friend-profile-card-action friend-profile-card-action-primary"
                 onStatusChange={reportRelationshipChange}
               />
             ) : null}
             {status === 'OUTGOING_PENDING' ? (
-              <AddFriendButton uid={friend.uid} initialStatus="PENDING" targetName={name} />
+              <button className="friend-profile-card-action friend-profile-card-action-pending" type="button" disabled aria-label="已发送好友申请，等待对方接受">等待对方接受</button>
             ) : null}
             {status === 'INCOMING_PENDING' ? (
               friend.requestId ? (
-                <FriendRequestDecision requestId={friend.requestId} onCompleted={(action) => {
+                <FriendRequestDecision requestId={friend.requestId} layout="inline" onCompleted={(action) => {
                   onRelationshipChange?.(action === 'accept' ? 'FRIEND' : 'NONE')
                 }} />
               ) : (

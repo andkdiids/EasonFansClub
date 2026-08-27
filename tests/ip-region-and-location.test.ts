@@ -259,7 +259,7 @@ test('个人档案与所有主要公开评论链路区分显示两个地区概�
 
 test('帖子保存发表时的独立省级 IP 属地并在广场、发现页和详情展示', () => {
   assert.match(postCreateApi, /resolveIpLocation\(request\)/)
-  assert.match(postCreateApi, /content: input\.content,\s*ipRegion,\s*summary:/)
+  assert.match(postCreateApi, /content: input\.content,[\s\S]*ipRegion,\s*summary:/)
   assert.match(replyCreateApi, /resolveIpLocation\(request\)/)
   assert.match(replyCreateApi, /content,\s*ipRegion,[\s\S]*parentId:/)
   assert.match(postDetailPage, /IpRegionLabel ipRegion=\{post\.ipRegion\}/)
