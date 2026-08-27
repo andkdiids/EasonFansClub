@@ -51,6 +51,7 @@ function syncStatusForError(error: unknown): SyncInstagramPostsResult['status'] 
     || error.code === 'PROVIDER_DISABLED_IN_PHASE_3'
     || error.code === 'PROVIDER_NOT_CONFIGURED'
     || error.code === 'PROVIDER_AUTH_ERROR'
+    || error.code === 'PROVIDER_TARGET_MISMATCH'
   ) return 'BLOCKED'
   return 'FAILED'
 }

@@ -174,6 +174,63 @@ test('Apify Provider calls the fixed Actor once, deduplicates, and sorts by publ
   assert.equal(resolveInstagramProviderName('apify'), 'apify')
 })
 
+test('Apify Provider skips foreign-owner collaboration posts without rewriting their owner', async () => {
+  const { provider } = successfulProvider([
+    rawImage('target-old', '2026-08-20T10:00:00.000Z'),
+    rawImage('foreign', '2026-08-26T10:00:00.000Z', { ownerUsername: 'australianopen' }),
+    rawImage('target-new', '2026-08-25T10:00:00.000Z', { ownerUsername: 'MReasonChan' }),
+  ])
+
+  const posts = await provider.getLatestPosts('MReasonChan', 3)
+  const diagnostics = provider.getDiagnostics()
+
+  assert.deepEqual(posts.map((post) => post.externalId), ['target-new', 'target-old'])
+  assert.ok(posts.every((post) => post.username === 'mreasonchan'))
+  assert.equal(diagnostics?.postItems, 3)
+  assert.equal(diagnostics?.targetPosts, 2)
+  assert.equal(diagnostics?.foreignOwnerSkipped, 1)
+})
+
+test('Apify Provider rejects a dataset with no target-owner posts', async () => {
+  const { provider } = successfulProvider([
+    rawImage('foreign-1', '2026-08-26T10:00:00.000Z', { ownerUsername: 'australianopen' }),
+    rawImage('foreign-2', '2026-08-25T10:00:00.000Z', { ownerUsername: 'shallwetalkhk20' }),
+  ])
+
+  await assert.rejects(provider.getLatestPosts('mreasonchan', 3), (error: unknown) => {
+    return error instanceof InstagramProviderError && error.code === 'PROVIDER_TARGET_MISMATCH'
+  })
+  assert.equal(provider.getDiagnostics()?.targetPosts, 0)
+  assert.equal(provider.getDiagnostics()?.foreignOwnerSkipped, 2)
+})
+
+test('Apify Provider audits inputUrl without using it to rewrite foreign owners', async () => {
+  const { provider } = successfulProvider([
+    rawImage('target-1', '2026-08-26T10:00:00.000Z', {
+      inputUrl: 'https://www.instagram.com/mreasonchan/',
+    }),
+    rawImage('foreign-1', '2026-08-25T10:00:00.000Z', {
+      inputUrl: 'https://www.instagram.com/mreasonchan/',
+      ownerUsername: 'australianopen',
+    }),
+  ])
+
+  const posts = await provider.getLatestPosts('mreasonchan', 3)
+  assert.equal(posts.length, 1)
+  assert.equal(posts[0]?.username, 'mreasonchan')
+  assert.equal(provider.getDiagnostics()?.foreignOwnerSkipped, 1)
+})
+
+test('Apify Provider rejects an inputUrl for a different profile', async () => {
+  const { provider } = successfulProvider([rawImage('wrong-target', '2026-08-26T10:00:00.000Z', {
+    inputUrl: 'https://www.instagram.com/australianopen/',
+  })])
+
+  await assert.rejects(provider.getLatestPosts('mreasonchan', 3), (error: unknown) => {
+    return error instanceof InstagramProviderError && error.code === 'PROVIDER_TARGET_MISMATCH'
+  })
+})
+
 test('Apify Provider attaches an explicit dispatcher without using global proxy settings', async () => {
   const calls: Array<{ url: string; init: RequestInit }> = []
   const proxiedProvider = new ApifyInstagramProvider({

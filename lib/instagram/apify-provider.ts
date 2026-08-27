@@ -28,6 +28,9 @@ export type ApifyProviderDiagnostics = {
   actorRuns: number
   apiRequests: number
   datasetItems: number
+  postItems: number
+  targetPosts: number
+  foreignOwnerSkipped: number
   runStatus: string | null
   usageTotalUsd: number | null
   billableResults: number | null
@@ -175,6 +178,28 @@ function isConcreteInstagramPermalink(value: string | null) {
       && !url.password
   } catch {
     return false
+  }
+}
+
+function profileUsernameFromInputUrl(value: unknown) {
+  const candidate = stringValue(value)
+  if (!candidate) return null
+  try {
+    const url = new URL(candidate)
+    const hostname = url.hostname.toLowerCase()
+    if (url.protocol !== 'https:'
+      || (hostname !== 'instagram.com' && !hostname.endsWith('.instagram.com'))
+      || url.username
+      || url.password) return null
+    const segments = url.pathname.split('/').filter(Boolean)
+    if (segments.length !== 1) return null
+    try {
+      return normalizeInstagramUsername(segments[0] || '')
+    } catch {
+      return null
+    }
+  } catch {
+    return null
   }
 }
 
@@ -453,6 +478,14 @@ export class ApifyInstagramProvider implements InstagramProvider {
     if (!rawItems.length) throw new InstagramProviderError('PROVIDER_EMPTY_RESULT', 'Apify Dataset 没有返回结果')
     const postItems = rawItems.filter((item) => !isApifyErrorRow(item))
     if (!postItems.length) throw new InstagramProviderError('PROVIDER_EMPTY_RESULT', 'Apify 返回空帖子结果')
+    if (this.diagnostics) this.diagnostics.postItems = postItems.length
+
+    const inputUrlUsernames = rawItems
+      .map((item) => profileUsernameFromInputUrl(asRecord(item)?.inputUrl))
+      .filter((username): username is string => Boolean(username))
+    if (inputUrlUsernames.some((username) => username.toLowerCase() !== target.toLowerCase())) {
+      throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Dataset inputUrl 与请求账号不一致')
+    }
 
     let normalized: InstagramPost[]
     try {
@@ -461,13 +494,19 @@ export class ApifyInstagramProvider implements InstagramProvider {
       if (error instanceof InstagramProviderError && error.code === 'PROVIDER_CONTRACT_FAILED') throw error
       throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Dataset 无法 normalize', { cause: error })
     }
-    if (normalized.some((post) => post.username !== target)) {
-      throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Dataset target 与请求账号不一致')
+    const targetPosts = normalized.filter((post) => post.username.toLowerCase() === target.toLowerCase())
+    const foreignOwnerSkipped = normalized.length - targetPosts.length
+    if (this.diagnostics) {
+      this.diagnostics.targetPosts = targetPosts.length
+      this.diagnostics.foreignOwnerSkipped = foreignOwnerSkipped
+    }
+    if (!targetPosts.length) {
+      throw new InstagramProviderError('PROVIDER_TARGET_MISMATCH', 'Apify Dataset 未包含目标账号帖子')
     }
 
-    const uniqueIds = new Set(normalized.map((post) => post.externalId))
-    if (this.diagnostics) this.diagnostics.duplicateExternalIds = normalized.length - uniqueIds.size
-    return dedupeAndSortInstagramPosts(normalized, requestedLimit)
+    const uniqueIds = new Set(targetPosts.map((post) => post.externalId))
+    if (this.diagnostics) this.diagnostics.duplicateExternalIds = targetPosts.length - uniqueIds.size
+    return dedupeAndSortInstagramPosts(targetPosts, requestedLimit)
   }
 
   private async waitForRun(initialRun: ApifyRun) {
@@ -492,6 +531,9 @@ export class ApifyInstagramProvider implements InstagramProvider {
       actorRuns: 1,
       apiRequests: 0,
       datasetItems: 0,
+      postItems: 0,
+      targetPosts: 0,
+      foreignOwnerSkipped: 0,
       runStatus: null,
       usageTotalUsd: null,
       billableResults: null,
@@ -555,6 +597,9 @@ export class ApifyInstagramProvider implements InstagramProvider {
       actorRuns: 0,
       apiRequests: 0,
       datasetItems: 0,
+      postItems: 0,
+      targetPosts: 0,
+      foreignOwnerSkipped: 0,
       runStatus: 'SUCCEEDED',
       usageTotalUsd: null,
       billableResults: null,
