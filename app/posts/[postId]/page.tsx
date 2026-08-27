@@ -23,6 +23,7 @@ import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/ima
 import { getPostModerationAccess } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
+import { isRetryableDatabaseConnectionError } from '@/lib/db-timeout'
 import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMount'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -41,7 +42,17 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-function PostLoadFallback() {
+function postDetailErrorCode(error: unknown) {
+  const record = error && typeof error === 'object' ? error as Record<string, unknown> : null
+  return typeof record?.code === 'string' || typeof record?.code === 'number' ? String(record.code) : undefined
+}
+
+function isDatabasePostDetailError(error: unknown) {
+  const code = postDetailErrorCode(error)
+  return isRetryableDatabaseConnectionError(error) || Boolean(code?.startsWith('P'))
+}
+
+function PostLoadFallback({ postId, databaseUnavailable }: Readonly<{ postId: string; databaseUnavailable: boolean }>) {
   return (
     <>
       <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
@@ -49,11 +60,16 @@ function PostLoadFallback() {
           <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Post</p>
           <h1 className="mt-3 text-3xl font-black text-brand-950">帖子暂时无法加载，请稍后重试</h1>
           <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
-            数据库连接可能正在恢复中。请稍后刷新页面，或返回 E院广场继续浏览。
+            {databaseUnavailable ? '数据库连接可能正在恢复中。' : '帖子服务暂时不可用。'} 请稍后刷新页面，或返回 E院广场继续浏览。
           </p>
-          <Link href="/" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
-            返回首页
-          </Link>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Link href={`/posts/${encodeURIComponent(postId)}`} className="inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+              重新加载
+            </Link>
+            <Link href="/forum" className="inline-flex min-h-11 items-center rounded-full border border-sky-200 bg-white px-5 text-sm font-black text-brand-700">
+              返回 E院广场
+            </Link>
+          </div>
         </section>
       </main>
     </>
@@ -131,53 +147,240 @@ function ModerationRejectedFallback({ postId, canEdit, rejectionReason }: Readon
   )
 }
 
-function loadPost(postId: string, userId?: string) {
-  return prisma.post.findFirst({
-    where: { id: postId },
-    include: {
-      User: {
-        select: {
-          uid: true,
-          id: true,
-          nickname: true,
-          usernameModerationStatus: true,
-          nicknameModerationStatus: true,
+const postCoreSelect = {
+  id: true,
+  title: true,
+  content: true,
+  richContent: true,
+  ipRegion: true,
+  viewCount: true,
+  likeCount: true,
+  replyCount: true,
+  isPinned: true,
+  isFeatured: true,
+  isDeleted: true,
+  createdAt: true,
+  authorId: true,
+  boardId: true,
+  favoriteCount: true,
+  status: true,
+  moderationStatus: true,
+  rejectionReason: true,
+  stickerId: true,
+} satisfies Prisma.PostSelect
 
-          nicknameViolationDisplay: true,
-          level: true,
-          avatarUrl: true,
-          status: true,
-          isDeleted: true,
-          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-        },
-      },
-      Board: { select: { name: true, slug: true } },
-      sticker: { select: { url: true, name: true, moderationStatus: true, type: true } },
-      // 最新 10 个点赞用户（朋友圈式头像展示）；当前用户是否点赞由页面里的批量查询单独判断。
-      Like: {
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        select: {
-          userId: true,
-          User: {
-            select: {
-              id: true,
-              uid: true,
-              nickname: true,
-              usernameModerationStatus: true,
-              nicknameModerationStatus: true,
+type PostCore = Prisma.PostGetPayload<{ select: typeof postCoreSelect }>
 
-              nicknameViolationDisplay: true,
-              avatarUrl: true,
-              Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-            },
-          },
-        },
-      },
-      PostFavorite: userId ? { where: { userId }, select: { id: true } } : false,
-      PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' } },
-    },
+const postAuthorSelect = {
+  uid: true,
+  id: true,
+  nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
+  level: true,
+  avatarUrl: true,
+  status: true,
+  isDeleted: true,
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+} satisfies Prisma.UserSelect
+
+type PostAuthor = Prisma.UserGetPayload<{ select: typeof postAuthorSelect }>
+
+const postLikerSelect = {
+  id: true,
+  uid: true,
+  nickname: true,
+  usernameModerationStatus: true,
+  nicknameModerationStatus: true,
+  nicknameViolationDisplay: true,
+  avatarUrl: true,
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+} satisfies Prisma.UserSelect
+
+const postLikeSelect = {
+  userId: true,
+  User: { select: postLikerSelect },
+} satisfies Prisma.LikeSelect
+
+type PostLike = Prisma.LikeGetPayload<{ select: typeof postLikeSelect }>
+
+const postBoardSelect = { name: true, slug: true } satisfies Prisma.BoardSelect
+type PostBoard = Prisma.BoardGetPayload<{ select: typeof postBoardSelect }>
+
+const postStickerSelect = { url: true, name: true, moderationStatus: true, type: true } satisfies Prisma.StickerSelect
+type PostSticker = Prisma.StickerGetPayload<{ select: typeof postStickerSelect }>
+
+const postMediaSelect = { id: true, url: true } satisfies Prisma.PostMediaSelect
+type PostMedia = Prisma.PostMediaGetPayload<{ select: typeof postMediaSelect }>
+
+function postDetailErrorInfo(error: unknown) {
+  const errorCode = postDetailErrorCode(error)
+  return {
+    errorName: error instanceof Error ? error.name : 'UnknownError',
+    errorCode,
+    retryable: isRetryableDatabaseConnectionError(error),
+  }
+}
+
+type PostDetailLogChannel = 'detail' | 'current-user' | 'support' | 'comments' | 'focused-reply' | 'permission' | 'engagement'
+
+function logPostDetailReadError({
+  postId,
+  channel,
+  operation,
+  error,
+  startedAt,
+  attempt = 1,
+  userId,
+}: Readonly<{
+  postId: string
+  channel: PostDetailLogChannel
+  operation: string
+  error: unknown
+  startedAt: number
+  attempt?: number
+  userId?: string
+}>) {
+  console.error(`[post.${channel}.load.error]`, {
+    postId,
+    userId,
+    operation,
+    attempt,
+    durationMs: Date.now() - startedAt,
+    ...postDetailErrorInfo(error),
   })
+}
+
+function readPostDetailQuery<T>(
+  postId: string,
+  operation: string,
+  query: () => Promise<T>,
+  channel: PostDetailLogChannel = 'support',
+  userId?: string,
+  attempt = 1,
+) {
+  const startedAt = Date.now()
+  return Promise.resolve()
+    .then(query)
+    .catch((error) => {
+      logPostDetailReadError({ postId, channel, operation, error, startedAt, attempt, userId })
+      throw error
+    })
+}
+
+const transientRetryDelayMs = 150
+
+function waitForTransientPostRetry() {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, transientRetryDelayMs)
+  })
+}
+
+async function loadPost(postId: string) {
+  const query = (attempt: number) => readPostDetailQuery(
+    postId,
+    'post.findUnique',
+    () => prisma.post.findUnique({ where: { id: postId }, select: postCoreSelect }),
+    'detail',
+    undefined,
+    attempt,
+  )
+
+  try {
+    return await query(1)
+  } catch (error) {
+    if (!isRetryableDatabaseConnectionError(error)) throw error
+    await waitForTransientPostRetry()
+    return query(2)
+  }
+}
+
+type PostDetailSupport = {
+  author: PostAuthor | null
+  board: PostBoard | null
+  sticker: PostSticker | null
+  likes: PostLike[]
+  favorited: boolean
+  media: PostMedia[]
+  authorLoadFailed: boolean
+  authorMissing: boolean
+}
+
+function fallbackPostAuthor(authorId: string): PostAuthor {
+  return {
+    id: authorId,
+    uid: 0,
+    nickname: 'E院用户',
+    usernameModerationStatus: 'NORMAL',
+    nicknameModerationStatus: 'NORMAL',
+    nicknameViolationDisplay: null,
+    level: 0,
+    avatarUrl: null,
+    status: 'DELETED',
+    isDeleted: true,
+    Profile: null,
+  }
+}
+
+async function loadPostSupport(post: PostCore, userId?: string | null): Promise<PostDetailSupport> {
+  const [authorResult, boardResult, stickerResult, mediaResult, likesResult, favoriteResult] = await Promise.allSettled([
+    readPostDetailQuery(post.id, 'author.findUnique', () => prisma.user.findUnique({ where: { id: post.authorId }, select: postAuthorSelect })),
+    readPostDetailQuery(post.id, 'board.findUnique', () => prisma.board.findUnique({ where: { id: post.boardId }, select: postBoardSelect })),
+    post.stickerId
+      ? readPostDetailQuery(post.id, 'sticker.findUnique', () => prisma.sticker.findUnique({ where: { id: post.stickerId! }, select: postStickerSelect }))
+      : Promise.resolve(null),
+    readPostDetailQuery(post.id, 'postMedia.findMany', () => prisma.postMedia.findMany({
+      where: { postId: post.id, type: 'IMAGE' },
+      orderBy: { sortOrder: 'asc' },
+      select: postMediaSelect,
+    })),
+    readPostDetailQuery(post.id, 'like.findMany', () => prisma.like.findMany({
+      where: { postId: post.id },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: postLikeSelect,
+    })),
+    userId
+      ? readPostDetailQuery(post.id, 'postFavorite.findUnique', () => prisma.postFavorite.findUnique({
+          where: { postId_userId: { postId: post.id, userId } },
+          select: { id: true },
+        }), 'support', userId)
+      : Promise.resolve(null),
+  ])
+
+  const author = authorResult.status === 'fulfilled' ? authorResult.value : null
+  return {
+    author,
+    board: boardResult.status === 'fulfilled' ? boardResult.value : null,
+    sticker: stickerResult.status === 'fulfilled' ? stickerResult.value : null,
+    likes: likesResult.status === 'fulfilled' ? likesResult.value : [],
+    favorited: favoriteResult.status === 'fulfilled' && Boolean(favoriteResult.value),
+    media: mediaResult.status === 'fulfilled' ? mediaResult.value : [],
+    authorLoadFailed: authorResult.status === 'rejected',
+    authorMissing: authorResult.status === 'fulfilled' && authorResult.value === null,
+  }
+}
+
+async function loadPostAdminPermission(
+  user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>,
+  permissionKey: 'post_manage' | 'reply_manage',
+  postId: string,
+) {
+  const permissionStartedAt = Date.now()
+  try {
+    return await hasAdminPermission(user, permissionKey)
+  } catch (error) {
+    logPostDetailReadError({
+      postId,
+      channel: 'permission',
+      operation: `admin.hasAdminPermission:${permissionKey}`,
+      error,
+      startedAt: permissionStartedAt,
+      userId: user.id,
+    })
+    return false
+  }
 }
 
 
@@ -241,6 +444,34 @@ const replyDetailSelect = {
   },
 } satisfies Prisma.ReplySelect
 
+async function loadVisibleReplyDescendants(tx: Prisma.TransactionClient, postId: string, rootIds: string[]) {
+  const descendants: Array<Prisma.ReplyGetPayload<{ select: typeof replyDetailSelect }>> = []
+  const seen = new Set(rootIds)
+  let frontier = Array.from(new Set(rootIds))
+
+  // Only walk threads attached to the roots already visible on this page (or
+  // to the viewer's own root replies). The previous query loaded every child
+  // reply for the whole post before filtering in memory, which made a popular
+  // post's detail page scale with the complete comment tree.
+  for (let depth = 0; frontier.length > 0 && depth < 20; depth += 1) {
+    const rows = await tx.reply.findMany({
+      where: { postId, isDeleted: false, parentId: { in: frontier } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: replyDetailSelect,
+    })
+    const nextFrontier: string[] = []
+    for (const row of rows) {
+      if (seen.has(row.id)) continue
+      seen.add(row.id)
+      descendants.push(row)
+      nextFrontier.push(row.id)
+    }
+    frontier = nextFrontier
+  }
+
+  return descendants
+}
+
 async function loadPostReplies(postId: string, sort: PostReplySort, requestedPage: number, viewerId?: string | null) {
   return prisma.$transaction(async (tx) => {
     const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
@@ -272,11 +503,7 @@ async function loadPostReplies(postId: string, sort: PostReplySort, requestedPag
     const viewerRootIds = myRootReplies.map((reply) => reply.id)
     const childRootIds = Array.from(new Set([...rootIds, ...viewerRootIds]))
     const childRows = childRootIds.length
-      ? await tx.reply.findMany({
-          where: { postId, isDeleted: false, parentId: { not: null } },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          select: replyDetailSelect,
-        })
+      ? await loadVisibleReplyDescendants(tx, postId, childRootIds)
       : []
     const includedRootIds = new Set(rootIds)
     const includedViewerRootIds = new Set(viewerRootIds)
@@ -439,24 +666,57 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const focusId = query.focus?.slice(0, 80)
   const commentSort = parsePostReplySort(query.commentSort)
   const requestedCommentPage = Math.max(1, Number.parseInt(query.commentPage || '1', 10) || 1)
-  const user = await getCurrentUser()
-
-  let post: Awaited<ReturnType<typeof loadPost>>
+  let postCore: Awaited<ReturnType<typeof loadPost>>
+  const postLoadStartedAt = Date.now()
   try {
-    post = await loadPost(postId, user?.id)
+    postCore = await loadPost(postId)
   } catch (error) {
-    console.error('[post:detail:load-error]', { postId, userId: user?.id, error })
-    return <PostLoadFallback />
+    logPostDetailReadError({
+      postId,
+      channel: 'detail',
+      operation: 'post.findUnique',
+      error,
+      startedAt: postLoadStartedAt,
+    })
+    return <PostLoadFallback postId={postId} databaseUnavailable={isDatabasePostDetailError(error)} />
   }
 
-  if (post === null) {
+  if (postCore === null) {
     notFound()
   }
+
+  const currentUserStartedAt = Date.now()
+  let user: Awaited<ReturnType<typeof getCurrentUser>> = null
+  try {
+    user = await getCurrentUser()
+  } catch (error) {
+    // A public post must remain readable when the optional session lookup is
+    // unavailable. Interactive state is simply rendered as signed out for
+    // this request; a valid session is not revoked or redirected to login.
+    logPostDetailReadError({
+      postId,
+      channel: 'current-user',
+      operation: 'auth.getCurrentUser',
+      error,
+      startedAt: currentUserStartedAt,
+    })
+  }
+
+  const support = await loadPostSupport(postCore, user?.id)
+  const post = {
+    ...postCore,
+    User: support.author || fallbackPostAuthor(postCore.authorId),
+    Board: support.board,
+    sticker: support.sticker,
+    Like: support.likes,
+    PostMedia: support.media,
+  }
+  const authorLoadFailed = support.authorLoadFailed
 
   // 审核状态处理：用户可能通过通知/收藏/历史链接进入未审核帖子。
   // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非 404。
   // 管理员可查看全部（保持现有权限）；普通用户只能查看 APPROVED。
-  const viewerIsAdmin = Boolean(user && await hasAdminPermission(user, 'post_manage'))
+  const viewerIsAdmin = Boolean(user && await loadPostAdminPermission(user, 'post_manage', postId))
   const viewerIsAuthor = Boolean(user && user.id === post.authorId)
   const moderationAccess = getPostModerationAccess(post.moderationStatus, viewerIsAdmin, viewerIsAuthor)
   if (moderationAccess === 'PENDING') {
@@ -470,7 +730,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     return <PostUnavailableFallback reason="POST" />
   }
 
-  if (post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile) {
+  if (!authorLoadFailed && (support.authorMissing || post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile)) {
     console.warn('[post:detail:unavailable]', {
       postId,
       reason: post.User.isDeleted
@@ -490,6 +750,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   let myPostReplies: Awaited<ReturnType<typeof loadPostReplies>>['myRows'] = []
   let commentPage = 1
   let commentTotalPages = 1
+  const commentsStartedAt = Date.now()
   try {
     const loadedReplies = await loadPostReplies(postId, commentSort, requestedCommentPage, user?.id)
     postReplies = loadedReplies.rows
@@ -498,10 +759,18 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     commentTotalPages = loadedReplies.totalPages
   } catch (error) {
     commentsLoadError = true
-    console.error('[post:comments:load-failed]', { postId, userId: user?.id, error })
+    logPostDetailReadError({
+      postId,
+      channel: 'comments',
+      operation: 'reply.loadPostReplies',
+      error,
+      startedAt: commentsStartedAt,
+      userId: user?.id,
+    })
   }
 
   if (focusId && !postReplies.some((reply) => reply.id === focusId)) {
+    const focusedReplyStartedAt = Date.now()
     try {
       const focusedReplies = await loadFocusedReplyChain(postId, focusId)
       const existingIds = new Set(postReplies.map((reply) => reply.id))
@@ -534,18 +803,33 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       })))
     } catch (error) {
       commentsLoadError = true
-      console.warn('[post:comments:focus-load-failed]', { postId, focusId, error })
+      logPostDetailReadError({
+        postId,
+        channel: 'focused-reply',
+        operation: 'reply.loadFocusedReplyChain',
+        error,
+        startedAt: focusedReplyStartedAt,
+        userId: user?.id,
+      })
     }
   }
 
   const focusedReplyExists = Boolean(focusId && postReplies.some((reply) => reply.id === focusId))
   if (user && (!focusId || focusedReplyExists)) {
+    const notificationReadStartedAt = Date.now()
     const markedNotifications = await markPersonalNotificationsForTargetRead({
       userId: user.id,
       linkPrefix: focusId ? `/posts/${postId}?focus=${focusId}` : `/posts/${postId}`,
       types: focusId ? ['REPLY', 'LIKE'] : ['LIKE'],
     }).catch((error) => {
-      console.warn('[post:notifications:mark-read-failed]', { postId, focusId, error })
+      logPostDetailReadError({
+        postId,
+        channel: 'support',
+        operation: 'notifications.markPersonalNotificationsForTargetRead',
+        error,
+        startedAt: notificationReadStartedAt,
+        userId: user?.id,
+      })
       return 0
     })
     if (markedNotifications > 0) emitRealtime(user.id, 'notification')
@@ -561,35 +845,56 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       ...reply.ReplyMention.map((mention) => mention.User_ReplyMention_mentionedUserIdToUser.id),
     ]),
   ]))
-  const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
+  let equippedBadgeMap: Awaited<ReturnType<typeof getEquippedBadgesForUsers>> = new Map()
+  const badgesStartedAt = Date.now()
+  try {
+    equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
+  } catch (error) {
+    logPostDetailReadError({
+      postId,
+      channel: 'support',
+      operation: 'badge.getEquippedBadgesForUsers',
+      error,
+      startedAt: badgesStartedAt,
+      userId: user?.id,
+    })
+  }
 
   // 当前用户的点赞状态：两次恒定数量的批量查询（避免 N+1）；点赞用户头像列表由 Like / ReplyLike include 提供。
   let viewerPostLiked = false
   const viewerLikedReplyIds = new Set<string>()
   if (user) {
-    try {
-      const replyIds = Array.from(new Set(allLoadedReplies.map((reply) => reply.id)))
-      const [viewerPostLike, viewerReplyLikes] = await Promise.all([
-        prisma.like.findUnique({ where: { postId_userId: { postId, userId: user.id } }, select: { id: true } }),
-        prisma.replyLike.findMany({
+    const replyIds = Array.from(new Set(allLoadedReplies.map((reply) => reply.id)))
+    const [viewerPostLike, viewerReplyLikes] = await Promise.allSettled([
+      readPostDetailQuery(
+        postId,
+        'like.findUnique.viewer',
+        () => prisma.like.findUnique({ where: { postId_userId: { postId, userId: user.id } }, select: { id: true } }),
+        'engagement',
+        user.id,
+      ),
+      readPostDetailQuery(
+        postId,
+        'replyLike.findMany.viewer',
+        () => prisma.replyLike.findMany({
           where: { userId: user.id, replyId: { in: replyIds } },
           select: { replyId: true },
         }),
-      ])
-      viewerPostLiked = Boolean(viewerPostLike)
-      viewerReplyLikes.forEach((like) => viewerLikedReplyIds.add(like.replyId))
-    } catch (error) {
-      console.warn('[post:detail:viewer-likes-failed]', { postId, error })
-    }
+        'engagement',
+        user.id,
+      ),
+    ])
+    if (viewerPostLike.status === 'fulfilled') viewerPostLiked = Boolean(viewerPostLike.value)
+    if (viewerReplyLikes.status === 'fulfilled') viewerReplyLikes.value.forEach((like) => viewerLikedReplyIds.add(like.replyId))
   }
 
   const liked = viewerPostLiked
-  const favorited = Array.isArray(post.PostFavorite) && post.PostFavorite.length > 0
-  const authorAvatar = publicImageVariantUrl(profileImageUrl(post.User.Profile.avatarUrl || post.User.avatarUrl), 'avatar-md')
-  const authorName = getPublicUserDisplayName(post.User)
-  const isArchivedAuthor = post.User.uid === 0
-  const canManagePost = Boolean(user && await hasAdminPermission(user, 'post_manage'))
-  const canManageReplies = Boolean(user && await hasAdminPermission(user, 'reply_manage'))
+  const favorited = support.favorited
+  const authorAvatar = publicImageVariantUrl(profileImageUrl(post.User.Profile?.avatarUrl || post.User.avatarUrl), 'avatar-md')
+  const authorName = authorLoadFailed ? '作者资料暂时不可用' : getPublicUserDisplayName(post.User)
+  const isArchivedAuthor = authorLoadFailed || post.User.uid === 0
+  const canManagePost = viewerIsAdmin
+  const canManageReplies = Boolean(user && await loadPostAdminPermission(user, 'reply_manage', postId))
   const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
   const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
   const publicPostContent = publicContentImageMarkers(post.content)
@@ -684,9 +989,13 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
             {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}
-            <Link href={`/boards/${post.Board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
-              {post.Board.name}
-            </Link>
+            {post.Board ? (
+              <Link href={`/boards/${post.Board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
+                {post.Board.name}
+              </Link>
+            ) : (
+              <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">E院广场</span>
+            )}
           </div>
           <h1 className="text-4xl font-black leading-tight text-brand-950">{publicPostTitle}</h1>
           <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-bold text-slate-500">
