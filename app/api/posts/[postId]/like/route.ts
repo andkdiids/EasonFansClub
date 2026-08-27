@@ -78,7 +78,7 @@ export async function POST(request: Request, { params }: Params) {
     const existing = await tx.like.findUnique({ where: { postId_userId: { postId, userId: user.id } } })
     if (existing) {
       const likeCount = await tx.like.count({ where: { postId } })
-      if (likeCount !== post.likeCount) await tx.post.update({ where: { id: postId }, data: { likeCount } })
+      if (likeCount !== post.likeCount) await tx.post.update({ where: { id: postId }, data: { likeCount }, select: { id: true } })
       return { isLiked: true, likeCount }
     }
 

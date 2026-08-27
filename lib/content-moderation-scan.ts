@@ -143,7 +143,7 @@ async function scanPosts(words: ModerationWord[], summary: ModerationScanSummary
       if (post.User.role === 'ADMIN' || post.User.role === 'SUPER_ADMIN') continue
       const rows = matched(`${post.title}\n${post.content}`, words)
       if (!rows.length) continue
-      await prisma.post.update({ where: { id: post.id }, data: violationData(rows) })
+      await prisma.post.update({ where: { id: post.id }, data: violationData(rows), select: { id: true } })
       summary.posts += 1
     }
   }

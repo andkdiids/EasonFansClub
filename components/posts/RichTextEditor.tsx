@@ -32,6 +32,7 @@ export type RichTextEditorHandle = {
 type RichTextEditorProps = {
   initialContent?: string
   initialRichContent?: unknown | null
+  compatibilityMode?: boolean
   onChange: (content: RichTextContent, plainText: string) => void
   placeholder?: string
 }
@@ -200,8 +201,8 @@ function sanitizePastedHtml(html: string) {
   return renderNodes(Array.from(parsed.body.childNodes))
 }
 
-function initialEditorContent(initialRichContent: unknown | null | undefined, initialContent: string) {
-  if (initialRichContent !== null && initialRichContent !== undefined) {
+function initialEditorContent(initialRichContent: unknown | null | undefined, initialContent: string, compatibilityMode: boolean) {
+  if (!compatibilityMode && initialRichContent !== null && initialRichContent !== undefined) {
     const result = validateRichPostContent(initialRichContent)
     if (result.valid) return result.value
   }
@@ -220,13 +221,14 @@ function emitEditorChange(editor: Editor, onChange: RichTextEditorProps['onChang
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor({
   initialContent = '',
   initialRichContent,
+  compatibilityMode = false,
   onChange,
   placeholder = '分享你的想法...',
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const initialDocument = useMemo(
-    () => initialEditorContent(initialRichContent, initialContent),
-    [initialContent, initialRichContent],
+    () => initialEditorContent(initialRichContent, initialContent, compatibilityMode),
+    [initialContent, initialRichContent, compatibilityMode],
   )
   const [openMenu, setOpenMenu] = useState<'size' | 'color' | null>(null)
   const [, setToolbarVersion] = useState(0)

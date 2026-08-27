@@ -222,6 +222,7 @@ export async function POST(request: Request, { params }: Params) {
     await tx.post.update({
       where: { id: postId },
       data: { replyCount: { increment: 1 } },
+      select: { id: true },
     })
     await tx.friendActivity.create({ data: { actorId: user.id, type: 'COMMENT', content: stickerId ? '[表情]' : textContent, targetUrl: `/posts/${postId}?focus=${createdReply.id}` } })
 

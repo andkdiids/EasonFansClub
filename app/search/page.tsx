@@ -32,7 +32,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               { content: { contains: q } },
             ],
           },
-          include: {
+          select: {
+            id: true,
+            title: true,
+            moderationStatus: true,
+            replyCount: true,
             User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
             Board: { select: { name: true, slug: true } },
           },

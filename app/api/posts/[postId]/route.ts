@@ -15,11 +15,108 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
-import { extractPlainText, validateRichPostContent } from '@/lib/rich-text'
+import {
+  logPostRichContentCompatibilityMode,
+  resolvePostContentInput,
+} from '@/lib/post-rich-content-compat'
 
 type Params = { params: Promise<{ postId: string }> }
 
 const POST_DETAIL_REPLY_LIMIT = 50
+
+// Keep this query explicit while production is waiting for the rich-content
+// migration. A top-level include would select every Post scalar, including
+// Post.richContent, even though the detail API only needs the legacy content.
+const postDetailSelect = {
+  id: true,
+  title: true,
+  content: true,
+  ipRegion: true,
+  viewCount: true,
+  likeCount: true,
+  replyCount: true,
+  isPinned: true,
+  profilePinnedAt: true,
+  isFeatured: true,
+  isDeleted: true,
+  deletedAt: true,
+  createdAt: true,
+  updatedAt: true,
+  authorId: true,
+  boardId: true,
+  contentType: true,
+  favoriteCount: true,
+  isLocked: true,
+  isRecommended: true,
+  publishedAt: true,
+  readUserCount: true,
+  shareCount: true,
+  status: true,
+  moderationStatus: true,
+  moderationReason: true,
+  matchedBannedWords: true,
+  reviewedAt: true,
+  reviewedById: true,
+  rejectionReason: true,
+  summary: true,
+  stickerId: true,
+  User: {
+    select: {
+      id: true,
+      nickname: true,
+      usernameModerationStatus: true,
+      nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
+      level: true,
+      avatarUrl: true,
+      Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+    },
+  },
+  Board: { select: { name: true, slug: true } },
+  Reply: {
+    where: {
+      isDeleted: false,
+      User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+    },
+    orderBy: { createdAt: 'asc' as const },
+    take: POST_DETAIL_REPLY_LIMIT,
+    select: {
+      id: true,
+      content: true,
+      ipRegion: true,
+      stickerId: true,
+      isDeleted: true,
+      moderationStatus: true,
+      moderationReason: true,
+      matchedBannedWords: true,
+      isPinned: true,
+      deletedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      postId: true,
+      authorId: true,
+      parentId: true,
+      likeCount: true,
+      User: {
+        select: {
+          id: true,
+          nickname: true,
+          usernameModerationStatus: true,
+          nicknameModerationStatus: true,
+          nicknameViolationDisplay: true,
+          level: true,
+          avatarUrl: true,
+          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+        },
+      },
+    },
+  },
+  PostMedia: {
+    where: { type: 'IMAGE' as const },
+    orderBy: { sortOrder: 'asc' as const },
+    select: { id: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true },
+  },
+} satisfies Prisma.PostSelect
 
 function redactPostDeleteErrorText(value: string) {
   return value
@@ -250,48 +347,7 @@ export async function GET(_request: Request, { params }: Params) {
       }),
       User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
-    include: {
-      User: {
-        select: {
-          id: true,
-          nickname: true,
-          usernameModerationStatus: true,
-          nicknameModerationStatus: true,
-          nicknameViolationDisplay: true,
-          level: true,
-          avatarUrl: true,
-          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-        },
-      },
-      Board: { select: { name: true, slug: true } },
-      Reply: {
-        where: {
-          isDeleted: false,
-          User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-        },
-        orderBy: { createdAt: 'asc' },
-        take: POST_DETAIL_REPLY_LIMIT,
-        include: {
-          User: {
-            select: {
-              id: true,
-              nickname: true,
-              usernameModerationStatus: true,
-              nicknameModerationStatus: true,
-              nicknameViolationDisplay: true,
-              level: true,
-              avatarUrl: true,
-              Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-            },
-          },
-        },
-      },
-      PostMedia: {
-        where: { type: 'IMAGE' },
-        orderBy: { sortOrder: 'asc' },
-        select: { id: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true },
-      },
-    },
+    select: postDetailSelect,
   })
 
   if (!post) {
@@ -299,10 +355,6 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   const { User, Board, Reply, PostMedia, ...postData } = post
-  const richContentResult = validateRichPostContent(postData.richContent)
-  if (postData.richContent !== null && !richContentResult.valid) {
-    console.warn('[posts.detail:invalid-rich-content]', { postId, errors: richContentResult.errors })
-  }
   const author = User.Profile ? {
     ...User,
     nickname: getPublicUserDisplayName(User),
@@ -318,7 +370,7 @@ export async function GET(_request: Request, { params }: Params) {
       ...postData,
       title: publicModerationText(postData.title, postData.moderationStatus),
       content: publicModerationText(publicContentImageMarkers(postData.content), postData.moderationStatus),
-      richContent: richContentResult.valid ? richContentResult.value : null,
+      richContent: null,
       author,
       board: Board,
       media: PostMedia.map((media) => ({
@@ -389,7 +441,6 @@ export async function PATCH(request: Request, { params }: Params) {
         isFeatured: true,
         title: true,
         content: true,
-        richContent: true,
         stickerId: true,
         moderationStatus: true,
       },
@@ -590,7 +641,6 @@ type EditContext = {
     status: string
     title: string
     content: string
-    richContent: Prisma.JsonValue | null
     stickerId: string | null
     moderationStatus: string
   }
@@ -614,24 +664,22 @@ async function handleEditPost(
 
   const rawTitle = sanitizeText(typeof body.title === 'string' ? body.title : existing.title, 120)
   const hasRichContentField = Object.prototype.hasOwnProperty.call(body, 'richContent')
-  const hasPlainContentField = typeof body.content === 'string'
-  let nextRichContent: Prisma.JsonValue | null = hasRichContentField || hasPlainContentField ? null : existing.richContent
-  let rawContent = stripUnsafeHtml(sanitizeText(typeof body.content === 'string' ? body.content : existing.content, 20000))
-  if (hasRichContentField && body.richContent !== null) {
-    const richContentResult = validateRichPostContent(body.richContent)
-    if (!richContentResult.valid) {
+  const contentInput = resolvePostContentInput({
+    content: typeof body.content === 'string' ? body.content : existing.content,
+    richContent: body.richContent,
+    hasRichContent: hasRichContentField,
+  })
+  if (contentInput.validation && !contentInput.validation.valid) {
       return NextResponse.json({
         message: '正文格式无效，请刷新后重试',
         errors: { content: '正文格式无效' },
-        details: richContentResult.errors,
+        details: contentInput.validation.errors,
       }, { status: 400 })
-    }
-    nextRichContent = richContentResult.value
-    // The validated document contains text nodes only; preserve literal
-    // angle brackets in that text while keeping the legacy HTML sanitizer for
-    // old plain-text clients.
-    rawContent = sanitizeText(extractPlainText(richContentResult.value), 20000)
   }
+  if (contentInput.usedCompatibilityMode && contentInput.validation?.valid) {
+    logPostRichContentCompatibilityMode('edit', postId)
+  }
+  const rawContent = stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
   const hasSticker = Boolean(existing.stickerId)
   const nextBoardId = typeof body.boardId === 'string' ? sanitizeText(body.boardId, 80) : existing.boardId
 
@@ -684,8 +732,7 @@ async function handleEditPost(
   const mediaChanged = addImageUrls.length > 0
     || keptIds.length !== currentMediaIds.length
     || keptIds.some((id, index) => id !== currentMediaIds[index])
-  const richContentChanged = JSON.stringify(existing.richContent) !== JSON.stringify(nextRichContent)
-  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || richContentChanged || nextBoardId !== existing.boardId || mediaChanged
+  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || nextBoardId !== existing.boardId || mediaChanged
   const removedCount = currentMedia.length - keptIds.length
   const keptCount = keptIds.length
   if (hasTooManyContentImages(body.addImageUrls) || keptCount + addImageUrls.length > MAX_CONTENT_IMAGES) {
@@ -695,13 +742,12 @@ async function handleEditPost(
     return NextResponse.json({ message: '请检查帖子内容', errors }, { status: 400 })
   }
   if (!contentChanged) {
-    const richContentResult = validateRichPostContent(existing.richContent)
     return NextResponse.json({
       post: {
         id: existing.id,
         title: existing.title,
         content: publicContentImageMarkers(existing.content),
-        richContent: richContentResult.valid ? richContentResult.value : null,
+        richContent: null,
         moderationStatus: existing.moderationStatus,
       },
       moderationStatus: existing.moderationStatus,
@@ -731,7 +777,6 @@ async function handleEditPost(
       data: {
         title: rawTitle,
         content: rawContent,
-        richContent: nextRichContent === null ? Prisma.DbNull : nextRichContent as Prisma.InputJsonValue,
         summary: createSummary(rawContent),
         boardId: nextBoardId,
         // 管理员编辑沿用现有直接发布豁免；普通用户编辑始终开启新的审核周期。
@@ -744,7 +789,7 @@ async function handleEditPost(
           rejectionReason: null,
         } : {}),
       },
-      select: { id: true, title: true, content: true, richContent: true, moderationStatus: true, updatedAt: true },
+      select: { id: true, title: true, content: true, moderationStatus: true, updatedAt: true },
     })
 
     // 删除被移除的图片（keepMediaIds 显式排除的）。
@@ -894,17 +939,12 @@ async function handleEditPost(
     })
   }
 
-  const richContentResult = validateRichPostContent(transactionResult.post.richContent)
-  if (transactionResult.post.richContent !== null && !richContentResult.valid) {
-    console.warn('[posts.edit:invalid-rich-content-after-save]', { postId, errors: richContentResult.errors })
-  }
-
   return NextResponse.json({
     post: {
       id: transactionResult.post.id,
       title: transactionResult.post.title,
       content: publicContentImageMarkers(transactionResult.post.content),
-      richContent: richContentResult.valid ? richContentResult.value : null,
+      richContent: null,
       moderationStatus: transactionResult.post.moderationStatus,
       updatedAt: transactionResult.post.updatedAt,
     },

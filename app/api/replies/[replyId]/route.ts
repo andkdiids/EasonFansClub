@@ -123,6 +123,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
       await tx.post.update({
         where: { id: reply.postId },
         data: { replyCount },
+        select: { id: true },
       })
 
       // Existing business rules only reverse community rewards for moderator

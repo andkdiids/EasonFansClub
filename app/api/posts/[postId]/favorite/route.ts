@@ -44,7 +44,7 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const favoriteCount = await tx.postFavorite.count({ where: { postId } })
-    await tx.post.update({ where: { id: postId }, data: { favoriteCount } })
+    await tx.post.update({ where: { id: postId }, data: { favoriteCount }, select: { id: true } })
     return { isFavorited: requestedState ?? !existing, favoriteCount }
   })
 
@@ -72,7 +72,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     await tx.postFavorite.deleteMany({ where: { postId, userId: guard.user.id } })
     const favoriteCount = await tx.postFavorite.count({ where: { postId } })
-    await tx.post.update({ where: { id: postId }, data: { favoriteCount } })
+    await tx.post.update({ where: { id: postId }, data: { favoriteCount }, select: { id: true } })
     return { isFavorited: false, favoriteCount }
   })
 

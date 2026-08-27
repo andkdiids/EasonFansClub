@@ -151,7 +151,6 @@ const postCoreSelect = {
   id: true,
   title: true,
   content: true,
-  richContent: true,
   ipRegion: true,
   viewCount: true,
   likeCount: true,
@@ -1018,7 +1017,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <span>回复 {post.replyCount}</span>
           </div>
           <RichPostContent
-            richContent={post.moderationStatus === 'VIOLATION' ? null : post.richContent}
+            richContent={null}
             fallbackContent={safePublicPostContent}
             className="mt-8 text-lg leading-9 text-slate-700 post-detail-body"
           />

@@ -21,7 +21,6 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
       id: true,
       title: true,
       content: true,
-      richContent: true,
       authorId: true,
       boardId: true,
       Board: { select: { id: true, name: true, slug: true } },
@@ -72,7 +71,6 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
           postId={post.id}
           initialTitle={post.title}
           initialContent={publicContentImageMarkers(post.content)}
-          initialRichContent={post.richContent}
           initialBoardId={post.boardId}
           boards={boards}
           initialMedia={initialMedia}

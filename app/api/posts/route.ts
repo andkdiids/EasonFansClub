@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
@@ -17,7 +16,10 @@ import { publicPostWhere } from '@/lib/post-moderation'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
-import { extractPlainText, validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
+import {
+  logPostRichContentCompatibilityMode,
+  resolvePostContentInput,
+} from '@/lib/post-rich-content-compat'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -229,23 +231,22 @@ export async function POST(request: Request) {
 
   const rawTitle = sanitizeText(body.title, 120)
   const hasRichContent = Object.prototype.hasOwnProperty.call(body, 'richContent')
-  let normalizedRichContent: RichTextContent | null = null
-  let rawContent = stripUnsafeHtml(sanitizeText(body.content, 20000))
-  if (hasRichContent && body.richContent !== null) {
-    const richContentResult = validateRichPostContent(body.richContent)
-    if (!richContentResult.valid) {
+  const contentInput = resolvePostContentInput({
+    content: body.content,
+    richContent: body.richContent,
+    hasRichContent,
+  })
+  if (contentInput.validation && !contentInput.validation.valid) {
       return NextResponse.json({
         message: '正文格式无效，请刷新后重试',
         errors: { content: '正文格式无效' },
-        details: richContentResult.errors,
+        details: contentInput.validation.errors,
       }, { status: 400 })
-    }
-    normalizedRichContent = richContentResult.value
-    // Rich content has already been reduced to text nodes by the whitelist
-    // validator. Keep literal angle brackets as text so search/SEO/content
-    // moderation see the same plain content that the renderer displays.
-    rawContent = sanitizeText(extractPlainText(richContentResult.value), 20000)
   }
+  if (contentInput.usedCompatibilityMode && contentInput.validation?.valid) {
+    logPostRichContentCompatibilityMode('create')
+  }
+  const rawContent = stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
   const rawStickerId = typeof body.stickerId === 'string' && body.stickerId ? body.stickerId.trim().slice(0, 191) : null
   const isAdmin = shouldBypassForbiddenWords(user)
   const input = {
@@ -334,7 +335,6 @@ export async function POST(request: Request) {
           authorId: user.id,
           title: input.title,
           content: input.content,
-          ...(normalizedRichContent ? { richContent: normalizedRichContent as Prisma.InputJsonValue } : {}),
           ipRegion,
           summary: createSummary(input.content),
           status: 'PUBLISHED',
