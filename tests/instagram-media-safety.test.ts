@@ -27,6 +27,60 @@ test('media suffix allowlist enforces a label boundary', () => {
   assert.equal(isAllowedMediaHostname('scontent-gru2.cdninstagram.com', 'scontent-gru1.cdninstagram.com'), false)
 })
 
+test('direct media requests still fail closed when local DNS returns EAI_AGAIN', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let fetchCalls = 0
+  try {
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://media.example.test/image.jpg', type: 'IMAGE' },
+        {
+          lookupImpl: (async () => { throw Object.assign(new Error('temporary DNS failure'), { code: 'EAI_AGAIN' }) }) as unknown as typeof import('node:dns/promises').lookup,
+          fetchImpl: (async () => { fetchCalls += 1; return new Response(null, { status: 200 }) }) as typeof fetch,
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'MEDIA_DNS_FAILED',
+    )
+    assert.equal(fetchCalls, 0)
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('proxy media requests do not depend on local DNS for approved Meta CDN hosts', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = DEFAULT_ALLOWED_MEDIA_HOSTS
+  let lookupCalls = 0
+  const dispatchers: unknown[] = []
+  try {
+    for (const sourceUrl of [
+      'https://scontent-dus1-1.cdninstagram.com/image.jpg',
+      'https://instagram.fmgf7-1.fna.fbcdn.net/image.jpg',
+    ]) {
+      const result = await inspectInstagramMediaUrl(
+        { sourceUrl, type: 'IMAGE' },
+        {
+          proxyUrl: 'http://127.0.0.1:7890',
+          lookupImpl: (async () => { lookupCalls += 1; throw new Error('local DNS must not be used in proxy mode') }) as unknown as typeof import('node:dns/promises').lookup,
+          fetchImpl: (async (_input, init = {}) => {
+            dispatchers.push((init as RequestInit & { dispatcher?: unknown }).dispatcher)
+            return new Response('jpeg', { status: 200, headers: { 'content-type': 'image/jpeg', 'content-length': '4' } })
+          }) as typeof fetch,
+        },
+      )
+      assert.equal(result.status, 200)
+    }
+    assert.equal(lookupCalls, 0)
+    assert.equal(dispatchers.length, 2)
+    assert.equal(dispatchers.every(Boolean), true)
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
 test('the reviewed production default accepts the real Dataset CDN host and rejects broad domains', () => {
   const env = process.env as Record<string, string | undefined>
   const previousNodeEnv = env.NODE_ENV
@@ -116,6 +170,66 @@ test('media redirect to a private-resolving host is rejected after the redirect 
       ),
       (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'UNSAFE_URL',
     )
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('proxy redirects are revalidated without local DNS and reject unsafe targets', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let lookupCalls = 0
+  try {
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://origin.example.test/image.jpg', type: 'IMAGE' },
+        {
+          proxyUrl: 'http://127.0.0.1:7890',
+          lookupImpl: (async () => { lookupCalls += 1; throw new Error('local DNS must not be used in proxy mode') }) as unknown as typeof import('node:dns/promises').lookup,
+          fetchImpl: (async () => new Response(null, { status: 302, headers: { location: 'https://evilcdninstagram.com/image.jpg' } })) as typeof fetch,
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'MEDIA_HOST_NOT_ALLOWED',
+    )
+
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://origin.example.test/image.jpg', type: 'IMAGE' },
+        {
+          proxyUrl: 'http://127.0.0.1:7890',
+          lookupImpl: (async () => { lookupCalls += 1; throw new Error('local DNS must not be used in proxy mode') }) as unknown as typeof import('node:dns/promises').lookup,
+          fetchImpl: (async () => new Response(null, { status: 302, headers: { location: 'https://127.0.0.1/image.jpg' } })) as typeof fetch,
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'UNSAFE_URL',
+    )
+
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://origin.example.test/image.jpg', type: 'IMAGE' },
+        {
+          proxyUrl: 'http://127.0.0.1:7890',
+          lookupImpl: (async () => { lookupCalls += 1; throw new Error('local DNS must not be used in proxy mode') }) as unknown as typeof import('node:dns/promises').lookup,
+          fetchImpl: (async () => new Response(null, { status: 302, headers: { location: 'https://localhost/image.jpg' } })) as typeof fetch,
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'MEDIA_HOST_NOT_ALLOWED',
+    )
+
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://origin.example.test/image.jpg', type: 'IMAGE' },
+        {
+          proxyUrl: 'http://127.0.0.1:7890',
+          lookupImpl: (async () => { lookupCalls += 1; throw new Error('local DNS must not be used in proxy mode') }) as unknown as typeof import('node:dns/promises').lookup,
+          fetchImpl: (async () => new Response(null, { status: 302, headers: { location: 'https://169.254.169.254/latest/meta-data' } })) as typeof fetch,
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'UNSAFE_URL',
+    )
+
+    assert.equal(lookupCalls, 0)
   } finally {
     if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
     else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist

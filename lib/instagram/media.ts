@@ -163,7 +163,7 @@ export function isRestrictedIp(value: string) {
 }
 
 export function isAllowedMediaHostname(hostname: string, allowlist?: string) {
-  const normalized = hostname.trim().toLowerCase().replace(/\.$/, '')
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
   if (!normalized || isIP(normalized)) return false
   const configured = configuredHosts(allowlist ?? (process.env.IG_ALLOWED_MEDIA_HOSTS || DEFAULT_ALLOWED_MEDIA_HOSTS))
   const rules = process.env.NODE_ENV === 'production' && allowlist === undefined
@@ -172,7 +172,11 @@ export function isAllowedMediaHostname(hostname: string, allowlist?: string) {
   return rules.some((rule) => rule.exact === normalized || Boolean(rule.suffix && (normalized === rule.suffix || normalized.endsWith(`.${rule.suffix}`))))
 }
 
-async function assertPublicMediaUrl(sourceUrl: string, options: MediaRequestOptions = {}) {
+function normalizedHostname(parsed: URL) {
+  return parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+}
+
+function validateMediaUrlSyntaxAndHost(sourceUrl: string) {
   let parsed: URL
   try {
     parsed = new URL(sourceUrl)
@@ -182,29 +186,43 @@ async function assertPublicMediaUrl(sourceUrl: string, options: MediaRequestOpti
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
     throw new InstagramMediaSafetyError('UNSAFE_URL', '媒体地址必须是无凭据的 HTTPS URL')
   }
-  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
-  if (!hostname || !isAllowedMediaHostname(hostname)) {
+  const hostname = normalizedHostname(parsed)
+  if (!hostname) {
     throw new InstagramMediaSafetyError('MEDIA_HOST_NOT_ALLOWED', '媒体域名不在允许列表中')
   }
+  if (isIP(hostname)) {
+    if (isRestrictedIp(hostname)) throw new InstagramMediaSafetyError('UNSAFE_URL', '媒体地址指向受限制的 IP 地址')
+    throw new InstagramMediaSafetyError('MEDIA_HOST_NOT_ALLOWED', '媒体域名不在允许列表中')
+  }
+  if (!isAllowedMediaHostname(hostname)) {
+    throw new InstagramMediaSafetyError('MEDIA_HOST_NOT_ALLOWED', '媒体域名不在允许列表中')
+  }
+  return { parsed, hostname }
+}
+
+async function assertPublicMediaUrl(sourceUrl: string, options: MediaRequestOptions = {}) {
+  const { parsed, hostname } = validateMediaUrlSyntaxAndHost(sourceUrl)
+
+  // With an explicit media proxy, the proxy performs the target DNS lookup.
+  // Requiring the production host's local resolver here would reject valid
+  // media when systemd-resolved cannot resolve Meta CDN names. The URL and
+  // redirect allowlist checks above still run for every hop.
+  if (options.proxyUrl?.trim()) return parsed
 
   let addresses: Array<{ address: string }>
-  if (isIP(hostname)) {
-    addresses = [{ address: hostname }]
-  } else {
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    try {
-      addresses = await Promise.race([
-        (options.lookupImpl || lookup)(hostname, { all: true, verbatim: true }),
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => reject(new InstagramMediaSafetyError('MEDIA_DNS_FAILED', '媒体域名 DNS 解析超时')), MEDIA_CONNECT_TIMEOUT_MS)
-        }),
-      ])
-    } catch (error) {
-      if (error instanceof InstagramMediaSafetyError) throw error
-      throw new InstagramMediaSafetyError('MEDIA_DNS_FAILED', '媒体域名 DNS 解析失败')
-    } finally {
-      if (timeout) clearTimeout(timeout)
-    }
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    addresses = await Promise.race([
+      (options.lookupImpl || lookup)(hostname, { all: true, verbatim: true }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new InstagramMediaSafetyError('MEDIA_DNS_FAILED', '媒体域名 DNS 解析超时')), MEDIA_CONNECT_TIMEOUT_MS)
+      }),
+    ])
+  } catch (error) {
+    if (error instanceof InstagramMediaSafetyError) throw error
+    throw new InstagramMediaSafetyError('MEDIA_DNS_FAILED', '媒体域名 DNS 解析失败')
+  } finally {
+    if (timeout) clearTimeout(timeout)
   }
   if (!addresses.length || addresses.some(({ address }) => isRestrictedIp(address))) {
     throw new InstagramMediaSafetyError('UNSAFE_URL', '媒体域名解析到受限制的内网地址')
