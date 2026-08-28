@@ -21,6 +21,7 @@ export const activitySelect = {
   endsAt: true,
   registrationStartAt: true,
   registrationEndAt: true,
+  verificationMode: true,
   organizer: true,
   contactInfo: true,
   isFeatured: true,
@@ -32,8 +33,8 @@ export const activitySelect = {
   updatedById: true,
   createdAt: true,
   updatedAt: true,
-  _count: { select: { ActivityRegistration: true } },
-} as const
+  _count: { select: { ActivityRegistration: { where: { status: { in: ['ACTIVE'] } } } } },
+} satisfies Prisma.ActivitySelect
 
 export type ActivityRow = Prisma.ActivityGetPayload<{ select: typeof activitySelect }>
 

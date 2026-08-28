@@ -145,7 +145,7 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     })),
   }),
   message: async (user) => ({
-    'message.main': await moduleData(() => prisma.notification.count({ where: { recipientId: user.id, isRead: false } })),
+    'message.main': await moduleData(() => prisma.notification.count({ where: { recipientId: user.id, readAt: null } })),
   }),
   profile: async (user) => ({
     'profile.main': await moduleData(() => prisma.user.findUnique({

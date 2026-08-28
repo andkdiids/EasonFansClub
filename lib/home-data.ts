@@ -252,7 +252,7 @@ export async function getHomeActivities() {
         isFeatured: true,
         isPinned: true,
         sortOrder: true,
-        _count: { select: { ActivityRegistration: true } },
+        _count: { select: { ActivityRegistration: { where: { status: { in: ['ACTIVE'] } } } } },
       },
     }),
     [],

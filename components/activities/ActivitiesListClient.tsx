@@ -44,7 +44,7 @@ export function ActivitiesListClient({ initialActivities }: Readonly<{ initialAc
         <span>共 {filtered.length} 个活动</span>
         {query || status !== 'ALL' || type !== 'ALL' ? <button type="button" onClick={() => { setQuery(''); setStatus('ALL'); setType('ALL') }} className="font-black text-brand-700 underline underline-offset-4 dark:text-sky-300">清除筛选</button> : null}
       </div>
-      {filtered.length ? <div className="mt-3 grid gap-4 md:grid-cols-2">{filtered.map((activity) => <ActivityCard key={activity.id} activity={activity} />)}</div> : <div className="mt-3 rounded-2xl border border-dashed border-sky-200 bg-white/70 p-10 text-center font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">{initialActivities.length ? '没有符合条件的活动。' : <>目前还没有活动。<br /><span className="text-xs font-semibold">新的活动发布后会出现在这里。</span></>}</div>}
+      {filtered.length ? <div className="mt-3 grid min-w-0 grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4">{filtered.map((activity) => <ActivityCard key={activity.id} activity={activity} />)}</div> : <div className="mt-3 rounded-2xl border border-dashed border-sky-200 bg-white/70 p-10 text-center font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">{initialActivities.length ? '没有符合条件的活动。' : <>目前还没有活动。<br /><span className="text-xs font-semibold">新的活动发布后会出现在这里。</span></>}</div>}
     </section>
   )
 }

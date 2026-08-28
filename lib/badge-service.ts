@@ -882,6 +882,57 @@ export async function grantBadge(input: GrantBadgeInput): Promise<BadgeOperation
   }
 }
 
+/**
+ * Grant a badge inside a caller-owned transaction. Activity verification uses
+ * this variant so the verification row and the hidden reward are committed or
+ * rolled back together. Phase 3 presentation effects remain outside this
+ * primitive and are intentionally not run while the parent transaction is
+ * open.
+ */
+export async function grantBadgeWithTransaction(tx: Prisma.TransactionClient, input: GrantBadgeInput): Promise<BadgeOperationResult> {
+  const obtainedAt = input.obtainedAt || new Date()
+  const sourceType = input.sourceType?.trim().slice(0, 32) || null
+  const sourceId = input.sourceId?.trim().slice(0, 191) || null
+  const grantReason = input.grantReason?.trim().slice(0, 500) || null
+  const [user, badge] = await Promise.all([
+    tx.user.findUnique({ where: { id: input.userId }, select: { id: true } }),
+    tx.badge.findUnique({ where: { id: input.badgeId }, select: { id: true, name: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true } }),
+  ])
+  if (!user) throw new BadgeServiceError('USER_NOT_FOUND', '目标用户不存在')
+  if (!badge) throw new BadgeServiceError('BADGE_NOT_FOUND', '勋章不存在')
+  const existing = await tx.userBadge.findUnique({ where: { userId_badgeId: { userId: input.userId, badgeId: input.badgeId } }, select: { id: true } })
+  if (existing) return { created: false, alreadyOwned: true, recordId: existing.id, userId: input.userId, badgeId: input.badgeId, badgeName: badge.name }
+  if (!badge.isEnabled || !badge.isActive) throw new BadgeServiceError('BADGE_DISABLED', '这枚勋章当前已停用')
+
+  const availability = getBadgeAvailability(badge)
+  const availabilityMode = input.availabilityMode || 'CURRENT'
+  if (availabilityMode === 'CURRENT' && availability !== 'PERMANENT' && availability !== 'AVAILABLE') {
+    throw new BadgeServiceError('BADGE_NOT_AVAILABLE', availability === 'UPCOMING' ? '这枚限定勋章尚未开放' : '这枚限定勋章已经绝版，当前不能再授予')
+  }
+  if (availabilityMode === 'HISTORICAL_WINDOW') {
+    if (availability === 'UPCOMING') throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '这枚限定勋章尚未开始，不能进行历史资格补发')
+    const window = input.historicalWindow
+    if (availability !== 'PERMANENT' && (!window || !(window.from instanceof Date) || !(window.until instanceof Date) || Number.isNaN(window.from.getTime()) || Number.isNaN(window.until.getTime()) || window.from > window.until)) {
+      throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '历史资格补发缺少有效的限定时间窗口')
+    }
+  }
+  if (availabilityMode === 'ADMIN_MANUAL' && availability !== 'PERMANENT' && !grantReason) throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '限定勋章手动补发必须填写补发原因')
+
+  const record = await tx.userBadge.create({
+    data: { userId: input.userId, badgeId: input.badgeId, obtainedAt, grantedAt: obtainedAt, createdAt: obtainedAt, sourceType, sourceId, grantReason, grantedBy: input.actorId || null },
+    select: { id: true },
+  })
+  await tx.userBadgeTracking.deleteMany({ where: { userId: input.userId, badgeId: input.badgeId } })
+  if (input.actorId) await writeBadgeAdminAction(tx, {
+    actorId: input.actorId,
+    action: 'BADGE_GRANT',
+    targetUserId: input.userId,
+    badgeId: input.badgeId,
+    detail: { badgeName: badge.name, obtainedAt: obtainedAt.toISOString(), sourceType, sourceId, grantReason },
+  })
+  return { created: true, recordId: record.id, userId: input.userId, badgeId: input.badgeId, badgeName: badge.name }
+}
+
 export async function hasBadge(userId: string, badgeId: string) {
   const record = await prisma.userBadge.findUnique({
     where: { userId_badgeId: { userId, badgeId } },

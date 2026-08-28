@@ -46,7 +46,7 @@ export async function PATCH(request: Request, context: RouteContext) {
             actorId: user.id,
             type: 'FRIEND_REQUEST',
             key: getFriendRequestNotificationKey(requestId),
-            isRead: false,
+            readAt: null,
           },
           select: { id: true },
         })
@@ -57,7 +57,7 @@ export async function PATCH(request: Request, context: RouteContext) {
             type: 'FRIEND_REQUEST',
             title: '好友申请',
             key: null,
-            isRead: false,
+            readAt: null,
             createdAt: { gte: cancelled.createdAt },
           },
           orderBy: { createdAt: 'desc' },

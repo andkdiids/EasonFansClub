@@ -115,7 +115,7 @@ async function loadLikeSnapshot(tx: PrismaClient, target: LikeNotificationTarget
 }
 
 function readState(rows: LikeNotificationRow[]) {
-  const read = rows.length > 0 && rows.every((row) => row.isRead)
+  const read = rows.length > 0 && rows.every((row) => row.readAt !== null)
   return {
     isRead: read,
     readAt: read ? rows.find((row) => row.readAt)?.readAt || null : null,

@@ -5,6 +5,7 @@ import { activitySelect, serializeActivityRow, type ActivityRow } from '@/lib/ac
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { checkBannedWords, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE } from '@/lib/content-moderation'
 import { normalizeActivityInput, type ActivityEditableValues } from '@/lib/activity-validation'
+import { ActivityConfigurationError, getActivityRegistrationQuestions, syncActivityRegistrationQuestions, syncActivityReward } from '@/lib/activity-registration'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
 
@@ -28,6 +29,7 @@ function editableActivity(activity: ActivityRow): ActivityEditableValues {
     endsAt: activity.endsAt,
     registrationStartAt: activity.registrationStartAt,
     registrationEndAt: activity.registrationEndAt,
+    verificationMode: activity.verificationMode,
     signupLimit: activity.signupLimit,
     organizer: activity.organizer,
     contactInfo: activity.contactInfo,
@@ -40,7 +42,7 @@ function editableActivity(activity: ActivityRow): ActivityEditableValues {
 function changedFields(before: ActivityEditableValues, after: ActivityEditableValues) {
   const keys: Array<keyof ActivityEditableValues> = [
     'title', 'subtitle', 'description', 'type', 'status', 'coverUrl', 'bannerUrl', 'locationName', 'locationAddress', 'onlineUrl',
-    'startsAt', 'endsAt', 'registrationStartAt', 'registrationEndAt', 'signupLimit', 'organizer', 'contactInfo', 'isFeatured', 'isPinned', 'sortOrder',
+    'startsAt', 'endsAt', 'registrationStartAt', 'registrationEndAt', 'verificationMode', 'signupLimit', 'organizer', 'contactInfo', 'isFeatured', 'isPinned', 'sortOrder',
   ]
   return keys.filter((key) => {
     const left = before[key]
@@ -65,7 +67,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
   if (!activityIdPattern.test(activityId)) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
   const activity = await getActivity(activityId)
   if (!activity) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
-  return NextResponse.json({ activity: serializeActivityRow(activity) }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  const [questions, reward] = await Promise.all([
+    getActivityRegistrationQuestions(prisma, activityId),
+    prisma.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { badgeId: true, enabled: true, Badge: { select: { id: true, name: true, code: true } } } }),
+  ])
+  return NextResponse.json({ activity: serializeActivityRow(activity), registrationQuestions: questions, activityReward: reward ? { badgeId: reward.badgeId, enabled: reward.enabled, badge: reward.Badge } : null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
@@ -76,10 +82,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
   const current = await getActivity(activityId)
   if (!current) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
   const body = await request.json().catch(() => null)
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
   const normalized = normalizeActivityInput(body, editableActivity(current))
   if (!normalized.valid) return NextResponse.json({ message: normalized.message }, { status: 400 })
   if ((await checkBannedWords(moderationText(normalized.value))).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+  }
+
+  if (normalized.value.verificationMode === 'NONE' && !Object.prototype.hasOwnProperty.call(input, 'activityReward')) {
+    const existingReward = await prisma.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { id: true } })
+    if (existingReward) return NextResponse.json({ message: '该活动已配置隐藏奖励，请先清除奖励或选择核销方式' }, { status: 400 })
   }
 
   const fields = changedFields(editableActivity(current), normalized.value)
@@ -106,6 +118,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         },
         select: activitySelect,
       })
+      if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, activityId, input.registrationQuestions)
+      if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, activityId, input.activityReward, normalized.value.verificationMode)
       await createAdminActionAudit(tx, {
         operatorId: guard.user.id,
         action: 'CREATE_ACTIVITY',
@@ -115,6 +129,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         targetTitle: updated.title,
         metadata: { activityId: updated.id, changedFields: fields, fromStatus: current.status, toStatus: updated.status } as Prisma.InputJsonValue,
       })
+      if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await createAdminActionAudit(tx, {
+        operatorId: guard.user.id,
+        action: 'CREATE_ACTIVITY',
+        operationType: adminAuditOperations.ACTIVITY_FORM_UPDATE,
+        targetType: 'ACTIVITY',
+        targetId: updated.id,
+        targetTitle: updated.title,
+        metadata: { activityId: updated.id, questionCount: Array.isArray(input.registrationQuestions) ? input.registrationQuestions.length : 0 } as Prisma.InputJsonValue,
+      })
+      if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await createAdminActionAudit(tx, {
+        operatorId: guard.user.id,
+        action: 'CREATE_ACTIVITY',
+        operationType: adminAuditOperations.ACTIVITY_REWARD_UPDATE,
+        targetType: 'ACTIVITY',
+        targetId: updated.id,
+        targetTitle: updated.title,
+        metadata: { activityId: updated.id, activityReward: input.activityReward as Prisma.InputJsonValue } as Prisma.InputJsonValue,
+      })
       return updated
     })
     revalidatePath('/activities')
@@ -122,6 +154,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     revalidatePath('/')
     return NextResponse.json({ activity: serializeActivityRow(activity) })
   } catch (error) {
+    if (error instanceof ActivityConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
     console.error('[admin.activities.update]', error instanceof Error ? error.message : error)
     return NextResponse.json({ message: '保存活动失败，请稍后重试' }, { status: 500 })
   }

@@ -6,6 +6,7 @@ import { activityTypeValues, type ActivityTypeValue } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { checkBannedWords, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE } from '@/lib/content-moderation'
 import { normalizeActivityInput } from '@/lib/activity-validation'
+import { ActivityConfigurationError, syncActivityRegistrationQuestions, syncActivityReward } from '@/lib/activity-registration'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
   const guard = await requireAdmin('activity_manage')
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
   const normalized = normalizeActivityInput(body)
   if (!normalized.valid) return NextResponse.json({ message: normalized.message }, { status: 400 })
   if ((await checkBannedWords(moderationText(normalized))).blocked) {
@@ -72,6 +74,8 @@ export async function POST(request: Request) {
         },
         select: activitySelect,
       })
+      if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, created.id, input.registrationQuestions)
+      if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, created.id, input.activityReward, normalized.value.verificationMode)
       await createAdminActionAudit(tx, {
         operatorId: guard.user.id,
         action: 'CREATE_ACTIVITY',
@@ -98,6 +102,7 @@ export async function POST(request: Request) {
     revalidatePath('/')
     return NextResponse.json({ activity: serializeActivityRow(activity) }, { status: 201 })
   } catch (error) {
+    if (error instanceof ActivityConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
     console.error('[admin.activities.create]', error instanceof Error ? error.message : error)
     return NextResponse.json({ message: '创建活动失败，请稍后重试' }, { status: 500 })
   }

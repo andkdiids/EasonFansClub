@@ -120,8 +120,10 @@ export function getNotificationVisibilityFilter(userId: string, extra: Prisma.No
 }
 
 export function getUnreadNotificationWhere(userId: string, extra: Prisma.NotificationWhereInput = {}): Prisma.NotificationWhereInput {
-  // isRead is the canonical unread flag. readAt is only an audit timestamp.
-  return getNotificationVisibilityFilter(userId, { isRead: false, ...extra })
+  // readAt is the canonical read state. isRead remains a synchronized legacy
+  // field for older writers and database compatibility, but it must not drive
+  // list/summary results.
+  return getNotificationVisibilityFilter(userId, { readAt: null, ...extra })
 }
 
 export function getNotificationCategoryFilter(category: string, canReview = false): Prisma.NotificationWhereInput {
@@ -633,7 +635,7 @@ async function loadUnreadSummary(userId: string, canReview = false): Promise<Unr
         COUNT(CASE WHEN ${canReview ? Prisma.sql`(n.type = 'REVIEW' OR (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%')))` : Prisma.sql`0`} THEN 1 END) AS review
       FROM Notification n
       WHERE n.recipientId = ${userId}
-        AND n.isRead = 0
+        AND n.readAt IS NULL
     `,
     prisma.systemNotification.count({ where: {
       ...effectiveSystemNotificationWhere(now),
@@ -748,7 +750,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const systemCategory = getSystemNotificationCategoryFilter(category)
   const personalWhere = getNotificationVisibilityFilter(userId, {
     ...personalCategory,
-    ...(options.unreadOnly ? { isRead: false } : {}),
+    ...(options.unreadOnly ? { readAt: null } : {}),
   })
   const systemWhere = {
     ...effectiveSystemNotificationWhere(now),
@@ -759,7 +761,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const [personalTotalResult, systemTotalResult, personalUnreadResult, systemUnreadResult] = await Promise.allSettled([
     prisma.notification.count({ where: personalWhere }),
     prisma.systemNotification.count({ where: systemWhere }),
-    prisma.notification.count({ where: getNotificationVisibilityFilter(userId, { ...personalCategory, isRead: false }) }),
+    prisma.notification.count({ where: getNotificationVisibilityFilter(userId, { ...personalCategory, readAt: null }) }),
     prisma.systemNotification.count({ where: { ...systemWhere, SystemNotificationRead: { none: { userId } } } }),
   ])
   let degraded = false
@@ -780,12 +782,14 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const offset = (page - 1) * pageSize
   const personalCategorySql = getPersonalNotificationCategorySql(category, canReview)
   const systemCategorySql = getSystemNotificationCategorySql(category)
-  const unreadPersonalSql = options.unreadOnly ? Prisma.sql`AND n.isRead = 0` : Prisma.empty
+  const unreadPersonalSql = options.unreadOnly ? Prisma.sql`AND n.readAt IS NULL` : Prisma.empty
   const unreadSystemSql = options.unreadOnly ? Prisma.sql`AND snr.id IS NULL` : Prisma.empty
   let rows: NotificationPageRow[]
   try {
     rows = await prisma.$queryRaw<NotificationPageRow[]>(Prisma.sql`
-      SELECT n.id AS id, 'personal' AS source, n.isRead AS isRead, n.createdAt AS createdAt
+      SELECT n.id AS id, 'personal' AS source,
+        CASE WHEN n.readAt IS NULL THEN 0 ELSE 1 END AS isRead,
+        n.createdAt AS createdAt
       FROM Notification n
       WHERE n.recipientId = ${userId}
         ${personalCategorySql}
@@ -821,12 +825,12 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     try {
       const fallbackRows = await prisma.notification.findMany({
         where: personalWhere,
-        orderBy: [{ isRead: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
+        orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
-        select: { id: true, isRead: true, createdAt: true },
+        select: { id: true, readAt: true, createdAt: true },
       })
-      rows = fallbackRows.map((row) => ({ ...row, source: 'personal' }))
+      rows = fallbackRows.map((row) => ({ id: row.id, source: 'personal', isRead: Boolean(row.readAt), createdAt: row.createdAt }))
     } catch (fallbackError) {
       failed = true
       logNotificationError('list.personal-fallback-query', { userId, page, pageSize, category }, fallbackError)
@@ -1068,8 +1072,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         likeTargetKind: likeTarget?.kind || null,
         popup: false,
         sticky: false,
-        isRead: item.isRead,
-        read: item.isRead,
+        isRead: Boolean(item.readAt),
+        read: Boolean(item.readAt),
         createdAt: item.createdAt,
         readAt: item.readAt,
         replyTarget: parseNotificationReplyTarget({
@@ -1424,7 +1428,7 @@ export async function markUnifiedNotificationReadWithState(userId: string, sourc
     where: getNotificationVisibilityFilter(userId, { id }),
     select: { isRead: true, readAt: true },
   })
-  return existing?.isRead ? { ok: true, readAt: existing.readAt } : { ok: false, readAt: null }
+  return existing?.readAt ? { ok: true, readAt: existing.readAt } : { ok: false, readAt: null }
 }
 
 /** Backwards-compatible boolean helper used by batch/read-all callers. */
@@ -1493,7 +1497,7 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
  * 不会触碰以下通知：点赞(LIKE)、评论回复(REPLY)、私信(MESSAGE)、好友(FRIEND_REQUEST/FOLLOW)、
  * 系统(SYSTEM)、公告(ANNOUNCEMENT)、反馈提醒(/admin/feedback、/feedback/*)等。
  *
- * 幂等：仅更新 `isRead: false` 的行，重复调用安全，不会重置已读时间。
+ * 幂等：仅更新 `readAt: null` 的行，重复调用安全，不会重置已读时间。
  * 不修改数据库结构。
  */
 export async function markModerationNotificationsRead(userId: string) {
@@ -1501,7 +1505,7 @@ export async function markModerationNotificationsRead(userId: string) {
   const pendingReviewNotifications = await prisma.notification.findMany({
     where: {
       recipientId: userId,
-      isRead: false,
+      readAt: null,
       OR: [
         { type: 'REVIEW', link: '/admin/posts/review', key: { startsWith: 'post-review:' } },
         { type: 'ADMIN', link: '/admin/posts/review', key: { startsWith: 'post-review:' } },
@@ -1517,7 +1521,7 @@ export async function markModerationNotificationsRead(userId: string) {
   const resultNotifications = await prisma.notification.updateMany({
     where: {
       recipientId: userId,
-      isRead: false,
+      readAt: null,
       type: 'ADMIN',
       OR: [
         { link: { startsWith: '/posts/' } },
@@ -1538,7 +1542,7 @@ export async function markModerationNotificationsRead(userId: string) {
       const completedResult = await prisma.notification.updateMany({
         where: {
           recipientId: userId,
-          isRead: false,
+          readAt: null,
           link: '/admin/posts/review',
           AND: [
             { OR: [{ type: 'REVIEW' }, { type: 'ADMIN' }] },

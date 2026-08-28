@@ -59,6 +59,15 @@ test('头像菜单将隐私设置放在账号安全后、后台管理前并保�
   assert.ok(privacyIndex < adminIndex)
   assert.match(menu, /isAdmin \? <Link href="\/admin"/)
   assert.match(menu, /隐私设置/)
+
+  for (const path of ['components/layout/Topbar.tsx', 'components/layout/Sidebar.tsx']) {
+    const shellMenu = source(path)
+    const shellSecurityIndex = shellMenu.indexOf('href="/settings/security"')
+    const shellPrivacyIndex = shellMenu.indexOf('href="/settings/privacy"')
+    const shellAdminIndex = shellMenu.indexOf('href="/admin"')
+    assert.ok(shellSecurityIndex >= 0 && shellSecurityIndex < shellPrivacyIndex)
+    assert.ok(shellAdminIndex < 0 || shellPrivacyIndex < shellAdminIndex)
+  }
 })
 
 test('隐私设置页面和接口只允许当前登录用户更新白名单字段', () => {

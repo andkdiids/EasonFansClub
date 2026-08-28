@@ -243,9 +243,10 @@ function filterDismissedSystemNotifications(items: UnifiedNotification[]) {
 }
 
 function isNotificationRead(item: UnifiedNotification) {
-  // `isRead` is the unified client-side fact. Personal rows are mapped from
-  // Notification.isRead and system rows from SystemNotificationRead.
-  return item.isRead === true
+  // readAt is the server-authoritative state for both personal and system
+  // notifications. `isRead` is retained only for compatibility with older
+  // payloads and must not make a null-readAt row look read.
+  return item.readAt !== null
 }
 
 function mergeUnreadSummary(base: UnreadSummary, items: UnifiedNotification[], direction: 1 | -1) {

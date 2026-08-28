@@ -46,40 +46,43 @@ model Achievement {
 }
 
 model Activity {
-  id                   String                 @id @default(cuid())
-  title                String
-  subtitle             String?                @db.VarChar(300)
-  description          String                 @db.Text
-  type                 ActivityType           @default(OTHER)
-  status               ActivityStatus         @default(DRAFT)
-  coverUrl             String?
-  bannerUrl            String?
-  locationName         String?                @db.VarChar(300)
-  locationAddress      String?                @db.VarChar(500)
-  onlineUrl            String?                @db.VarChar(500)
-  pointsReward         Int?
-  signupLimit          Int?
-  signupCount          Int                    @default(0)
-  startsAt             DateTime?
-  endsAt               DateTime?
-  registrationStartAt  DateTime?
-  registrationEndAt    DateTime?
-  organizer            String?                @db.VarChar(160)
-  contactInfo          String?                @db.VarChar(500)
-  isFeatured           Boolean                @default(false)
-  isPinned             Boolean                @default(false)
-  sortOrder            Int                    @default(0)
-  viewCount            Int                    @default(0)
-  publishedAt          DateTime?
-  createdById          String?
-  updatedById          String?
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
-  CreatedBy            User?                  @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  UpdatedBy            User?                  @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  ActivityFavorite     ActivityFavorite[]
-  ActivityRegistration ActivityRegistration[]
-  Lottery              Lottery[]
+  id                           String                         @id @default(cuid())
+  title                        String
+  subtitle                     String?                        @db.VarChar(300)
+  description                  String                         @db.Text
+  type                         ActivityType                   @default(OTHER)
+  status                       ActivityStatus                 @default(DRAFT)
+  coverUrl                     String?
+  bannerUrl                    String?
+  locationName                 String?                        @db.VarChar(300)
+  locationAddress              String?                        @db.VarChar(500)
+  onlineUrl                    String?                        @db.VarChar(500)
+  pointsReward                 Int?
+  signupLimit                  Int?
+  signupCount                  Int                            @default(0)
+  startsAt                     DateTime?
+  endsAt                       DateTime?
+  registrationStartAt          DateTime?
+  registrationEndAt            DateTime?
+  verificationMode             ActivityVerificationMode       @default(NONE)
+  organizer                    String?                        @db.VarChar(160)
+  contactInfo                  String?                        @db.VarChar(500)
+  isFeatured                   Boolean                        @default(false)
+  isPinned                     Boolean                        @default(false)
+  sortOrder                    Int                            @default(0)
+  viewCount                    Int                            @default(0)
+  publishedAt                  DateTime?
+  createdById                  String?
+  updatedById                  String?
+  createdAt                    DateTime                       @default(now())
+  updatedAt                    DateTime                       @updatedAt
+  CreatedBy                    User?                          @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  UpdatedBy                    User?                          @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  ActivityFavorite             ActivityFavorite[]
+  ActivityRegistration         ActivityRegistration[]
+  ActivityRegistrationQuestion ActivityRegistrationQuestion[]
+  ActivityReward               ActivityReward[]
+  Lottery                      Lottery[]
 
   @@index([status, createdAt])
   @@index([status, startsAt])
@@ -103,17 +106,91 @@ model ActivityFavorite {
 }
 
 model ActivityRegistration {
-  id          String    @id @default(cuid())
-  note        String?
-  checkedInAt DateTime?
-  createdAt   DateTime  @default(now())
-  activityId  String
-  userId      String
-  Activity    Activity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  User        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String                       @id @default(cuid())
+  note               String?
+  status             ActivityRegistrationStatus   @default(ACTIVE)
+  registeredAt       DateTime                     @default(now())
+  cancelledAt        DateTime?
+  verifiedAt         DateTime?
+  verifiedById       String?
+  verificationMethod ActivityVerificationMethod?
+  verificationToken  String?                      @unique @db.VarChar(128)
+  checkedInAt        DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  activityId         String
+  userId             String
+  Activity           Activity                     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User               User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  VerifiedBy         User?                        @relation("ActivityRegistrationVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  Answers            ActivityRegistrationAnswer[]
 
   @@unique([activityId, userId])
-  @@index([userId, createdAt])
+  @@index([activityId, status])
+  @@index([userId, registeredAt])
+  @@index([verifiedById, verifiedAt])
+}
+
+model ActivityRegistrationQuestion {
+  id          String                               @id @default(cuid())
+  activityId  String
+  title       String                               @db.VarChar(300)
+  type        ActivityRegistrationQuestionType
+  required    Boolean                              @default(false)
+  isActive    Boolean                              @default(true)
+  placeholder String?                              @db.VarChar(300)
+  sortOrder   Int                                  @default(0)
+  createdAt   DateTime                             @default(now())
+  updatedAt   DateTime                             @updatedAt
+  Activity    Activity                             @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  Options     ActivityRegistrationQuestionOption[]
+  Answers     ActivityRegistrationAnswer[]
+
+  @@index([activityId, sortOrder, id])
+}
+
+model ActivityRegistrationQuestionOption {
+  id         String                       @id @default(cuid())
+  questionId String
+  label      String                       @db.VarChar(300)
+  value      String                       @db.VarChar(300)
+  sortOrder  Int                          @default(0)
+  createdAt  DateTime                     @default(now())
+  updatedAt  DateTime                     @updatedAt
+  Question   ActivityRegistrationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, value])
+  @@index([questionId, sortOrder, id])
+}
+
+model ActivityRegistrationAnswer {
+  id             String                       @id @default(cuid())
+  registrationId String
+  questionId     String
+  questionTitle  String                       @db.VarChar(300)
+  value          String                       @db.Text
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  Registration   ActivityRegistration         @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  Question       ActivityRegistrationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([registrationId, questionId])
+  @@index([questionId])
+}
+
+model ActivityReward {
+  id         String             @id @default(cuid())
+  activityId String
+  type       ActivityRewardType
+  badgeId    String
+  enabled    Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  Activity   Activity           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  Badge      Badge              @relation(fields: [badgeId], references: [id], onDelete: Restrict)
+
+  @@unique([activityId, type])
+  @@index([badgeId])
 }
 
 model AdminAction {
@@ -314,6 +391,36 @@ enum BadgeGrantType {
   EVENT
 }
 
+enum ActivityRegistrationStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum ActivityRegistrationQuestionType {
+  TEXT
+  TEXTAREA
+  SINGLE_SELECT
+  MULTI_SELECT
+  NUMBER
+  PHONE
+  SELECT
+}
+
+enum ActivityVerificationMode {
+  NONE
+  MANUAL
+  QR
+}
+
+enum ActivityVerificationMethod {
+  MANUAL
+  QR
+}
+
+enum ActivityRewardType {
+  BADGE
+}
+
 enum BadgeRuleType {
   POST_COUNT
   FEATURED_POST_COUNT
@@ -407,6 +514,7 @@ model Badge {
   createdAt                        DateTime            @default(now())
   updatedAt                        DateTime            @updatedAt
   UserBadge                        UserBadge[]
+  ActivityReward                   ActivityReward[]
   UserBadgeShowcase                UserBadgeShowcase[]
   UserBadgeTracking                UserBadgeTracking[]
   BadgeRule                        BadgeRule?
@@ -2639,6 +2747,7 @@ model Notification {
 
   @@unique([recipientId, key])
   @@index([recipientId, isRead, createdAt])
+  @@index([recipientId, readAt, createdAt])
   @@index([type])
 }
 
@@ -3575,6 +3684,7 @@ model User {
   AccountSecurityLog                                     AccountSecurityLog[]
   ActivityFavorite                                       ActivityFavorite[]
   ActivityRegistration                                   ActivityRegistration[]
+  ActivityRegistrationVerifiedBy                         ActivityRegistration[]         @relation("ActivityRegistrationVerifiedBy")
   ActivityCreatedBy                                      Activity[]                     @relation("ActivityCreatedBy")
   ActivityUpdatedBy                                      Activity[]                     @relation("ActivityUpdatedBy")
   AlbumReview                                            AlbumReview[]
@@ -3667,7 +3777,7 @@ model User {
   GuessSongDuelInvite_GuessSongDuelInviteInvitee         GuessSongDuelInvite[]          @relation("GuessSongDuelInviteInvitee")
   Like                                                   Like[]
   SocialPostLikes                                        SocialPostLike[]
-  SocialPostComments                                     SocialPostComment[]           @relation("SocialPostCommentAuthor")
+  SocialPostComments                                     SocialPostComment[]            @relation("SocialPostCommentAuthor")
   LoginDevice                                            LoginDevice[]
   LotteryEntry                                           LotteryEntry[]
   LyricCard                                              LyricCard[]
@@ -3739,19 +3849,19 @@ model User {
 }
 
 model UserPrivacySetting {
-  id                   String   @id @default(cuid())
-  userId               String   @unique
-  showCheckInHistory   Boolean  @default(true)
-  showCheckInMessages  Boolean  @default(true)
-  showPosts            Boolean  @default(true)
-  showComments         Boolean  @default(true)
-  showConcertHistory   Boolean  @default(true)
-  showActivityHistory  Boolean  @default(true)
-  showBadgeHistory     Boolean  @default(true)
-  showRatings          Boolean  @default(true)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  User                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  showCheckInHistory  Boolean  @default(true)
+  showCheckInMessages Boolean  @default(true)
+  showPosts           Boolean  @default(true)
+  showComments        Boolean  @default(true)
+  showConcertHistory  Boolean  @default(true)
+  showActivityHistory Boolean  @default(true)
+  showBadgeHistory    Boolean  @default(true)
+  showRatings         Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  User                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UserAchievement {
@@ -4562,24 +4672,24 @@ model LeaderboardAdminLog {
 }
 
 model SocialPost {
-  id             String           @id @default(cuid())
-  platform       SocialPlatform   @default(INSTAGRAM)
-  externalId     String           @db.VarChar(191)
-  shortcode      String?          @db.VarChar(191)
-  authorUsername String           @db.VarChar(191)
+  id                String              @id @default(cuid())
+  platform          SocialPlatform      @default(INSTAGRAM)
+  externalId        String              @db.VarChar(191)
+  shortcode         String?             @db.VarChar(191)
+  authorUsername    String              @db.VarChar(191)
   authorDisplayName String?
-  caption        String?          @db.Text
-  permalink      String?          @db.Text
-  publishedAt    DateTime
-  syncedAt       DateTime         @default(now())
-  mediaType      SocialPostMediaType
-  status         SocialPostStatus @default(DISCOVERED)
-  provider       String           @db.VarChar(64)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  media          SocialPostMedia[]
-  likes          SocialPostLike[]
-  comments       SocialPostComment[]
+  caption           String?             @db.Text
+  permalink         String?             @db.Text
+  publishedAt       DateTime
+  syncedAt          DateTime            @default(now())
+  mediaType         SocialPostMediaType
+  status            SocialPostStatus    @default(DISCOVERED)
+  provider          String              @db.VarChar(64)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  media             SocialPostMedia[]
+  likes             SocialPostLike[]
+  comments          SocialPostComment[]
 
   @@unique([platform, externalId])
   @@index([status, publishedAt])
@@ -4587,17 +4697,17 @@ model SocialPost {
 }
 
 model SocialPostMedia {
-  id           String         @id @default(cuid())
+  id           String          @id @default(cuid())
   postId       String
   type         SocialMediaType
-  storageUrl   String         @db.Text
-  thumbnailUrl String?        @db.Text
+  storageUrl   String          @db.Text
+  thumbnailUrl String?         @db.Text
   width        Int?
   height       Int?
   durationMs   Int?
   sortOrder    Int
-  createdAt    DateTime       @default(now())
-  post          SocialPost     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt    DateTime        @default(now())
+  post         SocialPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@unique([postId, sortOrder])
   @@index([postId, sortOrder])
@@ -4634,52 +4744,52 @@ model SocialPostComment {
 }
 
 model SocialSyncLog {
-  id          String             @id @default(cuid())
-  provider    String             @db.VarChar(64)
-  actor       String?            @db.VarChar(191)
-  runId       String?            @db.VarChar(191)
-  datasetId   String?            @db.VarChar(191)
-  runStatus   String?            @db.VarChar(64)
-  runStartedAt DateTime?
-  runFinishedAt DateTime?
-  usageTotalUsd Float?
-  billableResults Int?
-  target      String             @db.VarChar(191)
-  startedAt   DateTime
-  finishedAt  DateTime?
-  status      SocialSyncLogStatus @default(RUNNING)
-  foundCount  Int                @default(0)
-  createdCount Int               @default(0)
-  updatedCount Int               @default(0)
-  mediaCount  Int                @default(0)
-  notificationCount Int          @default(0)
-  baselineImport Boolean          @default(false)
-  durationMs  Int?
-  errorCode   String?            @db.VarChar(64)
-  errorMessage String?           @db.Text
+  id                String              @id @default(cuid())
+  provider          String              @db.VarChar(64)
+  actor             String?             @db.VarChar(191)
+  runId             String?             @db.VarChar(191)
+  datasetId         String?             @db.VarChar(191)
+  runStatus         String?             @db.VarChar(64)
+  runStartedAt      DateTime?
+  runFinishedAt     DateTime?
+  usageTotalUsd     Float?
+  billableResults   Int?
+  target            String              @db.VarChar(191)
+  startedAt         DateTime
+  finishedAt        DateTime?
+  status            SocialSyncLogStatus @default(RUNNING)
+  foundCount        Int                 @default(0)
+  createdCount      Int                 @default(0)
+  updatedCount      Int                 @default(0)
+  mediaCount        Int                 @default(0)
+  notificationCount Int                 @default(0)
+  baselineImport    Boolean             @default(false)
+  durationMs        Int?
+  errorCode         String?             @db.VarChar(64)
+  errorMessage      String?             @db.Text
 
   @@index([target, startedAt])
   @@index([status, startedAt])
 }
 
 model SocialSyncState {
-  id                    String         @id @default(cuid())
-  platform              SocialPlatform @default(INSTAGRAM)
-  target                String         @db.VarChar(191)
-  lastCheckedAt         DateTime?
-  lastSuccessfulSyncAt  DateTime?
-  lastChangedAt         DateTime?
-  lastExternalId        String?        @db.VarChar(191)
-  consecutiveFailures   Int            @default(0)
-  nextAllowedSyncAt     DateTime?
-  lastErrorCode         String?        @db.VarChar(64)
-  lastErrorAt           DateTime?
-  baselineCompletedAt   DateTime?
-  syncRequestedAt       DateTime?
-  lockToken             String?        @db.VarChar(64)
-  lockUntil             DateTime?
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  id                   String         @id @default(cuid())
+  platform             SocialPlatform @default(INSTAGRAM)
+  target               String         @db.VarChar(191)
+  lastCheckedAt        DateTime?
+  lastSuccessfulSyncAt DateTime?
+  lastChangedAt        DateTime?
+  lastExternalId       String?        @db.VarChar(191)
+  consecutiveFailures  Int            @default(0)
+  nextAllowedSyncAt    DateTime?
+  lastErrorCode        String?        @db.VarChar(64)
+  lastErrorAt          DateTime?
+  baselineCompletedAt  DateTime?
+  syncRequestedAt      DateTime?
+  lockToken            String?        @db.VarChar(64)
+  lockUntil            DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   @@unique([platform, target])
   @@index([nextAllowedSyncAt])

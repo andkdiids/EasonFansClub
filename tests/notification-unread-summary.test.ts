@@ -38,15 +38,15 @@ test('summary is independent of notification pagination', () => {
   assert.equal(summary.replies, 45)
 })
 
-test('all unread sources use the same isRead authority and preserve failures', () => {
+test('all unread sources use the same readAt authority and preserve failures', () => {
   const service = read('lib/notifications.ts')
   const layout = read('app/layout.tsx')
   const summaryRoute = read('app/api/notifications/unread-summary/route.ts')
   const countRoute = read('app/api/notifications/unread-count/route.ts')
   const provider = read('components/NotificationProvider.tsx')
 
-  assert.match(service, /isRead: false/)
-  assert.match(service, /AND n\.isRead = 0/)
+  assert.match(service, /readAt: null/)
+  assert.match(service, /AND n\.readAt IS NULL/)
   assert.match(service, /export async function getUnreadNotificationCount\(userId: string, canReview = false\)[\s\S]*getUnreadSummary\(userId, canReview\)/)
   assert.match(layout, /getUnreadSummary\(sessionUser\.id, Boolean\(canAccessAdmin\)\)\.catch/)
   assert.match(layout, /layout\.unread-summary/)
@@ -77,7 +77,7 @@ test('mark-all-read and clear-all are server-side full-user operations', () => {
   const route = read('app/api/notifications/route.ts')
 
   assert.match(service, /markAllUnifiedNotificationsRead\(userId: string\)/)
-  assert.match(service, /isRead: false[\s\S]*data: \{ isRead: true, readAt: now \}/)
+  assert.match(service, /readAt: null[\s\S]*data: \{ isRead: true, readAt: now \}/)
   assert.match(route, /const clearAll = body\?\.all === true/)
   assert.match(route, /notification\.deleteMany\(\{[\s\S]*where: \{ recipientId: guard\.user\.id \}/)
 })

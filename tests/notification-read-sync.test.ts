@@ -4,7 +4,7 @@ import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('通知卡片、乐观计数和返回页面使用同一已读状态', () => {
+test('通知卡片、乐观计数和返回页面使用同一 readAt 已读状态', () => {
   const client = read('app/notifications/NotificationsClient.tsx')
 
   assert.match(client, /function isNotificationRead\(item: UnifiedNotification\)/)
@@ -29,8 +29,8 @@ test('通知列表 API 禁止缓存，返回服务端最新已读字段', () => 
   assert.match(route, /Cache-Control.*private, no-store/)
   assert.match(route, /totalPages/)
   assert.match(route, /pageSize/)
-  assert.match(service, /isRead: item\.isRead/)
-  assert.match(service, /read: item\.isRead/)
+  assert.match(service, /isRead: Boolean\(item\.readAt\)/)
+  assert.match(service, /read: Boolean\(item\.readAt\)/)
   assert.match(service, /readAt: item\.readAt/)
-  assert.match(service, /ORDER BY isRead ASC, createdAt DESC/)
+  assert.match(service, /CASE WHEN n\.readAt IS NULL THEN 0 ELSE 1 END AS isRead/)
 })

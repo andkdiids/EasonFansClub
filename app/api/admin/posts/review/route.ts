@@ -152,7 +152,7 @@ async function writeReviewNotification(input: {
           { type: 'REVIEW' },
           { type: 'ADMIN' },
         ],
-        isRead: false,
+        readAt: null,
         key: { startsWith: `post-review:${input.postId}` },
       },
       data: { isRead: true, readAt: input.reviewedAt },

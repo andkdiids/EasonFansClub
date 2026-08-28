@@ -17,7 +17,7 @@ test('审核结果批量已读函数只命中审核结果通知（ADMIN + /posts
   assert.ok(fn.length > 0, 'markModerationNotificationsRead 函数应存在')
 
   // 仅更新未读行：幂等且不会重置已读时间。
-  assert.match(fn, /isRead: false/)
+  assert.match(fn, /readAt: null/)
   // 严格限定为审核结果通知：ADMIN 类型 + 帖子/表情包审核结果链接前缀。
   assert.match(fn, /type: 'ADMIN'/)
   assert.match(fn, /startsWith: '\/posts\/'/)

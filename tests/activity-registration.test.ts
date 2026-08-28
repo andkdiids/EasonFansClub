@@ -56,7 +56,7 @@ test('正式发布的必填校验给出逐项提示，可选字段为空不会�
   assert.equal(normalizeActivityInput({ title: '先存起来', status: 'DRAFT' }).valid, true)
 })
 
-test('活动时间关系包含活动时段和报名窗口限制', () => {
+test('活动时间关系和独立报名窗口分别校验', () => {
   const activityEndBeforeStart = normalizeActivityInput(publishedActivity({ endsAt: '2026-09-01T09:00' }))
   assert.equal(activityEndBeforeStart.valid, false)
   if (!activityEndBeforeStart.valid) assert.equal(activityEndBeforeStart.message, '结束时间必须晚于开始时间')
@@ -66,11 +66,10 @@ test('活动时间关系包含活动时段和报名窗口限制', () => {
   if (!signupEndBeforeStart.valid) assert.equal(signupEndBeforeStart.message, '报名结束时间必须晚于报名开始时间')
 
   const signupAfterActivity = normalizeActivityInput(publishedActivity({ registrationEndAt: '2026-09-01T19:00' }))
-  assert.equal(signupAfterActivity.valid, false)
-  if (!signupAfterActivity.valid) assert.equal(signupAfterActivity.message, '报名结束时间不能晚于活动结束时间')
+  assert.equal(signupAfterActivity.valid, true)
 })
 
-test('报名状态统一处理开始时间、截止时间、结束状态和名额', () => {
+test('报名状态只处理独立报名窗口和有效名额', () => {
   const base = {
     status: 'PUBLISHED' as const,
     publishedAt: '2026-08-01T00:00:00.000Z',
@@ -82,7 +81,8 @@ test('报名状态统一处理开始时间、截止时间、结束状态和名�
   assert.deepEqual(getActivityRegistrationState(base, 0, new Date('2026-08-20T00:00:00.000Z')), { state: 'AVAILABLE', canRegister: true })
   assert.deepEqual(getActivityRegistrationState({ ...base, signupLimit: 2 }, 2, new Date('2026-08-20T00:00:00.000Z')), { state: 'FULL', canRegister: false })
   assert.deepEqual(getActivityRegistrationState({ ...base, signupLimit: 0 }, 999, new Date('2026-08-20T00:00:00.000Z')), { state: 'AVAILABLE', canRegister: true })
-  assert.deepEqual(getActivityRegistrationState(base, 0, new Date('2026-09-01T10:00:00.000Z')), { state: 'ENDED', canRegister: false })
+  assert.deepEqual(getActivityRegistrationState(base, 0, new Date('2026-09-01T10:00:00.000Z')), { state: 'AVAILABLE', canRegister: true })
+  assert.deepEqual(getActivityRegistrationState({ ...base, registrationEndAt: '2026-09-05T00:00:00.000Z' }, 0, new Date('2026-09-05T00:00:00.000Z')), { state: 'CLOSED', canRegister: false })
 })
 
 test('活动报名复用既有唯一模型，事务锁住活动并幂等写入通知', () => {
@@ -107,9 +107,9 @@ test('活动列表和首页一次带回真实报名数量，卡片封面固定�
   const data = read('lib/activity-data.ts')
   const home = read('lib/home-data.ts')
   const card = read('components/activities/ActivityCard.tsx')
-  assert.match(data, /_count: \{ select: \{ ActivityRegistration: true \} \}/)
+  assert.match(data, /_count: \{ select: \{ ActivityRegistration: \{ where: \{ status: \{ in: \['ACTIVE'\] \} \} \} \} \}/)
   assert.match(data, /signupCount: _count\.ActivityRegistration/)
-  assert.match(home, /_count: \{ select: \{ ActivityRegistration: true \} \}/)
+  assert.match(home, /_count: \{ select: \{ ActivityRegistration: \{ where: \{ status: \{ in: \['ACTIVE'\] \} \} \} \} \}/)
   assert.match(home, /signupCount: _count\.ActivityRegistration/)
   assert.match(card, /aspect-\[3\/4\]/)
   assert.match(card, /object-cover/)

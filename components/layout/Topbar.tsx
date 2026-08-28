@@ -85,6 +85,10 @@ export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessA
         账号安全
       </Link>
 
+      <Link href="/settings/privacy" onClick={() => setMenuOpen(false)}>
+        隐私设置
+      </Link>
+
       {canAccessAdmin ? (
         <Link href="/admin" onClick={() => setMenuOpen(false)} className="app-topbar-admin-link">
           后台管理

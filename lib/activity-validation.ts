@@ -1,4 +1,4 @@
-import { activityStatusValues, activityTypeValues, parseActivityDateInput, type ActivityStatusValue, type ActivityTypeValue } from '@/lib/activity'
+import { activityStatusValues, activityTypeValues, activityVerificationModeValues, parseActivityDateInput, type ActivityStatusValue, type ActivityTypeValue, type ActivityVerificationModeValue } from '@/lib/activity'
 import { parseActivityImageInput } from '@/lib/activity-image-url'
 import { sanitizeText } from '@/lib/security'
 
@@ -17,6 +17,7 @@ export type ActivityEditableValues = {
   endsAt: Date | null
   registrationStartAt: Date | null
   registrationEndAt: Date | null
+  verificationMode: ActivityVerificationModeValue
   signupLimit: number | null
   organizer: string | null
   contactInfo: string | null
@@ -93,6 +94,12 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
     : null
   if (!status) return { valid: false, message: '活动状态不正确' }
 
+  const verificationModeValue = recordValue(body, 'verificationMode', existing?.verificationMode ?? 'NONE')
+  const verificationMode = typeof verificationModeValue === 'string' && activityVerificationModeValues.includes(verificationModeValue as ActivityVerificationModeValue)
+    ? verificationModeValue as ActivityVerificationModeValue
+    : null
+  if (!verificationMode) return { valid: false, message: '活动核销方式不正确' }
+
   const cover = parseImage(recordValue(body, 'coverUrl', existing?.coverUrl), '封面图片', existing?.coverUrl)
   if (cover.message) return { valid: false, message: cover.message }
   const banner = parseImage(recordValue(body, 'bannerUrl', existing?.bannerUrl), '横幅图片', existing?.bannerUrl)
@@ -130,6 +137,7 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
     endsAt: ends.value ?? (recordValue(body, 'endsAt', undefined) === undefined ? existing?.endsAt ?? null : null),
     registrationStartAt: registrationStart.value ?? (recordValue(body, 'registrationStartAt', undefined) === undefined ? existing?.registrationStartAt ?? null : null),
     registrationEndAt: registrationEnd.value ?? (recordValue(body, 'registrationEndAt', undefined) === undefined ? existing?.registrationEndAt ?? null : null),
+    verificationMode,
     signupLimit: signupLimit.value,
     organizer: nullableText(recordValue(body, 'organizer', existing?.organizer), 160),
     contactInfo: nullableText(recordValue(body, 'contactInfo', existing?.contactInfo), 500),
@@ -140,7 +148,6 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
 
   if (value.startsAt && value.endsAt && value.endsAt <= value.startsAt) return { valid: false, message: '结束时间必须晚于开始时间' }
   if (value.registrationStartAt && value.registrationEndAt && value.registrationEndAt <= value.registrationStartAt) return { valid: false, message: '报名结束时间必须晚于报名开始时间' }
-  if (value.registrationEndAt && value.endsAt && value.registrationEndAt > value.endsAt) return { valid: false, message: '报名结束时间不能晚于活动结束时间' }
 
   if (status === 'PUBLISHED') {
     if (!title) return { valid: false, message: '请填写活动标题' }

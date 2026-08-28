@@ -6,15 +6,34 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { upsertNotificationWithDb } from '@/lib/notification-write'
-import { activityRegistrationStateMessage, activityRegistrationSuccessNotificationKey, ActivityRegistrationError, getActivityRegistrationState, type ActivityRegistrationState } from '@/lib/activity-registration'
+import {
+  activityRegistrationSelect,
+  activityRegistrationStateMessage,
+  activityRegistrationSuccessNotificationKey,
+  ActivityRegistrationError,
+  countActiveActivityRegistrations,
+  generateActivityRegistrationLifecycleKey,
+  generateActivityRegistrationToken,
+  getActivityRegistrationQuestions,
+  getActivityRegistrationState,
+  serializeActivityRegistration,
+  syncActivitySignupCount,
+  validateRegistrationAnswers,
+  type ActivityRegistrationState,
+} from '@/lib/activity-registration'
 
 export const dynamic = 'force-dynamic'
 
 const activityIdPattern = /^[A-Za-z0-9_-]{8,128}$/
+const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
 
 function stateError(state: ActivityRegistrationState) {
   if (state === 'AVAILABLE') throw new Error('活动报名状态不一致')
   return new ActivityRegistrationError(state, activityRegistrationStateMessage(state), 409)
+}
+
+function bodyRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
@@ -31,51 +50,69 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   if (limited) return limited
 
   const { activityId } = await params
-  if (!activityIdPattern.test(activityId)) return NextResponse.json({ ok: false, message: '活动不存在' }, { status: 404 })
+  if (!activityIdPattern.test(activityId)) return NextResponse.json({ ok: false, message: '活动不存在' }, { status: 404, headers: privateHeaders })
+  const body = bodyRecord(await request.json().catch(() => null))
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // Serialize all capacity decisions for one activity. The row lock makes
-      // the count/create/update sequence safe under concurrent submissions.
       const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
       if (!locked.length) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
 
       const activity = await tx.activity.findUnique({
         where: { id: activityId },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          startsAt: true,
-          endsAt: true,
-          registrationStartAt: true,
-          registrationEndAt: true,
-          publishedAt: true,
-          signupLimit: true,
-          signupCount: true,
-        },
+        select: { id: true, title: true, status: true, registrationStartAt: true, registrationEndAt: true, signupLimit: true },
       })
       if (!activity) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
 
       const existing = await tx.activityRegistration.findUnique({
         where: { activityId_userId: { activityId, userId: guard.user.id } },
-        select: { id: true },
+        select: activityRegistrationSelect,
       })
-      const registrationCount = await tx.activityRegistration.count({ where: { activityId } })
+      const registrationCount = await countActiveActivityRegistrations(tx, activityId)
+
+      // Retries after a successful request are idempotent and do not require
+      // the client to resubmit answers.
+      if (existing?.status === 'ACTIVE') {
+        const availability = getActivityRegistrationState(activity, registrationCount)
+        return {
+          alreadyRegistered: true,
+          registrationCount,
+          registrationState: availability.state,
+          registration: serializeActivityRegistration(existing),
+        }
+      }
+
       const availability = getActivityRegistrationState(activity, registrationCount)
+      if (!availability.canRegister) throw stateError(availability.state)
+      if (body.confirm !== true) throw new ActivityRegistrationError('CONFIRMATION_REQUIRED', '请确认报名信息后继续', 400)
 
-      if (!existing) {
-        if (!availability.canRegister) throw stateError(availability.state)
-        await tx.activityRegistration.create({ data: { activityId, userId: guard.user.id } })
-      }
+      const questions = await getActivityRegistrationQuestions(tx, activityId)
+      const answers = validateRegistrationAnswers(questions, body.answers)
+      if (!answers.valid) throw new ActivityRegistrationError('INVALID_ANSWERS', answers.message, 400)
 
-      const nextRegistrationCount = existing ? registrationCount : registrationCount + 1
-      if (activity.signupCount !== nextRegistrationCount) {
-        await tx.activity.update({ where: { id: activityId }, data: { signupCount: nextRegistrationCount }, select: { id: true } })
-      }
+      const now = new Date()
+      const token = generateActivityRegistrationToken()
+      const lifecycleKey = generateActivityRegistrationLifecycleKey()
+      const registration = existing
+        ? await tx.activityRegistration.update({
+            where: { id: existing.id },
+            data: { status: 'ACTIVE', registeredAt: now, cancelledAt: null, verifiedAt: null, verifiedById: null, verificationMethod: null, checkedInAt: null, verificationToken: token },
+            select: { id: true },
+          })
+        : await tx.activityRegistration.create({
+            data: { activityId, userId: guard.user.id, status: 'ACTIVE', registeredAt: now, verificationToken: token },
+            select: { id: true },
+          })
 
+      await tx.activityRegistrationAnswer.deleteMany({ where: { registrationId: registration.id } })
+      if (answers.value.length) await tx.activityRegistrationAnswer.createMany({
+        data: answers.value.map((answer) => ({ registrationId: registration.id, questionId: answer.questionId, questionTitle: answer.questionTitle, value: answer.value })),
+      })
+
+      const nextRegistrationCount = await syncActivitySignupCount(tx, activityId)
+      const notificationKey = activityRegistrationSuccessNotificationKey(activityId, guard.user.id, registration.id, lifecycleKey)
       await upsertNotificationWithDb(tx, {
-        where: { recipientId_key: { recipientId: guard.user.id, key: activityRegistrationSuccessNotificationKey(activityId, guard.user.id) } },
+        where: { recipientId_key: { recipientId: guard.user.id, key: notificationKey } },
         update: {},
         create: {
           recipientId: guard.user.id,
@@ -84,19 +121,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
           title: '活动报名成功',
           content: `你已成功报名「${activity.title}」`,
           link: `/activities/${activityId}`,
-          key: activityRegistrationSuccessNotificationKey(activityId, guard.user.id),
+          key: notificationKey,
         },
-      }, {
-        operation: 'activity-registration-success',
-        userId: guard.user.id,
-        activityFallback: true,
-      })
+      }, { operation: 'activity-registration-success', userId: guard.user.id, activityFallback: true })
 
+      const saved = await tx.activityRegistration.findUnique({ where: { id: registration.id }, select: activityRegistrationSelect })
+      if (!saved) throw new ActivityRegistrationError('REGISTRATION_NOT_FOUND', '报名记录保存失败', 500)
       const nextAvailability = getActivityRegistrationState(activity, nextRegistrationCount)
       return {
-        alreadyRegistered: Boolean(existing),
+        alreadyRegistered: false,
         registrationCount: nextRegistrationCount,
         registrationState: nextAvailability.state,
+        registration: serializeActivityRegistration(saved),
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 15_000, maxWait: 5_000 })
 
@@ -108,30 +144,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     return NextResponse.json({
       ok: true,
       alreadyRegistered: result.alreadyRegistered,
-      isRegistered: true,
+      isRegistered: result.registration.status === 'ACTIVE',
+      registrationStatus: result.registration.status,
+      registration: result.registration,
       registrationCount: result.registrationCount,
       registrationState: result.registrationState,
       canRegister: false,
-    }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+    }, { headers: privateHeaders })
   } catch (error) {
     if (error instanceof ActivityRegistrationError) {
-      return NextResponse.json({
-        ok: false,
-        code: error.code,
-        message: error.message,
-        ...(error.code !== 'ACTIVITY_NOT_FOUND' ? { registrationState: error.code } : {}),
-      }, { status: error.status, headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
-    }
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      // A legacy writer may race this endpoint without taking the activity
-      // lock. Treat the unique registration as an idempotent success.
-      const existing = await prisma.activityRegistration.findUnique({ where: { activityId_userId: { activityId, userId: guard.user.id } }, select: { id: true } }).catch(() => null)
-      if (existing) {
-        const count = await prisma.activityRegistration.count({ where: { activityId } }).catch(() => null)
-        if (count !== null) return NextResponse.json({ ok: true, alreadyRegistered: true, isRegistered: true, registrationCount: count, canRegister: false }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
-      }
+      return NextResponse.json({ ok: false, code: error.code, message: error.message, ...(error.code !== 'ACTIVITY_NOT_FOUND' ? { registrationState: error.code } : {}) }, { status: error.status, headers: privateHeaders })
     }
     console.error('[activities.register]', error instanceof Error ? error.message : error)
-    return NextResponse.json({ ok: false, message: '报名失败，请稍后重试' }, { status: 500 })
+    return NextResponse.json({ ok: false, code: 'REGISTRATION_FAILED', message: '报名失败，请稍后重试' }, { status: 500, headers: privateHeaders })
   }
 }

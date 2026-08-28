@@ -219,7 +219,7 @@ export async function decideFriendRequest(userId: string, requestId: string, act
         recipientId: userId,
         type: 'FRIEND_REQUEST',
         key: getFriendRequestNotificationKey(requestId),
-        isRead: false,
+        readAt: null,
       },
       select: { id: true },
     })
@@ -230,7 +230,7 @@ export async function decideFriendRequest(userId: string, requestId: string, act
         type: 'FRIEND_REQUEST',
         title: '好友申请',
         key: null,
-        isRead: false,
+        readAt: null,
         createdAt: { gte: result.requestCreatedAt },
       },
       orderBy: { createdAt: 'desc' },

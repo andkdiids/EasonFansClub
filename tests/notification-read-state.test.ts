@@ -12,7 +12,7 @@ test('单条已读接口返回持久化 readAt，并对重复请求保持幂等'
   assert.match(route, /const readAt = result\.readAt[\s\S]*readAt,/)
   assert.match(route, /isRead: true/)
   assert.match(service, /updateMany\([\s\S]*data: \{ isRead: true, readAt \}/)
-  assert.match(service, /existing\?\.isRead \? \{ ok: true, readAt: existing\.readAt \}/)
+  assert.match(service, /existing\?\.readAt \? \{ ok: true, readAt: existing\.readAt \}/)
   assert.match(service, /update: \{\}/)
 })
 

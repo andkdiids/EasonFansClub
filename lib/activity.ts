@@ -5,6 +5,8 @@ export type ActivityTypeValue = (typeof activityTypeValues)[number]
 
 export const activityStatusValues = ['DRAFT', 'PUBLISHED', 'CANCELLED'] as const
 export type ActivityStatusValue = (typeof activityStatusValues)[number]
+export const activityVerificationModeValues = ['NONE', 'MANUAL', 'QR'] as const
+export type ActivityVerificationModeValue = (typeof activityVerificationModeValues)[number]
 
 export const activityTypeLabels: Record<ActivityTypeValue, string> = {
   OFFLINE: '线下活动',
@@ -45,6 +47,7 @@ export type ActivityView = {
   endsAt: string | null
   registrationStartAt: string | null
   registrationEndAt: string | null
+  verificationMode: ActivityVerificationModeValue
   organizer: string | null
   contactInfo: string | null
   isFeatured: boolean
@@ -141,6 +144,7 @@ export function serializeActivity(activity: {
   endsAt?: ActivityDateValue
   registrationStartAt?: ActivityDateValue
   registrationEndAt?: ActivityDateValue
+  verificationMode?: ActivityVerificationModeValue
   organizer?: string | null
   contactInfo?: string | null
   isFeatured?: boolean
@@ -171,6 +175,7 @@ export function serializeActivity(activity: {
     endsAt: iso(activity.endsAt),
     registrationStartAt: iso(activity.registrationStartAt),
     registrationEndAt: iso(activity.registrationEndAt),
+    verificationMode: activity.verificationMode ?? 'NONE',
     organizer: activity.organizer ?? null,
     contactInfo: activity.contactInfo ?? null,
     isFeatured: activity.isFeatured ?? false,

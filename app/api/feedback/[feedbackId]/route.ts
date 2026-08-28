@@ -35,7 +35,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fee
     () => prisma.notification.updateMany({
       where: {
         recipientId: guard.user.id,
-        isRead: false,
+        readAt: null,
         link: { startsWith: `/feedback/${feedback.id}` },
       },
       data: { isRead: true, readAt: new Date() },
