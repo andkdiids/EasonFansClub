@@ -23,8 +23,8 @@ export function ActivityShareButton({ title }: Readonly<{ title: string }>) {
 
   return (
     <span className="inline-flex items-center gap-2">
-      <button type="button" onClick={() => void share()} className="min-h-10 rounded-full border border-sky-200 bg-white px-4 text-sm font-black text-brand-700 hover:bg-sky-50 dark:border-slate-600 dark:bg-slate-900 dark:text-sky-200 dark:hover:bg-slate-800">分享活动</button>
-      {message ? <span role="status" className="text-xs font-black text-emerald-600 dark:text-emerald-300">{message}</span> : null}
+      <button type="button" onClick={() => void share()} className="min-h-10 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-black text-[var(--primary)] hover:bg-[var(--navigation-active)]">分享活动</button>
+      {message ? <span role="status" className="text-xs font-black text-[var(--success)]">{message}</span> : null}
     </span>
   )
 }

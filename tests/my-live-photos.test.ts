@@ -167,7 +167,7 @@ test('公开接口继承isPublic并且不返回storageKey，照片和记录一�
 test('隐藏记录不会把图片地址发到公共响应，自己的接口仍可管理', () => {
   const publicApi = read('app/api/music/live/users/[uid]/route.ts')
   const ownApi = read('app/api/music/live/attendance/[attendanceId]/photos/route.ts')
-  assert.match(publicApi, /UserMusicConcert:[\s\S]*where:[\s\S]*isPublic: true/)
+  assert.match(publicApi, /prisma\.userMusicConcert\.findMany\([\s\S]*where: \{ userId: user\.id, isPublic: true/)
   assert.match(ownApi, /getOwnMyLivePhotos\(guard\.user\.id, attendanceId\)/)
   assert.doesNotMatch(read('lib/music-personal-live.ts'), /MyLivePhoto|serializeMyLivePhotos/)
 })

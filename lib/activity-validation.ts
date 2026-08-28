@@ -85,7 +85,7 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
   const type = typeof typeValue === 'string' && activityTypeValues.includes(typeValue as ActivityTypeValue)
     ? typeValue as ActivityTypeValue
     : null
-  if (!type) return { valid: false, message: '活动类型不正确' }
+  if (!type) return { valid: false, message: typeValue === undefined || typeValue === null || typeValue === '' ? '请选择活动类型' : '活动类型不正确' }
 
   const statusValue = recordValue(body, 'status', existing?.status ?? 'DRAFT')
   const status = typeof statusValue === 'string' && activityStatusValues.includes(statusValue as ActivityStatusValue)
@@ -110,7 +110,7 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
   const signupLimit = parseNullableInteger(recordValue(body, 'signupLimit', existing?.signupLimit), '报名名额')
   if (signupLimit.message) return { valid: false, message: signupLimit.message }
   const sortOrder = parseNullableInteger(recordValue(body, 'sortOrder', existing?.sortOrder ?? 0), '排序值')
-  if (sortOrder.message || sortOrder.value === null) return { valid: false, message: sortOrder.message || '排序值不正确' }
+  if (sortOrder.message) return { valid: false, message: sortOrder.message }
 
   const onlineUrl = parseUrl(recordValue(body, 'onlineUrl', existing?.onlineUrl), '线上活动链接')
   if (onlineUrl.message) return { valid: false, message: onlineUrl.message }
@@ -135,18 +135,19 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
     contactInfo: nullableText(recordValue(body, 'contactInfo', existing?.contactInfo), 500),
     isFeatured: parseBoolean(recordValue(body, 'isFeatured', existing?.isFeatured ?? false), existing?.isFeatured ?? false),
     isPinned: parseBoolean(recordValue(body, 'isPinned', existing?.isPinned ?? false), existing?.isPinned ?? false),
-    sortOrder: sortOrder.value,
+    sortOrder: sortOrder.value ?? 0,
   }
 
   if (value.startsAt && value.endsAt && value.endsAt <= value.startsAt) return { valid: false, message: '结束时间必须晚于开始时间' }
   if (value.registrationStartAt && value.registrationEndAt && value.registrationEndAt <= value.registrationStartAt) return { valid: false, message: '报名结束时间必须晚于报名开始时间' }
+  if (value.registrationEndAt && value.endsAt && value.registrationEndAt > value.endsAt) return { valid: false, message: '报名结束时间不能晚于活动结束时间' }
 
   if (status === 'PUBLISHED') {
-    if (title.length < 2) return { valid: false, message: '发布活动前请填写至少 2 个字的标题' }
-    if (description.length < 5) return { valid: false, message: '发布活动前请填写活动说明' }
-    if (!value.startsAt) return { valid: false, message: '发布活动前请填写开始时间' }
-    if (type === 'ONLINE' && !value.onlineUrl) return { valid: false, message: '线上活动请填写活动链接' }
-    if (type === 'OFFLINE' && !value.locationName) return { valid: false, message: '线下活动请填写活动地点' }
+    if (!title) return { valid: false, message: '请填写活动标题' }
+    if (!Object.prototype.hasOwnProperty.call(body, 'type') && !existing?.type) return { valid: false, message: '请选择活动类型' }
+    if (!value.startsAt) return { valid: false, message: '请选择活动开始时间' }
+    if (!value.endsAt) return { valid: false, message: '请选择活动结束时间' }
+    if (!description) return { valid: false, message: '请填写活动说明' }
   }
 
   return { valid: true, value }

@@ -368,14 +368,22 @@ export async function POST(request: Request) {
         ? runPostCreateSideEffect('friend-activity', () => prisma.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${result.post.id}` } }), user.id, input.boardId)
         : runPostCreateSideEffect('moderation-notification', async () => {
           const admins = await prisma.user.findMany({
-            where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+            where: {
+              role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+              status: 'ACTIVE',
+              isDeleted: false,
+              OR: [
+                { role: 'SUPER_ADMIN' },
+                { AdminPermission: { some: { permissionKey: 'post_manage', enabled: true } } },
+              ],
+            },
             select: { id: true },
           })
           if (!admins.length) return
           await createManyNotifications({
             data: admins.map((admin) => ({
               recipientId: admin.id,
-              type: 'ADMIN' as const,
+              type: 'REVIEW' as const,
               title: '新帖子待审核',
               content: input.title,
               link: '/admin/posts/review',

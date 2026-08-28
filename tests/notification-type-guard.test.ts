@@ -74,5 +74,7 @@ test('非法通知类型不会触发数据库写入，并记录结构化错误',
     'BADGE',
     'FRIEND_REQUEST',
     'BIRTHDAY_GREETING',
+    'FEEDBACK',
+    'REVIEW',
   ])
 })

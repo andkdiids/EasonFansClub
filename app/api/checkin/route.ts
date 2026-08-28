@@ -312,15 +312,14 @@ export async function POST(request: Request) {
   const preference = { checkinMoodEnabled: user.checkinMoodEnabled }
   const mood = preference.checkinMoodEnabled ? requestedMood : null
   const customMood = preference.checkinMoodEnabled ? validatedCustomMood : null
+  if (preference.checkinMoodEnabled && moodKey && requestedMoodType === PRESET_MOOD_TYPE && !requestedMood) {
+    return NextResponse.json({ message: '心情格式不正确' }, { status: 400 })
+  }
   const rawMessage = sanitizeText(body?.message, 300)
   if ((await checkBannedWords(rawMessage)).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
   const message = rawMessage
-
-  if (preference.checkinMoodEnabled && !mood && !customMood) {
-    return NextResponse.json({ message: '请选择今日心情' }, { status: 400 })
-  }
 
   const checkedAt = new Date()
   const today = startOfLocalDay(checkedAt)
@@ -545,7 +544,7 @@ export async function POST(request: Request) {
     checkedToday: true,
     checkDate: formatBeijingDate(today),
     todayCheckIn: result.checkIn,
-    mood,
+    mood: mood ?? null,
     gainedPoints: result.checkIn.points,
     gainedExp: result.checkIn.exp,
     bonus: result.bonus,

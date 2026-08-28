@@ -99,10 +99,11 @@ test('签到偏好只能修改本人并由签到 API 依据数据库值判断 mo
   assert.equal(calcMoodIndex([]), 0)
 })
 
-test('关闭心情后前端隐藏选择区并显示未填写心情而非伪造图标', () => {
+test('心情可选，关闭偏好后前端隐藏选择区并显示无心情而非伪造图标', () => {
   const button = source('components/CheckInButton.tsx')
   assert.match(button, /checkinMoodEnabled \? <div>/)
-  assert.match(button, /checkinMoodEnabled && !mood/)
-  assert.match(button, /未填写心情/)
+  assert.doesNotMatch(button, /checkinMoodEnabled && !mood/)
+  assert.match(button, /NO_MOOD_LABEL/)
+  assert.match(button, /disabled=\{previewMode \|\| isSubmitting\}/)
   assert.doesNotMatch(button, /selectedMood\?\.icon \|\| '♪'/)
 })

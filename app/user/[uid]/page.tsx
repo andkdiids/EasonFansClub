@@ -13,6 +13,8 @@ import { locationFromProfile } from '@/lib/user-location'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getBadgeProfileSummary, getEquippedBadgeForUser } from '@/lib/badge-service'
+import { getProfileRecordPagination } from '@/lib/profile-page'
+import { getProfileVisibility } from '@/lib/user-privacy'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,22 +48,13 @@ export default async function PublicUserPage({ params }: PageProps) {
       ipRegion: true,
       createdAt: true,
       Profile: true,
-      _count: {
-        select: {
-          UserMusicConcert: {
-            where: {
-              isPublic: true,
-              MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
-            },
-          },
-        },
-      },
     },
   }), 3500)
 
   if (!user || !user.Profile) notFound()
 
   const isSelf = viewer?.id === user.id
+  const visibility = await getProfileVisibility(user.id, viewer?.id)
   let isFriend = false
   let isFollowed = false
   let isBlocked = false
@@ -129,11 +122,16 @@ export default async function PublicUserPage({ params }: PageProps) {
   const avatar = profileImageUrl(user.Profile.avatarUrl || user.avatarUrl)
   const background = profileImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
   const bio = publicModerationText(user.Profile.bio || user.bio || '', user.Profile.bioModerationStatus === 'VIOLATION' || user.bioModerationStatus === 'VIOLATION' ? 'VIOLATION' : 'NORMAL')
-  const [growth, recentMessagesPage, equippedBadge, badgeSummary] = await Promise.all([
+  const [growth, recentMessagesPage, equippedBadge, badgeSummary, publicLiveCount] = await Promise.all([
     getGrowthSummarySafe(user.experience),
-    loadProfileRecentMessagesPage(user.id, viewer?.id),
+    visibility.isSelf || visibility.settings.showCheckInMessages
+      ? loadProfileRecentMessagesPage(user.id, viewer?.id)
+      : Promise.resolve({ messages: [], pagination: getProfileRecordPagination(0, 1) }),
     getEquippedBadgeForUser(user.id),
-    getBadgeProfileSummary(user.id, viewer?.id),
+    visibility.isSelf || visibility.settings.showBadgeHistory ? getBadgeProfileSummary(user.id, viewer?.id) : Promise.resolve(null),
+    visibility.isSelf || visibility.settings.showConcertHistory
+      ? prisma.userMusicConcert.count({ where: { userId: user.id, isPublic: true, MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } } } })
+      : Promise.resolve(0),
   ])
   const friendStatus: 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED' = isFriend
     ? 'FRIEND'
@@ -160,9 +158,10 @@ export default async function PublicUserPage({ params }: PageProps) {
         backgroundUrl: background,
         createdAt: user.createdAt,
         wallVisibility: user.Profile.wallVisibility || 'PUBLIC',
-        publicLiveCount: user._count.UserMusicConcert,
+        publicLiveCount,
         equippedBadge,
         badgeSummary,
+        privacy: visibility.settings,
       }}
       growth={growth}
       relationship={{

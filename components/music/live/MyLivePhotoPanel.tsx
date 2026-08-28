@@ -161,7 +161,7 @@ export function MyLivePhotoPanel({ attendanceId, photos = [], manage = false, wa
                       alt={`${categoryLabel(category)}照片 ${index + 1}`}
                       imageClassName="h-full w-full object-contain"
                       buttonClassName="my-live-photo-thumbnail"
-                      fetchPriority={manage ? 'high' : 'low'}
+                      fetchPriority={manage && index < 2 ? 'high' : 'low'}
                     />
                     {manage && isManaging ? <div className="my-live-photo-item-actions">
                       <button type="button" onClick={() => void reorderPhoto(photo, 'previous')} disabled={busy || index === 0}>前移</button>

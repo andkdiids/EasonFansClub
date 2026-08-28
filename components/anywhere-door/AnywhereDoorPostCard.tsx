@@ -6,11 +6,11 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
-export function AnywhereDoorPostCard({ post, onLike }: Readonly<{ post: SocialPostView; onLike?: (postId: string) => void }>) {
+export function AnywhereDoorPostCard({ post, priority = false, onLike }: Readonly<{ post: SocialPostView; priority?: boolean; onLike?: (postId: string) => void }>) {
   return (
     <article className="overflow-hidden rounded-[28px] border border-sky-100 bg-white/90 shadow-sm">
       <div className="p-3 sm:p-4">
-        <MediaCarousel media={post.media} title={post.authorUsername} />
+        <MediaCarousel media={post.media} title={post.authorUsername} priority={priority} />
       </div>
       <div className="px-4 pb-5 sm:px-6 sm:pb-6">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-500">

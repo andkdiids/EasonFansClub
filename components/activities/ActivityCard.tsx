@@ -19,11 +19,11 @@ export function ActivityCard({ activity, href = `/activities/${activity.id}` }: 
   return (
     <Link href={href} className="group block overflow-hidden rounded-2xl border border-sky-100 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-900/85 dark:hover:border-sky-700">
       <div className="grid min-w-0 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
-        <div className="relative aspect-[16/9] bg-sky-50 sm:aspect-auto sm:min-h-48 dark:bg-slate-950">
+        <div className="relative w-full self-start aspect-[3/4] overflow-hidden bg-sky-50 dark:bg-slate-950">
           {cover ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img src={cover} alt={`${activity.title}活动封面`} className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" loading="lazy" />
-          ) : <div className="flex h-full min-h-36 items-center justify-center bg-gradient-to-br from-sky-100 via-white to-indigo-100 text-4xl font-black text-brand-700/55 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800">E</div>}
+          ) : <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-sky-100 via-white to-indigo-100 text-4xl font-black text-brand-700/55 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800">E</div>}
         </div>
         <div className="min-w-0 p-5">
           <div className="flex flex-wrap items-center gap-2">
@@ -37,7 +37,7 @@ export function ActivityCard({ activity, href = `/activities/${activity.id}` }: 
           <div className="mt-4 space-y-1 text-xs font-bold leading-5 text-slate-500 dark:text-slate-400">
             {activity.startsAt ? <p>时间：{activityDateLabel(activity.startsAt)}{activity.endsAt ? ` — ${activityDateLabel(activity.endsAt)}` : ''}</p> : null}
             {activity.locationName ? <p className="truncate">地点：{activity.locationName}</p> : null}
-            {activity.signupLimit !== null ? <p>名额：{activity.signupCount}/{activity.signupLimit}</p> : null}
+            <p>{activity.signupLimit !== null && activity.signupLimit > 0 ? `报名：${activity.signupCount}/${activity.signupLimit}` : `报名：${activity.signupCount}人`}</p>
           </div>
         </div>
       </div>

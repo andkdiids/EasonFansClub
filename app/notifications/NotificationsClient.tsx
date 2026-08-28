@@ -44,6 +44,14 @@ function isBirthdayNotification(item: UnifiedNotification) {
  * - 返回 null 时该通知不展示智能入口（如无任何跳转目标的系统公告，仅可标记已读 / 清除）。
  */
 function getSmartEntry(item: UnifiedNotification): { label: string; href?: string; action?: 'dock' } | null {
+  if (item.category === 'review') {
+    const target = getNotificationTarget(item)
+    return target ? { label: '查看审核', href: target } : null
+  }
+  if (item.category === 'feedback') {
+    const target = getNotificationTarget(item)
+    return target ? { label: '查看反馈', href: target } : null
+  }
   if (isSystemNotification(item)) return null
 
   const target = getNotificationTarget(item)
@@ -68,6 +76,10 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
       return target
         ? { label: target.startsWith('/profile/stickers') ? '修改表情包' : '查看详情', href: target }
         : null
+    case 'REVIEW':
+      return target ? { label: '查看审核', href: target } : null
+    case 'FEEDBACK':
+      return target ? { label: '查看反馈', href: target } : null
     case 'BADGE':
       return target ? { label: '查看徽章', href: target } : { label: '查看徽章', href: '/profile' }
     case 'BIRTHDAY_GREETING':
@@ -87,21 +99,19 @@ const categoryLabels: Record<NotificationCategory, string> = {
   all: '全部',
   reply: '回复',
   like: '点赞',
-  friend: '申请',
-  messages: '私信',
+  application: '申请',
   feedback: '反馈',
   system: '系统',
-  wall: '留言墙',
+  review: '审核',
 }
 
 const typeIcon: Record<string, string> = {
   reply: '↩',
   like: '♥',
-  friend: '+',
-  messages: '✉',
+  application: '+',
   feedback: '!',
   system: 'i',
-  wall: '✎',
+  review: '✓',
 }
 
 function formatTime(value: Date | string) {
@@ -243,23 +253,21 @@ function mergeUnreadSummary(base: UnreadSummary, items: UnifiedNotification[], d
   const change = (value: number) => direction === -1 ? Math.max(0, value - 1) : value + 1
   for (const item of items) {
     if (isNotificationRead(item)) continue
+    // MESSAGE rows are no longer part of this feed. Keep the guard so an old
+    // cached response cannot make chat unread state appear in notification
+    // counters.
+    if (item.category === 'messages') continue
     next.total = change(next.total)
-    if (item.source === 'system' || item.category === 'system' || item.category === 'reply' || item.category === 'like' || item.category === 'wall') {
-      next.notifications = change(next.notifications)
-    }
-    if (item.source === 'system' || item.category === 'system') next.system = change(next.system)
+    next.notifications = change(next.notifications)
+    if (item.category === 'system') next.system = change(next.system)
     if (item.category === 'reply') next.replies = change(next.replies)
     if (item.category === 'like') next.likes = change(next.likes)
-    if (item.category === 'wall') next.wall = change(next.wall)
-    if (item.category === 'friend') next.friendRequests = change(next.friendRequests)
-    if (item.category === 'messages') {
-      next.messages = change(next.messages)
-      next.directMessages = change(next.directMessages)
-    }
+    if (item.category === 'application') next.friendRequests = change(next.friendRequests)
     if (item.category === 'feedback') {
       next.feedback = change(next.feedback)
       next.feedbackReplies = change(next.feedbackReplies)
     }
+    if (item.category === 'review') next.review = change(next.review)
   }
   return next
 }
@@ -276,6 +284,7 @@ export function NotificationsClient({
   initialNotifications,
   initialPagination,
   initialCategory = 'all',
+  canReview = false,
   siteLogoUrl,
   initialLoadError = null,
   initialLoadWarning = null,
@@ -283,6 +292,7 @@ export function NotificationsClient({
   initialNotifications: UnifiedNotification[]
   initialPagination: NotificationPagination
   initialCategory?: NotificationCategory
+  canReview?: boolean
   siteLogoUrl?: string | null
   initialLoadError?: string | null
   initialLoadWarning?: string | null
@@ -297,7 +307,8 @@ export function NotificationsClient({
   const [pagination, setPagination] = useState(initialPagination)
   const unreadSummary = sharedSummary
   const unreadCount = unreadSummary.total
-  const [activeCategory, setActiveCategory] = useState<NotificationCategory>(initialCategory)
+  const initialVisibleCategory = initialCategory === 'review' && !canReview ? 'all' : initialCategory
+  const [activeCategory, setActiveCategory] = useState<NotificationCategory>(initialVisibleCategory)
   const [isUpdating, setIsUpdating] = useState(false)
   const [replyingKey, setReplyingKey] = useState<string | null>(null)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
@@ -530,13 +541,17 @@ export function NotificationsClient({
       all: unreadSummary.total,
       reply: unreadSummary.replies,
       like: unreadSummary.likes,
-      friend: unreadSummary.friendRequests,
-      messages: unreadSummary.messages,
+      application: unreadSummary.friendRequests,
       feedback: unreadSummary.feedback,
       system: unreadSummary.system,
-      wall: unreadSummary.wall,
+      review: unreadSummary.review,
     } satisfies Record<NotificationCategory, number>
   }, [unreadSummary])
+
+  const visibleCategories = useMemo(
+    () => (Object.keys(categoryLabels) as NotificationCategory[]).filter((category) => canReview || category !== 'review'),
+    [canReview],
+  )
 
   const filteredNotifications = useMemo(() => {
     if (activeCategory === 'all') return notifications
@@ -544,9 +559,10 @@ export function NotificationsClient({
   }, [activeCategory, notifications])
 
   useEffect(() => {
-    const nextCategory = parseNotificationCategory(new URLSearchParams(searchParamsString).get('category'))
+    const parsedCategory = parseNotificationCategory(new URLSearchParams(searchParamsString).get('category'))
+    const nextCategory = parsedCategory === 'review' && !canReview ? 'all' : parsedCategory
     setActiveCategory((current) => current === nextCategory ? current : nextCategory)
-  }, [searchParamsString])
+  }, [canReview, searchParamsString])
 
   function goToPage(nextPage: number) {
     const safePage = Math.min(Math.max(1, Math.trunc(nextPage) || 1), Math.max(1, pagination.totalPages))
@@ -715,8 +731,11 @@ export function NotificationsClient({
       feedbackReplies: 0,
       feedback: 0,
       friendRequests: 0,
-      directMessages: 0,
-      messages: 0,
+      // Private-message unread state belongs to the conversation list and is
+      // intentionally untouched by the notification-center "全部已读" action.
+      directMessages: unreadSummary.directMessages,
+      messages: unreadSummary.messages,
+      review: 0,
       total: 0,
     }
     optimisticItems.forEach((item) => {
@@ -802,7 +821,8 @@ export function NotificationsClient({
         feedbackReplies: 0,
         feedback: 0,
         friendRequests: 0,
-        total: current.directMessages,
+        review: 0,
+        total: 0,
       }))
       if (currentPage !== 1) router.replace(buildNotificationHref(1), { scroll: false })
       await refreshUnreadSummary()
@@ -1147,13 +1167,13 @@ export function NotificationsClient({
         ) : null}
       </div>
 
-      <div className="flat-tabs flex overflow-x-auto border-b border-sky-100">
-        {(Object.keys(categoryLabels) as NotificationCategory[]).map((category) => (
+      <div className="notification-category-tabs flat-tabs border-b border-sky-100">
+        {visibleCategories.map((category) => (
           <button
             key={category}
             type="button"
             onClick={() => selectCategory(category)}
-            className={`rounded-none border-b-2 px-4 py-2 text-sm font-black transition ${
+            className={`notification-category-tab rounded-none border-b-2 px-4 py-2 text-sm font-black transition ${
               activeCategory === category
                 ? 'border-brand-700 text-brand-700'
                 : 'border-transparent text-slate-500 hover:bg-sky-50'
@@ -1170,29 +1190,17 @@ export function NotificationsClient({
             <p className="text-lg font-black text-amber-900">通知加载失败，请重试</p>
             <p className="mt-2 text-sm font-bold text-amber-800">通知数据暂时不可用，现有通知不会被删除。</p>
           </div>
-        ) : activeCategory === 'messages' ? (
-          <div className="rounded-[24px] border border-sky-100 bg-white/82 p-8 text-center">
-            <p className="text-lg font-black text-brand-950">未读私信 {unreadSummary.messages} 条</p>
-            <p className="mt-2 text-sm font-bold text-slate-500">私信不会复制成普通通知，点击后在好友窗口查看会话。</p>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new Event('friend-dock:open'))}
-              className="mt-4 min-h-11 rounded-xl bg-brand-950 px-5 text-sm font-black text-white"
-            >
-              打开好友与私信
-            </button>
-          </div>
         ) : filteredNotifications.length ? (
           filteredNotifications.map(renderNotification)
         ) : (
           <div className="rounded-[24px] border border-sky-100 bg-white/82 p-10 text-center">
             <p className="text-lg font-black text-brand-950">暂无通知</p>
-            <p className="mt-2 text-sm font-bold text-slate-500">新的回复、点赞、好友和系统消息会出现在这里。</p>
+            <p className="mt-2 text-sm font-bold text-slate-500">新的回复、点赞、申请、反馈和系统消息会出现在这里。</p>
           </div>
         )}
       </div>
 
-      {activeCategory !== 'messages' && pagination.totalPages > 1 ? (
+      {pagination.totalPages > 1 ? (
         <Pagination
           currentPage={pagination.page}
           totalPages={pagination.totalPages}

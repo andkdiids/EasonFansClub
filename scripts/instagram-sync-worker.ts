@@ -10,9 +10,16 @@ let stopping = false
 process.once('SIGTERM', () => { stopping = true })
 process.once('SIGINT', () => { stopping = true })
 
-while (!stopping) {
-  const result = await runInstagramSyncWorkerOnce()
-  console.info('[instagram-sync-worker]', { status: result.status, errorCode: result.errorCode || null })
-  const waitMs = result.status === 'SYNC_DISABLED' ? 15 * 60 * 1000 : 60 * 1000
-  await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+async function main() {
+  while (!stopping) {
+    const result = await runInstagramSyncWorkerOnce()
+    console.info('[instagram-sync-worker]', { status: result.status, errorCode: result.errorCode || null })
+    const waitMs = result.status === 'SYNC_DISABLED' ? 15 * 60 * 1000 : 60 * 1000
+    await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+  }
 }
+
+void main().catch((error) => {
+  console.error('[instagram-sync-worker.fatal]', error)
+  process.exitCode = 1
+})

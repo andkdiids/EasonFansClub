@@ -65,7 +65,7 @@ export default async function TrendingPostsPage({
                   <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs font-bold text-slate-500">
                     <span className="flex items-center gap-2 text-brand-950">
                       <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
-                        {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt="" className="h-full w-full object-cover" loading="lazy" /> : formatUid(post.authorUid).slice(0, 1)}
+                        {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" /> : formatUid(post.authorUid).slice(0, 1)}
                       </span>
                       {post.authorName}
                     </span>
@@ -75,7 +75,7 @@ export default async function TrendingPostsPage({
                     <span>浏览 {post.viewCount}</span>
                   </div>
                 </div>
-                {image ? <div className="pointer-events-none order-first h-40 overflow-hidden bg-sky-50 sm:order-none sm:h-full sm:min-h-36"><img src={image} alt="" className="h-full w-full object-cover" loading="lazy" /></div> : null}
+                {image ? <div className="pointer-events-none order-first h-40 overflow-hidden bg-sky-50 sm:order-none sm:h-full sm:min-h-36"><img src={image} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" /></div> : null}
               </article>
             )
           })}

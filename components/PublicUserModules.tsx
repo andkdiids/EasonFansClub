@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { Pagination } from '@/components/ui/Pagination'
@@ -15,8 +15,9 @@ import { PersonalPostPinMenu } from '@/components/PostActions'
 import { BadgeCollectionPanel } from '@/components/BadgeCollectionPanel'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy-types'
 
-type ModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
+type ModuleKey = PublicProfileModuleKey
 type PostItem = {
   id: string
   title: string
@@ -71,8 +72,15 @@ function moduleLabel(moduleKey: ModuleKey, isSelf: boolean) {
   return isSelf ? tab?.selfLabel || '内容' : tab?.otherLabel || '内容'
 }
 
-export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMessagesPagination }: { uid: string; isSelf: boolean; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination }) {
-  const [active, setActive] = useState<ModuleKey>('posts')
+export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages = [], recentMessagesPagination }: { uid: string; isSelf: boolean; visibleModules?: readonly ModuleKey[]; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination }) {
+  const visibleModuleKeys = useMemo(() => {
+    if (!visibleModules) return PUBLIC_PROFILE_MODULE_KEYS
+    const allowed = new Set(visibleModules)
+    return PUBLIC_PROFILE_MODULE_KEYS.filter((moduleKey) => allowed.has(moduleKey))
+  }, [visibleModules])
+  const visibleTabs = useMemo(() => tabs.filter((tab) => visibleModuleKeys.includes(tab.key)), [visibleModuleKeys])
+  const firstVisibleModule = visibleModuleKeys[0] || 'posts'
+  const [active, setActive] = useState<ModuleKey>(firstVisibleModule)
   const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({ posts: 1, 'recent-messages': recentMessagesPagination?.page || 1 })
   const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
   const [deleteTarget, setDeleteTarget] = useState<ProfileRecentMessage | null>(null)
@@ -90,10 +98,15 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
   useEffect(() => {
     if (!isSelf) return
     const requested = new URLSearchParams(window.location.search).get('module')
-    if (tabs.some((tab) => tab.key === requested)) setActive(requested as ModuleKey)
-  }, [isSelf])
+    if (requested && visibleModuleKeys.includes(requested as ModuleKey)) setActive(requested as ModuleKey)
+  }, [isSelf, visibleModuleKeys])
+
+  useEffect(() => {
+    if (!visibleModuleKeys.includes(active)) setActive(firstVisibleModule)
+  }, [active, firstVisibleModule, visibleModuleKeys])
 
   const loadModule = useCallback(async (moduleKey: ModuleKey, requestedPage = 1, scrollAfterLoad = false) => {
+    if (!visibleModuleKeys.includes(moduleKey)) return
     const requestedCacheKey = moduleCacheKey(moduleKey, requestedPage)
     setCache((current) => ({
       ...current,
@@ -130,12 +143,13 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
     } catch {
       setCache((current) => ({ ...current, [requestedCacheKey]: { loading: false, failed: true, items: [] } }))
     }
-  }, [uid])
+  }, [uid, visibleModuleKeys])
 
   useEffect(() => {
+    if (!visibleModuleKeys.length || !visibleModuleKeys.includes(active)) return
     if (state) return
     void loadModule(active, activePage)
-  }, [active, activePage, loadModule, state])
+  }, [active, activePage, loadModule, state, visibleModuleKeys])
 
   function handlePageChange(nextPage: number) {
     if (!isPaginatedModule(active) || !state?.pagination) return
@@ -224,7 +238,7 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
     <>
 <section ref={modulesSectionRef} id="profile-modules" className="h-full min-w-0 scroll-mt-24">
 <div className="flex flex-wrap gap-2 border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
-          {tabs.map((tab) => (
+          {visibleTabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActive(tab.key)}
@@ -236,11 +250,12 @@ export function PublicUserModules({ uid, isSelf, recentMessages = [], recentMess
       </div>
 
 <div className="min-w-0 border-x border-b border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-5">
+      {!visibleTabs.length ? <ModuleFallback title="该用户暂未公开个人记录。" /> : null}
       {recentMessageNotice ? <p role="status" className="mb-3 border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700">{recentMessageNotice}</p> : null}
       {recentMessageError ? <p role="alert" className="mb-3 border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{recentMessageError}</p> : null}
-      {state?.failed ? <ModuleFallback /> : null}
-        {state?.loading || !state ? <ModuleFallback title="正在加载..." /> : null}
-        {state && !state.loading && !state.failed ? (
+      {visibleTabs.length > 0 && state?.failed ? <ModuleFallback /> : null}
+        {visibleTabs.length > 0 && (state?.loading || !state) ? <ModuleFallback title="正在加载..." /> : null}
+        {visibleTabs.length > 0 && state && !state.loading && !state.failed ? (
           <ModuleContent
             moduleKey={active}
             uid={uid}

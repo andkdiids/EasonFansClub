@@ -205,6 +205,7 @@ export function ImageViewer({
             src={renderOriginalSrc}
             alt={activeAlt}
             draggable={false}
+            decoding="async"
             onLoad={handleOriginalLoad}
             onError={handleOriginalError}
             onDoubleClick={() => setZoom((value) => value === 1 ? 2 : 1)}
@@ -227,6 +228,7 @@ export function ImageViewer({
           draggable={false}
           loading={loading}
           fetchPriority={fetchPriority}
+          decoding="async"
           onError={onError}
           className={imageClassName}
         />

@@ -6,6 +6,7 @@ import { myLivePhotoOrderBy, myLivePhotoSelect, serializeMyLivePhotos } from '@/
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
+import { getProfileVisibility } from '@/lib/user-privacy'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,35 +27,34 @@ export async function GET(_request: Request, { params }: Context) {
       nicknameModerationStatus: true,
       nicknameViolationDisplay: true,
       Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-      UserMusicConcert: {
-        where: {
-          isPublic: true,
-          MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
-        },
-        orderBy: [{ MusicConcert: { concertDate: 'desc' } }, { createdAt: 'desc' }],
-        take: 100,
+    },
+  })
+  if (!user || !user.Profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+  const visibility = await getProfileVisibility(user.id, viewer?.id)
+  if (!visibility.isSelf && !visibility.settings.showConcertHistory) return NextResponse.json({ message: '该用户未公开现场记录' }, { status: 404, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } })
+  const records = await prisma.userMusicConcert.findMany({
+    where: { userId: user.id, isPublic: true, MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } } },
+    orderBy: [{ MusicConcert: { concertDate: 'desc' } }, { createdAt: 'desc' }],
+    take: 100,
+    select: {
+      mood: true,
+      isPublic: true,
+      MyLivePhoto: { orderBy: myLivePhotoOrderBy, select: myLivePhotoSelect },
+      MusicConcert: {
         select: {
-          mood: true,
-          isPublic: true,
-          MyLivePhoto: { orderBy: myLivePhotoOrderBy, select: myLivePhotoSelect },
-          MusicConcert: {
-            select: {
-              id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true,
-              MusicTour: { select: { id: true, name: true } },
-            },
-          },
+          id: true, title: true, concertDate: true, city: true, venue: true, sessionNumber: true,
+          MusicTour: { select: { id: true, name: true } },
         },
       },
     },
   })
-  if (!user || !user.Profile) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
   const displayName = getPublicUserDisplayName(user)
-  const tours = new Set(user.UserMusicConcert.map((record) => record.MusicConcert.MusicTour.id))
-  const cities = new Set(user.UserMusicConcert.map((record) => normalizedCityKey(record.MusicConcert.city)).filter(Boolean))
+  const tours = new Set(records.map((record) => record.MusicConcert.MusicTour.id))
+  const cities = new Set(records.map((record) => normalizedCityKey(record.MusicConcert.city)).filter(Boolean))
   return NextResponse.json({
     user: { uid: user.uid, displayName, avatarUrl: publicImageUrl(user.Profile.avatarUrl) },
-    stats: { concertCount: user.UserMusicConcert.length, tourCount: tours.size, cityCount: cities.size },
-    records: user.UserMusicConcert.map((record) => ({
+    stats: { concertCount: records.length, tourCount: tours.size, cityCount: cities.size },
+    records: records.map((record) => ({
       concertId: record.MusicConcert.id,
       concertDate: record.MusicConcert.concertDate,
       title: record.MusicConcert.title,

@@ -90,7 +90,7 @@ export async function POST(request: Request) {
         await createManyNotifications({
           data: admins.map((admin) => ({
             recipientId: admin.id,
-            type: 'ADMIN' as const,
+            type: 'REVIEW' as const,
             title: '有新的今日内容等待审核',
             content: event.title,
             link: '/admin/today',
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
           skipDuplicates: true,
         })
       },
-      { operation: 'today-event-review', userId: guard.user.id, notificationType: 'ADMIN' },
+      { operation: 'today-event-review', userId: guard.user.id, notificationType: 'REVIEW' },
     )
   }
   emitRealtimeMany(administratorIds, 'notification')

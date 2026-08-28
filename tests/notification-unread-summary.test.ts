@@ -13,10 +13,11 @@ test('unread summary counts full database categories as notification items', () 
     messages: 0,
     feedback: 0,
     system: 1,
+    review: 0,
   }, 0, 0)
 
   assert.equal(summary.total, 5)
-  assert.equal(summary.notifications, 4)
+  assert.equal(summary.notifications, 5)
   assert.equal(summary.replies, 2)
   assert.equal(summary.likes, 1)
   assert.equal(summary.friendRequests, 1)
@@ -46,8 +47,8 @@ test('all unread sources use the same isRead authority and preserve failures', (
 
   assert.match(service, /isRead: false/)
   assert.match(service, /AND n\.isRead = 0/)
-  assert.match(service, /export async function getUnreadNotificationCount\(userId: string\)[\s\S]*getUnreadSummary\(userId\)/)
-  assert.match(layout, /getUnreadSummary\(sessionUser\.id\)\.catch/)
+  assert.match(service, /export async function getUnreadNotificationCount\(userId: string, canReview = false\)[\s\S]*getUnreadSummary\(userId, canReview\)/)
+  assert.match(layout, /getUnreadSummary\(sessionUser\.id, Boolean\(canAccessAdmin\)\)\.catch/)
   assert.match(layout, /layout\.unread-summary/)
   assert.match(summaryRoute, /UNREAD_SUMMARY_UNAVAILABLE/)
   assert.match(summaryRoute, /status: 503/)

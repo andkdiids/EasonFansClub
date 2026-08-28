@@ -1,3 +1,4 @@
+import { unstable_cache } from 'next/cache'
 import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
@@ -19,6 +20,12 @@ import { getEasMusicAlbumLikeStates } from '@/lib/easmusic-likes'
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
 }
+
+// The homepage post module is public featured/pinned content. Keep this cache
+// separate from the user-specific /api/home response and its like state.
+export const HOME_FEATURED_POSTS_CACHE_KEY = 'home:hot-posts:v1'
+export const HOME_FEATURED_POSTS_CACHE_TAG = 'home-featured-posts'
+export const HOME_FEATURED_POSTS_CACHE_TTL_SECONDS = 60
 
 const homeDataCacheTtlMs = Number(process.env.HOME_DATA_CACHE_TTL_MS || 30000)
 const homeDataCache = new Map<string, { expiresAt: number; promise: Promise<unknown> }>()
@@ -48,29 +55,19 @@ function excerpt(value: string | null | undefined, length = 180) {
 const publicPostModerationStatuses: Array<'APPROVED' | 'VIOLATION'> = ['APPROVED', 'VIOLATION']
 
 export async function getHomePosts(userId?: string) {
-  const posts = await getHomePostsUncached()
-  const equippedBadgeMap = await getEquippedBadgesForUsers(posts.map((post) => post.author.id))
-  const displayPosts = posts.map((post) => ({
-    ...post,
-    author: {
-      ...post.author,
-      equippedBadge: equippedBadgeMap.get(post.author.id) || null,
-      profile: post.author.profile ? {
-        ...post.author.profile,
-        displayName: getPublicUserDisplayName(post.author),
-      } : post.author.profile,
-    },
-  }))
-  if (!userId || posts.length === 0) return displayPosts.map((post) => ({ ...post, likedByMe: false }))
+  // Only the public post projection and public author badge are cached. The
+  // current user's Like relation is deliberately queried after the cache.
+  const posts = await getCachedHomePostsWithFallback()
+  if (!userId || posts.length === 0) return posts.map((post) => ({ ...post, likedByMe: false }))
   const liked = await prisma.like.findMany({
     where: { userId, postId: { in: posts.map((post) => post.id) } },
     select: { postId: true },
   })
   const likedIds = new Set(liked.map((item) => item.postId))
-  return displayPosts.map((post) => ({ ...post, likedByMe: likedIds.has(post.id) }))
+  return posts.map((post) => ({ ...post, likedByMe: likedIds.has(post.id) }))
 }
 
-async function getHomePostsUncached() {
+async function queryHomePosts() {
   const baseWhere = {
     isDeleted: false,
     status: 'PUBLISHED' as const,
@@ -105,29 +102,23 @@ async function getHomePostsUncached() {
     },
   }
 
-  const rows = await safeDb(
-    'Post.findMany home.posts',
-    prisma.post.findMany({
-      where: baseWhere,
-      orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
-      take: 18,
-      select,
-    }).then((candidates) => {
-      const selected = new Map<string, (typeof candidates)[number]>()
-      candidates
-        .filter((post) => post.isFeatured || post.isPinned)
-        .slice(0, 4)
-        .forEach((post) => selected.set(post.id, post))
+  const candidates = await prisma.post.findMany({
+    where: baseWhere,
+    orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
+    take: 18,
+    select,
+  })
+  const selected = new Map<string, (typeof candidates)[number]>()
+  candidates
+    .filter((post) => post.isFeatured || post.isPinned)
+    .slice(0, 4)
+    .forEach((post) => selected.set(post.id, post))
 
-      candidates.forEach((post) => {
-        if (selected.size < 4 && (post.isFeatured || post.isPinned)) selected.set(post.id, post)
-      })
+  candidates.forEach((post) => {
+    if (selected.size < 4 && (post.isFeatured || post.isPinned)) selected.set(post.id, post)
+  })
 
-      return Array.from(selected.values()).slice(0, 4)
-    }),
-    [],
-    8000,
-  )
+  const rows = Array.from(selected.values()).slice(0, 4)
 
   return rows.map(({ summary, content, moderationStatus, Board, User, ...post }) => ({
     ...post,
@@ -136,6 +127,54 @@ async function getHomePostsUncached() {
     author: { ...User, nickname: getPublicUserDisplayName(User), profile: User.Profile },
     content: publicModerationText(publicContentImageMarkers(excerpt(summary || content)), moderationStatus),
   }))
+}
+
+async function getHomePostsUncached() {
+  return safeDb('Post.findMany home.posts', queryHomePosts(), [], 8000)
+}
+
+type HomePostPublicProjection = Awaited<ReturnType<typeof queryHomePosts>>[number]
+
+async function addHomePostPublicDetails(posts: readonly HomePostPublicProjection[]) {
+  const equippedBadgeMap = await getEquippedBadgesForUsers(posts.map((post) => post.author.id))
+  return posts.map((post) => ({
+    ...post,
+    author: {
+      ...post.author,
+      equippedBadge: equippedBadgeMap.get(post.author.id) || null,
+      profile: post.author.profile ? {
+        ...post.author.profile,
+        displayName: getPublicUserDisplayName(post.author),
+      } : post.author.profile,
+    },
+  }))
+}
+
+async function loadHomePostsForCache() {
+  return addHomePostPublicDetails(await queryHomePosts())
+}
+
+const getCachedHomePosts = unstable_cache(
+  loadHomePostsForCache,
+  [HOME_FEATURED_POSTS_CACHE_KEY],
+  {
+    revalidate: HOME_FEATURED_POSTS_CACHE_TTL_SECONDS,
+    tags: [HOME_FEATURED_POSTS_CACHE_TAG],
+  },
+)
+
+async function getCachedHomePostsWithFallback() {
+  try {
+    return await getCachedHomePosts()
+  } catch (error) {
+    // A cache backend failure must not make the personalized homepage fail.
+    // The fallback keeps the existing bounded/degraded DB read behavior.
+    console.error('[home.posts.cache]', {
+      fallback: true,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    })
+    return addHomePostPublicDetails(await getHomePostsUncached())
+  }
 }
 
 export async function getHomeDailyMessages() {
@@ -198,11 +237,31 @@ export async function getHomeActivities() {
       where: { status: 'PUBLISHED' },
       orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { sortOrder: 'asc' }, { startsAt: 'asc' }, { createdAt: 'desc' }],
       take: 3,
-      select: { id: true, title: true, subtitle: true, description: true, type: true, status: true, coverUrl: true, bannerUrl: true, startsAt: true, endsAt: true, isFeatured: true, isPinned: true, sortOrder: true },
+      select: {
+        id: true,
+        title: true,
+        subtitle: true,
+        description: true,
+        type: true,
+        status: true,
+        coverUrl: true,
+        bannerUrl: true,
+        startsAt: true,
+        endsAt: true,
+        signupLimit: true,
+        isFeatured: true,
+        isPinned: true,
+        sortOrder: true,
+        _count: { select: { ActivityRegistration: true } },
+      },
     }),
     [],
     5000,
-  ).then((activities) => activities.map((activity) => ({ ...activity, coverUrl: publicImageVariantUrl(activity.coverUrl, 'card') }))))
+  ).then((activities) => activities.map(({ _count, ...activity }) => ({
+    ...activity,
+    coverUrl: publicImageVariantUrl(activity.coverUrl || activity.bannerUrl, 'card'),
+    signupCount: _count.ActivityRegistration,
+  }))))
 }
 
 export async function getHomeConcerts() {

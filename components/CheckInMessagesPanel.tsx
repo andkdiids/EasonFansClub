@@ -17,7 +17,7 @@ import { getCheckInMessagePageSize, CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/che
 import { formatBeijingDateTime } from '@/lib/beijing-time'
 import { checkInMessageAuthorId } from '@/lib/checkin-message-order'
 import { getCheckInReplyToggleLabel, getVisibleCheckInReplyCount } from '@/lib/checkin-reply-display'
-import { getMoodDisplay } from '@/lib/checkin-mood'
+import { getMoodDisplay, NO_MOOD_LABEL } from '@/lib/checkin-mood'
 import { profileImageUrl } from '@/lib/images'
 import { scrollToSectionTop } from '@/lib/pagination'
 import { formatUid } from '@/lib/uid'
@@ -664,7 +664,7 @@ export function CheckInMessagesPanel({
                         }}
                       />
                     ) : null}
-                    {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood.formatted || '未填写心情'}</span> : mood.formatted ? <span className="break-words text-xs">{mood.formatted}</span> : null}
+                    {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood.formatted || NO_MOOD_LABEL}</span> : mood.formatted ? <span className="break-words text-xs">{mood.formatted}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
                     {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
                     <IpRegionLabel ipRegion={item.ipRegion} />

@@ -93,7 +93,7 @@ test('old and new mood records share a display formatter with Emoji plus text', 
   assert.equal(getMoodDisplay({ mood: '去看演唱会啦' }).formatted, '去看演唱会啦')
   assert.equal(getMoodDisplay({ mood: 'NOT_IN_PRESET' }).formatted, 'NOT_IN_PRESET')
   assert.equal(getMoodDisplay({ moodType: 'CUSTOM', moodEmoji: '🤒' }).formatted, '🤒')
-  assert.equal(getMoodDisplay({ mood: null, moodType: null, moodEmoji: null, moodText: null }).formatted, '')
+  assert.equal(getMoodDisplay({ mood: null, moodType: null, moodEmoji: null, moodText: null }).formatted, '无心情')
   assert.equal(getMoodDisplay({ mood: 'HAPPY' }).isCustom, false)
   assert.ok(getMoodDisplay({ mood: 'HAPPY' }).formatted)
   assert.equal(getMoodDisplay({ mood: '开心' }).formatted, '😀 开心')

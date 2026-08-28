@@ -14,6 +14,7 @@ const summary = {
   friendRequests: 0,
   directMessages: 0,
   messages: 0,
+  review: 0,
   total: 2,
 }
 

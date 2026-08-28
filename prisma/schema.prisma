@@ -3685,6 +3685,7 @@ model User {
   Post                                                   Post[]
   PostFavorite                                           PostFavorite[]
   Profile                                                Profile?
+  UserPrivacySetting                                     UserPrivacySetting?
   ProfileWallLike                                        ProfileWallLike[]
   ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]           @relation("ProfileWallMessage_receiverIdToUser")
   ProfileWallMessage_ProfileWallMessage_senderIdToUser   ProfileWallMessage[]           @relation("ProfileWallMessage_senderIdToUser")
@@ -3735,6 +3736,22 @@ model User {
   @@index([birthMonth, birthDay])
   @@index([nicknameViolationDisplay])
   @@index([equippedBadgeId])
+}
+
+model UserPrivacySetting {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  showCheckInHistory   Boolean  @default(true)
+  showCheckInMessages  Boolean  @default(true)
+  showPosts            Boolean  @default(true)
+  showComments         Boolean  @default(true)
+  showConcertHistory   Boolean  @default(true)
+  showActivityHistory  Boolean  @default(true)
+  showBadgeHistory     Boolean  @default(true)
+  showRatings          Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  User                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UserAchievement {
@@ -4244,6 +4261,8 @@ enum NotificationType {
   BADGE
   FRIEND_REQUEST
   BIRTHDAY_GREETING
+  FEEDBACK
+  REVIEW
 }
 
 enum PageLayoutRevisionSource {

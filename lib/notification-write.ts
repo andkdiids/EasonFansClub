@@ -13,6 +13,8 @@ export const NOTIFICATION_TYPE_VALUES = [
   'BADGE',
   'FRIEND_REQUEST',
   'BIRTHDAY_GREETING',
+  'FEEDBACK',
+  'REVIEW',
 ] as const satisfies readonly NotificationType[]
 
 export type ValidNotificationType = typeof NOTIFICATION_TYPE_VALUES[number]

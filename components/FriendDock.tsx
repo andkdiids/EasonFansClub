@@ -44,6 +44,7 @@ import { UserDisplayName } from '@/components/UserDisplayName'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
 type FriendListViewMode = 'alphabetical' | 'groups'
+type FriendDockTab = 'chat' | 'contacts'
 type Message = {
   id: string
   content: string
@@ -70,6 +71,21 @@ type FriendGroupPagination = {
   hasMore: boolean
 }
 
+type ConversationSummary = {
+  id: string
+  lastMessageAt: string | null
+  otherUser: FriendDockUser
+  latestMessage: {
+    id: string
+    content: string
+    createdAt: string
+    senderId: string
+    type?: string | null
+    preview?: string
+  } | null
+  unreadCount: number
+}
+
 const emptySummary: UnreadSummary = {
   notifications: 0,
   system: 0,
@@ -81,6 +97,7 @@ const emptySummary: UnreadSummary = {
   friendRequests: 0,
   directMessages: 0,
   messages: 0,
+  review: 0,
   total: 0,
 }
 
@@ -113,6 +130,11 @@ export function FriendDock({
   currentUserId: string
   unreadSummary?: UnreadSummary
 }) {
+  // Chat unread state is maintained by the conversation system. Keep it on
+  // the friend entry badge, while the notification-center link continues to
+  // use `unreadSummary.total` so private messages are not double-counted as
+  // notifications.
+  const friendDockUnreadCount = unreadSummary.total + unreadSummary.directMessages
   const pathname = usePathname()
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -127,10 +149,15 @@ export function FriendDock({
   const [ungroupedCount, setUngroupedCount] = useState(0)
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set())
   const [friendListViewMode, setFriendListViewMode] = useState<FriendListViewMode>('alphabetical')
+  const [activeTab, setActiveTab] = useState<FriendDockTab>('chat')
   const [activeAlphabetLetter, setActiveAlphabetLetter] = useState<FriendDirectoryLetter | null>(null)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [friendTotal, setFriendTotal] = useState(0)
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [conversationsLoaded, setConversationsLoaded] = useState(false)
+  const [loadingConversations, setLoadingConversations] = useState(false)
+  const [chatListError, setChatListError] = useState('')
   const [loadingList, setLoadingList] = useState(false)
   const [refreshingFriendList, setRefreshingFriendList] = useState(false)
   const [profileFriend, setProfileFriend] = useState<FriendDockUser | null>(null)
@@ -138,6 +165,8 @@ export function FriendDock({
   const [chatFriend, setChatFriend] = useState<FriendDockUser | null>(null)
   const [chatActionsOpen, setChatActionsOpen] = useState(false)
   const [clearingChat, setClearingChat] = useState(false)
+  const [deleteChatTarget, setDeleteChatTarget] = useState<ConversationSummary | null>(null)
+  const [deletingChatId, setDeletingChatId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [content, setContent] = useState('')
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
@@ -159,6 +188,7 @@ export function FriendDock({
   const toggleRef = useRef<HTMLButtonElement>(null)
   const messageListRef = useRef<HTMLDivElement>(null)
   const friendListRef = useRef<HTMLDivElement>(null)
+  const chatListRef = useRef<HTMLDivElement>(null)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const cursorRef = useRef('')
   const beforeCursorRef = useRef('')
@@ -167,11 +197,13 @@ export function FriendDock({
   const sendingMessageIdsRef = useRef(new Set<string>())
   const chatSessionRef = useRef(0)
   const friendListRequestRef = useRef(0)
+  const conversationRequestRef = useRef(0)
   const friendsRef = useRef<FriendDockUser[]>([])
   const friendListPageRef = useRef(1)
   const friendListRestorePendingRef = useRef(false)
   const friendListReturnStateRef = useRef<FriendListReturnState | null>(null)
   const friendListScrollTopByModeRef = useRef<Record<FriendListViewMode, number>>({ alphabetical: 0, groups: 0 })
+  const chatListScrollTopRef = useRef(0)
   const previousFriendListViewModeRef = useRef<FriendListViewMode>('alphabetical')
   const groupRequestRef = useRef(new Map<string, number>())
   const friendGroupDialogSubmittingRef = useRef(false)
@@ -249,6 +281,7 @@ export function FriendDock({
 
   const closeDock = useCallback(() => {
     window.clearTimeout(backdropCloseTimerRef.current)
+    conversationRequestRef.current += 1
     clearFriendListReturnState()
     setOpen(false)
     setProfileFriend(null)
@@ -256,12 +289,14 @@ export function FriendDock({
     setFriendGroupDialogName('')
     setFriendGroupDialogError('')
     setDeleteFriendGroupTarget(null)
+    setDeleteChatTarget(null)
     resetChat()
     window.requestAnimationFrame(() => toggleRef.current?.focus())
   }, [clearFriendListReturnState, resetChat])
 
   const openFriendList = useCallback(() => {
     clearFriendListReturnState()
+    conversationRequestRef.current += 1
     resetChat()
     setProfileFriend(null)
     setCollapsed(false)
@@ -274,6 +309,15 @@ export function FriendDock({
     setFriendGroupDialogName('')
     setFriendGroupDialogError('')
     setDeleteFriendGroupTarget(null)
+    setDeleteChatTarget(null)
+    setActiveTab('chat')
+    setConversations([])
+    setConversationsLoaded(false)
+    setLoadingConversations(false)
+    setChatListError('')
+    chatListScrollTopRef.current = 0
+    setQuery('')
+    setDebouncedQuery('')
     setOpen(true)
   }, [clearFriendListReturnState, resetChat])
 
@@ -412,6 +456,42 @@ export function FriendDock({
       }
     } finally {
       if (!silent && requestId === friendListRequestRef.current) setLoadingList(false)
+    }
+  }, [])
+
+  const loadConversations = useCallback(async (silent = false) => {
+    const requestId = ++conversationRequestRef.current
+    if (!silent) setLoadingConversations(true)
+    setChatListError('')
+    try {
+      const response = await fetch('/api/direct-conversations', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      const data = await response.json().catch(() => ({}))
+      if (requestId !== conversationRequestRef.current) return false
+      if (!response.ok) {
+        setChatListError(data.message || '聊天列表加载失败')
+        return false
+      }
+      const incoming = Array.isArray(data.conversations)
+        ? data.conversations.filter((item: unknown): item is ConversationSummary => {
+            if (!item || typeof item !== 'object') return false
+            const candidate = item as Partial<ConversationSummary>
+            return typeof candidate.id === 'string' && Boolean(candidate.otherUser) && Boolean(candidate.latestMessage)
+          })
+        : []
+      setConversations(incoming)
+      setConversationsLoaded(true)
+      if (Number.isSafeInteger(data.friendTotal) && data.friendTotal >= 0) setFriendTotal(data.friendTotal)
+      return true
+    } catch (loadError) {
+      if (requestId === conversationRequestRef.current) {
+        setChatListError(loadError instanceof Error ? loadError.message : '聊天列表加载失败')
+      }
+      return false
+    } finally {
+      if (requestId === conversationRequestRef.current) setLoadingConversations(false)
     }
   }, [])
 
@@ -570,7 +650,7 @@ export function FriendDock({
 
   const updateActiveAlphabetLetter = useCallback(() => {
     const list = friendListRef.current
-    if (!list || friendListViewMode !== 'alphabetical' || isSearchMode) {
+    if (!list || activeTab !== 'contacts' || friendListViewMode !== 'alphabetical' || isSearchMode) {
       setActiveAlphabetLetter(null)
       return
     }
@@ -591,7 +671,7 @@ export function FriendDock({
       }
     }
     setActiveAlphabetLetter((current) => current === currentLetter ? current : currentLetter || null)
-  }, [friendListViewMode, isSearchMode])
+  }, [activeTab, friendListViewMode, isSearchMode])
 
   const handleFriendListScroll = useCallback(() => {
     const list = friendListRef.current
@@ -622,6 +702,17 @@ export function FriendDock({
     setLoadingList(Boolean(nextValue.trim()))
   }, [])
 
+  const changeFriendDockTab = useCallback((tab: FriendDockTab) => {
+    setActiveTab(tab)
+    setError('')
+    if (tab === 'contacts') {
+      setFriendListReady(false)
+      setActiveAlphabetLetter(null)
+    } else {
+      setChatListError('')
+    }
+  }, [])
+
   useEffect(() => {
     friendsRef.current = friends
   }, [friends])
@@ -649,7 +740,7 @@ export function FriendDock({
   useEffect(() => {
     const previousMode = previousFriendListViewModeRef.current
     previousFriendListViewModeRef.current = friendListViewMode
-    if (previousMode === friendListViewMode || !open || chatFriend || isSearchMode) return
+    if (previousMode === friendListViewMode || !open || chatFriend || activeTab !== 'contacts' || isSearchMode) return
     const frame = window.requestAnimationFrame(() => {
       const list = friendListRef.current
       if (!list) return
@@ -657,13 +748,26 @@ export function FriendDock({
       updateActiveAlphabetLetter()
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [chatFriend, friendListViewMode, isSearchMode, open, updateActiveAlphabetLetter])
+  }, [activeTab, chatFriend, friendListViewMode, isSearchMode, open, updateActiveAlphabetLetter])
 
   useEffect(() => {
-    if (!open || chatFriend) return
+    if (!open || chatFriend || activeTab !== 'contacts') return
     const frame = window.requestAnimationFrame(updateActiveAlphabetLetter)
     return () => window.cancelAnimationFrame(frame)
-  }, [chatFriend, friends, friendListViewMode, isSearchMode, open, updateActiveAlphabetLetter])
+  }, [activeTab, chatFriend, friends, friendListViewMode, isSearchMode, open, updateActiveAlphabetLetter])
+
+  useEffect(() => {
+    if (!open || chatFriend || activeTab !== 'chat') return
+    void loadConversations()
+  }, [activeTab, chatFriend, loadConversations, open])
+
+  useEffect(() => {
+    if (!open || chatFriend || activeTab !== 'chat' || loadingConversations) return
+    const frame = window.requestAnimationFrame(() => {
+      if (chatListRef.current) chatListRef.current.scrollTop = chatListScrollTopRef.current
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeTab, chatFriend, conversations, loadingConversations, open])
 
   useEffect(() => () => window.clearTimeout(backdropCloseTimerRef.current), [])
 
@@ -687,7 +791,7 @@ export function FriendDock({
   }, [query])
 
   useEffect(() => {
-    if (!open || chatFriend) return
+    if (!open || chatFriend || activeTab !== 'contacts') return
     const controller = new AbortController()
     if (!debouncedQuery) {
       setSearchResults([])
@@ -712,10 +816,10 @@ export function FriendDock({
         })
     }
     return () => controller.abort()
-  }, [open, chatFriend, debouncedQuery, friendListViewMode, loadFriends])
+  }, [activeTab, open, chatFriend, debouncedQuery, friendListViewMode, loadFriends])
 
   useEffect(() => {
-    if (!open || chatFriend || isSearchMode || friendListViewMode !== 'groups' || !friendListReady) return
+    if (!open || chatFriend || activeTab !== 'contacts' || isSearchMode || friendListViewMode !== 'groups' || !friendListReady) return
     const scopes = [
       { id: UNGROUPED_FRIEND_GROUP_ID, count: ungroupedCount },
       ...friendGroups.map((group) => ({ id: group.id, count: group.count })),
@@ -729,10 +833,10 @@ export function FriendDock({
       }
       void loadGroupFriends(scope.id)
     })
-  }, [chatFriend, collapsedGroupIds, friendGroups, friendListReady, friendListViewMode, groupFriends, isSearchMode, loadingGroupIds, loadGroupFriends, open, ungroupedCount])
+  }, [activeTab, chatFriend, collapsedGroupIds, friendGroups, friendListReady, friendListViewMode, groupFriends, isSearchMode, loadingGroupIds, loadGroupFriends, open, ungroupedCount])
 
   useEffect(() => {
-    if (!open || chatFriend || loadingList || loadingGroupIds.size > 0 || refreshingFriendList || !friendListRestorePendingRef.current) return
+    if (!open || chatFriend || activeTab !== 'contacts' || loadingList || loadingGroupIds.size > 0 || refreshingFriendList || !friendListRestorePendingRef.current) return
     if (isSearchMode) return
     let state: ReturnType<typeof parseFriendListReturnState> = null
     try {
@@ -794,7 +898,7 @@ export function FriendDock({
     }
     frame = window.requestAnimationFrame(restore)
     return () => window.cancelAnimationFrame(frame)
-  }, [chatFriend, clearFriendListReturnState, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, friendListViewMode, groupFriends, isSearchMode, loadingGroupIds, loadingList, open, refreshingFriendList, ungroupedCount])
+  }, [activeTab, chatFriend, clearFriendListReturnState, collapsedGroupIds, debouncedQuery, friendGroups, friendListReady, friendListViewMode, groupFriends, isSearchMode, loadingGroupIds, loadingList, open, refreshingFriendList, ungroupedCount])
 
   useEffect(() => {
     clearFriendListReturnState()
@@ -832,12 +936,27 @@ export function FriendDock({
       setGroupFriends((groups) => Object.fromEntries(
         Object.entries(groups).map(([groupId, items]) => [groupId, update(items)]),
       ))
+      setConversations((current) => current.map((conversation) => conversation.otherUser.id === detail.targetUserId
+        ? {
+            ...conversation,
+            otherUser: {
+              ...conversation.otherUser,
+              friendRemark,
+              displayName: getFriendDisplayName({ nickname: conversation.otherUser.nickname, friendRemark, isFriendContext: true }),
+            },
+          }
+        : conversation))
       setChatFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
       setProfileFriend((current) => current && current.id === detail.targetUserId ? update([current])[0] : current)
     }
     const refresh = (event?: Event) => {
-      if (open && !chatFriend && !isSearchMode) {
-        const type = (event as CustomEvent<{ type?: string }> | undefined)?.detail?.type
+      if (!open || chatFriend) return
+      const type = (event as CustomEvent<{ type?: string }> | undefined)?.detail?.type
+      if (activeTab === 'chat') {
+        void loadConversations(true)
+        return
+      }
+      if (!isSearchMode) {
         if (type !== 'unread') {
           invalidateAllGroupCaches()
           setFriendListReady(false)
@@ -862,7 +981,10 @@ export function FriendDock({
       channel.onmessage = (event) => {
         if (event.data?.userId !== currentUserId) return
         if (event.data?.type === 'unread') {
-          if (open && !chatFriend && !isSearchMode) void loadFriends(1, false, undefined, false, friendListViewMode === 'alphabetical')
+          if (open && !chatFriend && (activeTab === 'chat' || !isSearchMode)) {
+            if (activeTab === 'chat') void loadConversations(true)
+            else void loadFriends(1, false, undefined, false, friendListViewMode === 'alphabetical')
+          }
           return
         }
         refresh()
@@ -876,7 +998,7 @@ export function FriendDock({
       window.removeEventListener('friend-dock:refresh', refresh)
       window.removeEventListener('realtime:event', refreshFromRealtime)
     }
-  }, [currentUserId, open, chatFriend, friendListViewMode, invalidateAllGroupCaches, isSearchMode, loadFriends, openFriendList, closeDock])
+  }, [activeTab, currentUserId, open, chatFriend, friendListViewMode, invalidateAllGroupCaches, isSearchMode, loadConversations, loadFriends, openFriendList, closeDock])
 
   useEffect(() => {
     if (!open || !isMobileDrawer) return
@@ -942,6 +1064,10 @@ export function FriendDock({
         closeFriendGroupDialog()
         return
       }
+      if (deleteChatTarget) {
+        if (!deletingChatId) setDeleteChatTarget(null)
+        return
+      }
       if (deleteFriendGroupTarget) {
         if (!deletingFriendGroupId) setDeleteFriendGroupTarget(null)
         return
@@ -993,6 +1119,9 @@ export function FriendDock({
         items.map((friend) => friend.conversationId === id ? { ...friend, unreadCount: 0 } : friend),
       ]),
     ))
+    setConversations((current) => current.map((conversation) => conversation.id === id
+      ? { ...conversation, unreadCount: 0 }
+      : conversation))
     notifyClients('unread')
   }, [notifyClients])
 
@@ -1060,63 +1189,98 @@ export function FriendDock({
     resetChat()
   }
 
-  async function clearChatHistory() {
-    if (!conversationId || clearingChat) return
-    if (!window.confirm('确定删除与该好友的全部聊天记录吗？删除后不可恢复。')) return
-    const chatSession = ++chatSessionRef.current
-    setClearingChat(true)
-    setSending(false)
-    setLoadingOlder(false)
+  function clearChatHistory() {
+    if (!conversationId || !chatFriend || clearingChat || deletingChatId) return
+    const existing = conversations.find((conversation) => conversation.id === conversationId)
+    setDeleteChatTarget(existing || {
+      id: conversationId,
+      lastMessageAt: null,
+      otherUser: chatFriend,
+      latestMessage: null,
+      unreadCount: 0,
+    })
+    setChatActionsOpen(false)
+  }
+
+  async function deleteConversation(target: ConversationSummary) {
+    if (deletingChatId) return
+    const requestSession = chatSessionRef.current
+    const isOpenConversation = target.id === conversationId
+    setDeletingChatId(target.id)
+    if (isOpenConversation) {
+      setClearingChat(true)
+      setSending(false)
+      setLoadingOlder(false)
+    }
     setError('')
     try {
-      const response = await fetch(`/api/direct-conversations/${conversationId}/clear`, { method: 'POST' })
+      // The existing clear endpoint persists a per-user clearedAt marker. It
+      // never deletes the shared DirectMessage rows, so the other participant
+      // keeps their history and a newer message can recreate this list item.
+      const response = await fetch(`/api/direct-conversations/${target.id}/clear`, { method: 'POST', cache: 'no-store' })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
         setError(data.message || '删除聊天记录失败')
         return
       }
-      if (chatSession !== chatSessionRef.current) return
-      setMessages([])
-      setHasOlderMessages(false)
-      setNewMessageNotice(false)
-      cursorRef.current = ''
-      beforeCursorRef.current = ''
-      setChatActionsOpen(false)
+      setConversations((current) => current.filter((conversation) => conversation.id !== target.id))
       setFriends((current) => {
-        const next = current.map((friend) => friend.conversationId === conversationId
+        const next = current.map((friend) => friend.conversationId === target.id
           ? { ...friend, lastMessage: null, lastMessageAt: null, unreadCount: 0 }
           : friend)
         friendsRef.current = next
         return next
       })
+      setGroupFriends((current) => Object.fromEntries(
+        Object.entries(current).map(([groupId, items]) => [
+          groupId,
+          items.map((friend) => friend.conversationId === target.id
+            ? { ...friend, lastMessage: null, lastMessageAt: null, unreadCount: 0 }
+            : friend),
+        ]),
+      ))
+      if (isOpenConversation && requestSession === chatSessionRef.current) {
+        setMessages([])
+        setHasOlderMessages(false)
+        setNewMessageNotice(false)
+        cursorRef.current = ''
+        beforeCursorRef.current = ''
+        setChatActionsOpen(false)
+      }
+      setDeleteChatTarget(null)
       notifyClients('messages')
     } catch (clearError) {
       setError(clearError instanceof Error ? clearError.message : '删除聊天记录失败')
     } finally {
-      setClearingChat(false)
+      setDeletingChatId(null)
+      if (isOpenConversation) setClearingChat(false)
     }
   }
 
-  async function openChat(friend: FriendDockUser) {
+  async function openChat(friend: FriendDockUser, existingConversationId?: string) {
     const chatSession = ++chatSessionRef.current
-    saveFriendListReturnState(friend.id)
+    if (activeTab === 'contacts') saveFriendListReturnState(friend.id)
+    else chatListScrollTopRef.current = chatListRef.current?.scrollTop || chatListScrollTopRef.current
     setError('')
     setProfileFriend(null)
-    const response = await fetch('/api/direct-conversations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetUid: friend.uid }),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (chatSession !== chatSessionRef.current) return
-    if (!response.ok) {
-      clearFriendListReturnState()
-      setError(data.message || '无法打开会话')
-      return
+    let nextConversationId = existingConversationId || ''
+    if (!nextConversationId) {
+      const response = await fetch('/api/direct-conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUid: friend.uid }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (chatSession !== chatSessionRef.current) return
+      if (!response.ok) {
+        clearFriendListReturnState()
+        setError(data.message || '无法打开会话')
+        return
+      }
+      nextConversationId = data.conversation.id as string
     }
-    const nextConversationId = data.conversation.id as string
     setChatFriend(friend)
-    friendListRestorePendingRef.current = true
+    if (activeTab === 'contacts') friendListRestorePendingRef.current = true
     setChatActionsOpen(false)
     setConversationId(nextConversationId)
     setMessages([])
@@ -1603,6 +1767,55 @@ export function FriendDock({
             </div>
             </div>
           ) : (
+            <>
+              <nav className="friend-dock-primary-tabs" role="tablist" aria-label="好友与私信栏目">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === 'chat'}
+                  className={activeTab === 'chat' ? 'is-active' : undefined}
+                  onClick={() => changeFriendDockTab('chat')}
+                >聊天</button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === 'contacts'}
+                  className={activeTab === 'contacts' ? 'is-active' : undefined}
+                  onClick={() => changeFriendDockTab('contacts')}
+                >通讯录</button>
+              </nav>
+              {activeTab === 'chat' ? (
+                <div className="friend-list-layout friend-chat-list-layout">
+                  <div
+                    ref={chatListRef}
+                    className="friend-dock-list friend-chat-list"
+                    onScroll={(event) => { chatListScrollTopRef.current = event.currentTarget.scrollTop }}
+                  >
+                    {loadingConversations ? <p className="friend-dock-empty">加载中…</p> : null}
+                    {!loadingConversations && chatListError ? (
+                      <div className="friend-chat-list-error" role="alert">
+                        <p>{chatListError}</p>
+                        <button type="button" onClick={() => void loadConversations()}>重试</button>
+                      </div>
+                    ) : null}
+                    {!loadingConversations && !chatListError && conversationsLoaded && !conversations.length ? (
+                      <div className="friend-chat-list-empty">
+                        <p>暂无聊天</p>
+                        <small>有新的私信后会显示在这里</small>
+                      </div>
+                    ) : null}
+                    {!loadingConversations && !chatListError ? conversations.map((conversation) => (
+                      <ConversationRow
+                        key={conversation.id}
+                        conversation={conversation}
+                        onOpen={() => void openChat(conversation.otherUser, conversation.id)}
+                        onDelete={() => setDeleteChatTarget(conversation)}
+                      />
+                    )) : null}
+                    <div className="friend-dock-list-end" aria-hidden="true" />
+                  </div>
+                </div>
+              ) : (
             <div className="friend-list-layout">
             <div className="friend-dock-search">
               <input value={query} onChange={(event) => handleFriendSearchChange(event.target.value)} placeholder="搜索好友或其他用户" aria-label="搜索好友或其他用户" />
@@ -1720,6 +1933,8 @@ export function FriendDock({
             ) : null}
             </div>
             </div>
+              )}
+            </>
           )}
         </div>
         {error ? <p className="friend-dock-error">{error}<button type="button" onClick={() => setError('')}>×</button></p> : null}
@@ -1741,6 +1956,21 @@ export function FriendDock({
           }}
           onCancel={() => {
             if (!deletingFriendGroupId) setDeleteFriendGroupTarget(null)
+          }}
+        />
+        <ConfirmDialog
+          open={Boolean(deleteChatTarget)}
+          title="删除聊天？"
+          description={deleteChatTarget
+            ? `确认删除与「${getFriendDisplayName({ nickname: deleteChatTarget.otherUser.nickname, friendRemark: deleteChatTarget.otherUser.friendRemark, isFriendContext: true })}」的聊天吗？\n删除后，你这边的聊天记录将一并删除，无法恢复。`
+            : undefined}
+          confirmLabel="确认删除"
+          loading={Boolean(deletingChatId)}
+          onConfirm={() => {
+            if (deleteChatTarget) void deleteConversation(deleteChatTarget)
+          }}
+          onCancel={() => {
+            if (!deletingChatId) setDeleteChatTarget(null)
           }}
         />
       </section>
@@ -1769,17 +1999,108 @@ export function FriendDock({
       {overlay}
       {!open && collapsed ? (
         <button ref={toggleRef} type="button" className="friend-dock-toggle is-handle" onClick={() => setCollapsed(false)} aria-label="展开好友入口">
-          ‹{unreadSummary.total > 0 ? <span className="friend-dock-unread-dot" /> : null}
+          ‹{friendDockUnreadCount > 0 ? <span className="friend-dock-unread-dot" /> : null}
         </button>
       ) : !open || !isMobileDrawer ? (
         <div className="friend-dock-actions">
           <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={open ? closeDock : openFriendList} aria-label={open ? '关闭好友窗口' : '打开好友窗口'} aria-expanded={open}>
-            好友{unreadSummary.total > 0 ? <b>{unreadSummary.total > 99 ? '99+' : unreadSummary.total}</b> : null}
+            好友{friendDockUnreadCount > 0 ? <b>{friendDockUnreadCount > 99 ? '99+' : friendDockUnreadCount}</b> : null}
           </button>
           <button type="button" className="friend-dock-collapse" onClick={() => { closeDock(); setCollapsed(true) }} aria-label="收起好友入口">›</button>
         </div>
       ) : null}
     </div>
+  )
+}
+
+function ConversationRow({
+  conversation,
+  onOpen,
+  onDelete,
+}: {
+  conversation: ConversationSummary
+  onOpen: () => void
+  onDelete: () => void
+}) {
+  const longPressTimerRef = useRef<number | null>(null)
+  const longPressTriggeredRef = useRef(false)
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null)
+  const peer = conversation.otherUser
+  const name = getFriendDisplayName({ nickname: peer.nickname, friendRemark: peer.friendRemark, isFriendContext: true })
+  const preview = conversation.latestMessage?.preview
+    || (conversation.latestMessage?.type === 'STICKER' ? '[表情]' : conversation.latestMessage?.content || '[消息]')
+
+  useEffect(() => () => {
+    if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current)
+    longPressTimerRef.current = null
+    pointerStartRef.current = null
+  }, [])
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+    pointerStartRef.current = null
+  }
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    cancelLongPress()
+    if (event.pointerType !== 'touch') return
+    pointerStartRef.current = { x: event.clientX, y: event.clientY }
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null
+      pointerStartRef.current = null
+      longPressTriggeredRef.current = true
+      onDelete()
+    }, 600)
+  }
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = pointerStartRef.current
+    if (!start) return
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancelLongPress()
+  }
+
+  const handleClick = () => {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false
+      return
+    }
+    onOpen()
+  }
+
+  return (
+    <article data-conversation-id={conversation.id} className={`friend-chat-row ${conversation.unreadCount ? 'has-unread' : ''}`}>
+      <button
+        type="button"
+        className="friend-chat-row-main"
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={cancelLongPress}
+        onPointerCancel={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          onDelete()
+        }}
+        aria-label={`打开与${name}的聊天`}
+      >
+        <SafeAvatar src={profileImageUrl(peer.profile?.avatarUrl || peer.avatarUrl)} name={name} uid={peer.uid} className="friend-chat-row-avatar" />
+        <span className="friend-chat-row-copy">
+          <span className="friend-chat-row-heading">
+            <strong><UserDisplayName name={name} uid={peer.uid} badge={peer.equippedBadge} compact /></strong>
+            {conversation.lastMessageAt ? <time>{formatConversationTime(conversation.lastMessageAt)}</time> : null}
+          </span>
+          <span className="friend-chat-row-preview">
+            <span>{preview}</span>
+            {conversation.unreadCount > 0 ? <b>{conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}</b> : null}
+          </span>
+        </span>
+      </button>
+      <button type="button" className="friend-chat-row-actions" onClick={onDelete} aria-label={`删除与${name}的聊天`} title="删除聊天">⋯</button>
+    </article>
   )
 }
 

@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client'
 import { unstable_cache } from 'next/cache'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
-import { publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 
@@ -118,8 +118,8 @@ export const getTrendingPosts = unstable_cache(
           Profile: { displayName: profileDisplayName },
         }),
         hotScore: Number(row.hotScore),
-        authorAvatarUrl: publicImageUrl(row.authorAvatarUrl),
-        imageUrl: publicImageUrl(row.imageUrl),
+        authorAvatarUrl: publicImageVariantUrl(row.authorAvatarUrl, 'avatar-md'),
+        imageUrl: publicImageVariantUrl(row.imageUrl, 'card'),
         }
       }),
     }

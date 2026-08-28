@@ -10,6 +10,7 @@ import type { ProfileRecentMessage, ProfileRecordPagination, ProfileWallVisibili
 import { formatUserLocation, type UserLocation } from '@/lib/user-location'
 import type { BadgeCollectionView, EquippedBadgeView } from '@/lib/badge-types'
 import { BadgeMiniShowcase } from '@/components/BadgeMiniShowcase'
+import { getVisibleProfileModules, type UserPrivacySettings } from '@/lib/user-privacy'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -28,6 +29,7 @@ export type ProfilePageSurfaceProfile = {
   publicLiveCount: number
   equippedBadge: EquippedBadgeView | null
   badgeSummary?: BadgeCollectionView | null
+  privacy: UserPrivacySettings
 }
 
 export type ProfilePageSurfaceRelationship = {
@@ -76,6 +78,7 @@ export function ProfilePageSurface({
   const { isSelf, isFriend, isBlocked, hasViewer, friendStatus } = relationship
   const wallHref = '#profile-wall'
   const canViewWall = isSelf || profile.wallVisibility === 'PUBLIC' || (profile.wallVisibility === 'FRIENDS' && isFriend && !isBlocked)
+  const visibleModules = getVisibleProfileModules(profile.privacy, isSelf)
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl space-y-4 px-4 py-5 sm:space-y-5 sm:px-5 sm:py-6">
@@ -115,7 +118,7 @@ export function ProfilePageSurface({
         </p>
       </section>
 
-      <BadgeMiniShowcase uid={profile.uid} summary={profile.badgeSummary || null} equippedBadge={profile.equippedBadge} isSelf={isSelf} />
+      {isSelf || profile.privacy.showBadgeHistory ? <BadgeMiniShowcase uid={profile.uid} summary={profile.badgeSummary || null} equippedBadge={profile.equippedBadge} isSelf={isSelf} /> : null}
 
       <div className="profile-actions-scroll min-w-0" aria-label={isSelf ? '个人操作' : '好友操作'}>
         <div className="flex w-max min-w-full flex-nowrap items-center gap-2 py-0.5">
@@ -147,7 +150,7 @@ export function ProfilePageSurface({
           {canViewWall ? <ProfileWall receiverUid={profile.uid} isOwner={isSelf} /> : <ClosedWall visibility={profile.wallVisibility} />}
         </div>
         <div className="min-w-0">
-          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} recentMessages={recentMessages} recentMessagesPagination={recentMessagesPagination} />
+          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} visibleModules={visibleModules} recentMessages={recentMessages} recentMessagesPagination={recentMessagesPagination} />
         </div>
       </section>
     </main>

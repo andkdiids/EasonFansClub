@@ -11,6 +11,7 @@ import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { buildProfilePostWhere } from '@/lib/post-moderation'
+import { getProfileVisibility, isProfileModuleVisible, PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -33,7 +34,15 @@ export async function GET(request: Request, context: RouteContext) {
 
   if (!target) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
-  if (moduleKey === 'posts') {
+  if (!(PUBLIC_PROFILE_MODULE_KEYS as readonly string[]).includes(moduleKey)) return NextResponse.json({ message: '模块不存在' }, { status: 404 })
+  const visibility = await getProfileVisibility(target.id, viewer?.id)
+  const typedModuleKey = moduleKey as PublicProfileModuleKey
+  if (!isProfileModuleVisible(visibility.settings, typedModuleKey, visibility.isSelf)) {
+    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' ? getProfileRecordPagination(0, page) : undefined
+    return NextResponse.json({ items: [], ...(pagination ? { pagination } : {}), visibility: { visible: false } })
+  }
+
+  if (typedModuleKey === 'posts') {
     const canViewPendingPosts = Boolean(viewer && (viewer.id === target.id || await hasAdminPermission(viewer, 'post_manage')))
     const postWhere = buildProfilePostWhere(target.id, canViewPendingPosts)
     const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
@@ -74,7 +83,7 @@ export async function GET(request: Request, context: RouteContext) {
     })
   }
 
-  if (moduleKey === 'recent-messages') {
+  if (typedModuleKey === 'recent-messages') {
     const result = await safeDb(
       'userModules.recentMessages',
       loadProfileRecentMessagesPage(target.id, viewer?.id, page),
@@ -83,7 +92,7 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ items: result.messages, pagination: result.pagination })
   }
 
-  if (moduleKey === 'replies') {
+  if (typedModuleKey === 'replies') {
     const replies = await safeDb(
       'userModules.replies',
       prisma.reply.findMany({
@@ -97,7 +106,7 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ items: replies.map(({ Post, ...reply }) => ({ ...reply, content: publicModerationText(publicContentImageMarkers(reply.content), reply.moderationStatus), post: { ...Post, title: publicModerationText(Post.title, Post.moderationStatus) } })) })
   }
 
-  if (moduleKey === 'achievements') {
+  if (typedModuleKey === 'achievements') {
     const achievements = await safeDb(
       'userModules.achievements',
       prisma.userAchievement.findMany({
@@ -115,7 +124,7 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ items: achievements.map(({ Achievement, ...item }) => ({ ...item, achievement: Achievement })) })
   }
 
-  if (moduleKey === 'badges') {
+  if (typedModuleKey === 'badges') {
     const badges = await safeDb(
       'userModules.badges',
       prisma.userBadge.findMany({
@@ -132,7 +141,7 @@ export async function GET(request: Request, context: RouteContext) {
     }) })
   }
 
-  if (moduleKey === 'albums') {
+  if (typedModuleKey === 'albums') {
     const albums = await safeDb(
       'userModules.albums',
       prisma.userAlbumCollection.findMany({
@@ -145,7 +154,7 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ items: albums.map(({ CultureItem, ...item }) => ({ ...item, album: CultureItem })) })
   }
 
-  if (moduleKey === 'favorites') {
+  if (typedModuleKey === 'favorites') {
     if (!viewer || viewer.id !== target.id) return NextResponse.json({ items: [] })
     const favorites = await safeDb(
       'userModules.favorites',

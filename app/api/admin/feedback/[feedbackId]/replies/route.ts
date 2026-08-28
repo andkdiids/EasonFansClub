@@ -73,7 +73,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
   await safeNotificationWrite(
     () => createNotification({
       data: {
-        type: 'ADMIN',
+        type: 'FEEDBACK',
         title: '你的反馈收到回复',
         content: '管理员回复了你的反馈。',
         link: `/feedback/${feedback.id}?focus=${replyId}`,
@@ -82,7 +82,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
         key: `feedback-reply:${feedback.id}:${replyId}`,
       },
     }),
-    { operation: 'admin-feedback-reply', userId: feedback.userId, notificationType: 'ADMIN' },
+    { operation: 'admin-feedback-reply', userId: feedback.userId, notificationType: 'FEEDBACK' },
   )
   emitRealtime(feedback.userId, 'feedback', { feedbackId })
   return NextResponse.json({ feedback: serializeFeedback(updated, { includeContact: true, forAdmin: true }), message: '回复已发送' })

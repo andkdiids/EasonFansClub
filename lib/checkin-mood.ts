@@ -3,6 +3,7 @@ import { isAllowedSystemEmoji } from '@/lib/system-emoji'
 
 export const CUSTOM_MOOD_TYPE = 'CUSTOM' as const
 export const PRESET_MOOD_TYPE = 'PRESET' as const
+export const NO_MOOD_LABEL = '无心情'
 export const CUSTOM_MOOD_MAX_GRAPHEMES = 7
 export const CUSTOM_MOOD_BANNED_WORD_MESSAGE = '心情内容包含不适合展示的内容，请修改后再试。'
 export const CUSTOM_MOOD_INVALID_MESSAGE = '请选择 Emoji，并填写 1～7 个字的心情文字。'
@@ -89,6 +90,10 @@ export function getMoodDisplay(value: CheckInMoodRecord | string | null | undefi
   const isExplicitCustom = record.moodType === CUSTOM_MOOD_TYPE
   const hasCustomFields = !isExplicitPreset && Boolean(customEmoji || customText)
   const hasLegacyCustomText = !preset && Boolean(rawMood) && rawMood !== CUSTOM_MOOD_TYPE
+
+  if (!rawMood && !customEmoji && !customText) {
+    return { icon: '', label: NO_MOOD_LABEL, formatted: NO_MOOD_LABEL, isCustom: false }
+  }
 
   if ((isExplicitCustom || hasCustomFields || hasLegacyCustomText) && (customEmoji || customText || hasLegacyCustomText)) {
     const icon = customEmoji

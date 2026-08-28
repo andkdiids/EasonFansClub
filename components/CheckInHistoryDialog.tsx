@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
-import { getMoodDisplay } from '@/lib/checkin-mood'
+import { getMoodDisplay, NO_MOOD_LABEL } from '@/lib/checkin-mood'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { CheckInMakeupDialog } from '@/components/CheckInMakeupDialog'
 import {
@@ -308,7 +308,7 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                     const content = (
                       <>
                         <span className="checkin-history-day-number">{cell.day}</span>
-                        {visibleRecord ? <span className="checkin-history-mood" title={mood?.formatted || '未填写心情'}>{mood?.icon ? <span aria-hidden="true">{mood.icon}</span> : null}<span className="checkin-history-mood-label">{moodLabel}</span></span> : null}
+                        {visibleRecord ? <span className="checkin-history-mood" title={mood?.formatted || NO_MOOD_LABEL}>{mood?.icon ? <span aria-hidden="true">{mood.icon}</span> : null}<span className="checkin-history-mood-label">{moodLabel}</span></span> : null}
                       </>
                     )
                     return visibleRecord ? (
@@ -345,7 +345,7 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
                     {detail ? (
                       <>
                         <dl className="checkin-history-detail-facts">
-                          <div><dt>今日心情</dt><dd>{getMoodDisplay(detail).formatted || '未填写心情'}</dd></div>
+                          <div><dt>今日心情</dt><dd>{getMoodDisplay(detail).formatted || NO_MOOD_LABEL}</dd></div>
                           <div><dt>挂号时间</dt><dd>{formatBeijingDateTimeMinute(detail.createdAt)}</dd></div>
                           <div><dt>挂号方式</dt><dd>{detail.type && detail.type !== 'NORMAL' ? '该日通过补签完成' : '正常挂号'}</dd></div>
                           {detail.streakDay > 0 ? <div><dt>连续挂号</dt><dd>{detail.streakDay} 天</dd></div> : null}

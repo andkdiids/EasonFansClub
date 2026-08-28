@@ -5,7 +5,7 @@ import { CheckInGrowthGuideCard } from '@/components/CheckInGrowthGuideCard'
 import { EmojiPicker } from '@/components/EmojiPicker'
 import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
 import { BEIJING_TIME_ZONE, formatBeijingDateTimeMinute } from '@/lib/beijing-time'
-import { CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_MAX_GRAPHEMES, getMoodDisplay, countGraphemes, truncateGraphemes, validateCustomMoodInput } from '@/lib/checkin-mood'
+import { CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_MAX_GRAPHEMES, getMoodDisplay, NO_MOOD_LABEL, countGraphemes, truncateGraphemes, validateCustomMoodInput } from '@/lib/checkin-mood'
 import { DAILY_MOODS } from '@/lib/daily'
 
 export type TodayCheckIn = {
@@ -156,12 +156,18 @@ export function CheckInButton({
   }, [todayValue])
   
   function selectPresetMood(key: string) {
-    setMood(key)
+    setMood((current) => current === key ? '' : key)
     setCustomMoodOpen(false)
     setCustomMoodError('')
   }
 
   function openCustomMood() {
+    if (mood === 'CUSTOM') {
+      setMood('')
+      setCustomMoodOpen(false)
+      setCustomMoodError('')
+      return
+    }
     moodBeforeCustomRef.current = mood
     setMood('CUSTOM')
     setCustomMoodOpen(true)
@@ -202,11 +208,6 @@ export function CheckInButton({
     setMessage('')
     setError('')
 
-    if (checkinMoodEnabled && !mood) {
-      setError('请选择今日心情')
-      return
-    }
-
     if (checkinMoodEnabled && mood === 'CUSTOM' && !applyCustomMood()) return
 
     submittingRef.current = true
@@ -217,9 +218,9 @@ export function CheckInButton({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mood: checkinMoodEnabled && mood !== 'CUSTOM' ? mood : null,
-          moodType: checkinMoodEnabled && mood === 'CUSTOM' ? 'CUSTOM' : 'PRESET',
-          moodKey: checkinMoodEnabled && mood !== 'CUSTOM' ? mood : null,
+          mood: checkinMoodEnabled && mood && mood !== 'CUSTOM' ? mood : null,
+          moodType: checkinMoodEnabled && mood ? (mood === 'CUSTOM' ? 'CUSTOM' : 'PRESET') : null,
+          moodKey: checkinMoodEnabled && mood && mood !== 'CUSTOM' ? mood : null,
           moodEmoji: checkinMoodEnabled && mood === 'CUSTOM' ? customMoodEmoji : null,
           moodText: checkinMoodEnabled && mood === 'CUSTOM' ? customMoodText : null,
           message: note,
@@ -306,7 +307,7 @@ export function CheckInButton({
           <div className="flex min-w-0 items-center gap-2">
             {selectedMood.icon ? <span className="text-2xl leading-none">{selectedMood.icon}</span> : null}
             <div className="min-w-0">
-              <p className="truncate text-sm font-black text-brand-950">{selectedMood.label || '未填写心情'}</p>
+              <p className="truncate text-sm font-black text-brand-950">{selectedMood.label || NO_MOOD_LABEL}</p>
               <p className="truncate text-[11px] font-bold text-slate-500">{formatBeijingTime(todayCheckIn.createdAt)}</p>
             </div>
           </div>
@@ -331,7 +332,7 @@ export function CheckInButton({
           <div className={isCompact ? 'mt-2 flex items-center gap-2' : 'mt-4 flex items-center gap-3'}>
             {selectedMood.icon ? <span className={isCompact ? 'text-3xl' : 'text-4xl'}>{selectedMood.icon}</span> : null}
             <div>
-              <p className="font-black text-brand-950">{selectedMood.label || '未填写心情'}</p>
+              <p className="font-black text-brand-950">{selectedMood.label || NO_MOOD_LABEL}</p>
               <p className="text-xs font-bold text-slate-500">挂号时间：{formatBeijingTime(todayCheckIn.createdAt)}</p>
             </div>
           </div>
@@ -351,7 +352,7 @@ export function CheckInButton({
   return (
     <div className={`${isMinimal ? 'space-y-2' : isCompact ? 'space-y-3' : 'space-y-5'} ${previewMode ? 'pointer-events-none select-none' : ''}`}>
       {checkinMoodEnabled ? <div>
-        <p className="text-sm font-black text-slate-700">今日心情</p>
+        <p className="text-sm font-black text-slate-700">今日心情（可选）</p>
         <div data-checkin-mood-grid="true" className={isMinimal || isPreviewCompact ? 'mt-1 grid grid-cols-5 gap-1' : isCompact ? 'mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5' : 'mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5'}>
           {DAILY_MOODS.map((item) => (
             <button

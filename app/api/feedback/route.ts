@@ -114,16 +114,16 @@ export async function POST(request: Request) {
           data: administrators.map((administrator) => ({
             recipientId: administrator.id,
             actorId: guard.user.id,
-            type: 'ADMIN' as const,
+            type: 'FEEDBACK' as const,
             title: '收到新的用户反馈',
             content: `用户昵称：${guard.user.nickname}\n反馈标题：${title}\n提交时间：${formatBeijingMonthDayTime(now)}`,
-            link: '/admin/feedback',
+            link: `/admin/feedback/${feedbackId}`,
             key: `feedback-new:${feedbackId}`,
           })),
           skipDuplicates: true,
         })
       },
-      { operation: 'feedback-created', userId: guard.user.id, notificationType: 'ADMIN' },
+      { operation: 'feedback-created', userId: guard.user.id, notificationType: 'FEEDBACK' },
     )
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

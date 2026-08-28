@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { SocialPostMediaView } from '@/lib/social-posts'
 
-export function MediaCarousel({ media, title }: Readonly<{ media: SocialPostMediaView[]; title: string }>) {
+export function MediaCarousel({ media, title, priority = false }: Readonly<{ media: SocialPostMediaView[]; title: string; priority?: boolean }>) {
   const [index, setIndex] = useState(0)
   const [videoFailed, setVideoFailed] = useState(false)
   const current = media[index] || media[0]
@@ -33,10 +33,10 @@ export function MediaCarousel({ media, title }: Readonly<{ media: SocialPostMedi
           // A Mock fixture may intentionally omit a binary video; keep its
           // verified poster visible instead of showing a broken media box.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.thumbnailUrl} alt={`${title} 视频封面`} className="h-full w-full object-contain" />
+          <img src={current.thumbnailUrl} alt={`${title} 视频封面`} className="h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.url} alt={`${title} 图片 ${index + 1}`} className="h-full w-full object-contain" />
+          <img src={current.url} alt={`${title} 图片 ${index + 1}`} className="h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
         )}
       </div>
       {media.length > 1 ? (

@@ -33,10 +33,11 @@ test('feedback creation creates personal notifications for active administrators
   assert.match(feedbackRoute, /role: \{ in: \['ADMIN', 'SUPER_ADMIN'\] \}/)
   assert.match(feedbackRoute, /status: 'ACTIVE'/)
   assert.match(feedbackRoute, /isDeleted: false/)
-  assert.match(feedbackRoute, /tx\.notification\.createMany\(/)
+  assert.match(feedbackRoute, /createManyNotifications\(/)
+  assert.match(feedbackRoute, /type: 'FEEDBACK'/)
   assert.match(feedbackRoute, /title: '收到新的用户反馈'/)
-  assert.match(feedbackRoute, /link: '\/admin\/feedback'/)
-  assert.match(feedbackRoute, /key: `feedback-new:\$\{created\.id\}`/)
+  assert.match(feedbackRoute, /link: `\/admin\/feedback\/\$\{feedbackId\}`/)
+  assert.match(feedbackRoute, /key: `feedback-new:\$\{feedbackId\}`/)
   assert.doesNotMatch(feedbackRoute, /recipientId: guard\.user\.id/)
 })
 
@@ -44,7 +45,7 @@ test('admin feedback notifications are included in unread-summary and notificati
   const notifications = read('lib/notifications.ts')
 
   assert.match(notifications, /getUnreadNotificationWhere\(userId\)/)
-  assert.match(notifications, /getNotificationCategory\(item\.type, item\.link\)/)
+  assert.match(notifications, /getNotificationCategory\(item\.type, link, item\.key\)/)
   assert.doesNotMatch(notifications, /prisma\.friendRequest\.count\(/)
   assert.match(notifications, /prisma\.notification\.findMany\(/)
   assert.doesNotMatch(notifications, /NOT: \{ link: \{ startsWith: '\/admin\/feedback' \} \}/)

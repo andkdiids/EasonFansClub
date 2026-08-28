@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getUnreadSummary } from '@/lib/notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
@@ -18,7 +19,8 @@ export async function GET(request: Request) {
   })
   if (limited) return limited
   try {
-    return NextResponse.json(await getUnreadSummary(guard.user.id), { headers: privateHeaders })
+    const canReview = await hasAdminPermission(guard.user).catch(() => false)
+    return NextResponse.json(await getUnreadSummary(guard.user.id, canReview), { headers: privateHeaders })
   } catch (error) {
     logNotificationError('unread-summary', { userId: guard.user.id }, error)
     return NextResponse.json({ ok: false, code: 'UNREAD_SUMMARY_UNAVAILABLE', message: '未读统计暂时不可用，请稍后重试' }, {

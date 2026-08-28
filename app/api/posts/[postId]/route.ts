@@ -15,6 +15,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
+import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 import {
   logPostRichContentCompatibilityMode,
   resolvePostContentInput,
@@ -298,6 +299,7 @@ async function postDeleteResponse(postId: string, user: SessionUser, canManagePo
       revalidatePath('/user/[uid]', 'page')
       revalidatePath(`/posts/${postId}`)
       revalidateTag('trending-posts')
+      revalidateTag(HOME_FEATURED_POSTS_CACHE_TAG)
     } catch (error) {
       console.error('[posts.delete.cache]', { postId, userId: user.id, ...describePostDeleteError(error) })
     }
@@ -625,6 +627,7 @@ export async function PATCH(request: Request, { params }: Params) {
     revalidatePath('/search')
     revalidatePath(`/posts/${postId}`)
     revalidateTag('trending-posts')
+    revalidateTag(HOME_FEATURED_POSTS_CACHE_TAG)
 
     return NextResponse.json({ post })
   } catch (error) {
@@ -889,14 +892,22 @@ async function handleEditPost(
     setPhase('edit-review-notification')
     try {
       const admins = await prisma.user.findMany({
-        where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+        where: {
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+          status: 'ACTIVE',
+          isDeleted: false,
+          OR: [
+            { role: 'SUPER_ADMIN' },
+            { AdminPermission: { some: { permissionKey: 'post_manage', enabled: true } } },
+          ],
+        },
         select: { id: true },
       })
       if (admins.length && reviewNotificationKey) {
         await createManyNotifications({
           data: admins.map((admin) => ({
             recipientId: admin.id,
-            type: 'ADMIN' as const,
+            type: 'REVIEW' as const,
             title: '帖子编辑后待审核',
             content: rawTitle,
             link: '/admin/posts/review',
@@ -930,6 +941,7 @@ async function handleEditPost(
     revalidatePath('/user/[uid]', 'page')
     revalidatePath(`/posts/${postId}`)
     revalidateTag('trending-posts')
+    revalidateTag(HOME_FEATURED_POSTS_CACHE_TAG)
   } catch (error) {
     logPostEditError(error, postId, user.id, 'edit-cache')
   }

@@ -12,6 +12,7 @@ import { locationFromProfile } from '@/lib/user-location'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { getBadgeProfileSummary, getEquippedBadgeForUser } from '@/lib/badge-service'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { getProfileVisibility } from '@/lib/user-privacy'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -62,6 +63,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   })
 
   if (!profile || !profile.Profile) redirect('/login')
+
+  const visibility = await getProfileVisibility(profile.id, user.id)
 
   await ensureBirthdayBadge(user.id).catch((error) => {
     console.error('[profile.ensureBirthdayBadge]', error)
@@ -117,10 +120,11 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           backgroundUrl: background,
           createdAt: profile.createdAt,
           wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
-          publicLiveCount: 0,
-          equippedBadge,
-          badgeSummary,
-        }}
+           publicLiveCount: 0,
+           equippedBadge,
+           badgeSummary,
+           privacy: visibility.settings,
+         }}
         growth={growth}
         relationship={{
           isSelf: true,

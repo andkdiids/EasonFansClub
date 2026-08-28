@@ -10,7 +10,7 @@ test('notification unread summary and list share the same personal visibility/ca
 
   assert.match(notifications, /getNotificationVisibilityFilter\(userId/)
   assert.match(notifications, /getUnreadNotificationWhere\(userId/)
-  assert.match(notifications, /getNotificationCategory\(item\.type, item\.link\)/)
+  assert.match(notifications, /getNotificationCategory\(item\.type, link, item\.key\)/)
   assert.match(notifications, /reconcileStalePersonalNotifications/)
   assert.doesNotMatch(notifications, /prisma\.friendRequest\.count\(/)
   assert.match(client, /const zeroSummary: UnreadSummary/)

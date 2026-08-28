@@ -11,6 +11,7 @@ import { emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { createNotification } from '@/lib/notification-write'
+import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -147,7 +148,10 @@ async function writeReviewNotification(input: {
   try {
     await prisma.notification.updateMany({
       where: {
-        type: 'ADMIN',
+        OR: [
+          { type: 'REVIEW' },
+          { type: 'ADMIN' },
+        ],
         isRead: false,
         key: { startsWith: `post-review:${input.postId}` },
       },
@@ -354,6 +358,7 @@ export async function PATCH(request: Request) {
       revalidatePath('/user/[uid]', 'page')
       revalidatePath(`/posts/${postId}`)
       revalidateTag('trending-posts')
+      revalidateTag(HOME_FEATURED_POSTS_CACHE_TAG)
     } catch (error) {
       logReviewError('cache', postId, action, error)
     }

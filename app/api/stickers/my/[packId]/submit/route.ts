@@ -55,7 +55,15 @@ export async function POST(
     await safeNotificationWrite(
       async () => {
         const administrators = await prisma.user.findMany({
-          where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+          where: {
+            role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+            status: 'ACTIVE',
+            isDeleted: false,
+            OR: [
+              { role: 'SUPER_ADMIN' },
+              { AdminPermission: { some: { permissionKey: 'sticker_manage', enabled: true } } },
+            ],
+          },
           select: { id: true },
         })
         administratorIds = administrators.map((administrator) => administrator.id)
@@ -64,7 +72,7 @@ export async function POST(
           data: administrators.map((administrator) => ({
             recipientId: administrator.id,
             actorId: guard.user.id,
-            type: 'ADMIN' as const,
+            type: 'REVIEW' as const,
             title: '表情包重新提交审核',
             content: `用户重新提交了表情包《${pack.name}》，请前往审核中心处理。`,
             link: '/admin/stickers',
@@ -73,7 +81,7 @@ export async function POST(
           skipDuplicates: true,
         })
       },
-      { operation: 'sticker-pack-resubmit', userId: guard.user.id, notificationType: 'ADMIN' },
+      { operation: 'sticker-pack-resubmit', userId: guard.user.id, notificationType: 'REVIEW' },
     )
 
     emitRealtimeMany(administratorIds, 'notification')

@@ -28,6 +28,7 @@ const summaryKeys: Array<keyof UnreadSummary> = [
   'friendRequests',
   'directMessages',
   'messages',
+  'review',
   'total',
 ]
 

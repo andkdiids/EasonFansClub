@@ -78,11 +78,11 @@ export function ProfileCheckInCalendar() {
             {Array.from({ length: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate() }, (_, index) => {
               const day = index + 1
               const record = checkIns.data.find((item) => new Date(item.checkDate).getDate() === day)
-              const mood = getMoodDisplay(record)
+              const mood = record ? getMoodDisplay(record) : null
               return (
                 <div key={day} className={`flex h-12 flex-col items-center justify-center rounded-lg p-1 text-center text-xs font-black sm:h-[60px] ${record ? 'bg-brand-700 text-white' : 'bg-sky-50 text-slate-400'}`}>
                   <span>{day}</span>
-                  <span className="mt-0.5 block break-words text-[10px] leading-tight">{mood.formatted || ''}</span>
+                  <span className="mt-0.5 block break-words text-[10px] leading-tight">{mood?.formatted || ''}</span>
                 </div>
               )
             })}

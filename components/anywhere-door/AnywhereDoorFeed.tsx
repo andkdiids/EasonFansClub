@@ -41,7 +41,7 @@ export function AnywhereDoorFeed({ initial }: Readonly<{ initial: Feed }>) {
 
   return (
     <div className="space-y-5">
-      {items.length ? items.map((post) => <AnywhereDoorPostCard key={post.id} post={post} onLike={(id) => void toggleLike(id)} />) : <section className="rounded-[28px] border border-dashed border-sky-200 bg-white/70 p-10 text-center"><p className="text-lg font-black text-brand-950">随意门正在等待第一批动态</p><p className="mt-2 text-sm font-bold text-slate-500">管理员完成同步后，公开且已存储的内容会出现在这里。</p></section>}
+      {items.length ? items.map((post, index) => <AnywhereDoorPostCard key={post.id} post={post} priority={index === 0} onLike={(id) => void toggleLike(id)} />) : <section className="rounded-[28px] border border-dashed border-sky-200 bg-white/70 p-10 text-center"><p className="text-lg font-black text-brand-950">随意门正在等待第一批动态</p><p className="mt-2 text-sm font-bold text-slate-500">管理员完成同步后，公开且已存储的内容会出现在这里。</p></section>}
       {message ? <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700" role="alert">{message}</p> : null}
       {nextCursor ? <button type="button" onClick={() => void loadMore()} disabled={loading} className="mx-auto block min-h-11 rounded-full border border-sky-200 bg-white px-6 text-sm font-black text-brand-700 disabled:opacity-50">{loading ? '加载中…' : '加载更多'}</button> : items.length ? <p className="text-center text-xs font-bold text-slate-400">已经看到全部动态</p> : null}
     </div>

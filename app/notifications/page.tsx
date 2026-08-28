@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, getSessionUserFromCookie, isAuthServiceUnavailableError } from '@/lib/auth'
 import { listUnifiedNotificationsPage, parseNotificationCategory } from '@/lib/notifications'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
@@ -24,10 +25,12 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   if (!user) redirect('/login')
   const params = await searchParams
   const page = Math.max(1, Number.parseInt(params.page || '1', 10) || 1)
-  const category = parseNotificationCategory(params.category)
+  const canReview = await hasAdminPermission(user).catch(() => false)
+  const requestedCategory = parseNotificationCategory(params.category)
+  const category = requestedCategory === 'review' && !canReview ? 'all' : requestedCategory
 
   const [notificationsResult, layoutResult, appearanceResult] = await Promise.allSettled([
-    listUnifiedNotificationsPage(user.id, { page, pageSize: NOTIFICATION_PAGE_SIZE, category }),
+    listUnifiedNotificationsPage(user.id, { page, pageSize: NOTIFICATION_PAGE_SIZE, category, canReview }),
     getPublishedPageLayoutConfig('message'),
     getSiteAppearance(),
   ])
@@ -84,6 +87,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
                   totalPages: notifications.totalPages,
                 }}
                 initialCategory={category}
+                canReview={canReview}
                 siteLogoUrl={siteLogoUrl}
                 initialLoadError={initialLoadError}
                 initialLoadWarning={initialLoadWarning}

@@ -16,6 +16,7 @@ const emptySummary: UnreadSummary = {
   friendRequests: 0,
   directMessages: 0,
   messages: 0,
+  review: 0,
   total: 0,
 }
 
@@ -29,6 +30,7 @@ const unreadSummaryKeys: Array<keyof UnreadSummary> = [
   'friendRequests',
   'directMessages',
   'messages',
+  'review',
   'total',
 ]
 

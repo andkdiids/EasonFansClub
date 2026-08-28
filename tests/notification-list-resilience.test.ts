@@ -38,12 +38,12 @@ test('per-item fallback is collected and logged with notification ids', () => {
 // 需求：unread count 与 list 的 reply/like 筛选保持一致（反馈回复排除在回复/点赞之外）。
 test('reply and like category filters exclude feedback links to match unread counts', () => {
   const service = read('lib/notifications.ts')
-  // Prisma 筛选对象排除 /feedback/
-  assert.match(service, /category === 'reply'\) return \{ type: 'REPLY'[\s\S]*startsWith: '\/feedback\/'/)
-  assert.match(service, /category === 'like'\) return \{ type: 'LIKE'[\s\S]*startsWith: '\/feedback\/'/)
-  // union 原始 SQL 同样排除 /feedback/（与 getUnreadSummary 一致）
-  assert.match(service, /n\.type = 'REPLY' AND \(n\.link IS NULL OR \(n\.link NOT LIKE '%\/wall%' AND n\.link NOT LIKE '\/feedback\/%'\)\)/)
-  assert.match(service, /n\.type = 'LIKE' AND \(n\.link IS NULL OR \(n\.link NOT LIKE '%\/wall%' AND n\.link NOT LIKE '\/feedback\/%'\)\)/)
+  // Prisma 筛选对象排除 /feedback/，但保留留言墙回复/点赞的真实语义。
+  assert.match(service, /normalizedCategory === 'reply'\) return \{ type: 'REPLY'[\s\S]*startsWith: '\/feedback\/'/)
+  assert.match(service, /normalizedCategory === 'like'\) return \{ type: 'LIKE'[\s\S]*startsWith: '\/feedback\/'/)
+  // union 原始 SQL 同样排除 /feedback/（与 getUnreadSummary 一致）。
+  assert.match(service, /n\.type = 'REPLY' AND \(n\.link IS NULL OR n\.link NOT LIKE '\/feedback\/%'\)/)
+  assert.match(service, /n\.type = 'LIKE' AND \(n\.link IS NULL OR n\.link NOT LIKE '\/feedback\/%'\)/)
 })
 
 // 需求：前端不在 degraded（有条目）时弹出「部分通知无法加载」黄条；仅整接口失败才提示。

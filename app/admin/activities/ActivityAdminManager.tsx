@@ -69,6 +69,15 @@ function statusLabel(status: ActivityStatusValue) {
   return status === 'DRAFT' ? activityDisplayStatusLabels.DRAFT : status === 'CANCELLED' ? activityDisplayStatusLabels.CANCELLED : '已发布'
 }
 
+function publishValidationMessage(form: ActivityForm) {
+  if (!form.title.trim()) return '请填写活动标题'
+  if (!form.type) return '请选择活动类型'
+  if (!form.startsAt) return '请选择活动开始时间'
+  if (!form.endsAt) return '请选择活动结束时间'
+  if (!form.description.trim()) return '请填写活动说明'
+  return ''
+}
+
 function toPreview(form: ActivityForm, id: string | null, status: ActivityStatusValue): ActivityView {
   const startsAt = form.startsAt ? new Date(`${form.startsAt}:00+08:00`).toISOString() : null
   const endsAt = form.endsAt ? new Date(`${form.endsAt}:00+08:00`).toISOString() : null
@@ -148,6 +157,14 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   async function save(desiredStatus: ActivityStatusValue, event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault()
     if (savingRef.current) return
+    if (desiredStatus === 'PUBLISHED') {
+      const validationMessage = publishValidationMessage(form)
+      if (validationMessage) {
+        setError(validationMessage)
+        setMessage('')
+        return
+      }
+    }
     savingRef.current = true
     setSaving(true)
     setMessage('')
@@ -167,7 +184,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
         bannerUrl = await uploadActivityImage(bannerSelection.file)
         setBannerStatus('success')
       }
-      const payload = { ...form, coverUrl, bannerUrl, status: desiredStatus, signupLimit: form.signupLimit || null, sortOrder: form.sortOrder || '0' }
+      const payload = { ...form, coverUrl, bannerUrl, status: desiredStatus, signupLimit: form.signupLimit === '' ? null : form.signupLimit, sortOrder: form.sortOrder || '0' }
       const response = await fetch(editingId ? `/api/admin/activities/${editingId}` : '/api/admin/activities', {
         method: editingId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload),
       })
@@ -239,7 +256,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
 
   return (
     <>
-      <form onSubmit={(event) => void save(editingActivity?.status || 'DRAFT', event)} className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7">
+      <form noValidate onSubmit={(event) => void save(editingActivity?.status || 'DRAFT', event)} className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-xs font-black tracking-[0.18em] text-sky-700 dark:text-sky-300">{editingId ? '编辑活动' : '新建活动'}</p><h2 className="mt-1 text-2xl font-black text-brand-950 dark:text-slate-100">{editingId ? editingActivity?.title || '活动编辑' : '创建活动草稿'}</h2></div>
           <div className="flex flex-wrap gap-2">
@@ -248,23 +265,23 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           </div>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">标题<input required minLength={2} maxLength={160} value={form.title} onChange={(event) => changeForm('title', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">标题<input aria-required="true" maxLength={160} value={form.title} onChange={(event) => changeForm('title', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">副标题<input maxLength={300} value={form.subtitle} onChange={(event) => changeForm('subtitle', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">活动类型<select value={form.type} onChange={(event) => changeForm('type', event.target.value as ActivityTypeValue)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{activityTypeValues.map((item) => <option key={item} value={item}>{activityTypeLabels[item]}</option>)}</select></label>
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">开始时间<input type="datetime-local" value={form.startsAt} onChange={(event) => changeForm('startsAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">结束时间<input type="datetime-local" value={form.endsAt} onChange={(event) => changeForm('endsAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">活动类型<select aria-required="true" value={form.type} onChange={(event) => changeForm('type', event.target.value as ActivityTypeValue)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{activityTypeValues.map((item) => <option key={item} value={item}>{activityTypeLabels[item]}</option>)}</select></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">开始时间<input aria-required="true" type="datetime-local" value={form.startsAt} onChange={(event) => changeForm('startsAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">结束时间<input aria-required="true" type="datetime-local" value={form.endsAt} onChange={(event) => changeForm('endsAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
-        <label className="mt-4 block text-sm font-black text-slate-700 dark:text-slate-200">活动说明<textarea rows={7} maxLength={20000} value={form.description} onChange={(event) => changeForm('description', event.target.value)} className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-3 font-bold leading-6 text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+        <label className="mt-4 block text-sm font-black text-slate-700 dark:text-slate-200">活动说明<textarea aria-required="true" rows={7} maxLength={20000} value={form.description} onChange={(event) => changeForm('description', event.target.value)} className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-3 font-bold leading-6 text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <ActivityImageUploader label="卡片封面" initialUrl={form.coverUrl} disabled={saving} status={coverStatus} onSelectionChange={(selection) => handleImageSelection('cover', selection)} />
           <ActivityImageUploader label="详情横幅（可选）" initialUrl={form.bannerUrl} disabled={saving} status={bannerStatus} onSelectionChange={(selection) => handleImageSelection('banner', selection)} />
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">活动地点<input value={form.locationName} onChange={(event) => changeForm('locationName', event.target.value)} placeholder="线下活动必填" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">活动地点<input value={form.locationName} onChange={(event) => changeForm('locationName', event.target.value)} placeholder="可选" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">详细地址<input value={form.locationAddress} onChange={(event) => changeForm('locationAddress', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">线上活动链接<input type="url" value={form.onlineUrl} onChange={(event) => changeForm('onlineUrl', event.target.value)} placeholder="线上活动必填" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">线上活动链接<input type="url" value={form.onlineUrl} onChange={(event) => changeForm('onlineUrl', event.target.value)} placeholder="可选，仅作为活动资料" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名名额<input type="number" min="0" value={form.signupLimit} onChange={(event) => changeForm('signupLimit', event.target.value)} placeholder="留空表示不限" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名开始时间<input type="datetime-local" value={form.registrationStartAt} onChange={(event) => changeForm('registrationStartAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名结束时间<input type="datetime-local" value={form.registrationEndAt} onChange={(event) => changeForm('registrationEndAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>

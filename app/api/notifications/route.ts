@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { listUnifiedNotificationsPage, markAllUnifiedNotificationsRead, markUnifiedNotificationRead, parseNotificationCategory } from '@/lib/notifications'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { hasAdminPermission } from '@/lib/admin-permissions'
+import { enforceApiRateLimit, requireAdmin, requireUser } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { effectiveSystemNotificationWhere } from '@/lib/system-notifications'
@@ -33,8 +34,16 @@ export async function GET(request: Request) {
   const pageSize = Math.min(Math.max(Number.isFinite(rawPageSize) ? rawPageSize : NOTIFICATION_PAGE_SIZE, 1), MAX_NOTIFICATION_PAGE_SIZE)
   const requestedPage = Math.min(10_000, Math.max(1, Number.isFinite(rawPage) ? rawPage : 1))
   const category = parseNotificationCategory(searchParams.get('category'))
+  let canReview = false
+  if (category === 'review') {
+    const reviewGuard = await requireAdmin()
+    if (!reviewGuard.user) return reviewGuard.response
+    canReview = true
+  } else {
+    canReview = await hasAdminPermission(guard.user).catch(() => false)
+  }
   try {
-    const result = await listUnifiedNotificationsPage(guard.user.id, { unreadOnly, page: requestedPage, pageSize, category })
+    const result = await listUnifiedNotificationsPage(guard.user.id, { unreadOnly, page: requestedPage, pageSize, category, canReview })
 
     if (result.failed) {
       logNotificationError('list.failed', {

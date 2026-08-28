@@ -72,8 +72,9 @@ export function UserNotificationMenu({
       <Link href="/notifications" className={itemClass}>消息中心<Badge count={summary.notifications} /></Link>
       <Link href="/feedback" className={itemClass}>我的反馈<Badge count={summary.feedbackReplies} /></Link>
       <Link href="/friends" className={itemClass}>我的好友<Badge count={summary.friendRequests} /></Link>
-      <Link href="/notifications?category=messages" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
+      <Link href="/friends" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
       <Link href="/settings/security" className={itemClass}>账号安全</Link>
+      <Link href="/settings/privacy" className={itemClass}>隐私设置</Link>
       {isAdmin ? <Link href="/admin" className={`${itemClass} text-brand-700`}>后台管理</Link> : null}
 <button
   type="button"

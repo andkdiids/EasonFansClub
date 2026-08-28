@@ -1,33 +1,30 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { buildUnreadSummary, getNotificationCategory, parseNotificationCategory } from '../lib/notifications'
+import { buildUnreadSummary, getNotificationCategory, notificationCategoryValues, parseNotificationCategory } from '../lib/notifications'
 import { parseNotificationReplyTarget } from '../lib/notification-target'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('留言墙通知进入独立「留言墙」分类，不再混入回复 / 点赞', () => {
+test('留言墙互动按真实语义归入回复 / 点赞，通知中心移除独立分类', () => {
   const service = read('lib/notifications.ts')
   const client = read('app/notifications/NotificationsClient.tsx')
 
-  // 分类枚举与映射
-  assert.match(service, /notificationCategoryValues = \[[^\]]*'wall'\]/)
-  // 留言墙链接识别：/user/<uid>/wall
-  assert.ok(service.includes("/^\\/user\\/\\d+\\/wall"))
-  assert.match(client, /wall: '留言墙'/)
-  assert.match(client, /wall: unreadSummary\.wall/)
+  assert.deepEqual(notificationCategoryValues, ['all', 'reply', 'like', 'application', 'feedback', 'system', 'review'])
+  assert.doesNotMatch(client, /wall: '留言墙'/)
+  assert.doesNotMatch(client, /messages: '私信'/)
+  assert.match(client, /notification-category-tabs/)
+  assert.ok(service.includes("normalizedCategory === 'reply') return { type: 'REPLY', OR:"))
+  assert.ok(service.includes("normalizedCategory === 'like') return { type: 'LIKE', OR:"))
 
-  // 回复 / 点赞分类排除留言墙，留言墙单独成类
-  assert.ok(service.includes("category === 'reply') return { type: 'REPLY', OR:"))
-  assert.ok(service.includes("category === 'wall') return { AND:"))
-
-  // 行为：留言墙链接归到 wall，普通回复仍归 reply
-  assert.equal(getNotificationCategory('REPLY', '/user/00012/wall?focus=msg-1'), 'wall')
-  assert.equal(getNotificationCategory('LIKE', '/user/00012/wall?focus=msg-1'), 'wall')
+  // 留言墙链接按通知真实行为归入回复 / 点赞，不再单独分组。
+  assert.equal(getNotificationCategory('REPLY', '/user/00012/wall?focus=msg-1'), 'reply')
+  assert.equal(getNotificationCategory('LIKE', '/user/00012/wall?focus=msg-1'), 'like')
   assert.equal(getNotificationCategory('REPLY', '/posts/abc'), 'reply')
   assert.equal(getNotificationCategory('LIKE', null), 'like')
-  // parseNotificationCategory 接受 wall
-  assert.equal(parseNotificationCategory('wall'), 'wall')
+  // 旧 URL 不再触发已移除的 wall Tab，而是安全回到全部。
+  assert.equal(parseNotificationCategory('wall'), 'all')
+  assert.equal(parseNotificationCategory('messages'), 'all')
 })
 
 test('通知中心点击留言墙回复携带正确的主人 userId、留言 id 与回复 commentId', () => {
@@ -74,21 +71,23 @@ test('留言墙通知读取与个人主页留言墙读取逻辑统一（删除 /
   assert.ok(service.includes('REPLY_UNAVAILABLE_TEXT'))
 })
 
-test('未读汇总正确统计留言墙分类，且不重复计入回复 / 点赞', () => {
+test('未读汇总不再暴露留言墙分类，且私信不重复计入通知总数', () => {
   const summary = buildUnreadSummary({
     replies: 2,
     likes: 1,
-    wall: 3,
+    wall: 0,
     friendRequests: 1,
-    messages: 0,
+    messages: 7,
     feedback: 0,
     system: 1,
-  }, 0, 0)
+    review: 2,
+  }, 0, 7)
 
-  // wall 从 replies/likes 中剥离后单独计数，total 不重复
-  assert.equal(summary.wall, 3)
+  assert.equal(summary.wall, 0)
   assert.equal(summary.replies, 2)
   assert.equal(summary.likes, 1)
-  // total = system(1) + replies(2) + likes(1) + friendRequests(1) + wall(3)
-  assert.equal(summary.total, 8)
+  assert.equal(summary.review, 2)
+  // total = system(1) + replies(2) + likes(1) + applications(1) + review(2)
+  assert.equal(summary.total, 7)
+  assert.equal(summary.directMessages, 7)
 })

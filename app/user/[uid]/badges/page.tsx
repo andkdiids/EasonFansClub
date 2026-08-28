@@ -6,6 +6,7 @@ import { getEquippedBadgeForUser } from '@/lib/badge-service'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { parseUidParam } from '@/lib/uid'
 import { prisma } from '@/lib/prisma'
+import { getProfileVisibility } from '@/lib/user-privacy'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +21,8 @@ export default async function UserBadgesPage({ params }: PageProps) {
     prisma.user.findFirst({ where: { uid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } }, select: { id: true, uid: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true } } } }),
   ])
   if (!target) notFound()
+  const visibility = await getProfileVisibility(target.id, viewer?.id)
+  if (!visibility.isSelf && !visibility.settings.showBadgeHistory) notFound()
   const equippedBadge = await getEquippedBadgeForUser(target.id)
 
   return (

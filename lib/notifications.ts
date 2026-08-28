@@ -23,7 +23,7 @@ const REPLY_UNAVAILABLE_TEXT = '该回复已被删除或不可查看'
 const REPLY_NOT_FOUND_TEXT = '该回复不存在或已失效'
 const REPLY_DELETED_TEXT = '该回复已被删除'
 const REPLY_NO_PERMISSION_TEXT = '你暂时无法查看这条回复'
-export const notificationCategoryValues = ['all', 'reply', 'like', 'friend', 'messages', 'feedback', 'system', 'wall'] as const
+export const notificationCategoryValues = ['all', 'reply', 'like', 'application', 'feedback', 'system', 'review'] as const
 export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
 const NOTIFICATION_RECONCILIATION_TTL_MS = 60_000
@@ -33,6 +33,49 @@ const DUEL_INVITE_LINK_PREFIX = '/games/guess-song/duel'
 const FRIEND_BIRTHDAY_LINK_PREFIX = '/user/'
 const notificationReconciliationInFlight = new Map<string, Promise<void>>()
 const notificationReconciliationLastRun = new Map<string, number>()
+
+/**
+ * Before FEEDBACK/REVIEW became first-class Notification types, the affected
+ * write paths used ADMIN plus a stable link/key. Keep those records readable
+ * without broad title/content matching, which would misclassify unrelated
+ * administrator messages.
+ */
+function isLegacyReviewNotification(type: string, link?: string | null, key?: string | null) {
+  if (type !== 'ADMIN' || !key) return false
+  if (link === '/admin/posts/review') return key.startsWith('post-review:')
+  if (link === '/admin/stickers') return key.startsWith('sticker-pack-review:') || key.startsWith('sticker-pack-resubmit:')
+  if (link === '/admin/today') return key.startsWith('today-review:')
+  return false
+}
+
+function isLegacyFeedbackNotification(type: string, key?: string | null) {
+  return type === 'ADMIN' && Boolean(key?.startsWith('feedback-new:'))
+}
+
+function legacyReviewNotificationWhere(): Prisma.NotificationWhereInput {
+  return {
+    OR: [
+      { type: 'ADMIN', link: '/admin/posts/review', key: { startsWith: 'post-review:' } },
+      { type: 'ADMIN', link: '/admin/stickers', key: { startsWith: 'sticker-pack-review:' } },
+      { type: 'ADMIN', link: '/admin/stickers', key: { startsWith: 'sticker-pack-resubmit:' } },
+      { type: 'ADMIN', link: '/admin/today', key: { startsWith: 'today-review:' } },
+    ],
+  }
+}
+
+function reviewNotificationWhere(): Prisma.NotificationWhereInput {
+  return { OR: [{ type: 'REVIEW' }, legacyReviewNotificationWhere()] }
+}
+
+function feedbackNotificationWhere(): Prisma.NotificationWhereInput {
+  return {
+    OR: [
+      { type: 'FEEDBACK' },
+      { link: { startsWith: '/feedback/' } },
+      { type: 'ADMIN', key: { startsWith: 'feedback-new:' } },
+    ],
+  }
+}
 
 const personalTypeLabels: Record<string, string> = {
   REPLY: '回复',
@@ -56,16 +99,14 @@ const systemTypeLabels: Record<string, string> = {
   SECURITY: '安全',
 }
 
-export function getNotificationCategory(type: string, link?: string | null) {
-  if (link?.startsWith('/feedback/')) return 'feedback'
-  // 留言墙互动（留言 / 回复 / 点赞）集中在独立的「留言墙」分类，不再混入回复 / 点赞。
-  if (link && /^\/user\/\d+\/wall(\?|$)/.test(link)) return 'wall'
+export function getNotificationCategory(type: string, link?: string | null, key?: string | null): NotificationCategory {
+  if (type === 'FEEDBACK' || link?.startsWith('/feedback/') || isLegacyFeedbackNotification(type, key)) return 'feedback'
+  if (type === 'REVIEW' || isLegacyReviewNotification(type, link, key)) return 'review'
   if (type === 'REPLY') return 'reply'
   if (type === 'LIKE') return 'like'
-  if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'friend'
-  if (type === 'ACTIVITY' && (link?.startsWith(DUEL_INVITE_LINK_PREFIX) || link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX))) return 'friend'
-  if (type === 'BIRTHDAY_GREETING' && link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX)) return 'friend'
-  if (type === 'MESSAGE') return 'messages'
+  if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'application'
+  if (type === 'ACTIVITY' && (link?.startsWith(DUEL_INVITE_LINK_PREFIX) || link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX))) return 'application'
+  if (type === 'BIRTHDAY_GREETING' && link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX)) return 'application'
   return 'system'
 }
 
@@ -83,16 +124,18 @@ export function getUnreadNotificationWhere(userId: string, extra: Prisma.Notific
   return getNotificationVisibilityFilter(userId, { isRead: false, ...extra })
 }
 
-export function getNotificationCategoryFilter(category: string): Prisma.NotificationWhereInput {
-  if (category === 'all') return {}
-  // 留言墙互动从回复 / 点赞分类中剥离，避免同一通知同时出现在多个 Tab。
-  // 反馈回复通知类型为 REPLY 且 link 以 /feedback/ 开头，已在 getNotificationCategory
-  // 中归为 'feedback'。这里排除 /feedback/，使「回复/点赞」标签的筛选与 getUnreadSummary
-  // 的计数原始 SQL 保持一致（避免反馈回复出现在回复标签却不被计数）。
-  if (category === 'reply') return { type: 'REPLY', OR: [{ link: null }, { AND: [{ link: { not: { contains: '/wall' } } }, { link: { not: { startsWith: '/feedback/' } } }] }] }
-  if (category === 'like') return { type: 'LIKE', OR: [{ link: null }, { AND: [{ link: { not: { contains: '/wall' } } }, { link: { not: { startsWith: '/feedback/' } } }] }] }
-  if (category === 'wall') return { AND: [{ type: { in: ['REPLY', 'LIKE'] } }, { link: { startsWith: '/user/' } }, { link: { contains: '/wall' } }] }
-  if (category === 'friend') return {
+export function getNotificationCategoryFilter(category: string, canReview = false): Prisma.NotificationWhereInput {
+  const normalizedCategory = parseNotificationCategory(category)
+  if (normalizedCategory === 'all') {
+    return canReview
+      ? { type: { not: 'MESSAGE' } }
+      : { AND: [{ type: { notIn: ['MESSAGE', 'REVIEW'] } }, { NOT: legacyReviewNotificationWhere() }] }
+  }
+  // 反馈回复历史上可能使用 REPLY + /feedback/，新通知使用 FEEDBACK。
+  // 留言墙互动仍按真实行为归入回复 / 点赞，不再保留独立一级分类。
+  if (normalizedCategory === 'reply') return { type: 'REPLY', OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] }
+  if (normalizedCategory === 'like') return { type: 'LIKE', OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] }
+  if (normalizedCategory === 'application') return {
     OR: [
       { type: { in: ['FRIEND_REQUEST', 'FOLLOW'] } },
       { type: 'ACTIVITY', link: { startsWith: DUEL_INVITE_LINK_PREFIX } },
@@ -100,23 +143,27 @@ export function getNotificationCategoryFilter(category: string): Prisma.Notifica
       { type: 'BIRTHDAY_GREETING', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } },
     ],
   }
-  if (category === 'messages') return { type: 'MESSAGE' }
-  if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
+  if (normalizedCategory === 'feedback') return feedbackNotificationWhere()
+  if (normalizedCategory === 'review') return canReview ? reviewNotificationWhere() : { id: { in: [] } }
   return {
-    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE'] },
+    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW'] },
     AND: [
       { NOT: { type: 'ACTIVITY', link: { startsWith: DUEL_INVITE_LINK_PREFIX } } },
       { NOT: { type: 'ACTIVITY', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } } },
       { NOT: { type: 'BIRTHDAY_GREETING', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } } },
+      { NOT: legacyReviewNotificationWhere() },
+      { NOT: feedbackNotificationWhere() },
     ],
     OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }],
   }
 }
 
 export function parseNotificationCategory(value: unknown): NotificationCategory {
-  return notificationCategoryValues.includes(value as NotificationCategory)
-    ? value as NotificationCategory
-    : 'all'
+  if (notificationCategoryValues.includes(value as NotificationCategory)) return value as NotificationCategory
+  // Keep old bookmarked URLs harmless: the removed tabs resolve to the main
+  // feed instead of querying private-message or wall-only rows.
+  if (value === 'friend') return 'application'
+  return 'all'
 }
 
 function getSystemNotificationCategoryFilter(category: NotificationCategory): Prisma.SystemNotificationWhereInput {
@@ -130,16 +177,19 @@ function getSystemNotificationCategoryFilter(category: NotificationCategory): Pr
 // database page the union of personal and system notifications before the
 // application loads actor/target details, so an unread row can never be left
 // behind on a later page.
-function getPersonalNotificationCategorySql(category: NotificationCategory) {
+function getPersonalNotificationCategorySql(category: NotificationCategory, canReview = false) {
   switch (category) {
-    // 与 getNotificationCategoryFilter / getUnreadSummary 保持一致：回复/点赞排除 /feedback/。
-    case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR (n.link NOT LIKE '%/wall%' AND n.link NOT LIKE '/feedback/%'))")
-    case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR (n.link NOT LIKE '%/wall%' AND n.link NOT LIKE '/feedback/%'))")
-    case 'wall': return Prisma.raw("AND n.type IN ('REPLY','LIKE') AND n.link LIKE '/user/%' AND n.link LIKE '%/wall%'")
-    case 'friend': return Prisma.raw("AND (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%'))")
-    case 'messages': return Prisma.raw("AND n.type = 'MESSAGE'")
-    case 'feedback': return Prisma.raw("AND n.link LIKE '/feedback/%'")
-    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'application': return Prisma.raw("AND (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%'))")
+    case 'feedback': return Prisma.raw("AND (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.key, '') LIKE 'feedback-new:%'))")
+    case 'review': return canReview
+      ? Prisma.raw("AND (n.type = 'REVIEW' OR (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%'))))")
+      : Prisma.raw('AND 1 = 0')
+    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%') OR COALESCE(n.key, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'all': return canReview
+      ? Prisma.raw("AND n.type <> 'MESSAGE'")
+      : Prisma.raw("AND n.type NOT IN ('MESSAGE', 'REVIEW') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%')))")
     default: return Prisma.empty
   }
 }
@@ -147,7 +197,7 @@ function getPersonalNotificationCategorySql(category: NotificationCategory) {
 function getSystemNotificationCategorySql(category: NotificationCategory) {
   if (category === 'feedback') return Prisma.raw("AND sn.link LIKE '/feedback/%'")
   if (category === 'system') return Prisma.raw("AND (sn.link IS NULL OR sn.link NOT LIKE '/feedback/%')")
-  if (category === 'wall') return Prisma.raw('AND 1 = 0')
+  if (category === 'review') return Prisma.raw('AND 1 = 0')
   if (category !== 'all') return Prisma.raw('AND 1 = 0')
   return Prisma.empty
 }
@@ -163,8 +213,9 @@ export function getFriendRequestAcceptedNotificationKey(requestId: string) {
   return `${FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX}${requestId}`
 }
 
-function getNotificationTypeLabel(type: string, link?: string | null, source?: 'personal' | 'system') {
-  if (link?.startsWith('/feedback/')) return '反馈'
+function getNotificationTypeLabel(type: string, link?: string | null, source?: 'personal' | 'system', key?: string | null) {
+  if (type === 'FEEDBACK' || link?.startsWith('/feedback/') || isLegacyFeedbackNotification(type, key)) return '反馈'
+  if (type === 'REVIEW' || isLegacyReviewNotification(type, link, key)) return '审核'
   return source === 'system' ? systemTypeLabels[type] || type : personalTypeLabels[type] || type
 }
 
@@ -263,6 +314,7 @@ export type UnreadSummary = {
   friendRequests: number
   directMessages: number
   messages: number
+  review: number
   total: number
 }
 
@@ -279,6 +331,7 @@ export type UnreadPersonalCounts = {
   messages: number
   feedback: number
   system: number
+  review?: number
 }
 
 type DailyCommentNotificationRow = {
@@ -524,32 +577,41 @@ async function getDirectMessageUnreadCount(userId: string) {
   }
 }
 
-export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: number, directMessages: number): UnreadSummary {
-  const wall = personal.wall ?? 0
+export function buildUnreadSummary(personal: UnreadPersonalCounts, systemCount: number, directMessages: number, systemFeedback = 0): UnreadSummary {
   const system = personal.system + systemCount
-  const notifications = system + personal.replies + personal.likes
+  const review = personal.review ?? 0
+  // `wall` is kept as an input-only compatibility field for older callers.
+  // Current SQL folds wall replies/likes into their real interaction category;
+  // if an older caller still supplies a separate count, retain it in the
+  // aggregate without exposing a removed wall tab.
+  const legacyWall = personal.wall ?? 0
+  const feedback = personal.feedback + systemFeedback
+  const notifications = system + personal.replies + personal.likes + personal.friendRequests + feedback + review + legacyWall
   const friendRequests = personal.friendRequests
-  const feedbackReplies = personal.feedback
+  const feedbackReplies = feedback
   return {
     notifications,
     system,
     replies: personal.replies,
     likes: personal.likes,
-    wall,
+    wall: 0,
     feedbackReplies,
     feedback: feedbackReplies,
     friendRequests,
     directMessages,
     messages: directMessages,
-    total: notifications + feedbackReplies + friendRequests + directMessages + wall,
+    review,
+    // Direct-message unread state has its own conversation cursor and must not
+    // be duplicated in the notification-center total.
+    total: notifications,
   }
 }
 
-async function loadUnreadSummary(userId: string): Promise<UnreadSummary> {
+async function loadUnreadSummary(userId: string, canReview = false): Promise<UnreadSummary> {
   // This endpoint is polled by the navigation/realtime fallback. It must stay
   // read-only and cheap; reconciliation belongs to the paginated list path.
   const now = new Date()
-  const [personalResult, systemResult, directMessageResult] = await Promise.allSettled([
+  const [personalResult, systemResult, systemFeedbackResult, directMessageResult] = await Promise.allSettled([
     prisma.$queryRaw<Array<{
       replies: bigint | number
       likes: bigint | number
@@ -558,20 +620,33 @@ async function loadUnreadSummary(userId: string): Promise<UnreadSummary> {
       messages: bigint | number
       feedback: bigint | number
       systemCount: bigint | number
+      review: bigint | number
     }>>`
       SELECT
-        COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') AND (n.link IS NULL OR n.link NOT LIKE '%/wall%') THEN 1 END) AS replies,
-        COUNT(CASE WHEN n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') AND (n.link IS NULL OR n.link NOT LIKE '%/wall%') THEN 1 END) AS likes,
-        COUNT(CASE WHEN n.type IN ('REPLY', 'LIKE') AND n.link LIKE '/user/%' AND n.link LIKE '%/wall%' THEN 1 END) AS wall,
+        COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS replies,
+        COUNT(CASE WHEN n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS likes,
+        0 AS wall,
         COUNT(CASE WHEN (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
-        COUNT(CASE WHEN n.type = 'MESSAGE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS messages,
-        COUNT(CASE WHEN n.link LIKE '/feedback/%' THEN 1 END) AS feedback,
-        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount
+        0 AS messages,
+        COUNT(CASE WHEN (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.key, '') LIKE 'feedback-new:%')) THEN 1 END) AS feedback,
+        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%') OR COALESCE(n.key, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount,
+        COUNT(CASE WHEN ${canReview ? Prisma.sql`(n.type = 'REVIEW' OR (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%')))` : Prisma.sql`0`} THEN 1 END) AS review
       FROM Notification n
       WHERE n.recipientId = ${userId}
         AND n.isRead = 0
     `,
-    prisma.systemNotification.count({ where: { ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, SystemNotificationRead: { none: { userId } } } }),
+    prisma.systemNotification.count({ where: {
+      ...effectiveSystemNotificationWhere(now),
+      type: { not: 'UPDATE' },
+      OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }],
+      SystemNotificationRead: { none: { userId } },
+    } }),
+    prisma.systemNotification.count({ where: {
+      ...effectiveSystemNotificationWhere(now),
+      type: { not: 'UPDATE' },
+      link: { startsWith: '/feedback/' },
+      SystemNotificationRead: { none: { userId } },
+    } }),
     getDirectMessageUnreadCount(userId),
   ])
 
@@ -585,6 +660,12 @@ async function loadUnreadSummary(userId: string): Promise<UnreadSummary> {
     ? systemResult.value
     : (() => {
         logNotificationError('unread-summary.system-query', { userId }, systemResult.reason)
+        return 0
+      })()
+  const systemFeedback = systemFeedbackResult.status === 'fulfilled'
+    ? systemFeedbackResult.value
+    : (() => {
+        logNotificationError('unread-summary.system-feedback-query', { userId }, systemFeedbackResult.reason)
         return 0
       })()
   const directMessages = directMessageResult.status === 'fulfilled'
@@ -603,29 +684,31 @@ async function loadUnreadSummary(userId: string): Promise<UnreadSummary> {
     messages: Number(personalRow?.messages || 0),
     feedback: Number(personalRow?.feedback || 0),
     system: Number(personalRow?.systemCount || 0),
+    review: Number(personalRow?.review || 0),
   }
 
   // Direct messages have their own conversation read cursor and are rendered
   // by the notification center as a dedicated entry, not as Notification rows.
-  const summary = buildUnreadSummary(personalCounts, systemCount, directMessages)
+  const summary = buildUnreadSummary(personalCounts, systemCount, directMessages, systemFeedback)
   return summary
 }
 
-export async function getUnreadSummary(userId: string): Promise<UnreadSummary> {
-  const inFlight = unreadSummaryInFlight.get(userId)
+export async function getUnreadSummary(userId: string, canReview = false): Promise<UnreadSummary> {
+  const inFlightKey = `${userId}:${canReview ? 'review' : 'standard'}`
+  const inFlight = unreadSummaryInFlight.get(inFlightKey)
   if (inFlight) return inFlight
 
-  const request = loadUnreadSummary(userId)
-  unreadSummaryInFlight.set(userId, request)
+  const request = loadUnreadSummary(userId, canReview)
+  unreadSummaryInFlight.set(inFlightKey, request)
   try {
     return await request
   } finally {
-    if (unreadSummaryInFlight.get(userId) === request) unreadSummaryInFlight.delete(userId)
+    if (unreadSummaryInFlight.get(inFlightKey) === request) unreadSummaryInFlight.delete(inFlightKey)
   }
 }
 
-export async function getUnreadNotificationCount(userId: string) {
-  return (await getUnreadSummary(userId)).total
+export async function getUnreadNotificationCount(userId: string, canReview = false) {
+  return (await getUnreadSummary(userId, canReview)).total
 }
 
 export type UnifiedNotificationPage = {
@@ -651,6 +734,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   page?: number
   pageSize?: number
   category?: NotificationCategory
+  canReview?: boolean
 } = {}): Promise<UnifiedNotificationPage> {
   // Reconciliation cleans up historical notification ghosts, but it is not
   // required to render the current page. Run it in the background so a stale
@@ -658,8 +742,9 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   scheduleNotificationReconciliation(userId, 'list')
   const now = new Date()
   const category = parseNotificationCategory(options.category)
+  const canReview = options.canReview === true
   const pageSize = Math.min(Math.max(Math.trunc(options.pageSize || 20) || 20, 1), MAX_NOTIFICATION_PAGE_SIZE)
-  const personalCategory = category === 'all' ? {} : getNotificationCategoryFilter(category)
+  const personalCategory = getNotificationCategoryFilter(category, canReview)
   const systemCategory = getSystemNotificationCategoryFilter(category)
   const personalWhere = getNotificationVisibilityFilter(userId, {
     ...personalCategory,
@@ -693,7 +778,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   let totalPages = Math.max(1, Math.ceil(total / pageSize))
   let page = clampPaginationPage(options.page || 1, totalPages)
   const offset = (page - 1) * pageSize
-  const personalCategorySql = getPersonalNotificationCategorySql(category)
+  const personalCategorySql = getPersonalNotificationCategorySql(category, canReview)
   const systemCategorySql = getSystemNotificationCategorySql(category)
   const unreadPersonalSql = options.unreadOnly ? Prisma.sql`AND n.isRead = 0` : Prisma.empty
   const unreadSystemSql = options.unreadOnly ? Prisma.sql`AND snr.id IS NULL` : Prisma.empty
@@ -966,9 +1051,9 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         id: item.id,
         source: 'personal' as const,
         type: item.type,
-        typeLabel: getNotificationTypeLabel(item.type, link, 'personal'),
-        category: getNotificationCategory(item.type, link),
-        title: likeTitle || resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, link, 'personal'),
+        typeLabel: getNotificationTypeLabel(item.type, link, 'personal', item.key),
+        category: getNotificationCategory(item.type, link, item.key),
+        title: likeTitle || resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, link, 'personal', item.key),
         content: likeTitle ? null : resolveNotificationActorText(item.content, actorName),
         key: item.key,
         link,
@@ -1220,11 +1305,12 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   }
 }
 
-export async function listUnifiedNotifications(userId: string, options: { unreadOnly?: boolean; limit?: number } = {}) {
+export async function listUnifiedNotifications(userId: string, options: { unreadOnly?: boolean; limit?: number; canReview?: boolean } = {}) {
   const page = await listUnifiedNotificationsPage(userId, {
     unreadOnly: options.unreadOnly,
     page: 1,
     pageSize: options.limit || MAX_NOTIFICATION_PAGE_SIZE,
+    canReview: options.canReview,
   })
   return page.items
 }
@@ -1379,10 +1465,6 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
       where: { userId, userUnread: true },
       data: { userUnread: false },
     }),
-    prisma.conversationParticipant.updateMany({
-      where: { userId, isDeleted: false },
-      data: { lastReadAt: now },
-    }),
     ...(unreadSystem.length
       ? [
           prisma.systemNotificationRead.createMany({
@@ -1402,11 +1484,12 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
 /**
  * 将当前用户所有"已完成审核结果"的通知标记为已读。
  *
- * 本项目里审核结果通知统一用 `type: 'ADMIN'` 存储，并通过 `link` 区分资源：
+ * 本项目里审核结果通知仍用 `type: 'ADMIN'` 存储，并通过 `link` 区分资源；
+ * 待审核提醒使用 `type: 'REVIEW'`，旧提醒继续按稳定 link/key 兼容：
  *   - 帖子审核结果：link 以 `/posts/` 开头（无 key）
  *   - 表情包审核结果：link 为 `/profile/stickers...`（key = `sticker-pack-review:*`）
  *
- * 因此本函数把更新范围严格限定为 `type: 'ADMIN'` 且 `link` 满足上述前缀，
+ * 因此本函数把更新范围严格限定为审核结果或审核提醒的稳定 link/key，
  * 不会触碰以下通知：点赞(LIKE)、评论回复(REPLY)、私信(MESSAGE)、好友(FRIEND_REQUEST/FOLLOW)、
  * 系统(SYSTEM)、公告(ANNOUNCEMENT)、反馈提醒(/admin/feedback、/feedback/*)等。
  *
@@ -1419,9 +1502,10 @@ export async function markModerationNotificationsRead(userId: string) {
     where: {
       recipientId: userId,
       isRead: false,
-      type: 'ADMIN',
-      link: '/admin/posts/review',
-      key: { startsWith: 'post-review:' },
+      OR: [
+        { type: 'REVIEW', link: '/admin/posts/review', key: { startsWith: 'post-review:' } },
+        { type: 'ADMIN', link: '/admin/posts/review', key: { startsWith: 'post-review:' } },
+      ],
     },
     select: { key: true },
   })
@@ -1455,9 +1539,11 @@ export async function markModerationNotificationsRead(userId: string) {
         where: {
           recipientId: userId,
           isRead: false,
-          type: 'ADMIN',
           link: '/admin/posts/review',
-          OR: completedPostIds.map((id) => ({ key: { startsWith: `post-review:${id}` } })),
+          AND: [
+            { OR: [{ type: 'REVIEW' }, { type: 'ADMIN' }] },
+            { OR: completedPostIds.map((id) => ({ key: { startsWith: `post-review:${id}` } })) },
+          ],
         },
         data: { isRead: true, readAt },
       })

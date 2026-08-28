@@ -18,6 +18,7 @@ const messages = read('app/api/direct-conversations/[conversationId]/messages/ro
 const readRoute = read('app/api/direct-conversations/[conversationId]/read/route.ts')
 const notifications = read('lib/notifications.ts')
 const notificationClient = read('app/notifications/NotificationsClient.tsx')
+const menu = read('components/UserNotificationMenu.tsx')
 const appShell = read('components/layout/AppShell.tsx')
 const notificationProvider = read('components/NotificationProvider.tsx')
 const css = read('app/globals.css')
@@ -165,10 +166,14 @@ test('统一未读按真实消息条数统计并在好友行展示', () => {
   assert.doesNotMatch(friendList, /Number\(b\.unreadCount > 0\) - Number\(a\.unreadCount > 0\)/)
 })
 
-test('通知中心显示私信来源且总红点由统一汇总同步', () => {
-  assert.match(notificationClient, /messages: '私信'/)
-  assert.match(notificationClient, /未读私信 \{unreadSummary\.messages\} 条/)
+test('通知中心移除私信来源并保留独立聊天未读入口', () => {
+  assert.match(notificationClient, /application: '申请'/)
+  assert.match(notificationClient, /review: '审核'/)
+  assert.match(notificationClient, /notification-category-tabs/)
+  assert.doesNotMatch(notificationClient, /messages: '私信'/)
+  assert.doesNotMatch(notificationClient, /wall: '留言墙'/)
   assert.match(notificationClient, /friend-dock:open/)
+  assert.match(menu, /href="\/friends"/)
   assert.doesNotMatch(appShell, /\/api\/notifications\/unread-summary/)
   assert.match(notificationProvider, /eason-private-sync:\$\{userId\}/)
   assert.match(notificationProvider, /new RealtimeClient/)

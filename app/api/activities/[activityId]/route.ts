@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
+import { getCurrentUser } from '@/lib/auth'
 import { activitySelect, serializeActivityRow } from '@/lib/activity-data'
+import { getActivityRegistrationState } from '@/lib/activity-registration'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -9,11 +11,25 @@ const activityIdPattern = /^[A-Za-z0-9_-]{8,128}$/
 export async function GET(_request: Request, { params }: { params: Promise<{ activityId: string }> }) {
   const { activityId } = await params
   if (!activityIdPattern.test(activityId)) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
-  const activity = await prisma.activity.findFirst({
-    where: { id: activityId, status: { in: ['PUBLISHED', 'CANCELLED'] } },
-    select: activitySelect,
-  })
+  const [activity, viewer] = await Promise.all([
+    prisma.activity.findFirst({
+      where: { id: activityId, status: { in: ['PUBLISHED', 'CANCELLED'] } },
+      select: activitySelect,
+    }),
+    getCurrentUser(),
+  ])
   if (!activity) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
 
-  return NextResponse.json({ activity: serializeActivityRow(activity) })
+  const view = serializeActivityRow(activity)
+  const registration = viewer
+    ? await prisma.activityRegistration.findUnique({ where: { activityId_userId: { activityId, userId: viewer.id } }, select: { id: true } })
+    : null
+  const availability = getActivityRegistrationState(view, view.signupCount)
+  return NextResponse.json({
+    activity: view,
+    registrationCount: view.signupCount,
+    isRegistered: Boolean(registration),
+    registrationState: availability.state,
+    canRegister: availability.canRegister && Boolean(viewer) && !registration,
+  }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
 }

@@ -893,7 +893,15 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
       const [creator, administrators] = await Promise.all([
         prisma.user.findUniqueOrThrow({ where: { id: input.creatorId }, select: { nickname: true } }),
         prisma.user.findMany({
-          where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] }, status: 'ACTIVE', isDeleted: false },
+        where: {
+          role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+          status: 'ACTIVE',
+          isDeleted: false,
+          OR: [
+            { role: 'SUPER_ADMIN' },
+            { AdminPermission: { some: { permissionKey: 'sticker_manage', enabled: true } } },
+          ],
+        },
           select: { id: true },
         }),
       ])
@@ -902,7 +910,7 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
         data: administrators.map((administrator) => ({
           recipientId: administrator.id,
           actorId: input.creatorId,
-          type: 'ADMIN' as const,
+          type: 'REVIEW' as const,
           title: '新的表情包审核申请',
           content: `用户 ${creator.nickname} 提交了表情包《${result.name}》，请前往审核中心处理。`,
           link: '/admin/stickers',
@@ -911,7 +919,7 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
         skipDuplicates: true,
       })
     },
-    { operation: 'sticker-pack-submitted', userId: input.creatorId, notificationType: 'ADMIN' },
+    { operation: 'sticker-pack-submitted', userId: input.creatorId, notificationType: 'REVIEW' },
   )
   void emitRealtimeToAdmins('notification')
   return { packId: result.id, status: 'PENDING' }
