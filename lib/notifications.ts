@@ -171,8 +171,20 @@ export function parseNotificationCategory(value: unknown): NotificationCategory 
 function getSystemNotificationCategoryFilter(category: NotificationCategory): Prisma.SystemNotificationWhereInput {
   if (category === 'all') return {}
   if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
-  if (category === 'system') return { OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] }
+  // Keep this OR nested under AND. effectiveSystemNotificationWhere() also
+  // contains an OR for the expiry window, and spreading two top-level OR
+  // objects would silently discard the visibility window.
+  if (category === 'system') return { AND: [{ OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] }] }
   return { id: { in: [] } }
+}
+
+function getSystemNotificationWhere(now: Date, category: NotificationCategory, userId: string, unreadOnly = false): Prisma.SystemNotificationWhereInput {
+  return {
+    ...effectiveSystemNotificationWhere(now),
+    type: { not: 'UPDATE' as const },
+    ...getSystemNotificationCategoryFilter(category),
+    ...(unreadOnly ? { SystemNotificationRead: { none: { userId } } } : {}),
+  }
 }
 
 // These clauses contain only fixed, code-defined category values. They let the
@@ -672,18 +684,8 @@ async function loadUnreadSummary(userId: string, canReview = false): Promise<Unr
       WHERE n.recipientId = ${userId}
         AND n.readAt IS NULL
     `,
-    prisma.systemNotification.count({ where: {
-      ...effectiveSystemNotificationWhere(now),
-      type: { not: 'UPDATE' },
-      OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }],
-      SystemNotificationRead: { none: { userId } },
-    } }),
-    prisma.systemNotification.count({ where: {
-      ...effectiveSystemNotificationWhere(now),
-      type: { not: 'UPDATE' },
-      link: { startsWith: '/feedback/' },
-      SystemNotificationRead: { none: { userId } },
-    } }),
+    prisma.systemNotification.count({ where: getSystemNotificationWhere(now, 'system', userId, true) }),
+    prisma.systemNotification.count({ where: getSystemNotificationWhere(now, 'feedback', userId, true) }),
     getDirectMessageUnreadCount(userId),
   ])
 
@@ -779,22 +781,16 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const canReview = options.canReview === true
   const pageSize = Math.min(Math.max(Math.trunc(options.pageSize || 20) || 20, 1), MAX_NOTIFICATION_PAGE_SIZE)
   const personalCategory = getNotificationCategoryFilter(category, canReview)
-  const systemCategory = getSystemNotificationCategoryFilter(category)
   const personalWhere = getNotificationVisibilityFilter(userId, {
     ...personalCategory,
     ...(options.unreadOnly ? { readAt: null } : {}),
   })
-  const systemWhere = {
-    ...effectiveSystemNotificationWhere(now),
-    type: { not: 'UPDATE' as const },
-    ...systemCategory,
-    ...(options.unreadOnly ? { SystemNotificationRead: { none: { userId } } } : {}),
-  }
+  const systemWhere = getSystemNotificationWhere(now, category, userId, options.unreadOnly)
   const [personalTotalResult, systemTotalResult, personalUnreadResult, systemUnreadResult] = await Promise.allSettled([
     prisma.notification.count({ where: personalWhere }),
     prisma.systemNotification.count({ where: systemWhere }),
     prisma.notification.count({ where: getNotificationVisibilityFilter(userId, { ...personalCategory, readAt: null }) }),
-    prisma.systemNotification.count({ where: { ...systemWhere, SystemNotificationRead: { none: { userId } } } }),
+    prisma.systemNotification.count({ where: getSystemNotificationWhere(now, category, userId, true) }),
   ])
   let degraded = false
   const getRequiredCount = (result: PromiseSettledResult<number>, phase: string) => {
@@ -858,7 +854,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       LIMIT ${pageSize} OFFSET ${offset}
     `)
   } catch (error) {
-    logNotificationError('list.union-query', { userId, page, pageSize, category }, error)
+    logNotificationError(category === 'system' ? 'list.system-query' : 'list.union-query', { userId, page, pageSize, category }, error)
     // Do not silently drop SystemNotification rows or invent a new total/page
     // from a personal-only fallback. The two-table union is the page source of
     // truth; an unavailable core query must be surfaced as a failed page.
@@ -903,7 +899,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       },
     }) : [],
     systemIds.length ? prisma.systemNotification.findMany({
-      where: { id: { in: systemIds }, ...effectiveSystemNotificationWhere(now), type: { not: 'UPDATE' }, ...systemCategory },
+      where: { id: { in: systemIds }, ...getSystemNotificationWhere(now, category, userId) },
       select: {
         id: true,
         type: true,

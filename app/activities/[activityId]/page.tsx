@@ -32,7 +32,7 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
   const availability = getActivityRegistrationState(view, view.signupCount)
 
   return (
-    <main className="site-page-main flat-page mx-auto w-full max-w-[1240px] space-y-5 px-4 py-6 sm:px-5 sm:py-8" style={{ maxWidth: '1240px' }}>
+    <main className="site-page-main flat-page mx-auto w-full max-w-[1440px] space-y-5 px-4 py-6 sm:px-5 sm:py-8" style={{ maxWidth: '1440px' }}>
       <ActivityDetailView activity={view} isAuthenticated={Boolean(viewer)} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && Boolean(viewer) && registration?.status !== 'ACTIVE'} />
       <p className="text-right text-xs font-bold text-slate-400 dark:text-slate-500"><ActivityViewCounter activityId={view.id} initialCount={view.viewCount} /></p>
     </main>

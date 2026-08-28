@@ -389,7 +389,8 @@ export function NotificationsClient({
         } | null
         if (requestSequence !== notificationListRequestSequenceRef.current) return
         if (!response.ok) {
-          setNotifications([])
+          // Keep the last successfully rendered list visible while exposing the
+          // failure. Pagination is reset below so stale navigation is hidden.
           setPagination({ page: 1, pageSize: NOTIFICATION_LIST_PAGE_SIZE, total: 0, totalPages: 1 })
           setLoadError(data?.message || '通知加载失败，请重试')
           setLoadWarning('')
@@ -397,7 +398,6 @@ export function NotificationsClient({
         }
         if (Array.isArray(data?.notifications)) {
           if (data.failed) {
-            setNotifications([])
             setPagination({ page: 1, pageSize: NOTIFICATION_LIST_PAGE_SIZE, total: 0, totalPages: 1 })
             setLoadError('通知加载失败，请重试')
             setLoadWarning('')
@@ -405,7 +405,6 @@ export function NotificationsClient({
           }
           const degradedWithoutItems = data.degraded === true && data.notifications.length === 0
           if (degradedWithoutItems) {
-            setNotifications([])
             setPagination({ page: 1, pageSize: NOTIFICATION_LIST_PAGE_SIZE, total: 0, totalPages: 1 })
             setLoadError('通知加载失败，请重试')
             setLoadWarning('')

@@ -20,16 +20,16 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
   const onlineUrl = activity.onlineUrl ? normalizeActionUrl(activity.onlineUrl) : null
   const layoutClass = preview
     ? 'min-w-0'
-    : 'grid min-w-0 lg:grid-cols-[300px_minmax(0,1fr)_300px] xl:grid-cols-[320px_minmax(0,1fr)_320px]'
+    : 'grid min-w-0 items-start lg:grid-cols-[340px_minmax(0,1fr)_320px] xl:grid-cols-[380px_minmax(0,1fr)_340px]'
   const contentClass = preview ? 'p-4 sm:p-7' : 'p-4 sm:p-7 lg:contents'
-  const posterClass = preview ? 'min-w-0' : 'min-w-0 lg:border-r lg:border-[var(--border)] lg:p-6 xl:p-7'
-  const detailsClass = preview ? 'min-w-0' : 'min-w-0 lg:p-7 xl:p-8'
+  const posterClass = preview ? 'min-w-0' : 'min-w-0 self-start h-auto lg:border-r lg:border-[var(--border)] lg:p-4 xl:p-3'
+  const detailsClass = preview ? 'min-w-0' : 'min-w-0 self-start h-auto lg:p-7 xl:p-8'
   return (
     <article className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-elevated)] text-[var(--foreground)] shadow-sm">
       <div className={layoutClass}>
         <div className={contentClass}>
           <div className={posterClass}>
-            {cover ? <div className="mb-6 flex min-h-[15rem] items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-subtle)] p-3 sm:min-h-[22rem] sm:p-5 lg:mb-0 lg:min-h-0 lg:p-3"><img src={cover} alt={`${activity.title}活动海报`} className="max-h-[60vh] w-auto max-w-full object-contain sm:max-h-[34rem] lg:h-auto lg:w-full lg:max-w-[320px] lg:max-h-[38rem]" loading={preview ? 'lazy' : 'eager'} /></div> : null}
+            {cover ? <div className="mb-6 flex min-h-[15rem] items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-subtle)] p-3 sm:min-h-[22rem] sm:p-5 lg:mb-0 lg:min-h-0 lg:p-2 xl:p-1"><img src={cover} alt={`${activity.title}活动海报`} className="max-h-[60vh] w-auto max-w-full object-contain sm:max-h-[34rem] lg:h-auto lg:w-full lg:max-w-[360px] lg:max-h-[38rem]" loading={preview ? 'lazy' : 'eager'} /></div> : null}
           </div>
           <div className={detailsClass}>
           <div className="flex flex-wrap items-center gap-2"><ActivityStatusBadge activity={activity} /><span className="text-xs font-black text-[var(--foreground-muted)]">{activityTypeLabels[activity.type]}</span>{activity.isPinned ? <span className="text-xs font-black text-[var(--primary)]">置顶</span> : null}</div>
@@ -48,7 +48,7 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
           <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-[var(--border)] pt-5">{!preview ? <Link href="/activities" className="min-h-10 rounded-full bg-[var(--navigation-active)] px-4 py-2 text-sm font-black text-[var(--primary)] hover:opacity-80">← 返回活动中心</Link> : null}{!preview ? <ActivityShareButton title={activity.title} /> : null}</div>
           </div>
         </div>
-        {!preview ? <aside className="min-w-0 border-t border-[var(--border)] bg-[var(--surface-subtle)] p-4 sm:p-7 lg:border-l lg:border-t-0 lg:p-6 lg:[&>section]:mt-0"><ActivityRegistrationButton activity={activity} isAuthenticated={isAuthenticated} initialRegistration={initialRegistration} questions={initialQuestions} initialRegistrationCount={activity.signupCount} initialRegistrationState={initialRegistrationState} initialCanRegister={initialCanRegister} /></aside> : null}
+        {!preview ? <aside className="min-w-0 self-start h-auto border-t border-[var(--border)] bg-[var(--surface-subtle)] p-4 sm:p-7 lg:border-l lg:border-t-0 lg:p-6 lg:[&>section]:mt-0"><ActivityRegistrationButton activity={activity} isAuthenticated={isAuthenticated} initialRegistration={initialRegistration} questions={initialQuestions} initialRegistrationCount={activity.signupCount} initialRegistrationState={initialRegistrationState} initialCanRegister={initialCanRegister} /></aside> : null}
       </div>
     </article>
   )
