@@ -48,6 +48,7 @@ const tabPresenceTimeoutMs = 15_000
 
 type NotificationContextValue = {
   summary: UnreadSummary
+  summaryAvailable: boolean
   updateSummary: (updater: (current: UnreadSummary) => UnreadSummary) => void
   refresh: () => Promise<void>
   realtimeStatus: RealtimeClientStatus
@@ -80,12 +81,13 @@ export function NotificationProvider({
 }: {
   children: ReactNode
   userId: string | null
-  initialSummary: UnreadSummary
+  initialSummary: UnreadSummary | null
 }) {
-  const [summary, setSummary] = useState(initialSummary)
+  const [summary, setSummary] = useState(initialSummary || emptySummary)
+  const [summaryAvailable, setSummaryAvailable] = useState(initialSummary !== null)
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeClientStatus>(initialStatus)
   const tabIdRef = useRef('')
-  const initialSummaryRef = useRef(initialSummary)
+  const initialSummaryRef = useRef<UnreadSummary | null>(initialSummary)
   const latestRealtimeAtRef = useRef(0)
   const summaryRefreshRef = useRef<Promise<void> | null>(null)
 
@@ -94,7 +96,13 @@ export function NotificationProvider({
   }, [initialSummary])
 
   useEffect(() => {
-    setSummary(userId ? initialSummaryRef.current : emptySummary)
+    if (!userId) {
+      setSummary(emptySummary)
+      setSummaryAvailable(false)
+      return
+    }
+    setSummary(initialSummaryRef.current || emptySummary)
+    setSummaryAvailable(initialSummaryRef.current !== null)
   }, [userId])
 
   useEffect(() => {
@@ -125,7 +133,10 @@ export function NotificationProvider({
       const eventTime = Date.parse(event.updatedAt)
       if (Number.isFinite(eventTime) && eventTime < latestRealtimeAtRef.current) return
       if (Number.isFinite(eventTime)) latestRealtimeAtRef.current = eventTime
-      if (event.type === 'unread-summary') setSummary(event.summary)
+      if (event.type === 'unread-summary') {
+        setSummary(event.summary)
+        setSummaryAvailable(true)
+      }
       window.dispatchEvent(new CustomEvent<RealtimeBrowserEvent>('realtime:event', {
         detail: { ...event, source },
       }))
@@ -253,7 +264,10 @@ export function NotificationProvider({
         if (!response.ok) return
 
         const nextSummary: unknown = await response.json()
-        if (isUnreadSummary(nextSummary)) setSummary(nextSummary)
+        if (isUnreadSummary(nextSummary)) {
+          setSummary(nextSummary)
+          setSummaryAvailable(true)
+        }
       } catch {
         // 保留最近一次成功统计，不能把请求失败误显示成 0 条未读。
       }
@@ -270,7 +284,7 @@ export function NotificationProvider({
     setSummary((current) => updater(current))
   }, [])
 
-  const value = useMemo(() => ({ summary, updateSummary, refresh, realtimeStatus }), [realtimeStatus, refresh, summary, updateSummary])
+  const value = useMemo(() => ({ summary, summaryAvailable, updateSummary, refresh, realtimeStatus }), [realtimeStatus, refresh, summary, summaryAvailable, updateSummary])
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>
 }
 

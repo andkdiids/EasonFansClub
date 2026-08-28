@@ -13,18 +13,18 @@ import type { EcenterFeatureItem } from '@/lib/ecenter-features'
 import { isAppNavigationActive, type AppNavigationItem } from './navigation'
 
 type NavLeafItem = Pick<AppNavigationItem, 'href' | 'label' | 'icon' | 'activePrefixes' | 'showsUnread'> & { featureKey: string }
-type NavLeafProps = { item: NavLeafItem; pathname: string; unreadCount: number }
+type NavLeafProps = { item: NavLeafItem; pathname: string; unreadCount: number | null }
 
 function NavLeaf({ item, pathname, unreadCount }: Readonly<NavLeafProps>) {
   const active = isAppNavigationActive(pathname, item)
   return <Link href={item.href} aria-current={active ? 'page' : undefined}>
     <UiIcon name={item.icon} />
     <span>{item.label}</span>
-    {item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
+    {item.showsUnread && unreadCount !== null && unreadCount > 0 ? <b>{unreadCount}</b> : null}
   </Link>
 }
 
-export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ecenterFeatures }: Readonly<{ user: SessionShellUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
+export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ecenterFeatures }: Readonly<{ user: SessionShellUser; growth: AppShellGrowth; logoUrl: string | null; unreadCount: number | null; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
   const [ecenterEditing, setEcenterEditing] = useState(false)
@@ -102,9 +102,9 @@ export function Sidebar({ user, growth, logoUrl, unreadCount, canAccessAdmin, ec
       </div> : null}
       <UserProfileSummary user={user} growth={growth} onActivate={() => setMenuOpen((value) => !value)} />
       <div className="sidebar-actions" aria-label="用户快捷操作">
-        <Link href="/notifications" aria-label={`消息通知，${unreadCount}条未读`} className="sidebar-notification-action">
+        <Link href="/notifications" aria-label={unreadCount === null ? '消息通知，未读数暂不可用' : `消息通知，${unreadCount}条未读`} className="sidebar-notification-action">
           <UiIcon name="bell" />
-          {unreadCount > 0 ? <b>{unreadCount}</b> : null}
+          {unreadCount !== null && unreadCount > 0 ? <b>{unreadCount}</b> : null}
         </Link>
         <ThemeToggle />
         <button type="button" onClick={logout} aria-label="退出登录"><UiIcon name="logout" /></button>

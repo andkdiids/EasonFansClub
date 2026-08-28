@@ -10,7 +10,7 @@ import { UserAvatar } from '@/components/UserAvatar'
 import type { SessionShellUser } from '@/lib/auth'
 import { isMusicRoute } from '@/lib/navigation'
 
-export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessAdmin }: Readonly<{ user: SessionShellUser; logoUrl: string | null; unreadCount: number; canManageLayout: boolean; canAccessAdmin: boolean }>) {
+export function Topbar({ user, logoUrl, unreadCount, canManageLayout, canAccessAdmin }: Readonly<{ user: SessionShellUser; logoUrl: string | null; unreadCount: number | null; canManageLayout: boolean; canAccessAdmin: boolean }>) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRootRef = useRef<HTMLDivElement>(null)

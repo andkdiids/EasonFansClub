@@ -19,7 +19,7 @@ test('单条已读接口返回持久化 readAt，并对重复请求保持幂等'
 test('通知卡片和单条已读按钮先乐观移除未读样式，失败恢复原状态', () => {
   const client = read('app/notifications/NotificationsClient.tsx')
 
-  assert.match(client, /const \{ summary: sharedSummary, updateSummary, refresh: refreshUnreadSummary \} = useNotificationSummary\(\)/)
+  assert.match(client, /const \{ summary: sharedSummary, summaryAvailable, updateSummary, refresh: refreshUnreadSummary \} = useNotificationSummary\(\)/)
   assert.doesNotMatch(client, /summaryOverride|setSummaryOverride/)
   assert.match(client, /updateSummary\(\(current\) => decrementUnreadSummary\(current, \[item\]\)\)[\s\S]*?fetch\(`/)
   assert.match(client, /setNotifications\(\(current\) => current\.map\(\(row\) => matchesItem\(row\)[\s\S]*isRead: true, read: true, readAt: optimisticReadAt/)

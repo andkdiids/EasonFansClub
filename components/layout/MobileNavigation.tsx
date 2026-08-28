@@ -15,7 +15,7 @@ import { EcenterEditButton, EcenterShortcutEditorPanel } from './EcenterShortcut
 import type { EcenterFeatureItem } from '@/lib/ecenter-features'
 import { isAppNavigationActive, primaryNavigation } from './navigation'
 
-export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures }: Readonly<{ unreadCount: number; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
+export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures }: Readonly<{ unreadCount: number | null; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
   const pathname = usePathname()
   const router = useRouter()
   const [centerOpen, setCenterOpen] = useState(false)
@@ -31,7 +31,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
   const menuItems = userFeatures.length > 0 ? userFeatures.filter((item) => !item.hidden && item.showInCenter && (!item.requiresAdmin || canAccessAdmin)) : fallbackMenuItems
   const centerActive = menuItems.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
   const renderItem = (item: (typeof items)[number]) => <Link key={item.featureKey} href={item.href} aria-current={isAppNavigationActive(pathname, item) ? 'page' : undefined} className={item.showsUnread ? 'mobile-notifications' : undefined}>
-    <UiIcon name={item.icon} />{item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}<span>{item.label}</span>
+    <UiIcon name={item.icon} />{item.showsUnread && unreadCount !== null && unreadCount > 0 ? <b>{unreadCount}</b> : null}<span>{item.label}</span>
   </Link>
 
   useEffect(() => {
@@ -181,7 +181,7 @@ export function MobileNavigation({ unreadCount, canAccessAdmin, ecenterFeatures 
           {menuItems.map((item) => <button type="button" key={item.featureKey} onClick={() => navigateFromCenter(item.href)}>
               <span className="mobile-center-item-icon"><UiIcon name={item.icon} /></span>
               <span>{item.label}</span>
-              {item.showsUnread && unreadCount > 0 ? <b>{unreadCount}</b> : null}
+              {item.showsUnread && unreadCount !== null && unreadCount > 0 ? <b>{unreadCount}</b> : null}
             </button>)}
         </nav>}
       </section>

@@ -7,8 +7,8 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 
-function Badge({ count }: { count: number }) {
-  if (count <= 0) return null
+function Badge({ count, available }: { count: number; available: boolean }) {
+  if (!available || count <= 0) return null
   return <span className="ml-auto rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-black text-white">{count > 99 ? '99+' : count}</span>
 }
 
@@ -27,7 +27,7 @@ export function UserNotificationMenu({
   currentUserId: string
   equippedBadge?: EquippedBadgeView | null
 }) {
-  const { summary } = useNotificationSummary()
+  const { summary, summaryAvailable } = useNotificationSummary()
   const [loggingOut, setLoggingOut] = useState(false)
 
   async function handleLogout() {
@@ -63,16 +63,16 @@ export function UserNotificationMenu({
         <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-sm font-black text-white">
           <SafeAvatar src={avatarUrl} name={displayName} uid={uid} />
         </span>
-        {summary.total > 0 ? <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-sky-50 bg-red-500" /> : null}
+        {summaryAvailable && summary.total > 0 ? <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-sky-50 bg-red-500" /> : null}
       </span>
       <span className="site-user-menu-name hidden max-w-40 truncate text-sm font-black text-brand-950 transition-colors duration-500 sm:block"><UserDisplayName name={displayName} uid={uid} badge={equippedBadge} compact /></span>
     </summary>
     <div data-user-menu-panel className="pointer-events-auto absolute right-0 z-[var(--layer-popover)] mt-2 w-60 rounded-sm border border-sky-100 bg-white p-2 shadow-sm">
       <Link href="/profile" className={itemClass}>个人病历</Link>
-      <Link href="/notifications" className={itemClass}>消息中心<Badge count={summary.notifications} /></Link>
-      <Link href="/feedback" className={itemClass}>我的反馈<Badge count={summary.feedbackReplies} /></Link>
-      <Link href="/friends" className={itemClass}>我的好友<Badge count={summary.friendRequests} /></Link>
-      <Link href="/friends" className={itemClass}>私信<Badge count={summary.directMessages} /></Link>
+      <Link href="/notifications" className={itemClass}>消息中心<Badge count={summary.notifications} available={summaryAvailable} /></Link>
+      <Link href="/feedback" className={itemClass}>我的反馈<Badge count={summary.feedbackReplies} available={summaryAvailable} /></Link>
+      <Link href="/friends" className={itemClass}>我的好友<Badge count={summary.friendRequests} available={summaryAvailable} /></Link>
+      <Link href="/friends" className={itemClass}>私信<Badge count={summary.directMessages} available={summaryAvailable} /></Link>
       <Link href="/settings/security" className={itemClass}>账号安全</Link>
       <Link href="/settings/privacy" className={itemClass}>隐私设置</Link>
       {isAdmin ? <Link href="/admin" className={`${itemClass} text-brand-700`}>后台管理</Link> : null}

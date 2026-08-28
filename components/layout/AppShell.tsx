@@ -30,8 +30,8 @@ export function AppShell({ children, user, growth, logoUrl, canManageLayout, can
   const isEntertainmentRoute = isImmersiveRoute(pathname)
   const [sidebarState, setSidebarState] = useState(() => ({ pathname, collapsed: isEntertainmentRoute }))
   const sidebarCollapsed = sidebarState.pathname === pathname ? sidebarState.collapsed : isEntertainmentRoute
-  const { summary: currentUnreadSummary } = useNotificationSummary()
-  const currentUnreadCount = currentUnreadSummary.total
+  const { summary: currentUnreadSummary, summaryAvailable } = useNotificationSummary()
+  const currentUnreadCount = summaryAvailable ? currentUnreadSummary.total : null
 
   useEffect(() => {
     setSidebarState({ pathname, collapsed: isEntertainmentRoute })
@@ -54,7 +54,7 @@ export function AppShell({ children, user, growth, logoUrl, canManageLayout, can
     </div>
     <MobileNavigation unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures} />
     <BackToTopButton />
-    <FriendDock currentUserId={user.id} unreadSummary={currentUnreadSummary} />
+    <FriendDock currentUserId={user.id} unreadSummary={currentUnreadSummary} unreadSummaryAvailable={summaryAvailable} />
     <DesktopImmersiveToggle
       visible={isEntertainmentRoute}
       collapsed={sidebarCollapsed}

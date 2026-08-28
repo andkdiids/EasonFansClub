@@ -126,15 +126,17 @@ function createMessageId() {
 export function FriendDock({
   currentUserId,
   unreadSummary = emptySummary,
+  unreadSummaryAvailable = true,
 }: {
   currentUserId: string
   unreadSummary?: UnreadSummary
+  unreadSummaryAvailable?: boolean
 }) {
   // Chat unread state is maintained by the conversation system. Keep it on
   // the friend entry badge, while the notification-center link continues to
   // use `unreadSummary.total` so private messages are not double-counted as
-  // notifications.
-  const friendDockUnreadCount = unreadSummary.total + unreadSummary.directMessages
+  // notifications. When the notification summary is unavailable, use the
+  // conversation list once it has loaded instead of displaying a fabricated 0.
   const pathname = usePathname()
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -156,6 +158,15 @@ export function FriendDock({
   const [friendTotal, setFriendTotal] = useState(0)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [conversationsLoaded, setConversationsLoaded] = useState(false)
+  const conversationUnreadCount = useMemo(
+    () => conversations.reduce((total, conversation) => total + Math.max(0, conversation.unreadCount || 0), 0),
+    [conversations],
+  )
+  const friendDockUnreadCount = unreadSummaryAvailable
+    ? unreadSummary.total + unreadSummary.directMessages
+    : conversationsLoaded
+      ? conversationUnreadCount
+      : null
   const [loadingConversations, setLoadingConversations] = useState(false)
   const [chatListError, setChatListError] = useState('')
   const [loadingList, setLoadingList] = useState(false)
@@ -1607,10 +1618,10 @@ export function FriendDock({
               <Link
                 className="friend-dock-notifications-link"
                 href="/notifications"
-                aria-label={unreadSummary.total > 0 ? `通知中心，${unreadSummary.total}条未读` : '通知中心'}
+                aria-label={unreadSummaryAvailable && unreadSummary.total > 0 ? `通知中心，${unreadSummary.total}条未读` : '通知中心'}
               >
                 <span>通知中心</span>
-                {unreadSummary.total > 0 ? (
+                {unreadSummaryAvailable && unreadSummary.total > 0 ? (
                   <b className="friend-dock-notification-badge">
                     {unreadSummary.total > 99 ? '99+' : unreadSummary.total}
                   </b>
@@ -1999,12 +2010,12 @@ export function FriendDock({
       {overlay}
       {!open && collapsed ? (
         <button ref={toggleRef} type="button" className="friend-dock-toggle is-handle" onClick={() => setCollapsed(false)} aria-label="展开好友入口">
-          ‹{friendDockUnreadCount > 0 ? <span className="friend-dock-unread-dot" /> : null}
+          ‹{friendDockUnreadCount !== null && friendDockUnreadCount > 0 ? <span className="friend-dock-unread-dot" /> : null}
         </button>
       ) : !open || !isMobileDrawer ? (
         <div className="friend-dock-actions">
           <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={open ? closeDock : openFriendList} aria-label={open ? '关闭好友窗口' : '打开好友窗口'} aria-expanded={open}>
-            好友{friendDockUnreadCount > 0 ? <b>{friendDockUnreadCount > 99 ? '99+' : friendDockUnreadCount}</b> : null}
+            好友{friendDockUnreadCount !== null && friendDockUnreadCount > 0 ? <b>{friendDockUnreadCount > 99 ? '99+' : friendDockUnreadCount}</b> : null}
           </button>
           <button type="button" className="friend-dock-collapse" onClick={() => { closeDock(); setCollapsed(true) }} aria-label="收起好友入口">›</button>
         </div>

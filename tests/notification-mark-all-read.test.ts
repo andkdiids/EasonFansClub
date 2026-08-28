@@ -22,8 +22,8 @@ test('全部已读：前端乐观更新 + keepalive 保证请求可靠', () => {
   assert.match(client, /setAllReadError\('操作失败，请重试'\)/)
 
   // 5) 按钮：处理中禁用 + 动态文案（处理中 / 已全部读 / 全部已读）。
-  assert.match(client, /disabled=\{isMarkingAllRead \|\| unreadCount === 0\}/)
-  assert.match(client, /isMarkingAllRead \? '处理中…' : unreadCount === 0 \? '已全部读' : '全部已读'/)
+  assert.match(client, /disabled=\{isMarkingAllRead \|\| unreadCount === null \|\| unreadCount === 0\}/)
+  assert.match(client, /isMarkingAllRead \? '处理中…' : unreadCount === null \? '未读数暂不可用' : unreadCount === 0 \? '已全部读' : '全部已读'/)
 })
 
 test('全部已读：后端一笔事务完成，不在热路径做对账', () => {
@@ -34,7 +34,7 @@ test('全部已读：后端一笔事务完成，不在热路径做对账', () =>
   assert.match(route, /POST\(\)/)
   assert.match(route, /await markAllUnifiedNotificationsRead\(guard\.user\.id\)/)
 
-  // 核心更新是一次 UPDATE WHERE (recipientId + isRead=false)，配合系统通知已读标记放进同一事务。
+  // 核心更新是一次 UPDATE WHERE (recipientId + readAt IS NULL)，配合系统通知已读标记放进同一事务。
   assert.match(service, /prisma\.notification\.updateMany\(\{[\s\S]*?where: getUnreadNotificationWhere\(userId\),[\s\S]*?data: \{ isRead: true, readAt: now \}/)
   assert.match(service, /prisma\.\$transaction\(\[/)
 
@@ -53,7 +53,7 @@ test('全部已读：顶部角标（AppShell）与未读汇总同源，成功后
 
   // 顶部角标来自 Provider 暴露的 useNotificationSummary（与未读汇总同源）。
   assert.match(provider, /export function useNotificationSummary\(\)/)
-  assert.match(appShell, /const \{ summary: currentUnreadSummary \} = useNotificationSummary\(\)/)
+  assert.match(appShell, /const \{ summary: currentUnreadSummary, summaryAvailable \} = useNotificationSummary\(\)/)
 
   // 全部已读成功后：刷新 Provider 中的权威汇总，使顶部角标归零。
   assert.match(client, /await refreshUnreadSummary\(\)/)

@@ -184,14 +184,14 @@ function getPersonalNotificationCategorySql(category: NotificationCategory, canR
     case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
     case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
     case 'application': return Prisma.raw("AND (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%'))")
-    case 'feedback': return Prisma.raw("AND (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.key, '') LIKE 'feedback-new:%'))")
+    case 'feedback': return Prisma.raw("AND (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.`key`, '') LIKE 'feedback-new:%'))")
     case 'review': return canReview
-      ? Prisma.raw("AND (n.type = 'REVIEW' OR (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%'))))")
+      ? Prisma.raw("AND (n.type = 'REVIEW' OR (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.`key`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.`key`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.`key`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.`key`, '') LIKE 'today-review:%'))))")
       : Prisma.raw('AND 1 = 0')
-    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%') OR COALESCE(n.key, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.`key`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.`key`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.`key`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.`key`, '') LIKE 'today-review:%') OR COALESCE(n.`key`, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
     case 'all': return canReview
       ? Prisma.raw("AND n.type <> 'MESSAGE'")
-      : Prisma.raw("AND n.type NOT IN ('MESSAGE', 'REVIEW') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%')))")
+      : Prisma.raw("AND n.type NOT IN ('MESSAGE', 'REVIEW') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.`key`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.`key`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.`key`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.`key`, '') LIKE 'today-review:%')))")
     default: return Prisma.empty
   }
 }
@@ -613,6 +613,41 @@ async function loadUnreadSummary(userId: string, canReview = false): Promise<Unr
   // This endpoint is polled by the navigation/realtime fallback. It must stay
   // read-only and cheap; reconciliation belongs to the paginated list path.
   const now = new Date()
+  // Keep the complete CASE expression in one stable SQL fragment. Interpolating
+  // only the WHEN condition made the generated MySQL statement sensitive to
+  // nested Prisma.sql fragments and caused the production 1064 near THEN.
+  const reviewCountSql = canReview
+    ? Prisma.sql`
+        COUNT(
+          CASE
+            WHEN (
+              n.type = 'REVIEW'
+              OR (
+                n.type = 'ADMIN'
+                AND (
+                  (
+                    COALESCE(n.link, '') = '/admin/posts/review'
+                    AND COALESCE(n.\`key\`, '') LIKE 'post-review:%'
+                  )
+                  OR (
+                    COALESCE(n.link, '') = '/admin/stickers'
+                    AND (
+                      COALESCE(n.\`key\`, '') LIKE 'sticker-pack-review:%'
+                      OR COALESCE(n.\`key\`, '') LIKE 'sticker-pack-resubmit:%'
+                    )
+                  )
+                  OR (
+                    COALESCE(n.link, '') = '/admin/today'
+                    AND COALESCE(n.\`key\`, '') LIKE 'today-review:%'
+                  )
+                )
+              )
+            )
+            THEN 1
+          END
+        )
+      `
+    : Prisma.sql`0`
   const [personalResult, systemResult, systemFeedbackResult, directMessageResult] = await Promise.allSettled([
     prisma.$queryRaw<Array<{
       replies: bigint | number
@@ -630,9 +665,9 @@ async function loadUnreadSummary(userId: string, canReview = false): Promise<Unr
         0 AS wall,
         COUNT(CASE WHEN (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
         0 AS messages,
-        COUNT(CASE WHEN (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.key, '') LIKE 'feedback-new:%')) THEN 1 END) AS feedback,
-        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%') OR COALESCE(n.key, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount,
-        COUNT(CASE WHEN ${canReview ? Prisma.sql`(n.type = 'REVIEW' OR (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.key, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.key, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.key, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.key, '') LIKE 'today-review:%')))` : Prisma.sql`0`} THEN 1 END) AS review
+        COUNT(CASE WHEN (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.\`key\`, '') LIKE 'feedback-new:%')) THEN 1 END) AS feedback,
+        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.\`key\`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.\`key\`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.\`key\`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.\`key\`, '') LIKE 'today-review:%') OR COALESCE(n.\`key\`, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount,
+        ${reviewCountSql} AS review
       FROM Notification n
       WHERE n.recipientId = ${userId}
         AND n.readAt IS NULL
@@ -652,24 +687,22 @@ async function loadUnreadSummary(userId: string, canReview = false): Promise<Unr
     getDirectMessageUnreadCount(userId),
   ])
 
-  const personalRows = personalResult.status === 'fulfilled'
-    ? personalResult.value
-    : (() => {
-        logNotificationError('unread-summary.personal-query', { userId }, personalResult.reason)
-        return []
-      })()
-  const systemCount = systemResult.status === 'fulfilled'
-    ? systemResult.value
-    : (() => {
-        logNotificationError('unread-summary.system-query', { userId }, systemResult.reason)
-        return 0
-      })()
-  const systemFeedback = systemFeedbackResult.status === 'fulfilled'
-    ? systemFeedbackResult.value
-    : (() => {
-        logNotificationError('unread-summary.system-feedback-query', { userId }, systemFeedbackResult.reason)
-        return 0
-      })()
+  if (personalResult.status === 'rejected') {
+    logNotificationError('unread-summary.personal-query', { userId }, personalResult.reason)
+    throw personalResult.reason
+  }
+  if (systemResult.status === 'rejected') {
+    logNotificationError('unread-summary.system-query', { userId }, systemResult.reason)
+    throw systemResult.reason
+  }
+  if (systemFeedbackResult.status === 'rejected') {
+    logNotificationError('unread-summary.system-feedback-query', { userId }, systemFeedbackResult.reason)
+    throw systemFeedbackResult.reason
+  }
+
+  const personalRows = personalResult.value
+  const systemCount = systemResult.value
+  const systemFeedback = systemFeedbackResult.value
   const directMessages = directMessageResult.status === 'fulfilled'
     ? directMessageResult.value
     : (() => {
@@ -739,9 +772,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   canReview?: boolean
 } = {}): Promise<UnifiedNotificationPage> {
   // Reconciliation cleans up historical notification ghosts, but it is not
-  // required to render the current page. Run it in the background so a stale
-  // relation or a partially migrated optional table cannot crash the route.
-  scheduleNotificationReconciliation(userId, 'list')
+  // required to render the current page. It is scheduled only after the core
+  // page query succeeds, so a failed list/count path remains strictly read-only.
   const now = new Date()
   const category = parseNotificationCategory(options.category)
   const canReview = options.canReview === true
@@ -765,20 +797,21 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     prisma.systemNotification.count({ where: { ...systemWhere, SystemNotificationRead: { none: { userId } } } }),
   ])
   let degraded = false
-  let failed = false
-  const getCount = (result: PromiseSettledResult<number>, phase: string) => {
+  const getRequiredCount = (result: PromiseSettledResult<number>, phase: string) => {
     if (result.status === 'fulfilled') return result.value
-    degraded = true
     logNotificationError(phase, { userId, category }, result.reason)
-    return 0
+    // Counts are part of the core notification page contract. Returning zero
+    // here would fabricate unread state and make pagination disagree with the
+    // list query, so let the API return its explicit 503 unavailable response.
+    throw result.reason
   }
-  const personalTotal = getCount(personalTotalResult, 'list.personal-count')
-  let systemTotal = getCount(systemTotalResult, 'list.system-count')
-  const personalUnread = getCount(personalUnreadResult, 'list.personal-unread-count')
-  let systemUnread = getCount(systemUnreadResult, 'list.system-unread-count')
-  let total = personalTotal + systemTotal
-  let totalPages = Math.max(1, Math.ceil(total / pageSize))
-  let page = clampPaginationPage(options.page || 1, totalPages)
+  const personalTotal = getRequiredCount(personalTotalResult, 'list.personal-count')
+  const systemTotal = getRequiredCount(systemTotalResult, 'list.system-count')
+  const personalUnread = getRequiredCount(personalUnreadResult, 'list.personal-unread-count')
+  const systemUnread = getRequiredCount(systemUnreadResult, 'list.system-unread-count')
+  const total = personalTotal + systemTotal
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const page = clampPaginationPage(options.page || 1, totalPages)
   const offset = (page - 1) * pageSize
   const personalCategorySql = getPersonalNotificationCategorySql(category, canReview)
   const systemCategorySql = getSystemNotificationCategorySql(category)
@@ -811,30 +844,18 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       LIMIT ${pageSize} OFFSET ${offset}
     `)
   } catch (error) {
-    degraded = true
     logNotificationError('list.union-query', { userId, page, pageSize, category }, error)
-
-    // The personal table is the core notification feed. If the cross-table
-    // union is temporarily unavailable, keep the page usable with a standard
-    // Prisma query instead of throwing into the global error boundary.
-    systemTotal = 0
-    systemUnread = 0
-    total = personalTotal
-    totalPages = Math.max(1, Math.ceil(total / pageSize))
-    page = clampPaginationPage(options.page || 1, totalPages)
-    try {
-      const fallbackRows = await prisma.notification.findMany({
-        where: personalWhere,
-        orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: { id: true, readAt: true, createdAt: true },
-      })
-      rows = fallbackRows.map((row) => ({ id: row.id, source: 'personal', isRead: Boolean(row.readAt), createdAt: row.createdAt }))
-    } catch (fallbackError) {
-      failed = true
-      logNotificationError('list.personal-fallback-query', { userId, page, pageSize, category }, fallbackError)
-      rows = []
+    // Do not silently drop SystemNotification rows or invent a new total/page
+    // from a personal-only fallback. The two-table union is the page source of
+    // truth; an unavailable core query must be surfaced as a failed page.
+    return {
+      items: [],
+      total,
+      page,
+      pageSize,
+      totalPages,
+      unreadCount: personalUnread + systemUnread,
+      failed: true,
     }
   }
 
@@ -1297,6 +1318,11 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     }, new Error('notification(s) rendered with placeholder due to missing related content'))
   }
 
+  // Maintenance is deliberately after the page has been assembled. A database
+  // failure above must not race a background task that changes readAt or removes
+  // a notification while the user is looking at an error state.
+  scheduleNotificationReconciliation(userId, 'list')
+
   return {
     items,
     total,
@@ -1305,7 +1331,6 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     totalPages,
     unreadCount: personalUnread + systemUnread,
     ...(degraded ? { degraded: true } : {}),
-    ...(failed ? { failed: true } : {}),
   }
 }
 
@@ -1481,7 +1506,7 @@ export async function markAllUnifiedNotificationsRead(userId: string) {
 
   // 对账（清理历史幽灵通知 / 点赞聚合）属于维护性工作，不是"全部已读"的必要路径。
   // 列表接口已经在后台异步对账，这里改为后台执行，避免阻塞用户点击的响应时间，
-  // 让"全部已读"在一笔事务内完成（一次 UPDATE WHERE isRead=false + 系统通知已读标记）。
+  // 让"全部已读"在一笔事务内完成（一次 UPDATE WHERE readAt IS NULL + 系统通知已读标记）。
   scheduleNotificationReconciliation(userId, 'read-all')
 }
 

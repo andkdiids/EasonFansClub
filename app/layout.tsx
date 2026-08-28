@@ -11,7 +11,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, getSessionUserFromCookie, isAuthServiceUnavailableError } from '@/lib/auth'
 import { calculateGrowthSummary, defaultGrowthLevels, getGrowthSummary } from '@/lib/growth'
 import { publicImageUrl } from '@/lib/images'
-import { getUnreadSummary } from '@/lib/notifications'
+import { getUnreadSummary, type UnreadSummary } from '@/lib/notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { getSiteAppearance } from '@/lib/site-config'
 import { getEcenterFeaturesForUser } from '@/lib/ecenter-features'
@@ -42,10 +42,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     hasAdminPermission(sessionUser).catch(() => false),
     getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),
   ]) : [null, false, false, fallbackGrowth]
-  const unreadSummary = sessionUser
+  const unreadSummary: UnreadSummary | null = sessionUser
     ? await getUnreadSummary(sessionUser.id, Boolean(canAccessAdmin)).catch((error) => {
         logNotificationError('layout.unread-summary', { userId: sessionUser.id }, error)
-        return emptyUnreadSummary
+        // Do not turn an unavailable core query into a false "0 unread" badge.
+        // The client provider keeps the summary unavailable until a later
+        // authoritative refresh succeeds.
+        return null
       })
     : emptyUnreadSummary
   const ecenterFeatures = sessionUser ? await getEcenterFeaturesForUser(Boolean(canAccessAdmin), sessionUser.id) : []

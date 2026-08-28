@@ -303,11 +303,11 @@ export function NotificationsClient({
   const searchParamsString = searchParams.toString()
   const searchParamsStringRef = useRef(searchParamsString)
   searchParamsStringRef.current = searchParamsString
-  const { summary: sharedSummary, updateSummary, refresh: refreshUnreadSummary } = useNotificationSummary()
+  const { summary: sharedSummary, summaryAvailable, updateSummary, refresh: refreshUnreadSummary } = useNotificationSummary()
   const [notifications, setNotifications] = useState(initialNotifications)
   const [pagination, setPagination] = useState(initialPagination)
   const unreadSummary = sharedSummary
-  const unreadCount = unreadSummary.total
+  const unreadCount = summaryAvailable ? unreadSummary.total : null
   const initialVisibleCategory = initialCategory === 'review' && !canReview ? 'all' : initialCategory
   const [activeCategory, setActiveCategory] = useState<NotificationCategory>(initialVisibleCategory)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -537,17 +537,15 @@ export function NotificationsClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const categoryCounts = useMemo(() => {
-    return {
-      all: unreadSummary.total,
-      reply: unreadSummary.replies,
-      like: unreadSummary.likes,
-      application: unreadSummary.friendRequests,
-      feedback: unreadSummary.feedback,
-      system: unreadSummary.system,
-      review: unreadSummary.review,
-    } satisfies Record<NotificationCategory, number>
-  }, [unreadSummary])
+  const categoryCounts = useMemo(() => summaryAvailable ? ({
+    all: unreadSummary.total,
+    reply: unreadSummary.replies,
+    like: unreadSummary.likes,
+    application: unreadSummary.friendRequests,
+    feedback: unreadSummary.feedback,
+    system: unreadSummary.system,
+    review: unreadSummary.review,
+  } satisfies Record<NotificationCategory, number>) : null, [summaryAvailable, unreadSummary])
 
   const visibleCategories = useMemo(
     () => (Object.keys(categoryLabels) as NotificationCategory[]).filter((category) => canReview || category !== 'review'),
@@ -1125,15 +1123,15 @@ export function NotificationsClient({
           <div>
             <p className="text-xs font-black tracking-[0.2em] text-brand-700">通知中心</p>
             <h1 className="mt-2 text-3xl font-black text-brand-950 sm:text-4xl">通知中心</h1>
-            <p className="mt-3 text-sm font-bold text-slate-500">未读通知 <span className="text-brand-700">{unreadCount}</span> 条</p>
+            <p className="mt-3 text-sm font-bold text-slate-500">未读通知 <span className="text-brand-700">{unreadCount === null ? '暂不可用' : unreadCount}</span>{unreadCount === null ? '' : ' 条'}</p>
           </div>
           <div className="flex flex-wrap gap-2"><button
             type="button"
             onClick={markAllRead}
-            disabled={isMarkingAllRead || unreadCount === 0}
+            disabled={isMarkingAllRead || unreadCount === null || unreadCount === 0}
             className="inline-flex h-11 items-center justify-center rounded-xl bg-brand-950 px-5 text-sm font-black text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isMarkingAllRead ? '处理中…' : unreadCount === 0 ? '已全部读' : '全部已读'}
+            {isMarkingAllRead ? '处理中…' : unreadCount === null ? '未读数暂不可用' : unreadCount === 0 ? '已全部读' : '全部已读'}
           </button><button
             type="button"
             onClick={() => {
@@ -1180,7 +1178,7 @@ export function NotificationsClient({
                 : 'border-transparent text-slate-500 hover:bg-sky-50'
             }`}
           >
-            {categoryLabels[category]} {categoryCounts[category]}
+            {categoryLabels[category]} {categoryCounts ? categoryCounts[category] : '—'}
           </button>
         ))}
       </div>
@@ -1201,7 +1199,7 @@ export function NotificationsClient({
         )}
       </div>
 
-      {pagination.totalPages > 1 ? (
+      {!loadError && pagination.totalPages > 1 ? (
         <Pagination
           currentPage={pagination.page}
           totalPages={pagination.totalPages}
@@ -1211,7 +1209,7 @@ export function NotificationsClient({
         />
       ) : null}
 
-      <div className="sr-only" aria-live="polite">未读通知 {unreadCount}</div>
+      <div className="sr-only" aria-live="polite">未读通知 {unreadCount === null ? '暂不可用' : unreadCount}</div>
       {selectedSystemNotification ? (
         <SystemNotificationDialog
           notification={selectedSystemNotification}

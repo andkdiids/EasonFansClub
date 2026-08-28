@@ -18,10 +18,11 @@ test('notification list keeps rendering when optional queries or history links f
   const service = read('lib/notifications.ts')
   assert.match(service, /Promise\.allSettled\(/)
   assert.match(service, /list\.union-query/)
-  assert.match(service, /list\.personal-fallback-query/)
+  assert.match(service, /failed: true/)
+  assert.doesNotMatch(service, /list\.personal-fallback-query/)
   assert.match(service, /该回复已被删除或不可查看/)
   assert.match(service, /degraded \? \{ degraded: true \}/)
-  assert.match(service, /failed \? \{ failed: true \}/)
+  assert.match(service, /unreadCount: personalUnread \+ systemUnread,[\s\S]*failed: true/)
 })
 
 test('notification API does not repeat the summary query after loading the page', () => {
@@ -34,10 +35,14 @@ test('notification API does not repeat the summary query after loading the page'
 
 test('notification client uses server data for the initial render and has local retry UI', () => {
   const client = read('app/notifications/NotificationsClient.tsx')
-  const effectStart = client.indexOf("const sync = (event?: Event) =>")
-  const effectEnd = client.indexOf("useEffect(() => () =>", effectStart)
-  const initialSyncEffect = client.slice(effectStart, effectEnd)
-  assert.equal((initialSyncEffect.match(/void refreshNotifications\(\)/g) || []).length, 1)
+  const syncStart = client.indexOf("const sync = (event?: Event) =>")
+  const syncEnd = client.indexOf("const onRealtimeEvent", syncStart)
+
+  assert.ok(syncStart >= 0)
+  assert.ok(syncEnd > syncStart)
+
+  const syncHandler = client.slice(syncStart, syncEnd)
+  assert.equal((syncHandler.match(/void refreshNotifications\(\)/g) || []).length, 1)
   assert.match(client, /通知加载失败，请重试/)
   assert.match(client, /loadError \|\| \(loadWarning && notifications\.length === 0\)/)
   assert.match(client, /onClick=\{\(\) => void refreshNotifications\(\)\}/)
