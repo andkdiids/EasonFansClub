@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import type { NotificationType, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { logNotificationError } from '@/lib/notification-errors'
 
@@ -15,7 +15,7 @@ export const NOTIFICATION_TRANSACTION_OPTIONS = {
 export type NotificationOperationContext = {
   operation: string
   userId?: string | null
-  notificationType?: string | null
+  notificationType?: NotificationType | null
 }
 
 function logNotificationTransaction(context: NotificationOperationContext, startedAt: number) {

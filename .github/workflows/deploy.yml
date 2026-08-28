@@ -112,62 +112,8 @@ jobs:
               echo 'Copied the legacy .env into shared/.env.'
             fi
 
-            if [ ! -e "${APP_DIR}/current" ] && [ ! -L "${APP_DIR}/current" ]; then
-              bootstrap_release="${APP_DIR}/releases/bootstrap"
-              bootstrap_paths=(
-                app
-                components
-                hooks
-                lib
-                prisma
-                public
-                types
-                scripts
-                server.ts
-                package.json
-                pnpm-lock.yaml
-                pnpm-workspace.yaml
-                ecosystem.config.js
-                next.config.ts
-                tsconfig.json
-                middleware.ts
-                postcss.config.js
-                tailwind.config.ts
-                eslint.config.mjs
-              )
-
-              if [ -e "${bootstrap_release}" ] || [ -L "${bootstrap_release}" ]; then
-                echo "Bootstrap release already exists while current is missing: ${bootstrap_release}" >&2
-                echo 'Refusing to overwrite a partial bootstrap release.' >&2
-                exit 1
-              fi
-
-              for bootstrap_path in "${bootstrap_paths[@]}"; do
-                if [ ! -e "${APP_DIR}/${bootstrap_path}" ] && [ ! -L "${APP_DIR}/${bootstrap_path}" ]; then
-                  echo "Legacy deployment is missing required path: ${APP_DIR}/${bootstrap_path}" >&2
-                  exit 1
-                fi
-              done
-
-              install -d -m 755 "${bootstrap_release}"
-              for bootstrap_path in "${bootstrap_paths[@]}"; do
-                cp -a -- "${APP_DIR}/${bootstrap_path}" "${bootstrap_release}/${bootstrap_path}"
-              done
-              for optional_path in .next node_modules; do
-                if [ -d "${APP_DIR}/${optional_path}" ]; then
-                  cp -a -- "${APP_DIR}/${optional_path}" "${bootstrap_release}/${optional_path}"
-                fi
-              done
-
-              ln -s -- "${APP_DIR}/shared/.env" "${bootstrap_release}/.env"
-              printf '%s\n' "${DEPLOY_SHA}" > "${bootstrap_release}/.deployed-sha"
-              touch "${bootstrap_release}/.bootstrap-release"
-              ln -s -- "${bootstrap_release}" "${APP_DIR}/current"
-              echo "Bootstrapped legacy deployment at ${bootstrap_release}."
-            fi
-
             if [ ! -L "${APP_DIR}/current" ]; then
-              echo 'Production current must be a symlink into releases/.' >&2
+              echo 'Production current must already be a symlink into releases/; refusing pre-migration bootstrap.' >&2
               echo 'Refusing to deploy into the legacy live directory.' >&2
               exit 1
             fi

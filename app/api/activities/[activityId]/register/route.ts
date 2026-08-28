@@ -123,7 +123,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
           link: `/activities/${activityId}`,
           key: notificationKey,
         },
-      }, { operation: 'activity-registration-success', userId: guard.user.id, activityFallback: true })
+      }, { operation: 'activity-registration-success', userId: guard.user.id })
 
       const saved = await tx.activityRegistration.findUnique({ where: { id: registration.id }, select: activityRegistrationSelect })
       if (!saved) throw new ActivityRegistrationError('REGISTRATION_NOT_FOUND', '报名记录保存失败', 500)

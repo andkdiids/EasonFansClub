@@ -254,7 +254,6 @@ release_env_real="$(readlink -f -- "${release_dir}/.env" 2>/dev/null || true)"
 [ "${release_env_real}" = "${shared_env_real}" ] || die "Release .env does not point to shared/.env."
 test -r "${release_dir}/.env"
 test -s "${release_dir}/.env"
-printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deployed-sha"
 
 for required_path in package.json pnpm-lock.yaml server.ts ecosystem.config.js prisma/schema.prisma; do
   test -e "${release_dir}/${required_path}" || die "Release is missing required path: ${required_path}"
@@ -325,21 +324,10 @@ test -d "${release_dir}/.next/static"
 test -d "${release_dir}/public"
 echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
-log_step "6/8" "Run the production migration safety gate after build"
+log_step "6/8" "Apply production migrations and verify notification data before current switch"
 pnpm_run migration:check:mysql
-migration_mode="${PRODUCTION_MIGRATION_MODE:-manual}"
-case "${migration_mode}" in
-  manual)
-    echo "Production migration deploy is disabled by default; migration gate passed without changing the database."
-    ;;
-  deploy)
-    echo "Production migration mode is explicitly enabled; applying reviewed migrations before release switch."
-    pnpm_run prisma migrate deploy
-    ;;
-  *)
-    die "Unsupported PRODUCTION_MIGRATION_MODE: ${migration_mode}"
-    ;;
-esac
+pnpm_run prisma migrate deploy
+pnpm_run notification:integrity
 
 atomic_switch() {
   local target="$1"
@@ -473,17 +461,15 @@ print_health_diagnostics() {
 }
 
 check_health() {
-  local health_response active_target deployed_sha pm2_ready
+  local health_response active_target pm2_ready
   for attempt in $(seq 1 10); do
     health_response="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${APP_PORT}/api/health/live" || true)"
     active_target="$(readlink -f -- "${current_link}" 2>/dev/null || true)"
-    deployed_sha="$(cat "${current_link}/.deployed-sha" 2>/dev/null || true)"
     pm2_ready=false
     if read_pm2_snapshot 2>/dev/null && pm2_is_current_release; then
       pm2_ready=true
     fi
     if [ "${active_target}" = "${release_dir}" ] &&
-       [ "${deployed_sha}" = "${DEPLOY_SHA}" ] &&
        printf '%s' "${health_response}" | grep -Fq "\"release\":\"${DEPLOY_SHA}\"" &&
        [ "${pm2_ready}" = true ]; then
       return 0
@@ -529,6 +515,18 @@ if ! ss -ltn 2>/dev/null | grep -Eq "[[:space:]](127\.0\.0\.1|\[::1\]):${APP_POR
   print_health_diagnostics
   rollback_release || die "Local binding check failed and automatic rollback also failed."
   die "Application is not bound to localhost behind Nginx; previous release was restored."
+fi
+
+log_step "9/9" "Record the deployed SHA after health verification"
+deployed_sha_tmp="${release_dir}/.deployed-sha.tmp"
+if ! {
+  printf '%s\n' "${DEPLOY_SHA}" > "${deployed_sha_tmp}"
+  mv -Tf -- "${deployed_sha_tmp}" "${release_dir}/.deployed-sha"
+  test -s "${release_dir}/.deployed-sha"
+}; then
+  print_health_diagnostics
+  rollback_release || die "Unable to record the deployed SHA and automatic rollback also failed."
+  die "Unable to record the deployed SHA; previous release was restored."
 fi
 
 rm -f -- "${release_dir}/.deploy-in-progress"

@@ -1,20 +1,21 @@
-import type { NotificationType, Prisma, PrismaClient } from '@prisma/client'
+import { NotificationType, type Prisma, type PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { logNotificationError } from '@/lib/notification-errors'
 
 /** The only Notification.type values that application code may persist. */
 export const NOTIFICATION_TYPE_VALUES = [
-  'REPLY',
-  'LIKE',
-  'SYSTEM',
-  'MESSAGE',
-  'ACTIVITY',
-  'ADMIN',
-  'FOLLOW',
-  'BADGE',
-  'FRIEND_REQUEST',
-  'BIRTHDAY_GREETING',
-  'FEEDBACK',
-  'REVIEW',
+  NotificationType.REPLY,
+  NotificationType.LIKE,
+  NotificationType.SYSTEM,
+  NotificationType.MESSAGE,
+  NotificationType.ACTIVITY,
+  NotificationType.ADMIN,
+  NotificationType.FOLLOW,
+  NotificationType.BADGE,
+  NotificationType.FRIEND_REQUEST,
+  NotificationType.BIRTHDAY_GREETING,
+  NotificationType.FEEDBACK,
+  NotificationType.REVIEW,
 ] as const satisfies readonly NotificationType[]
 
 export type ValidNotificationType = typeof NOTIFICATION_TYPE_VALUES[number]
@@ -22,8 +23,6 @@ export type ValidNotificationType = typeof NOTIFICATION_TYPE_VALUES[number]
 export type NotificationWriteContext = {
   operation: string
   userId?: string | null
-  /** Only activity-class callers may convert an unknown type to ACTIVITY. */
-  activityFallback?: boolean
 }
 
 type NotificationDb = PrismaClient | Prisma.TransactionClient
@@ -39,28 +38,31 @@ export class InvalidNotificationTypeError extends Error {
   }
 }
 
-function typeGuardLog(context: NotificationWriteContext, receivedType: unknown, fallbackType: ValidNotificationType | null) {
-  return {
-    code: 'INVALID_NOTIFICATION_TYPE',
-    operation: context.operation,
-    userId: context.userId ?? null,
-    receivedType: typeof receivedType === 'string' ? receivedType : String(receivedType ?? ''),
-    fallbackType,
-  }
+function describeReceivedType(receivedType: unknown) {
+  if (typeof receivedType === 'string') return receivedType
+  if (receivedType === null) return 'null'
+  if (receivedType === undefined) return 'undefined'
+  return typeof receivedType
 }
 
 /**
- * Validate the value before Prisma sees it. Invalid activity-class values may
- * be safely represented as ACTIVITY; all other invalid values are rejected.
+ * Validate the value before Prisma sees it. Do not normalize arbitrary input
+ * or silently fall back: a value not present in the generated enum is a write
+ * error and must be fixed at its caller.
  */
 export function normalizeNotificationType(value: unknown, context: NotificationWriteContext): ValidNotificationType {
-  const candidate = typeof value === 'string' ? value.trim().toUpperCase() : ''
-  if ((NOTIFICATION_TYPE_VALUES as readonly string[]).includes(candidate)) return candidate as ValidNotificationType
+  const matched = typeof value === 'string'
+    ? NOTIFICATION_TYPE_VALUES.find((type) => type === value)
+    : undefined
+  if (matched) return matched
 
-  const details = typeGuardLog(context, value, context.activityFallback ? 'ACTIVITY' : null)
-  console.error('[notifications.type-guard]', details)
-  if (context.activityFallback) return 'ACTIVITY'
-  throw new InvalidNotificationTypeError(value, context.operation)
+  const error = new InvalidNotificationTypeError(value, context.operation)
+  logNotificationError('write.invalid-type', {
+    operation: context.operation,
+    userId: context.userId ?? null,
+    receivedType: describeReceivedType(value),
+  }, error)
+  throw error
 }
 
 function normalizeCreateData(

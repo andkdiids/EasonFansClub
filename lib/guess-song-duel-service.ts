@@ -1320,7 +1320,6 @@ export async function createDuelInvite(userId: string, roomId: string, inviteeId
     }, {
       operation: 'guess-song-duel-invite',
       userId: inviteeId,
-      activityFallback: true,
     }),
     { operation: 'guess-song-duel-invite', userId: inviteeId, notificationType: 'ACTIVITY' },
   )

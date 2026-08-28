@@ -42,7 +42,8 @@
     "badges:concert:backfill": "tsx scripts/backfill-concert-badges.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy"
+    "prisma:deploy": "prisma migrate deploy",
+    "notification:integrity": "tsx scripts/check-notification-integrity.ts"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
