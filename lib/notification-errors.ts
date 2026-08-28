@@ -14,14 +14,28 @@ function redactSensitiveText(value: string) {
   )
 }
 
+function extractMySqlCode(error: Error & { meta?: unknown }) {
+  let metadata = ''
+  try {
+    metadata = error.meta === undefined ? '' : JSON.stringify(error.meta)
+  } catch {
+    metadata = ''
+  }
+  const text = `${error.message} ${metadata}`
+  const numericCode = text.match(/\bCode\s*:\s*`?(\d{3,5})`?/i)?.[1]
+  if (numericCode) return numericCode
+  return text.match(/\bER_[A-Z0-9_]+\b/)?.[0]
+}
+
 export function describeNotificationError(error: unknown) {
   if (error instanceof Error) {
-    const errorWithCode = error as Error & { code?: unknown }
+    const errorWithCode = error as Error & { code?: unknown; meta?: unknown }
     return {
       errorName: error.name,
       errorCode: typeof errorWithCode.code === 'string' || typeof errorWithCode.code === 'number'
         ? String(errorWithCode.code)
         : undefined,
+      mysqlCode: extractMySqlCode(errorWithCode),
       message: redactSensitiveText(error.message),
       stack: error.stack ? redactSensitiveText(error.stack) : undefined,
     }
@@ -30,6 +44,7 @@ export function describeNotificationError(error: unknown) {
   return {
     errorName: 'UnknownError',
     errorCode: undefined,
+    mysqlCode: undefined,
     message: redactSensitiveText(String(error)),
     stack: undefined,
   }
@@ -41,6 +56,7 @@ export function logNotificationError(
   error: unknown,
 ) {
   console.error(`[notifications.${phase}.error]`, {
+    scope: phase,
     ...context,
     ...describeNotificationError(error),
   })

@@ -45,7 +45,6 @@ export default async function NotificationsPage({ searchParams }: { searchParams
           page,
           pageSize: NOTIFICATION_PAGE_SIZE,
           totalPages: 1,
-          unreadCount: 0,
           degraded: true,
           failed: true,
         }
@@ -63,10 +62,18 @@ export default async function NotificationsPage({ searchParams }: { searchParams
         return null
       })()
   const siteLogoUrl = appearance ? publicImageUrl(appearance.images.navLogoUrl || appearance.images.logoUrl) : null
-  const initialLoadError = notificationsResult.status === 'rejected' || notifications.failed
+  const initialPagination = notifications.failed || (notifications.degraded && notifications.items.length === 0)
+    ? { page: 1, pageSize: notifications.pageSize, total: 0, totalPages: 1 }
+    : {
+        page: notifications.page,
+        pageSize: notifications.pageSize,
+        total: notifications.total,
+        totalPages: notifications.totalPages,
+      }
+  const initialLoadError = notificationsResult.status === 'rejected' || notifications.failed || (notifications.degraded && notifications.items.length === 0)
     ? '通知加载失败，请重试'
     : null
-  const initialLoadWarning = notificationsResult.status === 'fulfilled' && notifications.degraded && !notifications.failed
+  const initialLoadWarning = notificationsResult.status === 'fulfilled' && notifications.degraded && !notifications.failed && notifications.items.length > 0
     ? '部分通知暂时无法加载，请点击重试'
     : null
 
@@ -80,12 +87,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
             'message.main': (
               <NotificationsClient
                 initialNotifications={notifications.items}
-                initialPagination={{
-                  page: notifications.page,
-                  pageSize: notifications.pageSize,
-                  total: notifications.total,
-                  totalPages: notifications.totalPages,
-                }}
+                initialPagination={initialPagination}
                 initialCategory={category}
                 canReview={canReview}
                 siteLogoUrl={siteLogoUrl}

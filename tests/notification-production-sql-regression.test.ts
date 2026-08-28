@@ -7,6 +7,7 @@ import {
   getNotificationCategoryFilter,
   getUnreadNotificationWhere,
 } from '../lib/notifications'
+import { describeNotificationError } from '../lib/notification-errors'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const service = read('lib/notifications.ts')
@@ -16,6 +17,21 @@ function summaryBlock() {
   const end = service.indexOf('export async function getUnreadNotificationCount')
   assert.ok(start >= 0 && end > start)
   return service.slice(start, end)
+}
+
+function unifiedListBlock() {
+  const start = service.indexOf('export async function listUnifiedNotificationsPage')
+  const end = service.indexOf('export async function listUnifiedNotifications(', start)
+  assert.ok(start >= 0 && end > start)
+  return service.slice(start, end)
+}
+
+function unifiedUnionBlock() {
+  const list = unifiedListBlock()
+  const start = list.indexOf('rows = await prisma.$queryRaw')
+  const end = list.indexOf('    `)', start)
+  assert.ok(start >= 0 && end > start)
+  return list.slice(start, end)
 }
 
 test('canReview=false 使用稳定的 review=0 SQL 片段', () => {
@@ -59,6 +75,37 @@ test('FEEDBACK 类型归入反馈', () => {
 
 test('普通活动报名 ACTIVITY 归入系统', () => {
   assert.equal(getNotificationCategory('ACTIVITY', '/activities/a1', 'activity-registration-success:a1:u1'), 'system')
+})
+
+test('全部分类使用列对齐的派生表 UNION，并只按外层输出别名排序', () => {
+  const union = unifiedUnionBlock()
+  const selectProjections = [...union.matchAll(/SELECT\s+([\s\S]*?)\s+FROM\s+(Notification n|SystemNotification sn)/g)]
+  assert.equal(selectProjections.length, 2)
+  assert.deepEqual(selectProjections.map((match) => [...match[1].matchAll(/\bAS\s+(?!CHAR\b)([A-Za-z][A-Za-z0-9_]*)/g)].map((alias) => alias[1])), [
+    ['id', 'source', 'isRead', 'createdAt'],
+    ['id', 'source', 'isRead', 'createdAt'],
+  ])
+  assert.match(union, /FROM \(\s*SELECT/)
+  assert.match(union, /\) AS unified/)
+  assert.match(union, /ORDER BY unified\.isRead ASC, unified\.createdAt DESC, unified\.source ASC, unified\.id ASC/)
+  assert.doesNotMatch(union, /ORDER BY\s+(?:n|sn|snr)\./)
+  assert.match(union, /CAST\(n\.id AS CHAR\(191\)\)/)
+  assert.match(union, /CAST\(sn\.id AS CHAR\(191\)\)/)
+})
+
+test('全部分类的 count/list 共享分类入口、已读语义和系统通知读取状态', () => {
+  const list = unifiedListBlock()
+  const union = unifiedUnionBlock()
+  assert.match(list, /const personalCategory = getNotificationCategoryFilter\(category, canReview\)/)
+  assert.match(list, /const personalCategorySql = getPersonalNotificationCategorySql\(category, canReview\)/)
+  assert.match(list, /const systemCategory = getSystemNotificationCategoryFilter\(category\)/)
+  assert.match(list, /const systemCategorySql = getSystemNotificationCategorySql\(category\)/)
+  assert.match(list, /readAt: null/)
+  assert.match(list, /SystemNotificationRead: \{ none: \{ userId \} \}/)
+  assert.match(union, /LEFT JOIN SystemNotificationRead snr[\s\S]*snr\.notificationId = sn\.id AND snr\.userId = \$\{userId\}/)
+  assert.match(union, /CASE WHEN snr\.id IS NULL THEN 0 ELSE 1 END AS isRead/)
+  assert.match(union, /sn\.type <> 'UPDATE'/)
+  assert.match(service, /case 'all': return canReview[\s\S]*n\.type NOT IN \('MESSAGE', 'REVIEW'\)/)
 })
 
 test('REPLY 归入回复', () => {
@@ -131,6 +178,28 @@ test('所有 Notification.key 原生 SQL 引用均使用反引号', () => {
   assert.ok(service.includes('n.\\`key\\`'))
 })
 
+test('统一列表失败时返回安全分页，并让前端隐藏过期分页', () => {
+  const list = unifiedListBlock()
+  const client = read('app/notifications/NotificationsClient.tsx')
+  const page = read('app/notifications/page.tsx')
+  assert.match(list, /const unavailablePage = \(\): UnifiedNotificationPage => \{[\s\S]*total: 0,[\s\S]*page: 1,[\s\S]*totalPages: 1,[\s\S]*failed: true/)
+  assert.match(client, /setPagination\(\{ page: 1, pageSize: NOTIFICATION_LIST_PAGE_SIZE, total: 0, totalPages: 1 \}\)/)
+  assert.match(client, /!loadError && !\(loadWarning && notifications\.length === 0\) && pagination\.totalPages > 1/)
+  assert.match(page, /notifications\.failed \|\| \(notifications\.degraded && notifications\.items\.length === 0\)/)
+  assert.match(read('app/api/notifications/route.ts'), /if \(result\.failed\)[\s\S]*status: 503/)
+})
+
+test('通知 SQL 日志单独提取 MySQL 错误码且不暴露错误元数据', () => {
+  const error = Object.assign(new Error('Raw query failed. Code: 1064. Message: syntax error'), {
+    code: 'P2010',
+    meta: { query: 'SELECT ...', token: 'should-not-log' },
+  })
+  const details = describeNotificationError(error)
+  assert.equal(details.errorCode, 'P2010')
+  assert.equal(details.mysqlCode, '1064')
+  assert.doesNotMatch(JSON.stringify(details), /should-not-log|SELECT \.\.\./)
+})
+
 test('核心汇总或列表查询失败时不伪造未读 0', () => {
   assert.match(service, /unread-summary\.personal-query'[\s\S]*throw personalResult\.reason/)
   assert.match(service, /const getRequiredCount[\s\S]*throw result\.reason/)
@@ -138,7 +207,7 @@ test('核心汇总或列表查询失败时不伪造未读 0', () => {
   assert.match(read('app/layout.tsx'), /Do not turn an unavailable core query into a false "0 unread" badge/)
   assert.match(read('components/NotificationProvider.tsx'), /summaryAvailable/)
   assert.match(read('app/notifications/NotificationsClient.tsx'), /unreadCount === null \? '暂不可用'/)
-  assert.match(read('app/notifications/NotificationsClient.tsx'), /!loadError && pagination\.totalPages > 1/)
+  assert.match(read('app/notifications/NotificationsClient.tsx'), /!loadError && !\(loadWarning && notifications\.length === 0\) && pagination\.totalPages > 1/)
   assert.match(read('components/FriendDock.tsx'), /unreadSummaryAvailable/)
   assert.match(read('components/UserNotificationMenu.tsx'), /summaryAvailable && summary\.total/)
 })

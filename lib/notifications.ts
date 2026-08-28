@@ -813,6 +813,17 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const page = clampPaginationPage(options.page || 1, totalPages)
   const offset = (page - 1) * pageSize
+  const unavailablePage = (): UnifiedNotificationPage => {
+    return {
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize,
+      totalPages: 1,
+      unreadCount: personalUnread + systemUnread,
+      failed: true,
+    }
+  }
   const personalCategorySql = getPersonalNotificationCategorySql(category, canReview)
   const systemCategorySql = getSystemNotificationCategorySql(category)
   const unreadPersonalSql = options.unreadOnly ? Prisma.sql`AND n.readAt IS NULL` : Prisma.empty
@@ -820,27 +831,30 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   let rows: NotificationPageRow[]
   try {
     rows = await prisma.$queryRaw<NotificationPageRow[]>(Prisma.sql`
-      SELECT n.id AS id, 'personal' AS source,
-        CASE WHEN n.readAt IS NULL THEN 0 ELSE 1 END AS isRead,
-        n.createdAt AS createdAt
-      FROM Notification n
-      WHERE n.recipientId = ${userId}
-        ${personalCategorySql}
-        ${unreadPersonalSql}
-      UNION ALL
-      SELECT sn.id AS id, 'system' AS source,
-        CASE WHEN snr.id IS NULL THEN 0 ELSE 1 END AS isRead,
-        COALESCE(sn.publishAt, sn.createdAt) AS createdAt
-      FROM SystemNotification sn
-      LEFT JOIN SystemNotificationRead snr
-        ON snr.notificationId = sn.id AND snr.userId = ${userId}
-      WHERE sn.published = 1
-        AND sn.publishAt <= ${now}
-        AND (sn.expireAt IS NULL OR sn.expireAt > ${now})
-        AND sn.type <> 'UPDATE'
-        ${systemCategorySql}
-        ${unreadSystemSql}
-      ORDER BY isRead ASC, createdAt DESC, source ASC, id ASC
+      SELECT unified.id, unified.source, unified.isRead, unified.createdAt
+      FROM (
+        SELECT CAST(n.id AS CHAR(191)) AS id, 'personal' AS source,
+          CASE WHEN n.readAt IS NULL THEN 0 ELSE 1 END AS isRead,
+          n.createdAt AS createdAt
+        FROM Notification n
+        WHERE n.recipientId = ${userId}
+          ${personalCategorySql}
+          ${unreadPersonalSql}
+        UNION ALL
+        SELECT CAST(sn.id AS CHAR(191)) AS id, 'system' AS source,
+          CASE WHEN snr.id IS NULL THEN 0 ELSE 1 END AS isRead,
+          COALESCE(sn.publishAt, sn.createdAt) AS createdAt
+        FROM SystemNotification sn
+        LEFT JOIN SystemNotificationRead snr
+          ON snr.notificationId = sn.id AND snr.userId = ${userId}
+        WHERE sn.published = 1
+          AND sn.publishAt <= ${now}
+          AND (sn.expireAt IS NULL OR sn.expireAt > ${now})
+          AND sn.type <> 'UPDATE'
+          ${systemCategorySql}
+          ${unreadSystemSql}
+      ) AS unified
+      ORDER BY unified.isRead ASC, unified.createdAt DESC, unified.source ASC, unified.id ASC
       LIMIT ${pageSize} OFFSET ${offset}
     `)
   } catch (error) {
@@ -848,15 +862,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     // Do not silently drop SystemNotification rows or invent a new total/page
     // from a personal-only fallback. The two-table union is the page source of
     // truth; an unavailable core query must be surfaced as a failed page.
-    return {
-      items: [],
-      total,
-      page,
-      pageSize,
-      totalPages,
-      unreadCount: personalUnread + systemUnread,
-      failed: true,
-    }
+    return unavailablePage()
   }
 
   const personalIds = rows.filter((row) => row.source === 'personal').map((row) => row.id)
@@ -913,20 +919,17 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       },
     }) : [],
   ])
-  const personal = personalResult.status === 'fulfilled'
-    ? personalResult.value
-    : (() => {
-        degraded = true
-        logNotificationError('list.personal-hydration', { userId, page, pageSize, category }, personalResult.reason)
-        return []
-      })()
-  const system = systemResult.status === 'fulfilled'
-    ? systemResult.value
-    : (() => {
-        degraded = true
-        logNotificationError('list.system-hydration', { userId, page, pageSize, category }, systemResult.reason)
-        return []
-      })()
+  if (personalResult.status === 'rejected' || systemResult.status === 'rejected') {
+    if (personalResult.status === 'rejected') {
+      logNotificationError('list.personal-hydration', { userId, page, pageSize, category }, personalResult.reason)
+    }
+    if (systemResult.status === 'rejected') {
+      logNotificationError('list.system-hydration', { userId, page, pageSize, category }, systemResult.reason)
+    }
+    return unavailablePage()
+  }
+  const personal = personalResult.value
+  const system = systemResult.value
 
   const actorIds = personal.flatMap((item) => item.User_Notification_actorIdToUser ? [item.User_Notification_actorIdToUser.id] : [])
   const likeTargets = personal.flatMap((item) => {

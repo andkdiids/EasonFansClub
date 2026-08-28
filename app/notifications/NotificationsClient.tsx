@@ -389,13 +389,30 @@ export function NotificationsClient({
         } | null
         if (requestSequence !== notificationListRequestSequenceRef.current) return
         if (!response.ok) {
+          setNotifications([])
+          setPagination({ page: 1, pageSize: NOTIFICATION_LIST_PAGE_SIZE, total: 0, totalPages: 1 })
           setLoadError(data?.message || '通知加载失败，请重试')
           setLoadWarning('')
           return
         }
         if (Array.isArray(data?.notifications)) {
-          setLoadError(data.failed ? '通知加载失败，请重试' : '')
-          setLoadWarning(data.degraded && !data.failed ? '部分通知暂时无法加载，请点击重试' : '')
+          if (data.failed) {
+            setNotifications([])
+            setPagination({ page: 1, pageSize: NOTIFICATION_LIST_PAGE_SIZE, total: 0, totalPages: 1 })
+            setLoadError('通知加载失败，请重试')
+            setLoadWarning('')
+            return
+          }
+          const degradedWithoutItems = data.degraded === true && data.notifications.length === 0
+          if (degradedWithoutItems) {
+            setNotifications([])
+            setPagination({ page: 1, pageSize: NOTIFICATION_LIST_PAGE_SIZE, total: 0, totalPages: 1 })
+            setLoadError('通知加载失败，请重试')
+            setLoadWarning('')
+            return
+          }
+          setLoadError('')
+          setLoadWarning(data.degraded ? '部分通知暂时无法加载，请点击重试' : '')
           const nextPagination = typeof data.page === 'number' && typeof data.pageSize === 'number' && typeof data.total === 'number' && typeof data.totalPages === 'number'
             ? { page: data.page, pageSize: data.pageSize, total: data.total, totalPages: data.totalPages }
             : undefined
@@ -1199,7 +1216,7 @@ export function NotificationsClient({
         )}
       </div>
 
-      {!loadError && pagination.totalPages > 1 ? (
+      {!loadError && !(loadWarning && notifications.length === 0) && pagination.totalPages > 1 ? (
         <Pagination
           currentPage={pagination.page}
           totalPages={pagination.totalPages}

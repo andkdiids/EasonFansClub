@@ -124,3 +124,23 @@ test('活动封面、详情排版和数据库增量迁移覆盖移动端验收�
   assert.match(migration, /CREATE TABLE `ActivityRegistrationAnswer`/)
   assert.match(migration, /CREATE TABLE `ActivityReward`/)
 })
+
+test('活动详情桌面端使用三栏约束，已核销二维码保留但明确置灰', () => {
+  const page = read('app/activities/[activityId]/page.tsx')
+  const detail = read('components/activities/ActivityDetailView.tsx')
+  const registration = read('components/activities/ActivityRegistrationButton.tsx')
+  const qr = read('components/activities/ActivityRegistrationQr.tsx')
+
+  assert.match(page, /max-w-\[1240px\]/)
+  assert.match(page, /maxWidth: '1240px'/)
+  assert.match(detail, /lg:grid-cols-\[300px_minmax\(0,1fr\)_300px\]/)
+  assert.match(detail, /xl:grid-cols-\[320px_minmax\(0,1fr\)_320px\]/)
+  assert.match(detail, /lg:contents/)
+  assert.match(detail, /lg:max-w-\[320px\]/)
+  assert.match(detail, /object-contain/)
+  assert.match(registration, /verifiedAt=\{registration\.verifiedAt\}/)
+  assert.match(qr, /Boolean\(verifiedAt\)/)
+  assert.match(qr, /overflow-hidden/)
+  assert.match(qr, /pointer-events-none grayscale opacity-40/)
+  assert.match(qr, /已核销/)
+})
