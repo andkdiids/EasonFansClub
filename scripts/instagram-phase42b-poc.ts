@@ -62,7 +62,7 @@ function sampleMedia(posts: readonly InstagramPost[]) {
 async function inspectMedia(posts: readonly InstagramPost[]) {
   const results: Array<{ status: number; hostname: string; contentType: string | null; contentLength: number | null; method: string; redirects: number }> = []
   for (const media of sampleMedia(posts)) {
-    const result = await inspectInstagramMediaUrl(media, { proxyUrl: process.env.APIFY_PROXY_URL })
+    const result = await inspectInstagramMediaUrl(media, { proxyUrl: process.env.IG_MEDIA_PROXY_URL })
     results.push(result)
     if (result.status === 429) throw new Error('PROVIDER_RATE_LIMITED')
   }
@@ -99,7 +99,7 @@ async function main() {
   // database has been explicitly selected.
   const database = assertSafePocDatabaseTarget()
   if (process.env.IG_PROVIDER?.trim().toLowerCase() !== 'apify' || process.env.IG_TARGET_USERNAME?.trim().replace(/^@+/, '').toLowerCase() !== TARGET_USERNAME) throw new Error('APIFY_CONFIGURATION_MISSING_OR_MISMATCHED')
-  if (!process.env.APIFY_API_TOKEN?.trim() || !process.env.APIFY_PROXY_URL?.trim()) throw new Error('APIFY_CONFIGURATION_MISSING')
+  if (!process.env.APIFY_API_TOKEN?.trim()) throw new Error('APIFY_CONFIGURATION_MISSING')
 
   const reader = new ApifyInstagramProvider({ proxyUrl: process.env.APIFY_PROXY_URL })
   const posts = await reader.getLatestPostsFromDataset(DATASET_ID, TARGET_USERNAME, 2)
@@ -118,7 +118,7 @@ async function main() {
   const trace = traceForExistingRun()
   const result = await syncInstagramPosts({
     provider: fixedDatasetProvider(posts, trace, process.env.APIFY_PROXY_URL || null),
-    localizer: new SafeExternalInstagramMediaLocalizer({ proxyUrl: process.env.APIFY_PROXY_URL, keyPrefix: `social/instagram/${TARGET_USERNAME}/poc` }),
+    localizer: new SafeExternalInstagramMediaLocalizer({ proxyUrl: process.env.IG_MEDIA_PROXY_URL, keyPrefix: `social/instagram/${TARGET_USERNAME}/poc` }),
     username: TARGET_USERNAME,
     limit: 2,
     suppressNotification: true,

@@ -23,6 +23,7 @@ export async function GET() {
     } catch {
       providerStatus = {
         provider: 'CONFIG_ERROR', target: config.target, proxyConfigured: false, proxyType: null,
+        mediaProxyConfigured: false, mediaProxyType: null,
         directFallback: false, browserEnabled: false, brightDataConfigured: false,
         apifyConfigured: Boolean(process.env.APIFY_API_TOKEN?.trim()), sessionStateConfigured: false,
       }

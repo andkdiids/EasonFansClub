@@ -13,6 +13,8 @@ export async function GET() {
       browserEnabled: status.browserEnabled,
       directFallback: status.directFallback,
       proxyConfigured: status.proxyConfigured,
+      mediaProxyConfigured: status.mediaProxyConfigured,
+      mediaProxyType: status.mediaProxyType,
       externalProviderCredentialsConfigured: status.brightDataConfigured || status.apifyConfigured,
       mediaHostAllowlistConfigured: Boolean(process.env.IG_ALLOWED_MEDIA_HOSTS?.trim()),
       maxImageMb: Number(process.env.IG_MAX_IMAGE_MB || 20),

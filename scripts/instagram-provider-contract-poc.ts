@@ -97,7 +97,7 @@ async function inspectSampleMedia(posts: readonly InstagramPost[]) {
 
   for (const media of sample) {
     try {
-      const result = await inspectInstagramMediaUrl(media, { proxyUrl: process.env.APIFY_PROXY_URL })
+      const result = await inspectInstagramMediaUrl(media, { proxyUrl: process.env.IG_MEDIA_PROXY_URL })
       results.push(result)
       if (result.status === 429) {
         stoppedOnRateLimit = true

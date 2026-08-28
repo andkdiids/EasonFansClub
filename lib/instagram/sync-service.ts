@@ -240,7 +240,7 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
     }
   }
   const provider = options.provider || createInstagramProvider({ provider: options.providerName })
-  const localizer = assertProductionMediaLocalizer(options.localizer || createInstagramMediaLocalizer(target, provider.proxyUrl))
+  const localizer = assertProductionMediaLocalizer(options.localizer || createInstagramMediaLocalizer(target))
   const startedAt = new Date()
   const initialTrace = options.trace || provider.getTrace?.() || null
   const syncLog = await prisma.socialSyncLog.create({

@@ -9,14 +9,18 @@ export function assertProductionMediaLocalizer(localizer: InstagramMediaLocalize
   return localizer
 }
 
+export function resolveInstagramMediaProxyUrl(proxyUrl?: string | null) {
+  return proxyUrl !== undefined ? proxyUrl : process.env.IG_MEDIA_PROXY_URL ?? null
+}
+
 export function createInstagramMediaLocalizer(username: string, proxyUrl?: string | null): InstagramMediaLocalizer {
   const mode = getAnywhereDoorStorageMode()
   if (!mode) throw new InstagramProviderError('CONFIG_ERROR', '随意门存储模式无效')
   if (process.env.NODE_ENV === 'production') {
     if (mode !== 'production') throw new InstagramProviderError('CONFIG_ERROR', '生产环境必须显式使用 production 存储模式')
-    return new SafeExternalInstagramMediaLocalizer({ username, storageMode: mode, proxyUrl })
+    return new SafeExternalInstagramMediaLocalizer({ username, storageMode: mode, proxyUrl: resolveInstagramMediaProxyUrl(proxyUrl) })
   }
-  if (mode === 'production') return new SafeExternalInstagramMediaLocalizer({ username, storageMode: mode, proxyUrl })
+  if (mode === 'production') return new SafeExternalInstagramMediaLocalizer({ username, storageMode: mode, proxyUrl: resolveInstagramMediaProxyUrl(proxyUrl) })
   return new MockInstagramMediaLocalizer()
 }
 

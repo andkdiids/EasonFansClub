@@ -40,11 +40,14 @@ export function createInstagramProvider(options: { provider?: string; proxyUrl?:
 export function getInstagramProviderStatus() {
   const provider = resolveInstagramProviderName()
   const proxyUrl = provider === 'apify' ? process.env.APIFY_PROXY_URL : process.env.IG_PROXY_URL
+  const mediaProxyUrl = process.env.IG_MEDIA_PROXY_URL
   return {
     provider,
     target: process.env.IG_TARGET_USERNAME?.trim() || 'mreasonchan',
     proxyConfigured: Boolean(proxyUrl?.trim()),
     proxyType: proxyUrl?.trim().split('://', 1)[0]?.toLowerCase() || null,
+    mediaProxyConfigured: Boolean(mediaProxyUrl?.trim()),
+    mediaProxyType: mediaProxyUrl?.trim().split('://', 1)[0]?.toLowerCase() || null,
     directFallback: false,
     browserEnabled: process.env.IG_BROWSER_ENABLED === 'true',
     brightDataConfigured: envPresent('BRIGHT_DATA_API_KEY'),
