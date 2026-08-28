@@ -108,6 +108,25 @@ function errorCode(error: unknown) {
   return 'SYNC_FAILED'
 }
 
+function logMediaFailure(error: unknown) {
+  if (!(error instanceof InstagramMediaSafetyError) || !error.diagnostics) return
+  const diagnostics = error.diagnostics
+  console.error('[instagram.media.failure]', {
+    postExternalId: diagnostics.postExternalId ?? null,
+    mediaType: diagnostics.mediaType ?? null,
+    sortOrder: diagnostics.sortOrder ?? null,
+    stage: diagnostics.stage ?? null,
+    hostname: diagnostics.hostname ?? null,
+    status: diagnostics.status ?? null,
+    redirects: diagnostics.redirects ?? 0,
+    errorCode: error.code,
+    errorName: diagnostics.errorName ?? null,
+    errorMessage: diagnostics.errorMessage ?? null,
+    causeCode: diagnostics.causeCode ?? null,
+    proxyConfigured: diagnostics.proxyConfigured === true,
+  })
+}
+
 function traceData(trace: InstagramProviderTrace | null | undefined) {
   return {
     actor: trace?.actor || null,
@@ -218,6 +237,7 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
     })
     return { id: row.id, created: !existing, previousStatus: existing?.status || null, mediaCount: canReuseMedia ? existing?.media.length || 0 : localizedMedia.length }
   } catch (error) {
+    logMediaFailure(error)
     await prisma.socialPost.updateMany({
       where: { platform: 'INSTAGRAM', externalId: post.externalId },
       data: {

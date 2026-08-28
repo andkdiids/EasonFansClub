@@ -18,6 +18,8 @@ test('FAILED posts are retried in place instead of reusing a missing media set',
   assert.match(source, /platform_externalId: \{ platform: 'INSTAGRAM', externalId: post\.externalId \}/)
   assert.match(source, /status: prepared\.status === 'HIDDEN' \? 'HIDDEN' : 'READY'/)
   assert.match(source, /status: existing\?\.status === 'READY' \|\| existing\?\.status === 'HIDDEN' \? existing\.status : 'FAILED'/)
+  assert.match(source, /\[instagram\.media\.failure\]/)
+  assert.match(source, /errorCode: errorCode\(error\)/)
 })
 
 test('a failed baseline does not set baselineCompletedAt in the worker path', () => {

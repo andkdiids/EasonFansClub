@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import sharp from 'sharp'
-import { DEFAULT_ALLOWED_MEDIA_HOSTS, inspectInstagramMediaUrl, InstagramMediaSafetyError, isAllowedMediaHostname, isRestrictedIp, SafeExternalInstagramMediaLocalizer } from '@/lib/instagram/media'
+import { DEFAULT_ALLOWED_MEDIA_HOSTS, inspectInstagramMediaUrl, InstagramMediaSafetyError, isAllowedMediaHostname, isRestrictedIp, SafeExternalInstagramMediaLocalizer, type MediaUploadWriter } from '@/lib/instagram/media'
+
+function immediateRetrySleep() {
+  return async (milliseconds: number) => { void milliseconds }
+}
+
+function testWriter(): MediaUploadWriter {
+  return {
+    upload: async ({ key, body }) => {
+      for await (const chunk of body) void chunk
+      return `https://storage.example.test/${key}`
+    },
+  }
+}
+
+function networkFailure(name: string, code: string) {
+  const cause = Object.assign(new Error(`${code} while fetching media`), { code })
+  return Object.assign(new Error('fetch failed'), { name, cause })
+}
 
 test('media safety rejects non-HTTPS, credential-bearing and unallowlisted URLs before fetch', async () => {
   const cases = [
@@ -298,6 +316,192 @@ test('media inspection rejects HTML as a normal media response and localizer str
     ])
     assert.deepEqual(uploads.map((upload) => upload.contentType), ['video/mp4', 'image/webp'])
     assert.deepEqual(uploads[0]?.body, Buffer.from('video-stream'))
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('proxy media request retries ECONNRESET once and then succeeds', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let calls = 0
+  try {
+    const result = await inspectInstagramMediaUrl(
+      { sourceUrl: 'https://media.example.test/image.jpg', type: 'IMAGE' },
+      {
+        proxyUrl: 'http://127.0.0.1:7890',
+        lookupImpl: (async () => { throw new Error('proxy mode must not use local DNS') }) as unknown as typeof import('node:dns/promises').lookup,
+        fetchImpl: (async () => {
+          calls += 1
+          if (calls === 1) throw networkFailure('TypeError', 'ECONNRESET')
+          return new Response('jpeg', { status: 200, headers: { 'content-type': 'image/jpeg', 'content-length': '4' } })
+        }) as typeof fetch,
+        retrySleepImpl: immediateRetrySleep(),
+      },
+    )
+    assert.equal(result.status, 200)
+    assert.equal(calls, 2)
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('three proxy timeouts become MEDIA_REQUEST_FAILED with safe diagnostics', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let calls = 0
+  const delays: number[] = []
+  try {
+    await assert.rejects(
+      new SafeExternalInstagramMediaLocalizer({
+        writer: testWriter(),
+        proxyUrl: 'http://user:proxy-secret@media-proxy.example:8080',
+        fetchImpl: (async () => {
+          calls += 1
+          throw networkFailure('TimeoutError', 'UND_ERR_CONNECT_TIMEOUT')
+        }) as typeof fetch,
+        retrySleepImpl: async (milliseconds) => { delays.push(milliseconds) },
+        keyPrefix: 'social/instagram/mreasonchan/poc',
+      }).localize({
+        type: 'IMAGE', sourceUrl: 'https://media.example.test/image.jpg?token=query-secret', thumbnailUrl: null,
+        width: null, height: null, duration: null, sortOrder: 0,
+      }, { postExternalId: 'timeout-1' }),
+      (error: unknown) => {
+        assert.ok(error instanceof InstagramMediaSafetyError)
+        assert.equal(error.code, 'MEDIA_REQUEST_FAILED')
+        assert.equal(error.diagnostics?.postExternalId, 'timeout-1')
+        assert.equal(error.diagnostics?.sortOrder, 0)
+        assert.equal(error.diagnostics?.mediaType, 'IMAGE')
+        assert.equal(error.diagnostics?.stage, 'download')
+        assert.equal(error.diagnostics?.hostname, 'media.example.test')
+        assert.equal(error.diagnostics?.status, null)
+        assert.equal(error.diagnostics?.errorName, 'TimeoutError')
+        assert.equal(error.diagnostics?.errorMessage, 'fetch failed')
+        assert.equal(error.diagnostics?.causeCode, 'UND_ERR_CONNECT_TIMEOUT')
+        assert.equal(error.diagnostics?.proxyConfigured, true)
+        assert.doesNotMatch(JSON.stringify(error), /proxy-secret|query-secret|token=/)
+        return true
+      },
+    )
+    assert.equal(calls, 3)
+    assert.deepEqual(delays, [500, 1500])
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('HTTP 404 is reported with status and is not retried', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let calls = 0
+  try {
+    await assert.rejects(
+      new SafeExternalInstagramMediaLocalizer({
+        writer: testWriter(),
+        proxyUrl: 'http://127.0.0.1:7890',
+        fetchImpl: (async () => {
+          calls += 1
+          return new Response(null, { status: 404 })
+        }) as typeof fetch,
+        retrySleepImpl: immediateRetrySleep(),
+        keyPrefix: 'social/instagram/mreasonchan/poc',
+      }).localize({
+        type: 'IMAGE', sourceUrl: 'https://media.example.test/missing.jpg', thumbnailUrl: null,
+        width: null, height: null, duration: null, sortOrder: 0,
+      }, { postExternalId: 'not-found-1' }),
+      (error: unknown) => {
+        assert.ok(error instanceof InstagramMediaSafetyError)
+        assert.equal(error.code, 'MEDIA_REQUEST_FAILED')
+        assert.equal(error.diagnostics?.status, 404)
+        assert.equal(error.diagnostics?.stage, 'download')
+        return true
+      },
+    )
+    assert.equal(calls, 1)
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('HTTP 503 is retried and a later response can be localized', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let calls = 0
+  try {
+    const localized = await new SafeExternalInstagramMediaLocalizer({
+      writer: testWriter(),
+      proxyUrl: 'http://127.0.0.1:7890',
+      fetchImpl: (async () => {
+        calls += 1
+        if (calls < 3) return new Response('temporary', { status: 503 })
+        return new Response('video-stream', { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': '12' } })
+      }) as typeof fetch,
+      retrySleepImpl: immediateRetrySleep(),
+      keyPrefix: 'social/instagram/mreasonchan/poc',
+    }).localize({
+      type: 'VIDEO', sourceUrl: 'https://media.example.test/video.mp4', thumbnailUrl: null,
+      width: 720, height: 1280, duration: 12, sortOrder: 0,
+    }, { postExternalId: 'video-retry-1' })
+    assert.equal(calls, 3)
+    assert.match(localized.storageUrl, /video-01\.mp4$/)
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('a network failure after a redirect retries from the source and revalidates the next redirect', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let calls = 0
+  try {
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://origin.example.test/image.jpg', type: 'IMAGE' },
+        {
+          proxyUrl: 'http://127.0.0.1:7890',
+          fetchImpl: (async () => {
+            calls += 1
+            if (calls === 1) return new Response(null, { status: 302, headers: { location: 'https://next.example.test/image.jpg' } })
+            if (calls === 2) throw networkFailure('TypeError', 'ECONNRESET')
+            return new Response(null, { status: 302, headers: { location: 'https://evil.example.net/image.jpg' } })
+          }) as typeof fetch,
+          retrySleepImpl: immediateRetrySleep(),
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'MEDIA_HOST_NOT_ALLOWED',
+    )
+    assert.equal(calls, 3)
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('unsafe proxy redirect is rejected without retry', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let calls = 0
+  try {
+    await assert.rejects(
+      inspectInstagramMediaUrl(
+        { sourceUrl: 'https://origin.example.test/image.jpg', type: 'IMAGE' },
+        {
+          proxyUrl: 'http://127.0.0.1:7890',
+          fetchImpl: (async () => {
+            calls += 1
+            return new Response(null, { status: 302, headers: { location: 'https://169.254.169.254/latest/meta-data' } })
+          }) as typeof fetch,
+          retrySleepImpl: immediateRetrySleep(),
+        },
+      ),
+      (error: unknown) => error instanceof InstagramMediaSafetyError && error.code === 'UNSAFE_URL',
+    )
+    assert.equal(calls, 1)
   } finally {
     if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
     else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
