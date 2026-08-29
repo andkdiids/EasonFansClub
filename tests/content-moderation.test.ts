@@ -111,7 +111,7 @@ test('post creation and editing share one server-side bypass and validation path
   const postEdit = source('app/api/posts/[postId]/route.ts')
   assert.match(postCreate, /const isAdmin = shouldBypassForbiddenWords\(user\)/)
   assert.match(postCreate, /checkPostForbiddenWords\(\{ title: rawTitle, content: rawContent \}, user\)/)
-  assert.match(postEdit, /const isAdmin = shouldBypassForbiddenWords\(guard\.user\)/)
+  assert.match(postEdit, /const canManagePosts = await hasAdminPermission\(guard\.user, 'post_manage'\)/)
   assert.match(postEdit, /checkPostForbiddenWords\(\{ title: rawTitle, content: rawContent \}, user\)/)
   assert.doesNotMatch(postEdit, /containsSensitiveContent/)
   assert.doesNotMatch(postEdit, /checkForbiddenWords/)

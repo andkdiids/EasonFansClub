@@ -25,6 +25,9 @@ type ActivityForm = {
   endsAt: string
   registrationStartAt: string
   registrationEndAt: string
+  registrationFee: string
+  feeDescription: string
+  linkedMaterialId: string
   verificationMode: ActivityVerificationModeValue
   signupLimit: string
   organizer: string
@@ -34,9 +37,18 @@ type ActivityForm = {
   sortOrder: string
 }
 
+type ActivityMaterialOption = {
+  id: string
+  title: string
+  stockRemaining: number
+  stockTotal: number
+  status: string
+  isCurrent?: boolean
+}
+
 const emptyForm: ActivityForm = {
   title: '', subtitle: '', description: '', type: 'OTHER', coverUrl: null, bannerUrl: null, locationName: '', locationAddress: '', onlineUrl: '',
-  startsAt: '', endsAt: '', registrationStartAt: '', registrationEndAt: '', verificationMode: 'NONE', signupLimit: '', organizer: '', contactInfo: '', isFeatured: false, isPinned: false, sortOrder: '0',
+  startsAt: '', endsAt: '', registrationStartAt: '', registrationEndAt: '', registrationFee: '0', feeDescription: '', linkedMaterialId: '', verificationMode: 'NONE', signupLimit: '', organizer: '', contactInfo: '', isFeatured: false, isPinned: false, sortOrder: '0',
 }
 const emptySelection: ActivityImageSelection = { file: null, removed: false }
 
@@ -59,6 +71,9 @@ function formFromActivity(activity: ActivityView): ActivityForm {
     endsAt: dateInput(activity.endsAt),
     registrationStartAt: dateInput(activity.registrationStartAt),
     registrationEndAt: dateInput(activity.registrationEndAt),
+    registrationFee: String(activity.registrationFee || 0),
+    feeDescription: activity.feeDescription || '',
+    linkedMaterialId: activity.linkedMaterial?.id || '',
     verificationMode: activity.verificationMode || 'NONE',
     signupLimit: activity.signupLimit === null ? '' : String(activity.signupLimit),
     organizer: activity.organizer || '',
@@ -89,7 +104,7 @@ function toPreview(form: ActivityForm, id: string | null, status: ActivityStatus
     id: id || 'preview', title: form.title || '未命名活动', subtitle: form.subtitle || null, description: form.description,
     type: form.type, status, displayStatus: getActivityDisplayStatus({ status, startsAt, endsAt }), coverUrl: form.coverUrl, bannerUrl: form.bannerUrl,
     locationName: form.locationName || null, locationAddress: form.locationAddress || null, onlineUrl: form.onlineUrl || null,
-    pointsReward: null, signupLimit: form.signupLimit ? Number(form.signupLimit) : null, signupCount: 0, startsAt, endsAt,
+    pointsReward: null, registrationFee: Number(form.registrationFee) || 0, feeDescription: form.feeDescription || null, linkedMaterial: null, signupLimit: form.signupLimit ? Number(form.signupLimit) : null, signupCount: 0, startsAt, endsAt,
     registrationStartAt: form.registrationStartAt ? new Date(`${form.registrationStartAt}:00+08:00`).toISOString() : null,
     registrationEndAt: form.registrationEndAt ? new Date(`${form.registrationEndAt}:00+08:00`).toISOString() : null,
     verificationMode: form.verificationMode,
@@ -105,6 +120,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const [registrationQuestions, setRegistrationQuestions] = useState<ActivityQuestionDraft[]>([])
   const [rewardBadgeId, setRewardBadgeId] = useState('')
   const [badgeOptions, setBadgeOptions] = useState<Array<{ id: string; name: string; code: string }>>([])
+  const [materialOptions, setMaterialOptions] = useState<ActivityMaterialOption[]>([])
   const [loadingActivityConfig, setLoadingActivityConfig] = useState(false)
   const [coverSelection, setCoverSelection] = useState<ActivityImageSelection>(emptySelection)
   const [bannerSelection, setBannerSelection] = useState<ActivityImageSelection>(emptySelection)
@@ -128,6 +144,14 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       .then((data) => { if (Array.isArray(data?.badges)) setBadgeOptions(data.badges) })
       .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    const query = editingId ? `?activityId=${encodeURIComponent(editingId)}` : ''
+    void fetch(`/api/admin/activities/materials${query}`, { credentials: 'same-origin', cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => { if (Array.isArray(data?.materials)) setMaterialOptions(data.materials) })
+      .catch(() => undefined)
+  }, [editingId])
 
   const editingActivity = editingId ? activities.find((item) => item.id === editingId) || null : null
   const visibleActivities = useMemo(() => {
@@ -331,9 +355,12 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">详细地址<input value={form.locationAddress} onChange={(event) => changeForm('locationAddress', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">线上活动链接<input type="url" value={form.onlineUrl} onChange={(event) => changeForm('onlineUrl', event.target.value)} placeholder="可选，仅作为活动资料" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名名额<input type="number" min="0" value={form.signupLimit} onChange={(event) => changeForm('signupLimit', event.target.value)} placeholder="留空表示不限" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名开始时间<input type="datetime-local" value={form.registrationStartAt} onChange={(event) => changeForm('registrationStartAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名结束时间<input type="datetime-local" value={form.registrationEndAt} onChange={(event) => changeForm('registrationEndAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">主办方<input value={form.organizer} onChange={(event) => changeForm('organizer', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+           <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名开始时间<input type="datetime-local" value={form.registrationStartAt} onChange={(event) => changeForm('registrationStartAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+           <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名结束时间<input type="datetime-local" value={form.registrationEndAt} onChange={(event) => changeForm('registrationEndAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">报名挂号费<input type="number" min="0" value={form.registrationFee} onChange={(event) => changeForm('registrationFee', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /><span className="mt-1 block text-xs font-bold text-slate-500">填 0 表示免费报名。</span></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">费用说明<textarea value={form.feeDescription} onChange={(event) => changeForm('feeDescription', event.target.value)} placeholder="可选；未填写时前台显示基础费用说明" className="mt-1 min-h-24 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" maxLength={2000} /></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">绑定活动物料<select value={form.linkedMaterialId} onChange={(event) => changeForm('linkedMaterialId', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="">不绑定物料</option>{materialOptions.map((material) => <option key={material.id} value={material.id}>{material.title} · 剩余 {material.stockRemaining}/{material.stockTotal}{material.isCurrent ? ' · 当前绑定' : ''}</option>)}</select><span className="mt-1 block text-xs font-bold text-slate-500">只能选择已设置“需报名指定活动”的物料；报名费用包含这份物料。</span></label>
+           <label className="text-sm font-black text-slate-700 dark:text-slate-200">主办方<input value={form.organizer} onChange={(event) => changeForm('organizer', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">联系方式<input value={form.contactInfo} onChange={(event) => changeForm('contactInfo', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">

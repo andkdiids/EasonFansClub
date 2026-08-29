@@ -32,7 +32,7 @@ test('主页留言回复使用可见的幂等 REPLY 通知并定位到真实留�
   const route = read('app/api/profile-wall/route.ts')
   assert.match(route, /recipientId = parentMessage\?\.senderId \|\| receiver\.id/)
   assert.match(route, /if \(recipientId !== viewer\.id\)/)
-  assert.match(route, /notification\.upsert/)
+  assert.match(route, /upsertNotification\(/)
   assert.match(route, /type: 'REPLY'/)
   assert.match(route, /key: notificationKey/)
   assert.match(route, /rawContent\.slice\(0, 120\)/)

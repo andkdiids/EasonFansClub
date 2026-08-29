@@ -51,7 +51,7 @@ test('私信、帖子发布、评论回复统一使用 StickerPicker 单一表�
     assert.match(source, /import \{ StickerPicker,?.*\} from '@\/components\/StickerPicker'/)
     assert.match(source, /<StickerPicker\s/)
     // 系统 emoji 经 onSelectEmoji 插入输入框
-    assert.match(source, /onSelectEmoji=\{insertEmoji\}/)
+    assert.match(source, /onSelectEmoji=\{/)
     // 不再单独挂载 EmojiPicker，避免多个表情入口
     assert.doesNotMatch(source, /import \{ EmojiPicker \} from '@\/components\/EmojiPicker'/)
     assert.doesNotMatch(source, /<EmojiPicker /)

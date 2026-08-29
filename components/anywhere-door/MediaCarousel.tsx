@@ -3,20 +3,20 @@
 import { useEffect, useState } from 'react'
 import type { SocialPostMediaView } from '@/lib/social-posts'
 
-export function MediaCarousel({ media, title, priority = false }: Readonly<{ media: SocialPostMediaView[]; title: string; priority?: boolean }>) {
+export function MediaCarousel({ media, title, priority = false, className = '' }: Readonly<{ media: SocialPostMediaView[]; title: string; priority?: boolean; className?: string }>) {
   const [index, setIndex] = useState(0)
   const [videoFailed, setVideoFailed] = useState(false)
   const current = media[index] || media[0]
   useEffect(() => setVideoFailed(false), [current?.id])
-  if (!current) return <div className="grid aspect-square place-items-center bg-slate-100 text-sm font-bold text-slate-400">暂无媒体</div>
+  if (!current) return <div className={`grid aspect-square place-items-center bg-black text-sm font-bold text-slate-400 dark:bg-black dark:text-slate-500 ${className}`}>暂无媒体</div>
 
   function move(offset: number) {
     setIndex((value) => (value + offset + media.length) % media.length)
   }
 
   return (
-    <div className="relative overflow-hidden rounded-[24px] bg-slate-100" aria-label="动态媒体轮播">
-      <div className="flex aspect-square items-center justify-center sm:aspect-[4/3]">
+    <div className={`relative overflow-hidden bg-black dark:bg-black ${className}`} aria-label="动态媒体轮播">
+      <div className="flex w-full aspect-square items-center justify-center sm:aspect-[4/3] lg:h-full lg:aspect-auto" style={current.width && current.height ? { aspectRatio: `${current.width} / ${current.height}` } : undefined}>
         {current.type === 'VIDEO' && !videoFailed ? (
           <video
             key={current.id}
@@ -25,7 +25,7 @@ export function MediaCarousel({ media, title, priority = false }: Readonly<{ med
             controls
             playsInline
             preload="metadata"
-            className="h-full w-full object-contain"
+            className="h-auto max-h-full w-full object-contain"
             aria-label={`${title} 视频`}
             onError={() => setVideoFailed(true)}
           />
@@ -33,10 +33,10 @@ export function MediaCarousel({ media, title, priority = false }: Readonly<{ med
           // A Mock fixture may intentionally omit a binary video; keep its
           // verified poster visible instead of showing a broken media box.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.thumbnailUrl} alt={`${title} 视频封面`} className="h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
+          <img src={current.thumbnailUrl} alt={`${title} 视频封面`} className="h-auto max-h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.url} alt={`${title} 图片 ${index + 1}`} className="h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
+          <img src={current.url} alt={`${title} 图片 ${index + 1}`} className="h-auto max-h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
         )}
       </div>
       {media.length > 1 ? (
@@ -48,7 +48,6 @@ export function MediaCarousel({ media, title, priority = false }: Readonly<{ med
           </div>
         </>
       ) : null}
-      <span className="absolute left-3 top-3 rounded-full bg-black/45 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white backdrop-blur">{current.type}</span>
     </div>
   )
 }

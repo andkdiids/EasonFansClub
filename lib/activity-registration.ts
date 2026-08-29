@@ -5,6 +5,10 @@ import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { grantBadgeWithTransaction } from '@/lib/badge-service'
 import { sanitizeText } from '@/lib/security'
 import { activityRegistrationQuestionTypeValues } from '@/lib/activity-registration-shared'
+import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration-fee'
+import { publicImageUrl } from '@/lib/images'
+import { prisma } from '@/lib/prisma'
+import { generateMaterialRedeemCode } from '@/lib/material-redemption-code'
 import type { ActivityRegistrationQuestionType, ActivityRegistrationQuestionView, ActivityRegistrationState, ActivityRegistrationView } from '@/lib/activity-registration-shared'
 
 export {
@@ -23,7 +27,7 @@ export function activityRegistrationSuccessNotificationKey(activityId: string, u
   return `activity-registration-success:${activityId}:${userId}:${registrationId}:${lifecycleKey}`
 }
 
-type RegistrationErrorCode = Exclude<ActivityRegistrationState, 'AVAILABLE'> | 'ACTIVITY_NOT_FOUND' | 'INVALID_ANSWERS' | 'CONFIRMATION_REQUIRED' | 'ALREADY_VERIFIED' | 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'CANNOT_CANCEL'
+type RegistrationErrorCode = Exclude<ActivityRegistrationState, 'AVAILABLE'> | 'ACTIVITY_NOT_FOUND' | 'INVALID_ANSWERS' | 'CONFIRMATION_REQUIRED' | 'ALREADY_VERIFIED' | 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'CANNOT_CANCEL' | 'ALREADY_CANCELLED' | 'INSUFFICIENT_BALANCE' | 'ACTIVITY_MATERIAL_UNAVAILABLE' | 'ACTIVITY_MATERIAL_INVALID'
 
 export class ActivityRegistrationError extends Error {
   constructor(readonly code: RegistrationErrorCode, message: string, readonly status: number) {
@@ -41,7 +45,7 @@ export class ActivityConfigurationError extends Error {
 
 export class ActivityVerificationError extends Error {
   constructor(
-    readonly code: 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'REGISTRATION_CANCELLED' | 'ALREADY_VERIFIED',
+    readonly code: 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'REGISTRATION_CANCELLED' | 'ALREADY_VERIFIED' | 'LINKED_MATERIAL_UNAVAILABLE',
     message: string,
     readonly status = 409,
   ) {
@@ -205,11 +209,23 @@ export function decodeRegistrationAnswer(value: string): string | string[] {
 export const activityRegistrationSelect = {
   id: true,
   status: true,
+  paidRegistrationFee: true,
   registeredAt: true,
   cancelledAt: true,
   verifiedAt: true,
   verificationMethod: true,
+  checkInSource: true,
+  checkedInAt: true,
   verificationToken: true,
+  LinkedMaterialRedemption: {
+    select: {
+      id: true,
+      status: true,
+      redeemCode: true,
+      redeemedAt: true,
+      material: { select: { title: true, coverImageUrl: true } },
+    },
+  },
   Answers: {
     orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
     select: { questionId: true, questionTitle: true, value: true },
@@ -222,11 +238,22 @@ export function serializeActivityRegistration(row: ActivityRegistrationRow): Act
   return {
     id: row.id,
     status: row.status,
+    paidRegistrationFee: row.paidRegistrationFee,
     registeredAt: row.registeredAt.toISOString(),
     cancelledAt: row.cancelledAt?.toISOString() || null,
     verifiedAt: row.verifiedAt?.toISOString() || null,
     verificationMethod: row.verificationMethod,
+    checkInSource: row.checkInSource,
+    checkedInAt: row.checkedInAt?.toISOString() || null,
     verificationToken: row.verificationToken || null,
+    linkedMaterialRedemption: row.LinkedMaterialRedemption ? {
+      id: row.LinkedMaterialRedemption.id,
+      title: row.LinkedMaterialRedemption.material.title,
+      coverImageUrl: publicImageUrl(row.LinkedMaterialRedemption.material.coverImageUrl),
+      status: row.LinkedMaterialRedemption.status,
+      redeemCode: row.LinkedMaterialRedemption.redeemCode,
+      redeemedAt: row.LinkedMaterialRedemption.redeemedAt?.toISOString() || null,
+    } : null,
     answers: row.Answers.map((answer) => ({ questionId: answer.questionId, questionTitle: answer.questionTitle, value: decodeRegistrationAnswer(answer.value) })),
   }
 }
@@ -303,6 +330,86 @@ export async function syncActivityReward(tx: Prisma.TransactionClient, activityI
   })
 }
 
+const activityMaterialOrderIdempotencyPrefix = 'activity-registration-material:'
+
+type ActivityMaterialOrderInput = {
+  activityId: string
+  registrationId: string
+  userId: string
+  materialId: string
+  registrationFee: number
+  activityTitle: string
+  now: Date
+}
+
+/**
+ * Creates the zero-cost material order that belongs to one activity
+ * registration.  The activity registration transaction owns the fee and the
+ * stock reservation, so a retry can never charge the material a second time.
+ */
+export async function createActivityMaterialOrderInTransaction(tx: Prisma.TransactionClient, input: ActivityMaterialOrderInput) {
+  const idempotencyKey = `${activityMaterialOrderIdempotencyPrefix}${input.registrationId}`
+  const existing = await tx.materialRedemptionOrder.findUnique({
+    where: { idempotencyKey },
+    select: { id: true, userId: true, materialId: true, linkedActivityId: true, source: true, status: true },
+  })
+  if (existing) {
+    if (existing.userId !== input.userId || existing.materialId !== input.materialId || existing.linkedActivityId !== input.activityId || existing.source !== 'ACTIVITY_REGISTRATION_AUTO') {
+      throw new ActivityRegistrationError('ACTIVITY_MATERIAL_INVALID', '活动物料自动兑换记录已被其他业务占用', 409)
+    }
+    await tx.activityRegistration.update({ where: { id: input.registrationId }, data: { linkedMaterialRedemptionId: existing.id }, select: { id: true } })
+    return { orderId: existing.id, title: null as string | null, duplicate: true }
+  }
+
+  const material = await tx.materialRedemption.findUnique({
+    where: { id: input.materialId },
+    select: { id: true, title: true, description: true, coverImageUrl: true, cost: true, stockTotal: true, stockRemaining: true, status: true, redemptionRule: true, linkedActivityId: true },
+  })
+  if (!material || material.redemptionRule !== 'ACTIVITY_REGISTRATION_REQUIRED' || material.linkedActivityId !== input.activityId) {
+    throw new ActivityRegistrationError('ACTIVITY_MATERIAL_INVALID', '活动绑定的物料配置已变化，请联系管理员', 409)
+  }
+  if (material.status !== 'PUBLISHED') throw new ActivityRegistrationError('ACTIVITY_MATERIAL_UNAVAILABLE', '活动物料当前未发布，暂时无法报名', 409)
+
+  // Conditional decrement is the oversell guard.  It also makes a material
+  // reservation part of the same transaction as the registration itself.
+  const stockChanged = await tx.materialRedemption.updateMany({
+    where: { id: material.id, status: 'PUBLISHED', redemptionRule: 'ACTIVITY_REGISTRATION_REQUIRED', linkedActivityId: input.activityId, stockRemaining: { gte: 1 } },
+    data: { stockRemaining: { decrement: 1 } },
+  })
+  if (stockChanged.count !== 1) throw new ActivityRegistrationError('ACTIVITY_MATERIAL_UNAVAILABLE', '活动物料已兑换完，暂时无法报名', 409)
+
+  const order = await tx.materialRedemptionOrder.create({
+    data: {
+      materialId: material.id,
+      userId: input.userId,
+      quantity: 1,
+      // The activity fee is the only charge.  Keeping this order at zero
+      // prevents ordinary material accounting from charging the user again.
+      unitCost: 0,
+      totalCost: 0,
+      status: 'SUCCESS',
+      source: 'ACTIVITY_REGISTRATION_AUTO',
+      linkedActivityId: input.activityId,
+      redeemCode: generateMaterialRedeemCode(),
+      redeemToken: randomBytes(32).toString('base64url'),
+      eligibilitySnapshot: {
+        type: 'ACTIVITY_REGISTRATION_AUTO',
+        activityId: input.activityId,
+        activityTitle: input.activityTitle,
+        registrationId: input.registrationId,
+        registrationFee: input.registrationFee,
+        materialCostIgnored: material.cost,
+        quantity: 1,
+        cost: 0,
+      } as Prisma.InputJsonValue,
+      idempotencyKey,
+    },
+    select: { id: true, status: true },
+  })
+  await tx.activityRegistration.update({ where: { id: input.registrationId }, data: { linkedMaterialRedemptionId: order.id }, select: { id: true } })
+  return { orderId: order.id, title: material.title, duplicate: false }
+}
+
 export type ActivityVerificationMethodValue = 'MANUAL' | 'QR'
 
 function verificationTokenFromInput(value: string) {
@@ -316,75 +423,181 @@ function verificationTokenFromInput(value: string) {
   }
 }
 
-export async function verifyActivityRegistration(input: {
+type ActivityVerificationTransactionInput = {
   activityId: string
   adminId: string
   method: ActivityVerificationMethodValue
   registrationId?: string
   token?: string
-}) {
-  return prismaTransaction(async (tx) => {
-    const lockedActivity = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${input.activityId} FOR UPDATE`
-    if (!lockedActivity.length) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '活动不存在', 404)
-    const activity = await tx.activity.findUnique({
-      where: { id: input.activityId },
-      select: {
-        id: true,
-        title: true,
-        verificationMode: true,
-        ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true } },
-      },
-    })
-    if (!activity || activity.verificationMode === 'NONE' || activity.verificationMode !== input.method) throw new ActivityVerificationError('VERIFICATION_DISABLED', '这场活动未启用当前核销方式')
+  allowLinkedMaterial?: boolean
+}
 
-    const token = input.method === 'QR' ? verificationTokenFromInput(input.token || '') : ''
-    if (input.method === 'QR' && !token) throw new ActivityVerificationError('INVALID_TOKEN', '二维码核销令牌无效', 400)
-    const registration = await tx.activityRegistration.findFirst({
-      where: {
-        activityId: input.activityId,
-        ...(input.method === 'QR' ? { verificationToken: token } : { id: input.registrationId || '' }),
-      },
-      select: { id: true, status: true, verifiedAt: true, verifiedById: true, verificationMethod: true, userId: true },
-    })
-    if (!registration) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '找不到对应的有效报名记录', 404)
-    await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registration.id} FOR UPDATE`
-    const current = await tx.activityRegistration.findUnique({ where: { id: registration.id }, select: { id: true, status: true, verifiedAt: true, verifiedById: true, verificationMethod: true, userId: true } })
-    if (!current) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
-    if (current.status === 'CANCELLED') throw new ActivityVerificationError('REGISTRATION_CANCELLED', '该报名已取消')
-    if (current.verifiedAt) return { alreadyVerified: true, registrationId: current.id, verifiedAt: current.verifiedAt.toISOString(), verificationMethod: current.verificationMethod, rewardGranted: false }
+const verificationRegistrationSelect = {
+  id: true,
+  status: true,
+  verifiedAt: true,
+  verifiedById: true,
+  verificationMethod: true,
+  checkInSource: true,
+  checkedInAt: true,
+  userId: true,
+  linkedMaterialRedemptionId: true,
+  LinkedMaterialRedemption: {
+    select: { id: true, status: true, source: true, redeemCode: true, redeemedAt: true },
+  },
+} satisfies Prisma.ActivityRegistrationSelect
 
-    const verifiedAt = new Date()
-    await tx.activityRegistration.update({ where: { id: current.id }, data: { verifiedAt, verifiedById: input.adminId, verificationMethod: input.method, checkedInAt: verifiedAt }, select: { id: true } })
-    const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
-    let rewardGranted = false
-    let rewardId: string | null = null
-    let rewardBadgeId: string | null = null
-    if (reward) {
-      rewardId = reward.id
-      rewardBadgeId = reward.badgeId
-      const granted = await grantBadgeWithTransaction(tx, {
-        userId: current.userId,
-        badgeId: reward.badgeId,
-        sourceType: 'ACTIVITY_VERIFICATION',
-        sourceId: activity.id,
-        grantReason: `活动「${activity.title}」完成现场核销`,
-        actorId: input.adminId,
-        availabilityMode: 'ADMIN_MANUAL',
-      })
-      rewardGranted = granted.created
-    }
-    await createAdminActionAudit(tx, {
-      operatorId: input.adminId,
-      action: 'CREATE_ACTIVITY',
-      operationType: adminAuditOperations.ACTIVITY_REGISTRATION_VERIFY,
-      targetType: 'ACTIVITY_REGISTRATION',
-      targetId: current.id,
-      targetTitle: activity.title,
-      targetUserId: current.userId,
-      metadata: { activityId: activity.id, registrationId: current.id, rewardId, method: input.method, rewardBadgeId, rewardGranted } as Prisma.InputJsonValue,
-    })
-    return { alreadyVerified: false, registrationId: current.id, verifiedAt: verifiedAt.toISOString(), verificationMethod: input.method, rewardGranted }
+type VerificationRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof verificationRegistrationSelect }>
+
+async function redeemLinkedMaterialInTransaction(tx: Prisma.TransactionClient, registration: VerificationRegistration, adminId: string, redemptionSource: 'ACTIVITY_CHECK_IN' | 'ACTIVITY_AUTO_CHECK_IN', now: Date) {
+  const order = registration.LinkedMaterialRedemption
+  if (!order) {
+    if (registration.linkedMaterialRedemptionId) throw new ActivityVerificationError('LINKED_MATERIAL_UNAVAILABLE', '报名关联的活动物料记录不存在')
+    return { changed: false, orderId: null as string | null }
+  }
+  if (order.status === 'CANCELLED' || order.status === 'REFUNDED' || order.status === 'EXPIRED') throw new ActivityVerificationError('LINKED_MATERIAL_UNAVAILABLE', '报名关联的活动物料当前不可核销')
+  if (order.status === 'REDEEMED') return { changed: false, orderId: order.id }
+  const changed = await tx.materialRedemptionOrder.updateMany({
+    where: { id: order.id, status: 'SUCCESS' },
+    data: { status: 'REDEEMED', redeemedAt: now, redeemedByAdminId: adminId || null, redemptionSource },
   })
+  if (changed.count !== 1) {
+    const latest = await tx.materialRedemptionOrder.findUnique({ where: { id: order.id }, select: { status: true } })
+    if (latest?.status === 'REDEEMED') return { changed: false, orderId: order.id }
+    throw new ActivityVerificationError('LINKED_MATERIAL_UNAVAILABLE', '活动物料核销状态发生变化，请刷新后重试')
+  }
+  return { changed: true, orderId: order.id }
+}
+
+export async function verifyActivityRegistrationInTransaction(tx: Prisma.TransactionClient, input: ActivityVerificationTransactionInput, now = new Date()) {
+  const lockedActivity = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${input.activityId} FOR UPDATE`
+  if (!lockedActivity.length) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '活动不存在', 404)
+  const activity = await tx.activity.findUnique({
+    where: { id: input.activityId },
+    select: {
+      id: true,
+      title: true,
+      verificationMode: true,
+      startsAt: true,
+      ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true } },
+    },
+  })
+  const linkedMaterialVerification = input.allowLinkedMaterial === true
+  if (!activity || (!linkedMaterialVerification && (activity.verificationMode === 'NONE' || activity.verificationMode !== input.method))) throw new ActivityVerificationError('VERIFICATION_DISABLED', '这场活动未启用当前核销方式')
+
+  const token = input.method === 'QR' ? verificationTokenFromInput(input.token || '') : ''
+  if (input.method === 'QR' && !token) throw new ActivityVerificationError('INVALID_TOKEN', '二维码核销令牌无效', 400)
+  const registration = await tx.activityRegistration.findFirst({
+    where: {
+      activityId: input.activityId,
+      ...(input.method === 'QR' ? { verificationToken: token } : { id: input.registrationId || '' }),
+    },
+    select: verificationRegistrationSelect,
+  })
+  if (!registration) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '找不到对应的有效报名记录', 404)
+  await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registration.id} FOR UPDATE`
+  const current = await tx.activityRegistration.findUnique({ where: { id: registration.id }, select: verificationRegistrationSelect })
+  if (!current) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
+  if (current.status === 'CANCELLED') throw new ActivityVerificationError('REGISTRATION_CANCELLED', '该报名已取消')
+  if (current.LinkedMaterialRedemption?.source === 'ACTIVITY_REGISTRATION_AUTO' && activity.startsAt && now < activity.startsAt) {
+    throw new ActivityVerificationError('LINKED_MATERIAL_UNAVAILABLE', '活动尚未开始，暂不能核销活动物料')
+  }
+
+  const linkedMaterial = await redeemLinkedMaterialInTransaction(tx, current, input.adminId, 'ACTIVITY_CHECK_IN', now)
+  if (current.verifiedAt) return { alreadyVerified: true, registrationId: current.id, verifiedAt: current.verifiedAt.toISOString(), verificationMethod: current.verificationMethod, checkInSource: current.checkInSource, rewardGranted: false, linkedMaterialRedemptionId: linkedMaterial.orderId, linkedMaterialRedeemed: linkedMaterial.changed }
+
+  const verifiedAt = now
+  await tx.activityRegistration.update({ where: { id: current.id }, data: { verifiedAt, verifiedById: input.adminId, verificationMethod: input.method, checkedInAt: verifiedAt, checkInSource: input.method }, select: { id: true } })
+  const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
+  let rewardGranted = false
+  let rewardId: string | null = null
+  let rewardBadgeId: string | null = null
+  if (reward) {
+    rewardId = reward.id
+    rewardBadgeId = reward.badgeId
+    const granted = await grantBadgeWithTransaction(tx, {
+      userId: current.userId,
+      badgeId: reward.badgeId,
+      sourceType: 'ACTIVITY_VERIFICATION',
+      sourceId: activity.id,
+      grantReason: `活动「${activity.title}」完成现场核销`,
+      actorId: input.adminId,
+      availabilityMode: 'ADMIN_MANUAL',
+    })
+    rewardGranted = granted.created
+  }
+  await createAdminActionAudit(tx, {
+    operatorId: input.adminId,
+    action: 'CREATE_ACTIVITY',
+    operationType: adminAuditOperations.ACTIVITY_REGISTRATION_VERIFY,
+    targetType: 'ACTIVITY_REGISTRATION',
+    targetId: current.id,
+    targetTitle: activity.title,
+    targetUserId: current.userId,
+    metadata: { activityId: activity.id, registrationId: current.id, rewardId, method: input.method, rewardBadgeId, rewardGranted, linkedMaterialRedemptionId: linkedMaterial.orderId, linkedMaterialRedeemed: linkedMaterial.changed } as Prisma.InputJsonValue,
+  })
+  return { alreadyVerified: false, registrationId: current.id, verifiedAt: verifiedAt.toISOString(), verificationMethod: input.method, checkInSource: input.method, rewardGranted, linkedMaterialRedemptionId: linkedMaterial.orderId, linkedMaterialRedeemed: linkedMaterial.changed }
+}
+
+export async function verifyActivityRegistration(input: ActivityVerificationTransactionInput) {
+  return prismaTransaction((tx) => verifyActivityRegistrationInTransaction(tx, input))
+}
+
+export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.TransactionClient, registrationId: string, now = new Date()) {
+  const initial = await tx.activityRegistration.findUnique({ where: { id: registrationId }, select: { activityId: true } })
+  if (!initial) return { processed: false, reason: 'NOT_FOUND' as const }
+  await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${initial.activityId} FOR UPDATE`
+  await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registrationId} FOR UPDATE`
+  const registration = await tx.activityRegistration.findUnique({ where: { id: registrationId }, select: verificationRegistrationSelect })
+  const activity = await tx.activity.findUnique({ where: { id: initial.activityId }, select: { id: true, title: true, endsAt: true, ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true } } } })
+  if (!registration || !activity) return { processed: false, reason: 'NOT_FOUND' as const }
+  if (registration.status === 'CANCELLED') return { processed: false, reason: 'CANCELLED' as const }
+  if (registration.verifiedAt) return { processed: false, reason: 'ALREADY_VERIFIED' as const }
+  if (!activity.endsAt || activity.endsAt >= now) return { processed: false, reason: 'NOT_ENDED' as const }
+  const linkedMaterial = await redeemLinkedMaterialInTransaction(tx, registration, '', 'ACTIVITY_AUTO_CHECK_IN', now)
+  await tx.activityRegistration.update({ where: { id: registration.id }, data: { verifiedAt: now, checkedInAt: now, verifiedById: null, verificationMethod: null, checkInSource: 'AUTO_AFTER_ACTIVITY_END' }, select: { id: true } })
+  const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
+  let rewardGranted = false
+  if (reward) {
+    const granted = await grantBadgeWithTransaction(tx, {
+      userId: registration.userId,
+      badgeId: reward.badgeId,
+      sourceType: 'ACTIVITY_VERIFICATION',
+      sourceId: activity.id,
+      grantReason: `活动「${activity.title}」结束后自动完成核销`,
+      availabilityMode: 'ADMIN_MANUAL',
+    })
+    rewardGranted = granted.created
+  }
+  return { processed: true, registrationId: registration.id, activityId: activity.id, linkedMaterialRedemptionId: linkedMaterial.orderId, rewardGranted }
+}
+
+export async function autoCheckInEndedActivityRegistrations(options: { activityId?: string; batchSize?: number; now?: Date } = {}) {
+  const now = options.now || new Date()
+  const batchSize = Math.min(Math.max(options.batchSize || 100, 1), 500)
+  const candidates = await prisma.activityRegistration.findMany({
+    where: {
+      ...(options.activityId ? { activityId: options.activityId } : {}),
+      status: 'ACTIVE',
+      verifiedAt: null,
+      Activity: { endsAt: { lt: now } },
+    },
+    orderBy: [{ registeredAt: 'asc' }, { id: 'asc' }],
+    take: batchSize,
+    select: { id: true },
+  })
+  let processed = 0
+  let failed = 0
+  for (const candidate of candidates) {
+    try {
+      const result = await prismaTransaction((tx) => autoCheckInActivityRegistrationInTransaction(tx, candidate.id, now))
+      if (result.processed) processed += 1
+    } catch (error) {
+      failed += 1
+      console.error('[activities.auto-check-in]', { registrationId: candidate.id, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { scanned: candidates.length, processed, failed }
 }
 
 async function prismaTransaction<T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) {

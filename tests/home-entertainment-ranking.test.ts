@@ -96,7 +96,7 @@ test('首页消费历史四模式 service，区分查询失败并使用 no-store
   const route = source('app/api/home/entertainment-ranking/route.ts')
   const styles = source('app/globals.css')
 
-  assert.match(homeData, /getGuessSongModeHighScores\(userId\)/)
+  assert.match(homeData, /getGuessSongModeHighScores\(\)/)
   assert.doesNotMatch(homeData, /getGuessSongPersonalBest\(\{ userId, mode:/)
   assert.match(service, /periodKey: 'ALL'/)
   assert.match(service, /emptyGuessSongModeHighScores\('unavailable'\)/)
@@ -108,5 +108,5 @@ test('首页消费历史四模式 service，区分查询失败并使用 no-store
   assert.match(surface, /status === 'unavailable'/)
   assert.match(route, /dynamic = 'force-dynamic'/)
   assert.match(route, /Cache-Control.*no-store/)
-  assert.match(styles, /home-entertainment-score-username[^\n]*text-overflow:ellipsis/)
+  assert.match(styles, /home-entertainment-score-name[^\n]*text-overflow:ellipsis/)
 })

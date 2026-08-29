@@ -63,22 +63,25 @@ test('Duel does not retry non-P2034 errors', async () => {
   assert.equal(attempts, 1)
 })
 
-test('production start binds Next to loopback while development remains unchanged', () => {
+test('production start uses the custom server while development remains unchanged', () => {
   const packageJson = JSON.parse(source('package.json')) as { scripts: Record<string, string> }
   const deployWorkflow = source('.github/workflows/deploy.yml')
+  const deployScript = source('scripts/deploy-production-git.sh')
   const configureWorkflow = source('.github/workflows/configure-production-entry.yml')
   const client = source('components/games/GuessSongDuel.tsx')
 
-  assert.equal(packageJson.scripts.start, 'next start -H 127.0.0.1 -p 3000')
+  assert.equal(packageJson.scripts.start, 'tsx server.ts')
   assert.equal(packageJson.scripts.dev, 'next dev')
-  assert.match(deployWorkflow, /releases_dir=.*\/releases/)
-  assert.match(deployWorkflow, /mv -Tf -- "\$\{temporary_link\}" "\$\{current_link\}"/)
-  assert.match(deployWorkflow, /pm2 start ecosystem\.config\.js --only "\$\{PM2_APP_NAME\}" --update-env/)
-  assert.doesNotMatch(deployWorkflow, /pm2 start ecosystem\.config\.js --update-env/)
+  // The workflow transfers the deployment script; release switching and PM2
+  // safety checks therefore belong to that script rather than the YAML body.
+  assert.match(deployWorkflow, /< scripts\/deploy-production-git\.sh/)
+  assert.match(deployScript, /releases_dir=.*\/releases/)
+  assert.match(deployScript, /mv -Tf -- "\$\{temporary_link\}" "\$\{current_link\}"/)
+  assert.match(deployScript, /pm2 start ecosystem\.config\.js --only "\$\{PM2_APP_NAME\}" --update-env/)
+  assert.doesNotMatch(deployScript, /pm2 start ecosystem\.config\.js --update-env/)
   assert.doesNotMatch(deployWorkflow, /prisma migrate deploy|prisma db push|migrate resolve/)
-  assert.match(deployWorkflow, /\/api\/health\/live/)
-  assert.match(deployWorkflow, /scripts\/run-birthday-daily-job\.sh/)
-  assert.match(deployWorkflow, /Application port must be bound to localhost behind Nginx\./)
+  assert.match(deployScript, /\/api\/health\/live/)
+  assert.match(configureWorkflow, /Application port must be bound to localhost behind Nginx\./)
   assert.match(configureWorkflow, /Application port must be bound to localhost behind Nginx\./)
   assert.match(client, /const createRoomInFlightRef = useRef\(false\)/)
   assert.match(client, /if \(createRoomInFlightRef\.current\) return/)

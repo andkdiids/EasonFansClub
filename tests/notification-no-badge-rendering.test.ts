@@ -49,7 +49,8 @@ test('通知 actor 名称由服务端按好友备注优先、昵称回退解析'
   assert.match(service, /loadFriendRemarkMap\(userId, actorIds\)/)
   assert.match(service, /getFriendDisplayName\(/)
   assert.match(service, /actorName: actorDisplayName/)
-  assert.match(remarks, /return isFriendContext && remark \? remark : publicName/)
+  assert.match(remarks, /getFriendDisplayName/)
+  assert.match(read('lib/friend-display-name.ts'), /return isFriendContext && remark \? remark : publicName/)
 })
 
 test('通知头像资料卡与正文目标交互仍保留', () => {

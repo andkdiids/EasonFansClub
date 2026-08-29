@@ -13,6 +13,9 @@ export type ActivityEditableValues = {
   locationName: string | null
   locationAddress: string | null
   onlineUrl: string | null
+  registrationFee: number
+  feeDescription: string | null
+  linkedMaterialId: string | null
   startsAt: Date | null
   endsAt: Date | null
   registrationStartAt: Date | null
@@ -121,6 +124,8 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
 
   const onlineUrl = parseUrl(recordValue(body, 'onlineUrl', existing?.onlineUrl), '线上活动链接')
   if (onlineUrl.message) return { valid: false, message: onlineUrl.message }
+  const registrationFee = parseNullableInteger(recordValue(body, 'registrationFee', existing?.registrationFee ?? 0), '报名挂号费', 0)
+  if (registrationFee.message) return { valid: false, message: registrationFee.message }
 
   const value: ActivityEditableValues = {
     title,
@@ -133,6 +138,9 @@ export function normalizeActivityInput(bodyValue: unknown, existing?: ActivityEd
     locationName: nullableText(recordValue(body, 'locationName', existing?.locationName), 300),
     locationAddress: nullableText(recordValue(body, 'locationAddress', existing?.locationAddress), 500),
     onlineUrl: onlineUrl.value,
+    registrationFee: registrationFee.value ?? 0,
+    feeDescription: nullableText(recordValue(body, 'feeDescription', existing?.feeDescription), 2_000),
+    linkedMaterialId: nullableText(recordValue(body, 'linkedMaterialId', existing?.linkedMaterialId), 191),
     startsAt: starts.value ?? (recordValue(body, 'startsAt', undefined) === undefined ? existing?.startsAt ?? null : null),
     endsAt: ends.value ?? (recordValue(body, 'endsAt', undefined) === undefined ? existing?.endsAt ?? null : null),
     registrationStartAt: registrationStart.value ?? (recordValue(body, 'registrationStartAt', undefined) === undefined ? existing?.registrationStartAt ?? null : null),

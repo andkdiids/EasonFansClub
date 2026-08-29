@@ -178,8 +178,9 @@ export function parseDateInput(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
-export function isMaterialRedemptionRuleType(value: unknown): value is 'NONE' | 'REGISTER_DAYS' | 'CHECKIN_TOTAL' | 'CHECKIN_STREAK' | 'HAS_BADGE' | 'ATTENDED_CONCERT' | 'SPECIFIC_USER' {
+export function isMaterialRedemptionRuleType(value: unknown): value is 'NONE' | 'ACTIVITY_REGISTRATION_REQUIRED' | 'REGISTER_DAYS' | 'CHECKIN_TOTAL' | 'CHECKIN_STREAK' | 'HAS_BADGE' | 'ATTENDED_CONCERT' | 'SPECIFIC_USER' {
   return value === 'NONE'
+    || value === 'ACTIVITY_REGISTRATION_REQUIRED'
     || value === 'REGISTER_DAYS'
     || value === 'CHECKIN_TOTAL'
     || value === 'CHECKIN_STREAK'

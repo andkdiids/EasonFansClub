@@ -116,7 +116,8 @@ test('默认好友按 90 天提及频次、最近提及和最近互动排序', (
 })
 
 test('UID 搜索选择后只插入 @昵称并提交稳定 userId', () => {
-  assert.match(mentionInput, /displayText = `@\$\{friend\.name\}`/)
+  assert.match(mentionInput, /const name = getFriendDisplayName\(/)
+  assert.match(mentionInput, /displayText = `@\$\{name\}`/)
   assert.match(mentionInput, /userId: friend\.id/)
   assert.doesNotMatch(mentionInput, /displayText = `@\$\{friend\.uid\}`/)
   assert.match(replyForm, /JSON\.stringify\(\{[\s\S]*content,[\s\S]*parentId: replyTo\?\.id,[\s\S]*imageUrls,[\s\S]*mentions,[\s\S]*stickerId:/)
@@ -135,7 +136,9 @@ test('提及关系和去重通知只在回复事务中写入', () => {
   assert.match(schema, /model ReplyMention/)
   assert.match(schema, /mentionedUserId\s+String/)
   assert.match(replyApi, /tx\.replyMention\.createMany/)
-  assert.match(replyApi, /tx\.notification\.createMany/)
+  assert.match(replyApi, /createManyNotifications\(\{ data: notificationData, skipDuplicates: true \}\)/)
+  assert.match(replyApi, /safeNotificationWrite\([\s\S]*createManyNotifications/)
+  assert.ok(replyApi.indexOf('() => createManyNotifications') > replyApi.indexOf('const notificationData'))
   assert.match(replyApi, /skipDuplicates: true/)
   assert.match(replyApi, /reply-mention:\$\{createdReply\.id\}:\$\{mention\.userId\}/)
 })

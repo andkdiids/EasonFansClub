@@ -543,6 +543,7 @@ async function fetchMediaWithValidatedRedirects(
   context: MediaFailureContext = {},
 ): Promise<MediaFetchResult> {
   const wait = options.retrySleepImpl || sleep
+  let lastFailure: InstagramMediaSafetyError | null = null
   for (let attempt = 0; attempt < MEDIA_MAX_ATTEMPTS; attempt += 1) {
     try {
       const result = await fetchMediaAttempt(sourceUrl, init, options, context)
@@ -556,11 +557,20 @@ async function fetchMediaWithValidatedRedirects(
       const failure = error instanceof InstagramMediaSafetyError
         ? error
         : withMediaFailureDiagnostics(error, options, sourceUrl, context, 0)
-      if (!isRetryableMediaFailure(failure) || attempt >= MEDIA_MAX_ATTEMPTS - 1) throw failure
+      lastFailure = failure.diagnostics
+        ? failure
+        : withMediaFailureDiagnostics(failure, options, sourceUrl, context, 0)
+      if (!isRetryableMediaFailure(lastFailure) || attempt >= MEDIA_MAX_ATTEMPTS - 1) throw lastFailure
       await wait(MEDIA_RETRY_DELAYS_MS[attempt]!)
     }
   }
-  throw new InstagramMediaSafetyError('MEDIA_REQUEST_FAILED', '媒体请求失败')
+  throw lastFailure || withMediaFailureDiagnostics(
+    new InstagramMediaSafetyError('MEDIA_REQUEST_FAILED', '媒体请求失败'),
+    options,
+    sourceUrl,
+    context,
+    0,
+  )
 }
 
 async function inspectResponse(media: Pick<InstagramMedia, 'sourceUrl' | 'type'>, init: RequestInit, options: MediaRequestOptions, method: MediaInspection['method'], redirectOffset = 0) {

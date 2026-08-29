@@ -16,12 +16,12 @@ test('tour cover upload survives save and remains available to the tour list', (
     manager,
     /onUploaded=\{\(url\) => \{[\s\S]*setForm\(\(current\) => \(\{ \.\.\.current, coverUrl: url \}\)\)/,
   )
-  assert.match(manager, /body: JSON\.stringify\(form\)/)
+  assert.match(manager, /body: JSON\.stringify\(body\)/)
   assert.match(manager, /tour\.posterUrl \? <Image/)
 
   assert.match(
     createRoute,
-    /posterUrl: sanitizeText\(body\?\.coverUrl \?\? body\?\.posterUrl, 1000\) \|\| null/,
+    /posterUrl: toPublicMediaUrl\(sanitizeText\(body\?\.coverUrl \?\? body\?\.posterUrl, 1000\)\) \|\| null/,
   )
   assert.match(updateRoute, /'coverUrl' in body \|\| 'posterUrl' in body/)
   assert.match(updateRoute, /\.\.\.\(hasCoverUrl \? \{ posterUrl \} : \{\}\)/)

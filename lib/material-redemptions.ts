@@ -23,11 +23,14 @@ import {
 } from '@/lib/material-redemption-domain'
 import { sanitizeText } from '@/lib/security'
 import { createNotification } from '@/lib/notification-write'
+import { autoCheckInActivityRegistrationInTransaction, verifyActivityRegistrationInTransaction } from '@/lib/activity-registration'
+import { ACTIVITY_MATERIAL_RULE, activityMaterialSchedule, isActivityMaterialRule, ActivityMaterialConfigurationError } from '@/lib/activity-material'
 
 export const MATERIAL_REDEMPTION_PERMISSION = 'material_redemption_manage' as const
 
 export const materialRuleTypeLabels = {
   NONE: '无门槛',
+  ACTIVITY_REGISTRATION_REQUIRED: '需报名指定活动',
   REGISTER_DAYS: '注册满指定天数',
   CHECKIN_TOTAL: '累计挂号天数',
   CHECKIN_STREAK: '连续挂号天数',
@@ -48,6 +51,17 @@ export const materialOrderStatusLabels = {
   CANCELLED: '兑换已取消',
   EXPIRED: '已超过核销截止时间',
   REFUNDED: '已退款，兑换码无效',
+} as const
+
+export const materialOrderSourceLabels = {
+  MANUAL: '普通兑换',
+  ACTIVITY_REGISTRATION_AUTO: '活动报名自动兑换',
+} as const
+
+export const materialOrderRedemptionSourceLabels = {
+  MANUAL: '物料码核销',
+  ACTIVITY_CHECK_IN: '活动核销联动',
+  ACTIVITY_AUTO_CHECK_IN: '活动结束自动核销',
 } as const
 
 type MaterialRuleType = keyof typeof materialRuleTypeLabels
@@ -75,24 +89,38 @@ export class MaterialRedemptionError extends Error {
 
 type MaterialDb = Prisma.TransactionClient | PrismaClient
 
-type MaterialWithRules = Prisma.MaterialRedemptionGetPayload<{
-  include: { rules: { orderBy: { sortOrder: 'asc' } } }
-}>
+const materialWithRulesInclude = {
+  rules: { orderBy: { sortOrder: 'asc' as const } },
+  linkedActivity: { select: { id: true, title: true, status: true, startsAt: true, endsAt: true, registrationFee: true } },
+} satisfies Prisma.MaterialRedemptionInclude
+
+type MaterialWithRules = Prisma.MaterialRedemptionGetPayload<{ include: typeof materialWithRulesInclude }>
 
 const materialOrderInclude = {
-  material: true,
+  material: { include: { linkedActivity: { select: { id: true, title: true, startsAt: true, endsAt: true, registrationFee: true } } } },
   user: { select: { id: true, uid: true, nickname: true, username: true } },
   redeemedByAdmin: { select: { id: true, uid: true, nickname: true, username: true } },
+  linkedActivity: { select: { id: true, title: true, startsAt: true, endsAt: true, registrationFee: true } },
+  linkedRegistration: { select: { id: true, activityId: true, status: true, registeredAt: true, cancelledAt: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
 } satisfies Prisma.MaterialRedemptionOrderInclude
 
 type MaterialOrderWithRelations = Prisma.MaterialRedemptionOrderGetPayload<{
   include: typeof materialOrderInclude
 }>
 
+function materialOrderSchedule(order: Pick<MaterialOrderWithRelations, 'material' | 'linkedActivity'>): MaterialRedemptionSchedule {
+  if (order.linkedActivity) {
+    const inherited = activityMaterialSchedule(order.linkedActivity.startsAt, order.linkedActivity.endsAt)
+    if (inherited) return inherited
+  }
+  return materialScheduleFromRow(order.material)
+}
+
 function getRuleReferenceType(type: MaterialRuleType) {
   if (type === 'HAS_BADGE') return 'badge'
   if (type === 'ATTENDED_CONCERT') return 'concert'
   if (type === 'SPECIFIC_USER') return 'user'
+  if (type === 'ACTIVITY_REGISTRATION_REQUIRED') return 'activity'
   return null
 }
 
@@ -139,11 +167,40 @@ async function validateRuleReferences(db: MaterialDb, rules: readonly MaterialRu
     } else if (referenceType === 'user') {
       const user = await db.user.findFirst({ where: { id: rule.value, status: 'ACTIVE', isDeleted: false }, select: { id: true } })
       if (!user) throw new MaterialRedemptionError('INVALID_RULE_REFERENCE', '指定用户不存在或已停用', 400)
+    } else if (referenceType === 'activity') {
+      const activity = await db.activity.findFirst({ where: { id: rule.value }, select: { id: true, startsAt: true, endsAt: true, status: true } })
+      if (!activity) throw new MaterialRedemptionError('INVALID_RULE_REFERENCE', '指定活动不存在', 400)
+      if (!activity.startsAt || !activity.endsAt || activity.endsAt <= activity.startsAt) throw new MaterialRedemptionError('INVALID_RULE_REFERENCE', '指定活动必须先设置有效的开始和结束时间', 400)
     }
   }
 }
 
-function normalizeMaterialDraft(body: Record<string, unknown>, existing?: { stockTotal: number; stockRemaining: number }) {
+type MaterialDraftData = {
+  title: string
+  description: string
+  coverImageUrl: string | null
+  instructions: string | null
+  cost: number
+  stockTotal: number
+  perUserLimit: number
+  exchangeStartAt: Date | null
+  exchangeEndAt: Date | null
+  redeemEndAt: Date | null
+  status: MaterialRedemptionStatusValue | undefined
+  redemptionRule: 'DEFAULT' | typeof ACTIVITY_MATERIAL_RULE
+  linkedActivityId: string | null
+  rules: MaterialRuleInput[]
+}
+
+type MaterialDraftExisting = { stockTotal: number; stockRemaining: number; redemptionRule?: string; linkedActivityId?: string | null }
+
+type ResolvedMaterialDraftData = Omit<MaterialDraftData, 'exchangeStartAt' | 'exchangeEndAt' | 'redeemEndAt'> & {
+  exchangeStartAt: Date
+  exchangeEndAt: Date
+  redeemEndAt: Date
+}
+
+function normalizeMaterialDraft(body: Record<string, unknown>, existing?: MaterialDraftExisting) {
   const title = sanitizeText(body.title, 100)
   const description = sanitizeText(body.description, 5000)
   const coverImageUrl = sanitizeText(body.coverImageUrl, 1000) || null
@@ -155,19 +212,33 @@ function normalizeMaterialDraft(body: Record<string, unknown>, existing?: { stoc
   const exchangeEndAt = parseDateInput(body.exchangeEndAt)
   const redeemEndAt = parseDateInput(body.redeemEndAt)
   const status = body.status === undefined ? existing ? undefined : 'DRAFT' : body.status
+  const explicitRuleMode = Object.prototype.hasOwnProperty.call(body, 'redemptionRule')
+  const rawRuleMode = body.redemptionRule === undefined ? existing?.redemptionRule || 'DEFAULT' : body.redemptionRule
+  const redemptionRule = rawRuleMode === 'DEFAULT' || rawRuleMode === ACTIVITY_MATERIAL_RULE ? rawRuleMode : null
+  const linkedActivityId = sanitizeText(body.linkedActivityId === undefined ? existing?.linkedActivityId : body.linkedActivityId, 191) || null
   if (!title) return { error: '请填写物料标题' } as const
   if (!description) return { error: '请填写物料说明' } as const
   if (cost < 0) return { error: '兑换所需挂号费必须是非负整数' } as const
   if (stockTotal < 0) return { error: '库存必须是非负整数' } as const
   if (perUserLimit < 1) return { error: '每位用户限兑数量必须至少为 1' } as const
-  if (!exchangeStartAt || !exchangeEndAt || !redeemEndAt) return { error: '请填写完整的兑换和核销时间' } as const
-  const schedule = { exchangeStartAt, exchangeEndAt, redeemEndAt }
-  const scheduleError = validateMaterialRedemptionSchedule(schedule)
-  if (scheduleError) return { error: scheduleError } as const
+  if (!redemptionRule) return { error: '兑换条件类型无效' } as const
   if (existing && stockTotal < existing.stockTotal - existing.stockRemaining) return { error: '库存总量不能低于已兑换数量' } as const
   if (status !== undefined && !['DRAFT', 'PUBLISHED', 'PAUSED', 'ENDED', 'ARCHIVED'].includes(String(status))) return { error: '物料状态无效' } as const
   const parsedRules = normalizeMaterialRules(body.rules ?? [])
   if ('error' in parsedRules) return parsedRules
+  const activityRule = parsedRules.rules.find((rule) => rule.type === ACTIVITY_MATERIAL_RULE)
+  const activityMode = redemptionRule === ACTIVITY_MATERIAL_RULE || (!explicitRuleMode && Boolean(activityRule))
+  if (activityMode && !linkedActivityId && !activityRule?.value) return { error: '请选择指定活动' } as const
+  if (!activityMode && (linkedActivityId || activityRule)) return { error: '指定活动物料必须选择“需报名指定活动”' } as const
+  const resolvedActivityId = activityMode ? linkedActivityId || activityRule!.value : null
+  const rules = activityMode
+    ? [{ type: ACTIVITY_MATERIAL_RULE as MaterialRuleType, operator: 'EQ' as const, value: resolvedActivityId! }]
+    : parsedRules.rules
+  if (!activityMode) {
+    if (!exchangeStartAt || !exchangeEndAt || !redeemEndAt) return { error: '请填写完整的兑换和核销时间' } as const
+    const scheduleError = validateMaterialRedemptionSchedule({ exchangeStartAt, exchangeEndAt, redeemEndAt })
+    if (scheduleError) return { error: scheduleError } as const
+  }
   return {
     data: {
       title,
@@ -181,17 +252,42 @@ function normalizeMaterialDraft(body: Record<string, unknown>, existing?: { stoc
       exchangeEndAt,
       redeemEndAt,
       status: status as MaterialRedemptionStatusValue | undefined,
-      rules: parsedRules.rules,
+      redemptionRule: activityMode ? ACTIVITY_MATERIAL_RULE : 'DEFAULT',
+      linkedActivityId: resolvedActivityId,
+      rules,
     },
   } as const
 }
 
-export function materialScheduleFromRow(row: Pick<MaterialWithRules, 'exchangeStartAt' | 'exchangeEndAt' | 'redeemEndAt'>): MaterialRedemptionSchedule {
+async function resolveMaterialDraftSchedule(db: MaterialDb, data: MaterialDraftData): Promise<ResolvedMaterialDraftData> {
+  if (data.redemptionRule === ACTIVITY_MATERIAL_RULE) {
+    const activity = await db.activity.findUnique({ where: { id: data.linkedActivityId || '' }, select: { id: true, title: true, startsAt: true, endsAt: true } })
+    if (!activity) throw new MaterialRedemptionError('INVALID_RULE_REFERENCE', '指定活动不存在', 400)
+    const schedule = activityMaterialSchedule(activity.startsAt, activity.endsAt)
+    if (!schedule) throw new MaterialRedemptionError('INVALID_RULE_REFERENCE', '指定活动必须先设置有效的开始和结束时间', 400)
+    return { ...data, exchangeStartAt: schedule.exchangeStartAt, exchangeEndAt: schedule.exchangeEndAt, redeemEndAt: schedule.redeemEndAt }
+  }
+  if (!data.exchangeStartAt || !data.exchangeEndAt || !data.redeemEndAt) throw new MaterialRedemptionError('INVALID_MATERIAL', '请填写完整的兑换和核销时间', 400)
+  const scheduleError = validateMaterialRedemptionSchedule({ exchangeStartAt: data.exchangeStartAt, exchangeEndAt: data.exchangeEndAt, redeemEndAt: data.redeemEndAt })
+  if (scheduleError) throw new MaterialRedemptionError('INVALID_MATERIAL', scheduleError, 400)
+  return data as ResolvedMaterialDraftData
+}
+
+type MaterialScheduleRow = Pick<MaterialWithRules, 'exchangeStartAt' | 'exchangeEndAt' | 'redeemEndAt' | 'redemptionRule' | 'linkedActivityId'> & {
+  linkedActivity?: { startsAt: Date | null; endsAt: Date | null } | null
+}
+
+export function materialScheduleFromRow(row: MaterialScheduleRow): MaterialRedemptionSchedule {
+  if (isActivityMaterialRule(row.redemptionRule) && row.linkedActivity) {
+    const inherited = activityMaterialSchedule(row.linkedActivity.startsAt, row.linkedActivity.endsAt)
+    if (inherited) return inherited
+  }
   return { exchangeStartAt: row.exchangeStartAt, exchangeEndAt: row.exchangeEndAt, redeemEndAt: row.redeemEndAt }
 }
 
 export function serializePublicMaterial(material: MaterialWithRules, now = new Date()) {
-  const state = getMaterialExchangeState(material.status, materialScheduleFromRow(material), now)
+  const schedule = materialScheduleFromRow(material)
+  const state = getMaterialExchangeState(material.status, schedule, now)
   return {
     id: material.id,
     title: material.title,
@@ -202,15 +298,26 @@ export function serializePublicMaterial(material: MaterialWithRules, now = new D
     stockTotal: material.stockTotal,
     stockRemaining: material.stockRemaining,
     perUserLimit: material.perUserLimit,
-    exchangeStartAt: material.exchangeStartAt.toISOString(),
-    exchangeEndAt: material.exchangeEndAt.toISOString(),
-    redeemEndAt: material.redeemEndAt.toISOString(),
+    exchangeStartAt: schedule.exchangeStartAt.toISOString(),
+    exchangeEndAt: schedule.exchangeEndAt.toISOString(),
+    redeemEndAt: schedule.redeemEndAt.toISOString(),
     status: material.status,
+    redemptionRule: material.redemptionRule,
+    linkedActivityId: material.linkedActivityId,
+    linkedActivity: material.linkedActivity ? {
+      id: material.linkedActivity.id,
+      title: material.linkedActivity.title,
+      startsAt: material.linkedActivity.startsAt?.toISOString() || null,
+      endsAt: material.linkedActivity.endsAt?.toISOString() || null,
+      registrationFee: material.linkedActivity.registrationFee,
+    } : null,
+    isActivityBound: isActivityMaterialRule(material.redemptionRule) && Boolean(material.linkedActivityId),
     state,
     stateLabel: getMaterialExchangeStateLabel(state),
     publishedAt: material.publishedAt?.toISOString() || null,
     rules: material.rules
       .filter((rule) => rule.type !== 'NONE')
+      .filter((rule) => rule.type !== ACTIVITY_MATERIAL_RULE)
       .map((rule) => ({
         type: rule.type,
         operator: rule.operator,
@@ -296,7 +403,7 @@ export async function listPublicMaterialRedemptions(now = new Date()) {
     where: { status: { in: ['PUBLISHED', 'PAUSED', 'ENDED'] } },
     orderBy: [{ exchangeStartAt: 'desc' }, { createdAt: 'desc' }],
     take: 100,
-    include: { rules: { orderBy: { sortOrder: 'asc' } } },
+    include: materialWithRulesInclude,
   })
   return materials.map((material) => serializePublicMaterial(material, now))
 }
@@ -304,23 +411,65 @@ export async function listPublicMaterialRedemptions(now = new Date()) {
 export async function getPublicMaterialRedemption(materialId: string, userId?: string, now = new Date()) {
   const material = await prisma.materialRedemption.findFirst({
     where: { id: materialId, status: { in: ['PUBLISHED', 'PAUSED', 'ENDED'] } },
-    include: { rules: { orderBy: { sortOrder: 'asc' } } },
+    include: materialWithRulesInclude,
   })
   if (!material) return null
   const response: Record<string, unknown> = serializePublicMaterial(material, now)
   if (userId) {
-    const eligibility = await evaluateMaterialEligibility(prisma, userId, material.rules, now)
-    const priorQuantity = await getUserMaterialQuantity(prisma, material.id, userId)
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { points: true } })
     const currentBalance = user?.points ?? 0
-    response.eligibility = {
-      qualified: eligibility.qualified,
-      reasons: eligibility.reasons,
-      progress: eligibility.snapshot.rules.filter((rule) => rule.type !== 'NONE').map((rule) => ({ type: rule.type, operator: rule.operator, actual: rule.actual, qualified: rule.qualified })),
-      priorQuantity,
-      remainingUserQuota: Math.max(0, material.perUserLimit - priorQuantity),
-      balanceEnough: currentBalance >= material.cost,
-      canExchange: canExchangeMaterial(material.status, materialScheduleFromRow(material), now) && eligibility.qualified && material.stockRemaining > 0 && currentBalance >= material.cost,
+    if (isActivityMaterialRule(material.redemptionRule) && material.linkedActivityId && material.linkedActivity) {
+      const registration = await prisma.activityRegistration.findUnique({
+        where: { activityId_userId: { activityId: material.linkedActivityId, userId } },
+        select: {
+          id: true,
+          status: true,
+          paidRegistrationFee: true,
+          verifiedAt: true,
+          checkedInAt: true,
+          checkInSource: true,
+          LinkedMaterialRedemption: { select: { id: true, status: true, redeemCode: true, redeemedAt: true } },
+        },
+      })
+      const linkedOrder = registration?.LinkedMaterialRedemption || null
+      const activeRegistration = registration?.status === 'ACTIVE'
+      const priorQuantity = linkedOrder && ['SUCCESS', 'REDEEMED'].includes(linkedOrder.status) ? 1 : 0
+      const reasons = registration?.status === 'CANCELLED'
+        ? ['你已取消过本活动报名，无法再次报名']
+        : activeRegistration
+          ? linkedOrder ? ['已通过活动报名自动兑换'] : ['报名成功后将自动兑换']
+          : [`需报名「${material.linkedActivity.title}」后自动兑换`]
+      response.activityRegistration = registration ? {
+        id: registration.id,
+        status: registration.status,
+        paidRegistrationFee: registration.paidRegistrationFee,
+        verifiedAt: registration.verifiedAt?.toISOString() || null,
+        checkedInAt: registration.checkedInAt?.toISOString() || null,
+        checkInSource: registration.checkInSource,
+        linkedMaterialRedemption: linkedOrder ? { ...linkedOrder, redeemedAt: linkedOrder.redeemedAt?.toISOString() || null } : null,
+      } : null
+      response.eligibility = {
+        qualified: activeRegistration,
+        reasons,
+        progress: [{ type: ACTIVITY_MATERIAL_RULE, operator: 'EQ', actual: activeRegistration, qualified: activeRegistration }],
+        priorQuantity,
+        remainingUserQuota: Math.max(0, material.perUserLimit - priorQuantity),
+        balanceEnough: currentBalance >= material.linkedActivity.registrationFee,
+        // Activity-bound material is never exchanged from the material page.
+        canExchange: false,
+      }
+    } else {
+      const eligibility = await evaluateMaterialEligibility(prisma, userId, material.rules, now)
+      const priorQuantity = await getUserMaterialQuantity(prisma, material.id, userId)
+      response.eligibility = {
+        qualified: eligibility.qualified,
+        reasons: eligibility.reasons,
+        progress: eligibility.snapshot.rules.filter((rule) => rule.type !== 'NONE').map((rule) => ({ type: rule.type, operator: rule.operator, actual: rule.actual, qualified: rule.qualified })),
+        priorQuantity,
+        remainingUserQuota: Math.max(0, material.perUserLimit - priorQuantity),
+        balanceEnough: currentBalance >= material.cost,
+        canExchange: canExchangeMaterial(material.status, materialScheduleFromRow(material), now) && eligibility.qualified && material.stockRemaining > 0 && currentBalance >= material.cost,
+      }
     }
     response.currentBalance = currentBalance
   }
@@ -331,7 +480,7 @@ export async function listAdminMaterialRedemptions() {
   const [materials, redeemedStats] = await Promise.all([
     prisma.materialRedemption.findMany({
       orderBy: [{ createdAt: 'desc' }],
-      include: { rules: { orderBy: { sortOrder: 'asc' } } },
+      include: materialWithRulesInclude,
     }),
     prisma.materialRedemptionOrder.groupBy({
       by: ['materialId'],
@@ -347,14 +496,19 @@ export async function createMaterialRedemption(adminId: string, body: Record<str
   const parsed = normalizeMaterialDraft(body)
   if ('error' in parsed) throw new MaterialRedemptionError('INVALID_MATERIAL', parsed.error || '物料参数无效', 400)
   const data = parsed.data
-  const initialStatus = data.status || 'DRAFT'
+  const initialStatus = parsed.data.status || 'DRAFT'
   if (initialStatus === 'PUBLISHED') {
     if (!data.coverImageUrl) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前请上传物料图片', 400)
     if (data.stockTotal < 1) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前库存总量必须大于 0', 400)
     if (!data.instructions) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前请填写兑换说明', 400)
   }
   const material = await prisma.$transaction(async (tx) => {
+    const data = await resolveMaterialDraftSchedule(tx, parsed.data)
     await validateRuleReferences(tx, data.rules)
+    if (data.redemptionRule === ACTIVITY_MATERIAL_RULE && data.linkedActivityId) {
+      const occupied = await tx.materialRedemption.findFirst({ where: { linkedActivityId: data.linkedActivityId }, select: { id: true } })
+      if (occupied) throw new MaterialRedemptionError('ACTIVITY_MATERIAL_ALREADY_BOUND', '该活动已经绑定其他活动物料', 409)
+    }
     const created = await tx.materialRedemption.create({
       data: {
         title: data.title,
@@ -368,12 +522,14 @@ export async function createMaterialRedemption(adminId: string, body: Record<str
         exchangeStartAt: data.exchangeStartAt,
         exchangeEndAt: data.exchangeEndAt,
         redeemEndAt: data.redeemEndAt,
+        redemptionRule: data.redemptionRule,
+        linkedActivityId: data.linkedActivityId,
         status: initialStatus,
         publishedAt: initialStatus === 'PUBLISHED' ? new Date() : null,
         createdByAdminId: adminId,
         rules: { create: data.rules.map((rule, index) => ({ type: rule.type, operator: rule.operator, value: rule.value, sortOrder: index })) },
       },
-      include: { rules: { orderBy: { sortOrder: 'asc' } } },
+      include: materialWithRulesInclude,
     })
     await writeMaterialAdminLog(tx, {
       adminId,
@@ -386,21 +542,30 @@ export async function createMaterialRedemption(adminId: string, body: Record<str
 }
 
 export async function updateMaterialRedemption(adminId: string, materialId: string, body: Record<string, unknown>) {
-  const current = await prisma.materialRedemption.findUnique({ where: { id: materialId }, include: { rules: { orderBy: { sortOrder: 'asc' } } } })
+  const current = await prisma.materialRedemption.findUnique({ where: { id: materialId }, include: materialWithRulesInclude })
   if (!current) throw new MaterialRedemptionError('MATERIAL_NOT_FOUND', '物料不存在', 404)
-  const parsed = normalizeMaterialDraft(body, { stockTotal: current.stockTotal, stockRemaining: current.stockRemaining })
+  const parsed = normalizeMaterialDraft(body, { stockTotal: current.stockTotal, stockRemaining: current.stockRemaining, redemptionRule: current.redemptionRule, linkedActivityId: current.linkedActivityId })
   if ('error' in parsed) throw new MaterialRedemptionError('INVALID_MATERIAL', parsed.error || '物料参数无效', 400)
   const data = parsed.data
-  if (data.status === 'PUBLISHED') {
+  if (parsed.data.status === 'PUBLISHED') {
     if (!data.coverImageUrl) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前请上传物料图片', 400)
     if (data.stockTotal < 1) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前库存总量必须大于 0', 400)
     if (!data.instructions) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前请填写兑换说明', 400)
   }
   const material = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`MaterialRedemption\` WHERE \`id\` = ${materialId} FOR UPDATE`
-    const locked = await tx.materialRedemption.findUnique({ where: { id: materialId }, select: { id: true, status: true, title: true, stockTotal: true, stockRemaining: true, publishedAt: true } })
+    const locked = await tx.materialRedemption.findUnique({ where: { id: materialId }, select: { id: true, status: true, title: true, stockTotal: true, stockRemaining: true, publishedAt: true, redemptionRule: true, linkedActivityId: true } })
     if (!locked) throw new MaterialRedemptionError('MATERIAL_NOT_FOUND', '物料不存在', 404)
+    const data = await resolveMaterialDraftSchedule(tx, parsed.data)
     const nextStatus = data.status || locked.status
+    if (locked.redemptionRule !== ACTIVITY_MATERIAL_RULE && data.redemptionRule === ACTIVITY_MATERIAL_RULE) {
+      const existingOrders = await tx.materialRedemptionOrder.count({ where: { materialId } })
+      if (existingOrders > 0) throw new MaterialRedemptionError('INVALID_RULE_CHANGE', '已有普通兑换订单的物料不能直接改为活动报名物料', 409)
+    }
+    if (data.redemptionRule === ACTIVITY_MATERIAL_RULE && data.linkedActivityId) {
+      const occupied = await tx.materialRedemption.findFirst({ where: { linkedActivityId: data.linkedActivityId, id: { not: materialId } }, select: { id: true } })
+      if (occupied) throw new MaterialRedemptionError('ACTIVITY_MATERIAL_ALREADY_BOUND', '该活动已经绑定其他活动物料', 409)
+    }
     if (nextStatus === 'PUBLISHED') {
       if (!data.coverImageUrl) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前请上传物料图片', 400)
       if (data.stockTotal < 1) throw new MaterialRedemptionError('INVALID_MATERIAL', '发布物料前库存总量必须大于 0', 400)
@@ -426,10 +591,12 @@ export async function updateMaterialRedemption(adminId: string, materialId: stri
         exchangeStartAt: data.exchangeStartAt,
         exchangeEndAt: data.exchangeEndAt,
         redeemEndAt: data.redeemEndAt,
+        redemptionRule: data.redemptionRule,
+        linkedActivityId: data.linkedActivityId,
         status: nextStatus,
         publishedAt: nextStatus === 'PUBLISHED' ? locked.publishedAt || new Date() : locked.publishedAt,
       },
-      include: { rules: { orderBy: { sortOrder: 'asc' } } },
+      include: materialWithRulesInclude,
     })
     await tx.materialRedemptionRule.deleteMany({ where: { materialId } })
     if (data.rules.length) await tx.materialRedemptionRule.createMany({ data: data.rules.map((rule, index) => ({ materialId, type: rule.type, operator: rule.operator, value: rule.value, sortOrder: index })) })
@@ -453,7 +620,7 @@ export async function updateMaterialRedemption(adminId: string, materialId: stri
         stockRemainingAfter: updated.stockRemaining,
       },
     })
-    return tx.materialRedemption.findUniqueOrThrow({ where: { id: materialId }, include: { rules: { orderBy: { sortOrder: 'asc' } } } })
+    return tx.materialRedemption.findUniqueOrThrow({ where: { id: materialId }, include: materialWithRulesInclude })
   })
   return serializeAdminMaterial(material)
 }
@@ -548,6 +715,7 @@ async function expireOrders(db: MaterialDb, userId?: string) {
   await db.materialRedemptionOrder.updateMany({
     where: {
       status: 'SUCCESS',
+      source: 'MANUAL',
       ...(userId ? { userId } : {}),
       material: { redeemEndAt: { lt: now } },
     },
@@ -556,6 +724,8 @@ async function expireOrders(db: MaterialDb, userId?: string) {
 }
 
 function serializeOrder(order: MaterialOrderWithRelations, includePrivate = false) {
+  const schedule = materialOrderSchedule(order)
+  const linkedActivity = order.linkedActivity || order.material.linkedActivity
   return {
     id: order.id,
     materialId: order.materialId,
@@ -563,7 +733,9 @@ function serializeOrder(order: MaterialOrderWithRelations, includePrivate = fals
       id: order.material.id,
       title: order.material.title,
       coverImageUrl: publicImageUrl(order.material.coverImageUrl),
-      redeemEndAt: order.material.redeemEndAt.toISOString(),
+      exchangeStartAt: schedule.exchangeStartAt.toISOString(),
+      exchangeEndAt: schedule.exchangeEndAt.toISOString(),
+      redeemEndAt: schedule.redeemEndAt.toISOString(),
     },
     user: { id: order.user.id, uid: order.user.uid, nickname: order.user.nickname },
     quantity: order.quantity,
@@ -571,6 +743,26 @@ function serializeOrder(order: MaterialOrderWithRelations, includePrivate = fals
     totalCost: order.totalCost,
     status: order.status,
     statusLabel: materialOrderStatusLabels[order.status as keyof typeof materialOrderStatusLabels],
+    source: order.source,
+    sourceLabel: materialOrderSourceLabels[order.source],
+    linkedActivity: linkedActivity ? {
+      id: linkedActivity.id,
+      title: linkedActivity.title,
+      startsAt: linkedActivity.startsAt?.toISOString() || null,
+      endsAt: linkedActivity.endsAt?.toISOString() || null,
+    } : null,
+    redemptionSource: order.redemptionSource,
+    redemptionSourceLabel: order.redemptionSource ? materialOrderRedemptionSourceLabels[order.redemptionSource] : null,
+    linkedRegistration: order.linkedRegistration ? {
+      id: order.linkedRegistration.id,
+      activityId: order.linkedRegistration.activityId,
+      status: order.linkedRegistration.status,
+      registeredAt: order.linkedRegistration.registeredAt.toISOString(),
+      cancelledAt: order.linkedRegistration.cancelledAt?.toISOString() || null,
+      verifiedAt: order.linkedRegistration.verifiedAt?.toISOString() || null,
+      checkedInAt: order.linkedRegistration.checkedInAt?.toISOString() || null,
+      checkInSource: order.linkedRegistration.checkInSource,
+    } : null,
     redeemCode: order.redeemCode,
     ...(includePrivate ? { redeemToken: order.redeemToken, eligibilitySnapshot: order.eligibilitySnapshot } : {}),
     createdAt: order.createdAt.toISOString(),
@@ -618,11 +810,12 @@ export async function exchangeMaterialRedemption(userId: string, materialId: str
       }
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
       const [material, user] = await Promise.all([
-        tx.materialRedemption.findUnique({ where: { id: materialId }, include: { rules: { orderBy: { sortOrder: 'asc' } } } }),
+        tx.materialRedemption.findUnique({ where: { id: materialId }, include: materialWithRulesInclude }),
         tx.user.findUnique({ where: { id: userId }, select: { id: true, status: true, isDeleted: true, points: true } }),
       ])
       if (!material) throw new MaterialRedemptionError('MATERIAL_NOT_FOUND', '物料不存在', 404)
       if (!user || user.isDeleted || user.status !== 'ACTIVE') throw new MaterialRedemptionError('USER_NOT_ACTIVE', '当前账号不可兑换', 403)
+      if (isActivityMaterialRule(material.redemptionRule)) throw new MaterialRedemptionError('ACTIVITY_MATERIAL_AUTO_ONLY', '该物料需报名指定活动后自动兑换，请前往活动详情报名', 409)
       const schedule = materialScheduleFromRow(material)
       if (material.status === 'PAUSED') throw new MaterialRedemptionError('PAUSED', '该物料兑换已暂停')
       if (material.status !== 'PUBLISHED') throw new MaterialRedemptionError(material.status === 'DRAFT' ? 'NOT_PUBLISHED' : 'EXCHANGE_ENDED', '该物料当前不可兑换')
@@ -710,11 +903,16 @@ async function notifyMaterialOrder(userId: string, orderId: string, content: str
 export async function getAdminMaterialOrderPreview(token: string) {
   const order = await findMaterialOrderByRedeemIdentifier(prisma, token)
   if (!order) throw new MaterialRedemptionError('ORDER_NOT_FOUND', '兑换订单不存在', 404)
-  const expired = order.status === 'EXPIRED' || (order.status === 'SUCCESS' && !canRedeemMaterial(order.material.status, order.material.redeemEndAt))
+  const now = new Date()
+  const activityBound = order.source === 'ACTIVITY_REGISTRATION_AUTO'
+  const effectiveSchedule = materialOrderSchedule(order)
+  const notStarted = activityBound && order.status === 'SUCCESS' && now < effectiveSchedule.exchangeStartAt
+  const expired = !activityBound && (order.status === 'EXPIRED' || (order.status === 'SUCCESS' && !canRedeemMaterial(order.material.status, effectiveSchedule.redeemEndAt, now)))
   return {
     ...serializeOrder(order, false),
-    canRedeem: order.status === 'SUCCESS' && !expired,
+    canRedeem: order.status === 'SUCCESS' && !expired && !notStarted,
     expired,
+    notStarted,
     redeemTokenLast4: order.redeemToken.slice(-4),
   }
 }
@@ -724,11 +922,48 @@ export async function redeemMaterialOrder(adminId: string, token: string) {
   const result = await prisma.$transaction(async (tx) => {
     const order = await findMaterialOrderByRedeemIdentifier(tx, token)
     if (!order) throw new MaterialRedemptionError('ORDER_NOT_FOUND', '兑换订单不存在', 404)
-    if (order.status === 'REDEEMED') throw new MaterialRedemptionError('ALREADY_REDEEMED', '该兑换码已经核销', 409)
+    // Activity-bound orders are the second half of the one-scan operation.
+    // Re-scanning their material code must be idempotent just like
+    // re-scanning the activity code, while ordinary material orders retain
+    // their existing duplicate-scan error.
+    if (order.status === 'REDEEMED') {
+      if (order.source !== 'ACTIVITY_REGISTRATION_AUTO') throw new MaterialRedemptionError('ALREADY_REDEEMED', '该兑换码已经核销', 409)
+      return { expired: false as const, alreadyRedeemed: true, order }
+    }
     if (order.status !== 'SUCCESS') throw new MaterialRedemptionError('ORDER_NOT_REDEEMABLE', `该订单当前状态为${materialOrderStatusLabels[order.status as keyof typeof materialOrderStatusLabels] || order.status}`)
-    if (!canRedeemMaterial(order.material.status, order.material.redeemEndAt, now)) {
+
+    if (order.source === 'ACTIVITY_REGISTRATION_AUTO') {
+      const effectiveSchedule = materialOrderSchedule(order)
+      if (now < effectiveSchedule.exchangeStartAt) throw new MaterialRedemptionError('ACTIVITY_NOT_STARTED', '活动尚未开始，暂不能核销活动物料', 409)
+      const activityId = order.linkedActivityId || order.material.linkedActivity?.id
+      const registrationId = order.linkedRegistration?.id
+      if (!activityId || !registrationId) throw new MaterialRedemptionError('ACTIVITY_LINK_MISSING', '活动物料缺少报名关联记录，请联系管理员', 409)
+      const activityEndsAt = order.linkedActivity?.endsAt || order.material.linkedActivity?.endsAt
+      const verification = activityEndsAt && activityEndsAt < now
+        ? await autoCheckInActivityRegistrationInTransaction(tx, registrationId, now)
+        : await verifyActivityRegistrationInTransaction(tx, { activityId, registrationId, adminId, method: 'MANUAL', allowLinkedMaterial: true }, now)
+      if ('processed' in verification && !verification.processed && verification.reason !== 'ALREADY_VERIFIED') {
+        throw new MaterialRedemptionError('ACTIVITY_LINK_MISSING', '活动报名当前无法核销，请刷新后重试', 409)
+      }
+      if (!('processed' in verification) && !verification.alreadyVerified) {
+        await writeMaterialAdminLog(tx, {
+          adminId,
+          targetUserId: order.userId,
+          action: 'MATERIAL_REDEMPTION_REDEEM',
+          detail: { orderId: order.id, materialId: order.materialId, redeemCode: order.redeemCode, quantity: order.quantity, source: order.source, linkedActivityId: activityId, redemptionSource: verification.checkInSource === 'AUTO_AFTER_ACTIVITY_END' ? 'ACTIVITY_AUTO_CHECK_IN' : 'ACTIVITY_CHECK_IN' },
+        })
+      }
+      return {
+        expired: false as const,
+        alreadyRedeemed: 'alreadyVerified' in verification ? verification.alreadyVerified : verification.reason === 'ALREADY_VERIFIED',
+        order: await tx.materialRedemptionOrder.findUniqueOrThrow({ where: { id: order.id }, include: materialOrderInclude }),
+      }
+    }
+
+    const effectiveSchedule = materialScheduleFromRow(order.material)
+    if (!canRedeemMaterial(order.material.status, effectiveSchedule.redeemEndAt, now)) {
       await tx.materialRedemptionOrder.updateMany({ where: { id: order.id, status: 'SUCCESS' }, data: { status: 'EXPIRED', expiredAt: now } })
-      return { expired: true as const, order }
+      return { expired: true as const, alreadyRedeemed: false, order }
     }
     const changed = await tx.materialRedemptionOrder.updateMany({
       where: { id: order.id, status: 'SUCCESS' },
@@ -741,11 +976,11 @@ export async function redeemMaterialOrder(adminId: string, token: string) {
       action: 'MATERIAL_REDEMPTION_REDEEM',
       detail: { orderId: order.id, materialId: order.materialId, redeemCode: order.redeemCode, quantity: order.quantity },
     })
-    return { expired: false as const, order: await tx.materialRedemptionOrder.findUniqueOrThrow({ where: { id: order.id }, include: materialOrderInclude }) }
+    return { expired: false as const, alreadyRedeemed: false, order: await tx.materialRedemptionOrder.findUniqueOrThrow({ where: { id: order.id }, include: materialOrderInclude }) }
   })
   if (result.expired) throw new MaterialRedemptionError('REDEEM_EXPIRED', '该订单已经超过核销截止时间')
-  await notifyMaterialOrder(result.order.userId, result.order.id, `「${result.order.material.title}」已完成核销`, '物料已核销')
-  return serializeOrder(result.order, false)
+  if (!result.alreadyRedeemed) await notifyMaterialOrder(result.order.userId, result.order.id, `「${result.order.material.title}」已完成核销`, '物料已核销')
+  return { ...serializeOrder(result.order, false), alreadyRedeemed: result.alreadyRedeemed }
 }
 
 export async function refundMaterialOrder(adminId: string, orderId: string, input: { reason: string; restoreStock: boolean }) {
@@ -755,6 +990,7 @@ export async function refundMaterialOrder(adminId: string, orderId: string, inpu
     await tx.$queryRaw`SELECT \`id\` FROM \`MaterialRedemptionOrder\` WHERE \`id\` = ${orderId} FOR UPDATE`
     const order = await tx.materialRedemptionOrder.findUnique({ where: { id: orderId }, include: materialOrderInclude })
     if (!order) throw new MaterialRedemptionError('ORDER_NOT_FOUND', '兑换订单不存在', 404)
+    if (order.source === 'ACTIVITY_REGISTRATION_AUTO') throw new MaterialRedemptionError('ACTIVITY_MATERIAL_REFUND_UNSUPPORTED', '活动报名自动兑换物料请通过取消报名处理', 409)
     if (order.status === 'REFUNDED') return { duplicate: true, order }
     if (order.status === 'REDEEMED') throw new MaterialRedemptionError('REDEEMED_REFUND_UNSUPPORTED', '已核销订单暂不支持退款')
     if (order.status !== 'SUCCESS') throw new MaterialRedemptionError('ORDER_NOT_REFUNDABLE', '只有待核销订单可以退款')

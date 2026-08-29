@@ -28,7 +28,9 @@ test('全局返回顶部使用被动监听、rAF 和 reduced motion', () => {
 test('通知创建时保存具体目标资源和 focus ID', () => {
   assert.match(read('app/api/posts/[postId]/replies/route.ts'), /\/posts\/\$\{postId\}\?focus=\$\{createdReply\.id\}/)
   assert.match(read('app/api/daily-messages/[messageId]/comments/route.ts'), /message=\$\{messageId\}&focus=\$\{created\.id\}/)
-  assert.match(read('app/api/admin/feedback/[feedbackId]/replies/route.ts'), /\/feedback\/\$\{feedback\.id\}\?focus=\$\{reply\.id\}/)
+  const feedbackReplyRoute = read('app/api/admin/feedback/[feedbackId]/replies/route.ts')
+  assert.match(feedbackReplyRoute, /const \{ updated, replyId \} = transactionResult/)
+  assert.match(feedbackReplyRoute, /\/feedback\/\$\{feedback\.id\}\?focus=\$\{replyId\}/)
   assert.match(read('app/api/profile-wall/route.ts'), /\/wall\?focus=\$\{created\.id\}/)
 })
 

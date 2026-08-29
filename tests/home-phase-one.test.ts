@@ -37,7 +37,8 @@ test('today content has a PENDING/APPROVED/REJECTED review workflow and admin en
   const submit = read('app/api/today/route.ts')
   const review = read('app/api/admin/today/[eventId]/route.ts')
   assert.match(schema, /enum TodayEventStatus \{[\s\S]*PENDING[\s\S]*APPROVED[\s\S]*REJECTED/)
-  assert.match(submit, /status: 'PENDING'/)
+  assert.match(submit, /const moderationStatus = isSuperAdmin\(guard\.user\) \? 'APPROVED'[^\n]*'PENDING'/)
+  assert.match(submit, /status: moderationStatus/)
   assert.match(review, /requireAdmin\('today_manage'\)/)
   assert.match(read('app/admin/today/page.tsx'), /requireAdminPage\('\/admin\/today', 'today_manage'\)/)
   assert.match(read('components/HomeLayoutSurface.tsx'), /homeText\.noToday|todayEvent \? /)
@@ -49,10 +50,10 @@ test('post review creates an admin notification and public home query only accep
   const review = read('app/api/admin/posts/review/route.ts')
   const home = read('lib/home-data.ts')
   assert.match(create, /moderationStatus/)
-  assert.match(create, /type: 'ADMIN'/)
+  assert.match(create, /type: 'REVIEW'/)
   assert.match(create, /link: '\/admin\/posts\/review'/)
   assert.match(review, /status === 'APPROVED' \? 'APPROVE_POST' : 'REJECT_POST'/)
-  assert.match(home, /moderationStatus: 'APPROVED'/)
+  assert.match(home, /moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\] \}/)
   assert.match(home, /OR: \[\{ isFeatured: true \}, \{ isPinned: true \}\]/)
 })
 
@@ -73,7 +74,7 @@ test('Hero carousel only consumes enabled slides and supports autoplay, controls
   assert.match(hero, /onPointerDown/)
   assert.match(hero, /function previous\(\)/)
   assert.match(hero, /function next\(\)/)
-  assert.match(manager, /\/api\/uploads\/site-image/)
+  assert.match(manager, /\/api\/uploads\/hero-media/)
   assert.match(manager, /\/api\/admin\/home\/hero/)
 })
 
@@ -82,7 +83,7 @@ test('homepage keeps the original surface order and does not render shortcut car
   assert.doesNotMatch(surface, /shortcutItems|grid-cols-6|home-hero|community-hero-actions|growthThresholds|homeText\.(level|exp|points)/)
   const positions = [
     surface.indexOf('<HomeHero'),
-    surface.indexOf('className="community-stats home-checkin-stats"'),
+    surface.indexOf('community-stats home-checkin-stats'),
     surface.indexOf('home-primary-columns'),
     surface.indexOf('homeText.randomAlbums'),
     surface.indexOf('data-featured-post-card'),
@@ -94,9 +95,12 @@ test('homepage keeps the original surface order and does not render shortcut car
 
 test('entertainment home card uses the endless-mode leaderboard and concerts remain available', () => {
   const home = read('lib/home-data.ts')
+  const leaderboard = read('lib/guess-song-leaderboard.ts')
   const api = read('app/api/home/route.ts')
   const surface = read('components/HomeLayoutSurface.tsx')
-  assert.match(home, /periodType: 'YEAR', mode: 'ENDLESS'/)
+  assert.match(home, /getGuessSongModeHighScores\(\)/)
+  assert.match(leaderboard, /periodType: 'HISTORY'/)
+  assert.match(leaderboard, /periodKey: 'ALL'/)
   assert.match(api, /getHomeConcerts\(\)/)
   assert.match(api, /concerts, albums, stats/)
   assert.match(surface, /homeText\.entertainment/)

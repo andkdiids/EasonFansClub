@@ -58,6 +58,8 @@ model Activity {
   locationAddress              String?                        @db.VarChar(500)
   onlineUrl                    String?                        @db.VarChar(500)
   pointsReward                 Int?
+  registrationFee              Int                            @default(0)
+  feeDescription               String?                        @db.Text
   signupLimit                  Int?
   signupCount                  Int                            @default(0)
   startsAt                     DateTime?
@@ -82,6 +84,8 @@ model Activity {
   ActivityRegistration         ActivityRegistration[]
   ActivityRegistrationQuestion ActivityRegistrationQuestion[]
   ActivityReward               ActivityReward[]
+  linkedMaterial               MaterialRedemption?            @relation("ActivityMaterialLink")
+  MaterialRedemptionOrders     MaterialRedemptionOrder[]      @relation("MaterialOrderLinkedActivity")
   Lottery                      Lottery[]
 
   @@index([status, createdAt])
@@ -106,29 +110,35 @@ model ActivityFavorite {
 }
 
 model ActivityRegistration {
-  id                 String                       @id @default(cuid())
-  note               String?
-  status             ActivityRegistrationStatus   @default(ACTIVE)
-  registeredAt       DateTime                     @default(now())
-  cancelledAt        DateTime?
-  verifiedAt         DateTime?
-  verifiedById       String?
-  verificationMethod ActivityVerificationMethod?
-  verificationToken  String?                      @unique @db.VarChar(128)
-  checkedInAt        DateTime?
-  createdAt          DateTime                     @default(now())
-  updatedAt          DateTime                     @updatedAt
-  activityId         String
-  userId             String
-  Activity           Activity                     @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  User               User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  VerifiedBy         User?                        @relation("ActivityRegistrationVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
-  Answers            ActivityRegistrationAnswer[]
+  id                         String                             @id @default(cuid())
+  note                       String?
+  status                     ActivityRegistrationStatus         @default(ACTIVE)
+  paidRegistrationFee        Int                                @default(0)
+  registeredAt               DateTime                           @default(now())
+  cancelledAt                DateTime?
+  verifiedAt                 DateTime?
+  verifiedById               String?
+  verificationMethod         ActivityVerificationMethod?
+  verificationToken          String?                            @unique @db.VarChar(128)
+  checkedInAt                DateTime?
+  checkInSource              ActivityRegistrationCheckInSource?
+  linkedMaterialRedemptionId String?                            @unique
+  createdAt                  DateTime                           @default(now())
+  updatedAt                  DateTime                           @updatedAt
+  activityId                 String
+  userId                     String
+  Activity                   Activity                           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User                       User                               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  VerifiedBy                 User?                              @relation("ActivityRegistrationVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  LinkedMaterialRedemption   MaterialRedemptionOrder?           @relation("ActivityRegistrationLinkedMaterial", fields: [linkedMaterialRedemptionId], references: [id], onDelete: SetNull)
+  Answers                    ActivityRegistrationAnswer[]
+  PointLogs                  PointLog[]
 
   @@unique([activityId, userId])
   @@index([activityId, status])
   @@index([userId, registeredAt])
   @@index([verifiedById, verifiedAt])
+  @@index([checkInSource, verifiedAt])
 }
 
 model ActivityRegistrationQuestion {
@@ -262,24 +272,27 @@ model AdminPermission {
 }
 
 model MaterialRedemption {
-  id               String                    @id @default(cuid())
-  title            String                    @db.VarChar(191)
-  description      String                    @db.Text
-  coverImageUrl    String?                   @db.Text
-  instructions     String?                   @db.Text
-  cost             Int                       @default(0)
+  id               String                     @id @default(cuid())
+  title            String                     @db.VarChar(191)
+  description      String                     @db.Text
+  coverImageUrl    String?                    @db.Text
+  instructions     String?                    @db.Text
+  cost             Int                        @default(0)
   stockTotal       Int
   stockRemaining   Int
-  perUserLimit     Int                       @default(1)
+  perUserLimit     Int                        @default(1)
   exchangeStartAt  DateTime
   exchangeEndAt    DateTime
   redeemEndAt      DateTime
-  status           MaterialRedemptionStatus  @default(DRAFT)
+  redemptionRule   MaterialRedemptionRuleMode @default(DEFAULT)
+  linkedActivityId String?                    @unique
+  status           MaterialRedemptionStatus   @default(DRAFT)
   createdByAdminId String
   publishedAt      DateTime?
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
-  createdByAdmin   User                      @relation("MaterialRedemptionCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  createdByAdmin   User                       @relation("MaterialRedemptionCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  linkedActivity   Activity?                  @relation("ActivityMaterialLink", fields: [linkedActivityId], references: [id], onDelete: SetNull)
   rules            MaterialRedemptionRule[]
   orders           MaterialRedemptionOrder[]
 
@@ -303,19 +316,20 @@ model MaterialRedemptionRule {
 }
 
 model MaterialRedemptionOrder {
-  id                  String                        @id @default(cuid())
+  id                  String                              @id @default(cuid())
   materialId          String
   userId              String
-  quantity            Int                           @default(1)
+  quantity            Int                                 @default(1)
   unitCost            Int
   totalCost           Int
-  status              MaterialRedemptionOrderStatus @default(SUCCESS)
-  redeemCode          String                        @unique @db.VarChar(64)
-  redeemToken         String                        @unique @db.VarChar(128)
+  status              MaterialRedemptionOrderStatus       @default(SUCCESS)
+  source              MaterialRedemptionOrderSource       @default(MANUAL)
+  redeemCode          String                              @unique @db.VarChar(64)
+  redeemToken         String                              @unique @db.VarChar(128)
   eligibilitySnapshot Json
-  idempotencyKey      String                        @unique @db.VarChar(191)
-  createdAt           DateTime                      @default(now())
-  updatedAt           DateTime                      @updatedAt
+  idempotencyKey      String                              @unique @db.VarChar(191)
+  createdAt           DateTime                            @default(now())
+  updatedAt           DateTime                            @updatedAt
   redeemedAt          DateTime?
   redeemedByAdminId   String?
   expiredAt           DateTime?
@@ -323,16 +337,22 @@ model MaterialRedemptionOrder {
   cancelledByAdminId  String?
   refundedAt          DateTime?
   refundedByAdminId   String?
-  refundReason        String?                       @db.VarChar(500)
-  material            MaterialRedemption            @relation(fields: [materialId], references: [id], onDelete: Restrict)
-  user                User                          @relation("MaterialRedemptionOrderUser", fields: [userId], references: [id], onDelete: Cascade)
-  redeemedByAdmin     User?                         @relation("MaterialRedemptionOrderRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
-  cancelledByAdmin    User?                         @relation("MaterialRedemptionOrderCancelledByAdmin", fields: [cancelledByAdminId], references: [id], onDelete: SetNull)
-  refundedByAdmin     User?                         @relation("MaterialRedemptionOrderRefundedByAdmin", fields: [refundedByAdminId], references: [id], onDelete: SetNull)
+  refundReason        String?                             @db.VarChar(500)
+  linkedActivityId    String?
+  redemptionSource    MaterialRedemptionRedemptionSource?
+  material            MaterialRedemption                  @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  user                User                                @relation("MaterialRedemptionOrderUser", fields: [userId], references: [id], onDelete: Cascade)
+  linkedActivity      Activity?                           @relation("MaterialOrderLinkedActivity", fields: [linkedActivityId], references: [id], onDelete: SetNull)
+  linkedRegistration  ActivityRegistration?               @relation("ActivityRegistrationLinkedMaterial")
+  redeemedByAdmin     User?                               @relation("MaterialRedemptionOrderRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
+  cancelledByAdmin    User?                               @relation("MaterialRedemptionOrderCancelledByAdmin", fields: [cancelledByAdminId], references: [id], onDelete: SetNull)
+  refundedByAdmin     User?                               @relation("MaterialRedemptionOrderRefundedByAdmin", fields: [refundedByAdminId], references: [id], onDelete: SetNull)
 
   @@index([materialId, createdAt])
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  @@index([linkedActivityId, createdAt])
+  @@index([source, status])
 }
 
 model UserReward {
@@ -394,6 +414,12 @@ enum BadgeGrantType {
 enum ActivityRegistrationStatus {
   ACTIVE
   CANCELLED
+}
+
+enum ActivityRegistrationCheckInSource {
+  MANUAL
+  QR
+  AUTO_AFTER_ACTIVITY_END
 }
 
 enum ActivityRegistrationQuestionType {
@@ -2835,16 +2861,19 @@ model PointLog {
   replyId                String?
   checkInId              String?
   activityId             String?
+  activityRegistrationId String?
   badgeId                String?
   dailyDrawId            String?                 @unique
   dateKey                String?
   businessKey            String?                 @unique
   EntertainmentDailyDraw EntertainmentDailyDraw? @relation(fields: [dailyDrawId], references: [id])
+  ActivityRegistration   ActivityRegistration?   @relation(fields: [activityRegistrationId], references: [id], onDelete: SetNull)
   User                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([action, checkInId])
   @@index([action])
   @@index([activityId])
+  @@index([activityRegistrationId])
   @@index([checkInId])
   @@index([postId])
   @@index([replyId])
@@ -4008,8 +4037,14 @@ enum MaterialRedemptionStatus {
   ARCHIVED
 }
 
+enum MaterialRedemptionRuleMode {
+  DEFAULT
+  ACTIVITY_REGISTRATION_REQUIRED
+}
+
 enum MaterialRedemptionRuleType {
   NONE
+  ACTIVITY_REGISTRATION_REQUIRED
   REGISTER_DAYS
   CHECKIN_TOTAL
   CHECKIN_STREAK
@@ -4030,6 +4065,17 @@ enum MaterialRedemptionOrderStatus {
   CANCELLED
   EXPIRED
   REFUNDED
+}
+
+enum MaterialRedemptionOrderSource {
+  MANUAL
+  ACTIVITY_REGISTRATION_AUTO
+}
+
+enum MaterialRedemptionRedemptionSource {
+  MANUAL
+  ACTIVITY_CHECK_IN
+  ACTIVITY_AUTO_CHECK_IN
 }
 
 enum ActivityType {
@@ -4416,6 +4462,8 @@ enum PointActionType {
   CHECK_IN_MAKEUP
   MATERIAL_REDEMPTION
   MATERIAL_REDEMPTION_REFUND
+  ACTIVITY_REGISTRATION_FEE
+  ACTIVITY_REGISTRATION_REFUND
 }
 
 enum CheckInType {

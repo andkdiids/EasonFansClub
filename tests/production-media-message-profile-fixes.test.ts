@@ -125,7 +125,7 @@ test('歌曲详情播放器最多播放60秒且全站共享单一音频实例', 
 })
 
 test('Nginx 接收100MB音频并为转码保留超时时间', () => {
-  assert.equal((nginxWorkflow.match(/client_max_body_size 110m/g) || []).length, 2)
+  assert.equal((nginxWorkflow.match(/client_max_body_size 256m/g) || []).length, 2)
   assert.equal((nginxWorkflow.match(/proxy_read_timeout 180s/g) || []).length, 2)
   assert.equal((nginxWorkflow.match(/proxy_send_timeout 180s/g) || []).length, 2)
 })
@@ -139,7 +139,7 @@ test('私信 API 始终返回结构化成功或失败代码', () => {
 })
 
 test('私信重试复用 clientMessageId 并保留失败输入', () => {
-  assert.match(friendDock, /sendMessage\(\{ content: message\.content, clientMessageId: message\.clientMessageId/)
+  assert.match(friendDock, /sendMessage\(\{\s*content: message\.content,\s*clientMessageId: message\.clientMessageId/)
   assert.match(friendDock, /setContent\(\(current\) => current\.trim\(\) === trimmed \? '' : current\)/)
   assert.match(friendDock, /sendingMessageIdsRef\.current\.has/)
   assert.match(friendDock, /clientMessageId = createMessageId\(\)/)
@@ -174,7 +174,7 @@ test('桌面 FriendDock 固定动态视口高度且只有好友列表内部滚�
 test('FriendDock 发送点击层可用且输入和按钮触控区至少44px', () => {
   assert.match(css, /\.friend-dock-panel \{[^}]*z-index:var\(--layer-friend-window\);[^}]*isolation:isolate/)
   assert.match(css, /\.friend-chat-composer \{[^}]*z-index:2;[^}]*pointer-events:auto/)
-  assert.match(css, /\.friend-chat-composer textarea \{[^}]*min-height:44px/)
+  assert.match(css, /\.friend-chat-composer>textarea \{[^}]*min-height:44px/)
   assert.match(css, /\.friend-chat-composer>button\[type='submit'\] \{[^}]*height:44px;[^}]*pointer-events:auto/)
 })
 
@@ -240,9 +240,9 @@ test('背景上传使用显式 label 触发文件选择且只支持三种格式'
 })
 
 test('背景上传展示处理上传阶段并捕获超时和网络错误', () => {
-  assert.match(profileForm, /setBackgroundStage\('processing'\)/)
-  assert.match(profileForm, /setBackgroundStage\('uploading'\)/)
-  assert.match(profileForm, /backgroundStage === 'processing' \? '处理中…'/)
+  assert.match(profileForm, /setUploading\('background'\)/)
+  assert.match(profileForm, /uploading === 'background' \? '上传中(?:…|\.\.\.)' : '使用此背景'/)
+  assert.match(profileForm, /uploadError instanceof DOMException && uploadError\.name === 'AbortError'/)
   assert.match(profileForm, /uploadError instanceof TypeError/)
   assert.match(profileForm, /finally \{/)
 })

@@ -284,8 +284,8 @@ test('他人只能看到isPublic true记录', () => {
 
 test('公开统计只基于公开记录', () => {
   const source = read('app/api/music/live/users/[uid]/route.ts')
-  assert.match(source, /UserMusicConcert:[\s\S]*isPublic: true/)
-  assert.match(source, /concertCount: user\.UserMusicConcert\.length/)
+  assert.match(source, /where: \{ userId: user\.id, isPublic: true/)
+  assert.match(source, /concertCount: records\.length/)
 })
 
 test('私人笔记不在公开API返回', () => {

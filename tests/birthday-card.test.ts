@@ -107,7 +107,7 @@ test('notification types and categories are consistent end-to-end (类型与分�
   assert.doesNotMatch(notificationTypeEnum, /FRIEND_BIRTHDAY/)
   assert.match(migration, /'FRIEND_BIRTHDAY'/)
   assert.match(notificationsLib, /BIRTHDAY_GREETING: '生日'/)
-  assert.match(notificationsLib, /type === 'BIRTHDAY_GREETING' && link\?\.startsWith\(FRIEND_BIRTHDAY_LINK_PREFIX\)\) return 'friend'/)
+  assert.match(notificationsLib, /type === 'BIRTHDAY_GREETING' && link\?\.startsWith\(FRIEND_BIRTHDAY_LINK_PREFIX\)\) return 'application'/)
   assert.match(notificationsLib, /type = 'BIRTHDAY_GREETING' AND n\.link LIKE '\/user\/%'/)
   // 好友生日提醒归类到「好友」而非「系统」
   assert.doesNotMatch(notificationsLib, /GUESS_SONG_DUEL_INVITE/)

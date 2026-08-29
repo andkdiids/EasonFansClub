@@ -20,15 +20,15 @@ test('E院体检迁移只创建注册验证相关表', () => {
   assert.doesNotMatch(migration, /ALTER TABLE `User`|ALTER TABLE `GuessSong/)
 })
 
-test('注册建号只要求邮箱验证和 E院体检，不要求手机验证', () => {
+test('注册建号要求手机号作为登录/找回字段，并使用邮箱验证和 E院体检', () => {
   const prepare = source('app/api/auth/register/prepare/route.ts')
   const register = source('app/api/auth/register/route.ts')
   const verify = source('app/api/auth/register/verify-code/route.ts')
   const sendEmail = source('app/api/auth/register/send-email-code/route.ts')
   assert.match(prepare, /!rawPhone/)
-  assert.match(prepare, /手机号不能为空/)
+  assert.match(prepare, /手机号格式错误/)
   assert.match(register, /submittedPhone/)
-  assert.match(register, /PHONE_REQUIRED/)
+  assert.match(register, /INVALID_PHONE/)
   assert.doesNotMatch(prepare, /sendRegistrationPhoneCode|phoneCodeHash: hashRegistrationCode/)
   assert.match(register, /!draft\.emailVerifiedAt/)
   assert.doesNotMatch(register, /!draft\.phoneVerifiedAt \|\| !draft\.emailVerifiedAt/)
@@ -52,7 +52,7 @@ test('注册页使用资料→体检→邮箱验证码→自动进入欢迎页�
   const form = source('app/register/RegisterForm.tsx')
   assert.match(form, /🏥 E院体检/)
   assert.doesNotMatch(form, /选填/)
-  assert.match(form, /请输入手机号/)
+  assert.match(form, /用于登录和找回账号/)
   assert.match(form, /InternationalPhoneInput/)
   assert.match(form, /required[\s\S]{0,300}data-register-field="phone"/)
   assert.doesNotMatch(form, /phoneCode|verifyCode\('PHONE'/)

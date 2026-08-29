@@ -90,7 +90,7 @@ test('后台页面视觉入口提供活动中心设置页面和高清媒体上�
   assert.match(manager, /desktopFitMode/)
   assert.match(manager, /mobileScale/)
   assert.match(manager, /\/api\/uploads\/hero-media/)
-  assert.match(upload, /quality: 94/)
+  assert.match(upload, /sourceQuality: 94/)
   assert.match(upload, /MAX_IMAGE_EDGE = 2560/)
   assert.match(upload, /sourceUrl/)
 })

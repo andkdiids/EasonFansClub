@@ -45,7 +45,8 @@ test('UID 前导零搜索按数字 UID 精确匹配且不返回隐私字段', ()
 test('积分榜显示按 experience 批量计算的真实成长等级', () => {
   const page = read('app/rankings/page.tsx')
   assert.match(page, /orderBy: \{ points: 'desc' \}/)
-  assert.match(page, /select: \{ id: true, nickname: true, points: true, experience: true \}/)
+  assert.match(page, /points: true, experience: true/)
+  assert.match(page, /Profile: \{ select: \{ displayName: true \} \}/)
   assert.match(page, /listGrowthLevels\(\)/)
   assert.match(page, /calculateGrowthSummary\(u\.experience, growthLevels\)/)
   const levels = [{ level: 1, name: '初入E院', requiredExp: 0 }, { level: 2, name: '观察期', requiredExp: 1000 }]
@@ -69,7 +70,7 @@ test('社区互动奖励使用上海时间、行锁、业务键并移除发帖�
   const rewards = read('lib/community-rewards.ts')
   assert.doesNotMatch(post, /POST_DAILY_FIRST/)
   assert.doesNotMatch(post, /getRandomPostRegistrationFee/)
-  assert.match(reply, /checkForbiddenWords/)
+  assert.match(reply, /checkBannedWords/)
   assert.match(reply, /awardCommunityCommentRewards/)
   assert.match(rewards, /POST_COMMENT_RECEIVED/)
   assert.match(rewards, /COMMENT_POST/)

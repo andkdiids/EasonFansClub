@@ -15,6 +15,7 @@ const mobileNavigation = read('components/layout/MobileNavigation.tsx')
 const navigationRegistry = read('lib/navigation-registry.ts')
 const appShell = read('components/layout/AppShell.tsx')
 const forum = read('components/ForumHome.tsx')
+const pagination = read('components/ui/Pagination.tsx')
 
 test('回复 API 返回前端可直接渲染且可序列化的 author 结构', () => {
   assert.match(replyRoute, /success:\s*true/)
@@ -72,7 +73,8 @@ test('评论查询与帖子正文查询隔离', () => {
   assert.match(postPage, /function loadPostReplies/)
   assert.match(postPage, /const loadedReplies = await loadPostReplies/)
   assert.match(postPage, /postReplies = loadedReplies\.rows/)
-  assert.match(postPage, /\[post:comments:load-failed\]/)
+  assert.match(postPage, /channel: 'comments'/)
+  assert.match(postPage, /operation: 'reply\.loadPostReplies'/)
 })
 
 test('评论渲染异常由局部 Error Boundary 接管', () => {
@@ -104,19 +106,20 @@ test('页面容器和社区内容不再重复叠加固定 86 或 88 像素补偿
 })
 
 test('E院广场分页采用独立间距和足够触控高度', () => {
-  assert.match(forum, /className="forum-pagination flex flex-wrap/)
+  assert.match(forum, /<Pagination[\s\S]*className="forum-pagination"/)
   assert.match(css, /\.forum-pagination \{ margin:24px 0 36px;/)
   assert.match(css, /\.forum-pagination>\* \{ min-height:40px; \}/)
 })
 
 test('320px 分页隐藏首末页且不依赖横向滚动', () => {
-  assert.match(forum, /edge \/>/)
-  assert.match(css, /@media \(max-width:359px\)[\s\S]*\.forum-pagination-edge \{ display:none!important; \}/)
+  assert.match(pagination, /className="pagination-edge"/)
+  assert.match(css, /@media \(max-width:359px\)[\s\S]*\.forum-pagination \.pagination-edge \{ display:none!important; \}/)
   assert.doesNotMatch(css, /\.forum-pagination[^}]*overflow-x:\s*auto/)
 })
 
 test('当前页圆形按钮不应用 disabled 透明度', () => {
-  assert.match(forum, /if \(page === currentPage\) return <span aria-current="page" className=\{className\}>/)
+  assert.match(pagination, /if \(item === safeCurrent\)\s*\{\s*return <span[\s\S]*aria-current="page"[\s\S]*className="pagination-page is-current"/)
+  assert.doesNotMatch(pagination, /pagination-page is-current[^\n]*disabled/)
 })
 
 test('好友入口贴右侧并位于导航总高上方', () => {
@@ -136,7 +139,7 @@ test('好友入口复用 AppShell 的统一未读统计并显示 99+', () => {
 
 test('统一未读计数覆盖通知、反馈、好友申请和私信', () => {
   const notifications = read('lib/notifications.ts')
-  assert.match(notifications, /getUnreadNotificationCount[\s\S]*getUnreadSummary\(userId\)\)\.total/)
+  assert.match(notifications, /getUnreadNotificationCount[\s\S]*getUnreadSummary\(userId, canReview\)\)\.total/)
   for (const field of ['notifications', 'feedback', 'friendRequests', 'directMessages', 'messages']) assert.match(notifications, new RegExp(field))
 })
 
@@ -151,7 +154,7 @@ test('好友窗支持遮罩、关闭按钮、Esc、再次点击入口和路由�
   assert.match(friendDock, /aria-label="关闭好友窗口"/)
   assert.match(friendDock, /event\.key !== 'Escape'/)
   assert.match(friendDock, /onClick=\{open \? closeDock : openFriendList\}/)
-  assert.match(friendDock, /\[pathname, currentUserId, resetChat\]/)
+  assert.match(friendDock, /\[clearFriendListReturnState, pathname, currentUserId, resetChat\]/)
 })
 
 test('好友窗内部列表项可操作且不会被 outside-click 关闭', () => {
@@ -161,7 +164,7 @@ test('好友窗内部列表项可操作且不会被 outside-click 关闭', () =>
 })
 
 test('好友窗口作为右侧浮层抽屉保留页面上下文且内容限制在面板内', () => {
-  assert.match(css, /\.friend-dock-panel \{[^}]*width:80vw;[^}]*max-width:420px;[^}]*height:82vh;[^}]*max-height:calc\(100vh - 120px\)/)
+  assert.match(css, /\.friend-dock-panel \{[^}]*width:80vw;[^}]*max-width:420px;[^}]*height:min\(82dvh,calc\(var\(--friend-dock-viewport-height,100dvh\) - 120px\)\);[^}]*max-height:calc\(var\(--friend-dock-viewport-height,100dvh\) - 120px\)/)
   assert.match(css, /\.friend-dock-panel \.friend-list-layout,\.friend-dock-panel \.friend-chat-layout \{[^}]*min-height:0;[^}]*overflow:hidden/)
 })
 

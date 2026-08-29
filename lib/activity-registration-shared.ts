@@ -25,11 +25,22 @@ export type ActivityRegistrationAnswerView = {
 export type ActivityRegistrationView = {
   id: string
   status: 'ACTIVE' | 'CANCELLED'
+  paidRegistrationFee: number
   registeredAt: string
   cancelledAt: string | null
   verifiedAt: string | null
   verificationMethod: 'MANUAL' | 'QR' | null
+  checkInSource: 'MANUAL' | 'QR' | 'AUTO_AFTER_ACTIVITY_END' | null
+  checkedInAt: string | null
   verificationToken: string | null
+  linkedMaterialRedemption: {
+    id: string
+    title: string
+    coverImageUrl: string | null
+    status: string
+    redeemCode: string
+    redeemedAt: string | null
+  } | null
   answers: ActivityRegistrationAnswerView[]
 }
 

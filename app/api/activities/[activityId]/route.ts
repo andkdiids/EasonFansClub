@@ -30,6 +30,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
   ])
   const availability = getActivityRegistrationState(view, view.signupCount)
   const isRegistered = registration?.status === 'ACTIVE'
+  const isCancelled = registration?.status === 'CANCELLED'
+  const activityMaterialAvailable = !view.linkedMaterial || (view.linkedMaterial.status === 'PUBLISHED' && view.linkedMaterial.stockRemaining > 0)
   return NextResponse.json({
     activity: view,
     questions,
@@ -38,6 +40,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
     isRegistered,
     registrationStatus: registration?.status || null,
     registrationState: availability.state,
-    canRegister: availability.canRegister && Boolean(viewer) && !isRegistered,
+    canRegister: availability.canRegister && Boolean(viewer) && !isRegistered && !isCancelled && activityMaterialAvailable,
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
 }

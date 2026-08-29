@@ -19,13 +19,32 @@ type MaterialDetail = {
   redeemEndAt: string
   state: string
   stateLabel: string
+  redemptionRule: 'DEFAULT' | 'ACTIVITY_REGISTRATION_REQUIRED'
+  linkedActivityId: string | null
+  linkedActivity: { id: string; title: string; startsAt: string | null; endsAt: string | null; registrationFee: number } | null
+  isActivityBound: boolean
   rules: Array<{ type: string; label: string }>
+  activityRegistration?: {
+    id: string
+    status: 'ACTIVE' | 'CANCELLED'
+    paidRegistrationFee: number
+    verifiedAt: string | null
+    checkedInAt: string | null
+    checkInSource: string | null
+    linkedMaterialRedemption: { id: string; status: string; redeemCode: string; redeemedAt: string | null } | null
+  } | null
   eligibility?: { qualified: boolean; reasons: string[]; canExchange: boolean; balanceEnough: boolean; priorQuantity: number; remainingUserQuota: number; progress: Array<{ type: string; operator: string; actual: number | boolean; qualified: boolean }> }
   currentBalance?: number
 }
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
+}
+
+function activityMaterialStatusLabel(status: string) {
+  if (status === 'REDEEMED') return '已核销'
+  if (status === 'CANCELLED' || status === 'REFUNDED') return '兑换已取消'
+  return '待核销'
 }
 
 export function MaterialRedemptionDetailClient({ materialId }: { materialId: string }) {
@@ -70,7 +89,9 @@ export function MaterialRedemptionDetailClient({ materialId }: { materialId: str
   if (!material) return <main className="site-page-main mx-auto max-w-5xl px-4 py-10"><section className="border border-rose-200 bg-rose-50 p-6 font-bold text-rose-700">{message || '物料不存在'}</section></main>
   const balanceQuantity = material.cost > 0 && material.currentBalance !== undefined ? Math.floor(material.currentBalance / material.cost) : material.perUserLimit
   const maxQuantity = Math.max(1, Math.min(material.perUserLimit, material.eligibility?.remainingUserQuota || material.perUserLimit, material.stockRemaining, Math.max(1, balanceQuantity)))
-  const canExchange = Boolean(material.eligibility?.canExchange && maxQuantity > 0)
+  const canExchange = !material.isActivityBound && Boolean(material.eligibility?.canExchange && maxQuantity > 0)
+  const activity = material.linkedActivity
+  const activityRegistration = material.activityRegistration
 
   return (
     <main className="site-page-main mx-auto min-w-0 max-w-5xl space-y-5 px-4 py-6 sm:px-5 sm:py-9">
@@ -80,20 +101,21 @@ export function MaterialRedemptionDetailClient({ materialId }: { materialId: str
         <div className="min-w-0 p-6 sm:p-8">
           <div className="flex items-start justify-between gap-3"><h1 className="min-w-0 break-words text-3xl font-black text-brand-950">{material.title}</h1><span className="shrink-0 border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{material.stateLabel}</span></div>
           <p className="mt-4 whitespace-pre-wrap break-words text-sm font-bold leading-7 text-slate-600">{material.description}</p>
+          {material.isActivityBound && activity ? <section className="mt-5 border border-emerald-200 bg-emerald-50/70 p-4 text-sm font-bold text-emerald-950"><p className="font-black">活动限定</p><p className="mt-2">需报名「{activity.title}」后自动兑换，无需在物料页另行支付挂号费。</p><p className="mt-2">活动时间：{activity.startsAt ? formatDate(activity.startsAt) : '未设置'}{activity.endsAt ? ` — ${formatDate(activity.endsAt)}` : ''}</p>{activityRegistration?.status === 'CANCELLED' ? <p className="mt-3 font-black text-amber-800">你已取消过该活动报名，兑换已取消且不能再次报名。</p> : activityRegistration?.linkedMaterialRedemption ? <p className="mt-3 font-black">已通过活动报名自动兑换 · {activityMaterialStatusLabel(activityRegistration.linkedMaterialRedemption.status)} · 核销码 {activityRegistration.linkedMaterialRedemption.redeemCode}</p> : activityRegistration?.status === 'ACTIVE' ? <p className="mt-3 font-black">已报名，活动物料将在活动核销时同步完成核销。</p> : null}<Link href={`/activities/${activity.id}`} className="mt-4 inline-flex min-h-10 items-center border border-emerald-700 px-4 text-sm font-black text-emerald-800">前往活动报名</Link></section> : null}
           <dl className="mt-6 grid gap-3 text-sm font-bold text-slate-600 sm:grid-cols-2">
-            <div className="border border-sky-100 bg-sky-50/60 p-3"><dt className="text-xs text-slate-500">所需费用</dt><dd className="mt-1 text-lg font-black text-brand-700">{material.cost === 0 ? '免费兑换' : `${material.cost} 挂号费`}</dd></div>
+            <div className="border border-sky-100 bg-sky-50/60 p-3"><dt className="text-xs text-slate-500">所需费用</dt><dd className="mt-1 text-lg font-black text-brand-700">{material.isActivityBound ? '已包含在活动报名费中' : material.cost === 0 ? '免费兑换' : `${material.cost} 挂号费`}</dd></div>
             <div className="border border-sky-100 bg-sky-50/60 p-3"><dt className="text-xs text-slate-500">剩余数量</dt><dd className="mt-1 text-lg font-black text-brand-700">{material.stockRemaining} / {material.stockTotal}</dd></div>
-            <div className="border border-sky-100 bg-sky-50/60 p-3"><dt className="text-xs text-slate-500">兑换截止</dt><dd className="mt-1 text-sm font-black text-brand-950">{formatDate(material.exchangeEndAt)}</dd></div>
-            <div className="border border-sky-100 bg-sky-50/60 p-3"><dt className="text-xs text-slate-500">核销截止</dt><dd className="mt-1 text-sm font-black text-brand-950">{formatDate(material.redeemEndAt)}</dd></div>
+            <div className="border border-sky-100 bg-sky-50/60 p-3"><dt className="text-xs text-slate-500">{material.isActivityBound ? '活动开始' : '兑换截止'}</dt><dd className="mt-1 text-sm font-black text-brand-950">{formatDate(material.isActivityBound ? material.exchangeStartAt : material.exchangeEndAt)}</dd></div>
+            <div className="border border-sky-100 bg-sky-50/60 p-3"><dt className="text-xs text-slate-500">{material.isActivityBound ? '活动结束' : '核销截止'}</dt><dd className="mt-1 text-sm font-black text-brand-950">{formatDate(material.isActivityBound ? material.exchangeEndAt : material.redeemEndAt)}</dd></div>
           </dl>
-          {material.eligibility ? <div className="mt-5 border border-sky-100 p-4 text-sm font-bold text-slate-600"><p>当前挂号费：<span className="font-black text-brand-700">{material.currentBalance ?? 0}</span></p><p className="mt-2">资格：<span className={material.eligibility.qualified ? 'text-emerald-700' : 'text-rose-700'}>{material.eligibility.qualified ? '已满足' : material.eligibility.reasons.join('；') || '未满足'}</span></p>{!material.eligibility.balanceEnough ? <p className="mt-2 text-rose-700">挂号费不足：需要 {material.cost}，当前 {material.currentBalance ?? 0}</p> : null}<p className="mt-2">本账号还可兑换：{material.eligibility.remainingUserQuota} 件</p></div> : <p className="mt-5 border border-amber-100 bg-amber-50 p-4 text-sm font-bold text-amber-800">兑换前需要登录，并会在提交时再次检查资格、库存和挂号费。</p>}
+          {!material.isActivityBound && material.eligibility ? <div className="mt-5 border border-sky-100 p-4 text-sm font-bold text-slate-600"><p>当前挂号费：<span className="font-black text-brand-700">{material.currentBalance ?? 0}</span></p><p className="mt-2">资格：<span className={material.eligibility.qualified ? 'text-emerald-700' : 'text-rose-700'}>{material.eligibility.qualified ? '已满足' : material.eligibility.reasons.join('；') || '未满足'}</span></p>{!material.eligibility.balanceEnough ? <p className="mt-2 text-rose-700">挂号费不足：需要 {material.cost}，当前 {material.currentBalance ?? 0}</p> : null}<p className="mt-2">本账号还可兑换：{material.eligibility.remainingUserQuota} 件</p></div> : !material.isActivityBound ? <p className="mt-5 border border-amber-100 bg-amber-50 p-4 text-sm font-bold text-amber-800">兑换前需要登录，并会在提交时再次检查资格、库存和挂号费。</p> : null}
           {material.rules.length ? <div className="mt-5"><p className="text-sm font-black text-brand-950">兑换条件</p><ul className="mt-2 list-disc space-y-1 pl-5 text-sm font-bold text-slate-600">{material.rules.map((rule, index) => <li key={`${rule.type}-${index}`}>{rule.label}</li>)}</ul></div> : null}
           {material.eligibility?.progress?.length ? <div className="mt-4 border border-sky-100 bg-sky-50/50 p-4"><p className="text-sm font-black text-brand-950">当前条件进度</p><ul className="mt-2 space-y-2 text-sm font-bold text-slate-600">{material.eligibility.progress.map((progress, index) => <li key={`${progress.type}-${index}`} className="flex items-start justify-between gap-3"><span className="min-w-0 break-words">{material.rules[index]?.label || '兑换条件'}</span><span className={progress.qualified ? 'shrink-0 text-emerald-700' : 'shrink-0 text-rose-700'}>{typeof progress.actual === 'boolean' ? (progress.qualified ? '已满足' : '未满足') : `当前 ${progress.actual}`}</span></li>)}</ul></div> : null}
           {material.instructions ? <div className="mt-5 border-t border-sky-100 pt-5"><p className="text-sm font-black text-brand-950">兑换说明</p><p className="mt-2 whitespace-pre-wrap break-words text-sm font-bold leading-7 text-slate-600">{material.instructions}</p></div> : null}
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end">
+          {!material.isActivityBound ? <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="text-sm font-black text-brand-950">数量<input type="number" min={1} max={maxQuantity} value={quantity} onChange={(event) => setQuantity(Math.max(1, Math.min(maxQuantity, Number(event.target.value) || 1)))} className="mt-2 block h-11 w-28 border border-sky-200 px-3" disabled={!canExchange || busy} /></label>
             <button type="button" onClick={() => setConfirmOpen(true)} disabled={!canExchange || busy} className="inline-flex min-h-11 flex-1 items-center justify-center bg-brand-950 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">{busy ? '提交中…' : material.state === 'UPCOMING' ? '尚未开始' : material.state === 'PAUSED' ? '兑换已暂停' : material.stockRemaining < 1 ? '暂时无库存' : '确认兑换'}</button>
-          </div>
+          </div> : null}
           {message ? <p className="mt-4 border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">{message}</p> : null}
         </div>
       </section>

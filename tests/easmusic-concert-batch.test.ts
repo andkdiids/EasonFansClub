@@ -221,7 +221,7 @@ test('后台多选日期可添加标签和删除且不再提供手填场次编�
   assert.match(manager, />新增场次</)
   assert.match(manager, /posterUrl: form\.posterUrl/)
   assert.match(manager, /form\.status/)
-  assert.match(createRoute, /posterUrl: sanitizeText\(body\?\.posterUrl, 1000\)/)
+  assert.match(createRoute, /posterUrl: toPublicMediaUrl\(sanitizeText\(body\?\.posterUrl, 1000\)\)/)
   assert.match(editor, /mode=copy-options/)
   assert.match(editor, /sessionNumber\?: string \| null/)
   assert.match(editor, /选择当前巡演其他场次复制歌单/)

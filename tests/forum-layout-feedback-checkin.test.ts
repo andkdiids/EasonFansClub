@@ -51,9 +51,9 @@ test('单密保迁移先备份和统计，再在同一事务中清理', () => {
 
 test('profile.posts 注册到布局并且真实前台不再布局外渲染', () => {
   const registry = readFileSync('lib/page-layout/registry.ts', 'utf8')
-  const profile = readFileSync('app/profile/page.tsx', 'utf8')
+  const profile = readFileSync('components/ProfilePageSurface.tsx', 'utf8')
   assert.match(registry, /'profile\.posts'/)
-  assert.match(profile, /'profile\.posts': <PublicUserModules/)
+  assert.match(profile, /<PublicUserModules/)
   assert.equal((profile.match(/<PublicUserModules/g) || []).length, 1)
 })
 
@@ -81,8 +81,9 @@ test('帖子与回复图片在浏览器压缩为 WebP 且服务端限制格式',
   const uploader = readFileSync('components/ContentImageUploader.tsx', 'utf8')
   const route = readFileSync('app/api/uploads/content-image/route.ts', 'utf8')
   const posts = readFileSync('app/api/posts/route.ts', 'utf8')
-  assert.match(uploader, /canvas\.toBlob\(resolve, 'image\/webp'/)
-  assert.match(route, /file\.type !== 'image\/webp'/)
+  assert.match(uploader, /form\.set\('file', file\)/)
+  assert.match(route, /sharp\(buffer/)
+  assert.match(route, /ALLOWED_IMAGE_FORMATS/)
   assert.match(posts, /postMedia\.createMany/)
 })
 
@@ -236,8 +237,8 @@ test('好友挂号留言只查询当前用户好友且空好友缓存不与公�
   assert.match(route, /scope === 'friends'/)
   assert.match(route, /getFriendIds\(user\.id\)/)
   assert.match(friends, /prisma\.friendship\.findMany/)
-  assert.match(friends, /userA: activeUserWhere/)
-  assert.match(friends, /userB: activeUserWhere/)
+  assert.match(friends, /User_Friendship_userAIdToUser: activeUserWhere/)
+  assert.match(friends, /User_Friendship_userBIdToUser: activeUserWhere/)
 })
 
 test('好友入口、申请锚点和个人资料卡结构保持统一', () => {

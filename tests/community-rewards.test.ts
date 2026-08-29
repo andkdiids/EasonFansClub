@@ -39,7 +39,7 @@ test('发帖不再写入挂号费，评论与精华走可幂等的社区奖励�
   const fee = read('lib/registration-fee.ts')
 
   assert.doesNotMatch(postRoute, /awardRegistrationFee|POST_DAILY_FIRST|getRandomPostRegistrationFee/)
-  assert.match(replyRoute, /checkForbiddenWords/)
+  assert.match(replyRoute, /checkBannedWords/)
   assert.match(replyRoute, /awardCommunityCommentRewards/)
   assert.match(deleteRoute, /reverseCommunityCommentRewards/)
   assert.match(featureRoute, /awardFeaturedPostRewards/)

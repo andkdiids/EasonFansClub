@@ -17,5 +17,5 @@ assert.doesNotMatch(lib, /<img src=\{pack\.iconUrl\}/, '不应再使用 pack.ico
 // 4. 图标尺寸：移动端 28px (h-7 w-7)，桌面端 32px (sm:h-8 sm:w-8)
 assert.match(lib, /h-7 w-7 flex-none[^"]*sm:h-8 sm:w-8/, '图标尺寸应为移动端 28px / 桌面端 32px')
 
-// 5. 仍保持 object-cover 与 rounded
-assert.match(lib, /className="h-full w-full object-cover"/, '图标应保持 object-cover 铺满')
+// 5. 入口图标完整显示，不裁切表情包封面
+assert.match(lib, /className="h-full w-full object-contain"/, '图标应使用 object-contain 完整显示')

@@ -129,7 +129,8 @@ test('十题平均答题低于两秒仅在叠加异常 API 和完美正确时判
 
 test('风控服务包含组合信号、80 分阈值和 10 题平均答题判断', () => {
   const service = source('lib/guess-song-risk.ts')
-  assert.match(service, /GUESS_SONG_RISK_THRESHOLD = 80/)
+  const constants = source('lib/guess-song-constants.ts')
+  assert.match(constants, /GUESS_SONG_RISK_THRESHOLD = 80/)
   assert.match(service, /sessionCreateCount >= 3/)
   assert.match(service, /answerRequestCount >= 20/)
   assert.match(service, /playRequestCount >= 30/)

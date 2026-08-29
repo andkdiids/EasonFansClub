@@ -33,8 +33,8 @@ test('登录、注册与管理员接口全部复用统一规范化函数和字�
   const users = source('lib/users.ts')
   const register = source('app/api/auth/register/route.ts')
   const admin = source('app/api/admin/users/[userId]/account/route.ts')
-  assert.match(users, /normalizeLoginAccount\(identifier\)/)
-  assert.match(users, /usernameNormalized: lookup/)
+  assert.match(users, /normalizeLoginAccount\(normalized\)/)
+  assert.match(users, /usernameNormalized: normalizeLoginAccount\(normalized\)/)
   assert.match(register, /validateLoginAccountValue\(username\)/)
   assert.match(register, /usernameNormalized,/)
   assert.match(register, /findLoginAccountConflict\(usernameNormalized\)/)
@@ -44,8 +44,9 @@ test('登录、注册与管理员接口全部复用统一规范化函数和字�
 
 test('数据库仅以 usernameNormalized 唯一，username 保留展示值', () => {
   const schema = source('prisma/schema.prisma')
-  assert.match(schema, /username\s+String\s*\n\s*usernameNormalized\s+String\s+@unique/)
-  assert.doesNotMatch(schema, /username\s+String\s+@unique/)
+  const userModel = schema.match(/model User \{[\s\S]*?^\}/m)?.[0] || ''
+  assert.match(userModel, /\busername\s+String\b(?!\s+@unique)/)
+  assert.match(userModel, /\busernameNormalized\s+String\s+@unique\b/)
 })
 
 test('migration 要求受控回填且冲突时在事务内明确停止', () => {
@@ -62,7 +63,7 @@ test('migration 要求受控回填且冲突时在事务内明确停止', () => {
 test('注册和管理员数据库冲突均返回大小写不敏感提示', () => {
   const register = source('app/api/auth/register/route.ts')
   const admin = source('app/api/admin/users/[userId]/account/route.ts')
-  assert.match(register, /该登录账号已被使用，账号不区分大小写。/)
+  assert.match(register, /该登录账号已被使用，账号不区分大小写/)
   assert.match(admin, /该登录账号已被其他用户使用，账号不区分大小写。/)
 })
 

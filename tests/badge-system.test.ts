@@ -229,7 +229,8 @@ test('major nickname surfaces render through the shared UserDisplayName componen
     'components/CheckInMessagesPanel.tsx',
     'app/search/page.tsx',
     'app/notifications/NotificationsClient.tsx',
-  ]) assert.match(read(path), /UserDisplayName/)
+  ]) assert.match(read(path), path === 'app/notifications/NotificationsClient.tsx' ? /FriendProfileCard/ : /UserDisplayName/)
+  assert.match(read('components/FriendProfileCard.tsx'), /UserDisplayName/)
   assert.match(read('components/UserDisplayName.tsx'), /user-display-name-highlight/)
 })
 

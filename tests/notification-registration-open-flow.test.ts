@@ -14,16 +14,16 @@ test('notification unread summary and list share the same personal visibility/ca
   assert.match(notifications, /reconcileStalePersonalNotifications/)
   assert.doesNotMatch(notifications, /prisma\.friendRequest\.count\(/)
   assert.match(client, /const zeroSummary: UnreadSummary/)
-  assert.match(client, /setSummaryOverride\(zeroSummary\)/)
+  assert.match(client, /updateSummary\(\(\) => zeroSummary\)/)
 })
 
 test('friend request notifications are keyed and direct decisions mark only the related request read', () => {
   const friends = read('lib/friends.ts')
   const requestRoute = read('app/api/friends/requests/[requestId]/route.ts')
 
-  assert.match(friends, /getFriendRequestNotificationKey\(request\.id\)/)
+  assert.match(friends, /getFriendRequestNotificationKey\(friendRequest\.id\)/)
   assert.match(friends, /key: getFriendRequestNotificationKey\(requestId\)/)
-  assert.match(friends, /createdAt: \{ gte: friendRequest\.createdAt \}/)
+  assert.match(friends, /createdAt: \{ gte: result\.requestCreatedAt \}/)
   assert.match(requestRoute, /getFriendRequestNotificationKey\(requestId\)/)
   assert.doesNotMatch(requestRoute, /where: \{ actorId: user\.id, type: 'FRIEND_REQUEST', link:/)
 })
@@ -51,7 +51,8 @@ test('registration still requires phone, email verification, hospital pass, and 
   const prepare = read('app/api/auth/register/prepare/route.ts')
   const register = read('app/api/auth/register/route.ts')
 
-  assert.match(prepare, /PHONE_REQUIRED/)
+  assert.match(prepare, /errors\.phone = '手机号格式错误'/)
+  assert.match(register, /INVALID_PHONE/)
   assert.match(register, /EMAIL_VERIFICATION_REQUIRED/)
   assert.match(register, /HOSPITAL_CHECK_REQUIRED/)
   assert.match(register, /EMAIL_ALREADY_EXISTS/)

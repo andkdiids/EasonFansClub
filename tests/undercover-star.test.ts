@@ -295,7 +295,9 @@ test('realtime client fails fast on a hanging upgrade, resyncs on connect, and o
   assert.match(realtimeClient, /startFallback\(generation\)/)
   assert.match(realtimeClient, /this\.stopFallback\(\)/)
   assert.match(realtimeClient, /this\.socket\?\.readyState === OPEN_STATE/)
-  assert.match(realtimeClient, /window\.setInterval\(\(\) => void poll\(\), 3_000\)/)
+  assert.match(realtimeClient, /this\.fallbackTimer = window\.setTimeout\(/)
+  assert.match(realtimeClient, /void poll\(\)\.finally\(schedule\)/)
+  assert.doesNotMatch(realtimeClient, /window\.setInterval\(\(\) => void poll\(\), 3_000\)/)
 })
 
 test('client component guards room updates and fetches the authoritative match snapshot when missing', () => {

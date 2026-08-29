@@ -53,12 +53,15 @@ CREATE TABLE `Activity` (
     `locationAddress` VARCHAR(500) NULL,
     `onlineUrl` VARCHAR(500) NULL,
     `pointsReward` INTEGER NULL,
+    `registrationFee` INTEGER NOT NULL DEFAULT 0,
+    `feeDescription` TEXT NULL,
     `signupLimit` INTEGER NULL,
     `signupCount` INTEGER NOT NULL DEFAULT 0,
     `startsAt` DATETIME(3) NULL,
     `endsAt` DATETIME(3) NULL,
     `registrationStartAt` DATETIME(3) NULL,
     `registrationEndAt` DATETIME(3) NULL,
+    `verificationMode` ENUM('NONE', 'MANUAL', 'QR') NOT NULL DEFAULT 'NONE',
     `organizer` VARCHAR(160) NULL,
     `contactInfo` VARCHAR(500) NULL,
     `isFeatured` BOOLEAN NOT NULL DEFAULT false,
@@ -97,13 +100,91 @@ CREATE TABLE `ActivityFavorite` (
 CREATE TABLE `ActivityRegistration` (
     `id` VARCHAR(191) NOT NULL,
     `note` VARCHAR(191) NULL,
+    `status` ENUM('ACTIVE', 'CANCELLED') NOT NULL DEFAULT 'ACTIVE',
+    `paidRegistrationFee` INTEGER NOT NULL DEFAULT 0,
+    `registeredAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `cancelledAt` DATETIME(3) NULL,
+    `verifiedAt` DATETIME(3) NULL,
+    `verifiedById` VARCHAR(191) NULL,
+    `verificationMethod` ENUM('MANUAL', 'QR') NULL,
+    `verificationToken` VARCHAR(128) NULL,
     `checkedInAt` DATETIME(3) NULL,
+    `checkInSource` ENUM('MANUAL', 'QR', 'AUTO_AFTER_ACTIVITY_END') NULL,
+    `linkedMaterialRedemptionId` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
     `activityId` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
 
-    INDEX `ActivityRegistration_userId_createdAt_idx`(`userId`, `createdAt`),
+    UNIQUE INDEX `ActivityRegistration_verificationToken_key`(`verificationToken`),
+    UNIQUE INDEX `ActivityRegistration_linkedMaterialRedemptionId_key`(`linkedMaterialRedemptionId`),
+    INDEX `ActivityRegistration_activityId_status_idx`(`activityId`, `status`),
+    INDEX `ActivityRegistration_userId_registeredAt_idx`(`userId`, `registeredAt`),
+    INDEX `ActivityRegistration_verifiedById_verifiedAt_idx`(`verifiedById`, `verifiedAt`),
+    INDEX `ActivityRegistration_checkInSource_verifiedAt_idx`(`checkInSource`, `verifiedAt`),
     UNIQUE INDEX `ActivityRegistration_activityId_userId_key`(`activityId`, `userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityRegistrationQuestion` (
+    `id` VARCHAR(191) NOT NULL,
+    `activityId` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(300) NOT NULL,
+    `type` ENUM('TEXT', 'TEXTAREA', 'SINGLE_SELECT', 'MULTI_SELECT', 'NUMBER', 'PHONE', 'SELECT') NOT NULL,
+    `required` BOOLEAN NOT NULL DEFAULT false,
+    `isActive` BOOLEAN NOT NULL DEFAULT true,
+    `placeholder` VARCHAR(300) NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityRegistrationQuestion_activityId_sortOrder_id_idx`(`activityId`, `sortOrder`, `id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityRegistrationQuestionOption` (
+    `id` VARCHAR(191) NOT NULL,
+    `questionId` VARCHAR(191) NOT NULL,
+    `label` VARCHAR(300) NOT NULL,
+    `value` VARCHAR(300) NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityRegistrationQuestionOption_questionId_sortOrder_id_idx`(`questionId`, `sortOrder`, `id`),
+    UNIQUE INDEX `ActivityRegistrationQuestionOption_questionId_value_key`(`questionId`, `value`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityRegistrationAnswer` (
+    `id` VARCHAR(191) NOT NULL,
+    `registrationId` VARCHAR(191) NOT NULL,
+    `questionId` VARCHAR(191) NOT NULL,
+    `questionTitle` VARCHAR(300) NOT NULL,
+    `value` TEXT NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityRegistrationAnswer_questionId_idx`(`questionId`),
+    UNIQUE INDEX `ActivityRegistrationAnswer_registrationId_questionId_key`(`registrationId`, `questionId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityReward` (
+    `id` VARCHAR(191) NOT NULL,
+    `activityId` VARCHAR(191) NOT NULL,
+    `type` ENUM('BADGE') NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+    `enabled` BOOLEAN NOT NULL DEFAULT true,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityReward_badgeId_idx`(`badgeId`),
+    UNIQUE INDEX `ActivityReward_activityId_type_key`(`activityId`, `type`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -187,12 +268,15 @@ CREATE TABLE `MaterialRedemption` (
     `exchangeStartAt` DATETIME(3) NOT NULL,
     `exchangeEndAt` DATETIME(3) NOT NULL,
     `redeemEndAt` DATETIME(3) NOT NULL,
+    `redemptionRule` ENUM('DEFAULT', 'ACTIVITY_REGISTRATION_REQUIRED') NOT NULL DEFAULT 'DEFAULT',
+    `linkedActivityId` VARCHAR(191) NULL,
     `status` ENUM('DRAFT', 'PUBLISHED', 'PAUSED', 'ENDED', 'ARCHIVED') NOT NULL DEFAULT 'DRAFT',
     `createdByAdminId` VARCHAR(191) NOT NULL,
     `publishedAt` DATETIME(3) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
+    UNIQUE INDEX `MaterialRedemption_linkedActivityId_key`(`linkedActivityId`),
     INDEX `MaterialRedemption_status_exchangeStartAt_exchangeEndAt_idx`(`status`, `exchangeStartAt`, `exchangeEndAt`),
     INDEX `MaterialRedemption_createdByAdminId_createdAt_idx`(`createdByAdminId`, `createdAt`),
     PRIMARY KEY (`id`)
@@ -202,7 +286,7 @@ CREATE TABLE `MaterialRedemption` (
 CREATE TABLE `MaterialRedemptionRule` (
     `id` VARCHAR(191) NOT NULL,
     `materialId` VARCHAR(191) NOT NULL,
-    `type` ENUM('NONE', 'REGISTER_DAYS', 'CHECKIN_TOTAL', 'CHECKIN_STREAK', 'HAS_BADGE', 'ATTENDED_CONCERT', 'SPECIFIC_USER') NOT NULL,
+    `type` ENUM('NONE', 'ACTIVITY_REGISTRATION_REQUIRED', 'REGISTER_DAYS', 'CHECKIN_TOTAL', 'CHECKIN_STREAK', 'HAS_BADGE', 'ATTENDED_CONCERT', 'SPECIFIC_USER') NOT NULL,
     `operator` ENUM('GTE', 'EQ', 'LTE') NOT NULL DEFAULT 'GTE',
     `value` VARCHAR(191) NOT NULL,
     `sortOrder` INTEGER NOT NULL DEFAULT 0,
@@ -223,6 +307,7 @@ CREATE TABLE `MaterialRedemptionOrder` (
     `unitCost` INTEGER NOT NULL,
     `totalCost` INTEGER NOT NULL,
     `status` ENUM('SUCCESS', 'REDEEMED', 'CANCELLED', 'EXPIRED', 'REFUNDED') NOT NULL DEFAULT 'SUCCESS',
+    `source` ENUM('MANUAL', 'ACTIVITY_REGISTRATION_AUTO') NOT NULL DEFAULT 'MANUAL',
     `redeemCode` VARCHAR(64) NOT NULL,
     `redeemToken` VARCHAR(128) NOT NULL,
     `eligibilitySnapshot` JSON NOT NULL,
@@ -237,6 +322,8 @@ CREATE TABLE `MaterialRedemptionOrder` (
     `refundedAt` DATETIME(3) NULL,
     `refundedByAdminId` VARCHAR(191) NULL,
     `refundReason` VARCHAR(500) NULL,
+    `linkedActivityId` VARCHAR(191) NULL,
+    `redemptionSource` ENUM('MANUAL', 'ACTIVITY_CHECK_IN', 'ACTIVITY_AUTO_CHECK_IN') NULL,
 
     UNIQUE INDEX `MaterialRedemptionOrder_redeemCode_key`(`redeemCode`),
     UNIQUE INDEX `MaterialRedemptionOrder_redeemToken_key`(`redeemToken`),
@@ -244,6 +331,8 @@ CREATE TABLE `MaterialRedemptionOrder` (
     INDEX `MaterialRedemptionOrder_materialId_createdAt_idx`(`materialId`, `createdAt`),
     INDEX `MaterialRedemptionOrder_userId_createdAt_idx`(`userId`, `createdAt`),
     INDEX `MaterialRedemptionOrder_status_createdAt_idx`(`status`, `createdAt`),
+    INDEX `MaterialRedemptionOrder_linkedActivityId_createdAt_idx`(`linkedActivityId`, `createdAt`),
+    INDEX `MaterialRedemptionOrder_source_status_idx`(`source`, `status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -2532,7 +2621,7 @@ CREATE TABLE `MusicTrack` (
 -- CreateTable
 CREATE TABLE `Notification` (
     `id` VARCHAR(191) NOT NULL,
-    `type` ENUM('REPLY', 'LIKE', 'SYSTEM', 'MESSAGE', 'ACTIVITY', 'ADMIN', 'FOLLOW', 'BADGE', 'FRIEND_REQUEST', 'BIRTHDAY_GREETING') NOT NULL,
+    `type` ENUM('REPLY', 'LIKE', 'SYSTEM', 'MESSAGE', 'ACTIVITY', 'ADMIN', 'FOLLOW', 'BADGE', 'FRIEND_REQUEST', 'BIRTHDAY_GREETING', 'FEEDBACK', 'REVIEW') NOT NULL,
     `title` VARCHAR(191) NOT NULL,
     `content` VARCHAR(191) NULL,
     `link` VARCHAR(191) NULL,
@@ -2545,6 +2634,7 @@ CREATE TABLE `Notification` (
     `completedAt` DATETIME(3) NULL,
 
     INDEX `Notification_recipientId_isRead_createdAt_idx`(`recipientId`, `isRead`, `createdAt`),
+    INDEX `Notification_recipientId_readAt_createdAt_idx`(`recipientId`, `readAt`, `createdAt`),
     INDEX `Notification_type_idx`(`type`),
     UNIQUE INDEX `Notification_recipientId_key_key`(`recipientId`, `key`),
     PRIMARY KEY (`id`)
@@ -2627,7 +2717,7 @@ CREATE TABLE `PasswordResetToken` (
 -- CreateTable
 CREATE TABLE `PointLog` (
     `id` VARCHAR(191) NOT NULL,
-    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD', 'CHECK_IN_MAKEUP', 'MATERIAL_REDEMPTION', 'MATERIAL_REDEMPTION_REFUND') NOT NULL,
+    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD', 'CHECK_IN_MAKEUP', 'MATERIAL_REDEMPTION', 'MATERIAL_REDEMPTION_REFUND', 'ACTIVITY_REGISTRATION_FEE', 'ACTIVITY_REGISTRATION_REFUND') NOT NULL,
     `points` INTEGER NOT NULL,
     `before` INTEGER NOT NULL,
     `after` INTEGER NOT NULL,
@@ -2638,6 +2728,7 @@ CREATE TABLE `PointLog` (
     `replyId` VARCHAR(191) NULL,
     `checkInId` VARCHAR(191) NULL,
     `activityId` VARCHAR(191) NULL,
+    `activityRegistrationId` VARCHAR(191) NULL,
     `badgeId` VARCHAR(191) NULL,
     `dailyDrawId` VARCHAR(191) NULL,
     `dateKey` VARCHAR(191) NULL,
@@ -2647,6 +2738,7 @@ CREATE TABLE `PointLog` (
     UNIQUE INDEX `PointLog_businessKey_key`(`businessKey`),
     INDEX `PointLog_action_idx`(`action`),
     INDEX `PointLog_activityId_idx`(`activityId`),
+    INDEX `PointLog_activityRegistrationId_idx`(`activityRegistrationId`),
     INDEX `PointLog_checkInId_idx`(`checkInId`),
     INDEX `PointLog_postId_idx`(`postId`),
     INDEX `PointLog_replyId_idx`(`replyId`),
@@ -2699,6 +2791,7 @@ CREATE TABLE `Post` (
     `id` VARCHAR(191) NOT NULL,
     `title` VARCHAR(191) NOT NULL,
     `content` VARCHAR(191) NOT NULL,
+    `richContent` JSON NULL,
     `ipRegion` VARCHAR(191) NULL,
     `viewCount` INTEGER NOT NULL DEFAULT 0,
     `likeCount` INTEGER NOT NULL DEFAULT 0,
@@ -3462,6 +3555,25 @@ CREATE TABLE `User` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `UserPrivacySetting` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `showCheckInHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showCheckInMessages` BOOLEAN NOT NULL DEFAULT true,
+    `showPosts` BOOLEAN NOT NULL DEFAULT true,
+    `showComments` BOOLEAN NOT NULL DEFAULT true,
+    `showConcertHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showActivityHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showBadgeHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showRatings` BOOLEAN NOT NULL DEFAULT true,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `UserPrivacySetting_userId_key`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `UserAchievement` (
     `id` VARCHAR(191) NOT NULL,
     `progress` INTEGER NOT NULL DEFAULT 0,
@@ -3696,12 +3808,40 @@ CREATE TABLE `SocialSyncLog` (
     `createdCount` INTEGER NOT NULL DEFAULT 0,
     `updatedCount` INTEGER NOT NULL DEFAULT 0,
     `mediaCount` INTEGER NOT NULL DEFAULT 0,
+    `notificationCount` INTEGER NOT NULL DEFAULT 0,
+    `baselineImport` BOOLEAN NOT NULL DEFAULT false,
     `durationMs` INTEGER NULL,
     `errorCode` VARCHAR(64) NULL,
     `errorMessage` TEXT NULL,
 
     INDEX `SocialSyncLog_target_startedAt_idx`(`target`, `startedAt`),
     INDEX `SocialSyncLog_status_startedAt_idx`(`status`, `startedAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SocialSyncState` (
+    `id` VARCHAR(191) NOT NULL,
+    `platform` ENUM('INSTAGRAM') NOT NULL DEFAULT 'INSTAGRAM',
+    `target` VARCHAR(191) NOT NULL,
+    `lastCheckedAt` DATETIME(3) NULL,
+    `lastSuccessfulSyncAt` DATETIME(3) NULL,
+    `lastChangedAt` DATETIME(3) NULL,
+    `lastExternalId` VARCHAR(191) NULL,
+    `consecutiveFailures` INTEGER NOT NULL DEFAULT 0,
+    `nextAllowedSyncAt` DATETIME(3) NULL,
+    `lastErrorCode` VARCHAR(64) NULL,
+    `lastErrorAt` DATETIME(3) NULL,
+    `baselineCompletedAt` DATETIME(3) NULL,
+    `syncRequestedAt` DATETIME(3) NULL,
+    `lockToken` VARCHAR(64) NULL,
+    `lockUntil` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `SocialSyncState_nextAllowedSyncAt_idx`(`nextAllowedSyncAt`),
+    INDEX `SocialSyncState_lastSuccessfulSyncAt_idx`(`lastSuccessfulSyncAt`),
+    UNIQUE INDEX `SocialSyncState_platform_target_key`(`platform`, `target`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3725,6 +3865,30 @@ ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_activity
 
 -- AddForeignKey
 ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_verifiedById_fkey` FOREIGN KEY (`verifiedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_linkedMaterialRedemptionId_fkey` FOREIGN KEY (`linkedMaterialRedemptionId`) REFERENCES `MaterialRedemptionOrder`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationQuestion` ADD CONSTRAINT `ActivityRegistrationQuestion_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationQuestionOption` ADD CONSTRAINT `ActivityRegistrationQuestionOption_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `ActivityRegistrationQuestion`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationAnswer` ADD CONSTRAINT `ActivityRegistrationAnswer_registrationId_fkey` FOREIGN KEY (`registrationId`) REFERENCES `ActivityRegistration`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationAnswer` ADD CONSTRAINT `ActivityRegistrationAnswer_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `ActivityRegistrationQuestion`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityReward` ADD CONSTRAINT `ActivityReward_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityReward` ADD CONSTRAINT `ActivityReward_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `AdminAction` ADD CONSTRAINT `AdminAction_adminId_fkey` FOREIGN KEY (`adminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -3754,6 +3918,9 @@ ALTER TABLE `AdminPermission` ADD CONSTRAINT `AdminPermission_userId_fkey` FOREI
 ALTER TABLE `MaterialRedemption` ADD CONSTRAINT `MaterialRedemption_createdByAdminId_fkey` FOREIGN KEY (`createdByAdminId`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `MaterialRedemption` ADD CONSTRAINT `MaterialRedemption_linkedActivityId_fkey` FOREIGN KEY (`linkedActivityId`) REFERENCES `Activity`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `MaterialRedemptionRule` ADD CONSTRAINT `MaterialRedemptionRule_materialId_fkey` FOREIGN KEY (`materialId`) REFERENCES `MaterialRedemption`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -3761,6 +3928,9 @@ ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_ma
 
 -- AddForeignKey
 ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_linkedActivityId_fkey` FOREIGN KEY (`linkedActivityId`) REFERENCES `Activity`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_redeemedByAdminId_fkey` FOREIGN KEY (`redeemedByAdminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -4324,6 +4494,9 @@ ALTER TABLE `PasswordResetToken` ADD CONSTRAINT `PasswordResetToken_userId_fkey`
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_dailyDrawId_fkey` FOREIGN KEY (`dailyDrawId`) REFERENCES `EntertainmentDailyDraw`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_activityRegistrationId_fkey` FOREIGN KEY (`activityRegistrationId`) REFERENCES `ActivityRegistration`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -4514,6 +4687,9 @@ ALTER TABLE `SystemNotificationRead` ADD CONSTRAINT `SystemNotificationRead_user
 
 -- AddForeignKey
 ALTER TABLE `User` ADD CONSTRAINT `User_equippedBadgeId_fkey` FOREIGN KEY (`equippedBadgeId`) REFERENCES `Badge`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserPrivacySetting` ADD CONSTRAINT `UserPrivacySetting_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `UserAchievement` ADD CONSTRAINT `UserAchievement_achievementId_fkey` FOREIGN KEY (`achievementId`) REFERENCES `Achievement`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

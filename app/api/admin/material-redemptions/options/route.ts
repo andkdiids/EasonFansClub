@@ -23,5 +23,17 @@ export async function GET(request: Request) {
     const users = await prisma.user.findMany({ where: { status: 'ACTIVE', isDeleted: false, ...(query ? { OR: [{ nickname: { contains: query } }, { username: { contains: query } }, ...(Number.isSafeInteger(uid) ? [{ uid }] : [])] } : {}) }, orderBy: { uid: 'asc' }, take: 30, select: { id: true, uid: true, nickname: true, username: true } })
     return NextResponse.json({ options: users.map((user) => ({ id: user.id, label: `${user.nickname || 'E院用户'} · E院ID ${user.uid}`, username: user.username, uid: user.uid })) })
   }
+  if (kind === 'activities') {
+    const activities = await prisma.activity.findMany({
+      where: {
+        status: { not: 'CANCELLED' },
+        ...(query ? { OR: [{ title: { contains: query } }, { subtitle: { contains: query } }] } : {}),
+      },
+      orderBy: [{ startsAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      select: { id: true, title: true, startsAt: true, endsAt: true, status: true },
+    })
+    return NextResponse.json({ options: activities.map((activity) => ({ id: activity.id, label: `${activity.title}${activity.startsAt ? ` · ${activity.startsAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}` : ''}`, title: activity.title, startsAt: activity.startsAt?.toISOString() || null, endsAt: activity.endsAt?.toISOString() || null, status: activity.status })) })
+  }
   return NextResponse.json({ options: [] })
 }

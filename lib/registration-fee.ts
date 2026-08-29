@@ -30,6 +30,8 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   CHECK_IN_MAKEUP: '补挂号',
   MATERIAL_REDEMPTION: '物料兑换',
   MATERIAL_REDEMPTION_REFUND: '物料兑换退款',
+  ACTIVITY_REGISTRATION_FEE: '活动报名挂号费',
+  ACTIVITY_REGISTRATION_REFUND: '活动报名退款',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
@@ -53,6 +55,7 @@ type RegistrationFeeAwardInput = {
   replyId?: string
   checkInId?: string
   activityId?: string
+  activityRegistrationId?: string
   badgeId?: string
   dailyDrawId?: string
 }
@@ -114,6 +117,7 @@ export async function awardRegistrationFee(
       replyId: input.replyId,
       checkInId: input.checkInId,
       activityId: input.activityId,
+      activityRegistrationId: input.activityRegistrationId,
       badgeId: input.badgeId,
       dailyDrawId: input.dailyDrawId,
       createdAt: now,
@@ -193,6 +197,8 @@ type RegistrationFeeConsumptionInput = {
   businessKey: string
   now?: Date
   checkInId?: string
+  activityId?: string
+  activityRegistrationId?: string
 }
 
 /** Atomically consumes registration fees without ever allowing a negative balance. */
@@ -226,6 +232,8 @@ export async function consumeRegistrationFee(
       reason: input.reason,
       businessKey: input.businessKey,
       checkInId: input.checkInId,
+      activityId: input.activityId,
+      activityRegistrationId: input.activityRegistrationId,
       dateKey,
       createdAt: now,
     },
@@ -308,6 +316,7 @@ const registrationFeeRecordSelect = {
   replyId: true,
   checkInId: true,
   activityId: true,
+  activityRegistrationId: true,
   badgeId: true,
   dailyDrawId: true,
 } satisfies Prisma.PointLogSelect
@@ -326,6 +335,7 @@ export function serializeRegistrationFeeRecord(record: RegistrationFeeRecord) {
     sourceLabel: getRegistrationFeeSourceLabel(record.action),
     description: record.reason,
     relatedId: getRegistrationFeeRelatedId(record),
+    activityRegistrationId: record.activityRegistrationId,
     createdAt: record.createdAt.toISOString(),
     displayTime: formatBeijingDateTimeMinute(record.createdAt).slice(-5),
   }

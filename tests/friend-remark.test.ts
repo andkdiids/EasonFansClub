@@ -47,7 +47,7 @@ test('备注显示出口使用批量 map，mention 仍返回真实 userId', () =
 
   assert.match(mentions, /loadFriendRemarkMap\(user\.id, friendIds\)/)
   assert.doesNotMatch(replyPage, /loadFriendRemarkMap/)
-  assert.match(replyPage, /const authorName = getPublicUserDisplayName\(post\.User\)/)
+  assert.match(replyPage, /getPublicUserDisplayName\(mentionedUser\)/)
   assert.match(replyPage, /id: mentionedUser\.id/)
   assert.match(notifications, /loadFriendRemarkMap\(userId, actorIds\)/)
 })

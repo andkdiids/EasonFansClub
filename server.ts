@@ -22,6 +22,7 @@ const maxConnectionsPerIp = 20
 const maxAttemptsPerIp = 30
 const attemptWindowMs = 60_000
 const heartbeatIntervalMs = 30_000
+const activityAutoCheckInIntervalMs = 60_000
 const websocketPaths = [websocketPath, duelWebsocketPath, undercoverWebsocketPath, undercoverChatWebsocketPath] as const
 
 const websocketMetrics = {
@@ -329,8 +330,42 @@ async function start() {
     }
   }, heartbeatIntervalMs)
 
+  // Keep the end-of-activity reconciliation in the same production process as
+  // the custom HTTP/WebSocket entrypoint. Each candidate is re-checked and
+  // locked in its own transaction, so overlapping ticks and restarts are safe.
+  let activityAutoCheckInRunning = false
+  const runActivityAutoCheckIn = async () => {
+    if (activityAutoCheckInRunning) return
+    activityAutoCheckInRunning = true
+    try {
+      const { autoCheckInEndedActivityRegistrations } = await import('./lib/activity-registration')
+      const result = await autoCheckInEndedActivityRegistrations({ batchSize: 100 })
+      if (result.scanned || result.failed) {
+        console.info('[activities.auto-check-in.completed]', {
+          event: 'activities.auto_check_in.completed',
+          scanned: result.scanned,
+          processed: result.processed,
+          failed: result.failed,
+        })
+      }
+    } catch (error) {
+      console.error('[activities.auto-check-in.failed]', {
+        event: 'activities.auto_check_in.failed',
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      })
+    } finally {
+      activityAutoCheckInRunning = false
+    }
+  }
+  const activityAutoCheckInEnabled = process.env.NODE_ENV === 'production'
+  const productionActivityAutoCheckInHeartbeat = activityAutoCheckInEnabled
+    ? setInterval(() => { void runActivityAutoCheckIn() }, activityAutoCheckInIntervalMs)
+    : null
+  if (activityAutoCheckInEnabled) void runActivityAutoCheckIn()
+
   const shutdown = () => {
     clearInterval(heartbeat)
+    if (productionActivityAutoCheckInHeartbeat) clearInterval(productionActivityAutoCheckInHeartbeat)
     for (const socket of realtimeSockets) socket.close(1001, 'server shutdown')
     websocketServer.close()
     server.close()

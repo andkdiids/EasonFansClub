@@ -30,9 +30,11 @@ test('home today module keeps the original card and rotates multiple events', ()
 
 test('today page sorts complete history by original year and preserves source origin', () => {
   const page = read('app/today/TodayPageClient.tsx')
+  const service = read('lib/today-events.ts')
   const route = read('app/api/today/route.ts')
   assert.match(page, /b\.year - a\.year/)
-  assert.match(page, /sourceLabels\[item\.source\]/)
+  assert.match(page, /source: 'AUTO' \| 'ADMIN'/)
+  assert.match(service, /source: event\.source/)
   assert.match(route, /source: 'ADMIN'/)
   assert.match(route, /getTodayEventRecords\(\)/)
 })

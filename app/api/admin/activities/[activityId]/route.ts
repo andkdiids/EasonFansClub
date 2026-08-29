@@ -6,6 +6,7 @@ import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { checkBannedWords, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE } from '@/lib/content-moderation'
 import { normalizeActivityInput, type ActivityEditableValues } from '@/lib/activity-validation'
 import { ActivityConfigurationError, getActivityRegistrationQuestions, syncActivityRegistrationQuestions, syncActivityReward } from '@/lib/activity-registration'
+import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '@/lib/activity-material'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
 
@@ -25,6 +26,9 @@ function editableActivity(activity: ActivityRow): ActivityEditableValues {
     locationName: activity.locationName,
     locationAddress: activity.locationAddress,
     onlineUrl: activity.onlineUrl,
+    registrationFee: activity.registrationFee,
+    feeDescription: activity.feeDescription,
+    linkedMaterialId: activity.linkedMaterial?.id || null,
     startsAt: activity.startsAt,
     endsAt: activity.endsAt,
     registrationStartAt: activity.registrationStartAt,
@@ -42,7 +46,7 @@ function editableActivity(activity: ActivityRow): ActivityEditableValues {
 function changedFields(before: ActivityEditableValues, after: ActivityEditableValues) {
   const keys: Array<keyof ActivityEditableValues> = [
     'title', 'subtitle', 'description', 'type', 'status', 'coverUrl', 'bannerUrl', 'locationName', 'locationAddress', 'onlineUrl',
-    'startsAt', 'endsAt', 'registrationStartAt', 'registrationEndAt', 'verificationMode', 'signupLimit', 'organizer', 'contactInfo', 'isFeatured', 'isPinned', 'sortOrder',
+    'startsAt', 'endsAt', 'registrationStartAt', 'registrationEndAt', 'verificationMode', 'signupLimit', 'registrationFee', 'feeDescription', 'linkedMaterialId', 'organizer', 'contactInfo', 'isFeatured', 'isPinned', 'sortOrder',
   ]
   return keys.filter((key) => {
     const left = before[key]
@@ -53,7 +57,7 @@ function changedFields(before: ActivityEditableValues, after: ActivityEditableVa
 }
 
 function moderationText(value: ActivityEditableValues) {
-  return [value.title, value.subtitle, value.description, value.locationName, value.locationAddress, value.organizer, value.contactInfo].filter(Boolean).join('\n')
+  return [value.title, value.subtitle, value.description, value.feeDescription, value.locationName, value.locationAddress, value.organizer, value.contactInfo].filter(Boolean).join('\n')
 }
 
 async function getActivity(activityId: string) {
@@ -109,15 +113,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
 
   try {
     const activity = await prisma.$transaction(async (tx) => {
+      const { linkedMaterialId, ...activityData } = normalized.value
       const updated = await tx.activity.update({
         where: { id: activityId },
         data: {
-          ...normalized.value,
+          ...activityData,
           publishedAt,
           updatedById: guard.user.id,
         },
         select: activitySelect,
       })
+      await syncActivityLinkedMaterial(tx, { activityId, linkedMaterialId, startsAt: updated.startsAt, endsAt: updated.endsAt })
       if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, activityId, input.registrationQuestions)
       if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, activityId, input.activityReward, normalized.value.verificationMode)
       await createAdminActionAudit(tx, {
@@ -147,14 +153,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         targetTitle: updated.title,
         metadata: { activityId: updated.id, activityReward: input.activityReward as Prisma.InputJsonValue } as Prisma.InputJsonValue,
       })
-      return updated
+      return tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: activitySelect })
     })
     revalidatePath('/activities')
     revalidatePath(`/activities/${activityId}`)
     revalidatePath('/')
     return NextResponse.json({ activity: serializeActivityRow(activity) })
   } catch (error) {
-    if (error instanceof ActivityConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
+    if (error instanceof ActivityConfigurationError || error instanceof ActivityMaterialConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
     console.error('[admin.activities.update]', error instanceof Error ? error.message : error)
     return NextResponse.json({ message: '保存活动失败，请稍后重试' }, { status: 500 })
   }
@@ -171,12 +177,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       id: true,
       title: true,
       status: true,
+      linkedMaterial: { select: { id: true, title: true } },
       _count: { select: { ActivityRegistration: true, ActivityFavorite: true, Lottery: true } },
     },
   })
   if (!activity) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
-  if (activity.status !== 'DRAFT' || activity._count.ActivityRegistration > 0 || activity._count.ActivityFavorite > 0 || activity._count.Lottery > 0) {
-    return NextResponse.json({ message: '已发布、已取消或存在关联数据的活动不能删除，请使用“取消活动”保留历史记录' }, { status: 409 })
+  if (activity.status !== 'DRAFT' || activity._count.ActivityRegistration > 0 || activity._count.ActivityFavorite > 0 || activity._count.Lottery > 0 || activity.linkedMaterial) {
+    return NextResponse.json({ message: activity.linkedMaterial ? '活动已绑定物料，请先解除绑定后再删除' : '已发布、已取消或存在关联数据的活动不能删除，请使用“取消活动”保留历史记录' }, { status: 409 })
   }
 
   try {

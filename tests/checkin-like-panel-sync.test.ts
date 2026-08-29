@@ -9,7 +9,7 @@ const actions = read('components/DailyMessageActions.tsx')
 const likeRoute = read('app/api/daily-messages/[messageId]/like/route.ts')
 
 test('点赞接口事务内返回权威 isLiked / likeCount，且不会减成负数', () => {
-  assert.match(likeRoute, /return \{ isLiked: !existing, likeCount \}/)
+  assert.match(likeRoute, /return \{ isLiked: !existing, likeCount, notifiedUserId:/)
   assert.match(likeRoute, /dailyMessageLike\.count\(\{ where: \{ messageId \} \}\)/)
   // 取消点赞走 deleteMany（幂等，不存在时不会重复扣减）
   assert.match(likeRoute, /dailyMessageLike\.deleteMany\(\{ where: \{ messageId, userId: guard\.user\.id \} \}\)/)
@@ -18,7 +18,7 @@ test('点赞接口事务内返回权威 isLiked / likeCount，且不会减成负
 test('面板同步 effect 不依赖不稳定的 likeCtx，点赞不再触发分页重置与旧数据覆盖', () => {
   assert.match(panel, /const likeCtxRef = useRef\(likeCtx\)/)
   // 初始数据同步 effect 只跟随真正的服务端 props 变化
-  assert.match(panel, /\}, \[initialDate, initialMessages, initialPagination, initialSort\]\)/)
+  assert.match(panel, /\}, \[initialDate, initialFollowedUserIds, initialMessages, initialPagination, initialSort\]\)/)
   assert.ok(!panel.includes('[initialDate, initialMessages, initialSort, likeCtx]'))
   // loadMessages 同样不把 likeCtx 列入依赖
   assert.match(panel, /\}, \[date, isLoading, page, scope, serverPaginated, sort\]\)/)

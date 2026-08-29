@@ -68,5 +68,6 @@ test('桌面端遗留操作区为作者/管理员提供编辑入口，且与移�
   assert.match(detail, /canEditPost \? \([\s\S]*?Link href=\{\`\/posts\/\$\{post\.id\}\/edit\`\}/)
   // 编辑权限统一：作者本人或拥有 post_manage 权限的管理员，不依赖旧管理员字段。
   assert.match(detail, /const canEditPost = Boolean\(user && \(user\.id === post\.User\.id \|\| canManagePost\)\)/)
-  assert.match(detail, /const canManagePost = Boolean\(user && await hasAdminPermission\(user, 'post_manage'\)\)/)
+  assert.match(detail, /const viewerIsAdmin = Boolean\(user && await loadPostAdminPermission\(user, 'post_manage', postId\)\)/)
+  assert.match(detail, /const canManagePost = viewerIsAdmin/)
 })

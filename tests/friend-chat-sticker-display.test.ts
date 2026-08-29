@@ -40,12 +40,12 @@ test('表情选择器入口图标优先封面且尺寸 28/32px，顶部标题栏
     stickerPicker,
     /const packIcon = pack\.coverUrl \|\| data\?\.stickersByPack\[pack\.id\]\?\.\[0\]\?\.url \|\| ''/,
   )
-  // 尺寸：移动端 28px（h-7 w-7），桌面端 32px（sm:h-8 sm:w-8）；object-cover + rounded-md。
+  // 尺寸：移动端 28px（h-7 w-7），桌面端 32px（sm:h-8 sm:w-8）；图标保持完整比例。
   assert.match(
     stickerPicker,
-    /h-7 w-7 flex-none cursor-pointer place-items-center overflow-hidden rounded-md ring-1 transition sm:h-8 sm:w-8/,
+    /box-border grid h-7 w-7 flex-none cursor-pointer place-items-center overflow-hidden rounded-md p-0\.5 ring-1 transition sm:h-8 sm:w-8/,
   )
-  assert.match(stickerPicker, /<img src=\{packIcon\} alt="" className="h-full w-full object-cover" loading="lazy" \/>/)
+  assert.match(stickerPicker, /<img src=\{publicImageVariantUrl\(packIcon, 'thumb-sm'\) \|\| packIcon\} alt="" className="h-full w-full object-contain" loading="lazy" \/>/)
   // 顶部标题栏压缩上下空白（py-2.5 -> py-1.5）。
   assert.match(
     stickerPicker,

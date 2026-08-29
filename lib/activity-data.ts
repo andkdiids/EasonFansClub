@@ -15,6 +15,8 @@ export const activitySelect = {
   locationAddress: true,
   onlineUrl: true,
   pointsReward: true,
+  registrationFee: true,
+  feeDescription: true,
   signupLimit: true,
   signupCount: true,
   startsAt: true,
@@ -33,6 +35,20 @@ export const activitySelect = {
   updatedById: true,
   createdAt: true,
   updatedAt: true,
+  linkedMaterial: {
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      coverImageUrl: true,
+      status: true,
+      stockTotal: true,
+      stockRemaining: true,
+      exchangeStartAt: true,
+      exchangeEndAt: true,
+      redeemEndAt: true,
+    },
+  },
   _count: { select: { ActivityRegistration: { where: { status: { in: ['ACTIVE'] } } } } },
 } satisfies Prisma.ActivitySelect
 
@@ -44,6 +60,9 @@ export function serializeActivityRow(row: ActivityRow, now = new Date()) {
     ...activity,
     coverUrl: publicImageUrl(activity.coverUrl),
     bannerUrl: publicImageUrl(activity.bannerUrl),
+    linkedMaterial: activity.linkedMaterial
+      ? { ...activity.linkedMaterial, coverImageUrl: publicImageUrl(activity.linkedMaterial.coverImageUrl) }
+      : null,
     // Activity.signupCount is a legacy denormalized value. The relation count
     // is the source of truth for every public/admin activity read.
     signupCount: _count.ActivityRegistration,

@@ -7,6 +7,7 @@ import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { checkBannedWords, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE } from '@/lib/content-moderation'
 import { normalizeActivityInput } from '@/lib/activity-validation'
 import { ActivityConfigurationError, syncActivityRegistrationQuestions, syncActivityReward } from '@/lib/activity-registration'
+import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '@/lib/activity-material'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
 
 function moderationText(value: ReturnType<typeof normalizeActivityInput>) {
   if (!value.valid) return ''
-  return [value.value.title, value.value.subtitle, value.value.description, value.value.locationName, value.value.locationAddress, value.value.organizer, value.value.contactInfo].filter(Boolean).join('\n')
+  return [value.value.title, value.value.subtitle, value.value.description, value.value.feeDescription, value.value.locationName, value.value.locationAddress, value.value.organizer, value.value.contactInfo].filter(Boolean).join('\n')
 }
 
 export async function POST(request: Request) {
@@ -65,15 +66,17 @@ export async function POST(request: Request) {
   const now = new Date()
   try {
     const activity = await prisma.$transaction(async (tx) => {
+      const { linkedMaterialId, ...activityData } = normalized.value
       const created = await tx.activity.create({
         data: {
-          ...normalized.value,
+          ...activityData,
           publishedAt: normalized.value.status === 'PUBLISHED' ? now : null,
           createdById: guard.user.id,
           updatedById: guard.user.id,
         },
         select: activitySelect,
       })
+      await syncActivityLinkedMaterial(tx, { activityId: created.id, linkedMaterialId, startsAt: created.startsAt, endsAt: created.endsAt })
       if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, created.id, input.registrationQuestions)
       if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, created.id, input.activityReward, normalized.value.verificationMode)
       await createAdminActionAudit(tx, {
@@ -96,13 +99,13 @@ export async function POST(request: Request) {
           metadata: { activityId: created.id, fromStatus: 'DRAFT', toStatus: 'PUBLISHED' } as Prisma.InputJsonValue,
         })
       }
-      return created
+      return tx.activity.findUniqueOrThrow({ where: { id: created.id }, select: activitySelect })
     })
     revalidatePath('/activities')
     revalidatePath('/')
     return NextResponse.json({ activity: serializeActivityRow(activity) }, { status: 201 })
   } catch (error) {
-    if (error instanceof ActivityConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
+    if (error instanceof ActivityConfigurationError || error instanceof ActivityMaterialConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
     console.error('[admin.activities.create]', error instanceof Error ? error.message : error)
     return NextResponse.json({ message: '创建活动失败，请稍后重试' }, { status: 500 })
   }

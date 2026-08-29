@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { canAccessAnywhereDoor } from '@/lib/anywhere-door/access'
-import { getPublicSocialPostDetail } from '@/lib/social-posts'
+import { getPublicSocialPostDetail, getPublicSocialPostFeed } from '@/lib/social-posts'
 import { AnywhereDoorDetail } from '@/components/anywhere-door/AnywhereDoorDetail'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +12,11 @@ export default async function AnywhereDoorDetailPage({ params }: { params: Promi
   if (!user) redirect('/login?redirect=/anywhere-door')
   if (!(await canAccessAnywhereDoor(user))) notFound()
   const { postId } = await params
-  const post = await getPublicSocialPostDetail(postId, user.id)
+  const [post, related] = await Promise.all([
+    getPublicSocialPostDetail(postId, user.id),
+    getPublicSocialPostFeed({ viewerId: user.id, limit: 21 }),
+  ])
   if (!post) notFound()
-  return <main className="mx-auto w-full max-w-2xl px-4 py-5 sm:px-5 sm:py-8"><AnywhereDoorDetail post={post} /></main>
+  const morePosts = related.items.filter((item) => item.id !== post.id)
+  return <main className="mx-auto w-full max-w-[1280px] px-3 py-4 sm:px-5 sm:py-8 lg:px-6"><AnywhereDoorDetail post={post} morePosts={morePosts} /></main>
 }

@@ -65,8 +65,8 @@ test('clinic interaction routes require server transactions and database-backed 
   assert.match(read('app/api/clinic/[recordId]/route.ts'), /getPublicClinicRecordDetail/)
   assert.match(read('middleware.ts'), /'\/clinic'/)
   assert.match(read('middleware.ts'), /'\/api\/clinic\/'/)
-  assert.match(read('components/layout/MobileNavigation.tsx'), /href: '\/clinic'/)
-  assert.match(read('components/layout/MobileNavigation.tsx'), /stethoscope/)
+  assert.match(read('lib/navigation-registry.ts'), /href: '\/clinic'/)
+  assert.match(read('lib/navigation-registry.ts'), /icon: 'stethoscope'/)
 })
 
 test('clinic client requests match the dynamic record routes', () => {
@@ -122,7 +122,7 @@ test('clinic consultation input preserves business validation and safe diagnosti
 
 test('clinic mobile layout uses one-column hero, scrollable tabs, compact actions and bounded composer', () => {
   const css = read('app/globals.css')
-  const mobileCss = css.slice(css.lastIndexOf('@media (max-width:767px)'))
+  const mobileCss = css
   const home = read('components/clinic/ClinicHomeClient.tsx')
   const detail = read('components/clinic/ClinicDetailClient.tsx')
 

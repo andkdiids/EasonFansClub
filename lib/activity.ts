@@ -41,6 +41,9 @@ export type ActivityView = {
   locationAddress: string | null
   onlineUrl: string | null
   pointsReward: number | null
+  registrationFee: number
+  feeDescription: string | null
+  linkedMaterial: ActivityLinkedMaterialView | null
   signupLimit: number | null
   signupCount: number
   startsAt: string | null
@@ -57,6 +60,19 @@ export type ActivityView = {
   publishedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+export type ActivityLinkedMaterialView = {
+  id: string
+  title: string
+  description: string | null
+  coverImageUrl: string | null
+  status: 'DRAFT' | 'PUBLISHED' | 'PAUSED' | 'ENDED' | 'ARCHIVED'
+  stockTotal: number
+  stockRemaining: number
+  exchangeStartAt: string
+  exchangeEndAt: string
+  redeemEndAt: string
 }
 
 type ActivityDateValue = Date | string | null | undefined
@@ -138,6 +154,20 @@ export function serializeActivity(activity: {
   locationAddress?: string | null
   onlineUrl?: string | null
   pointsReward?: number | null
+  registrationFee?: number
+  feeDescription?: string | null
+  linkedMaterial?: {
+    id: string
+    title: string
+    description?: string | null
+    coverImageUrl?: string | null
+    status: 'DRAFT' | 'PUBLISHED' | 'PAUSED' | 'ENDED' | 'ARCHIVED'
+    stockTotal: number
+    stockRemaining: number
+    exchangeStartAt: ActivityDateValue
+    exchangeEndAt: ActivityDateValue
+    redeemEndAt: ActivityDateValue
+  } | null
   signupLimit?: number | null
   signupCount?: number
   startsAt?: ActivityDateValue
@@ -169,6 +199,22 @@ export function serializeActivity(activity: {
     locationAddress: activity.locationAddress ?? null,
     onlineUrl: activity.onlineUrl ?? null,
     pointsReward: activity.pointsReward ?? null,
+    registrationFee: activity.registrationFee ?? 0,
+    feeDescription: activity.feeDescription ?? null,
+    linkedMaterial: activity.linkedMaterial
+      ? {
+          id: activity.linkedMaterial.id,
+          title: activity.linkedMaterial.title,
+          description: activity.linkedMaterial.description ?? null,
+          coverImageUrl: activity.linkedMaterial.coverImageUrl ?? null,
+          status: activity.linkedMaterial.status,
+          stockTotal: activity.linkedMaterial.stockTotal,
+          stockRemaining: activity.linkedMaterial.stockRemaining,
+          exchangeStartAt: iso(activity.linkedMaterial.exchangeStartAt) || new Date(0).toISOString(),
+          exchangeEndAt: iso(activity.linkedMaterial.exchangeEndAt) || new Date(0).toISOString(),
+          redeemEndAt: iso(activity.linkedMaterial.redeemEndAt) || new Date(0).toISOString(),
+        }
+      : null,
     signupLimit: activity.signupLimit ?? null,
     signupCount: activity.signupCount ?? 0,
     startsAt: iso(activity.startsAt),

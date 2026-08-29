@@ -68,8 +68,19 @@ test('FriendDock title actions and close button are vertically centered', () => 
 })
 
 test('mobile FriendDock is a contained floating drawer that keeps page context visible', () => {
-  assert.match(css, /\.friend-dock-panel \{[^}]*top:50%;[^}]*right:0;[^}]*width:80vw;[^}]*max-width:420px;[^}]*height:82vh;[^}]*max-height:calc\(100vh - 120px\);[^}]*contain:layout paint;[^}]*overflow:hidden;[^}]*transform:translateY\(-50%\)/)
-  assert.match(css, /\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[^}]*height:82vh;[^}]*max-height:calc\(100vh - 120px\)/)
+  const panelRule = css.match(/\.friend-dock-panel \{[^}]*top:50%;[^}]*\}/)?.[0] || ''
+  const modeRule = css.match(/\.friend-dock-panel\.is-list,\.friend-dock-panel\.is-chat \{[^}]*\}/)?.[0] || ''
+  assert.match(panelRule, /top:50%;/)
+  assert.match(panelRule, /right:0;/)
+  assert.match(panelRule, /width:80vw;/)
+  assert.match(panelRule, /max-width:420px;/)
+  assert.match(panelRule, /height:min\(82(?:vh|dvh),/)
+  assert.match(panelRule, /max-height:calc\(var\(--friend-dock-viewport-height,100dvh\) - 120px\)/)
+  assert.match(panelRule, /contain:layout paint;/)
+  assert.match(panelRule, /overflow:hidden;/)
+  assert.match(panelRule, /transform:translateY\(-50%\)/)
+  assert.match(modeRule, /height:min\(82(?:vh|dvh),/)
+  assert.match(modeRule, /max-height:calc\(var\(--friend-dock-viewport-height,100dvh\) - 120px\)/)
   assert.match(css, /@keyframes friend-dock-drawer-in \{ from \{ transform:translate\(100%,-50%\); \} to \{ transform:translate\(0,-50%\); \} \}/)
 })
 

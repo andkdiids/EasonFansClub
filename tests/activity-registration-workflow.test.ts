@@ -8,6 +8,9 @@ import {
   parseRegistrationQuestions,
   validateRegistrationAnswers,
 } from '@/lib/activity-registration'
+import { activityMaterialSchedule } from '@/lib/activity-material'
+import { normalizeActivityInput } from '@/lib/activity-validation'
+import { normalizeMaterialRules } from '@/lib/material-redemptions'
 
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
@@ -96,11 +99,13 @@ test('限定奖励只在核销事务内复用统一勋章服务，前台不返�
   assert.doesNotMatch(detail, /ActivityReward|限定勋章|rewardBadge/)
 })
 
-test('取消后重新报名不会从已取消记录回填旧答案', () => {
+test('取消后永久禁止再次报名并且不回填已取消记录的旧答案', () => {
   const button = read('components/activities/ActivityRegistrationButton.tsx')
   assert.match(button, /initialRegistration\?\.status === 'ACTIVE'/)
-  assert.match(button, /registration\?\.status === 'CANCELLED'\) setAnswers\(emptyAnswers\(questions\)\)/)
   assert.match(button, /setAnswers\(emptyAnswers\(questions\)\)/)
+  assert.match(button, /initialRegistration\?\.status !== 'CANCELLED'/)
+  assert.match(button, /isCancelled/)
+  assert.doesNotMatch(button, /取消后仍可在报名时间内重新报名/)
 })
 
 test('报名状态服务不读取发布或活动开始/结束时间作为报名窗口兜底', () => {
@@ -146,4 +151,139 @@ test('活动详情桌面端使用三栏约束，已核销二维码保留但明�
   assert.match(qr, /lg:max-w-\[300px\]/)
   assert.match(qr, /pointer-events-none grayscale opacity-40/)
   assert.match(qr, /已核销/)
+})
+
+test('收费活动和活动物料规则使用新增字段，物料时间继承活动实际起止时间', () => {
+  const activity = normalizeActivityInput({
+    title: '收费活动',
+    type: 'OFFLINE',
+    status: 'PUBLISHED',
+    startsAt: '2026-09-13T18:00',
+    endsAt: '2026-09-13T21:00',
+    description: '活动说明',
+    registrationFee: 27,
+    feeDescription: '报名费用包含活动物料。',
+    linkedMaterialId: 'material-1',
+  })
+  assert.equal(activity.valid, true)
+  if (activity.valid) {
+    assert.equal(activity.value.registrationFee, 27)
+    assert.equal(activity.value.feeDescription, '报名费用包含活动物料。')
+    assert.equal(activity.value.linkedMaterialId, 'material-1')
+  }
+  const rules = normalizeMaterialRules([{ type: 'ACTIVITY_REGISTRATION_REQUIRED', operator: 'EQ', value: 'activity-1' }])
+  assert.deepEqual(rules, { rules: [{ type: 'ACTIVITY_REGISTRATION_REQUIRED', operator: 'EQ', value: 'activity-1' }] })
+  const schedule = activityMaterialSchedule(new Date('2026-09-13T10:00:00.000Z'), new Date('2026-09-13T13:00:00.000Z'))
+  assert.deepEqual(schedule, {
+    exchangeStartAt: new Date('2026-09-13T10:00:00.000Z'),
+    exchangeEndAt: new Date('2026-09-13T13:00:00.000Z'),
+    redeemEndAt: new Date('2026-09-13T13:00:00.000Z'),
+  })
+})
+
+test('报名费用、自动物料库存和自动订单在同一事务内且只收一次费用', () => {
+  const route = read('app/api/activities/[activityId]/register/route.ts')
+  const service = read('lib/activity-registration.ts')
+  const schema = read('prisma/schema.prisma')
+  assert.match(route, /prisma\.\$transaction\(async \(tx\)/)
+  assert.match(route, /consumeRegistrationFee\(tx, \{[\s\S]*action: 'ACTIVITY_REGISTRATION_FEE'/)
+  assert.match(route, /createActivityMaterialOrderInTransaction\(tx, \{[\s\S]*materialId: activity\.linkedMaterial\.id/)
+  assert.match(service, /activityMaterialOrderIdempotencyPrefix = 'activity-registration-material:'/)
+  assert.match(service, /const idempotencyKey = `\$\{activityMaterialOrderIdempotencyPrefix\}\$\{input\.registrationId\}`/)
+  assert.match(service, /stockRemaining: \{ gte: 1 \}/)
+  assert.match(service, /if \(stockChanged\.count !== 1\)/)
+  assert.match(service, /source: 'ACTIVITY_REGISTRATION_AUTO'/)
+  assert.match(service, /unitCost: 0[\s\S]*totalCost: 0/)
+  assert.match(schema, /idempotencyKey\s+String\s+@unique/)
+  assert.match(schema, /paidRegistrationFee\s+Int\s+@default\(0\)/)
+})
+
+test('取消报名按实际支付金额退款、同步取消活动物料并永久保留取消事实', () => {
+  const cancel = read('app/api/activities/[activityId]/register/cancel/route.ts')
+  const button = read('components/activities/ActivityRegistrationButton.tsx')
+  assert.match(cancel, /status === 'CANCELLED'/)
+  assert.match(cancel, /paidRegistrationFee/)
+  assert.match(cancel, /action: 'ACTIVITY_REGISTRATION_REFUND'/)
+  assert.match(cancel, /businessKey: `activity-registration-refund:\$\{registration\.id\}`/)
+  assert.match(cancel, /status: 'CANCELLED'/)
+  assert.match(cancel, /stockRemaining: \{ lte:/)
+  assert.match(cancel, /status: 'CANCELLED', cancelledAt: now/)
+  assert.doesNotMatch(cancel, /activityRegistration\.delete|tx\.activityRegistration\.delete/)
+  assert.match(button, /cancelDialogOpen/)
+  assert.match(button, /确认取消报名/)
+  assert.match(button, /initialRegistration\?\.status !== 'CANCELLED'/)
+  assert.match(button, /无法再次报名/)
+})
+
+test('活动码和物料码共享同一联动核销事务，重复扫码不会重复核销', () => {
+  const registration = read('lib/activity-registration.ts')
+  const material = read('lib/material-redemptions.ts')
+  const activityVerify = read('app/api/admin/activities/[activityId]/verify/route.ts')
+  const materialVerify = read('app/api/admin/material-redemptions/verify/route.ts')
+  assert.match(registration, /redeemLinkedMaterialInTransaction/)
+  assert.match(registration, /redemptionSource: 'ACTIVITY_CHECK_IN'/)
+  assert.match(registration, /if \(current\.verifiedAt\) return \{ alreadyVerified: true/)
+  assert.match(material, /verifyActivityRegistrationInTransaction\(tx, \{ activityId, registrationId, adminId, method: 'MANUAL', allowLinkedMaterial: true \}/)
+  assert.match(material, /if \(order\.status === 'REDEEMED'\)[\s\S]*ACTIVITY_REGISTRATION_AUTO/)
+  assert.match(material, /source === 'ACTIVITY_REGISTRATION_AUTO'/)
+  assert.match(activityVerify, /verifyActivityRegistration\(/)
+  assert.match(materialVerify, /redeemMaterialOrder\(/)
+  assert.match(registration, /where: \{ id: order\.id, status: 'SUCCESS' \}/)
+})
+
+test('活动结束自动核销只扫描未核销的有效报名，服务进程提供幂等补偿触发', () => {
+  const registration = read('lib/activity-registration.ts')
+  const server = read('server.ts')
+  const jobRoute = read('app/api/internal/daily-jobs/activity-auto-checkin/route.ts')
+  assert.match(registration, /status: 'ACTIVE'/)
+  assert.match(registration, /verifiedAt: null/)
+  assert.match(registration, /endsAt: \{ lt: now \}/)
+  assert.match(registration, /checkInSource: 'AUTO_AFTER_ACTIVITY_END'/)
+  assert.match(registration, /ACTIVITY_AUTO_CHECK_IN/)
+  assert.match(registration, /if \(registration\.verifiedAt\) return \{ processed: false, reason: 'ALREADY_VERIFIED'/)
+  assert.match(server, /activityAutoCheckInIntervalMs/)
+  assert.match(server, /autoCheckInEndedActivityRegistrations/)
+  assert.match(jobRoute, /x-daily-job-secret/)
+  assert.match(jobRoute, /autoCheckInEndedActivityRegistrations/)
+})
+
+test('活动与物料前台明确区分自动兑换来源，活动物料不出现普通兑换入口', () => {
+  const activityDetail = read('components/activities/ActivityDetailView.tsx')
+  const materialList = read('app/material-redemptions/MaterialRedemptionsClient.tsx')
+  const materialDetail = read('app/material-redemptions/[materialId]/MaterialRedemptionDetailClient.tsx')
+  const adminMaterial = read('app/admin/material-redemptions/MaterialRedemptionAdminManager.tsx')
+  assert.match(activityDetail, /报名福利/)
+  assert.match(activityDetail, /无需重复扫码/)
+  assert.match(materialList, /活动限定/)
+  assert.match(materialDetail, /前往活动报名/)
+  assert.match(materialDetail, /!material\.isActivityBound/)
+  assert.match(adminMaterial, /需报名指定活动/)
+  assert.match(adminMaterial, /报名时自动兑换/)
+})
+
+test('活动物料核销遵守活动实际开始时间，活动结束后仍由自动联动流程处理', () => {
+  const material = read('lib/material-redemptions.ts')
+  const registration = read('lib/activity-registration.ts')
+  const button = read('components/activities/ActivityRegistrationButton.tsx')
+  const adminMaterial = read('app/admin/material-redemptions/MaterialRedemptionAdminManager.tsx')
+  assert.match(material, /const notStarted = activityBound && order\.status === 'SUCCESS' && now < effectiveSchedule\.exchangeStartAt/)
+  assert.match(material, /ACTIVITY_NOT_STARTED/)
+  assert.match(registration, /current\.LinkedMaterialRedemption\?\.source === 'ACTIVITY_REGISTRATION_AUTO'/)
+  assert.match(registration, /now < activity\.startsAt/)
+  assert.match(button, /activity\.endsAt/)
+  assert.match(adminMaterial, /verifyPreview\.notStarted \? '活动尚未开始'/)
+})
+
+test('删除草稿活动前阻止遗留活动物料绑定', () => {
+  const route = read('app/api/admin/activities/[activityId]/route.ts')
+  assert.match(route, /linkedMaterial: \{ select: \{ id: true, title: true \} \}/)
+  assert.match(route, /activity\.linkedMaterial/)
+  assert.match(route, /请先解除绑定后再删除/)
+})
+
+test('活动物料历史订单的兑换时间优先继承订单关联活动', () => {
+  const material = read('lib/material-redemptions.ts')
+  assert.match(material, /function materialOrderSchedule\(order: Pick<MaterialOrderWithRelations, 'material' \| 'linkedActivity'>\)/)
+  assert.match(material, /if \(order\.linkedActivity\)[\s\S]*activityMaterialSchedule\(order\.linkedActivity\.startsAt, order\.linkedActivity\.endsAt\)/)
+  assert.match(material, /const schedule = materialOrderSchedule\(order\)/)
 })

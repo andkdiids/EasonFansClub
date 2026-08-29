@@ -37,7 +37,7 @@ test('好友申请合并为默认全部、收到和发出三个分类', () => {
 
 test('好友动态 API 只允许挂号和发帖并执行服务端分页', () => {
   const route = read('app/api/friends/activity/route.ts')
-  assert.match(route, /ALLOWED_TYPES = \['CHECKIN', 'POST'\]/)
+  assert.match(route, /ALLOWED_TYPES = \['CHECKIN', 'POST', 'BADGE'\]/)
   assert.match(route, /page = positiveInteger/)
   assert.match(route, /limit = positiveInteger/)
   assert.match(route, /skip: \(page - 1\) \* limit/)
@@ -55,8 +55,7 @@ test('好友动态默认最近七天并支持日期、类型和分页筛选', ()
   assert.match(panel, /<option value="CHECKIN">今日挂号/)
   assert.match(panel, /<option value="POST">最近发帖/)
   assert.match(panel, /const limit = compact \? 10 : 20/)
-  assert.match(panel, />上一页</)
-  assert.match(panel, />下一页</)
+  assert.match(panel, /<Pagination/)
 })
 
 test('好友中心保持 40/60 双栏且首页只显示十条最新动态', () => {

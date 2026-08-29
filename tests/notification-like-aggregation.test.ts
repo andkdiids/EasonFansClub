@@ -12,7 +12,8 @@ const client = read('app/notifications/NotificationsClient.tsx')
 
 test('帖子和评论点赞使用不同的稳定聚合 key，并通过 upsert 保持一条通知', () => {
   assert.match(helper, /return `\$\{LIKE_NOTIFICATION_KEY_PREFIX\}\$\{kind\}:\$\{id\}`/)
-  assert.match(helper, /notification\.upsert\(/)
+  assert.match(helper, /upsertNotificationWithDb\(/)
+  assert.match(read('lib/notification-write.ts'), /db\.notification\.upsert\(/)
   assert.match(postLikeRoute, /target: \{[\s\S]*kind: 'post',[\s\S]*id: postId/)
   assert.match(replyLikeRoute, /target: \{[\s\S]*kind: 'reply',[\s\S]*id: reply\.id/)
   assert.match(replyLikeRoute, /target: \{ kind: 'reply', id: reply\.id, link: `\/posts\/\$\{reply\.postId\}\?focus=\$\{reply\.id\}` \}/)

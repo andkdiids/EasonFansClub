@@ -23,8 +23,8 @@ test('return state records the friend anchor, inner list scroll and viewport con
 })
 
 test('opening chat saves the anchor before asynchronous conversation loading', () => {
-  assert.match(friendDock, /const chatSession = \+\+chatSessionRef\.current\n    saveFriendListReturnState\(friend\.id\)\n    setError\(''\)/)
-  assert.match(friendDock, /setChatFriend\(friend\)\n    friendListRestorePendingRef\.current = true/)
+  assert.match(friendDock, /const chatSession = \+\+chatSessionRef\.current\n    if \(activeTab === 'contacts'\) saveFriendListReturnState\(friend\.id\)/)
+  assert.match(friendDock, /setChatFriend\(friend\)[\r\n]+    if \(activeTab === 'contacts'\) friendListRestorePendingRef\.current = true/)
 })
 
 test('an existing target is restored by its current position after sorting changes', () => {
@@ -64,10 +64,11 @@ test('successful restoration consumes session state, while ordinary close clears
 })
 
 test('the list waits for normal and grouped data before restoring', () => {
-  assert.match(friendDock, /if \(!open \|\| chatFriend \|\| loadingList \|\| loadingGroupIds\.size > 0 \|\| refreshingFriendList \|\| !friendListRestorePendingRef\.current\) return/)
+  assert.match(friendDock, /if \(!open \|\| chatFriend \|\| activeTab !== 'contacts'\) return/)
+  assert.match(friendDock, /const listDataReady = debouncedQuery/)
   assert.match(friendDock, /groupScopes\.every\(/)
   assert.match(friendDock, /collapsedGroupIds\.has\(scope\.id\) \|\| scope\.count === 0 \|\| groupFriends\[scope\.id\] !== undefined/)
-  assert.match(friendDock, /refreshLoadedFriendGroups\(\)\n    resetChat\(\)/)
+  assert.match(friendDock, /void refreshLoadedFriendGroups\(\)\n    resetChat\(\)/)
   assert.match(friendDock, /const pageAfterLoadedRange = pagination\?\.hasMore \? lastLoadedPage \+ 1 : lastLoadedPage/)
 })
 

@@ -122,7 +122,11 @@ test('9b/审计安全：adminId 不级联删除，保留管理员快照', () => 
   // 管理员被永久删除时，历史操作日志不得级联消失
   assert.match(schema, /adminId\s+String\?/) // 可空，删除后置空
   assert.match(schema, /onDelete: SetNull/)
-  assert.doesNotMatch(schema, /model LeaderboardAdminLog \{[\s\S]*?onDelete: Cascade[\s\S]*?\}/)
+  const modelStart = schema.indexOf('model LeaderboardAdminLog {')
+  const modelEnd = schema.indexOf('\n}', modelStart)
+  assert.ok(modelStart >= 0 && modelEnd > modelStart, 'LeaderboardAdminLog 模型应存在且可独立解析')
+  const auditModel = schema.slice(modelStart, modelEnd + 2)
+  assert.doesNotMatch(auditModel, /onDelete: Cascade/)
   // 快照字段：日志自包含，管理员删除后仍可追溯
   assert.match(schema, /adminUid\s+Int\?/)
   assert.match(schema, /adminNickname\s+String\?\s+@db\.VarChar\(64\)/)

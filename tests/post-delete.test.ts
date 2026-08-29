@@ -48,6 +48,7 @@ test('评论删除 UI 不复用帖子对象，失败可见且成功后只移除�
   assert.match(replies, /<DeleteReplyButton replyId=\{reply\.id\}/)
   assert.match(replies, /onDeleted=\{\(result\) => removeReply\(reply\.id, result\)\}/)
   assert.match(replies, /ecfc:post-reply-count/)
-  assert.match(detailPage, /hasAdminPermission\(user, 'reply_manage'\)/)
+  assert.match(detailPage, /loadPostAdminPermission\(user, 'reply_manage', postId\)/)
+  assert.match(detailPage, /hasAdminPermission\(user, permissionKey\)/)
   assert.match(detailPage, /canManageReplies=\{canManageReplies\}/)
 })

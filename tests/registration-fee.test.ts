@@ -101,6 +101,7 @@ test('历史奖励数字按流水原值展示，不把旧的 1 重算为新规�
     replyId: null,
     checkInId: 'checkin-1',
     activityId: null,
+    activityRegistrationId: null,
     badgeId: null,
     dailyDrawId: null,
   })

@@ -271,8 +271,10 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
   let createdCount = 0
   let updatedCount = 0
   let mediaCount = 0
+  let providerCompleted = false
   try {
     const rawPosts = await provider.getLatestPosts(target, limit)
+    providerCompleted = true
     logProviderDiagnostics(provider, 'success')
     const trace = options.trace || provider.getTrace?.() || initialTrace
     await prisma.socialSyncLog.update({ where: { id: syncLog.id }, data: traceData(trace) })
@@ -302,7 +304,7 @@ export async function syncInstagramPosts(options: SyncInstagramPostsOptions = {}
     return { syncLogId: syncLog.id, provider: provider.name, target, status: 'SUCCEEDED', foundCount, createdCount, updatedCount, mediaCount, notifiedCount, errorCode: null, newExternalIds, latestExternalId: posts[0]?.externalId || null, retryAfterSeconds: null }
   } catch (error) {
     const status = syncStatusForError(error)
-    const diagnostics = logProviderDiagnostics(provider, 'failure')
+    const diagnostics = providerCompleted ? null : logProviderDiagnostics(provider, 'failure')
     const trace = options.trace || provider.getTrace?.() || initialTrace
     await prisma.socialSyncLog.update({
       where: { id: syncLog.id },

@@ -41,7 +41,7 @@ test('服务端先全局排序再分页，且不使用已读状态或 updatedAt 
   const messages = source('app/api/direct-conversations/[conversationId]/messages/route.ts')
   const dock = source('components/FriendDock.tsx')
 
-  assert.match(friendsList, /const orderedFriendRows = friendRows[\s\S]*compareFriendConversationOrder[\s\S]*const pageStart = \(page - 1\) \* pageSize/)
+  assert.match(friendsList, /const orderedFriendRows = scopedFriendRows[\s\S]*compareFriendConversationOrder[\s\S]*const pageStart = \(page - 1\) \* pageSize/)
   assert.match(friendsList, /const visibleRows = orderedFriendRows\.slice\(pageStart, pageStart \+ pageSize\)/)
   assert.doesNotMatch(friendsList, /Number\(b\.unreadCount > 0\)/)
   assert.match(conversations, /const conversations = conversationRows[\s\S]*compareFriendConversationOrder[\s\S]*\.slice\(0, 30\)/)
@@ -49,7 +49,6 @@ test('服务端先全局排序再分页，且不使用已读状态或 updatedAt 
   assert.match(messages, /updateMany\([\s\S]*lastMessageAt: \{ lt: created\.createdAt \}/)
   assert.doesNotMatch(dock, /FRIEND_LIST_REFRESH_INTERVAL_MS = 3000/)
   assert.match(dock, /realtime:event/)
-  assert.match(dock, /loadFriends\(1\)/)
-  assert.match(dock, /loadFriends\(1\)/)
+  assert.match(dock, /loadFriends\(1(?:,|\))/)
   assert.match(dock, /promoteFriendConversation\(conversationId, data\.message\)/)
 })

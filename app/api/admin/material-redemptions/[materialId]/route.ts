@@ -17,7 +17,13 @@ export async function GET(_request: Request, context: RouteContext) {
   const guard = await requireAdmin('material_redemption_manage')
   if (!guard.user) return guard.response
   const { materialId } = await context.params
-  const material = await prisma.materialRedemption.findUnique({ where: { id: materialId }, include: { rules: { orderBy: { sortOrder: 'asc' } } } })
+  const material = await prisma.materialRedemption.findUnique({
+    where: { id: materialId },
+    include: {
+      rules: { orderBy: { sortOrder: 'asc' } },
+      linkedActivity: { select: { id: true, title: true, status: true, startsAt: true, endsAt: true, registrationFee: true } },
+    },
+  })
   if (!material) return NextResponse.json({ ok: false, code: 'MATERIAL_NOT_FOUND', message: '物料不存在' }, { status: 404 })
   return NextResponse.json({ material: serializeAdminMaterial(material) }, { headers: { 'Cache-Control': 'no-store' } })
 }

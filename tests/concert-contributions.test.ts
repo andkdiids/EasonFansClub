@@ -57,7 +57,8 @@ test('所有权、状态和管理员权限由服务端路由校验', () => {
 
 test('审核通知使用正式资料链接，投稿功能不接入任何奖励服务', () => {
   const service = read('lib/music-contributions.ts')
-  assert.match(service, /tx\.notification\.upsert/)
+  assert.match(service, /safeNotificationWrite/)
+  assert.match(service, /upsertNotification\(notification\)/)
   assert.match(service, /资料已经进入 Eason in Concert 正式数据体系/)
   for (const path of [
     'lib/music-contributions.ts',

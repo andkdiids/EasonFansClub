@@ -172,7 +172,7 @@ test('ecfc.fans 与 www.ecfc.fans 共享会话域，HTTPS 升级保留原始 hos
   assert.equal(www.domain, '.ecfc.fans')
 
   const middleware = read('middleware.ts')
-  assert.match(middleware, /secureUrl\.hostname = requestHost/)
+  assert.match(middleware, /buildPublicAbsoluteUrl\(securePath, request\)/)
   assert.doesNotMatch(middleware, /requestHost === 'www\.ecfc\.fans'/)
 })
 
@@ -182,5 +182,5 @@ test('登录表单允许密码管理器识别账号和当前密码，redirect �
   assert.match(login, /autoComplete="username"/)
   assert.match(login, /name="password"/)
   assert.match(login, /autoComplete="current-password"/)
-  assert.match(login, /!path\.startsWith\('\/\/'\)/)
+  assert.match(login, /normalizeStoredInternalPath\(path\)/)
 })
