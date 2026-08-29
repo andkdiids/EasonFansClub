@@ -26,34 +26,6 @@ export function getPostReplyOrderBy(sort: PostReplySort, direction: PostReplyDir
       : [{ createdAt: 'asc' }, { id: 'asc' }]
 }
 
-/**
- * Calculate the floor for a zero-based position in a canonical root-reply
- * sequence. The UI must use the persisted/computed floor on each reply, not
- * the index of the currently rendered (possibly pinned or re-sorted) array.
- */
-export function getCommentFloor({ page, pageSize, index }: Readonly<{ page: number; pageSize: number; index: number }>) {
-  const safePage = Number.isFinite(page) && Math.trunc(page) > 0 ? Math.trunc(page) : 1
-  const safePageSize = Number.isFinite(pageSize) && Math.trunc(pageSize) > 0 ? Math.trunc(pageSize) : 1
-  const safeIndex = Number.isFinite(index) && Math.trunc(index) >= 0 ? Math.trunc(index) : 0
-  return (safePage - 1) * safePageSize + safeIndex + 1
-}
-
-/**
- * Build stable floor numbers from roots already ordered by createdAt ASC and
- * id ASC. Pinned roots are intentionally included in this source sequence so
- * moving one to the top of the UI never changes its real floor or closes a
- * floor number gap in the normal list.
- */
-export function buildPostReplyFloorMap<T extends { id: string; parentId?: string | null }>(rootReplies: readonly T[], pageSize = POST_REPLY_PAGE_SIZE) {
-  const safePageSize = Number.isFinite(pageSize) && Math.trunc(pageSize) > 0 ? Math.trunc(pageSize) : 1
-  const canonicalRoots = rootReplies.filter((reply) => reply.parentId === undefined || reply.parentId === null)
-  return new Map(canonicalRoots.map((reply, index) => {
-    const page = Math.floor(index / safePageSize) + 1
-    const pageIndex = index % safePageSize
-    return [reply.id, getCommentFloor({ page, pageSize: safePageSize, index: pageIndex })] as const
-  }))
-}
-
 export function getPostReplyTotalPages(total: number, pageSize = POST_REPLY_PAGE_SIZE) {
   return Math.max(1, Math.ceil(Math.max(0, total) / Math.max(1, pageSize)))
 }

@@ -1,0 +1,1 @@
+export const CHECK_IN_MESSAGE_MAX_LENGTH = 300

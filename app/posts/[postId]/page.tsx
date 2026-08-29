@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import type { Prisma } from '@prisma/client'
+import type { Metadata } from 'next'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton, PostManagementMenu } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
 import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
@@ -20,7 +21,7 @@ import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicModerationText } from '@/lib/content-moderation'
 import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
-import { getPostModerationAccess } from '@/lib/post-moderation'
+import { getPostModerationAccess, publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { isRetryableDatabaseConnectionError } from '@/lib/db-timeout'
@@ -30,8 +31,10 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { emitRealtime } from '@/lib/realtime'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
+import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
+import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
+import { validateRichPostContent } from '@/lib/rich-text'
 import {
-  buildPostReplyFloorMap,
   clampPostReplyPage,
   getPostReplyOffset,
   getPostReplyOrderBy,
@@ -45,6 +48,57 @@ import {
 } from '@/lib/post-replies'
 
 export const dynamic = 'force-dynamic'
+
+const postMetadataSelect = {
+  title: true,
+  content: true,
+  richContent: true,
+  moderationStatus: true,
+  PostMedia: {
+    where: { type: 'IMAGE' as const },
+    orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
+    take: 9,
+    select: { url: true },
+  },
+  User: {
+    select: {
+      status: true,
+      isDeleted: true,
+      Profile: { select: { id: true } },
+    },
+  },
+} satisfies Prisma.PostSelect
+
+export async function generateMetadata({ params }: Readonly<{ params: Promise<{ postId: string }> }>): Promise<Metadata> {
+  const { postId } = await params
+  try {
+    const post = await prisma.post.findFirst({
+      where: {
+        id: postId,
+        ...publicPostWhere,
+        User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+      },
+      select: postMetadataSelect,
+    })
+    if (!post) return buildPostMetadata({ postId, isPublic: false })
+
+    const publicContent = publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus)
+    const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
+    const publicRichContent = richResult?.valid ? richResult.value : null
+    const imageUrl = firstAbsoluteMetadataImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url)))
+    return buildPostMetadata({
+      postId,
+      title: publicModerationText(post.title, post.moderationStatus),
+      content: publicContent,
+      richContent: publicRichContent,
+      imageUrl,
+    })
+  } catch {
+    // A failed metadata read must fail closed: generic, noindex metadata does
+    // not reveal a post title, body, or private image URL.
+    return buildPostMetadata({ postId, isPublic: false })
+  }
+}
 
 function postDetailErrorCode(error: unknown) {
   const record = error && typeof error === 'object' ? error as Record<string, unknown> : null
@@ -155,6 +209,7 @@ const postCoreSelect = {
   id: true,
   title: true,
   content: true,
+  richContent: true,
   ipRegion: true,
   viewCount: true,
   likeCount: true,
@@ -193,16 +248,11 @@ type PostAuthor = Prisma.UserGetPayload<{ select: typeof postAuthorSelect }>
 const postLikerSelect = {
   id: true,
   uid: true,
-  nickname: true,
-  usernameModerationStatus: true,
-  nicknameModerationStatus: true,
-  nicknameViolationDisplay: true,
   avatarUrl: true,
-  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+  Profile: { select: { avatarUrl: true } },
 } satisfies Prisma.UserSelect
 
 const postLikeSelect = {
-  userId: true,
   User: { select: postLikerSelect },
 } satisfies Prisma.LikeSelect
 
@@ -340,7 +390,7 @@ async function loadPostSupport(post: PostCore, userId?: string | null): Promise<
     })),
     readPostDetailQuery(post.id, 'like.findMany', () => prisma.like.findMany({
       where: { postId: post.id },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 10,
       select: postLikeSelect,
     })),
@@ -392,6 +442,7 @@ const replyDetailSelect = {
   content: true,
   moderationStatus: true,
   parentId: true,
+  floorNumber: true,
   likeCount: true,
   isPinned: true,
   ipRegion: true,
@@ -483,7 +534,7 @@ async function loadPostReplies(
   viewerId?: string | null,
 ) {
   return prisma.$transaction(async (tx) => {
-    const [pinnedReply, normalTotal, myRootReplies, canonicalRootReplies] = await Promise.all([
+    const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
       tx.reply.findFirst({
         where: { postId, isDeleted: false, parentId: null, isPinned: true },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -497,13 +548,7 @@ async function loadPostReplies(
             select: replyDetailSelect,
           })
         : Promise.resolve([]),
-      tx.reply.findMany({
-        where: { postId, isDeleted: false, parentId: null },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { id: true },
-      }),
     ])
-    const floorNumberByReplyId = buildPostReplyFloorMap(canonicalRootReplies)
     const totalPages = getPostReplyTotalPages(normalTotal)
     const page = clampPostReplyPage(requestedPage, totalPages)
     const normalRoots = await tx.reply.findMany({
@@ -537,9 +582,9 @@ async function loadPostReplies(
       }
     }
 
-    const withFloorNumber = <T extends { id: string; parentId: string | null }>(reply: T) => ({
+    const withFloorNumber = <T extends { id: string; parentId: string | null; floorNumber: number | null }>(reply: T) => ({
       ...reply,
-      floorNumber: reply.parentId === null ? floorNumberByReplyId.get(reply.id) ?? null : null,
+      floorNumber: reply.parentId === null ? reply.floorNumber : null,
     })
 
     return {
@@ -552,7 +597,6 @@ async function loadPostReplies(
         ...myRootReplies,
         ...childRows.filter((reply) => includedViewerRootIds.has(reply.id)),
       ].map(withFloorNumber),
-      floorNumberByReplyId,
       pagination: {
         page,
         pageSize: POST_REPLY_PAGE_SIZE,
@@ -568,6 +612,7 @@ type FocusedReply = {
   content: string
   moderationStatus: 'NORMAL' | 'VIOLATION'
   parentId: string | null
+  floorNumber: number | null
   likeCount: number
   isPinned: boolean
   ipRegion: string | null
@@ -598,6 +643,7 @@ type FocusedReplyQueryRow = {
   content: string
   moderationStatus: 'NORMAL' | 'VIOLATION'
   parentId: string | null
+  floorNumber: number | null
   likeCount: number
   isPinned: boolean
   ipRegion: string | null
@@ -631,6 +677,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
         content: true,
         moderationStatus: true,
         parentId: true,
+        floorNumber: true,
         likeCount: true,
          isPinned: true,
          ipRegion: true,
@@ -774,7 +821,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   let commentsLoadError = false
   let postReplies: Awaited<ReturnType<typeof loadPostReplies>>['rows'] = []
   let myPostReplies: Awaited<ReturnType<typeof loadPostReplies>>['myRows'] = []
-  let postReplyFloorMap = new Map<string, number>()
   let commentPagination: PostReplyPagination = {
     page: 1,
     pageSize: POST_REPLY_PAGE_SIZE,
@@ -786,7 +832,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     const loadedReplies = await loadPostReplies(postId, commentSort, commentDirection, requestedCommentPage, user?.id)
     postReplies = loadedReplies.rows
     myPostReplies = loadedReplies.myRows
-    postReplyFloorMap = loadedReplies.floorNumberByReplyId
     commentPagination = loadedReplies.pagination
   } catch (error) {
     commentsLoadError = true
@@ -812,7 +857,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         parentId: reply.parentId,
         likeCount: reply.likeCount,
         isPinned: reply.isPinned,
-        floorNumber: reply.parentId === null ? postReplyFloorMap.get(reply.id) ?? null : null,
+        floorNumber: reply.parentId === null ? reply.floorNumber : null,
         ipRegion: reply.ipRegion,
         createdAt: reply.createdAt,
         stickerId: reply.stickerId,
@@ -870,7 +915,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const allLoadedReplies = [...postReplies, ...myPostReplies]
   const displayNameUserIds = Array.from(new Set([
     post.User.id,
-    ...post.Like.map((like) => like.userId),
     ...allLoadedReplies.flatMap((reply) => [
       reply.User.id,
       ...reply.ReplyLike.map((like) => like.userId),
@@ -922,6 +966,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
 
   const liked = viewerPostLiked
   const favorited = support.favorited
+  const currentUserLiker = user ? { id: user.id, uid: user.uid, avatarUrl: publicImageUrl(user.avatarUrl) } : null
   const authorAvatar = publicImageVariantUrl(profileImageUrl(post.User.Profile?.avatarUrl || post.User.avatarUrl), 'avatar-md')
   const authorName = authorLoadFailed ? '作者资料暂时不可用' : getPublicUserDisplayName(post.User)
   const isArchivedAuthor = authorLoadFailed || post.User.uid === 0
@@ -929,9 +974,25 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canManageReplies = Boolean(user && await loadPostAdminPermission(user, 'reply_manage', postId))
   const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
   const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
-  const publicPostContent = publicContentImageMarkers(post.content)
+  const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
+  const publicRichContent = richResult?.valid ? richResult.value : null
+  const publicPostContentSource = publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus)
+  const publicPostContent = postContentPlainText(publicPostContentSource, publicRichContent)
   const publicPostTitle = publicModerationText(post.title, post.moderationStatus)
   const safePublicPostContent = publicModerationText(publicPostContent, post.moderationStatus)
+  const shareTitle = createPostShareTitle(publicPostTitle, safePublicPostContent, publicRichContent)
+  const shareText = createPostShareDescription(safePublicPostContent, publicRichContent)
+  const shareCardData: ShareCardData = {
+    type: 'post',
+    title: shareTitle,
+    description: shareText,
+    image: firstAbsoluteMetadataImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
+    url: canonicalShareUrl(`/posts/${post.id}`),
+    author: authorName,
+    authorAvatar,
+    date: formatDate(post.createdAt),
+    meta: post.Board ? [{ label: '版块', value: post.Board.name }] : [],
+  }
   const serializeReply = ({ ReplyLike, ReplyMention, User, ...reply }: (typeof postReplies)[number]) => ({
     ...reply,
     content: publicModerationText(publicContentImageMarkers(reply.content), reply.moderationStatus),
@@ -1004,6 +1065,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           authorAvatar={authorAvatar}
           authorUid={post.User.uid}
           authorBadge={equippedBadgeMap.get(post.User.id) || null}
+          shareTitle={shareTitle}
+          shareText={shareText}
+          shareCardData={shareCardData}
           postActions={canManagePost || canDeletePost || canEditPost ? (
             <PostManagementMenu
               postId={post.id}
@@ -1050,8 +1114,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <span>回复 {post.replyCount}</span>
           </div>
           <RichPostContent
-            richContent={null}
-            fallbackContent={safePublicPostContent}
+            richContent={publicRichContent}
+            fallbackContent={publicPostContentSource}
             className="mt-8 text-lg leading-9 text-slate-700 post-detail-body"
           />
           {post.sticker?.url ? (
@@ -1071,7 +1135,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           ) : null}
           <div className="post-detail-legacy-actions mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
-              <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} />
+              <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} currentUserLiker={currentUserLiker} />
               <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1091,14 +1155,14 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             likers={(post.Like || []).map((like) => ({
               id: like.User.id,
               uid: like.User.uid,
-              nickname: getPublicUserDisplayName(like.User),
-              friendRemark: null,
-              displayName: getPublicUserDisplayName(like.User),
               avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
-              equippedBadge: equippedBadgeMap.get(like.User.id) || null,
             }))}
             totalCount={post.likeCount}
             listUrl={`/api/posts/${post.id}/like`}
+            postId={post.id}
+            avatarOnly
+            responsivePreview
+            currentUser={currentUserLiker}
             className="mt-3 post-detail-like-avatars"
           />
         </article>
@@ -1124,6 +1188,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       <ForumDiscoveryActionBar
         postId={post.id}
         currentUserId={user?.id}
+        currentUserLiker={currentUserLiker}
         initialLiked={liked}
         initialLikeCount={post.likeCount}
         initialFavorited={favorited}

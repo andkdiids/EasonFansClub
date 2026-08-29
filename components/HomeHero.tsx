@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { HeroBackground } from '@/components/HeroBackground'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { hasHeroMediaAsset } from '@/lib/hero-visuals'
@@ -19,6 +19,7 @@ export function HomeHero({
   visual,
   defaultTitle = defaultHeroTitle,
   defaultSubtitle = 'NOW IS THE ONLY REALITY.',
+  shareAction,
 }: {
   slides: SiteHeroSlide[]
   siteName: string
@@ -27,6 +28,7 @@ export function HomeHero({
   visual?: SiteHeroVisualConfig | null
   defaultTitle?: string
   defaultSubtitle?: string
+  shareAction?: ReactNode
 }) {
   const visibleSlides = useMemo(
     () => slides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -79,7 +81,7 @@ export function HomeHero({
   const showTitle = active?.showTitle !== false
   const showSubtitle = active?.showSubtitle !== false
   const showButton = active?.showButton !== false
-  const hasHeroCopy = showTitle || showSubtitle || showButton
+  const hasHeroCopy = showTitle || showSubtitle || showButton || Boolean(shareAction)
   const hasBackground = Boolean(
     (backgroundVisual?.enabled ?? true)
     && (hasHeroMediaAsset(backgroundVisual?.desktopHeroMedia) || hasHeroMediaAsset(backgroundVisual?.mobileHeroMedia)),
@@ -109,13 +111,16 @@ export function HomeHero({
           <p className="hero-slogan">{subtitle}</p>
           <em>C{String.fromCharCode(0x2019)}mon in~</em>
         </> : null}
-        {showButton ? <Link
-          href={active?.href || '#community-content'}
-          className="hero-primary-button"
-          style={{ backgroundColor: buttonColor }}
-        >
-          {buttonText} <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
-        </Link> : null}
+        {showButton || shareAction ? <div className="community-hero-copy-actions">
+          {showButton ? <Link
+            href={active?.href || '#community-content'}
+            className="hero-primary-button"
+            style={{ backgroundColor: buttonColor }}
+          >
+            {buttonText} <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
+          </Link> : null}
+          {shareAction}
+        </div> : null}
       </div> : null}
       {visibleSlides.length > 1 ? (
         <div className="absolute bottom-5 right-5 z-10 flex gap-2 sm:bottom-8 sm:right-8" aria-label="Hero controls">

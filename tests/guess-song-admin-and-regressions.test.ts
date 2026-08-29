@@ -6,6 +6,7 @@ import {
   GuessSongAdminLeaderboardError,
   GUESS_SONG_ADMIN_MAX_CORRECT_ANSWERS,
 } from '../lib/guess-song-admin-leaderboard'
+import { collectGuessSongDeletedSessionIds } from '../lib/guess-song-leaderboard'
 import { getGuessSongPeriod } from '../lib/guess-song-period'
 
 const root = process.cwd()
@@ -94,6 +95,52 @@ test('补分更新源会话并通过原有记录服务同步周榜月榜，年�
   assert.match(service, /periodType: 'YEAR'/)
   assert.match(leaderboard, /s\.score/)
   assert.match(leaderboard, /getGuessSongDeletedYearSessionIds\(yearKey\)/)
+})
+
+test('管理员删除只排除被删源 Session，重建时允许回退到下一条有效成绩且不接受补分日志作为删除', () => {
+  const deleted = collectGuessSongDeletedSessionIds([
+    {
+      action: 'GUESS_SONG_DELETE_SCORE',
+      detail: {
+        mode: 'EASY',
+        periodType: 'WEEK',
+        periodKey: '2026-08-24',
+        sessionIds: ['highest-session'],
+      },
+    },
+    {
+      action: 'GUESS_SONG_ADD_SCORE',
+      detail: {
+        mode: 'EASY',
+        periodType: 'WEEK',
+        periodKey: '2026-08-24',
+        sourceSessionId: '補分来源不应被删除',
+      },
+    },
+    {
+      action: 'GUESS_SONG_DELETE_SCORE',
+      detail: {
+        mode: 'EASY',
+        periodType: 'MONTH',
+        periodKey: '2026-08',
+        sessionId: 'other-period-session',
+      },
+    },
+  ])
+  assert.equal(deleted.has('highest-session'), true)
+  assert.equal(deleted.has('fallback-session'), false)
+  assert.equal(deleted.has('補分来源不应被删除'), false)
+
+  const service = source('lib/guess-song-admin-leaderboard.ts')
+  const leaderboard = source('lib/guess-song-leaderboard.ts')
+  assert.match(service, /const source = entries\.reduce\(/)
+  assert.match(service, /sessionIds: \[source\.sessionId\]/)
+  assert.match(service, /const fallback = await tx\.guessSongSession\.findFirst\(/)
+  assert.match(service, /if \(fallback\) await recordGuessSongLeaderboard\(fallback\.id, tx\)/)
+  assert.match(service, /getGuessSongDeletedSessionIds\([\s\S]*periodType[\s\S]*periodKey[\s\S]*, tx\)/)
+  assert.match(leaderboard, /getGuessSongDeletedSessionIds\([\s\S]*periodType[\s\S]*periodKey/)
+  assert.match(leaderboard, /if \(deletedSessionIds\.has\(session\.id\)\) continue/)
+  assert.match(leaderboard, /sessionId: \{ notIn: \[\.\.\.deletedSessionIds\] \}/)
 })
 
 test('听听周月年周期统一按北京时间计算并在周期切换后使用新 periodKey', () => {

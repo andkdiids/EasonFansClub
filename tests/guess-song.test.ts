@@ -8,10 +8,13 @@ import {
   GUESS_SONG_ENDLESS_COMBO_INTERVAL,
   GUESS_SONG_MODE_CONFIG,
   calculateGuessSongScore,
+  getGuessSongDatabaseModes,
+  isGuessSongPublicMode,
   normalizeGuessSongAnswer,
+  toPublicGuessSongMode,
 } from '../lib/guess-song-config'
 import { getFfmpegPath, processGuessSongAudio } from '../lib/guess-song-audio'
-import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '../lib/guess-song-period'
+import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter, selectBestGuessSongRows } from '../lib/guess-song-period'
 import { canEnableGuessSongQuestion, getRequiredGuessSongDurations, parseGuessSongQuestionInput } from '../lib/guess-song-questions'
 import {
   createGuessSongStorageAdapter,
@@ -229,9 +232,71 @@ test('月榜按北京时间每月1日切换', () => {
   assert.equal(getGuessSongPeriod('MONTH', new Date('2026-07-31T16:00:00Z')).periodKey, '2026-08')
 })
 
+test('排行榜不把显式无效周期静默降级为周榜，月榜/年榜保持原周期', () => {
+  const route = source('app/api/entertainment/guess-song/leaderboard/route.ts')
+  assert.match(route, /rawPeriod !== null[\s\S]*rawPeriod !== 'MONTH'[\s\S]*rawPeriod !== 'YEAR'/)
+  assert.match(route, /rawPeriod === 'MONTH' \? 'MONTH' : rawPeriod === 'YEAR' \? 'YEAR' : 'WEEK'/)
+})
+
 test('同一用户同周期同模式只有一条最好成绩', () => {
   const schema = source('prisma/schema.prisma')
   assert.match(schema, /@@unique\(\[userId, mode, periodType, periodKey\]\)/)
+})
+
+test('ENDLESS 仅是 EASY 的历史兼容值，canonical 读取按用户选最佳成绩后再做 TopN', () => {
+  assert.deepEqual(getGuessSongDatabaseModes('EASY'), ['EASY', 'ENDLESS'])
+  assert.equal(toPublicGuessSongMode('ENDLESS'), 'EASY')
+  assert.equal(isGuessSongPublicMode('ENDLESS'), false)
+
+  const achievedAt = new Date('2026-08-29T00:00:00Z')
+  const rows = [
+    { userId: 'u1', mode: 'EASY' as const, score: 100, correctCount: 1, maxStreak: 1, totalPlayCount: 5, achievedAt },
+    { userId: 'u1', mode: 'ENDLESS' as const, score: 1200, correctCount: 12, maxStreak: 12, totalPlayCount: 12, achievedAt },
+    ...Array.from({ length: 10 }, (_, index) => ({
+      userId: `u${index + 2}`,
+      mode: 'EASY' as const,
+      score: 1100 - index * 50,
+      correctCount: 11 - index,
+      maxStreak: 11 - index,
+      totalPlayCount: 5,
+      achievedAt,
+    })),
+  ]
+
+  const ranked = selectBestGuessSongRows(rows)
+  assert.equal(ranked.filter((row) => row.userId === 'u1').length, 1)
+  assert.equal(ranked[0].userId, 'u1')
+  assert.equal(ranked[0].mode, 'EASY')
+  assert.equal(ranked[0].score, 1200)
+  assert.deepEqual(ranked.slice(0, 10).map((row) => row.userId), [
+    'u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8', 'u9', 'u10',
+  ])
+
+  const session = source('lib/guess-song-session.ts')
+  const leaderboard = source('lib/guess-song-leaderboard.ts')
+  const adminLeaderboard = source('lib/guess-song-admin-leaderboard.ts')
+  const game = source('app/entertainment/guess-song/GuessSongGame.tsx')
+  const publicLeaderboard = source('app/entertainment/guess-song/leaderboard/GuessSongLeaderboard.tsx')
+  assert.match(session, /return toPublicGuessSongMode\(requestedMode\)/)
+  assert.match(leaderboard, /mode: \{ in: getGuessSongDatabaseModes\(publicMode\) \}/)
+  assert.match(leaderboard, /selectBestGuessSongRows\(entries\)/)
+  assert.match(adminLeaderboard, /selectBestGuessSongRows\(rows as AdminEntry\[\]\)/)
+  assert.doesNotMatch(game, /ENDLESS/)
+  assert.doesNotMatch(publicLeaderboard, /ENDLESS/)
+})
+
+test('排行榜在跨数据库模式去重前不截断候选记录', () => {
+  const leaderboard = source('lib/guess-song-leaderboard.ts')
+  const adminLeaderboard = source('lib/guess-song-admin-leaderboard.ts')
+  const publicQueryStart = leaderboard.indexOf('const entries = await prisma.guessSongLeaderboardEntry.findMany')
+  const publicDedupeStart = leaderboard.indexOf('selectBestGuessSongRows(entries)', publicQueryStart)
+  const adminQueryStart = adminLeaderboard.indexOf('const rows = await prisma.guessSongLeaderboardEntry.findMany')
+  const adminDedupeStart = adminLeaderboard.indexOf('selectBestGuessSongRows(rows as AdminEntry[])', adminQueryStart)
+  assert.ok(publicQueryStart >= 0 && publicDedupeStart > publicQueryStart)
+  assert.ok(adminQueryStart >= 0 && adminDedupeStart > adminQueryStart)
+  assert.doesNotMatch(leaderboard.slice(publicQueryStart, publicDedupeStart), /take:\s*1000/)
+  assert.doesNotMatch(adminLeaderboard.slice(adminQueryStart, adminDedupeStart), /take:\s*500/)
+  assert.match(adminLeaderboard, /rankedRows[\s\S]*?slice\(0, 500\)/)
 })
 
 test('排行榜并列依次比较分数、答对、连击、播放次数和更早达成', () => {

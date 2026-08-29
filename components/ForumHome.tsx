@@ -73,6 +73,7 @@ export function ForumHome({ previewMode = false }: { previewMode?: boolean }) {
     return (
       <ForumDiscoveryHome
         showModeSwitch={!isMobile}
+        showDesktopRefresh={isMobile === false}
         onSwitchToPlaza={isMobile ? undefined : () => switchTheme('plaza')}
       />
     )

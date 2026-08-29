@@ -196,14 +196,11 @@ test('同一天重复领取复用已保存奖励，并由唯一约束处理并�
 test('北京时间跨日生成新的 dateKey，历史奖励数字按原值动态显示', () => {
   const service = source('lib/entertainment.ts')
   const detail = source('components/games/DailyPrescriptionDetail.tsx')
-  const center = source('app/entertainment/EntertainmentCenter.tsx')
   assert.notEqual(getBeijingDateKey(new Date('2026-07-26T15:59:59Z')), getBeijingDateKey(new Date('2026-07-26T16:00:00Z')))
   assert.match(service, /const dateKey = getBeijingDateKey\(now\)/)
   assert.match(service, /dateKey,\s*points: requestedPoints/)
   assert.match(detail, /\+\{status\.draw\.points\} 挂号费/)
-  assert.match(center, /\+\{drawResult\.points\} 挂号费/)
   assert.doesNotMatch(detail, /\+1 挂号费/)
-  assert.doesNotMatch(center, /\+1 挂号费/)
 })
 
 test('奖励只写入挂号费 points，不写入经验或听听排行榜', () => {
@@ -217,14 +214,12 @@ test('奖励只写入挂号费 points，不写入经验或听听排行榜', () =
 test('服务端使用 crypto.randomInt，客户端不自行随机或伪造失败奖励', () => {
   const rewardService = source('lib/entertainment-rewards.ts')
   const detail = source('components/games/DailyPrescriptionDetail.tsx')
-  const center = source('app/entertainment/EntertainmentCenter.tsx')
   assert.match(rewardService, /from 'node:crypto'/)
   assert.match(rewardService, /randomInt\(maxExclusive\)/)
   assert.doesNotMatch(rewardService, /Math\.random/)
   assert.doesNotMatch(detail, /Math\.random/)
-  assert.doesNotMatch(center, /Math\.random/)
   assert.match(detail, /throw new Error\(payload\.error \|\| '请求失败'\)/)
-  assert.match(center, /throw new Error\(body\?\.error \|\| '请求失败，请稍后重试'\)/)
+  assert.doesNotMatch(source('app/entertainment/EntertainmentCenter.tsx'), /daily-draw|Math\.random/)
 })
 
 test('用户抽奖接口未登录返回 401 且不把异常堆栈返回前端', () => {

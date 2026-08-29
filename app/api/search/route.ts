@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { summarizePlainText } from '@/lib/share-metadata'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -194,7 +195,7 @@ export async function GET(request: Request) {
     posts: posts.map(({ User, Board, ...post }) => ({
       id: post.id,
       title: publicModerationText(post.title, post.moderationStatus),
-      content: post.content,
+      content: summarizePlainText(post.summary || post.content),
       ipRegion: post.ipRegion,
       viewCount: post.viewCount,
       likeCount: post.likeCount,
@@ -209,7 +210,7 @@ export async function GET(request: Request) {
       isRecommended: post.isRecommended,
       publishedAt: post.publishedAt,
       shareCount: post.shareCount,
-      summary: post.summary,
+      summary: summarizePlainText(post.summary || post.content),
       author: {
         uid: User.uid,
         nickname: getPublicUserDisplayName(User),

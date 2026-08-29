@@ -145,7 +145,7 @@ export const NAVIGATION_REGISTRY = [
     defaultSortOrder: 16, defaultEnabled: true, isManageable: true,
     showInCenter: true, showInQuickNavigation: true, showInDesktopSidebar: true,
     sidebarSection: 'quick', editable: true, hideable: true,
-    activePrefixes: ['/games/daily-prescription'],
+    activePrefixes: ['/games/daily-prescription', '/prescription/history'],
   },
   {
     featureKey: 'BADGE_MUSEUM', label: '勋章展览馆', href: '/badges', icon: 'archive', title: 'E院勋章展览馆',

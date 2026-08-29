@@ -4,12 +4,19 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 
+export type PostInteractionLiker = {
+  id: string
+  uid: number
+  avatarUrl?: string | null
+}
+
 type PostInteractionDetail = {
   postId?: string
   isLiked?: boolean
   likeCount?: number
   isFavorited?: boolean
   favoriteCount?: number
+  liker?: PostInteractionLiker | null
 }
 
 function emitPostInteraction(detail: PostInteractionDetail) {
@@ -38,7 +45,8 @@ export function LikeButton({
   initialCount,
   className,
   refreshOnSuccess = true,
-}: Readonly<{ postId: string; initialLiked: boolean; initialCount: number; className?: string; refreshOnSuccess?: boolean }>) {
+  currentUserLiker = null,
+}: Readonly<{ postId: string; initialLiked: boolean; initialCount: number; className?: string; refreshOnSuccess?: boolean; currentUserLiker?: PostInteractionLiker | null }>) {
   const router = useRouter()
   const [liked, setLiked] = useState(initialLiked)
   const [count, setCount] = useState(Math.max(initialCount, 0))
@@ -75,7 +83,7 @@ export function LikeButton({
       if (!response.ok) throw new Error(response.status === 401 ? '登录状态暂时无法确认，请稍后重试' : data.message || '操作失败，请稍后重试')
       setLiked(Boolean(data.isLiked))
       setCount(Math.max(Number(data.likeCount || 0), 0))
-      emitPostInteraction({ postId, isLiked: Boolean(data.isLiked), likeCount: Number(data.likeCount || 0) })
+      emitPostInteraction({ postId, isLiked: Boolean(data.isLiked), likeCount: Number(data.likeCount || 0), liker: currentUserLiker })
       if (refreshOnSuccess) router.refresh()
     } catch (reason) {
       setLiked(previousLiked)

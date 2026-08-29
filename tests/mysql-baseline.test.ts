@@ -14,6 +14,10 @@ function sha256(source: string): string {
   return createHash('sha256').update(source).digest('hex')
 }
 
+function canonicalizeText(source: string): string {
+  return source.replace(/\r\n?/g, '\n')
+}
+
 test('MySQL baseline candidate is bound to the current schema and stays MySQL-compatible', () => {
   const schema = readFileSync(schemaPath, 'utf8')
   const baseline = readFileSync(baselinePath, 'utf8')
@@ -24,8 +28,8 @@ test('MySQL baseline candidate is bound to the current schema and stays MySQL-co
   assert.equal(metadata.baselineStatus, 'CANDIDATE')
   assert.equal(metadata.source, 'prisma/schema.prisma')
   assert.equal(metadata.productionVerified, false)
-  assert.equal(metadata.schemaHash, sha256(schema))
-  assert.equal(metadata.baselineHash, sha256(baseline))
+  assert.equal(metadata.schemaHash, sha256(canonicalizeText(schema)))
+  assert.equal(metadata.baselineHash, sha256(canonicalizeText(baseline)))
   assert.equal(inspection.findings.length, 0)
 })
 

@@ -1,7 +1,7 @@
 import { Prisma, type GuessSongMode, type GuessSongPeriodType } from '@prisma/client'
 import type { GuessSongPublicMode } from '@/lib/guess-song-config'
-import { getGuessSongDatabaseModes, GUESS_SONG_PUBLIC_MODES, GUESS_SONG_SIMPLE_MODE, toPublicGuessSongMode } from '@/lib/guess-song-config'
-import { compareGuessSongScores, getGuessSongPeriod, isGuessSongScoreBetter } from '@/lib/guess-song-period'
+import { getGuessSongDatabaseModes, GUESS_SONG_PUBLIC_MODES, GUESS_SONG_SIMPLE_MODE, isGuessSongMode, toPublicGuessSongMode } from '@/lib/guess-song-config'
+import { getGuessSongPeriod, selectBestGuessSongRows } from '@/lib/guess-song-period'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { publicImageUrl } from '@/lib/images'
@@ -9,20 +9,65 @@ import { prisma } from '@/lib/prisma'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 
-export async function getGuessSongDeletedYearSessionIds(periodKey?: string) {
-  const logs = await prisma.adminActionLog.findMany({
-    where: { action: 'GUESS_SONG_DELETE_SCORE' },
-    select: { detail: true },
-  })
+type GuessSongLeaderboardDatabase = Prisma.TransactionClient | typeof prisma
+type GuessSongDeletionPeriodType = GuessSongPeriodType | 'YEAR'
+type GuessSongDeletionFilter = {
+  periodType?: GuessSongDeletionPeriodType
+  periodKey?: string
+  mode?: GuessSongPublicMode
+}
+
+type GuessSongAdminActionLog = { action: string; detail: unknown }
+
+function canonicalGuessSongActionMode(value: unknown) {
+  if (!isGuessSongMode(value)) return null
+  return toPublicGuessSongMode(value)
+}
+
+function deletedSessionIdsFromDetail(detail: unknown) {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return []
+  const value = detail as Record<string, unknown>
+  const ids = typeof value.sessionId === 'string' ? [value.sessionId] : []
+  if (Array.isArray(value.sessionIds)) ids.push(...value.sessionIds.filter((id): id is string => typeof id === 'string'))
+  return ids
+}
+
+export function collectGuessSongDeletedSessionIds(
+  logs: readonly GuessSongAdminActionLog[],
+  filter: GuessSongDeletionFilter = {},
+) {
   const deleted = new Set<string>()
   for (const log of logs) {
-    if (!log.detail || typeof log.detail !== 'object' || Array.isArray(log.detail)) continue
+    if (log.action !== 'GUESS_SONG_DELETE_SCORE') continue
     const detail = log.detail as Record<string, unknown>
-    if (detail.periodType === 'YEAR' && (!periodKey || detail.periodKey === periodKey) && typeof detail.sessionId === 'string') {
-      deleted.add(detail.sessionId)
-    }
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail)) continue
+    if (filter.periodType && detail.periodType !== filter.periodType) continue
+    if (filter.periodKey && detail.periodKey !== filter.periodKey) continue
+    const loggedMode = canonicalGuessSongActionMode(detail.mode)
+    // Existing delete logs carry the public mode. If an older log has no
+    // parseable mode, conservatively keep its exclusion for the requested mode.
+    if (filter.mode && loggedMode && loggedMode !== filter.mode) continue
+    for (const sessionId of deletedSessionIdsFromDetail(detail)) deleted.add(sessionId)
   }
   return deleted
+}
+
+export async function getGuessSongDeletedSessionIds(
+  filter: GuessSongDeletionFilter = {},
+  database: GuessSongLeaderboardDatabase = prisma,
+) {
+  const logs = await database.adminActionLog.findMany({
+    where: { action: 'GUESS_SONG_DELETE_SCORE' },
+    select: { action: true, detail: true },
+  })
+  return collectGuessSongDeletedSessionIds(logs, filter)
+}
+
+export async function getGuessSongDeletedYearSessionIds(
+  periodKey?: string,
+  database: GuessSongLeaderboardDatabase = prisma,
+) {
+  return getGuessSongDeletedSessionIds({ periodType: 'YEAR', periodKey }, database)
 }
 
 type ScoreRecord = {
@@ -31,6 +76,77 @@ type ScoreRecord = {
   maxStreak: number
   totalPlayCount: number
   achievedAt: Date
+}
+
+type GuessSongLeaderboardKey = {
+  userId: string
+  mode: GuessSongMode
+  periodType: GuessSongPeriodType
+  periodKey: string
+}
+
+function guessSongBetterThanCandidateWhere(
+  key: GuessSongLeaderboardKey,
+  candidate: ScoreRecord,
+): Prisma.GuessSongLeaderboardEntryWhereInput {
+  return {
+    ...key,
+    OR: [
+      { score: { lt: candidate.score } },
+      { score: candidate.score, correctCount: { lt: candidate.correctCount } },
+      {
+        score: candidate.score,
+        correctCount: candidate.correctCount,
+        maxStreak: { lt: candidate.maxStreak },
+      },
+      {
+        score: candidate.score,
+        correctCount: candidate.correctCount,
+        maxStreak: candidate.maxStreak,
+        totalPlayCount: { gt: candidate.totalPlayCount },
+      },
+      {
+        score: candidate.score,
+        correctCount: candidate.correctCount,
+        maxStreak: candidate.maxStreak,
+        totalPlayCount: candidate.totalPlayCount,
+        achievedAt: { gt: candidate.achievedAt },
+      },
+    ],
+  }
+}
+
+function isPrismaUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+async function writeGuessSongLeaderboardEntry(
+  database: GuessSongLeaderboardDatabase,
+  key: GuessSongLeaderboardKey,
+  sessionId: string,
+  score: ScoreRecord,
+) {
+  const betterThanCandidateWhere = guessSongBetterThanCandidateWhere(key, score)
+  const updateData = { sessionId, ...score }
+  const updated = await database.guessSongLeaderboardEntry.updateMany({
+    where: betterThanCandidateWhere,
+    data: updateData,
+  })
+  if (updated.count > 0) return
+
+  try {
+    await database.guessSongLeaderboardEntry.create({
+      data: { ...key, sessionId, ...score },
+    })
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) throw error
+    // Another request won the first insert. Re-evaluate the same atomic
+    // condition against its committed row so a lower score cannot replace it.
+    await database.guessSongLeaderboardEntry.updateMany({
+      where: betterThanCandidateWhere,
+      data: updateData,
+    })
+  }
 }
 
 export type GuessSongModeHighScore = {
@@ -240,7 +356,7 @@ export async function recordGuessSongLeaderboard(sessionId: string, db: Prisma.T
   // the replacement infinite simple leaderboard.
   if (session.mode === 'EASY' && session.questionCount !== null) return
 
-  const leaderboardMode = toPublicGuessSongMode(session.mode) as GuessSongMode
+  const leaderboardMode = toPublicGuessSongMode(session.mode)
 
   const score: ScoreRecord = {
     score: session.score,
@@ -252,32 +368,22 @@ export async function recordGuessSongLeaderboard(sessionId: string, db: Prisma.T
 
   for (const periodType of ['WEEK', 'MONTH'] as const) {
     const { periodKey } = getGuessSongPeriod(periodType, session.completedAt)
-    const where = {
-      userId_mode_periodType_periodKey: {
+    const deletedSessionIds = await getGuessSongDeletedSessionIds(
+      { mode: leaderboardMode, periodType, periodKey },
+      db,
+    )
+    if (deletedSessionIds.has(session.id)) continue
+    await writeGuessSongLeaderboardEntry(
+      db,
+      {
         userId: session.userId,
         mode: leaderboardMode,
         periodType,
         periodKey,
       },
-    }
-    const existing = await db.guessSongLeaderboardEntry.findUnique({ where })
-    if (!existing) {
-      await db.guessSongLeaderboardEntry.create({
-        data: {
-          userId: session.userId,
-          sessionId: session.id,
-          mode: leaderboardMode,
-          periodType,
-          periodKey,
-          ...score,
-        },
-      })
-    } else if (isGuessSongScoreBetter(score, existing)) {
-      await db.guessSongLeaderboardEntry.update({
-        where,
-        data: { sessionId: session.id, ...score },
-      })
-    }
+      session.id,
+      score,
+    )
   }
 }
 
@@ -559,11 +665,17 @@ export async function getGuessSongLeaderboard(input: {
   }
 
   const periodKey = getGuessSongPeriod(input.periodType, input.now).periodKey
+  const deletedSessionIds = await getGuessSongDeletedSessionIds({
+    mode: input.mode,
+    periodType: input.periodType,
+    periodKey,
+  })
   const entries = await prisma.guessSongLeaderboardEntry.findMany({
     where: {
       periodType: input.periodType,
       periodKey,
       mode: { in: modeFilter },
+      ...(deletedSessionIds.size > 0 ? { sessionId: { notIn: [...deletedSessionIds] } } : {}),
       GuessSongSession: {
         isValid: true,
         riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
@@ -583,18 +695,11 @@ export async function getGuessSongLeaderboard(input: {
         },
       },
     },
-    take: 1000,
   })
-    // 周榜/月榜：guessSongLeaderboardEntry 已存储该用户该模式该周期的最高单局成绩，直接采用（非累计）
-  const bestByUser = new Map<string, LeaderboardRow>()
-  for (const entry of entries) {
-    const candidate = { ...entry, mode: toPublicGuessSongMode(entry.mode) as GuessSongMode }
-    const current = bestByUser.get(candidate.userId)
-    if (!current || compareGuessSongScores(candidate, current) < 0) bestByUser.set(candidate.userId, candidate)
-  }
-  const rows = [...bestByUser.values()]
-
-  rows.sort(compareGuessSongScores)
+    // 周榜/月榜：先读取完整候选集，再在应用层跨 EASY/ENDLESS 选每位用户的最好成绩。
+    // 不能在这里 take，否则重复用户会消耗名额，导致 Top 10 漏人。
+    // guessSongLeaderboardEntry 已存储该用户该模式该周期的最高单局成绩，直接采用（非累计）
+  const rows = selectBestGuessSongRows(entries)
   const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.userId))
   const ownIndex = rows.findIndex((row) => row.userId === input.userId)
   return {

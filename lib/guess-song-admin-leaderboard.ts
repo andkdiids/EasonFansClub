@@ -8,8 +8,8 @@ import {
   toPublicGuessSongMode,
   calculateGuessSongScore,
 } from '@/lib/guess-song-config'
-import { compareGuessSongScores, getGuessSongPeriod } from '@/lib/guess-song-period'
-import { getGuessSongDeletedYearSessionIds, recordGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
+import { compareGuessSongScores, getGuessSongPeriod, selectBestGuessSongRows } from '@/lib/guess-song-period'
+import { getGuessSongDeletedSessionIds, getGuessSongDeletedYearSessionIds, recordGuessSongLeaderboard } from '@/lib/guess-song-leaderboard'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-risk'
 import { publicImageUrl } from '@/lib/images'
@@ -177,7 +177,7 @@ function compareYearSessions(left: YearSession, right: YearSession) {
   )
 }
 
-function serializeEntry(entry: AdminEntry, entryIds: string[]) {
+function serializeEntry(entry: AdminEntry, entryIds: string[], databaseMode = entry.mode) {
   return {
     id: entry.id,
     entryIds,
@@ -187,7 +187,7 @@ function serializeEntry(entry: AdminEntry, entryIds: string[]) {
     displayName: getPublicUserDisplayName(entry.User),
     avatarUrl: publicImageUrl(entry.User.Profile?.avatarUrl || entry.User.avatarUrl),
     mode: toPublicGuessSongMode(entry.mode),
-    databaseMode: entry.mode,
+    databaseMode,
     periodType: entry.periodType,
     periodKey: entry.periodKey,
     score: entry.score,
@@ -291,11 +291,17 @@ export async function listGuessSongAdminLeaderboard(input: {
         .map((session) => serializeYearSession(session, period.periodKey)),
     }
   }
+  const deletedSessionIds = await getGuessSongDeletedSessionIds({
+    mode: input.mode,
+    periodType: input.periodType,
+    periodKey: period.periodKey,
+  })
   const rows = await prisma.guessSongLeaderboardEntry.findMany({
     where: {
       mode: { in: modeValues },
       periodType: input.periodType,
       periodKey: period.periodKey,
+      ...(deletedSessionIds.size > 0 ? { sessionId: { notIn: [...deletedSessionIds] } } : {}),
       User: userSearchFilter(input.query || ''),
       GuessSongSession: {
         isValid: true,
@@ -331,27 +337,30 @@ export async function listGuessSongAdminLeaderboard(input: {
       },
     },
     orderBy: [{ score: 'desc' }, { achievedAt: 'asc' }],
-    take: 500,
   })
 
-  const bestByUser = new Map<string, { best: AdminEntry; entryIds: string[] }>()
+  // EASY 同时覆盖 EASY/ENDLESS；必须先完整去重，再限制后台展示的 Top 500。
+  const entryIdsByUser = new Map<string, string[]>()
+  const databaseModeByEntryId = new Map<string, GuessSongMode>()
   for (const row of rows as AdminEntry[]) {
-    const current = bestByUser.get(row.userId)
-    if (!current) {
-      bestByUser.set(row.userId, { best: row, entryIds: [row.id] })
-      continue
-    }
-    current.entryIds.push(row.id)
-    if (compareGuessSongScores(row, current.best) < 0) current.best = row
+    databaseModeByEntryId.set(row.id, row.mode)
+    const entryIds = entryIdsByUser.get(row.userId)
+    if (entryIds) entryIds.push(row.id)
+    else entryIdsByUser.set(row.userId, [row.id])
   }
+  const rankedRows = selectBestGuessSongRows(rows as AdminEntry[])
 
   return {
     mode: input.mode,
     periodType: input.periodType,
     periodKey: period.periodKey,
-    rows: [...bestByUser.values()]
-      .sort((left, right) => compareGuessSongScores(left.best, right.best))
-      .map(({ best, entryIds }) => serializeEntry(best, entryIds)),
+    rows: rankedRows
+      .slice(0, 500)
+      .map((entry) => serializeEntry(
+        entry,
+        entryIdsByUser.get(entry.userId) || [],
+        databaseModeByEntryId.get(entry.id) || entry.mode,
+      )),
   }
 }
 
@@ -414,14 +423,26 @@ export async function deleteGuessSongAdminLeaderboard(input: {
       })
       return { deletedCount: 1, mode, periodType, periodKey: period.periodKey }
     }
+    const deletedSessionIds = await getGuessSongDeletedSessionIds({
+      mode,
+      periodType,
+      periodKey: period.periodKey,
+    }, tx)
     const entries = await tx.guessSongLeaderboardEntry.findMany({
-      where: { userId: input.userId, mode: { in: getGuessSongDatabaseModes(mode) }, periodType, periodKey: period.periodKey },
-      select: { id: true, score: true, mode: true, sessionId: true },
+      where: {
+        userId: input.userId,
+        mode: { in: getGuessSongDatabaseModes(mode) },
+        periodType,
+        periodKey: period.periodKey,
+        ...(deletedSessionIds.size > 0 ? { sessionId: { notIn: [...deletedSessionIds] } } : {}),
+      },
+      select: { id: true, score: true, correctCount: true, maxStreak: true, totalPlayCount: true, achievedAt: true, mode: true, sessionId: true },
     })
     if (!entries.length) throw new GuessSongAdminLeaderboardError('该用户没有对应榜单成绩', 404, 'SCORE_NOT_FOUND')
-    const beforeScore = Math.max(...entries.map((entry) => entry.score))
+    const source = entries.reduce((best, entry) => compareGuessSongScores(entry, best) < 0 ? entry : best)
+    const deletedEntryIds = entries.filter((entry) => entry.sessionId === source.sessionId).map((entry) => entry.id)
     await tx.guessSongLeaderboardEntry.deleteMany({
-      where: { id: { in: entries.map((entry) => entry.id) } },
+      where: { id: { in: deletedEntryIds } },
     })
     await tx.adminActionLog.create({
       data: {
@@ -432,14 +453,36 @@ export async function deleteGuessSongAdminLeaderboard(input: {
           mode,
           periodType,
           periodKey: period.periodKey,
-          beforeScore,
-          deletedEntryIds: entries.map((entry) => entry.id),
-          sessionIds: entries.map((entry) => entry.sessionId),
+          beforeScore: source.score,
+          deletedEntryIds,
+          sessionIds: [source.sessionId],
           reason,
         },
       },
     })
-    return { deletedCount: entries.length, mode, periodType, periodKey: period.periodKey }
+    const fallback = await tx.guessSongSession.findFirst({
+      where: {
+        userId: input.userId,
+        mode: { in: getGuessSongDatabaseModes(mode) },
+        status: { in: ['COMPLETED', 'EXPIRED'] },
+        completedAt: { gte: period.start, lt: period.end },
+        isValid: true,
+        riskScore: { lt: GUESS_SONG_RISK_THRESHOLD },
+        id: { notIn: [...deletedSessionIds, source.sessionId] },
+        ...(mode === 'EASY' ? { questionCount: null } : {}),
+      },
+      orderBy: [
+        { score: 'desc' },
+        { correctCount: 'desc' },
+        { maxStreak: 'desc' },
+        { totalPlayCount: 'asc' },
+        { completedAt: 'asc' },
+        { id: 'asc' },
+      ],
+      select: { id: true },
+    })
+    if (fallback) await recordGuessSongLeaderboard(fallback.id, tx)
+    return { deletedCount: deletedEntryIds.length, mode, periodType, periodKey: period.periodKey }
   })
 }
 
@@ -568,8 +611,19 @@ export async function addGuessSongAdminScore(input: {
     const target = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
     if (!target) throw new GuessSongAdminLeaderboardError('用户不存在', 404, 'USER_NOT_FOUND')
     const modeValues = getGuessSongDatabaseModes(mode)
+    const deletedSessionIds = await getGuessSongDeletedSessionIds({
+      mode,
+      periodType,
+      periodKey: period.periodKey,
+    }, tx)
     const entries = await tx.guessSongLeaderboardEntry.findMany({
-      where: { userId: input.userId, mode: { in: modeValues }, periodType: periodType as GuessSongPeriodType, periodKey: period.periodKey },
+      where: {
+        userId: input.userId,
+        mode: { in: modeValues },
+        periodType: periodType as GuessSongPeriodType,
+        periodKey: period.periodKey,
+        ...(deletedSessionIds.size > 0 ? { sessionId: { notIn: [...deletedSessionIds] } } : {}),
+      },
       include: {
         GuessSongSession: {
           select: {
@@ -602,6 +656,7 @@ export async function addGuessSongAdminScore(input: {
           score: { gt: 0 },
           status: { in: ['COMPLETED', 'EXPIRED'] },
           completedAt: { gte: period.start, lt: period.end },
+          ...(deletedSessionIds.size > 0 ? { id: { notIn: [...deletedSessionIds] } } : {}),
           ...(mode === 'EASY' ? { questionCount: null } : {}),
         },
         orderBy: [{ score: 'desc' }, { updatedAt: 'asc' }],

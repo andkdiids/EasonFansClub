@@ -111,7 +111,9 @@ test('6/correctCount > completedCount 必须拒绝', () => {
 })
 
 test('7/排行榜最高分字段来自同一 Result：聚合写入整行，不做独立 MAX', () => {
-  assert.match(leaderboardSource, /data: \{ userId: session\.userId, sessionId: session\.id[\s\S]*?\.\.\.score \}/)
+  assert.match(leaderboardSource, /data: \{ \.\.\.key, sessionId, \.\.\.score \}/)
+  assert.match(leaderboardSource, /const updateData = \{ sessionId, \.\.\.score \}/)
+  assert.match(leaderboardSource, /wantListenLeaderboardEntry\.updateMany\(/)
   assert.doesNotMatch(leaderboardSource, /aggregate\(/)
   assert.doesNotMatch(leaderboardSource, /_max/)
 })

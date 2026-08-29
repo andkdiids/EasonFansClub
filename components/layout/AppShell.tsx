@@ -20,6 +20,7 @@ const shelllessPrefixes = ['/login', '/register', '/forgot-password', '/welcome'
 const immersiveRoutePrefixes = ['/games', '/entertainment']
 
 function isImmersiveRoute(pathname: string) {
+  if (pathname === '/games/daily-prescription' || pathname.startsWith('/games/daily-prescription/')) return false
   return immersiveRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 

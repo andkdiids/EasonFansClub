@@ -4,7 +4,7 @@ import type { ActivityVerificationModeValue } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { grantBadgeWithTransaction } from '@/lib/badge-service'
 import { sanitizeText } from '@/lib/security'
-import { activityRegistrationQuestionTypeValues } from '@/lib/activity-registration-shared'
+import { ACTIVITY_REGISTRATION_CANCEL_CLOSED, activityRegistrationQuestionTypeValues } from '@/lib/activity-registration-shared'
 import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration-fee'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -15,7 +15,10 @@ export {
   activityRegistrationQuestionTypeValues,
   activityRegistrationStateValues,
   activityRegistrationStateMessage,
+  ACTIVITY_REGISTRATION_CANCEL_CLOSED,
+  activityRegistrationCancelClosedMessage,
   getActivityRegistrationState,
+  isActivityRegistrationCancellationOpen,
   type ActivityRegistrationAnswerView,
   type ActivityRegistrationQuestionType,
   type ActivityRegistrationQuestionView,
@@ -27,7 +30,7 @@ export function activityRegistrationSuccessNotificationKey(activityId: string, u
   return `activity-registration-success:${activityId}:${userId}:${registrationId}:${lifecycleKey}`
 }
 
-type RegistrationErrorCode = Exclude<ActivityRegistrationState, 'AVAILABLE'> | 'ACTIVITY_NOT_FOUND' | 'INVALID_ANSWERS' | 'CONFIRMATION_REQUIRED' | 'ALREADY_VERIFIED' | 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'CANNOT_CANCEL' | 'ALREADY_CANCELLED' | 'INSUFFICIENT_BALANCE' | 'ACTIVITY_MATERIAL_UNAVAILABLE' | 'ACTIVITY_MATERIAL_INVALID'
+type RegistrationErrorCode = Exclude<ActivityRegistrationState, 'AVAILABLE'> | typeof ACTIVITY_REGISTRATION_CANCEL_CLOSED | 'ACTIVITY_NOT_FOUND' | 'INVALID_ANSWERS' | 'CONFIRMATION_REQUIRED' | 'ALREADY_VERIFIED' | 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'CANNOT_CANCEL' | 'ALREADY_CANCELLED' | 'INSUFFICIENT_BALANCE' | 'ACTIVITY_MATERIAL_UNAVAILABLE' | 'ACTIVITY_MATERIAL_INVALID'
 
 export class ActivityRegistrationError extends Error {
   constructor(readonly code: RegistrationErrorCode, message: string, readonly status: number) {

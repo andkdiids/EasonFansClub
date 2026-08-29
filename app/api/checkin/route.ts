@@ -44,6 +44,12 @@ function logCheckInPostProcessError(input: { requestId: string; userId: string; 
   })
 }
 
+function serializeTodayCheckIn<T extends { DailyMessage: { id: string } | null }>(checkIn: T | null) {
+  if (!checkIn) return null
+  const { DailyMessage, ...payload } = checkIn
+  return { ...payload, dailyMessageId: DailyMessage?.id ?? null }
+}
+
 async function runCheckInPostProcess(input: {
   requestId: string
   userId: string
@@ -224,7 +230,7 @@ export async function GET(request: Request) {
       'CheckIn.findUnique checkinApi.todayCheckIn',
       prisma.checkIn.findUnique({
         where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
-        select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
+        select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true, type: true, isMakeUp: true, DailyMessage: { select: { id: true } } },
       }),
       8000,
     ),
@@ -245,7 +251,7 @@ export async function GET(request: Request) {
   const responseBuildStartedAt = Date.now()
   const response = NextResponse.json({
     checkedToday: Boolean(todayCheckIn),
-    todayCheckIn,
+    todayCheckIn: serializeTodayCheckIn(todayCheckIn),
     consecutiveDays: streaks.currentStreak,
     currentStreak: streaks.currentStreak,
     longestStreak: streaks.longestStreak,
@@ -327,7 +333,7 @@ export async function POST(request: Request) {
 
   const existing = await prisma.checkIn.findUnique({
     where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
-    select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
+    select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true, type: true, isMakeUp: true, DailyMessage: { select: { id: true } } },
   })
   if (existing) {
     const precheckMs = Date.now() - precheckStartedAt
@@ -345,7 +351,7 @@ export async function POST(request: Request) {
       message: '今天已经挂号过了',
       checkedToday: true,
       checkDate: formatBeijingDate(today),
-      todayCheckIn: existing,
+      todayCheckIn: serializeTodayCheckIn(existing),
       consecutiveDays: streaks.currentStreak,
       currentStreak: streaks.currentStreak,
       longestStreak: streaks.longestStreak,
@@ -392,7 +398,7 @@ export async function POST(request: Request) {
         moodText: customMood?.text ?? null,
         message: message || null,
       },
-      select: { id: true, checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
+      select: { id: true, checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true, type: true, isMakeUp: true },
     })
     const ordinaryFeeAward = await awardRegistrationFee(tx, {
       userId: user.id,
@@ -427,7 +433,7 @@ export async function POST(request: Request) {
     const checkIn = await tx.checkIn.update({
       where: { id: createdCheckIn.id },
       data: { points: gainedPoints, exp: gainedExp },
-      select: { id: true, checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
+      select: { id: true, checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true, type: true, isMakeUp: true },
     })
     let dailyMessageId: string | null = null
     if (message) {
@@ -474,7 +480,10 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const [todayCheckIn, profile, history] = await Promise.all([
-        prisma.checkIn.findUnique({ where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } } }),
+        prisma.checkIn.findUnique({
+          where: { userId_checkinDateKey: { userId: user.id, checkinDateKey: todayKey } },
+          select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true, type: true, isMakeUp: true, DailyMessage: { select: { id: true } } },
+        }),
         prisma.user.findUnique({ where: { id: user.id }, select: { points: true, exp: true, experience: true, level: true } }),
         prisma.checkIn.findMany({ where: { userId: user.id }, select: { checkinDateKey: true } }),
       ])
@@ -482,7 +491,7 @@ export async function POST(request: Request) {
       const streaks = calculateCheckinStreaks(history.map((item) => item.checkinDateKey))
       const responseBuildStartedAt = Date.now()
       const response = NextResponse.json({
-        message: '今日已挂号', checkedToday: true, checkDate: todayKey, todayCheckIn,
+        message: '今日已挂号', checkedToday: true, checkDate: todayKey, todayCheckIn: serializeTodayCheckIn(todayCheckIn),
         consecutiveDays: streaks.currentStreak,
         currentStreak: streaks.currentStreak,
         longestStreak: streaks.longestStreak,
@@ -543,7 +552,7 @@ export async function POST(request: Request) {
     message: '今日挂号成功',
     checkedToday: true,
     checkDate: formatBeijingDate(today),
-    todayCheckIn: result.checkIn,
+    todayCheckIn: { ...result.checkIn, dailyMessageId: result.dailyMessageId },
     mood: mood ?? null,
     gainedPoints: result.checkIn.points,
     gainedExp: result.checkIn.exp,

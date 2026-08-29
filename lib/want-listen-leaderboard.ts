@@ -2,7 +2,7 @@ import { Prisma, type WantListenMode } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { compareWantListenScores, getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod } from '@/lib/want-listen-period'
+import { compareWantListenScores, getWantListenPeriod, parseWantListenPeriod } from '@/lib/want-listen-period'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 
@@ -15,6 +15,77 @@ type WantListenScore = {
   totalQuestions: number
   completionTimeMs: number
   achievedAt: Date
+}
+
+type WantListenLeaderboardKey = {
+  userId: string
+  mode: WantListenMode
+  periodType: 'DAY' | 'WEEK' | 'ALL'
+  periodKey: string
+}
+
+function wantListenBetterThanCandidateWhere(
+  key: WantListenLeaderboardKey,
+  candidate: WantListenScore,
+): Prisma.WantListenLeaderboardEntryWhereInput {
+  return {
+    ...key,
+    OR: [
+      { score: { lt: candidate.score } },
+      { score: candidate.score, correctCount: { lt: candidate.correctCount } },
+      {
+        score: candidate.score,
+        correctCount: candidate.correctCount,
+        maxStreak: { lt: candidate.maxStreak },
+      },
+      {
+        score: candidate.score,
+        correctCount: candidate.correctCount,
+        maxStreak: candidate.maxStreak,
+        completionTimeMs: { gt: candidate.completionTimeMs },
+      },
+      {
+        score: candidate.score,
+        correctCount: candidate.correctCount,
+        maxStreak: candidate.maxStreak,
+        completionTimeMs: candidate.completionTimeMs,
+        achievedAt: { gt: candidate.achievedAt },
+      },
+    ],
+  }
+}
+
+function isPrismaUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+async function writeWantListenLeaderboardEntry(
+  database: Database,
+  key: WantListenLeaderboardKey,
+  sessionId: string,
+  score: WantListenScore,
+) {
+  const betterThanCandidateWhere = wantListenBetterThanCandidateWhere(key, score)
+  const updateData = { sessionId, ...score }
+  const updated = await database.wantListenLeaderboardEntry.updateMany({
+    where: betterThanCandidateWhere,
+    data: updateData,
+  })
+  if (updated.count > 0) return
+
+  try {
+    await database.wantListenLeaderboardEntry.create({
+      data: { ...key, sessionId, ...score },
+    })
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) throw error
+    // Another request won the first insert. Re-evaluate the same atomic
+    // condition against its committed row so a lower score cannot replace it.
+    await database.wantListenLeaderboardEntry.updateMany({
+      where: betterThanCandidateWhere,
+      data: updateData,
+    })
+  }
 }
 
 export async function recordWantListenLeaderboard(sessionId: string, database: Database = prisma) {
@@ -38,22 +109,17 @@ export async function recordWantListenLeaderboard(sessionId: string, database: D
 
   for (const periodType of ['DAY', 'WEEK', 'ALL'] as const) {
     const period = getWantListenPeriod(periodType, session.completedAt)
-    const where = {
-      userId_mode_periodType_periodKey: {
+    await writeWantListenLeaderboardEntry(
+      database,
+      {
         userId: session.userId,
         mode: session.mode,
         periodType,
         periodKey: period.periodKey,
       },
-    }
-    const existing = await database.wantListenLeaderboardEntry.findUnique({ where })
-    if (!existing) {
-      await database.wantListenLeaderboardEntry.create({
-        data: { userId: session.userId, sessionId: session.id, mode: session.mode, periodType, periodKey: period.periodKey, ...score },
-      })
-    } else if (isWantListenScoreBetter(score, existing)) {
-      await database.wantListenLeaderboardEntry.update({ where, data: { sessionId: session.id, ...score } })
-    }
+      session.id,
+      score,
+    )
   }
 }
 

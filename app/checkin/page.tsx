@@ -108,7 +108,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
       'CheckIn.findUnique checkin.todayCheckIn',
       prisma.checkIn.findUnique({
         where: { userId_checkinDateKey: { userId: sessionUser.id, checkinDateKey: todayKey } },
-        select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true },
+        select: { checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true, type: true, isMakeUp: true, DailyMessage: { select: { id: true } } },
       }),
       8000,
     ),
@@ -227,11 +227,15 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const todayValue = formatBeijingDate(today)
   const layoutConfig = await getPublishedPageLayoutConfig('checkin')
   const todayCheckInPayload = todayCheckIn
-    ? {
-        ...todayCheckIn,
-        checkDate: todayCheckIn.checkDate.toISOString(),
-        createdAt: todayCheckIn.createdAt.toISOString(),
-      }
+    ? (() => {
+        const { DailyMessage, ...checkIn } = todayCheckIn
+        return {
+          ...checkIn,
+          dailyMessageId: DailyMessage?.id ?? null,
+          checkDate: todayCheckIn.checkDate.toISOString(),
+          createdAt: todayCheckIn.createdAt.toISOString(),
+        }
+      })()
     : null
 
   return (

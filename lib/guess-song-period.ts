@@ -1,5 +1,6 @@
-import type { GuessSongPeriodType } from '@prisma/client'
+import type { GuessSongMode, GuessSongPeriodType } from '@prisma/client'
 import { getBeijingDateKey } from '@/lib/beijing-time'
+import { toPublicGuessSongMode } from '@/lib/guess-song-config'
 
 const DAY_MS = 86_400_000
 
@@ -72,6 +73,35 @@ export function compareGuessSongScores(
     || left.totalPlayCount - right.totalPlayCount
     || left.achievedAt.getTime() - right.achievedAt.getTime()
   )
+}
+
+type GuessSongRankableRow = {
+  userId: string
+  mode?: GuessSongMode
+  score: number
+  correctCount: number
+  maxStreak: number
+  totalPlayCount: number
+  achievedAt: Date
+}
+
+/**
+ * Canonicalizes legacy ENDLESS rows, then selects one best row per user.
+ *
+ * EASY reads include physical EASY and ENDLESS records for backward
+ * compatibility. This function must run on the complete candidate set before
+ * a caller applies its public TopN limit.
+ */
+export function selectBestGuessSongRows<T extends GuessSongRankableRow>(rows: readonly T[]) {
+  const bestByUser = new Map<string, T>()
+  for (const row of rows) {
+    const candidate = row.mode === 'ENDLESS'
+      ? { ...row, mode: toPublicGuessSongMode(row.mode) as GuessSongMode } as T
+      : row
+    const current = bestByUser.get(candidate.userId)
+    if (!current || compareGuessSongScores(candidate, current) < 0) bestByUser.set(candidate.userId, candidate)
+  }
+  return [...bestByUser.values()].sort(compareGuessSongScores)
 }
 
 export function isGuessSongScoreBetter(

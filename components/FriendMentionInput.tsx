@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
+import { shouldSubmitCommentOnEnter } from '@/lib/comment-keyboard'
+import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
 
 export type MentionDraft = {
   userId: string
@@ -62,6 +64,7 @@ export function FriendMentionInput({
   onChange,
   onMentionsChange,
   onSubmitShortcut,
+  canSubmitShortcut = true,
   maxLength,
 }: Readonly<{
   textareaRef: RefObject<HTMLTextAreaElement | null>
@@ -70,6 +73,7 @@ export function FriendMentionInput({
   onChange: (value: string) => void
   onMentionsChange: (mentions: MentionDraft[]) => void
   onSubmitShortcut: () => void
+  canSubmitShortcut?: boolean
   maxLength?: number
 }>) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -78,6 +82,7 @@ export function FriendMentionInput({
   const [trigger, setTrigger] = useState<{ start: number; end: number; query: string } | null>(null)
   const [friends, setFriends] = useState<MentionFriend[]>([])
   const [loading, setLoading] = useState(false)
+  const isDesktop = useIsDesktopMediaQuery()
 
   function closePicker(useHistory = true) {
     setTrigger(null)
@@ -196,7 +201,12 @@ export function FriendMentionInput({
       closePicker()
       return
     }
-    if (event.key === 'Enter' && !event.shiftKey && !trigger && !composingRef.current) {
+    if (shouldSubmitCommentOnEnter(event, {
+      isDesktop,
+      canSubmit: canSubmitShortcut,
+      suggestionOpen: Boolean(trigger),
+      isComposing: composingRef.current,
+    })) {
       event.preventDefault()
       onSubmitShortcut()
     }

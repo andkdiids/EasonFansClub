@@ -1,11 +1,10 @@
 import { validateRichPostContent } from '@/lib/rich-text'
 
 /**
- * The application schema already knows about richContent, but production has
- * not applied that additive migration yet. Keep the database dependency
- * explicitly disabled until the migration is reviewed and deployed.
+ * richContent is the canonical Post body representation. The legacy content
+ * column remains a plain-text mirror for search, moderation and old clients.
  */
-export const POST_RICH_CONTENT_DB_ENABLED = false
+export const POST_RICH_CONTENT_DB_ENABLED = true
 
 export function resolvePostContentInput(input: {
   content: unknown
@@ -16,6 +15,7 @@ export function resolvePostContentInput(input: {
   if (!input.hasRichContent || input.richContent === null || input.richContent === undefined) {
     return {
       content: plainContent,
+      richContent: null,
       validation: null,
       usedCompatibilityMode: false,
     }
@@ -24,8 +24,9 @@ export function resolvePostContentInput(input: {
   const validation = validateRichPostContent(input.richContent)
   return {
     content: validation.valid ? validation.plainText : plainContent,
+    richContent: validation.valid ? validation.value : null,
     validation,
-    usedCompatibilityMode: !POST_RICH_CONTENT_DB_ENABLED,
+    usedCompatibilityMode: false,
   }
 }
 

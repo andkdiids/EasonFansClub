@@ -89,12 +89,12 @@ export function DailyPrescriptionDetail() {
   }
 
   return (
-    <section className="daily-game-panel">
+    <section className="checkin-layout-card daily-prescription-panel">
       <header className="daily-prescription-page-header">
         <h2>今日处方</h2>
         <Link href="/prescription/history" className="daily-prescription-history-link">查看历史处方 →</Link>
       </header>
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? <p className="daily-prescription-error" role="alert">{error}</p> : null}
       {!status?.draw ? (
         <button type="button" onClick={() => void draw()} disabled={loading}>
           {loading ? '正在读取…' : '领取今日处方'}

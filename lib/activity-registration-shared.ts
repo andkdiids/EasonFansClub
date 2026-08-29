@@ -3,6 +3,9 @@ import type { ActivityStatusValue } from '@/lib/activity'
 export const activityRegistrationStateValues = ['AVAILABLE', 'NOT_STARTED', 'CLOSED', 'FULL', 'ENDED', 'CANCELLED'] as const
 export type ActivityRegistrationState = (typeof activityRegistrationStateValues)[number]
 
+export const ACTIVITY_REGISTRATION_CANCEL_CLOSED = 'ACTIVITY_REGISTRATION_CANCEL_CLOSED' as const
+export const activityRegistrationCancelClosedMessage = '活动报名已结束，无法取消报名。'
+
 export const activityRegistrationQuestionTypeValues = ['TEXT', 'TEXTAREA', 'SINGLE_SELECT', 'MULTI_SELECT', 'NUMBER', 'PHONE', 'SELECT'] as const
 export type ActivityRegistrationQuestionType = (typeof activityRegistrationQuestionTypeValues)[number]
 
@@ -55,6 +58,15 @@ function timestamp(value: Date | string | null | undefined) {
   if (!value) return null
   const result = value instanceof Date ? value.getTime() : new Date(value).getTime()
   return Number.isFinite(result) ? result : null
+}
+
+/** Cancellation is governed only by the registration end time, never by the activity dates. */
+export function isActivityRegistrationCancellationOpen(
+  activity: Pick<ActivityRegistrationInput, 'registrationEndAt'>,
+  now: Date = new Date(),
+) {
+  const registrationEnd = timestamp(activity.registrationEndAt)
+  return registrationEnd === null || now.getTime() < registrationEnd
 }
 
 /** Registration has its own time window; activity dates do not close it. */

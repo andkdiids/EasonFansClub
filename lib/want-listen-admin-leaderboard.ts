@@ -39,17 +39,16 @@ export function leaderboardModeLabel(mode: WantListenAdminMode) {
 }
 
 export function startOfDay(now = new Date()) {
-  const value = new Date(now)
-  value.setHours(0, 0, 0, 0)
-  return value
+  const period = getWantListenPeriod('DAY', now)
+  if (!period.start) throw new Error('DAY 周期必须有开始时间')
+  return period.start
 }
 
 /** 本周一 00:00（周一为一周起点） */
 export function startOfWeek(now = new Date()) {
-  const value = startOfDay(now)
-  const day = value.getDay() || 7
-  value.setDate(value.getDate() - (day - 1))
-  return value
+  const period = getWantListenPeriod('WEEK', now)
+  if (!period.start) throw new Error('WEEK 周期必须有开始时间')
+  return period.start
 }
 
 type OverviewUser = {

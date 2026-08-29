@@ -79,9 +79,9 @@ export function AnywhereDoorCommentPanel({ postId, initialComments, initialNextC
   }
 
   return (
-    <section className={embedded ? 'flex min-h-0 flex-1 flex-col overflow-visible border-t border-sky-100 p-4 dark:border-slate-700 lg:overflow-hidden lg:border-t-0 lg:p-5' : 'mt-6 border border-sky-100 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-6'} data-anywhere-door-comments={embedded ? 'embedded' : 'standalone'}>
+    <section className={embedded ? 'anywhere-door-comments anywhere-door-comments-embedded flex min-h-0 flex-1 flex-col overflow-visible border-t border-sky-100 p-4 dark:border-slate-700 lg:overflow-hidden lg:border-t-0 lg:p-5' : 'anywhere-door-comments anywhere-door-comments-standalone mt-6 border border-sky-100 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-6'} data-anywhere-door-comments={embedded ? 'embedded' : 'standalone'}>
       <div className="flex shrink-0 items-center justify-between gap-3"><h2 className="text-xl font-black text-brand-950 dark:text-slate-100">院友评论</h2><span className="text-xs font-bold text-slate-400">{comments.length} 条主评论</span></div>
-      <div className={`mt-4 space-y-3 ${embedded ? 'min-h-0 flex-1 lg:overflow-y-auto lg:pr-1' : ''}`}>
+      <div className={`anywhere-door-comment-list mt-4 space-y-3 ${embedded ? 'min-h-0 flex-1 lg:overflow-y-auto lg:pr-1' : ''}`}>
         {comments.length ? comments.map((comment) => (
           <div key={comment.id} id={`comment-${comment.id}`} className="border-b border-sky-100 pb-3 last:border-0 dark:border-slate-700">
             <div className="flex items-center justify-between gap-2 text-xs font-black text-brand-900 dark:text-slate-200"><span>{comment.author.nickname}</span><time dateTime={comment.createdAt}>{formatDate(comment.createdAt)}</time></div>

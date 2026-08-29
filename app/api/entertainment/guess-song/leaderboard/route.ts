@@ -12,6 +12,9 @@ export async function GET(request: Request) {
   if (!guard.user) return guessSongError('请先登录', guard.response.status)
   const params = new URL(request.url).searchParams
   const rawPeriod = params.get('period')
+  if (rawPeriod !== null && rawPeriod !== '' && rawPeriod !== 'WEEK' && rawPeriod !== 'MONTH' && rawPeriod !== 'YEAR') {
+    return guessSongError('请选择有效榜单周期', 400, 'INVALID_PERIOD')
+  }
   const periodType: GuessSongPeriodType | 'YEAR' =
     rawPeriod === 'MONTH' ? 'MONTH' : rawPeriod === 'YEAR' ? 'YEAR' : 'WEEK'
   const rawMode = params.get('mode')

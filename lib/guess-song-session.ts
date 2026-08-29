@@ -143,7 +143,7 @@ function normalizeGuessSongSessionMode(requestedMode: unknown) {
   if (!isGuessSongMode(requestedMode)) throw new GuessSongServiceError('璇烽€夋嫨鏈夋晥娓告垙妯″紡')
   // ENDLESS is kept only for old database rows and old deep links. A new start
   // through that legacy value opens the replacement simple challenge instead.
-  return (requestedMode === 'ENDLESS' ? 'EASY' : requestedMode) as GuessSongMode
+  return toPublicGuessSongMode(requestedMode)
 }
 
 async function createSessionQuestion(

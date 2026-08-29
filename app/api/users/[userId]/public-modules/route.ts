@@ -11,6 +11,7 @@ import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { buildProfilePostWhere } from '@/lib/post-moderation'
+import { postContentPlainText } from '@/lib/share-metadata'
 import { getProfileVisibility, isProfileModuleVisible, PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -58,6 +59,7 @@ export async function GET(request: Request, context: RouteContext) {
           id: true,
           title: true,
           content: true,
+          richContent: true,
           moderationStatus: true,
           rejectionReason: true,
           profilePinnedAt: true,
@@ -72,10 +74,10 @@ export async function GET(request: Request, context: RouteContext) {
       [],
     )
     return NextResponse.json({
-      items: posts.map(({ Board, profilePinnedAt, ...post }) => ({
+      items: posts.map(({ Board, profilePinnedAt, richContent, ...post }) => ({
         ...post,
         title: publicModerationText(post.title, post.moderationStatus),
-        content: publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus),
+        content: publicModerationText(postContentPlainText(post.content, richContent), post.moderationStatus),
         board: Board,
         isProfilePinned: Boolean(profilePinnedAt),
       })),
@@ -173,6 +175,7 @@ export async function GET(request: Request, context: RouteContext) {
               id: true,
               title: true,
               content: true,
+              richContent: true,
               moderationStatus: true,
               User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, Profile: { select: { displayName: true, displayNameModerationStatus: true } } } },
             },
@@ -186,20 +189,23 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({
       items: favorites.map(({ Post, ...favorite }) => ({
         ...favorite,
-        post: {
-          ...Post,
-          title: publicModerationText(Post.title, Post.moderationStatus),
-          content: publicModerationText(publicContentImageMarkers(Post.content), Post.moderationStatus),
-          author: {
-            ...Post.User,
-            nickname: getPublicUserDisplayName(Post.User),
-            equippedBadge: equippedBadgeMap.get(Post.User.id) || null,
-            profile: Post.User.Profile ? {
-              ...Post.User.Profile,
-              displayName: getPublicUserDisplayName(Post.User),
-            } : Post.User.Profile,
-          },
-        },
+        post: (() => {
+          const { richContent, ...post } = Post
+          return {
+            ...post,
+            title: publicModerationText(Post.title, Post.moderationStatus),
+            content: publicModerationText(postContentPlainText(Post.content, richContent), Post.moderationStatus),
+            author: {
+              ...Post.User,
+              nickname: getPublicUserDisplayName(Post.User),
+              equippedBadge: equippedBadgeMap.get(Post.User.id) || null,
+              profile: Post.User.Profile ? {
+                ...Post.User.Profile,
+                displayName: getPublicUserDisplayName(Post.User),
+              } : Post.User.Profile,
+            },
+          }
+        })(),
       })),
     })
   }

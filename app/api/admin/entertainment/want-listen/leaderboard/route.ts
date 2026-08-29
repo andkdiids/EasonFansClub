@@ -11,6 +11,7 @@ import {
   WantListenAdminLeaderboardError,
 } from '@/lib/want-listen-admin-leaderboard'
 import { wantListenError, wantListenOk } from '@/lib/want-listen-api'
+import { WantListenPeriodError } from '@/lib/want-listen-period'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -18,6 +19,9 @@ export const runtime = 'nodejs'
 
 function handleAdminLeaderboardError(error: unknown, operation: string) {
   if (error instanceof WantListenAdminLeaderboardError) {
+    return wantListenError(error.message, error.status, error.code)
+  }
+  if (error instanceof WantListenPeriodError) {
     return wantListenError(error.message, error.status, error.code)
   }
   console.error(`[want-listen.admin-leaderboard.${operation}]`, error)

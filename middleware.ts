@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { authCookieName, getSessionCookieOptions, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 import { buildPublicAbsoluteUrl, getPublicOrigin, isLocalHostname, safeInternalPath } from '@/lib/url-safety'
 import { isCrossSiteRequest, isStateChangingMethod } from '@/lib/csrf'
+import { isPublicMetadataCrawlerUserAgent } from '@/lib/public-metadata-crawler'
 const noStoreValue = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
 const immutableCacheValue = 'public, max-age=31536000, immutable'
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
@@ -18,10 +19,13 @@ const publicExactPaths = new Set([
   '/reset-password',
   '/user-agreement',
   '/favicon.ico',
+  '/icon.png',
+  '/apple-icon.png',
   '/robots.txt',
   '/manifest.webmanifest',
   '/d89ed4255676640e037130589550e237.txt',
   '/clinic',
+  '/activities',
   '/api/clinic',
 ])
 
@@ -105,7 +109,12 @@ function normalizeHost(value: string) {
 function isPublicPath(pathname: string) {
   if (publicExactPaths.has(pathname)) return true
   if (pathname === '/api/auth') return true
-  return publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))
+  if (publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))) return true
+  // Public detail pages must be reachable by WeChat and other crawlers. The
+  // nested create/edit/register routes remain protected by their page/API
+  // guards because they do not match these exact one-segment detail paths.
+  if (/^\/posts\/(?!new$)[^/]+$/.test(pathname)) return true
+  return /^\/activities\/[^/]+$/.test(pathname)
 }
 
 function isImmutablePublicPath(pathname: string) {
@@ -114,6 +123,10 @@ function isImmutablePublicPath(pathname: string) {
 
 function isApiPath(pathname: string) {
   return pathname === '/api' || pathname.startsWith('/api/')
+}
+
+function isPublicMetadataCrawlerRequest(request: NextRequest) {
+  return request.nextUrl.pathname === '/' && isPublicMetadataCrawlerUserAgent(request.headers.get('user-agent'))
 }
 
 type SessionVerification = {
@@ -318,7 +331,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  if (isPublicPath(pathname)) {
+  if (isPublicPath(pathname) || isPublicMetadataCrawlerRequest(request)) {
     const response = NextResponse.next()
     return isImmutablePublicPath(pathname)
       ? withImmutableCacheHeaders(response)
@@ -347,5 +360,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|manifest.webmanifest).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|robots.txt|manifest.webmanifest).*)'],
 }

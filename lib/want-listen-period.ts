@@ -3,6 +3,16 @@ import type { WantListenPeriodType } from '@prisma/client'
 
 const DAY_MS = 86_400_000
 
+export class WantListenPeriodError extends Error {
+  readonly status = 400
+  readonly code = 'INVALID_PERIOD'
+
+  constructor() {
+    super('请选择有效的想听排行榜周期')
+    this.name = 'WantListenPeriodError'
+  }
+}
+
 export function getWantListenPeriod(periodType: WantListenPeriodType, value = new Date()) {
   if (periodType === 'ALL') return { periodKey: 'ALL', start: null, end: null }
 
@@ -11,6 +21,7 @@ export function getWantListenPeriod(periodType: WantListenPeriodType, value = ne
   if (periodType === 'DAY') {
     return { periodKey: dateKey, start: dayStart, end: new Date(dayStart.getTime() + DAY_MS) }
   }
+  if (periodType !== 'WEEK') throw new WantListenPeriodError()
 
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', weekday: 'short' }).format(dayStart)
   const weekdayIndex = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday)
@@ -20,7 +31,10 @@ export function getWantListenPeriod(periodType: WantListenPeriodType, value = ne
 }
 
 export function parseWantListenPeriod(value: unknown): WantListenPeriodType {
-  return value === 'TODAY' || value === 'DAY' ? 'DAY' : value === 'ALL' ? 'ALL' : 'WEEK'
+  if (value === undefined || value === null || value === '' || value === 'WEEK') return 'WEEK'
+  if (value === 'TODAY' || value === 'DAY') return 'DAY'
+  if (value === 'ALL') return 'ALL'
+  throw new WantListenPeriodError()
 }
 
 export function compareWantListenScores(

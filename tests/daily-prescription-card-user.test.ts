@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(path, 'utf8')
 test('每日处方卡片使用处方归属用户并移除余额与右上角日期', () => {
   const service = read('lib/entertainment.ts')
   const saveButton = read('components/games/SavePrescriptionButton.tsx')
-  const center = read('app/entertainment/EntertainmentCenter.tsx')
+  const detail = read('components/games/DailyPrescriptionDetail.tsx')
   const history = read('app/prescription/history/page.tsx')
 
   assert.match(service, /userId: draw\.userId/)
@@ -25,15 +25,14 @@ test('每日处方卡片使用处方归属用户并移除余额与右上角日�
   assert.match(saveButton, /data\.user\.nickname/)
   assert.doesNotMatch(saveButton, /data\.user\.username|user\.username/)
   assert.match(saveButton, /truncateCanvasText/)
-  assert.match(center, /<PrescriptionUserBadge user=\{drawResult\.user\}/)
-  assert.doesNotMatch(center, /当前挂号费/)
+  assert.match(detail, /<PrescriptionUserBadge user=\{status\.draw\.user\}/)
+  assert.doesNotMatch(detail, /当前挂号费/)
   assert.match(history, /<PrescriptionUserBadge user=\{record\.user\}/)
 })
 
 test('历史处方渲染使用当前用户资料并同步到图片生成', () => {
   const service = read('lib/entertainment.ts')
   const detail = read('components/games/DailyPrescriptionDetail.tsx')
-  const center = read('app/entertainment/EntertainmentCenter.tsx')
   const saveButton = read('components/games/SavePrescriptionButton.tsx')
   const profileForm = read('app/profile/ProfileSettingsForm.tsx')
 
@@ -45,8 +44,7 @@ test('历史处方渲染使用当前用户资料并同步到图片生成', () =>
   assert.match(service, /profileImageUrl\(user\.Profile\?\.avatarUrl\) \|\| profileImageUrl\(user\.avatarUrl\)/)
   assert.match(detail, /cache: 'no-store'/)
   assert.match(detail, /profile-updated/)
-  assert.match(center, /cache: 'no-store'/)
-  assert.match(center, /profile-updated/)
+  assert.doesNotMatch(read('app/entertainment/EntertainmentCenter.tsx'), /daily-draw|每日处方|每日抽奖/)
   assert.match(saveButton, /loadAvatarImage\(data\.user\.avatarUrl\)/)
   assert.match(saveButton, /data\.user\.nickname/)
   assert.doesNotMatch(detail, /BEIJING TIME · DAILY/)

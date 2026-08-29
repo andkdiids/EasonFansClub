@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
+import { Prisma } from '@prisma/client'
 import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
@@ -9,7 +10,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
-import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls, publicContentImageMarkers } from '@/lib/content-images'
+import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
@@ -20,6 +21,7 @@ import {
   logPostRichContentCompatibilityMode,
   resolvePostContentInput,
 } from '@/lib/post-rich-content-compat'
+import { summarizePlainText } from '@/lib/share-metadata'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -177,7 +179,7 @@ export async function GET(request: Request) {
         } : User.Profile,
       },
       board: Board,
-      content: publicModerationText(publicContentImageMarkers(summary || createSummary(content)), moderationStatus),
+      content: publicModerationText(summarizePlainText(summary || content), moderationStatus),
       stickerUrl: publicImageUrl(sticker?.url),
     }))
 
@@ -246,13 +248,16 @@ export async function POST(request: Request) {
   if (contentInput.usedCompatibilityMode && contentInput.validation?.valid) {
     logPostRichContentCompatibilityMode('create')
   }
-  const rawContent = stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
+  const rawContent = contentInput.validation?.valid
+    ? contentInput.content
+    : stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
   const rawStickerId = typeof body.stickerId === 'string' && body.stickerId ? body.stickerId.trim().slice(0, 191) : null
   const isAdmin = shouldBypassForbiddenWords(user)
   const input = {
     boardId: sanitizeText(body.boardId, 80),
     title: rawTitle,
     content: rawContent,
+    richContent: contentInput.richContent,
   }
 
   try {
@@ -335,6 +340,7 @@ export async function POST(request: Request) {
           authorId: user.id,
           title: input.title,
           content: input.content,
+          richContent: input.richContent ? input.richContent as Prisma.InputJsonValue : Prisma.DbNull,
           ipRegion,
           summary: createSummary(input.content),
           status: 'PUBLISHED',

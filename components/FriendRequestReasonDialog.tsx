@@ -150,7 +150,7 @@ export function FriendRequestReasonDialog({
             }}
             placeholder="输入至少 2 个字的申请理由"
             aria-invalid={Boolean(error)}
-            className="mt-2 block min-h-24 w-full resize-y rounded-lg border border-sky-100 bg-slate-50 px-3 py-2.5 text-sm font-bold leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:border-brand-400 focus:bg-white"
+            className="friend-request-reason-input mt-2 block min-h-24 w-full resize-y rounded-lg border border-sky-100 bg-white px-3 py-2.5 text-sm font-bold leading-6 text-slate-900 outline-none placeholder:text-slate-400 caret-slate-900 selection:bg-sky-200 selection:text-slate-900 focus:border-brand-400 disabled:text-slate-500"
           />
         </label>
         <div className="mt-1 flex items-start justify-between gap-3 text-xs font-bold text-slate-400">

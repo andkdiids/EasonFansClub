@@ -43,6 +43,14 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
   const suppressClickRef = useRef(false)
   const activeIndexRef = useRef(0)
   const itemsKey = items.map((item) => `${item.id}:${item.url}:${item.broken ? 'broken' : 'ok'}`).join('|')
+  const viewerGallery = items
+    .filter((item) => !item.broken && !failedImageIds.has(item.id))
+    .map((item, index) => ({
+      id: item.id,
+      src: item.url,
+      previewSrc: publicImageVariantUrl(item.url, index === currentIndex ? 'large' : 'card') || item.url,
+      alt: `帖子图片 ${index + 1}`,
+    }))
 
   const clearHideControlsTimer = useCallback(() => {
     if (hideControlsTimerRef.current !== null) {
@@ -229,6 +237,9 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
                     src={item.url}
                     previewSrc={previewSrc}
                     alt={`帖子图片 ${index + 1}`}
+                    gallery={viewerGallery}
+                    initialIndex={viewerGallery.findIndex((viewerItem) => viewerItem.id === item.id)}
+                    autoPlay={viewerGallery.length > 1}
                     loading={index <= currentIndex + 1 ? 'eager' : 'lazy'}
                     fetchPriority={index === currentIndex ? 'high' : 'low'}
                     onError={() => markImageFailed(item.id)}

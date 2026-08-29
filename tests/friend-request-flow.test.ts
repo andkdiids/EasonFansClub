@@ -78,6 +78,16 @@ test('申请理由弹窗通过 body portal 脱离入口 stacking context，并�
   assert.match(globalCss, /\.friend-request-reason-dialog \{[^}]*max-height:calc\(100dvh/)
 })
 
+test('申请理由 textarea 在夜间模式白底上保持深色输入文字和可见光标', () => {
+  assert.match(reasonDialog, /className="[^\"]*friend-request-reason-input[^\"]*bg-white[^\"]*text-slate-900[^\"]*placeholder:text-slate-400[^\"]*caret-slate-900[^\"]*selection:bg-sky-200[^\"]*selection:text-slate-900/)
+  assert.match(globalCss, /\.friend-request-reason-dialog textarea\.friend-request-reason-input \{[^}]*color:#0f172a;[^}]*caret-color:#0f172a;[^}]*background-color:#fff;[^}]*color-scheme:light;/)
+  assert.match(globalCss, /\.friend-request-reason-dialog textarea\.friend-request-reason-input::placeholder \{[^}]*color:#94a3b8;[^}]*opacity:1;/)
+  assert.match(globalCss, /\.friend-request-reason-dialog textarea\.friend-request-reason-input::selection \{[^}]*color:#0f172a;[^}]*background-color:#bae6fd;/)
+  assert.match(globalCss, /:root\[data-theme='midnight'\] \.friend-request-reason-dialog textarea\.friend-request-reason-input \{[^}]*color:#0f172a;[^}]*background-color:#fff;/)
+  assert.match(globalCss, /textarea\.friend-request-reason-input:disabled \{[^}]*color:#64748b;[^}]*-webkit-text-fill-color:#64748b;/)
+  assert.match(globalCss, /textarea\.friend-request-reason-input:-webkit-autofill[\s\S]*-webkit-text-fill-color:#0f172a;/)
+})
+
 test('申请理由 API 缺失、过短或超长时返回明确 400 错误码', () => {
   assert.match(requestRoute, /body\?\.reason \?\? body\?\.message/)
   assert.match(requestRoute, /validateFriendRequestReason/)

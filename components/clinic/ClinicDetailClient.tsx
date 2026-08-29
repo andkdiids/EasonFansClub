@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { UiIcon } from '@/components/UiIcon'
 import { confirmSessionForAction } from '@/lib/client-auth'
 import { parseClinicIdentityMode } from '@/lib/clinic-config'
+import { ShareButton } from '@/components/share/ShareButton'
+import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { appendAspirinClinicListRestoreParam, updateAspirinClinicListHistoryState } from '@/lib/clinic-scroll-state'
 import type { ClinicPublicConsultation, ClinicPublicRecordDetail } from '@/lib/clinic-service'
 import { ClinicIdentityBadge } from './ClinicIdentityBadge'
@@ -168,6 +170,21 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
     if (await requireLogin()) setReportTarget(target)
   }
 
+  const clinicShareCardData: ShareCardData = {
+    type: 'clinic',
+    title: `${record.categoryLabel} · ${record.needLabel}`,
+    description: record.content,
+    image: null,
+    url: canonicalShareUrl(`/clinic/${record.id}`),
+    author: record.author.displayName,
+    authorAvatar: record.author.type === 'public' ? record.author.avatarUrl : null,
+    date: new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(record.createdAt)),
+    meta: [
+      { label: '分类', value: record.categoryLabel },
+      { label: '诉求', value: record.needLabel },
+    ],
+  }
+
   return (
     <main className="clinic-page-shell clinic-detail-page">
       <div className="clinic-detail-back"><Link href={returnLinkHref} onClick={handleReturnToClinic}>← 返回候诊大厅</Link></div>
@@ -178,7 +195,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
         <footer className="clinic-detail-actions">
           <button type="button" className={`clinic-action-button ${record.viewerHasAspirin ? 'is-active' : ''}`} onClick={() => void toggleRecordAspirin()} disabled={recordAspirinPending} aria-label={record.viewerHasAspirin ? '取消阿士匹灵' : '给颗阿士匹灵'}><UiIcon name="pill" /><span>{record.viewerHasAspirin ? '已经给药' : '给颗阿士匹灵'}</span><b>{record.aspirinCount}</b></button>
           <button type="button" className="clinic-action-button" onClick={() => document.getElementById('clinic-consultation-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><UiIcon name="stethoscope" /><span>参与会诊</span><b>{record.consultationCount}</b></button>
-          <button type="button" className="clinic-action-button" onClick={() => { void navigator.clipboard?.writeText(window.location.href); setActionError('病历链接已复制。') }}>复制链接</button>
+          <ShareButton data={clinicShareCardData} linkTitle={clinicShareCardData.title} linkText={record.content} label="分享病历" triggerClassName="clinic-action-button" messageClassName="clinic-inline-message" />
         </footer>
       </article>
 

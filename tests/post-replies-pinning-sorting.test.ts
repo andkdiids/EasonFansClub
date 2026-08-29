@@ -2,10 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
-  buildPostReplyFloorMap,
   canPinPostReply,
   clampPostReplyPage,
-  getCommentFloor,
   getPostReplyOffset,
   getPostReplyOrderBy,
   getPostReplyTotalPages,
@@ -14,6 +12,11 @@ import {
   shouldScrollToPostRepliesTop,
   splitViewerPostReplyRoots,
 } from '../lib/post-replies'
+import {
+  allocatePostCommentFloor,
+  buildPostCommentFloorMap,
+  readPersistedCommentFloor,
+} from '../lib/post-comment-floor'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const pinRoute = read('app/api/replies/[replyId]/pin/route.ts')
@@ -25,6 +28,7 @@ const forumHome = read('components/ForumHome.tsx')
 const forumFeed = read('app/api/forum/feed/route.ts')
 const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260814120000_add_reply_pinned/migration.sql')
+const floorMigration = read('prisma/migrations/20260830120000_add_post_comment_floor_sequence/migration.sql')
 
 test('只有当前帖子的发帖人可以置顶一级评论', () => {
   assert.equal(canPinPostReply({ currentUserId: 'author', postAuthorId: 'author', parentId: null }), true)
@@ -73,41 +77,78 @@ test('楼层排序支持正序/倒序，最热使用点赞数和稳定次级排�
   assert.deepEqual([...rows].sort((a, b) => b.likeCount - a.likeCount).map((row) => row.id), ['b', 'c', 'a'])
 })
 
-test('楼层按完整一级评论序列计算，分页/置顶/楼中楼不改变评论自身 floorNumber', () => {
-  assert.equal(getCommentFloor({ page: 1, pageSize: 20, index: 0 }), 1)
-  assert.equal(getCommentFloor({ page: 1, pageSize: 20, index: 19 }), 20)
-  assert.equal(getCommentFloor({ page: 2, pageSize: 20, index: 0 }), 21)
-  assert.equal(getCommentFloor({ page: 2, pageSize: 20, index: 19 }), 40)
-  assert.equal(getCommentFloor({ page: 3, pageSize: 20, index: 0 }), 41)
+test('楼层来自持久化历史序号，删除空洞、分页/置顶/楼中楼都不会重排', () => {
+  assert.equal(readPersistedCommentFloor(1), 1)
+  assert.equal(readPersistedCommentFloor(0), null)
+  assert.equal(readPersistedCommentFloor(-1), null)
+  assert.equal(readPersistedCommentFloor('2'), null)
 
-  const floorMap = buildPostReplyFloorMap([
-    { id: 'root-1' },
-    { id: 'root-2' },
-    { id: 'pinned-root' },
-    { id: 'root-4' },
+  const floorMap = buildPostCommentFloorMap([
+    { id: 'root-1', parentId: null, floorNumber: 1 },
+    { id: 'deleted-root-2', parentId: null, floorNumber: 2 },
+    { id: 'root-3', parentId: null, floorNumber: 3 },
+    { id: 'nested-reply', parentId: 'root-1', floorNumber: null },
   ])
-  assert.equal(floorMap.get('pinned-root'), 3)
-  assert.equal(floorMap.get('root-4'), 4)
-  const rootOnlyFloorMap = buildPostReplyFloorMap([
-    { id: 'root', parentId: null },
-    { id: 'reply', parentId: 'root' },
-  ])
-  assert.equal(rootOnlyFloorMap.get('root'), 1)
-  assert.equal(rootOnlyFloorMap.get('reply'), undefined)
-
-  const hundredFloorMap = buildPostReplyFloorMap(Array.from({ length: 100 }, (_, index) => ({ id: `root-${index + 1}` })))
-  const descendingPageOne = [100, 99, 81].map((floor) => hundredFloorMap.get(`root-${floor}`))
-  const descendingPageTwo = [80, 61].map((floor) => hundredFloorMap.get(`root-${floor}`))
-  assert.deepEqual(descendingPageOne, [100, 99, 81])
-  assert.deepEqual(descendingPageTwo, [80, 61])
+  assert.equal(floorMap.get('root-1'), 1)
+  assert.equal(floorMap.get('root-3'), 3)
+  assert.equal(floorMap.get('deleted-root-2'), 2)
+  assert.equal(floorMap.get('nested-reply'), undefined)
 
   assert.match(detailPage, /orderBy: \[\{ createdAt: 'asc' \}, \{ id: 'asc' \}\]/)
   assert.match(detailPage, /parentId: null, isDeleted: false|isDeleted: false, parentId: null/)
-  assert.ok(detailPage.includes('buildPostReplyFloorMap(canonicalRootReplies)'))
+  assert.match(detailPage, /floorNumber: true/)
+  assert.doesNotMatch(detailPage, /buildPostReplyFloorMap|canonicalRootReplies/)
   assert.ok(detailPage.includes('floorNumber: reply.parentId === null'))
-  assert.match(replyApi, /floorNumber = createdReply\.parentId === null/)
-  assert.match(replyApi, /parentId: null,[\s\S]*createdAt: \{ lt: createdReply\.createdAt \}/)
+  assert.match(replyApi, /tx\.\$queryRaw[\s\S]*Post[\s\S]*FOR UPDATE/)
+  assert.match(replyApi, /allocatePostCommentFloor\(tx, postId\)/)
+  assert.match(replyApi, /floorNumber,/)
+  assert.doesNotMatch(replyApi, /floorNumber = createdReply\.parentId === null/)
+  assert.doesNotMatch(replyApi, /tx\.reply\.count\(/)
+  assert.match(schema, /lastCommentFloor\s+Int\s+@default\(0\)/)
+  assert.match(schema, /floorNumber\s+Int\?/)
+  assert.match(schema, /@@unique\(\[postId, floorNumber\], map: "Reply_postId_floorNumber_key"\)/)
+  assert.match(floorMigration, /ROW_NUMBER\(\) OVER/)
+  assert.match(floorMigration, /PARTITION BY `postId`/)
+  assert.match(floorMigration, /WHERE `parentId` IS NULL/)
+  assert.match(floorMigration, /SET post\.\`lastCommentFloor\` = COALESCE/)
+  assert.match(floorMigration, /CREATE UNIQUE INDEX `Reply_postId_floorNumber_key`/)
   assert.doesNotMatch(replySection, /<span>#\{index \+ 1\} ·/)
+})
+
+test('帖子行原子递增为并发一级评论分配不重复楼层', async () => {
+  let lastCommentFloor = 0
+  const tx = {
+    post: {
+      update: async () => {
+        lastCommentFloor += 1
+        return { lastCommentFloor }
+      },
+    },
+  } as unknown as Parameters<typeof allocatePostCommentFloor>[0]
+
+  const floors = await Promise.all(Array.from({ length: 100 }, () => allocatePostCommentFloor(tx, 'post-1')))
+  assert.equal(new Set(floors).size, 100)
+  assert.deepEqual([...floors].sort((a, b) => a - b), Array.from({ length: 100 }, (_, index) => index + 1))
+})
+
+test('soft delete、hard delete 和楼中楼都不回收已经分配的主楼层', async () => {
+  let lastCommentFloor = 0
+  const tx = {
+    post: {
+      update: async () => ({ lastCommentFloor: ++lastCommentFloor }),
+    },
+  } as unknown as Parameters<typeof allocatePostCommentFloor>[0]
+
+  const first = await allocatePostCommentFloor(tx, 'post-2')
+  const softDeleted = await allocatePostCommentFloor(tx, 'post-2')
+  const nestedReplyDoesNotAllocate = null
+  const third = await allocatePostCommentFloor(tx, 'post-2')
+  const hardDeleted = await allocatePostCommentFloor(tx, 'post-2')
+  const next = await allocatePostCommentFloor(tx, 'post-2')
+
+  assert.deepEqual([first, softDeleted, third, hardDeleted, next], [1, 2, 3, 4, 5])
+  assert.equal(nestedReplyDoesNotAllocate, null)
+  assert.deepEqual([first, third, next], [1, 3, 5])
 })
 
 test('置顶评论单独查询，普通分页排除置顶并在数据库排序后 skip/take', () => {

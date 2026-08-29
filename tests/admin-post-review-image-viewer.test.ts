@@ -26,7 +26,7 @@ test('画廊提供上一张、下一张和当前位置提示', () => {
   assert.match(viewer, /上一张图片/)
   assert.match(viewer, /下一张图片/)
   assert.match(viewer, /\{safeCurrentIndex \+ 1\} \/ \{viewerItems\.length\}/)
-  assert.match(viewer, /function goTo\(nextIndex: number\)/)
+  assert.match(viewer, /function goTo\(nextIndex: number/)
 })
 
 test('首张和末张不会越界，最后一张仍可关闭或回退', () => {
@@ -50,15 +50,16 @@ test('桌面端支持 ESC、遮罩空白区域和关闭按钮退出', () => {
 test('移动端预览覆盖安全区并位于导航、Sheet、普通 Dialog 之上', () => {
   assert.match(viewer, /z-\[var\(--layer-image-viewer\)\]/)
   assert.match(viewer, /pt-\[env\(safe-area-inset-top\)\]/)
-  assert.match(viewer, /pb-\[calc\(1rem\+env\(safe-area-inset-bottom\)\)\]/)
+  assert.match(viewer, /bottom-\[calc\(1rem\+env\(safe-area-inset-bottom\)\)\]/)
   assert.match(viewer, /h-\[100dvh\] w-\[100vw\]/)
   assert.match(globals, /--layer-image-viewer:\s*100000/)
 })
 
-test('移动端保留双指缩放、双击缩放和左右滑动', () => {
-  assert.match(viewer, /onTouchStart=\{onTouchStart\}/)
-  assert.match(viewer, /onTouchEnd=\{onTouchEnd\}/)
-  assert.match(viewer, /pinchDistanceRef/)
+test('移动端保留 Pointer 双指缩放、双击缩放和左右滑动', () => {
+  assert.match(viewer, /onPointerDown=\{onPointerDown\}/)
+  assert.match(viewer, /onPointerUp=\{onPointerEnd\}/)
+  assert.match(viewer, /pinchRef/)
+  assert.match(viewer, /pointersRef/)
   assert.match(viewer, /onDoubleClick=/)
   assert.match(viewer, /SWIPE_COMMIT_THRESHOLD_PX/)
 })

@@ -1,11 +1,13 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, type KeyboardEvent } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { EmojiPicker } from '@/components/EmojiPicker'
 import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { shouldSubmitCommentOnEnter } from '@/lib/comment-keyboard'
+import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
 
 export type NotificationReplyPayload = {
   content: string
@@ -44,6 +46,8 @@ export function NotificationReplyComposer({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState('')
   const isDisabled = disabled || submitting
+  const isDesktop = useIsDesktopMediaQuery()
+  const canSubmitShortcut = !isDisabled && (content.trim().length > 0 || imageUrls.length > 0 || Boolean(pendingSticker))
 
   function updateContent(next: string) {
     setContent(next)
@@ -104,6 +108,7 @@ export function NotificationReplyComposer({
           onChange={updateContent}
           onMentionsChange={setMentions}
           onSubmitShortcut={() => void submit()}
+          canSubmitShortcut={canSubmitShortcut}
           maxLength={maxLength}
         />
       ) : (
@@ -112,6 +117,11 @@ export function NotificationReplyComposer({
           value={content}
           maxLength={maxLength}
           onChange={(event) => updateContent(event.target.value)}
+          onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+            if (!shouldSubmitCommentOnEnter(event, { isDesktop, canSubmit: canSubmitShortcut })) return
+            event.preventDefault()
+            void submit()
+          }}
           className="mt-2 min-h-20 w-full min-w-0 max-w-full box-border resize-y rounded-sm border border-sky-100 bg-white px-3 py-2 text-sm font-bold outline-none focus:ring-4 focus:ring-brand-500/20"
           placeholder="写下你的回复…"
         />

@@ -24,6 +24,7 @@ export const primaryNavigation: AppNavigationItem[] = NAVIGATION_REGISTRY
   }))
 
 export function isAppNavigationActive(pathname: string, item: AppNavigationItem) {
+  if (item.featureKey === 'ENTERTAINMENT' && (pathname === '/games/daily-prescription' || pathname.startsWith('/games/daily-prescription/'))) return false
   const prefixes = item.activePrefixes || [item.href]
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }

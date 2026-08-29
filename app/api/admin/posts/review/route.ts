@@ -2,10 +2,10 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory, userSnapshotName } from '@/lib/admin-audit'
-import { publicContentImageMarkers } from '@/lib/content-images'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { buildPostReviewUpdate, isPostModerationStatus, POST_REVIEW_PAGE_SIZE } from '@/lib/post-moderation'
 import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds, type PostModerationHistoryRow } from '@/lib/post-moderation-history'
+import { postContentPlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -19,6 +19,7 @@ const reviewSelect = {
   id: true,
   title: true,
   content: true,
+  richContent: true,
   summary: true,
   createdAt: true,
   moderationStatus: true,
@@ -208,10 +209,11 @@ async function writeApprovalFriendActivity(input: { postId: string; authorId: st
 }
 
 function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[]) {
+  const { richContent, ...postWithoutRichContent } = post
   return {
-    ...post,
-    content: publicContentImageMarkers(post.content),
-    summary: post.summary ? publicContentImageMarkers(post.summary) : post.summary,
+    ...postWithoutRichContent,
+    content: postContentPlainText(post.content, richContent),
+    summary: post.summary ? postContentPlainText(post.summary) : post.summary,
     createdAt: post.createdAt.toISOString(),
     reviewedAt: post.reviewedAt?.toISOString() || null,
     User: { ...post.User, Profile: post.User.Profile ? { ...post.User.Profile, avatarUrl: profileImageUrl(post.User.Profile.avatarUrl) } : null },

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { gameCatalog, gameCategories, type GameCategoryFilter } from '@/lib/game-catalog'
+import { entertainmentGameCatalog, gameCategories, type GameCategoryFilter } from '@/lib/game-catalog'
 import { GameBanner } from './GameBanner'
 import { GameGrid } from './GameGrid'
 
@@ -31,7 +31,7 @@ export function GameCenter() {
 
   const filteredGames = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase('zh-CN')
-    return gameCatalog.filter((game) => {
+    return entertainmentGameCatalog.filter((game) => {
       const categoryMatches =
         category === '全部'
         || (category === '热门' && game.tags.includes('热门'))
@@ -49,7 +49,7 @@ return (
         <h1>娱乐天空</h1>
         <p>发现更多有趣的互动游戏</p>
       </header>
-      <GameBanner games={gameCatalog.filter((game) => game.featured)} />
+      <GameBanner games={entertainmentGameCatalog.filter((game) => game.featured)} />
       <section className="game-duel-entry" aria-labelledby="game-duel-entry-title">
         <div>
           <h2 id="game-duel-entry-title">1v1 对决</h2>

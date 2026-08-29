@@ -13,6 +13,7 @@ import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
+import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -158,6 +159,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const replyRecipientId = parentReply?.authorId || post.authorId
   const reply = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     for (const userId of [...new Set([user.id, post.authorId])].sort()) {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
     }
@@ -179,6 +181,7 @@ export async function POST(request: Request, { params }: Params) {
     })
     if (duplicateReply) return { duplicateReplyId: duplicateReply.id }
 
+    const floorNumber = parentId ? null : await allocatePostCommentFloor(tx, postId)
     const createdReply = await tx.reply.create({
       data: {
         postId,
@@ -187,6 +190,7 @@ export async function POST(request: Request, { params }: Params) {
         ipRegion,
         stickerId: stickerId || null,
         parentId: parentId || null,
+        floorNumber,
       },
       include: {
         User: {
@@ -232,20 +236,6 @@ export async function POST(request: Request, { params }: Params) {
       commenterId: user.id,
       postAuthorId: post.authorId,
     })
-
-    const floorNumber = createdReply.parentId === null
-      ? await tx.reply.count({
-          where: {
-            postId,
-            isDeleted: false,
-            parentId: null,
-            OR: [
-              { createdAt: { lt: createdReply.createdAt } },
-              { createdAt: createdReply.createdAt, id: { lte: createdReply.id } },
-            ],
-          },
-        })
-      : null
 
     return {
       createdReply,

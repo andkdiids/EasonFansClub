@@ -1,37 +1,27 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import type { ShareCardData } from '@/lib/share-card'
+import { ShareButton } from '@/components/share/ShareButton'
 
-export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid, authorBadge, postActions }: Readonly<{
+export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid, authorBadge, postActions, shareTitle, shareText, shareCardData }: Readonly<{
   authorName: string
   authorAvatar: string | null
   authorUid: number
   authorBadge?: EquippedBadgeView | null
   postActions?: ReactNode
+  shareTitle: string
+  shareText: string
+  shareCardData: ShareCardData
 }>) {
   const router = useRouter()
-  const [shareMessage, setShareMessage] = useState('')
 
   function goBack() {
     if (window.history.length > 1) router.back()
     else router.push('/forum')
-  }
-
-  async function sharePost() {
-    const shareData = { title: document.title, url: window.location.href }
-    try {
-      if (navigator.share) await navigator.share(shareData)
-      else {
-        await navigator.clipboard?.writeText(window.location.href)
-        setShareMessage('链接已复制')
-        window.setTimeout(() => setShareMessage(''), 1800)
-      }
-    } catch {
-      // Closing the native share sheet is not an error for the page.
-    }
   }
 
   return (
@@ -47,8 +37,14 @@ export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid
         <UserDisplayName name={authorName} uid={authorUid} badge={authorBadge} compact />
       </div>
       {postActions ? <span className="forum-discovery-detail-post-actions">{postActions}</span> : null}
-      <button type="button" onClick={() => void sharePost()} className="forum-discovery-detail-share" aria-label="分享帖子">↗</button>
-      {shareMessage ? <span className="forum-discovery-share-message" role="status">{shareMessage}</span> : null}
+      <ShareButton
+        data={shareCardData}
+        linkTitle={shareTitle}
+        linkText={shareText}
+        triggerClassName="forum-discovery-detail-share"
+        messageClassName="forum-discovery-share-message"
+        ariaLabel="分享帖子"
+      />
     </header>
   )
 }

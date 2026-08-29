@@ -17,7 +17,7 @@ export default async function GameDetailPage({ params }: Readonly<{ params: Prom
   if (game.slug === 'guess-song') return <GuessSongDetail game={game} />
 
   const actions = game.slug === 'daily-prescription'
-    ? <div className="game-detail-actions"><a href="#daily-prescription">立即领取</a></div>
+    ? null
     : <div className="game-detail-actions"><button type="button" disabled>即将开放</button></div>
 
   return (

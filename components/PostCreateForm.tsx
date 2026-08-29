@@ -1,14 +1,15 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { RichTextEditor, type RichTextEditorHandle } from '@/components/posts/RichTextEditor'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import type { RichTextContent } from '@/lib/rich-text'
+import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
 
 type Board = { id: string; name: string; slug: string }
+const POST_DRAFT_STORAGE_KEY = 'eason-forum-post-draft:v2'
 
 export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: Board[]; initialBoardSlug?: string }>) {
   const router = useRouter()
@@ -20,8 +21,95 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
+  const [draftStatus, setDraftStatus] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const draftPublishedRef = useRef(false)
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(POST_DRAFT_STORAGE_KEY)
+      if (!raw) {
+        setDraftReady(true)
+        return
+      }
+      const saved = JSON.parse(raw) as {
+        boardId?: unknown
+        title?: unknown
+        content?: unknown
+        richContent?: unknown
+        imageUrls?: unknown
+        pendingSticker?: unknown
+      }
+      const savedBoardId = typeof saved.boardId === 'string' && boards.some((board) => board.id === saved.boardId)
+        ? saved.boardId
+        : null
+      const richResult = validateRichPostContent(saved.richContent)
+      if (savedBoardId) setBoardId(savedBoardId)
+      if (typeof saved.title === 'string') setTitle(saved.title.slice(0, 120))
+      if (richResult.valid) {
+        setRichContent(richResult.value)
+        setContent(richResult.plainText)
+      } else if (typeof saved.content === 'string') {
+        setContent(saved.content.slice(0, 20_000))
+      }
+      if (Array.isArray(saved.imageUrls)) {
+        setImageUrls(saved.imageUrls.filter((url): url is string => typeof url === 'string' && /^https?:\/\//iu.test(url)).slice(0, 9))
+      }
+      if (saved.pendingSticker && typeof saved.pendingSticker === 'object') {
+        const sticker = saved.pendingSticker as Record<string, unknown>
+        if (
+          typeof sticker.id === 'string'
+          && typeof sticker.url === 'string'
+          && (sticker.type === 'STATIC' || sticker.type === 'GIF')
+          && (typeof sticker.name === 'string' || sticker.name === null)
+        ) {
+          setPendingSticker({ id: sticker.id, name: sticker.name, url: sticker.url, type: sticker.type })
+        }
+      }
+      setDraftStatus('已恢复上次未发布的草稿')
+    } catch {
+      // A malformed local draft must never prevent the compose screen from opening.
+    } finally {
+      setDraftReady(true)
+    }
+  }, [boards])
+
+  useEffect(() => {
+    if (!draftReady || isSubmitting || draftPublishedRef.current) return
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(POST_DRAFT_STORAGE_KEY, JSON.stringify({
+          boardId,
+          title,
+          content,
+          richContent,
+          imageUrls,
+          pendingSticker,
+        }))
+      } catch {
+        // Quota/private-mode failures do not block publishing.
+      }
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [boardId, title, content, richContent, imageUrls, pendingSticker, draftReady, isSubmitting])
+
+  function saveDraftNow() {
+    try {
+      window.localStorage.setItem(POST_DRAFT_STORAGE_KEY, JSON.stringify({
+        boardId,
+        title,
+        content,
+        richContent,
+        imageUrls,
+        pendingSticker,
+      }))
+      setDraftStatus('草稿已保存')
+    } catch {
+      setDraftStatus('当前浏览器无法保存草稿')
+    }
+  }
 
   async function submitPost(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -52,6 +140,12 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : `/posts/${postId}`
         router.push(detailUrl)
       }
+      draftPublishedRef.current = true
+      try {
+        window.localStorage.removeItem(POST_DRAFT_STORAGE_KEY)
+      } catch {
+        // Storage failures do not change the successful publish result.
+      }
       router.refresh()
     } catch (error) {
       console.error('[post:create:request]', {
@@ -67,6 +161,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   return (
     <form onSubmit={submitPost} className="space-y-5 rounded-xl border border-sky-100 bg-white/82 p-6 shadow-sm">
       {errors.form ? <p className="text-sm font-bold text-red-600">{errors.form}</p> : null}
+      {draftStatus ? <p className="rounded-lg bg-sky-50 px-4 py-2 text-sm font-bold text-brand-700" role="status">{draftStatus}</p> : null}
       <label className="block">
         <span className="text-sm font-black text-slate-700">选择板块</span>
         <select value={boardId} onChange={(event) => setBoardId(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2">
@@ -85,13 +180,17 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       <label className="block">
         <span className="text-sm font-black text-slate-700">正文</span>
         <div className="mt-2">
-          <RichTextEditor
-            ref={editorRef}
-            onChange={(nextRichContent, plainText) => {
-              setRichContent(nextRichContent)
-              setContent(plainText)
-            }}
-          />
+          {draftReady ? (
+            <RichTextEditor
+              ref={editorRef}
+              initialContent={content}
+              initialRichContent={richContent}
+              onChange={(nextRichContent, plainText) => {
+                setRichContent(nextRichContent)
+                setContent(plainText)
+              }}
+            />
+          ) : <div className="rich-text-editor-loading" aria-live="polite">正在恢复草稿…</div>}
         </div>
         {errors.content ? <p className="mt-2 text-sm font-bold text-red-600">{errors.content}</p> : null}
       </label>
@@ -105,6 +204,9 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       ) : null}
       <div className="relative flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
+          <button type="button" onClick={saveDraftNow} className="inline-flex h-10 items-center rounded-lg border border-sky-200 px-3 text-sm font-black text-brand-700 transition hover:bg-sky-50">
+            保存草稿
+          </button>
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}

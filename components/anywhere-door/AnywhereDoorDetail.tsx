@@ -33,14 +33,14 @@ export function AnywhereDoorDetail({ post, morePosts = [], showBackLink = true }
   }
 
   return (
-    <div className="space-y-3" data-anywhere-door-detail>
+    <div className="anywhere-door-detail space-y-3" data-anywhere-door-detail>
       {showBackLink ? <Link href="/anywhere-door" className="inline-flex text-sm font-black text-brand-700 hover:underline dark:text-sky-300">← 返回随意门</Link> : null}
-      <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)_280px] lg:items-stretch lg:gap-4" data-anywhere-door-detail-shell>
-        <article className="min-w-0 overflow-hidden bg-transparent shadow-none dark:bg-transparent lg:col-span-2 lg:grid lg:min-h-[680px] lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)] lg:rounded-2xl lg:border lg:border-sky-100 lg:bg-white/90 lg:shadow-sm dark:lg:border-slate-700 dark:lg:bg-slate-900/90" data-anywhere-door-main>
-          <section className="min-w-0 border-b border-slate-800 bg-black dark:border-slate-800 dark:bg-black lg:border-b-0 lg:border-r" data-anywhere-door-media>
-            <MediaCarousel media={post.media} title={post.authorUsername} priority className="h-full rounded-none bg-black dark:bg-black" />
+      <div className="anywhere-door-detail-shell grid min-w-0 gap-3" data-anywhere-door-detail-shell>
+        <article className="anywhere-door-main min-w-0 overflow-hidden bg-transparent shadow-none dark:bg-transparent" data-anywhere-door-main>
+          <section className="anywhere-door-media min-w-0 border-b border-slate-800 bg-black dark:border-slate-800 dark:bg-black" data-anywhere-door-media>
+            <MediaCarousel media={post.media} title={post.authorUsername} priority className="anywhere-door-media-viewer h-full rounded-none bg-black dark:bg-black" />
           </section>
-          <section className="flex min-h-0 min-w-0 flex-col bg-white/90 dark:bg-slate-900/90" data-anywhere-door-info>
+          <section className="anywhere-door-info flex min-h-0 min-w-0 flex-col bg-white/90 dark:bg-slate-900/90" data-anywhere-door-info>
             <header className="shrink-0 border-b border-sky-100 p-4 dark:border-slate-700 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -59,7 +59,7 @@ export function AnywhereDoorDetail({ post, morePosts = [], showBackLink = true }
               </div>
               {message ? <p className="mt-2 text-xs font-bold text-red-600 dark:text-red-300" role="alert">{message}</p> : null}
             </div>
-            <div className="min-h-0 flex-1">
+            <div className="anywhere-door-comment-slot min-h-0 flex-1">
               <AnywhereDoorCommentPanel embedded postId={post.id} initialComments={post.comments} initialNextCursor={post.commentsNextCursor} />
             </div>
           </section>

@@ -15,8 +15,8 @@ export function MediaCarousel({ media, title, priority = false, className = '' }
   }
 
   return (
-    <div className={`relative overflow-hidden bg-black dark:bg-black ${className}`} aria-label="动态媒体轮播">
-      <div className="flex w-full aspect-square items-center justify-center sm:aspect-[4/3] lg:h-full lg:aspect-auto" style={current.width && current.height ? { aspectRatio: `${current.width} / ${current.height}` } : undefined}>
+    <div className={`anywhere-door-media-carousel relative overflow-hidden bg-black dark:bg-black ${className}`} aria-label="动态媒体轮播">
+      <div className="anywhere-door-media-frame flex w-full aspect-square items-center justify-center sm:aspect-[4/3] lg:h-full lg:aspect-auto" style={current.width && current.height ? { aspectRatio: `${current.width} / ${current.height}` } : undefined}>
         {current.type === 'VIDEO' && !videoFailed ? (
           <video
             key={current.id}
@@ -25,7 +25,7 @@ export function MediaCarousel({ media, title, priority = false, className = '' }
             controls
             playsInline
             preload="metadata"
-            className="h-auto max-h-full w-full object-contain"
+            className="anywhere-door-media-content h-auto max-h-full w-full object-contain"
             aria-label={`${title} 视频`}
             onError={() => setVideoFailed(true)}
           />
@@ -33,10 +33,10 @@ export function MediaCarousel({ media, title, priority = false, className = '' }
           // A Mock fixture may intentionally omit a binary video; keep its
           // verified poster visible instead of showing a broken media box.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.thumbnailUrl} alt={`${title} 视频封面`} className="h-auto max-h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
+          <img src={current.thumbnailUrl} alt={`${title} 视频封面`} className="anywhere-door-media-content h-auto max-h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.url} alt={`${title} 图片 ${index + 1}`} className="h-auto max-h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
+          <img src={current.url} alt={`${title} 图片 ${index + 1}`} className="anywhere-door-media-content h-auto max-h-full w-full object-contain" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding="async" />
         )}
       </div>
       {media.length > 1 ? (

@@ -42,6 +42,7 @@ import {
 } from '@/lib/want-listen-questions'
 import { normalizeWantListenTitle } from '@/lib/want-listen-title'
 import { recordWantListenLeaderboard } from '@/lib/want-listen-leaderboard'
+import { settleOptionalWantListenRead } from '@/lib/want-listen-summary'
 
 const WANT_LISTEN_SETTING_KEYS = {
   enabled: 'entertainment.want-listen.enabled',
@@ -960,6 +961,21 @@ type StatsRow = {
   silentMaxStreak: number
 }
 
+type WantListenSummaryDatabase = Pick<typeof prisma, 'siteSetting' | 'wantListenStats' | 'wantListenSession'>
+
+function summaryReadErrorDetails(error: unknown) {
+  const record = typeof error === 'object' && error !== null ? error as Record<string, unknown> : null
+  return {
+    errorName: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
+    errorCode: record && 'code' in record ? String(record.code) : undefined,
+    message: error instanceof Error ? error.message : String(error),
+  }
+}
+
+function logDegradedSummaryRead(area: string, error: unknown) {
+  console.warn(`[want-listen.summary.${area}.degraded]`, summaryReadErrorDetails(error))
+}
+
 function serializeStats(row: StatsRow | undefined) {
   const totalQuestions = row?.totalQuestions || 0
   return {
@@ -976,15 +992,30 @@ function serializeStats(row: StatsRow | undefined) {
   }
 }
 
-export async function getWantListenSummary(userId: string) {
+export async function getWantListenSummary(userId: string, database: WantListenSummaryDatabase = prisma) {
   const now = new Date()
   // 已过期的进行中会话 → EXPIRED（避免过期残留让前端误判为「继续游戏」）
-  await prisma.wantListenSession.updateMany({ where: { userId, status: 'IN_PROGRESS', expiresAt: { lte: now } }, data: { status: 'EXPIRED', activeKey: null } })
-  const [config, rows, active] = await Promise.all([
-    getWantListenConfig(),
-    prisma.wantListenStats.findMany({ where: { userId }, select: { mode: true, gamesPlayed: true, totalQuestions: true, totalCorrect: true, bestScore: true, currentStreak: true, maxStreak: true, perfectGames: true, silentCurrentStreak: true, silentMaxStreak: true } }),
-    prisma.wantListenSession.findMany({ where: { userId, status: 'IN_PROGRESS', expiresAt: { gt: now } }, orderBy: { updatedAt: 'desc' }, select: { id: true, mode: true, currentQuestion: true, score: true, correctCount: true, expiresAt: true } }),
+  try {
+    await database.wantListenSession.updateMany({ where: { userId, status: 'IN_PROGRESS', expiresAt: { lte: now } }, data: { status: 'EXPIRED', activeKey: null } })
+  } catch (error) {
+    // 清理只是首页展示的 housekeeping；创建/恢复 session 会再次做权威检查。
+    logDegradedSummaryRead('expired-session-cleanup', error)
+  }
+  const [configResult, statsResult, activeResult] = await Promise.allSettled([
+    getWantListenConfig(database),
+    database.wantListenStats.findMany({ where: { userId }, select: { mode: true, gamesPlayed: true, totalQuestions: true, totalCorrect: true, bestScore: true, currentStreak: true, maxStreak: true, perfectGames: true, silentCurrentStreak: true, silentMaxStreak: true } }),
+    database.wantListenSession.findMany({ where: { userId, status: 'IN_PROGRESS', expiresAt: { gt: now } }, orderBy: { updatedAt: 'desc' }, select: { id: true, mode: true, currentQuestion: true, score: true, correctCount: true, expiresAt: true } }),
   ])
+  const statsRead = settleOptionalWantListenRead(statsResult, [])
+  const activeRead = settleOptionalWantListenRead(activeResult, [])
+  if (!statsRead.available) logDegradedSummaryRead('stats', statsRead.reason)
+  if (!activeRead.available) logDegradedSummaryRead('active-sessions', activeRead.reason)
+  // Configuration is the only summary read that decides whether a mode may be
+  // started. It remains a core dependency and must not silently default open.
+  if (configResult.status === 'rejected') throw configResult.reason
+  const config = configResult.value
+  const rows = statsRead.value
+  const active = activeRead.value
   // 每个模式只暴露最新一个有效进行中会话，避免同模式多 session 残留时前端 Map 状态混乱
   const latestActiveByMode = new Map<string, (typeof active)[number]>()
   for (const session of active) {
@@ -1009,6 +1040,8 @@ export async function getWantListenSummary(userId: string) {
       bestMode: totalQuestions ? skilledMode.mode : null,
     },
     activeSessions: Array.from(latestActiveByMode.values()).map((session) => ({ ...session, expiresAt: session.expiresAt.toISOString() })),
+    statsUnavailable: !statsRead.available,
+    activeSessionsUnavailable: !activeRead.available,
   }
 }
 

@@ -1,6 +1,5 @@
 import { unstable_cache } from 'next/cache'
 import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
-import { publicContentImageMarkers } from '@/lib/content-images'
 import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -16,6 +15,7 @@ import { getTodayEventRecords } from '@/lib/today-events'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { getEasMusicAlbumLikeStates } from '@/lib/easmusic-likes'
+import { summarizePlainText } from '@/lib/share-metadata'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -125,7 +125,7 @@ async function queryHomePosts() {
     title: publicModerationText(post.title, moderationStatus),
     board: Board,
     author: { ...User, nickname: getPublicUserDisplayName(User), profile: User.Profile },
-    content: publicModerationText(publicContentImageMarkers(excerpt(summary || content)), moderationStatus),
+    content: publicModerationText(summarizePlainText(summary || content), moderationStatus),
   }))
 }
 

@@ -20,18 +20,17 @@ import {
   logPostRichContentCompatibilityMode,
   resolvePostContentInput,
 } from '@/lib/post-rich-content-compat'
+import { validateRichPostContent } from '@/lib/rich-text'
 
 type Params = { params: Promise<{ postId: string }> }
 
 const POST_DETAIL_REPLY_LIMIT = 50
 
-// Keep this query explicit while production is waiting for the rich-content
-// migration. A top-level include would select every Post scalar, including
-// Post.richContent, even though the detail API only needs the legacy content.
 const postDetailSelect = {
   id: true,
   title: true,
   content: true,
+  richContent: true,
   ipRegion: true,
   viewCount: true,
   likeCount: true,
@@ -372,7 +371,12 @@ export async function GET(_request: Request, { params }: Params) {
       ...postData,
       title: publicModerationText(postData.title, postData.moderationStatus),
       content: publicModerationText(publicContentImageMarkers(postData.content), postData.moderationStatus),
-      richContent: null,
+      richContent: postData.moderationStatus === 'VIOLATION'
+        ? null
+        : (() => {
+            const result = validateRichPostContent(postData.richContent)
+            return result.valid ? result.value : null
+          })(),
       author,
       board: Board,
       media: PostMedia.map((media) => ({
@@ -443,6 +447,7 @@ export async function PATCH(request: Request, { params }: Params) {
         isFeatured: true,
         title: true,
         content: true,
+        richContent: true,
         stickerId: true,
         moderationStatus: true,
       },
@@ -644,6 +649,7 @@ type EditContext = {
     status: string
     title: string
     content: string
+    richContent: unknown | null
     stickerId: string | null
     moderationStatus: string
   }
@@ -667,6 +673,7 @@ async function handleEditPost(
 
   const rawTitle = sanitizeText(typeof body.title === 'string' ? body.title : existing.title, 120)
   const hasRichContentField = Object.prototype.hasOwnProperty.call(body, 'richContent')
+  const hasContentField = typeof body.content === 'string'
   const contentInput = resolvePostContentInput({
     content: typeof body.content === 'string' ? body.content : existing.content,
     richContent: body.richContent,
@@ -682,7 +689,17 @@ async function handleEditPost(
   if (contentInput.usedCompatibilityMode && contentInput.validation?.valid) {
     logPostRichContentCompatibilityMode('edit', postId)
   }
-  const rawContent = stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
+  const shouldUpdateContent = hasRichContentField || hasContentField
+  const rawContent = shouldUpdateContent
+    ? contentInput.validation?.valid
+      ? contentInput.content
+      : stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
+    : existing.content
+  const nextRichContent = hasRichContentField
+    ? contentInput.richContent
+    : hasContentField
+      ? null
+      : existing.richContent
   const hasSticker = Boolean(existing.stickerId)
   const nextBoardId = typeof body.boardId === 'string' ? sanitizeText(body.boardId, 80) : existing.boardId
 
@@ -735,7 +752,8 @@ async function handleEditPost(
   const mediaChanged = addImageUrls.length > 0
     || keptIds.length !== currentMediaIds.length
     || keptIds.some((id, index) => id !== currentMediaIds[index])
-  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || nextBoardId !== existing.boardId || mediaChanged
+  const richContentChanged = JSON.stringify(nextRichContent) !== JSON.stringify(existing.richContent)
+  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || richContentChanged || nextBoardId !== existing.boardId || mediaChanged
   const removedCount = currentMedia.length - keptIds.length
   const keptCount = keptIds.length
   if (hasTooManyContentImages(body.addImageUrls) || keptCount + addImageUrls.length > MAX_CONTENT_IMAGES) {
@@ -750,7 +768,12 @@ async function handleEditPost(
         id: existing.id,
         title: existing.title,
         content: publicContentImageMarkers(existing.content),
-        richContent: null,
+        richContent: existing.moderationStatus === 'VIOLATION'
+          ? null
+          : (() => {
+              const result = validateRichPostContent(existing.richContent)
+              return result.valid ? result.value : null
+            })(),
         moderationStatus: existing.moderationStatus,
       },
       moderationStatus: existing.moderationStatus,
@@ -780,6 +803,7 @@ async function handleEditPost(
       data: {
         title: rawTitle,
         content: rawContent,
+        richContent: nextRichContent ? nextRichContent as Prisma.InputJsonValue : Prisma.DbNull,
         summary: createSummary(rawContent),
         boardId: nextBoardId,
         // 管理员编辑沿用现有直接发布豁免；普通用户编辑始终开启新的审核周期。
@@ -792,7 +816,7 @@ async function handleEditPost(
           rejectionReason: null,
         } : {}),
       },
-      select: { id: true, title: true, content: true, moderationStatus: true, updatedAt: true },
+      select: { id: true, title: true, content: true, richContent: true, moderationStatus: true, updatedAt: true },
     })
 
     // 删除被移除的图片（keepMediaIds 显式排除的）。
@@ -956,7 +980,12 @@ async function handleEditPost(
       id: transactionResult.post.id,
       title: transactionResult.post.title,
       content: publicContentImageMarkers(transactionResult.post.content),
-      richContent: null,
+      richContent: transactionResult.post.moderationStatus === 'VIOLATION'
+        ? null
+        : (() => {
+            const result = validateRichPostContent(transactionResult.post.richContent)
+            return result.valid ? result.value : null
+          })(),
       moderationStatus: transactionResult.post.moderationStatus,
       updatedAt: transactionResult.post.updatedAt,
     },

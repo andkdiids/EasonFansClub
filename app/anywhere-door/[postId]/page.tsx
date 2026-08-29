@@ -18,5 +18,5 @@ export default async function AnywhereDoorDetailPage({ params }: { params: Promi
   ])
   if (!post) notFound()
   const morePosts = related.items.filter((item) => item.id !== post.id)
-  return <main className="mx-auto w-full max-w-[1280px] px-3 py-4 sm:px-5 sm:py-8 lg:px-6"><AnywhereDoorDetail post={post} morePosts={morePosts} /></main>
+  return <main className="anywhere-door-page mx-auto w-full max-w-[1480px] px-3 py-4 sm:px-5 sm:py-8"><AnywhereDoorDetail post={post} morePosts={morePosts} /></main>
 }

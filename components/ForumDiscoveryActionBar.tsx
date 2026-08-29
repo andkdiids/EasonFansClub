@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { FavoriteButton, LikeButton } from '@/components/PostActions'
+import { FavoriteButton, LikeButton, type PostInteractionLiker } from '@/components/PostActions'
 import { confirmSessionForAction } from '@/lib/client-auth'
 
-export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, initialLikeCount, initialFavorited, initialFavoriteCount, initialReplyCount }: Readonly<{
+export function ForumDiscoveryActionBar({ postId, currentUserId, currentUserLiker, initialLiked, initialLikeCount, initialFavorited, initialFavoriteCount, initialReplyCount }: Readonly<{
   postId: string
   currentUserId?: string
+  currentUserLiker?: PostInteractionLiker | null
   initialLiked: boolean
   initialLikeCount: number
   initialFavorited: boolean
@@ -54,6 +55,7 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, initialLiked, i
         postId={postId}
         initialLiked={initialLiked}
         initialCount={initialLikeCount}
+        currentUserLiker={currentUserLiker}
         refreshOnSuccess={false}
         className="forum-discovery-action-button forum-discovery-action-like"
       />

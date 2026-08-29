@@ -14,6 +14,7 @@ export type GameCatalogItem = {
   tags: string[]
   available: boolean
   featured: boolean
+  showInEntertainment?: boolean
   isNew?: boolean
   accent: 'blue' | 'green' | 'violet' | 'amber'
   rules: string[]
@@ -52,6 +53,7 @@ export const gameCatalog: GameCatalogItem[] = [
     tags: ['每日', '休闲'],
     available: true,
     featured: true,
+    showInEntertainment: false,
     accent: 'blue',
     rules: ['每天只能领取一次，按北京时间自然日判断。', `每日随机获得 ${MIN_DAILY_PRESCRIPTION_REWARD}～${MAX_DAILY_PRESCRIPTION_REWARD} 挂号费。`],
     rewards: [`挂号费奖励范围固定为 ${MIN_DAILY_PRESCRIPTION_REWARD}～${MAX_DAILY_PRESCRIPTION_REWARD}，同一天刷新不会重新抽取。`],
@@ -123,6 +125,9 @@ export const gameCatalog: GameCatalogItem[] = [
     rewards: ['开放后公布。'],
   },
 ]
+
+/** The daily prescription keeps its direct detail route but is no longer a game-hall entry. */
+export const entertainmentGameCatalog = gameCatalog.filter((game) => game.showInEntertainment !== false)
 
 export function findGame(slug: string) {
   return gameCatalog.find((game) => game.slug === slug)

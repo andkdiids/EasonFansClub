@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { LikeButton } from '@/components/PostActions'
+import { ShareButton } from '@/components/share/ShareButton'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
@@ -19,6 +20,8 @@ import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { normalizeActionUrl } from '@/lib/url-safety'
+import { absoluteMetadataImageUrl, metadataImageVariantUrl, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
+import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 
 const homeText = {
   checkedIn: '已签到',
@@ -201,6 +204,17 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const topRanking = data.entertainmentRanking?.mobileBest || null
   const entertainmentModes = data.entertainmentRanking?.modes || emptyEntertainmentModes()
   const dailyMusicCoverUrl = publicImageVariantUrl(data.dailyMusic?.album.coverUrl, 'thumb-sm') || null
+  const homeShareCardData: ShareCardData = useMemo(() => ({
+    type: 'home',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    image: absoluteMetadataImageUrl(metadataImageVariantUrl(siteConfig.images.navLogoUrl || siteConfig.images.logoUrl)),
+    url: canonicalShareUrl('/'),
+    author: SITE_TITLE,
+    authorAvatar: null,
+    date: null,
+    meta: [],
+  }), [siteConfig.images.logoUrl, siteConfig.images.navLogoUrl])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -435,6 +449,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         styleConfig={siteConfig.heroStyle}
         visual={siteConfig.heroVisuals.home}
         defaultTitle={siteConfig.text.homeSubtitle}
+        shareAction={<ShareButton data={homeShareCardData} label="分享" triggerClassName="share-button-trigger share-button-trigger-hero" ariaLabel="分享私家E院首页" />}
       />
       <div id="community-content" className="community-content">
         <section className="community-stats home-checkin-stats mb-4 sm:mb-6" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-label="E院数据与签到状态">

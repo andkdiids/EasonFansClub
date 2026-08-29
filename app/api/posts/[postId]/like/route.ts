@@ -1,58 +1,70 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
-import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { publicPostWhere } from '@/lib/post-moderation'
+import { decodePostLikeCursor, encodePostLikeCursor, POST_LIKE_PAGE_SIZE } from '@/lib/post-like-pagination'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
-import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 
 type Params = { params: Promise<{ postId: string }> }
 
-// 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
+// 点赞用户列表是公开帖子详情的一部分，不要求登录；头像点击后仍由公开用户页处理可见性。
 export async function GET(request: Request, { params }: Params) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse()
-  const limited = await enforceApiRateLimit(request, user.id, {
+  const limited = await enforceApiRateLimit(request, null, {
     endpoint: '/api/posts/like',
-    user: { limit: 120, windowSeconds: 60 },
+    ip: { limit: 120, windowSeconds: 60 },
   })
   if (limited) return limited
 
   const { postId } = await params
-  const likes = await prisma.like.findMany({
-    where: { postId, Post: publicPostWhere },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-    select: {
-      User: {
-        select: {
-          id: true,
-          uid: true,
-          nickname: true,
-          usernameModerationStatus: true,
-          nicknameModerationStatus: true,
-          nicknameViolationDisplay: true,
-          avatarUrl: true,
-          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
+  const cursor = decodePostLikeCursor(new URL(request.url).searchParams.get('cursor'))
+  const where: Prisma.LikeWhereInput = {
+    postId,
+    Post: publicPostWhere,
+    ...(cursor ? {
+      OR: [
+        { createdAt: { lt: new Date(cursor.createdAt) } },
+        { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } },
+      ],
+    } : {}),
+  }
+  const [rows, total] = await Promise.all([
+    prisma.like.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: POST_LIKE_PAGE_SIZE + 1,
+      select: {
+        id: true,
+        createdAt: true,
+        User: {
+          select: {
+            id: true,
+            uid: true,
+            avatarUrl: true,
+            Profile: { select: { avatarUrl: true } },
+          },
         },
       },
-    },
-  })
-  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
+    }),
+    prisma.like.count({ where: { postId, Post: publicPostWhere } }),
+  ])
+  const likes = rows.slice(0, POST_LIKE_PAGE_SIZE)
+  const last = likes[likes.length - 1]
+  const nextCursor = rows.length > POST_LIKE_PAGE_SIZE && last
+    ? encodePostLikeCursor({ createdAt: last.createdAt.toISOString(), id: last.id })
+    : null
   return NextResponse.json({
     likers: likes.map((like) => ({
       id: like.User.id,
       uid: like.User.uid,
-      nickname: getPublicUserDisplayName(like.User),
-      friendRemark: null,
-      displayName: getPublicUserDisplayName(like.User),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
-      equippedBadge: equippedBadgeMap.get(like.User.id) || null,
     })),
+    total,
+    nextCursor,
   })
 }
 

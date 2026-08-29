@@ -20,8 +20,8 @@ export default async function PrescriptionHistoryPage({ searchParams }: Readonly
   const result = await getEntertainmentDailyDrawHistory(user.id, parsePage((await searchParams).page))
 
   return (
-    <main className="entertainment-page prescription-history-page mx-auto pb-10">
-      <header className="entertainment-heading">
+    <main className="site-page-main flat-page daily-prescription-page prescription-history-page mx-auto max-w-7xl px-4 py-5 sm:px-5">
+      <header className="daily-prescription-page-heading">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1>我的处方记录</h1>

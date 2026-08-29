@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod, WantListenPeriodError } from '@/lib/want-listen-period'
 
 // 想听排行榜管理（后台）测试：源码结构校验 + 纯函数测试，不连真实数据库。
 // 覆盖需求 一~八：
@@ -154,16 +155,19 @@ test('10/纯函数：模式与操作类型校验', () => {
 test('11/纯函数：今日/本周起点（周一为一周起点）', () => {
   const now = new Date('2026-08-19T15:00:00+08:00') // 周三
   const day = startOfDay(now)
-  assert.equal(day.getHours(), 0)
-  assert.equal(day.getMinutes(), 0)
+  assert.equal(day.toISOString(), '2026-08-18T16:00:00.000Z', '今日起点应为北京时间当天 00:00')
   const week = startOfWeek(now)
-  assert.equal(week.getDay(), 1, '应为周一')
-  assert.equal(week.getHours(), 0)
+  assert.equal(week.toISOString(), '2026-08-16T16:00:00.000Z', '本周起点应为北京时间周一 00:00')
+})
+
+test('11b/不支持的 MONTH / YEAR 周期不能静默降级为 WEEK', () => {
+  assert.equal(parseWantListenPeriod(null), 'WEEK', '缺少周期参数仍默认本周')
+  assert.equal(parseWantListenPeriod('WEEK'), 'WEEK')
+  assert.throws(() => parseWantListenPeriod('MONTH'), WantListenPeriodError)
+  assert.throws(() => parseWantListenPeriod('YEAR'), WantListenPeriodError)
 })
 
 // ---------- 想听排行榜补录（统一计分：异常游戏恢复优先，人工补题次之） ----------
-
-import { getWantListenPeriod, isWantListenScoreBetter } from '@/lib/want-listen-period'
 
 test('12/补录路由：POST 支持 PREVIEW_BACKFILL / BACKFILL，且 requireAdmin 服务端校验权限（普通用户 403）', () => {
   assert.match(route, /requireAdmin\('entertainment_manage'\)/)

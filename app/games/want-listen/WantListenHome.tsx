@@ -27,6 +27,8 @@ type Summary = {
   modes: Record<WantListenMode, ModeStats>
   total: { gamesPlayed: number; totalQuestions: number; totalCorrect: number; accuracy: number; bestMode: WantListenMode | null }
   activeSessions: Array<{ id: string; mode: WantListenMode; currentQuestion: number; score: number; correctCount: number; expiresAt: string }>
+  statsUnavailable: boolean
+  activeSessionsUnavailable: boolean
 }
 
 async function request<T>(url: string, init?: RequestInit) {
@@ -78,6 +80,7 @@ export function WantListenHome() {
   }
 
   const activeByMode = new Map((summary?.activeSessions || []).map((session) => [session.mode, session]))
+  const personalStatsUnavailable = summary?.statsUnavailable === true
 
   return (
     <main className="games-page games-full-width">
@@ -91,6 +94,7 @@ export function WantListenHome() {
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
       {!summary && loading ? <p className="want-listen-loading">正在读取想听状态…</p> : null}
       {summary && !summary.config.enabled ? <p className="want-listen-disabled" role="status">想听板块目前暂停开放，请稍后再来。</p> : null}
+      {summary && (summary.statsUnavailable || summary.activeSessionsUnavailable) ? <p className="want-listen-degraded" role="status">个人数据暂时无法完整加载，但游戏仍可开始。</p> : null}
 
       <section className="want-listen-mode-grid" aria-label="想听游戏模式">
         {WANT_LISTEN_MODES.map((mode) => {
@@ -104,7 +108,7 @@ export function WantListenHome() {
               <p>{WANT_LISTEN_MODE_DESCRIPTIONS[mode]}</p>
               <div className="want-listen-mode-meta">
                 <span>无尽模式 · 答错 3 次结束</span>
-                <span>最佳 {stats?.bestScore ?? '—'} 分</span>
+                <span>最佳 {personalStatsUnavailable ? '—' : stats?.bestScore ?? '—'} 分</span>
               </div>
               <button type="button" onClick={() => void start(mode)} disabled={(!enabled && !active) || Boolean(starting)}>
                 {active ? `继续第 ${active.currentQuestion} 题` : !enabled ? '暂未开放' : starting === mode ? '创建对局中…' : '开始游戏'}
@@ -120,16 +124,16 @@ export function WantListenHome() {
           <Link href="/games/want-listen/leaderboard">查看排行榜 →</Link>
         </div>
         <div className="want-listen-total-stats">
-          <div><span>累计游玩</span><strong>{number(summary?.total.gamesPlayed || 0)}</strong></div>
-          <div><span>累计答题</span><strong>{number(summary?.total.totalQuestions || 0)}</strong></div>
-          <div><span>累计答对</span><strong>{number(summary?.total.totalCorrect || 0)}</strong></div>
-          <div><span>总正确率</span><strong>{summary?.total.accuracy || 0}%</strong></div>
-          <div><span>最擅长模式</span><strong>{summary?.total.bestMode ? WANT_LISTEN_MODE_LABELS[summary.total.bestMode] : '—'}</strong></div>
+          <div><span>累计游玩</span><strong>{personalStatsUnavailable ? '—' : number(summary?.total.gamesPlayed || 0)}</strong></div>
+          <div><span>累计答题</span><strong>{personalStatsUnavailable ? '—' : number(summary?.total.totalQuestions || 0)}</strong></div>
+          <div><span>累计答对</span><strong>{personalStatsUnavailable ? '—' : number(summary?.total.totalCorrect || 0)}</strong></div>
+          <div><span>总正确率</span><strong>{personalStatsUnavailable ? '—' : `${summary?.total.accuracy || 0}%`}</strong></div>
+          <div><span>最擅长模式</span><strong>{personalStatsUnavailable ? '—' : summary?.total.bestMode ? WANT_LISTEN_MODE_LABELS[summary.total.bestMode] : '—'}</strong></div>
         </div>
         <div className="want-listen-mode-stats">
           {WANT_LISTEN_MODES.map((mode) => {
             const stats = summary?.modes[mode]
-            return <div key={mode}><strong>{WANT_LISTEN_MODE_LABELS[mode]}</strong><span>{stats?.gamesPlayed || 0} 局 · 最高 {stats?.bestScore || 0} 分 · 最高连击 {stats?.maxStreak || 0} · 答对 {stats?.totalCorrect || 0}</span></div>
+            return <div key={mode}><strong>{WANT_LISTEN_MODE_LABELS[mode]}</strong><span>{personalStatsUnavailable ? '—' : `${stats?.gamesPlayed || 0} 局 · 最高 ${stats?.bestScore || 0} 分 · 最高连击 ${stats?.maxStreak || 0} · 答对 ${stats?.totalCorrect || 0}`}</span></div>
           })}
         </div>
       </section>

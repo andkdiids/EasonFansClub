@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { WantListenServiceError } from '@/lib/want-listen'
+import { WantListenPeriodError } from '@/lib/want-listen-period'
 
 export function wantListenOk<T>(data: T, status = 200) {
   return NextResponse.json({ ok: true, data, error: null }, { status, headers: { 'Cache-Control': 'private, no-store' } })
@@ -19,8 +20,8 @@ export function wantListenError(error: string, status: number, code?: string) {
 
 function isMigrationOutOfSyncError(error: unknown) {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false
-  // P2010/P2011/P2021：Raw query / 列 / 表不存在，通常是 schema 迁移未应用
-  return error.code === 'P2010' || error.code === 'P2011' || error.code === 'P2021'
+  // P2010/P2011/P2021/P2022：Raw query / 列 / 表不存在，通常是 schema 迁移未应用
+  return error.code === 'P2010' || error.code === 'P2011' || error.code === 'P2021' || error.code === 'P2022'
 }
 
 function detectDevice(userAgent: string | null | undefined) {
@@ -43,6 +44,7 @@ export function handleWantListenError(error: unknown, operation: string, context
   // instanceof 可能因模块被多个入口重复加载（不同实例）而失效，附加构造器名兜底
   const isServiceError = error instanceof WantListenServiceError
     || (typeof error === 'object' && error !== null && (error as Error | null)?.constructor?.name === 'WantListenServiceError')
+  if (error instanceof WantListenPeriodError) return wantListenError(error.message, error.status, error.code)
   if (isServiceError) return wantListenError((error as WantListenServiceError).message, (error as WantListenServiceError).status, (error as WantListenServiceError).code)
 
   const device = detectDevice(context.userAgent)

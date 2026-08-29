@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import { normalizeActivityInput } from '@/lib/activity-validation'
-import { getActivityRegistrationState } from '@/lib/activity-registration'
+import { getActivityRegistrationState, isActivityRegistrationCancellationOpen } from '@/lib/activity-registration'
 
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
@@ -83,6 +83,21 @@ test('报名状态只处理独立报名窗口和有效名额', () => {
   assert.deepEqual(getActivityRegistrationState({ ...base, signupLimit: 0 }, 999, new Date('2026-08-20T00:00:00.000Z')), { state: 'AVAILABLE', canRegister: true })
   assert.deepEqual(getActivityRegistrationState(base, 0, new Date('2026-09-01T10:00:00.000Z')), { state: 'AVAILABLE', canRegister: true })
   assert.deepEqual(getActivityRegistrationState({ ...base, registrationEndAt: '2026-09-05T00:00:00.000Z' }, 0, new Date('2026-09-05T00:00:00.000Z')), { state: 'CLOSED', canRegister: false })
+})
+
+test('取消报名严格使用报名结束时间，结束前一秒允许，整点和结束后一秒禁止', () => {
+  const registrationEndAt = '2026-09-12T15:59:59.000Z'
+  const activity = {
+    registrationEndAt,
+    // These dates intentionally disagree with the cancellation window.
+    startsAt: '2026-09-13T10:00:00.000Z',
+    endsAt: '2026-09-13T13:00:00.000Z',
+  }
+
+  assert.equal(isActivityRegistrationCancellationOpen(activity, new Date('2026-09-12T15:59:58.000Z')), true)
+  assert.equal(isActivityRegistrationCancellationOpen(activity, new Date(registrationEndAt)), false)
+  assert.equal(isActivityRegistrationCancellationOpen(activity, new Date('2026-09-12T16:00:00.000Z')), false)
+  assert.equal(isActivityRegistrationCancellationOpen({ ...activity, registrationEndAt: null }, new Date('2026-09-14T00:00:00.000Z')), true)
 })
 
 test('活动报名复用既有唯一模型，事务锁住活动并幂等写入通知', () => {

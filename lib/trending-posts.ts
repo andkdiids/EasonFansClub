@@ -1,10 +1,10 @@
 import { Prisma } from '@prisma/client'
 import { unstable_cache } from 'next/cache'
-import { publicContentImageMarkers } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
+import { summarizePlainText } from '@/lib/share-metadata'
 
 export const TRENDING_PAGE_SIZE = 15
 export type TrendingRange = 7 | 30
@@ -110,7 +110,7 @@ export const getTrendingPosts = unstable_cache(
         return {
         ...publicRow,
         title: publicModerationText(row.title, row.moderationStatus),
-        summary: publicModerationText(publicContentImageMarkers(row.summary), row.moderationStatus),
+        summary: publicModerationText(summarizePlainText(row.summary), row.moderationStatus),
         authorName: getPublicUserDisplayName({
           nickname: row.authorName,
           nicknameModerationStatus,

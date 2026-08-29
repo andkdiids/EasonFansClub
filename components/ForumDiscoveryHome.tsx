@@ -73,7 +73,7 @@ function writeRecentRecommendedPostIds(values: ReadonlyArray<string>) {
 
 const DISCOVERY_SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six'] as const
 
-export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: Readonly<{ onSwitchToPlaza?: () => void; showModeSwitch?: boolean }>) {
+export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, showDesktopRefresh = false }: Readonly<{ onSwitchToPlaza?: () => void; showModeSwitch?: boolean; showDesktopRefresh?: boolean }>) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -94,6 +94,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: R
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [showBackTop, setShowBackTop] = useState(false)
   const [pullDistance, setPullDistance] = useState(0)
@@ -108,6 +109,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: R
   const recentRecommendedPostIdsRef = useRef<string[]>([])
   const requestSequence = useRef(0)
   const requestRef = useRef<DiscoveryRequest | null>(null)
+  const refreshingRef = useRef(false)
   const autoLoadBlockedRef = useRef(false)
   const initializedSessionKeyRef = useRef('')
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -397,10 +399,19 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: R
     }
   }, [])
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async (scrollToTop = false) => {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
+    setIsRefreshing(true)
     setPullDistance(0)
     pullDistanceRef.current = 0
-    void loadPage(true)
+    try {
+      await loadPage(true, true)
+      if (scrollToTop) window.scrollTo({ top: 0, behavior: 'auto' })
+    } finally {
+      refreshingRef.current = false
+      setIsRefreshing(false)
+    }
   }, [loadPage])
 
   useEffect(() => {
@@ -484,6 +495,19 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true }: R
         <div className="forum-discovery-header-row">
           <h1>小臣书</h1>
           <div className="forum-discovery-header-actions">
+            {showDesktopRefresh && mode === 'recommend' ? (
+              <button
+                type="button"
+                className={`forum-discovery-refresh-button${isRefreshing ? ' is-refreshing' : ''}`}
+                onClick={() => void refresh(true)}
+                disabled={isRefreshing}
+                aria-busy={isRefreshing}
+                aria-label={isRefreshing ? '正在刷新推荐' : '刷新推荐'}
+              >
+                <span aria-hidden="true">↻</span>
+                {isRefreshing ? '刷新中…' : '刷新'}
+              </button>
+            ) : null}
             {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
             {showModeSwitch && onSwitchToPlaza ? (
               <button type="button" className="forum-discovery-mode-button" onClick={onSwitchToPlaza} aria-label="切换到广场模式">广场模式</button>

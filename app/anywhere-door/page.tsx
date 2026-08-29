@@ -30,7 +30,7 @@ export default async function AnywhereDoorPage() {
   const morePosts = latestDetail ? initial.items.filter((post) => post.id !== latestDetail?.id) : []
 
   return (
-    <main className="mx-auto w-full max-w-[1280px] px-3 py-4 sm:px-5 sm:py-8 lg:px-6" data-anywhere-door-page>
+    <main className="anywhere-door-page mx-auto w-full max-w-[1480px] px-3 py-4 sm:px-5 sm:py-8" data-anywhere-door-page>
       <header className="mb-4 border-b border-sky-100 pb-4 dark:border-slate-700 sm:mb-6 sm:pb-6">
         <p className="text-xs font-black uppercase tracking-[0.2em] text-brand-700 dark:text-sky-300">Anywhere Door</p>
         <h1 className="mt-1 text-2xl font-black text-brand-950 dark:text-slate-100 sm:mt-2 sm:text-3xl">随意门</h1>

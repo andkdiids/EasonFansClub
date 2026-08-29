@@ -7,6 +7,8 @@ import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayou
 import { BEIJING_TIME_ZONE, formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_MAX_GRAPHEMES, getMoodDisplay, NO_MOOD_LABEL, countGraphemes, truncateGraphemes, validateCustomMoodInput } from '@/lib/checkin-mood'
 import { DAILY_MOODS } from '@/lib/daily'
+import { CHECK_IN_MESSAGE_MAX_LENGTH } from '@/lib/checkin-message-constants'
+import type { CheckInMessageItem } from '@/lib/checkin-messages'
 
 export type TodayCheckIn = {
   checkDate: string | Date
@@ -19,6 +21,9 @@ export type TodayCheckIn = {
   message: string | null
   streakDay: number
   createdAt: string | Date
+  dailyMessageId?: string | null
+  type?: 'NORMAL' | 'MAKEUP_FREE_QUIZ' | 'MAKEUP_PAID' | 'MAKEUP_ADMIN'
+  isMakeUp?: boolean
 } | null
 
 export type CheckInStats = {
@@ -72,9 +77,11 @@ export function CheckInButton({
   onStateChange?: (state: CheckInStateChange) => void
 }>) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const supplementTextareaRef = useRef<HTMLTextAreaElement>(null)
   const customMoodInputRef = useRef<HTMLInputElement>(null)
   const moodBeforeCustomRef = useRef('')
   const submittingRef = useRef(false)
+  const supplementingRef = useRef(false)
   const knownDateRef = useRef(todayValue || getCurrentBeijingDateKey())
   const refreshPromiseRef = useRef<Promise<void> | null>(null)
   const [mood, setMood] = useState('')
@@ -86,17 +93,40 @@ export function CheckInButton({
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [supplementDraft, setSupplementDraft] = useState('')
+  const [supplementOpen, setSupplementOpen] = useState(false)
+  const [supplementNotice, setSupplementNotice] = useState('')
+  const [supplementError, setSupplementError] = useState('')
+  const [isSupplementing, setIsSupplementing] = useState(false)
   const [todayCheckIn, setTodayCheckIn] = useState<TodayCheckIn>(initialCheckIn)
   const [stats, setStats] = useState(initialStats)
   const displayDensity = density || (compact ? 'compact' : 'normal')
   const isCompact = displayDensity !== 'normal'
   const isMinimal = displayDensity === 'minimal'
   const isPreviewCompact = previewMode && displayDensity === 'compact'
+  const canSupplementToday = Boolean(
+    todayCheckIn
+      && todayCheckIn.type === 'NORMAL'
+      && !todayCheckIn.isMakeUp
+      && !todayCheckIn.dailyMessageId
+      && !todayCheckIn.message?.trim(),
+  )
 
   useEffect(() => {
     setTodayCheckIn(initialCheckIn)
     setStats(initialStats)
   }, [initialCheckIn, initialStats])
+
+  useEffect(() => {
+    setSupplementOpen(false)
+    setSupplementDraft('')
+    setSupplementError('')
+    setSupplementNotice('')
+  }, [todayCheckIn?.checkDate])
+
+  useEffect(() => {
+    if (supplementOpen) supplementTextareaRef.current?.focus()
+  }, [supplementOpen])
 
   useEffect(() => {
     if (previewMode) return
@@ -299,6 +329,133 @@ export function CheckInButton({
     }
   }
 
+  async function supplementMessage() {
+    if (previewMode || supplementingRef.current || isSupplementing || !canSupplementToday) return
+
+    if (!supplementDraft.trim()) {
+      setSupplementError('请输入留言内容')
+      return
+    }
+
+    supplementingRef.current = true
+    setIsSupplementing(true)
+    setSupplementError('')
+    try {
+      const response = await fetch('/api/checkin/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: supplementDraft }),
+      })
+      const data = await response.json().catch(() => null) as {
+        message?: string
+        checkDate?: string
+        todayCheckIn?: TodayCheckIn
+        dailyMessage?: CheckInMessageItem | null
+      } | null
+
+      if (!response.ok) {
+        setSupplementError(data?.message || '留言补写失败，请稍后重试')
+        return
+      }
+
+      const nextCheckIn = data?.todayCheckIn
+      if (!nextCheckIn || !nextCheckIn.message) {
+        setSupplementError('留言状态异常，请刷新后重试')
+        return
+      }
+
+      setTodayCheckIn(nextCheckIn)
+      setSupplementDraft('')
+      setSupplementOpen(false)
+      setSupplementNotice('留言已补写')
+      setMessage('')
+      onStateChange?.({ todayCheckIn: nextCheckIn, stats, created: false })
+      window.dispatchEvent(new CustomEvent('checkin:completed', {
+        detail: {
+          date: data.checkDate || todayValue || getCurrentBeijingDateKey(),
+          hasMessage: true,
+          dailyMessage: data.dailyMessage || null,
+        },
+      }))
+      if (data.checkDate) window.localStorage.setItem('checkin:last-updated', `${data.checkDate}:${Date.now()}`)
+    } catch {
+      setSupplementError('留言补写失败，请检查网络后重试')
+    } finally {
+      supplementingRef.current = false
+      setIsSupplementing(false)
+    }
+  }
+
+  function renderMessageSupplement() {
+    if (!canSupplementToday || previewMode) return null
+
+    return (
+      <div className={isCompact ? 'mt-2' : 'mt-3'}>
+        {!supplementOpen ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSupplementOpen(true)
+              setSupplementError('')
+              setSupplementNotice('')
+            }}
+            disabled={isSubmitting || isSupplementing}
+            className="rounded-xl border border-brand-200 bg-white/85 px-3 py-2 text-xs font-black text-brand-700 transition hover:border-brand-400 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            补写留言
+          </button>
+        ) : (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              void supplementMessage()
+            }}
+            className="space-y-2 rounded-2xl border border-sky-200 bg-white/85 p-3"
+          >
+            <label className="block">
+              <span className="text-sm font-black text-brand-950">补写今日留言</span>
+              <textarea
+                ref={supplementTextareaRef}
+                value={supplementDraft}
+                onChange={(event) => {
+                  setSupplementDraft(event.target.value.slice(0, CHECK_IN_MESSAGE_MAX_LENGTH))
+                  setSupplementError('')
+                }}
+                disabled={isSupplementing}
+                rows={isCompact ? 2 : 3}
+                maxLength={CHECK_IN_MESSAGE_MAX_LENGTH}
+                placeholder="今天还想留下些什么吗？"
+                className="mt-1 w-full resize-none rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 text-slate-700 outline-none transition focus:border-brand-300 disabled:opacity-70"
+              />
+              <span className="mt-1 block text-right text-xs font-bold text-slate-400">{supplementDraft.length}/{CHECK_IN_MESSAGE_MAX_LENGTH}</span>
+            </label>
+            {supplementError ? <p role="alert" className="text-xs font-black text-red-600">{supplementError}</p> : null}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSupplementOpen(false)
+                  setSupplementError('')
+                }}
+                disabled={isSupplementing}
+                className="rounded-xl border border-sky-100 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={isSupplementing}
+                className="rounded-xl bg-brand-700 px-3 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSupplementing ? '保存中...' : '保存留言'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    )
+  }
+
   if (todayCheckIn) {
     const selectedMood = getMoodDisplay(todayCheckIn)
     if (isMinimal) {
@@ -315,6 +472,9 @@ export function CheckInButton({
             <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-black text-brand-700">+{todayCheckIn.points} 挂号费</span>
             <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-black text-brand-700">+{todayCheckIn.exp} 经验</span>
           </div>
+          {todayCheckIn.message ? <p className="whitespace-pre-wrap rounded-xl bg-white/80 px-2 py-1 text-[11px] font-bold leading-5 text-slate-700">{todayCheckIn.message}</p> : null}
+          {renderMessageSupplement()}
+          {supplementNotice ? <p className="text-xs font-black text-emerald-700">{supplementNotice}</p> : null}
         </div>
       )
     }
@@ -341,10 +501,12 @@ export function CheckInButton({
           ) : (
             <p className={isCompact ? 'mt-2 rounded-2xl bg-white/80 px-3 py-2 text-xs font-bold text-slate-500' : 'mt-4 rounded-2xl bg-white/80 px-4 py-2 text-sm font-bold text-slate-500'}>今天没有填写留言。</p>
           )}
+          {renderMessageSupplement()}
           <p className={isCompact ? 'mt-2 text-xs font-black text-emerald-700' : 'mt-4 text-sm font-black text-emerald-700'}>本次获得 +{todayCheckIn.points} 挂号费、+{todayCheckIn.exp} 经验</p>
           {todayCheckIn.streakDay >= 7 ? <p className="mt-1 text-xs font-black text-amber-700">长期患者奖励已生效：每日额外 +7 挂号费。</p> : null}
         </div>
         {message ? <p className="text-sm font-bold text-brand-700">{message}</p> : null}
+        {supplementNotice ? <p className="text-sm font-black text-emerald-700">{supplementNotice}</p> : null}
       </div>
     )
   }

@@ -15,13 +15,18 @@ import { getUnreadSummary, type UnreadSummary } from '@/lib/notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { getSiteAppearance } from '@/lib/site-config'
 import { getEcenterFeaturesForUser } from '@/lib/ecenter-features'
+import { buildPageMetadata, metadataImageVariantUrl, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
 import './globals.css'
 
-export const metadata: Metadata = {
-  metadataBase: new URL('https://ecfc.fans'),
-  alternates: { canonical: '/' },
-  title: '私家E院 | Eason Fans Club',
-  description: '陈奕迅中文粉丝社区',
+export async function generateMetadata(): Promise<Metadata> {
+  const appearance = await getSiteAppearance()
+  const logoUrl = publicImageUrl(appearance.images.navLogoUrl || appearance.images.logoUrl)
+  return buildPageMetadata({
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    canonical: '/',
+    imageUrl: metadataImageVariantUrl(logoUrl),
+  })
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

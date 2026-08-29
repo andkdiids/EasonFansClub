@@ -2796,6 +2796,7 @@ CREATE TABLE `Post` (
     `viewCount` INTEGER NOT NULL DEFAULT 0,
     `likeCount` INTEGER NOT NULL DEFAULT 0,
     `replyCount` INTEGER NOT NULL DEFAULT 0,
+    `lastCommentFloor` INTEGER NOT NULL DEFAULT 0,
     `isPinned` BOOLEAN NOT NULL DEFAULT false,
     `profilePinnedAt` DATETIME(3) NULL,
     `isFeatured` BOOLEAN NOT NULL DEFAULT false,
@@ -3090,6 +3091,7 @@ CREATE TABLE `Reply` (
     `postId` VARCHAR(191) NOT NULL,
     `authorId` VARCHAR(191) NOT NULL,
     `parentId` VARCHAR(191) NULL,
+    `floorNumber` INTEGER NULL,
     `likeCount` INTEGER NOT NULL DEFAULT 0,
 
     INDEX `Reply_authorId_createdAt_idx`(`authorId`, `createdAt`),
@@ -3098,6 +3100,7 @@ CREATE TABLE `Reply` (
     INDEX `Reply_parentId_idx`(`parentId`),
     INDEX `Reply_postId_createdAt_idx`(`postId`, `createdAt`),
     INDEX `Reply_stickerId_idx`(`stickerId`),
+    UNIQUE INDEX `Reply_postId_floorNumber_key`(`postId`, `floorNumber`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

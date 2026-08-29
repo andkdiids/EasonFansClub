@@ -215,6 +215,27 @@ test('取消报名按实际支付金额退款、同步取消活动物料并永�
   assert.match(button, /无法再次报名/)
 })
 
+test('取消报名只受报名结束时间约束，后端事务和前端均拒绝截止后操作', () => {
+  const cancel = read('app/api/activities/[activityId]/register/cancel/route.ts')
+  const button = read('components/activities/ActivityRegistrationButton.tsx')
+  const shared = read('lib/activity-registration-shared.ts')
+  assert.match(cancel, /registrationEndAt: true/)
+  assert.match(cancel, /isActivityRegistrationCancellationOpen\(activity, now\)/)
+  assert.match(cancel, /ACTIVITY_REGISTRATION_CANCEL_CLOSED/)
+  assert.match(cancel, /activityRegistrationCancelClosedMessage/)
+  assert.match(shared, /活动报名已结束，无法取消报名。/)
+  assert.match(cancel, /registration\.status !== 'ACTIVE'/)
+  assert.match(cancel, /currentLinkedOrder\.status === 'REDEEMED'/)
+  assert.doesNotMatch(cancel, /activity\.startsAt|activity\.endsAt/)
+  assert.ok(cancel.indexOf('ACTIVITY_REGISTRATION_CANCEL_CLOSED') < cancel.indexOf('awardRegistrationFee'))
+  assert.ok(cancel.indexOf('ACTIVITY_REGISTRATION_CANCEL_CLOSED') < cancel.indexOf('materialRedemption.updateMany'))
+  assert.match(button, /isActivityRegistrationCancellationOpen\(activity, new Date\(now\)\)/)
+  assert.match(button, /ACTIVITY_REGISTRATION_CANCEL_CLOSED/)
+  assert.match(button, /activityRegistrationCancelClosedMessage/)
+  assert.match(button, /绑定活动物料已核销，无法取消报名。/)
+  assert.doesNotMatch(button, /canCancelByTime = .*activity\.startsAt|canCancelByTime = .*activity\.endsAt/)
+})
+
 test('活动码和物料码共享同一联动核销事务，重复扫码不会重复核销', () => {
   const registration = read('lib/activity-registration.ts')
   const material = read('lib/material-redemptions.ts')
@@ -270,7 +291,7 @@ test('活动物料核销遵守活动实际开始时间，活动结束后仍由�
   assert.match(material, /ACTIVITY_NOT_STARTED/)
   assert.match(registration, /current\.LinkedMaterialRedemption\?\.source === 'ACTIVITY_REGISTRATION_AUTO'/)
   assert.match(registration, /now < activity\.startsAt/)
-  assert.match(button, /activity\.endsAt/)
+  assert.match(button, /activity\.registrationEndAt/)
   assert.match(adminMaterial, /verifyPreview\.notStarted \? '活动尚未开始'/)
 })
 

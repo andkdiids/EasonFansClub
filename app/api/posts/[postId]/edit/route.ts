@@ -4,6 +4,7 @@ import { publicContentImageMarkers } from '@/lib/content-images'
 import { requireUser } from '@/lib/security'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
+import { validateRichPostContent } from '@/lib/rich-text'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -19,6 +20,7 @@ export async function GET(_request: Request, { params }: Params) {
       id: true,
       title: true,
       content: true,
+      richContent: true,
       boardId: true,
       authorId: true,
       moderationStatus: true,
@@ -47,7 +49,10 @@ export async function GET(_request: Request, { params }: Params) {
       id: post.id,
       title: post.title,
       content: publicContentImageMarkers(post.content),
-      richContent: null,
+      richContent: (() => {
+        const result = validateRichPostContent(post.richContent)
+        return result.valid ? result.value : null
+      })(),
       boardId: post.boardId,
       moderationStatus: post.moderationStatus,
       status: post.status,

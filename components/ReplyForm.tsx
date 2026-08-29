@@ -137,6 +137,7 @@ export function ReplyForm({
           onChange={setContent}
           onMentionsChange={setMentions}
           onSubmitShortcut={() => void submitReply()}
+          canSubmitShortcut={!isSubmitting && (content.trim().length >= 2 || imageUrls.length > 0 || Boolean(pendingSticker))}
         />
       </label>
       <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
