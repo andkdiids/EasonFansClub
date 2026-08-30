@@ -5,9 +5,11 @@ import sharp from 'sharp'
 import { getMediaPublicBaseUrl, PUBLIC_COS_HOST } from '@/lib/media-url'
 import { publicImageUrl } from '@/lib/images'
 import { createBrandedQrBuffer } from '@/lib/branded-qr-server'
+import { shareCardEmojiAssetUrl, tokenizeShareCardText } from '@/lib/share-card-emoji'
 import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, shareCardTypeLabel, type ShareCardData, type ShareCardImageCandidate } from '@/lib/share-card'
 import {
   calculateShareCardLayout,
+  estimatedShareCardTextWidth,
   shareCardHeroFit,
   SHARE_CARD_AUTHOR_LINE_HEIGHT,
   SHARE_CARD_AUTHOR_X,
@@ -20,6 +22,7 @@ import {
   SHARE_CARD_FOOTER_LOGO_SIZE,
   SHARE_CARD_FOOTER_LOGO_X,
   SHARE_CARD_FOOTER_BRAND_FONT_SIZE,
+  SHARE_CARD_FOOTER_BRAND_LINE_HEIGHT,
   SHARE_CARD_FOOTER_TEXT_GAP,
   SHARE_CARD_FOOTER_TITLE_FONT_SIZE,
   SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT,
@@ -37,22 +40,13 @@ import {
 } from '@/lib/share-card-layout'
 
 const IMAGE_FETCH_TIMEOUT_MS = 5000
+const EMOJI_FETCH_TIMEOUT_MS = 1800
+const MAX_EMOJI_ASSET_BYTES = 256 * 1024
 const MAX_REMOTE_IMAGE_BYTES = 6 * 1024 * 1024
 const VIDEO_FILE_PATTERN = /\.(?:3gp|avi|flv|m4v|mkv|mov|mp4|mpeg|mpg|ogm|ogv|webm|wmv|m3u8)$/i
 const CJK_FONT_PATH = path.join(process.cwd(), 'public', 'fonts', 'NotoSansSC-VF.ttf')
-const EMOJI_FONT_CANDIDATES = process.platform === 'win32'
-  ? [
-      ['Segoe UI Emoji', 'C:/Windows/Fonts/seguiemj.ttf'],
-      ['Noto Color Emoji', 'C:/Windows/Fonts/NotoColorEmoji.ttf'],
-    ] as const
-  : process.platform === 'darwin'
-    ? [['Apple Color Emoji', '/System/Library/Fonts/Apple Color Emoji.ttc']] as const
-    : [
-        ['Noto Color Emoji', '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'],
-        ['Noto Color Emoji', '/usr/share/fonts/opentype/noto/NotoColorEmoji.ttf'],
-      ] as const
-const EMOJI_FONT = EMOJI_FONT_CANDIDATES.find(([, candidatePath]) => existsSync(candidatePath)) || null
-const TEXT_FONT_PATH = EMOJI_FONT?.[1] || CJK_FONT_PATH
+/** CJK text is embedded locally; Emoji are rendered as pinned image assets below. */
+const TEXT_FONT_PATH = CJK_FONT_PATH
 const FONT_STACK = 'Noto Sans SC, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, Microsoft YaHei, PingFang SC, sans-serif'
 const OFFICIAL_LOGO_PATH = path.join(process.cwd(), 'app', 'icon.png')
 const DEFAULT_OG_ASSET_PATH = path.join(process.cwd(), 'public', 'images', 'og-default.png')
@@ -65,6 +59,7 @@ type TextLayerInput = Readonly<{
   top: number
   width: number
   fontSize: number
+  lineHeight: number
   color: string
   weight?: number
   align?: 'left' | 'center'
@@ -219,6 +214,27 @@ async function loadOfficialLogo() {
   return officialLogoPromise
 }
 
+const emojiAssetPromises = new Map<string, Promise<Buffer | null>>()
+
+async function loadShareCardEmojiAsset(codePoint: string) {
+  const cached = emojiAssetPromises.get(codePoint)
+  if (cached) return cached
+  const assetUrl = shareCardEmojiAssetUrl(codePoint)
+  if (!assetUrl) return null
+  const pending = fetch(assetUrl, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(EMOJI_FETCH_TIMEOUT_MS),
+  }).then(async (response) => {
+    if (!response.ok) return null
+    const declaredLength = Number(response.headers.get('content-length') || 0)
+    if (declaredLength > MAX_EMOJI_ASSET_BYTES) return null
+    const buffer = Buffer.from(await response.arrayBuffer())
+    return buffer.length <= MAX_EMOJI_ASSET_BYTES ? buffer : null
+  }).catch(() => null)
+  emojiAssetPromises.set(codePoint, pending)
+  return pending
+}
+
 async function createTextLayer(input: TextLayerInput) {
   const textConfig = {
     text: `<span foreground="${input.color}" font_weight="${input.weight || 600}">${escapePango(input.text)}</span>`,
@@ -231,9 +247,63 @@ async function createTextLayer(input: TextLayerInput) {
   const rendered = await sharp({ text: textConfig }).png().toBuffer({ resolveWithObject: true })
   return {
     input: rendered.data,
-    left: input.align === 'center' ? input.left + Math.max(0, Math.round((input.width - rendered.info.width) / 2)) : input.left,
-    top: input.top,
+    left: Math.round(input.align === 'center' ? input.left + Math.max(0, Math.round((input.width - rendered.info.width) / 2)) : input.left),
+    top: Math.round(input.top),
   } satisfies CompositeLayer
+}
+
+async function createTextLayersForLine(input: TextLayerInput) {
+  const tokens = tokenizeShareCardText(input.text)
+  const emojiTokens = tokens.filter((token) => token.type === 'emoji' && token.codePoint)
+  if (!emojiTokens.length) return [await createTextLayer(input)]
+
+  const emojiAssets = await Promise.all(emojiTokens.map((token) => loadShareCardEmojiAsset(token.codePoint || '')))
+  const assetByCodePoint = new Map<string, Buffer | null>()
+  emojiTokens.forEach((token, index) => {
+    if (token.codePoint) assetByCodePoint.set(token.codePoint, emojiAssets[index] || null)
+  })
+
+  const layers: CompositeLayer[] = []
+  let left = input.left
+  for (const token of tokens) {
+    if (token.type === 'text') {
+      if (token.value) {
+        layers.push(await createTextLayer({
+          ...input,
+          text: token.value,
+          left: Math.round(left),
+          width: Math.max(1, Math.ceil(estimatedShareCardTextWidth(token.value, input.fontSize))),
+        }))
+        left += estimatedShareCardTextWidth(token.value, input.fontSize)
+      }
+      continue
+    }
+
+    const emojiSize = Math.max(1, Math.round(input.fontSize * 0.98))
+    const asset = token.codePoint ? assetByCodePoint.get(token.codePoint) : null
+    if (asset) {
+      const emojiLayer = await fitImage(asset, emojiSize, emojiSize, 'contain')
+      if (emojiLayer) {
+        layers.push({
+          input: emojiLayer,
+          left: Math.round(left),
+          top: Math.round(input.top + Math.max(0, Math.round((input.lineHeight - emojiSize) / 2))),
+        })
+      }
+    } else {
+      // A pinned asset can be unavailable in an offline renderer. Preserve the
+      // original Unicode token as the last-resort font fallback instead of
+      // deleting or replacing it.
+      layers.push(await createTextLayer({
+        ...input,
+        text: token.value,
+        left: Math.round(left),
+        width: emojiSize,
+      }))
+    }
+    left += emojiSize
+  }
+  return layers
 }
 
 function baseBackgroundSvg(height: number, heroHeight: number) {
@@ -307,15 +377,15 @@ export async function renderShareCardPngWithInfo(data: ShareCardData): Promise<S
   const categoryColor = '#d5f1f4'
   const titleColor = '#ffffff'
   const detailColor = '#f0f6f7'
-  const textInputs: TextLayerInput[] = [{ text: shareCardTypeLabel(normalizedData.type), left: contentLeft, top: layout.categoryTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_CATEGORY_FONT_SIZE, color: categoryColor, weight: 800 }]
+  const textInputs: TextLayerInput[] = [{ text: shareCardTypeLabel(normalizedData.type), left: contentLeft, top: layout.categoryTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_CATEGORY_FONT_SIZE, lineHeight: 32, color: categoryColor, weight: 800 }]
   pushTextLines(textInputs, layout.titleLines, { left: contentLeft, top: layout.titleTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_TITLE_FONT_SIZE, color: titleColor, weight: 800, lineHeight: SHARE_CARD_TITLE_LINE_HEIGHT })
   pushTextLines(textInputs, layout.descriptionLines, { left: contentLeft, top: layout.descriptionTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_DESCRIPTION_FONT_SIZE, color: detailColor, weight: 500, lineHeight: SHARE_CARD_DESCRIPTION_LINE_HEIGHT })
   pushTextLines(textInputs, layout.metaLines, { left: contentLeft, top: layout.metaTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_META_FONT_SIZE, color: detailColor, weight: 700, lineHeight: SHARE_CARD_META_LINE_HEIGHT })
   pushTextLines(textInputs, layout.authorLines, { left: SHARE_CARD_AUTHOR_X, top: layout.authorTextTop, width: SHARE_CARD_AUTHOR_WIDTH, fontSize: 30, color: '#102033', weight: 800, lineHeight: SHARE_CARD_AUTHOR_LINE_HEIGHT })
   pushTextLines(textInputs, layout.dateLines, { left: SHARE_CARD_AUTHOR_X, top: layout.dateTop, width: SHARE_CARD_AUTHOR_WIDTH, fontSize: 22, color: '#7b8b98', weight: 500, lineHeight: 30 })
   textInputs.push(
-    { text: '扫码查看完整内容', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.brandTextTop, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: SHARE_CARD_FOOTER_TITLE_FONT_SIZE, color: '#0f5f8f', weight: 800 },
-    { text: '私家E院 | Eason Fans Club', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: SHARE_CARD_FOOTER_BRAND_FONT_SIZE, color: '#7b8b98', weight: 600 },
+    { text: '扫码查看完整内容', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.brandTextTop, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: SHARE_CARD_FOOTER_TITLE_FONT_SIZE, lineHeight: SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT, color: '#0f5f8f', weight: 800 },
+    { text: '私家E院 | Eason Fans Club', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: SHARE_CARD_FOOTER_BRAND_FONT_SIZE, lineHeight: SHARE_CARD_FOOTER_BRAND_LINE_HEIGHT, color: '#7b8b98', weight: 600 },
   )
 
   if (logo) {
@@ -323,7 +393,7 @@ export async function renderShareCardPngWithInfo(data: ShareCardData): Promise<S
     if (logoLayer) layers.push({ input: logoLayer, left: SHARE_CARD_FOOTER_LOGO_X, top: layout.brandLogoTop })
   }
 
-  const textLayers = await Promise.all(textInputs.map(createTextLayer))
+  const textLayers = (await Promise.all(textInputs.map(createTextLayersForLine))).flat()
   layers.push(...textLayers)
   const body = await sharp(Buffer.from(baseBackgroundSvg(layout.height, layout.heroHeight), 'utf8'))
     .composite(layers)

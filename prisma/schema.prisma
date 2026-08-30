@@ -3024,6 +3024,7 @@ model Post {
   updatedAt             DateTime                @updatedAt
   authorId              String
   boardId               String
+  userPostGroupId       String?
   contentType           PostContentType         @default(NORMAL)
   favoriteCount         Int                     @default(0)
   isLocked              Boolean                 @default(false)
@@ -3044,6 +3045,7 @@ model Post {
   Like                  Like[]
   Poll                  Poll?
   User                  User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  UserPostGroup         UserPostGroup?          @relation(fields: [userPostGroupId], references: [id], onDelete: SetNull)
   ReviewedBy            User?                   @relation("PostReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   Board                 Board                   @relation(fields: [boardId], references: [id])
   PostFavorite          PostFavorite[]
@@ -3055,6 +3057,7 @@ model Post {
   sticker               Sticker?                @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
 
   @@index([authorId, createdAt])
+  @@index([authorId, userPostGroupId, createdAt])
   @@index([authorId, profilePinnedAt, createdAt])
   @@index([boardId, createdAt])
   @@index([boardId, status, isDeleted, isPinned, isFeatured, createdAt], map: "Post_board_feed_idx")
@@ -3071,6 +3074,20 @@ model Post {
   @@index([replyCount])
   @@index([status])
   @@index([moderationStatus, createdAt])
+}
+
+model UserPostGroup {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String   @db.VarChar(20)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Post      Post[]
+
+  @@unique([userId, name])
+  @@index([userId, sortOrder, createdAt])
 }
 
 /// Independent anonymous/light-social records for the Aspirin Clinic.
@@ -3912,6 +3929,7 @@ model User {
   PasswordResetToken                                     PasswordResetToken[]
   PointLog                                               PointLog[]
   Post                                                   Post[]
+  UserPostGroup                                          UserPostGroup[]
   PostFavorite                                           PostFavorite[]
   Profile                                                Profile?
   UserPrivacySetting                                     UserPrivacySetting?

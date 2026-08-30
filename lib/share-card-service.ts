@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { getForumBoardDisplayName } from '@/lib/boards'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
@@ -44,7 +45,7 @@ const postShareCardSelect = {
       Profile: { select: { avatarUrl: true } },
     },
   },
-  Board: { select: { name: true } },
+  Board: { select: { name: true, slug: true } },
 } satisfies Prisma.PostSelect
 
 const activityShareCardSelect = {
@@ -177,7 +178,7 @@ export async function loadPostShareCardData(postId: string): Promise<ShareCardDa
     author: getPublicUserDisplayName(post.User),
     authorAvatar: safeAuthorAvatar(post.User.Profile?.avatarUrl || post.User.avatarUrl),
     date: formatDate(post.createdAt),
-    meta: post.Board ? [{ label: '版块', value: post.Board.name }] : [],
+    meta: post.Board ? [{ label: '版块', value: getForumBoardDisplayName(post.Board) }] : [],
   }
 }
 

@@ -16,6 +16,8 @@ import { BadgeCollectionPanel } from '@/components/BadgeCollectionPanel'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy-types'
+import type { ProfilePostGroupView } from '@/lib/profile-post-groups'
+import { PersonalPostGroupMenu, ProfilePostGroupBar } from '@/components/ProfilePostGroups'
 
 type ModuleKey = PublicProfileModuleKey
 type PostItem = {
@@ -29,6 +31,7 @@ type PostItem = {
   likeCount: number
   viewCount: number
   isProfilePinned: boolean
+  userPostGroupId: string | null
   board?: { name: string }
 }
 type ReplyItem = { id: string; content: string; post: { id: string; title: string } }
@@ -46,15 +49,19 @@ type FavoriteItem = {
 }
 type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem
 type PaginatedModuleKey = 'posts' | 'recent-messages'
-type ModuleState = { loading: boolean; failed: boolean; items: ModuleItem[]; pagination?: ProfileRecordPagination }
+type ModuleState = { loading: boolean; failed: boolean; items: ModuleItem[]; pagination?: ProfileRecordPagination; postGroups?: ProfilePostGroupView[] }
 type CacheState = Record<string, ModuleState | undefined>
 
 function isPaginatedModule(moduleKey: ModuleKey): moduleKey is PaginatedModuleKey {
   return moduleKey === 'posts' || moduleKey === 'recent-messages'
 }
 
-function moduleCacheKey(moduleKey: ModuleKey, page: number) {
-  return isPaginatedModule(moduleKey) ? `${moduleKey}:${page}` : moduleKey
+const ALL_POST_GROUPS = ''
+
+function moduleCacheKey(moduleKey: ModuleKey, page: number, postGroupId = ALL_POST_GROUPS) {
+  return isPaginatedModule(moduleKey)
+    ? moduleKey === 'posts' ? `${moduleKey}:${page}:${postGroupId || 'all'}` : `${moduleKey}:${page}`
+    : moduleKey
 }
 
 const tabs: Array<{ key: ModuleKey; selfLabel: string; otherLabel: string }> = [
@@ -82,6 +89,8 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
   const firstVisibleModule = visibleModuleKeys[0] || 'posts'
   const [active, setActive] = useState<ModuleKey>(firstVisibleModule)
   const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({ posts: 1, 'recent-messages': recentMessagesPagination?.page || 1 })
+  const [postGroupFilter, setPostGroupFilter] = useState(ALL_POST_GROUPS)
+  const [postGroups, setPostGroups] = useState<ProfilePostGroupView[]>([])
   const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
   const [deleteTarget, setDeleteTarget] = useState<ProfileRecentMessage | null>(null)
   const [isDeletingRecentMessage, setIsDeletingRecentMessage] = useState(false)
@@ -93,7 +102,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
     [moduleCacheKey('recent-messages', initialRecentPage)]: { loading: false, failed: false, items: recentMessages, pagination: recentMessagesPagination },
   }))
   const activePage = isPaginatedModule(active) ? modulePages[active] : 1
-  const state = cache[moduleCacheKey(active, activePage)]
+  const state = cache[moduleCacheKey(active, activePage, active === 'posts' ? postGroupFilter : ALL_POST_GROUPS)]
 
   useEffect(() => {
     if (!isSelf) return
@@ -105,9 +114,9 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
     if (!visibleModuleKeys.includes(active)) setActive(firstVisibleModule)
   }, [active, firstVisibleModule, visibleModuleKeys])
 
-  const loadModule = useCallback(async (moduleKey: ModuleKey, requestedPage = 1, scrollAfterLoad = false) => {
+  const loadModule = useCallback(async (moduleKey: ModuleKey, requestedPage = 1, scrollAfterLoad = false, requestedGroupId = postGroupFilter) => {
     if (!visibleModuleKeys.includes(moduleKey)) return
-    const requestedCacheKey = moduleCacheKey(moduleKey, requestedPage)
+    const requestedCacheKey = moduleCacheKey(moduleKey, requestedPage, moduleKey === 'posts' ? requestedGroupId : ALL_POST_GROUPS)
     setCache((current) => ({
       ...current,
       [requestedCacheKey]: {
@@ -124,18 +133,20 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
         params.set('page', String(Math.max(1, Math.trunc(requestedPage) || 1)))
         params.set('pageSize', String(PROFILE_RECORD_PAGE_SIZE))
       }
+      if (moduleKey === 'posts' && requestedGroupId) params.set('groupId', requestedGroupId)
       const response = await fetch(`/api/users/${uid}/public-modules?${params.toString()}`, { cache: 'no-store' })
       if (!response.ok) throw new Error(moduleKey)
-      const data = await response.json() as { items?: ModuleItem[]; pagination?: ProfileRecordPagination }
+      const data = await response.json() as { items?: ModuleItem[]; pagination?: ProfileRecordPagination; groups?: ProfilePostGroupView[] }
       const items = Array.isArray(data.items) ? data.items : []
       const pagination = data.pagination
       const resolvedPage = pagination?.page || requestedPage
-      const resolvedCacheKey = moduleCacheKey(moduleKey, resolvedPage)
+      const resolvedCacheKey = moduleCacheKey(moduleKey, resolvedPage, moduleKey === 'posts' ? requestedGroupId : ALL_POST_GROUPS)
+      if (moduleKey === 'posts' && Array.isArray(data.groups)) setPostGroups(data.groups)
       setModulePages((current) => isPaginatedModule(moduleKey) ? { ...current, [moduleKey]: resolvedPage } : current)
       setCache((current) => ({
         ...current,
-        [requestedCacheKey]: { loading: false, failed: false, items, pagination },
-        [resolvedCacheKey]: { loading: false, failed: false, items, pagination },
+        [requestedCacheKey]: { loading: false, failed: false, items, pagination, ...(moduleKey === 'posts' ? { postGroups: data.groups || [] } : {}) },
+        [resolvedCacheKey]: { loading: false, failed: false, items, pagination, ...(moduleKey === 'posts' ? { postGroups: data.groups || [] } : {}) },
       }))
       if (scrollAfterLoad) {
         window.requestAnimationFrame(() => scrollToSectionTop(modulesSectionRef.current))
@@ -143,7 +154,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
     } catch {
       setCache((current) => ({ ...current, [requestedCacheKey]: { loading: false, failed: true, items: [] } }))
     }
-  }, [uid, visibleModuleKeys])
+  }, [postGroupFilter, uid, visibleModuleKeys])
 
   useEffect(() => {
     if (!visibleModuleKeys.length || !visibleModuleKeys.includes(active)) return
@@ -156,14 +167,26 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
     const safePage = Math.min(Math.max(1, Math.trunc(nextPage) || 1), state.pagination.totalPages)
     if (safePage === activePage) return
     setModulePages((current) => ({ ...current, [active]: safePage }))
-    void loadModule(active, safePage, true)
+    void loadModule(active, safePage, true, active === 'posts' ? postGroupFilter : ALL_POST_GROUPS)
   }
+
+  const handlePostGroupChange = useCallback((nextGroupId: string) => {
+    setPostGroupFilter(nextGroupId)
+    setModulePages((current) => ({ ...current, posts: 1 }))
+    void loadModule('posts', 1, true, nextGroupId)
+  }, [loadModule])
+
+  const handlePostGroupsChanged = useCallback(() => {
+    const currentPostsPage = modulePages.posts
+    void loadModule('posts', 1, false, postGroupFilter)
+    if (currentPostsPage > 1) void loadModule('posts', currentPostsPage, false, postGroupFilter)
+  }, [loadModule, modulePages.posts, postGroupFilter])
 
   const handleProfilePinChanged = useCallback(() => {
     const currentPostsPage = modulePages.posts
     void loadModule('posts', 1)
-    if (currentPostsPage > 1) void loadModule('posts', currentPostsPage)
-  }, [loadModule, modulePages.posts])
+    if (currentPostsPage > 1) void loadModule('posts', currentPostsPage, false, postGroupFilter)
+  }, [loadModule, modulePages.posts, postGroupFilter])
 
   const removeRecentMessageFromCache = useCallback((messageId: string) => {
     setCache((current) => {
@@ -263,6 +286,10 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
             isSelf={isSelf}
             pagination={state.pagination}
             currentPage={activePage}
+            postGroups={postGroups}
+            activePostGroupId={postGroupFilter}
+            onPostGroupChange={handlePostGroupChange}
+            onPostGroupsChanged={handlePostGroupsChanged}
             onPageChange={handlePageChange}
             onProfilePinChanged={handleProfilePinChanged}
             expandedRecentMessages={expandedRecentMessages}
@@ -294,6 +321,10 @@ function ModuleContent({
   isSelf,
   pagination,
   currentPage,
+  postGroups,
+  activePostGroupId,
+  onPostGroupChange,
+  onPostGroupsChanged,
   onPageChange,
   onProfilePinChanged,
   expandedRecentMessages,
@@ -307,6 +338,10 @@ function ModuleContent({
   isSelf: boolean
   pagination?: ProfileRecordPagination
   currentPage: number
+  postGroups: ProfilePostGroupView[]
+  activePostGroupId: string
+  onPostGroupChange: (groupId: string) => void
+  onPostGroupsChanged: () => void
   onPageChange: (page: number) => void
   onProfilePinChanged: () => void
   expandedRecentMessages: Record<string, boolean>
@@ -314,7 +349,7 @@ function ModuleContent({
   onRequestDeleteRecentMessage?: (message: ProfileRecentMessage) => void
   deletingRecentMessageId?: string | null
 }) {
-  if (moduleKey !== 'badges' && !items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
+  if (moduleKey !== 'badges' && moduleKey !== 'posts' && !items.length) return <ModuleFallback title={`${moduleLabel(moduleKey, isSelf)}暂时没有内容。`} />
 
   const pageNavigation = isPaginatedModule(moduleKey) && pagination && pagination.totalPages > 1 ? (
     <Pagination
@@ -329,9 +364,17 @@ function ModuleContent({
     const posts = items as PostItem[]
     return (
       <div className="space-y-3">
+        <ProfilePostGroupBar
+          groups={postGroups}
+          activeGroupId={activePostGroupId}
+          isSelf={isSelf}
+          onSelect={onPostGroupChange}
+          onChanged={onPostGroupsChanged}
+        />
+        {!posts.length ? <ModuleFallback title="该分组暂时没有帖子。" /> : null}
         {posts.map((post) => (
           <article key={post.id} className="relative min-w-0 border border-[var(--border)] bg-[var(--surface-subtle)]">
-            <Link href={`/posts/${post.id}`} className="block min-w-0 p-3 pr-14">
+            <Link href={`/posts/${post.id}`} className="block min-w-0 p-3 pr-40">
               <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {post.isProfilePinned ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
@@ -346,7 +389,13 @@ function ModuleContent({
               </p>
             </Link>
             {isSelf ? (
-              <div className="absolute right-2 top-2">
+              <div className="absolute right-2 top-2 flex max-w-[45%] flex-wrap items-start justify-end gap-1">
+                <PersonalPostGroupMenu
+                  postId={post.id}
+                  currentGroupId={post.userPostGroupId}
+                  groups={postGroups}
+                  onChanged={onPostGroupsChanged}
+                />
                 <PersonalPostPinMenu
                   postId={post.id}
                   initialIsPinned={post.isProfilePinned}

@@ -2,20 +2,39 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildForumDiscoveryTabs } from '../lib/forum-discovery'
+import { BARD_BOARD_NAME, BARD_BOARD_SLUG, DAILY_CHAT_BOARD_SLUG, DAILY_CHAT_DISPLAY_NAME, defaultBoards, getForumBoardDisplayName } from '../lib/boards'
 import { MAX_CONTENT_IMAGES } from '../lib/content-images'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
 test('小臣书分类固定为全部、公告区、推荐、最新、热门，再接现有分区顺序', () => {
   const tabs = buildForumDiscoveryTabs([
-    { slug: 'daily-chat', name: '日常吹水' },
+    { slug: 'daily-chat', name: '吹水' },
     { slug: 'announcements', name: '旧公告名', isAnnouncement: true },
     { slug: 'concert', name: '演唱会' },
     { slug: 'material-trade', name: '物料交换' },
+    { slug: 'bard', name: '吟游诗人' },
   ])
 
-  assert.deepEqual(tabs.map((tab) => tab.value), ['all', 'announcements', 'recommend', 'latest', 'hot', 'daily-chat', 'concert', 'material-trade'])
-  assert.deepEqual(tabs.map((tab) => tab.label), ['全部', '公告区', '推荐', '最新', '热门', '日常吹水', '演唱会', '物料交换'])
+  assert.deepEqual(tabs.map((tab) => tab.value), ['all', 'announcements', 'recommend', 'latest', 'hot', 'daily-chat', 'concert', 'material-trade', 'bard'])
+  assert.deepEqual(tabs.map((tab) => tab.label), ['全部', '公告区', '推荐', '最新', '热门', '吹水', '演唱会', '物料交换', '吟游诗人'])
+})
+
+test('论坛分区改名保留 daily-chat slug，并新增吟游诗人默认分区', () => {
+  assert.equal(getForumBoardDisplayName({ slug: DAILY_CHAT_BOARD_SLUG, name: '日常吹水' }), DAILY_CHAT_DISPLAY_NAME)
+  assert.equal(getForumBoardDisplayName({ slug: DAILY_CHAT_BOARD_SLUG, name: DAILY_CHAT_DISPLAY_NAME }), DAILY_CHAT_DISPLAY_NAME)
+  assert.equal(BARD_BOARD_SLUG, 'bard')
+  assert.equal(BARD_BOARD_NAME, '吟游诗人')
+  assert.deepEqual(
+    defaultBoards.map((board) => ({ name: board.name, slug: board.slug })),
+    [
+      { name: '公告区', slug: 'announcements' },
+      { name: DAILY_CHAT_DISPLAY_NAME, slug: DAILY_CHAT_BOARD_SLUG },
+      { name: '演唱会', slug: 'concerts' },
+      { name: '物料交换', slug: 'merch-exchange' },
+      { name: BARD_BOARD_NAME, slug: BARD_BOARD_SLUG },
+    ],
+  )
 })
 
 test('模式入口和热门文案位于统一的顶部操作区', () => {

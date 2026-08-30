@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -150,7 +151,7 @@ function serializePost(row: DiscoveryRow) {
     updatedAt: row.updatedAt.toISOString(),
     likedByMe: row.Like.length > 0,
     favoritedByMe: row.PostFavorite.length > 0,
-    board: row.Board,
+    board: withForumBoardDisplayName(row.Board),
     author: {
       id: row.User.id,
       uid: row.User.uid,
@@ -274,6 +275,8 @@ export async function POST(request: Request) {
   const selectedBoard = boardValue && boardValue !== 'all'
     ? boards.find((board) => board.slug === boardValue || board.id === boardValue) || null
     : null
+  const publicBoards = normalizeForumBoards(boards)
+  const publicSelectedBoard = selectedBoard ? withForumBoardDisplayName(selectedBoard) : null
   if (boardValue && boardValue !== 'all' && !selectedBoard) return NextResponse.json({ message: '分区不存在' }, { status: 404 })
   const mode: ForumDiscoveryMode = !boardValue && !query ? requestedMode : 'latest'
   const feedSeed = mode === 'recommend'
@@ -438,8 +441,8 @@ export async function POST(request: Request) {
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
   return NextResponse.json({
     posts: rows.map((row) => serializePost(row)),
-    boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
-    selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
+    boards: publicBoards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
+    selectedBoard: publicSelectedBoard ? { ...publicSelectedBoard, isAnnouncement: announcement } : null,
     nextCursor,
     feedSeed: feedSeed?.value || null,
     hasMore,

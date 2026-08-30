@@ -57,12 +57,12 @@ test('post review creates an admin notification and public home query only accep
   assert.match(home, /OR: \[\{ isFeatured: true \}, \{ isPinned: true \}\]/)
 })
 
-test('homepage uses date-seeded random albums and only featured or pinned posts', () => {
+test('homepage uses date-seeded random albums and no longer renders the removed post module', () => {
   const home = read('lib/home-data.ts')
   const surface = read('components/HomeLayoutSurface.tsx')
   assert.match(home, /dailyAlbumRank\(a\.id, dateKey\) - dailyAlbumRank\(b\.id, dateKey\)/)
   assert.match(home, /slice\(0, 6\)/)
-  assert.match(surface, /data\.posts\.slice\(0,\s*4\)/)
+  assert.doesNotMatch(surface, /data\.posts|data-featured-post-card|精选帖子/)
   assert.match(surface, /homeText\.dailyMusic/)
 })
 
@@ -86,14 +86,14 @@ test('homepage keeps the original surface order and does not render shortcut car
     surface.indexOf('community-stats home-checkin-stats'),
     surface.indexOf('home-primary-columns'),
     surface.indexOf('homeText.randomAlbums'),
-    surface.indexOf('data-featured-post-card'),
-    surface.indexOf('homeText.hotConcerts'),
+    surface.indexOf('{renderRecentActivitiesPanel()}'),
+    surface.indexOf('{renderAnywhereDoorPanel()}'),
   ]
   assert.ok(positions.every((position) => position >= 0))
   assert.deepEqual([...positions].sort((a, b) => a - b), positions)
 })
 
-test('entertainment home card uses the endless-mode leaderboard and concerts remain available', () => {
+test('entertainment home card uses the endless-mode leaderboard without loading removed concert data', () => {
   const home = read('lib/home-data.ts')
   const leaderboard = read('lib/guess-song-leaderboard.ts')
   const api = read('app/api/home/route.ts')
@@ -101,10 +101,10 @@ test('entertainment home card uses the endless-mode leaderboard and concerts rem
   assert.match(home, /getGuessSongModeHighScores\(\)/)
   assert.match(leaderboard, /periodType: 'HISTORY'/)
   assert.match(leaderboard, /periodKey: 'ALL'/)
-  assert.match(api, /getHomeConcerts\(\)/)
-  assert.match(api, /concerts, albums, stats/)
+  assert.doesNotMatch(api, /getHomeConcerts\(\)|getHomePosts\(\)/)
+  assert.match(api, /activities, albums, stats/)
   assert.match(surface, /homeText\.entertainment/)
-  assert.match(surface, /home-concert-grid/)
+  assert.doesNotMatch(surface, /homeText\.hotConcerts|data\.concerts|home-concerts-section/)
 })
 
 test('mobile home layout uses a compact hero, two-by-two stats, and bottom safe space', () => {

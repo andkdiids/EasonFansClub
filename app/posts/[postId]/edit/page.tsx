@@ -4,6 +4,7 @@ import { BackButton } from '@/components/BackButton'
 import { PostEditForm, type ExistingMedia } from '@/components/PostEditForm'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { normalizeForumBoards } from '@/lib/boards'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -74,7 +75,7 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
           initialContent={publicContentImageMarkers(post.content)}
           initialRichContent={post.richContent}
           initialBoardId={post.boardId}
-          boards={boards}
+          boards={normalizeForumBoards(boards)}
           initialMedia={initialMedia}
         />
       </div>

@@ -4,7 +4,6 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
-import { LikeButton } from '@/components/PostActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
@@ -14,7 +13,6 @@ import { GUESS_SONG_MODE_CONFIG, GUESS_SONG_PUBLIC_MODES, type GuessSongPublicMo
 import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
 import type { PageLayoutConfig, PageLayoutDevice } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
-import type { EquippedBadgeView } from '@/lib/badge-types'
 import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
@@ -49,13 +47,15 @@ const homeText = {
   rankingUnavailable: '成绩暂时无法读取，请稍后刷新。',
   randomAlbums: '每日推荐专辑',
   albumsMore: '更多',
-  featured: '精选',
-  pinned: '置顶',
-  more: '更多',
   noAlbums: '暂无已发布专辑。',
-  hotConcerts: '热门演唱会',
-  concertsMore: '查看全部',
-  noConcerts: '演唱会档案正在整理中。',
+  recentActivities: '近期活动',
+  activitiesMore: '查看全部',
+  ongoing: '进行中',
+  anywhereDoor: '随意门',
+  anywhereDoorMore: '查看',
+  anywhereDoorEmpty: '暂时没有最新更新。',
+  dailyPrescription: '每日处方',
+  goPrescription: '去领取处方',
   distance: '距今',
   years: '周年',
   loadError: '部分社区内容暂时无法载入，请稍后刷新。',
@@ -76,15 +76,15 @@ const todayTypeLabels: Record<string, string> = {
 }
 
 type Announcement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
-type Post = { id: string; title: string; content: string; likeCount: number; likedByMe: boolean; replyCount: number; viewCount: number; isPinned: boolean; isFeatured: boolean; createdAt: string; board: { name: string }; author: { uid: number; nickname: string; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null } }
 type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null; likedByMe: boolean; likeCount: number }
 type Stats = { consecutiveDays: number; checkIns: { id: string }[]; _count: { checkIns: number } }
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
 type DailyMusic = { id: string; title: string; artist: string; releaseYear: number; lyrics: string | null; coverUrl: string | null; previewUrl: string; previewDuration: number; isFullPlayback: false; likedByMe: boolean; likeCount: number; album: { id: string; name: string; coverUrl: string | null } }
 type TodayEvent = { id: string; date: string; year: number; month: number; day: number; type: string; title: string; content: string; imageUrl: string | null; source: 'AUTO' | 'ADMIN'; reference: string | null; status: 'APPROVED'; href: string | null }
 type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: GuessSongModeHighScores['status'] | 'loading' }
-type HomeConcert = { id: string; title: string; concertDate: string; city: string; venue: string | null; tourName: string; posterUrl: string | null; href: string }
-type Payload = { posts: Post[]; activities: unknown[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; entertainmentRanking: EntertainmentRanking | null; concerts: HomeConcert[] }
+type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; startsAt: string | null; endsAt: string | null }
+type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
+type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; entertainmentRanking: EntertainmentRanking | null }
 
 const modeLabels = Object.fromEntries(
   GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, GUESS_SONG_MODE_CONFIG[mode].label]),
@@ -121,8 +121,11 @@ function excerpt(value: string | null | undefined, length = 70) {
   return value.length > length ? `${value.slice(0, length)}...` : value
 }
 
-function shortDate(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(new Date(value))
+function shortDateTime(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
 // 历史上的今天日期格式化：YYYY年MM月DD日（月/日零填充，对齐用户要求）。
@@ -189,7 +192,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const items = useMemo(() => getPageLayoutModules(layoutConfig, device, 'home'), [layoutConfig, device])
   const layoutModule = (key: string) => items.find((item) => item.key === key)
   const visible = (key: string) => Boolean(layoutModule(key))
-  const [data, setData] = useState<Payload>({ posts: [], activities: [], albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], entertainmentRanking: loadingEntertainmentRanking, concerts: [] })
+  const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], entertainmentRanking: loadingEntertainmentRanking })
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const [todayPageIndex, setTodayPageIndex] = useState(0)
@@ -213,7 +216,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           // The main home payload intentionally keeps entertainment ranking in
           // its own request. Do not let its legacy null field overwrite the
           // independently loaded result.
-          setData((current) => ({ ...nextData, concerts: nextData.concerts || [], entertainmentRanking: current.entertainmentRanking }))
+          setData((current) => ({ ...nextData, activities: nextData.activities || [], anywhereDoor: nextData.anywhereDoor || null, entertainmentRanking: current.entertainmentRanking }))
           setFailed(false)
         }
       } catch (error) {
@@ -425,6 +428,38 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     )
   }
 
+  const renderRecentActivitiesPanel = () => {
+    if (!data.activities.length) return null
+    return (
+      <section className="community-panel concert-panel home-full-panel home-activities-section" aria-label={homeText.recentActivities}>
+        <header><h2>{homeText.recentActivities}</h2><Link href="/activities" className="home-module-entry">{homeText.activitiesMore} {'>>'}</Link></header>
+        <div className="home-concert-grid home-activity-grid">
+          {data.activities.map((activity) => {
+            const posterUrl = activity.coverUrl || activity.bannerUrl
+            return <Link key={activity.id} href={`/activities/${activity.id}`} className="home-concert-card home-activity-card">
+              <span className="home-concert-cover">{posterUrl ? <Image src={posterUrl} alt={`${activity.title} 海报`} fill sizes="72px" loading="lazy" className="object-cover" /> : '活动'}</span>
+              <span className="home-concert-copy"><time>{shortDateTime(activity.startsAt)}</time><strong>{activity.title}</strong><small>{homeText.ongoing}</small></span>
+            </Link>
+          })}
+        </div>
+      </section>
+    )
+  }
+
+  const renderAnywhereDoorPanel = () => {
+    if (!data.anywhereDoor) return null
+    return (
+      <section className="community-panel home-full-panel home-anywhere-door-section" aria-label={homeText.anywhereDoor}>
+        <header><h2>{homeText.anywhereDoor}</h2><Link href="/anywhere-door" className="home-module-entry">{homeText.anywhereDoorMore} {'>>'}</Link></header>
+        <Link href={data.anywhereDoor.href} className="home-anywhere-door-item">
+          <span className="home-anywhere-door-account">@{data.anywhereDoor.authorUsername}</span>
+          <strong>{data.anywhereDoor.title}</strong>
+          <time dateTime={data.anywhereDoor.publishedAt}>{shortDateTime(data.anywhereDoor.publishedAt)}</time>
+        </Link>
+      </section>
+    )
+  }
+
   return (
     <div className="community-home">
       <HomeHero
@@ -436,16 +471,19 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         defaultTitle={siteConfig.text.homeSubtitle}
       />
       <div id="community-content" className="community-content">
-        <section className="community-stats home-checkin-stats mb-4 sm:mb-6" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-label="E院数据与签到状态">
-          <div><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
-          <Link href="/checkin" className={`stat-checkin ${checkinStateClass}`}>
-            <span>{homeText.todayCheckins}</span>
-            <strong>{data.stats ? (checkedIn ? fmt(data.siteStats?.todayCheckIns ?? 0) : homeText.notCheckedIn) : '—'}</strong>
-            <small>{data.stats ? (checkedIn ? <><span className="stat-checkin-mobile-mark" aria-hidden="true">✓</span>{homeText.checkedIn}</> : homeText.goCheckin) : homeText.loadingStats}</small>
-            {checkedIn ? <i aria-hidden="true">✓</i> : null}
-          </Link>
-          <div className="stat-total"><span>{homeText.totalCheckins}</span><strong>{data.stats ? `${fmt(data.stats._count.checkIns)} ${homeText.days}` : '—'}</strong><Link href="/checkin">{homeText.viewCheckin} →</Link></div>
-          <div><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
+        <section className="community-stats home-checkin-stats mb-4 sm:mb-6" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }} aria-label="E院数据与签到状态">
+          <div className="stat-members"><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
+          <div className={`stat-registration ${checkinStateClass}`}>
+            <Link href="/checkin" className="stat-checkin">
+              <span>{homeText.todayCheckins}</span>
+              <strong>{data.stats ? (checkedIn ? fmt(data.siteStats?.todayCheckIns ?? 0) : homeText.notCheckedIn) : '—'}</strong>
+              <small>{data.stats ? (checkedIn ? <><span className="stat-checkin-mobile-mark" aria-hidden="true">✓</span>{homeText.checkedIn}</> : homeText.goCheckin) : homeText.loadingStats}</small>
+              {checkedIn ? <i aria-hidden="true">✓</i> : null}
+            </Link>
+            <div className="stat-total"><span>{homeText.totalCheckins}</span><strong>{data.stats ? `${fmt(data.stats._count.checkIns)} ${homeText.days}` : '—'}</strong><Link href="/checkin">{homeText.viewCheckin} →</Link></div>
+          </div>
+          <div className="stat-birthdays"><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
+          <Link href="/games/daily-prescription" className="stat-prescription"><span>{homeText.dailyPrescription}</span><strong>今日处方</strong><small>{homeText.goPrescription} →</small></Link>
         </section>
 
         {announcement && visible('home.announcement') ? <Link href={normalizeActionUrl(announcement.link) || normalizeActionUrl(announcement.buttonUrl) || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
@@ -484,23 +522,8 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
             {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
           </div>
         </section>
-
-        {visible('home.featuredPosts') || visible('home.latestPosts') ? <section className="community-panel posts-panel home-full-panel" aria-label="Featured posts"><header><h2>{layoutModule('home.featuredPosts')?.title || '精选帖子'}</h2><Link href="/forum" className="home-module-entry">更多内容 {'>>'}</Link></header><div className="post-list">{data.posts.slice(0, 4).map((post) => <article data-featured-post-card key={post.id}><Link data-post-card-link href={`/posts/${post.id}`} className="post-row-link absolute inset-0 z-[1] focus:outline-none focus-visible:ring-2" aria-label={`View post: ${post.title}`} /><div className="post-copy pointer-events-none relative z-[2]"><h3>
-  {post.isPinned ? <b>{homeText.pinned}</b> : post.isFeatured ? <b>{homeText.featured}</b> : null}
-  <span className="post-board-name">[{post.board.name}]</span>
-  {post.title}
-</h3><p><Link href={`/user/${formatUid(post.author.uid)}`} className="pointer-events-auto relative z-[3]"><UserDisplayName name={post.author.nickname || 'E院用户'} uid={post.author.uid} badge={post.author.equippedBadge} compact /></Link> · {new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(post.createdAt))}</p></div><div className="post-metrics pointer-events-auto relative z-[3]"><span>Reply {post.replyCount}</span><span>Views {fmt(post.viewCount)}</span><div data-post-like-control className="pointer-events-auto relative z-[3]"><LikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /></div></div></article>)}{!data.posts.length && !failed ? <p className="community-empty">{siteConfig.text.emptyText}</p> : null}</div></section> : null}
-
-        <section className="community-panel concert-panel home-full-panel home-concerts-section" aria-label="Hot concerts">
-          <header><h2>{homeText.hotConcerts}</h2><Link href="/music/concerts" className="home-module-entry">{homeText.concertsMore} {'>>'}</Link></header>
-          <div className="home-concert-grid">
-            {data.concerts.map((concert) => <Link key={concert.id} href={concert.href} className="home-concert-card">
-              <span className="home-concert-cover">{concert.posterUrl ? <Image src={publicImageVariantUrl(concert.posterUrl, 'thumb-sm') || concert.posterUrl} alt={`${concert.title} poster`} fill sizes="72px" loading="lazy" className="object-cover" /> : 'Eason'}</span>
-              <span className="home-concert-copy"><time>{shortDate(concert.concertDate)}</time><strong>{concert.title}</strong><small>{concert.city}{concert.venue ? ` · ${concert.venue}` : ''}</small><small>{concert.tourName}</small></span>
-            </Link>)}
-            {!data.concerts.length && !failed ? <p className="community-empty">{homeText.noConcerts}</p> : null}
-          </div>
-        </section>
+        {renderRecentActivitiesPanel()}
+        {renderAnywhereDoorPanel()}
       </div>
     </div>
   )

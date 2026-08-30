@@ -1,6 +1,7 @@
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
+import { withForumBoardDisplayName } from '@/lib/boards'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory, userSnapshotName } from '@/lib/admin-audit'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { buildPostReviewUpdate, isPostModerationStatus, POST_REVIEW_PAGE_SIZE } from '@/lib/post-moderation'
@@ -212,6 +213,7 @@ function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[])
   const { richContent, ...postWithoutRichContent } = post
   return {
     ...postWithoutRichContent,
+    Board: withForumBoardDisplayName(post.Board),
     content: postContentPlainText(post.content, richContent),
     summary: post.summary ? postContentPlainText(post.summary) : post.summary,
     createdAt: post.createdAt.toISOString(),

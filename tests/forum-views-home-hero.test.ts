@@ -46,44 +46,40 @@ test('详情真实挂载调用计数接口且列表、首页、详情统一读�
   assert.match(home, /viewCount: true/)
 })
 
-test('社区首页精选限制四篇并使用扁平单列列表', () => {
-  const data = readFileSync('lib/home-data.ts', 'utf8')
+test('社区首页移除旧精选与热门演唱会模块，并使用当前首页数据模块', () => {
+  const api = readFileSync('app/api/home/route.ts', 'utf8')
   const surface = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
-  assert.match(data, /selected\.size < 4/)
-  assert.match(data, /slice\(0, 4\)/)
-  assert.match(surface, /data\.posts\.slice\(0,\s*4\)/)
-  assert.match(surface, /className="post-list"/)
-  assert.doesNotMatch(surface, /md:grid-cols-2/)
+  assert.doesNotMatch(surface, /data\.posts|data\.concerts|精选帖子|热门演唱会|home-concerts-section/)
+  assert.doesNotMatch(api, /getHomePosts|getHomeConcerts|posts:|concerts:/)
+  assert.match(api, /getHomeActivities\(\)/)
+  assert.match(api, /getHomeAnywhereDoorLatest\(\)/)
+  assert.match(surface, /home-activities-section/)
+  assert.match(surface, /home-anywhere-door-section/)
+  assert.match(surface, /home-albums-section/)
 })
 
-test('首页精选卡片自然高度、整卡可点击且独立点赞不会触发跳转', () => {
+test('首页当前内容模块使用各自的整卡入口，不保留旧精选卡片层级', () => {
   const surface = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
-  const actions = readFileSync('components/PostActions.tsx', 'utf8')
-  const article = surface.slice(surface.indexOf('<article data-featured-post-card'), surface.indexOf('</article>'))
-  assert.match(surface, /data-featured-post-card/)
-  assert.match(surface, /data-post-card-link[\s\S]*absolute inset-0 z-\[1\]/)
-  assert.match(surface, /focus-visible:ring-2/)
-  assert.match(surface, /pointer-events-none relative z-\[2\]/)
-  assert.match(surface, /data-post-like-control[\s\S]*pointer-events-auto relative z-\[3\]/)
-  assert.doesNotMatch(article, /min-h-(?:52|\[)|mt-auto|h-full|justify-between/)
-  assert.match(actions, /event\.preventDefault\(\)/)
-  assert.match(actions, /event\.stopPropagation\(\)/)
-  assert.match(actions, /void toggleLike\(\)/)
+  assert.match(surface, /home-activity-card/)
+  assert.match(surface, /href=\{`\/activities\/\$\{activity\.id\}`\}/)
+  assert.match(surface, /home-anywhere-door-item/)
+  assert.match(surface, /href=\{data\.anywhereDoor\.href\}/)
+  assert.match(surface, /home-album-link/)
+  assert.doesNotMatch(surface, /data-featured-post-card|data-post-card-link|post-row-link|data-post-like-control/)
 })
 
-test('用户菜单层级高于卡片交互且搜索弹窗保持最高层', () => {
+test('用户菜单层级高于当前首页交互且搜索弹窗保持最高层', () => {
   const surface = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
   const header = readFileSync('components/SiteHeaderFrame.tsx', 'utf8')
   const menu = readFileSync('components/UserNotificationMenu.tsx', 'utf8')
   const carousel = readFileSync('components/music/MusicAlbumCarousel.tsx', 'utf8')
   const search = readFileSync('components/music/MusicSearchDialog.tsx', 'utf8')
-  assert.match(surface, /data-post-like-control[\s\S]*z-\[3\]/)
   assert.match(header, /z-\[var\(--layer-sticky\)\]/)
   assert.match(menu, /data-user-menu[\s\S]*z-\[var\(--layer-popover\)\]/)
   assert.match(menu, /data-user-menu-panel[\s\S]*pointer-events-auto/)
   assert.match(carousel, /isolate z-0/)
   assert.match(search, /z-\[var\(--layer-dialog\)\]/)
-  assert.doesNotMatch(surface, /data-post-like-control[^\n]*(?:z-50|z-\[100\]|z-\[999\])/)
+  assert.match(surface, /home-daily-music-panel/)
 })
 
 test('Hero 默认样式美观且合法后台枚举映射到前台', () => {

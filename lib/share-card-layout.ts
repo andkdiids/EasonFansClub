@@ -1,4 +1,5 @@
 import { sanitizeShareCardText, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { tokenizeShareCardText } from '@/lib/share-card-emoji'
 
 /** Default Hero height used when an image has no readable dimensions. */
 export const SHARE_CARD_HERO_HEIGHT = 660
@@ -40,6 +41,8 @@ export const SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM = 36
 export const SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP = 16
 export const SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP = 18
 export const SHARE_CARD_ACTIVITY_OVERLAY_META_GAP = 16
+/** Posts need a little more optical separation before the board label. */
+export const SHARE_CARD_POST_DESCRIPTION_META_GAP = 24
 export const SHARE_CARD_ACTIVITY_TITLE_MAX_LINES = 3
 export const SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES = 2
 export const SHARE_CARD_ACTIVITY_META_MAX_LINES = 1
@@ -118,7 +121,9 @@ export type ShareCardLayout = Readonly<{
   authorTextTop: number
   dateTop: number
   qrTop: number
+  qrBottom: number
   brandBlockTop: number
+  brandBlockBottom: number
   brandBlockHeight: number
   brandLogoTop: number
   brandTextTop: number
@@ -148,8 +153,11 @@ function estimatedCharacterWidth(character: string, fontSize: number) {
   return codePoint <= 0x007f ? fontSize * 0.55 : fontSize
 }
 
-function estimatedTextWidth(value: string, fontSize: number) {
-  return Array.from(value).reduce((total, character) => total + estimatedCharacterWidth(character, fontSize), 0)
+export function estimatedShareCardTextWidth(value: string, fontSize: number) {
+  return tokenizeShareCardText(value).reduce((total, token) => {
+    if (token.type === 'emoji') return total + fontSize
+    return total + Array.from(token.value).reduce((textTotal, character) => textTotal + estimatedCharacterWidth(character, fontSize), 0)
+  }, 0)
 }
 
 /** Wrap text by the same safe width model used by both the Sharp and Canvas renderers. */
@@ -162,7 +170,8 @@ export function wrapShareCardText(value: string, maxWidth: number, fontSize: num
     }
     let line = ''
     let lineWidth = 0
-    for (const character of Array.from(paragraph)) {
+    const units = tokenizeShareCardText(paragraph).flatMap((token) => token.type === 'emoji' ? [token.value] : Array.from(token.value))
+    for (const character of units) {
       const characterWidth = estimatedCharacterWidth(character, fontSize)
       if (line && lineWidth + characterWidth > maxWidth) {
         lines.push(line)
@@ -178,6 +187,7 @@ export function wrapShareCardText(value: string, maxWidth: number, fontSize: num
 }
 
 export function measureWrappedText(value: string, maxWidth: number, fontSize: number, lineHeight: number): ShareCardTextBlock {
+  if (!value.trim()) return { lines: [], lineHeight, height: 0 }
   const lines = wrapShareCardText(value, maxWidth, fontSize)
   return { lines, lineHeight, height: lines.length * lineHeight }
 }
@@ -187,8 +197,15 @@ function limitWrappedText(block: ShareCardTextBlock, maxLines: number, maxWidth:
   const lines = block.lines.slice(0, maxLines)
   while (lines.length > 1 && !lines[lines.length - 1]?.trim()) lines.pop()
   let lastLine = (lines[lines.length - 1] || '').trimEnd()
-  while (lastLine && estimatedTextWidth(`${lastLine}…`, fontSize) > maxWidth) {
-    lastLine = Array.from(lastLine).slice(0, -1).join('')
+  while (lastLine && estimatedShareCardTextWidth(`${lastLine}…`, fontSize) > maxWidth) {
+    const units = tokenizeShareCardText(lastLine)
+    const lastUnit = units.at(-1)
+    if (!lastUnit) break
+    if (lastUnit.type === 'emoji') {
+      lastLine = units.slice(0, -1).map((unit) => unit.value).join('')
+      continue
+    }
+    lastLine = units.slice(0, -1).map((unit) => unit.value).join('') + Array.from(lastUnit.value).slice(0, -1).join('')
   }
   lines[lines.length - 1] = `${lastLine}…`
   return { ...block, lines, height: lines.length * block.lineHeight }
@@ -222,7 +239,7 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const hero = shareCardHeroDimensions(data, dimensions)
   const isActivity = data.type === 'activity'
   const title = normalizeCardText(data.title) || shareCardTypeLabel(data.type)
-  const description = isActivity ? normalizeActivityDescription(data.description) : normalizeCardText(data.description) || '扫码查看完整内容'
+  const description = isActivity ? normalizeActivityDescription(data.description) : normalizeCardText(data.description)
   const author = normalizeCardText(data.author) || '私家E院'
   const date = normalizeCardText(data.date)
   const meta = visibleMeta(data)
@@ -238,14 +255,21 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const authorBlock = measureWrappedText(author, SHARE_CARD_AUTHOR_WIDTH, SHARE_CARD_AUTHOR_FONT_SIZE, SHARE_CARD_AUTHOR_LINE_HEIGHT)
   const dateBlock = measureWrappedText(date ? `发布于 ${date}` : '来自私家E院', SHARE_CARD_AUTHOR_WIDTH, SHARE_CARD_DATE_FONT_SIZE, SHARE_CARD_DATE_LINE_HEIGHT)
 
+  const hasDescription = descriptionBlock.lines.some((line) => line.trim())
+  const hasMeta = metaLines.length > 0
   const metaHeight = metaLines.length * SHARE_CARD_META_LINE_HEIGHT
+  const descriptionGap = hasDescription ? SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP : 0
+  const metaGap = hasMeta
+    ? (data.type === 'post' ? SHARE_CARD_POST_DESCRIPTION_META_GAP : SHARE_CARD_ACTIVITY_OVERLAY_META_GAP)
+    : 0
   const overlayHeight = SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
     + SHARE_CARD_CATEGORY_LINE_HEIGHT
     + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
     + titleBlock.height
-    + SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP
+    + descriptionGap
     + descriptionBlock.height
-    + (metaLines.length ? SHARE_CARD_ACTIVITY_OVERLAY_META_GAP + metaHeight : 0)
+    + metaGap
+    + metaHeight
     + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM
   const overlayTop = Math.max(0, hero.height - overlayHeight)
   const panelTop = overlayTop
@@ -255,8 +279,8 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const activityOverlayHeight = overlayHeight
   const categoryTop = overlayTop + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
   const titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
-  const descriptionTop = titleTop + titleBlock.height + SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP
-  const metaTop = descriptionTop + descriptionBlock.height + (metaLines.length ? SHARE_CARD_ACTIVITY_OVERLAY_META_GAP : 0)
+  const descriptionTop = titleTop + titleBlock.height + descriptionGap
+  const metaTop = descriptionTop + descriptionBlock.height + metaGap
   const authorTop = panelBottom + SHARE_CARD_AUTHOR_TOP_GAP
   const authorTextTop = authorTop + Math.max(0, (SHARE_CARD_AVATAR_SIZE - authorBlock.height - dateBlock.height - 4) / 2)
   const dateTop = authorTextTop + authorBlock.height + 4
@@ -274,13 +298,26 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const footerVisualHeight = Math.max(brandOffsetY + brandBlockHeight, qrOffsetY + SHARE_CARD_QR_FRAME_SIZE)
   const footerAnchorMin = SHARE_CARD_HEIGHT - SHARE_CARD_FOOTER_BOTTOM_PADDING - footerVisualHeight
   const footerAnchorTop = Math.max(naturalBrandBlockTop, footerAnchorMin)
-  const brandBlockTop = footerAnchorTop + brandOffsetY
-  // Keep the QR above the brand group without allowing it to overlap the author.
-  const qrTop = Math.max(authorTop + authorBlockHeight + 16, naturalBrandBlockTop + qrOffsetY, footerAnchorTop + qrOffsetY)
+  let brandBlockTop = footerAnchorTop + brandOffsetY
+  let qrTop = Math.max(authorTop + authorBlockHeight + 16, naturalBrandBlockTop + qrOffsetY, footerAnchorTop + qrOffsetY)
+  if (data.type === 'post') {
+    // Keep the established QR size while giving posts an exact shared bottom
+    // edge for the QR and brand groups. Only long cards need extra footer flow
+    // to keep that edge below the author block.
+    const minBrandTopForQr = authorTop + authorBlockHeight + 16 + SHARE_CARD_QR_FRAME_SIZE - brandBlockHeight
+    brandBlockTop = Math.max(brandBlockTop, minBrandTopForQr)
+    qrTop = brandBlockTop + brandBlockHeight - SHARE_CARD_QR_FRAME_SIZE
+  }
   const brandLogoTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_LOGO_SIZE) / 2
   const brandTextTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT) / 2
-  const footerBottom = Math.max(brandBlockTop + brandBlockHeight, qrTop + SHARE_CARD_QR_FRAME_SIZE) + SHARE_CARD_FOOTER_BOTTOM_PADDING
-  const height = Math.max(SHARE_CARD_HEIGHT, footerBottom)
+  const brandBlockBottom = brandBlockTop + brandBlockHeight
+  const qrBottom = qrTop + SHARE_CARD_QR_FRAME_SIZE
+  const footerContentBottom = Math.max(brandBlockBottom, qrBottom)
+  // The minimum canvas height is part of the final flow, rather than a
+  // separate empty area below it. This keeps the reported/API height equal to
+  // the actual PNG bottom while preserving the minimum 1440px contract.
+  const footerBottom = Math.max(SHARE_CARD_HEIGHT, footerContentBottom + SHARE_CARD_FOOTER_BOTTOM_PADDING)
+  const height = footerBottom
 
   return {
     width: SHARE_CARD_WIDTH,
@@ -302,7 +339,9 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
     authorTextTop,
     dateTop,
     qrTop,
+    qrBottom,
     brandBlockTop,
+    brandBlockBottom,
     brandBlockHeight,
     brandLogoTop,
     brandTextTop,

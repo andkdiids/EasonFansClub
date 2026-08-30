@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { unstable_cache } from 'next/cache'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { getForumBoardDisplayName } from '@/lib/boards'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -109,6 +110,7 @@ export const getTrendingPosts = unstable_cache(
         const { nicknameModerationStatus, nicknameViolationDisplay, profileDisplayName, ...publicRow } = row
         return {
         ...publicRow,
+        boardName: getForumBoardDisplayName({ slug: row.boardSlug, name: row.boardName }),
         title: publicModerationText(row.title, row.moderationStatus),
         summary: publicModerationText(summarizePlainText(row.summary), row.moderationStatus),
         authorName: getPublicUserDisplayName({
@@ -124,6 +126,6 @@ export const getTrendingPosts = unstable_cache(
       }),
     }
   },
-  ['trending-posts-v1'],
+  ['trending-posts-v2'],
   { revalidate: 60, tags: ['trending-posts'] },
 )

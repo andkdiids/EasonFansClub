@@ -62,6 +62,12 @@ type RankingAggregate = {
   lastActivityAt: Date
 }
 
+type CommentRankingQueryRow = {
+  userId: string
+  count: number | bigint
+  lastActivityAt: Date | null
+}
+
 const rankingUserWhere = {
   status: 'ACTIVE',
   isDeleted: false,
@@ -249,31 +255,154 @@ async function queryPostRanking(range: DashboardPeriodRange) {
 }
 
 async function queryCommentRanking(range: DashboardPeriodRange) {
-  const rows = await prisma.reply.groupBy({
-    by: ['authorId'],
-    where: {
-      isDeleted: false,
-      deletedAt: null,
-      createdAt: { gte: range.start, lt: range.endExclusive },
-      User: rankingUserWhere,
-      Post: {
-        ...publicForumPostRelationWhere(),
-      },
-    },
-    orderBy: [
-      { _count: { id: 'desc' } },
-      { _max: { createdAt: 'asc' } },
-      { authorId: 'asc' },
-    ],
-    take: DASHBOARD_RANKING_LIMIT,
-    _count: true,
-    _max: { createdAt: true },
-  })
+  /*
+   * The comment leaderboard counts effective participation events, not raw
+   * Reply rows.  Keep the range predicate on the candidate reply only: a
+   * root reply may have been created before the selected window while a
+   * reply in that thread is created inside it.
+   *
+   * The recursive CTE resolves every candidate's root in SQL.  The two
+   * event keys then implement the window-scoped business rules:
+   *   - top-level: user + post
+   *   - nested participation: user + root comment, only for another user's
+   *     root thread
+   */
+  const rows = await prisma.$queryRaw<CommentRankingQueryRow[]>`
+    WITH RECURSIVE
+    candidate_replies AS (
+      SELECT
+        r.id AS candidateId,
+        r.postId AS candidatePostId,
+        r.authorId AS candidateAuthorId,
+        r.parentId AS candidateParentId,
+        r.createdAt AS candidateCreatedAt
+      FROM \`Reply\` AS r
+      INNER JOIN \`Post\` AS p ON p.id = r.postId
+      INNER JOIN \`Board\` AS b ON b.id = p.boardId
+      INNER JOIN \`User\` AS u ON u.id = r.authorId
+      INNER JOIN \`Profile\` AS profile ON profile.userId = u.id
+      WHERE r.isDeleted = 0
+        AND r.deletedAt IS NULL
+        AND r.createdAt >= ${range.start}
+        AND r.createdAt < ${range.endExclusive}
+        AND u.status = 'ACTIVE'
+        AND u.isDeleted = 0
+        AND p.isDeleted = 0
+        AND p.deletedAt IS NULL
+        AND p.status = 'PUBLISHED'
+        AND p.moderationStatus IN ('APPROVED', 'VIOLATION')
+        AND b.isActive = 1
+    ),
+    reply_ancestors (
+      candidateId,
+      candidatePostId,
+      candidateAuthorId,
+      candidateParentId,
+      candidateCreatedAt,
+      currentId,
+      currentParentId,
+      currentAuthorId,
+      depth,
+      path
+    ) AS (
+      SELECT
+        c.candidateId,
+        c.candidatePostId,
+        c.candidateAuthorId,
+        c.candidateParentId,
+        c.candidateCreatedAt,
+        c.candidateId,
+        c.candidateParentId,
+        c.candidateAuthorId,
+        0,
+        CAST(CONCAT(',', c.candidateId, ',') AS CHAR(4096))
+      FROM candidate_replies AS c
+
+      UNION ALL
+
+      SELECT
+        a.candidateId,
+        a.candidatePostId,
+        a.candidateAuthorId,
+        a.candidateParentId,
+        a.candidateCreatedAt,
+        parent.id,
+        parent.parentId,
+        parent.authorId,
+        a.depth + 1,
+        CONCAT(a.path, parent.id, ',')
+      FROM reply_ancestors AS a
+      INNER JOIN \`Reply\` AS parent
+        ON parent.id = a.currentParentId
+        AND parent.postId = a.candidatePostId
+      WHERE a.currentParentId IS NOT NULL
+        AND a.depth < 128
+        AND LOCATE(CONCAT(',', parent.id, ','), a.path) = 0
+        AND parent.isDeleted = 0
+        AND parent.deletedAt IS NULL
+    ),
+    resolved_roots AS (
+      SELECT
+        candidateId,
+        candidatePostId,
+        candidateAuthorId,
+        candidateParentId,
+        candidateCreatedAt,
+        currentId AS rootCommentId,
+        currentAuthorId AS rootAuthorId
+      FROM reply_ancestors
+      WHERE currentParentId IS NULL
+    ),
+    effective_events AS (
+      SELECT
+        c.candidateAuthorId AS userId,
+        CAST('post' AS CHAR(6)) AS eventType,
+        c.candidatePostId AS eventId,
+        c.candidateCreatedAt AS activityAt
+      FROM candidate_replies AS c
+      WHERE c.candidateParentId IS NULL
+
+      UNION ALL
+
+      SELECT
+        r.candidateAuthorId AS userId,
+        CAST('thread' AS CHAR(6)) AS eventType,
+        r.rootCommentId AS eventId,
+        r.candidateCreatedAt AS activityAt
+      FROM resolved_roots AS r
+      WHERE r.candidateParentId IS NOT NULL
+        AND r.rootAuthorId <> r.candidateAuthorId
+    ),
+    deduplicated_events AS (
+      SELECT
+        userId,
+        eventType,
+        eventId,
+        MIN(activityAt) AS activityAt
+      FROM effective_events
+      GROUP BY userId, eventType, eventId
+    ),
+    aggregates AS (
+      SELECT
+        userId,
+        COUNT(*) AS eventCount,
+        MAX(activityAt) AS lastActivityAt
+      FROM deduplicated_events
+      GROUP BY userId
+    )
+    SELECT
+      userId,
+      eventCount AS count,
+      lastActivityAt
+    FROM aggregates
+    ORDER BY eventCount DESC, lastActivityAt ASC, userId ASC
+    LIMIT ${DASHBOARD_RANKING_LIMIT}
+  `
 
   return rows.map((row) => ({
-    userId: row.authorId,
-    count: row._count,
-    lastActivityAt: row._max.createdAt || range.end,
+    userId: row.userId,
+    count: Number(row.count),
+    lastActivityAt: row.lastActivityAt || range.end,
   }))
 }
 

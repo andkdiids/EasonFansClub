@@ -1,4 +1,11 @@
-import { validateRichPostContent } from '@/lib/rich-text'
+import { validateRichPostContent, type RichTextContent, type RichTextValidationResult } from '@/lib/rich-text'
+
+type ResolvedPostContentInput = {
+  content: string
+  richContent: RichTextContent | null
+  validation: RichTextValidationResult | null
+  usedCompatibilityMode: boolean
+}
 
 /**
  * richContent is the canonical Post body representation. The legacy content
@@ -10,7 +17,7 @@ export function resolvePostContentInput(input: {
   content: unknown
   richContent: unknown
   hasRichContent: boolean
-}) {
+}): ResolvedPostContentInput {
   const plainContent = typeof input.content === 'string' ? input.content : ''
   if (!input.hasRichContent || input.richContent === null || input.richContent === undefined) {
     return {

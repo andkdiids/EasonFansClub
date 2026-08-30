@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { Prisma } from '@prisma/client'
+import { withForumBoardDisplayName } from '@/lib/boards'
 import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
@@ -21,6 +22,7 @@ import {
   logPostRichContentCompatibilityMode,
   resolvePostContentInput,
 } from '@/lib/post-rich-content-compat'
+import { InvalidPostMusicReferenceError, validateAndNormalizePostMusicReferences } from '@/lib/post-music-references'
 import { summarizePlainText } from '@/lib/share-metadata'
 
 function stripUnsafeHtml(value: string) {
@@ -178,7 +180,7 @@ export async function GET(request: Request) {
           displayName: getPublicUserDisplayName(User),
         } : User.Profile,
       },
-      board: Board,
+      board: withForumBoardDisplayName(Board),
       content: publicModerationText(summarizePlainText(summary || content), moderationStatus),
       stickerUrl: publicImageUrl(sticker?.url),
     }))
@@ -248,16 +250,36 @@ export async function POST(request: Request) {
   if (contentInput.usedCompatibilityMode && contentInput.validation?.valid) {
     logPostRichContentCompatibilityMode('create')
   }
-  const rawContent = contentInput.validation?.valid
+  let rawContent = contentInput.validation?.valid
     ? contentInput.content
     : stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
+  let richContent = contentInput.richContent
+  if (contentInput.validation?.valid && contentInput.richContent) {
+    try {
+      const normalized = await validateAndNormalizePostMusicReferences(
+        contentInput.richContent,
+        (songIds) => prisma.musicSong.findMany({
+          where: { id: { in: songIds }, MusicAlbum: { status: 'PUBLISHED' } },
+          select: { id: true, title: true, artist: true, MusicAlbum: { select: { name: true } } },
+        }),
+      )
+      rawContent = normalized.plainText
+      richContent = normalized.richContent
+    } catch (error) {
+      if (error instanceof InvalidPostMusicReferenceError) {
+        return NextResponse.json({ message: error.message, errors: { content: '存在无效或未公开的 EasMusic 歌曲引用' } }, { status: 400 })
+      }
+      logPostCreateError('music-reference-validation', error, user.id)
+      return NextResponse.json({ message: '歌曲引用暂时无法验证，请稍后重试' }, { status: 503 })
+    }
+  }
   const rawStickerId = typeof body.stickerId === 'string' && body.stickerId ? body.stickerId.trim().slice(0, 191) : null
   const isAdmin = shouldBypassForbiddenWords(user)
   const input = {
     boardId: sanitizeText(body.boardId, 80),
     title: rawTitle,
     content: rawContent,
-    richContent: contentInput.richContent,
+    richContent,
   }
 
   try {

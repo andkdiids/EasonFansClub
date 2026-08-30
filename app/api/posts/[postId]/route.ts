@@ -12,6 +12,7 @@ import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { withForumBoardDisplayName } from '@/lib/boards'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
@@ -20,6 +21,7 @@ import {
   logPostRichContentCompatibilityMode,
   resolvePostContentInput,
 } from '@/lib/post-rich-content-compat'
+import { InvalidPostMusicReferenceError, validateAndNormalizePostMusicReferences } from '@/lib/post-music-references'
 import { validateRichPostContent } from '@/lib/rich-text'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -378,7 +380,7 @@ export async function GET(_request: Request, { params }: Params) {
             return result.valid ? result.value : null
           })(),
       author,
-      board: Board,
+      board: withForumBoardDisplayName(Board),
       media: PostMedia.map((media) => ({
         ...media,
         url: publicImageUrl(media.url) || media.url,
@@ -690,16 +692,39 @@ async function handleEditPost(
     logPostRichContentCompatibilityMode('edit', postId)
   }
   const shouldUpdateContent = hasRichContentField || hasContentField
-  const rawContent = shouldUpdateContent
+  let rawContent = shouldUpdateContent
     ? contentInput.validation?.valid
       ? contentInput.content
       : stripUnsafeHtml(sanitizeText(contentInput.content, 20000))
     : existing.content
-  const nextRichContent = hasRichContentField
-    ? contentInput.richContent
-    : hasContentField
-      ? null
-      : existing.richContent
+  let nextRichContent: import('@/lib/rich-text').RichTextContent | null
+  if (hasRichContentField) {
+    nextRichContent = contentInput.richContent
+  } else if (hasContentField) {
+    nextRichContent = null
+  } else {
+    const existingRichContentValidation = validateRichPostContent(existing.richContent)
+    nextRichContent = existingRichContentValidation.valid ? existingRichContentValidation.value : null
+  }
+  if (shouldUpdateContent && contentInput.validation?.valid && nextRichContent) {
+    try {
+      const normalized = await validateAndNormalizePostMusicReferences(
+        nextRichContent,
+        (songIds) => prisma.musicSong.findMany({
+          where: { id: { in: songIds }, MusicAlbum: { status: 'PUBLISHED' } },
+          select: { id: true, title: true, artist: true, MusicAlbum: { select: { name: true } } },
+        }),
+      )
+      rawContent = normalized.plainText
+      nextRichContent = normalized.richContent
+    } catch (error) {
+      if (error instanceof InvalidPostMusicReferenceError) {
+        return NextResponse.json({ message: error.message, errors: { content: '存在无效或未公开的 EasMusic 歌曲引用' } }, { status: 400 })
+      }
+      logPostEditError(error, postId, user.id, 'edit-music-reference-validation')
+      return NextResponse.json({ message: '歌曲引用暂时无法验证，请稍后重试' }, { status: 503 })
+    }
+  }
   const hasSticker = Boolean(existing.stickerId)
   const nextBoardId = typeof body.boardId === 'string' ? sanitizeText(body.boardId, 80) : existing.boardId
 

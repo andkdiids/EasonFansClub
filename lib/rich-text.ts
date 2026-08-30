@@ -35,6 +35,17 @@ export type RichTextMark =
 export type RichTextInlineNode =
   | { type: 'text'; text: string; marks?: RichTextMark[] }
   | { type: 'hardBreak' }
+  | RichTextMusicReferenceNode
+
+export type RichTextMusicReferenceNode = {
+  type: 'musicReference'
+  attrs: {
+    songId: string
+    title?: string
+    artist?: string
+    album?: string
+  }
+}
 
 export type RichTextParagraphNode = {
   type: 'paragraph'
@@ -235,6 +246,30 @@ function normalizeInlineNode(value: unknown, state: ValidationState, depth: numb
     if (!hasOnlyKeys(value, ['type'])) fail(state, path + ' has unknown attributes')
     return { type: 'hardBreak' }
   }
+  if (value.type === 'musicReference') {
+    if (!hasOnlyKeys(value, ['type', 'attrs']) || !isRecord(value.attrs) || !hasOnlyKeys(value.attrs, ['songId', 'title', 'artist', 'album'])) {
+      fail(state, path + ' has invalid music reference attributes')
+      return null
+    }
+    const attrs = value.attrs
+    const songId = typeof attrs.songId === 'string' ? attrs.songId.trim() : ''
+    if (!songId || songId.length > 191 || /[\u0000-\u001f\u007f\s]/u.test(songId)) {
+      fail(state, path + '.attrs.songId is invalid')
+      return null
+    }
+    const metadata: RichTextMusicReferenceNode['attrs'] = { songId }
+    for (const key of ['title', 'artist', 'album'] as const) {
+      const valueForKey = attrs[key]
+      if (valueForKey === undefined) continue
+      if (typeof valueForKey !== 'string' || valueForKey.length > 200) {
+        fail(state, path + '.attrs.' + key + ' is invalid')
+        return null
+      }
+      const trimmed = valueForKey.trim()
+      if (trimmed) metadata[key] = trimmed
+    }
+    return { type: 'musicReference', attrs: metadata }
+  }
   if (value.type !== 'text' || typeof value.text !== 'string' || value.text.length === 0) {
     fail(state, path + ' uses an unsupported inline node')
     return null
@@ -393,7 +428,11 @@ function normalizeBlockNode(value: unknown, state: ValidationState, depth: numbe
 }
 
 function extractInlineText(content: RichTextInlineNode[] | undefined) {
-  return (content || []).map((node) => node.type === 'hardBreak' ? '\n' : node.text).join('')
+  return (content || []).map((node) => {
+    if (node.type === 'hardBreak') return '\n'
+    if (node.type === 'musicReference') return node.attrs.title || ''
+    return node.text
+  }).join('')
 }
 
 function extractBlockText(block: RichTextBlockNode): string {
@@ -440,6 +479,76 @@ export function validateRichPostContent(value: unknown): RichTextValidationResul
 export function extractPlainText(value: unknown) {
   const result = validateRichPostContent(value)
   return result.valid ? result.plainText : ''
+}
+
+export function collectMusicReferenceSongIds(value: RichTextContent) {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const visitInline = (node: RichTextInlineNode) => {
+    if (node.type === 'musicReference' && !seen.has(node.attrs.songId)) {
+      seen.add(node.attrs.songId)
+      ids.push(node.attrs.songId)
+    }
+  }
+  const visitBlock = (block: RichTextBlockNode): void => {
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      block.content?.forEach(visitInline)
+      return
+    }
+    if (block.type === 'listItem' || block.type === 'blockquote') {
+      block.content?.forEach(visitBlock)
+      return
+    }
+    if (block.type === 'bulletList' || block.type === 'orderedList') {
+      block.content?.forEach(visitBlock)
+    }
+  }
+  value.content.forEach(visitBlock)
+  return ids
+}
+
+export type RichTextMusicReferenceMetadata = {
+  title: string
+  artist: string
+  album: string
+}
+
+/**
+ * Replace only the display snapshot of a validated music reference. The
+ * songId remains the canonical identity and is validated against MusicSong by
+ * the post API before this helper is used for persistence.
+ */
+export function enrichMusicReferenceMetadata(
+  value: RichTextContent,
+  metadataBySongId: ReadonlyMap<string, RichTextMusicReferenceMetadata>,
+): RichTextContent {
+  const mapInline = (node: RichTextInlineNode): RichTextInlineNode => {
+    if (node.type !== 'musicReference') return node
+    const metadata = metadataBySongId.get(node.attrs.songId)
+    if (!metadata) return node
+    return {
+      type: 'musicReference',
+      attrs: {
+        songId: node.attrs.songId,
+        title: metadata.title,
+        artist: metadata.artist,
+        album: metadata.album,
+      },
+    }
+  }
+  const mapBlock = (block: RichTextBlockNode): RichTextBlockNode => {
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      return block.content ? { ...block, content: block.content.map(mapInline) } : block
+    }
+    if (block.type === 'listItem' || block.type === 'blockquote') {
+      return block.content ? { ...block, content: block.content.map(mapBlock) } : block
+    }
+    if (block.type === 'bulletList' || block.type === 'orderedList') {
+      return block.content ? { ...block, content: block.content.map((item) => mapBlock(item) as RichTextListItemNode) } : block
+    }
+    return block
+  }
+  return { type: 'doc', content: value.content.map(mapBlock) }
 }
 
 export function plainTextToRichContent(value: string): RichTextContent {

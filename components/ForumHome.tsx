@@ -21,8 +21,9 @@ const sortOptions: Array<[ForumSort, string]> = [
 const previewData: ForumFeedResponse = {
   boards: [
     { id: 'all-preview', name: '公告区', slug: 'announcements', description: null, postCount: 8, isAnnouncement: true },
-    { id: 'chat-preview', name: '日常吹水', slug: 'daily-chat', description: null, postCount: 36, isAnnouncement: false },
+    { id: 'chat-preview', name: '吹水', slug: 'daily-chat', description: null, postCount: 36, isAnnouncement: false },
     { id: 'concert-preview', name: '演唱会', slug: 'concert', description: null, postCount: 18, isAnnouncement: false },
+    { id: 'bard-preview', name: '吟游诗人', slug: 'bard', description: null, postCount: 0, isAnnouncement: false },
   ],
   selectedBoard: null,
   posts: [],

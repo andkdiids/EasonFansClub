@@ -308,6 +308,38 @@ test('server renderer keeps CJK, traditional Chinese, Cantonese, emoji, and symb
   assert.ok(result.body.length > 1000)
 })
 
+test('server renderer uses pinned emoji image assets when they are available', async () => {
+  const emojiSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="30" fill="#ffd166"/></svg>')
+  const attempts: string[] = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input) => {
+    const url = String(input)
+    attempts.push(url)
+    return new Response(emojiSvg, { status: 200, headers: { 'content-type': 'image/svg+xml' } })
+  }) as typeof fetch
+  try {
+    const result = await renderShareCardPngWithInfo({
+      ...baseData,
+      contentId: 'emoji-image-render-fixture',
+      title: '标题😀🔥👍',
+      description: '摘要：今天真的很开心😀',
+      author: 'Talk👨‍👩‍👧‍👦',
+      image: null,
+      imageWidth: null,
+      imageHeight: null,
+    })
+    const metadata = await sharp(result.body).metadata()
+    assert.equal(metadata.format, 'png')
+    assert.equal(metadata.width, SHARE_CARD_WIDTH)
+    assert.ok(attempts.some((url) => url.endsWith('/1f600.svg')))
+    assert.ok(attempts.some((url) => url.endsWith('/1f525.svg')))
+    assert.ok(attempts.some((url) => url.endsWith('/1f44d.svg')))
+    assert.ok(attempts.some((url) => url.endsWith('/1f468-200d-1f469-200d-1f467-200d-1f466.svg')))
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('post/activity records flow through the public service into one card payload', async () => {
   const originalPostFindFirst = prisma.post.findFirst
   const originalActivityFindFirst = prisma.activity.findFirst

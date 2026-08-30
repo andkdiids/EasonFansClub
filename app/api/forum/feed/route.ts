@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { clampForumPage, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
@@ -31,6 +32,8 @@ export async function GET(request: Request) {
   const selectedBoard = boardValue
     ? boards.find((board) => board.slug === boardValue || board.id === boardValue) || null
     : null
+  const publicBoards = normalizeForumBoards(boards)
+  const publicSelectedBoard = selectedBoard ? withForumBoardDisplayName(selectedBoard) : null
 
   const where: Prisma.PostWhereInput = {
     ...publicPostWhere,
@@ -79,8 +82,8 @@ export async function GET(request: Request) {
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
   const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.User.id))
   return NextResponse.json({
-    boards: boards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
-    selectedBoard: selectedBoard ? { ...selectedBoard, isAnnouncement: announcement } : null,
+    boards: publicBoards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
+    selectedBoard: publicSelectedBoard ? { ...publicSelectedBoard, isAnnouncement: announcement } : null,
     posts: rows.map(({ Like, User, Board, ...post }) => ({
       ...post,
       title: publicModerationText(post.title, post.moderationStatus),
@@ -95,7 +98,7 @@ export async function GET(request: Request) {
           displayName: getPublicUserDisplayName(User),
         } : User.Profile,
       },
-      board: Board,
+      board: withForumBoardDisplayName(Board),
       likedByMe: Like.length > 0,
     })),
     total,

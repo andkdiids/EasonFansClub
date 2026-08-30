@@ -17,6 +17,62 @@ function source(path: string) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 }
 
+type CommentReplyFixture = {
+  id: string
+  postId: string
+  authorId: string
+  parentId: string | null
+  createdAt: Date
+}
+
+function countEffectiveCommentEvents(
+  replies: ReadonlyArray<CommentReplyFixture>,
+  start = new Date('2026-08-24T00:00:00.000Z'),
+  endExclusive = new Date('2026-09-01T00:00:00.000Z'),
+) {
+  const replyById = new Map(replies.map((reply) => [reply.id, reply]))
+  const eventKeys = new Set<string>()
+  const counts = new Map<string, number>()
+
+  for (const reply of replies) {
+    if (reply.createdAt < start || reply.createdAt >= endExclusive) continue
+
+    let eventKey: string
+    if (reply.parentId === null) {
+      eventKey = `${reply.authorId}:post:${reply.postId}`
+    } else {
+      let root: CommentReplyFixture | undefined = reply
+      const visited = new Set<string>()
+      while (root?.parentId) {
+        if (visited.has(root.id)) {
+          root = undefined
+          break
+        }
+        visited.add(root.id)
+        root = replyById.get(root.parentId)
+      }
+      if (!root || root.authorId === reply.authorId) continue
+      eventKey = `${reply.authorId}:thread:${root.id}`
+    }
+
+    if (eventKeys.has(eventKey)) continue
+    eventKeys.add(eventKey)
+    counts.set(reply.authorId, (counts.get(reply.authorId) || 0) + 1)
+  }
+
+  return Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right)))
+}
+
+function fixture(
+  id: string,
+  authorId: string,
+  postId: string,
+  parentId: string | null,
+  createdAt: string,
+): CommentReplyFixture {
+  return { id, authorId, postId, parentId, createdAt: new Date(createdAt) }
+}
+
 test('本周从北京时间周一 00:00 开始，不是最近 7 天', () => {
   const range = getDashboardPeriodRange('week', new Date('2026-08-26T02:30:00.000Z'))
   assert.equal(range.start.toISOString(), '2026-08-23T16:00:00.000Z')
@@ -134,6 +190,45 @@ test('统计范围使用 [start, endExclusive) 边界，恰好落在结束边界
   assert.equal(atEnd.getTime() < range.endExclusive.getTime(), false)
 })
 
+test('评论榜按帖子一级评论和他人 root 线程在统计窗口内去重', () => {
+  const replies = [
+    fixture('a-root-1', 'user-a', 'post-a', null, '2026-08-25T01:00:00.000Z'),
+    fixture('a-root-2', 'user-a', 'post-a', null, '2026-08-25T02:00:00.000Z'),
+    fixture('a-root-3', 'user-a', 'post-a', null, '2026-08-25T03:00:00.000Z'),
+    fixture('a-post-b', 'user-a', 'post-b', null, '2026-08-25T04:00:00.000Z'),
+    fixture('b-in-a-thread', 'user-b', 'post-a', 'a-root-1', '2026-08-25T05:00:00.000Z'),
+    fixture('a-replies-back', 'user-a', 'post-a', 'b-in-a-thread', '2026-08-25T06:00:00.000Z'),
+    fixture('b-continues-thread-1', 'user-b', 'post-a', 'a-replies-back', '2026-08-25T07:00:00.000Z'),
+    fixture('b-continues-thread-2', 'user-b', 'post-a', 'b-continues-thread-1', '2026-08-25T07:01:00.000Z'),
+    fixture('b-continues-thread-3', 'user-b', 'post-a', 'b-continues-thread-2', '2026-08-25T07:02:00.000Z'),
+    fixture('b-continues-thread-4', 'user-b', 'post-a', 'b-continues-thread-3', '2026-08-25T07:03:00.000Z'),
+    fixture('b-continues-thread-5', 'user-b', 'post-a', 'b-continues-thread-4', '2026-08-25T07:04:00.000Z'),
+    fixture('c-root', 'user-c', 'post-a', null, '2026-08-25T08:00:00.000Z'),
+    fixture('b-joins-second-thread', 'user-b', 'post-a', 'c-root', '2026-08-25T09:00:00.000Z'),
+    fixture('b-continues-second-thread', 'user-b', 'post-a', 'b-joins-second-thread', '2026-08-25T10:00:00.000Z'),
+  ]
+
+  assert.deepEqual(countEffectiveCommentEvents(replies), {
+    'user-a': 2,
+    'user-b': 2,
+    'user-c': 1,
+  })
+})
+
+test('评论榜去重按统计窗口隔离，窗口外历史行为不会永久占用资格', () => {
+  const replies = [
+    fixture('old-top-level', 'user-a', 'post-a', null, '2026-08-01T01:00:00.000Z'),
+    fixture('current-top-level', 'user-a', 'post-a', null, '2026-08-25T01:00:00.000Z'),
+    fixture('old-root', 'user-b', 'post-b', null, '2026-08-01T02:00:00.000Z'),
+    fixture('current-thread-entry', 'user-a', 'post-b', 'old-root', '2026-08-25T02:00:00.000Z'),
+  ]
+
+  assert.deepEqual(
+    countEffectiveCommentEvents(replies, new Date('2026-08-24T00:00:00.000Z'), new Date('2026-09-01T00:00:00.000Z')),
+    { 'user-a': 2 },
+  )
+})
+
 test('同数量榜单按最后一次行为时间升序，再按 userId 稳定排序，并限制 TOP 10', () => {
   const rows = Array.from({ length: 12 }, (_, index) => ({
     userId: `user-${String(12 - index).padStart(2, '0')}`,
@@ -158,7 +253,7 @@ test('统计 service 使用真实模型、公开状态和删除过滤', () => {
   const service = source('lib/admin-dashboard-rankings.ts')
   const moderation = source('lib/post-moderation.ts')
   assert.match(service, /prisma\.post\.groupBy/)
-  assert.match(service, /prisma\.reply\.groupBy/)
+  assert.match(service, /prisma\.\$queryRaw<CommentRankingQueryRow\[\]>/)
   assert.match(service, /prisma\.clinicConsultation\.groupBy/)
   assert.match(service, /publicPostWhere/)
   assert.match(moderation, /isDeleted: false[\s\S]*status: 'PUBLISHED'/)
@@ -174,6 +269,22 @@ test('统计 service 使用真实模型、公开状态和删除过滤', () => {
   assert.match(service, /\{ authorId: 'asc' \}/)
 })
 
+test('评论榜在数据库内解析 root、按有效事件去重并限制 TOP 10', () => {
+  const service = source('lib/admin-dashboard-rankings.ts')
+  assert.match(service, /WITH RECURSIVE/)
+  assert.match(service, /candidate_replies/)
+  assert.match(service, /reply_ancestors/)
+  assert.match(service, /resolved_roots/)
+  assert.match(service, /c\.candidateParentId IS NULL/)
+  assert.match(service, /r\.rootAuthorId <> r\.candidateAuthorId/)
+  assert.match(service, /GROUP BY userId, eventType, eventId/)
+  assert.match(service, /r\.createdAt >= \$\{range\.start\}/)
+  assert.match(service, /r\.createdAt < \$\{range\.endExclusive\}/)
+  assert.match(service, /LIMIT \$\{DASHBOARD_RANKING_LIMIT\}/)
+  assert.doesNotMatch(service, /prisma\.reply\.groupBy/)
+  assert.doesNotMatch(service, /reply\.(findMany|findUnique)/)
+})
+
 test('三个排行榜在五个周期中复用同一个 resolved range，并由数据库聚合取 TOP 10', () => {
   const service = source('lib/admin-dashboard-rankings.ts')
   for (const period of DASHBOARD_RANKING_PERIODS) {
@@ -187,7 +298,9 @@ test('三个排行榜在五个周期中复用同一个 resolved range，并由�
   }
   assert.match(service, /const range = typeof input === 'string'/)
   assert.match(service, /const \[postAggregates, commentAggregates, consultationAggregates\] = await Promise\.all\(/)
-  assert.equal((service.match(/createdAt: \{ gte: range\.start, lt: range\.endExclusive \}/g) || []).length, 3)
+  assert.equal((service.match(/createdAt: \{ gte: range\.start, lt: range\.endExclusive \}/g) || []).length, 2)
+  assert.match(service, /r\.createdAt >= \$\{range\.start\}/)
+  assert.match(service, /r\.createdAt < \$\{range\.endExclusive\}/)
   assert.match(service, /prisma\.user\.findMany/)
   assert.doesNotMatch(service, /prisma\.user\.findUnique/)
 })
@@ -242,4 +355,6 @@ test('数据面板统一切换周期、三个榜单一起请求，并保留加�
   assert.match(client, /<SafeAvatar/)
   assert.match(client, /flex-wrap/)
   assert.match(client, /lg:grid-cols-3/)
+  assert.match(client, /统计有效评论参与/)
+  assert.doesNotMatch(client, /统计有效帖子下的评论与回复/)
 })

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
+import { withForumBoardDisplayName } from '@/lib/boards'
 import { safeDb } from '@/lib/db-timeout'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -12,6 +13,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { buildProfilePostWhere } from '@/lib/post-moderation'
 import { postContentPlainText } from '@/lib/share-metadata'
+import { PROFILE_POST_GROUP_UNGROUPED } from '@/lib/profile-post-groups'
 import { getProfileVisibility, isProfileModuleVisible, PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -45,7 +47,22 @@ export async function GET(request: Request, context: RouteContext) {
 
   if (typedModuleKey === 'posts') {
     const canViewPendingPosts = Boolean(viewer && (viewer.id === target.id || await hasAdminPermission(viewer, 'post_manage')))
+    const requestedGroupId = searchParams.get('groupId')
+    const groups = await safeDb(
+      'userModules.postGroups',
+      prisma.userPostGroup.findMany({
+        where: { userId: target.id },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, name: true, sortOrder: true },
+      }),
+      [],
+    )
+    if (requestedGroupId && requestedGroupId !== PROFILE_POST_GROUP_UNGROUPED && !groups.some((group) => group.id === requestedGroupId)) {
+      return NextResponse.json({ items: [], pagination: getProfileRecordPagination(0, page), groups })
+    }
     const postWhere = buildProfilePostWhere(target.id, canViewPendingPosts)
+    if (requestedGroupId === PROFILE_POST_GROUP_UNGROUPED) Object.assign(postWhere, { userPostGroupId: null })
+    else if (requestedGroupId) Object.assign(postWhere, { userPostGroupId: requestedGroupId })
     const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
     const pagination = getProfileRecordPagination(total, page)
     const posts = await safeDb(
@@ -68,6 +85,7 @@ export async function GET(request: Request, context: RouteContext) {
           likeCount: true,
           viewCount: true,
           createdAt: true,
+          userPostGroupId: true,
           Board: { select: { name: true, slug: true } },
         },
       }),
@@ -78,10 +96,11 @@ export async function GET(request: Request, context: RouteContext) {
         ...post,
         title: publicModerationText(post.title, post.moderationStatus),
         content: publicModerationText(postContentPlainText(post.content, richContent), post.moderationStatus),
-        board: Board,
+        board: withForumBoardDisplayName(Board),
         isProfilePinned: Boolean(profilePinnedAt),
       })),
       pagination,
+      groups,
     })
   }
 

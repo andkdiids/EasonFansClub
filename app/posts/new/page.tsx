@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { PostCreateForm } from '@/components/PostCreateForm'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { normalizeForumBoards } from '@/lib/boards'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -28,7 +29,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
         <div className="mb-6">
           <h1 className="mt-2 text-4xl font-black text-brand-950">发布帖子</h1>
         </div>
-        <PostCreateForm boards={boards} initialBoardSlug={query.board} />
+        <PostCreateForm boards={normalizeForumBoards(boards)} initialBoardSlug={query.board} />
       </main>
     </>
   )

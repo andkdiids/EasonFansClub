@@ -4,9 +4,8 @@ import { NextResponse } from 'next/server'
 import {
   getHomeActivities,
   getHomeAlbums,
-  getHomeConcerts,
+  getHomeAnywhereDoorLatest,
   getHomeDailyMusicRecommendation,
-  getHomePosts,
   getHomeSiteStats,
   getHomeTodayEvents,
   getHomeUserStats,
@@ -24,19 +23,18 @@ export async function GET() {
     const user = await getCurrentUser()
     const existingAnonymousId = cookieStore.get(DAILY_MUSIC_ANONYMOUS_COOKIE)?.value
     const anonymousId = user ? undefined : existingAnonymousId || randomUUID()
-    const [posts, activities, concerts, albums, stats, dailyMusic, siteStats, todayEvents] = await Promise.all([
-      getHomePosts(user?.id),
+    const [activities, albums, stats, dailyMusic, siteStats, todayEvents, anywhereDoor] = await Promise.all([
       getHomeActivities(),
-      getHomeConcerts(),
       getHomeAlbums(user?.id),
       getHomeUserStats(user?.id),
       getHomeDailyMusicRecommendation(user?.id, anonymousId),
       getHomeSiteStats(),
       getHomeTodayEvents(),
+      getHomeAnywhereDoorLatest(),
     ])
 
     const growth = stats ? await getGrowthSummary(stats.experience) : null
-    const response = NextResponse.json({ posts, messages: [], activities, concerts, tracks: [], albums, stats: stats && growth ? { ...stats, ...growth } : stats, dailyMusic, siteStats, todayEvents, entertainmentRanking: null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
+    const response = NextResponse.json({ messages: [], activities, albums, stats: stats && growth ? { ...stats, ...growth } : stats, dailyMusic, siteStats, todayEvents, anywhereDoor, entertainmentRanking: null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
     if (!user && anonymousId && !existingAnonymousId) {
       response.cookies.set(DAILY_MUSIC_ANONYMOUS_COOKIE, anonymousId, {
         httpOnly: true,
@@ -50,10 +48,10 @@ export async function GET() {
   } catch (error) {
     console.error('[api/home] prisma module loading failed', {
       queries: [
-        { model: 'Post', query: 'findMany', feature: 'home.posts' },
         { model: 'Activity', query: 'findMany', feature: 'home.activities' },
         { model: 'MusicAlbum', query: 'findMany', feature: 'home.albums' },
         { model: 'User', query: 'findUnique', feature: 'home.stats' },
+        { model: 'SocialPost', query: 'findFirst', feature: 'home.anywhereDoor' },
       ],
     }, error)
     throw error

@@ -1,5 +1,6 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
+import { getForumBoardDisplayName } from '@/lib/boards'
 import { publicImageUrl } from '@/lib/images'
 import { POST_REVIEW_PAGE_SIZE } from '@/lib/post-moderation'
 import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds } from '@/lib/post-moderation-history'
@@ -29,7 +30,7 @@ export default async function AdminPostReviewPage() {
         isFeatured: true,
         User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
         ReviewedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
-        Board: { select: { name: true } },
+        Board: { select: { name: true, slug: true } },
         PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, thumbnail: true } },
       },
     })
@@ -42,6 +43,7 @@ export default async function AdminPostReviewPage() {
   const historyByPostId = await loadPostModerationHistoryByPostIds(posts.map((post) => post.id), 'admin.posts.review.page')
   const initialPosts: ReviewPost[] = posts.map((post) => ({
     ...post,
+    Board: { name: getForumBoardDisplayName(post.Board) },
     createdAt: post.createdAt.toISOString(),
     reviewedAt: post.reviewedAt?.toISOString() || null,
     ReviewedBy: post.ReviewedBy

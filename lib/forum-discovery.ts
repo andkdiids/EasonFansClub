@@ -1,3 +1,5 @@
+import { getForumBoardDisplayName } from '@/lib/boards'
+
 export const FORUM_DISCOVERY_PAGE_SIZE = 12
 export const FORUM_DISCOVERY_MIN_PAGE_SIZE = 8
 export const FORUM_DISCOVERY_MAX_PAGE_SIZE = 20
@@ -17,7 +19,7 @@ export function buildForumDiscoveryTabs(boards: ReadonlyArray<{ slug: string; na
     { value: 'recommend', label: '推荐' },
     { value: 'latest', label: '最新' },
     { value: 'hot', label: '热门' },
-    ...otherBoards.map((board) => ({ value: board.slug, label: board.name })),
+    ...otherBoards.map((board) => ({ value: board.slug, label: getForumBoardDisplayName(board) })),
   ]
 }
 

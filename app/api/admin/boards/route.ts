@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { publicImageUrl, storedImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireAdmin, sanitizeText } from '@/lib/security'
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
   const hasMore = boards.length > limit
 
   const visibleBoards = hasMore ? boards.slice(0, limit) : boards
-  return NextResponse.json({ boards: visibleBoards.map((board) => ({ ...board, coverUrl: publicImageUrl(board.coverUrl) })), page, limit, hasMore })
+  return NextResponse.json({ boards: normalizeForumBoards(visibleBoards).map((board) => ({ ...board, coverUrl: publicImageUrl(board.coverUrl) })), page, limit, hasMore })
 }
 
 export async function POST(request: Request) {
@@ -94,5 +95,5 @@ export async function POST(request: Request) {
     },
   })
 
-  return NextResponse.json({ board: { ...board, coverUrl: publicImageUrl(board.coverUrl) } }, { status: 201 })
+  return NextResponse.json({ board: { ...withForumBoardDisplayName(board), coverUrl: publicImageUrl(board.coverUrl) } }, { status: 201 })
 }

@@ -9,7 +9,8 @@ import Paragraph from '@tiptap/extension-paragraph'
 import Placeholder from '@tiptap/extension-placeholder'
 import Text from '@tiptap/extension-text'
 import { EditorContent, useEditor } from '@tiptap/react'
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type MouseEvent } from 'react'
+import { MusicReferencePicker, type MusicReferenceSong } from '@/components/posts/MusicReferencePicker'
 import {
   RICH_TEXT_COLOR_TOKENS,
   RICH_TEXT_FONT_SIZE_TOKENS,
@@ -291,6 +292,50 @@ const richCodeBlock = TiptapNode.create({
   },
 })
 
+const richMusicReference = TiptapNode.create({
+  name: 'musicReference',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      songId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-music-song-id'),
+        renderHTML: (attributes: { songId?: unknown }) => typeof attributes.songId === 'string' && attributes.songId ? { 'data-music-song-id': attributes.songId } : {},
+      },
+      title: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-music-title') || '',
+        renderHTML: (attributes: { title?: unknown }) => typeof attributes.title === 'string' && attributes.title ? { 'data-music-title': attributes.title } : {},
+      },
+      artist: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-music-artist') || '',
+        renderHTML: (attributes: { artist?: unknown }) => typeof attributes.artist === 'string' && attributes.artist ? { 'data-music-artist': attributes.artist } : {},
+      },
+      album: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-music-album') || '',
+        renderHTML: (attributes: { album?: unknown }) => typeof attributes.album === 'string' && attributes.album ? { 'data-music-album': attributes.album } : {},
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-music-reference]' }]
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const title = typeof node.attrs.title === 'string' && node.attrs.title ? node.attrs.title : '歌曲引用'
+    return ['span', mergeAttributes(HTMLAttributes, {
+      'data-music-reference': 'true',
+      class: 'rich-text-music-reference',
+      contenteditable: 'false',
+      'aria-label': `歌曲引用：${title}`,
+    }), `♪ ${title}`]
+  },
+})
+
 const richTextExtensions = [
   Document,
   Paragraph,
@@ -312,6 +357,7 @@ const richTextExtensions = [
   Placeholder.configure({ placeholder: '分享你的想法...' }),
   RichColorMark(),
   RichFontSizeMark(),
+  richMusicReference,
 ]
 
 function sanitizePastedHtml(html: string) {
@@ -337,6 +383,20 @@ function sanitizePastedHtml(html: string) {
       return href ? '<a href="' + escapeAttribute(href) + '">' + children + '</a>' : children
     }
     if (tag === 'span') {
+      const songId = element.getAttribute('data-music-song-id')
+      if (element.hasAttribute('data-music-reference') && songId) {
+        const title = (element.getAttribute('data-music-title') || element.textContent || '').replace(/^♪\s*/u, '').trim().slice(0, 200)
+        const artist = (element.getAttribute('data-music-artist') || '').trim().slice(0, 200)
+        const album = (element.getAttribute('data-music-album') || '').trim().slice(0, 200)
+        const musicAttributes = [
+          'data-music-reference="true"',
+          'data-music-song-id="' + escapeAttribute(songId) + '"',
+          title ? 'data-music-title="' + escapeAttribute(title) + '"' : '',
+          artist ? 'data-music-artist="' + escapeAttribute(artist) + '"' : '',
+          album ? 'data-music-album="' + escapeAttribute(album) + '"' : '',
+        ].filter(Boolean)
+        return '<span ' + musicAttributes.join(' ') + '>♪ ' + escapeText(title || '歌曲引用') + '</span>'
+      }
       const attributes = [
         isRichTextColorToken(element.getAttribute('data-rich-color')) ? 'data-rich-color="' + element.getAttribute('data-rich-color') + '"' : '',
         isRichTextFontSizeToken(element.getAttribute('data-rich-size')) ? 'data-rich-size="' + element.getAttribute('data-rich-size') + '"' : '',
@@ -373,13 +433,18 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   placeholder = '分享你的想法...',
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const initialDocument = useMemo(
-    () => initialEditorContent(initialRichContent, initialContent),
-    [initialContent, initialRichContent],
-  )
+  const savedSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const [initialDocument] = useState(() => initialEditorContent(initialRichContent, initialContent))
   const [openMenu, setOpenMenu] = useState<'block' | 'size' | 'color' | null>(null)
+  const [musicPickerOpen, setMusicPickerOpen] = useState(false)
   const [toolbarNotice, setToolbarNotice] = useState('')
   const [, setToolbarVersion] = useState(0)
+
+  function rememberSelection(currentEditor: Editor) {
+    const { from, to } = currentEditor.state.selection
+    savedSelectionRef.current = { from, to }
+  }
+
   const editor = useEditor({
     extensions: richTextExtensions,
     content: initialDocument,
@@ -392,8 +457,15 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       },
       transformPastedHTML: sanitizePastedHtml,
     },
-    onCreate: ({ editor: createdEditor }) => emitEditorChange(createdEditor, onChange),
-    onUpdate: ({ editor: updatedEditor }) => emitEditorChange(updatedEditor, onChange),
+    onCreate: ({ editor: createdEditor }) => {
+      rememberSelection(createdEditor)
+      emitEditorChange(createdEditor, onChange)
+    },
+    onUpdate: ({ editor: updatedEditor }) => {
+      rememberSelection(updatedEditor)
+      emitEditorChange(updatedEditor, onChange)
+    },
+    onSelectionUpdate: ({ editor: selectedEditor }) => rememberSelection(selectedEditor),
     onTransaction: () => setToolbarVersion((version) => version + 1),
   })
 
@@ -410,7 +482,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     focus: () => editor?.chain().focus().run(),
     insertText: (text: string) => {
       if (!editor || !text) return
+      const selection = savedSelectionRef.current
+      if (selection) editor.commands.setTextSelection(selection)
       editor.chain().focus().insertContent(text).run()
+      rememberSelection(editor)
     },
   }), [editor])
 
@@ -425,31 +500,54 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const currentColor = isRichTextColorToken(activeColor) && activeColor !== 'default' ? activeColor : null
   const activeHeading = [1, 2, 3].find((level) => activeEditor.isActive('heading', { level })) as 1 | 2 | 3 | undefined
   const blockLabel = activeHeading ? blockLabels[activeHeading] : '正文'
-  const stopToolbarBlur = (event: MouseEvent<HTMLButtonElement>) => event.preventDefault()
+  const stopToolbarBlur = (event: MouseEvent<HTMLButtonElement>) => {
+    rememberSelection(activeEditor)
+    event.preventDefault()
+  }
+
+  function restoreSavedSelection() {
+    const selection = savedSelectionRef.current
+    if (!selection) return
+    const maxPosition = activeEditor.state.doc.content.size
+    const from = Math.max(1, Math.min(selection.from, maxPosition))
+    const to = Math.max(from, Math.min(selection.to, maxPosition))
+    activeEditor.commands.setTextSelection({ from, to })
+  }
+
+  function startCommand() {
+    restoreSavedSelection()
+    return activeEditor.chain().focus()
+  }
+
+  function toggleToolbarMenu(menu: 'block' | 'size' | 'color') {
+    rememberSelection(activeEditor)
+    setOpenMenu((current) => current === menu ? null : menu)
+  }
 
   function applySize(token: RichTextFontSizeToken) {
-    activeEditor.chain().focus().setMark('fontSize', { token }).run()
+    startCommand().setMark('fontSize', { token }).run()
     setOpenMenu(null)
   }
 
   function applyColor(token: RichTextColorToken) {
-    if (token === 'default') activeEditor.chain().focus().unsetMark('textColor').run()
-    else activeEditor.chain().focus().setMark('textColor', { token }).run()
+    if (token === 'default') startCommand().unsetMark('textColor').run()
+    else startCommand().setMark('textColor', { token }).run()
     setOpenMenu(null)
   }
 
   function applyBlock(level: 'paragraph' | 1 | 2 | 3) {
-    if (level === 'paragraph') activeEditor.chain().focus().setNode('paragraph').run()
-    else activeEditor.chain().focus().setNode('heading', { level }).run()
+    if (level === 'paragraph') startCommand().setNode('paragraph').run()
+    else startCommand().setNode('heading', { level }).run()
     setOpenMenu(null)
   }
 
   function applyLink() {
+    rememberSelection(activeEditor)
     const currentHref = activeEditor.getAttributes('link').href
     const input = window.prompt('链接地址', typeof currentHref === 'string' ? currentHref : '')
     if (input === null) return
     if (!input.trim()) {
-      activeEditor.chain().focus().unsetMark('link').run()
+      startCommand().unsetMark('link').run()
       setToolbarNotice('')
       return
     }
@@ -458,13 +556,30 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       setToolbarNotice('链接地址无效或不安全')
       return
     }
-    activeEditor.chain().focus().setMark('link', { href }).run()
+    startCommand().setMark('link', { href }).run()
     setToolbarNotice('')
   }
 
   function clearFormatting() {
-    activeEditor.chain().focus().unsetAllMarks().setNode('paragraph').run()
+    startCommand().unsetAllMarks().setNode('paragraph').run()
     setOpenMenu(null)
+  }
+
+  function insertMusicReference(song: MusicReferenceSong) {
+    startCommand()
+      .insertContent({
+        type: 'musicReference',
+        attrs: {
+          songId: song.id,
+          title: song.title,
+          artist: song.artist || song.album.artist || '',
+          album: song.album.name,
+        },
+      })
+      .insertContent(' ')
+      .run()
+    rememberSelection(activeEditor)
+    setMusicPickerOpen(false)
   }
 
   return (
@@ -477,7 +592,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             aria-haspopup="menu"
             aria-expanded={openMenu === 'block'}
             onMouseDown={stopToolbarBlur}
-            onClick={() => setOpenMenu(openMenu === 'block' ? null : 'block')}
+            onClick={() => toggleToolbarMenu('block')}
           >
             {blockLabel}<span aria-hidden="true">⌄</span>
           </button>
@@ -510,7 +625,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="加粗"
           aria-pressed={activeEditor.isActive('bold')}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().toggleBold().run()}
+          onClick={() => startCommand().toggleBold().run()}
         >
           <strong>B</strong>
         </button>
@@ -520,7 +635,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="斜体"
           aria-pressed={activeEditor.isActive('italic')}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().toggleMark('italic').run()}
+          onClick={() => startCommand().toggleMark('italic').run()}
         >
           <em>I</em>
         </button>
@@ -530,7 +645,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="删除线"
           aria-pressed={activeEditor.isActive('strike')}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().toggleMark('strike').run()}
+          onClick={() => startCommand().toggleMark('strike').run()}
         >
           <s>S</s>
         </button>
@@ -541,7 +656,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="无序列表"
           aria-pressed={activeEditor.isActive('bulletList')}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().toggleList('bulletList', 'listItem').run()}
+          onClick={() => startCommand().toggleList('bulletList', 'listItem').run()}
         >
           • 列表
         </button>
@@ -551,7 +666,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="有序列表"
           aria-pressed={activeEditor.isActive('orderedList')}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().toggleList('orderedList', 'listItem').run()}
+          onClick={() => startCommand().toggleList('orderedList', 'listItem').run()}
         >
           1. 列表
         </button>
@@ -561,7 +676,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="引用"
           aria-pressed={activeEditor.isActive('blockquote')}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().toggleWrap('blockquote').run()}
+          onClick={() => startCommand().toggleWrap('blockquote').run()}
         >
           “ 引用
         </button>
@@ -580,9 +695,23 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           className={toolbarButtonClass()}
           aria-label="插入分割线"
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().insertContent({ type: 'horizontalRule' }).run()}
+          onClick={() => startCommand().insertContent({ type: 'horizontalRule' }).run()}
         >
           分割线
+        </button>
+
+        <button
+          type="button"
+          className={toolbarButtonClass()}
+          aria-label="引用 EasMusic 歌曲"
+          onMouseDown={stopToolbarBlur}
+          onClick={() => {
+            rememberSelection(activeEditor)
+            setOpenMenu(null)
+            setMusicPickerOpen(true)
+          }}
+        >
+          ♪ 歌曲
         </button>
 
         <div className="relative">
@@ -592,7 +721,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             aria-haspopup="menu"
             aria-expanded={openMenu === 'size'}
             onMouseDown={stopToolbarBlur}
-            onClick={() => setOpenMenu(openMenu === 'size' ? null : 'size')}
+            onClick={() => toggleToolbarMenu('size')}
           >
             字号<span aria-hidden="true">⌄</span>
           </button>
@@ -621,7 +750,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             aria-haspopup="menu"
             aria-expanded={openMenu === 'color'}
             onMouseDown={stopToolbarBlur}
-            onClick={() => setOpenMenu(openMenu === 'color' ? null : 'color')}
+            onClick={() => toggleToolbarMenu('color')}
           >
             <span className="rich-text-color-trigger">A</span>
             <span>{currentColor ? colorLabels[currentColor] : '颜色'}</span>
@@ -660,7 +789,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="撤销"
           disabled={!activeEditor.can().undo()}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().undo().run()}
+          onClick={() => startCommand().undo().run()}
         >
           ↶ <span className="sr-only">撤销</span>
         </button>
@@ -670,13 +799,18 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="重做"
           disabled={!activeEditor.can().redo()}
           onMouseDown={stopToolbarBlur}
-          onClick={() => activeEditor.chain().focus().redo().run()}
+          onClick={() => startCommand().redo().run()}
         >
           ↷ <span className="sr-only">重做</span>
         </button>
       </div>
       {toolbarNotice ? <p className="rich-text-toolbar-notice" role="status">{toolbarNotice}</p> : null}
       <EditorContent editor={editor} className="rich-text-editor-content" data-placeholder={placeholder} />
+      <MusicReferencePicker
+        open={musicPickerOpen}
+        onClose={() => setMusicPickerOpen(false)}
+        onSelect={insertMusicReference}
+      />
     </div>
   )
 })

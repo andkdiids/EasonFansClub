@@ -13,7 +13,7 @@ test('首页精选帖子只缓存公共投影，用户点赞状态在缓存外�
 
   const cachedLoader = homeData.slice(cacheStart, fallbackStart)
   assert.match(homeData, /import \{ unstable_cache \} from 'next\/cache'/)
-  assert.match(homeData, /HOME_FEATURED_POSTS_CACHE_KEY = 'home:hot-posts:v1'/)
+  assert.match(homeData, /HOME_FEATURED_POSTS_CACHE_KEY = 'home:hot-posts:v2'/)
   assert.match(homeData, /HOME_FEATURED_POSTS_CACHE_TAG = 'home-featured-posts'/)
   assert.match(homeData, /HOME_FEATURED_POSTS_CACHE_TTL_SECONDS = 60/)
   assert.match(cachedLoader, /revalidate: HOME_FEATURED_POSTS_CACHE_TTL_SECONDS/)

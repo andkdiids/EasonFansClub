@@ -1,5 +1,6 @@
 import { unstable_cache } from 'next/cache'
 import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
+import { withForumBoardDisplayName } from '@/lib/boards'
 import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -15,7 +16,8 @@ import { getTodayEventRecords } from '@/lib/today-events'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { getEasMusicAlbumLikeStates } from '@/lib/easmusic-likes'
-import { summarizePlainText } from '@/lib/share-metadata'
+import { htmlToPlainText, summarizePlainText } from '@/lib/share-metadata'
+import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -23,7 +25,7 @@ export const homeCacheHeaders = {
 
 // The homepage post module is public featured/pinned content. Keep this cache
 // separate from the user-specific /api/home response and its like state.
-export const HOME_FEATURED_POSTS_CACHE_KEY = 'home:hot-posts:v1'
+export const HOME_FEATURED_POSTS_CACHE_KEY = 'home:hot-posts:v2'
 export const HOME_FEATURED_POSTS_CACHE_TAG = 'home-featured-posts'
 export const HOME_FEATURED_POSTS_CACHE_TTL_SECONDS = 60
 
@@ -123,7 +125,7 @@ async function queryHomePosts() {
   return rows.map(({ summary, content, moderationStatus, Board, User, ...post }) => ({
     ...post,
     title: publicModerationText(post.title, moderationStatus),
-    board: Board,
+    board: withForumBoardDisplayName(Board),
     author: { ...User, nickname: getPublicUserDisplayName(User), profile: User.Profile },
     content: publicModerationText(summarizePlainText(summary || content), moderationStatus),
   }))
@@ -231,12 +233,17 @@ async function getHomeDailyMessagesUncached() {
 }
 
 export async function getHomeActivities() {
+  const now = new Date()
   return cachedHomeData('home.activities', () => safeDb(
     'Activity.findMany home.activities',
     prisma.activity.findMany({
-      where: { status: 'PUBLISHED' },
-      orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { sortOrder: 'asc' }, { startsAt: 'asc' }, { createdAt: 'desc' }],
-      take: 3,
+      where: {
+        status: 'PUBLISHED',
+        startsAt: { lte: now },
+        OR: [{ endsAt: { gt: now } }, { endsAt: null }],
+      },
+      orderBy: [{ endsAt: 'asc' }, { isPinned: 'desc' }, { isFeatured: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
+      take: 4,
       select: {
         id: true,
         title: true,
@@ -262,6 +269,39 @@ export async function getHomeActivities() {
     coverUrl: publicImageVariantUrl(activity.coverUrl || activity.bannerUrl, 'card'),
     signupCount: _count.ActivityRegistration,
   }))))
+}
+
+export type HomeAnywhereDoorPost = Readonly<{
+  id: string
+  authorUsername: string
+  title: string
+  publishedAt: string
+  href: string
+}>
+
+export function createHomeAnywhereDoorTitle(caption: string | null | undefined) {
+  const plainCaption = htmlToPlainText(caption, { preserveLineBreaks: true })
+  const firstLine = plainCaption.split('\n').map((line) => line.trim()).find(Boolean) || `@${ANYWHERE_DOOR_TARGET} 最新更新`
+  return summarizePlainText(firstLine, 100) || `@${ANYWHERE_DOOR_TARGET} 最新更新`
+}
+
+export async function getHomeAnywhereDoorLatest(): Promise<HomeAnywhereDoorPost | null> {
+  return cachedHomeData('home.anywhereDoor.latest', () => safeDb(
+    'SocialPost.findFirst home.anywhereDoor.latest',
+    prisma.socialPost.findFirst({
+      where: { status: 'READY', authorUsername: ANYWHERE_DOOR_TARGET },
+      orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, authorUsername: true, caption: true, publishedAt: true },
+    }),
+    null,
+    5000,
+  ).then((post) => post ? {
+    id: post.id,
+    authorUsername: post.authorUsername,
+    title: createHomeAnywhereDoorTitle(post.caption),
+    publishedAt: post.publishedAt.toISOString(),
+    href: `/anywhere-door/${post.id}`,
+  } : null))
 }
 
 export async function getHomeConcerts() {

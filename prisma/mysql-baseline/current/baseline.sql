@@ -2603,8 +2603,8 @@ CREATE TABLE `MusicConcertCategory` (
 CREATE TABLE `SalonPost` (
     `id` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
-    `category` ENUM('CONCERT', 'MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER') NOT NULL,
-    `concertId` VARCHAR(191) NOT NULL,
+    `category` ENUM('CONCERT', 'MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER', 'TIME_TRAVEL') NOT NULL,
+    `concertId` VARCHAR(191) NULL,
     `title` VARCHAR(200) NULL,
     `content` TEXT NULL,
     `status` ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
@@ -2633,7 +2633,7 @@ CREATE TABLE `SalonPost` (
 CREATE TABLE `SalonPostMedia` (
     `id` VARCHAR(191) NOT NULL,
     `postId` VARCHAR(191) NOT NULL,
-    `originalUrl` TEXT NOT NULL,
+    `originalUrl` TEXT NULL,
     `previewUrl` TEXT NOT NULL,
     `thumbnailUrl` TEXT NOT NULL,
     `storageKey` VARCHAR(512) NOT NULL,
@@ -2887,6 +2887,7 @@ CREATE TABLE `Post` (
     `updatedAt` DATETIME(3) NOT NULL,
     `authorId` VARCHAR(191) NOT NULL,
     `boardId` VARCHAR(191) NOT NULL,
+    `userPostGroupId` VARCHAR(191) NULL,
     `contentType` ENUM('NORMAL', 'IMAGE', 'VIDEO', 'POLL', 'ARTICLE') NOT NULL DEFAULT 'NORMAL',
     `favoriteCount` INTEGER NOT NULL DEFAULT 0,
     `isLocked` BOOLEAN NOT NULL DEFAULT false,
@@ -2905,6 +2906,7 @@ CREATE TABLE `Post` (
     `stickerId` VARCHAR(191) NULL,
 
     INDEX `Post_authorId_createdAt_idx`(`authorId`, `createdAt`),
+    INDEX `Post_authorId_userPostGroupId_createdAt_idx`(`authorId`, `userPostGroupId`, `createdAt`),
     INDEX `Post_authorId_profilePinnedAt_createdAt_idx`(`authorId`, `profilePinnedAt`, `createdAt`),
     INDEX `Post_boardId_createdAt_idx`(`boardId`, `createdAt`),
     INDEX `Post_board_feed_idx`(`boardId`, `status`, `isDeleted`, `isPinned`, `isFeatured`, `createdAt`),
@@ -2921,6 +2923,20 @@ CREATE TABLE `Post` (
     INDEX `Post_replyCount_idx`(`replyCount`),
     INDEX `Post_status_idx`(`status`),
     INDEX `Post_moderationStatus_createdAt_idx`(`moderationStatus`, `createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserPostGroup` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `name` VARCHAR(20) NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `UserPostGroup_userId_sortOrder_createdAt_idx`(`userId`, `sortOrder`, `createdAt`),
+    UNIQUE INDEX `UserPostGroup_userId_name_key`(`userId`, `name`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -4627,6 +4643,9 @@ ALTER TABLE `PollVote` ADD CONSTRAINT `PollVote_pollId_fkey` FOREIGN KEY (`pollI
 ALTER TABLE `Post` ADD CONSTRAINT `Post_authorId_fkey` FOREIGN KEY (`authorId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `Post` ADD CONSTRAINT `Post_userPostGroupId_fkey` FOREIGN KEY (`userPostGroupId`) REFERENCES `UserPostGroup`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `Post` ADD CONSTRAINT `Post_reviewedById_fkey` FOREIGN KEY (`reviewedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -4634,6 +4653,9 @@ ALTER TABLE `Post` ADD CONSTRAINT `Post_boardId_fkey` FOREIGN KEY (`boardId`) RE
 
 -- AddForeignKey
 ALTER TABLE `Post` ADD CONSTRAINT `Post_stickerId_fkey` FOREIGN KEY (`stickerId`) REFERENCES `Sticker`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserPostGroup` ADD CONSTRAINT `UserPostGroup_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `ClinicRecord` ADD CONSTRAINT `ClinicRecord_authorId_fkey` FOREIGN KEY (`authorId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

@@ -69,7 +69,7 @@ const rankingCards: ReadonlyArray<{
   unit: string
 }> = [
   { key: 'postRanking', title: 'E院广场发帖榜', description: '统计有效公开帖子作者', unit: '篇' },
-  { key: 'commentRanking', title: 'E院广场评论榜', description: '统计有效帖子下的评论与回复', unit: '条' },
+  { key: 'commentRanking', title: 'E院广场评论榜', description: '统计有效评论参与', unit: '条' },
   { key: 'consultationRanking', title: '阿士匹灵门诊部会诊榜', description: '统计有效会诊及会诊回复作者', unit: '次' },
 ]
 

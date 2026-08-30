@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { PageContainer } from '@/components/PageContainer'
+import { getForumBoardDisplayName } from '@/lib/boards'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { getCurrentUser } from '@/lib/auth'
@@ -158,7 +159,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
                 <p className="font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
                 <p className="mt-2 text-sm text-slate-500">
-                  {post.Board.name} · <UserDisplayName name={getPublicUserDisplayName(post.User)} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · 回复 {post.replyCount}
+                  {getForumBoardDisplayName(post.Board)} · <UserDisplayName name={getPublicUserDisplayName(post.User)} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · 回复 {post.replyCount}
                 </p>
               </Link>
             ))}

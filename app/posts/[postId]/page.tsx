@@ -17,6 +17,7 @@ import { ForumDiscoveryDetailTopbar } from '@/components/ForumDiscoveryDetailTop
 import { ShareButton } from '@/components/share/ShareButton'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
+import { getForumBoardDisplayName } from '@/lib/boards'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
@@ -1000,7 +1001,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     author: authorName,
     authorAvatar,
     date: formatDate(post.createdAt),
-    meta: post.Board ? [{ label: '版块', value: post.Board.name }] : [],
+    meta: post.Board ? [{ label: '版块', value: getForumBoardDisplayName(post.Board) }] : [],
   }
   const serializeReply = ({ ReplyLike, ReplyMention, User, ...reply }: (typeof postReplies)[number]) => ({
     ...reply,
@@ -1097,7 +1098,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}
               {post.Board ? (
                 <Link href={`/boards/${post.Board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
-                  {post.Board.name}
+                  {getForumBoardDisplayName(post.Board)}
                 </Link>
               ) : (
                 <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">E院广场</span>

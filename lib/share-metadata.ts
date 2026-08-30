@@ -93,7 +93,15 @@ export function htmlToPlainText(value: string | null | undefined, options: Plain
 export function summarizePlainText(value: string | null | undefined, length = 180) {
   const text = htmlToPlainText(value)
   if (text.length <= length) return text
-  return `${text.slice(0, Math.max(1, length - 1)).trimEnd()}…`
+  const maximumTextLength = Math.max(1, length - 1)
+  // Summary boundaries must not split surrogate pairs, flags, skin tones, or
+  // ZWJ emoji sequences. Intl.Segmenter is available in the supported Node
+  // and modern browser runtimes; the code-point fallback still avoids broken
+  // UTF-16 surrogate halves when it is unavailable.
+  const segments = typeof Intl.Segmenter === 'function'
+    ? Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text), ({ segment }) => segment)
+    : Array.from(text)
+  return `${segments.slice(0, maximumTextLength).join('').trimEnd()}…`
 }
 
 /** Return one plain-text view for cards, search and crawler metadata. */

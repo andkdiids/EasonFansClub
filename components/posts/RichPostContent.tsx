@@ -1,5 +1,6 @@
 import * as React from 'react'
 import type { ReactNode } from 'react'
+import Link from 'next/link'
 import {
   legacyHtmlToRichContent,
   plainTextToRichContent,
@@ -39,6 +40,22 @@ function renderMarks(content: ReactNode, marks: RichTextMark[] | undefined, key:
 
 function renderInline(node: RichTextInlineNode, key: string) {
   if (node.type === 'hardBreak') return <br key={key} />
+  if (node.type === 'musicReference') {
+    return (
+      <Link
+        key={key}
+        href={`/music/song/${encodeURIComponent(node.attrs.songId)}`}
+        className="rich-text-music-reference"
+        aria-label={`查看歌曲：${node.attrs.title || '歌曲引用'}`}
+      >
+        <span className="rich-text-music-reference-icon" aria-hidden="true">♪</span>
+        <span className="rich-text-music-reference-copy">
+          <strong>{node.attrs.title || '歌曲引用'}</strong>
+          {node.attrs.artist || node.attrs.album ? <small>{[node.attrs.artist, node.attrs.album ? `《${node.attrs.album}》` : ''].filter(Boolean).join(' · ')}</small> : null}
+        </span>
+      </Link>
+    )
+  }
   return <span key={key}>{renderMarks(node.text, node.marks, key)}</span>
 }
 

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { BRANDED_QR_VERSION } from '@/lib/branded-qr'
+import { SHARE_CARD_EMOJI_VERSION } from '@/lib/share-card-emoji'
 import type { ShareCardData } from '@/lib/share-card'
 
-/** Bump when any generated pixel/layout changes. v9 uses one Hero overlay for every content type. */
-export const SHARE_CARD_TEMPLATE_VERSION = 'v9'
+/** Bump when any generated pixel/layout changes. v10 adds post-safe Emoji assets and footer alignment. */
+export const SHARE_CARD_TEMPLATE_VERSION = 'v10'
 export const SHARE_CARD_LOGO_SOURCE = 'app/icon.png'
 export const SHARE_CARD_LOGO_VERSION = 'app-icon-footer-v1'
 
@@ -15,6 +16,7 @@ export function shareCardHashPayload(data: ShareCardData) {
       version: SHARE_CARD_LOGO_VERSION,
     },
     qrVersion: BRANDED_QR_VERSION,
+    emojiVersion: SHARE_CARD_EMOJI_VERSION,
     type: data.type,
     contentId: data.contentId || '',
     title: data.title.trim(),

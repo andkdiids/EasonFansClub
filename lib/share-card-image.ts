@@ -2,6 +2,7 @@
 
 import { publicImageUrl } from '@/lib/images'
 import { drawBrandedQrToCanvas } from '@/lib/branded-qr-client'
+import { shareCardEmojiAssetUrl, tokenizeShareCardText } from '@/lib/share-card-emoji'
 import { canonicalShareUrl, createShareCardFilename, shareCardQrPayload, shareCardTypeLabel, isTrustedShareCardHttpsUrl, SHARE_CARD_LOGO_PATH, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import {
   calculateShareCardLayout,
@@ -110,6 +111,37 @@ function loadLocalImage(value: string): Promise<LoadedImage> {
   })
 }
 
+function loadEmojiImage(codePoint: string): Promise<LoadedImage> {
+  const imageUrl = shareCardEmojiAssetUrl(codePoint)
+  if (!imageUrl) return Promise.resolve(null)
+  return new Promise<LoadedImage>((resolve) => {
+    const image = new Image()
+    let settled = false
+    const finish = (result: LoadedImage) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeoutId)
+      resolve(result)
+    }
+    const timeoutId = window.setTimeout(() => finish(null), IMAGE_TIMEOUT_MS)
+    image.crossOrigin = 'anonymous'
+    image.referrerPolicy = 'no-referrer'
+    image.decoding = 'async'
+    image.onload = () => finish(image.naturalWidth > 0 && image.naturalHeight > 0 ? image : null)
+    image.onerror = () => finish(null)
+    image.src = imageUrl
+  })
+}
+
+async function loadShareCardEmojiImages(values: readonly string[]) {
+  const codePoints = new Set<string>()
+  values.forEach((value) => tokenizeShareCardText(value).forEach((token) => {
+    if (token.type === 'emoji' && token.codePoint) codePoints.add(token.codePoint)
+  }))
+  const entries = await Promise.all(Array.from(codePoints).map(async (codePoint) => [codePoint, await loadEmojiImage(codePoint)] as const))
+  return new Map(entries)
+}
+
 function drawImageCover(context: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
   const sourceRatio = image.naturalWidth / image.naturalHeight
   const targetRatio = width / height
@@ -179,6 +211,28 @@ function drawAvatar(context: CanvasRenderingContext2D, avatar: LoadedImage, name
   context.textBaseline = 'alphabetic'
 }
 
+function drawShareCardTextLine(context: CanvasRenderingContext2D, value: string, x: number, baseline: number, font: string, fontSize: number, emojiImages: ReadonlyMap<string, HTMLImageElement | null>) {
+  context.font = font
+  let left = x
+  for (const token of tokenizeShareCardText(value)) {
+    if (token.type === 'text') {
+      context.fillText(token.value, left, baseline)
+      left += context.measureText(token.value).width
+      continue
+    }
+    const size = Math.max(1, Math.round(fontSize * 0.98))
+    const image = token.codePoint ? emojiImages.get(token.codePoint) : null
+    if (image) {
+      context.drawImage(image, left, baseline - Math.round(size * 0.84), size, size)
+    } else {
+      // Keep the original token when the pinned image cannot be reached; this
+      // is preferable to silently stripping a user's Emoji from the card.
+      context.fillText(token.value, left, baseline)
+    }
+    left += size
+  }
+}
+
 async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boolean) {
   const [heroImage, avatar, logo] = await Promise.all([
     loadFirstImage([data.image, ...(data.imageCandidates || []).map((candidate) => candidate.url)], allowRemoteImages),
@@ -189,7 +243,20 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
   const layout = calculateShareCardLayout(data, dimensions)
   const qrUrl = shareCardQrPayload(data.url)
   const qrCanvas = document.createElement('canvas')
-  await drawBrandedQrToCanvas(qrCanvas, qrUrl, SHARE_CARD_QR_SIZE)
+  const textValues = [
+    shareCardTypeLabel(data.type),
+    ...layout.titleLines,
+    ...layout.descriptionLines,
+    ...layout.metaLines,
+    ...layout.authorLines,
+    ...layout.dateLines,
+    '扫码查看完整内容',
+    '私家E院 | Eason Fans Club',
+  ]
+  const [emojiImages] = await Promise.all([
+    loadShareCardEmojiImages(textValues),
+    drawBrandedQrToCanvas(qrCanvas, qrUrl, SHARE_CARD_QR_SIZE),
+  ])
 
   const canvas = document.createElement('canvas')
   canvas.width = SHARE_CARD_WIDTH
@@ -225,34 +292,34 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
   context.textAlign = 'left'
   context.fillStyle = '#d5f1f4'
   context.font = `800 ${SHARE_CARD_CATEGORY_FONT_SIZE}px ${FONT_SANS}`
-  context.fillText(shareCardTypeLabel(data.type), contentLeft, layout.categoryTop + 24)
+  drawShareCardTextLine(context, shareCardTypeLabel(data.type), contentLeft, layout.categoryTop + 24, `800 ${SHARE_CARD_CATEGORY_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_CATEGORY_FONT_SIZE, emojiImages)
 
   context.fillStyle = '#ffffff'
   context.font = `800 ${SHARE_CARD_TITLE_FONT_SIZE}px ${FONT_SANS}`
-  layout.titleLines.forEach((line, index) => context.fillText(line, contentLeft, layout.titleTop + SHARE_CARD_TITLE_FONT_SIZE + index * SHARE_CARD_TITLE_LINE_HEIGHT))
+  layout.titleLines.forEach((line, index) => drawShareCardTextLine(context, line, contentLeft, layout.titleTop + SHARE_CARD_TITLE_FONT_SIZE + index * SHARE_CARD_TITLE_LINE_HEIGHT, `800 ${SHARE_CARD_TITLE_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_TITLE_FONT_SIZE, emojiImages))
 
   context.fillStyle = '#f0f6f7'
   context.font = `500 ${SHARE_CARD_DESCRIPTION_FONT_SIZE}px ${FONT_SANS}`
-  layout.descriptionLines.forEach((line, index) => context.fillText(line, contentLeft, layout.descriptionTop + SHARE_CARD_DESCRIPTION_FONT_SIZE + index * SHARE_CARD_DESCRIPTION_LINE_HEIGHT))
+  layout.descriptionLines.forEach((line, index) => drawShareCardTextLine(context, line, contentLeft, layout.descriptionTop + SHARE_CARD_DESCRIPTION_FONT_SIZE + index * SHARE_CARD_DESCRIPTION_LINE_HEIGHT, `500 ${SHARE_CARD_DESCRIPTION_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_DESCRIPTION_FONT_SIZE, emojiImages))
 
   context.font = `700 ${SHARE_CARD_META_FONT_SIZE}px ${FONT_SANS}`
-  layout.metaLines.forEach((line, index) => context.fillText(line, contentLeft, layout.metaTop + SHARE_CARD_META_FONT_SIZE + index * SHARE_CARD_META_LINE_HEIGHT))
+  layout.metaLines.forEach((line, index) => drawShareCardTextLine(context, line, contentLeft, layout.metaTop + SHARE_CARD_META_FONT_SIZE + index * SHARE_CARD_META_LINE_HEIGHT, `700 ${SHARE_CARD_META_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_META_FONT_SIZE, emojiImages))
 
   drawAvatar(context, avatar, layout.author, SHARE_CARD_AVATAR_X, layout.authorTop, SHARE_CARD_AVATAR_SIZE)
   context.fillStyle = '#102033'
   context.font = `800 ${SHARE_CARD_AUTHOR_FONT_SIZE}px ${FONT_SANS}`
-  layout.authorLines.forEach((line, index) => context.fillText(line, SHARE_CARD_AUTHOR_X, layout.authorTextTop + SHARE_CARD_AUTHOR_FONT_SIZE + index * SHARE_CARD_AUTHOR_LINE_HEIGHT))
+  layout.authorLines.forEach((line, index) => drawShareCardTextLine(context, line, SHARE_CARD_AUTHOR_X, layout.authorTextTop + SHARE_CARD_AUTHOR_FONT_SIZE + index * SHARE_CARD_AUTHOR_LINE_HEIGHT, `800 ${SHARE_CARD_AUTHOR_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_AUTHOR_FONT_SIZE, emojiImages))
   context.fillStyle = '#7b8b98'
   context.font = `500 ${SHARE_CARD_DATE_FONT_SIZE}px ${FONT_SANS}`
-  layout.dateLines.forEach((line, index) => context.fillText(line, SHARE_CARD_AUTHOR_X, layout.dateTop + SHARE_CARD_DATE_FONT_SIZE + index * SHARE_CARD_DATE_LINE_HEIGHT))
+  layout.dateLines.forEach((line, index) => drawShareCardTextLine(context, line, SHARE_CARD_AUTHOR_X, layout.dateTop + SHARE_CARD_DATE_FONT_SIZE + index * SHARE_CARD_DATE_LINE_HEIGHT, `500 ${SHARE_CARD_DATE_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_DATE_FONT_SIZE, emojiImages))
 
   context.fillStyle = '#0f5f8f'
   context.font = `800 ${SHARE_CARD_FOOTER_TITLE_FONT_SIZE}px ${FONT_SANS}`
   if (logo) drawImageContain(context, logo, SHARE_CARD_FOOTER_LOGO_X, layout.brandLogoTop, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 4)
-  context.fillText('扫码查看完整内容', SHARE_CARD_FOOTER_TEXT_X, layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_FONT_SIZE)
+  drawShareCardTextLine(context, '扫码查看完整内容', SHARE_CARD_FOOTER_TEXT_X, layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_FONT_SIZE, `800 ${SHARE_CARD_FOOTER_TITLE_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_FOOTER_TITLE_FONT_SIZE, emojiImages)
   context.fillStyle = '#7b8b98'
   context.font = `600 ${SHARE_CARD_FOOTER_BRAND_FONT_SIZE}px ${FONT_SANS}`
-  context.fillText('私家E院 | Eason Fans Club', SHARE_CARD_FOOTER_TEXT_X, layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP + SHARE_CARD_FOOTER_BRAND_FONT_SIZE)
+  drawShareCardTextLine(context, '私家E院 | Eason Fans Club', SHARE_CARD_FOOTER_TEXT_X, layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP + SHARE_CARD_FOOTER_BRAND_FONT_SIZE, `600 ${SHARE_CARD_FOOTER_BRAND_FONT_SIZE}px ${FONT_SANS}`, SHARE_CARD_FOOTER_BRAND_FONT_SIZE, emojiImages)
 
   context.fillStyle = '#ffffff'
   context.fillRect(SHARE_CARD_QR_FRAME_X, layout.qrTop, SHARE_CARD_QR_FRAME_SIZE, SHARE_CARD_QR_FRAME_SIZE)

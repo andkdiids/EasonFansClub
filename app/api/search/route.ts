@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { DAILY_CHAT_BOARD_SLUG, DAILY_CHAT_DISPLAY_NAME, DAILY_CHAT_LEGACY_NAME, normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -54,6 +55,10 @@ export async function GET(request: Request) {
   if (user) {
     await prisma.searchHistory.create({ data: { userId: user.id, keyword } })
   }
+
+  const matchesDailyChatAlias = keyword.includes(DAILY_CHAT_DISPLAY_NAME)
+    || keyword.includes(DAILY_CHAT_LEGACY_NAME)
+    || DAILY_CHAT_LEGACY_NAME.includes(keyword)
 
   const [users, posts, boards, tags, albums, songs] = await Promise.all([
     prisma.user.findMany({
@@ -118,6 +123,7 @@ export async function GET(request: Request) {
         OR: [
           { name: { contains: keyword } },
           { description: { contains: keyword } },
+          ...(matchesDailyChatAlias ? [{ slug: DAILY_CHAT_BOARD_SLUG }] : []),
         ],
       },
       take: 10,
@@ -221,9 +227,9 @@ export async function GET(request: Request) {
           avatarUrl: toPublicMediaUrl(User.Profile.avatarUrl),
         } : User.Profile,
       },
-      board: Board,
+      board: withForumBoardDisplayName(Board),
     })),
-    boards,
+    boards: normalizeForumBoards(boards),
     tags,
     albums: albums.map((album) => ({ ...album, coverUrl: toPublicMediaUrl(album.coverUrl) })),
     songs: songs.map(({ MusicAlbum, ...song }) => {

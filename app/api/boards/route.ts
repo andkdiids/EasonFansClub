@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { normalizeForumBoards } from '@/lib/boards'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
@@ -24,7 +25,7 @@ export async function GET() {
   })
 
   return NextResponse.json(
-    { boards: boards.map((board) => ({ ...board, coverUrl: publicImageUrl(board.coverUrl) })) },
+    { boards: normalizeForumBoards(boards).map((board) => ({ ...board, coverUrl: publicImageUrl(board.coverUrl) })) },
     { headers: { 'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600' } },
   )
 }
