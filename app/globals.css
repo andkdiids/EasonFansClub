@@ -7232,7 +7232,8 @@ body:has(.duel-page) .app-page-content {
 .salon-gallery-concert { display: block; overflow: hidden; color: var(--salon-text); font-size: 12px; font-weight: 900; text-overflow: ellipsis; text-decoration: none; white-space: nowrap; }
 .salon-gallery-concert:hover { color: var(--salon-primary); }
 .salon-gallery-caption > p { margin: 5px 0 0; overflow: hidden; color: var(--salon-muted); font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.salon-gallery-meta { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.salon-gallery-meta { display: grid; min-width: 0; gap: 8px; margin-top: 12px; }
+.salon-gallery-stats-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
 .salon-author-link { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--salon-muted); font-size: 10px; font-weight: 800; text-decoration: none; }
 .salon-author-link > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .salon-author-link:hover { color: var(--salon-primary); }
@@ -7241,6 +7242,8 @@ body:has(.duel-page) .app-page-content {
 .salon-avatar img,.salon-comment-avatar img,.salon-detail-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .salon-avatar-fallback { display: grid; width: 100%; height: 100%; place-items: center; color: var(--salon-primary); background: color-mix(in srgb, var(--salon-primary), transparent 88%); font-size: 9px; font-weight: 900; }
 .salon-card-stats { display: flex; flex: none; align-items: center; gap: 8px; color: var(--salon-muted); font-size: 10px; white-space: nowrap; }
+.salon-view-stat { display: inline-flex; align-items: center; gap: 3px; }
+.salon-stat-icon { width: 13px; height: 13px; flex: none; }
 .salon-like-button { border: 0; padding: 0; color: var(--salon-muted); background: transparent; font: inherit; font-weight: 850; cursor: pointer; }
 .salon-like-button:hover,.salon-like-button.is-liked { color: var(--salon-danger); }
 .salon-like-button:disabled { cursor: wait; opacity: .55; }
@@ -7272,6 +7275,7 @@ body:has(.duel-page) .app-page-content {
 .salon-detail-content { margin: 20px 0 0; color: var(--salon-muted); font-size: 13px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
 .salon-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 25px; border-top: 1px solid var(--salon-border); padding-top: 15px; color: var(--salon-muted); font-size: 11px; font-weight: 850; }
 .salon-detail-actions .salon-like-button { font-size: 13px; }
+.salon-detail-actions .salon-view-stat { color: inherit; }
 .salon-review-banner { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 16px; border-left: 3px solid var(--salon-primary); padding: 11px 13px; color: var(--salon-muted); background: color-mix(in srgb, var(--salon-primary), transparent 93%); font-size: 12px; line-height: 1.55; }
 .salon-review-banner strong { color: var(--salon-primary); }
 .salon-review-rejected { border-left-color: var(--salon-danger); background: color-mix(in srgb, var(--salon-danger), transparent 94%); }
@@ -7327,6 +7331,29 @@ body:has(.duel-page) .app-page-content {
 .salon-add-image span { font-size: 26px; line-height: 1; }
 .salon-add-image small { color: var(--salon-muted); font-size: 10px; font-weight: 850; }
 .salon-hidden-file-input { display: none; }
+.salon-watermark-toggle { display: inline-flex; min-height: 40px; align-items: center; gap: 9px; color: var(--salon-text); font-size: 12px; font-weight: 900; cursor: pointer; }
+.salon-watermark-toggle input { width: 17px; height: 17px; accent-color: var(--salon-primary); }
+.salon-watermark-settings { display: grid; max-width: 560px; gap: 14px; margin-top: 13px; border-left: 3px solid var(--salon-primary); padding: 13px 15px; color: var(--salon-muted); background: color-mix(in srgb, var(--salon-primary), transparent 95%); font-size: 11px; }
+.salon-watermark-settings p { margin: 0; overflow-wrap: anywhere; }
+.salon-watermark-settings p strong { color: var(--salon-text); }
+.salon-watermark-settings label { display: grid; gap: 8px; }
+.salon-watermark-settings label > span { display: flex; justify-content: space-between; gap: 10px; }
+.salon-watermark-settings label b { color: var(--salon-primary); }
+.salon-watermark-settings input[type='range'] { width: min(100%, 360px); accent-color: var(--salon-primary); }
+.salon-watermark-settings fieldset { display: grid; gap: 8px; margin: 0; border: 0; padding: 0; }
+.salon-watermark-settings legend { padding: 0; font-weight: 850; }
+.salon-watermark-position-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.salon-watermark-position-grid button { min-height: 34px; border: 1px solid var(--salon-border-strong); border-radius: 2px; color: var(--salon-muted); background: var(--salon-surface); font: inherit; font-size: 11px; font-weight: 850; cursor: pointer; }
+.salon-watermark-position-grid button:hover,.salon-watermark-position-grid button.is-active { border-color: var(--salon-primary); color: var(--salon-primary); background: color-mix(in srgb, var(--salon-primary), transparent 92%); }
+.salon-preview-watermark { position: absolute; z-index: 1; max-width: calc(100% - 24px); overflow: hidden; color: #fff; font-size: clamp(9px, 4vw, 18px); font-weight: 800; line-height: 1.2; pointer-events: none; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0,0,0,.75), 0 0 2px rgba(0,0,0,.55); white-space: nowrap; }
+.salon-preview-watermark-top { top: 12px; left: 50%; transform: translateX(-50%); }
+.salon-preview-watermark-bottom { bottom: 12px; left: 50%; transform: translateX(-50%); }
+.salon-preview-watermark-left { top: 50%; left: 12px; transform: translateY(-50%); }
+.salon-preview-watermark-right { top: 50%; right: 12px; transform: translateY(-50%); }
+.salon-preview-watermark-top_left { top: 12px; left: 12px; }
+.salon-preview-watermark-top_right { top: 12px; right: 12px; }
+.salon-preview-watermark-bottom_left { bottom: 12px; left: 12px; }
+.salon-preview-watermark-bottom_right { right: 12px; bottom: 12px; }
 .salon-upload-submit { display: flex; align-items: center; gap: 12px; padding-top: 2px; }
 .salon-upload-submit > span { color: var(--salon-muted); font-size: 10px; font-weight: 750; }
 .salon-mine-section { margin-top: 22px; }
@@ -7351,6 +7378,7 @@ body:has(.duel-page) .app-page-content {
 .admin-salon-tabs { margin-bottom: 15px; }
 .admin-salon-list { display: grid; gap: 12px; margin-top: 15px; }
 .admin-salon-row { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-width: 0; border: 1px solid var(--salon-border); background: var(--salon-surface); }
+.admin-salon-row-focused { outline: 2px solid var(--salon-primary); outline-offset: 3px; }
 .admin-salon-row-images { min-width: 0; border-right: 1px solid var(--salon-border); background: var(--salon-subtle); }
 .admin-salon-image-button,.admin-salon-image { display: block; width: 100%; }
 .admin-salon-image { aspect-ratio: 1; object-fit: cover; }
@@ -7387,8 +7415,8 @@ body:has(.duel-page) .app-page-content {
   .salon-header-actions > * { flex: 1; }
   .salon-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 14px; }
   .salon-gallery-caption { padding: 9px 9px 10px; }
-  .salon-gallery-meta { align-items: flex-start; flex-direction: column; gap: 7px; }
-  .salon-card-stats { width: 100%; justify-content: space-between; }
+  .salon-gallery-meta { gap: 7px; }
+  .salon-gallery-stats-row { width: 100%; }
   .salon-filter-bar { align-items: stretch; }
   .salon-filter-bar label { flex: 1 1 140px; }
   .salon-filter-bar select { width: 100%; }
@@ -7400,6 +7428,8 @@ body:has(.duel-page) .app-page-content {
   .salon-form-wide { grid-column: auto; }
   .salon-form-section-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
   .salon-upload-previews { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .salon-watermark-settings { max-width: none; }
+  .salon-watermark-position-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .salon-upload-submit { align-items: stretch; flex-direction: column; }
   .salon-upload-submit .salon-primary-button { width: 100%; }
   .salon-mine-card,.admin-salon-row { grid-template-columns: 112px minmax(0, 1fr); }

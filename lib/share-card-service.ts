@@ -7,10 +7,11 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { prisma } from '@/lib/prisma'
 import { buildPublicMediaUrl } from '@/lib/media-url'
+import { buildSalonFeedWhere, formatSalonSession, SALON_CATEGORY_LABELS } from '@/lib/salon'
 import { validateRichPostContent } from '@/lib/rich-text'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { publicPostWhere } from '@/lib/post-moderation'
-import { firstShareCardImageCandidate, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, postContentPlainText } from '@/lib/share-metadata'
+import { firstShareCardImageCandidate, shareCardImageCandidates, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { calculateShareCardLayout } from '@/lib/share-card-layout'
 import { createShareCardContentHash } from '@/lib/share-card-hash'
@@ -73,6 +74,41 @@ const activityShareCardSelect = {
   },
 } satisfies Prisma.ActivitySelect
 
+const salonShareCardSelect = {
+  id: true,
+  category: true,
+  title: true,
+  content: true,
+  createdAt: true,
+  concert: {
+    select: {
+      id: true,
+      title: true,
+      concertDate: true,
+      city: true,
+      stageType: true,
+      venue: true,
+      sessionNumber: true,
+      MusicTour: { select: { id: true, name: true, status: true } },
+    },
+  },
+  author: {
+    select: {
+      nickname: true,
+      nicknameModerationStatus: true,
+      nicknameViolationDisplay: true,
+      status: true,
+      isDeleted: true,
+      avatarUrl: true,
+      Profile: { select: { avatarUrl: true } },
+    },
+  },
+  media: {
+    orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
+    select: { previewUrl: true, width: true, height: true },
+  },
+} satisfies Prisma.SalonPostSelect
+
 type ShareCardResult = Readonly<{
   url: string
   cached: boolean
@@ -82,7 +118,11 @@ type ShareCardResult = Readonly<{
   mimeType: typeof SHARE_CARD_MIME_TYPE
 }>
 
-export type ShareCardContentType = 'post' | 'activity'
+export type ShareCardContentType = 'post' | 'activity' | 'salon'
+
+function isShareCardContentType(type: ShareCardData['type']): type is ShareCardContentType {
+  return type === 'post' || type === 'activity' || type === 'salon'
+}
 
 export class ShareCardContentNotFoundError extends Error {
   constructor(type: ShareCardContentType, contentId: string) {
@@ -123,6 +163,7 @@ export async function loadPostShareCardData(postId: string): Promise<ShareCardDa
   const title = publicModerationText(post.title, post.moderationStatus)
   const safeContent = publicModerationText(plainContent, post.moderationStatus)
   const image = firstShareCardImageCandidate(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
+  const imageCandidates = shareCardImageCandidates(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
   return {
     type: 'post',
     contentId: post.id,
@@ -131,6 +172,7 @@ export async function loadPostShareCardData(postId: string): Promise<ShareCardDa
     image: image?.url || null,
     imageWidth: image?.width,
     imageHeight: image?.height,
+    imageCandidates,
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: getPublicUserDisplayName(post.User),
     authorAvatar: safeAuthorAvatar(post.User.Profile?.avatarUrl || post.User.avatarUrl),
@@ -151,12 +193,15 @@ export async function loadActivityShareCardData(activityId: string): Promise<Sha
     ? `${activityShareDate(activity.startsAt)}${activity.endsAt ? ` — ${activityShareDate(activity.endsAt)}` : ''}`
     : ''
   const shareLocation = [activity.locationName, activity.locationAddress].filter(Boolean).join('，')
+  const image = firstShareCardImageCandidate([{ url: activity.bannerUrl }, { url: activity.coverUrl }])
+  const imageCandidates = shareCardImageCandidates([{ url: activity.bannerUrl }, { url: activity.coverUrl }])
   return {
     type: 'activity',
     contentId: activity.id,
     title: activity.title,
     description: createActivityShareCardDescription(activity),
-    image: firstShareCardImageCandidate([{ url: activity.bannerUrl }, { url: activity.coverUrl }])?.url || null,
+    image: image?.url || null,
+    imageCandidates,
     url: canonicalShareUrl(`/activities/${activity.id}`),
     author: creator ? getPublicUserDisplayName(creator) : activity.organizer || '私家E院',
     authorAvatar: creator ? safeAuthorAvatar(creator.Profile?.avatarUrl || creator.avatarUrl) : null,
@@ -168,15 +213,62 @@ export async function loadActivityShareCardData(activityId: string): Promise<Sha
   }
 }
 
+export async function loadSalonShareCardData(postId: string): Promise<ShareCardData | null> {
+  const post = await prisma.salonPost.findFirst({
+    where: {
+      id: postId,
+      ...buildSalonFeedWhere(),
+      author: { status: 'ACTIVE', isDeleted: false },
+    },
+    select: salonShareCardSelect,
+  })
+  if (!post) return null
+
+  const sessionDescription = post.concert ? formatSalonSession({
+    city: post.concert.city,
+    concertDate: post.concert.concertDate.toISOString(),
+    venue: post.concert.venue,
+    title: post.concert.title,
+    sessionNumber: post.concert.sessionNumber,
+  }) : ''
+  const title = post.title?.trim() || (post.concert ? `${post.concert.MusicTour.name} · ${post.concert.city}` : SALON_CATEGORY_LABELS[post.category])
+  const description = post.content?.trim() || sessionDescription || SALON_CATEGORY_LABELS[post.category]
+  const firstMedia = firstShareCardImageCandidate(post.media.map((media) => ({ url: media.previewUrl, width: media.width, height: media.height })))
+  const imageCandidates = shareCardImageCandidates(post.media.map((media) => ({ url: media.previewUrl, width: media.width, height: media.height })))
+  return {
+    type: 'salon',
+    contentId: post.id,
+    title,
+    description: postContentPlainText(description, null, { preserveLineBreaks: true }),
+    image: firstMedia?.url || null,
+    imageWidth: firstMedia?.width,
+    imageHeight: firstMedia?.height,
+    imageCandidates,
+    url: canonicalShareUrl(`/salon/${post.id}`),
+    author: getPublicUserDisplayName(post.author),
+    authorAvatar: safeAuthorAvatar(post.author.Profile?.avatarUrl || post.author.avatarUrl),
+    date: formatDate(post.createdAt),
+    meta: [
+      { label: '沙龙', value: SALON_CATEGORY_LABELS[post.category] },
+      ...(post.concert ? [
+        { label: '演唱会', value: post.concert.MusicTour.name },
+        { label: '场次', value: sessionDescription },
+      ] : []),
+    ],
+  }
+}
+
 export async function loadPublicShareCardData(type: ShareCardContentType, contentId: string) {
   if (type === 'post') return loadPostShareCardData(contentId)
-  return loadActivityShareCardData(contentId)
+  if (type === 'activity') return loadActivityShareCardData(contentId)
+  return loadSalonShareCardData(contentId)
 }
 
 export function shareCardObjectKey(type: ShareCardContentType, contentId: string, hash: string) {
   if (!isValidShareCardContentId(contentId)) throw new Error('SHARE_CARD_CONTENT_ID_INVALID')
   if (!/^[a-f0-9]{64}$/i.test(hash)) throw new Error('SHARE_CARD_HASH_INVALID')
-  return `share-cards/${type === 'post' ? 'posts' : 'activities'}/${contentId}/${hash}.png`
+  const folder = type === 'post' ? 'posts' : type === 'activity' ? 'activities' : 'salon'
+  return `share-cards/${folder}/${contentId}/${hash}.png`
 }
 
 export function shareCardPublicUrl(objectKey: string) {
@@ -198,9 +290,10 @@ export function createShareCardCache(dependencies: ShareCardCacheDependencies) {
 
   return {
     async getOrCreate(data: ShareCardData): Promise<ShareCardResult> {
-      if (!data.contentId || (data.type !== 'post' && data.type !== 'activity')) throw new Error('SHARE_CARD_CONTENT_ID_REQUIRED')
+      const contentType = data.type
+      if (!data.contentId || !isShareCardContentType(contentType)) throw new Error('SHARE_CARD_CONTENT_ID_REQUIRED')
       const hash = createShareCardContentHash(data)
-      const objectKey = shareCardObjectKey(data.type, data.contentId, hash)
+      const objectKey = shareCardObjectKey(contentType, data.contentId, hash)
       const url = shareCardPublicUrl(objectKey)
       const existing = pending.get(objectKey)
       if (existing) return existing

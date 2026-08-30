@@ -242,6 +242,19 @@ export function firstShareCardImageCandidate(values: readonly ShareCardImageCand
   return null
 }
 
+/** Keep the source order while allowing the renderer to skip a broken first object. */
+export function shareCardImageCandidates(values: readonly ShareCardImageCandidateInput[]) {
+  const candidates: Array<{ url: string; width: number | null; height: number | null }> = []
+  const seen = new Set<string>()
+  for (const value of values) {
+    const candidate = firstShareCardImageCandidate([value])
+    if (!candidate || seen.has(candidate.url)) continue
+    seen.add(candidate.url)
+    candidates.push(candidate)
+  }
+  return candidates
+}
+
 export type PageMetadataInput = Readonly<{
   title?: string | null
   description?: string | null

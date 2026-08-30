@@ -13,12 +13,14 @@ import {
   type SalonPostView,
 } from '@/lib/salon'
 import { SalonLikeButton } from './SalonLikeButton'
+import { UiIcon } from '@/components/UiIcon'
 
 const categoryTabs: Array<{ value: SalonCategoryValue | ''; label: string }> = [
   { value: '', label: '全部' },
   { value: 'CONCERT', label: '演唱会记录' },
   { value: 'MOBILE_WALLPAPER', label: '手机壁纸' },
   { value: 'DESKTOP_WALLPAPER', label: '电脑壁纸' },
+  { value: 'TIME_TRAVEL', label: '时光倒流二十年' },
 ]
 
 function formatDate(value: string) {
@@ -41,6 +43,10 @@ function categoryHref(pathname: string, searchParams: SearchParamsLike, category
   const query = new URLSearchParams(searchParams.toString())
   if (category) query.set('category', category)
   else query.delete('category')
+  if (category && category !== 'CONCERT') {
+    query.delete('concert')
+    query.delete('session')
+  }
   query.delete('cursor')
   const value = query.toString()
   return `${pathname}${value ? `?${value}` : ''}`
@@ -68,6 +74,7 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, opt
   const selectedSort = searchParams.get('sort') === 'popular' ? 'popular' : 'latest'
   const selectedTour = options.tours.find((tour) => tour.id === selectedTourId)
   const sessions = selectedTour?.sessions || []
+  const showConcertFilters = !selectedCategory || selectedCategory === 'CONCERT'
 
   useEffect(() => {
     setPosts(initialPosts)
@@ -147,8 +154,10 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, opt
     </nav>
 
     <section className="salon-filter-bar" aria-label="沙龙筛选">
-      <label><span>演唱会</span><select value={selectedTourId} onChange={(event) => selectTour(event.target.value)}><option value="">全部演唱会</option>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
-      <label><span>场次</span><select value={selectedSessionId} disabled={!selectedTourId} onChange={(event) => updateUrl(router, pathname, searchParams, { session: event.target.value || null, cursor: null })}><option value="">{selectedTourId ? '全部场次' : '先选择演唱会'}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label>
+      {showConcertFilters ? <>
+        <label><span>演唱会</span><select value={selectedTourId} onChange={(event) => selectTour(event.target.value)}><option value="">全部演唱会</option>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
+        <label><span>场次</span><select value={selectedSessionId} disabled={!selectedTourId} onChange={(event) => updateUrl(router, pathname, searchParams, { session: event.target.value || null, cursor: null })}><option value="">{selectedTourId ? '全部场次' : '先选择演唱会'}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label>
+      </> : null}
       <div className="salon-sort-tabs" role="tablist" aria-label="作品排序"><button type="button" role="tab" aria-selected={selectedSort === 'latest'} onClick={() => updateUrl(router, pathname, searchParams, { sort: null, cursor: null })}>最新</button><button type="button" role="tab" aria-selected={selectedSort === 'popular'} onClick={() => updateUrl(router, pathname, searchParams, { sort: 'popular', cursor: null })}>最热</button></div>
     </section>
 
@@ -163,19 +172,20 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, opt
 function SalonGalleryCard({ post, priority }: Readonly<{ post: SalonPostView; priority: boolean }>) {
   const media = post.media[0]
   if (!media) return null
+  const contextLabel = post.concert ? `${post.concert.tour.name} · ${post.concert.city}` : SALON_CATEGORY_LABELS[post.category]
   return <article className="salon-gallery-card">
     <Link href={`/salon/${post.id}`} className="salon-gallery-image-link">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={media.thumbnailUrl} alt={post.title || `${post.concert.tour.name} · ${post.concert.city}`} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} />
+      <img src={media.thumbnailUrl} alt={post.title || contextLabel} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} />
       {post.media.length > 1 ? <span className="salon-media-count">{post.media.length} 张</span> : null}
       <span className="salon-category-tag">{SALON_CATEGORY_LABELS[post.category]}</span>
     </Link>
     <div className="salon-gallery-caption">
-      <Link href={`/salon/${post.id}`} className="salon-gallery-concert">{post.concert.tour.name} · {post.concert.city}</Link>
-      <p>{post.concert.title || formatDate(post.concert.date)}</p>
+      <Link href={`/salon/${post.id}`} className="salon-gallery-concert">{contextLabel}</Link>
+      <p>{post.concert ? post.concert.title || formatDate(post.concert.date) : '历史影像'}</p>
       <div className="salon-gallery-meta">
         <Link href={`/user/${formatUid(post.author.uid)}`} className="salon-author-link"><SafeAvatar src={post.author.avatarUrl} name={post.author.nickname} uid={post.author.uid} className="salon-avatar" textClassName="salon-avatar-fallback" variant="avatar-sm" /><span>{post.author.nickname}</span></Link>
-        <span className="salon-card-stats"><SalonLikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /><span>评论 {post.commentCount}</span></span>
+        <div className="salon-gallery-stats-row"><SalonLikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /><span className="salon-card-stats"><span className="salon-view-stat"><UiIcon name="eye" className="salon-stat-icon" /><span>{post.viewCount || 0}</span></span><span>评论 {post.commentCount}</span></span></div>
       </div>
     </div>
   </article>

@@ -34,7 +34,7 @@ import {
   SHARE_CARD_TITLE_LINE_HEIGHT,
 } from '@/lib/share-card-layout'
 
-const FONT_SANS = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji", sans-serif'
+const FONT_SANS = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif'
 const IMAGE_TIMEOUT_MS = 4500
 const VIDEO_FILE_PATTERN = /\.(?:3gp|avi|flv|m4v|mkv|mov|mp4|mpeg|mpg|ogm|ogv|webm|wmv|m3u8)$/i
 const SHARE_CARD_DATA_URL_PREFIX = `data:${SHARE_CARD_MIME_TYPE};base64,`
@@ -88,6 +88,17 @@ function loadImage(value: string | null | undefined, allowRemoteImages: boolean)
     image.onerror = () => finish(null)
     image.src = imageUrl
   })
+}
+
+async function loadFirstImage(values: readonly (string | null | undefined)[], allowRemoteImages: boolean) {
+  const seen = new Set<string>()
+  for (const value of values) {
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    const image = await loadImage(value, allowRemoteImages)
+    if (image) return image
+  }
+  return null
 }
 
 function loadLocalImage(value: string): Promise<LoadedImage> {
@@ -170,7 +181,7 @@ function drawAvatar(context: CanvasRenderingContext2D, avatar: LoadedImage, name
 
 async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boolean) {
   const [heroImage, avatar, logo] = await Promise.all([
-    loadImage(data.image, allowRemoteImages),
+    loadFirstImage([data.image, ...(data.imageCandidates || []).map((candidate) => candidate.url)], allowRemoteImages),
     loadImage(data.authorAvatar, allowRemoteImages),
     loadLocalImage(SHARE_CARD_LOGO_PATH),
   ])
@@ -205,28 +216,22 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
 
   context.fillStyle = '#f5fbfd'
   context.fillRect(0, layout.heroHeight, SHARE_CARD_WIDTH, layout.height - layout.heroHeight)
-  if (data.type === 'activity') {
-    context.fillStyle = 'rgba(20,30,35,.72)'
-    context.fillRect(0, layout.activityOverlayTop, SHARE_CARD_WIDTH, layout.activityOverlayHeight)
-    context.fillStyle = 'rgba(255,255,255,.12)'
-    context.fillRect(0, layout.activityOverlayTop, SHARE_CARD_WIDTH, 2)
-  } else {
-    context.fillStyle = 'rgba(255,255,255,.96)'
-    context.fillRect(0, layout.panelTop, SHARE_CARD_WIDTH, layout.panelHeight)
-  }
+  context.fillStyle = 'rgba(20,30,35,.72)'
+  context.fillRect(0, layout.overlayTop, SHARE_CARD_WIDTH, layout.overlayHeight)
+  context.fillStyle = 'rgba(255,255,255,.12)'
+  context.fillRect(0, layout.overlayTop, SHARE_CARD_WIDTH, 2)
 
   const contentLeft = SHARE_CARD_PANEL_PADDING_X
-  const isActivity = data.type === 'activity'
   context.textAlign = 'left'
-  context.fillStyle = isActivity ? '#d5f1f4' : '#0f5f8f'
+  context.fillStyle = '#d5f1f4'
   context.font = `800 ${SHARE_CARD_CATEGORY_FONT_SIZE}px ${FONT_SANS}`
   context.fillText(shareCardTypeLabel(data.type), contentLeft, layout.categoryTop + 24)
 
-  context.fillStyle = isActivity ? '#ffffff' : '#102033'
+  context.fillStyle = '#ffffff'
   context.font = `800 ${SHARE_CARD_TITLE_FONT_SIZE}px ${FONT_SANS}`
   layout.titleLines.forEach((line, index) => context.fillText(line, contentLeft, layout.titleTop + SHARE_CARD_TITLE_FONT_SIZE + index * SHARE_CARD_TITLE_LINE_HEIGHT))
 
-  context.fillStyle = isActivity ? '#f0f6f7' : '#536779'
+  context.fillStyle = '#f0f6f7'
   context.font = `500 ${SHARE_CARD_DESCRIPTION_FONT_SIZE}px ${FONT_SANS}`
   layout.descriptionLines.forEach((line, index) => context.fillText(line, contentLeft, layout.descriptionTop + SHARE_CARD_DESCRIPTION_FONT_SIZE + index * SHARE_CARD_DESCRIPTION_LINE_HEIGHT))
 

@@ -5,7 +5,7 @@ import { ActivityRegistrationButton } from '@/components/activities/ActivityRegi
 import { activityDateLabel, activityTypeLabels, type ActivityView } from '@/lib/activity'
 import type { ActivityRegistrationQuestionView, ActivityRegistrationState, ActivityRegistrationView } from '@/lib/activity-registration-shared'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { createActivityShareCardDescription, createActivityShareDescription, firstShareCardImageCandidate } from '@/lib/share-metadata'
+import { createActivityShareCardDescription, createActivityShareDescription, firstShareCardImageCandidate, shareCardImageCandidates } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { normalizeActionUrl } from '@/lib/url-safety'
 
@@ -23,12 +23,15 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
   const onlineUrl = activity.onlineUrl ? normalizeActionUrl(activity.onlineUrl) : null
   const shareTime = activity.startsAt ? `${activityDateLabel(activity.startsAt)}${activity.endsAt ? ` — ${activityDateLabel(activity.endsAt)}` : ''}` : ''
   const shareLocation = [activity.locationName, activity.locationAddress].filter(Boolean).join('，')
+  const shareCardImage = firstShareCardImageCandidate([{ url: activity.bannerUrl }, { url: activity.coverUrl }])
+  const shareCardImages = shareCardImageCandidates([{ url: activity.bannerUrl }, { url: activity.coverUrl }])
   const shareCardData: ShareCardData = {
     type: 'activity',
     contentId: activity.id,
     title: activity.title,
     description: createActivityShareCardDescription(activity),
-    image: firstShareCardImageCandidate([{ url: activity.bannerUrl }, { url: activity.coverUrl }])?.url || null,
+    image: shareCardImage?.url || null,
+    imageCandidates: shareCardImages,
     url: canonicalShareUrl(`/activities/${activity.id}`),
     author: shareAuthor?.name || activity.organizer || '私家E院',
     authorAvatar: shareAuthor?.avatarUrl || null,

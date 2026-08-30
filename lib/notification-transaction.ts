@@ -15,6 +15,7 @@ export const NOTIFICATION_TRANSACTION_OPTIONS = {
 export type NotificationOperationContext = {
   operation: string
   userId?: string | null
+  targetId?: string | null
   notificationType?: NotificationType | null
 }
 
@@ -23,6 +24,7 @@ function logNotificationTransaction(context: NotificationOperationContext, start
     operation: context.operation,
     durationMs: Date.now() - startedAt,
     userId: context.userId ?? null,
+    targetId: context.targetId ?? null,
     notificationType: context.notificationType ?? null,
   })
 }
@@ -57,6 +59,7 @@ export async function safeNotificationWrite<T>(
       operation: context.operation,
       durationMs: Date.now() - startedAt,
       userId: context.userId ?? null,
+      targetId: context.targetId ?? null,
       notificationType: context.notificationType ?? null,
     }, error)
     return null

@@ -1,4 +1,4 @@
-export type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker' | 'stethoscope' | 'pill' | 'gift' | 'camera'
+export type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker' | 'stethoscope' | 'pill' | 'gift' | 'camera' | 'eye'
 
 const paths: Record<IconName, React.ReactNode> = {
   home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></>,
@@ -28,6 +28,7 @@ const paths: Record<IconName, React.ReactNode> = {
   pill: <><path d="m7 17 10-10a4.24 4.24 0 0 1 6 6L13 23a4.24 4.24 0 0 1-6-6Z"/><path d="m9.5 14.5 6 6"/></>,
   gift: <><rect x="3" y="8" width="18" height="13" rx="1"/><path d="M12 8v13M3 12h18M12 8H8.5a2.5 2.5 0 1 1 2.5-2.5V8Zm0 0h3.5a2.5 2.5 0 1 0-2.5-2.5V8Z"/></>,
   camera: <><path d="M4 7h3l1.5-2h7L17 7h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></>,
+  eye: <><path d="M2.5 12s3.2-5 9.5-5 9.5 5 9.5 5-3.2 5-9.5 5-9.5-5-9.5-5Z"/><circle cx="12" cy="12" r="2.2"/></>,
 }
 
 export function UiIcon({ name, className = '' }: { name: IconName; className?: string }) {

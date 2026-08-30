@@ -8,11 +8,17 @@ export const SHARE_CARD_MIME_TYPE = 'image/png'
 export const SHARE_CARD_CANONICAL_ORIGIN = 'https://ecfc.fans'
 export const SHARE_CARD_LOGO_PATH = '/icon.png'
 
-export type ShareCardType = 'home' | 'post' | 'activity' | 'clinic'
+export type ShareCardType = 'home' | 'post' | 'activity' | 'salon' | 'clinic'
 
 export type ShareCardMeta = Readonly<{
   label: string
   value: string
+}>
+
+export type ShareCardImageCandidate = Readonly<{
+  url: string
+  width?: number | null
+  height?: number | null
 }>
 
 /** The only public fields that can reach the client-side poster renderer. */
@@ -26,6 +32,8 @@ export type ShareCardData = Readonly<{
   /** Optional persisted dimensions let the API return the exact deterministic Hero height without fetching twice. */
   imageWidth?: number | null
   imageHeight?: number | null
+  /** Ordered, already trusted candidates let the renderer skip a failed first media object. */
+  imageCandidates?: readonly ShareCardImageCandidate[]
   url: string
   author: string | null
   authorAvatar: string | null
@@ -58,6 +66,7 @@ export function shareCardApiPath(data: Pick<ShareCardData, 'type' | 'contentId'>
   if (!data.contentId) return null
   if (data.type === 'post') return `/api/posts/${encodeURIComponent(data.contentId)}/share-card`
   if (data.type === 'activity') return `/api/activities/${encodeURIComponent(data.contentId)}/share-card`
+  if (data.type === 'salon') return `/api/salon/posts/${encodeURIComponent(data.contentId)}/share-card`
   return null
 }
 
@@ -112,6 +121,7 @@ export function createShareCardFilename(title: string | null | undefined) {
 export function shareCardTypeLabel(type: ShareCardType) {
   if (type === 'activity') return 'E院活动'
   if (type === 'post') return 'E院广场'
+  if (type === 'salon') return '沙龙'
   if (type === 'clinic') return '病友会诊'
   return 'Eason Fans Club'
 }

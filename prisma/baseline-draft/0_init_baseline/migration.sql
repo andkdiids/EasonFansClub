@@ -43,21 +43,45 @@ CREATE TABLE `Achievement` (
 CREATE TABLE `Activity` (
     `id` VARCHAR(191) NOT NULL,
     `title` VARCHAR(191) NOT NULL,
-    `description` VARCHAR(191) NOT NULL,
-    `type` ENUM('CONCERT_SIGNUP', 'GATHERING', 'ONLINE', 'LOTTERY', 'OTHER') NOT NULL DEFAULT 'OTHER',
-    `status` ENUM('DRAFT', 'PUBLISHED', 'CLOSED', 'FINISHED', 'CANCELLED') NOT NULL DEFAULT 'DRAFT',
+    `subtitle` VARCHAR(300) NULL,
+    `description` TEXT NOT NULL,
+    `type` ENUM('OFFLINE', 'ONLINE', 'CONCERT', 'COMMUNITY', 'BENEFIT', 'OTHER') NOT NULL DEFAULT 'OTHER',
+    `status` ENUM('DRAFT', 'PUBLISHED', 'CANCELLED') NOT NULL DEFAULT 'DRAFT',
     `coverUrl` VARCHAR(191) NULL,
+    `bannerUrl` VARCHAR(191) NULL,
+    `locationName` VARCHAR(300) NULL,
+    `locationAddress` VARCHAR(500) NULL,
+    `onlineUrl` VARCHAR(500) NULL,
     `pointsReward` INTEGER NULL,
+    `registrationFee` INTEGER NOT NULL DEFAULT 0,
+    `feeDescription` TEXT NULL,
     `signupLimit` INTEGER NULL,
     `signupCount` INTEGER NOT NULL DEFAULT 0,
     `startsAt` DATETIME(3) NULL,
     `endsAt` DATETIME(3) NULL,
+    `registrationStartAt` DATETIME(3) NULL,
+    `registrationEndAt` DATETIME(3) NULL,
+    `verificationMode` ENUM('NONE', 'MANUAL', 'QR') NOT NULL DEFAULT 'NONE',
+    `organizer` VARCHAR(160) NULL,
+    `contactInfo` VARCHAR(500) NULL,
+    `isFeatured` BOOLEAN NOT NULL DEFAULT false,
+    `isPinned` BOOLEAN NOT NULL DEFAULT false,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `viewCount` INTEGER NOT NULL DEFAULT 0,
+    `publishedAt` DATETIME(3) NULL,
+    `createdById` VARCHAR(191) NULL,
+    `updatedById` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
     INDEX `Activity_status_createdAt_idx`(`status`, `createdAt`),
     INDEX `Activity_status_startsAt_idx`(`status`, `startsAt`),
     INDEX `Activity_type_idx`(`type`),
+    INDEX `Activity_isPinned_sortOrder_startsAt_idx`(`isPinned`, `sortOrder`, `startsAt`),
+    INDEX `Activity_isFeatured_idx`(`isFeatured`),
+    INDEX `Activity_publishedAt_idx`(`publishedAt`),
+    INDEX `Activity_createdById_idx`(`createdById`),
+    INDEX `Activity_updatedById_idx`(`updatedById`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -76,13 +100,91 @@ CREATE TABLE `ActivityFavorite` (
 CREATE TABLE `ActivityRegistration` (
     `id` VARCHAR(191) NOT NULL,
     `note` VARCHAR(191) NULL,
+    `status` ENUM('ACTIVE', 'CANCELLED') NOT NULL DEFAULT 'ACTIVE',
+    `paidRegistrationFee` INTEGER NOT NULL DEFAULT 0,
+    `registeredAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `cancelledAt` DATETIME(3) NULL,
+    `verifiedAt` DATETIME(3) NULL,
+    `verifiedById` VARCHAR(191) NULL,
+    `verificationMethod` ENUM('MANUAL', 'QR') NULL,
+    `verificationToken` VARCHAR(128) NULL,
     `checkedInAt` DATETIME(3) NULL,
+    `checkInSource` ENUM('MANUAL', 'QR', 'AUTO_AFTER_ACTIVITY_END') NULL,
+    `linkedMaterialRedemptionId` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
     `activityId` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
 
-    INDEX `ActivityRegistration_userId_createdAt_idx`(`userId`, `createdAt`),
+    UNIQUE INDEX `ActivityRegistration_verificationToken_key`(`verificationToken`),
+    UNIQUE INDEX `ActivityRegistration_linkedMaterialRedemptionId_key`(`linkedMaterialRedemptionId`),
+    INDEX `ActivityRegistration_activityId_status_idx`(`activityId`, `status`),
+    INDEX `ActivityRegistration_userId_registeredAt_idx`(`userId`, `registeredAt`),
+    INDEX `ActivityRegistration_verifiedById_verifiedAt_idx`(`verifiedById`, `verifiedAt`),
+    INDEX `ActivityRegistration_checkInSource_verifiedAt_idx`(`checkInSource`, `verifiedAt`),
     UNIQUE INDEX `ActivityRegistration_activityId_userId_key`(`activityId`, `userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityRegistrationQuestion` (
+    `id` VARCHAR(191) NOT NULL,
+    `activityId` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(300) NOT NULL,
+    `type` ENUM('TEXT', 'TEXTAREA', 'SINGLE_SELECT', 'MULTI_SELECT', 'NUMBER', 'PHONE', 'SELECT') NOT NULL,
+    `required` BOOLEAN NOT NULL DEFAULT false,
+    `isActive` BOOLEAN NOT NULL DEFAULT true,
+    `placeholder` VARCHAR(300) NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityRegistrationQuestion_activityId_sortOrder_id_idx`(`activityId`, `sortOrder`, `id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityRegistrationQuestionOption` (
+    `id` VARCHAR(191) NOT NULL,
+    `questionId` VARCHAR(191) NOT NULL,
+    `label` VARCHAR(300) NOT NULL,
+    `value` VARCHAR(300) NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityRegistrationQuestionOption_questionId_sortOrder_id_idx`(`questionId`, `sortOrder`, `id`),
+    UNIQUE INDEX `ActivityRegistrationQuestionOption_questionId_value_key`(`questionId`, `value`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityRegistrationAnswer` (
+    `id` VARCHAR(191) NOT NULL,
+    `registrationId` VARCHAR(191) NOT NULL,
+    `questionId` VARCHAR(191) NOT NULL,
+    `questionTitle` VARCHAR(300) NOT NULL,
+    `value` TEXT NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityRegistrationAnswer_questionId_idx`(`questionId`),
+    UNIQUE INDEX `ActivityRegistrationAnswer_registrationId_questionId_key`(`registrationId`, `questionId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityReward` (
+    `id` VARCHAR(191) NOT NULL,
+    `activityId` VARCHAR(191) NOT NULL,
+    `type` ENUM('BADGE') NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+    `enabled` BOOLEAN NOT NULL DEFAULT true,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ActivityReward_badgeId_idx`(`badgeId`),
+    UNIQUE INDEX `ActivityReward_activityId_type_key`(`activityId`, `type`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -153,6 +255,88 @@ CREATE TABLE `AdminPermission` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `MaterialRedemption` (
+    `id` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(191) NOT NULL,
+    `description` TEXT NOT NULL,
+    `coverImageUrl` TEXT NULL,
+    `instructions` TEXT NULL,
+    `cost` INTEGER NOT NULL DEFAULT 0,
+    `stockTotal` INTEGER NOT NULL,
+    `stockRemaining` INTEGER NOT NULL,
+    `perUserLimit` INTEGER NOT NULL DEFAULT 1,
+    `exchangeStartAt` DATETIME(3) NOT NULL,
+    `exchangeEndAt` DATETIME(3) NOT NULL,
+    `redeemEndAt` DATETIME(3) NOT NULL,
+    `redemptionRule` ENUM('DEFAULT', 'ACTIVITY_REGISTRATION_REQUIRED') NOT NULL DEFAULT 'DEFAULT',
+    `linkedActivityId` VARCHAR(191) NULL,
+    `status` ENUM('DRAFT', 'PUBLISHED', 'PAUSED', 'ENDED', 'ARCHIVED') NOT NULL DEFAULT 'DRAFT',
+    `createdByAdminId` VARCHAR(191) NOT NULL,
+    `publishedAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `MaterialRedemption_linkedActivityId_key`(`linkedActivityId`),
+    INDEX `MaterialRedemption_status_exchangeStartAt_exchangeEndAt_idx`(`status`, `exchangeStartAt`, `exchangeEndAt`),
+    INDEX `MaterialRedemption_createdByAdminId_createdAt_idx`(`createdByAdminId`, `createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `MaterialRedemptionRule` (
+    `id` VARCHAR(191) NOT NULL,
+    `materialId` VARCHAR(191) NOT NULL,
+    `type` ENUM('NONE', 'ACTIVITY_REGISTRATION_REQUIRED', 'REGISTER_DAYS', 'CHECKIN_TOTAL', 'CHECKIN_STREAK', 'HAS_BADGE', 'ATTENDED_CONCERT', 'SPECIFIC_USER') NOT NULL,
+    `operator` ENUM('GTE', 'EQ', 'LTE') NOT NULL DEFAULT 'GTE',
+    `value` VARCHAR(191) NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `MaterialRedemptionRule_materialId_sortOrder_idx`(`materialId`, `sortOrder`),
+    INDEX `MaterialRedemptionRule_type_idx`(`type`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `MaterialRedemptionOrder` (
+    `id` VARCHAR(191) NOT NULL,
+    `materialId` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `quantity` INTEGER NOT NULL DEFAULT 1,
+    `unitCost` INTEGER NOT NULL,
+    `totalCost` INTEGER NOT NULL,
+    `status` ENUM('SUCCESS', 'REDEEMED', 'CANCELLED', 'EXPIRED', 'REFUNDED') NOT NULL DEFAULT 'SUCCESS',
+    `source` ENUM('MANUAL', 'ACTIVITY_REGISTRATION_AUTO') NOT NULL DEFAULT 'MANUAL',
+    `redeemCode` VARCHAR(64) NOT NULL,
+    `redeemToken` VARCHAR(128) NOT NULL,
+    `eligibilitySnapshot` JSON NOT NULL,
+    `idempotencyKey` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `redeemedAt` DATETIME(3) NULL,
+    `redeemedByAdminId` VARCHAR(191) NULL,
+    `expiredAt` DATETIME(3) NULL,
+    `cancelledAt` DATETIME(3) NULL,
+    `cancelledByAdminId` VARCHAR(191) NULL,
+    `refundedAt` DATETIME(3) NULL,
+    `refundedByAdminId` VARCHAR(191) NULL,
+    `refundReason` VARCHAR(500) NULL,
+    `linkedActivityId` VARCHAR(191) NULL,
+    `redemptionSource` ENUM('MANUAL', 'ACTIVITY_CHECK_IN', 'ACTIVITY_AUTO_CHECK_IN') NULL,
+
+    UNIQUE INDEX `MaterialRedemptionOrder_redeemCode_key`(`redeemCode`),
+    UNIQUE INDEX `MaterialRedemptionOrder_redeemToken_key`(`redeemToken`),
+    UNIQUE INDEX `MaterialRedemptionOrder_idempotencyKey_key`(`idempotencyKey`),
+    INDEX `MaterialRedemptionOrder_materialId_createdAt_idx`(`materialId`, `createdAt`),
+    INDEX `MaterialRedemptionOrder_userId_createdAt_idx`(`userId`, `createdAt`),
+    INDEX `MaterialRedemptionOrder_status_createdAt_idx`(`status`, `createdAt`),
+    INDEX `MaterialRedemptionOrder_linkedActivityId_createdAt_idx`(`linkedActivityId`, `createdAt`),
+    INDEX `MaterialRedemptionOrder_source_status_idx`(`source`, `status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `UserReward` (
     `id` VARCHAR(191) NOT NULL,
     `transactionId` VARCHAR(191) NOT NULL,
@@ -193,6 +377,7 @@ CREATE TABLE `BadgeSeries` (
     `description` VARCHAR(500) NULL,
     `sortOrder` INTEGER NOT NULL DEFAULT 0,
     `isEnabled` BOOLEAN NOT NULL DEFAULT true,
+    `completionRewardBadgeId` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
@@ -229,6 +414,8 @@ CREATE TABLE `Badge` (
     `tierLevel` INTEGER NULL,
     `availableFrom` DATETIME(3) NULL,
     `availableUntil` DATETIME(3) NULL,
+    `announceOnGrant` BOOLEAN NOT NULL DEFAULT false,
+    `countsTowardSeriesCompletion` BOOLEAN NOT NULL DEFAULT true,
     `musicTourId` VARCHAR(191) NULL,
     `isAutoGrant` BOOLEAN NOT NULL DEFAULT false,
     `isActive` BOOLEAN NOT NULL DEFAULT true,
@@ -255,9 +442,9 @@ CREATE TABLE `Badge` (
 CREATE TABLE `BadgeRule` (
     `id` VARCHAR(191) NOT NULL,
     `badgeId` VARCHAR(191) NOT NULL,
-    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'RATING_COUNT') NOT NULL,
+    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE') NOT NULL,
     `operator` ENUM('GTE', 'LTE', 'EQ') NOT NULL DEFAULT 'GTE',
-    `threshold` INTEGER NOT NULL,
+    `threshold` INTEGER NULL,
     `secondaryThreshold` INTEGER NULL,
     `configJson` JSON NULL,
     `isEnabled` BOOLEAN NOT NULL DEFAULT true,
@@ -444,6 +631,10 @@ CREATE TABLE `CheckIn` (
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `userId` VARCHAR(191) NOT NULL,
     `isMakeUp` BOOLEAN NOT NULL DEFAULT false,
+    `type` ENUM('NORMAL', 'MAKEUP_FREE_QUIZ', 'MAKEUP_PAID', 'MAKEUP_ADMIN') NOT NULL DEFAULT 'NORMAL',
+    `madeUpAt` DATETIME(3) NULL,
+    `makeupCost` INTEGER NULL,
+    `challengeId` VARCHAR(191) NULL,
     `exp` INTEGER NOT NULL DEFAULT 0,
     `message` VARCHAR(191) NULL,
     `mood` VARCHAR(191) NULL,
@@ -452,10 +643,38 @@ CREATE TABLE `CheckIn` (
     `moodText` VARCHAR(191) NULL,
     `checkinDateKey` VARCHAR(191) NOT NULL,
 
+    UNIQUE INDEX `CheckIn_challengeId_key`(`challengeId`),
     INDEX `CheckIn_checkDate_idx`(`checkDate`),
+    INDEX `CheckIn_checkinDateKey_mood_idx`(`checkinDateKey`, `mood`),
     INDEX `CheckIn_userId_createdAt_idx`(`userId`, `createdAt`),
+    INDEX `CheckIn_userId_type_checkinDateKey_idx`(`userId`, `type`, `checkinDateKey`),
     UNIQUE INDEX `CheckIn_userId_checkDate_key`(`userId`, `checkDate`),
     UNIQUE INDEX `CheckIn_userId_checkinDateKey_key`(`userId`, `checkinDateKey`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `MakeupChallenge` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `targetDate` DATETIME(3) NOT NULL,
+    `targetDateKey` VARCHAR(191) NOT NULL,
+    `monthKey` VARCHAR(191) NOT NULL,
+    `questionId` VARCHAR(191) NOT NULL,
+    `correctOptionId` VARCHAR(191) NOT NULL,
+    `options` JSON NOT NULL,
+    `audioStoragePath` VARCHAR(191) NOT NULL,
+    `playbackSeconds` INTEGER NOT NULL DEFAULT 10,
+    `status` ENUM('PENDING', 'CORRECT', 'WRONG') NOT NULL DEFAULT 'PENDING',
+    `selectedOptionId` VARCHAR(191) NULL,
+    `answeredAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `MakeupChallenge_userId_status_idx`(`userId`, `status`),
+    INDEX `MakeupChallenge_targetDateKey_idx`(`targetDateKey`),
+    INDEX `MakeupChallenge_questionId_idx`(`questionId`),
+    UNIQUE INDEX `MakeupChallenge_userId_monthKey_key`(`userId`, `monthKey`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -1696,6 +1915,9 @@ CREATE TABLE `GuessSongDuelMatch` (
     `startedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `finishedAt` DATETIME(3) NULL,
     `rewardAmount` INTEGER NOT NULL DEFAULT 0,
+    `rewardGranted` BOOLEAN NOT NULL DEFAULT false,
+    `rewardReason` ENUM('NOT_APPLICABLE', 'PENDING', 'GRANTED', 'DAILY_LIMIT_REACHED', 'ALREADY_GRANTED_FOR_MATCH', 'REWARD_FAILED', 'NOT_ELIGIBLE') NOT NULL DEFAULT 'NOT_APPLICABLE',
+    `rewardedAt` DATETIME(3) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
     `roomId` VARCHAR(191) NOT NULL,
@@ -1703,6 +1925,7 @@ CREATE TABLE `GuessSongDuelMatch` (
     UNIQUE INDEX `GuessSongDuelMatch_roomId_key`(`roomId`),
     INDEX `GuessSongDuelMatch_status_createdAt_idx`(`status`, `createdAt`),
     INDEX `GuessSongDuelMatch_winnerId_finishedAt_idx`(`winnerId`, `finishedAt`),
+    INDEX `GuessSongDuelMatch_rewardReason_finishedAt_idx`(`rewardReason`, `finishedAt`),
     INDEX `GuessSongDuelMatch_startedAt_idx`(`startedAt`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -1958,6 +2181,19 @@ CREATE TABLE `MusicAlbum` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `MusicAlbumLike` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `albumId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `MusicAlbumLike_albumId_idx`(`albumId`),
+    INDEX `MusicAlbumLike_userId_idx`(`userId`),
+    UNIQUE INDEX `MusicAlbumLike_userId_albumId_key`(`userId`, `albumId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `AlbumReview` (
     `id` VARCHAR(191) NOT NULL,
     `title` VARCHAR(191) NOT NULL,
@@ -2071,6 +2307,19 @@ CREATE TABLE `MusicSong` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `MusicSongLike` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `songId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `MusicSongLike_songId_idx`(`songId`),
+    INDEX `MusicSongLike_userId_idx`(`userId`),
+    UNIQUE INDEX `MusicSongLike_userId_songId_key`(`userId`, `songId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `Rating` (
     `id` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
@@ -2136,6 +2385,40 @@ CREATE TABLE `RatingStats` (
     UNIQUE INDEX `RatingStats_albumId_key`(`albumId`),
     INDEX `RatingStats_targetType_averageScore_ratingCount_idx`(`targetType`, `averageScore`, `ratingCount`),
     INDEX `RatingStats_targetType_updatedAt_idx`(`targetType`, `updatedAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PersonalRanking` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `type` ENUM('SONG', 'ALBUM') NOT NULL,
+    `visibility` ENUM('PRIVATE', 'PUBLIC') NOT NULL DEFAULT 'PRIVATE',
+    `revision` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `PersonalRanking_userId_idx`(`userId`),
+    UNIQUE INDEX `PersonalRanking_userId_type_key`(`userId`, `type`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PersonalRankingItem` (
+    `id` VARCHAR(191) NOT NULL,
+    `rankingId` VARCHAR(191) NOT NULL,
+    `songId` VARCHAR(191) NULL,
+    `albumId` VARCHAR(191) NULL,
+    `position` INTEGER NOT NULL,
+    `note` TEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `PersonalRankingItem_rankingId_position_idx`(`rankingId`, `position`),
+    INDEX `PersonalRankingItem_songId_idx`(`songId`),
+    INDEX `PersonalRankingItem_albumId_idx`(`albumId`),
+    UNIQUE INDEX `PersonalRankingItem_rankingId_songId_key`(`rankingId`, `songId`),
+    UNIQUE INDEX `PersonalRankingItem_rankingId_albumId_key`(`rankingId`, `albumId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -2317,6 +2600,87 @@ CREATE TABLE `MusicConcertCategory` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `SalonPost` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `category` ENUM('CONCERT', 'MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER') NOT NULL,
+    `concertId` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(200) NULL,
+    `content` TEXT NULL,
+    `status` ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+    `rejectReason` TEXT NULL,
+    `likeCount` INTEGER NOT NULL DEFAULT 0,
+    `commentCount` INTEGER NOT NULL DEFAULT 0,
+    `viewCount` INTEGER NOT NULL DEFAULT 0,
+    `watermarkEnabled` BOOLEAN NOT NULL DEFAULT false,
+    `watermarkOpacity` INTEGER NOT NULL DEFAULT 50,
+    `watermarkPosition` ENUM('TOP', 'BOTTOM', 'LEFT', 'RIGHT', 'TOP_LEFT', 'TOP_RIGHT', 'BOTTOM_LEFT', 'BOTTOM_RIGHT') NOT NULL DEFAULT 'BOTTOM_RIGHT',
+    `approvedAt` DATETIME(3) NULL,
+    `approvedById` VARCHAR(191) NULL,
+    `submissionKey` VARCHAR(64) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `SalonPost_status_approvedAt_idx`(`status`, `approvedAt`),
+    INDEX `SalonPost_category_status_approvedAt_idx`(`category`, `status`, `approvedAt`),
+    INDEX `SalonPost_concertId_status_approvedAt_idx`(`concertId`, `status`, `approvedAt`),
+    INDEX `SalonPost_userId_createdAt_idx`(`userId`, `createdAt`),
+    UNIQUE INDEX `SalonPost_userId_submissionKey_key`(`userId`, `submissionKey`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SalonPostMedia` (
+    `id` VARCHAR(191) NOT NULL,
+    `postId` VARCHAR(191) NOT NULL,
+    `originalUrl` TEXT NOT NULL,
+    `previewUrl` TEXT NOT NULL,
+    `thumbnailUrl` TEXT NOT NULL,
+    `storageKey` VARCHAR(512) NOT NULL,
+    `originalObjectKey` VARCHAR(512) NULL,
+    `originalFilename` VARCHAR(255) NULL,
+    `originalMimeType` VARCHAR(100) NULL,
+    `originalSize` INTEGER NULL,
+    `width` INTEGER NOT NULL,
+    `height` INTEGER NOT NULL,
+    `sortOrder` INTEGER NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `SalonPostMedia_postId_sortOrder_idx`(`postId`, `sortOrder`),
+    UNIQUE INDEX `SalonPostMedia_postId_sortOrder_key`(`postId`, `sortOrder`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SalonPostLike` (
+    `id` VARCHAR(191) NOT NULL,
+    `postId` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `SalonPostLike_postId_idx`(`postId`),
+    UNIQUE INDEX `SalonPostLike_postId_userId_key`(`postId`, `userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SalonComment` (
+    `id` VARCHAR(191) NOT NULL,
+    `postId` VARCHAR(191) NOT NULL,
+    `authorId` VARCHAR(191) NOT NULL,
+    `parentId` VARCHAR(191) NULL,
+    `content` TEXT NOT NULL,
+    `isDeleted` BOOLEAN NOT NULL DEFAULT false,
+    `deletedAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `SalonComment_postId_parentId_createdAt_idx`(`postId`, `parentId`, `createdAt`),
+    INDEX `SalonComment_authorId_createdAt_idx`(`authorId`, `createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `MusicTrack` (
     `id` VARCHAR(191) NOT NULL,
     `title` VARCHAR(191) NOT NULL,
@@ -2338,7 +2702,7 @@ CREATE TABLE `MusicTrack` (
 -- CreateTable
 CREATE TABLE `Notification` (
     `id` VARCHAR(191) NOT NULL,
-    `type` ENUM('REPLY', 'LIKE', 'SYSTEM', 'MESSAGE', 'ACTIVITY', 'ADMIN', 'FOLLOW', 'BADGE', 'FRIEND_REQUEST', 'BIRTHDAY_GREETING', 'GUESS_SONG_DUEL_INVITE', 'USER_REWARD', 'FRIEND_BIRTHDAY') NOT NULL,
+    `type` ENUM('REPLY', 'LIKE', 'SYSTEM', 'MESSAGE', 'ACTIVITY', 'ADMIN', 'FOLLOW', 'BADGE', 'FRIEND_REQUEST', 'BIRTHDAY_GREETING', 'FEEDBACK', 'REVIEW') NOT NULL,
     `title` VARCHAR(191) NOT NULL,
     `content` VARCHAR(191) NULL,
     `link` VARCHAR(191) NULL,
@@ -2351,6 +2715,7 @@ CREATE TABLE `Notification` (
     `completedAt` DATETIME(3) NULL,
 
     INDEX `Notification_recipientId_isRead_createdAt_idx`(`recipientId`, `isRead`, `createdAt`),
+    INDEX `Notification_recipientId_readAt_createdAt_idx`(`recipientId`, `readAt`, `createdAt`),
     INDEX `Notification_type_idx`(`type`),
     UNIQUE INDEX `Notification_recipientId_key_key`(`recipientId`, `key`),
     PRIMARY KEY (`id`)
@@ -2433,7 +2798,7 @@ CREATE TABLE `PasswordResetToken` (
 -- CreateTable
 CREATE TABLE `PointLog` (
     `id` VARCHAR(191) NOT NULL,
-    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD') NOT NULL,
+    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD', 'CHECK_IN_MAKEUP', 'MATERIAL_REDEMPTION', 'MATERIAL_REDEMPTION_REFUND', 'ACTIVITY_REGISTRATION_FEE', 'ACTIVITY_REGISTRATION_REFUND') NOT NULL,
     `points` INTEGER NOT NULL,
     `before` INTEGER NOT NULL,
     `after` INTEGER NOT NULL,
@@ -2444,6 +2809,7 @@ CREATE TABLE `PointLog` (
     `replyId` VARCHAR(191) NULL,
     `checkInId` VARCHAR(191) NULL,
     `activityId` VARCHAR(191) NULL,
+    `activityRegistrationId` VARCHAR(191) NULL,
     `badgeId` VARCHAR(191) NULL,
     `dailyDrawId` VARCHAR(191) NULL,
     `dateKey` VARCHAR(191) NULL,
@@ -2453,10 +2819,12 @@ CREATE TABLE `PointLog` (
     UNIQUE INDEX `PointLog_businessKey_key`(`businessKey`),
     INDEX `PointLog_action_idx`(`action`),
     INDEX `PointLog_activityId_idx`(`activityId`),
+    INDEX `PointLog_activityRegistrationId_idx`(`activityRegistrationId`),
     INDEX `PointLog_checkInId_idx`(`checkInId`),
     INDEX `PointLog_postId_idx`(`postId`),
     INDEX `PointLog_replyId_idx`(`replyId`),
     INDEX `PointLog_userId_createdAt_idx`(`userId`, `createdAt`),
+    INDEX `PointLog_userId_action_dateKey_idx`(`userId`, `action`, `dateKey`),
     UNIQUE INDEX `PointLog_action_checkInId_key`(`action`, `checkInId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -2504,10 +2872,12 @@ CREATE TABLE `Post` (
     `id` VARCHAR(191) NOT NULL,
     `title` VARCHAR(191) NOT NULL,
     `content` VARCHAR(191) NOT NULL,
+    `richContent` JSON NULL,
     `ipRegion` VARCHAR(191) NULL,
     `viewCount` INTEGER NOT NULL DEFAULT 0,
     `likeCount` INTEGER NOT NULL DEFAULT 0,
     `replyCount` INTEGER NOT NULL DEFAULT 0,
+    `lastCommentFloor` INTEGER NOT NULL DEFAULT 0,
     `isPinned` BOOLEAN NOT NULL DEFAULT false,
     `profilePinnedAt` DATETIME(3) NULL,
     `isFeatured` BOOLEAN NOT NULL DEFAULT false,
@@ -2802,6 +3172,7 @@ CREATE TABLE `Reply` (
     `postId` VARCHAR(191) NOT NULL,
     `authorId` VARCHAR(191) NOT NULL,
     `parentId` VARCHAR(191) NULL,
+    `floorNumber` INTEGER NULL,
     `likeCount` INTEGER NOT NULL DEFAULT 0,
 
     INDEX `Reply_authorId_createdAt_idx`(`authorId`, `createdAt`),
@@ -2810,6 +3181,7 @@ CREATE TABLE `Reply` (
     INDEX `Reply_parentId_idx`(`parentId`),
     INDEX `Reply_postId_createdAt_idx`(`postId`, `createdAt`),
     INDEX `Reply_stickerId_idx`(`stickerId`),
+    UNIQUE INDEX `Reply_postId_floorNumber_key`(`postId`, `floorNumber`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -2931,6 +3303,24 @@ CREATE TABLE `ContentModerationScanJob` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `DailyJobExecution` (
+    `id` VARCHAR(191) NOT NULL,
+    `jobKey` VARCHAR(191) NOT NULL,
+    `dateKey` VARCHAR(191) NOT NULL,
+    `status` ENUM('RUNNING', 'SUCCEEDED', 'FAILED') NOT NULL DEFAULT 'RUNNING',
+    `runToken` VARCHAR(64) NULL,
+    `startedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `finishedAt` DATETIME(3) NULL,
+    `error` TEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `DailyJobExecution_status_startedAt_idx`(`status`, `startedAt`),
+    UNIQUE INDEX `DailyJobExecution_jobKey_dateKey_key`(`jobKey`, `dateKey`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `SiteSetting` (
     `id` VARCHAR(191) NOT NULL,
     `key` VARCHAR(191) NOT NULL,
@@ -2943,6 +3333,35 @@ CREATE TABLE `SiteSetting` (
 
     UNIQUE INDEX `SiteSetting_key_key`(`key`),
     INDEX `SiteSetting_group_idx`(`group`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `EcenterFeatureSetting` (
+    `id` VARCHAR(191) NOT NULL,
+    `featureKey` VARCHAR(191) NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `isEnabled` BOOLEAN NOT NULL DEFAULT true,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `EcenterFeatureSetting_featureKey_key`(`featureKey`),
+    INDEX `EcenterFeatureSetting_sortOrder_isEnabled_idx`(`sortOrder`, `isEnabled`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserCenterShortcutPreference` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `itemKey` VARCHAR(191) NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `hidden` BOOLEAN NOT NULL DEFAULT false,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `UserCenterShortcutPreference_userId_sortOrder_idx`(`userId`, `sortOrder`),
+    UNIQUE INDEX `UserCenterShortcutPreference_userId_itemKey_key`(`userId`, `itemKey`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3193,6 +3612,8 @@ CREATE TABLE `User` (
     `usernameChangedAt` DATETIME(3) NULL,
     `equippedBadgeId` VARCHAR(191) NULL,
     `checkinMoodEnabled` BOOLEAN NOT NULL DEFAULT true,
+    `showBadgeActivity` BOOLEAN NOT NULL DEFAULT true,
+    `showBadgeProgressNotifications` BOOLEAN NOT NULL DEFAULT true,
     `ipRegion` VARCHAR(191) NULL,
     `ipRegionUpdatedAt` DATETIME(3) NULL,
 
@@ -3214,6 +3635,25 @@ CREATE TABLE `User` (
     INDEX `User_birthMonth_birthDay_idx`(`birthMonth`, `birthDay`),
     INDEX `User_nicknameViolationDisplay_idx`(`nicknameViolationDisplay`),
     INDEX `User_equippedBadgeId_idx`(`equippedBadgeId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserPrivacySetting` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `showCheckInHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showCheckInMessages` BOOLEAN NOT NULL DEFAULT true,
+    `showPosts` BOOLEAN NOT NULL DEFAULT true,
+    `showComments` BOOLEAN NOT NULL DEFAULT true,
+    `showConcertHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showActivityHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showBadgeHistory` BOOLEAN NOT NULL DEFAULT true,
+    `showRatings` BOOLEAN NOT NULL DEFAULT true,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `UserPrivacySetting_userId_key`(`userId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3269,6 +3709,36 @@ CREATE TABLE `UserBadge` (
     INDEX `UserBadge_badgeId_idx`(`badgeId`),
     INDEX `UserBadge_grantedBy_createdAt_idx`(`grantedBy`, `createdAt`),
     UNIQUE INDEX `UserBadge_userId_badgeId_key`(`userId`, `badgeId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserBadgeShowcase` (
+    `id` VARCHAR(191) NOT NULL,
+    `slot` INTEGER NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+
+    INDEX `UserBadgeShowcase_badgeId_idx`(`badgeId`),
+    UNIQUE INDEX `UserBadgeShowcase_userId_badgeId_key`(`userId`, `badgeId`),
+    UNIQUE INDEX `UserBadgeShowcase_userId_slot_key`(`userId`, `slot`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserBadgeTracking` (
+    `id` VARCHAR(191) NOT NULL,
+    `lastMilestone` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+
+    INDEX `UserBadgeTracking_userId_createdAt_idx`(`userId`, `createdAt`),
+    INDEX `UserBadgeTracking_badgeId_idx`(`badgeId`),
+    UNIQUE INDEX `UserBadgeTracking_userId_badgeId_key`(`userId`, `badgeId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3332,8 +3802,142 @@ CREATE TABLE `LeaderboardAdminLog` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- CreateTable
+CREATE TABLE `SocialPost` (
+    `id` VARCHAR(191) NOT NULL,
+    `platform` ENUM('INSTAGRAM') NOT NULL DEFAULT 'INSTAGRAM',
+    `externalId` VARCHAR(191) NOT NULL,
+    `shortcode` VARCHAR(191) NULL,
+    `authorUsername` VARCHAR(191) NOT NULL,
+    `authorDisplayName` VARCHAR(191) NULL,
+    `authorAvatarUrl` TEXT NULL,
+    `caption` TEXT NULL,
+    `permalink` TEXT NULL,
+    `publishedAt` DATETIME(3) NOT NULL,
+    `syncedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `mediaType` ENUM('IMAGE', 'VIDEO', 'CAROUSEL', 'REEL') NOT NULL,
+    `status` ENUM('DISCOVERED', 'DOWNLOADING', 'READY', 'FAILED', 'HIDDEN', 'SOURCE_DELETED') NOT NULL DEFAULT 'DISCOVERED',
+    `provider` VARCHAR(64) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `SocialPost_status_publishedAt_idx`(`status`, `publishedAt`),
+    INDEX `SocialPost_authorUsername_publishedAt_idx`(`authorUsername`, `publishedAt`),
+    UNIQUE INDEX `SocialPost_platform_externalId_key`(`platform`, `externalId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SocialPostMedia` (
+    `id` VARCHAR(191) NOT NULL,
+    `postId` VARCHAR(191) NOT NULL,
+    `type` ENUM('IMAGE', 'VIDEO') NOT NULL,
+    `storageUrl` TEXT NOT NULL,
+    `thumbnailUrl` TEXT NULL,
+    `width` INTEGER NULL,
+    `height` INTEGER NULL,
+    `durationMs` INTEGER NULL,
+    `sortOrder` INTEGER NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `SocialPostMedia_postId_sortOrder_idx`(`postId`, `sortOrder`),
+    UNIQUE INDEX `SocialPostMedia_postId_sortOrder_key`(`postId`, `sortOrder`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SocialPostLike` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `postId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `SocialPostLike_postId_createdAt_idx`(`postId`, `createdAt`),
+    UNIQUE INDEX `SocialPostLike_userId_postId_key`(`userId`, `postId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SocialPostComment` (
+    `id` VARCHAR(191) NOT NULL,
+    `postId` VARCHAR(191) NOT NULL,
+    `authorId` VARCHAR(191) NOT NULL,
+    `parentId` VARCHAR(191) NULL,
+    `content` TEXT NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `deletedAt` DATETIME(3) NULL,
+
+    INDEX `SocialPostComment_postId_parentId_createdAt_idx`(`postId`, `parentId`, `createdAt`),
+    INDEX `SocialPostComment_authorId_createdAt_idx`(`authorId`, `createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SocialSyncLog` (
+    `id` VARCHAR(191) NOT NULL,
+    `provider` VARCHAR(64) NOT NULL,
+    `actor` VARCHAR(191) NULL,
+    `runId` VARCHAR(191) NULL,
+    `datasetId` VARCHAR(191) NULL,
+    `runStatus` VARCHAR(64) NULL,
+    `runStartedAt` DATETIME(3) NULL,
+    `runFinishedAt` DATETIME(3) NULL,
+    `usageTotalUsd` DOUBLE NULL,
+    `billableResults` INTEGER NULL,
+    `target` VARCHAR(191) NOT NULL,
+    `startedAt` DATETIME(3) NOT NULL,
+    `finishedAt` DATETIME(3) NULL,
+    `status` ENUM('RUNNING', 'SUCCEEDED', 'FAILED', 'BLOCKED', 'RATE_LIMITED', 'CHALLENGE_REQUIRED') NOT NULL DEFAULT 'RUNNING',
+    `foundCount` INTEGER NOT NULL DEFAULT 0,
+    `createdCount` INTEGER NOT NULL DEFAULT 0,
+    `updatedCount` INTEGER NOT NULL DEFAULT 0,
+    `mediaCount` INTEGER NOT NULL DEFAULT 0,
+    `notificationCount` INTEGER NOT NULL DEFAULT 0,
+    `baselineImport` BOOLEAN NOT NULL DEFAULT false,
+    `durationMs` INTEGER NULL,
+    `errorCode` VARCHAR(64) NULL,
+    `errorMessage` TEXT NULL,
+
+    INDEX `SocialSyncLog_target_startedAt_idx`(`target`, `startedAt`),
+    INDEX `SocialSyncLog_status_startedAt_idx`(`status`, `startedAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `SocialSyncState` (
+    `id` VARCHAR(191) NOT NULL,
+    `platform` ENUM('INSTAGRAM') NOT NULL DEFAULT 'INSTAGRAM',
+    `target` VARCHAR(191) NOT NULL,
+    `lastCheckedAt` DATETIME(3) NULL,
+    `lastSuccessfulSyncAt` DATETIME(3) NULL,
+    `lastChangedAt` DATETIME(3) NULL,
+    `lastExternalId` VARCHAR(191) NULL,
+    `consecutiveFailures` INTEGER NOT NULL DEFAULT 0,
+    `nextAllowedSyncAt` DATETIME(3) NULL,
+    `lastErrorCode` VARCHAR(64) NULL,
+    `lastErrorAt` DATETIME(3) NULL,
+    `baselineCompletedAt` DATETIME(3) NULL,
+    `syncRequestedAt` DATETIME(3) NULL,
+    `lockToken` VARCHAR(64) NULL,
+    `lockUntil` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `SocialSyncState_nextAllowedSyncAt_idx`(`nextAllowedSyncAt`),
+    INDEX `SocialSyncState_lastSuccessfulSyncAt_idx`(`lastSuccessfulSyncAt`),
+    UNIQUE INDEX `SocialSyncState_platform_target_key`(`platform`, `target`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- AddForeignKey
 ALTER TABLE `AccountSecurityLog` ADD CONSTRAINT `AccountSecurityLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `Activity` ADD CONSTRAINT `Activity_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `Activity` ADD CONSTRAINT `Activity_updatedById_fkey` FOREIGN KEY (`updatedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `ActivityFavorite` ADD CONSTRAINT `ActivityFavorite_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -3346,6 +3950,30 @@ ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_activity
 
 -- AddForeignKey
 ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_verifiedById_fkey` FOREIGN KEY (`verifiedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistration` ADD CONSTRAINT `ActivityRegistration_linkedMaterialRedemptionId_fkey` FOREIGN KEY (`linkedMaterialRedemptionId`) REFERENCES `MaterialRedemptionOrder`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationQuestion` ADD CONSTRAINT `ActivityRegistrationQuestion_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationQuestionOption` ADD CONSTRAINT `ActivityRegistrationQuestionOption_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `ActivityRegistrationQuestion`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationAnswer` ADD CONSTRAINT `ActivityRegistrationAnswer_registrationId_fkey` FOREIGN KEY (`registrationId`) REFERENCES `ActivityRegistration`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityRegistrationAnswer` ADD CONSTRAINT `ActivityRegistrationAnswer_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `ActivityRegistrationQuestion`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityReward` ADD CONSTRAINT `ActivityReward_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityReward` ADD CONSTRAINT `ActivityReward_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `AdminAction` ADD CONSTRAINT `AdminAction_adminId_fkey` FOREIGN KEY (`adminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -3372,10 +4000,40 @@ ALTER TABLE `AdminActionLog` ADD CONSTRAINT `AdminActionLog_targetUserId_fkey` F
 ALTER TABLE `AdminPermission` ADD CONSTRAINT `AdminPermission_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `MaterialRedemption` ADD CONSTRAINT `MaterialRedemption_createdByAdminId_fkey` FOREIGN KEY (`createdByAdminId`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemption` ADD CONSTRAINT `MaterialRedemption_linkedActivityId_fkey` FOREIGN KEY (`linkedActivityId`) REFERENCES `Activity`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionRule` ADD CONSTRAINT `MaterialRedemptionRule_materialId_fkey` FOREIGN KEY (`materialId`) REFERENCES `MaterialRedemption`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_materialId_fkey` FOREIGN KEY (`materialId`) REFERENCES `MaterialRedemption`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_linkedActivityId_fkey` FOREIGN KEY (`linkedActivityId`) REFERENCES `Activity`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_redeemedByAdminId_fkey` FOREIGN KEY (`redeemedByAdminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_cancelledByAdminId_fkey` FOREIGN KEY (`cancelledByAdminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MaterialRedemptionOrder` ADD CONSTRAINT `MaterialRedemptionOrder_refundedByAdminId_fkey` FOREIGN KEY (`refundedByAdminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `UserReward` ADD CONSTRAINT `UserReward_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `UserReward` ADD CONSTRAINT `UserReward_operatorId_fkey` FOREIGN KEY (`operatorId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `BadgeSeries` ADD CONSTRAINT `BadgeSeries_completionRewardBadgeId_fkey` FOREIGN KEY (`completionRewardBadgeId`) REFERENCES `Badge`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `Badge` ADD CONSTRAINT `Badge_seriesId_fkey` FOREIGN KEY (`seriesId`) REFERENCES `BadgeSeries`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -3421,6 +4079,15 @@ ALTER TABLE `Changelog` ADD CONSTRAINT `Changelog_createdById_fkey` FOREIGN KEY 
 
 -- AddForeignKey
 ALTER TABLE `CheckIn` ADD CONSTRAINT `CheckIn_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `CheckIn` ADD CONSTRAINT `CheckIn_challengeId_fkey` FOREIGN KEY (`challengeId`) REFERENCES `MakeupChallenge`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MakeupChallenge` ADD CONSTRAINT `MakeupChallenge_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MakeupChallenge` ADD CONSTRAINT `MakeupChallenge_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `GuessSongQuestion`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `ConversationParticipant` ADD CONSTRAINT `ConversationParticipant_conversationId_fkey` FOREIGN KEY (`conversationId`) REFERENCES `Conversation`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -3756,6 +4423,12 @@ ALTER TABLE `LyricCard` ADD CONSTRAINT `LyricCard_templateId_fkey` FOREIGN KEY (
 ALTER TABLE `LyricCard` ADD CONSTRAINT `LyricCard_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `MusicAlbumLike` ADD CONSTRAINT `MusicAlbumLike_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MusicAlbumLike` ADD CONSTRAINT `MusicAlbumLike_albumId_fkey` FOREIGN KEY (`albumId`) REFERENCES `MusicAlbum`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `AlbumReview` ADD CONSTRAINT `AlbumReview_albumId_fkey` FOREIGN KEY (`albumId`) REFERENCES `MusicAlbum`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -3789,6 +4462,12 @@ ALTER TABLE `MusicPlayRecord` ADD CONSTRAINT `MusicPlayRecord_userId_fkey` FOREI
 ALTER TABLE `MusicSong` ADD CONSTRAINT `MusicSong_albumId_fkey` FOREIGN KEY (`albumId`) REFERENCES `MusicAlbum`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `MusicSongLike` ADD CONSTRAINT `MusicSongLike_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MusicSongLike` ADD CONSTRAINT `MusicSongLike_songId_fkey` FOREIGN KEY (`songId`) REFERENCES `MusicSong`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `Rating` ADD CONSTRAINT `Rating_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -3814,6 +4493,18 @@ ALTER TABLE `RatingStats` ADD CONSTRAINT `RatingStats_songId_fkey` FOREIGN KEY (
 
 -- AddForeignKey
 ALTER TABLE `RatingStats` ADD CONSTRAINT `RatingStats_albumId_fkey` FOREIGN KEY (`albumId`) REFERENCES `MusicAlbum`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PersonalRanking` ADD CONSTRAINT `PersonalRanking_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PersonalRankingItem` ADD CONSTRAINT `PersonalRankingItem_rankingId_fkey` FOREIGN KEY (`rankingId`) REFERENCES `PersonalRanking`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PersonalRankingItem` ADD CONSTRAINT `PersonalRankingItem_songId_fkey` FOREIGN KEY (`songId`) REFERENCES `MusicSong`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PersonalRankingItem` ADD CONSTRAINT `PersonalRankingItem_albumId_fkey` FOREIGN KEY (`albumId`) REFERENCES `MusicAlbum`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `MusicTour` ADD CONSTRAINT `MusicTour_categoryId_fkey` FOREIGN KEY (`categoryId`) REFERENCES `MusicConcertCategory`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -3861,6 +4552,33 @@ ALTER TABLE `MusicConcertSetlistItem` ADD CONSTRAINT `MusicConcertSetlistItem_so
 ALTER TABLE `MusicConcertHighlight` ADD CONSTRAINT `MusicConcertHighlight_concertId_fkey` FOREIGN KEY (`concertId`) REFERENCES `MusicConcert`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `SalonPost` ADD CONSTRAINT `SalonPost_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonPost` ADD CONSTRAINT `SalonPost_concertId_fkey` FOREIGN KEY (`concertId`) REFERENCES `MusicConcert`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonPost` ADD CONSTRAINT `SalonPost_approvedById_fkey` FOREIGN KEY (`approvedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonPostMedia` ADD CONSTRAINT `SalonPostMedia_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `SalonPost`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonPostLike` ADD CONSTRAINT `SalonPostLike_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `SalonPost`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonPostLike` ADD CONSTRAINT `SalonPostLike_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonComment` ADD CONSTRAINT `SalonComment_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `SalonPost`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonComment` ADD CONSTRAINT `SalonComment_authorId_fkey` FOREIGN KEY (`authorId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SalonComment` ADD CONSTRAINT `SalonComment_parentId_fkey` FOREIGN KEY (`parentId`) REFERENCES `SalonComment`(`id`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
 ALTER TABLE `Notification` ADD CONSTRAINT `Notification_actorId_fkey` FOREIGN KEY (`actorId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -3886,6 +4604,9 @@ ALTER TABLE `PasswordResetToken` ADD CONSTRAINT `PasswordResetToken_userId_fkey`
 
 -- AddForeignKey
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_dailyDrawId_fkey` FOREIGN KEY (`dailyDrawId`) REFERENCES `EntertainmentDailyDraw`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_activityRegistrationId_fkey` FOREIGN KEY (`activityRegistrationId`) REFERENCES `ActivityRegistration`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -4041,6 +4762,9 @@ ALTER TABLE `SearchHistory` ADD CONSTRAINT `SearchHistory_userId_fkey` FOREIGN K
 ALTER TABLE `BannedWord` ADD CONSTRAINT `BannedWord_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `UserCenterShortcutPreference` ADD CONSTRAINT `UserCenterShortcutPreference_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `StickerPack` ADD CONSTRAINT `StickerPack_creatorId_fkey` FOREIGN KEY (`creatorId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -4077,6 +4801,9 @@ ALTER TABLE `SystemNotificationRead` ADD CONSTRAINT `SystemNotificationRead_user
 ALTER TABLE `User` ADD CONSTRAINT `User_equippedBadgeId_fkey` FOREIGN KEY (`equippedBadgeId`) REFERENCES `Badge`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `UserPrivacySetting` ADD CONSTRAINT `UserPrivacySetting_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `UserAchievement` ADD CONSTRAINT `UserAchievement_achievementId_fkey` FOREIGN KEY (`achievementId`) REFERENCES `Achievement`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -4098,6 +4825,18 @@ ALTER TABLE `UserBadge` ADD CONSTRAINT `UserBadge_userId_fkey` FOREIGN KEY (`use
 ALTER TABLE `UserBadge` ADD CONSTRAINT `UserBadge_grantedBy_fkey` FOREIGN KEY (`grantedBy`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `UserBadgeShowcase` ADD CONSTRAINT `UserBadgeShowcase_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeShowcase` ADD CONSTRAINT `UserBadgeShowcase_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeTracking` ADD CONSTRAINT `UserBadgeTracking_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeTracking` ADD CONSTRAINT `UserBadgeTracking_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `UserSecurityQuestion` ADD CONSTRAINT `UserSecurityQuestion_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -4105,3 +4844,21 @@ ALTER TABLE `LeaderboardAdminLog` ADD CONSTRAINT `LeaderboardAdminLog_adminId_fk
 
 -- AddForeignKey
 ALTER TABLE `LeaderboardAdminLog` ADD CONSTRAINT `LeaderboardAdminLog_targetUserId_fkey` FOREIGN KEY (`targetUserId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SocialPostMedia` ADD CONSTRAINT `SocialPostMedia_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `SocialPost`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SocialPostLike` ADD CONSTRAINT `SocialPostLike_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SocialPostLike` ADD CONSTRAINT `SocialPostLike_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `SocialPost`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SocialPostComment` ADD CONSTRAINT `SocialPostComment_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `SocialPost`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SocialPostComment` ADD CONSTRAINT `SocialPostComment_authorId_fkey` FOREIGN KEY (`authorId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `SocialPostComment` ADD CONSTRAINT `SocialPostComment_parentId_fkey` FOREIGN KEY (`parentId`) REFERENCES `SocialPostComment`(`id`) ON DELETE NO ACTION ON UPDATE NO ACTION;

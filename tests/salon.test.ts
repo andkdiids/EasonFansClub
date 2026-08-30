@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { collectSalonCommentThreadIds, decodeSalonCursor, encodeSalonCursor, getSalonPostVisibilityWhere, parseSalonFilters, salonCategoryLabel } from '@/lib/salon'
+import { collectSalonCommentThreadIds, decodeSalonCursor, encodeSalonCursor, getSalonPostVisibilityWhere, parseSalonFilters, salonCategoryLabel, salonPublicBaseWhere } from '@/lib/salon'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -28,8 +28,10 @@ test('沙龙游标可往返，并拒绝过长或不完整的游标', () => {
 })
 
 test('沙龙作品可见性隔离访客、作者和 post_manage 审核者', () => {
-  assert.deepEqual(getSalonPostVisibilityWhere('post-1'), { id: 'post-1', status: 'APPROVED' })
-  assert.deepEqual(getSalonPostVisibilityWhere('post-1', 'user-1'), { id: 'post-1', OR: [{ status: 'APPROVED' }, { userId: 'user-1' }] })
+  const guest = getSalonPostVisibilityWhere('post-1')
+  assert.deepEqual(guest, { id: 'post-1', ...salonPublicBaseWhere })
+  const owner = getSalonPostVisibilityWhere('post-1', 'user-1')
+  assert.deepEqual(owner, { id: 'post-1', OR: [salonPublicBaseWhere, { userId: 'user-1' }] })
   assert.deepEqual(getSalonPostVisibilityWhere('post-1', 'admin-1', true), { id: 'post-1' })
 })
 
@@ -60,14 +62,14 @@ test('沙龙投稿链路保留原图、使用有限 WebP 变体并在审核后�
   const route = read('app/api/salon/posts/route.ts')
   const feed = read('lib/salon.ts')
   const admin = read('app/api/admin/salon/route.ts')
-  assert.match(route, /const MAX_FILES = 9/)
-  assert.match(route, /const MAX_FILE_SIZE = 20 \* 1024 \* 1024/)
+  assert.match(route, /SALON_MAX_FILES/)
+  assert.match(route, /SALON_MAX_FILE_SIZE/)
   assert.match(route, /uploadImageVariantFamily/)
   assert.match(route, /original: image\.buffer/)
   assert.match(route, /variants: \['thumb-md', 'card', 'large'\]/)
   assert.match(feed, /status: 'APPROVED'/)
   assert.match(admin, /requireAdmin\('post_manage'\)/)
-  assert.match(admin, /type: 'REVIEW'/)
+  assert.match(admin, /type: 'ADMIN'/)
 })
 
 test('沙龙访客页面和只读 API 绕过通用登录中间件，写操作仍由路由鉴权', () => {
@@ -87,7 +89,7 @@ test('沙龙页面和接口使用缩略图首屏、原图详情与固定数量�
   const service = read('lib/salon.ts')
   assert.match(home, /src=\{media\.thumbnailUrl\}/)
   assert.match(home, /IntersectionObserver/)
-  assert.match(detail, /src=\{activeMedia\.originalUrl\}/)
+  assert.match(detail, /src=\{activeMedia\.previewUrl\}/)
   assert.match(detail, /setActiveIndex\(index\)/)
   assert.match(service, /export const SALON_PAGE_SIZE = 24/)
   assert.match(service, /take: SALON_PAGE_SIZE \+ 1/)

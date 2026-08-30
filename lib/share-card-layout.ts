@@ -4,7 +4,7 @@ import { sanitizeShareCardText, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CAR
 export const SHARE_CARD_HERO_HEIGHT = 660
 export const SHARE_CARD_PORTRAIT_HERO_HEIGHT = Math.round(SHARE_CARD_WIDTH * 4 / 3)
 export const SHARE_CARD_LANDSCAPE_MIN_HERO_HEIGHT = 360
-/** Kept as a compatibility constant; the real panel top follows the Hero. */
+/** Kept as compatibility constants; the content overlay follows the Hero. */
 export const SHARE_CARD_PANEL_TOP = SHARE_CARD_HERO_HEIGHT
 export const SHARE_CARD_PANEL_X = 0
 export const SHARE_CARD_PANEL_WIDTH = SHARE_CARD_WIDTH
@@ -34,18 +34,25 @@ export const SHARE_CARD_CONTENT_BOTTOM_PADDING = 48
 export const SHARE_CARD_AUTHOR_TOP_GAP = 40
 export const SHARE_CARD_FOOTER_TOP_GAP = 40
 export const SHARE_CARD_FOOTER_BOTTOM_PADDING = 56
-/** Activity details sit inside the lower part of the existing Hero viewport. */
+/** Content details sit inside the lower part of the existing Hero viewport. */
 export const SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP = 36
 export const SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM = 36
 export const SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP = 16
 export const SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP = 18
 export const SHARE_CARD_ACTIVITY_OVERLAY_META_GAP = 16
 export const SHARE_CARD_ACTIVITY_TITLE_MAX_LINES = 3
-export const SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES = 3
-export const SHARE_CARD_ACTIVITY_META_MAX_LINES = 2
-/** Activity footer balance: move the brand block down and the QR slightly up. */
-export const SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y = 28
-export const SHARE_CARD_ACTIVITY_QR_OFFSET_Y = -24
+export const SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES = 2
+export const SHARE_CARD_ACTIVITY_META_MAX_LINES = 1
+/** All share-card types use the same bounded overlay copy policy. */
+export const SHARE_CARD_OVERLAY_TITLE_MAX_LINES = SHARE_CARD_ACTIVITY_TITLE_MAX_LINES
+export const SHARE_CARD_OVERLAY_DESCRIPTION_MAX_LINES = SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES
+export const SHARE_CARD_OVERLAY_META_MAX_LINES = SHARE_CARD_ACTIVITY_META_MAX_LINES
+/** Footer balance: the brand group sits lower while the QR group sits higher. */
+export const SHARE_CARD_BRAND_OFFSET_Y = 64
+export const SHARE_CARD_QR_OFFSET_Y = -56
+/** Kept as compatibility aliases for callers/tests that used the activity names. */
+export const SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y = SHARE_CARD_BRAND_OFFSET_Y
+export const SHARE_CARD_ACTIVITY_QR_OFFSET_Y = SHARE_CARD_QR_OFFSET_Y
 export const SHARE_CARD_CATEGORY_FONT_SIZE = 22
 export const SHARE_CARD_CATEGORY_LINE_HEIGHT = 32
 export const SHARE_CARD_TITLE_FONT_SIZE = 56
@@ -99,6 +106,8 @@ export type ShareCardLayout = Readonly<{
   panelHeight: number
   panelBottom: number
   contentCardBottom: number
+  overlayTop: number
+  overlayHeight: number
   activityOverlayTop: number
   activityOverlayHeight: number
   categoryTop: number
@@ -176,11 +185,12 @@ export function measureWrappedText(value: string, maxWidth: number, fontSize: nu
 function limitWrappedText(block: ShareCardTextBlock, maxLines: number, maxWidth: number, fontSize: number): ShareCardTextBlock {
   if (block.lines.length <= maxLines) return block
   const lines = block.lines.slice(0, maxLines)
-  let lastLine = (lines[maxLines - 1] || '').trimEnd()
+  while (lines.length > 1 && !lines[lines.length - 1]?.trim()) lines.pop()
+  let lastLine = (lines[lines.length - 1] || '').trimEnd()
   while (lastLine && estimatedTextWidth(`${lastLine}…`, fontSize) > maxWidth) {
     lastLine = Array.from(lastLine).slice(0, -1).join('')
   }
-  lines[maxLines - 1] = `${lastLine}…`
+  lines[lines.length - 1] = `${lastLine}…`
   return { ...block, lines, height: lines.length * block.lineHeight }
 }
 
@@ -218,54 +228,35 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const meta = visibleMeta(data)
   const measuredTitleBlock = measureWrappedText(title, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_TITLE_FONT_SIZE, SHARE_CARD_TITLE_LINE_HEIGHT)
   const measuredDescriptionBlock = measureWrappedText(description, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_DESCRIPTION_FONT_SIZE, SHARE_CARD_DESCRIPTION_LINE_HEIGHT)
-  const titleBlock = isActivity
-    ? limitWrappedText(measuredTitleBlock, SHARE_CARD_ACTIVITY_TITLE_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_TITLE_FONT_SIZE)
-    : measuredTitleBlock
-  const descriptionBlock = isActivity
-    ? limitWrappedText(measuredDescriptionBlock, SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_DESCRIPTION_FONT_SIZE)
-    : measuredDescriptionBlock
+  const titleBlock = limitWrappedText(measuredTitleBlock, SHARE_CARD_OVERLAY_TITLE_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_TITLE_FONT_SIZE)
+  const descriptionBlock = limitWrappedText(measuredDescriptionBlock, SHARE_CARD_OVERLAY_DESCRIPTION_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_DESCRIPTION_FONT_SIZE)
   const metaBlocks = meta.map((value) => {
     const block = measureWrappedText(value, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_META_FONT_SIZE, SHARE_CARD_META_LINE_HEIGHT)
-    return isActivity ? limitWrappedText(block, SHARE_CARD_ACTIVITY_META_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_META_FONT_SIZE) : block
+    return limitWrappedText(block, SHARE_CARD_OVERLAY_META_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_META_FONT_SIZE)
   })
   const metaLines = metaBlocks.flatMap((block) => block.lines)
   const authorBlock = measureWrappedText(author, SHARE_CARD_AUTHOR_WIDTH, SHARE_CARD_AUTHOR_FONT_SIZE, SHARE_CARD_AUTHOR_LINE_HEIGHT)
   const dateBlock = measureWrappedText(date ? `发布于 ${date}` : '来自私家E院', SHARE_CARD_AUTHOR_WIDTH, SHARE_CARD_DATE_FONT_SIZE, SHARE_CARD_DATE_LINE_HEIGHT)
 
   const metaHeight = metaLines.length * SHARE_CARD_META_LINE_HEIGHT
-  let panelTop = hero.height
-  let panelHeight = 0
-  let panelBottom = hero.height
-  let activityOverlayTop = hero.height
-  let activityOverlayHeight = 0
-  let categoryTop = panelTop + 48
-  let titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + 20
-  let descriptionTop = titleTop + titleBlock.height + 22
-  let metaTop = descriptionTop + descriptionBlock.height + (metaLines.length ? 24 : 0)
-
-  if (isActivity) {
-    activityOverlayHeight = SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
-      + SHARE_CARD_CATEGORY_LINE_HEIGHT
-      + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
-      + titleBlock.height
-      + SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP
-      + descriptionBlock.height
-      + (metaLines.length ? SHARE_CARD_ACTIVITY_OVERLAY_META_GAP + metaHeight : 0)
-      + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM
-    activityOverlayTop = Math.max(0, hero.height - activityOverlayHeight)
-    categoryTop = activityOverlayTop + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
-    titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
-    descriptionTop = titleTop + titleBlock.height + SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP
-    metaTop = descriptionTop + descriptionBlock.height + (metaLines.length ? SHARE_CARD_ACTIVITY_OVERLAY_META_GAP : 0)
-  } else {
-    panelTop = hero.height
-    categoryTop = panelTop + 48
-    titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + 20
-    descriptionTop = titleTop + titleBlock.height + 22
-    metaTop = descriptionTop + descriptionBlock.height + (metaLines.length ? 24 : 0)
-    panelBottom = metaTop + metaHeight + SHARE_CARD_CONTENT_BOTTOM_PADDING
-    panelHeight = panelBottom - panelTop
-  }
+  const overlayHeight = SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
+    + SHARE_CARD_CATEGORY_LINE_HEIGHT
+    + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
+    + titleBlock.height
+    + SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP
+    + descriptionBlock.height
+    + (metaLines.length ? SHARE_CARD_ACTIVITY_OVERLAY_META_GAP + metaHeight : 0)
+    + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM
+  const overlayTop = Math.max(0, hero.height - overlayHeight)
+  const panelTop = overlayTop
+  const panelHeight = overlayHeight
+  const panelBottom = hero.height
+  const activityOverlayTop = overlayTop
+  const activityOverlayHeight = overlayHeight
+  const categoryTop = overlayTop + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
+  const titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
+  const descriptionTop = titleTop + titleBlock.height + SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP
+  const metaTop = descriptionTop + descriptionBlock.height + (metaLines.length ? SHARE_CARD_ACTIVITY_OVERLAY_META_GAP : 0)
   const authorTop = panelBottom + SHARE_CARD_AUTHOR_TOP_GAP
   const authorTextTop = authorTop + Math.max(0, (SHARE_CARD_AVATAR_SIZE - authorBlock.height - dateBlock.height - 4) / 2)
   const dateTop = authorTextTop + authorBlock.height + 4
@@ -274,17 +265,18 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
     (authorTextTop - authorTop) + authorBlock.height + 4 + dateBlock.height,
   )
   const brandBlockHeight = SHARE_CARD_FOOTER_BRAND_BLOCK_HEIGHT
-  const footerVisualHeight = Math.max(brandBlockHeight, SHARE_CARD_QR_FRAME_SIZE)
   const naturalBrandBlockTop = authorTop + authorBlockHeight + SHARE_CARD_FOOTER_TOP_GAP
   // Keep the established minimum canvas height without leaving the footer
   // floating above the bottom edge on compact cards. Long content still wins
   // because its natural flow position is larger than this minimum anchor.
-  const footerAnchorTop = Math.max(naturalBrandBlockTop, SHARE_CARD_HEIGHT - footerVisualHeight - SHARE_CARD_FOOTER_BOTTOM_PADDING)
-  const brandBlockTop = footerAnchorTop + (isActivity ? SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y : 0)
-  const qrTop = Math.max(
-    authorTop + authorBlockHeight + SHARE_CARD_FOOTER_TOP_GAP + (isActivity ? SHARE_CARD_ACTIVITY_QR_OFFSET_Y : 0),
-    footerAnchorTop + (isActivity ? SHARE_CARD_ACTIVITY_QR_OFFSET_Y : 0),
-  )
+  const brandOffsetY = SHARE_CARD_BRAND_OFFSET_Y
+  const qrOffsetY = SHARE_CARD_QR_OFFSET_Y
+  const footerVisualHeight = Math.max(brandOffsetY + brandBlockHeight, qrOffsetY + SHARE_CARD_QR_FRAME_SIZE)
+  const footerAnchorMin = SHARE_CARD_HEIGHT - SHARE_CARD_FOOTER_BOTTOM_PADDING - footerVisualHeight
+  const footerAnchorTop = Math.max(naturalBrandBlockTop, footerAnchorMin)
+  const brandBlockTop = footerAnchorTop + brandOffsetY
+  // Keep the QR above the brand group without allowing it to overlap the author.
+  const qrTop = Math.max(authorTop + authorBlockHeight + 16, naturalBrandBlockTop + qrOffsetY, footerAnchorTop + qrOffsetY)
   const brandLogoTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_LOGO_SIZE) / 2
   const brandTextTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT) / 2
   const footerBottom = Math.max(brandBlockTop + brandBlockHeight, qrTop + SHARE_CARD_QR_FRAME_SIZE) + SHARE_CARD_FOOTER_BOTTOM_PADDING
@@ -298,6 +290,8 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
     panelHeight,
     panelBottom,
     contentCardBottom: panelBottom,
+    overlayTop,
+    overlayHeight,
     activityOverlayTop,
     activityOverlayHeight,
     categoryTop,

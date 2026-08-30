@@ -5,8 +5,11 @@ import { AdminSalonManager } from './AdminSalonManager'
 
 export const dynamic = 'force-dynamic'
 
-export default async function AdminSalonPage() {
+export default async function AdminSalonPage({ searchParams }: { searchParams: Promise<{ postId?: string | string[] }> }) {
   await requireAdminPage('/admin/salon', 'post_manage')
+  const params = await searchParams
+  const rawPostId = Array.isArray(params.postId) ? params.postId[0] : params.postId
+  const postId = typeof rawPostId === 'string' && rawPostId.trim() ? rawPostId.trim() : null
   const [initial, options] = await Promise.all([getSalonAdminPosts('PENDING', 1), getSalonOptions()])
-  return <main className="salon-page admin-salon-page"><div className="salon-page-back"><Link href="/admin">← 返回后台</Link></div><header className="salon-header"><div><p className="salon-kicker">SALON MODERATION</p><h1>沙龙管理</h1><p>审核投稿、修正演唱会关联并处理违规作品。</p></div></header><AdminSalonManager initialPosts={initial.posts} initialHasMore={initial.hasMore} options={options} /></main>
+  return <main className="salon-page admin-salon-page"><div className="salon-page-back"><Link href="/admin">← 返回后台</Link></div><header className="salon-header"><div><p className="salon-kicker">SALON MODERATION</p><h1>沙龙管理</h1><p>审核投稿、修正演唱会关联并处理违规作品。</p></div></header><AdminSalonManager initialPosts={initial.posts} initialHasMore={initial.hasMore} initialPostId={postId} options={options} /></main>
 }

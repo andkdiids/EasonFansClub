@@ -10,17 +10,29 @@ import {
   SALON_CATEGORIES,
   SALON_CATEGORY_HINTS,
   SALON_CATEGORY_LABELS,
+  supportsOriginal,
   type SalonCategoryValue,
   type SalonOptions,
 } from '@/lib/salon'
+import { validateSalonFiles, SALON_MAX_FILES } from '@/lib/salon-upload'
+import { SALON_DEFAULT_WATERMARK_OPACITY, SALON_WATERMARK_POSITIONS, type SalonWatermarkPosition } from '@/lib/salon-watermark'
 
-const MAX_FILES = 9
-const MAX_FILE_SIZE = 20 * 1024 * 1024
-const ACCEPTED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+const MAX_FILES = SALON_MAX_FILES
+
+const WATERMARK_POSITION_LABELS: Record<SalonWatermarkPosition, string> = {
+  TOP: '上',
+  BOTTOM: '下',
+  LEFT: '左',
+  RIGHT: '右',
+  TOP_LEFT: '左上',
+  TOP_RIGHT: '右上',
+  BOTTOM_LEFT: '左下',
+  BOTTOM_RIGHT: '右下',
+}
 
 type PreviewFile = { file: File; url: string }
 
-export function SalonUploadForm({ options }: Readonly<{ options: SalonOptions }>) {
+export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: SalonOptions; watermarkText: string }>) {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [category, setCategory] = useState<SalonCategoryValue>('CONCERT')
@@ -29,11 +41,16 @@ export function SalonUploadForm({ options }: Readonly<{ options: SalonOptions }>
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [files, setFiles] = useState<PreviewFile[]>([])
+  const [watermarkEnabled, setWatermarkEnabled] = useState(false)
+  const [watermarkOpacity, setWatermarkOpacity] = useState(SALON_DEFAULT_WATERMARK_OPACITY)
+  const [watermarkPosition, setWatermarkPosition] = useState<SalonWatermarkPosition>('BOTTOM_RIGHT')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const selectedTour = options.tours.find((tour) => tour.id === tourId)
   const sessions = selectedTour?.sessions || []
+  const requiresConcert = category === 'CONCERT'
+  const preservesOriginal = supportsOriginal(category)
   const hint = useMemo(() => SALON_CATEGORY_HINTS[category], [category])
   const filesRef = useRef(files)
   filesRef.current = files
@@ -46,23 +63,21 @@ export function SalonUploadForm({ options }: Readonly<{ options: SalonOptions }>
     setSessionId(tour?.sessions[0]?.id || '')
   }
 
+  function chooseCategory(value: SalonCategoryValue) {
+    setCategory(value)
+    if (value !== 'CONCERT') {
+      setTourId('')
+      setSessionId('')
+    }
+  }
+
   function addFiles(event: ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(event.target.files || [])
     event.target.value = ''
     setError('')
     if (!selected.length) return
-    if (files.length + selected.length > MAX_FILES) {
-      setError(`一次最多上传 ${MAX_FILES} 张图片`)
-      return
-    }
-    const invalid = selected.find((file) => {
-      const extension = file.name.split('.').pop()?.toLowerCase() || ''
-      return !ACCEPTED_EXTENSIONS.has(extension) || file.size <= 0 || file.size > MAX_FILE_SIZE
-    })
-    if (invalid) {
-      setError('仅支持 JPG、PNG、WEBP，且每张图片不能超过 20MB')
-      return
-    }
+    const validation = validateSalonFiles(selected, files.length)
+    if (!validation.ok) { setError(validation.error || '图片校验失败'); return }
     setFiles((current) => [...current, ...selected.map((file) => ({ file, url: URL.createObjectURL(file) }))])
   }
 
@@ -77,16 +92,19 @@ export function SalonUploadForm({ options }: Readonly<{ options: SalonOptions }>
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (submitting) return
-    if (!sessionId) { setError('请选择演唱会和场次'); return }
+    if (requiresConcert && !sessionId) { setError('请选择演唱会和场次'); return }
     if (!files.length) { setError('请至少选择一张图片'); return }
     setSubmitting(true)
     setError('')
     setMessage('图片正在处理并上传，请稍候…')
     const body = new FormData()
     body.set('category', category)
-    body.set('concertId', sessionId)
+    if (requiresConcert) body.set('concertId', sessionId)
     body.set('title', title)
     body.set('content', content)
+    body.set('watermarkEnabled', String(watermarkEnabled))
+    body.set('watermarkOpacity', String(watermarkOpacity))
+    body.set('watermarkPosition', watermarkPosition)
     body.set('submissionKey', typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${files.length}`)
     files.forEach((item) => body.append('file', item.file, item.file.name))
     try {
@@ -105,19 +123,25 @@ export function SalonUploadForm({ options }: Readonly<{ options: SalonOptions }>
   }
 
   return <form className="salon-upload-form" onSubmit={submit}>
-    <section className="salon-form-section"><div className="salon-form-section-heading"><div><p className="salon-kicker">01 · CONTEXT</p><h2>作品信息</h2></div><span>分类、演唱会和场次为必填</span></div>
+    <section className="salon-form-section"><div className="salon-form-section-heading"><div><p className="salon-kicker">01 · CONTEXT</p><h2>作品信息</h2></div><span>{requiresConcert ? '分类、演唱会和场次为必填' : '分类为必填，演唱会关联可留空'}</span></div>
       <div className="salon-form-grid">
-        <label><span>分类 <b>*</b></span><select value={category} onChange={(event) => setCategory(event.target.value as SalonCategoryValue)}>{SALON_CATEGORIES.map((value) => <option key={value} value={value}>{SALON_CATEGORY_LABELS[value]}</option>)}</select><small>{hint}</small></label>
-        <label><span>演唱会 <b>*</b></span><select value={tourId} onChange={(event) => chooseTour(event.target.value)}><option value="">请选择演唱会</option>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
-        <label><span>场次 <b>*</b></span><select value={sessionId} disabled={!tourId} onChange={(event) => setSessionId(event.target.value)}><option value="">{tourId ? '请选择场次' : '先选择演唱会'}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label>
+        <label><span>分类 <b>*</b></span><select value={category} onChange={(event) => chooseCategory(event.target.value as SalonCategoryValue)}>{SALON_CATEGORIES.map((value) => <option key={value} value={value}>{SALON_CATEGORY_LABELS[value]}</option>)}</select><small>{hint}</small></label>
+        {requiresConcert ? <>
+          <label><span>演唱会 <b>*</b></span><select value={tourId} onChange={(event) => chooseTour(event.target.value)}><option value="">请选择演唱会</option>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
+          <label><span>场次 <b>*</b></span><select value={sessionId} disabled={!tourId} onChange={(event) => setSessionId(event.target.value)}><option value="">{tourId ? '请选择场次' : '先选择演唱会'}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label>
+        </> : null}
         <label><span>标题</span><input value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} placeholder="给这组照片起个名字（选填）" /></label>
         <label className="salon-form-wide"><span>描述</span><textarea value={content} maxLength={5000} onChange={(event) => setContent(event.target.value)} rows={5} placeholder="记录一些现场或图片背后的故事（选填）" /></label>
       </div>
     </section>
     <section className="salon-form-section"><div className="salon-form-section-heading"><div><p className="salon-kicker">02 · IMAGES</p><h2>选择图片</h2></div><span>最多 9 张 · 单张不超过 20MB</span></div>
-      <div className="salon-upload-note">原图会保留，图库只使用优化后的缩略图；壁纸不会被强制裁成固定比例。</div>
-      <div className="salon-upload-previews">{files.map((item, index) => <figure key={`${item.file.name}-${index}`}><img src={item.url} alt={`待上传图片 ${index + 1}`} /><button type="button" onClick={() => removeFile(index)} aria-label={`移除第 ${index + 1} 张图片`}>×</button><figcaption>{index + 1}</figcaption></figure>)}<button type="button" className="salon-add-image" onClick={() => inputRef.current?.click()} disabled={files.length >= MAX_FILES}><span>＋</span><small>{files.length >= MAX_FILES ? '已达上限' : '添加图片'}</small></button></div>
+      <div className="salon-upload-note">{preservesOriginal ? '会保留无水印原图，图库只使用优化后的缩略图；壁纸不会被强制裁成固定比例。' : '此分类只保存优化后的 WebP 展示图，不长期保留原始上传文件。'}</div>
+      <div className="salon-upload-previews">{files.map((item, index) => <figure key={`${item.file.name}-${index}`}><img src={item.url} alt={`待上传图片 ${index + 1}`} />{watermarkEnabled ? <span className={`salon-preview-watermark salon-preview-watermark-${watermarkPosition}`} style={{ opacity: watermarkOpacity / 100 }}>{watermarkText}</span> : null}<button type="button" onClick={() => removeFile(index)} aria-label={`移除第 ${index + 1} 张图片`}>×</button><figcaption>{index + 1}</figcaption></figure>)}<button type="button" className="salon-add-image" onClick={() => inputRef.current?.click()} disabled={files.length >= MAX_FILES}><span>＋</span><small>{files.length >= MAX_FILES ? '已达上限' : '添加图片'}</small></button></div>
       <input ref={inputRef} className="salon-hidden-file-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple onChange={addFiles} />
+    </section>
+    <section className="salon-form-section"><div className="salon-form-section-heading"><div><p className="salon-kicker">03 · WATERMARK</p><h2>展示设置</h2></div><span>默认关闭，原图永远不加水印</span></div>
+      <label className="salon-watermark-toggle"><input type="checkbox" checked={watermarkEnabled} onChange={(event) => setWatermarkEnabled(event.target.checked)} /><span>增加水印</span></label>
+      {watermarkEnabled ? <div className="salon-watermark-settings"><p>水印内容：<strong>{watermarkText}</strong></p><label><span>透明度 <b>{watermarkOpacity}%</b></span><input type="range" min="10" max="100" step="1" value={watermarkOpacity} onChange={(event) => setWatermarkOpacity(Number(event.target.value))} /></label><fieldset><legend>水印位置</legend><div className="salon-watermark-position-grid">{SALON_WATERMARK_POSITIONS.map((position) => <button key={position} type="button" className={watermarkPosition === position ? 'is-active' : ''} onClick={() => setWatermarkPosition(position)} aria-pressed={watermarkPosition === position}>{WATERMARK_POSITION_LABELS[position]}</button>)}</div></fieldset></div> : null}
     </section>
     {error ? <p className="salon-form-error" role="alert">{error}</p> : null}
     {message ? <p className="salon-form-success" role="status">{message}</p> : null}

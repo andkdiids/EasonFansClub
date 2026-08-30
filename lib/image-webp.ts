@@ -1,5 +1,6 @@
 import sharp, { type Metadata, type ResizeOptions, type Sharp } from 'sharp'
 import { IMAGE_VARIANT_WIDTHS, type ImageVariant } from '@/lib/image-variants'
+import { createSalonWatermarkSvg, type SalonWatermarkRenderOptions } from '@/lib/salon-watermark'
 
 /**
  * 允许作为「输入」解码的常见图片格式（由 sharp 真实解码后再校验，不信任浏览器 MIME）。
@@ -34,6 +35,8 @@ export type CreateImageVariantsOptions = {
   /** Optional background for workflows that intentionally flatten artwork. */
   flatten?: string
   variants?: readonly ImageVariant[]
+  /** Optional watermark burned into display WebP only; callers still receive the untouched input. */
+  watermark?: SalonWatermarkRenderOptions
 }
 
 export type CreatedImageVariants = {
@@ -85,12 +88,21 @@ export function isAnimatedImageInput(input: Buffer, metadata: Metadata) {
   return isAnimatedMetadata(metadata, input)
 }
 
-async function renderStaticWebp(input: Sharp, width: number | undefined, quality: number, flatten?: string) {
+async function renderStaticWebp(input: Sharp, width: number | undefined, quality: number, flatten?: string, watermark?: SalonWatermarkRenderOptions, height?: number) {
   const resizeOptions: ResizeOptions = { withoutEnlargement: true }
   if (typeof width === 'number') resizeOptions.width = width
+  if (typeof height === 'number') resizeOptions.height = height
+  if (typeof width === 'number' && typeof height === 'number') resizeOptions.fit = 'inside'
   let pipeline = input.clone().rotate().resize(resizeOptions)
   if (flatten) pipeline = pipeline.flatten({ background: flatten })
-  return pipeline.webp({ quality, effort: 4 }).toBuffer()
+  const base = await pipeline.webp({ quality, effort: 4 }).toBuffer()
+  if (!watermark) return base
+  const metadata = await sharp(base, { failOn: 'error', limitInputPixels: 100_000_000 }).metadata()
+  if (!metadata.width || !metadata.height) return base
+  return sharp(base, { failOn: 'error', limitInputPixels: 100_000_000 })
+    .composite([{ input: Buffer.from(createSalonWatermarkSvg(metadata.width, metadata.height, watermark), 'utf8'), left: 0, top: 0 }])
+    .webp({ quality, effort: 4 })
+    .toBuffer()
 }
 
 async function renderAnimatedWebp(input: Sharp, width: number | undefined, quality: number) {
@@ -122,18 +134,11 @@ export async function createImageVariants(
   const sourceMaxWidth = options.sourceMaxWidth ?? 1920
   const sourceMaxHeight = options.sourceMaxHeight
   const variants = options.variants || defaultImageVariants
-  const sourceResize: ResizeOptions = { withoutEnlargement: true }
-  if (typeof sourceMaxWidth === 'number') sourceResize.width = sourceMaxWidth
-  if (typeof sourceMaxHeight === 'number') sourceResize.height = sourceMaxHeight
-  if (typeof sourceMaxWidth === 'number' && typeof sourceMaxHeight === 'number') sourceResize.fit = 'inside'
-
-  let sourcePipeline = image.clone().rotate().resize(sourceResize)
-  if (options.flatten) sourcePipeline = sourcePipeline.flatten({ background: options.flatten })
-  const source = await sourcePipeline.webp({ quality: sourceQuality, effort: 4 }).toBuffer()
+  const source = await renderStaticWebp(image, sourceMaxWidth, sourceQuality, options.flatten, options.watermark, sourceMaxHeight)
   const rendered = await Promise.all(variants.map(async (variant) => {
     const width = IMAGE_VARIANT_WIDTHS[variant]
     const quality = width <= 240 ? 78 : width >= 1920 ? 88 : 82
-    return [variant, await renderStaticWebp(image, width, quality, options.flatten)] as const
+    return [variant, await renderStaticWebp(image, width, quality, options.flatten, options.watermark)] as const
   }))
 
   return {

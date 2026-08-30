@@ -3,19 +3,29 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
-export const SALON_CATEGORIES = ['CONCERT', 'MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER'] as const
+export const SALON_CATEGORIES = ['CONCERT', 'MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER', 'TIME_TRAVEL'] as const
 export type SalonCategoryValue = typeof SALON_CATEGORIES[number]
+
+/** Every Salon upload retains an untouched source; only public display variants are optimized. */
+export function supportsOriginal(category: SalonCategoryValue | string) {
+  return SALON_CATEGORIES.includes(category as SalonCategoryValue)
+}
+
+/** Naming alias for upload code that describes the persistence decision. */
+export const shouldPreserveOriginal = supportsOriginal
 
 export const SALON_CATEGORY_LABELS: Record<SalonCategoryValue, string> = {
   CONCERT: '演唱会记录',
   MOBILE_WALLPAPER: '手机壁纸',
   DESKTOP_WALLPAPER: '电脑壁纸',
+  TIME_TRAVEL: '时光倒流二十年',
 }
 
 export const SALON_CATEGORY_HINTS: Record<SalonCategoryValue, string> = {
   CONCERT: '上传你在现场拍摄的照片。',
   MOBILE_WALLPAPER: '适合手机竖屏使用的高清图片。',
   DESKTOP_WALLPAPER: '适合电脑横屏使用的高清图片。',
+  TIME_TRAVEL: '分享与陈奕迅有关的早年生活照、公开影像和珍贵历史记录。',
 }
 
 export const SALON_POST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const
@@ -58,9 +68,14 @@ export type SalonOptions = {
 
 export type SalonPostMediaView = {
   id: string
-  originalUrl: string
+  /** Public pages render display WebP; originalUrl is only populated for admin review. */
+  originalUrl: string | null
   previewUrl: string
   thumbnailUrl: string
+  originalFilename: string | null
+  originalMimeType: string | null
+  originalSize: number | null
+  originalAvailable: boolean
   width: number
   height: number
   sortOrder: number
@@ -75,6 +90,7 @@ export type SalonPostView = {
   rejectReason: string | null
   likeCount: number
   commentCount: number
+  viewCount: number
   createdAt: string
   approvedAt: string | null
   likedByMe: boolean
@@ -92,7 +108,7 @@ export type SalonPostView = {
     stageType: string
     venue: string | null
     tour: { id: string; name: string }
-  }
+  } | null
   media: SalonPostMediaView[]
 }
 
@@ -232,6 +248,7 @@ const salonPostSelect = {
   rejectReason: true,
   likeCount: true,
   commentCount: true,
+  viewCount: true,
   createdAt: true,
   approvedAt: true,
   author: {
@@ -263,6 +280,10 @@ const salonPostSelect = {
       originalUrl: true,
       previewUrl: true,
       thumbnailUrl: true,
+      originalObjectKey: true,
+      originalFilename: true,
+      originalMimeType: true,
+      originalSize: true,
       width: true,
       height: true,
       sortOrder: true,
@@ -281,19 +302,31 @@ function publicAuthor(author: SalonPostRow['author']) {
   }
 }
 
-function publicMedia(media: SalonPostRow['media'][number]): SalonPostMediaView {
+function originalObjectKey(media: SalonPostRow['media'][number]) {
+  // A legacy display/source key is not evidence that an original object was
+  // retained. Only an explicitly persisted original key may expose the
+  // protected download action.
+  return media.originalObjectKey?.trim() || null
+}
+
+function publicMedia(media: SalonPostRow['media'][number], category: SalonCategoryValue, includeOriginal = false): SalonPostMediaView {
+  const originalAvailable = supportsOriginal(category) && Boolean(originalObjectKey(media))
   return {
     id: media.id,
-    originalUrl: publicImageUrl(media.originalUrl) || media.originalUrl,
+    originalUrl: includeOriginal && originalAvailable ? publicImageUrl(media.originalUrl) || media.originalUrl : null,
     previewUrl: publicImageUrl(media.previewUrl) || media.previewUrl,
     thumbnailUrl: publicImageUrl(media.thumbnailUrl) || media.thumbnailUrl,
+    originalFilename: media.originalFilename,
+    originalMimeType: media.originalMimeType,
+    originalSize: media.originalSize,
+    originalAvailable,
     width: media.width,
     height: media.height,
     sortOrder: media.sortOrder,
   }
 }
 
-export function serializeSalonPost(row: SalonPostRow, likedByMe = false): SalonPostView {
+export function serializeSalonPost(row: SalonPostRow, likedByMe = false, includeOriginal = false): SalonPostView {
   return {
     id: row.id,
     category: row.category,
@@ -303,11 +336,12 @@ export function serializeSalonPost(row: SalonPostRow, likedByMe = false): SalonP
     rejectReason: row.rejectReason,
     likeCount: row.likeCount,
     commentCount: row.commentCount,
+    viewCount: row.viewCount || 0,
     createdAt: row.createdAt.toISOString(),
     approvedAt: row.approvedAt?.toISOString() || null,
     likedByMe,
     author: publicAuthor(row.author),
-    concert: {
+    concert: row.concert ? {
       id: row.concert.id,
       title: row.concert.title,
       date: row.concert.concertDate.toISOString(),
@@ -315,38 +349,49 @@ export function serializeSalonPost(row: SalonPostRow, likedByMe = false): SalonP
       stageType: row.concert.stageType,
       venue: row.concert.venue,
       tour: row.concert.MusicTour,
-    },
-    media: row.media.map(publicMedia),
+    } : null,
+    media: row.media.map((media) => publicMedia(media, row.category, includeOriginal)),
   }
 }
 
 function visibilityWhere(postId: string, viewerId?: string | null, viewerCanModerate = false): Prisma.SalonPostWhereInput {
   if (viewerCanModerate) return { id: postId }
-  return {
-    id: postId,
-    ...(viewerId
-      ? { OR: [{ status: 'APPROVED' as const }, { userId: viewerId }] }
-      : { status: 'APPROVED' as const }),
-  }
+  const publicWhere = { ...salonPublicBaseWhere, id: postId }
+  if (viewerId) return { id: postId, OR: [salonPublicBaseWhere, { userId: viewerId }] }
+  return publicWhere
 }
 
 export function getSalonPostVisibilityWhere(postId: string, viewerId?: string | null, viewerCanModerate = false) {
   return visibilityWhere(postId, viewerId, viewerCanModerate)
 }
 
-function buildFeedWhere(filters: SalonFilters): Prisma.SalonPostWhereInput {
+const publishedConcertWhere = {
+  status: 'PUBLISHED' as const,
+  MusicTour: { status: 'PUBLISHED' as const },
+} satisfies Prisma.MusicConcertWhereInput
+
+/** Concert records need a published session; wallpapers and archives do not. */
+export const salonPublicBaseWhere = {
+  status: 'APPROVED' as const,
+  approvedAt: { not: null },
+  OR: [
+    { category: 'CONCERT' as const, concert: publishedConcertWhere },
+    { category: { in: ['MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER', 'TIME_TRAVEL'] as const } },
+  ],
+} satisfies Prisma.SalonPostWhereInput
+
+/** One public filter is shared by ALL, category tabs, latest, and popular feeds. */
+export function buildSalonFeedWhere(filters: Pick<SalonFilters, 'category' | 'tourId' | 'sessionId'> = {}): Prisma.SalonPostWhereInput {
   const concertWhere: Prisma.MusicConcertWhereInput = {
-    status: 'PUBLISHED',
-    MusicTour: { status: 'PUBLISHED' },
+    ...publishedConcertWhere,
     ...(filters.tourId ? { tourId: filters.tourId } : {}),
     ...(filters.sessionId ? { id: filters.sessionId } : {}),
   }
-  return {
-    status: 'APPROVED',
-    approvedAt: { not: null },
-    ...(filters.category ? { category: filters.category } : {}),
-    concert: concertWhere,
+  const hasConcertFilter = Boolean(filters.tourId || filters.sessionId)
+  if (filters.category === 'CONCERT' || hasConcertFilter) {
+    return { ...salonPublicBaseWhere, ...(filters.category ? { category: filters.category } : {}), concert: concertWhere }
   }
+  return { ...salonPublicBaseWhere, ...(filters.category ? { category: filters.category } : {}) }
 }
 
 function addCursorWhere(where: Prisma.SalonPostWhereInput, sort: SalonSort, cursor: SalonCursor | null) {
@@ -373,7 +418,7 @@ function addCursorWhere(where: Prisma.SalonPostWhereInput, sort: SalonSort, curs
 export async function getSalonPosts(filters: SalonFilters = {}, viewerId?: string | null) {
   const sort = parseSalonSort(filters.sort)
   const cursor = decodeSalonCursor(filters.cursor)
-  const where = addCursorWhere(buildFeedWhere(filters), sort, cursor)
+  const where = addCursorWhere(buildSalonFeedWhere(filters), sort, cursor)
   const rows = await prisma.salonPost.findMany({
     where,
     orderBy: sort === 'popular'
@@ -433,7 +478,7 @@ export async function getSalonAdminPosts(status: SalonPostStatusValue = 'PENDING
     select: salonPostSelect,
   })
   return {
-    posts: rows.slice(0, 20).map((row) => serializeSalonPost(row, false)),
+    posts: rows.slice(0, 20).map((row) => serializeSalonPost(row, false, true)),
     hasMore: rows.length > 20,
     page: safePage,
   }

@@ -5,17 +5,22 @@ import { NextResponse } from 'next/server'
 import { createImageVariants } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 import { publicImageUrl } from '@/lib/images'
-import { getSalonPosts, parseSalonCategory, parseSalonFilters } from '@/lib/salon'
+import { getSalonPosts, parseSalonCategory, parseSalonFilters, shouldPreserveOriginal } from '@/lib/salon'
+import { SALON_MAX_FILES, SALON_MAX_FILE_SIZE, validateSalonFiles } from '@/lib/salon-upload'
+import { clampSalonWatermarkOpacity, createSalonWatermarkText, parseSalonWatermarkPosition } from '@/lib/salon-watermark'
+import { createSalonReviewNotifications } from '@/lib/salon-review-notifications'
 import { prisma } from '@/lib/prisma'
+import { deleteFromCos } from '@/lib/tencent-cos'
+import { emitRealtimeMany } from '@/lib/realtime'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { SiteMediaStorageError, uploadSiteImage } from '@/lib/site-media-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const MAX_FILES = 9
-const MAX_FILE_SIZE = 20 * 1024 * 1024
-const MAX_TOTAL_SIZE = MAX_FILES * MAX_FILE_SIZE
+const MAX_FILES = SALON_MAX_FILES
+const MAX_FILE_SIZE = SALON_MAX_FILE_SIZE
 const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/pjpeg'])
 const FORMAT_BY_EXTENSION: Record<string, string> = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', webp: 'webp' }
@@ -33,7 +38,7 @@ async function inspectImage(file: File, index: number) {
   const extension = file.name.split('.').pop()?.trim().toLowerCase() || ''
   if (!ALLOWED_EXTENSIONS.has(extension)) throw new Error(`第 ${index + 1} 张图片格式不支持，仅支持 JPG、PNG、WEBP`)
   if (file.type && !ALLOWED_MIME_TYPES.has(file.type.toLowerCase())) throw new Error(`第 ${index + 1} 张图片的 MIME 类型无效`)
-  if (file.size <= 0 || file.size > MAX_FILE_SIZE) throw new Error(`第 ${index + 1} 张图片不能超过 20MB`)
+  if (file.size <= 0 || file.size > MAX_FILE_SIZE) throw new Error(`${file.name || `第 ${index + 1} 张图片`} 超过 20MB，请重新选择`)
 
   const buffer = Buffer.from(await file.arrayBuffer())
   const image = sharp(buffer, { failOn: 'error', limitInputPixels: 100_000_000 })
@@ -90,14 +95,20 @@ export async function POST(request: Request) {
   const title = sanitizeText(form.get('title'), 200) || null
   const content = sanitizeText(form.get('content'), 5000) || null
   const submissionKey = sanitizeText(form.get('submissionKey'), 64) || null
+  const watermarkEnabled = form.get('watermarkEnabled') === 'true'
+  const watermarkOpacity = clampSalonWatermarkOpacity(form.get('watermarkOpacity'))
+  const watermarkPosition = parseSalonWatermarkPosition(form.get('watermarkPosition'))
   if (!category) return uploadError('请选择投稿分类')
-  if (!concertId) return uploadError('请选择对应的演唱会和场次')
+  const requiresConcert = category === 'CONCERT'
+  if (requiresConcert && !concertId) return uploadError('请选择对应的演唱会和场次')
 
-  const concert = await prisma.musicConcert.findFirst({
-    where: { id: concertId, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
-    select: { id: true },
-  })
-  if (!concert) return uploadError('演唱会场次不存在或暂未公开')
+  const concert = requiresConcert
+    ? await prisma.musicConcert.findFirst({
+        where: { id: concertId!, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
+        select: { id: true },
+      })
+    : null
+  if (requiresConcert && !concert) return uploadError('演唱会场次不存在或暂未公开')
 
   if (submissionKey) {
     const existing = await prisma.salonPost.findFirst({ where: { userId: guard.user.id, submissionKey }, select: { id: true } })
@@ -107,7 +118,8 @@ export async function POST(request: Request) {
   const files = form.getAll('file').filter(isMultipartFile)
   if (!files.length) return uploadError('请至少选择一张图片')
   if (files.length > MAX_FILES) return uploadError(`一次最多上传 ${MAX_FILES} 张图片`)
-  if (files.reduce((total, file) => total + file.size, 0) > MAX_TOTAL_SIZE) return uploadError('本次图片总大小过大，请分批投稿')
+  const fileValidation = validateSalonFiles(files.map((file) => ({ name: file.name, size: file.size, type: file.type })))
+  if (!fileValidation.ok) return uploadError(fileValidation.error || '图片校验失败')
 
   const inspected: Array<Awaited<ReturnType<typeof inspectImage>>> = []
   try {
@@ -117,6 +129,20 @@ export async function POST(request: Request) {
   }
 
   const postId = randomUUID()
+  const uploadedObjectKeys: string[] = []
+  const watermark = watermarkEnabled ? {
+    text: createSalonWatermarkText(guard.user.uid, guard.user.nickname),
+    opacity: watermarkOpacity,
+    position: watermarkPosition,
+  } : undefined
+
+  async function cleanupUploadedObjects() {
+    if (!uploadedObjectKeys.length) return
+    await Promise.allSettled(uploadedObjectKeys.map(async (key) => {
+      try { await deleteFromCos(key) } catch (cleanupError) { console.error('[salon.posts.create.cleanup]', { key, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) }) }
+    }))
+  }
+
   try {
     const media = []
     for (const [index, image] of inspected.entries()) {
@@ -125,21 +151,29 @@ export async function POST(request: Request) {
         sourceMaxWidth: 2560,
         sourceQuality: 90,
         variants: ['thumb-md', 'card', 'large'],
+        watermark,
       })
       const uploaded = await uploadImageVariantFamily({
         sourceObjectPath,
         original: image.buffer,
         originalContentType: image.contentType,
+        preserveOriginal: shouldPreserveOriginal(category),
         generated,
         upload: ({ key, body, contentType }) => uploadSiteImage({ key, body, contentType }),
+        remove: deleteFromCos,
       })
+      uploadedObjectKeys.push(...[uploaded.originalObjectKey, uploaded.sourceObjectKey, ...Object.values(uploaded.variantObjectKeys)].filter((key): key is string => Boolean(key)))
       const thumbnailUrl = uploaded.variantUrls['thumb-md'] || uploaded.sourceUrl
       const previewUrl = uploaded.variantUrls.large || uploaded.variantUrls.card || uploaded.sourceUrl
       media.push({
-        originalUrl: publicImageUrl(uploaded.originalUrl) || uploaded.originalUrl,
+        originalUrl: uploaded.originalUrl ? publicImageUrl(uploaded.originalUrl) || uploaded.originalUrl : null,
         previewUrl: publicImageUrl(previewUrl) || previewUrl,
         thumbnailUrl: publicImageUrl(thumbnailUrl) || thumbnailUrl,
         storageKey: sourceObjectPath,
+        originalObjectKey: uploaded.originalObjectKey,
+        originalFilename: shouldPreserveOriginal(category) && inspected[index] ? files[index]?.name.trim().slice(0, 255) || null : null,
+        originalMimeType: shouldPreserveOriginal(category) ? image.contentType : null,
+        originalSize: shouldPreserveOriginal(category) ? files[index]?.size || image.buffer.byteLength : null,
         width: image.width,
         height: image.height,
         sortOrder: index,
@@ -151,16 +185,48 @@ export async function POST(request: Request) {
         id: postId,
         userId: guard.user.id,
         category,
-        concertId: concert.id,
+        concertId: concert?.id || null,
         title,
         content,
+        status: 'PENDING',
+        watermarkEnabled,
+        watermarkOpacity,
+        watermarkPosition,
         submissionKey,
         media: { create: media },
       },
       select: { id: true },
     })
+
+    const adminRecipientIds = await safeNotificationWrite(
+      () => createSalonReviewNotifications({
+        postId: post.id,
+        authorId: guard.user.id,
+        nickname: guard.user.nickname,
+        category,
+        title,
+      }),
+      {
+        operation: 'salon.admin-review-notification.failed',
+        userId: guard.user.id,
+        targetId: post.id,
+        notificationType: 'REVIEW',
+      },
+    )
+    if (adminRecipientIds?.length) {
+      await safeNotificationWrite(
+        async () => { emitRealtimeMany(adminRecipientIds, 'notification') },
+        {
+          operation: 'salon.admin-review-notification.realtime',
+          userId: guard.user.id,
+          targetId: post.id,
+          notificationType: 'REVIEW',
+        },
+      )
+    }
     return NextResponse.json({ ok: true, postId: post.id, message: '投稿成功，作品将在审核通过后公开显示。' }, { status: 201 })
   } catch (error) {
+    await cleanupUploadedObjects()
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && submissionKey) {
       const existing = await prisma.salonPost.findFirst({ where: { userId: guard.user.id, submissionKey }, select: { id: true } })
       if (existing) return NextResponse.json({ ok: true, duplicate: true, postId: existing.id, message: '这次投稿已经提交过了' })

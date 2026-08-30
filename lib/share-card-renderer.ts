@@ -5,7 +5,7 @@ import sharp from 'sharp'
 import { getMediaPublicBaseUrl, PUBLIC_COS_HOST } from '@/lib/media-url'
 import { publicImageUrl } from '@/lib/images'
 import { createBrandedQrBuffer } from '@/lib/branded-qr-server'
-import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, shareCardTypeLabel, type ShareCardData } from '@/lib/share-card'
+import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, shareCardTypeLabel, type ShareCardData, type ShareCardImageCandidate } from '@/lib/share-card'
 import {
   calculateShareCardLayout,
   shareCardHeroFit,
@@ -39,8 +39,21 @@ import {
 const IMAGE_FETCH_TIMEOUT_MS = 5000
 const MAX_REMOTE_IMAGE_BYTES = 6 * 1024 * 1024
 const VIDEO_FILE_PATTERN = /\.(?:3gp|avi|flv|m4v|mkv|mov|mp4|mpeg|mpg|ogm|ogv|webm|wmv|m3u8)$/i
-const FONT_PATH = path.join(process.cwd(), 'public', 'fonts', 'NotoSansSC-VF.ttf')
-const FONT_STACK = 'Noto Sans SC, Noto Color Emoji, Segoe UI Emoji, Apple Color Emoji, Microsoft YaHei, PingFang SC, sans-serif'
+const CJK_FONT_PATH = path.join(process.cwd(), 'public', 'fonts', 'NotoSansSC-VF.ttf')
+const EMOJI_FONT_CANDIDATES = process.platform === 'win32'
+  ? [
+      ['Segoe UI Emoji', 'C:/Windows/Fonts/seguiemj.ttf'],
+      ['Noto Color Emoji', 'C:/Windows/Fonts/NotoColorEmoji.ttf'],
+    ] as const
+  : process.platform === 'darwin'
+    ? [['Apple Color Emoji', '/System/Library/Fonts/Apple Color Emoji.ttc']] as const
+    : [
+        ['Noto Color Emoji', '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'],
+        ['Noto Color Emoji', '/usr/share/fonts/opentype/noto/NotoColorEmoji.ttf'],
+      ] as const
+const EMOJI_FONT = EMOJI_FONT_CANDIDATES.find(([, candidatePath]) => existsSync(candidatePath)) || null
+const TEXT_FONT_PATH = EMOJI_FONT?.[1] || CJK_FONT_PATH
+const FONT_STACK = 'Noto Sans SC, Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, Microsoft YaHei, PingFang SC, sans-serif'
 const OFFICIAL_LOGO_PATH = path.join(process.cwd(), 'app', 'icon.png')
 const DEFAULT_OG_ASSET_PATH = path.join(process.cwd(), 'public', 'images', 'og-default.png')
 
@@ -130,6 +143,31 @@ async function loadTrustedImage(value: string | null | undefined): Promise<Image
   }
 }
 
+function shareCardImageCandidateValues(data: ShareCardData) {
+  const values: ShareCardImageCandidate[] = []
+  const seen = new Set<string>()
+  const append = (candidate: ShareCardImageCandidate | null) => {
+    if (!candidate || seen.has(candidate.url)) return
+    seen.add(candidate.url)
+    values.push(candidate)
+  }
+  if (data.image) {
+    append({ url: data.image, width: data.imageWidth, height: data.imageHeight })
+  }
+  for (const candidate of data.imageCandidates || []) {
+    append(candidate)
+  }
+  return values
+}
+
+async function loadFirstTrustedImage(data: ShareCardData) {
+  for (const candidate of shareCardImageCandidateValues(data)) {
+    const buffer = await loadTrustedImage(candidate.url)
+    if (buffer) return { buffer, candidate }
+  }
+  return null
+}
+
 async function readableImageDimensions(input: Buffer): Promise<ShareCardImageDimensions | null> {
   try {
     const metadata = await sharp(input, { failOn: 'error', limitInputPixels: 30_000_000 }).rotate().metadata()
@@ -188,7 +226,7 @@ async function createTextLayer(input: TextLayerInput) {
     width: input.width,
     align: input.align || 'left',
     rgba: true,
-    ...(existsSync(FONT_PATH) ? { fontfile: FONT_PATH } : {}),
+    ...(existsSync(TEXT_FONT_PATH) ? { fontfile: TEXT_FONT_PATH } : {}),
   }
   const rendered = await sharp({ text: textConfig }).png().toBuffer({ resolveWithObject: true })
   return {
@@ -214,13 +252,8 @@ function heroShadeSvg(height: number) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHARE_CARD_WIDTH}" height="${height}"><defs><linearGradient id="heroShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#020812" stop-opacity="0"/><stop offset="1" stop-color="#020812" stop-opacity="0.76"/></linearGradient></defs><rect width="${SHARE_CARD_WIDTH}" height="${height}" fill="url(#heroShade)"/></svg>`
 }
 
-/** The information block is a flush, rectangular part of the poster flow. */
-function panelSvg(top: number, height: number) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHARE_CARD_WIDTH}" height="${Math.max(SHARE_CARD_HEIGHT, top + height)}"><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="${height}" fill="#ffffff" fill-opacity="0.96"/></svg>`
-}
-
-/** Activity details are a translucent lower overlay inside the existing Hero. */
-function activityOverlaySvg(top: number, height: number) {
+/** Every content type places its detail copy on a translucent rectangle inside the Hero. */
+function contentOverlaySvg(top: number, height: number) {
   const canvasHeight = Math.max(SHARE_CARD_HEIGHT, top + height)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHARE_CARD_WIDTH}" height="${canvasHeight}"><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="${height}" fill="#141e23" fill-opacity="0.72"/><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="2" fill="#ffffff" fill-opacity="0.12"/></svg>`
 }
@@ -245,11 +278,12 @@ export type ShareCardRenderResult = Readonly<{
 /** Generate the canonical 1080px-wide PNG used by the COS cache. */
 export async function renderShareCardPngWithInfo(data: ShareCardData): Promise<ShareCardRenderResult> {
   const normalizedData = { ...data, url: canonicalShareUrl(data.url) }
-  const [hero, avatar, logo] = await Promise.all([
-    loadTrustedImage(normalizedData.image),
+  const [heroResult, avatar, logo] = await Promise.all([
+    loadFirstTrustedImage(normalizedData),
     loadTrustedImage(normalizedData.authorAvatar),
     loadOfficialLogo(),
   ])
+  const hero = heroResult?.buffer || null
   const actualHeroDimensions = hero ? await readableImageDimensions(hero) : null
   const layout = calculateShareCardLayout(normalizedData, actualHeroDimensions)
   const qr = await createBrandedQrBuffer(normalizedData.url, SHARE_CARD_QR_SIZE)
@@ -259,11 +293,7 @@ export async function renderShareCardPngWithInfo(data: ShareCardData): Promise<S
     const heroLayer = await fitImage(hero, SHARE_CARD_WIDTH, layout.heroHeight, shareCardHeroFit(normalizedData.type))
     if (heroLayer) layers.push({ input: heroLayer, left: 0, top: 0 }, { input: Buffer.from(heroShadeSvg(layout.heroHeight)), left: 0, top: 0 })
   }
-  if (normalizedData.type === 'activity') {
-    layers.push({ input: Buffer.from(activityOverlaySvg(layout.activityOverlayTop, layout.activityOverlayHeight)), left: 0, top: 0 })
-  } else {
-    layers.push({ input: Buffer.from(panelSvg(layout.panelTop, layout.panelHeight)), left: 0, top: 0 })
-  }
+  layers.push({ input: Buffer.from(contentOverlaySvg(layout.overlayTop, layout.overlayHeight)), left: 0, top: 0 })
 
   if (avatar) {
     const avatarLayer = await circleImage(avatar, SHARE_CARD_AVATAR_SIZE)
@@ -274,10 +304,9 @@ export async function renderShareCardPngWithInfo(data: ShareCardData): Promise<S
   layers.push({ input: qr, left: SHARE_CARD_QR_X, top: layout.qrTop })
 
   const contentLeft = SHARE_CARD_PANEL_PADDING_X
-  const isActivity = normalizedData.type === 'activity'
-  const categoryColor = isActivity ? '#d5f1f4' : '#0f5f8f'
-  const titleColor = isActivity ? '#ffffff' : '#102033'
-  const detailColor = isActivity ? '#f0f6f7' : '#536779'
+  const categoryColor = '#d5f1f4'
+  const titleColor = '#ffffff'
+  const detailColor = '#f0f6f7'
   const textInputs: TextLayerInput[] = [{ text: shareCardTypeLabel(normalizedData.type), left: contentLeft, top: layout.categoryTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_CATEGORY_FONT_SIZE, color: categoryColor, weight: 800 }]
   pushTextLines(textInputs, layout.titleLines, { left: contentLeft, top: layout.titleTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_TITLE_FONT_SIZE, color: titleColor, weight: 800, lineHeight: SHARE_CARD_TITLE_LINE_HEIGHT })
   pushTextLines(textInputs, layout.descriptionLines, { left: contentLeft, top: layout.descriptionTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_DESCRIPTION_FONT_SIZE, color: detailColor, weight: 500, lineHeight: SHARE_CARD_DESCRIPTION_LINE_HEIGHT })

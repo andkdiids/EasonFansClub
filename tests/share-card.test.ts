@@ -54,7 +54,7 @@ test('card payload has one shared shape and a high-resolution portrait contract'
   assert.match(image, /imageSmoothingQuality = 'high'/)
 })
 
-test('share card flow layout keeps all copy, preserves the portrait baseline, and grows for long content', () => {
+test('share card flow layout keeps the Hero baseline and places bounded copy inside one overlay', () => {
   const shortData: ShareCardData = {
     type: 'post',
     title: '短标题',
@@ -74,16 +74,26 @@ test('share card flow layout keeps all copy, preserves the portrait baseline, an
   assert.ok(shortLayout.height >= SHARE_CARD_HEIGHT)
   assert.equal(compactLayout.height, 1440)
   assert.equal(compactLayout.height, compactLayout.footerBottom)
-  assert.ok(longLayout.height > shortLayout.height)
-  assert.equal(shortLayout.descriptionLines.join('\n'), '第一段\n\n第二段\n第三段')
+  assert.ok(longLayout.height >= shortLayout.height)
+  assert.equal(shortLayout.descriptionLines.join('\n'), '第一段…')
+  assert.equal(shortLayout.panelTop, shortLayout.overlayTop)
+  assert.equal(shortLayout.panelHeight, shortLayout.overlayHeight)
+  assert.equal(shortLayout.panelBottom, shortLayout.heroHeight)
+  assert.equal(shortLayout.overlayTop + shortLayout.overlayHeight, shortLayout.heroHeight)
+  assert.ok(shortLayout.overlayTop >= 0)
+  assert.ok(shortLayout.overlayTop + shortLayout.overlayHeight <= shortLayout.heroHeight)
   assert.ok(shortLayout.authorTop >= shortLayout.panelBottom + SHARE_CARD_AUTHOR_TOP_GAP)
-  assert.equal(shortLayout.qrTop, shortLayout.brandBlockTop)
+  assert.ok(shortLayout.titleLines.length <= SHARE_CARD_ACTIVITY_TITLE_MAX_LINES)
+  assert.ok(shortLayout.descriptionLines.length <= SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES)
+  assert.ok(shortLayout.brandBlockTop > shortLayout.qrTop)
+  assert.ok(shortLayout.qrTop >= shortLayout.authorTop + shortLayout.authorBlockHeight)
   assert.equal(shortLayout.brandLogoTop + SHARE_CARD_FOOTER_LOGO_SIZE / 2, shortLayout.brandTextTop + SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT / 2)
   assert.equal(shortLayout.footerBottom - Math.max(shortLayout.brandBlockTop + shortLayout.brandBlockHeight, shortLayout.qrTop + SHARE_CARD_QR_FRAME_SIZE), SHARE_CARD_FOOTER_BOTTOM_PADDING)
   assert.ok(SHARE_CARD_FOOTER_TEXT_X + SHARE_CARD_FOOTER_TEXT_WIDTH < SHARE_CARD_QR_FRAME_X)
   assert.match(read('lib/share-card-layout.ts'), /measureWrappedText/)
-  assert.doesNotMatch(read('lib/share-card-renderer.ts'), /maxLines|DESCRIPTION_CHARS_PER_LINE|\.slice\(0, maxLength\)/)
-  assert.doesNotMatch(read('lib/share-card-image.ts'), /maxLines|\.slice\(0, maxLines\)/)
+  assert.match(read('lib/share-card-renderer.ts'), /contentOverlaySvg\(layout\.overlayTop, layout\.overlayHeight\)/)
+  assert.doesNotMatch(read('lib/share-card-renderer.ts'), /panelSvg\(|activityOverlaySvg\(/)
+  assert.match(read('lib/share-card-image.ts'), /context\.fillRect\(0, layout\.overlayTop, SHARE_CARD_WIDTH, layout\.overlayHeight\)/)
 })
 
 test('activity and post payloads use the common renderer rather than type-specific generators', () => {
@@ -165,18 +175,19 @@ test('activity cards render one labeled detail set in a lower Hero overlay', () 
     '活动时间：2026年8月28日 18:35 — 2026年8月28日 22:39',
     '活动地点：测试',
   ])
-  assert.equal(layout.panelTop, layout.heroHeight)
-  assert.equal(layout.panelHeight, 0)
+  assert.equal(layout.panelTop, layout.overlayTop)
+  assert.equal(layout.panelHeight, layout.overlayHeight)
+  assert.equal(layout.panelBottom, layout.heroHeight)
   assert.ok(layout.activityOverlayTop > 0)
   assert.equal(layout.activityOverlayTop + layout.activityOverlayHeight, layout.heroHeight)
   assert.ok(layout.categoryTop >= layout.activityOverlayTop + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP)
   assert.ok(layout.metaTop + layout.metaLines.length * 38 + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM <= layout.heroHeight)
   assert.ok(layout.titleLines.length <= SHARE_CARD_ACTIVITY_TITLE_MAX_LINES)
   assert.ok(layout.descriptionLines.length <= SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES)
-  assert.equal(layout.brandBlockTop, layout.qrTop + SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y - SHARE_CARD_ACTIVITY_QR_OFFSET_Y)
   assert.ok(layout.brandBlockTop > layout.qrTop)
+  assert.ok(layout.brandBlockTop - layout.qrTop >= SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y + SHARE_CARD_ACTIVITY_QR_OFFSET_Y)
   assert.equal(layout.brandLogoTop + SHARE_CARD_FOOTER_LOGO_SIZE / 2, layout.brandTextTop + SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT / 2)
-  assert.match(read('lib/share-card-renderer.ts'), /activityOverlaySvg\(layout\.activityOverlayTop, layout\.activityOverlayHeight\)/)
+  assert.match(read('lib/share-card-renderer.ts'), /contentOverlaySvg\(layout\.overlayTop, layout\.overlayHeight\)/)
   assert.match(read('lib/share-card-renderer.ts'), /fill="#141e23" fill-opacity="0\.72"/)
   assert.match(read('lib/share-card-image.ts'), /rgba\(20,30,35,\.72\)/)
 })
@@ -277,12 +288,12 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.doesNotMatch(preview, /share-card-preview-eyebrow/)
 })
 
-test('V8 keeps the shared Hero policy for landscape and portrait media', () => {
+test('V9 keeps the shared Hero policy for landscape and portrait media', () => {
   const layout = read('lib/share-card-layout.ts')
   const server = read('lib/share-card-renderer.ts')
   const client = read('lib/share-card-image.ts')
   const service = read('lib/share-card-service.ts')
-  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v8')
+  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v9')
   assert.match(layout, /export function shareCardHeroFit[\s\S]*type === 'home' \? 'contain' : 'cover'/)
   assert.match(server, /fitImage\(hero, SHARE_CARD_WIDTH, layout\.heroHeight, shareCardHeroFit\(normalizedData\.type\)\)/)
   assert.match(client, /shareCardHeroFit\(data\.type\)/)

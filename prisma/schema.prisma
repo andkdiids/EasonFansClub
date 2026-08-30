@@ -2738,27 +2738,31 @@ model MusicConcertCategory {
 }
 
 model SalonPost {
-  id            String           @id @default(cuid())
-  userId        String
-  category      SalonCategory
-  concertId     String
-  title         String?          @db.VarChar(200)
-  content       String?          @db.Text
-  status        SalonPostStatus  @default(PENDING)
-  rejectReason  String?          @db.Text
-  likeCount     Int              @default(0)
-  commentCount  Int              @default(0)
-  approvedAt    DateTime?
-  approvedById  String?
-  submissionKey String?          @db.VarChar(64)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  author        User             @relation("SalonPostAuthor", fields: [userId], references: [id], onDelete: Cascade)
-  concert       MusicConcert     @relation("SalonPostConcert", fields: [concertId], references: [id], onDelete: Restrict)
-  approvedBy    User?            @relation("SalonPostApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
-  media         SalonPostMedia[]
-  likes         SalonPostLike[]
-  comments      SalonComment[]
+  id                String                 @id @default(cuid())
+  userId            String
+  category          SalonCategory
+  concertId         String?
+  title             String?                @db.VarChar(200)
+  content           String?                @db.Text
+  status            SalonPostStatus        @default(PENDING)
+  rejectReason      String?                @db.Text
+  likeCount         Int                    @default(0)
+  commentCount      Int                    @default(0)
+  viewCount         Int                    @default(0)
+  watermarkEnabled  Boolean                @default(false)
+  watermarkOpacity  Int                    @default(50)
+  watermarkPosition SalonWatermarkPosition @default(BOTTOM_RIGHT)
+  approvedAt        DateTime?
+  approvedById      String?
+  submissionKey     String?                @db.VarChar(64)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  author            User                   @relation("SalonPostAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  concert           MusicConcert?          @relation("SalonPostConcert", fields: [concertId], references: [id], onDelete: Restrict)
+  approvedBy        User?                  @relation("SalonPostApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  media             SalonPostMedia[]
+  likes             SalonPostLike[]
+  comments          SalonComment[]
 
   @@unique([userId, submissionKey], map: "SalonPost_userId_submissionKey_key")
   @@index([status, approvedAt])
@@ -2768,17 +2772,21 @@ model SalonPost {
 }
 
 model SalonPostMedia {
-  id           String    @id @default(cuid())
-  postId       String
-  originalUrl  String    @db.Text
-  previewUrl   String    @db.Text
-  thumbnailUrl String    @db.Text
-  storageKey   String    @db.VarChar(512)
-  width        Int
-  height       Int
-  sortOrder    Int
-  createdAt    DateTime  @default(now())
-  post         SalonPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  id                String    @id @default(cuid())
+  postId            String
+  originalUrl       String?   @db.Text
+  previewUrl        String    @db.Text
+  thumbnailUrl      String    @db.Text
+  storageKey        String    @db.VarChar(512)
+  originalObjectKey String?   @db.VarChar(512)
+  originalFilename  String?   @db.VarChar(255)
+  originalMimeType  String?   @db.VarChar(100)
+  originalSize      Int?
+  width             Int
+  height            Int
+  sortOrder         Int
+  createdAt         DateTime  @default(now())
+  post              SalonPost @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@unique([postId, sortOrder], map: "SalonPostMedia_postId_sortOrder_key")
   @@index([postId, sortOrder])
@@ -4486,12 +4494,24 @@ enum SalonCategory {
   CONCERT
   MOBILE_WALLPAPER
   DESKTOP_WALLPAPER
+  TIME_TRAVEL
 }
 
 enum SalonPostStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum SalonWatermarkPosition {
+  TOP
+  BOTTOM
+  LEFT
+  RIGHT
+  TOP_LEFT
+  TOP_RIGHT
+  BOTTOM_LEFT
+  BOTTOM_RIGHT
 }
 
 enum MusicHighlightType {

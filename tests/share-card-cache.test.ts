@@ -107,7 +107,7 @@ test('twenty concurrent requests use one renderer and one upload', async () => {
   assert.equal(new Set(results.map((result) => result.hash)).size, 1)
 })
 
-test('cache responses expose the same deterministic height for short and long content', async () => {
+test('cache responses expose the same deterministic Hero/footer height for bounded long content', async () => {
   const longData = { ...baseData, contentId: 'post-long-layout-fixture', description: '完整长正文'.repeat(300) }
   let stored = false
   const cache = createShareCardCache({
@@ -119,12 +119,12 @@ test('cache responses expose the same deterministic height for short and long co
   const second = await cache.getOrCreate(longData)
   assert.equal(first.width, SHARE_CARD_WIDTH)
   assert.equal(first.height, calculateShareCardLayout(longData).height)
-  assert.ok(first.height > SHARE_CARD_HEIGHT)
+  assert.ok(first.height >= SHARE_CARD_HEIGHT)
   assert.equal(second.height, first.height)
   assert.equal(second.url, first.url)
 })
 
-test('server PNG dimensions follow the full long copy and keep author/QR below the content card', async () => {
+test('server PNG dimensions follow the shared Hero overlay and keep author/QR below it', async () => {
   const longData = {
     ...baseData,
     contentId: 'post-render-long-layout-fixture',
@@ -136,12 +136,21 @@ test('server PNG dimensions follow the full long copy and keep author/QR below t
   const metadata = await sharp(png).metadata()
   assert.equal(metadata.width, SHARE_CARD_WIDTH)
   assert.equal(metadata.height, layout.height)
-  assert.ok(layout.height > SHARE_CARD_HEIGHT)
+  assert.ok(layout.height >= SHARE_CARD_HEIGHT)
   assert.ok(layout.authorTop >= layout.panelBottom + 36)
-  assert.equal(layout.qrTop, layout.brandBlockTop)
+  assert.equal(layout.panelTop, layout.overlayTop)
+  assert.equal(layout.panelHeight, layout.overlayHeight)
+  assert.equal(layout.panelBottom, layout.heroHeight)
+  assert.equal(layout.overlayTop + layout.overlayHeight, layout.heroHeight)
+  assert.ok(layout.overlayTop >= 0)
+  assert.ok(layout.overlayTop + layout.overlayHeight <= layout.heroHeight)
+  assert.ok(layout.brandBlockTop > layout.qrTop)
+  assert.ok(layout.qrTop >= layout.authorTop + layout.authorBlockHeight)
   assert.equal(layout.brandLogoTop + 42, layout.brandTextTop + 36)
   assert.equal(layout.footerBottom, layout.height)
-  assert.ok(layout.descriptionLines.join('').includes('完整正文内容'))
+  assert.ok(layout.titleLines.length <= 3)
+  assert.ok(layout.descriptionLines.length <= 3)
+  assert.equal(layout.descriptionLines.at(-1)?.endsWith('…'), true)
 })
 
 test('server PNG puts a real vertical/long first image into the fixed cover Hero', async () => {
@@ -153,6 +162,39 @@ test('server PNG puts a real vertical/long first image into the fixed cover Hero
   try {
     const png = await renderShareCardPng({ ...baseData, image: 'https://media.ecfc.fans/media/post/first-long.webp' })
     const pixel = await sharp(png).extract({ left: 540, top: 120, width: 1, height: 1 }).removeAlpha().raw().toBuffer()
+    assert.ok((pixel[0] || 0) > 150)
+    assert.ok((pixel[1] || 0) < 100)
+    assert.ok((pixel[2] || 0) < 100)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('server renderer skips a broken first media object and uses the next valid IMAGE candidate', async () => {
+  const heroFixture = await sharp({
+    create: { width: 360, height: 1800, channels: 3, background: { r: 226, g: 44, b: 48 } },
+  }).png().toBuffer()
+  const attempts: string[] = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input) => {
+    const url = String(input)
+    attempts.push(url)
+    return url.endsWith('/valid.webp')
+      ? new Response(heroFixture, { status: 200, headers: { 'content-type': 'image/webp' } })
+      : new Response(null, { status: 404 })
+  }) as typeof fetch
+  try {
+    const png = await renderShareCardPng({
+      ...baseData,
+      contentId: 'post-image-candidate-fallback',
+      image: 'https://media.ecfc.fans/media/post/broken.webp',
+      imageCandidates: [{ url: 'https://media.ecfc.fans/media/post/valid.webp', width: 360, height: 1800 }],
+    })
+    const pixel = await sharp(png).extract({ left: 540, top: 120, width: 1, height: 1 }).removeAlpha().raw().toBuffer()
+    assert.deepEqual(attempts, [
+      'https://media.ecfc.fans/media/post/broken.webp',
+      'https://media.ecfc.fans/media/post/valid.webp',
+    ])
     assert.ok((pixel[0] || 0) > 150)
     assert.ok((pixel[1] || 0) < 100)
     assert.ok((pixel[2] || 0) < 100)
@@ -192,7 +234,9 @@ test('activity PNG keeps the existing Hero geometry and overlays one dark detail
     assert.equal(metadata.width, SHARE_CARD_WIDTH)
     assert.equal(metadata.height, expected.height)
     assert.equal(expected.heroHeight, SHARE_CARD_PORTRAIT_HERO_HEIGHT)
-    assert.equal(expected.panelHeight, 0)
+    assert.equal(expected.panelTop, expected.overlayTop)
+    assert.equal(expected.panelHeight, expected.overlayHeight)
+    assert.equal(expected.panelBottom, expected.heroHeight)
     assert.ok(expected.activityOverlayTop > 0)
     assert.equal(expected.activityOverlayTop + expected.activityOverlayHeight, expected.heroHeight)
     assert.ok(expected.brandBlockTop > expected.qrTop)

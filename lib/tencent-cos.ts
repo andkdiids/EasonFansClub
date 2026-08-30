@@ -143,6 +143,36 @@ export function getCosUrl(key: string) {
   return `https://${config.bucket}.cos.${config.region}.myqcloud.com/${key}`
 }
 
+/** Read one server-selected object for a controlled download endpoint. */
+export async function getCosObject(key: string, timeoutMs = 30_000) {
+  const normalizedKey = key.trim().replace(/^\/+/, '')
+  if (!normalizedKey || normalizedKey.includes('..')) throw new Error('COS_OBJECT_KEY_INVALID')
+  const { cos, config } = getCosClient()
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      new Promise<Buffer>((resolve, reject) => {
+        cos.getObject({ Bucket: config.bucket, Region: config.region, Key: normalizedKey }, (error, data) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          if (!data?.Body) {
+            reject(new Error('COS_OBJECT_EMPTY'))
+            return
+          }
+          resolve(Buffer.isBuffer(data.Body) ? data.Body : Buffer.from(data.Body as string))
+        })
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('COS_GET_TIMEOUT')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
 function isCosNotFoundError(error: unknown) {
   if (!error || typeof error !== 'object') return false
   const details = error as { code?: string; statusCode?: number | string; error?: { Code?: string } }

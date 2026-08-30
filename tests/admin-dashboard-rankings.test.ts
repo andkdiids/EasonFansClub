@@ -3,9 +3,13 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
+  DASHBOARD_RANKING_PERIODS,
   DASHBOARD_RANKING_LIMIT,
+  DASHBOARD_TIME_ZONE,
+  DashboardDateRangeError,
   getDashboardPeriodRange,
   parseDashboardRankingPeriod,
+  resolveDashboardDateRange,
   sortRankingAggregates,
 } from '../lib/admin-dashboard-rankings'
 
@@ -36,11 +40,98 @@ test('本月从北京时间当月 1 日 00:00 开始，不是最近 30 天', () 
   assert.equal(previousMonth.start.toISOString(), '2026-07-31T16:00:00.000Z')
 })
 
-test('周期解析只接受 week 和 month', () => {
+test('五个周期都按北京时间解析，并保留旧 week/month URL 兼容', () => {
+  assert.deepEqual(
+    DASHBOARD_RANKING_PERIODS.map((period) => parseDashboardRankingPeriod(period)),
+    [...DASHBOARD_RANKING_PERIODS],
+  )
   assert.equal(parseDashboardRankingPeriod('week'), 'week')
   assert.equal(parseDashboardRankingPeriod('month'), 'month')
   assert.equal(parseDashboardRankingPeriod('7d'), null)
   assert.equal(parseDashboardRankingPeriod(null), null)
+  assert.equal(DASHBOARD_TIME_ZONE, 'Asia/Shanghai')
+})
+
+test('上周是上一个完整周一至周日，结束边界为本周一 00:00', () => {
+  const range = resolveDashboardDateRange({ period: 'last_week', now: new Date('2026-08-31T01:00:00.000Z') })
+
+  assert.equal(range.start.toISOString(), '2026-08-23T16:00:00.000Z')
+  assert.equal(range.endExclusive.toISOString(), '2026-08-30T16:00:00.000Z')
+  assert.equal(range.startDateKey, '2026-08-24')
+  assert.equal(range.endDateKey, '2026-08-30')
+  assert.equal(range.label, '上周')
+})
+
+test('本周和本月结束于服务端当前时间，不计算未来日期', () => {
+  const now = new Date('2026-08-31T01:00:00.000Z')
+  const week = resolveDashboardDateRange({ period: 'this_week', now })
+  const month = resolveDashboardDateRange({ period: 'this_month', now })
+
+  assert.equal(week.endExclusive.getTime(), now.getTime())
+  assert.equal(month.endExclusive.getTime(), now.getTime())
+  assert.equal(week.endDateKey, '2026-08-31')
+  assert.equal(month.startDateKey, '2026-08-01')
+})
+
+test('上月按自然月边界计算，并覆盖 28/29/30/31 天月份', () => {
+  const cases = [
+    ['2026-03-15T00:00:00.000Z', '2026-02-01', '2026-02-28', '2026-01-31T16:00:00.000Z', '2026-02-28T16:00:00.000Z'],
+    ['2024-03-15T00:00:00.000Z', '2024-02-01', '2024-02-29', '2024-01-31T16:00:00.000Z', '2024-02-29T16:00:00.000Z'],
+    ['2026-05-15T00:00:00.000Z', '2026-04-01', '2026-04-30', '2026-03-31T16:00:00.000Z', '2026-04-30T16:00:00.000Z'],
+    ['2026-08-15T00:00:00.000Z', '2026-07-01', '2026-07-31', '2026-06-30T16:00:00.000Z', '2026-07-31T16:00:00.000Z'],
+  ] as const
+
+  for (const [now, startDateKey, endDateKey, start, endExclusive] of cases) {
+    const range = resolveDashboardDateRange({ period: 'last_month', now: new Date(now) })
+    assert.equal(range.startDateKey, startDateKey)
+    assert.equal(range.endDateKey, endDateKey)
+    assert.equal(range.start.toISOString(), start)
+    assert.equal(range.endExclusive.toISOString(), endExclusive)
+  }
+})
+
+test('自定义范围包含结束日，支持单日、跨月和跨年', () => {
+  const singleDay = resolveDashboardDateRange({ period: 'custom', startDate: '2026-08-15', endDate: '2026-08-15' })
+  assert.equal(singleDay.start.toISOString(), '2026-08-14T16:00:00.000Z')
+  assert.equal(singleDay.endExclusive.toISOString(), '2026-08-15T16:00:00.000Z')
+  assert.equal(singleDay.startDateKey, '2026-08-15')
+  assert.equal(singleDay.endDateKey, '2026-08-15')
+
+  const crossMonth = resolveDashboardDateRange({ period: 'custom', startDate: '2026-07-25', endDate: '2026-08-05' })
+  assert.equal(crossMonth.startDateKey, '2026-07-25')
+  assert.equal(crossMonth.endDateKey, '2026-08-05')
+  assert.equal(crossMonth.endExclusive.toISOString(), '2026-08-05T16:00:00.000Z')
+
+  const crossYear = resolveDashboardDateRange({ period: 'custom', startDate: '2025-12-25', endDate: '2026-01-05' })
+  assert.equal(crossYear.start.toISOString(), '2025-12-24T16:00:00.000Z')
+  assert.equal(crossYear.endExclusive.toISOString(), '2026-01-05T16:00:00.000Z')
+})
+
+test('自定义日期必填且开始日期不能晚于结束日期', () => {
+  assert.throws(
+    () => resolveDashboardDateRange({ period: 'custom', startDate: '2026-08-15', endDate: '2026-08-14' }),
+    (error: unknown) => error instanceof DashboardDateRangeError
+      && error.code === 'CUSTOM_DATE_ORDER'
+      && error.message === '开始日期不能晚于结束日期',
+  )
+  assert.throws(
+    () => resolveDashboardDateRange({ period: 'custom', startDate: '2026-08-15' }),
+    (error: unknown) => error instanceof DashboardDateRangeError && error.code === 'CUSTOM_DATE_REQUIRED',
+  )
+  assert.throws(
+    () => resolveDashboardDateRange({ period: 'custom', startDate: '2026-02-30', endDate: '2026-03-01' }),
+    (error: unknown) => error instanceof DashboardDateRangeError && error.code === 'CUSTOM_DATE_INVALID',
+  )
+})
+
+test('统计范围使用 [start, endExclusive) 边界，恰好落在结束边界的数据不计入', () => {
+  const range = resolveDashboardDateRange({ period: 'last_week', now: new Date('2026-08-31T01:00:00.000Z') })
+  const beforeEnd = new Date('2026-08-30T15:59:59.999Z')
+  const atEnd = range.endExclusive
+
+  assert.equal(range.start.getTime() <= beforeEnd.getTime(), true)
+  assert.equal(beforeEnd.getTime() < range.endExclusive.getTime(), true)
+  assert.equal(atEnd.getTime() < range.endExclusive.getTime(), false)
 })
 
 test('同数量榜单按最后一次行为时间升序，再按 userId 稳定排序，并限制 TOP 10', () => {
@@ -83,6 +174,24 @@ test('统计 service 使用真实模型、公开状态和删除过滤', () => {
   assert.match(service, /\{ authorId: 'asc' \}/)
 })
 
+test('三个排行榜在五个周期中复用同一个 resolved range，并由数据库聚合取 TOP 10', () => {
+  const service = source('lib/admin-dashboard-rankings.ts')
+  for (const period of DASHBOARD_RANKING_PERIODS) {
+    const range = resolveDashboardDateRange({
+      period,
+      startDate: period === 'custom' ? '2026-08-01' : undefined,
+      endDate: period === 'custom' ? '2026-08-15' : undefined,
+      now: new Date('2026-08-31T01:00:00.000Z'),
+    })
+    assert.equal(range.period, period)
+  }
+  assert.match(service, /const range = typeof input === 'string'/)
+  assert.match(service, /const \[postAggregates, commentAggregates, consultationAggregates\] = await Promise\.all\(/)
+  assert.equal((service.match(/createdAt: \{ gte: range\.start, lt: range\.endExclusive \}/g) || []).length, 3)
+  assert.match(service, /prisma\.user\.findMany/)
+  assert.doesNotMatch(service, /prisma\.user\.findUnique/)
+})
+
 test('三个统计模型已有 authorId + createdAt 索引，本轮不需要新增索引', () => {
   const schema = source('prisma/schema.prisma')
   for (const model of ['Post', 'Reply', 'ClinicConsultation']) {
@@ -97,6 +206,11 @@ test('排行榜 API 复用统一 stats_view 管理员权限并返回无缓存响
   const route = source('app/api/admin/dashboard/rankings/route.ts')
   assert.match(route, /requireAdmin\('stats_view'\)/)
   assert.match(route, /parseDashboardRankingPeriod/)
+  assert.match(route, /\|\| 'this_week'/)
+  assert.match(route, /startDate/)
+  assert.match(route, /endDate/)
+  assert.match(route, /DashboardDateRangeError/)
+  assert.match(route, /endExclusive/)
   assert.match(route, /Cache-Control.*no-store/)
   assert.match(route, /postRanking: result\.postRanking/)
   assert.match(route, /commentRanking: result\.commentRanking/)
@@ -107,13 +221,25 @@ test('数据面板统一切换周期、三个榜单一起请求，并保留加�
   const page = source('app/admin/dashboard/page.tsx')
   const client = source('app/admin/dashboard/DashboardRankings.tsx')
   assert.match(page, /requireAdminPage\('\/admin\/dashboard', 'stats_view'\)/)
-  assert.match(client, /useState<RankingPeriod>\('week'\)/)
-  assert.match(client, /fetch\(`\/api\/admin\/dashboard\/rankings\?period=\$\{period\}`/)
+  for (const period of DASHBOARD_RANKING_PERIODS) assert.match(client, new RegExp(period))
+  assert.match(client, /useState<RankingPeriod>\(urlState\.period\)/)
+  assert.match(client, /fetch\(\`\/api\/admin\/dashboard\/rankings\?\$\{query\.toString\(\)\}\`/)
   assert.match(client, /setLoading\(true\)/)
+  assert.match(client, /setData\(null\)/)
+  assert.match(client, /useSearchParams/)
+  assert.match(client, /router\.push/)
+  assert.match(client, /aria-pressed/)
+  assert.match(client, /startDate/)
+  assert.match(client, /endDate/)
+  assert.match(client, /开始日期不能晚于结束日期/)
+  assert.match(client, /<input type="date"/)
+  assert.match(client, /查询/)
   assert.match(client, /本周/)
   assert.match(client, /本月/)
   assert.match(client, /TOP 10/)
+  assert.match(client, /当前时间范围暂无有效数据/)
   assert.match(client, /查看用户/)
   assert.match(client, /<SafeAvatar/)
+  assert.match(client, /flex-wrap/)
   assert.match(client, /lg:grid-cols-3/)
 })

@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import { BRANDED_QR_VERSION } from '@/lib/branded-qr'
 import type { ShareCardData } from '@/lib/share-card'
 
-/** Bump when any generated pixel/layout changes. v8 moves activity details into the poster overlay and refines the activity footer flow. */
-export const SHARE_CARD_TEMPLATE_VERSION = 'v8'
+/** Bump when any generated pixel/layout changes. v9 uses one Hero overlay for every content type. */
+export const SHARE_CARD_TEMPLATE_VERSION = 'v9'
 export const SHARE_CARD_LOGO_SOURCE = 'app/icon.png'
 export const SHARE_CARD_LOGO_VERSION = 'app-icon-footer-v1'
 

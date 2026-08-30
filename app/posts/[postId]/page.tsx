@@ -32,7 +32,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { emitRealtime } from '@/lib/realtime'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
-import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, firstShareCardImageCandidate, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
+import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, firstShareCardImageCandidate, shareCardImageCandidates, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { validateRichPostContent } from '@/lib/rich-text'
 import {
@@ -986,6 +986,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const shareTitle = createPostShareTitle(publicPostTitle, safePublicPostContent, publicRichContent)
   const shareText = createPostShareDescription(safePublicPostContent, publicRichContent)
   const shareCardImage = firstShareCardImageCandidate(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
+  const shareCardImages = shareCardImageCandidates(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
   const shareCardData: ShareCardData = {
     type: 'post',
     contentId: post.id,
@@ -994,6 +995,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     image: shareCardImage?.url || null,
     imageWidth: shareCardImage?.width,
     imageHeight: shareCardImage?.height,
+    imageCandidates: shareCardImages,
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: authorName,
     authorAvatar,

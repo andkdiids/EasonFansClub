@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ImageViewer } from '@/components/ImageViewer'
 import {
   formatSalonSession,
@@ -8,6 +8,7 @@ import {
   SALON_CATEGORY_LABELS,
   SALON_POST_STATUSES,
   SALON_STATUS_LABELS,
+  supportsOriginal,
   type SalonCategoryValue,
   type SalonOptions,
   type SalonPostStatusValue,
@@ -17,7 +18,7 @@ import {
 type ReviewTarget = { post: SalonPostView; action: 'approve' | 'reject' }
 type EditTarget = { post: SalonPostView; category: SalonCategoryValue; tourId: string; sessionId: string; title: string; content: string }
 
-export function AdminSalonManager({ initialPosts, initialHasMore, options }: Readonly<{ initialPosts: SalonPostView[]; initialHasMore: boolean; options: SalonOptions }>) {
+export function AdminSalonManager({ initialPosts, initialHasMore, initialPostId, options }: Readonly<{ initialPosts: SalonPostView[]; initialHasMore: boolean; initialPostId?: string | null; options: SalonOptions }>) {
   const [posts, setPosts] = useState(initialPosts)
   const [status, setStatus] = useState<SalonPostStatusValue>('PENDING')
   const [page, setPage] = useState(1)
@@ -28,6 +29,34 @@ export function AdminSalonManager({ initialPosts, initialHasMore, options }: Rea
   const [rejectReason, setRejectReason] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!initialPostId) return
+    let cancelled = false
+    setLoading(true)
+    setError('')
+    fetch(`/api/admin/salon?postId=${encodeURIComponent(initialPostId)}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null) as { posts?: SalonPostView[]; status?: string; message?: string } | null
+        if (!response.ok) throw new Error(data?.message || '审核作品加载失败')
+        if (cancelled) return
+        const nextStatus = SALON_POST_STATUSES.includes(data?.status as SalonPostStatusValue) ? data?.status as SalonPostStatusValue : 'PENDING'
+        setStatus(nextStatus)
+        setPage(1)
+        setHasMore(false)
+        setPosts(data?.posts || [])
+        window.setTimeout(() => {
+          if (!cancelled) document.getElementById(`salon-post-${initialPostId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 0)
+      })
+      .catch((caught) => {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : '审核作品加载失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [initialPostId])
 
   async function load(nextStatus: SalonPostStatusValue, nextPage = 1) {
     setLoading(true); setError('')
@@ -53,7 +82,8 @@ export function AdminSalonManager({ initialPosts, initialHasMore, options }: Rea
     if (!editing) return
     setLoading(true); setError('')
     try {
-      const response = await fetch(`/api/salon/posts/${encodeURIComponent(editing.post.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category: editing.category, concertId: editing.sessionId, title: editing.title, content: editing.content }) })
+      const body = { category: editing.category, ...(editing.category === 'CONCERT' ? { concertId: editing.sessionId } : {}), title: editing.title, content: editing.content }
+      const response = await fetch(`/api/salon/posts/${encodeURIComponent(editing.post.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await response.json().catch(() => null) as { message?: string } | null
       if (!response.ok) throw new Error(data?.message || '保存失败')
       setMessage(data?.message || '作品已更新'); setEditing(null); await load(status, page)
@@ -72,22 +102,26 @@ export function AdminSalonManager({ initialPosts, initialHasMore, options }: Rea
   }
 
   function openEdit(post: SalonPostView) {
-    setEditing({ post, category: post.category, tourId: post.concert.tour.id, sessionId: post.concert.id, title: post.title || '', content: post.content || '' })
+    setEditing({ post, category: post.category, tourId: post.concert?.tour.id || '', sessionId: post.concert?.id || '', title: post.title || '', content: post.content || '' })
   }
 
-  return <section className="admin-salon-manager" aria-busy={loading}><div className="admin-salon-tabs" role="tablist" aria-label="沙龙审核状态">{SALON_POST_STATUSES.map((item) => <button key={item} type="button" role="tab" aria-selected={status === item} onClick={() => void load(item, 1)} disabled={loading}>{SALON_STATUS_LABELS[item]}</button>)}</div>{message ? <p className="salon-form-success" role="status">{message}</p> : null}{error ? <p className="salon-form-error" role="alert">{error}</p> : null}<div className="admin-salon-list">{posts.map((post) => <AdminSalonRow key={post.id} post={post} onApprove={() => { setRejectReason(''); setReviewing({ post, action: 'approve' }) }} onReject={() => { setRejectReason(post.rejectReason || ''); setReviewing({ post, action: 'reject' }) }} onEdit={() => openEdit(post)} onDelete={() => void remove(post)} />)}{!posts.length ? <div className="salon-empty"><strong>暂无{SALON_STATUS_LABELS[status]}作品</strong></div> : null}</div><div className="admin-salon-pagination"><button type="button" disabled={loading || page <= 1} onClick={() => void load(status, page - 1)}>上一页</button><span>第 {page} 页</span><button type="button" disabled={loading || !hasMore} onClick={() => void load(status, page + 1)}>下一页</button></div>
+  return <section className="admin-salon-manager" aria-busy={loading}><div className="admin-salon-tabs" role="tablist" aria-label="沙龙审核状态">{SALON_POST_STATUSES.map((item) => <button key={item} type="button" role="tab" aria-selected={status === item} onClick={() => void load(item, 1)} disabled={loading}>{SALON_STATUS_LABELS[item]}</button>)}</div>{message ? <p className="salon-form-success" role="status">{message}</p> : null}{error ? <p className="salon-form-error" role="alert">{error}</p> : null}<div className="admin-salon-list">{posts.map((post) => <AdminSalonRow key={post.id} post={post} focused={post.id === initialPostId} onApprove={() => { setRejectReason(''); setReviewing({ post, action: 'approve' }) }} onReject={() => { setRejectReason(post.rejectReason || ''); setReviewing({ post, action: 'reject' }) }} onEdit={() => openEdit(post)} onDelete={() => void remove(post)} />)}{!posts.length ? <div className="salon-empty"><strong>暂无{SALON_STATUS_LABELS[status]}作品</strong></div> : null}</div><div className="admin-salon-pagination"><button type="button" disabled={loading || page <= 1} onClick={() => void load(status, page - 1)}>上一页</button><span>第 {page} 页</span><button type="button" disabled={loading || !hasMore} onClick={() => void load(status, page + 1)}>下一页</button></div>
     {reviewing ? <div className="salon-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewing(null) }}><section className="salon-modal" role="dialog" aria-modal="true" aria-labelledby="salon-review-title"><h2 id="salon-review-title">{reviewing.action === 'approve' ? '通过这篇作品？' : '拒绝这篇作品？'}</h2><p>{reviewing.post.title || '无标题作品'}</p>{reviewing.action === 'reject' ? <label>拒绝原因 <textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} rows={5} maxLength={2000} placeholder="用户会在我的投稿和审核通知中看到。" /></label> : null}<div><button type="button" onClick={() => setReviewing(null)}>取消</button><button type="button" className={reviewing.action === 'approve' ? 'is-approve' : 'is-danger'} onClick={() => { if (reviewing.action === 'reject' && !rejectReason.trim()) { setError('拒绝时必须填写原因'); return } void review(reviewing, reviewing.action === 'reject' ? rejectReason.trim() : null) }}>{reviewing.action === 'approve' ? '确认通过' : '确认拒绝'}</button></div></section></div> : null}
     {editing ? <EditSalonModal editing={editing} options={options} onChange={setEditing} onCancel={() => setEditing(null)} onSave={() => void saveEdit()} /> : null}
   </section>
 }
 
-function AdminSalonRow({ post, onApprove, onReject, onEdit, onDelete }: Readonly<{ post: SalonPostView; onApprove: () => void; onReject: () => void; onEdit: () => void; onDelete: () => void }>) {
-  const gallery = post.media.map((media, index) => ({ id: media.id, src: media.originalUrl, previewSrc: media.previewUrl, alt: `${post.title || '作品'} · ${index + 1}` }))
+function AdminSalonRow({ post, focused, onApprove, onReject, onEdit, onDelete }: Readonly<{ post: SalonPostView; focused?: boolean; onApprove: () => void; onReject: () => void; onEdit: () => void; onDelete: () => void }>) {
+  const gallery = post.media.map((media, index) => ({ id: media.id, src: media.previewUrl, previewSrc: media.previewUrl, originalUrl: supportsOriginal(post.category) && media.originalAvailable ? `/api/salon/media/${encodeURIComponent(media.id)}/original?mode=view` : null, downloadUrl: supportsOriginal(post.category) && media.originalAvailable ? `/api/salon/media/${encodeURIComponent(media.id)}/original?mode=download` : undefined, alt: `${post.title || '作品'} · ${index + 1}` }))
   const first = post.media[0]
-  return <article className="admin-salon-row"><div className="admin-salon-row-images">{first ? <ImageViewer src={first.originalUrl} previewSrc={first.previewUrl} alt={post.title || '沙龙作品'} gallery={gallery} imageClassName="admin-salon-image" buttonClassName="admin-salon-image-button" /> : null}<span>{post.media.length} 张 · {first?.width || 0} × {first?.height || 0}</span></div><div className="admin-salon-row-copy"><div className="admin-salon-row-meta"><b>{post.author.nickname}</b><span>UID {post.author.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time></div><h2>{post.title || '无标题作品'}</h2><p>{SALON_CATEGORY_LABELS[post.category]} · {post.concert.tour.name} · {formatSalonSession({ city: post.concert.city, concertDate: post.concert.date, venue: post.concert.venue, title: post.concert.title, sessionNumber: null })}</p>{post.content ? <div className="admin-salon-description">{post.content}</div> : null}{post.rejectReason ? <div className="salon-reject-reason">拒绝原因：{post.rejectReason}</div> : null}<div className="admin-salon-actions">{post.status === 'PENDING' ? <><button type="button" className="is-approve" onClick={onApprove}>通过</button><button type="button" className="is-danger" onClick={onReject}>拒绝</button></> : null}<button type="button" onClick={onEdit}>修改资料</button><button type="button" className="is-danger" onClick={onDelete}>删除</button></div></div></article>
+  const context = post.concert
+    ? `${post.concert.tour.name} · ${formatSalonSession({ city: post.concert.city, concertDate: post.concert.date, venue: post.concert.venue, title: post.concert.title, sessionNumber: null })}`
+    : '独立作品，无需关联演唱会'
+  return <article id={`salon-post-${post.id}`} data-focused={focused ? 'true' : undefined} className={`admin-salon-row${focused ? ' admin-salon-row-focused' : ''}`}><div className="admin-salon-row-images">{first ? <ImageViewer src={first.previewUrl} previewSrc={first.previewUrl} originalUrl={gallery[0]?.originalUrl} downloadUrl={gallery[0]?.downloadUrl} alt={post.title || '沙龙作品'} gallery={gallery} imageClassName="admin-salon-image" buttonClassName="admin-salon-image-button" /> : null}<span>{post.media.length} 张 · {first?.width || 0} × {first?.height || 0}</span></div><div className="admin-salon-row-copy"><div className="admin-salon-row-meta"><b>{post.author.nickname}</b><span>UID {post.author.uid}</span><time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time></div><div className="flex flex-wrap items-center gap-2"><span className={`salon-status-badge salon-status-${post.status.toLowerCase()}`}>{SALON_STATUS_LABELS[post.status]}</span><h2>{post.title || '无标题作品'}</h2></div><p>{SALON_CATEGORY_LABELS[post.category]} · {context}</p>{post.content ? <div className="admin-salon-description">{post.content}</div> : null}{post.rejectReason ? <div className="salon-reject-reason">拒绝原因：{post.rejectReason}</div> : null}<div className="admin-salon-actions">{post.status === 'PENDING' ? <><button type="button" className="is-approve" onClick={onApprove}>通过</button><button type="button" className="is-danger" onClick={onReject}>拒绝</button></> : null}<button type="button" onClick={onEdit}>修改资料</button><button type="button" className="is-danger" onClick={onDelete}>删除</button></div></div></article>
 }
 
 function EditSalonModal({ editing, options, onChange, onCancel, onSave }: Readonly<{ editing: EditTarget; options: SalonOptions; onChange: (value: EditTarget) => void; onCancel: () => void; onSave: () => void }>) {
   const sessions = options.tours.find((tour) => tour.id === editing.tourId)?.sessions || []
-  return <div className="salon-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}><section className="salon-modal" role="dialog" aria-modal="true" aria-labelledby="salon-edit-title"><h2 id="salon-edit-title">修改作品资料</h2><label>分类<select value={editing.category} onChange={(event) => onChange({ ...editing, category: event.target.value as SalonCategoryValue })}>{SALON_CATEGORIES.map((value) => <option key={value} value={value}>{SALON_CATEGORY_LABELS[value]}</option>)}</select></label><label>演唱会<select value={editing.tourId} onChange={(event) => { const tourId = event.target.value; const tour = options.tours.find((item) => item.id === tourId); onChange({ ...editing, tourId, sessionId: tour?.sessions[0]?.id || '' }) }}>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label><label>场次<select value={editing.sessionId} onChange={(event) => onChange({ ...editing, sessionId: event.target.value })}>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label><label>标题<input value={editing.title} onChange={(event) => onChange({ ...editing, title: event.target.value })} /></label><label>描述<textarea value={editing.content} rows={4} onChange={(event) => onChange({ ...editing, content: event.target.value })} /></label><div><button type="button" onClick={onCancel}>取消</button><button type="button" className="is-approve" onClick={onSave}>保存修改</button></div></section></div>
+  const requiresConcert = editing.category === 'CONCERT'
+  return <div className="salon-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}><section className="salon-modal" role="dialog" aria-modal="true" aria-labelledby="salon-edit-title"><h2 id="salon-edit-title">修改作品资料</h2><label>分类<select value={editing.category} onChange={(event) => { const category = event.target.value as SalonCategoryValue; onChange({ ...editing, category, ...(category === 'CONCERT' ? {} : { tourId: '', sessionId: '' }) }) }}>{SALON_CATEGORIES.map((value) => <option key={value} value={value}>{SALON_CATEGORY_LABELS[value]}</option>)}</select></label>{requiresConcert ? <><label>演唱会<select value={editing.tourId} onChange={(event) => { const tourId = event.target.value; const tour = options.tours.find((item) => item.id === tourId); onChange({ ...editing, tourId, sessionId: tour?.sessions[0]?.id || '' }) }}><option value="">不关联演唱会</option>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label><label>场次<select value={editing.sessionId} onChange={(event) => onChange({ ...editing, sessionId: event.target.value })}><option value="">不关联场次</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label></> : null}<label>标题<input value={editing.title} onChange={(event) => onChange({ ...editing, title: event.target.value })} /></label><label>描述<textarea value={editing.content} rows={4} onChange={(event) => onChange({ ...editing, content: event.target.value })} /></label><div><button type="button" onClick={onCancel}>取消</button><button type="button" className="is-approve" onClick={onSave}>保存修改</button></div></section></div>
 }

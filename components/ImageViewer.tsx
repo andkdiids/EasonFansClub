@@ -19,6 +19,9 @@ export type ImageViewerItem = {
   src: string
   alt?: string
   previewSrc?: string
+  /** Explicitly control whether a protected/original route is available. */
+  originalUrl?: string | null
+  downloadUrl?: string
 }
 
 type ViewerImageState = 'loading' | 'loaded' | 'error'
@@ -86,6 +89,8 @@ export function ImageViewer({
   src,
   alt,
   previewSrc,
+  originalUrl,
+  downloadUrl,
   gallery,
   initialIndex = 0,
   autoPlay = false,
@@ -100,6 +105,8 @@ export function ImageViewer({
   src: string
   alt: string
   previewSrc?: string
+  originalUrl?: string | null
+  downloadUrl?: string
   gallery?: readonly ImageViewerItem[]
   initialIndex?: number
   autoPlay?: boolean
@@ -135,14 +142,17 @@ export function ImageViewer({
   zoomRef.current = zoom
   panRef.current = pan
 
-  const viewerItems: readonly ImageViewerItem[] = gallery?.length ? gallery : [{ src, alt, previewSrc }]
+  const viewerItems: readonly ImageViewerItem[] = gallery?.length ? gallery : [{ src, alt, previewSrc, originalUrl, downloadUrl }]
   const safeCurrentIndex = clampIndex(currentIndex, viewerItems.length)
   const activeItem = viewerItems[safeCurrentIndex] ?? viewerItems[0] ?? { src, alt, previewSrc }
   const activeAlt = activeItem.alt || alt
   const publicSrc = publicImageUrl(activeItem.src) || activeItem.src
   const requestedPreviewSrc = activeItem.previewSrc ? publicImageUrl(activeItem.previewSrc) || activeItem.previewSrc : null
   const renderPreviewSrc = requestedPreviewSrc || publicImageVariantUrl(publicSrc, 'card') || publicSrc
-  const renderOriginalSrc = publicImageOriginalUrl(publicSrc) || publicSrc
+  const hasExplicitOriginal = Object.prototype.hasOwnProperty.call(activeItem, 'originalUrl')
+  const renderOriginalSrc = hasExplicitOriginal
+    ? publicImageUrl(activeItem.originalUrl) || activeItem.originalUrl || publicSrc
+    : publicImageOriginalUrl(publicSrc) || publicSrc
   const isGallery = viewerItems.length > 1
 
   const clearAutoPlayTimeout = useCallback(() => {
@@ -492,6 +502,8 @@ export function ImageViewer({
             <button type="button" disabled={safeCurrentIndex === 0} onClick={(event) => { event.stopPropagation(); goTo(safeCurrentIndex - 1) }} aria-label="上一张图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl disabled:opacity-40">‹</button>
             <button type="button" disabled={safeCurrentIndex === viewerItems.length - 1} onClick={(event) => { event.stopPropagation(); goTo(safeCurrentIndex + 1) }} aria-label="下一张图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl disabled:opacity-40">›</button>
           </> : null}
+          {activeItem.originalUrl ? <a href={activeItem.originalUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center border border-white/20 px-3 text-xs font-black text-white no-underline" onClick={(event) => event.stopPropagation()}>查看原图</a> : null}
+          {activeItem.downloadUrl ? <a href={activeItem.downloadUrl} download className="inline-flex min-h-10 items-center border border-white/20 px-3 text-xs font-black text-white no-underline" onClick={(event) => event.stopPropagation()}>下载原图</a> : null}
           <button type="button" onClick={() => { applyTransform(zoomRef.current - IMAGE_VIEWER_ZOOM_STEP); restartAutoPlayTimer() }} aria-label="缩小图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl">−</button>
           <button type="button" onClick={() => { applyTransform(1); restartAutoPlayTimer() }} aria-label="恢复适配缩放" className="min-w-16 border border-white/20 px-3 py-2 text-xs font-black" aria-live="polite">{Math.round(zoom * 100)}%</button>
           <button type="button" onClick={() => { applyTransform(zoomRef.current + IMAGE_VIEWER_ZOOM_STEP); restartAutoPlayTimer() }} aria-label="放大图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl">+</button>
