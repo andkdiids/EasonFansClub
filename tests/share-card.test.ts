@@ -5,11 +5,11 @@ import path from 'node:path'
 import test from 'node:test'
 import sharp from 'sharp'
 import { createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
-import { calculateShareCardLayout, shareCardHeroDimensions, SHARE_CARD_AUTHOR_TOP_GAP, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_QR_FRAME_X, SHARE_CARD_QR_FRAME_SIZE, SHARE_CARD_PORTRAIT_HERO_HEIGHT } from '@/lib/share-card-layout'
+import { calculateShareCardLayout, shareCardHeroDimensions, SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y, SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP, SHARE_CARD_ACTIVITY_QR_OFFSET_Y, SHARE_CARD_ACTIVITY_TITLE_MAX_LINES, SHARE_CARD_AUTHOR_TOP_GAP, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_QR_FRAME_X, SHARE_CARD_QR_FRAME_SIZE, SHARE_CARD_PORTRAIT_HERO_HEIGHT } from '@/lib/share-card-layout'
 import { SHARE_CARD_TEMPLATE_VERSION } from '@/lib/share-card-hash'
 import { BRANDED_QR_ERROR_CORRECTION, BRANDED_QR_LOGO_PLATE_PADDING_PX, BRANDED_QR_LOGO_RATIO, BRANDED_QR_MARGIN_MODULES, BRANDED_QR_VERSION, createBrandedQrSvg } from '@/lib/branded-qr'
 import { createBrandedQrBuffer } from '@/lib/branded-qr-server'
-import { firstShareCardImageCandidate } from '@/lib/share-metadata'
+import { createActivityShareCardDescription, firstShareCardImageCandidate } from '@/lib/share-metadata'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -143,6 +143,44 @@ test('activity card follows banner, cover, default and keeps invalid candidates 
   assert.match(page, /catch \{/)
 })
 
+test('activity cards render one labeled detail set in a lower Hero overlay', () => {
+  const activity: ShareCardData = {
+    type: 'activity',
+    title: '陈奕迅 x 林家谦 903 Live 拉阔音乐会（bushi，乱说的）',
+    description: '测试测试测试',
+    image: 'https://media.ecfc.fans/media/activities/activity-poster.webp',
+    url: 'https://ecfc.fans/activities/activity-overlay-fixture',
+    author: 'Andkdids',
+    authorAvatar: null,
+    date: '2026年8月28日 18:36',
+    meta: [
+      { label: '活动时间', value: '2026年8月28日 18:35 — 2026年8月28日 22:39' },
+      { label: '活动地点', value: '测试' },
+      { label: '报名', value: '免费' },
+    ],
+  }
+  const layout = calculateShareCardLayout(activity, { width: 1080, height: 1600 })
+  assert.equal(createActivityShareCardDescription({ description: '<p>测试测试测试</p>' }), '简介：测试测试测试')
+  assert.deepEqual(layout.meta, [
+    '活动时间：2026年8月28日 18:35 — 2026年8月28日 22:39',
+    '活动地点：测试',
+  ])
+  assert.equal(layout.panelTop, layout.heroHeight)
+  assert.equal(layout.panelHeight, 0)
+  assert.ok(layout.activityOverlayTop > 0)
+  assert.equal(layout.activityOverlayTop + layout.activityOverlayHeight, layout.heroHeight)
+  assert.ok(layout.categoryTop >= layout.activityOverlayTop + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP)
+  assert.ok(layout.metaTop + layout.metaLines.length * 38 + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM <= layout.heroHeight)
+  assert.ok(layout.titleLines.length <= SHARE_CARD_ACTIVITY_TITLE_MAX_LINES)
+  assert.ok(layout.descriptionLines.length <= SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES)
+  assert.equal(layout.brandBlockTop, layout.qrTop + SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y - SHARE_CARD_ACTIVITY_QR_OFFSET_Y)
+  assert.ok(layout.brandBlockTop > layout.qrTop)
+  assert.equal(layout.brandLogoTop + SHARE_CARD_FOOTER_LOGO_SIZE / 2, layout.brandTextTop + SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT / 2)
+  assert.match(read('lib/share-card-renderer.ts'), /activityOverlaySvg\(layout\.activityOverlayTop, layout\.activityOverlayHeight\)/)
+  assert.match(read('lib/share-card-renderer.ts'), /fill="#141e23" fill-opacity="0\.72"/)
+  assert.match(read('lib/share-card-image.ts'), /rgba\(20,30,35,\.72\)/)
+})
+
 test('server-backed card requests use only a content id, keep HTTPS as the normal source, and use data URL only for fallback', () => {
   const button = read('components/share/ShareButton.tsx')
   const routes = `${read('app/api/posts/[postId]/share-card/route.ts')}\n${read('app/api/activities/[activityId]/share-card/route.ts')}`
@@ -239,12 +277,12 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.doesNotMatch(preview, /share-card-preview-eyebrow/)
 })
 
-test('V7 uses the shared Hero policy for landscape and portrait media', () => {
+test('V8 keeps the shared Hero policy for landscape and portrait media', () => {
   const layout = read('lib/share-card-layout.ts')
   const server = read('lib/share-card-renderer.ts')
   const client = read('lib/share-card-image.ts')
   const service = read('lib/share-card-service.ts')
-  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v7')
+  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v8')
   assert.match(layout, /export function shareCardHeroFit[\s\S]*type === 'home' \? 'contain' : 'cover'/)
   assert.match(server, /fitImage\(hero, SHARE_CARD_WIDTH, layout\.heroHeight, shareCardHeroFit\(normalizedData\.type\)\)/)
   assert.match(client, /shareCardHeroFit\(data\.type\)/)

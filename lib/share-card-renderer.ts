@@ -219,6 +219,12 @@ function panelSvg(top: number, height: number) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHARE_CARD_WIDTH}" height="${Math.max(SHARE_CARD_HEIGHT, top + height)}"><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="${height}" fill="#ffffff" fill-opacity="0.96"/></svg>`
 }
 
+/** Activity details are a translucent lower overlay inside the existing Hero. */
+function activityOverlaySvg(top: number, height: number) {
+  const canvasHeight = Math.max(SHARE_CARD_HEIGHT, top + height)
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHARE_CARD_WIDTH}" height="${canvasHeight}"><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="${height}" fill="#141e23" fill-opacity="0.72"/><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="2" fill="#ffffff" fill-opacity="0.12"/></svg>`
+}
+
 function fallbackAvatarSvg(name: string) {
   const initial = escapeXml(Array.from(name.trim())[0] || 'E')
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="86" height="86"><defs><linearGradient id="avatar" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f5f8f"/><stop offset="1" stop-color="#16845b"/></linearGradient></defs><circle cx="43" cy="43" r="43" fill="url(#avatar)"/><text x="43" y="55" text-anchor="middle" fill="white" font-family="${FONT_STACK}" font-size="36" font-weight="800">${initial}</text></svg>`)
@@ -253,7 +259,11 @@ export async function renderShareCardPngWithInfo(data: ShareCardData): Promise<S
     const heroLayer = await fitImage(hero, SHARE_CARD_WIDTH, layout.heroHeight, shareCardHeroFit(normalizedData.type))
     if (heroLayer) layers.push({ input: heroLayer, left: 0, top: 0 }, { input: Buffer.from(heroShadeSvg(layout.heroHeight)), left: 0, top: 0 })
   }
-  layers.push({ input: Buffer.from(panelSvg(layout.panelTop, layout.panelHeight)), left: 0, top: 0 })
+  if (normalizedData.type === 'activity') {
+    layers.push({ input: Buffer.from(activityOverlaySvg(layout.activityOverlayTop, layout.activityOverlayHeight)), left: 0, top: 0 })
+  } else {
+    layers.push({ input: Buffer.from(panelSvg(layout.panelTop, layout.panelHeight)), left: 0, top: 0 })
+  }
 
   if (avatar) {
     const avatarLayer = await circleImage(avatar, SHARE_CARD_AVATAR_SIZE)
@@ -264,10 +274,14 @@ export async function renderShareCardPngWithInfo(data: ShareCardData): Promise<S
   layers.push({ input: qr, left: SHARE_CARD_QR_X, top: layout.qrTop })
 
   const contentLeft = SHARE_CARD_PANEL_PADDING_X
-  const textInputs: TextLayerInput[] = [{ text: shareCardTypeLabel(normalizedData.type), left: contentLeft, top: layout.categoryTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_CATEGORY_FONT_SIZE, color: '#0f5f8f', weight: 800 }]
-  pushTextLines(textInputs, layout.titleLines, { left: contentLeft, top: layout.titleTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_TITLE_FONT_SIZE, color: '#102033', weight: 800, lineHeight: SHARE_CARD_TITLE_LINE_HEIGHT })
-  pushTextLines(textInputs, layout.descriptionLines, { left: contentLeft, top: layout.descriptionTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_DESCRIPTION_FONT_SIZE, color: '#536779', weight: 500, lineHeight: SHARE_CARD_DESCRIPTION_LINE_HEIGHT })
-  pushTextLines(textInputs, layout.metaLines, { left: contentLeft, top: layout.metaTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_META_FONT_SIZE, color: '#536779', weight: 700, lineHeight: SHARE_CARD_META_LINE_HEIGHT })
+  const isActivity = normalizedData.type === 'activity'
+  const categoryColor = isActivity ? '#d5f1f4' : '#0f5f8f'
+  const titleColor = isActivity ? '#ffffff' : '#102033'
+  const detailColor = isActivity ? '#f0f6f7' : '#536779'
+  const textInputs: TextLayerInput[] = [{ text: shareCardTypeLabel(normalizedData.type), left: contentLeft, top: layout.categoryTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_CATEGORY_FONT_SIZE, color: categoryColor, weight: 800 }]
+  pushTextLines(textInputs, layout.titleLines, { left: contentLeft, top: layout.titleTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_TITLE_FONT_SIZE, color: titleColor, weight: 800, lineHeight: SHARE_CARD_TITLE_LINE_HEIGHT })
+  pushTextLines(textInputs, layout.descriptionLines, { left: contentLeft, top: layout.descriptionTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_DESCRIPTION_FONT_SIZE, color: detailColor, weight: 500, lineHeight: SHARE_CARD_DESCRIPTION_LINE_HEIGHT })
+  pushTextLines(textInputs, layout.metaLines, { left: contentLeft, top: layout.metaTop, width: SHARE_CARD_TEXT_WIDTH, fontSize: SHARE_CARD_META_FONT_SIZE, color: detailColor, weight: 700, lineHeight: SHARE_CARD_META_LINE_HEIGHT })
   pushTextLines(textInputs, layout.authorLines, { left: SHARE_CARD_AUTHOR_X, top: layout.authorTextTop, width: SHARE_CARD_AUTHOR_WIDTH, fontSize: 30, color: '#102033', weight: 800, lineHeight: SHARE_CARD_AUTHOR_LINE_HEIGHT })
   pushTextLines(textInputs, layout.dateLines, { left: SHARE_CARD_AUTHOR_X, top: layout.dateTop, width: SHARE_CARD_AUTHOR_WIDTH, fontSize: 22, color: '#7b8b98', weight: 500, lineHeight: 30 })
   textInputs.push(

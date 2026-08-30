@@ -205,20 +205,28 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
 
   context.fillStyle = '#f5fbfd'
   context.fillRect(0, layout.heroHeight, SHARE_CARD_WIDTH, layout.height - layout.heroHeight)
-  context.fillStyle = 'rgba(255,255,255,.96)'
-  context.fillRect(0, layout.panelTop, SHARE_CARD_WIDTH, layout.panelHeight)
+  if (data.type === 'activity') {
+    context.fillStyle = 'rgba(20,30,35,.72)'
+    context.fillRect(0, layout.activityOverlayTop, SHARE_CARD_WIDTH, layout.activityOverlayHeight)
+    context.fillStyle = 'rgba(255,255,255,.12)'
+    context.fillRect(0, layout.activityOverlayTop, SHARE_CARD_WIDTH, 2)
+  } else {
+    context.fillStyle = 'rgba(255,255,255,.96)'
+    context.fillRect(0, layout.panelTop, SHARE_CARD_WIDTH, layout.panelHeight)
+  }
 
   const contentLeft = SHARE_CARD_PANEL_PADDING_X
+  const isActivity = data.type === 'activity'
   context.textAlign = 'left'
-  context.fillStyle = '#0f5f8f'
+  context.fillStyle = isActivity ? '#d5f1f4' : '#0f5f8f'
   context.font = `800 ${SHARE_CARD_CATEGORY_FONT_SIZE}px ${FONT_SANS}`
   context.fillText(shareCardTypeLabel(data.type), contentLeft, layout.categoryTop + 24)
 
-  context.fillStyle = '#102033'
+  context.fillStyle = isActivity ? '#ffffff' : '#102033'
   context.font = `800 ${SHARE_CARD_TITLE_FONT_SIZE}px ${FONT_SANS}`
   layout.titleLines.forEach((line, index) => context.fillText(line, contentLeft, layout.titleTop + SHARE_CARD_TITLE_FONT_SIZE + index * SHARE_CARD_TITLE_LINE_HEIGHT))
 
-  context.fillStyle = '#536779'
+  context.fillStyle = isActivity ? '#f0f6f7' : '#536779'
   context.font = `500 ${SHARE_CARD_DESCRIPTION_FONT_SIZE}px ${FONT_SANS}`
   layout.descriptionLines.forEach((line, index) => context.fillText(line, contentLeft, layout.descriptionTop + SHARE_CARD_DESCRIPTION_FONT_SIZE + index * SHARE_CARD_DESCRIPTION_LINE_HEIGHT))
 

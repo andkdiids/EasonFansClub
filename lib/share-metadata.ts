@@ -144,34 +144,14 @@ export function createActivityShareDescription({
   return summarizePlainText(details.join('；'), 180) || '查看私家E院活动详情。'
 }
 
-/** Full activity copy for the saved portrait card; crawler summaries stay bounded above. */
+/** Activity card copy; time and location are rendered once from the card meta rows. */
 export function createActivityShareCardDescription({
-  startsAt,
-  endsAt,
-  locationName,
-  locationAddress,
   description,
 }: Readonly<{
-  startsAt?: string | Date | null
-  endsAt?: string | Date | null
-  locationName?: string | null
-  locationAddress?: string | null
   description?: string | null
 }>) {
-  const details: string[] = []
-  const start = activityDate(startsAt)
-  const end = activityDate(endsAt)
-  if (start) details.push(`时间：${start}${end ? ` — ${end}` : ''}`)
-
-  const location = [locationName, locationAddress]
-    .map(normalizedText)
-    .filter(Boolean)
-    .join('，')
-  if (location) details.push(`地点：${location}`)
-
   const intro = htmlToPlainText(description, { preserveLineBreaks: true })
-  if (intro) details.push(`简介：${intro}`)
-  return details.join('\n') || '查看私家E院活动详情。'
+  return intro ? `简介：${intro}` : '简介：暂无活动简介。'
 }
 
 function canonicalUrl(path: string) {

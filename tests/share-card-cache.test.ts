@@ -161,6 +161,52 @@ test('server PNG puts a real vertical/long first image into the fixed cover Hero
   }
 })
 
+test('activity PNG keeps the existing Hero geometry and overlays one dark detail block', async () => {
+  const heroFixture = await sharp({
+    create: { width: 900, height: 1600, channels: 3, background: { r: 40, g: 150, b: 190 } },
+  }).png().toBuffer()
+  const activityData: ShareCardData = {
+    type: 'activity',
+    contentId: 'activity-overlay-render-fixture',
+    title: '陈奕迅 x 林家谦 903 Live 拉阔音乐会（bushi，乱说的）',
+    description: '简介：测试测试测试',
+    image: 'https://media.ecfc.fans/media/activities/activity-poster.webp',
+    imageWidth: null,
+    imageHeight: null,
+    url: 'https://ecfc.fans/activities/activity-overlay-render-fixture',
+    author: 'Andkdids',
+    authorAvatar: null,
+    date: '2026年8月28日 18:36',
+    meta: [
+      { label: '活动时间', value: '2026年8月28日 18:35 — 2026年8月28日 22:39' },
+      { label: '活动地点', value: '测试' },
+      { label: '报名', value: '免费' },
+    ],
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(heroFixture, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch
+  try {
+    const expected = calculateShareCardLayout(activityData, { width: 900, height: 1600 })
+    const result = await renderShareCardPngWithInfo(activityData)
+    const metadata = await sharp(result.body).metadata()
+    assert.equal(metadata.width, SHARE_CARD_WIDTH)
+    assert.equal(metadata.height, expected.height)
+    assert.equal(expected.heroHeight, SHARE_CARD_PORTRAIT_HERO_HEIGHT)
+    assert.equal(expected.panelHeight, 0)
+    assert.ok(expected.activityOverlayTop > 0)
+    assert.equal(expected.activityOverlayTop + expected.activityOverlayHeight, expected.heroHeight)
+    assert.ok(expected.brandBlockTop > expected.qrTop)
+
+    const topPixel = await sharp(result.body).extract({ left: 540, top: 80, width: 1, height: 1 }).removeAlpha().raw().toBuffer()
+    const overlayPixel = await sharp(result.body).extract({ left: 540, top: expected.activityOverlayTop + 10, width: 1, height: 1 }).removeAlpha().raw().toBuffer()
+    const belowHeroPixel = await sharp(result.body).extract({ left: 10, top: expected.heroHeight + 10, width: 1, height: 1 }).removeAlpha().raw().toBuffer()
+    assert.ok((topPixel[1] || 0) > (overlayPixel[1] || 0) + 40)
+    assert.ok((belowHeroPixel[0] || 0) > 235)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('server Hero keeps landscape ratio and converts portrait/long portrait to 3:4', async () => {
   const landscape = await sharp({
     create: { width: 1600, height: 900, channels: 3, background: { r: 24, g: 90, b: 140 } },

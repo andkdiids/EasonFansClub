@@ -36,7 +36,6 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
     meta: [
       ...(shareTime ? [{ label: '活动时间', value: shareTime }] : []),
       ...(shareLocation ? [{ label: '活动地点', value: shareLocation }] : []),
-      { label: '报名', value: activity.registrationFee > 0 ? `${activity.registrationFee} 挂号费` : '免费' },
     ],
   }
   const layoutClass = preview
