@@ -70,6 +70,7 @@ const adminNavigationGroups: readonly AdminNavigationGroup[] = [
       { href: '/admin/notifications', title: '公告管理', desc: '发布与管理后台系统公告。' },
       { href: '/admin/content', title: '活动内容管理', desc: '保留原内容中心入口，管理活动与其他内容入口。' },
       { href: '/admin/anywhere-door', title: '随意门管理', desc: '查看 Provider 状态、登记 Worker 同步请求并管理已同步动态。' },
+      { href: '/admin/salon', title: '沙龙管理', desc: '审核演唱会记录与壁纸投稿，维护作品分类、场次和图片。' },
     ],
   },
   {

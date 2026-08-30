@@ -92,4 +92,5 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/material-redemptions': 'material_redemption_manage',
   '/admin/banned-words': 'banned_word_manage',
   '/admin/anywhere-door': 'social_manage',
+  '/admin/salon': 'post_manage',
 }

@@ -320,15 +320,19 @@ test('all local QR producers use the shared branded QR adapters', () => {
   assert.match(read('lib/share-card-renderer.ts'), /createBrandedQrBuffer/)
 })
 
-test('desktop detail share control keeps the label horizontal without squeezing the title', () => {
+test('desktop detail share control belongs to the content card while the topbar remains mobile-only', () => {
+  const detail = read('app/posts/[postId]/page.tsx')
   const topbar = read('components/ForumDiscoveryDetailTopbar.tsx')
   const css = read('app/globals.css')
+  assert.equal((detail.match(/<ShareButton/g) || []).length, 1)
+  assert.match(detail, /post-detail-card-header[\s\S]*post-detail-desktop-share[\s\S]*<ShareButton/)
   assert.match(topbar, /forum-discovery-detail-share shrink-0 whitespace-nowrap/)
-  assert.match(css, /\.forum-discovery-detail-share \{[^}]*min-width:64px[^}]*flex:none[^}]*white-space:nowrap/)
-  assert.match(css, /\.forum-discovery-detail-author \{[^}]*min-width:0[^}]*flex:1 1 auto/)
+  assert.match(css, /\.post-detail-desktop-share \{ display:none; flex:none; \}/)
+  assert.match(css, /@media \(min-width:768px\)[\s\S]*\.post-detail-desktop-share \{ display:block; \}/)
+  assert.doesNotMatch(css, /\.forum-discovery-detail-topbar \{ display:flex; width:100%;/)
 })
 
-test('mobile preview uses the generated PNG img directly and renders no action footer', () => {
+test('preview scales the complete PNG without an inner scrolling frame and keeps the desktop save action', () => {
   const preview = read('components/share/ShareCardPreview.tsx')
   const button = read('components/share/ShareButton.tsx')
   const css = read('app/globals.css')
@@ -342,9 +346,22 @@ test('mobile preview uses the generated PNG img directly and renders no action f
   assert.doesNotMatch(preview, /<img[^>]+(?:onContextMenu|onTouchStart|preventDefault\(\))/)
   assert.doesNotMatch(button, /previewSrcIsObjectUrl|URL\.revokeObjectURL/)
   assert.match(css, /\.share-card-preview-image \{[^}]*-webkit-touch-callout:default;[^}]*-webkit-user-drag:auto;[^}]*user-select:auto;[^}]*touch-action:auto;/)
-  assert.match(css, /\.share-card-preview-image \{[^}]*width:min\(100%,540px\); height:auto;/)
-  assert.doesNotMatch(css, /\.share-card-preview-image \{[^}]*max-height/)
-  assert.match(css, /\.share-card-preview-image-wrap \{[^}]*overflow:auto;/)
+  assert.match(css, /\.share-card-preview-backdrop[^\{]*\{[^}]*overflow-y:auto;/)
+  assert.match(css, /\.share-card-preview-dialog \{[^}]*overflow:visible;/)
+  assert.match(css, /\.share-card-preview-image-wrap \{[^}]*overflow:visible;/)
+  assert.match(css, /\.share-card-preview-image \{[^}]*width:auto; height:auto; max-width:min\(100%,540px\); max-height:calc\(100dvh - 210px\);[^}]*object-fit:contain;/)
+  assert.doesNotMatch(css, /\.share-card-preview-image-wrap \{[^}]*max-height/)
+  assert.doesNotMatch(css, /\.share-card-preview-image-wrap \{[^}]*border:/)
+  assert.match(css, /\.share-card-preview-image \{[^}]*-webkit-touch-callout:default;/)
+  assert.match(css, /\.share-card-preview-image \{[^}]*width:auto; height:auto;/)
+  assert.match(css, /\.share-card-preview-image \{[^}]*max-height:calc\(100dvh - 116px\);/)
+})
+
+test('preview keeps the generated PNG dimensions for the download while only the display is constrained', () => {
+  const preview = read('components/share/ShareCardPreview.tsx')
+  assert.match(preview, /<img src=\{image\.previewSrc\} width=\{image\.width\} height=\{image\.height\}/)
+  assert.match(preview, /download=\{image\.fileName\}/)
+  assert.doesNotMatch(preview, /image\.width\s*=|image\.height\s*=/)
 })
 
 test('final card preview is a portable PNG data URL and does not depend on object URL lifetime', () => {

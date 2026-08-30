@@ -2603,6 +2603,7 @@ model MusicConcert {
   MusicConcertSetlistItem  MusicConcertSetlistItem[]
   MusicConcertHighlight    MusicConcertHighlight[]
   UserMusicConcert         UserMusicConcert[]
+  SalonPost                SalonPost[]               @relation("SalonPostConcert")
   ConcertContributions     ConcertContribution[]     @relation("ConcertContributionTargetShow")
   contributorUser          User?                     @relation("MusicConcertContributor", fields: [contributorUserId], references: [id], onDelete: Restrict)
   setlistContributorUser   User?                     @relation("MusicConcertSetlistContributor", fields: [setlistContributorUserId], references: [id], onDelete: Restrict)
@@ -2734,6 +2735,84 @@ model MusicConcertCategory {
   musicTours MusicTour[]
 
   @@index([sortOrder])
+}
+
+model SalonPost {
+  id            String           @id @default(cuid())
+  userId        String
+  category      SalonCategory
+  concertId     String
+  title         String?          @db.VarChar(200)
+  content       String?          @db.Text
+  status        SalonPostStatus  @default(PENDING)
+  rejectReason  String?          @db.Text
+  likeCount     Int              @default(0)
+  commentCount  Int              @default(0)
+  approvedAt    DateTime?
+  approvedById  String?
+  submissionKey String?          @db.VarChar(64)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  author        User             @relation("SalonPostAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  concert       MusicConcert     @relation("SalonPostConcert", fields: [concertId], references: [id], onDelete: Restrict)
+  approvedBy    User?            @relation("SalonPostApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  media         SalonPostMedia[]
+  likes         SalonPostLike[]
+  comments      SalonComment[]
+
+  @@unique([userId, submissionKey], map: "SalonPost_userId_submissionKey_key")
+  @@index([status, approvedAt])
+  @@index([category, status, approvedAt])
+  @@index([concertId, status, approvedAt])
+  @@index([userId, createdAt])
+}
+
+model SalonPostMedia {
+  id           String    @id @default(cuid())
+  postId       String
+  originalUrl  String    @db.Text
+  previewUrl   String    @db.Text
+  thumbnailUrl String    @db.Text
+  storageKey   String    @db.VarChar(512)
+  width        Int
+  height       Int
+  sortOrder    Int
+  createdAt    DateTime  @default(now())
+  post         SalonPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, sortOrder], map: "SalonPostMedia_postId_sortOrder_key")
+  @@index([postId, sortOrder])
+}
+
+model SalonPostLike {
+  id        String    @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime  @default(now())
+  post      SalonPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User      @relation("SalonPostLikeUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId], map: "SalonPostLike_postId_userId_key")
+  @@index([postId])
+}
+
+model SalonComment {
+  id        String         @id @default(cuid())
+  postId    String
+  authorId  String
+  parentId  String?
+  content   String         @db.Text
+  isDeleted Boolean        @default(false)
+  deletedAt DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  post      SalonPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User           @relation("SalonCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  parent    SalonComment?  @relation("SalonCommentThread", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies   SalonComment[] @relation("SalonCommentThread")
+
+  @@index([postId, parentId, createdAt])
+  @@index([authorId, createdAt])
 }
 
 model MusicTrack {
@@ -3853,6 +3932,10 @@ model User {
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
   MyLivePhoto                                            MyLivePhoto[]
+  SalonPost                                              SalonPost[]                    @relation("SalonPostAuthor")
+  SalonPostApproved                                      SalonPost[]                    @relation("SalonPostApprovedBy")
+  SalonPostLike                                          SalonPostLike[]                @relation("SalonPostLikeUser")
+  SalonComment                                           SalonComment[]                 @relation("SalonCommentAuthor")
   ConcertContributionSubmitter                           ConcertContribution[]          @relation("ConcertContributionSubmitter")
   ConcertContributionReviewer                            ConcertContribution[]          @relation("ConcertContributionReviewer")
   MusicConcertContributor                                MusicConcert[]                 @relation("MusicConcertContributor")
@@ -4397,6 +4480,18 @@ enum ConcertStageType {
   NORMAL
   ENCORE
   FINAL
+}
+
+enum SalonCategory {
+  CONCERT
+  MOBILE_WALLPAPER
+  DESKTOP_WALLPAPER
+}
+
+enum SalonPostStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum MusicHighlightType {

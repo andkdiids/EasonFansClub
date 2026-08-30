@@ -24,8 +24,11 @@ const publicExactPaths = new Set([
   '/manifest.webmanifest',
   '/d89ed4255676640e037130589550e237.txt',
   '/clinic',
+  '/salon',
   '/activities',
   '/api/clinic',
+  '/api/salon/posts',
+  '/api/salon/options',
   '/api/share/wechat-logo-v2.png',
 ])
 
@@ -120,6 +123,9 @@ function isPublicPath(pathname: string) {
   // nested create/edit/register routes remain protected by their page/API
   // guards because they do not match these exact one-segment detail paths.
   if (/^\/posts\/(?!new$)[^/]+$/.test(pathname)) return true
+  if (/^\/salon\/[^/]+$/.test(pathname)) return true
+  if (/^\/api\/salon\/posts\/[^/]+\/comments$/.test(pathname)) return true
+  if (/^\/api\/salon\/posts\/[^/]+$/.test(pathname)) return true
   return /^\/activities\/[^/]+$/.test(pathname)
 }
 

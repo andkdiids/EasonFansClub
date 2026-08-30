@@ -67,3 +67,16 @@ test('帖子详情顶栏的分享按钮在窄屏仍保持横向且不挤压标�
   assert.match(css, /\.forum-discovery-detail-post-actions \{ display:flex; min-width:0; flex:none;/)
   assert.doesNotMatch(css, /\.forum-discovery-detail-share \{[^}]*width:32px/)
 })
+
+test('帖子详情桌面端只在正文卡片右上角显示分享，不渲染额外顶部工具栏', () => {
+  const detail = read('app/posts/[postId]/page.tsx')
+  const css = read('app/globals.css')
+
+  assert.equal((detail.match(/<ShareButton/g) || []).length, 1)
+  assert.match(detail, /<article className="post-detail-article border[^>]*>/)
+  assert.match(detail, /post-detail-card-header[\s\S]*post-detail-desktop-share[\s\S]*<ShareButton/)
+  assert.match(css, /\.post-detail-desktop-share \{ display:none; flex:none; \}/)
+  assert.match(css, /@media \(min-width:768px\)[\s\S]*\.post-detail-desktop-share \{ display:block; \}/)
+  assert.doesNotMatch(css, /\.forum-discovery-detail-topbar \{ display:flex; width:100%;/)
+  assert.match(css, /\.forum-discovery-detail-topbar,[\s\S]*\.post-reply-bottom-sheet \{ display:none; \}/)
+})

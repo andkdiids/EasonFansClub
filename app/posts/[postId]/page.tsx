@@ -14,6 +14,7 @@ import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ForumDiscoveryActionBar } from '@/components/ForumDiscoveryActionBar'
 import { ForumDiscoveryDetailController } from '@/components/ForumDiscoveryDetailController'
 import { ForumDiscoveryDetailTopbar } from '@/components/ForumDiscoveryDetailTopbar'
+import { ShareButton } from '@/components/share/ShareButton'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -1088,16 +1089,28 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         />
         <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref="/forum" /></div>
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
-            {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}
-            {post.Board ? (
-              <Link href={`/boards/${post.Board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
-                {post.Board.name}
-              </Link>
-            ) : (
-              <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">E院广场</span>
-            )}
+          <div className="post-detail-card-header mb-4 flex items-start justify-between gap-4">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {post.isPinned ? <span className="rounded bg-red-50 px-2 py-1 text-xs font-black text-red-600">置顶</span> : null}
+              {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}
+              {post.Board ? (
+                <Link href={`/boards/${post.Board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">
+                  {post.Board.name}
+                </Link>
+              ) : (
+                <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">E院广场</span>
+              )}
+            </div>
+            <div className="post-detail-desktop-share">
+              <ShareButton
+                data={shareCardData}
+                linkTitle={shareTitle}
+                linkText={shareText}
+                triggerClassName="forum-discovery-detail-share shrink-0 whitespace-nowrap"
+                messageClassName="forum-discovery-share-message"
+                ariaLabel="分享帖子"
+              />
+            </div>
           </div>
           <h1 className="text-4xl font-black leading-tight text-brand-950">{publicPostTitle}</h1>
           <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-bold text-slate-500">

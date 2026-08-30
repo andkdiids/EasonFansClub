@@ -182,6 +182,13 @@ export const NAVIGATION_REGISTRY = [
     sidebarSection: 'quick', editable: true, hideable: true,
     activePrefixes: ['/feedback'],
   },
+  {
+    featureKey: 'SALON', label: '沙龙', href: '/salon', icon: 'camera', title: '沙龙',
+    defaultSortOrder: 22, defaultEnabled: true, isManageable: true,
+    showInCenter: true, showInQuickNavigation: true, showInDesktopSidebar: true,
+    sidebarSection: 'quick', editable: true, hideable: true,
+    activePrefixes: ['/salon'],
+  },
 ] as const satisfies readonly NavigationRegistryItem[]
 
 export type NavigationFeatureKey = (typeof NAVIGATION_REGISTRY)[number]['featureKey']
