@@ -60,7 +60,7 @@ export function ShareCardPreview({ data, status, image, error, onClose, onRetry 
       <section className="share-card-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="share-card-preview-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="share-card-preview-header">
           <div>
-            <p className="share-card-preview-eyebrow">高清 PNG · 1080 × 1440</p>
+            <p className="share-card-preview-eyebrow">高清 PNG · 1080px 宽</p>
             <h2 id="share-card-preview-title">分享卡片预览</h2>
           </div>
           <button type="button" className="share-card-preview-close" onClick={onClose} aria-label="关闭分享卡片预览">×</button>

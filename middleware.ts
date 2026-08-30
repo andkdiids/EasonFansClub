@@ -37,6 +37,7 @@ const publicPathPrefixes = [
   '/images/',
   '/fonts/',
   '/uploads/',
+  '/icons/',
   '/clinic/',
   '/api/clinic/',
 ]
@@ -361,5 +362,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|robots.txt|manifest.webmanifest).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|icons/|robots.txt|manifest.webmanifest).*)'],
 }

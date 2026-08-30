@@ -349,8 +349,8 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .share-card-preview-dialog { display:flex; width:min(920px,100%); max-height:calc(100dvh - 36px); flex-direction:column; overflow:auto; border:1px solid var(--border-strong); border-radius:22px; padding:20px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 24px 80px rgba(0,0,0,.38); }
 .share-card-preview-eyebrow { margin:0 0 5px; color:var(--primary); font-size:11px; font-weight:900; letter-spacing:.12em; }
 .share-card-preview-hint { margin:12px 0 0; color:var(--foreground-muted); font-size:12px; font-weight:700; }
-.share-card-preview-image-wrap { display:flex; max-height:calc(100dvh - 220px); align-items:center; justify-content:center; margin-top:14px; overflow:auto; border:1px solid var(--border); border-radius:15px; padding:10px; background:var(--background); }
-.share-card-preview-image { display:block; width:min(100%,540px); height:auto; max-height:calc(100dvh - 240px); object-fit:contain; -webkit-touch-callout:default; -webkit-user-drag:auto; user-select:auto; touch-action:auto; }
+.share-card-preview-image-wrap { display:flex; max-height:calc(100dvh - 220px); align-items:flex-start; justify-content:center; margin-top:14px; overflow:auto; border:1px solid var(--border); border-radius:15px; padding:10px; background:var(--background); }
+.share-card-preview-image { display:block; width:min(100%,540px); height:auto; object-fit:contain; -webkit-touch-callout:default; -webkit-user-drag:auto; user-select:auto; touch-action:auto; }
 .share-card-preview-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:14px; }
 .share-card-preview-primary,.share-card-preview-secondary { display:inline-flex; min-height:42px; align-items:center; justify-content:center; border-radius:999px; padding:0 18px; font-size:13px; font-weight:900; text-decoration:none; cursor:pointer; touch-action:manipulation; }
 .share-card-preview-primary { border:1px solid var(--primary); color:#fff; background:var(--primary); }
@@ -390,14 +390,12 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
   .prescription-preview-image-wrap { max-height:calc(100dvh - 230px); margin-top:14px; padding:4px; }
   .prescription-preview-image { max-height:calc(100dvh - 250px); }
   .community-hero-copy-actions { gap:8px; }
-  .share-button-trigger-hero { min-height:34px; padding:0 12px; font-size:11px; }
   .share-method-backdrop { align-items:flex-end; padding:0; }
   .share-method-dialog { width:100%; border-right:0; border-bottom:0; border-radius:22px 22px 0 0; padding:18px 14px calc(12px + env(safe-area-inset-bottom)); }
   .share-method-option { min-height:70px; border-radius:15px; }
   .share-card-preview-backdrop { align-items:flex-end; padding:0; }
   .share-card-preview-dialog { width:100%; max-height:100dvh; border-right:0; border-bottom:0; border-radius:22px 22px 0 0; padding:16px 14px calc(12px + env(safe-area-inset-bottom)); }
   .share-card-preview-image-wrap { max-height:calc(100dvh - 260px); margin-top:12px; padding:5px; }
-  .share-card-preview-image { max-height:calc(100dvh - 280px); }
 }
 
 /* Keep the prescription archive readable on small screens without reserving empty space. */
@@ -660,7 +658,7 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
 .post-replies-mobile-composer-trigger { display:none; }
 .post-replies-desktop-composer { display:block; }
 
-.forum-discovery-detail-post-actions { display:flex; min-width:0; align-items:center; }
+.forum-discovery-detail-post-actions { display:flex; min-width:0; flex:none; align-items:center; }
 .post-management-menu { position:relative; z-index:2; }
 .post-management-menu-trigger { display:grid; width:36px; height:36px; place-items:center; border:0; border-radius:50%; padding:0; color:var(--foreground); background:transparent; font-size:25px; line-height:1; }
 .post-management-menu-trigger:hover,.post-management-menu-trigger[aria-expanded='true'] { background:var(--navigation-active); }
@@ -969,8 +967,8 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
     background:color-mix(in srgb,var(--background),transparent 3%);
     backdrop-filter:blur(14px);
   }
-  .forum-discovery-detail-back,.forum-discovery-detail-share { display:grid; width:32px; height:32px; flex:none; place-items:center; border:0; color:var(--foreground); background:transparent; font-size:29px; font-weight:300; line-height:1; }
-  .forum-discovery-detail-share { font-size:22px; }
+  .forum-discovery-detail-back,.forum-discovery-detail-share { display:grid; height:32px; flex:none; place-items:center; border:0; color:var(--foreground); background:transparent; font-size:29px; font-weight:300; line-height:1; }
+  .forum-discovery-detail-share { min-width:48px; padding-inline:4px; font-size:22px; white-space:nowrap; }
   .forum-discovery-detail-author { display:flex; min-width:0; flex:1; align-items:center; gap:8px; font-size:13px; font-weight:850; }
   .forum-discovery-detail-author > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .forum-discovery-detail-avatar { display:grid; width:30px; height:30px; flex:none; place-items:center; overflow:hidden; border-radius:50%; color:#fff; background:var(--primary); font-size:10px; }
@@ -1212,8 +1210,9 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
 .hero-primary-button { display:inline-flex; min-height:44px; align-items:center; gap:28px; border:1px solid rgba(255,255,255,.24); border-radius:2px; padding:0 22px; color:#fff; background:rgba(23,105,223,.9); font-size:14px; font-style:normal; text-decoration:none; }
 .hero-primary-button:hover { background:#0f5fcf; }
 .community-hero-copy-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-.share-button-trigger-hero { display:inline-flex; min-height:44px; align-items:center; border:1px solid rgba(255,255,255,.24); border-radius:2px; padding:0 20px; color:#fff; background:rgba(3,9,16,.34); font-size:14px; font-weight:700; backdrop-filter:blur(10px); cursor:pointer; }
-.share-button-trigger-hero:hover { background:rgba(3,9,16,.58); }
+.community-home-share-action { display:flex; justify-content:flex-end; padding:10px 40px 0; }
+.community-home-share-action .share-button-trigger { min-height:34px; border:1px solid var(--border); border-radius:999px; padding:0 14px; color:var(--foreground-muted); background:var(--surface); font-size:11px; font-weight:800; cursor:pointer; }
+.community-home-share-action .share-button-trigger:hover { color:var(--foreground); background:var(--surface-subtle); }
 
 .app-shell { position:relative; min-height:100dvh; color:var(--foreground); background:var(--background); }
 html.easmusic-route-active,
@@ -1829,6 +1828,7 @@ flex-direction:column;
 
 @media (max-width: 767px) {
   .community-content { padding: 24px 16px; }
+  .community-home-share-action { padding-inline:16px; }
 }
 
 .app-main-area { display: flex; min-height: 100dvh; flex-direction: column; }

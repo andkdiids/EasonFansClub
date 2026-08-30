@@ -57,3 +57,13 @@ test('帖子多图页面和查看器共用 3 秒自动轮播，交互只临时�
   assert.match(detailController, /if \(hasReplyTarget \|\| window\.location\.hash\) return/)
   assert.match(detailController, /window\.scrollTo\(\{ left: 0, top: 0, behavior: 'auto' \}\)/)
 })
+
+test('帖子详情顶栏的分享按钮在窄屏仍保持横向且不挤压标题', () => {
+  const topbar = read('components/ForumDiscoveryDetailTopbar.tsx')
+  const css = read('app/globals.css')
+  assert.match(topbar, /triggerClassName="forum-discovery-detail-share shrink-0 whitespace-nowrap"/)
+  assert.match(css, /\.forum-discovery-detail-share \{ min-width:48px; padding-inline:4px; font-size:22px; white-space:nowrap; \}/)
+  assert.match(css, /\.forum-discovery-detail-author \{ display:flex; min-width:0; flex:1;/)
+  assert.match(css, /\.forum-discovery-detail-post-actions \{ display:flex; min-width:0; flex:none;/)
+  assert.doesNotMatch(css, /\.forum-discovery-detail-share \{[^}]*width:32px/)
+})

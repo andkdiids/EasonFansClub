@@ -449,8 +449,10 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         styleConfig={siteConfig.heroStyle}
         visual={siteConfig.heroVisuals.home}
         defaultTitle={siteConfig.text.homeSubtitle}
-        shareAction={<ShareButton data={homeShareCardData} label="分享" triggerClassName="share-button-trigger share-button-trigger-hero" ariaLabel="分享私家E院首页" />}
       />
+      <div className="community-home-share-action">
+        <ShareButton data={homeShareCardData} label="分享" triggerClassName="share-button-trigger" ariaLabel="分享私家E院首页" />
+      </div>
       <div id="community-content" className="community-content">
         <section className="community-stats home-checkin-stats mb-4 sm:mb-6" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }} aria-label="E院数据与签到状态">
           <div><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>

@@ -63,9 +63,13 @@ function decodeHtmlEntities(value: string) {
   })
 }
 
+type PlainTextOptions = Readonly<{
+  preserveLineBreaks?: boolean
+}>
+
 /** Convert stored rich/HTML-ish content into crawler-safe plain text. */
-export function htmlToPlainText(value: string | null | undefined) {
-  return decodeHtmlEntities(String(value || '')
+export function htmlToPlainText(value: string | null | undefined, options: PlainTextOptions = {}) {
+  const text = decodeHtmlEntities(String(value || '')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
@@ -73,8 +77,17 @@ export function htmlToPlainText(value: string | null | undefined) {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(?:p|div|li|h[1-6]|blockquote|pre|tr)>/gi, '\n')
     .replace(/<[^>]*>/g, ' '))
-    .replace(/\s+/g, ' ')
-    .trim()
+    .replace(/\r\n?/g, '\n')
+
+  if (options.preserveLineBreaks) {
+    return text
+      .replace(/[^\S\n]+/g, ' ')
+      .replace(/[ \t]*\n[ \t]*/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 export function summarizePlainText(value: string | null | undefined, length = 180) {
@@ -84,9 +97,9 @@ export function summarizePlainText(value: string | null | undefined, length = 18
 }
 
 /** Return one plain-text view for cards, search and crawler metadata. */
-export function postContentPlainText(content: string | null | undefined, richContent?: unknown | null) {
+export function postContentPlainText(content: string | null | undefined, richContent?: unknown | null, options: PlainTextOptions = {}) {
   const richText = richContent === null || richContent === undefined ? '' : extractPlainText(richContent)
-  return richText || htmlToPlainText(content)
+  return richText || htmlToPlainText(content, options)
 }
 
 /** Use the post title when present and the first meaningful body text otherwise. */
@@ -129,6 +142,36 @@ export function createActivityShareDescription({
   const intro = htmlToPlainText(description)
   if (intro) details.push(`简介：${intro}`)
   return summarizePlainText(details.join('；'), 180) || '查看私家E院活动详情。'
+}
+
+/** Full activity copy for the saved portrait card; crawler summaries stay bounded above. */
+export function createActivityShareCardDescription({
+  startsAt,
+  endsAt,
+  locationName,
+  locationAddress,
+  description,
+}: Readonly<{
+  startsAt?: string | Date | null
+  endsAt?: string | Date | null
+  locationName?: string | null
+  locationAddress?: string | null
+  description?: string | null
+}>) {
+  const details: string[] = []
+  const start = activityDate(startsAt)
+  const end = activityDate(endsAt)
+  if (start) details.push(`时间：${start}${end ? ` — ${end}` : ''}`)
+
+  const location = [locationName, locationAddress]
+    .map(normalizedText)
+    .filter(Boolean)
+    .join('，')
+  if (location) details.push(`地点：${location}`)
+
+  const intro = htmlToPlainText(description, { preserveLineBreaks: true })
+  if (intro) details.push(`简介：${intro}`)
+  return details.join('\n') || '查看私家E院活动详情。'
 }
 
 function canonicalUrl(path: string) {

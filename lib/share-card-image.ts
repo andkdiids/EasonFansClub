@@ -1,11 +1,37 @@
 'use client'
 
 import QRCode from 'qrcode'
-import { canonicalShareUrl, createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CARD_LOGO_PATH, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { canonicalShareUrl, createShareCardFilename, shareCardQrPayload, shareCardTypeLabel, SHARE_CARD_LOGO_PATH, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import {
+  calculateShareCardLayout,
+  SHARE_CARD_AUTHOR_FONT_SIZE,
+  SHARE_CARD_AUTHOR_LINE_HEIGHT,
+  SHARE_CARD_AUTHOR_X,
+  SHARE_CARD_AVATAR_SIZE,
+  SHARE_CARD_AVATAR_X,
+  SHARE_CARD_CATEGORY_FONT_SIZE,
+  SHARE_CARD_DATE_FONT_SIZE,
+  SHARE_CARD_DATE_LINE_HEIGHT,
+  SHARE_CARD_DESCRIPTION_FONT_SIZE,
+  SHARE_CARD_DESCRIPTION_LINE_HEIGHT,
+  SHARE_CARD_FOOTER_LOGO_SIZE,
+  SHARE_CARD_FOOTER_LOGO_X,
+  SHARE_CARD_FOOTER_TEXT_X,
+  SHARE_CARD_HERO_HEIGHT,
+  SHARE_CARD_META_FONT_SIZE,
+  SHARE_CARD_META_LINE_HEIGHT,
+  SHARE_CARD_PANEL_PADDING_X,
+  SHARE_CARD_PANEL_X,
+  SHARE_CARD_QR_FRAME_SIZE,
+  SHARE_CARD_QR_FRAME_X,
+  SHARE_CARD_QR_SIZE,
+  SHARE_CARD_QR_X,
+  SHARE_CARD_TITLE_FONT_SIZE,
+  SHARE_CARD_TITLE_LINE_HEIGHT,
+} from '@/lib/share-card-layout'
 
 const FONT_SANS = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif'
 const IMAGE_TIMEOUT_MS = 4500
-const QR_SIZE = 224
 const PUBLIC_IMAGE_ORIGINS = new Set(['https://ecfc.fans', 'https://www.ecfc.fans', 'https://media.ecfc.fans'])
 const SHARE_CARD_DATA_URL_PREFIX = `data:${SHARE_CARD_MIME_TYPE};base64,`
 
@@ -17,7 +43,7 @@ export type GeneratedShareCardImage = Readonly<{
   previewSrc: string
   fileName: string
   width: typeof SHARE_CARD_WIDTH
-  height: typeof SHARE_CARD_HEIGHT
+  height: number
   qrUrl: string
 }>
 
@@ -110,13 +136,13 @@ function drawImageContain(context: CanvasRenderingContext2D, image: HTMLImageEle
   context.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight)
 }
 
-function drawDefaultBrandVisual(context: CanvasRenderingContext2D, type: ShareCardData['type'], logo: LoadedImage) {
-  const gradient = context.createLinearGradient(0, 0, SHARE_CARD_WIDTH, 660)
+function drawDefaultBrandVisual(context: CanvasRenderingContext2D, type: ShareCardData['type']) {
+  const gradient = context.createLinearGradient(0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT)
   gradient.addColorStop(0, '#071523')
   gradient.addColorStop(0.55, '#0d526b')
   gradient.addColorStop(1, '#16845b')
   context.fillStyle = gradient
-  context.fillRect(0, 0, SHARE_CARD_WIDTH, 660)
+  context.fillRect(0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT)
 
   context.save()
   context.globalAlpha = 0.16
@@ -129,32 +155,9 @@ function drawDefaultBrandVisual(context: CanvasRenderingContext2D, type: ShareCa
   context.fill()
   context.restore()
 
-  if (logo) drawImageContain(context, logo, 56, 38, 128, 128, 4)
   context.fillStyle = 'rgba(255,255,255,.86)'
   context.font = `700 28px ${FONT_SANS}`
   context.fillText(shareCardTypeLabel(type), 66, 592)
-}
-
-function wrapText(context: CanvasRenderingContext2D, value: string, maxWidth: number, maxLines: number) {
-  const lines: string[] = []
-  let line = ''
-  for (const character of Array.from(value.replace(/\s+/g, ' '))) {
-    const next = line + character
-    if (line && context.measureText(next).width > maxWidth) {
-      lines.push(line)
-      line = character
-    } else {
-      line = next
-    }
-  }
-  if (line) lines.push(line)
-  const visibleLines = lines.slice(0, maxLines)
-  if (lines.length > maxLines && visibleLines.length) {
-    let last = visibleLines[visibleLines.length - 1]
-    while (last && context.measureText(`${last}…`).width > maxWidth) last = last.slice(0, -1)
-    visibleLines[visibleLines.length - 1] = `${last}…`
-  }
-  return visibleLines
 }
 
 function drawAvatar(context: CanvasRenderingContext2D, avatar: LoadedImage, name: string, x: number, y: number, size: number) {
@@ -183,6 +186,7 @@ function drawAvatar(context: CanvasRenderingContext2D, avatar: LoadedImage, name
 }
 
 async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boolean) {
+  const layout = calculateShareCardLayout(data)
   const [heroImage, avatar, logo] = await Promise.all([
     loadImage(data.image, allowRemoteImages),
     loadImage(data.authorAvatar, allowRemoteImages),
@@ -190,7 +194,7 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
   ])
   const qrUrl = shareCardQrPayload(data.url)
   const qrDataUrl = await QRCode.toDataURL(qrUrl, {
-    width: QR_SIZE,
+    width: SHARE_CARD_QR_SIZE,
     margin: 2,
     errorCorrectionLevel: 'H',
     color: { dark: '#071523', light: '#ffffff' },
@@ -200,7 +204,7 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
 
   const canvas = document.createElement('canvas')
   canvas.width = SHARE_CARD_WIDTH
-  canvas.height = SHARE_CARD_HEIGHT
+  canvas.height = layout.height
   const context = canvas.getContext('2d')
   if (!context) throw new Error('SHARE_CARD_CANVAS_CONTEXT_UNAVAILABLE')
   context.imageSmoothingEnabled = true
@@ -209,31 +213,26 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
 
   if (heroImage) {
     context.fillStyle = '#071523'
-    context.fillRect(0, 0, SHARE_CARD_WIDTH, 660)
-    if (data.type === 'home') drawImageContain(context, heroImage, 0, 0, SHARE_CARD_WIDTH, 660, 100)
-    else drawImageCover(context, heroImage, 0, 0, SHARE_CARD_WIDTH, 660)
-    const overlay = context.createLinearGradient(0, 320, 0, 660)
+    context.fillRect(0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT)
+    if (data.type === 'home') drawImageContain(context, heroImage, 0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, 100)
+    else drawImageCover(context, heroImage, 0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT)
+    const overlay = context.createLinearGradient(0, 320, 0, SHARE_CARD_HERO_HEIGHT)
     overlay.addColorStop(0, 'rgba(2,8,18,0)')
     overlay.addColorStop(1, 'rgba(2,8,18,.76)')
     context.fillStyle = overlay
-    context.fillRect(0, 0, SHARE_CARD_WIDTH, 660)
-    if (logo) drawImageContain(context, logo, 56, 38, 128, 128, 4)
+    context.fillRect(0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT)
     context.fillStyle = '#ffffff'
     context.font = `700 28px ${FONT_SANS}`
     context.fillText(shareCardTypeLabel(data.type), 66, 592)
   } else {
-    drawDefaultBrandVisual(context, data.type, logo)
+    drawDefaultBrandVisual(context, data.type)
   }
 
   context.fillStyle = '#f5fbfd'
-  context.fillRect(0, 660, SHARE_CARD_WIDTH, SHARE_CARD_HEIGHT - 660)
+  context.fillRect(0, SHARE_CARD_HERO_HEIGHT, SHARE_CARD_WIDTH, layout.height - SHARE_CARD_HERO_HEIGHT)
 
-  const panelX = 56
-  const panelY = 570
-  const panelWidth = 968
-  const panelHeight = 640
   context.save()
-  roundedRect(context, panelX, panelY, panelWidth, panelHeight, 26)
+  roundedRect(context, SHARE_CARD_PANEL_X, layout.panelTop, 968, layout.panelHeight, 26)
   context.fillStyle = 'rgba(255,255,255,.96)'
   context.shadowColor = 'rgba(7,21,35,.14)'
   context.shadowBlur = 32
@@ -241,65 +240,44 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
   context.fill()
   context.restore()
 
-  const title = sanitizeShareCardText(data.title) || shareCardTypeLabel(data.type)
-  const description = sanitizeShareCardText(data.description)
-  const author = sanitizeShareCardText(data.author) || '私家E院'
-  const date = sanitizeShareCardText(data.date)
-  const meta = data.meta
-    .map((item) => ({ label: sanitizeShareCardText(item.label), value: sanitizeShareCardText(item.value) }))
-    .filter((item) => item.label && item.value)
-    .slice(0, 3)
-
+  const contentLeft = SHARE_CARD_PANEL_X + SHARE_CARD_PANEL_PADDING_X
   context.textAlign = 'left'
   context.fillStyle = '#0f5f8f'
-  context.font = `800 22px ${FONT_SANS}`
-  context.fillText(shareCardTypeLabel(data.type), panelX + 48, panelY + 70)
+  context.font = `800 ${SHARE_CARD_CATEGORY_FONT_SIZE}px ${FONT_SANS}`
+  context.fillText(shareCardTypeLabel(data.type), contentLeft, layout.categoryTop + 24)
 
   context.fillStyle = '#102033'
-  context.font = `800 56px ${FONT_SANS}`
-  const titleLines = wrapText(context, title, panelWidth - 96, 2)
-  titleLines.forEach((line, index) => context.fillText(line, panelX + 48, panelY + 145 + index * 72))
+  context.font = `800 ${SHARE_CARD_TITLE_FONT_SIZE}px ${FONT_SANS}`
+  layout.titleLines.forEach((line, index) => context.fillText(line, contentLeft, layout.titleTop + SHARE_CARD_TITLE_FONT_SIZE + index * SHARE_CARD_TITLE_LINE_HEIGHT))
 
-  const descriptionY = panelY + 145 + titleLines.length * 72 + 24
   context.fillStyle = '#536779'
-  context.font = `500 30px ${FONT_SANS}`
-  const descriptionLines = wrapText(context, description || '扫码查看完整内容', panelWidth - 96, 3)
-  descriptionLines.forEach((line, index) => context.fillText(line, panelX + 48, descriptionY + index * 42))
+  context.font = `500 ${SHARE_CARD_DESCRIPTION_FONT_SIZE}px ${FONT_SANS}`
+  layout.descriptionLines.forEach((line, index) => context.fillText(line, contentLeft, layout.descriptionTop + SHARE_CARD_DESCRIPTION_FONT_SIZE + index * SHARE_CARD_DESCRIPTION_LINE_HEIGHT))
 
-  let metaY = descriptionY + descriptionLines.length * 42 + 26
-  context.font = `700 25px ${FONT_SANS}`
-  for (const item of meta) {
-    if (metaY > panelY + panelHeight - 46) break
-    context.fillStyle = '#0f5f8f'
-    context.fillText(`${item.label}：`, panelX + 48, metaY)
-    context.fillStyle = '#536779'
-    const labelWidth = context.measureText(`${item.label}：`).width
-    const valueLines = wrapText(context, item.value, panelWidth - 96 - labelWidth, 1)
-    context.fillText(valueLines[0] || '', panelX + 48 + labelWidth, metaY)
-    metaY += 38
-  }
+  context.font = `700 ${SHARE_CARD_META_FONT_SIZE}px ${FONT_SANS}`
+  layout.metaLines.forEach((line, index) => context.fillText(line, contentLeft, layout.metaTop + SHARE_CARD_META_FONT_SIZE + index * SHARE_CARD_META_LINE_HEIGHT))
 
-  const authorY = 1278
-  drawAvatar(context, avatar, author, 60, authorY - 70, 86)
+  drawAvatar(context, avatar, layout.author, SHARE_CARD_AVATAR_X, layout.authorTop, SHARE_CARD_AVATAR_SIZE)
   context.fillStyle = '#102033'
-  context.font = `800 30px ${FONT_SANS}`
-  context.fillText(author, 172, authorY - 24)
+  context.font = `800 ${SHARE_CARD_AUTHOR_FONT_SIZE}px ${FONT_SANS}`
+  layout.authorLines.forEach((line, index) => context.fillText(line, SHARE_CARD_AUTHOR_X, layout.authorTextTop + SHARE_CARD_AUTHOR_FONT_SIZE + index * SHARE_CARD_AUTHOR_LINE_HEIGHT))
   context.fillStyle = '#7b8b98'
-  context.font = `500 22px ${FONT_SANS}`
-  context.fillText(date ? `发布于 ${date}` : '来自私家E院', 172, authorY + 14)
+  context.font = `500 ${SHARE_CARD_DATE_FONT_SIZE}px ${FONT_SANS}`
+  layout.dateLines.forEach((line, index) => context.fillText(line, SHARE_CARD_AUTHOR_X, layout.dateTop + SHARE_CARD_DATE_FONT_SIZE + index * SHARE_CARD_DATE_LINE_HEIGHT))
 
   context.fillStyle = '#0f5f8f'
   context.font = `800 26px ${FONT_SANS}`
-  context.fillText('扫码查看完整内容', 60, 1390)
+  if (logo) drawImageContain(context, logo, SHARE_CARD_FOOTER_LOGO_X, layout.footerTop, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 4)
+  context.fillText('扫码查看完整内容', SHARE_CARD_FOOTER_TEXT_X, layout.footerTop + 26)
   context.fillStyle = '#7b8b98'
   context.font = `600 20px ${FONT_SANS}`
-  context.fillText('私家E院 | Eason Fans Club', 60, 1422)
+  context.fillText('私家E院 | Eason Fans Club', SHARE_CARD_FOOTER_TEXT_X, layout.brandTop + 20)
 
   context.save()
-  roundedRect(context, 788, 1160, 232, 232, 22)
+  roundedRect(context, SHARE_CARD_QR_FRAME_X, layout.qrTop, SHARE_CARD_QR_FRAME_SIZE, SHARE_CARD_QR_FRAME_SIZE, 22)
   context.fillStyle = '#ffffff'
   context.fill()
-  context.drawImage(qrImage, 792, 1164, 224, 224)
+  context.drawImage(qrImage, SHARE_CARD_QR_X, layout.qrTop + 4, SHARE_CARD_QR_SIZE, SHARE_CARD_QR_SIZE)
   context.restore()
 
   return { canvas, qrUrl }
@@ -373,7 +351,7 @@ async function finishImage(canvas: HTMLCanvasElement, data: ShareCardData, qrUrl
     previewSrc,
     fileName: createShareCardFilename(data.title),
     width: SHARE_CARD_WIDTH,
-    height: SHARE_CARD_HEIGHT,
+    height: canvas.height,
     qrUrl,
   } satisfies GeneratedShareCardImage
 }

@@ -81,15 +81,18 @@ function redactSensitiveText(value: string) {
 }
 
 /** Remove HTML/Markdown presentation syntax before text reaches the poster. */
-export function sanitizeShareCardText(value: string | null | undefined) {
-  return redactSensitiveText(htmlToPlainText(value)
+export function sanitizeShareCardText(value: string | null | undefined, options: { preserveLineBreaks?: boolean } = {}) {
+  return redactSensitiveText(htmlToPlainText(value, options)
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/`{1,3}/g, '')
-    .replace(/^\s*#{1,6}\s*/gm, '')
-    .replace(/^\s*>\s?/gm, '')
+    .replace(/^[ \t]*#{1,6}[ \t]*/gm, '')
+    .replace(/^[ \t]*>[ \t]?/gm, '')
     .replace(/[*_~]/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim())
 }
 

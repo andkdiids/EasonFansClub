@@ -693,7 +693,7 @@ test('前端错误区分：401 才提示重新认证，500/网络自动重试恢
 test('API-only 活跃：middleware matcher 覆盖想听 API，rolling session 在 API 请求上生效', () => {
   const middleware = source('middleware.ts')
   // matcher 覆盖所有非静态路径（含 /api/...）
-  assert.match(middleware, /matcher: \['\/\(\(\?!_next\/static\|_next\/image\|favicon\.ico\|icon\.png\|apple-icon\.png\|robots\.txt\|manifest\.webmanifest\).*\)'\]/)
+  assert.match(middleware, /matcher: \['\/\(\(\?!_next\/static\|_next\/image\|favicon\.ico\|icon\.png\|apple-icon\.png\|icons\/\|robots\.txt\|manifest\.webmanifest\).*\)'\]/)
   assert.match(middleware, /'\/icon\.png'/)
   assert.match(middleware, /'\/apple-icon\.png'/)
   // 想听 API 路径不在此 public 前缀列表（/api/auth/ 等）→ 会走验证 + 滚动续期

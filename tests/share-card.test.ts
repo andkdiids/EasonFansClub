@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { canonicalShareUrl, createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { calculateShareCardLayout } from '@/lib/share-card-layout'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -44,6 +45,32 @@ test('card payload has one shared shape and a high-resolution portrait contract'
   assert.match(image, /document\.createElement\('canvas'\)/)
   assert.match(image, /canvas\.toBlob\(/)
   assert.match(image, /imageSmoothingQuality = 'high'/)
+})
+
+test('share card flow layout keeps all copy, preserves paragraphs, and grows below the minimum height', () => {
+  const shortData: ShareCardData = {
+    type: 'post',
+    title: '短标题',
+    description: '第一段\n\n第二段\n第三段',
+    image: null,
+    url: 'https://ecfc.fans/posts/short-layout',
+    author: 'E友',
+    authorAvatar: null,
+    date: '2026年8月30日',
+    meta: [{ label: '版块', value: 'E院广场' }],
+  }
+  const longData = { ...shortData, description: '长正文'.repeat(300) }
+  const shortLayout = calculateShareCardLayout(shortData)
+  const longLayout = calculateShareCardLayout(longData)
+  assert.equal(shortLayout.width, SHARE_CARD_WIDTH)
+  assert.ok(shortLayout.height >= SHARE_CARD_HEIGHT)
+  assert.ok(longLayout.height > shortLayout.height)
+  assert.equal(shortLayout.descriptionLines.join('\n'), '第一段\n\n第二段\n第三段')
+  assert.ok(shortLayout.authorTop >= shortLayout.panelBottom + 36)
+  assert.ok(shortLayout.qrTop >= shortLayout.panelBottom + 36)
+  assert.match(read('lib/share-card-layout.ts'), /measureWrappedText/)
+  assert.doesNotMatch(read('lib/share-card-renderer.ts'), /maxLines|DESCRIPTION_CHARS_PER_LINE|\.slice\(0, maxLength\)/)
+  assert.doesNotMatch(read('lib/share-card-image.ts'), /maxLines|\.slice\(0, maxLines\)/)
 })
 
 test('activity and post payloads use the common renderer rather than type-specific generators', () => {
@@ -115,15 +142,30 @@ test('server-backed card requests use only a content id, keep HTTPS as the norma
   assert.match(button, /isTrustedShareCardHttpsUrl\(result\.url\)/)
 })
 
-test('both client and server card renderers use the same official app icon without a top-left text brand', () => {
+test('both client and server card renderers use the official app icon in the footer brand area', () => {
   const client = read('lib/share-card-image.ts')
   const server = read('lib/share-card-renderer.ts')
   assert.match(client, /loadLocalImage\(SHARE_CARD_LOGO_PATH\)/)
-  assert.match(client, /drawImageContain\(context, logo, 56, 38, 128, 128, 4\)/)
+  assert.match(client, /drawImageContain\(context, logo, SHARE_CARD_FOOTER_LOGO_X, layout\.footerTop, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 4\)/)
+  assert.doesNotMatch(client, /drawImageContain\(context, logo, 56, 38, 128, 128, 4\)/)
   assert.match(server, /OFFICIAL_LOGO_PATH = path\.join\(process\.cwd\(\), 'app', 'icon\.png'\)/)
+  assert.match(server, /fitImage\(logo, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 'contain'\)/)
+  assert.match(server, /left: SHARE_CARD_FOOTER_LOGO_X, top: layout\.footerTop/)
+  assert.doesNotMatch(server, /fitImage\(logo, 128, 128, 'contain'\)/)
   assert.doesNotMatch(client, /fillText\('私家E院', 64, 92\)/)
   assert.doesNotMatch(client, /fillText\(shareCardTypeLabel\(data\.type\), 66, 130\)/)
   assert.doesNotMatch(server, /fillText\(/)
+})
+
+test('home CTA is independent from the share action and has no implicit share fallback', () => {
+  const hero = read('components/HomeHero.tsx')
+  const home = read('components/HomeLayoutSurface.tsx')
+  assert.match(hero, /resolveHomeHeroCopy/)
+  assert.match(hero, /showButton: Boolean\(active\)[\s\S]*Boolean\(buttonText\)[\s\S]*Boolean\(buttonHref\)/)
+  assert.doesNotMatch(hero, /defaultHeroButton|shareAction|label="分享"/)
+  assert.match(home, /<HomeHero[\s\S]*defaultTitle=\{siteConfig\.text\.homeSubtitle\}[\s\S]*\/>/)
+  assert.doesNotMatch(home.slice(home.indexOf('<HomeHero'), home.indexOf('<div className="community-home-share-action"')), /ShareButton|shareAction/)
+  assert.match(home, /community-home-share-action[\s\S]*<ShareButton data=\{homeShareCardData\}/)
 })
 
 test('author avatar is optional and card renderer has a deterministic initials fallback', () => {
@@ -175,7 +217,7 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.match(preview, /data-share-card-save/)
   assert.match(preview, /data-share-card-qr-url=\{image\.qrUrl\}/)
   assert.match(preview, /data-share-card-source=\{image\.source\}/)
-  assert.match(preview, /高清 PNG · 1080 × 1440/)
+  assert.match(preview, /高清 PNG · 1080px 宽/)
 })
 
 test('mobile preview uses the generated PNG img directly and renders no action footer', () => {
@@ -192,6 +234,9 @@ test('mobile preview uses the generated PNG img directly and renders no action f
   assert.doesNotMatch(preview, /<img[^>]+(?:onContextMenu|onTouchStart|preventDefault\(\))/)
   assert.doesNotMatch(button, /previewSrcIsObjectUrl|URL\.revokeObjectURL/)
   assert.match(css, /\.share-card-preview-image \{[^}]*-webkit-touch-callout:default;[^}]*-webkit-user-drag:auto;[^}]*user-select:auto;[^}]*touch-action:auto;/)
+  assert.match(css, /\.share-card-preview-image \{[^}]*width:min\(100%,540px\); height:auto;/)
+  assert.doesNotMatch(css, /\.share-card-preview-image \{[^}]*max-height/)
+  assert.match(css, /\.share-card-preview-image-wrap \{[^}]*overflow:auto;/)
 })
 
 test('final card preview is a portable PNG data URL and does not depend on object URL lifetime', () => {

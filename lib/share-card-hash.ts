@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
 import type { ShareCardData } from '@/lib/share-card'
 
-/** Bump when any generated pixel/layout changes. v2 removes the old text brand block. */
-export const SHARE_CARD_TEMPLATE_VERSION = 'v2'
+/** Bump when any generated pixel/layout changes. v4 moves the official logo into the footer brand area. */
+export const SHARE_CARD_TEMPLATE_VERSION = 'v4'
 export const SHARE_CARD_LOGO_SOURCE = 'app/icon.png'
-export const SHARE_CARD_LOGO_VERSION = 'app-icon-v1'
+export const SHARE_CARD_LOGO_VERSION = 'app-icon-footer-v1'
 
 export function shareCardHashPayload(data: ShareCardData) {
   return {

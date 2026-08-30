@@ -978,15 +978,17 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const publicRichContent = richResult?.valid ? richResult.value : null
   const publicPostContentSource = publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus)
   const publicPostContent = postContentPlainText(publicPostContentSource, publicRichContent)
+  const shareCardPostContent = postContentPlainText(publicPostContentSource, publicRichContent, { preserveLineBreaks: true })
   const publicPostTitle = publicModerationText(post.title, post.moderationStatus)
   const safePublicPostContent = publicModerationText(publicPostContent, post.moderationStatus)
+  const safeShareCardPostContent = publicModerationText(shareCardPostContent, post.moderationStatus)
   const shareTitle = createPostShareTitle(publicPostTitle, safePublicPostContent, publicRichContent)
   const shareText = createPostShareDescription(safePublicPostContent, publicRichContent)
   const shareCardData: ShareCardData = {
     type: 'post',
     contentId: post.id,
     title: shareTitle,
-    description: shareText,
+    description: safeShareCardPostContent || shareText,
     image: firstAbsoluteMetadataImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: authorName,

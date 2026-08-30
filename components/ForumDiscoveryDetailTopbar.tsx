@@ -41,7 +41,7 @@ export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid
         data={shareCardData}
         linkTitle={shareTitle}
         linkText={shareText}
-        triggerClassName="forum-discovery-detail-share"
+        triggerClassName="forum-discovery-detail-share shrink-0 whitespace-nowrap"
         messageClassName="forum-discovery-share-message"
         ariaLabel="分享帖子"
       />

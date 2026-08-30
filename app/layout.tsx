@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { AppShell } from '@/components/layout/AppShell'
 import { AuthSessionRestore } from '@/components/AuthSessionRestore'
 import { DisableNativeImageDrag } from '@/components/DisableNativeImageDrag'
@@ -23,15 +23,28 @@ import './globals.css'
 // public crawler responses still receive the server-rendered metadata below.
 export const dynamic = 'force-dynamic'
 
+export const viewport: Viewport = {
+  themeColor: '#0f5f8f',
+  colorScheme: 'light dark',
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   const appearance = await getSiteAppearance()
   const logoUrl = publicImageUrl(appearance.images.navLogoUrl || appearance.images.logoUrl)
-  return buildPageMetadata({
-    title: SITE_TITLE,
-    description: SITE_DESCRIPTION,
-    canonical: '/',
-    imageUrl: metadataImageVariantUrl(logoUrl),
-  })
+  return {
+    ...buildPageMetadata({
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
+      canonical: '/',
+      imageUrl: metadataImageVariantUrl(logoUrl),
+    }),
+    manifest: '/manifest.webmanifest',
+    appleWebApp: {
+      capable: true,
+      title: '私家E院',
+      statusBarStyle: 'default',
+    },
+  }
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

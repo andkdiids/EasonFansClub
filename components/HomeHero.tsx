@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { HeroBackground } from '@/components/HeroBackground'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { hasHeroMediaAsset } from '@/lib/hero-visuals'
@@ -9,7 +9,38 @@ import { resolveHeroSlideVisual, type SiteHeroSlide, type SiteHeroStyle } from '
 import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
 
 const defaultHeroTitle = '\u542c\u89c1 Eason\uff0c\u4e5f\u542c\u89c1\u81ea\u5df1'
-const defaultHeroButton = '\u6d4f\u89c8\u4eca\u65e5\u5185\u5bb9'
+
+type HomeHeroCopyInput = Pick<SiteHeroSlide, 'title' | 'subtitle' | 'buttonText' | 'href' | 'showTitle' | 'showSubtitle' | 'showButton'>
+
+export type HomeHeroCopy = Readonly<{
+  title: string
+  subtitle: string
+  buttonText: string
+  showTitle: boolean
+  showSubtitle: boolean
+  showButton: boolean
+}>
+
+/** Resolve every slide's copy independently; empty fields never receive a CTA fallback. */
+export function resolveHomeHeroCopy(
+  active: HomeHeroCopyInput | null | undefined,
+  defaultTitle = defaultHeroTitle,
+  defaultSubtitle = 'NOW IS THE ONLY REALITY.',
+): HomeHeroCopy {
+  const hasActiveSlide = Boolean(active)
+  const title = (hasActiveSlide ? active?.title : defaultTitle)?.trim() || ''
+  const subtitle = (hasActiveSlide ? active?.subtitle : defaultSubtitle)?.trim() || ''
+  const buttonText = active?.buttonText?.trim() || ''
+  const buttonHref = active?.href?.trim() || ''
+  return {
+    title,
+    subtitle,
+    buttonText,
+    showTitle: (active?.showTitle !== false) && Boolean(title),
+    showSubtitle: (active?.showSubtitle !== false) && Boolean(subtitle),
+    showButton: Boolean(active) && active?.showButton !== false && Boolean(buttonText) && Boolean(buttonHref),
+  }
+}
 
 export function HomeHero({
   slides,
@@ -19,7 +50,6 @@ export function HomeHero({
   visual,
   defaultTitle = defaultHeroTitle,
   defaultSubtitle = 'NOW IS THE ONLY REALITY.',
-  shareAction,
 }: {
   slides: SiteHeroSlide[]
   siteName: string
@@ -28,7 +58,6 @@ export function HomeHero({
   visual?: SiteHeroVisualConfig | null
   defaultTitle?: string
   defaultSubtitle?: string
-  shareAction?: ReactNode
 }) {
   const visibleSlides = useMemo(
     () => slides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -51,9 +80,7 @@ export function HomeHero({
     return () => window.clearInterval(timer)
   }, [isPageVisible, visibleSlides.length])
 
-  const title = active?.title || defaultTitle
-  const subtitle = active?.subtitle || defaultSubtitle
-  const buttonText = active?.buttonText || defaultHeroButton
+  const { title, subtitle, buttonText, showTitle, showSubtitle, showButton } = resolveHomeHeroCopy(active, defaultTitle, defaultSubtitle)
 
   function previous() {
     setIndex((current) => (current - 1 + visibleSlides.length) % visibleSlides.length)
@@ -78,10 +105,7 @@ export function HomeHero({
   }
 
   const backgroundVisual = resolveHeroSlideVisual(visual, active)
-  const showTitle = active?.showTitle !== false
-  const showSubtitle = active?.showSubtitle !== false
-  const showButton = active?.showButton !== false
-  const hasHeroCopy = showTitle || showSubtitle || showButton || Boolean(shareAction)
+  const hasHeroCopy = showTitle || showSubtitle || showButton
   const hasBackground = Boolean(
     (backgroundVisual?.enabled ?? true)
     && (hasHeroMediaAsset(backgroundVisual?.desktopHeroMedia) || hasHeroMediaAsset(backgroundVisual?.mobileHeroMedia)),
@@ -111,15 +135,14 @@ export function HomeHero({
           <p className="hero-slogan">{subtitle}</p>
           <em>C{String.fromCharCode(0x2019)}mon in~</em>
         </> : null}
-        {showButton || shareAction ? <div className="community-hero-copy-actions">
-          {showButton ? <Link
+        {showButton ? <div className="community-hero-copy-actions">
+          <Link
             href={active?.href || '#community-content'}
             className="hero-primary-button"
             style={{ backgroundColor: buttonColor }}
           >
             {buttonText} <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
-          </Link> : null}
-          {shareAction}
+          </Link>
         </div> : null}
       </div> : null}
       {visibleSlides.length > 1 ? (

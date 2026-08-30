@@ -5,7 +5,7 @@ import { ActivityRegistrationButton } from '@/components/activities/ActivityRegi
 import { activityDateLabel, activityTypeLabels, type ActivityView } from '@/lib/activity'
 import type { ActivityRegistrationQuestionView, ActivityRegistrationState, ActivityRegistrationView } from '@/lib/activity-registration-shared'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { createActivityShareDescription, firstAbsoluteMetadataImageUrl, metadataImageVariantUrl } from '@/lib/share-metadata'
+import { createActivityShareCardDescription, createActivityShareDescription, firstAbsoluteMetadataImageUrl, metadataImageVariantUrl } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { normalizeActionUrl } from '@/lib/url-safety'
 
@@ -27,7 +27,7 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
     type: 'activity',
     contentId: activity.id,
     title: activity.title,
-    description: createActivityShareDescription(activity),
+    description: createActivityShareCardDescription(activity),
     image: firstAbsoluteMetadataImageUrl([
       metadataImageVariantUrl(activity.bannerUrl),
       metadataImageVariantUrl(activity.coverUrl),

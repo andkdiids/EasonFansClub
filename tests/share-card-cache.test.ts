@@ -4,6 +4,7 @@ import test from 'node:test'
 import sharp from 'sharp'
 import { canonicalShareUrl, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { createShareCardContentHash, SHARE_CARD_LOGO_SOURCE, SHARE_CARD_LOGO_VERSION, SHARE_CARD_TEMPLATE_VERSION, shareCardHashPayload } from '@/lib/share-card-hash'
+import { calculateShareCardLayout } from '@/lib/share-card-layout'
 import { createShareCardCache, getOrCreatePublicShareCard, loadActivityShareCardData, loadPostShareCardData, ShareCardContentNotFoundError, shareCardObjectKey, shareCardPublicUrl } from '@/lib/share-card-service'
 import { isTrustedShareCardImageUrl, renderShareCardPng, shareCardRendererConstants } from '@/lib/share-card-renderer'
 import { prisma } from '@/lib/prisma'
@@ -104,6 +105,41 @@ test('twenty concurrent requests use one renderer and one upload', async () => {
   assert.equal(new Set(results.map((result) => result.hash)).size, 1)
 })
 
+test('cache responses expose the same deterministic height for short and long content', async () => {
+  const longData = { ...baseData, contentId: 'post-long-layout-fixture', description: '完整长正文'.repeat(300) }
+  let stored = false
+  const cache = createShareCardCache({
+    headObject: async () => stored,
+    render: async () => Buffer.from('png-fixture'),
+    upload: async () => { stored = true; return 'https://media.ecfc.fans/media/ignored.png' },
+  })
+  const first = await cache.getOrCreate(longData)
+  const second = await cache.getOrCreate(longData)
+  assert.equal(first.width, SHARE_CARD_WIDTH)
+  assert.equal(first.height, calculateShareCardLayout(longData).height)
+  assert.ok(first.height > SHARE_CARD_HEIGHT)
+  assert.equal(second.height, first.height)
+  assert.equal(second.url, first.url)
+})
+
+test('server PNG dimensions follow the full long copy and keep author/QR below the content card', async () => {
+  const longData = {
+    ...baseData,
+    contentId: 'post-render-long-layout-fixture',
+    title: '这是一个非常非常长的分享卡片标题测试'.repeat(4),
+    description: '第一段\n\n第二段\n\n' + '完整正文内容'.repeat(300),
+  }
+  const layout = calculateShareCardLayout(longData)
+  const png = await renderShareCardPng(longData)
+  const metadata = await sharp(png).metadata()
+  assert.equal(metadata.width, SHARE_CARD_WIDTH)
+  assert.equal(metadata.height, layout.height)
+  assert.ok(layout.height > SHARE_CARD_HEIGHT)
+  assert.ok(layout.authorTop >= layout.panelBottom + 36)
+  assert.ok(layout.qrTop >= layout.panelBottom + 36)
+  assert.ok(layout.descriptionLines.join('').includes('完整正文内容'))
+})
+
 test('post/activity records flow through the public service into one card payload', async () => {
   const originalPostFindFirst = prisma.post.findFirst
   const originalActivityFindFirst = prisma.activity.findFirst
@@ -184,7 +220,7 @@ test('server renderer emits the official-logo portrait PNG and survives missing 
     const metadata = await sharp(png).metadata()
     assert.equal(metadata.format, 'png')
     assert.equal(metadata.width, SHARE_CARD_WIDTH)
-    assert.equal(metadata.height, SHARE_CARD_HEIGHT)
+    assert.equal(metadata.height, calculateShareCardLayout({ ...baseData, image: 'https://media.ecfc.fans/media/not-found.webp', authorAvatar: 'https://media.ecfc.fans/media/not-found-avatar.webp' }).height)
     assert.ok(png.length > 1000)
     assert.equal(SHARE_CARD_MIME_TYPE, 'image/png')
   } finally {

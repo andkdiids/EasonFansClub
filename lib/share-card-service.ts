@@ -10,8 +10,9 @@ import { buildPublicMediaUrl } from '@/lib/media-url'
 import { validateRichPostContent } from '@/lib/rich-text'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { publicPostWhere } from '@/lib/post-moderation'
-import { firstAbsoluteMetadataImageUrl, createActivityShareDescription, createPostShareDescription, createPostShareTitle, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
-import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { firstAbsoluteMetadataImageUrl, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
+import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { calculateShareCardLayout } from '@/lib/share-card-layout'
 import { createShareCardContentHash } from '@/lib/share-card-hash'
 import { renderShareCardPng, isTrustedShareCardImageUrl } from '@/lib/share-card-renderer'
 import { headCosObject } from '@/lib/tencent-cos'
@@ -78,7 +79,7 @@ type ShareCardResult = Readonly<{
   cached: boolean
   hash: string
   width: typeof SHARE_CARD_WIDTH
-  height: typeof SHARE_CARD_HEIGHT
+  height: number
   mimeType: typeof SHARE_CARD_MIME_TYPE
 }>
 
@@ -119,14 +120,14 @@ export async function loadPostShareCardData(postId: string): Promise<ShareCardDa
   const publicContent = publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus)
   const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
   const publicRichContent = richResult?.valid ? richResult.value : null
-  const plainContent = postContentPlainText(publicContent, publicRichContent)
+  const plainContent = postContentPlainText(publicContent, publicRichContent, { preserveLineBreaks: true })
   const title = publicModerationText(post.title, post.moderationStatus)
   const safeContent = publicModerationText(plainContent, post.moderationStatus)
   return {
     type: 'post',
     contentId: post.id,
     title: createPostShareTitle(title, safeContent, publicRichContent),
-    description: createPostShareDescription(safeContent, publicRichContent),
+    description: safeContent || createPostShareDescription(safeContent, publicRichContent),
     image: firstAbsoluteMetadataImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: getPublicUserDisplayName(post.User),
@@ -152,7 +153,7 @@ export async function loadActivityShareCardData(activityId: string): Promise<Sha
     type: 'activity',
     contentId: activity.id,
     title: activity.title,
-    description: createActivityShareDescription(activity),
+    description: createActivityShareCardDescription(activity),
     image: firstAbsoluteMetadataImageUrl([
       metadataImageVariantUrl(activity.bannerUrl),
       metadataImageVariantUrl(activity.coverUrl),
@@ -206,12 +207,13 @@ export function createShareCardCache(dependencies: ShareCardCacheDependencies) {
       if (existing) return existing
 
       const work = (async () => {
+        const height = calculateShareCardLayout(data).height
         if (await dependencies.headObject(objectKey)) {
-          return { url, cached: true, hash, width: SHARE_CARD_WIDTH, height: SHARE_CARD_HEIGHT, mimeType: SHARE_CARD_MIME_TYPE } satisfies ShareCardResult
+          return { url, cached: true, hash, width: SHARE_CARD_WIDTH, height, mimeType: SHARE_CARD_MIME_TYPE } satisfies ShareCardResult
         }
         const body = await dependencies.render(data)
         await dependencies.upload({ objectKey, body, contentType: SHARE_CARD_MIME_TYPE })
-        return { url, cached: false, hash, width: SHARE_CARD_WIDTH, height: SHARE_CARD_HEIGHT, mimeType: SHARE_CARD_MIME_TYPE } satisfies ShareCardResult
+        return { url, cached: false, hash, width: SHARE_CARD_WIDTH, height, mimeType: SHARE_CARD_MIME_TYPE } satisfies ShareCardResult
       })()
       pending.set(objectKey, work)
       try {

@@ -24,14 +24,14 @@ async function requestServerShareCard(data: ShareCardData): Promise<GeneratedSha
   if (!response.ok) throw new Error(`SHARE_CARD_API_${response.status}`)
   const result = await response.json() as ShareCardApiResponse
   if (typeof result.url !== 'string' || !isTrustedShareCardHttpsUrl(result.url)) throw new Error('SHARE_CARD_API_URL_INVALID')
-  if (result.mimeType !== SHARE_CARD_MIME_TYPE || result.width !== SHARE_CARD_WIDTH || result.height !== SHARE_CARD_HEIGHT) throw new Error('SHARE_CARD_API_DIMENSIONS_INVALID')
+  if (result.mimeType !== SHARE_CARD_MIME_TYPE || result.width !== SHARE_CARD_WIDTH || typeof result.height !== 'number' || result.height < SHARE_CARD_HEIGHT) throw new Error('SHARE_CARD_API_DIMENSIONS_INVALID')
   return {
     source: 'remote',
     blob: null,
     previewSrc: result.url,
     fileName: createShareCardFilename(data.title),
     width: SHARE_CARD_WIDTH,
-    height: SHARE_CARD_HEIGHT,
+    height: result.height,
     qrUrl: shareCardQrPayload(data.url),
   }
 }
