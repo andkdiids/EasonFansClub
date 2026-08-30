@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { MediaCarousel } from '@/components/anywhere-door/MediaCarousel'
 import { AnywhereDoorCommentPanel } from '@/components/anywhere-door/AnywhereDoorCommentPanel'
 import { AnywhereDoorMorePosts } from '@/components/anywhere-door/AnywhereDoorMorePosts'
+import { AnywhereDoorSourceIdentity } from '@/components/anywhere-door/AnywhereDoorSourceIdentity'
 import type { SocialPostDetailView, SocialPostView } from '@/lib/social-posts'
 
 function formatDate(value: string) {
@@ -36,26 +37,26 @@ export function AnywhereDoorDetail({ post, morePosts = [], showBackLink = true }
     <div className="anywhere-door-detail space-y-3" data-anywhere-door-detail>
       {showBackLink ? <Link href="/anywhere-door" className="inline-flex text-sm font-black text-brand-700 hover:underline dark:text-sky-300">← 返回随意门</Link> : null}
       <div className="anywhere-door-detail-shell grid min-w-0 gap-3" data-anywhere-door-detail-shell>
-        <article className="anywhere-door-main min-w-0 overflow-hidden bg-transparent shadow-none dark:bg-transparent" data-anywhere-door-main>
+        <article className="anywhere-door-main min-w-0 overflow-hidden shadow-none" data-anywhere-door-main>
           <section className="anywhere-door-media min-w-0 border-b border-slate-800 bg-black dark:border-slate-800 dark:bg-black" data-anywhere-door-media>
             <MediaCarousel media={post.media} title={post.authorUsername} priority className="anywhere-door-media-viewer h-full rounded-none bg-black dark:bg-black" />
           </section>
-          <section className="anywhere-door-info flex min-h-0 min-w-0 flex-col bg-white/90 dark:bg-slate-900/90" data-anywhere-door-info>
-            <header className="shrink-0 border-b border-sky-100 p-4 dark:border-slate-700 sm:p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+          <section className="anywhere-door-info flex min-h-0 min-w-0 flex-col" data-anywhere-door-info>
+            <header className="anywhere-door-info-header shrink-0 p-4 sm:p-5">
+              <div className="anywhere-door-source-row flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-base font-black text-brand-950 dark:text-slate-100">@{post.authorUsername}</p>
-                  <time className="mt-1 block text-xs font-bold text-slate-500 dark:text-slate-400" dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
+                  <AnywhereDoorSourceIdentity username={post.authorUsername} avatarUrl={post.authorAvatarUrl} />
+                  <time className="anywhere-door-post-time mt-1 block" dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
                 </div>
-                <span className="shrink-0 border border-sky-200 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-brand-700 dark:border-slate-600 dark:text-sky-300">{post.mediaType}</span>
+                <span className="anywhere-door-media-type shrink-0">{post.mediaType}</span>
               </div>
             </header>
-            <div className="shrink-0 p-4 pb-3 sm:p-5 sm:pb-4">
-              {post.caption ? <p className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-700 dark:text-slate-300">{post.caption}</p> : <p className="text-sm font-bold text-slate-400">暂无文字说明</p>}
-              <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-sky-100 pt-4 dark:border-slate-700">
-                <button type="button" onClick={() => void toggleLike()} className={`min-h-10 border px-3 text-xs font-black transition-colors ${viewerLiked ? 'border-pink-200 bg-pink-50 text-pink-600 dark:border-pink-900 dark:bg-pink-950/40 dark:text-pink-300' : 'border-sky-200 bg-sky-50/60 text-slate-600 hover:bg-sky-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`} aria-pressed={viewerLiked}>{viewerLiked ? '♥' : '♡'} {likeCount}</button>
-                <span className="text-xs font-black text-slate-500 dark:text-slate-400">评论 {post.commentCount}</span>
-                {post.permalink ? <a href={post.permalink} target="_blank" rel="noreferrer" className="text-xs font-black text-brand-700 hover:underline dark:text-sky-300">查看 Instagram 来源 ↗</a> : null}
+            <div className="anywhere-door-info-body shrink-0 p-4 pb-3 sm:p-5 sm:pb-4">
+              {post.caption ? <p className="anywhere-door-caption whitespace-pre-wrap break-words text-sm leading-7">{post.caption}</p> : <p className="anywhere-door-empty-copy text-sm font-bold">暂无文字说明</p>}
+              <div className="anywhere-door-meta mt-5 flex flex-wrap items-center gap-2 border-t pt-4">
+                <button type="button" onClick={() => void toggleLike()} className={`anywhere-door-like-button min-h-10 px-3 text-xs font-black transition-colors ${viewerLiked ? 'anywhere-door-like-button-active' : ''}`} aria-pressed={viewerLiked}>{viewerLiked ? '♥' : '♡'} {likeCount}</button>
+                <span className="anywhere-door-comment-count text-xs font-black">评论 {post.commentCount}</span>
+                {post.permalink ? <a href={post.permalink} target="_blank" rel="noreferrer" className="anywhere-door-source-link text-xs font-black hover:underline">查看 Instagram 来源 ↗</a> : null}
               </div>
               {message ? <p className="mt-2 text-xs font-bold text-red-600 dark:text-red-300" role="alert">{message}</p> : null}
             </div>

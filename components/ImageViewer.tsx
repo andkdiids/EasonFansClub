@@ -94,6 +94,8 @@ export function ImageViewer({
   loading = 'lazy',
   fetchPriority = 'auto',
   onError,
+  onOpenChange,
+  onIndexChange,
 }: Readonly<{
   src: string
   alt: string
@@ -106,6 +108,8 @@ export function ImageViewer({
   loading?: 'eager' | 'lazy'
   fetchPriority?: 'high' | 'low' | 'auto'
   onError?: () => void
+  onOpenChange?: (open: boolean) => void
+  onIndexChange?: (index: number) => void
 }>) {
   const [open, setOpen] = useState(false)
   const [zoom, setZoom] = useState(1)
@@ -114,7 +118,9 @@ export function ImageViewer({
   const [currentIndex, setCurrentIndex] = useState(() => clampIndex(initialIndex, gallery?.length || 1))
   const [imageState, setImageState] = useState<ViewerImageState>('loading')
   const [isAutoPlaying, setIsAutoPlaying] = useState(false)
-  const [hasUserInteracted, setHasUserInteracted] = useState(false)
+  const [isInteracting, setIsInteracting] = useState(false)
+  const [isPageVisible, setIsPageVisible] = useState(true)
+  const [autoPlayResetKey, setAutoPlayResetKey] = useState(0)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const naturalSizeRef = useRef<Size>(ZERO_SIZE)
   const viewportSizeRef = useRef<Size>(ZERO_SIZE)
@@ -125,6 +131,7 @@ export function ImageViewer({
   const pinchRef = useRef<PinchState | null>(null)
   const didDragRef = useRef(false)
   const autoPlayTimeoutRef = useRef<number | null>(null)
+  const isInteractingRef = useRef(false)
   zoomRef.current = zoom
   panRef.current = pan
 
@@ -145,10 +152,23 @@ export function ImageViewer({
     }
   }, [])
 
-  const pauseAutoPlay = useCallback(() => {
+  const beginInteraction = useCallback(() => {
     clearAutoPlayTimeout()
-    setHasUserInteracted(true)
-    setIsAutoPlaying(false)
+    if (isInteractingRef.current) return
+    isInteractingRef.current = true
+    setIsInteracting(true)
+  }, [clearAutoPlayTimeout])
+
+  const endInteraction = useCallback(() => {
+    if (!isInteractingRef.current) return
+    isInteractingRef.current = false
+    setIsInteracting(false)
+    setAutoPlayResetKey((value) => value + 1)
+  }, [])
+
+  const restartAutoPlayTimer = useCallback(() => {
+    clearAutoPlayTimeout()
+    setAutoPlayResetKey((value) => value + 1)
   }, [clearAutoPlayTimeout])
 
   function resetTransform() {
@@ -194,9 +214,13 @@ export function ImageViewer({
 
   function openViewer() {
     clearAutoPlayTimeout()
-    setCurrentIndex(clampIndex(initialIndex, viewerItems.length))
-    setHasUserInteracted(false)
+    const nextIndex = clampIndex(initialIndex, viewerItems.length)
+    isInteractingRef.current = false
+    setCurrentIndex(nextIndex)
+    onIndexChange?.(nextIndex)
+    setIsInteracting(false)
     setIsAutoPlaying(autoPlay && viewerItems.length > 1)
+    setAutoPlayResetKey((value) => value + 1)
     resetTransform()
     resetGestureState()
     naturalSizeRef.current = ZERO_SIZE
@@ -204,18 +228,21 @@ export function ImageViewer({
     setFitSize(ZERO_SIZE)
     setImageState('loading')
     setOpen(true)
+    onOpenChange?.(true)
   }
 
   function close() {
     clearAutoPlayTimeout()
+    isInteractingRef.current = false
     setOpen(false)
-    setHasUserInteracted(false)
+    setIsInteracting(false)
     setIsAutoPlaying(false)
     resetTransform()
     resetGestureState()
     naturalSizeRef.current = ZERO_SIZE
     viewportSizeRef.current = ZERO_SIZE
     setFitSize(ZERO_SIZE)
+    onOpenChange?.(false)
   }
 
   useEffect(() => {
@@ -237,12 +264,21 @@ export function ImageViewer({
   }, [open])
 
   useEffect(() => {
+    const syncVisibility = () => setIsPageVisible(document.visibilityState === 'visible')
+    syncVisibility()
+    document.addEventListener('visibilitychange', syncVisibility)
+    return () => document.removeEventListener('visibilitychange', syncVisibility)
+  }, [])
+
+  useEffect(() => {
     clearAutoPlayTimeout()
-    if (!open || !autoPlay || !isGallery || !isAutoPlaying || hasUserInteracted || zoom !== 1) return
+    if (!open || !autoPlay || !isGallery || !isAutoPlaying || isInteracting || !isPageVisible) return
     autoPlayTimeoutRef.current = window.setTimeout(() => {
       autoPlayTimeoutRef.current = null
+      if (isInteractingRef.current || document.visibilityState !== 'visible') return
       const nextIndex = (safeCurrentIndex + 1) % viewerItems.length
       setCurrentIndex(nextIndex)
+      onIndexChange?.(nextIndex)
       resetTransform()
       resetGestureState()
       naturalSizeRef.current = ZERO_SIZE
@@ -251,13 +287,9 @@ export function ImageViewer({
       setImageState('loading')
     }, IMAGE_VIEWER_AUTO_PLAY_INTERVAL_MS)
     return clearAutoPlayTimeout
-  }, [autoPlay, clearAutoPlayTimeout, hasUserInteracted, isAutoPlaying, isGallery, open, safeCurrentIndex, viewerItems.length, zoom])
+  }, [autoPlay, autoPlayResetKey, clearAutoPlayTimeout, isAutoPlaying, isGallery, isInteracting, isPageVisible, onIndexChange, open, safeCurrentIndex, viewerItems.length])
 
   useEffect(() => () => clearAutoPlayTimeout(), [clearAutoPlayTimeout])
-
-  useEffect(() => {
-    if (open && zoom !== 1) pauseAutoPlay()
-  }, [open, pauseAutoPlay, zoom])
 
   useEffect(() => {
     if (!open) return
@@ -271,12 +303,13 @@ export function ImageViewer({
   }, [open, safeCurrentIndex, renderOriginalSrc])
 
   function goTo(nextIndex: number, reason: 'manual' | 'auto' = 'manual') {
-    if (reason === 'manual') pauseAutoPlay()
+    if (reason === 'manual') restartAutoPlayTimer()
     const nextSafeIndex = reason === 'auto'
       ? (nextIndex % viewerItems.length + viewerItems.length) % viewerItems.length
       : clampIndex(nextIndex, viewerItems.length)
     if (nextSafeIndex === safeCurrentIndex) return
     setCurrentIndex(nextSafeIndex)
+    onIndexChange?.(nextSafeIndex)
     resetTransform()
     resetGestureState()
     naturalSizeRef.current = ZERO_SIZE
@@ -287,7 +320,7 @@ export function ImageViewer({
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
-    pauseAutoPlay()
+    beginInteraction()
     event.preventDefault()
     if (pointersRef.current.size === 0) didDragRef.current = false
     try {
@@ -320,7 +353,7 @@ export function ImageViewer({
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const tracked = pointersRef.current.get(event.pointerId)
     if (!tracked) return
-    pauseAutoPlay()
+    beginInteraction()
     tracked.x = event.clientX
     tracked.y = event.clientY
     if (pointersRef.current.size >= 2 && pinchRef.current) {
@@ -354,7 +387,6 @@ export function ImageViewer({
 
   function onPointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
     const endedPointer = pointersRef.current.get(event.pointerId)
-    if (endedPointer) pauseAutoPlay()
     const drag = dragRef.current
     const wasPinching = pinchRef.current !== null
     pointersRef.current.delete(event.pointerId)
@@ -392,17 +424,18 @@ export function ImageViewer({
     } else {
       dragRef.current = null
       pointersRef.current.clear()
+      if (endedPointer) endInteraction()
     }
   }
 
   function onWheel(event: WheelEvent<HTMLDivElement>) {
-    pauseAutoPlay()
+    beginInteraction()
     event.preventDefault()
     applyTransform(zoomRef.current + (event.deltaY < 0 ? IMAGE_VIEWER_ZOOM_STEP : -IMAGE_VIEWER_ZOOM_STEP))
+    endInteraction()
   }
 
   function handleViewportClick(event: ReactMouseEvent<HTMLDivElement>) {
-    pauseAutoPlay()
     if (didDragRef.current) {
       didDragRef.current = false
       return
@@ -446,7 +479,7 @@ export function ImageViewer({
       role="dialog"
       aria-modal="true"
       aria-label={`${activeAlt}图片查看器`}
-      data-auto-playing={isAutoPlaying && !hasUserInteracted ? 'true' : 'false'}
+      data-auto-playing={isAutoPlaying && !isInteracting && isPageVisible ? 'true' : 'false'}
       className="fixed inset-0 z-[var(--layer-image-viewer)] h-[100dvh] w-[100vw] bg-black/95 text-white"
     >
       <div className="absolute inset-x-0 top-0 z-20 flex min-h-14 items-start justify-between gap-3 border-b border-white/10 bg-black/70 px-3 pb-2 pt-[env(safe-area-inset-top)] backdrop-blur sm:px-5">
@@ -459,9 +492,9 @@ export function ImageViewer({
             <button type="button" disabled={safeCurrentIndex === 0} onClick={(event) => { event.stopPropagation(); goTo(safeCurrentIndex - 1) }} aria-label="上一张图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl disabled:opacity-40">‹</button>
             <button type="button" disabled={safeCurrentIndex === viewerItems.length - 1} onClick={(event) => { event.stopPropagation(); goTo(safeCurrentIndex + 1) }} aria-label="下一张图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl disabled:opacity-40">›</button>
           </> : null}
-          <button type="button" onClick={() => { pauseAutoPlay(); applyTransform(zoomRef.current - IMAGE_VIEWER_ZOOM_STEP) }} aria-label="缩小图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl">−</button>
-          <button type="button" onClick={() => { pauseAutoPlay(); applyTransform(1) }} aria-label="恢复适配缩放" className="min-w-16 border border-white/20 px-3 py-2 text-xs font-black" aria-live="polite">{Math.round(zoom * 100)}%</button>
-          <button type="button" onClick={() => { pauseAutoPlay(); applyTransform(zoomRef.current + IMAGE_VIEWER_ZOOM_STEP) }} aria-label="放大图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl">+</button>
+          <button type="button" onClick={() => { applyTransform(zoomRef.current - IMAGE_VIEWER_ZOOM_STEP); restartAutoPlayTimer() }} aria-label="缩小图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl">−</button>
+          <button type="button" onClick={() => { applyTransform(1); restartAutoPlayTimer() }} aria-label="恢复适配缩放" className="min-w-16 border border-white/20 px-3 py-2 text-xs font-black" aria-live="polite">{Math.round(zoom * 100)}%</button>
+          <button type="button" onClick={() => { applyTransform(zoomRef.current + IMAGE_VIEWER_ZOOM_STEP); restartAutoPlayTimer() }} aria-label="放大图片" className="grid h-10 w-10 place-items-center border border-white/20 text-xl">+</button>
           <button type="button" onClick={close} aria-label="关闭图片查看器" className="grid h-10 w-10 place-items-center border border-white/20 text-xl">×</button>
         </div>
       </div>
@@ -495,7 +528,7 @@ export function ImageViewer({
             decoding="async"
             onLoad={handleOriginalLoad}
             onError={handleOriginalError}
-            onDoubleClick={(event) => { event.stopPropagation(); pauseAutoPlay(); applyTransform(zoomRef.current === 1 ? 2 : 1) }}
+            onDoubleClick={(event) => { event.stopPropagation(); applyTransform(zoomRef.current === 1 ? 2 : 1); restartAutoPlayTimer() }}
             className={`block flex-none select-none object-contain${imageState === 'error' ? ' opacity-0' : ''}`}
             style={imageStyle}
           />

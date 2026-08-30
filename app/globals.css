@@ -350,7 +350,7 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .share-card-preview-eyebrow { margin:0 0 5px; color:var(--primary); font-size:11px; font-weight:900; letter-spacing:.12em; }
 .share-card-preview-hint { margin:12px 0 0; color:var(--foreground-muted); font-size:12px; font-weight:700; }
 .share-card-preview-image-wrap { display:flex; max-height:calc(100dvh - 220px); align-items:center; justify-content:center; margin-top:14px; overflow:auto; border:1px solid var(--border); border-radius:15px; padding:10px; background:var(--background); }
-.share-card-preview-image { display:block; width:min(100%,540px); height:auto; max-height:calc(100dvh - 240px); object-fit:contain; -webkit-touch-callout:default; user-select:none; }
+.share-card-preview-image { display:block; width:min(100%,540px); height:auto; max-height:calc(100dvh - 240px); object-fit:contain; -webkit-touch-callout:default; -webkit-user-drag:auto; user-select:auto; touch-action:auto; }
 .share-card-preview-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:14px; }
 .share-card-preview-primary,.share-card-preview-secondary { display:inline-flex; min-height:42px; align-items:center; justify-content:center; border-radius:999px; padding:0 18px; font-size:13px; font-weight:900; text-decoration:none; cursor:pointer; touch-action:manipulation; }
 .share-card-preview-primary { border:1px solid var(--primary); color:#fff; background:var(--primary); }
@@ -398,8 +398,6 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
   .share-card-preview-dialog { width:100%; max-height:100dvh; border-right:0; border-bottom:0; border-radius:22px 22px 0 0; padding:16px 14px calc(12px + env(safe-area-inset-bottom)); }
   .share-card-preview-image-wrap { max-height:calc(100dvh - 260px); margin-top:12px; padding:5px; }
   .share-card-preview-image { max-height:calc(100dvh - 280px); }
-  .share-card-preview-actions { justify-content:stretch; }
-  .share-card-preview-actions > * { flex:1; }
 }
 
 /* Keep the prescription archive readable on small screens without reserving empty space. */
@@ -6959,5 +6957,219 @@ body:has(.duel-page) .app-page-content {
 
   .anywhere-door-more-posts-grid {
     gap: 8px;
+  }
+}
+
+/* 随意门非媒体内容使用全站主题变量；媒体 viewer/缩略图仍保留自己的黑底。 */
+.anywhere-door-page-heading {
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+}
+
+.anywhere-door-page-title {
+  margin: 0;
+  color: var(--foreground);
+  font-size: clamp(28px, 3vw, 36px);
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.anywhere-door-page-description {
+  max-width: 48rem;
+  margin: 10px 0 0;
+  color: var(--foreground-muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.75;
+}
+
+.anywhere-door-main,
+.anywhere-door-info,
+.anywhere-door-post-card,
+.anywhere-door-comments-standalone,
+.anywhere-door-more-posts-panel,
+.anywhere-door-empty-state {
+  color: var(--foreground);
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.anywhere-door-post-content,
+.anywhere-door-caption,
+.anywhere-door-comments,
+.anywhere-door-comment-content {
+  color: var(--foreground);
+}
+
+.anywhere-door-info-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.anywhere-door-source-row {
+  min-width: 0;
+  color: var(--foreground-muted);
+}
+
+.anywhere-door-source-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.anywhere-door-source-avatar {
+  display: block;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-subtle);
+}
+
+.anywhere-door-source-avatar > * {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.anywhere-door-source-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anywhere-door-post-time,
+.anywhere-door-comment-count,
+.anywhere-door-comment-time,
+.anywhere-door-post-note,
+.anywhere-door-empty-copy {
+  color: var(--foreground-muted);
+}
+
+.anywhere-door-post-time {
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.anywhere-door-media-type {
+  border: 1px solid var(--border-strong);
+  padding: 5px 10px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.anywhere-door-meta,
+.anywhere-door-comment-composer {
+  border-color: var(--border);
+}
+
+.anywhere-door-like-button,
+.anywhere-door-comment-link,
+.anywhere-door-load-more-comments,
+.anywhere-door-feed-more {
+  border: 1px solid var(--border-strong);
+  color: var(--foreground-muted);
+  background: var(--surface-subtle);
+}
+
+.anywhere-door-like-button:hover,
+.anywhere-door-comment-link:hover,
+.anywhere-door-load-more-comments:hover,
+.anywhere-door-feed-more:hover {
+  color: var(--foreground);
+  background: var(--surface-elevated);
+}
+
+.anywhere-door-like-button-active {
+  border-color: color-mix(in srgb, var(--danger), transparent 62%);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger), transparent 90%);
+}
+
+.anywhere-door-source-link,
+.anywhere-door-comment-actions {
+  color: var(--primary);
+}
+
+.anywhere-door-source-link:hover,
+.anywhere-door-comment-actions button:hover {
+  color: var(--foreground);
+}
+
+.anywhere-door-comments-embedded,
+.anywhere-door-comment-item,
+.anywhere-door-comment-replies {
+  border-color: var(--border);
+}
+
+.anywhere-door-comment-author,
+.anywhere-door-comments-heading {
+  color: var(--foreground);
+}
+
+.anywhere-door-comment-input {
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  background: var(--surface-subtle);
+}
+
+.anywhere-door-comment-input::placeholder {
+  color: var(--foreground-muted);
+}
+
+.anywhere-door-comment-submit {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.anywhere-door-comment-submit:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.anywhere-door-feed-message {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger), transparent 90%);
+}
+
+.anywhere-door-more-posts-heading,
+.anywhere-door-more-posts-title {
+  color: var(--foreground);
+}
+
+.anywhere-door-more-posts-title:hover,
+.anywhere-door-more-posts-title:focus-visible {
+  color: var(--primary);
+}
+
+@media (max-width: 767px) {
+  .anywhere-door-page-heading {
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+  }
+
+  .anywhere-door-source-avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+  .anywhere-door-source-name {
+    max-width: min(48vw, 220px);
+  }
+
+  .anywhere-door-post-time {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-size: 11px;
   }
 }

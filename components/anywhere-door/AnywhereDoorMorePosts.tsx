@@ -7,9 +7,9 @@ export function AnywhereDoorMorePosts({ posts, currentPostId }: Readonly<{ posts
 
   return (
     <aside className="anywhere-door-more-posts hidden min-w-0 lg:block" data-anywhere-door-more-posts>
-      <div className="anywhere-door-more-posts-panel sticky top-6 border border-sky-100 bg-white/75 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/75">
+      <div className="anywhere-door-more-posts-panel sticky top-6 p-4 shadow-sm">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-black text-brand-950 dark:text-slate-100">更多帖子</h2>
+          <h2 className="anywhere-door-more-posts-heading text-sm font-black">更多帖子</h2>
         </div>
         {visiblePosts.length ? <div className="anywhere-door-more-posts-grid mt-4 grid grid-cols-2 gap-2">
           {visiblePosts.map((post) => {
@@ -22,7 +22,7 @@ export function AnywhereDoorMorePosts({ posts, currentPostId }: Readonly<{ posts
                 ) : <div className="grid h-full place-items-center text-[10px] font-bold text-slate-400">暂无媒体</div>}
                 {post.mediaType === 'CAROUSEL' || post.mediaType === 'VIDEO' || post.mediaType === 'REEL' ? <span className="absolute bottom-1 left-1 grid size-5 place-items-center bg-slate-950/65 text-[10px] font-black text-white" aria-label={post.mediaType === 'CAROUSEL' ? '轮播' : '视频'}>{post.mediaType === 'CAROUSEL' ? '▧' : '▶'}</span> : null}
               </div>
-              <p className="anywhere-door-more-posts-title mt-1.5 truncate text-xs font-bold text-slate-600 group-hover:text-brand-700 dark:text-slate-300 dark:group-hover:text-sky-300">{post.caption || `@${post.authorUsername}`}</p>
+              <p className="anywhere-door-more-posts-title mt-1.5 truncate text-xs font-bold">{post.caption || `@${post.authorUsername}`}</p>
             </Link>
           })}
         </div> : <p className="mt-4 text-xs font-bold leading-5 text-slate-400">暂时没有更多已归档动态。</p>}

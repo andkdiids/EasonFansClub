@@ -984,6 +984,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const shareText = createPostShareDescription(safePublicPostContent, publicRichContent)
   const shareCardData: ShareCardData = {
     type: 'post',
+    contentId: post.id,
     title: shareTitle,
     description: shareText,
     image: firstAbsoluteMetadataImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
@@ -1046,7 +1047,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     .map((reply) => reply.id)
 
   return (
-    <ForumDiscoveryDetailController>
+    <ForumDiscoveryDetailController hasReplyTarget={Boolean(focusId)}>
       <>
       <main className="forum-discovery-detail-shell site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
         {user ? <MarkModerationReadOnMount /> : null}

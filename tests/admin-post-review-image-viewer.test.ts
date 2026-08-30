@@ -19,7 +19,8 @@ test('审核中心单图缩略图使用站内 ImageViewer 打开大图', () => {
 test('多图从被点击图片的 initialIndex 开始预览', () => {
   assert.match(reviewManager, /gallery=\{imageItems\}/)
   assert.match(reviewManager, /initialIndex=\{index\}/)
-  assert.match(viewer, /setCurrentIndex\(clampIndex\(initialIndex, viewerItems\.length\)\)/)
+  assert.match(viewer, /const nextIndex = clampIndex\(initialIndex, viewerItems\.length\)/)
+  assert.match(viewer, /setCurrentIndex\(nextIndex\)/)
 })
 
 test('画廊提供上一张、下一张和当前位置提示', () => {

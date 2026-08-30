@@ -110,6 +110,7 @@ function isPublicPath(pathname: string) {
   if (publicExactPaths.has(pathname)) return true
   if (pathname === '/api/auth') return true
   if (publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))) return true
+  if (/^\/api\/(?:posts|activities)\/[^/]+\/share-card$/.test(pathname)) return true
   // Public detail pages must be reachable by WeChat and other crawlers. The
   // nested create/edit/register routes remain protected by their page/API
   // guards because they do not match these exact one-segment detail paths.

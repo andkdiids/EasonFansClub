@@ -21,6 +21,7 @@ export type InstagramPost = {
   externalId: string
   shortcode: string | null
   username: string
+  authorAvatarUrl: string | null
   caption: string | null
   publishedAt: Date
   permalink: string | null

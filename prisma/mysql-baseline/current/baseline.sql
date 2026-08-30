@@ -3729,6 +3729,7 @@ CREATE TABLE `SocialPost` (
     `shortcode` VARCHAR(191) NULL,
     `authorUsername` VARCHAR(191) NOT NULL,
     `authorDisplayName` VARCHAR(191) NULL,
+    `authorAvatarUrl` TEXT NULL,
     `caption` TEXT NULL,
     `permalink` TEXT NULL,
     `publishedAt` DATETIME(3) NOT NULL,

@@ -27,6 +27,7 @@ function rawImage(id: string, timestamp: string, options: Record<string, unknown
     dimensionsWidth: 1080,
     dimensionsHeight: 1350,
     ownerUsername: 'mreasonchan',
+    profilePicUrl: 'https://scontent.cdninstagram.com/avatar.jpg',
     childPosts: [],
     ...options,
   }
@@ -121,6 +122,24 @@ test('normalizer rejects incomplete media instead of manufacturing fields', () =
   }), (error: unknown) => error instanceof InstagramProviderError && error.code === 'INVALID_DATA')
 })
 
+test('normalizer keeps an optional source avatar without making it required', () => {
+  const normalized = normalizeInstagramPost({
+    externalId: 'avatar',
+    username: 'mreasonchan',
+    authorAvatarUrl: 'https://scontent.cdninstagram.com/avatar.jpg',
+    publishedAt: '2026-08-25T00:00:00Z',
+    media: [{ type: 'IMAGE', sourceUrl: 'https://scontent.cdninstagram.com/post.jpg' }],
+  })
+  assert.equal(normalized.authorAvatarUrl, 'https://scontent.cdninstagram.com/avatar.jpg')
+  assert.equal(normalizeInstagramPost({
+    externalId: 'avatar-invalid',
+    username: 'mreasonchan',
+    authorAvatarUrl: 'javascript:alert(1)',
+    publishedAt: '2026-08-25T00:00:00Z',
+    media: [{ type: 'IMAGE', sourceUrl: 'https://scontent.cdninstagram.com/post.jpg' }],
+  }).authorAvatarUrl, null)
+})
+
 test('Apify mapper normalizes image, carousel children, and reel/video fields', () => {
   const carousel = normalizeApifyInstagramItem({
     ...rawImage('carousel-1', '2026-08-25T10:00:00.000Z'),
@@ -144,6 +163,7 @@ test('Apify mapper normalizes image, carousel children, and reel/video fields', 
   assert.deepEqual(carousel.media.map((media) => media.sortOrder), [0, 1, 2])
   assert.deepEqual(carousel.media.map((media) => media.type), ['IMAGE', 'VIDEO', 'IMAGE'])
   assert.equal(carousel.media[1]?.duration, 12.5)
+  assert.equal(carousel.authorAvatarUrl, 'https://scontent.cdninstagram.com/avatar.jpg')
 
   const reel = normalizeApifyInstagramItem({
     ...rawImage('reel-1', '2026-08-24T10:00:00.000Z'),

@@ -31,10 +31,9 @@ export default async function AnywhereDoorPage() {
 
   return (
     <main className="anywhere-door-page mx-auto w-full max-w-[1480px] px-3 py-4 sm:px-5 sm:py-8" data-anywhere-door-page>
-      <header className="mb-4 border-b border-sky-100 pb-4 dark:border-slate-700 sm:mb-6 sm:pb-6">
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-brand-700 dark:text-sky-300">Anywhere Door</p>
-        <h1 className="mt-1 text-2xl font-black text-brand-950 dark:text-slate-100 sm:mt-2 sm:text-3xl">随意门</h1>
-        <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-600 dark:text-slate-300 sm:mt-3 sm:leading-7">只同步公开动态，按原发布时间排列。这里是私家 E 院的存档浏览区，不代表 Instagram 官方页面。</p>
+      <header className="anywhere-door-page-heading">
+        <h1 className="anywhere-door-page-title">随意门</h1>
+        <p className="anywhere-door-page-description">只同步公开动态，按原发布时间排列。这里是私家 E 院的存档浏览区，不代表 Instagram 官方页面。</p>
       </header>
       <div className="hidden lg:block">
         {latestDetail ? <AnywhereDoorDetail post={latestDetail} morePosts={morePosts} showBackLink={false} /> : <AnywhereDoorFeed initial={initial} />}

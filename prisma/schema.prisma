@@ -4729,6 +4729,7 @@ model SocialPost {
   shortcode         String?             @db.VarChar(191)
   authorUsername    String              @db.VarChar(191)
   authorDisplayName String?
+  authorAvatarUrl   String?             @db.Text
   caption           String?             @db.Text
   permalink         String?             @db.Text
   publishedAt       DateTime

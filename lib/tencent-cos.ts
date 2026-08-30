@@ -142,3 +142,40 @@ export function getCosUrl(key: string) {
   const { config } = getCosClient()
   return `https://${config.bucket}.cos.${config.region}.myqcloud.com/${key}`
 }
+
+function isCosNotFoundError(error: unknown) {
+  if (!error || typeof error !== 'object') return false
+  const details = error as { code?: string; statusCode?: number | string; error?: { Code?: string } }
+  const code = String(details.code || details.error?.Code || '').toLowerCase()
+  return Number(details.statusCode) === 404 || code === 'nosuchkey' || code === 'notfound' || code === 'nosuchobject'
+}
+
+/** Read-only existence check using the same cached COS client/config as uploads. */
+export async function headCosObject(key: string, timeoutMs = 5000) {
+  const normalizedKey = key.trim().replace(/^\/+/, '')
+  if (!normalizedKey || normalizedKey.includes('..')) throw new Error('COS_OBJECT_KEY_INVALID')
+  const { cos, config } = getCosClient()
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      new Promise<boolean>((resolve, reject) => {
+        cos.headObject({ Bucket: config.bucket, Region: config.region, Key: normalizedKey }, (error) => {
+          if (!error) {
+            resolve(true)
+            return
+          }
+          if (isCosNotFoundError(error)) {
+            resolve(false)
+            return
+          }
+          reject(error)
+        })
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('COS_HEAD_TIMEOUT')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}

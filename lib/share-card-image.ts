@@ -1,19 +1,20 @@
 'use client'
 
 import QRCode from 'qrcode'
-import { canonicalShareUrl, createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { canonicalShareUrl, createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CARD_LOGO_PATH, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 
 const FONT_SANS = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif'
 const IMAGE_TIMEOUT_MS = 4500
 const QR_SIZE = 224
 const PUBLIC_IMAGE_ORIGINS = new Set(['https://ecfc.fans', 'https://www.ecfc.fans', 'https://media.ecfc.fans'])
+const SHARE_CARD_DATA_URL_PREFIX = `data:${SHARE_CARD_MIME_TYPE};base64,`
 
 type LoadedImage = HTMLImageElement | null
 
 export type GeneratedShareCardImage = Readonly<{
-  blob: Blob
+  source: 'local' | 'remote'
+  blob: Blob | null
   previewSrc: string
-  previewSrcIsObjectUrl: boolean
   fileName: string
   width: typeof SHARE_CARD_WIDTH
   height: typeof SHARE_CARD_HEIGHT
@@ -65,6 +66,15 @@ function loadDataImage(value: string): Promise<LoadedImage> {
   })
 }
 
+function loadLocalImage(value: string): Promise<LoadedImage> {
+  return new Promise<LoadedImage>((resolve) => {
+    const image = new Image()
+    image.onload = () => resolve(image.naturalWidth > 0 && image.naturalHeight > 0 ? image : null)
+    image.onerror = () => resolve(null)
+    image.src = value
+  })
+}
+
 function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
   const safeRadius = Math.min(radius, width / 2, height / 2)
   context.beginPath()
@@ -100,7 +110,7 @@ function drawImageContain(context: CanvasRenderingContext2D, image: HTMLImageEle
   context.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight)
 }
 
-function drawDefaultBrandVisual(context: CanvasRenderingContext2D, type: ShareCardData['type']) {
+function drawDefaultBrandVisual(context: CanvasRenderingContext2D, type: ShareCardData['type'], logo: LoadedImage) {
   const gradient = context.createLinearGradient(0, 0, SHARE_CARD_WIDTH, 660)
   gradient.addColorStop(0, '#071523')
   gradient.addColorStop(0.55, '#0d526b')
@@ -119,13 +129,7 @@ function drawDefaultBrandVisual(context: CanvasRenderingContext2D, type: ShareCa
   context.fill()
   context.restore()
 
-  context.fillStyle = '#ffffff'
-  context.textAlign = 'left'
-  context.font = `800 38px ${FONT_SANS}`
-  context.fillText('私家E院', 64, 92)
-  context.fillStyle = 'rgba(255,255,255,.76)'
-  context.font = `600 24px ${FONT_SANS}`
-  context.fillText('Eason Fans Club', 66, 130)
+  if (logo) drawImageContain(context, logo, 56, 38, 128, 128, 4)
   context.fillStyle = 'rgba(255,255,255,.86)'
   context.font = `700 28px ${FONT_SANS}`
   context.fillText(shareCardTypeLabel(type), 66, 592)
@@ -179,9 +183,10 @@ function drawAvatar(context: CanvasRenderingContext2D, avatar: LoadedImage, name
 }
 
 async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boolean) {
-  const [heroImage, avatar] = await Promise.all([
+  const [heroImage, avatar, logo] = await Promise.all([
     loadImage(data.image, allowRemoteImages),
     loadImage(data.authorAvatar, allowRemoteImages),
+    loadLocalImage(SHARE_CARD_LOGO_PATH),
   ])
   const qrUrl = shareCardQrPayload(data.url)
   const qrDataUrl = await QRCode.toDataURL(qrUrl, {
@@ -212,18 +217,12 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
     overlay.addColorStop(1, 'rgba(2,8,18,.76)')
     context.fillStyle = overlay
     context.fillRect(0, 0, SHARE_CARD_WIDTH, 660)
-    context.fillStyle = '#ffffff'
-    context.textAlign = 'left'
-    context.font = `800 38px ${FONT_SANS}`
-    context.fillText('私家E院', 64, 92)
-    context.fillStyle = 'rgba(255,255,255,.82)'
-    context.font = `600 24px ${FONT_SANS}`
-    context.fillText(shareCardTypeLabel(data.type), 66, 130)
+    if (logo) drawImageContain(context, logo, 56, 38, 128, 128, 4)
     context.fillStyle = '#ffffff'
     context.font = `700 28px ${FONT_SANS}`
     context.fillText(shareCardTypeLabel(data.type), 66, 592)
   } else {
-    drawDefaultBrandVisual(context, data.type)
+    drawDefaultBrandVisual(context, data.type, logo)
   }
 
   context.fillStyle = '#f5fbfd'
@@ -310,8 +309,17 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => {
     try {
       canvas.toBlob((blob) => {
-        if (blob) resolve(blob)
-        else reject(new Error('SHARE_CARD_IMAGE_CREATE_FAILED'))
+        if (!blob) {
+          reject(new Error('SHARE_CARD_IMAGE_CREATE_FAILED'))
+          return
+        }
+        try {
+          const type = blob.type.trim().toLowerCase()
+          if (type && type !== SHARE_CARD_MIME_TYPE) throw new Error('SHARE_CARD_IMAGE_INVALID_MIME')
+          resolve(type === SHARE_CARD_MIME_TYPE ? blob : new Blob([blob], { type: SHARE_CARD_MIME_TYPE }))
+        } catch (error) {
+          reject(error)
+        }
       }, SHARE_CARD_MIME_TYPE)
     } catch (error) {
       reject(error)
@@ -319,23 +327,50 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
   })
 }
 
+function blobToDataUrl(blob: Blob) {
+  if (typeof FileReader === 'undefined') return Promise.reject(new Error('SHARE_CARD_DATA_URL_UNAVAILABLE'))
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      if (typeof result !== 'string' || !result.startsWith(SHARE_CARD_DATA_URL_PREFIX)) {
+        reject(new Error('SHARE_CARD_DATA_URL_INVALID'))
+        return
+      }
+      resolve(result)
+    }
+    reader.onerror = () => reject(reader.error || new Error('SHARE_CARD_DATA_URL_READ_FAILED'))
+    reader.onabort = () => reject(new Error('SHARE_CARD_DATA_URL_READ_ABORTED'))
+    try {
+      reader.readAsDataURL(blob)
+    } catch (error) {
+      reject(error)
+    }
+  })
+}
+
+function canvasToDataUrl(canvas: HTMLCanvasElement) {
+  const dataUrl = canvas.toDataURL(SHARE_CARD_MIME_TYPE)
+  if (!dataUrl.startsWith(SHARE_CARD_DATA_URL_PREFIX)) throw new Error('SHARE_CARD_DATA_URL_INVALID')
+  return dataUrl
+}
+
 async function finishImage(canvas: HTMLCanvasElement, data: ShareCardData, qrUrl: string) {
   const blob = await canvasToBlob(canvas)
-  if (typeof URL.createObjectURL !== 'function') {
-    return {
-      blob,
-      previewSrc: canvas.toDataURL(SHARE_CARD_MIME_TYPE),
-      previewSrcIsObjectUrl: false,
-      fileName: createShareCardFilename(data.title),
-      width: SHARE_CARD_WIDTH,
-      height: SHARE_CARD_HEIGHT,
-      qrUrl,
-    } satisfies GeneratedShareCardImage
+  let previewSrc: string
+  try {
+    previewSrc = await blobToDataUrl(blob)
+  } catch (dataUrlError) {
+    try {
+      previewSrc = canvasToDataUrl(canvas)
+    } catch {
+      throw dataUrlError
+    }
   }
   return {
+    source: 'local',
     blob,
-    previewSrc: URL.createObjectURL(blob),
-    previewSrcIsObjectUrl: true,
+    previewSrc,
     fileName: createShareCardFilename(data.title),
     width: SHARE_CARD_WIDTH,
     height: SHARE_CARD_HEIGHT,

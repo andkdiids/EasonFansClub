@@ -18,6 +18,11 @@ import { getEcenterFeaturesForUser } from '@/lib/ecenter-features'
 import { buildPageMetadata, metadataImageVariantUrl, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
 import './globals.css'
 
+// The root shell reads the request session and runtime site configuration.
+// Keep its metadata and authenticated shell out of build-time prerendering;
+// public crawler responses still receive the server-rendered metadata below.
+export const dynamic = 'force-dynamic'
+
 export async function generateMetadata(): Promise<Metadata> {
   const appearance = await getSiteAppearance()
   const logoUrl = publicImageUrl(appearance.images.navLogoUrl || appearance.images.logoUrl)

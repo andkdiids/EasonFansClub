@@ -2,10 +2,39 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { shareContent } from '@/lib/share'
+import { createShareCardFilename, isTrustedShareCardHttpsUrl, shareCardApiPath, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { generateShareCardImage, type GeneratedShareCardImage } from '@/lib/share-card-image'
-import type { ShareCardData } from '@/lib/share-card'
 import { ShareCardPreview } from './ShareCardPreview'
 import { ShareMethodDialog } from './ShareMethodDialog'
+
+type ShareCardApiResponse = Readonly<{
+  url?: unknown
+  width?: unknown
+  height?: unknown
+  mimeType?: unknown
+}>
+
+class ShareCardNotShareableError extends Error {}
+
+async function requestServerShareCard(data: ShareCardData): Promise<GeneratedShareCardImage | null> {
+  const endpoint = shareCardApiPath(data)
+  if (!endpoint) return null
+  const response = await fetch(endpoint, { method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } })
+  if (response.status === 403 || response.status === 404) throw new ShareCardNotShareableError()
+  if (!response.ok) throw new Error(`SHARE_CARD_API_${response.status}`)
+  const result = await response.json() as ShareCardApiResponse
+  if (typeof result.url !== 'string' || !isTrustedShareCardHttpsUrl(result.url)) throw new Error('SHARE_CARD_API_URL_INVALID')
+  if (result.mimeType !== SHARE_CARD_MIME_TYPE || result.width !== SHARE_CARD_WIDTH || result.height !== SHARE_CARD_HEIGHT) throw new Error('SHARE_CARD_API_DIMENSIONS_INVALID')
+  return {
+    source: 'remote',
+    blob: null,
+    previewSrc: result.url,
+    fileName: createShareCardFilename(data.title),
+    width: SHARE_CARD_WIDTH,
+    height: SHARE_CARD_HEIGHT,
+    qrUrl: shareCardQrPayload(data.url),
+  }
+}
 
 export function ShareButton({ data, linkTitle, linkText, label = '分享', triggerClassName = '', messageClassName = '', ariaLabel, canSaveCard = data.canGenerateCard !== false }: Readonly<{
   data: ShareCardData
@@ -25,7 +54,6 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
   const [message, setMessage] = useState('')
   const generationId = useRef(0)
   const messageTimer = useRef<number | null>(null)
-  const cardImageRef = useRef<GeneratedShareCardImage | null>(null)
 
   const clearMessageTimer = useCallback(() => {
     if (messageTimer.current !== null) window.clearTimeout(messageTimer.current)
@@ -41,7 +69,6 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
   useEffect(() => () => {
     generationId.current += 1
     clearMessageTimer()
-    if (cardImageRef.current?.previewSrcIsObjectUrl) URL.revokeObjectURL(cardImageRef.current.previewSrc)
   }, [clearMessageTimer])
 
   function closePreview() {
@@ -49,11 +76,7 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
     setPreviewOpen(false)
     setCardStatus('generating')
     setCardError('')
-    setCardImage((current) => {
-      if (current?.previewSrcIsObjectUrl) URL.revokeObjectURL(current.previewSrc)
-      cardImageRef.current = null
-      return null
-    })
+    setCardImage(null)
   }
 
   async function generateCard() {
@@ -62,22 +85,29 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
     setPreviewOpen(true)
     setCardStatus('generating')
     setCardError('')
-    setCardImage((current) => {
-      if (current?.previewSrcIsObjectUrl) URL.revokeObjectURL(current.previewSrc)
-      cardImageRef.current = null
-      return null
-    })
+    setCardImage(null)
     await new Promise<void>((resolve) => {
       if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => resolve())
       else window.setTimeout(resolve, 0)
     })
     try {
-      const image = await generateShareCardImage(data)
+      let image: GeneratedShareCardImage | null = null
+      try {
+        image = await requestServerShareCard(data)
+      } catch (error) {
+        if (error instanceof ShareCardNotShareableError) {
+          if (currentGeneration !== generationId.current) return
+          setCardError('此内容暂不能生成公开分享卡片。')
+          setCardStatus('error')
+          return
+        }
+        // A temporary API/renderer/COS failure is intentionally handled by the
+        // existing local renderer. The server remains the normal path.
+      }
+      if (!image) image = await generateShareCardImage(data)
       if (currentGeneration !== generationId.current) {
-        if (image.previewSrcIsObjectUrl) URL.revokeObjectURL(image.previewSrc)
         return
       }
-      cardImageRef.current = image
       setCardImage(image)
       setCardStatus('ready')
     } catch (error) {

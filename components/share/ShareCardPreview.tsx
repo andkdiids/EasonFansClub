@@ -1,9 +1,30 @@
 'use client'
 
 import { createPortal } from 'react-dom'
-import { useEffect } from 'react'
+import { useEffect, type MouseEvent } from 'react'
 import type { GeneratedShareCardImage } from '@/lib/share-card-image'
 import type { ShareCardData } from '@/lib/share-card'
+import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
+
+async function downloadShareCard(event: MouseEvent<HTMLAnchorElement>, image: GeneratedShareCardImage) {
+  if (image.source !== 'remote' || !image.previewSrc.startsWith('https://')) return
+  event.preventDefault()
+  try {
+    const response = await fetch(image.previewSrc, { mode: 'cors', credentials: 'omit', cache: 'force-cache' })
+    if (!response.ok) throw new Error('SHARE_CARD_DOWNLOAD_FAILED')
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = image.fileName
+    anchor.click()
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+  } catch {
+    // A CDN without CORS can still be opened from the user's explicit click;
+    // the preview itself remains the original HTTPS image throughout.
+    window.open(image.previewSrc, '_blank', 'noopener,noreferrer')
+  }
+}
 
 export function ShareCardPreview({ data, status, image, error, onClose, onRetry }: Readonly<{
   data: ShareCardData
@@ -13,6 +34,8 @@ export function ShareCardPreview({ data, status, image, error, onClose, onRetry 
   onClose: () => void
   onRetry: () => void
 }>) {
+  const isDesktop = useIsDesktopMediaQuery()
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -56,15 +79,16 @@ export function ShareCardPreview({ data, status, image, error, onClose, onRetry 
           </div>
         ) : image ? (
           <>
-            <p className="share-card-preview-hint">手机可长按图片保存；电脑可点击“保存图片”下载 PNG。</p>
+            <p className="share-card-preview-hint">{isDesktop ? '点击保存图片下载 PNG' : '长按分享卡片，可保存图片或转发给好友'}</p>
             <div className="share-card-preview-image-wrap">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={image.previewSrc} alt={`${data.title}分享卡片`} className="share-card-preview-image" data-share-card-image data-share-card-qr-url={image.qrUrl} />
+              <img src={image.previewSrc} width={image.width} height={image.height} alt={`${data.title}分享卡片`} className="share-card-preview-image" data-share-card-image data-share-card-source={image.source} data-share-card-qr-url={image.qrUrl} data-allow-native-image-drag="true" />
             </div>
-            <div className="share-card-preview-actions">
-              <a href={image.previewSrc} download={image.fileName} className="share-card-preview-primary" data-share-card-save>保存图片</a>
-              <button type="button" onClick={onClose} className="share-card-preview-secondary">完成</button>
-            </div>
+            {isDesktop ? (
+              <div className="share-card-preview-actions">
+                <a href={image.previewSrc} download={image.fileName} onClick={(event) => { void downloadShareCard(event, image) }} className="share-card-preview-primary" data-share-card-save>保存图片</a>
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>

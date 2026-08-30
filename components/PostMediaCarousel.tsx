@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { ImageViewer } from '@/components/ImageViewer'
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { IMAGE_VIEWER_AUTO_PLAY_INTERVAL_MS, ImageViewer } from '@/components/ImageViewer'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 const CONTROL_HIDE_DELAY_MS = 2_200
@@ -36,12 +36,17 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
   const [currentIndex, setCurrentIndex] = useState(0)
   const [controlsVisible, setControlsVisible] = useState(items.length > 1)
   const [failedImageIds, setFailedImageIds] = useState<Set<string>>(() => new Set())
+  const [isViewerOpen, setIsViewerOpen] = useState(false)
+  const [isPageVisible, setIsPageVisible] = useState(true)
   const viewportRef = useRef<HTMLDivElement>(null)
   const hideControlsTimerRef = useRef<number | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
+  const pageAutoPlayTimeoutRef = useRef<number | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const suppressClickRef = useRef(false)
   const activeIndexRef = useRef(0)
+  const viewerOpenRef = useRef(false)
+  const viewerItemIdRef = useRef<string | null>(null)
   const itemsKey = items.map((item) => `${item.id}:${item.url}:${item.broken ? 'broken' : 'ok'}`).join('|')
   const viewerGallery = items
     .filter((item) => !item.broken && !failedImageIds.has(item.id))
@@ -56,6 +61,13 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
     if (hideControlsTimerRef.current !== null) {
       window.clearTimeout(hideControlsTimerRef.current)
       hideControlsTimerRef.current = null
+    }
+  }, [])
+
+  const clearPageAutoPlayTimeout = useCallback(() => {
+    if (pageAutoPlayTimeoutRef.current !== null) {
+      window.clearTimeout(pageAutoPlayTimeoutRef.current)
+      pageAutoPlayTimeoutRef.current = null
     }
   }, [])
 
@@ -85,6 +97,13 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
   }, [itemsKey])
 
   useEffect(() => {
+    const syncVisibility = () => setIsPageVisible(document.visibilityState === 'visible')
+    syncVisibility()
+    document.addEventListener('visibilitychange', syncVisibility)
+    return () => document.removeEventListener('visibilitychange', syncVisibility)
+  }, [])
+
+  useEffect(() => {
     if (items.length <= 1) return undefined
     showControls()
     return () => clearHideControlsTimer()
@@ -92,8 +111,9 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
 
   useEffect(() => () => {
     clearHideControlsTimer()
+    clearPageAutoPlayTimeout()
     if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current)
-  }, [clearHideControlsTimer])
+  }, [clearHideControlsTimer, clearPageAutoPlayTimeout])
 
   const handleScroll = useCallback(() => {
     showControls()
@@ -104,7 +124,7 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
     })
   }, [showControls, updateCurrentIndex])
 
-  function scrollToIndex(nextIndex: number, event?: React.MouseEvent<HTMLButtonElement>) {
+  const scrollToIndex = useCallback((nextIndex: number, event?: ReactMouseEvent<HTMLButtonElement>) => {
     event?.preventDefault()
     event?.stopPropagation()
     const safeIndex = Math.min(items.length - 1, Math.max(0, nextIndex))
@@ -117,7 +137,43 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
     activeIndexRef.current = safeIndex
     setCurrentIndex(safeIndex)
     if (viewport) viewport.scrollTo({ left: safeIndex * viewport.clientWidth, behavior: 'smooth' })
-  }
+  }, [items.length, showControls])
+
+  useEffect(() => {
+    clearPageAutoPlayTimeout()
+    if (items.length <= 1 || isViewerOpen || !isPageVisible) return clearPageAutoPlayTimeout
+    pageAutoPlayTimeoutRef.current = window.setTimeout(() => {
+      pageAutoPlayTimeoutRef.current = null
+      if (viewerOpenRef.current || document.visibilityState !== 'visible') return
+      const nextIndex = (activeIndexRef.current + 1) % items.length
+      scrollToIndex(nextIndex)
+    }, IMAGE_VIEWER_AUTO_PLAY_INTERVAL_MS)
+    return clearPageAutoPlayTimeout
+  }, [clearPageAutoPlayTimeout, currentIndex, isPageVisible, isViewerOpen, items.length, itemsKey, scrollToIndex])
+
+  const handleViewerIndexChange = useCallback((viewerIndex: number) => {
+    viewerItemIdRef.current = viewerGallery[viewerIndex]?.id || null
+  }, [viewerGallery])
+
+  const handleViewerOpenChange = useCallback((open: boolean) => {
+    viewerOpenRef.current = open
+    if (open) {
+      clearPageAutoPlayTimeout()
+      setIsViewerOpen(true)
+      return
+    }
+
+    const nextIndex = viewerItemIdRef.current
+      ? items.findIndex((item) => item.id === viewerItemIdRef.current)
+      : -1
+    if (nextIndex >= 0) {
+      activeIndexRef.current = nextIndex
+      setCurrentIndex(nextIndex)
+      const viewport = viewportRef.current
+      if (viewport) viewport.scrollTo({ left: nextIndex * viewport.clientWidth, behavior: 'auto' })
+    }
+    setIsViewerOpen(false)
+  }, [clearPageAutoPlayTimeout, items])
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (items.length <= 1 || (event.pointerType === 'mouse' && event.button !== 0)) return
@@ -243,6 +299,8 @@ export function PostMediaCarousel({ items }: Readonly<{ items: PostMediaCarousel
                     loading={index <= currentIndex + 1 ? 'eager' : 'lazy'}
                     fetchPriority={index === currentIndex ? 'high' : 'low'}
                     onError={() => markImageFailed(item.id)}
+                    onOpenChange={handleViewerOpenChange}
+                    onIndexChange={handleViewerIndexChange}
                     buttonClassName="post-media-carousel-image-button"
                     imageClassName="post-media-carousel-image"
                   />

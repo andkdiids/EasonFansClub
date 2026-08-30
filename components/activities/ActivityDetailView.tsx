@@ -25,6 +25,7 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
   const shareLocation = [activity.locationName, activity.locationAddress].filter(Boolean).join('，')
   const shareCardData: ShareCardData = {
     type: 'activity',
+    contentId: activity.id,
     title: activity.title,
     description: createActivityShareDescription(activity),
     image: firstAbsoluteMetadataImageUrl([

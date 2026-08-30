@@ -19,6 +19,19 @@ function stringOrNull(value: unknown) {
   return text ? text : null
 }
 
+function optionalImageUrl(value: unknown) {
+  const result = stringOrNull(value)
+  if (!result) return null
+  if (result.startsWith('/')) return result
+  try {
+    const url = new URL(result)
+    if (url.protocol !== 'https:' || url.username || url.password) return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
 function numberOrNull(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
@@ -93,6 +106,7 @@ export function normalizeInstagramPost(value: unknown): InstagramPost {
     externalId: safeExternalId(item.externalId ?? item.id),
     shortcode: stringOrNull(item.shortcode),
     username: normalizeInstagramUsername(requiredString(item.username ?? item.ownerUsername, 'username')),
+    authorAvatarUrl: optionalImageUrl(item.authorAvatarUrl ?? item.ownerAvatarUrl ?? item.profilePicUrl ?? item.profileImageUrl ?? item.avatarUrl),
     caption: stringOrNull(item.caption),
     publishedAt: parsePublishedAt(item.publishedAt ?? item.timestamp ?? item.takenAt),
     permalink: safeInstagramPermalink(item.permalink ?? item.url),

@@ -102,6 +102,30 @@ test('activity card follows banner, cover, default and keeps invalid candidates 
   assert.match(page, /catch \{/)
 })
 
+test('server-backed card requests use only a content id, keep HTTPS as the normal source, and use data URL only for fallback', () => {
+  const button = read('components/share/ShareButton.tsx')
+  const routes = `${read('app/api/posts/[postId]/share-card/route.ts')}\n${read('app/api/activities/[activityId]/share-card/route.ts')}`
+  assert.match(button, /shareCardApiPath\(data\)/)
+  assert.match(button, /method: 'GET'/)
+  assert.match(button, /source: 'remote'/)
+  assert.match(button, /if \(!image\) image = await generateShareCardImage\(data\)/)
+  assert.match(button, /previewSrc: result\.url/)
+  assert.match(routes, /export async function GET/)
+  assert.doesNotMatch(routes, /request\.json\(\)/)
+  assert.match(button, /isTrustedShareCardHttpsUrl\(result\.url\)/)
+})
+
+test('both client and server card renderers use the same official app icon without a top-left text brand', () => {
+  const client = read('lib/share-card-image.ts')
+  const server = read('lib/share-card-renderer.ts')
+  assert.match(client, /loadLocalImage\(SHARE_CARD_LOGO_PATH\)/)
+  assert.match(client, /drawImageContain\(context, logo, 56, 38, 128, 128, 4\)/)
+  assert.match(server, /OFFICIAL_LOGO_PATH = path\.join\(process\.cwd\(\), 'app', 'icon\.png'\)/)
+  assert.doesNotMatch(client, /fillText\('私家E院', 64, 92\)/)
+  assert.doesNotMatch(client, /fillText\(shareCardTypeLabel\(data\.type\), 66, 130\)/)
+  assert.doesNotMatch(server, /fillText\(/)
+})
+
 test('author avatar is optional and card renderer has a deterministic initials fallback', () => {
   const image = read('lib/share-card-image.ts')
   assert.match(image, /if \(avatar\)/)
@@ -150,7 +174,33 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.match(preview, /download=\{image\.fileName\}/)
   assert.match(preview, /data-share-card-save/)
   assert.match(preview, /data-share-card-qr-url=\{image\.qrUrl\}/)
+  assert.match(preview, /data-share-card-source=\{image\.source\}/)
   assert.match(preview, /高清 PNG · 1080 × 1440/)
+})
+
+test('mobile preview uses the generated PNG img directly and renders no action footer', () => {
+  const preview = read('components/share/ShareCardPreview.tsx')
+  const button = read('components/share/ShareButton.tsx')
+  const css = read('app/globals.css')
+  assert.match(preview, /useIsDesktopMediaQuery\(\)/)
+  assert.match(preview, /长按分享卡片，可保存图片或转发给好友/)
+  assert.match(preview, /点击保存图片下载 PNG/)
+  assert.match(preview, /\{isDesktop \? \(/)
+  assert.doesNotMatch(preview, /完成/)
+  assert.match(preview, /<img src=\{image\.previewSrc\} width=\{image\.width\} height=\{image\.height\}/)
+  assert.match(preview, /data-allow-native-image-drag="true"/)
+  assert.doesNotMatch(preview, /<img[^>]+(?:onContextMenu|onTouchStart|preventDefault\(\))/)
+  assert.doesNotMatch(button, /previewSrcIsObjectUrl|URL\.revokeObjectURL/)
+  assert.match(css, /\.share-card-preview-image \{[^}]*-webkit-touch-callout:default;[^}]*-webkit-user-drag:auto;[^}]*user-select:auto;[^}]*touch-action:auto;/)
+})
+
+test('final card preview is a portable PNG data URL and does not depend on object URL lifetime', () => {
+  const image = read('lib/share-card-image.ts')
+  assert.match(image, /reader\.readAsDataURL\(blob\)/)
+  assert.match(image, /data:\$\{SHARE_CARD_MIME_TYPE\};base64,/)
+  assert.match(image, /previewSrc = await blobToDataUrl\(blob\)/)
+  assert.match(image, /blob\.type\.trim\(\)\.toLowerCase\(\)/)
+  assert.doesNotMatch(image, /URL\.createObjectURL|previewSrcIsObjectUrl/)
 })
 
 test('the existing link helper contract remains title, text, url, navigator.share, and title-newline-url fallback', () => {

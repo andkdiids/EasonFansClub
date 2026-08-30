@@ -289,6 +289,14 @@ test('dynamic routes use server metadata and public detail paths bypass the logi
   assert.equal(activityResponse.status, 200)
   assert.equal(postResponse.headers.get('location'), null)
   assert.equal(activityResponse.headers.get('location'), null)
+
+  const shareCardResponse = await import('../middleware').then(({ middleware: handler }) => handler(new NextRequest('https://ecfc.fans/api/posts/post-1/share-card')))
+  assert.equal(shareCardResponse.status, 200)
+  assert.equal(shareCardResponse.headers.get('location'), null)
+
+  const protectedApiResponse = await import('../middleware').then(({ middleware: handler }) => handler(new NextRequest('https://ecfc.fans/api/posts/post-1/like')))
+  assert.equal(protectedApiResponse.status, 401)
+  assert.equal(protectedApiResponse.headers.get('location'), null)
 })
 
 test('homepage metadata crawler allow-list bypasses only the root page', async () => {

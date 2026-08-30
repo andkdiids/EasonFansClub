@@ -5,6 +5,7 @@ export const SHARE_CARD_HEIGHT = 1440
 export const SHARE_CARD_MIME_TYPE = 'image/png'
 
 export const SHARE_CARD_CANONICAL_ORIGIN = 'https://ecfc.fans'
+export const SHARE_CARD_LOGO_PATH = '/icon.png'
 
 export type ShareCardType = 'home' | 'post' | 'activity' | 'clinic'
 
@@ -16,6 +17,8 @@ export type ShareCardMeta = Readonly<{
 /** The only public fields that can reach the client-side poster renderer. */
 export type ShareCardData = Readonly<{
   type: ShareCardType
+  /** Public content id used to request a server-generated card. */
+  contentId?: string
   title: string
   description: string
   image: string | null
@@ -44,6 +47,31 @@ export function canonicalShareUrl(value: string) {
 
 export function shareCardQrPayload(url: string) {
   return canonicalShareUrl(url)
+}
+
+/** Return the public server endpoint for content types backed by persisted data. */
+export function shareCardApiPath(data: Pick<ShareCardData, 'type' | 'contentId'>) {
+  if (!data.contentId) return null
+  if (data.type === 'post') return `/api/posts/${encodeURIComponent(data.contentId)}/share-card`
+  if (data.type === 'activity') return `/api/activities/${encodeURIComponent(data.contentId)}/share-card`
+  return null
+}
+
+/** Guard the URL returned by the Share Card API before putting it in an image element. */
+export function isTrustedShareCardHttpsUrl(value: string | null | undefined) {
+  if (!value) return false
+  try {
+    const parsed = new URL(value)
+    const host = parsed.hostname.toLowerCase()
+    return parsed.protocol === 'https:' && (
+      host === 'ecfc.fans'
+      || host === 'www.ecfc.fans'
+      || host === 'media.ecfc.fans'
+      || host === 'ecfc-1306412725.cos.ap-guangzhou.myqcloud.com'
+    )
+  } catch {
+    return false
+  }
 }
 
 function redactSensitiveText(value: string) {

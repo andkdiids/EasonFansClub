@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { isPublicMediaProxyUrl, toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 
@@ -23,6 +23,7 @@ export type SocialPostView = {
   externalId: string
   shortcode: string | null
   authorUsername: string
+  authorAvatarUrl: string | null
   caption: string | null
   publishedAt: string
   permalink: string | null
@@ -52,17 +53,29 @@ export type SocialPostDetailView = SocialPostView & {
   commentsNextCursor: string | null
 }
 
-type SocialPostRow = Prisma.SocialPostGetPayload<{
-  include: {
-    media: true
-    _count: { select: { likes: true; comments: true } }
-  }
-}>
+type SocialPostRow = Prisma.SocialPostGetPayload<{ select: typeof publicPostSelect }>
 
-const publicPostInclude = {
+/* Keep the public projection explicit so a pending optional avatar migration
+   cannot take the feed down before the column exists in a local database. */
+const publicPostSelect = {
+  id: true,
+  platform: true,
+  externalId: true,
+  shortcode: true,
+  authorUsername: true,
+  authorDisplayName: true,
+  caption: true,
+  permalink: true,
+  publishedAt: true,
+  syncedAt: true,
+  mediaType: true,
+  status: true,
+  provider: true,
+  createdAt: true,
+  updatedAt: true,
   media: { orderBy: { sortOrder: 'asc' as const } },
   _count: { select: { likes: true, comments: true } },
-} satisfies Prisma.SocialPostInclude
+} satisfies Prisma.SocialPostSelect
 
 function pageSize(value: number | string | null | undefined, fallback = DEFAULT_SOCIAL_PAGE_SIZE) {
   const parsed = typeof value === 'number' ? value : Number(value)
@@ -99,6 +112,47 @@ function safePublicMediaUrl(value?: string | null) {
   }
 }
 
+const PUBLIC_AUTHOR_AVATAR_HOSTS = ['cdninstagram.com', 'fbcdn.net'] as const
+let authorAvatarColumnAvailable: boolean | null = null
+
+function safePublicAuthorAvatarUrl(value?: string | null) {
+  const url = toPublicMediaUrl(value)
+  if (!url) return null
+  if (isPublicMediaProxyUrl(url)) return url
+  try {
+    const parsed = new URL(url, 'https://local.invalid')
+    if (parsed.origin === 'https://local.invalid' && parsed.pathname.startsWith('/') && !parsed.username && !parsed.password) return url
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
+    return PUBLIC_AUTHOR_AVATAR_HOSTS.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`)) ? url : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Reads the optional avatar column in one bounded query. The query is
+ * intentionally best-effort so a database awaiting the accompanying
+ * migration continues to render the source fallback instead of failing the
+ * whole public feed.
+ */
+export async function readStoredAuthorAvatarUrls(postIds: readonly string[]) {
+  if (!postIds.length || authorAvatarColumnAvailable === false) return new Map<string, string>()
+  try {
+    const rows = await prisma.$queryRaw<Array<{ id: string; authorAvatarUrl: string | null }>>(Prisma.sql`SELECT id, authorAvatarUrl FROM SocialPost WHERE id IN (${Prisma.join([...postIds])})`)
+    authorAvatarColumnAvailable = true
+    const result = new Map<string, string>()
+    for (const row of rows) {
+      const url = safePublicAuthorAvatarUrl(row.authorAvatarUrl)
+      if (url) result.set(row.id, url)
+    }
+    return result
+  } catch {
+    authorAvatarColumnAvailable = false
+    return new Map<string, string>()
+  }
+}
+
 function serializeMedia(row: SocialPostRow['media'][number]): SocialPostMediaView | null {
   const url = safePublicMediaUrl(row.storageUrl)
   if (!url) return null
@@ -123,12 +177,13 @@ async function viewerLikeIds(postIds: string[], viewerId?: string | null) {
   return new Set(rows.map((row) => row.postId))
 }
 
-function serializePost(row: SocialPostRow, likedIds: Set<string>): SocialPostView {
+function serializePost(row: SocialPostRow, likedIds: Set<string>, authorAvatarUrl?: string | null): SocialPostView {
   return {
     id: row.id,
     externalId: row.externalId,
     shortcode: row.shortcode,
     authorUsername: row.authorUsername,
+    authorAvatarUrl: safePublicAuthorAvatarUrl(authorAvatarUrl),
     caption: row.caption,
     publishedAt: row.publishedAt.toISOString(),
     permalink: row.permalink,
@@ -156,14 +211,15 @@ export async function getPublicSocialPostFeed(options: { cursor?: string | null;
     where,
     orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
     take: take + 1,
-    include: publicPostInclude,
+    select: publicPostSelect,
   })
   const hasMore = rows.length > take
   const pageRows = rows.slice(0, take)
   const likedIds = await viewerLikeIds(pageRows.map((row) => row.id), options.viewerId)
+  const authorAvatarUrls = await readStoredAuthorAvatarUrls(pageRows.map((row) => row.id))
   const last = pageRows[pageRows.length - 1]
   return {
-    items: pageRows.map((row) => serializePost(row, likedIds)),
+    items: pageRows.map((row) => serializePost(row, likedIds, authorAvatarUrls.get(row.id))),
     nextCursor: hasMore && last ? encodeSocialCursor({ publishedAt: last.publishedAt.toISOString(), id: last.id }) : null,
   }
 }
@@ -265,10 +321,11 @@ export async function getPublicSocialPostComments(options: {
 }
 
 export async function getPublicSocialPostDetail(id: string, viewerId?: string | null): Promise<SocialPostDetailView | null> {
-  const row = await prisma.socialPost.findFirst({ where: { id, status: 'READY' }, include: publicPostInclude })
+  const row = await prisma.socialPost.findFirst({ where: { id, status: 'READY' }, select: publicPostSelect })
   if (!row) return null
   const likedIds = await viewerLikeIds([row.id], viewerId)
-  const post = serializePost(row, likedIds)
+  const authorAvatarUrls = await readStoredAuthorAvatarUrls([row.id])
+  const post = serializePost(row, likedIds, authorAvatarUrls.get(row.id))
   const comments = await getPublicSocialPostComments({ postId: id, viewerId })
   return {
     ...post,
@@ -290,7 +347,7 @@ export async function getAdminSocialPosts(options: { status?: string | null; pag
       orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
       skip: (page - 1) * take,
       take,
-      include: publicPostInclude,
+      select: publicPostSelect,
     }),
     prisma.socialPost.count({ where }),
   ])

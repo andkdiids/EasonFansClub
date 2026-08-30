@@ -2,7 +2,15 @@
 
 import { useEffect } from 'react'
 
-export function ForumDiscoveryDetailController({ children }: Readonly<{ children: React.ReactNode }>) {
+export function ForumDiscoveryDetailController({ children, hasReplyTarget = false }: Readonly<{
+  children: React.ReactNode
+  hasReplyTarget?: boolean
+}>) {
+  useEffect(() => {
+    if (hasReplyTarget || window.location.hash) return
+    window.scrollTo({ left: 0, top: 0, behavior: 'auto' })
+  }, [hasReplyTarget])
+
   useEffect(() => {
     const root = document.documentElement
     const media = window.matchMedia('(max-width: 767px)')

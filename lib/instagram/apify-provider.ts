@@ -142,6 +142,71 @@ function firstUrl(value: unknown): string | null {
   return null
 }
 
+function avatarUrlValue(value: unknown): string | null {
+  if (typeof value === 'string') return stringValue(value)
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const url = avatarUrlValue(entry)
+      if (url) return url
+    }
+    return null
+  }
+  const item = asRecord(value)
+  if (!item) return null
+  for (const key of [
+    'profilePicUrl', 'profile_pic_url', 'profilePicUrlHD', 'profile_pic_url_hd',
+    'profileImageUrl', 'profile_image_url', 'avatarUrl', 'avatar_url',
+    'profilePictureUrl', 'profile_picture_url', 'url', 'src',
+  ]) {
+    const url = avatarUrlValue(item[key])
+    if (url) return url
+  }
+  return null
+}
+
+function authorAvatarUrl(item: UnknownRecord) {
+  const owner = asRecord(item.owner)
+  const profile = asRecord(item.profile)
+  for (const candidate of [
+    item.ownerProfilePicUrl,
+    item.owner_profile_pic_url,
+    item.ownerProfilePicUrlHD,
+    item.owner_profile_pic_url_hd,
+    item.ownerAvatarUrl,
+    item.owner_avatar_url,
+    item.profilePicUrl,
+    item.profile_pic_url,
+    item.profilePicUrlHD,
+    item.profile_pic_url_hd,
+    item.profileImageUrl,
+    item.profile_image_url,
+    item.avatarUrl,
+    item.avatar_url,
+    item.profilePictureUrl,
+    item.profile_picture_url,
+    owner?.profilePicUrl,
+    owner?.profile_pic_url,
+    owner?.profilePicUrlHD,
+    owner?.profile_pic_url_hd,
+    owner?.profileImageUrl,
+    owner?.profile_image_url,
+    owner?.avatarUrl,
+    owner?.avatar_url,
+    profile?.profilePicUrl,
+    profile?.profile_pic_url,
+    profile?.profilePicUrlHD,
+    profile?.profile_pic_url_hd,
+    profile?.profileImageUrl,
+    profile?.profile_image_url,
+    profile?.avatarUrl,
+    profile?.avatar_url,
+  ]) {
+    const url = avatarUrlValue(candidate)
+    if (url) return url
+  }
+  return null
+}
+
 function mediaUrl(item: UnknownRecord, keys: readonly string[]) {
   for (const key of keys) {
     const url = firstUrl(item[key])
@@ -428,6 +493,7 @@ export function normalizeApifyInstagramItem(value: unknown): InstagramPost {
       externalId,
       shortcode,
       username,
+      authorAvatarUrl: authorAvatarUrl(item),
       caption: stringValue(item.caption),
       publishedAt,
       permalink: permalinkFor(item, shortcode),

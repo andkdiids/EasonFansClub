@@ -172,6 +172,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
 
   const clinicShareCardData: ShareCardData = {
     type: 'clinic',
+    contentId: record.id,
     title: `${record.categoryLabel} · ${record.needLabel}`,
     description: record.content,
     image: null,

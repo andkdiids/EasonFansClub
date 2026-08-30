@@ -186,7 +186,7 @@ async function notifyNewSocialPosts(postIds: string[], target: string) {
 async function upsertPost(post: InstagramPost, providerName: string, localizer: InstagramMediaLocalizer) {
   const existing = await prisma.socialPost.findUnique({
     where: { platform_externalId: { platform: 'INSTAGRAM', externalId: post.externalId } },
-    include: { media: { orderBy: { sortOrder: 'asc' } } },
+    select: { status: true, media: { orderBy: { sortOrder: 'asc' } } },
   })
   const canReuseMedia = canReuseInstagramMedia(existing, post)
   const localizedMedia: LocalizedInstagramMedia[] = []
@@ -199,12 +199,14 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
           platform: 'INSTAGRAM', externalId: post.externalId, shortcode: post.shortcode,
           authorUsername: post.username, caption: post.caption, publishedAt: post.publishedAt,
           permalink: post.permalink, mediaType: post.mediaType, status: 'DISCOVERED', provider: providerName,
+          ...(post.authorAvatarUrl ? { authorAvatarUrl: post.authorAvatarUrl } : {}),
         },
         update: {
           shortcode: post.shortcode, authorUsername: post.username, caption: post.caption,
           publishedAt: post.publishedAt, permalink: post.permalink, mediaType: post.mediaType, provider: providerName,
           status: existing?.status === 'HIDDEN' ? 'HIDDEN' : 'DOWNLOADING',
           syncedAt: new Date(),
+          ...(post.authorAvatarUrl ? { authorAvatarUrl: post.authorAvatarUrl } : {}),
         },
         select: { id: true, status: true },
       })

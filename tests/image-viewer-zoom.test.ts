@@ -78,12 +78,14 @@ test('多图默认每三秒自动切图，最后一张回到第一张，单图�
   assert.match(viewer, /if \(!open \|\| !autoPlay \|\| !isGallery \|\| !isAutoPlaying/)
 })
 
-test('点击、切图、拖动、缩放和关闭都会停止或清理自动播放', () => {
-  assert.match(viewer, /const pauseAutoPlay = useCallback/)
-  assert.match(viewer, /onPointerDown[\s\S]*pauseAutoPlay\(\)/)
-  assert.match(viewer, /onPointerMove[\s\S]*pauseAutoPlay\(\)/)
-  assert.match(viewer, /onWheel[\s\S]*pauseAutoPlay\(\)/)
-  assert.match(viewer, /onDoubleClick=\{\(event\) => \{ event\.stopPropagation\(\); pauseAutoPlay\(\)/)
+test('点击、切图、拖动和缩放只重置计时，关闭才清理自动播放', () => {
+  assert.match(viewer, /const beginInteraction = useCallback/)
+  assert.match(viewer, /const endInteraction = useCallback/)
+  assert.match(viewer, /onPointerDown[\s\S]*beginInteraction\(\)/)
+  assert.match(viewer, /onPointerMove[\s\S]*beginInteraction\(\)/)
+  assert.match(viewer, /onWheel[\s\S]*beginInteraction\(\)[\s\S]*endInteraction\(\)/)
+  assert.match(viewer, /onDoubleClick=\{\(event\) => \{ event\.stopPropagation\(\); applyTransform\([\s\S]*restartAutoPlayTimer\(\)/)
+  assert.doesNotMatch(viewer, /const pauseAutoPlay|hasUserInteracted/)
   assert.match(viewer, /setOpen\(false\)[\s\S]*setIsAutoPlaying\(false\)/)
   assert.match(viewer, /return clearAutoPlayTimeout/)
 })
