@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { NextRequest } from 'next/server'
+import { SignJWT } from 'jose'
 import {
   absoluteMetadataImageUrl,
   buildActivityMetadata,
@@ -18,6 +19,7 @@ import {
 } from '@/lib/share-metadata'
 import { shareContent, shareFallbackText } from '@/lib/share'
 import { isPublicMetadataCrawlerUserAgent } from '@/lib/public-metadata-crawler'
+import { WECHAT_SHARE_IMAGE_PATH } from '@/lib/wechat-share-image'
 
 function metadataOpenGraph(metadata: ReturnType<typeof buildPageMetadata>) {
   assert.ok(metadata.openGraph && typeof metadata.openGraph === 'object')
@@ -299,7 +301,7 @@ test('dynamic routes use server metadata and public detail paths bypass the logi
   assert.equal(protectedApiResponse.headers.get('location'), null)
 })
 
-test('homepage metadata crawler allow-list bypasses only the root page', async () => {
+test('root authentication applies equally to browsers, crawlers, and both public hosts', async () => {
   const crawlerUserAgents = [
     'Mozilla/5.0 MicroMessenger/8.0.1',
     'facebookexternalhit/1.1',
@@ -320,12 +322,35 @@ test('homepage metadata crawler allow-list bypasses only the root page', async (
   const { middleware } = await import('../middleware')
   const crawlerHeaders = { 'user-agent': 'Twitterbot/1.0' }
   const crawlerRootResponse = await middleware(new NextRequest('https://ecfc.fans/', { headers: crawlerHeaders }))
-  assert.equal(crawlerRootResponse.status, 200)
-  assert.equal(crawlerRootResponse.headers.get('location'), null)
+  assert.ok(crawlerRootResponse.status === 307 || crawlerRootResponse.status === 308)
+  assert.equal(new URL(crawlerRootResponse.headers.get('location') || 'https://ecfc.fans/').pathname, '/login')
 
   const browserRootResponse = await middleware(new NextRequest('https://ecfc.fans/', { headers: { 'user-agent': 'Mozilla/5.0 Chrome/140.0' } }))
   assert.ok(browserRootResponse.status === 307 || browserRootResponse.status === 308)
   assert.equal(new URL(browserRootResponse.headers.get('location') || 'https://ecfc.fans/').pathname, '/login')
+
+  for (const host of ['ecfc.fans', 'www.ecfc.fans']) {
+    const response = await middleware(new NextRequest(`https://${host}/`, { headers: crawlerHeaders }))
+    assert.ok(response.status === 307 || response.status === 308, host)
+    assert.equal(new URL(response.headers.get('location') || `https://${host}/`).pathname, '/login', host)
+  }
+
+  const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
+  const validToken = await new SignJWT({ id: 'root-routing-test-user' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setExpirationTime('1h')
+    .sign(secret)
+  const authenticatedRootResponse = await middleware(new NextRequest('https://ecfc.fans/', {
+    headers: { cookie: `eason_fans_session=${validToken}`, 'user-agent': 'Mozilla/5.0 Chrome/140.0' },
+  }))
+  assert.equal(authenticatedRootResponse.status, 200)
+  assert.equal(authenticatedRootResponse.headers.get('location'), null)
+
+  const invalidSessionResponse = await middleware(new NextRequest('https://ecfc.fans/', {
+    headers: { cookie: 'eason_fans_session=not-a-jwt', 'user-agent': 'Mozilla/5.0 Chrome/140.0' },
+  }))
+  assert.ok(invalidSessionResponse.status === 307 || invalidSessionResponse.status === 308)
+  assert.equal(new URL(invalidSessionResponse.headers.get('location') || 'https://ecfc.fans/').pathname, '/login')
 
   for (const path of ['/profile', '/admin', '/messages', '/friends', '/private']) {
     const response = await middleware(new NextRequest(`https://ecfc.fans${path}`, { headers: crawlerHeaders }))
@@ -335,14 +360,15 @@ test('homepage metadata crawler allow-list bypasses only the root page', async (
 
   const rootPage = readFileSync('app/page.tsx', 'utf8')
   const layout = readFileSync('app/layout.tsx', 'utf8')
-  assert.match(rootPage, /isPublicMetadataCrawlerUserAgent/)
-  assert.match(rootPage, /陈奕迅中文粉丝社区/)
+  assert.match(rootPage, /const user = await getCurrentUser\(\)/)
+  assert.match(rootPage, /redirect\(user \? '\/welcome' : '\/login'\)/)
+  assert.doesNotMatch(rootPage, /isPublicMetadataCrawlerUserAgent|陈奕迅中文粉丝社区|public-home-title/)
   assert.match(layout, /canonical: '\/'/)
   const { generateMetadata } = await import('../app/page')
   const metadata = generateMetadata()
   const html = metadataHtml(metadata)
   assert.match(html, /<title>私家E院 \| Eason Fans Club<\/title>/)
-  assert.match(html, /content="https:\/\/ecfc\.fans\/images\/og-default\.png"/)
+  assert.equal(html.includes(`content="https://ecfc.fans${WECHAT_SHARE_IMAGE_PATH}"`), true)
   assert.match(html, /content="https:\/\/ecfc\.fans\/"/)
   assert.match(html, /content="summary_large_image"/)
 })

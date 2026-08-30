@@ -1034,6 +1034,21 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
 @keyframes forum-discovery-skeleton { 0% { background-position:100% 0; } 100% { background-position:0 0; } }
 @keyframes forum-discovery-refresh-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
 
+/* The discovery detail topbar is intentionally mobile-first. On wide
+   screens it is the single desktop share entry; fixed-width controls keep
+   the Chinese label on one line while the author/title area may shrink. */
+@media (min-width:1024px) {
+  .forum-discovery-detail-topbar { display:flex; width:100%; min-width:0; min-height:58px; align-items:center; gap:12px; padding:8px 16px; border-bottom:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
+  .forum-discovery-detail-back { display:grid; width:38px; height:36px; flex:none; place-items:center; border:0; color:var(--foreground); background:transparent; font-size:30px; font-weight:300; line-height:1; }
+  .forum-discovery-detail-author { display:flex; min-width:0; flex:1 1 auto; align-items:center; gap:8px; overflow:hidden; color:var(--foreground); font-size:13px; font-weight:850; }
+  .forum-discovery-detail-author > span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .forum-discovery-detail-avatar { display:grid; width:32px; height:32px; flex:none; place-items:center; overflow:hidden; border-radius:50%; color:#fff; background:var(--primary); font-size:10px; }
+  .forum-discovery-detail-avatar img { width:100%; height:100%; object-fit:cover; }
+  .forum-discovery-detail-post-actions { display:flex; min-width:0; flex:none; align-items:center; }
+  .forum-discovery-detail-share { display:inline-flex; min-width:64px; height:36px; flex:none; align-items:center; justify-content:center; border:0; padding-inline:10px; color:var(--foreground); background:transparent; font-size:14px; font-weight:850; line-height:1; white-space:nowrap; }
+  .forum-discovery-share-message { position:absolute; top:48px; right:16px; border:1px solid var(--border); border-radius:999px; padding:5px 9px; color:var(--foreground); background:var(--surface-elevated); font-size:10px; font-weight:800; }
+}
+
 @media (max-width:380px) {
   .checkin-history-weekdays,.checkin-history-calendar-grid { gap:2px; }
   .checkin-history-day-cell { min-height:58px; padding-inline:1px; }
@@ -1209,9 +1224,6 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
 .hero-primary-button { display:inline-flex; min-height:44px; align-items:center; gap:28px; border:1px solid rgba(255,255,255,.24); border-radius:2px; padding:0 22px; color:#fff; background:rgba(23,105,223,.9); font-size:14px; font-style:normal; text-decoration:none; }
 .hero-primary-button:hover { background:#0f5fcf; }
 .community-hero-copy-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-.community-home-share-action { display:flex; justify-content:flex-end; padding:10px 40px 0; }
-.community-home-share-action .share-button-trigger { min-height:34px; border:1px solid var(--border); border-radius:999px; padding:0 14px; color:var(--foreground-muted); background:var(--surface); font-size:11px; font-weight:800; cursor:pointer; }
-.community-home-share-action .share-button-trigger:hover { color:var(--foreground); background:var(--surface-subtle); }
 
 .app-shell { position:relative; min-height:100dvh; color:var(--foreground); background:var(--background); }
 html.easmusic-route-active,
@@ -1827,7 +1839,6 @@ flex-direction:column;
 
 @media (max-width: 767px) {
   .community-content { padding: 24px 16px; }
-  .community-home-share-action { padding-inline:16px; }
 }
 
 .app-main-area { display: flex; min-height: 100dvh; flex-direction: column; }

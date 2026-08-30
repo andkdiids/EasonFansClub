@@ -1,23 +1,27 @@
 import { sanitizeShareCardText, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 
+/** Default Hero height used when an image has no readable dimensions. */
 export const SHARE_CARD_HERO_HEIGHT = 660
-export const SHARE_CARD_PANEL_X = 56
-export const SHARE_CARD_PANEL_TOP = 570
-export const SHARE_CARD_PANEL_WIDTH = 968
-export const SHARE_CARD_PANEL_PADDING_X = 48
+export const SHARE_CARD_PORTRAIT_HERO_HEIGHT = Math.round(SHARE_CARD_WIDTH * 4 / 3)
+export const SHARE_CARD_LANDSCAPE_MIN_HERO_HEIGHT = 360
+/** Kept as a compatibility constant; the real panel top follows the Hero. */
+export const SHARE_CARD_PANEL_TOP = SHARE_CARD_HERO_HEIGHT
+export const SHARE_CARD_PANEL_X = 0
+export const SHARE_CARD_PANEL_WIDTH = SHARE_CARD_WIDTH
+export const SHARE_CARD_PANEL_PADDING_X = 72
 export const SHARE_CARD_TEXT_WIDTH = SHARE_CARD_PANEL_WIDTH - SHARE_CARD_PANEL_PADDING_X * 2
 export const SHARE_CARD_QR_SIZE = 224
 export const SHARE_CARD_QR_FRAME_X = 788
 export const SHARE_CARD_QR_FRAME_SIZE = 232
 export const SHARE_CARD_QR_X = 792
 export const SHARE_CARD_AVATAR_SIZE = 86
-export const SHARE_CARD_AVATAR_X = 60
-export const SHARE_CARD_AUTHOR_X = 172
-export const SHARE_CARD_AUTHOR_WIDTH = 560
+export const SHARE_CARD_AVATAR_X = SHARE_CARD_PANEL_PADDING_X
+export const SHARE_CARD_AUTHOR_X = SHARE_CARD_AVATAR_X + SHARE_CARD_AVATAR_SIZE + 26
+export const SHARE_CARD_AUTHOR_WIDTH = SHARE_CARD_QR_FRAME_X - SHARE_CARD_AUTHOR_X - 28
 export const SHARE_CARD_FOOTER_LOGO_SIZE = 84
-export const SHARE_CARD_FOOTER_LOGO_X = SHARE_CARD_AVATAR_X
+export const SHARE_CARD_FOOTER_LOGO_X = SHARE_CARD_PANEL_PADDING_X
 export const SHARE_CARD_FOOTER_TEXT_X = SHARE_CARD_FOOTER_LOGO_X + SHARE_CARD_FOOTER_LOGO_SIZE + 12
-/** Keep footer copy to the left of the 232px QR frame. */
+/** Keep the footer copy to the left of the QR frame. */
 export const SHARE_CARD_FOOTER_TEXT_WIDTH = SHARE_CARD_QR_FRAME_X - SHARE_CARD_FOOTER_TEXT_X - 28
 export const SHARE_CARD_FOOTER_TITLE_FONT_SIZE = 26
 export const SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT = 34
@@ -26,8 +30,10 @@ export const SHARE_CARD_FOOTER_BRAND_LINE_HEIGHT = 28
 export const SHARE_CARD_FOOTER_TEXT_GAP = 10
 export const SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT = SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP + SHARE_CARD_FOOTER_BRAND_LINE_HEIGHT
 export const SHARE_CARD_FOOTER_BRAND_BLOCK_HEIGHT = Math.max(SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT)
-export const SHARE_CARD_FOOTER_TOP_GAP = 48
-export const SHARE_CARD_FOOTER_BOTTOM_PADDING = 64
+export const SHARE_CARD_CONTENT_BOTTOM_PADDING = 48
+export const SHARE_CARD_AUTHOR_TOP_GAP = 40
+export const SHARE_CARD_FOOTER_TOP_GAP = 40
+export const SHARE_CARD_FOOTER_BOTTOM_PADDING = 56
 export const SHARE_CARD_CATEGORY_FONT_SIZE = 22
 export const SHARE_CARD_CATEGORY_LINE_HEIGHT = 32
 export const SHARE_CARD_TITLE_FONT_SIZE = 56
@@ -41,9 +47,30 @@ export const SHARE_CARD_AUTHOR_LINE_HEIGHT = 36
 export const SHARE_CARD_DATE_FONT_SIZE = 22
 export const SHARE_CARD_DATE_LINE_HEIGHT = 30
 
-/** Post and activity media fill the Hero; the home poster keeps its contained logo treatment. */
+export type ShareCardImageDimensions = Readonly<{
+  width: number
+  height: number
+}>
+
+/** Post and activity media use the image's natural flow; home keeps its contained brand treatment. */
 export function shareCardHeroFit(type: ShareCardData['type']): 'cover' | 'contain' {
   return type === 'home' ? 'contain' : 'cover'
+}
+
+export function shareCardHeroDimensions(data: ShareCardData, dimensions?: ShareCardImageDimensions | null) {
+  const width = dimensions?.width || data.imageWidth || 0
+  const height = dimensions?.height || data.imageHeight || 0
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return { width: SHARE_CARD_WIDTH, height: SHARE_CARD_HERO_HEIGHT, orientation: 'unknown' as const }
+  }
+  if (height > width) {
+    return { width: SHARE_CARD_WIDTH, height: SHARE_CARD_PORTRAIT_HERO_HEIGHT, orientation: 'portrait' as const }
+  }
+  return {
+    width: SHARE_CARD_WIDTH,
+    height: Math.max(SHARE_CARD_LANDSCAPE_MIN_HERO_HEIGHT, Math.round(SHARE_CARD_WIDTH * height / width)),
+    orientation: 'landscape' as const,
+  }
 }
 
 export type ShareCardTextBlock = Readonly<{
@@ -55,9 +82,11 @@ export type ShareCardTextBlock = Readonly<{
 export type ShareCardLayout = Readonly<{
   width: typeof SHARE_CARD_WIDTH
   height: number
+  heroHeight: number
   panelTop: number
   panelHeight: number
   panelBottom: number
+  contentCardBottom: number
   categoryTop: number
   titleTop: number
   descriptionTop: number
@@ -82,6 +111,7 @@ export type ShareCardLayout = Readonly<{
   authorLines: readonly string[]
   dateLines: readonly string[]
   authorBlockHeight: number
+  heroOrientation: 'landscape' | 'portrait' | 'unknown'
 }>
 
 function normalizeCardText(value: string | null | undefined) {
@@ -134,7 +164,8 @@ function visibleMeta(data: ShareCardData) {
 }
 
 /** Single flow layout shared by the API response, server renderer, and local fallback. */
-export function calculateShareCardLayout(data: ShareCardData): ShareCardLayout {
+export function calculateShareCardLayout(data: ShareCardData, dimensions?: ShareCardImageDimensions | null): ShareCardLayout {
+  const hero = shareCardHeroDimensions(data, dimensions)
   const title = normalizeCardText(data.title) || shareCardTypeLabel(data.type)
   const description = normalizeCardText(data.description) || '扫码查看完整内容'
   const author = normalizeCardText(data.author) || '私家E院'
@@ -147,25 +178,28 @@ export function calculateShareCardLayout(data: ShareCardData): ShareCardLayout {
   const authorBlock = measureWrappedText(author, SHARE_CARD_AUTHOR_WIDTH, SHARE_CARD_AUTHOR_FONT_SIZE, SHARE_CARD_AUTHOR_LINE_HEIGHT)
   const dateBlock = measureWrappedText(date ? `发布于 ${date}` : '来自私家E院', SHARE_CARD_AUTHOR_WIDTH, SHARE_CARD_DATE_FONT_SIZE, SHARE_CARD_DATE_LINE_HEIGHT)
 
-  const categoryTop = SHARE_CARD_PANEL_TOP + 62
-  const titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + 24
-  const descriptionTop = titleTop + titleBlock.height + 24
-  const metaTop = descriptionTop + descriptionBlock.height + (metaLines.length ? 26 : 0)
+  const panelTop = hero.height
+  const categoryTop = panelTop + 48
+  const titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + 20
+  const descriptionTop = titleTop + titleBlock.height + 22
+  const metaTop = descriptionTop + descriptionBlock.height + (metaLines.length ? 24 : 0)
   const metaHeight = metaLines.length * SHARE_CARD_META_LINE_HEIGHT
-  const panelBottom = metaTop + metaHeight + 42
-  const panelHeight = panelBottom - SHARE_CARD_PANEL_TOP
-  const authorTop = panelBottom + 36
-  const authorTextTop = authorTop + 18
+  const panelBottom = metaTop + metaHeight + SHARE_CARD_CONTENT_BOTTOM_PADDING
+  const panelHeight = panelBottom - panelTop
+  const authorTop = panelBottom + SHARE_CARD_AUTHOR_TOP_GAP
+  const authorTextTop = authorTop + Math.max(0, (SHARE_CARD_AVATAR_SIZE - authorBlock.height - dateBlock.height - 4) / 2)
   const dateTop = authorTextTop + authorBlock.height + 4
   const authorBlockHeight = Math.max(
     SHARE_CARD_AVATAR_SIZE,
-    (authorTextTop - authorTop) + authorBlock.height + 4 + dateBlock.height + 10,
+    (authorTextTop - authorTop) + authorBlock.height + 4 + dateBlock.height,
   )
-  // The author row and the footer row are separate. QR belongs to the footer,
-  // so a short card does not leave the brand copy stranded below an author-row
-  // QR block. All footer items share one row center.
-  const brandBlockTop = authorTop + authorBlockHeight + SHARE_CARD_FOOTER_TOP_GAP
   const brandBlockHeight = SHARE_CARD_FOOTER_BRAND_BLOCK_HEIGHT
+  const footerVisualHeight = Math.max(brandBlockHeight, SHARE_CARD_QR_FRAME_SIZE)
+  const naturalBrandBlockTop = authorTop + authorBlockHeight + SHARE_CARD_FOOTER_TOP_GAP
+  // Keep the established minimum canvas height without leaving the footer
+  // floating above the bottom edge on compact cards. Long content still wins
+  // because its natural flow position is larger than this minimum anchor.
+  const brandBlockTop = Math.max(naturalBrandBlockTop, SHARE_CARD_HEIGHT - footerVisualHeight - SHARE_CARD_FOOTER_BOTTOM_PADDING)
   const qrTop = brandBlockTop
   const brandLogoTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_LOGO_SIZE) / 2
   const brandTextTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT) / 2
@@ -175,9 +209,11 @@ export function calculateShareCardLayout(data: ShareCardData): ShareCardLayout {
   return {
     width: SHARE_CARD_WIDTH,
     height,
-    panelTop: SHARE_CARD_PANEL_TOP,
+    heroHeight: hero.height,
+    panelTop,
     panelHeight,
     panelBottom,
+    contentCardBottom: panelBottom,
     categoryTop,
     titleTop,
     descriptionTop,
@@ -202,5 +238,6 @@ export function calculateShareCardLayout(data: ShareCardData): ShareCardLayout {
     authorLines: authorBlock.lines,
     dateLines: dateBlock.lines,
     authorBlockHeight,
+    heroOrientation: hero.orientation,
   }
 }

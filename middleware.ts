@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { authCookieName, getSessionCookieOptions, SESSION_MAX_AGE_SECONDS } from '@/lib/auth-cookie'
 import { buildPublicAbsoluteUrl, getPublicOrigin, isLocalHostname, safeInternalPath } from '@/lib/url-safety'
 import { isCrossSiteRequest, isStateChangingMethod } from '@/lib/csrf'
-import { isPublicMetadataCrawlerUserAgent } from '@/lib/public-metadata-crawler'
 const noStoreValue = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
 const immutableCacheValue = 'public, max-age=31536000, immutable'
 const jwtSecret = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-secret-change-before-production')
@@ -27,6 +26,11 @@ const publicExactPaths = new Set([
   '/clinic',
   '/activities',
   '/api/clinic',
+  '/api/share/wechat-logo-v2.png',
+])
+
+const immutablePublicExactPaths = new Set([
+  '/api/share/wechat-logo-v2.png',
 ])
 
 const publicPathPrefixes = [
@@ -120,15 +124,11 @@ function isPublicPath(pathname: string) {
 }
 
 function isImmutablePublicPath(pathname: string) {
-  return immutablePublicPathPrefixes.some((prefix) => pathname.startsWith(prefix))
+  return immutablePublicExactPaths.has(pathname) || immutablePublicPathPrefixes.some((prefix) => pathname.startsWith(prefix))
 }
 
 function isApiPath(pathname: string) {
   return pathname === '/api' || pathname.startsWith('/api/')
-}
-
-function isPublicMetadataCrawlerRequest(request: NextRequest) {
-  return request.nextUrl.pathname === '/' && isPublicMetadataCrawlerUserAgent(request.headers.get('user-agent'))
 }
 
 type SessionVerification = {
@@ -333,7 +333,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  if (isPublicPath(pathname) || isPublicMetadataCrawlerRequest(request)) {
+  if (isPublicPath(pathname)) {
     const response = NextResponse.next()
     return isImmutablePublicPath(pathname)
       ? withImmutableCacheHeaders(response)

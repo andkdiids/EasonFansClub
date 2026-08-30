@@ -5,20 +5,18 @@ import { getCurrentUser } from '@/lib/auth'
 import { getHomeAnnouncement } from '@/lib/home-announcement'
 import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { getSiteAppearance } from '@/lib/site-config'
-import { publicImageUrl } from '@/lib/images'
-import { buildPageMetadata, metadataImageVariantUrl, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
+import { buildPageMetadata, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
+import { WECHAT_SHARE_IMAGE_PATH } from '@/lib/wechat-share-image'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getSiteAppearance()
-  const logoUrl = publicImageUrl(config.images.navLogoUrl || config.images.logoUrl)
   return buildPageMetadata({
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
     canonical: '/community',
-    imageUrl: metadataImageVariantUrl(logoUrl),
+    imageUrl: WECHAT_SHARE_IMAGE_PATH,
   })
 }
 

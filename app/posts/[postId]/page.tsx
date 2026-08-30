@@ -31,7 +31,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { emitRealtime } from '@/lib/realtime'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
-import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, firstShareCardImageUrl, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
+import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, firstShareCardImageCandidate, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { validateRichPostContent } from '@/lib/rich-text'
 import {
@@ -264,7 +264,7 @@ type PostBoard = Prisma.BoardGetPayload<{ select: typeof postBoardSelect }>
 const postStickerSelect = { url: true, name: true, moderationStatus: true, type: true } satisfies Prisma.StickerSelect
 type PostSticker = Prisma.StickerGetPayload<{ select: typeof postStickerSelect }>
 
-const postMediaSelect = { id: true, url: true } satisfies Prisma.PostMediaSelect
+const postMediaSelect = { id: true, url: true, width: true, height: true } satisfies Prisma.PostMediaSelect
 type PostMedia = Prisma.PostMediaGetPayload<{ select: typeof postMediaSelect }>
 
 function postDetailErrorInfo(error: unknown) {
@@ -984,12 +984,15 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const safeShareCardPostContent = publicModerationText(shareCardPostContent, post.moderationStatus)
   const shareTitle = createPostShareTitle(publicPostTitle, safePublicPostContent, publicRichContent)
   const shareText = createPostShareDescription(safePublicPostContent, publicRichContent)
+  const shareCardImage = firstShareCardImageCandidate(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
   const shareCardData: ShareCardData = {
     type: 'post',
     contentId: post.id,
     title: shareTitle,
     description: safeShareCardPostContent || shareText,
-    image: firstShareCardImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
+    image: shareCardImage?.url || null,
+    imageWidth: shareCardImage?.width,
+    imageHeight: shareCardImage?.height,
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: authorName,
     authorAvatar,

@@ -15,12 +15,12 @@ import { getUnreadSummary, type UnreadSummary } from '@/lib/notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { getSiteAppearance } from '@/lib/site-config'
 import { getEcenterFeaturesForUser } from '@/lib/ecenter-features'
-import { buildPageMetadata, metadataImageVariantUrl, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
+import { buildPageMetadata, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
+import { WECHAT_SHARE_IMAGE_PATH } from '@/lib/wechat-share-image'
 import './globals.css'
 
 // The root shell reads the request session and runtime site configuration.
-// Keep its metadata and authenticated shell out of build-time prerendering;
-// public crawler responses still receive the server-rendered metadata below.
+// Keep its metadata and authenticated shell out of build-time prerendering.
 export const dynamic = 'force-dynamic'
 
 export const viewport: Viewport = {
@@ -28,15 +28,13 @@ export const viewport: Viewport = {
   colorScheme: 'light dark',
 }
 
-export async function generateMetadata(): Promise<Metadata> {
-  const appearance = await getSiteAppearance()
-  const logoUrl = publicImageUrl(appearance.images.navLogoUrl || appearance.images.logoUrl)
+export function generateMetadata(): Metadata {
   return {
     ...buildPageMetadata({
       title: SITE_TITLE,
       description: SITE_DESCRIPTION,
       canonical: '/',
-      imageUrl: metadataImageVariantUrl(logoUrl),
+      imageUrl: WECHAT_SHARE_IMAGE_PATH,
     }),
     manifest: '/manifest.webmanifest',
     appleWebApp: {

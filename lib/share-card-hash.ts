@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
+import { BRANDED_QR_VERSION } from '@/lib/branded-qr'
 import type { ShareCardData } from '@/lib/share-card'
 
-/** Bump when any generated pixel/layout changes. v5 restores the media Hero and compacts the footer row. */
-export const SHARE_CARD_TEMPLATE_VERSION = 'v5'
+/** Bump when any generated pixel/layout changes. v7 adds the final Hero policy, footer flow, and branded QR treatment. */
+export const SHARE_CARD_TEMPLATE_VERSION = 'v7'
 export const SHARE_CARD_LOGO_SOURCE = 'app/icon.png'
 export const SHARE_CARD_LOGO_VERSION = 'app-icon-footer-v1'
 
@@ -13,11 +14,15 @@ export function shareCardHashPayload(data: ShareCardData) {
       source: SHARE_CARD_LOGO_SOURCE,
       version: SHARE_CARD_LOGO_VERSION,
     },
+    qrVersion: BRANDED_QR_VERSION,
     type: data.type,
     contentId: data.contentId || '',
     title: data.title.trim(),
     description: data.description.trim(),
     image: data.image?.trim() || null,
+    imageDimensions: data.imageWidth && data.imageHeight
+      ? { width: data.imageWidth, height: data.imageHeight }
+      : null,
     url: data.url.trim(),
     author: data.author?.trim() || null,
     authorAvatar: data.authorAvatar?.trim() || null,

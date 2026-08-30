@@ -1,8 +1,8 @@
 import { htmlToPlainText } from '@/lib/share-metadata'
 
 export const SHARE_CARD_WIDTH = 1080
-/** Minimum flow height for compact cards; longer content grows naturally. */
-export const SHARE_CARD_HEIGHT = 1160
+/** Keep the established portrait baseline; longer flow content grows beyond it. */
+export const SHARE_CARD_HEIGHT = 1440
 export const SHARE_CARD_MIME_TYPE = 'image/png'
 
 export const SHARE_CARD_CANONICAL_ORIGIN = 'https://ecfc.fans'
@@ -23,6 +23,9 @@ export type ShareCardData = Readonly<{
   title: string
   description: string
   image: string | null
+  /** Optional persisted dimensions let the API return the exact deterministic Hero height without fetching twice. */
+  imageWidth?: number | null
+  imageHeight?: number | null
   url: string
   author: string | null
   authorAvatar: string | null

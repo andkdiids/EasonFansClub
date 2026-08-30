@@ -18,7 +18,7 @@ test('帖子正文使用轻量主查询，关系数据不会再通过重型 incl
   assert.match(detail, /async function loadPostSupport\(post: PostCore, userId\?: string \| null\)/)
   assert.match(detail, /Promise\.allSettled\(\[/)
   assert.match(detail, /take: 10[\s\S]{0,160}select: postLikeSelect/)
-  assert.match(detail, /const postMediaSelect = \{ id: true, url: true \}/)
+  assert.match(detail, /const postMediaSelect = \{ id: true, url: true, width: true, height: true \}/)
 })
 
 test('公共帖子不被 session、权限、勋章或互动状态读取失败拖垮', () => {

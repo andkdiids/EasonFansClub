@@ -1,7 +1,7 @@
 'use client'
 
-import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
+import { drawBrandedQrToCanvas } from '@/lib/branded-qr-client'
 
 export function MaterialRedemptionQr({ token }: { token: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -10,7 +10,7 @@ export function MaterialRedemptionQr({ token }: { token: string }) {
   useEffect(() => {
     if (!canvasRef.current || !token) return
     const verifyUrl = `${window.location.origin}/admin/material-redemptions/verify?token=${encodeURIComponent(token)}`
-    QRCode.toCanvas(canvasRef.current, verifyUrl, { width: 240, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#0b1f35', light: '#ffffff' } })
+    drawBrandedQrToCanvas(canvasRef.current, verifyUrl, 240)
       .then(() => setError(''))
       .catch(() => setError('二维码生成失败，请使用兑换码核销'))
   }, [token])

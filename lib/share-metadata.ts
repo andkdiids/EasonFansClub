@@ -237,9 +237,27 @@ export function firstAbsoluteMetadataImageUrl(values: readonly (string | null | 
 
 /** Return the first real public media URL without substituting the OG fallback. */
 export function firstShareCardImageUrl(values: readonly (string | null | undefined)[]) {
+  return firstShareCardImageCandidate(values.map((url) => ({ url })))?.url || null
+}
+
+export type ShareCardImageCandidateInput = Readonly<{
+  url: string | null | undefined
+  width?: number | null
+  height?: number | null
+}>
+
+/**
+ * Select the first public image without allowing one malformed media row to
+ * poison the whole poster. Dimensions are retained for deterministic Hero
+ * layout; the raw URL remains the source of truth for Sharp/browser loading.
+ */
+export function firstShareCardImageCandidate(values: readonly ShareCardImageCandidateInput[]) {
   for (const value of values) {
-    const resolved = resolveMetadataImageUrl(value)
-    if (resolved) return resolved
+    const url = resolveMetadataImageUrl(value.url)
+    if (!url) continue
+    const width = Number.isFinite(value.width) && Number(value.width) > 0 ? Number(value.width) : null
+    const height = Number.isFinite(value.height) && Number(value.height) > 0 ? Number(value.height) : null
+    return { url, width, height } as const
   }
   return null
 }

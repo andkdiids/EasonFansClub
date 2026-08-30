@@ -5,7 +5,7 @@ import { ActivityRegistrationButton } from '@/components/activities/ActivityRegi
 import { activityDateLabel, activityTypeLabels, type ActivityView } from '@/lib/activity'
 import type { ActivityRegistrationQuestionView, ActivityRegistrationState, ActivityRegistrationView } from '@/lib/activity-registration-shared'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { createActivityShareCardDescription, createActivityShareDescription, firstShareCardImageUrl, metadataImageVariantUrl } from '@/lib/share-metadata'
+import { createActivityShareCardDescription, createActivityShareDescription, firstShareCardImageCandidate } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { normalizeActionUrl } from '@/lib/url-safety'
 
@@ -28,10 +28,7 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
     contentId: activity.id,
     title: activity.title,
     description: createActivityShareCardDescription(activity),
-    image: firstShareCardImageUrl([
-      metadataImageVariantUrl(activity.bannerUrl),
-      metadataImageVariantUrl(activity.coverUrl),
-    ]),
+    image: firstShareCardImageCandidate([{ url: activity.bannerUrl }, { url: activity.coverUrl }])?.url || null,
     url: canonicalShareUrl(`/activities/${activity.id}`),
     author: shareAuthor?.name || activity.organizer || '私家E院',
     authorAvatar: shareAuthor?.avatarUrl || null,

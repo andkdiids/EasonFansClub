@@ -10,11 +10,11 @@ import { buildPublicMediaUrl } from '@/lib/media-url'
 import { validateRichPostContent } from '@/lib/rich-text'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { publicPostWhere } from '@/lib/post-moderation'
-import { firstShareCardImageUrl, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
+import { firstShareCardImageCandidate, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { calculateShareCardLayout } from '@/lib/share-card-layout'
 import { createShareCardContentHash } from '@/lib/share-card-hash'
-import { renderShareCardPng, isTrustedShareCardImageUrl } from '@/lib/share-card-renderer'
+import { renderShareCardPngWithInfo, isTrustedShareCardImageUrl, type ShareCardRenderResult } from '@/lib/share-card-renderer'
 import { headCosObject } from '@/lib/tencent-cos'
 import { uploadSiteImage } from '@/lib/site-media-storage'
 
@@ -30,8 +30,7 @@ const postShareCardSelect = {
   PostMedia: {
     where: { type: 'IMAGE' as const },
     orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
-    take: 12,
-    select: { url: true },
+    select: { url: true, width: true, height: true },
   },
   User: {
     select: {
@@ -123,12 +122,15 @@ export async function loadPostShareCardData(postId: string): Promise<ShareCardDa
   const plainContent = postContentPlainText(publicContent, publicRichContent, { preserveLineBreaks: true })
   const title = publicModerationText(post.title, post.moderationStatus)
   const safeContent = publicModerationText(plainContent, post.moderationStatus)
+  const image = firstShareCardImageCandidate(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
   return {
     type: 'post',
     contentId: post.id,
     title: createPostShareTitle(title, safeContent, publicRichContent),
     description: safeContent || createPostShareDescription(safeContent, publicRichContent),
-    image: firstShareCardImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
+    image: image?.url || null,
+    imageWidth: image?.width,
+    imageHeight: image?.height,
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: getPublicUserDisplayName(post.User),
     authorAvatar: safeAuthorAvatar(post.User.Profile?.avatarUrl || post.User.avatarUrl),
@@ -154,10 +156,7 @@ export async function loadActivityShareCardData(activityId: string): Promise<Sha
     contentId: activity.id,
     title: activity.title,
     description: createActivityShareCardDescription(activity),
-    image: firstShareCardImageUrl([
-      metadataImageVariantUrl(activity.bannerUrl),
-      metadataImageVariantUrl(activity.coverUrl),
-    ]),
+    image: firstShareCardImageCandidate([{ url: activity.bannerUrl }, { url: activity.coverUrl }])?.url || null,
     url: canonicalShareUrl(`/activities/${activity.id}`),
     author: creator ? getPublicUserDisplayName(creator) : activity.organizer || '私家E院',
     authorAvatar: creator ? safeAuthorAvatar(creator.Profile?.avatarUrl || creator.avatarUrl) : null,
@@ -189,7 +188,7 @@ export function shareCardPublicUrl(objectKey: string) {
 
 export type ShareCardCacheDependencies = Readonly<{
   headObject: (objectKey: string) => Promise<boolean>
-  render: (data: ShareCardData) => Promise<Buffer>
+  render: (data: ShareCardData) => Promise<Buffer | ShareCardRenderResult>
   upload: (input: { objectKey: string; body: Buffer; contentType: typeof SHARE_CARD_MIME_TYPE }) => Promise<string>
 }>
 
@@ -207,11 +206,13 @@ export function createShareCardCache(dependencies: ShareCardCacheDependencies) {
       if (existing) return existing
 
       const work = (async () => {
-        const height = calculateShareCardLayout(data).height
+        const fallbackHeight = calculateShareCardLayout(data).height
         if (await dependencies.headObject(objectKey)) {
-          return { url, cached: true, hash, width: SHARE_CARD_WIDTH, height, mimeType: SHARE_CARD_MIME_TYPE } satisfies ShareCardResult
+          return { url, cached: true, hash, width: SHARE_CARD_WIDTH, height: fallbackHeight, mimeType: SHARE_CARD_MIME_TYPE } satisfies ShareCardResult
         }
-        const body = await dependencies.render(data)
+        const rendered = await dependencies.render(data)
+        const body = Buffer.isBuffer(rendered) ? rendered : rendered.body
+        const height = Buffer.isBuffer(rendered) ? fallbackHeight : rendered.height
         await dependencies.upload({ objectKey, body, contentType: SHARE_CARD_MIME_TYPE })
         return { url, cached: false, hash, width: SHARE_CARD_WIDTH, height, mimeType: SHARE_CARD_MIME_TYPE } satisfies ShareCardResult
       })()
@@ -230,7 +231,7 @@ export function createShareCardCache(dependencies: ShareCardCacheDependencies) {
 
 const defaultShareCardCache = createShareCardCache({
   headObject: (objectKey) => headCosObject(objectKey),
-  render: (data) => renderShareCardPng(data),
+  render: (data) => renderShareCardPngWithInfo(data),
   upload: ({ objectKey, body, contentType }) => uploadSiteImage({ key: objectKey, body, contentType }),
 })
 

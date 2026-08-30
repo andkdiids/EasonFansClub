@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import path from 'node:path'
 import test from 'node:test'
+import sharp from 'sharp'
 import { createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
-import { calculateShareCardLayout, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_QR_FRAME_X, SHARE_CARD_QR_FRAME_SIZE } from '@/lib/share-card-layout'
+import { calculateShareCardLayout, shareCardHeroDimensions, SHARE_CARD_AUTHOR_TOP_GAP, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_QR_FRAME_X, SHARE_CARD_QR_FRAME_SIZE, SHARE_CARD_PORTRAIT_HERO_HEIGHT } from '@/lib/share-card-layout'
 import { SHARE_CARD_TEMPLATE_VERSION } from '@/lib/share-card-hash'
+import { BRANDED_QR_ERROR_CORRECTION, BRANDED_QR_LOGO_PLATE_PADDING_PX, BRANDED_QR_LOGO_RATIO, BRANDED_QR_MARGIN_MODULES, BRANDED_QR_VERSION, createBrandedQrSvg } from '@/lib/branded-qr'
+import { createBrandedQrBuffer } from '@/lib/branded-qr-server'
+import { firstShareCardImageCandidate } from '@/lib/share-metadata'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -41,14 +47,14 @@ test('card payload has one shared shape and a high-resolution portrait contract'
   }
   assert.equal(payload.type, 'post')
   assert.equal(SHARE_CARD_WIDTH, 1080)
-  assert.equal(SHARE_CARD_HEIGHT, 1160)
+  assert.equal(SHARE_CARD_HEIGHT, 1440)
   assert.equal(SHARE_CARD_MIME_TYPE, 'image/png')
   assert.match(image, /document\.createElement\('canvas'\)/)
   assert.match(image, /canvas\.toBlob\(/)
   assert.match(image, /imageSmoothingQuality = 'high'/)
 })
 
-test('share card flow layout keeps all copy, compacts short cards, and grows for long content', () => {
+test('share card flow layout keeps all copy, preserves the portrait baseline, and grows for long content', () => {
   const shortData: ShareCardData = {
     type: 'post',
     title: '短标题',
@@ -66,11 +72,11 @@ test('share card flow layout keeps all copy, compacts short cards, and grows for
   const longLayout = calculateShareCardLayout(longData)
   assert.equal(shortLayout.width, SHARE_CARD_WIDTH)
   assert.ok(shortLayout.height >= SHARE_CARD_HEIGHT)
-  assert.ok(compactLayout.height < 1440)
+  assert.equal(compactLayout.height, 1440)
   assert.equal(compactLayout.height, compactLayout.footerBottom)
   assert.ok(longLayout.height > shortLayout.height)
   assert.equal(shortLayout.descriptionLines.join('\n'), '第一段\n\n第二段\n第三段')
-  assert.ok(shortLayout.authorTop >= shortLayout.panelBottom + 36)
+  assert.ok(shortLayout.authorTop >= shortLayout.panelBottom + SHARE_CARD_AUTHOR_TOP_GAP)
   assert.equal(shortLayout.qrTop, shortLayout.brandBlockTop)
   assert.equal(shortLayout.brandLogoTop + SHARE_CARD_FOOTER_LOGO_SIZE / 2, shortLayout.brandTextTop + SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT / 2)
   assert.equal(shortLayout.footerBottom - Math.max(shortLayout.brandBlockTop + shortLayout.brandBlockHeight, shortLayout.qrTop + SHARE_CARD_QR_FRAME_SIZE), SHARE_CARD_FOOTER_BOTTOM_PADDING)
@@ -112,15 +118,16 @@ test('generator explicitly handles CORS failures by redrawing without remote pix
   const image = read('lib/share-card-image.ts')
   assert.match(image, /crossOrigin = 'anonymous'/)
   assert.match(image, /referrerPolicy = 'no-referrer'/)
+  assert.match(image, /drawBrandedQrToCanvas\(qrCanvas, qrUrl, SHARE_CARD_QR_SIZE\)/)
   assert.match(image, /drawShareCardCanvas\(normalizedData, false\)/)
-  assert.match(image, /SHARE_CARD_QR_IMAGE_UNAVAILABLE/)
+  assert.match(image, /catch \(firstError\)/)
 })
 
 test('post card uses first legal image, excludes videos, and lets the renderer provide the no-image background', () => {
   const page = read('app/posts/[postId]/page.tsx')
   assert.match(page, /PostMedia: \{/)
   assert.match(page, /where: \{ type: 'IMAGE'/)
-  assert.match(page, /firstShareCardImageUrl\(post\.PostMedia\.map/)
+  assert.match(page, /firstShareCardImageCandidate\(post\.PostMedia\.map/)
   assert.match(page, /firstAbsoluteMetadataImageUrl\(post\.PostMedia\.map/)
   assert.match(page, /metadataImageVariantUrl\(url\)/)
   const metadata = read('lib/share-metadata.ts')
@@ -132,9 +139,7 @@ test('post card uses first legal image, excludes videos, and lets the renderer p
 test('activity card follows banner, cover, default and keeps invalid candidates non-fatal', () => {
   const view = read('components/activities/ActivityDetailView.tsx')
   const page = read('app/activities/[activityId]/page.tsx')
-  assert.match(view, /metadataImageVariantUrl\(activity\.bannerUrl\)/)
-  assert.match(view, /metadataImageVariantUrl\(activity\.coverUrl\)/)
-  assert.match(view, /firstShareCardImageUrl\(\[/)
+  assert.match(view, /firstShareCardImageCandidate\(\[\{ url: activity\.bannerUrl \}, \{ url: activity\.coverUrl \}\]\)/)
   assert.match(page, /catch \{/)
 })
 
@@ -171,15 +176,14 @@ test('both client and server card renderers use the official app icon in the foo
   assert.doesNotMatch(server, /fillText\(/)
 })
 
-test('home CTA is independent from the share action and has no implicit share fallback', () => {
+test('home CTA is independent from sharing and the homepage has no share action', () => {
   const hero = read('components/HomeHero.tsx')
   const home = read('components/HomeLayoutSurface.tsx')
   assert.match(hero, /resolveHomeHeroCopy/)
   assert.match(hero, /showButton: Boolean\(active\)[\s\S]*Boolean\(buttonText\)[\s\S]*Boolean\(buttonHref\)/)
   assert.doesNotMatch(hero, /defaultHeroButton|shareAction|label="分享"/)
   assert.match(home, /<HomeHero[\s\S]*defaultTitle=\{siteConfig\.text\.homeSubtitle\}[\s\S]*\/>/)
-  assert.doesNotMatch(home.slice(home.indexOf('<HomeHero'), home.indexOf('<div className="community-home-share-action"')), /ShareButton|shareAction/)
-  assert.match(home, /community-home-share-action[\s\S]*<ShareButton data=\{homeShareCardData\}/)
+  assert.doesNotMatch(home, /ShareButton|shareAction|homeShareCardData|community-home-share-action/)
 })
 
 test('author avatar is optional and card renderer has a deterministic initials fallback', () => {
@@ -210,8 +214,8 @@ test('private card data can disable public poster generation and does not expose
   assert.doesNotMatch(JSON.stringify(privateCard), /手机号|邮箱|session|token|username/i)
 })
 
-test('home, activity, post, and clinic entry points all use ShareButton', () => {
-  assert.match(read('components/HomeLayoutSurface.tsx'), /<ShareButton data=\{homeShareCardData\}/)
+test('activity, post, and clinic entry points retain their ShareButton integrations', () => {
+  assert.doesNotMatch(read('components/HomeLayoutSurface.tsx'), /ShareButton|homeShareCardData|community-home-share-action/)
   assert.match(read('components/activities/ActivityDetailView.tsx'), /<ActivityShareButton data=\{shareCardData\}/)
   assert.match(read('components/ForumDiscoveryDetailTopbar.tsx'), /<ShareButton/)
   assert.match(read('components/clinic/ClinicDetailClient.tsx'), /<ShareButton data=\{clinicShareCardData\}/)
@@ -235,18 +239,93 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.doesNotMatch(preview, /share-card-preview-eyebrow/)
 })
 
-test('V5 uses a fixed cover Hero for post/activity media and leaves the fallback to missing media', () => {
+test('V7 uses the shared Hero policy for landscape and portrait media', () => {
   const layout = read('lib/share-card-layout.ts')
   const server = read('lib/share-card-renderer.ts')
   const client = read('lib/share-card-image.ts')
   const service = read('lib/share-card-service.ts')
-  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v5')
+  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v7')
   assert.match(layout, /export function shareCardHeroFit[\s\S]*type === 'home' \? 'contain' : 'cover'/)
-  assert.match(server, /fitImage\(hero, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, shareCardHeroFit\(normalizedData\.type\)\)/)
+  assert.match(server, /fitImage\(hero, SHARE_CARD_WIDTH, layout\.heroHeight, shareCardHeroFit\(normalizedData\.type\)\)/)
   assert.match(client, /shareCardHeroFit\(data\.type\)/)
-  assert.match(service, /firstShareCardImageUrl\(/)
+  assert.match(service, /firstShareCardImageCandidate\(/)
   assert.match(server, /if \(hero\)/)
-  assert.match(server, /heroLayer = await fitImage\(hero, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, shareCardHeroFit\(normalizedData\.type\)\)/)
+  assert.match(server, /heroLayer = await fitImage\(hero, SHARE_CARD_WIDTH, layout\.heroHeight, shareCardHeroFit\(normalizedData\.type\)\)/)
+  assert.equal(shareCardHeroDimensions({ type: 'post', title: 'x', description: 'x', image: null, url: 'https://ecfc.fans/posts/x', author: null, authorAvatar: null, date: null, meta: [] }, { width: 1600, height: 900 }).height, 608)
+  assert.equal(shareCardHeroDimensions({ type: 'post', title: 'x', description: 'x', image: null, url: 'https://ecfc.fans/posts/x', author: null, authorAvatar: null, date: null, meta: [] }, { width: 1080, height: 1920 }).height, SHARE_CARD_PORTRAIT_HERO_HEIGHT)
+  assert.equal(shareCardHeroDimensions({ type: 'post', title: 'x', description: 'x', image: null, url: 'https://ecfc.fans/posts/x', author: null, authorAvatar: null, date: null, meta: [] }, { width: 1080, height: 4000 }).height, SHARE_CARD_PORTRAIT_HERO_HEIGHT)
+})
+
+test('branded QR keeps H correction, quiet zone, official logo, and safe logo sizing', () => {
+  const payload = 'https://ecfc.fans/posts/test123?ignored=1'
+  const svg = createBrandedQrSvg(payload, 320)
+  assert.equal(BRANDED_QR_VERSION, 'v1')
+  assert.equal(BRANDED_QR_ERROR_CORRECTION, 'H')
+  assert.equal(BRANDED_QR_MARGIN_MODULES, 4)
+  assert.match(svg, /shape-rendering="crispEdges"/)
+  assert.match(svg, /fill="#ffffff"/)
+  assert.match(svg, /href="\/icon\.png"/)
+  assert.ok(BRANDED_QR_LOGO_RATIO <= 0.22)
+  assert.ok(BRANDED_QR_LOGO_PLATE_PADDING_PX > 0)
+  for (const size of [160, 240, 320, 480]) {
+    const sized = createBrandedQrSvg(payload, size)
+    assert.match(sized, new RegExp(`width="${size}" height="${size}"`))
+  }
+  // The data modules are emitted from QRCode's H-level matrix and remain
+  // untouched outside the small center logo plate; this is the round-trip
+  // contract consumed by the project's existing ZXing scanner.
+  assert.match(svg, /<rect x="4" y="4" width="1" height="1"\/>/)
+})
+
+test('branded QR PNG round-trips through the existing ZXing decoder', async () => {
+  const payload = 'https://ecfc.fans/posts/test123'
+  const png = await createBrandedQrBuffer(payload, 320)
+  const { data, info } = await sharp(png).grayscale().raw().toBuffer({ resolveWithObject: true })
+  const requireFromScanner = createRequire(path.join(process.cwd(), 'node_modules/@zxing/browser/package.json'))
+  const zxing = requireFromScanner('@zxing/library') as {
+    RGBLuminanceSource: new (data: Uint8ClampedArray, width: number, height: number) => unknown
+    HybridBinarizer: new (source: unknown) => unknown
+    BinaryBitmap: new (source: unknown) => unknown
+    QRCodeReader: new () => { decode(bitmap: unknown): { getText(): string } }
+  }
+  const source = new zxing.RGBLuminanceSource(new Uint8ClampedArray(data), info.width, info.height)
+  const bitmap = new zxing.BinaryBitmap(new zxing.HybridBinarizer(source))
+  assert.equal(new zxing.QRCodeReader().decode(bitmap).getText(), payload)
+})
+
+test('share-card image candidate selects the first trusted IMAGE URL and skips video/bad media', () => {
+  const candidate = firstShareCardImageCandidate([
+    { url: 'https://media.ecfc.fans/media/video.mp4' },
+    { url: 'not a URL' },
+    { url: '/cos-files/posts/test/source.webp', width: 900, height: 1600 },
+  ])
+  assert.deepEqual(candidate, {
+    url: 'https://media.ecfc.fans/media/posts/test/source.webp',
+    width: 900,
+    height: 1600,
+  })
+})
+
+test('all local QR producers use the shared branded QR adapters', () => {
+  const consumers = [
+    read('components/activities/ActivityRegistrationQr.tsx'),
+    read('components/MaterialRedemptionQr.tsx'),
+    read('lib/share-card-image.ts'),
+    read('lib/share-card-renderer.ts'),
+  ]
+  for (const consumer of consumers) assert.doesNotMatch(consumer, /from ['"]qrcode['"]|QRCode\.(to|create)/)
+  assert.match(read('components/activities/ActivityRegistrationQr.tsx'), /drawBrandedQrToCanvas/)
+  assert.match(read('components/MaterialRedemptionQr.tsx'), /drawBrandedQrToCanvas/)
+  assert.match(read('lib/share-card-image.ts'), /drawBrandedQrToCanvas/)
+  assert.match(read('lib/share-card-renderer.ts'), /createBrandedQrBuffer/)
+})
+
+test('desktop detail share control keeps the label horizontal without squeezing the title', () => {
+  const topbar = read('components/ForumDiscoveryDetailTopbar.tsx')
+  const css = read('app/globals.css')
+  assert.match(topbar, /forum-discovery-detail-share shrink-0 whitespace-nowrap/)
+  assert.match(css, /\.forum-discovery-detail-share \{[^}]*min-width:64px[^}]*flex:none[^}]*white-space:nowrap/)
+  assert.match(css, /\.forum-discovery-detail-author \{[^}]*min-width:0[^}]*flex:1 1 auto/)
 })
 
 test('mobile preview uses the generated PNG img directly and renders no action footer', () => {

@@ -11,9 +11,12 @@ test('COS browser media is exposed through the media gateway and storage input i
   const mediaUrl = 'https://media.ecfc.fans/media/page-visuals/home/hero.webp?version=1'
   assert.equal(toPublicMediaUrl(cosUrl), mediaUrl)
   assert.equal(toPublicMediaUrl('/cos/page-visuals/home/hero.webp?version=1'), mediaUrl)
+  assert.equal(toPublicMediaUrl('/cos-files/page-visuals/home/hero.webp?version=1'), mediaUrl)
   assert.equal(toStoredMediaUrl('/cos/page-visuals/home/hero.webp?version=1'), cosUrl)
+  assert.equal(toStoredMediaUrl('/cos-files/page-visuals/home/hero.webp?version=1'), cosUrl)
   assert.equal(toStoredMediaUrl(mediaUrl), cosUrl)
   assert.equal(isPublicMediaProxyUrl('/cos/page-visuals/home/hero.webp?version=1'), true)
+  assert.equal(isPublicMediaProxyUrl('/cos-files/page-visuals/home/hero.webp?version=1'), true)
   assert.equal(isPublicMediaProxyUrl(mediaUrl), true)
 })
 

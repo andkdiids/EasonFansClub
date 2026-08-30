@@ -1,7 +1,7 @@
 'use client'
 
-import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
+import { drawBrandedQrToCanvas } from '@/lib/branded-qr-client'
 
 export function ActivityRegistrationQr({ activityId, token, verifiedAt = null }: Readonly<{ activityId: string; token: string; verifiedAt?: string | null }>) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -10,7 +10,7 @@ export function ActivityRegistrationQr({ activityId, token, verifiedAt = null }:
   useEffect(() => {
     if (!canvasRef.current || !token) return
     const value = `${window.location.origin}/admin/activities/${encodeURIComponent(activityId)}/verify?token=${encodeURIComponent(token)}`
-    QRCode.toCanvas(canvasRef.current, value, { width: 220, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#0b1f35', light: '#ffffff' } })
+    drawBrandedQrToCanvas(canvasRef.current, value, 220)
       .then(() => setError(''))
       .catch(() => setError('二维码生成失败，请联系管理员手动核销'))
   }, [activityId, token])

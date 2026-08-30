@@ -30,11 +30,16 @@ function splitPublicMediaPath(value?: string | null): PublicMediaPath | null {
   if (!publicUrl) return null
 
   const parsed = new URL(publicUrl, 'https://ecfc.fans')
-  if (parsed.pathname === '/cos' || parsed.pathname.startsWith('/cos/')) {
+  const cosPrefix = parsed.pathname === '/cos-files' || parsed.pathname.startsWith('/cos-files/')
+    ? '/cos-files'
+    : parsed.pathname === '/cos' || parsed.pathname.startsWith('/cos/')
+      ? '/cos'
+      : null
+  if (cosPrefix) {
     return {
       parsed,
-      pathWithoutProxy: parsed.pathname.replace(/^\/cos(?=\/|$)/i, '') || '/',
-      prefix: '/cos',
+      pathWithoutProxy: parsed.pathname.slice(cosPrefix.length) || '/',
+      prefix: cosPrefix,
     }
   }
 

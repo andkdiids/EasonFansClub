@@ -4,9 +4,9 @@ import test from 'node:test'
 import sharp from 'sharp'
 import { canonicalShareUrl, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { createShareCardContentHash, SHARE_CARD_LOGO_SOURCE, SHARE_CARD_LOGO_VERSION, SHARE_CARD_TEMPLATE_VERSION, shareCardHashPayload } from '@/lib/share-card-hash'
-import { calculateShareCardLayout } from '@/lib/share-card-layout'
+import { calculateShareCardLayout, SHARE_CARD_PORTRAIT_HERO_HEIGHT } from '@/lib/share-card-layout'
 import { createShareCardCache, getOrCreatePublicShareCard, loadActivityShareCardData, loadPostShareCardData, ShareCardContentNotFoundError, shareCardObjectKey, shareCardPublicUrl } from '@/lib/share-card-service'
-import { isTrustedShareCardImageUrl, renderShareCardPng, shareCardRendererConstants } from '@/lib/share-card-renderer'
+import { isTrustedShareCardImageUrl, renderShareCardPng, renderShareCardPngWithInfo, shareCardRendererConstants } from '@/lib/share-card-renderer'
 import { prisma } from '@/lib/prisma'
 
 const baseData: ShareCardData = {
@@ -15,6 +15,8 @@ const baseData: ShareCardData = {
   title: '缓存测试帖子',
   description: '这是用于验证内容版本缓存的摘要。',
   image: 'https://ecfc.fans/images/og-default.png',
+  imageWidth: 1200,
+  imageHeight: 630,
   url: 'https://ecfc.fans/posts/post-cache-fixture',
   author: 'E友',
   authorAvatar: null,
@@ -157,6 +159,63 @@ test('server PNG puts a real vertical/long first image into the fixed cover Hero
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('server Hero keeps landscape ratio and converts portrait/long portrait to 3:4', async () => {
+  const landscape = await sharp({
+    create: { width: 1600, height: 900, channels: 3, background: { r: 24, g: 90, b: 140 } },
+  }).jpeg().toBuffer()
+  const portrait = await sharp({
+    create: { width: 900, height: 1600, channels: 3, background: { r: 140, g: 70, b: 24 } },
+  }).webp().toBuffer()
+  const longPortrait = await sharp({
+    create: { width: 1080, height: 4000, channels: 3, background: { r: 70, g: 24, b: 140 } },
+  }).png().toBuffer()
+  const images = new Map([
+    ['https://media.ecfc.fans/media/landscape.jpg', landscape],
+    ['https://media.ecfc.fans/media/portrait.webp', portrait],
+    ['https://media.ecfc.fans/media/long-portrait.png', longPortrait],
+  ])
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input) => {
+    const body = images.get(String(input))
+    return body ? new Response(body, { status: 200 }) : new Response(null, { status: 404 })
+  }) as typeof fetch
+  try {
+    for (const [name, image, dimensions] of [
+      ['landscape', 'https://media.ecfc.fans/media/landscape.jpg', { width: 1600, height: 900 }],
+      ['portrait', 'https://media.ecfc.fans/media/portrait.webp', { width: 900, height: 1600 }],
+      ['long-portrait', 'https://media.ecfc.fans/media/long-portrait.png', { width: 1080, height: 4000 }],
+    ] as const) {
+      const result = await renderShareCardPngWithInfo({ ...baseData, contentId: `hero-${name}`, image, imageWidth: null, imageHeight: null })
+      const metadata = await sharp(result.body).metadata()
+      const expected = calculateShareCardLayout({ ...baseData, image, imageWidth: null, imageHeight: null }, dimensions)
+      assert.equal(metadata.width, SHARE_CARD_WIDTH)
+      assert.equal(metadata.height, expected.height)
+      assert.equal(result.height, expected.height)
+      if (name !== 'landscape') assert.equal(expected.heroHeight, SHARE_CARD_PORTRAIT_HERO_HEIGHT)
+      if (name === 'landscape') assert.equal(expected.heroHeight, 608)
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('server renderer keeps CJK, traditional Chinese, Cantonese, emoji, and symbols renderable', async () => {
+  const result = await renderShareCardPngWithInfo({
+    ...baseData,
+    contentId: 'unicode-render-fixture',
+    title: '简中：今天打的大朴楼锄了卒；繁中：今日喺度測試分享卡片',
+    description: '粤语：唔該晒，你哋好呀\nemoji：😂🥹❤️✨🎵😵‍💫\nsymbols：& < > “ ” · — …',
+    image: null,
+    imageWidth: null,
+    imageHeight: null,
+  })
+  const metadata = await sharp(result.body).metadata()
+  assert.equal(metadata.format, 'png')
+  assert.equal(metadata.width, SHARE_CARD_WIDTH)
+  assert.equal(metadata.height, result.height)
+  assert.ok(result.body.length > 1000)
 })
 
 test('post/activity records flow through the public service into one card payload', async () => {

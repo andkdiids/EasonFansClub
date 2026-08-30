@@ -5,6 +5,7 @@
  */
 export const PUBLIC_COS_HOST = 'ecfc-1306412725.cos.ap-guangzhou.myqcloud.com'
 export const COS_PROXY_PREFIX = '/cos'
+export const COS_PROXY_PREFIXES = ['/cos', '/cos-files'] as const
 export const DEFAULT_MEDIA_PUBLIC_BASE_URL = 'https://media.ecfc.fans/media'
 
 function trimValue(value?: string | null) {
@@ -42,15 +43,16 @@ function parseMediaPublicBaseUrl() {
 }
 
 function isCosProxyPath(value: string) {
-  return value === COS_PROXY_PREFIX || value.startsWith(`${COS_PROXY_PREFIX}/`)
+  return COS_PROXY_PREFIXES.some((prefix) => value === prefix || value.startsWith(`${prefix}/`))
 }
 
 function cosProxyPathFromUrl(value: string) {
   try {
     const parsed = new URL(value, 'https://local.invalid')
     if (parsed.origin !== 'https://local.invalid' || !isCosProxyPath(parsed.pathname)) return null
+    const prefix = COS_PROXY_PREFIXES.find((candidate) => parsed.pathname === candidate || parsed.pathname.startsWith(`${candidate}/`)) || COS_PROXY_PREFIX
     return {
-      path: parsed.pathname.slice(COS_PROXY_PREFIX.length) || '/',
+      path: parsed.pathname.slice(prefix.length) || '/',
       search: parsed.search,
       hash: parsed.hash,
     }
@@ -133,8 +135,9 @@ export function toStoredMediaUrl(value?: string | null) {
     if (mediaPath !== null) {
       return `https://${PUBLIC_COS_HOST}/${mediaPath}${parsed.search}${parsed.hash}`
     }
-    const path = parsed.pathname.slice(COS_PROXY_PREFIX.length) || '/'
-    return `https://${PUBLIC_COS_HOST}${path}${parsed.search}${parsed.hash}`
+    const cosProxyPath = cosProxyPathFromUrl(url)
+    if (cosProxyPath) return `https://${PUBLIC_COS_HOST}${cosProxyPath.path}${cosProxyPath.search}${cosProxyPath.hash}`
+    return url
   } catch {
     return url
   }

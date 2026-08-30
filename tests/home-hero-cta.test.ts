@@ -23,8 +23,9 @@ test('Hero slide combinations match the product display contract', () => {
   assert.match(hero, /showButton: Boolean\(active\) && active\?\.showButton !== false && Boolean\(buttonText\) && Boolean\(buttonHref\)/)
   assert.match(hero, /showTitle: \(active\?\.showTitle !== false\) && Boolean\(title\)/)
   assert.doesNotMatch(hero, /shareAction/)
-  const heroBlock = home.slice(home.indexOf('<HomeHero'), home.indexOf('<div className="community-home-share-action"'))
+  const heroBlock = home.slice(home.indexOf('<HomeHero'))
   assert.doesNotMatch(heroBlock, /分享/)
+  assert.doesNotMatch(home, /ShareButton|homeShareCardData|community-home-share-action/)
 })
 
 type SlideCopyInput = NonNullable<Parameters<typeof resolveHomeHeroCopy>[0]>
