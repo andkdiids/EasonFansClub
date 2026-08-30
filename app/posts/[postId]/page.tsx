@@ -31,7 +31,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { emitRealtime } from '@/lib/realtime'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
-import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
+import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, firstShareCardImageUrl, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { validateRichPostContent } from '@/lib/rich-text'
 import {
@@ -989,7 +989,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     contentId: post.id,
     title: shareTitle,
     description: safeShareCardPostContent || shareText,
-    image: firstAbsoluteMetadataImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
+    image: firstShareCardImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: authorName,
     authorAvatar,

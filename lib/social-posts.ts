@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { isAnywhereDoorAccountUsername, readManualAnywhereDoorAvatar, resolveAnywhereDoorAvatar, safePublicAnywhereDoorAvatarUrl } from '@/lib/anywhere-door/avatar'
 import { isPublicMediaProxyUrl, toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 
@@ -112,23 +113,7 @@ function safePublicMediaUrl(value?: string | null) {
   }
 }
 
-const PUBLIC_AUTHOR_AVATAR_HOSTS = ['cdninstagram.com', 'fbcdn.net'] as const
 let authorAvatarColumnAvailable: boolean | null = null
-
-function safePublicAuthorAvatarUrl(value?: string | null) {
-  const url = toPublicMediaUrl(value)
-  if (!url) return null
-  if (isPublicMediaProxyUrl(url)) return url
-  try {
-    const parsed = new URL(url, 'https://local.invalid')
-    if (parsed.origin === 'https://local.invalid' && parsed.pathname.startsWith('/') && !parsed.username && !parsed.password) return url
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null
-    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
-    return PUBLIC_AUTHOR_AVATAR_HOSTS.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`)) ? url : null
-  } catch {
-    return null
-  }
-}
 
 /**
  * Reads the optional avatar column in one bounded query. The query is
@@ -143,7 +128,7 @@ export async function readStoredAuthorAvatarUrls(postIds: readonly string[]) {
     authorAvatarColumnAvailable = true
     const result = new Map<string, string>()
     for (const row of rows) {
-      const url = safePublicAuthorAvatarUrl(row.authorAvatarUrl)
+      const url = safePublicAnywhereDoorAvatarUrl(row.authorAvatarUrl)
       if (url) result.set(row.id, url)
     }
     return result
@@ -177,13 +162,17 @@ async function viewerLikeIds(postIds: string[], viewerId?: string | null) {
   return new Set(rows.map((row) => row.postId))
 }
 
-function serializePost(row: SocialPostRow, likedIds: Set<string>, authorAvatarUrl?: string | null): SocialPostView {
+function serializePost(row: SocialPostRow, likedIds: Set<string>, autoAvatarUrl?: string | null, manualAvatarUrl?: string | null): SocialPostView {
+  const avatar = resolveAnywhereDoorAvatar({
+    manualAvatarUrl: isAnywhereDoorAccountUsername(row.authorUsername) ? manualAvatarUrl : null,
+    autoAvatarUrl,
+  })
   return {
     id: row.id,
     externalId: row.externalId,
     shortcode: row.shortcode,
     authorUsername: row.authorUsername,
-    authorAvatarUrl: safePublicAuthorAvatarUrl(authorAvatarUrl),
+    authorAvatarUrl: avatar.url,
     caption: row.caption,
     publishedAt: row.publishedAt.toISOString(),
     permalink: row.permalink,
@@ -215,11 +204,14 @@ export async function getPublicSocialPostFeed(options: { cursor?: string | null;
   })
   const hasMore = rows.length > take
   const pageRows = rows.slice(0, take)
-  const likedIds = await viewerLikeIds(pageRows.map((row) => row.id), options.viewerId)
-  const authorAvatarUrls = await readStoredAuthorAvatarUrls(pageRows.map((row) => row.id))
+  const [likedIds, authorAvatarUrls, manualAvatarUrl] = await Promise.all([
+    viewerLikeIds(pageRows.map((row) => row.id), options.viewerId),
+    readStoredAuthorAvatarUrls(pageRows.map((row) => row.id)),
+    readManualAnywhereDoorAvatar(),
+  ])
   const last = pageRows[pageRows.length - 1]
   return {
-    items: pageRows.map((row) => serializePost(row, likedIds, authorAvatarUrls.get(row.id))),
+    items: pageRows.map((row) => serializePost(row, likedIds, authorAvatarUrls.get(row.id), manualAvatarUrl)),
     nextCursor: hasMore && last ? encodeSocialCursor({ publishedAt: last.publishedAt.toISOString(), id: last.id }) : null,
   }
 }
@@ -323,9 +315,12 @@ export async function getPublicSocialPostComments(options: {
 export async function getPublicSocialPostDetail(id: string, viewerId?: string | null): Promise<SocialPostDetailView | null> {
   const row = await prisma.socialPost.findFirst({ where: { id, status: 'READY' }, select: publicPostSelect })
   if (!row) return null
-  const likedIds = await viewerLikeIds([row.id], viewerId)
-  const authorAvatarUrls = await readStoredAuthorAvatarUrls([row.id])
-  const post = serializePost(row, likedIds, authorAvatarUrls.get(row.id))
+  const [likedIds, authorAvatarUrls, manualAvatarUrl] = await Promise.all([
+    viewerLikeIds([row.id], viewerId),
+    readStoredAuthorAvatarUrls([row.id]),
+    readManualAnywhereDoorAvatar(),
+  ])
+  const post = serializePost(row, likedIds, authorAvatarUrls.get(row.id), manualAvatarUrl)
   const comments = await getPublicSocialPostComments({ postId: id, viewerId })
   return {
     ...post,

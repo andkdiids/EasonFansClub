@@ -235,6 +235,15 @@ export function firstAbsoluteMetadataImageUrl(values: readonly (string | null | 
   return new URL(DEFAULT_OG_IMAGE_PATH, metadataOrigin()).toString()
 }
 
+/** Return the first real public media URL without substituting the OG fallback. */
+export function firstShareCardImageUrl(values: readonly (string | null | undefined)[]) {
+  for (const value of values) {
+    const resolved = resolveMetadataImageUrl(value)
+    if (resolved) return resolved
+  }
+  return null
+}
+
 export type PageMetadataInput = Readonly<{
   title?: string | null
   description?: string | null

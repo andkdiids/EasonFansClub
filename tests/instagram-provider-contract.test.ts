@@ -178,6 +178,26 @@ test('Apify mapper normalizes image, carousel children, and reel/video fields', 
   assert.equal(reel.media[0]?.duration, 21)
 })
 
+test('Apify avatar mapper accepts HD and nested owner/profile avatar fields', () => {
+  const nested = normalizeApifyInstagramItem({
+    ...rawImage('nested-avatar', '2026-08-25T10:00:00.000Z', {
+      profilePicUrl: undefined,
+      profilePicUrlHD: undefined,
+      owner: { profilePicUrlHD: 'https://scontent.cdninstagram.com/avatar-hd.jpg' },
+    }),
+  })
+  assert.equal(nested.authorAvatarUrl, 'https://scontent.cdninstagram.com/avatar-hd.jpg')
+
+  const directHd = normalizeInstagramPost({
+    externalId: 'direct-hd-avatar',
+    username: 'mreasonchan',
+    profilePicUrlHD: 'https://scontent.cdninstagram.com/avatar-direct-hd.jpg',
+    publishedAt: '2026-08-25T10:00:00.000Z',
+    media: [{ type: 'IMAGE', sourceUrl: 'https://scontent.cdninstagram.com/post.jpg' }],
+  })
+  assert.equal(directHd.authorAvatarUrl, 'https://scontent.cdninstagram.com/avatar-direct-hd.jpg')
+})
+
 test('Apify owner resolver accepts the production ownerUsername shape and normalizes case', () => {
   const item = rawImage('production-shape', '2026-08-25T10:00:00.000Z', {
     username: undefined,

@@ -10,7 +10,7 @@ import { buildPublicMediaUrl } from '@/lib/media-url'
 import { validateRichPostContent } from '@/lib/rich-text'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { publicPostWhere } from '@/lib/post-moderation'
-import { firstAbsoluteMetadataImageUrl, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
+import { firstShareCardImageUrl, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { calculateShareCardLayout } from '@/lib/share-card-layout'
 import { createShareCardContentHash } from '@/lib/share-card-hash'
@@ -128,7 +128,7 @@ export async function loadPostShareCardData(postId: string): Promise<ShareCardDa
     contentId: post.id,
     title: createPostShareTitle(title, safeContent, publicRichContent),
     description: safeContent || createPostShareDescription(safeContent, publicRichContent),
-    image: firstAbsoluteMetadataImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
+    image: firstShareCardImageUrl(post.PostMedia.map(({ url }) => metadataImageVariantUrl(url))),
     url: canonicalShareUrl(`/posts/${post.id}`),
     author: getPublicUserDisplayName(post.User),
     authorAvatar: safeAuthorAvatar(post.User.Profile?.avatarUrl || post.User.avatarUrl),
@@ -154,7 +154,7 @@ export async function loadActivityShareCardData(activityId: string): Promise<Sha
     contentId: activity.id,
     title: activity.title,
     description: createActivityShareCardDescription(activity),
-    image: firstAbsoluteMetadataImageUrl([
+    image: firstShareCardImageUrl([
       metadataImageVariantUrl(activity.bannerUrl),
       metadataImageVariantUrl(activity.coverUrl),
     ]),

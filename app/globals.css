@@ -347,9 +347,8 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .share-method-option-copy small { color:var(--foreground-muted); font-size:11px; font-weight:700; }
 .share-card-preview-backdrop { align-items:center; }
 .share-card-preview-dialog { display:flex; width:min(920px,100%); max-height:calc(100dvh - 36px); flex-direction:column; overflow:auto; border:1px solid var(--border-strong); border-radius:22px; padding:20px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 24px 80px rgba(0,0,0,.38); }
-.share-card-preview-eyebrow { margin:0 0 5px; color:var(--primary); font-size:11px; font-weight:900; letter-spacing:.12em; }
-.share-card-preview-hint { margin:12px 0 0; color:var(--foreground-muted); font-size:12px; font-weight:700; }
-.share-card-preview-image-wrap { display:flex; max-height:calc(100dvh - 220px); align-items:flex-start; justify-content:center; margin-top:14px; overflow:auto; border:1px solid var(--border); border-radius:15px; padding:10px; background:var(--background); }
+.share-card-preview-hint { margin:8px 0 0; color:var(--foreground-muted); font-size:12px; font-weight:700; }
+.share-card-preview-image-wrap { display:flex; max-height:calc(100dvh - 210px); align-items:flex-start; justify-content:center; margin-top:10px; overflow:auto; border:1px solid var(--border); border-radius:15px; padding:10px; background:var(--background); }
 .share-card-preview-image { display:block; width:min(100%,540px); height:auto; object-fit:contain; -webkit-touch-callout:default; -webkit-user-drag:auto; user-select:auto; touch-action:auto; }
 .share-card-preview-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:14px; }
 .share-card-preview-primary,.share-card-preview-secondary { display:inline-flex; min-height:42px; align-items:center; justify-content:center; border-radius:999px; padding:0 18px; font-size:13px; font-weight:900; text-decoration:none; cursor:pointer; touch-action:manipulation; }
@@ -395,7 +394,7 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
   .share-method-option { min-height:70px; border-radius:15px; }
   .share-card-preview-backdrop { align-items:flex-end; padding:0; }
   .share-card-preview-dialog { width:100%; max-height:100dvh; border-right:0; border-bottom:0; border-radius:22px 22px 0 0; padding:16px 14px calc(12px + env(safe-area-inset-bottom)); }
-  .share-card-preview-image-wrap { max-height:calc(100dvh - 260px); margin-top:12px; padding:5px; }
+  .share-card-preview-image-wrap { max-height:calc(100dvh - 250px); margin-top:8px; padding:5px; }
 }
 
 /* Keep the prescription archive readable on small screens without reserving empty space. */
@@ -7057,16 +7056,6 @@ body:has(.duel-page) .app-page-content {
   flex: 0 1 auto;
   font-size: 12px;
   font-weight: 700;
-}
-
-.anywhere-door-media-type {
-  border: 1px solid var(--border-strong);
-  padding: 5px 10px;
-  color: var(--primary);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: .12em;
-  text-transform: uppercase;
 }
 
 .anywhere-door-meta,

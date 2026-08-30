@@ -7,6 +7,7 @@ import { getMediaPublicBaseUrl, PUBLIC_COS_HOST } from '@/lib/media-url'
 import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, shareCardQrPayload, shareCardTypeLabel, type ShareCardData } from '@/lib/share-card'
 import {
   calculateShareCardLayout,
+  shareCardHeroFit,
   SHARE_CARD_AUTHOR_LINE_HEIGHT,
   SHARE_CARD_AUTHOR_WIDTH,
   SHARE_CARD_AVATAR_SIZE,
@@ -16,6 +17,10 @@ import {
   SHARE_CARD_DESCRIPTION_LINE_HEIGHT,
   SHARE_CARD_FOOTER_LOGO_SIZE,
   SHARE_CARD_FOOTER_LOGO_X,
+  SHARE_CARD_FOOTER_BRAND_FONT_SIZE,
+  SHARE_CARD_FOOTER_TEXT_GAP,
+  SHARE_CARD_FOOTER_TITLE_FONT_SIZE,
+  SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT,
   SHARE_CARD_FOOTER_TEXT_WIDTH,
   SHARE_CARD_FOOTER_TEXT_X,
   SHARE_CARD_HERO_HEIGHT,
@@ -226,7 +231,7 @@ export async function renderShareCardPng(data: ShareCardData) {
 
   const layers: CompositeLayer[] = []
   if (hero) {
-    const heroLayer = await fitImage(hero, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, 'cover')
+    const heroLayer = await fitImage(hero, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, shareCardHeroFit(normalizedData.type))
     if (heroLayer) layers.push({ input: heroLayer, left: 0, top: 0 }, { input: Buffer.from(heroShadeSvg()), left: 0, top: 0 })
   }
   layers.push({ input: Buffer.from(panelSvg(layout.panelTop, layout.panelHeight)), left: 0, top: 0 })
@@ -247,13 +252,13 @@ export async function renderShareCardPng(data: ShareCardData) {
   pushTextLines(textInputs, layout.authorLines, { left: 172, top: layout.authorTextTop, width: SHARE_CARD_AUTHOR_WIDTH, fontSize: 30, color: '#102033', weight: 800, lineHeight: SHARE_CARD_AUTHOR_LINE_HEIGHT })
   pushTextLines(textInputs, layout.dateLines, { left: 172, top: layout.dateTop, width: SHARE_CARD_AUTHOR_WIDTH, fontSize: 22, color: '#7b8b98', weight: 500, lineHeight: 30 })
   textInputs.push(
-    { text: '扫码查看完整内容', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.footerTop, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: 26, color: '#0f5f8f', weight: 800 },
-    { text: '私家E院 | Eason Fans Club', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.brandTop, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: 20, color: '#7b8b98', weight: 600 },
+    { text: '扫码查看完整内容', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.brandTextTop, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: SHARE_CARD_FOOTER_TITLE_FONT_SIZE, color: '#0f5f8f', weight: 800 },
+    { text: '私家E院 | Eason Fans Club', left: SHARE_CARD_FOOTER_TEXT_X, top: layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP, width: SHARE_CARD_FOOTER_TEXT_WIDTH, fontSize: SHARE_CARD_FOOTER_BRAND_FONT_SIZE, color: '#7b8b98', weight: 600 },
   )
 
   if (logo) {
     const logoLayer = await fitImage(logo, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 'contain')
-    if (logoLayer) layers.push({ input: logoLayer, left: SHARE_CARD_FOOTER_LOGO_X, top: layout.footerTop })
+    if (logoLayer) layers.push({ input: logoLayer, left: SHARE_CARD_FOOTER_LOGO_X, top: layout.brandLogoTop })
   }
 
   const textLayers = await Promise.all(textInputs.map(createTextLayer))

@@ -14,11 +14,20 @@ export const SHARE_CARD_AVATAR_SIZE = 86
 export const SHARE_CARD_AVATAR_X = 60
 export const SHARE_CARD_AUTHOR_X = 172
 export const SHARE_CARD_AUTHOR_WIDTH = 560
-export const SHARE_CARD_FOOTER_LOGO_SIZE = 88
+export const SHARE_CARD_FOOTER_LOGO_SIZE = 84
 export const SHARE_CARD_FOOTER_LOGO_X = SHARE_CARD_AVATAR_X
 export const SHARE_CARD_FOOTER_TEXT_X = SHARE_CARD_FOOTER_LOGO_X + SHARE_CARD_FOOTER_LOGO_SIZE + 12
 /** Keep footer copy to the left of the 232px QR frame. */
 export const SHARE_CARD_FOOTER_TEXT_WIDTH = SHARE_CARD_QR_FRAME_X - SHARE_CARD_FOOTER_TEXT_X - 28
+export const SHARE_CARD_FOOTER_TITLE_FONT_SIZE = 26
+export const SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT = 34
+export const SHARE_CARD_FOOTER_BRAND_FONT_SIZE = 20
+export const SHARE_CARD_FOOTER_BRAND_LINE_HEIGHT = 28
+export const SHARE_CARD_FOOTER_TEXT_GAP = 10
+export const SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT = SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP + SHARE_CARD_FOOTER_BRAND_LINE_HEIGHT
+export const SHARE_CARD_FOOTER_BRAND_BLOCK_HEIGHT = Math.max(SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT)
+export const SHARE_CARD_FOOTER_TOP_GAP = 48
+export const SHARE_CARD_FOOTER_BOTTOM_PADDING = 64
 export const SHARE_CARD_CATEGORY_FONT_SIZE = 22
 export const SHARE_CARD_CATEGORY_LINE_HEIGHT = 32
 export const SHARE_CARD_TITLE_FONT_SIZE = 56
@@ -31,6 +40,11 @@ export const SHARE_CARD_AUTHOR_FONT_SIZE = 30
 export const SHARE_CARD_AUTHOR_LINE_HEIGHT = 36
 export const SHARE_CARD_DATE_FONT_SIZE = 22
 export const SHARE_CARD_DATE_LINE_HEIGHT = 30
+
+/** Post and activity media fill the Hero; the home poster keeps its contained logo treatment. */
+export function shareCardHeroFit(type: ShareCardData['type']): 'cover' | 'contain' {
+  return type === 'home' ? 'contain' : 'cover'
+}
 
 export type ShareCardTextBlock = Readonly<{
   lines: readonly string[]
@@ -52,8 +66,11 @@ export type ShareCardLayout = Readonly<{
   authorTextTop: number
   dateTop: number
   qrTop: number
-  footerTop: number
-  brandTop: number
+  brandBlockTop: number
+  brandBlockHeight: number
+  brandLogoTop: number
+  brandTextTop: number
+  footerBottom: number
   title: string
   description: string
   author: string
@@ -144,11 +161,16 @@ export function calculateShareCardLayout(data: ShareCardData): ShareCardLayout {
     SHARE_CARD_AVATAR_SIZE,
     (authorTextTop - authorTop) + authorBlock.height + 4 + dateBlock.height + 10,
   )
-  const qrTop = authorTop
-  const footerTop = Math.max(authorTop + authorBlockHeight, qrTop + SHARE_CARD_QR_FRAME_SIZE) + 28
-  const brandTop = footerTop + 37
-  const footerContentBottom = Math.max(SHARE_CARD_FOOTER_LOGO_SIZE, 26 + 44) + footerTop
-  const height = Math.max(SHARE_CARD_HEIGHT, footerContentBottom + 28)
+  // The author row and the footer row are separate. QR belongs to the footer,
+  // so a short card does not leave the brand copy stranded below an author-row
+  // QR block. All footer items share one row center.
+  const brandBlockTop = authorTop + authorBlockHeight + SHARE_CARD_FOOTER_TOP_GAP
+  const brandBlockHeight = SHARE_CARD_FOOTER_BRAND_BLOCK_HEIGHT
+  const qrTop = brandBlockTop
+  const brandLogoTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_LOGO_SIZE) / 2
+  const brandTextTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT) / 2
+  const footerBottom = Math.max(brandBlockTop + brandBlockHeight, qrTop + SHARE_CARD_QR_FRAME_SIZE) + SHARE_CARD_FOOTER_BOTTOM_PADDING
+  const height = Math.max(SHARE_CARD_HEIGHT, footerBottom)
 
   return {
     width: SHARE_CARD_WIDTH,
@@ -164,8 +186,11 @@ export function calculateShareCardLayout(data: ShareCardData): ShareCardLayout {
     authorTextTop,
     dateTop,
     qrTop,
-    footerTop,
-    brandTop,
+    brandBlockTop,
+    brandBlockHeight,
+    brandLogoTop,
+    brandTextTop,
+    footerBottom,
     title,
     description,
     author,

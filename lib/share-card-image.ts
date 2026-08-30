@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import { canonicalShareUrl, createShareCardFilename, shareCardQrPayload, shareCardTypeLabel, SHARE_CARD_LOGO_PATH, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import {
   calculateShareCardLayout,
+  shareCardHeroFit,
   SHARE_CARD_AUTHOR_FONT_SIZE,
   SHARE_CARD_AUTHOR_LINE_HEIGHT,
   SHARE_CARD_AUTHOR_X,
@@ -16,6 +17,10 @@ import {
   SHARE_CARD_DESCRIPTION_LINE_HEIGHT,
   SHARE_CARD_FOOTER_LOGO_SIZE,
   SHARE_CARD_FOOTER_LOGO_X,
+  SHARE_CARD_FOOTER_BRAND_FONT_SIZE,
+  SHARE_CARD_FOOTER_TEXT_GAP,
+  SHARE_CARD_FOOTER_TITLE_FONT_SIZE,
+  SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT,
   SHARE_CARD_FOOTER_TEXT_X,
   SHARE_CARD_HERO_HEIGHT,
   SHARE_CARD_META_FONT_SIZE,
@@ -214,7 +219,7 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
   if (heroImage) {
     context.fillStyle = '#071523'
     context.fillRect(0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT)
-    if (data.type === 'home') drawImageContain(context, heroImage, 0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, 100)
+    if (shareCardHeroFit(data.type) === 'contain') drawImageContain(context, heroImage, 0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, 100)
     else drawImageCover(context, heroImage, 0, 0, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT)
     const overlay = context.createLinearGradient(0, 320, 0, SHARE_CARD_HERO_HEIGHT)
     overlay.addColorStop(0, 'rgba(2,8,18,0)')
@@ -266,12 +271,12 @@ async function drawShareCardCanvas(data: ShareCardData, allowRemoteImages: boole
   layout.dateLines.forEach((line, index) => context.fillText(line, SHARE_CARD_AUTHOR_X, layout.dateTop + SHARE_CARD_DATE_FONT_SIZE + index * SHARE_CARD_DATE_LINE_HEIGHT))
 
   context.fillStyle = '#0f5f8f'
-  context.font = `800 26px ${FONT_SANS}`
-  if (logo) drawImageContain(context, logo, SHARE_CARD_FOOTER_LOGO_X, layout.footerTop, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 4)
-  context.fillText('扫码查看完整内容', SHARE_CARD_FOOTER_TEXT_X, layout.footerTop + 26)
+  context.font = `800 ${SHARE_CARD_FOOTER_TITLE_FONT_SIZE}px ${FONT_SANS}`
+  if (logo) drawImageContain(context, logo, SHARE_CARD_FOOTER_LOGO_X, layout.brandLogoTop, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 4)
+  context.fillText('扫码查看完整内容', SHARE_CARD_FOOTER_TEXT_X, layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_FONT_SIZE)
   context.fillStyle = '#7b8b98'
-  context.font = `600 20px ${FONT_SANS}`
-  context.fillText('私家E院 | Eason Fans Club', SHARE_CARD_FOOTER_TEXT_X, layout.brandTop + 20)
+  context.font = `600 ${SHARE_CARD_FOOTER_BRAND_FONT_SIZE}px ${FONT_SANS}`
+  context.fillText('私家E院 | Eason Fans Club', SHARE_CARD_FOOTER_TEXT_X, layout.brandTextTop + SHARE_CARD_FOOTER_TITLE_LINE_HEIGHT + SHARE_CARD_FOOTER_TEXT_GAP + SHARE_CARD_FOOTER_BRAND_FONT_SIZE)
 
   context.save()
   roundedRect(context, SHARE_CARD_QR_FRAME_X, layout.qrTop, SHARE_CARD_QR_FRAME_SIZE, SHARE_CARD_QR_FRAME_SIZE, 22)

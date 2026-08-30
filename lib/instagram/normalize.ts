@@ -106,7 +106,16 @@ export function normalizeInstagramPost(value: unknown): InstagramPost {
     externalId: safeExternalId(item.externalId ?? item.id),
     shortcode: stringOrNull(item.shortcode),
     username: normalizeInstagramUsername(requiredString(item.username ?? item.ownerUsername, 'username')),
-    authorAvatarUrl: optionalImageUrl(item.authorAvatarUrl ?? item.ownerAvatarUrl ?? item.profilePicUrl ?? item.profileImageUrl ?? item.avatarUrl),
+    authorAvatarUrl: optionalImageUrl(
+      item.authorAvatarUrl
+      ?? item.ownerAvatarUrl
+      ?? item.ownerProfilePicUrl
+      ?? item.ownerProfilePicUrlHD
+      ?? item.profilePicUrlHD
+      ?? item.profilePicUrl
+      ?? item.profileImageUrl
+      ?? item.avatarUrl,
+    ),
     caption: stringOrNull(item.caption),
     publishedAt: parsePublishedAt(item.publishedAt ?? item.timestamp ?? item.takenAt),
     permalink: safeInstagramPermalink(item.permalink ?? item.url),

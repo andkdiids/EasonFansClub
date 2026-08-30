@@ -43,12 +43,11 @@ export function AnywhereDoorDetail({ post, morePosts = [], showBackLink = true }
           </section>
           <section className="anywhere-door-info flex min-h-0 min-w-0 flex-col" data-anywhere-door-info>
             <header className="anywhere-door-info-header shrink-0 p-4 sm:p-5">
-              <div className="anywhere-door-source-row flex flex-wrap items-center justify-between gap-3">
+              <div className="anywhere-door-source-row flex flex-wrap items-center gap-3">
                 <div className="min-w-0">
                   <AnywhereDoorSourceIdentity username={post.authorUsername} avatarUrl={post.authorAvatarUrl} />
                   <time className="anywhere-door-post-time mt-1 block" dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
                 </div>
-                <span className="anywhere-door-media-type shrink-0">{post.mediaType}</span>
               </div>
             </header>
             <div className="anywhere-door-info-body shrink-0 p-4 pb-3 sm:p-5 sm:pb-4">

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { canonicalShareUrl, createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
-import { calculateShareCardLayout } from '@/lib/share-card-layout'
+import { createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { calculateShareCardLayout, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_QR_FRAME_X, SHARE_CARD_QR_FRAME_SIZE } from '@/lib/share-card-layout'
+import { SHARE_CARD_TEMPLATE_VERSION } from '@/lib/share-card-hash'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -40,14 +41,14 @@ test('card payload has one shared shape and a high-resolution portrait contract'
   }
   assert.equal(payload.type, 'post')
   assert.equal(SHARE_CARD_WIDTH, 1080)
-  assert.equal(SHARE_CARD_HEIGHT, 1440)
+  assert.equal(SHARE_CARD_HEIGHT, 1160)
   assert.equal(SHARE_CARD_MIME_TYPE, 'image/png')
   assert.match(image, /document\.createElement\('canvas'\)/)
   assert.match(image, /canvas\.toBlob\(/)
   assert.match(image, /imageSmoothingQuality = 'high'/)
 })
 
-test('share card flow layout keeps all copy, preserves paragraphs, and grows below the minimum height', () => {
+test('share card flow layout keeps all copy, compacts short cards, and grows for long content', () => {
   const shortData: ShareCardData = {
     type: 'post',
     title: '短标题',
@@ -60,14 +61,20 @@ test('share card flow layout keeps all copy, preserves paragraphs, and grows bel
     meta: [{ label: '版块', value: 'E院广场' }],
   }
   const longData = { ...shortData, description: '长正文'.repeat(300) }
+  const compactLayout = calculateShareCardLayout({ ...shortData, description: '短正文', meta: [] })
   const shortLayout = calculateShareCardLayout(shortData)
   const longLayout = calculateShareCardLayout(longData)
   assert.equal(shortLayout.width, SHARE_CARD_WIDTH)
   assert.ok(shortLayout.height >= SHARE_CARD_HEIGHT)
+  assert.ok(compactLayout.height < 1440)
+  assert.equal(compactLayout.height, compactLayout.footerBottom)
   assert.ok(longLayout.height > shortLayout.height)
   assert.equal(shortLayout.descriptionLines.join('\n'), '第一段\n\n第二段\n第三段')
   assert.ok(shortLayout.authorTop >= shortLayout.panelBottom + 36)
-  assert.ok(shortLayout.qrTop >= shortLayout.panelBottom + 36)
+  assert.equal(shortLayout.qrTop, shortLayout.brandBlockTop)
+  assert.equal(shortLayout.brandLogoTop + SHARE_CARD_FOOTER_LOGO_SIZE / 2, shortLayout.brandTextTop + SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT / 2)
+  assert.equal(shortLayout.footerBottom - Math.max(shortLayout.brandBlockTop + shortLayout.brandBlockHeight, shortLayout.qrTop + SHARE_CARD_QR_FRAME_SIZE), SHARE_CARD_FOOTER_BOTTOM_PADDING)
+  assert.ok(SHARE_CARD_FOOTER_TEXT_X + SHARE_CARD_FOOTER_TEXT_WIDTH < SHARE_CARD_QR_FRAME_X)
   assert.match(read('lib/share-card-layout.ts'), /measureWrappedText/)
   assert.doesNotMatch(read('lib/share-card-renderer.ts'), /maxLines|DESCRIPTION_CHARS_PER_LINE|\.slice\(0, maxLength\)/)
   assert.doesNotMatch(read('lib/share-card-image.ts'), /maxLines|\.slice\(0, maxLines\)/)
@@ -109,15 +116,17 @@ test('generator explicitly handles CORS failures by redrawing without remote pix
   assert.match(image, /SHARE_CARD_QR_IMAGE_UNAVAILABLE/)
 })
 
-test('post card uses first legal image, excludes videos, and falls back to the brand image', () => {
+test('post card uses first legal image, excludes videos, and lets the renderer provide the no-image background', () => {
   const page = read('app/posts/[postId]/page.tsx')
   assert.match(page, /PostMedia: \{/)
   assert.match(page, /where: \{ type: 'IMAGE'/)
+  assert.match(page, /firstShareCardImageUrl\(post\.PostMedia\.map/)
   assert.match(page, /firstAbsoluteMetadataImageUrl\(post\.PostMedia\.map/)
   assert.match(page, /metadataImageVariantUrl\(url\)/)
   const metadata = read('lib/share-metadata.ts')
   assert.match(metadata, /VIDEO_FILE_PATTERN/)
   assert.match(metadata, /DEFAULT_OG_IMAGE_PATH/)
+  assert.match(metadata, /export function firstShareCardImageUrl/)
 })
 
 test('activity card follows banner, cover, default and keeps invalid candidates non-fatal', () => {
@@ -125,7 +134,7 @@ test('activity card follows banner, cover, default and keeps invalid candidates 
   const page = read('app/activities/[activityId]/page.tsx')
   assert.match(view, /metadataImageVariantUrl\(activity\.bannerUrl\)/)
   assert.match(view, /metadataImageVariantUrl\(activity\.coverUrl\)/)
-  assert.match(view, /firstAbsoluteMetadataImageUrl\(\[/)
+  assert.match(view, /firstShareCardImageUrl\(\[/)
   assert.match(page, /catch \{/)
 })
 
@@ -145,12 +154,17 @@ test('server-backed card requests use only a content id, keep HTTPS as the norma
 test('both client and server card renderers use the official app icon in the footer brand area', () => {
   const client = read('lib/share-card-image.ts')
   const server = read('lib/share-card-renderer.ts')
+  const layout = read('lib/share-card-layout.ts')
   assert.match(client, /loadLocalImage\(SHARE_CARD_LOGO_PATH\)/)
-  assert.match(client, /drawImageContain\(context, logo, SHARE_CARD_FOOTER_LOGO_X, layout\.footerTop, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 4\)/)
+  assert.match(client, /drawImageContain\(context, logo, SHARE_CARD_FOOTER_LOGO_X, layout\.brandLogoTop, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 4\)/)
   assert.doesNotMatch(client, /drawImageContain\(context, logo, 56, 38, 128, 128, 4\)/)
   assert.match(server, /OFFICIAL_LOGO_PATH = path\.join\(process\.cwd\(\), 'app', 'icon\.png'\)/)
   assert.match(server, /fitImage\(logo, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_LOGO_SIZE, 'contain'\)/)
-  assert.match(server, /left: SHARE_CARD_FOOTER_LOGO_X, top: layout\.footerTop/)
+  assert.match(server, /left: SHARE_CARD_FOOTER_LOGO_X, top: layout\.brandLogoTop/)
+  assert.match(layout, /brandBlockTop/)
+  assert.match(layout, /brandBlockHeight/)
+  assert.match(layout, /brandLogoTop = brandBlockTop \+ \(brandBlockHeight - SHARE_CARD_FOOTER_LOGO_SIZE\) \/ 2/)
+  assert.match(layout, /brandTextTop = brandBlockTop \+ \(brandBlockHeight - SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT\) \/ 2/)
   assert.doesNotMatch(server, /fitImage\(logo, 128, 128, 'contain'\)/)
   assert.doesNotMatch(client, /fillText\('私家E院', 64, 92\)/)
   assert.doesNotMatch(client, /fillText\(shareCardTypeLabel\(data\.type\), 66, 130\)/)
@@ -217,7 +231,22 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.match(preview, /data-share-card-save/)
   assert.match(preview, /data-share-card-qr-url=\{image\.qrUrl\}/)
   assert.match(preview, /data-share-card-source=\{image\.source\}/)
-  assert.match(preview, /高清 PNG · 1080px 宽/)
+  assert.doesNotMatch(preview, /高清 PNG · 1080px 宽/)
+  assert.doesNotMatch(preview, /share-card-preview-eyebrow/)
+})
+
+test('V5 uses a fixed cover Hero for post/activity media and leaves the fallback to missing media', () => {
+  const layout = read('lib/share-card-layout.ts')
+  const server = read('lib/share-card-renderer.ts')
+  const client = read('lib/share-card-image.ts')
+  const service = read('lib/share-card-service.ts')
+  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v5')
+  assert.match(layout, /export function shareCardHeroFit[\s\S]*type === 'home' \? 'contain' : 'cover'/)
+  assert.match(server, /fitImage\(hero, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, shareCardHeroFit\(normalizedData\.type\)\)/)
+  assert.match(client, /shareCardHeroFit\(data\.type\)/)
+  assert.match(service, /firstShareCardImageUrl\(/)
+  assert.match(server, /if \(hero\)/)
+  assert.match(server, /heroLayer = await fitImage\(hero, SHARE_CARD_WIDTH, SHARE_CARD_HERO_HEIGHT, shareCardHeroFit\(normalizedData\.type\)\)/)
 })
 
 test('mobile preview uses the generated PNG img directly and renders no action footer', () => {

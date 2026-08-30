@@ -1,7 +1,8 @@
 import { htmlToPlainText } from '@/lib/share-metadata'
 
 export const SHARE_CARD_WIDTH = 1080
-export const SHARE_CARD_HEIGHT = 1440
+/** Minimum flow height for compact cards; longer content grows naturally. */
+export const SHARE_CARD_HEIGHT = 1160
 export const SHARE_CARD_MIME_TYPE = 'image/png'
 
 export const SHARE_CARD_CANONICAL_ORIGIN = 'https://ecfc.fans'

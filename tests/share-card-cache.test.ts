@@ -136,8 +136,27 @@ test('server PNG dimensions follow the full long copy and keep author/QR below t
   assert.equal(metadata.height, layout.height)
   assert.ok(layout.height > SHARE_CARD_HEIGHT)
   assert.ok(layout.authorTop >= layout.panelBottom + 36)
-  assert.ok(layout.qrTop >= layout.panelBottom + 36)
+  assert.equal(layout.qrTop, layout.brandBlockTop)
+  assert.equal(layout.brandLogoTop + 42, layout.brandTextTop + 36)
+  assert.equal(layout.footerBottom, layout.height)
   assert.ok(layout.descriptionLines.join('').includes('完整正文内容'))
+})
+
+test('server PNG puts a real vertical/long first image into the fixed cover Hero', async () => {
+  const heroFixture = await sharp({
+    create: { width: 360, height: 1800, channels: 3, background: { r: 226, g: 44, b: 48 } },
+  }).png().toBuffer()
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(heroFixture, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch
+  try {
+    const png = await renderShareCardPng({ ...baseData, image: 'https://media.ecfc.fans/media/post/first-long.webp' })
+    const pixel = await sharp(png).extract({ left: 540, top: 120, width: 1, height: 1 }).removeAlpha().raw().toBuffer()
+    assert.ok((pixel[0] || 0) > 150)
+    assert.ok((pixel[1] || 0) < 100)
+    assert.ok((pixel[2] || 0) < 100)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('post/activity records flow through the public service into one card payload', async () => {

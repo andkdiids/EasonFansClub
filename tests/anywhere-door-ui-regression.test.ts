@@ -14,6 +14,8 @@ test('Anywhere Door responsive contract covers required mobile and desktop viewp
   const card = read('components/anywhere-door/AnywhereDoorPostCard.tsx')
   const comments = read('components/anywhere-door/AnywhereDoorCommentPanel.tsx')
   const sourceIdentity = read('components/anywhere-door/AnywhereDoorSourceIdentity.tsx')
+  const admin = read('app/admin/anywhere-door/AnywhereDoorAdminClient.tsx')
+  const avatarRoute = read('app/api/admin/anywhere-door/avatar/route.ts')
   const styles = read('app/globals.css')
   const requiredMobileWidths = [360, 390, 430]
   const requiredDesktopWidths = [1366, 1440, 1920]
@@ -37,6 +39,9 @@ test('Anywhere Door responsive contract covers required mobile and desktop viewp
   assert.match(detailComponent, /anywhere-door-comment-slot/)
   assert.match(detailComponent, /<AnywhereDoorCommentPanel embedded/)
   assert.match(detailComponent, /<AnywhereDoorSourceIdentity username=\{post\.authorUsername\} avatarUrl=\{post\.authorAvatarUrl\}/)
+  assert.match(detailComponent, /<MediaCarousel media=\{post\.media\}/)
+  assert.doesNotMatch(detailComponent, /anywhere-door-media-type/)
+  assert.doesNotMatch(detailComponent, />\{post\.mediaType\}<\/span>/)
   assert.doesNotMatch(detailComponent, /bg-white|bg-slate-900/)
   assert.match(morePosts, /data-anywhere-door-more-posts/)
   assert.match(morePosts, /anywhere-door-more-posts-panel/)
@@ -67,6 +72,14 @@ test('Anywhere Door responsive contract covers required mobile and desktop viewp
   assert.match(comments, /data-anywhere-door-comments=\{embedded \? 'embedded' : 'standalone'\}/)
   assert.match(sourceIdentity, /SafeAvatar/)
   assert.doesNotMatch(sourceIdentity, /UserAvatar|badge|uid/)
+  assert.match(admin, /data-anywhere-door-account-profile/)
+  assert.match(admin, /上传\/更换头像/)
+  assert.match(admin, /恢复自动头像/)
+  assert.match(admin, /api\/admin\/anywhere-door\/avatar/)
+  assert.match(avatarRoute, /requireAdmin\('social_manage'\)/)
+  assert.match(avatarRoute, /uploadSiteImage/)
+  assert.match(avatarRoute, /siteSetting\.upsert/)
+  assert.match(avatarRoute, /siteSetting\.deleteMany/)
   assert.match(styles, /\.anywhere-door-page \{[\s\S]*max-width: 1480px;/)
   assert.match(styles, /\.anywhere-door-page-title \{[\s\S]*color: var\(--foreground\)/)
   assert.match(styles, /\.anywhere-door-post-card,[\s\S]*background: var\(--surface\)/)
@@ -103,4 +116,18 @@ test('Anywhere Door data paths stay local and bounded', () => {
   assert.match(sync, /authorAvatarUrl/)
   assert.match(schema, /authorAvatarUrl\s+String\?\s+@db\.Text/)
   assert.match(migration, /ADD COLUMN `authorAvatarUrl` TEXT NULL/)
+})
+
+test('Anywhere Door account avatar uses manual, then stable automatic, then SafeAvatar fallback', async () => {
+  const { isAnywhereDoorAccountUsername, resolveAnywhereDoorAvatar } = await import('@/lib/anywhere-door/avatar')
+  const automatic = 'https://scontent.cdninstagram.com/avatar.jpg'
+  const manual = 'https://media.ecfc.fans/media/social/instagram/mreasonchan/avatar/manual/source.webp'
+
+  assert.deepEqual(resolveAnywhereDoorAvatar({ autoAvatarUrl: automatic }), { url: automatic, source: 'instagram' })
+  assert.deepEqual(resolveAnywhereDoorAvatar({ manualAvatarUrl: manual, autoAvatarUrl: automatic }), { url: manual, source: 'manual' })
+  assert.deepEqual(resolveAnywhereDoorAvatar({ manualAvatarUrl: 'https://evil.example/avatar.jpg', autoAvatarUrl: automatic }), { url: automatic, source: 'instagram' })
+  assert.deepEqual(resolveAnywhereDoorAvatar({ autoAvatarUrl: 'https://evil.example/avatar.jpg' }), { url: null, source: 'fallback' })
+  assert.deepEqual(resolveAnywhereDoorAvatar({}), { url: null, source: 'fallback' })
+  assert.equal(isAnywhereDoorAccountUsername('@MReasonChan'), true)
+  assert.equal(isAnywhereDoorAccountUsername('australianopen'), false)
 })
