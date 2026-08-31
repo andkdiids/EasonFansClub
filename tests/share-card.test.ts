@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import sharp from 'sharp'
 import { createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
-import { calculateShareCardLayout, shareCardHeroDimensions, SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y, SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP, SHARE_CARD_ACTIVITY_QR_OFFSET_Y, SHARE_CARD_ACTIVITY_TITLE_MAX_LINES, SHARE_CARD_AUTHOR_TOP_GAP, SHARE_CARD_DESCRIPTION_LINE_HEIGHT, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_POST_DESCRIPTION_META_GAP, SHARE_CARD_QR_FRAME_X, SHARE_CARD_PORTRAIT_HERO_HEIGHT, SHARE_CARD_TITLE_LINE_HEIGHT } from '@/lib/share-card-layout'
+import { calculateShareCardLayout, shareCardHeroDimensions, SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y, SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP, SHARE_CARD_ACTIVITY_QR_OFFSET_Y, SHARE_CARD_ACTIVITY_TITLE_MAX_LINES, SHARE_CARD_AUTHOR_TOP_GAP, SHARE_CARD_DESCRIPTION_LINE_HEIGHT, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_POST_DESCRIPTION_META_GAP, SHARE_CARD_POST_TITLE_MAX_LINES, SHARE_CARD_QR_FRAME_X, SHARE_CARD_PORTRAIT_HERO_HEIGHT, SHARE_CARD_TITLE_LINE_HEIGHT } from '@/lib/share-card-layout'
 import { SHARE_CARD_TEMPLATE_VERSION } from '@/lib/share-card-hash'
 import { BRANDED_QR_ERROR_CORRECTION, BRANDED_QR_LOGO_PLATE_PADDING_PX, BRANDED_QR_LOGO_RATIO, BRANDED_QR_MARGIN_MODULES, BRANDED_QR_VERSION, createBrandedQrSvg } from '@/lib/branded-qr'
 import { createBrandedQrBuffer } from '@/lib/branded-qr-server'
@@ -135,6 +135,8 @@ test('post excerpt and board metadata use conditional vertical flow without spli
   const layout = calculateShareCardLayout(data)
   assert.equal(layout.descriptionLines.length, 2)
   assert.equal(layout.descriptionLines.at(-1)?.endsWith('…'), true)
+  assert.ok(layout.titleLines.length <= SHARE_CARD_POST_TITLE_MAX_LINES)
+  assert.deepEqual(layout.metaLines, ['版块：吹水'])
   assert.ok(layout.metaTop >= layout.descriptionTop + layout.descriptionLines.length * SHARE_CARD_DESCRIPTION_LINE_HEIGHT + SHARE_CARD_POST_DESCRIPTION_META_GAP)
 
   const withoutExcerpt = calculateShareCardLayout({ ...data, description: '' })
@@ -326,12 +328,12 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.doesNotMatch(preview, /share-card-preview-eyebrow/)
 })
 
-test('V10 keeps the shared Hero policy for landscape and portrait media', () => {
+test('V11 keeps the shared Hero policy for landscape and portrait media', () => {
   const layout = read('lib/share-card-layout.ts')
   const server = read('lib/share-card-renderer.ts')
   const client = read('lib/share-card-image.ts')
   const service = read('lib/share-card-service.ts')
-  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v10')
+  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v11')
   assert.match(layout, /export function shareCardHeroFit[\s\S]*type === 'home' \? 'contain' : 'cover'/)
   assert.match(server, /fitImage\(hero, SHARE_CARD_WIDTH, layout\.heroHeight, shareCardHeroFit\(normalizedData\.type\)\)/)
   assert.match(client, /shareCardHeroFit\(data\.type\)/)

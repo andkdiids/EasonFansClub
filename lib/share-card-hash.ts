@@ -3,8 +3,8 @@ import { BRANDED_QR_VERSION } from '@/lib/branded-qr'
 import { SHARE_CARD_EMOJI_VERSION } from '@/lib/share-card-emoji'
 import type { ShareCardData } from '@/lib/share-card'
 
-/** Bump when any generated pixel/layout changes. v10 adds post-safe Emoji assets and footer alignment. */
-export const SHARE_CARD_TEMPLATE_VERSION = 'v10'
+/** Bump when any generated pixel/layout changes. v11 refreshes post flow spacing and board labels. */
+export const SHARE_CARD_TEMPLATE_VERSION = 'v11'
 export const SHARE_CARD_LOGO_SOURCE = 'app/icon.png'
 export const SHARE_CARD_LOGO_VERSION = 'app-icon-footer-v1'
 

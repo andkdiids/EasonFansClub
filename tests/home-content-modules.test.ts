@@ -14,7 +14,10 @@ test('homepage groups accumulated check-ins with registration and adds the presc
   assert.match(surface, /<div className="stat-birthdays">/)
   assert.match(surface, /href="\/games\/daily-prescription" className="stat-prescription"/)
   assert.match(css, /\.community-stats\.home-checkin-stats \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
-  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*min-height: 184px;/)
+  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*display: grid;[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);[\s\S]*min-height: 184px;/)
+  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration > \.stat-checkin \{[\s\S]*border-right: 1px solid var\(--border\);/)
+  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration > \.stat-total \{[\s\S]*border-top: 0;/)
+  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);/)
 })
 
 test('homepage no longer requests or renders the removed featured post and hot concert modules', () => {

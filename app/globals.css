@@ -7454,30 +7454,40 @@ body:has(.duel-page) .app-page-content {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 .community-stats.home-checkin-stats > .stat-registration {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   min-width: 0;
   min-height: 184px;
-  flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  padding: 0;
 }
-.home-checkin-stats .stat-checkin {
-  position: relative;
-  display: flex;
+.community-stats.home-checkin-stats > .stat-registration > .stat-checkin,
+.community-stats.home-checkin-stats > .stat-registration > .stat-total {
   min-width: 0;
-  min-height: 0;
-  flex-direction: column;
+  min-height: 100%;
   align-items: flex-start;
   justify-content: center;
-  padding: 0;
+  padding: 18px 24px;
+}
+.community-stats.home-checkin-stats > .stat-registration > .stat-checkin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
   color: var(--foreground);
   text-decoration: none;
+}
+.community-stats.home-checkin-stats > .stat-registration > .stat-total {
+  display: flex;
+  flex-direction: column;
+  border-top: 0;
 }
 .home-checkin-stats .stat-checkin > strong { overflow-wrap: anywhere; }
 .home-checkin-stats .stat-checkin > small { margin-top: 9px; }
 .home-checkin-stats .stat-total {
-  display: grid;
+  display: flex;
   min-width: 0;
+  flex-direction: column;
   justify-items: start;
   margin-top: 16px;
   border-top: 1px solid var(--border);
@@ -7522,8 +7532,22 @@ body:has(.duel-page) .app-page-content {
 }
 
 @media (max-width: 767px) {
-  .community-stats.home-checkin-stats > .stat-registration { min-height: 176px; }
-  .home-checkin-stats .stat-total { margin-top: 12px; padding-top: 9px; }
+  .community-stats.home-checkin-stats > .stat-registration {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-height: 176px;
+    padding: 0;
+  }
+  .community-stats.home-checkin-stats > .stat-registration > .stat-checkin,
+  .community-stats.home-checkin-stats > .stat-registration > .stat-total {
+    min-height: 100%;
+    padding: 14px 12px;
+  }
+  .community-stats.home-checkin-stats > .stat-registration > .stat-total {
+    margin-top: 0;
+    border-top: 0;
+    padding-top: 14px;
+  }
+  .home-checkin-stats .stat-total { margin-top: 0; padding-top: 14px; }
   .home-checkin-stats .stat-total strong { font-size: 18px; }
   .home-checkin-stats .stat-total a { font-size: 9px; }
   .home-activity-grid { grid-template-columns: 1fr; }

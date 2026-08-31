@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
+import { isConfiguredForumBoardId, mergeForumBoardSummaries, normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { clampForumPage, getForumOffset, getForumTotalPages, parseForumSort } from '@/lib/forum'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
@@ -23,22 +23,28 @@ export async function GET(request: Request) {
   const requestedPage = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
   const pageSize = Math.min(40, Math.max(5, Number.parseInt(searchParams.get('pageSize') || '20', 10) || 20))
 
-  const boards = await prisma.board.findMany({
+  const boardRows = await prisma.board.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     take: 100,
     select: { id: true, name: true, slug: true, description: true, postCount: true },
   })
+  const boards = mergeForumBoardSummaries(boardRows)
   const selectedBoard = boardValue
     ? boards.find((board) => board.slug === boardValue || board.id === boardValue) || null
     : null
   const publicBoards = normalizeForumBoards(boards)
   const publicSelectedBoard = selectedBoard ? withForumBoardDisplayName(selectedBoard) : null
 
+  const boardWhere: Prisma.PostWhereInput = selectedBoard
+    ? isConfiguredForumBoardId(selectedBoard.id)
+      ? { Board: { isActive: true, slug: selectedBoard.slug } }
+      : { boardId: selectedBoard.id }
+    : { Board: { isActive: true } }
   const where: Prisma.PostWhereInput = {
     ...publicPostWhere,
     User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    ...(selectedBoard ? { boardId: selectedBoard.id } : { Board: { isActive: true } }),
+    ...boardWhere,
     ...(sort === 'featured' ? { isFeatured: true } : {}),
     ...(sort === 'pinned' ? { isPinned: true } : {}),
     ...(query ? { OR: [

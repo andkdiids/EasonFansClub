@@ -4,7 +4,7 @@ import test from 'node:test'
 import sharp from 'sharp'
 import { canonicalShareUrl, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { createShareCardContentHash, SHARE_CARD_LOGO_SOURCE, SHARE_CARD_LOGO_VERSION, SHARE_CARD_TEMPLATE_VERSION, shareCardHashPayload } from '@/lib/share-card-hash'
-import { calculateShareCardLayout, SHARE_CARD_PORTRAIT_HERO_HEIGHT } from '@/lib/share-card-layout'
+import { calculateShareCardLayout, SHARE_CARD_DESCRIPTION_LINE_HEIGHT, SHARE_CARD_POST_DESCRIPTION_META_GAP, SHARE_CARD_POST_TITLE_MAX_LINES, SHARE_CARD_PORTRAIT_HERO_HEIGHT } from '@/lib/share-card-layout'
 import { createShareCardCache, getOrCreatePublicShareCard, loadActivityShareCardData, loadPostShareCardData, ShareCardContentNotFoundError, shareCardObjectKey, shareCardPublicUrl } from '@/lib/share-card-service'
 import { isTrustedShareCardImageUrl, renderShareCardPng, renderShareCardPngWithInfo, shareCardRendererConstants } from '@/lib/share-card-renderer'
 import { prisma } from '@/lib/prisma'
@@ -148,8 +148,9 @@ test('server PNG dimensions follow the shared Hero overlay and keep author/QR be
   assert.ok(layout.qrTop >= layout.authorTop + layout.authorBlockHeight)
   assert.equal(layout.brandLogoTop + 42, layout.brandTextTop + 36)
   assert.equal(layout.footerBottom, layout.height)
-  assert.ok(layout.titleLines.length <= 3)
-  assert.ok(layout.descriptionLines.length <= 3)
+  assert.ok(layout.titleLines.length <= SHARE_CARD_POST_TITLE_MAX_LINES)
+  assert.ok(layout.descriptionLines.length <= 2)
+  assert.ok(layout.metaTop >= layout.descriptionTop + layout.descriptionLines.length * SHARE_CARD_DESCRIPTION_LINE_HEIGHT + SHARE_CARD_POST_DESCRIPTION_META_GAP)
   assert.equal(layout.descriptionLines.at(-1)?.endsWith('…'), true)
 })
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildForumDiscoveryTabs } from '../lib/forum-discovery'
-import { BARD_BOARD_NAME, BARD_BOARD_SLUG, DAILY_CHAT_BOARD_SLUG, DAILY_CHAT_DISPLAY_NAME, defaultBoards, getForumBoardDisplayName } from '../lib/boards'
+import { appendMissingDefaultForumBoards, BARD_BOARD_NAME, BARD_BOARD_SLUG, DAILY_CHAT_BOARD_SLUG, DAILY_CHAT_DISPLAY_NAME, defaultBoards, getForumBoardDisplayName } from '../lib/boards'
 import { MAX_CONTENT_IMAGES } from '../lib/content-images'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -35,6 +35,20 @@ test('论坛分区改名保留 daily-chat slug，并新增吟游诗人默认分�
       { name: BARD_BOARD_NAME, slug: BARD_BOARD_SLUG },
     ],
   )
+})
+
+test('广场分区入口从共享目录补齐缺失的吟游诗人，并保留发帖所需的稳定 slug', () => {
+  const boards = appendMissingDefaultForumBoards([
+    { id: 'chat', name: DAILY_CHAT_DISPLAY_NAME, slug: DAILY_CHAT_BOARD_SLUG },
+  ])
+  assert.deepEqual(boards.map((board) => ({ name: board.name, slug: board.slug })), [
+    { name: DAILY_CHAT_DISPLAY_NAME, slug: DAILY_CHAT_BOARD_SLUG },
+    { name: BARD_BOARD_NAME, slug: BARD_BOARD_SLUG },
+  ])
+  assert.match(read('app/api/forum/feed/route.ts'), /mergeForumBoardSummaries/)
+  assert.match(read('app/api/forum/discover/route.ts'), /mergeForumBoardSummaries/)
+  assert.match(read('app/posts/new/page.tsx'), /PostCreateForm boards=\{normalizeForumBoards\(boards\)\}/)
+  assert.match(read('app/posts/[postId]/edit/page.tsx'), /boards=\{normalizeForumBoards\(boards\)\}/)
 })
 
 test('模式入口和热门文案位于统一的顶部操作区', () => {

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
+import { isConfiguredForumBoardId, mergeForumBoardSummaries, normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -206,8 +206,9 @@ const discoverySelect = {
 
 type DiscoveryRow = Prisma.PostGetPayload<{ select: typeof discoverySelect }>
 
-function buildWhere({ boardId, query, excludedPostIds, excludedAuthorIds, excludeSystemPosts }: {
+function buildWhere({ boardId, boardSlug, query, excludedPostIds, excludedAuthorIds, excludeSystemPosts }: {
   boardId?: string
+  boardSlug?: string
   query?: string
   excludedPostIds?: string[]
   excludedAuthorIds?: string[]
@@ -216,7 +217,9 @@ function buildWhere({ boardId, query, excludedPostIds, excludedAuthorIds, exclud
   return {
     ...publicPostWhere,
     User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    Board: excludeSystemPosts ? { isActive: true, slug: { not: 'announcements' } } : { isActive: true },
+    Board: boardSlug
+      ? { isActive: true, slug: boardSlug }
+      : excludeSystemPosts ? { isActive: true, slug: { not: 'announcements' } } : { isActive: true },
     ...(excludeSystemPosts ? { isPinned: false, isFeatured: false } : {}),
     ...(boardId ? { boardId } : {}),
     ...(query ? { OR: [{ title: { contains: query } }, { summary: { contains: query } }] } : {}),
@@ -266,12 +269,13 @@ export async function POST(request: Request) {
   const seenAuthorIds = normalizeDiscoveryIds(body.seenAuthorIds)
   const recentRecommendedPostIds = normalizeDiscoveryIds(body.recentRecommendedPostIds, FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT)
 
-  const boards = await prisma.board.findMany({
+  const boardRows = await prisma.board.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     take: 100,
     select: { id: true, name: true, slug: true, description: true, postCount: true },
   })
+  const boards = mergeForumBoardSummaries(boardRows)
   const selectedBoard = boardValue && boardValue !== 'all'
     ? boards.find((board) => board.slug === boardValue || board.id === boardValue) || null
     : null
@@ -294,7 +298,12 @@ export async function POST(request: Request) {
   const currentUserId = user?.id
   const interactionUserId = currentUserId || '__anonymous__'
   const isSystemSort = !boardValue && !query && (mode === 'latest' || mode === 'hot')
-  const where = buildWhere({ boardId: selectedBoard?.id, query, excludeSystemPosts: isSystemSort })
+  const where = buildWhere({
+    boardId: selectedBoard && !isConfiguredForumBoardId(selectedBoard.id) ? selectedBoard.id : undefined,
+    boardSlug: selectedBoard && isConfiguredForumBoardId(selectedBoard.id) ? selectedBoard.slug : undefined,
+    query,
+    excludeSystemPosts: isSystemSort,
+  })
 
   let rows: DiscoveryRow[] = []
   let hasMore = false

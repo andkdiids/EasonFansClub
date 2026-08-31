@@ -1,5 +1,6 @@
 import { sanitizeShareCardText, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { tokenizeShareCardText } from '@/lib/share-card-emoji'
+import { getForumBoardDisplayName } from '@/lib/boards'
 
 /** Default Hero height used when an image has no readable dimensions. */
 export const SHARE_CARD_HERO_HEIGHT = 660
@@ -46,6 +47,7 @@ export const SHARE_CARD_POST_DESCRIPTION_META_GAP = 24
 export const SHARE_CARD_ACTIVITY_TITLE_MAX_LINES = 3
 export const SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES = 2
 export const SHARE_CARD_ACTIVITY_META_MAX_LINES = 1
+export const SHARE_CARD_POST_TITLE_MAX_LINES = 2
 /** All share-card types use the same bounded overlay copy policy. */
 export const SHARE_CARD_OVERLAY_TITLE_MAX_LINES = SHARE_CARD_ACTIVITY_TITLE_MAX_LINES
 export const SHARE_CARD_OVERLAY_DESCRIPTION_MAX_LINES = SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES
@@ -213,7 +215,16 @@ function limitWrappedText(block: ShareCardTextBlock, maxLines: number, maxWidth:
 
 function visibleMeta(data: ShareCardData) {
   const entries = data.meta
-    .map(({ label, value }) => ({ label: normalizeCardText(label), value: normalizeCardText(value) }))
+    .map(({ label, value }) => {
+      const normalizedLabel = normalizeCardText(label)
+      const normalizedValue = normalizeCardText(value)
+      return {
+        label: normalizedLabel,
+        value: normalizedLabel === '版块'
+          ? getForumBoardDisplayName({ slug: normalizedValue, name: normalizedValue })
+          : normalizedValue,
+      }
+    })
     .filter(({ label, value }) => label && value)
   const activityEntries = data.type === 'activity'
     ? entries.filter(({ label }) => label === '活动时间' || label === '活动地点')
@@ -245,7 +256,8 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const meta = visibleMeta(data)
   const measuredTitleBlock = measureWrappedText(title, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_TITLE_FONT_SIZE, SHARE_CARD_TITLE_LINE_HEIGHT)
   const measuredDescriptionBlock = measureWrappedText(description, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_DESCRIPTION_FONT_SIZE, SHARE_CARD_DESCRIPTION_LINE_HEIGHT)
-  const titleBlock = limitWrappedText(measuredTitleBlock, SHARE_CARD_OVERLAY_TITLE_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_TITLE_FONT_SIZE)
+  const titleMaxLines = data.type === 'post' ? SHARE_CARD_POST_TITLE_MAX_LINES : SHARE_CARD_OVERLAY_TITLE_MAX_LINES
+  const titleBlock = limitWrappedText(measuredTitleBlock, titleMaxLines, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_TITLE_FONT_SIZE)
   const descriptionBlock = limitWrappedText(measuredDescriptionBlock, SHARE_CARD_OVERLAY_DESCRIPTION_MAX_LINES, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_DESCRIPTION_FONT_SIZE)
   const metaBlocks = meta.map((value) => {
     const block = measureWrappedText(value, SHARE_CARD_TEXT_WIDTH, SHARE_CARD_META_FONT_SIZE, SHARE_CARD_META_LINE_HEIGHT)
