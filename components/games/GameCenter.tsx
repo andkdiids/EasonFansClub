@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { entertainmentGameCatalog, gameCategories, type GameCategoryFilter } from '@/lib/game-catalog'
 import { GameBanner } from './GameBanner'
 import { GameGrid } from './GameGrid'
+import { EntertainmentLeaderboardCenter } from './EntertainmentLeaderboardCenter'
 
 type LobbySummary = {
   weeklyBest: number | null
@@ -88,6 +89,7 @@ return (
           <GameGrid games={filteredGames} bestScores={{ 'guess-song': bestScore }} />
         )}
       </section>
+      <EntertainmentLeaderboardCenter />
     </div>
   </main>
 )

@@ -17,6 +17,7 @@ import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { normalizeActionUrl } from '@/lib/url-safety'
+import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
 
 const homeText = {
   checkedIn: '已签到',
@@ -55,6 +56,10 @@ const homeText = {
   anywhereDoorMore: '查看',
   anywhereDoorEmpty: '暂时没有最新更新。',
   dailyPrescription: '每日处方',
+  prescriptionPending: '待领取',
+  prescriptionClaimed: '已领取',
+  prescriptionView: '查看处方',
+  prescriptionFee: '挂号费',
   goPrescription: '去领取处方',
   distance: '距今',
   years: '周年',
@@ -84,7 +89,7 @@ type TodayEvent = { id: string; date: string; year: number; month: number; day: 
 type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: GuessSongModeHighScores['status'] | 'loading' }
 type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; startsAt: string | null; endsAt: string | null }
 type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
-type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; entertainmentRanking: EntertainmentRanking | null }
+type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
 
 const modeLabels = Object.fromEntries(
   GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, GUESS_SONG_MODE_CONFIG[mode].label]),
@@ -192,7 +197,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const items = useMemo(() => getPageLayoutModules(layoutConfig, device, 'home'), [layoutConfig, device])
   const layoutModule = (key: string) => items.find((item) => item.key === key)
   const visible = (key: string) => Boolean(layoutModule(key))
-  const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], entertainmentRanking: loadingEntertainmentRanking })
+  const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const [todayPageIndex, setTodayPageIndex] = useState(0)
@@ -201,6 +206,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const todayTouchStart = useRef<{ x: number; y: number } | null>(null)
   const todayTouchCurrent = useRef<{ x: number; y: number } | null>(null)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
+  const dailyPrescription = getHomeDailyPrescriptionDisplay(data.dailyPrescriptionReward)
   const topRanking = data.entertainmentRanking?.mobileBest || null
   const entertainmentModes = data.entertainmentRanking?.modes || emptyEntertainmentModes()
   const dailyMusicCoverUrl = publicImageVariantUrl(data.dailyMusic?.album.coverUrl, 'thumb-sm') || null
@@ -216,7 +222,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           // The main home payload intentionally keeps entertainment ranking in
           // its own request. Do not let its legacy null field overwrite the
           // independently loaded result.
-          setData((current) => ({ ...nextData, activities: nextData.activities || [], anywhereDoor: nextData.anywhereDoor || null, entertainmentRanking: current.entertainmentRanking }))
+          setData((current) => ({ ...nextData, activities: nextData.activities || [], anywhereDoor: nextData.anywhereDoor || null, dailyPrescriptionReward: nextData.dailyPrescriptionReward ?? null, entertainmentRanking: current.entertainmentRanking }))
           setFailed(false)
         }
       } catch (error) {
@@ -248,6 +254,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     void load()
     void loadEntertainmentRanking()
     window.addEventListener('checkin:completed', refresh)
+    window.addEventListener('user:points-updated', refresh)
     window.addEventListener('focus', refresh)
     window.addEventListener('pageshow', refresh)
     document.addEventListener('visibilitychange', refresh)
@@ -255,6 +262,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       disposed = true
       controller.abort()
       window.removeEventListener('checkin:completed', refresh)
+      window.removeEventListener('user:points-updated', refresh)
       window.removeEventListener('focus', refresh)
       window.removeEventListener('pageshow', refresh)
       document.removeEventListener('visibilitychange', refresh)
@@ -483,7 +491,16 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
             <div className="stat-total"><span>{homeText.totalCheckins}</span><strong>{data.stats ? `${fmt(data.stats._count.checkIns)} ${homeText.days}` : '—'}</strong><Link href="/checkin">{homeText.viewCheckin} →</Link></div>
           </div>
           <div className="stat-birthdays"><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
-          <Link href="/games/daily-prescription" className="stat-prescription"><span>{homeText.dailyPrescription}</span><strong>今日处方</strong><small>{homeText.goPrescription} →</small></Link>
+          <Link href="/games/daily-prescription" className="stat-prescription">
+            <span>{homeText.dailyPrescription}</span>
+            {dailyPrescription.status === 'claimed' ? <>
+              <strong>+{fmt(dailyPrescription.points)} {homeText.prescriptionFee}</strong>
+              <small>{homeText.prescriptionClaimed} / {homeText.prescriptionView} →</small>
+            </> : <>
+              <strong>{homeText.prescriptionPending}</strong>
+              <small>{homeText.goPrescription} →</small>
+            </>}
+          </Link>
         </section>
 
         {announcement && visible('home.announcement') ? <Link href={normalizeActionUrl(announcement.link) || normalizeActionUrl(announcement.buttonUrl) || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}

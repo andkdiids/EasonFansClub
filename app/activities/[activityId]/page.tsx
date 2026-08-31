@@ -11,6 +11,7 @@ import { buildActivityMetadata, firstAbsoluteMetadataImageUrl, metadataImageVari
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { getPublicActivityLotteries } from '@/lib/activity-lottery'
 
 export const dynamic = 'force-dynamic'
 
@@ -100,12 +101,13 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
       : Promise.resolve(null),
     getActivityRegistrationQuestions(prisma, view.id),
   ])
+  const lotteries = await getPublicActivityLotteries(view.id, viewer?.id)
   const availability = getActivityRegistrationState(view, view.signupCount)
   const activityMaterialAvailable = !view.linkedMaterial || (view.linkedMaterial.status === 'PUBLISHED' && view.linkedMaterial.stockRemaining > 0)
 
   return (
     <main className="site-page-main flat-page mx-auto w-full max-w-[1440px] space-y-5 px-4 py-6 sm:px-5 sm:py-8" style={{ maxWidth: '1440px' }}>
-      <ActivityDetailView activity={view} shareAuthor={shareAuthor} isAuthenticated={Boolean(viewer)} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && activityMaterialAvailable && Boolean(viewer) && registration?.status !== 'ACTIVE' && registration?.status !== 'CANCELLED'} />
+      <ActivityDetailView activity={view} shareAuthor={shareAuthor} isAuthenticated={Boolean(viewer)} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && activityMaterialAvailable && Boolean(viewer) && registration?.status !== 'ACTIVE' && registration?.status !== 'CANCELLED'} lotteries={lotteries} />
       <p className="text-right text-xs font-bold text-slate-400 dark:text-slate-500"><ActivityViewCounter activityId={view.id} initialCount={view.viewCount} /></p>
     </main>
   )

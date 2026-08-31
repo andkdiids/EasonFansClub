@@ -4,7 +4,7 @@ import { BackButton } from '@/components/BackButton'
 import { PostEditForm, type ExistingMedia } from '@/components/PostEditForm'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { normalizeForumBoards } from '@/lib/boards'
+import { mergeForumBoardOptions, normalizeForumBoards } from '@/lib/boards'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -59,11 +59,12 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
     url: publicImageUrl(media.url) || media.url,
     broken: isSupabaseStorageUrl(media.url),
   }))
-  const boards = await prisma.board.findMany({
+  const boardRows = await prisma.board.findMany({
     where: { OR: [{ isActive: true }, { id: post.boardId }] },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     select: { id: true, name: true, slug: true },
   })
+  const boards = mergeForumBoardOptions(boardRows)
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-3xl px-5 py-10">

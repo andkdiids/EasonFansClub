@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { PostCreateForm } from '@/components/PostCreateForm'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { normalizeForumBoards } from '@/lib/boards'
+import { mergeForumBoardOptions, normalizeForumBoards } from '@/lib/boards'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +12,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
   if (!user) redirect('/login')
 
   const canPostAnnouncement = await hasAdminPermission(user, 'post_manage')
-  const boards = await prisma.board.findMany({
+  const boardRows = await prisma.board.findMany({
     where: {
       isActive: true,
       ...(canPostAnnouncement ? {} : { slug: { not: 'announcements' } }),
@@ -21,6 +21,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
     take: 100,
     select: { id: true, name: true, slug: true },
   })
+  const boards = mergeForumBoardOptions(boardRows)
   const query = await searchParams
 
   return (

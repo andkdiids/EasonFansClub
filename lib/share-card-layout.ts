@@ -1,4 +1,4 @@
-import { sanitizeShareCardText, shareCardTypeLabel, SHARE_CARD_HEIGHT, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { sanitizeShareCardText, shareCardTypeLabel, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { tokenizeShareCardText } from '@/lib/share-card-emoji'
 import { getForumBoardDisplayName } from '@/lib/boards'
 
@@ -35,26 +35,28 @@ export const SHARE_CARD_FOOTER_BRAND_BLOCK_HEIGHT = Math.max(SHARE_CARD_FOOTER_L
 export const SHARE_CARD_CONTENT_BOTTOM_PADDING = 48
 export const SHARE_CARD_AUTHOR_TOP_GAP = 40
 export const SHARE_CARD_FOOTER_TOP_GAP = 40
-export const SHARE_CARD_FOOTER_BOTTOM_PADDING = 56
+export const SHARE_CARD_FOOTER_QR_TOP_GAP = 16
+export const SHARE_CARD_FOOTER_BOTTOM_PADDING = 32
 /** Content details sit inside the lower part of the existing Hero viewport. */
 export const SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP = 36
-export const SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM = 36
+export const SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM = 32
 export const SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP = 16
 export const SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP = 18
-export const SHARE_CARD_ACTIVITY_OVERLAY_META_GAP = 16
-/** Posts need a little more optical separation before the board label. */
-export const SHARE_CARD_POST_DESCRIPTION_META_GAP = 24
+/** Keep one explicit, independent gap between summary and section/meta rows. */
+export const SHARE_CARD_SECTION_GAP = 28
+export const SHARE_CARD_ACTIVITY_OVERLAY_META_GAP = SHARE_CARD_SECTION_GAP
+export const SHARE_CARD_POST_DESCRIPTION_META_GAP = SHARE_CARD_SECTION_GAP
 export const SHARE_CARD_ACTIVITY_TITLE_MAX_LINES = 3
 export const SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES = 2
 export const SHARE_CARD_ACTIVITY_META_MAX_LINES = 1
-export const SHARE_CARD_POST_TITLE_MAX_LINES = 2
+export const SHARE_CARD_POST_TITLE_MAX_LINES = 3
 /** All share-card types use the same bounded overlay copy policy. */
 export const SHARE_CARD_OVERLAY_TITLE_MAX_LINES = SHARE_CARD_ACTIVITY_TITLE_MAX_LINES
 export const SHARE_CARD_OVERLAY_DESCRIPTION_MAX_LINES = SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES
 export const SHARE_CARD_OVERLAY_META_MAX_LINES = SHARE_CARD_ACTIVITY_META_MAX_LINES
 /** Footer balance: the brand group sits lower while the QR group sits higher. */
-export const SHARE_CARD_BRAND_OFFSET_Y = 64
-export const SHARE_CARD_QR_OFFSET_Y = -56
+export const SHARE_CARD_BRAND_OFFSET_Y = SHARE_CARD_FOOTER_TOP_GAP
+export const SHARE_CARD_QR_OFFSET_Y = SHARE_CARD_FOOTER_QR_TOP_GAP
 /** Kept as compatibility aliases for callers/tests that used the activity names. */
 export const SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y = SHARE_CARD_BRAND_OFFSET_Y
 export const SHARE_CARD_ACTIVITY_QR_OFFSET_Y = SHARE_CARD_QR_OFFSET_Y
@@ -117,7 +119,11 @@ export type ShareCardLayout = Readonly<{
   activityOverlayHeight: number
   categoryTop: number
   titleTop: number
+  titleBottom: number
   descriptionTop: number
+  summaryBottom: number
+  sectionTop: number
+  sectionGap: number
   metaTop: number
   authorTop: number
   authorTextTop: number
@@ -271,16 +277,14 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const hasMeta = metaLines.length > 0
   const metaHeight = metaLines.length * SHARE_CARD_META_LINE_HEIGHT
   const descriptionGap = hasDescription ? SHARE_CARD_ACTIVITY_OVERLAY_DESCRIPTION_GAP : 0
-  const metaGap = hasMeta
-    ? (data.type === 'post' ? SHARE_CARD_POST_DESCRIPTION_META_GAP : SHARE_CARD_ACTIVITY_OVERLAY_META_GAP)
-    : 0
+  const sectionGap = hasMeta ? SHARE_CARD_SECTION_GAP : 0
   const overlayHeight = SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
     + SHARE_CARD_CATEGORY_LINE_HEIGHT
     + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
     + titleBlock.height
     + descriptionGap
     + descriptionBlock.height
-    + metaGap
+    + sectionGap
     + metaHeight
     + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM
   const overlayTop = Math.max(0, hero.height - overlayHeight)
@@ -291,8 +295,11 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
   const activityOverlayHeight = overlayHeight
   const categoryTop = overlayTop + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP
   const titleTop = categoryTop + SHARE_CARD_CATEGORY_LINE_HEIGHT + SHARE_CARD_ACTIVITY_OVERLAY_TITLE_GAP
-  const descriptionTop = titleTop + titleBlock.height + descriptionGap
-  const metaTop = descriptionTop + descriptionBlock.height + metaGap
+  const titleBottom = titleTop + titleBlock.height
+  const descriptionTop = titleBottom + descriptionGap
+  const summaryBottom = descriptionTop + descriptionBlock.height
+  const sectionTop = summaryBottom + sectionGap
+  const metaTop = sectionTop
   const authorTop = panelBottom + SHARE_CARD_AUTHOR_TOP_GAP
   const authorTextTop = authorTop + Math.max(0, (SHARE_CARD_AVATAR_SIZE - authorBlock.height - dateBlock.height - 4) / 2)
   const dateTop = authorTextTop + authorBlock.height + 4
@@ -301,34 +308,20 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
     (authorTextTop - authorTop) + authorBlock.height + 4 + dateBlock.height,
   )
   const brandBlockHeight = SHARE_CARD_FOOTER_BRAND_BLOCK_HEIGHT
-  const naturalBrandBlockTop = authorTop + authorBlockHeight + SHARE_CARD_FOOTER_TOP_GAP
-  // Keep the established minimum canvas height without leaving the footer
-  // floating above the bottom edge on compact cards. Long content still wins
-  // because its natural flow position is larger than this minimum anchor.
+  const authorBottom = authorTop + authorBlockHeight
+  // The left column flows from the author into the brand group. The QR sits
+  // near the upper part of the footer, alongside the author column, and its
+  // independent right-side column keeps the two groups from colliding.
   const brandOffsetY = SHARE_CARD_BRAND_OFFSET_Y
   const qrOffsetY = SHARE_CARD_QR_OFFSET_Y
-  const footerVisualHeight = Math.max(brandOffsetY + brandBlockHeight, qrOffsetY + SHARE_CARD_QR_FRAME_SIZE)
-  const footerAnchorMin = SHARE_CARD_HEIGHT - SHARE_CARD_FOOTER_BOTTOM_PADDING - footerVisualHeight
-  const footerAnchorTop = Math.max(naturalBrandBlockTop, footerAnchorMin)
-  let brandBlockTop = footerAnchorTop + brandOffsetY
-  let qrTop = Math.max(authorTop + authorBlockHeight + 16, naturalBrandBlockTop + qrOffsetY, footerAnchorTop + qrOffsetY)
-  if (data.type === 'post') {
-    // Keep the established QR size while giving posts an exact shared bottom
-    // edge for the QR and brand groups. Only long cards need extra footer flow
-    // to keep that edge below the author block.
-    const minBrandTopForQr = authorTop + authorBlockHeight + 16 + SHARE_CARD_QR_FRAME_SIZE - brandBlockHeight
-    brandBlockTop = Math.max(brandBlockTop, minBrandTopForQr)
-    qrTop = brandBlockTop + brandBlockHeight - SHARE_CARD_QR_FRAME_SIZE
-  }
+  const brandBlockTop = authorBottom + brandOffsetY
+  const qrTop = panelBottom + qrOffsetY
   const brandLogoTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_LOGO_SIZE) / 2
   const brandTextTop = brandBlockTop + (brandBlockHeight - SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT) / 2
   const brandBlockBottom = brandBlockTop + brandBlockHeight
   const qrBottom = qrTop + SHARE_CARD_QR_FRAME_SIZE
   const footerContentBottom = Math.max(brandBlockBottom, qrBottom)
-  // The minimum canvas height is part of the final flow, rather than a
-  // separate empty area below it. This keeps the reported/API height equal to
-  // the actual PNG bottom while preserving the minimum 1440px contract.
-  const footerBottom = Math.max(SHARE_CARD_HEIGHT, footerContentBottom + SHARE_CARD_FOOTER_BOTTOM_PADDING)
+  const footerBottom = footerContentBottom + SHARE_CARD_FOOTER_BOTTOM_PADDING
   const height = footerBottom
 
   return {
@@ -345,7 +338,11 @@ export function calculateShareCardLayout(data: ShareCardData, dimensions?: Share
     activityOverlayHeight,
     categoryTop,
     titleTop,
+    titleBottom,
     descriptionTop,
+    summaryBottom,
+    sectionTop,
+    sectionGap,
     metaTop,
     authorTop,
     authorTextTop,

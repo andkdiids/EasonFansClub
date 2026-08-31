@@ -133,6 +133,7 @@ model ActivityRegistration {
   LinkedMaterialRedemption   MaterialRedemptionOrder?           @relation("ActivityRegistrationLinkedMaterial", fields: [linkedMaterialRedemptionId], references: [id], onDelete: SetNull)
   Answers                    ActivityRegistrationAnswer[]
   PointLogs                  PointLog[]
+  LotteryEntry               LotteryEntry[]
 
   @@unique([activityId, userId])
   @@index([activityId, status])
@@ -2180,45 +2181,87 @@ model LoginDevice {
 }
 
 model Lottery {
-  id           String         @id @default(cuid())
-  title        String
-  pointsCost   Int            @default(0)
-  startsAt     DateTime?
-  endsAt       DateTime?
-  createdAt    DateTime       @default(now())
-  activityId   String?
-  Activity     Activity?      @relation(fields: [activityId], references: [id])
-  LotteryEntry LotteryEntry[]
-  LotteryPrize LotteryPrize[]
+  id               String                @id @default(cuid())
+  title            String
+  pointsCost       Int                   @default(0)
+  startsAt         DateTime?
+  endsAt           DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @default(now()) @updatedAt
+  activityId       String?
+  description      String?               @db.Text
+  drawAt           DateTime?
+  status           ActivityLotteryStatus @default(DRAFT)
+  eligibleCount    Int?
+  winnerCount      Int?
+  drawnAt          DateTime?
+  cancelledAt      DateTime?
+  algorithmVersion String?
+  createdById      String?
+  Activity         Activity?             @relation(fields: [activityId], references: [id])
+  CreatedBy        User?                 @relation("LotteryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  LotteryEntry     LotteryEntry[]
+  LotteryPrize     LotteryPrize[]
 
   @@index([activityId])
+  @@index([activityId, status, drawAt])
+  @@index([status, drawAt])
+  @@index([createdById])
 }
 
 model LotteryEntry {
-  id           String        @id @default(cuid())
-  createdAt    DateTime      @default(now())
-  lotteryId    String
-  prizeId      String?
-  userId       String
-  Lottery      Lottery       @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
-  LotteryPrize LotteryPrize? @relation(fields: [prizeId], references: [id])
-  User         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String                  @id @default(cuid())
+  createdAt         DateTime                @default(now())
+  wonAt             DateTime                @default(now())
+  lotteryId         String
+  prizeId           String?
+  userId            String
+  registrationId    String?
+  redemptionStatus  LotteryRedemptionStatus @default(PENDING)
+  redeemedAt        DateTime?
+  redeemedByAdminId String?
+  Lottery           Lottery                 @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+  LotteryPrize      LotteryPrize?           @relation(fields: [prizeId], references: [id])
+  User              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Registration      ActivityRegistration?   @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  RedeemedByAdmin   User?                   @relation("LotteryEntryRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
 
+  @@unique([lotteryId, userId])
   @@index([lotteryId, createdAt])
   @@index([userId, createdAt])
+  @@index([registrationId])
+  @@index([redeemedByAdminId, redeemedAt])
 }
 
 model LotteryPrize {
   id           String         @id @default(cuid())
   name         String
+  tierName     String?        @db.VarChar(160)
+  description  String?        @db.Text
+  imageUrl     String?        @db.Text
   type         RewardType
   quantity     Int            @default(1)
   remaining    Int            @default(1)
   pointsValue  Int?
   metadata     Json?
+  sortOrder    Int            @default(0)
   lotteryId    String
   LotteryEntry LotteryEntry[]
   Lottery      Lottery        @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+
+  @@index([lotteryId, sortOrder, id])
+}
+
+enum ActivityLotteryStatus {
+  DRAFT
+  SCHEDULED
+  DRAWN
+  CANCELLED
+}
+
+enum LotteryRedemptionStatus {
+  PENDING
+  REDEEMED
 }
 
 model LyricCard {
@@ -3285,6 +3328,20 @@ model Profile {
   @@index([wallVisibility])
 }
 
+model ProfileRecordPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  section   String   @db.VarChar(32)
+  sortOrder Int      @default(0)
+  isVisible Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, section])
+  @@index([userId, sortOrder])
+}
+
 model ProfileWallLike {
   id                 String             @id @default(cuid())
   createdAt          DateTime           @default(now())
@@ -3823,6 +3880,8 @@ model User {
   ActivityRegistrationVerifiedBy                         ActivityRegistration[]         @relation("ActivityRegistrationVerifiedBy")
   ActivityCreatedBy                                      Activity[]                     @relation("ActivityCreatedBy")
   ActivityUpdatedBy                                      Activity[]                     @relation("ActivityUpdatedBy")
+  LotteryCreatedBy                                       Lottery[]                      @relation("LotteryCreatedBy")
+  LotteryEntryRedeemedByAdmin                            LotteryEntry[]                 @relation("LotteryEntryRedeemedByAdmin")
   AlbumReview                                            AlbumReview[]
   AlbumReviewFavorite                                    AlbumReviewFavorite[]
   AlbumReviewLike                                        AlbumReviewLike[]
@@ -3932,6 +3991,7 @@ model User {
   UserPostGroup                                          UserPostGroup[]
   PostFavorite                                           PostFavorite[]
   Profile                                                Profile?
+  ProfileRecordPreference                                ProfileRecordPreference[]
   UserPrivacySetting                                     UserPrivacySetting?
   ProfileWallLike                                        ProfileWallLike[]
   ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]           @relation("ProfileWallMessage_receiverIdToUser")
@@ -4000,6 +4060,7 @@ model UserPrivacySetting {
   showActivityHistory Boolean  @default(true)
   showBadgeHistory    Boolean  @default(true)
   showRatings         Boolean  @default(true)
+  showSalon           Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   User                User     @relation(fields: [userId], references: [id], onDelete: Cascade)

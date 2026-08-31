@@ -7,6 +7,7 @@ import { checkBannedWords, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE } f
 import { normalizeActivityInput, type ActivityEditableValues } from '@/lib/activity-validation'
 import { ActivityConfigurationError, getActivityRegistrationQuestions, syncActivityRegistrationQuestions, syncActivityReward } from '@/lib/activity-registration'
 import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '@/lib/activity-material'
+import { cancelUndrawnActivityLotteriesInTransaction } from '@/lib/activity-lottery'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
 
@@ -124,6 +125,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         select: activitySelect,
       })
       await syncActivityLinkedMaterial(tx, { activityId, linkedMaterialId, startsAt: updated.startsAt, endsAt: updated.endsAt })
+      if (updated.status === 'CANCELLED') await cancelUndrawnActivityLotteriesInTransaction(tx, updated.id, now)
       if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, activityId, input.registrationQuestions)
       if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, activityId, input.activityReward, normalized.value.verificationMode)
       await createAdminActionAudit(tx, {

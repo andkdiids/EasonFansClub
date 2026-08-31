@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { ActivityVerificationError, verifyActivityRegistration } from '@/lib/activity-registration'
+import { ActivityRedemptionError, getActivityRedemptionLookup } from '@/lib/activity-redemption'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -21,11 +21,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   const body = await request.json().catch(() => null) as { token?: unknown } | null
   const token = typeof body?.token === 'string' ? body.token.trim() : ''
   try {
-    const result = await verifyActivityRegistration({ activityId, token, adminId: guard.user.id, method: 'QR' })
-    return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders })
+    const result = await getActivityRedemptionLookup(activityId, token)
+    return NextResponse.json({ ok: true, scanOnly: true, ...result }, { headers: privateHeaders })
   } catch (error) {
-    if (error instanceof ActivityVerificationError) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: privateHeaders })
+    if (error instanceof ActivityRedemptionError) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: privateHeaders })
     console.error('[admin.activities.qr-verify]', error instanceof Error ? error.message : error)
-    return NextResponse.json({ ok: false, code: 'VERIFICATION_FAILED', message: '扫码核销失败，请稍后重试' }, { status: 500, headers: privateHeaders })
+    return NextResponse.json({ ok: false, code: 'REDEMPTION_LOOKUP_FAILED', message: '扫码查询失败，请稍后重试' }, { status: 500, headers: privateHeaders })
   }
 }

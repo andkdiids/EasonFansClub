@@ -1,3 +1,5 @@
+import { PROFILE_RECORD_SECTION_KEYS, type ProfileRecordSectionKey } from '@/lib/profile-record-sections'
+
 export const USER_PRIVACY_KEYS = [
   'showCheckInHistory',
   'showCheckInMessages',
@@ -7,6 +9,7 @@ export const USER_PRIVACY_KEYS = [
   'showActivityHistory',
   'showBadgeHistory',
   'showRatings',
+  'showSalon',
 ] as const
 
 export type UserPrivacyKey = typeof USER_PRIVACY_KEYS[number]
@@ -21,19 +24,12 @@ export const DEFAULT_USER_PRIVACY_SETTINGS: UserPrivacySettings = {
   showActivityHistory: true,
   showBadgeHistory: true,
   showRatings: true,
+  showSalon: true,
 }
 
-export type PublicProfileModuleKey = 'posts' | 'replies' | 'recent-messages' | 'achievements' | 'badges' | 'albums' | 'favorites'
+export type PublicProfileModuleKey = ProfileRecordSectionKey
 
-export const PUBLIC_PROFILE_MODULE_KEYS: readonly PublicProfileModuleKey[] = [
-  'posts',
-  'replies',
-  'recent-messages',
-  'achievements',
-  'badges',
-  'albums',
-  'favorites',
-]
+export const PUBLIC_PROFILE_MODULE_KEYS = PROFILE_RECORD_SECTION_KEYS
 
 const PROFILE_MODULE_PRIVACY_KEY: Record<PublicProfileModuleKey, UserPrivacyKey | null> = {
   posts: 'showPosts',
@@ -43,6 +39,7 @@ const PROFILE_MODULE_PRIVACY_KEY: Record<PublicProfileModuleKey, UserPrivacyKey 
   badges: 'showBadgeHistory',
   albums: null,
   favorites: null,
+  salon: 'showSalon',
 }
 
 export function normalizeUserPrivacySettings(row: Partial<UserPrivacySettings> | null | undefined): UserPrivacySettings {

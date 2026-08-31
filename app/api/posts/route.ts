@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { syncUserAchievements } from '@/lib/achievements'
 import { Prisma } from '@prisma/client'
-import { withForumBoardDisplayName } from '@/lib/boards'
+import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
 import { createPostModerationHistory } from '@/lib/admin-audit'
 import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
@@ -318,11 +318,30 @@ export async function POST(request: Request) {
     }
 
     phase = 'board-validation'
-    const board = await prisma.board.findFirst({
-      where: { id: input.boardId, isActive: true },
-      select: { id: true, slug: true },
-    })
-    if (!board) {
+    const configuredBoard = getConfiguredForumBoardBySelectionId(input.boardId)
+    if (configuredBoard?.slug === 'announcements' && !await hasAdminPermission(user, 'post_manage')) {
+      return NextResponse.json(
+        { message: '\u53ea\u6709\u7ba1\u7406\u5458\u53ef\u4ee5\u5728\u516c\u544a\u533a\u53d1\u5e03\u5185\u5bb9', errors: { boardId: '\u666e\u901a\u7528\u6237\u4e0d\u80fd\u9009\u62e9\u516c\u544a\u533a' } },
+        { status: 403 },
+      )
+    }
+    const board = configuredBoard
+      ? await prisma.board.upsert({
+          where: { slug: configuredBoard.slug },
+          update: {},
+          create: {
+            name: configuredBoard.name,
+            slug: configuredBoard.slug,
+            description: configuredBoard.description,
+            sortOrder: configuredBoard.sortOrder,
+          },
+          select: { id: true, slug: true, isActive: true },
+        })
+      : await prisma.board.findFirst({
+          where: { id: input.boardId, isActive: true },
+          select: { id: true, slug: true, isActive: true },
+        })
+    if (!board || !board.isActive) {
       return NextResponse.json({ message: '\u677f\u5757\u4e0d\u5b58\u5728\u6216\u5df2\u7981\u7528', errors: { boardId: '\u8bf7\u9009\u62e9\u6709\u6548\u677f\u5757' } }, { status: 404 })
     }
     if (board.slug === 'announcements' && !await hasAdminPermission(user, 'post_manage')) {
@@ -342,7 +361,7 @@ export async function POST(request: Request) {
     try {
       ipLocation = await resolveIpLocation(request)
     } catch (error) {
-      logPostCreateError('ip-location', error, user.id, input.boardId)
+      logPostCreateError('ip-location', error, user.id, board.id)
     }
     const ipRegion = ipLocation?.label || null
 
@@ -358,7 +377,7 @@ export async function POST(request: Request) {
       phase = 'post-transaction.post-create'
       const post = await tx.post.create({
         data: {
-          boardId: input.boardId,
+          boardId: board.id,
           authorId: user.id,
           title: input.title,
           content: input.content,
@@ -391,9 +410,9 @@ export async function POST(request: Request) {
         action: 'SUBMITTED',
         status: moderationStatus,
         titleSnapshot: input.title,
-      }), user.id, input.boardId),
+      }), user.id, board.id),
       moderationStatus === 'APPROVED'
-        ? runPostCreateSideEffect('friend-activity', () => prisma.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${result.post.id}` } }), user.id, input.boardId)
+        ? runPostCreateSideEffect('friend-activity', () => prisma.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${result.post.id}` } }), user.id, board.id)
         : runPostCreateSideEffect('moderation-notification', async () => {
           const admins = await prisma.user.findMany({
             where: {
@@ -419,18 +438,18 @@ export async function POST(request: Request) {
             })),
             skipDuplicates: true,
           })
-        }, user.id, input.boardId),
+        }, user.id, board.id),
       moderationStatus === 'APPROVED'
-        ? runPostCreateSideEffect('board-counter', () => prisma.board.update({ where: { id: input.boardId }, data: { postCount: { increment: 1 } } }), user.id, input.boardId)
+        ? runPostCreateSideEffect('board-counter', () => prisma.board.update({ where: { id: board.id }, data: { postCount: { increment: 1 } } }), user.id, board.id)
         : Promise.resolve(),
       rawStickerId
-        ? runPostCreateSideEffect('sticker-usage', () => recordStickerUsage(user.id, rawStickerId), user.id, input.boardId)
+        ? runPostCreateSideEffect('sticker-usage', () => recordStickerUsage(user.id, rawStickerId), user.id, board.id)
         : Promise.resolve(),
-      runPostCreateSideEffect('ip-region', () => updateUserIpRegion(user.id, ipLocation), user.id, input.boardId),
+      runPostCreateSideEffect('ip-region', () => updateUserIpRegion(user.id, ipLocation), user.id, board.id),
       moderationStatus === 'PENDING'
-        ? runPostCreateSideEffect('admin-realtime', () => emitRealtimeToAdmins('notification'), user.id, input.boardId)
+        ? runPostCreateSideEffect('admin-realtime', () => emitRealtimeToAdmins('notification'), user.id, board.id)
         : Promise.resolve(),
-      runPostCreateSideEffect('achievement-sync', () => syncUserAchievements(user.id, ['POST']), user.id, input.boardId),
+      runPostCreateSideEffect('achievement-sync', () => syncUserAchievements(user.id, ['POST']), user.id, board.id),
     ])
 
     if (moderationStatus === 'APPROVED') triggerBadgeEvaluation(user.id, 'POST_CREATED')

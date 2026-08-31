@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { getHomeDailyPrescriptionDisplay } from '../lib/home-daily-prescription'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -13,11 +14,31 @@ test('homepage groups accumulated check-ins with registration and adds the presc
   assert.match(surface, /<div className="stat-total">[\s\S]*homeText\.totalCheckins[\s\S]*homeText\.viewCheckin/)
   assert.match(surface, /<div className="stat-birthdays">/)
   assert.match(surface, /href="\/games\/daily-prescription" className="stat-prescription"/)
+  assert.match(surface, /dailyPrescriptionReward/)
+  assert.match(surface, /homeText\.prescriptionFee/)
+  assert.doesNotMatch(surface, /<strong>今日处方<\/strong>/)
   assert.match(css, /\.community-stats\.home-checkin-stats \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
-  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*display: grid;[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);[\s\S]*min-height: 184px;/)
+  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*display: grid;[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);[\s\S]*min-height: 132px;/)
   assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration > \.stat-checkin \{[\s\S]*border-right: 1px solid var\(--border\);/)
-  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration > \.stat-total \{[\s\S]*border-top: 0;/)
-  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);/)
+  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration > \.stat-total \{[\s\S]*margin-top: 0;[\s\S]*border-top: 0;/)
+  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);[\s\S]*min-height: 112px;/)
+})
+
+test('homepage displays the stored daily prescription reward without treating an unclaimed state as zero', () => {
+  const homeData = read('lib/home-data.ts')
+  const api = read('app/api/home/route.ts')
+  const surface = read('components/HomeLayoutSurface.tsx')
+
+  assert.match(homeData, /prisma\.entertainmentDailyDraw\.findUnique\([\s\S]*select: \{ points: true \}/)
+  assert.match(homeData, /where: \{ userId_dateKey: \{ userId, dateKey \} \}/)
+  assert.doesNotMatch(homeData, /issueEntertainmentDailyDraw/)
+  assert.match(api, /getHomeDailyPrescriptionReward\(user\?\.id\)/)
+  assert.match(surface, /window\.addEventListener\('user:points-updated', refresh\)/)
+
+  assert.deepEqual(getHomeDailyPrescriptionDisplay(null), { status: 'unclaimed', points: null })
+  assert.deepEqual(getHomeDailyPrescriptionDisplay(7), { status: 'claimed', points: 7 })
+  assert.deepEqual(getHomeDailyPrescriptionDisplay(21), { status: 'claimed', points: 21 })
+  assert.deepEqual(getHomeDailyPrescriptionDisplay(27), { status: 'claimed', points: 27 })
 })
 
 test('homepage no longer requests or renders the removed featured post and hot concert modules', () => {
@@ -79,7 +100,7 @@ test('homepage loads activities and latest anywhere-door content in the main par
   assert.match(calls, /getHomeActivities\(\)/)
   assert.match(calls, /getHomeAnywhereDoorLatest\(\)/)
   assert.doesNotMatch(calls, /getHomePosts|getHomeConcerts/)
-  assert.match(api, /activities, albums, stats, dailyMusic, siteStats, todayEvents, anywhereDoor/)
+  assert.match(api, /activities, albums, stats, dailyMusic, siteStats, todayEvents, anywhereDoor, dailyPrescriptionReward/)
 })
 
 test('new homepage modules keep compact responsive and theme-token based styles', () => {

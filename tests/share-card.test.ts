@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import sharp from 'sharp'
 import { createShareCardFilename, sanitizeShareCardText, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
-import { calculateShareCardLayout, shareCardHeroDimensions, SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y, SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP, SHARE_CARD_ACTIVITY_QR_OFFSET_Y, SHARE_CARD_ACTIVITY_TITLE_MAX_LINES, SHARE_CARD_AUTHOR_TOP_GAP, SHARE_CARD_DESCRIPTION_LINE_HEIGHT, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_POST_DESCRIPTION_META_GAP, SHARE_CARD_POST_TITLE_MAX_LINES, SHARE_CARD_QR_FRAME_X, SHARE_CARD_PORTRAIT_HERO_HEIGHT, SHARE_CARD_TITLE_LINE_HEIGHT } from '@/lib/share-card-layout'
+import { calculateShareCardLayout, shareCardHeroDimensions, SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM, SHARE_CARD_ACTIVITY_OVERLAY_PADDING_TOP, SHARE_CARD_ACTIVITY_TITLE_MAX_LINES, SHARE_CARD_AUTHOR_TOP_GAP, SHARE_CARD_DESCRIPTION_LINE_HEIGHT, SHARE_CARD_FOOTER_BOTTOM_PADDING, SHARE_CARD_FOOTER_LOGO_SIZE, SHARE_CARD_FOOTER_QR_TOP_GAP, SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT, SHARE_CARD_FOOTER_TEXT_X, SHARE_CARD_FOOTER_TEXT_WIDTH, SHARE_CARD_FOOTER_TOP_GAP, SHARE_CARD_POST_DESCRIPTION_META_GAP, SHARE_CARD_POST_TITLE_MAX_LINES, SHARE_CARD_QR_FRAME_X, SHARE_CARD_PORTRAIT_HERO_HEIGHT, SHARE_CARD_SECTION_GAP, SHARE_CARD_TITLE_LINE_HEIGHT } from '@/lib/share-card-layout'
 import { SHARE_CARD_TEMPLATE_VERSION } from '@/lib/share-card-hash'
 import { BRANDED_QR_ERROR_CORRECTION, BRANDED_QR_LOGO_PLATE_PADDING_PX, BRANDED_QR_LOGO_RATIO, BRANDED_QR_MARGIN_MODULES, BRANDED_QR_VERSION, createBrandedQrSvg } from '@/lib/branded-qr'
 import { createBrandedQrBuffer } from '@/lib/branded-qr-server'
@@ -72,8 +72,8 @@ test('share card flow layout keeps the Hero baseline and places bounded copy ins
   const shortLayout = calculateShareCardLayout(shortData)
   const longLayout = calculateShareCardLayout(longData)
   assert.equal(shortLayout.width, SHARE_CARD_WIDTH)
-  assert.ok(shortLayout.height >= SHARE_CARD_HEIGHT)
-  assert.equal(compactLayout.height, 1440)
+  assert.ok(shortLayout.height < SHARE_CARD_HEIGHT)
+  assert.ok(compactLayout.height < SHARE_CARD_HEIGHT)
   assert.equal(compactLayout.height, compactLayout.footerBottom)
   assert.ok(longLayout.height >= shortLayout.height)
   assert.equal(shortLayout.descriptionLines.join('\n'), '第一段…')
@@ -87,9 +87,9 @@ test('share card flow layout keeps the Hero baseline and places bounded copy ins
   assert.ok(shortLayout.titleLines.length <= SHARE_CARD_ACTIVITY_TITLE_MAX_LINES)
   assert.ok(shortLayout.descriptionLines.length <= SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES)
   assert.ok(shortLayout.brandBlockTop > shortLayout.qrTop)
-  assert.ok(shortLayout.qrTop >= shortLayout.authorTop + shortLayout.authorBlockHeight)
+  assert.ok(shortLayout.qrTop >= shortLayout.panelBottom)
   assert.equal(shortLayout.brandLogoTop + SHARE_CARD_FOOTER_LOGO_SIZE / 2, shortLayout.brandTextTop + SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT / 2)
-  assert.equal(shortLayout.qrBottom, shortLayout.brandBlockBottom)
+  assert.ok(shortLayout.footerBottom - shortLayout.brandBlockBottom >= SHARE_CARD_FOOTER_BOTTOM_PADDING)
   assert.ok(shortLayout.footerBottom - shortLayout.qrBottom >= SHARE_CARD_FOOTER_BOTTOM_PADDING)
   assert.ok(SHARE_CARD_FOOTER_TEXT_X + SHARE_CARD_FOOTER_TEXT_WIDTH < SHARE_CARD_QR_FRAME_X)
   assert.match(read('lib/share-card-layout.ts'), /measureWrappedText/)
@@ -137,13 +137,86 @@ test('post excerpt and board metadata use conditional vertical flow without spli
   assert.equal(layout.descriptionLines.at(-1)?.endsWith('…'), true)
   assert.ok(layout.titleLines.length <= SHARE_CARD_POST_TITLE_MAX_LINES)
   assert.deepEqual(layout.metaLines, ['版块：吹水'])
-  assert.ok(layout.metaTop >= layout.descriptionTop + layout.descriptionLines.length * SHARE_CARD_DESCRIPTION_LINE_HEIGHT + SHARE_CARD_POST_DESCRIPTION_META_GAP)
+  assert.equal(layout.sectionGap, SHARE_CARD_SECTION_GAP)
+  assert.equal(layout.metaTop, layout.summaryBottom + layout.sectionGap)
+  assert.equal(layout.metaTop, layout.descriptionTop + layout.descriptionLines.length * SHARE_CARD_DESCRIPTION_LINE_HEIGHT + SHARE_CARD_POST_DESCRIPTION_META_GAP)
 
   const withoutExcerpt = calculateShareCardLayout({ ...data, description: '' })
   assert.equal(withoutExcerpt.descriptionLines.length, 0)
   assert.equal(withoutExcerpt.descriptionTop, withoutExcerpt.titleTop + withoutExcerpt.titleLines.length * SHARE_CARD_TITLE_LINE_HEIGHT)
-  assert.equal(withoutExcerpt.metaTop, withoutExcerpt.descriptionTop + SHARE_CARD_POST_DESCRIPTION_META_GAP)
-  assert.equal(layout.qrBottom, layout.brandBlockBottom)
+  assert.equal(withoutExcerpt.metaTop, withoutExcerpt.titleBottom + SHARE_CARD_SECTION_GAP)
+  assert.equal(withoutExcerpt.metaTop, withoutExcerpt.summaryBottom + withoutExcerpt.sectionGap)
+  assert.equal(layout.qrTop, layout.panelBottom + SHARE_CARD_FOOTER_QR_TOP_GAP)
+})
+
+test('section flow uses measured title/summary bottoms for all supported line counts', () => {
+  const base: ShareCardData = {
+    type: 'post',
+    title: '短标题',
+    description: '一行摘要',
+    image: null,
+    url: 'https://ecfc.fans/posts/section-flow-fixture',
+    author: 'E友',
+    authorAvatar: null,
+    date: '2026年8月31日',
+    meta: [{ label: '版块', value: 'E院广场' }],
+  }
+  const cases = [
+    { title: '短标题', description: '一行摘要', titleLines: 1, descriptionLines: 1 },
+    { title: '标题第一行\n标题第二行', description: '摘要第一行\n摘要第二行', titleLines: 2, descriptionLines: 2 },
+    { title: '标题第一行\n标题第二行\n标题第三行', description: '摘要第一行\n摘要第二行', titleLines: 3, descriptionLines: 2 },
+    { title: '标题第一行\n标题第二行\n标题第三行', description: '', titleLines: 3, descriptionLines: 0 },
+    { title: '短标题', description: '', titleLines: 1, descriptionLines: 0 },
+  ]
+
+  for (const fixture of cases) {
+    const layout = calculateShareCardLayout({ ...base, title: fixture.title, description: fixture.description })
+    assert.equal(layout.titleLines.length, fixture.titleLines, fixture.title)
+    assert.equal(layout.descriptionLines.length, fixture.descriptionLines, fixture.description || 'no summary')
+    assert.equal(layout.titleBottom, layout.titleTop + layout.titleLines.length * SHARE_CARD_TITLE_LINE_HEIGHT)
+    assert.equal(layout.summaryBottom, layout.descriptionTop + layout.descriptionLines.length * SHARE_CARD_DESCRIPTION_LINE_HEIGHT)
+    assert.equal(layout.sectionTop, layout.summaryBottom + layout.sectionGap)
+    assert.equal(layout.metaTop, layout.sectionTop)
+    assert.equal(layout.sectionGap, SHARE_CARD_SECTION_GAP)
+    assert.ok(layout.sectionTop > layout.summaryBottom)
+    assert.ok(layout.sectionTop + layout.metaLines.length * 38 + SHARE_CARD_ACTIVITY_OVERLAY_PADDING_BOTTOM <= layout.heroHeight)
+    assert.ok(layout.overlayTop >= 0)
+    assert.equal(layout.overlayTop + layout.overlayHeight, layout.heroHeight)
+  }
+})
+
+test('footer flow is compact and shared by post, activity, and salon cards', () => {
+  const base: ShareCardData = {
+    type: 'post',
+    title: '统一 Footer 测试',
+    description: '摘要',
+    image: null,
+    url: 'https://ecfc.fans/posts/footer-flow-fixture',
+    author: 'E友',
+    authorAvatar: null,
+    date: '2026年8月31日',
+    meta: [{ label: '版块', value: 'E院广场' }],
+  }
+
+  for (const type of ['post', 'activity', 'salon'] as const) {
+    const path = type === 'post' ? 'posts' : type === 'activity' ? 'activities' : 'salon'
+    const layout = calculateShareCardLayout({
+      ...base,
+      type,
+      url: `https://ecfc.fans/${path}/footer-flow-fixture`,
+      meta: type === 'activity'
+        ? [{ label: '活动时间', value: '2026年8月31日' }]
+        : [{ label: '版块', value: 'E院广场' }],
+    })
+    const authorBottom = layout.authorTop + layout.authorBlockHeight
+    assert.equal(layout.brandBlockTop, authorBottom + SHARE_CARD_FOOTER_TOP_GAP, type)
+    assert.equal(layout.qrTop, layout.panelBottom + SHARE_CARD_FOOTER_QR_TOP_GAP, type)
+    assert.ok(layout.qrTop < layout.brandBlockTop, type)
+    assert.equal(layout.footerBottom, Math.max(layout.brandBlockBottom, layout.qrBottom) + SHARE_CARD_FOOTER_BOTTOM_PADDING, type)
+    assert.ok(layout.brandBlockBottom < layout.footerBottom, type)
+    assert.ok(layout.qrBottom < layout.footerBottom, type)
+    assert.ok(layout.height < SHARE_CARD_HEIGHT, type)
+  }
 })
 
 test('share-card text tokenization and metadata summaries preserve emoji graphemes', () => {
@@ -225,7 +298,8 @@ test('activity cards render one labeled detail set in a lower Hero overlay', () 
   assert.ok(layout.titleLines.length <= SHARE_CARD_ACTIVITY_TITLE_MAX_LINES)
   assert.ok(layout.descriptionLines.length <= SHARE_CARD_ACTIVITY_DESCRIPTION_MAX_LINES)
   assert.ok(layout.brandBlockTop > layout.qrTop)
-  assert.ok(layout.brandBlockTop - layout.qrTop >= SHARE_CARD_ACTIVITY_BRAND_OFFSET_Y + SHARE_CARD_ACTIVITY_QR_OFFSET_Y)
+  assert.equal(layout.qrTop, layout.panelBottom + SHARE_CARD_FOOTER_QR_TOP_GAP)
+  assert.equal(layout.brandBlockTop, layout.authorTop + layout.authorBlockHeight + SHARE_CARD_FOOTER_TOP_GAP)
   assert.equal(layout.brandLogoTop + SHARE_CARD_FOOTER_LOGO_SIZE / 2, layout.brandTextTop + SHARE_CARD_FOOTER_TEXT_BLOCK_HEIGHT / 2)
   assert.match(read('lib/share-card-renderer.ts'), /contentOverlaySvg\(layout\.overlayTop, layout\.overlayHeight\)/)
   assert.match(read('lib/share-card-renderer.ts'), /fill="#141e23" fill-opacity="0\.72"/)
@@ -328,12 +402,12 @@ test('preview exposes a real PNG save action and the exact QR payload for accept
   assert.doesNotMatch(preview, /share-card-preview-eyebrow/)
 })
 
-test('V11 keeps the shared Hero policy for landscape and portrait media', () => {
+test('V12 keeps the shared Hero policy for landscape and portrait media', () => {
   const layout = read('lib/share-card-layout.ts')
   const server = read('lib/share-card-renderer.ts')
   const client = read('lib/share-card-image.ts')
   const service = read('lib/share-card-service.ts')
-  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v11')
+  assert.equal(SHARE_CARD_TEMPLATE_VERSION, 'v12')
   assert.match(layout, /export function shareCardHeroFit[\s\S]*type === 'home' \? 'contain' : 'cover'/)
   assert.match(server, /fitImage\(hero, SHARE_CARD_WIDTH, layout\.heroHeight, shareCardHeroFit\(normalizedData\.type\)\)/)
   assert.match(client, /shareCardHeroFit\(data\.type\)/)

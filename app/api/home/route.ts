@@ -6,6 +6,7 @@ import {
   getHomeAlbums,
   getHomeAnywhereDoorLatest,
   getHomeDailyMusicRecommendation,
+  getHomeDailyPrescriptionReward,
   getHomeSiteStats,
   getHomeTodayEvents,
   getHomeUserStats,
@@ -23,7 +24,7 @@ export async function GET() {
     const user = await getCurrentUser()
     const existingAnonymousId = cookieStore.get(DAILY_MUSIC_ANONYMOUS_COOKIE)?.value
     const anonymousId = user ? undefined : existingAnonymousId || randomUUID()
-    const [activities, albums, stats, dailyMusic, siteStats, todayEvents, anywhereDoor] = await Promise.all([
+    const [activities, albums, stats, dailyMusic, siteStats, todayEvents, anywhereDoor, dailyPrescriptionReward] = await Promise.all([
       getHomeActivities(),
       getHomeAlbums(user?.id),
       getHomeUserStats(user?.id),
@@ -31,10 +32,11 @@ export async function GET() {
       getHomeSiteStats(),
       getHomeTodayEvents(),
       getHomeAnywhereDoorLatest(),
+      getHomeDailyPrescriptionReward(user?.id),
     ])
 
     const growth = stats ? await getGrowthSummary(stats.experience) : null
-    const response = NextResponse.json({ messages: [], activities, albums, stats: stats && growth ? { ...stats, ...growth } : stats, dailyMusic, siteStats, todayEvents, anywhereDoor, entertainmentRanking: null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
+    const response = NextResponse.json({ messages: [], activities, albums, stats: stats && growth ? { ...stats, ...growth } : stats, dailyMusic, siteStats, todayEvents, anywhereDoor, dailyPrescriptionReward, entertainmentRanking: null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
     if (!user && anonymousId && !existingAnonymousId) {
       response.cookies.set(DAILY_MUSIC_ANONYMOUS_COOKIE, anonymousId, {
         httpOnly: true,

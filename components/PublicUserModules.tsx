@@ -15,9 +15,15 @@ import { PersonalPostPinMenu } from '@/components/PostActions'
 import { BadgeCollectionPanel } from '@/components/BadgeCollectionPanel'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
-import { PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy-types'
+import { type PublicProfileModuleKey } from '@/lib/user-privacy-types'
+import { ProfileRecordSettings } from '@/components/ProfileRecordSettings'
+import { getOrderedProfileRecordSectionKeys, getProfileRecordLabel, normalizeProfileRecordPreferences, PROFILE_RECORD_SECTIONS, type ProfileRecordPreference } from '@/lib/profile-record-sections'
 import type { ProfilePostGroupView } from '@/lib/profile-post-groups'
 import { PersonalPostGroupMenu, ProfilePostGroupBar } from '@/components/ProfilePostGroups'
+import type { SalonPostView } from '@/lib/salon'
+import { SALON_CATEGORY_LABELS } from '@/lib/salon'
+import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
+import { UiIcon } from '@/components/UiIcon'
 
 type ModuleKey = PublicProfileModuleKey
 type PostItem = {
@@ -47,13 +53,13 @@ type FavoriteItem = {
     author: { uid: number; nickname: string; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null }
   }
 }
-type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem
-type PaginatedModuleKey = 'posts' | 'recent-messages'
+type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem | SalonPostView
+type PaginatedModuleKey = 'posts' | 'recent-messages' | 'salon'
 type ModuleState = { loading: boolean; failed: boolean; items: ModuleItem[]; pagination?: ProfileRecordPagination; postGroups?: ProfilePostGroupView[] }
 type CacheState = Record<string, ModuleState | undefined>
 
 function isPaginatedModule(moduleKey: ModuleKey): moduleKey is PaginatedModuleKey {
-  return moduleKey === 'posts' || moduleKey === 'recent-messages'
+  return moduleKey === 'posts' || moduleKey === 'recent-messages' || moduleKey === 'salon'
 }
 
 const ALL_POST_GROUPS = ''
@@ -64,31 +70,21 @@ function moduleCacheKey(moduleKey: ModuleKey, page: number, postGroupId = ALL_PO
     : moduleKey
 }
 
-const tabs: Array<{ key: ModuleKey; selfLabel: string; otherLabel: string }> = [
-  { key: 'posts', selfLabel: '发帖记录', otherLabel: '发帖记录' },
-  { key: 'replies', selfLabel: '回复记录', otherLabel: '回复记录' },
-  { key: 'recent-messages', selfLabel: '最近留言', otherLabel: '最近留言' },
-  { key: 'achievements', selfLabel: '我的成就', otherLabel: 'TA的成就' },
-  { key: 'badges', selfLabel: '我的勋章', otherLabel: 'TA的勋章' },
-  { key: 'albums', selfLabel: '我的专辑', otherLabel: 'TA的专辑' },
-  { key: 'favorites', selfLabel: '我的收藏', otherLabel: 'TA的收藏' },
-]
-
 function moduleLabel(moduleKey: ModuleKey, isSelf: boolean) {
-  const tab = tabs.find((item) => item.key === moduleKey)
-  return isSelf ? tab?.selfLabel || '内容' : tab?.otherLabel || '内容'
+  return getProfileRecordLabel(moduleKey, isSelf)
 }
 
-export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages = [], recentMessagesPagination }: { uid: string; isSelf: boolean; visibleModules?: readonly ModuleKey[]; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination }) {
+export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferences, recentMessages = [], recentMessagesPagination }: { uid: string; isSelf: boolean; visibleModules?: readonly ModuleKey[]; recordPreferences?: readonly ProfileRecordPreference[]; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination }) {
+  const [recordLayout, setRecordLayout] = useState<ProfileRecordPreference[]>(() => recordPreferences?.length ? [...recordPreferences] : normalizeProfileRecordPreferences([]))
   const visibleModuleKeys = useMemo(() => {
-    if (!visibleModules) return PUBLIC_PROFILE_MODULE_KEYS
-    const allowed = new Set(visibleModules)
-    return PUBLIC_PROFILE_MODULE_KEYS.filter((moduleKey) => allowed.has(moduleKey))
-  }, [visibleModules])
-  const visibleTabs = useMemo(() => tabs.filter((tab) => visibleModuleKeys.includes(tab.key)), [visibleModuleKeys])
+    const allowed = new Set(visibleModules || PROFILE_RECORD_SECTIONS.map((section) => section.key))
+    const hidden = new Map(recordLayout.map((preference) => [preference.key, preference.visible]))
+    return getOrderedProfileRecordSectionKeys(recordLayout, isSelf).filter((moduleKey) => allowed.has(moduleKey) && (isSelf || hidden.get(moduleKey) !== false))
+  }, [isSelf, recordLayout, visibleModules])
+  const visibleTabs = useMemo(() => visibleModuleKeys.map((moduleKey) => PROFILE_RECORD_SECTIONS.find((tab) => tab.key === moduleKey)).filter((tab): tab is typeof PROFILE_RECORD_SECTIONS[number] => Boolean(tab)), [visibleModuleKeys])
   const firstVisibleModule = visibleModuleKeys[0] || 'posts'
   const [active, setActive] = useState<ModuleKey>(firstVisibleModule)
-  const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({ posts: 1, 'recent-messages': recentMessagesPagination?.page || 1 })
+  const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({ posts: 1, 'recent-messages': recentMessagesPagination?.page || 1, salon: 1 })
   const [postGroupFilter, setPostGroupFilter] = useState(ALL_POST_GROUPS)
   const [postGroups, setPostGroups] = useState<ProfilePostGroupView[]>([])
   const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
@@ -260,6 +256,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
   return (
     <>
 <section ref={modulesSectionRef} id="profile-modules" className="h-full min-w-0 scroll-mt-24">
+{isSelf ? <ProfileRecordSettings initialPreferences={recordLayout} onSaved={setRecordLayout} /> : null}
 <div className="flex flex-wrap gap-2 border border-[var(--border)] border-b-0 bg-[var(--surface)] p-2">
           {visibleTabs.map((tab) => (
           <button
@@ -268,6 +265,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recentMessages 
             className={`max-w-full rounded-xl px-3 py-2 text-xs font-black whitespace-nowrap sm:px-4 sm:text-sm ${active === tab.key ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}
           >
             {isSelf ? tab.selfLabel : tab.otherLabel}
+            {isSelf && recordLayout.find((preference) => preference.key === tab.key)?.visible === false ? '（已隐藏）' : null}
           </button>
         ))}
       </div>
@@ -464,9 +462,10 @@ function ModuleContent({
             {expandedRecentMessages[message.id] ? (
               <ul className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
                 {message.comments.length ? message.comments.map((comment) => (
-                  <li key={comment.id} className="flex gap-2">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
-                      {comment.authorAvatarUrl ? <img src={publicImageVariantUrl(comment.authorAvatarUrl, 'avatar-md') || comment.authorAvatarUrl} alt={comment.authorName} className="h-full w-full object-cover" loading="lazy" /> : (comment.authorName || 'E').slice(0, 1)}
+                    <li key={comment.id} className="flex gap-2">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-xs font-black text-white">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        {comment.authorAvatarUrl ? <img src={publicImageVariantUrl(comment.authorAvatarUrl, 'avatar-md') || comment.authorAvatarUrl} alt={comment.authorName} className="h-full w-full object-cover" loading="lazy" /> : (comment.authorName || 'E').slice(0, 1)}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -484,6 +483,37 @@ function ModuleContent({
             ) : null}
           </article>
           )
+        })}
+        {pageNavigation}
+      </div>
+    )
+  }
+
+  if (moduleKey === 'salon') {
+    const salonPosts = items as SalonPostView[]
+    return (
+      <div className="space-y-3">
+        {salonPosts.map((post) => {
+          const media = post.media[0]
+          const context = post.concert ? `${post.concert.tour.name} · ${post.concert.city}` : SALON_CATEGORY_LABELS[post.category]
+          return <article key={post.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] sm:flex">
+            {media ? <Link href={`/salon/${post.id}`} className="block shrink-0 sm:w-40">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={media.thumbnailUrl} alt={post.title || context} className="h-40 w-full object-cover sm:h-full" loading="lazy" />
+            </Link> : null}
+            <div className="min-w-0 flex-1 p-3 sm:p-4">
+              <Link href={`/salon/${post.id}`} className="block min-w-0">
+                <p className="text-xs font-black text-brand-700">{context}</p>
+                <h3 className="mt-1 break-words text-base font-black text-brand-950">{post.title || (post.concert?.title || '沙龙作品')}</h3>
+                <time className="mt-2 block text-xs font-bold text-slate-500">{new Date(post.createdAt).toLocaleString('zh-CN')}</time>
+              </Link>
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
+                <SalonLikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} />
+                <span className="inline-flex items-center gap-1"><UiIcon name="eye" className="size-3.5" />{post.viewCount}</span>
+                <span>评论 {post.commentCount}</span>
+              </div>
+            </div>
+          </article>
         })}
         {pageNavigation}
       </div>

@@ -11,6 +11,7 @@ import { formatUserLocation, type UserLocation } from '@/lib/user-location'
 import type { BadgeCollectionView, EquippedBadgeView } from '@/lib/badge-types'
 import { BadgeMiniShowcase } from '@/components/BadgeMiniShowcase'
 import { getVisibleProfileModules, type UserPrivacySettings } from '@/lib/user-privacy'
+import type { ProfileRecordPreference } from '@/lib/profile-record-sections'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -30,6 +31,7 @@ export type ProfilePageSurfaceProfile = {
   equippedBadge: EquippedBadgeView | null
   badgeSummary?: BadgeCollectionView | null
   privacy: UserPrivacySettings
+  recordPreferences?: readonly ProfileRecordPreference[]
 }
 
 export type ProfilePageSurfaceRelationship = {
@@ -145,12 +147,12 @@ export function ProfilePageSurface({
         </div>
       </div>
 
-      <section className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.48fr)] lg:gap-5">
+      <section className="min-w-0 space-y-4">
+        <div className="min-w-0">
+          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} visibleModules={visibleModules} recordPreferences={profile.recordPreferences} recentMessages={recentMessages} recentMessagesPagination={recentMessagesPagination} />
+        </div>
         <div id="profile-wall" className="min-w-0 scroll-mt-24">
           {canViewWall ? <ProfileWall receiverUid={profile.uid} isOwner={isSelf} /> : <ClosedWall visibility={profile.wallVisibility} />}
-        </div>
-        <div className="min-w-0">
-          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} visibleModules={visibleModules} recentMessages={recentMessages} recentMessagesPagination={recentMessagesPagination} />
         </div>
       </section>
     </main>

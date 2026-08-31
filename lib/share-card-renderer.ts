@@ -324,7 +324,7 @@ function heroShadeSvg(height: number) {
 
 /** Every content type places its detail copy on a translucent rectangle inside the Hero. */
 function contentOverlaySvg(top: number, height: number) {
-  const canvasHeight = Math.max(SHARE_CARD_HEIGHT, top + height)
+  const canvasHeight = Math.max(1, top + height)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHARE_CARD_WIDTH}" height="${canvasHeight}"><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="${height}" fill="#141e23" fill-opacity="0.72"/><rect x="0" y="${top}" width="${SHARE_CARD_WIDTH}" height="2" fill="#ffffff" fill-opacity="0.12"/></svg>`
 }
 

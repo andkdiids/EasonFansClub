@@ -9,7 +9,17 @@ import Paragraph from '@tiptap/extension-paragraph'
 import Placeholder from '@tiptap/extension-placeholder'
 import Text from '@tiptap/extension-text'
 import { EditorContent, useEditor } from '@tiptap/react'
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type MouseEvent } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { MusicReferencePicker, type MusicReferenceSong } from '@/components/posts/MusicReferencePicker'
 import {
   RICH_TEXT_COLOR_TOKENS,
@@ -41,6 +51,8 @@ type RichTextEditorProps = {
   placeholder?: string
 }
 
+type HeadingLevel = 1 | 2 | 3
+
 const colorLabels: Record<RichTextColorToken, string> = {
   default: '默认',
   gray: '灰色',
@@ -67,6 +79,11 @@ const blockLabels = {
   2: '二级标题',
   3: '三级标题',
 } as const
+
+function getActiveHeadingLevel(editor: Editor): HeadingLevel | undefined {
+  const headingLevels: HeadingLevel[] = [1, 2, 3]
+  return headingLevels.find((level) => editor.isActive('heading', { level }))
+}
 
 const toolbarButtonClass = (active = false) => [
   'rich-text-toolbar-button',
@@ -434,11 +451,13 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const savedSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const headingMenuOpenRef = useRef(false)
   const [initialDocument] = useState(() => initialEditorContent(initialRichContent, initialContent))
-  // The active block type is derived from the editor selection below.  Keep
-  // the heading menu's visibility entirely interaction-driven so a selection
-  // or transaction can never open it as a side effect.
+  // The active block type is a formatting snapshot.  Keep the heading menu's
+  // visibility entirely interaction-driven so a selection or transaction can
+  // never open it as a side effect.
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false)
+  const [activeHeadingLevel, setActiveHeadingLevel] = useState<HeadingLevel | undefined>(undefined)
   const [openMenu, setOpenMenu] = useState<'size' | 'color' | null>(null)
   const [musicPickerOpen, setMusicPickerOpen] = useState(false)
   const [toolbarNotice, setToolbarNotice] = useState('')
@@ -447,6 +466,12 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   function rememberSelection(currentEditor: Editor) {
     const { from, to } = currentEditor.state.selection
     savedSelectionRef.current = { from, to }
+  }
+
+  function syncEditorSelection(currentEditor: Editor) {
+    rememberSelection(currentEditor)
+    const nextHeadingLevel = getActiveHeadingLevel(currentEditor)
+    setActiveHeadingLevel((currentHeadingLevel) => currentHeadingLevel === nextHeadingLevel ? currentHeadingLevel : nextHeadingLevel)
   }
 
   const editor = useEditor({
@@ -462,21 +487,26 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       transformPastedHTML: sanitizePastedHtml,
     },
     onCreate: ({ editor: createdEditor }) => {
-      rememberSelection(createdEditor)
+      syncEditorSelection(createdEditor)
       emitEditorChange(createdEditor, onChange)
     },
     onUpdate: ({ editor: updatedEditor }) => {
-      rememberSelection(updatedEditor)
+      syncEditorSelection(updatedEditor)
       emitEditorChange(updatedEditor, onChange)
     },
-    onSelectionUpdate: ({ editor: selectedEditor }) => rememberSelection(selectedEditor),
+    onSelectionUpdate: ({ editor: selectedEditor }) => syncEditorSelection(selectedEditor),
     onTransaction: () => setToolbarVersion((version) => version + 1),
   })
 
-  const closeToolbarMenus = useCallback(() => {
+  const closeHeadingMenu = useCallback(() => {
+    headingMenuOpenRef.current = false
     setHeadingMenuOpen(false)
-    setOpenMenu(null)
   }, [])
+
+  const closeToolbarMenus = useCallback(() => {
+    closeHeadingMenu()
+    setOpenMenu(null)
+  }, [closeHeadingMenu])
 
   useEffect(() => {
     if (!headingMenuOpen && !openMenu) return
@@ -516,16 +546,19 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const activeColor = activeEditor.getAttributes('textColor').token
   const currentSize = isRichTextFontSizeToken(activeSize) ? activeSize : null
   const currentColor = isRichTextColorToken(activeColor) && activeColor !== 'default' ? activeColor : null
-  const activeHeading = [1, 2, 3].find((level) => activeEditor.isActive('heading', { level })) as 1 | 2 | 3 | undefined
-  const currentBlockType: 'paragraph' | 1 | 2 | 3 = activeHeading ?? 'paragraph'
+  const currentBlockType: 'paragraph' | HeadingLevel = activeHeadingLevel ?? 'paragraph'
   const blockLabel = blockLabels[currentBlockType]
   const stopToolbarBlur = (event: MouseEvent<HTMLButtonElement>) => {
     rememberSelection(activeEditor)
     event.preventDefault()
   }
+  const rememberToolbarPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    rememberSelection(activeEditor)
+    event.preventDefault()
+  }
   const closeHeadingOnToolbarMouseDown = (event: MouseEvent<HTMLButtonElement>) => {
     stopToolbarBlur(event)
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
   }
 
   function restoreSavedSelection() {
@@ -542,40 +575,57 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     return activeEditor.chain().focus()
   }
 
-  function toggleHeadingMenu() {
+  function toggleHeadingMenuFromUser() {
     rememberSelection(activeEditor)
     setOpenMenu(null)
-    setHeadingMenuOpen((current) => !current)
+    const nextOpen = !headingMenuOpenRef.current
+    headingMenuOpenRef.current = nextOpen
+    setHeadingMenuOpen(nextOpen)
+  }
+
+  function handleHeadingTriggerPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    toggleHeadingMenuFromUser()
+  }
+
+  function handleHeadingTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
+    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'ArrowDown') return
+    event.preventDefault()
+    event.stopPropagation()
+    toggleHeadingMenuFromUser()
   }
 
   function toggleToolbarMenu(menu: 'size' | 'color') {
     rememberSelection(activeEditor)
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     setOpenMenu((current) => current === menu ? null : menu)
   }
 
   function applySize(token: RichTextFontSizeToken) {
     startCommand().setMark('fontSize', { token }).run()
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     setOpenMenu(null)
   }
 
   function applyColor(token: RichTextColorToken) {
     if (token === 'default') startCommand().unsetMark('textColor').run()
     else startCommand().setMark('textColor', { token }).run()
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     setOpenMenu(null)
   }
 
   function applyBlock(level: 'paragraph' | 1 | 2 | 3) {
     if (level === 'paragraph') startCommand().setNode('paragraph').run()
     else startCommand().setNode('heading', { level }).run()
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     setOpenMenu(null)
   }
 
   function toggleInlineMark(mark: 'bold' | 'italic' | 'strike') {
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     const command = startCommand()
     if (mark === 'bold') {
       command.toggleBold().run()
@@ -589,7 +639,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   }
 
   function applyLink() {
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     rememberSelection(activeEditor)
     const currentHref = activeEditor.getAttributes('link').href
     const input = window.prompt('链接地址', typeof currentHref === 'string' ? currentHref : '')
@@ -610,12 +660,12 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   function clearFormatting() {
     startCommand().unsetAllMarks().setNode('paragraph').run()
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     setOpenMenu(null)
   }
 
   function insertMusicReference(song: MusicReferenceSong) {
-    setHeadingMenuOpen(false)
+    closeHeadingMenu()
     startCommand()
       .insertContent({
         type: 'musicReference',
@@ -638,16 +688,17 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         <div className="relative">
           <button
             type="button"
-            className={toolbarButtonClass(Boolean(activeHeading))}
+            className={toolbarButtonClass(Boolean(activeHeadingLevel))}
             aria-haspopup="menu"
             aria-expanded={headingMenuOpen}
-            onMouseDown={stopToolbarBlur}
-            onClick={toggleHeadingMenu}
+            aria-controls="rich-text-heading-menu"
+            onPointerDown={handleHeadingTriggerPointerDown}
+            onKeyDown={handleHeadingTriggerKeyDown}
           >
             {blockLabel}<span aria-hidden="true">⌄</span>
           </button>
           {headingMenuOpen ? (
-            <div className="rich-text-toolbar-menu" role="menu" aria-label="段落样式">
+            <div id="rich-text-heading-menu" className="rich-text-toolbar-menu" role="menu" aria-label="段落样式">
               {([
                 ['paragraph', '正文'],
                 [1, '一级标题'],
@@ -659,6 +710,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
                   role="menuitem"
                   key={String(value)}
                   className={menuItemClass(value === currentBlockType)}
+                  onPointerDown={rememberToolbarPointerDown}
                   onMouseDown={stopToolbarBlur}
                   onClick={() => applyBlock(value)}
                 >
@@ -707,7 +759,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-pressed={activeEditor.isActive('bulletList')}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => {
-            setHeadingMenuOpen(false)
+            closeHeadingMenu()
             startCommand().toggleList('bulletList', 'listItem').run()
           }}
         >
@@ -720,7 +772,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-pressed={activeEditor.isActive('orderedList')}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => {
-            setHeadingMenuOpen(false)
+            closeHeadingMenu()
             startCommand().toggleList('orderedList', 'listItem').run()
           }}
         >
@@ -733,7 +785,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-pressed={activeEditor.isActive('blockquote')}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => {
-            setHeadingMenuOpen(false)
+            closeHeadingMenu()
             startCommand().toggleWrap('blockquote').run()
           }}
         >
@@ -755,7 +807,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           aria-label="插入分割线"
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => {
-            setHeadingMenuOpen(false)
+            closeHeadingMenu()
             startCommand().insertContent({ type: 'horizontalRule' }).run()
           }}
         >
@@ -795,6 +847,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
                   role="menuitem"
                   key={token}
                   className={menuItemClass(currentSize === token)}
+                  onPointerDown={rememberToolbarPointerDown}
                   onMouseDown={closeHeadingOnToolbarMouseDown}
                   onClick={() => applySize(token)}
                 >
@@ -826,6 +879,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
                   role="menuitem"
                   key={token}
                   className={menuItemClass((token === 'default' && !currentColor) || currentColor === token)}
+                  onPointerDown={rememberToolbarPointerDown}
                   onMouseDown={closeHeadingOnToolbarMouseDown}
                   onClick={() => applyColor(token)}
                 >
@@ -852,7 +906,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           disabled={!activeEditor.can().undo()}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => {
-            setHeadingMenuOpen(false)
+            closeHeadingMenu()
             startCommand().undo().run()
           }}
         >
@@ -865,7 +919,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           disabled={!activeEditor.can().redo()}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => {
-            setHeadingMenuOpen(false)
+            closeHeadingMenu()
             startCommand().redo().run()
           }}
         >

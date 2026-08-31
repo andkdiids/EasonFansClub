@@ -7,10 +7,12 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib/profile-page'
+import { getProfileRecordPreferences } from '@/lib/profile-record-preferences'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { getProfileSalonPosts } from '@/lib/salon'
 import { buildProfilePostWhere } from '@/lib/post-moderation'
 import { postContentPlainText } from '@/lib/share-metadata'
 import { PROFILE_POST_GROUP_UNGROUPED } from '@/lib/profile-post-groups'
@@ -42,6 +44,17 @@ export async function GET(request: Request, context: RouteContext) {
   const typedModuleKey = moduleKey as PublicProfileModuleKey
   if (!isProfileModuleVisible(visibility.settings, typedModuleKey, visibility.isSelf)) {
     const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' ? getProfileRecordPagination(0, page) : undefined
+    return NextResponse.json({ items: [], ...(pagination ? { pagination } : {}), visibility: { visible: false } })
+  }
+  let recordPreferences
+  try {
+    recordPreferences = await getProfileRecordPreferences(target.id)
+  } catch (error) {
+    console.error('[userModules.recordPreferences]', { userId: target.id, error })
+    return NextResponse.json({ message: '个人记录暂时无法加载，请稍后重试' }, { status: 503, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } })
+  }
+  if (!visibility.isSelf && recordPreferences.find((preference) => preference.key === typedModuleKey)?.visible === false) {
+    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' || typedModuleKey === 'salon' ? getProfileRecordPagination(0, page) : undefined
     return NextResponse.json({ items: [], ...(pagination ? { pagination } : {}), visibility: { visible: false } })
   }
 
@@ -111,6 +124,15 @@ export async function GET(request: Request, context: RouteContext) {
       { messages: [], pagination: getProfileRecordPagination(0, page) },
     )
     return NextResponse.json({ items: result.messages, pagination: result.pagination })
+  }
+
+  if (typedModuleKey === 'salon') {
+    const result = await safeDb(
+      'userModules.salon',
+      getProfileSalonPosts(target.id, page, viewer?.id),
+      { posts: [], pagination: getProfileRecordPagination(0, page) },
+    )
+    return NextResponse.json({ items: result.posts, pagination: result.pagination })
   }
 
   if (typedModuleKey === 'replies') {

@@ -23,6 +23,7 @@ test('隐私默认值全部公开，历史用户无需批量创建设置记录',
     showActivityHistory: true,
     showBadgeHistory: true,
     showRatings: true,
+    showSalon: true,
   })
   assert.deepEqual(getVisibleProfileModules(DEFAULT_USER_PRIVACY_SETTINGS, false), PUBLIC_PROFILE_MODULE_KEYS)
   assert.deepEqual(getVisibleProfileModules({ ...DEFAULT_USER_PRIVACY_SETTINGS, showPosts: false }, true), PUBLIC_PROFILE_MODULE_KEYS)
@@ -75,7 +76,7 @@ test('隐私设置页面和接口只允许当前登录用户更新白名单字�
   const form = source('components/UserPrivacySettingsForm.tsx')
   const route = source('app/api/settings/privacy/route.ts')
   assert.match(page, /隐私设置/)
-  for (const label of ['显示挂号记录', '显示挂号留言', '显示发帖记录', '显示评论记录', '显示演唱会记录', '显示活动记录', '显示勋章记录', '显示评分与榜单']) assert.match(form, new RegExp(label))
+  for (const label of ['显示挂号记录', '显示挂号留言', '显示发帖记录', '显示评论记录', '显示沙龙记录', '显示演唱会记录', '显示活动记录', '显示勋章记录', '显示评分与榜单']) assert.match(form, new RegExp(label))
   assert.match(route, /rejectInvalidRequestOrigin\(request\)/)
   assert.match(route, /requireUser\(\)/)
   assert.match(route, /where: \{ userId: guard\.user\.id \}/)
@@ -115,7 +116,7 @@ test('隐私设置迁移使用安全默认值并建立一对一用户关系', ()
   const schema = source('prisma/schema.prisma')
   const migration = source('prisma/migrations/20260828090000_add_user_privacy_settings/migration.sql')
   assert.match(schema, /UserPrivacySetting\s+UserPrivacySetting\?/) 
-  assert.match(schema, /model UserPrivacySetting \{[\s\S]*?userId\s+String\s+@unique[\s\S]*?showRatings\s+Boolean\s+@default\(true\)[\s\S]*?User\s+User\s+@relation\(/)
+  assert.match(schema, /model UserPrivacySetting \{[\s\S]*?userId\s+String\s+@unique[\s\S]*?showRatings\s+Boolean\s+@default\(true\)[\s\S]*?showSalon\s+Boolean\s+@default\(true\)[\s\S]*?User\s+User\s+@relation\(/)
   assert.match(migration, /CREATE TABLE `UserPrivacySetting`/)
   assert.match(migration, /`showCheckInHistory` BOOLEAN NOT NULL DEFAULT true/)
   assert.match(migration, /`showRatings` BOOLEAN NOT NULL DEFAULT true/)

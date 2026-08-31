@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { normalizeForumBoards } from '@/lib/boards'
+import { mergeForumBoardSummaries, normalizeForumBoards } from '@/lib/boards'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
-  const boards = await prisma.board.findMany({
+  const boardRows = await prisma.board.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     take: 100,
@@ -23,6 +23,7 @@ export async function GET() {
       parentId: true,
     },
   })
+  const boards = mergeForumBoardSummaries(boardRows)
 
   return NextResponse.json(
     { boards: normalizeForumBoards(boards).map((board) => ({ ...board, coverUrl: publicImageUrl(board.coverUrl) })) },

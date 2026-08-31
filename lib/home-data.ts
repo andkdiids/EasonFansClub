@@ -434,3 +434,23 @@ export async function getHomeUserStats(userId?: string) {
     _count: { checkIns: _count.CheckIn },
   }
 }
+
+/**
+ * Read only the already-issued prescription reward for today. The homepage
+ * must never call the issuing service or infer this value from the user's
+ * total registration-fee balance.
+ */
+export async function getHomeDailyPrescriptionReward(userId?: string) {
+  if (!userId) return null
+  const dateKey = getShanghaiDateKey(new Date())
+  const draw = await safeDb(
+    'EntertainmentDailyDraw.findUnique home.dailyPrescription',
+    prisma.entertainmentDailyDraw.findUnique({
+      where: { userId_dateKey: { userId, dateKey } },
+      select: { points: true },
+    }),
+    null,
+    5000,
+  )
+  return draw?.points && draw.points > 0 ? draw.points : null
+}

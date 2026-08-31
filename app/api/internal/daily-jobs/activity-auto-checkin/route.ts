@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { autoCheckInEndedActivityRegistrations } from '@/lib/activity-registration'
+import { drawDueActivityLotteries } from '@/lib/activity-lottery'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,11 @@ export async function POST(request: Request) {
   const batchSize = requestedBatchSize === undefined ? undefined : Math.min(Math.max(Math.trunc(requestedBatchSize), 1), 500)
   const startedAt = Date.now()
   try {
-    const result = await autoCheckInEndedActivityRegistrations({ activityId, batchSize })
+    const [checkInResult, lotteryResult] = await Promise.all([
+      autoCheckInEndedActivityRegistrations({ activityId, batchSize }),
+      drawDueActivityLotteries({ activityId, batchSize: batchSize ? Math.min(batchSize, 200) : undefined }),
+    ])
+    const result = { ...checkInResult, lottery: lotteryResult }
     console.info('[daily-job.activity-auto-checkin.completed]', {
       event: 'daily_job.completed',
       jobKey: 'activity-auto-checkin',

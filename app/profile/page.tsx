@@ -13,6 +13,7 @@ import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { getBadgeProfileSummary, getEquippedBadgeForUser } from '@/lib/badge-service'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getProfileVisibility } from '@/lib/user-privacy'
+import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -74,12 +75,13 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
-  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge, badgeSummary] = await Promise.all([
+  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge, badgeSummary, recordPreferences] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
     getEquippedBadgeForUser(profile.id),
     getBadgeProfileSummary(profile.id, user.id),
+    getProfileRecordPreferencesSafe(profile.id),
   ])
 
   const profileEditorInitialProfile = {
@@ -124,6 +126,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
            equippedBadge,
            badgeSummary,
            privacy: visibility.settings,
+           recordPreferences,
          }}
         growth={growth}
         relationship={{

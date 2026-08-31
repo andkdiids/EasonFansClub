@@ -338,14 +338,21 @@ async function start() {
     if (activityAutoCheckInRunning) return
     activityAutoCheckInRunning = true
     try {
-      const { autoCheckInEndedActivityRegistrations } = await import('./lib/activity-registration')
-      const result = await autoCheckInEndedActivityRegistrations({ batchSize: 100 })
-      if (result.scanned || result.failed) {
+      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }] = await Promise.all([
+        import('./lib/activity-registration'),
+        import('./lib/activity-lottery'),
+      ])
+      const [result, lotteryResult] = await Promise.all([
+        autoCheckInEndedActivityRegistrations({ batchSize: 100 }),
+        drawDueActivityLotteries({ batchSize: 200 }),
+      ])
+      if (result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed) {
         console.info('[activities.auto-check-in.completed]', {
           event: 'activities.auto_check_in.completed',
           scanned: result.scanned,
           processed: result.processed,
           failed: result.failed,
+          lotteries: lotteryResult,
         })
       }
     } catch (error) {

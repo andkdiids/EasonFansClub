@@ -6,12 +6,19 @@ export const BARD_BOARD_NAME = '吟游诗人'
 
 export type ForumBoardIdentity = Readonly<{ slug?: string | null; name: string }>
 
+export type ForumBoardOption = Readonly<{
+  id: string
+  name: string
+  slug: string
+}>
+
 export type ForumBoardSummary = Readonly<{
   id: string
   name: string
   slug: string
   description: string | null
   postCount: number
+  coverUrl?: string | null
 }>
 
 /**
@@ -22,9 +29,9 @@ export type ForumBoardSummary = Readonly<{
  */
 export function getForumBoardDisplayName(board: ForumBoardIdentity | null | undefined) {
   if (!board) return ''
-  return board.slug === DAILY_CHAT_BOARD_SLUG || board.name === DAILY_CHAT_LEGACY_NAME
-    ? DAILY_CHAT_DISPLAY_NAME
-    : board.name
+  const configuredBoard = board.slug ? defaultBoards.find((item) => item.slug === board.slug) : null
+  if (configuredBoard) return configuredBoard.name
+  return board.name === DAILY_CHAT_LEGACY_NAME ? DAILY_CHAT_DISPLAY_NAME : board.name
 }
 
 export function withForumBoardDisplayName<T extends ForumBoardIdentity>(board: T): T {
@@ -35,17 +42,38 @@ export function normalizeForumBoards<T extends ForumBoardIdentity>(boards: reado
   return boards.map(withForumBoardDisplayName)
 }
 
+function missingConfiguredForumBoards(knownSlugs: ReadonlySet<string>) {
+  return defaultBoards.filter((board) => board.slug === BARD_BOARD_SLUG && !knownSlugs.has(board.slug))
+}
+
 /**
  * Keep the public forum navigation backed by one catalog even when an older
  * database has not yet materialized one of the default Board rows. Configured
- * rows are read-only navigation entries; posting still requires the normal
- * database-backed Board relation.
+ * rows use a stable slug so the post API can materialize the missing row when
+ * a user actually submits to that configured board.
  */
 export function appendMissingDefaultForumBoards<T extends ForumBoardIdentity>(boards: readonly T[]) {
   const knownSlugs = new Set(boards.map((board) => board.slug).filter((slug): slug is string => Boolean(slug)))
   return [
     ...boards,
-    ...defaultBoards.filter((board) => board.slug === BARD_BOARD_SLUG && !knownSlugs.has(board.slug)),
+    ...missingConfiguredForumBoards(knownSlugs),
+  ]
+}
+
+/**
+ * Return the same board catalog used by the public forum feeds for compose
+ * screens. A configured fallback uses a stable sentinel until the board row
+ * is materialized by the post submission request.
+ */
+export function mergeForumBoardOptions(boards: readonly ForumBoardOption[]): ForumBoardOption[] {
+  const knownSlugs = new Set(boards.map((board) => board.slug))
+  return [
+    ...boards,
+    ...missingConfiguredForumBoards(knownSlugs).map((board) => ({
+      id: `configured:${board.slug}`,
+      name: board.name,
+      slug: board.slug,
+    })),
   ]
 }
 
@@ -53,20 +81,26 @@ export function mergeForumBoardSummaries(boards: readonly ForumBoardSummary[]): 
   const knownSlugs = new Set(boards.map((board) => board.slug))
   return [
     ...boards,
-    ...defaultBoards
-      .filter((board) => board.slug === BARD_BOARD_SLUG && !knownSlugs.has(board.slug))
+    ...missingConfiguredForumBoards(knownSlugs)
       .map((board) => ({
         id: `configured:${board.slug}`,
         name: board.name,
         slug: board.slug,
         description: board.description,
         postCount: 0,
+        coverUrl: null,
       })),
   ]
 }
 
 export function isConfiguredForumBoardId(id: string) {
   return id.startsWith('configured:')
+}
+
+export function getConfiguredForumBoardBySelectionId(selectionId: string) {
+  if (!isConfiguredForumBoardId(selectionId)) return null
+  const slug = selectionId.slice('configured:'.length)
+  return defaultBoards.find((board) => board.slug === slug) || null
 }
 
 export const defaultBoards = [

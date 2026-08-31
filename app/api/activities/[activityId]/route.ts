@@ -4,6 +4,7 @@ import { activitySelect, serializeActivityRow } from '@/lib/activity-data'
 import { getActivityRegistrationState } from '@/lib/activity-registration'
 import { activityRegistrationSelect, getActivityRegistrationQuestions, serializeActivityRegistration } from '@/lib/activity-registration'
 import { prisma } from '@/lib/prisma'
+import { getPublicActivityLotteries } from '@/lib/activity-lottery'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +30,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
     getActivityRegistrationQuestions(prisma, activityId),
   ])
   const availability = getActivityRegistrationState(view, view.signupCount)
+  const lotteries = await getPublicActivityLotteries(activityId, viewer?.id)
   const isRegistered = registration?.status === 'ACTIVE'
   const isCancelled = registration?.status === 'CANCELLED'
   const activityMaterialAvailable = !view.linkedMaterial || (view.linkedMaterial.status === 'PUBLISHED' && view.linkedMaterial.stockRemaining > 0)
@@ -41,5 +43,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
     registrationStatus: registration?.status || null,
     registrationState: availability.state,
     canRegister: availability.canRegister && Boolean(viewer) && !isRegistered && !isCancelled && activityMaterialAvailable,
+    lotteries,
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
 }

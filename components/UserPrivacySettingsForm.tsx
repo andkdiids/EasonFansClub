@@ -17,6 +17,7 @@ const sections: Array<{ title: string; items: Array<{ key: UserPrivacyKey; label
       { key: 'showCheckInMessages', label: '显示挂号留言', description: '允许其他用户查看你在个人主页中的历史挂号留言。' },
       { key: 'showPosts', label: '显示发帖记录', description: '允许其他用户从你的主页查看你发布过的帖子。' },
       { key: 'showComments', label: '显示评论记录', description: '允许其他用户从你的主页查看你的评论和回复记录。' },
+      { key: 'showSalon', label: '显示沙龙记录', description: '允许其他用户从你的主页查看你已审核通过的公开沙龙作品。' },
     ],
   },
   {

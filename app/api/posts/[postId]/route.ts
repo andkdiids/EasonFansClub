@@ -12,7 +12,7 @@ import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
-import { withForumBoardDisplayName } from '@/lib/boards'
+import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
@@ -726,17 +726,34 @@ async function handleEditPost(
     }
   }
   const hasSticker = Boolean(existing.stickerId)
-  const nextBoardId = typeof body.boardId === 'string' ? sanitizeText(body.boardId, 80) : existing.boardId
+  const boardSelectionId = typeof body.boardId === 'string' ? sanitizeText(body.boardId, 80) : existing.boardId
 
   setPhase('edit-board')
-  const board = await prisma.board.findFirst({
-    where: { id: nextBoardId, isActive: true },
-    select: { id: true, slug: true },
-  })
-  if (!board) return NextResponse.json({ message: '板块不存在或已停用', errors: { boardId: '板块无效' } }, { status: 404 })
+  const configuredBoard = getConfiguredForumBoardBySelectionId(boardSelectionId)
+  if (configuredBoard?.slug === 'announcements' && !canManagePosts) {
+    return NextResponse.json({ message: '只有内容管理员可以编辑公告区帖子', errors: { boardId: '无权编辑公告区' } }, { status: 403 })
+  }
+  const board = configuredBoard
+    ? await prisma.board.upsert({
+        where: { slug: configuredBoard.slug },
+        update: {},
+        create: {
+          name: configuredBoard.name,
+          slug: configuredBoard.slug,
+          description: configuredBoard.description,
+          sortOrder: configuredBoard.sortOrder,
+        },
+        select: { id: true, slug: true, isActive: true },
+      })
+    : await prisma.board.findFirst({
+        where: { id: boardSelectionId, isActive: true },
+        select: { id: true, slug: true, isActive: true },
+      })
+  if (!board || !board.isActive) return NextResponse.json({ message: '板块不存在或已停用', errors: { boardId: '板块无效' } }, { status: 404 })
   if (board.slug === 'announcements' && !canManagePosts) {
     return NextResponse.json({ message: '只有内容管理员可以编辑公告区帖子', errors: { boardId: '无权编辑公告区' } }, { status: 403 })
   }
+  const nextBoardId = board.id
 
   setPhase('edit-moderation')
   const forbiddenWords = await checkPostForbiddenWords({ title: rawTitle, content: rawContent }, user)

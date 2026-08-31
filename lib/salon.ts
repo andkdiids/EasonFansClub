@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
+import { getProfileRecordPagination } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 
 export const SALON_CATEGORIES = ['CONCERT', 'MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER', 'TIME_TRAVEL'] as const
@@ -442,6 +443,33 @@ export async function getSalonPosts(filters: SalonFilters = {}, viewerId?: strin
     nextCursor: hasMore && last?.approvedAt
       ? encodeSalonCursor({ id: last.id, approvedAt: last.approvedAt.toISOString(), likeCount: last.likeCount })
       : null,
+  }
+}
+
+/**
+ * The profile record is a public projection, so it uses the same approved
+ * conditions as the main Salon feed and paginates in the database.
+ */
+export async function getProfileSalonPosts(userId: string, requestedPage = 1, viewerId?: string | null) {
+  const where: Prisma.SalonPostWhereInput = { ...salonPublicBaseWhere, userId }
+  const total = await prisma.salonPost.count({ where })
+  const pagination = getProfileRecordPagination(total, requestedPage)
+  const rows = await prisma.salonPost.findMany({
+    where,
+    orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
+    skip: (pagination.page - 1) * pagination.pageSize,
+    take: pagination.pageSize,
+    select: salonPostSelect,
+  })
+  const likedIds = viewerId && rows.length
+    ? new Set((await prisma.salonPostLike.findMany({
+      where: { userId: viewerId, postId: { in: rows.map((row) => row.id) } },
+      select: { postId: true },
+    })).map((row) => row.postId))
+    : new Set<string>()
+  return {
+    posts: rows.map((row) => serializeSalonPost(row, likedIds.has(row.id))),
+    pagination,
   }
 }
 

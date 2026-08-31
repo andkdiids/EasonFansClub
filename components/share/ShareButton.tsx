@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { shareContent } from '@/lib/share'
-import { createShareCardFilename, isTrustedShareCardHttpsUrl, shareCardApiPath, shareCardQrPayload, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { createShareCardFilename, isTrustedShareCardHttpsUrl, shareCardApiPath, shareCardQrPayload, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { generateShareCardImage, type GeneratedShareCardImage } from '@/lib/share-card-image'
 import { ShareCardPreview } from './ShareCardPreview'
 import { ShareMethodDialog } from './ShareMethodDialog'
@@ -24,7 +24,7 @@ async function requestServerShareCard(data: ShareCardData): Promise<GeneratedSha
   if (!response.ok) throw new Error(`SHARE_CARD_API_${response.status}`)
   const result = await response.json() as ShareCardApiResponse
   if (typeof result.url !== 'string' || !isTrustedShareCardHttpsUrl(result.url)) throw new Error('SHARE_CARD_API_URL_INVALID')
-  if (result.mimeType !== SHARE_CARD_MIME_TYPE || result.width !== SHARE_CARD_WIDTH || typeof result.height !== 'number' || result.height < SHARE_CARD_HEIGHT) throw new Error('SHARE_CARD_API_DIMENSIONS_INVALID')
+  if (result.mimeType !== SHARE_CARD_MIME_TYPE || result.width !== SHARE_CARD_WIDTH || typeof result.height !== 'number' || !Number.isSafeInteger(result.height) || result.height <= 0) throw new Error('SHARE_CARD_API_DIMENSIONS_INVALID')
   return {
     source: 'remote',
     blob: null,

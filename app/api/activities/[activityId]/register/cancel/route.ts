@@ -40,6 +40,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
       if (!registration) throw new ActivityRegistrationError('REGISTRATION_NOT_FOUND', '你还没有报名这场活动', 404)
       if (registration.status === 'CANCELLED') return { alreadyCancelled: true, registrationCount: await syncActivitySignupCount(tx, activityId) }
       if (registration.status !== 'ACTIVE') throw new ActivityRegistrationError('CANNOT_CANCEL', '当前报名状态不能取消', 409)
+      const drawnLottery = await tx.lottery.findFirst({ where: { activityId, status: 'DRAWN' }, select: { id: true } })
+      if (drawnLottery) throw new ActivityRegistrationError('CANNOT_CANCEL', '活动已经开奖，不能取消报名', 409)
       const now = new Date()
       if (!isActivityRegistrationCancellationOpen(activity, now)) throw new ActivityRegistrationError(ACTIVITY_REGISTRATION_CANCEL_CLOSED, activityRegistrationCancelClosedMessage, 409)
       if (registration.verifiedAt) throw new ActivityRegistrationError('CANNOT_CANCEL', '已核销的报名不能取消', 409)

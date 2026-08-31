@@ -1,0 +1,216 @@
+import { Prisma } from '@prisma/client'
+import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
+import { activityVerificationTokenFromInput, redeemActivityLinkedMaterialInTransaction, verifyActivityRegistrationInTransaction } from '@/lib/activity-registration'
+import { publicImageUrl } from '@/lib/images'
+import { prisma } from '@/lib/prisma'
+
+export const activityRedemptionEntitlementTypes = ['ACTIVITY_REGISTRATION', 'MATERIAL', 'LOTTERY_PRIZE'] as const
+export type ActivityRedemptionEntitlementType = (typeof activityRedemptionEntitlementTypes)[number]
+
+export type ActivityRedemptionSelection = { type: ActivityRedemptionEntitlementType; id: string }
+
+export type ActivityRedemptionEntitlement = {
+  type: ActivityRedemptionEntitlementType
+  id: string
+  title: string
+  subtitle: string | null
+  quantity: number
+  status: 'PENDING' | 'REDEEMED' | 'UNAVAILABLE'
+  redeemable: boolean
+  redeemedAt: string | null
+}
+
+export type ActivityRedemptionLookupView = {
+  activity: { id: string; title: string }
+  user: { uid: number; nickname: string; avatarUrl: string | null }
+  entitlements: ActivityRedemptionEntitlement[]
+}
+
+export class ActivityRedemptionError extends Error {
+  constructor(readonly code: 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'REGISTRATION_CANCELLED' | 'NO_SELECTION' | 'INVALID_ENTITLEMENT' | 'REDEMPTION_FAILED', message: string, readonly status = 409) {
+    super(message)
+    this.name = 'ActivityRedemptionError'
+  }
+}
+
+const lookupRegistrationSelect = {
+  id: true,
+  status: true,
+  userId: true,
+  verifiedAt: true,
+  LinkedMaterialRedemption: {
+    select: {
+      id: true,
+      status: true,
+      source: true,
+      quantity: true,
+      redeemedAt: true,
+      material: { select: { title: true } },
+    },
+  },
+  User: { select: { uid: true, nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
+  Activity: { select: { id: true, title: true, startsAt: true } },
+} satisfies Prisma.ActivityRegistrationSelect
+
+type LookupRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof lookupRegistrationSelect }>
+
+function tokenFromInput(value: string) {
+  const token = activityVerificationTokenFromInput(value)
+  if (!token) throw new ActivityRedemptionError('INVALID_TOKEN', '二维码核销令牌无效', 400)
+  return token
+}
+
+function materialEntitlement(registration: LookupRegistration, now: Date): ActivityRedemptionEntitlement | null {
+  const order = registration.LinkedMaterialRedemption
+  if (!order) return null
+  const isPending = order.status === 'SUCCESS'
+  const isRedeemed = order.status === 'REDEEMED'
+  const isAvailableNow = !registration.Activity.startsAt || now >= registration.Activity.startsAt
+  return {
+    type: 'MATERIAL',
+    id: order.id,
+    title: order.material.title,
+    subtitle: order.source === 'ACTIVITY_REGISTRATION_AUTO' && !isAvailableNow && isPending ? '活动尚未开始' : '活动物料',
+    quantity: order.quantity,
+    status: isPending ? 'PENDING' : isRedeemed ? 'REDEEMED' : 'UNAVAILABLE',
+    redeemable: isPending && isAvailableNow,
+    redeemedAt: order.redeemedAt?.toISOString() || null,
+  }
+}
+
+async function loadLookupRows(activityId: string, token: string) {
+  const registration = await prisma.activityRegistration.findFirst({ where: { activityId, verificationToken: token }, select: lookupRegistrationSelect })
+  if (!registration) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '找不到对应的有效活动报名记录', 404)
+  if (registration.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
+  const winners = await prisma.lotteryEntry.findMany({
+    where: { userId: registration.userId, Lottery: { activityId, status: 'DRAWN' } },
+    orderBy: [{ wonAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      redemptionStatus: true,
+      redeemedAt: true,
+      Lottery: { select: { title: true } },
+      LotteryPrize: { select: { tierName: true, name: true } },
+    },
+  })
+  return { registration, winners }
+}
+
+export async function getActivityRedemptionLookup(activityId: string, rawToken: string): Promise<ActivityRedemptionLookupView> {
+  const token = tokenFromInput(rawToken)
+  const { registration, winners } = await loadLookupRows(activityId, token)
+  const now = new Date()
+  const entitlements: ActivityRedemptionEntitlement[] = [
+    {
+      type: 'ACTIVITY_REGISTRATION',
+      id: registration.id,
+      title: '活动签到',
+      subtitle: registration.verifiedAt ? '已完成活动核销' : '活动报名资格',
+      quantity: 1,
+      status: registration.verifiedAt ? 'REDEEMED' : 'PENDING',
+      redeemable: !registration.verifiedAt,
+      redeemedAt: registration.verifiedAt?.toISOString() || null,
+    },
+    ...(materialEntitlement(registration, now) ? [materialEntitlement(registration, now)!] : []),
+    ...winners.map((winner) => ({
+      type: 'LOTTERY_PRIZE' as const,
+      id: winner.id,
+      title: winner.LotteryPrize ? `${winner.LotteryPrize.tierName || '中奖奖项'} · ${winner.LotteryPrize.name}` : '中奖奖品',
+      subtitle: winner.Lottery.title,
+      quantity: 1,
+      status: winner.redemptionStatus,
+      redeemable: winner.redemptionStatus === 'PENDING',
+      redeemedAt: winner.redeemedAt?.toISOString() || null,
+    })),
+  ]
+  return {
+    activity: { id: registration.Activity.id, title: registration.Activity.title },
+    user: { uid: registration.User.uid, nickname: registration.User.nickname, avatarUrl: publicImageUrl(registration.User.Profile?.avatarUrl || registration.User.avatarUrl) },
+    entitlements,
+  }
+}
+
+function assertSelection(value: unknown): ActivityRedemptionSelection[] {
+  if (!Array.isArray(value)) throw new ActivityRedemptionError('NO_SELECTION', '请选择至少一项待核销权益', 400)
+  const selections: ActivityRedemptionSelection[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '核销项目格式不正确', 400)
+    const record = item as Record<string, unknown>
+    const type = typeof record.type === 'string' && activityRedemptionEntitlementTypes.includes(record.type as ActivityRedemptionEntitlementType) ? record.type as ActivityRedemptionEntitlementType : null
+    const id = typeof record.id === 'string' ? record.id.trim() : ''
+    if (!type || !id || id.length > 191) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '核销项目无效', 400)
+    const key = `${type}:${id}`
+    if (!seen.has(key)) {
+      selections.push({ type, id })
+      seen.add(key)
+    }
+  }
+  if (!selections.length) throw new ActivityRedemptionError('NO_SELECTION', '请选择至少一项待核销权益', 400)
+  return selections
+}
+
+async function lockRegistration(tx: Prisma.TransactionClient, activityId: string, token: string) {
+  const registration = await tx.activityRegistration.findFirst({ where: { activityId, verificationToken: token }, select: { id: true, status: true, userId: true, linkedMaterialRedemptionId: true } })
+  if (!registration) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '找不到对应的有效活动报名记录', 404)
+  await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registration.id} FOR UPDATE`
+  const current = await tx.activityRegistration.findUnique({ where: { id: registration.id }, select: { id: true, status: true, userId: true, verifiedAt: true, linkedMaterialRedemptionId: true } })
+  if (!current) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
+  if (current.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
+  return current
+}
+
+async function redeemLotteryWinnerInTransaction(tx: Prisma.TransactionClient, activityId: string, winnerId: string, userId: string, adminId: string, now: Date) {
+  await tx.$queryRaw`SELECT \`id\` FROM \`LotteryEntry\` WHERE \`id\` = ${winnerId} FOR UPDATE`
+  const winner = await tx.lotteryEntry.findFirst({
+    where: { id: winnerId, userId, Lottery: { activityId, status: 'DRAWN' } },
+    select: { id: true, redemptionStatus: true, redeemedAt: true },
+  })
+  if (!winner) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '中奖奖品不属于当前活动或当前用户', 403)
+  if (winner.redemptionStatus === 'REDEEMED') return { id: winner.id, status: 'ALREADY_REDEEMED' as const, redeemedAt: winner.redeemedAt?.toISOString() || null }
+  const updated = await tx.lotteryEntry.updateMany({ where: { id: winner.id, userId, redemptionStatus: 'PENDING' }, data: { redemptionStatus: 'REDEEMED', redeemedAt: now, redeemedByAdminId: adminId } })
+  if (updated.count !== 1) {
+    const latest = await tx.lotteryEntry.findUnique({ where: { id: winner.id }, select: { redemptionStatus: true, redeemedAt: true } })
+    if (latest?.redemptionStatus === 'REDEEMED') return { id: winner.id, status: 'ALREADY_REDEEMED' as const, redeemedAt: latest.redeemedAt?.toISOString() || null }
+    throw new ActivityRedemptionError('REDEMPTION_FAILED', '中奖奖品核销状态发生变化，请刷新后重试', 409)
+  }
+  return { id: winner.id, status: 'REDEEMED' as const, redeemedAt: now.toISOString() }
+}
+
+export async function confirmActivityRedemption(activityId: string, rawToken: string, rawSelections: unknown, adminId: string) {
+  const token = tokenFromInput(rawToken)
+  const selections = assertSelection(rawSelections)
+  const results = await prisma.$transaction(async (tx) => {
+    const lockedActivity = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
+    if (!lockedActivity.length) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '活动不存在', 404)
+    const registration = await lockRegistration(tx, activityId, token)
+    const now = new Date()
+    const itemResults: Array<{ type: ActivityRedemptionEntitlementType; id: string; status: 'REDEEMED' | 'ALREADY_REDEEMED' }> = []
+    for (const selection of selections) {
+      if (selection.type === 'ACTIVITY_REGISTRATION') {
+        if (selection.id !== registration.id) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '活动报名权益不属于当前二维码', 403)
+        const result = await verifyActivityRegistrationInTransaction(tx, { activityId, token, adminId, method: 'QR', redeemLinkedMaterial: false }, now)
+        itemResults.push({ type: selection.type, id: selection.id, status: result.alreadyVerified ? 'ALREADY_REDEEMED' : 'REDEEMED' })
+      } else if (selection.type === 'MATERIAL') {
+        if (selection.id !== registration.linkedMaterialRedemptionId) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '活动物料不属于当前二维码', 403)
+        const result = await redeemActivityLinkedMaterialInTransaction(tx, { activityId, registrationId: registration.id, orderId: selection.id, adminId }, now)
+        itemResults.push({ type: selection.type, id: selection.id, status: result.changed ? 'REDEEMED' : 'ALREADY_REDEEMED' })
+      } else {
+        const result = await redeemLotteryWinnerInTransaction(tx, activityId, selection.id, registration.userId, adminId, now)
+        itemResults.push({ type: selection.type, id: selection.id, status: result.status === 'REDEEMED' ? 'REDEEMED' : 'ALREADY_REDEEMED' })
+      }
+    }
+    await createAdminActionAudit(tx, {
+      operatorId: adminId,
+      action: 'UPDATE_SETTING',
+      operationType: adminAuditOperations.ACTIVITY_REDEMPTION_CONFIRM,
+      targetType: 'ACTIVITY_REDEMPTION',
+      targetId: registration.id,
+      targetUserId: registration.userId,
+      metadata: { activityId, registrationId: registration.id, selections: itemResults } as Prisma.InputJsonValue,
+    })
+    return itemResults
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
+  const lookup = await getActivityRedemptionLookup(activityId, token)
+  return { ...lookup, results }
+}

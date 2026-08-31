@@ -28,7 +28,7 @@ async function request<T>(url: string) {
 
 export function WantListenLeaderboard() {
   const [mode, setMode] = useState<WantListenMode>('WANT_LISTEN')
-  const [period, setPeriod] = useState<'TODAY' | 'WEEK' | 'ALL'>('WEEK')
+  const [period, setPeriod] = useState<'TODAY' | 'WEEK' | 'MONTH' | 'ALL'>('WEEK')
   const [board, setBoard] = useState<Board | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -51,7 +51,7 @@ export function WantListenLeaderboard() {
         <h1>想听榜</h1>
         <p>每个模式独立记录，自己的最佳成绩只占一个位置。</p>
       </header>
-      <div className="want-listen-board-filters"><div>{WANT_LISTEN_MODES.map((item) => <button key={item} type="button" aria-pressed={mode === item} onClick={() => setMode(item)}>{WANT_LISTEN_MODE_LABELS[item]}</button>)}</div><div>{[['TODAY', '今日'], ['WEEK', '本周'], ['ALL', '总榜']].map(([value, label]) => <button key={value} type="button" aria-pressed={period === value} onClick={() => setPeriod(value as typeof period)}>{label}</button>)}</div></div>
+      <div className="want-listen-board-filters"><div>{WANT_LISTEN_MODES.map((item) => <button key={item} type="button" aria-pressed={mode === item} onClick={() => setMode(item)}>{WANT_LISTEN_MODE_LABELS[item]}</button>)}</div><div>{[['TODAY', '今日'], ['WEEK', '本周'], ['MONTH', '本月'], ['ALL', '总榜']].map(([value, label]) => <button key={value} type="button" aria-pressed={period === value} onClick={() => setPeriod(value as typeof period)}>{label}</button>)}</div></div>
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
       <section className={`want-listen-board${loading ? ' is-loading' : ''}`} aria-label={`${WANT_LISTEN_MODE_LABELS[mode]}排行榜`}>
         <div className="want-listen-board-head"><span>排名</span><span>用户</span><span>分数</span><span>答对</span><span>连击</span><span>用时</span></div>

@@ -2072,9 +2072,22 @@ CREATE TABLE `Lottery` (
     `startsAt` DATETIME(3) NULL,
     `endsAt` DATETIME(3) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `activityId` VARCHAR(191) NULL,
+    `description` TEXT NULL,
+    `drawAt` DATETIME(3) NULL,
+    `status` ENUM('DRAFT', 'SCHEDULED', 'DRAWN', 'CANCELLED') NOT NULL DEFAULT 'DRAFT',
+    `eligibleCount` INTEGER NULL,
+    `winnerCount` INTEGER NULL,
+    `drawnAt` DATETIME(3) NULL,
+    `cancelledAt` DATETIME(3) NULL,
+    `algorithmVersion` VARCHAR(191) NULL,
+    `createdById` VARCHAR(191) NULL,
 
     INDEX `Lottery_activityId_idx`(`activityId`),
+    INDEX `Lottery_activityId_status_drawAt_idx`(`activityId`, `status`, `drawAt`),
+    INDEX `Lottery_status_drawAt_idx`(`status`, `drawAt`),
+    INDEX `Lottery_createdById_idx`(`createdById`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -2082,12 +2095,20 @@ CREATE TABLE `Lottery` (
 CREATE TABLE `LotteryEntry` (
     `id` VARCHAR(191) NOT NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `wonAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `lotteryId` VARCHAR(191) NOT NULL,
     `prizeId` VARCHAR(191) NULL,
     `userId` VARCHAR(191) NOT NULL,
+    `registrationId` VARCHAR(191) NULL,
+    `redemptionStatus` ENUM('PENDING', 'REDEEMED') NOT NULL DEFAULT 'PENDING',
+    `redeemedAt` DATETIME(3) NULL,
+    `redeemedByAdminId` VARCHAR(191) NULL,
 
     INDEX `LotteryEntry_lotteryId_createdAt_idx`(`lotteryId`, `createdAt`),
     INDEX `LotteryEntry_userId_createdAt_idx`(`userId`, `createdAt`),
+    INDEX `LotteryEntry_registrationId_idx`(`registrationId`),
+    INDEX `LotteryEntry_redeemedByAdminId_redeemedAt_idx`(`redeemedByAdminId`, `redeemedAt`),
+    UNIQUE INDEX `LotteryEntry_lotteryId_userId_key`(`lotteryId`, `userId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -2095,13 +2116,18 @@ CREATE TABLE `LotteryEntry` (
 CREATE TABLE `LotteryPrize` (
     `id` VARCHAR(191) NOT NULL,
     `name` VARCHAR(191) NOT NULL,
+    `tierName` VARCHAR(160) NULL,
+    `description` TEXT NULL,
+    `imageUrl` TEXT NULL,
     `type` ENUM('BADGE', 'PHYSICAL', 'COUPON', 'POINTS') NOT NULL,
     `quantity` INTEGER NOT NULL DEFAULT 1,
     `remaining` INTEGER NOT NULL DEFAULT 1,
     `pointsValue` INTEGER NULL,
     `metadata` JSON NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
     `lotteryId` VARCHAR(191) NOT NULL,
 
+    INDEX `LotteryPrize_lotteryId_sortOrder_id_idx`(`lotteryId`, `sortOrder`, `id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3123,6 +3149,21 @@ CREATE TABLE `Profile` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `ProfileRecordPreference` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `section` VARCHAR(32) NOT NULL,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `isVisible` BOOLEAN NOT NULL DEFAULT true,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ProfileRecordPreference_userId_sortOrder_idx`(`userId`, `sortOrder`),
+    UNIQUE INDEX `ProfileRecordPreference_userId_section_key`(`userId`, `section`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `ProfileWallLike` (
     `id` VARCHAR(191) NOT NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -3666,6 +3707,7 @@ CREATE TABLE `UserPrivacySetting` (
     `showActivityHistory` BOOLEAN NOT NULL DEFAULT true,
     `showBadgeHistory` BOOLEAN NOT NULL DEFAULT true,
     `showRatings` BOOLEAN NOT NULL DEFAULT true,
+    `showSalon` BOOLEAN NOT NULL DEFAULT true,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
@@ -4418,6 +4460,9 @@ ALTER TABLE `LoginDevice` ADD CONSTRAINT `LoginDevice_userId_fkey` FOREIGN KEY (
 ALTER TABLE `Lottery` ADD CONSTRAINT `Lottery_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `Lottery` ADD CONSTRAINT `Lottery_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_lotteryId_fkey` FOREIGN KEY (`lotteryId`) REFERENCES `Lottery`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -4425,6 +4470,12 @@ ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_prizeId_fkey` FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_registrationId_fkey` FOREIGN KEY (`registrationId`) REFERENCES `ActivityRegistration`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_redeemedByAdminId_fkey` FOREIGN KEY (`redeemedByAdminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `LotteryPrize` ADD CONSTRAINT `LotteryPrize_lotteryId_fkey` FOREIGN KEY (`lotteryId`) REFERENCES `Lottery`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -4719,6 +4770,9 @@ ALTER TABLE `PostTag` ADD CONSTRAINT `PostTag_tagId_fkey` FOREIGN KEY (`tagId`) 
 
 -- AddForeignKey
 ALTER TABLE `Profile` ADD CONSTRAINT `Profile_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ProfileRecordPreference` ADD CONSTRAINT `ProfileRecordPreference_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `ProfileWallLike` ADD CONSTRAINT `ProfileWallLike_messageId_fkey` FOREIGN KEY (`messageId`) REFERENCES `ProfileWallMessage`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
