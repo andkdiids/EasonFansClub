@@ -39,13 +39,16 @@ test('today page sorts complete history by original year and preserves source or
   assert.match(route, /getTodayEventRecords\(\)/)
 })
 
-test('home check-in statistic restores the original status interaction and refreshes after check-in', () => {
+test('home registration statistic switches between the CTA and accumulated registration history', () => {
   const surface = read('components/HomeLayoutSurface.tsx')
-  assert.match(surface, /homeText\.notCheckedIn/)
   assert.match(surface, /homeText\.goCheckin/)
-  assert.match(surface, /data\.siteStats\?\.todayCheckIns/)
+  assert.match(surface, /homeText\.totalRegistrations/)
+  assert.match(surface, /homeText\.viewRegistrations/)
+  assert.match(surface, /aria-label="已挂号"/)
+  assert.doesNotMatch(surface, /homeText\.(checkedIn|notCheckedIn)/)
+  assert.doesNotMatch(surface, /data\.siteStats\?\.todayCheckIns/)
   assert.match(surface, /window\.addEventListener\('checkin:completed'/)
-  assert.match(surface, />✓<\/i>/)
+  assert.doesNotMatch(surface, />✓<\/i>/)
 })
 
 test('homepage target files contain no literal unicode escape markers', () => {

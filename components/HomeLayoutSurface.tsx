@@ -20,13 +20,11 @@ import { normalizeActionUrl } from '@/lib/url-safety'
 import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
 
 const homeText = {
-  checkedIn: '已签到',
-  notCheckedIn: '未挂号',
   goCheckin: '去挂号',
-  loadingStats: '正在读取签到数据',
-  totalCheckins: '累计签到',
+  loadingStats: '正在读取挂号数据',
+  totalRegistrations: '累计挂号',
   days: '天',
-  viewCheckin: '查看签到记录',
+  viewRegistrations: '查看挂号记录',
   members: 'E院人数',
   todayCheckins: '今日挂号',
   birthdays: '今日生日',
@@ -303,7 +301,8 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   }, [data.todayEvents.length, device, todayPageCount, todayAutoplayReset])
 
   const checkedIn = Boolean(data.stats?.checkIns.length)
-  const checkinStateClass = data.stats ? checkedIn ? 'is-checked' : 'is-not-checked' : 'is-loading'
+  const homeDataLoaded = Boolean(data.siteStats)
+  const checkinStateClass = !homeDataLoaded ? 'is-loading' : checkedIn ? 'is-checked' : 'is-not-checked'
   const todayEvent = data.todayEvents[todayEventIndex] || null
   const desktopTodayEvents = useMemo(() => {
     if (todayPageCount <= 1) return []
@@ -511,16 +510,27 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         {failed ? <p className="community-error">{homeText.loadError}</p> : null}
 
         <div className="home-first-row" aria-label="首页第一行">
-        <section className="community-stats home-checkin-stats home-first-row-data" aria-label="E院数据与签到状态">
+        <section className="community-stats home-checkin-stats home-first-row-data" aria-label="E院数据与挂号状态">
           <div className="stat-members"><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
           <div className={`stat-registration ${checkinStateClass}`}>
-            <Link href="/checkin" className="stat-checkin">
-              <span>{homeText.todayCheckins}</span>
-              <strong>{data.stats ? (checkedIn ? fmt(data.siteStats?.todayCheckIns ?? 0) : homeText.notCheckedIn) : '—'}</strong>
-              <small>{data.stats ? (checkedIn ? <><span className="stat-checkin-mobile-mark" aria-hidden="true">✓</span>{homeText.checkedIn}</> : homeText.goCheckin) : homeText.loadingStats}</small>
-              {checkedIn ? <i aria-hidden="true">✓</i> : null}
-            </Link>
-            <div className="stat-total"><span>{homeText.totalCheckins}</span><strong>{data.stats ? `${fmt(data.stats._count.checkIns)} ${homeText.days}` : '—'}</strong><Link href="/checkin">{homeText.viewCheckin} →</Link></div>
+            {checkedIn ? (
+              <div className="stat-total stat-registration-total" aria-label="已挂号">
+                <span>{homeText.totalRegistrations}</span>
+                <strong>{data.stats ? `${fmt(data.stats._count.checkIns)} ${homeText.days}` : '—'}</strong>
+                <Link href="/checkin">{homeText.viewRegistrations} →</Link>
+              </div>
+            ) : homeDataLoaded ? (
+              <Link href="/checkin" className="stat-checkin stat-registration-cta">
+                <span>{homeText.todayCheckins}</span>
+                <strong>{homeText.goCheckin}</strong>
+              </Link>
+            ) : (
+              <div className="stat-total stat-registration-total">
+                <span>{homeText.todayCheckins}</span>
+                <strong>—</strong>
+                <small>{homeText.loadingStats}</small>
+              </div>
+            )}
           </div>
           <div className="stat-birthdays"><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
           <Link href="/games/daily-prescription" className="stat-prescription">

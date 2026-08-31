@@ -5270,7 +5270,6 @@ height:330px;
 /* 移动端首页：娱乐天空 + EasMusic 今日推荐 并排两列 50%/50% */
 .home-mobile-dual { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .home-mobile-dual > .community-panel { min-width:0; }
-.stat-checkin-mobile-mark { display:none; }
 
 /* Mobile home density adjustments; desktop home rules remain unchanged. */
 @media (max-width:767px) {
@@ -5300,10 +5299,6 @@ height:330px;
   .community-stats.home-checkin-stats>:nth-child(2),
   .community-stats.home-checkin-stats>:nth-child(4) { border-right:0; }
   .community-stats.home-checkin-stats>.stat-total { display:flex; }
-  .community-stats.home-checkin-stats .stat-checkin>i { position:static; display:none; width:auto; height:auto; }
-  .community-stats.home-checkin-stats .stat-checkin-mobile-mark { display:inline; }
-  .community-stats.home-checkin-stats .stat-checkin.is-not-checked>small { display:inline-flex; width:max-content; min-height:30px; align-items:center; margin-top:10px; border-radius:2px; padding:0 10px; color:#fff; background:var(--primary); font-size:11px; }
-  .community-stats.home-checkin-stats .stat-checkin.is-checked>small { margin-top:10px; }
 
   .home-entertainment-content { min-height:0; padding:14px 0 8px; }
   .home-entertainment-mobile-score { display:block; min-width:0; }
@@ -7506,32 +7501,31 @@ body:has(.duel-page) .app-page-content {
   .salon-comment-item { margin-left: calc(var(--salon-comment-depth, 0) * 10px); }
 }
 
-/* Homepage: keep registration and the accumulated check-in history in one
-   readable card while preserving the two-by-two mobile information grid. */
+/* Homepage stats: keep the four data items in an equal two-by-two grid. */
 .community-stats.home-checkin-stats {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 .community-stats.home-checkin-stats > .stat-registration {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
   min-width: 0;
-  min-height: 132px;
-  align-items: stretch;
-  padding: 0;
-}
-.community-stats.home-checkin-stats > .stat-registration > .stat-checkin,
-.community-stats.home-checkin-stats > .stat-registration > .stat-total {
-  min-width: 0;
-  min-height: 100%;
+  min-height: 0;
+  flex-direction: column;
   align-items: flex-start;
   justify-content: center;
   padding: 14px 20px;
 }
+.community-stats.home-checkin-stats > .stat-registration > .stat-checkin,
+.community-stats.home-checkin-stats > .stat-registration > .stat-total {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0;
+}
 .community-stats.home-checkin-stats > .stat-registration > .stat-checkin {
-  position: relative;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   color: var(--foreground);
   text-decoration: none;
 }
@@ -7548,9 +7542,9 @@ body:has(.duel-page) .app-page-content {
   min-width: 0;
   flex-direction: column;
   justify-items: start;
-  margin-top: 16px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
 }
 .home-checkin-stats .stat-total strong { margin-top: 7px; }
 .home-checkin-stats .stat-total a { margin-top: 8px; }
@@ -7592,21 +7586,20 @@ body:has(.duel-page) .app-page-content {
 
 @media (max-width: 767px) {
   .community-stats.home-checkin-stats > .stat-registration {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    min-height: 112px;
-    padding: 0;
+    min-height: 0;
+    padding: 14px 12px;
   }
   .community-stats.home-checkin-stats > .stat-registration > .stat-checkin,
   .community-stats.home-checkin-stats > .stat-registration > .stat-total {
-    min-height: 100%;
-    padding: 14px 12px;
+    min-height: 0;
+    padding: 0;
   }
   .community-stats.home-checkin-stats > .stat-registration > .stat-total {
     margin-top: 0;
     border-top: 0;
-    padding-top: 14px;
+    padding-top: 0;
   }
-  .home-checkin-stats .stat-total { margin-top: 0; padding-top: 14px; }
+  .home-checkin-stats .stat-total { margin-top: 0; padding-top: 0; }
   .home-checkin-stats .stat-total strong { font-size: 18px; }
   .home-checkin-stats .stat-total a { font-size: 9px; }
   .home-activity-grid { grid-template-columns: 1fr; }
@@ -7651,17 +7644,13 @@ body:has(.duel-page) .app-page-content {
 }
 .home-first-row-data {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
   padding: 0;
 }
 .community-stats.home-checkin-stats.home-first-row-data {
-  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
-.home-first-row-data > .stat-members { grid-column: 1 / span 2; grid-row: 1; }
-.home-first-row-data > .stat-registration { grid-column: 3 / span 4; grid-row: 1; }
-.home-first-row-data > .stat-birthdays { grid-column: 1 / span 3; grid-row: 2; }
-.home-first-row-data > .stat-prescription { grid-column: 4 / span 3; grid-row: 2; }
 .home-first-row-data > div,
 .home-first-row-data > a {
   display: flex;
@@ -7681,62 +7670,39 @@ body:has(.duel-page) .app-page-content {
 .home-first-row-data > :nth-child(even) { border-right: 0; }
 .home-first-row-data > :nth-child(n + 3) { border-bottom: 0; }
 .home-first-row-data > .stat-registration {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  align-items: stretch;
-  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px 14px;
 }
 .home-first-row-data > .stat-registration > .stat-checkin,
 .home-first-row-data > .stat-registration > .stat-total {
   min-width: 0;
   min-height: 0;
+  width: 100%;
   align-items: flex-start;
   justify-content: center;
-  padding: 12px 14px;
+  padding: 0;
 }
 .home-first-row-data > .stat-registration > .stat-checkin {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "label icon"
-    "value icon"
-    "status icon";
-  column-gap: 8px;
-  align-items: center;
-  border-right: 1px solid var(--border);
-}
-.home-first-row-data > .stat-registration > .stat-checkin > span {
-  grid-area: label;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 0;
+  color: var(--foreground);
+  text-decoration: none;
 }
 .home-first-row-data > .stat-registration > .stat-checkin > strong {
-  grid-area: value;
   min-width: 0;
   max-width: 100%;
   font-size: clamp(16px, 1.05vw, 22px);
   line-height: 1.1;
   overflow-wrap: anywhere;
 }
-.home-first-row-data > .stat-registration > .stat-checkin > small {
-  grid-area: status;
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-.home-first-row-data .stat-checkin > i {
-  position: static;
-  grid-area: icon;
-  display: grid;
-  flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  margin: 0;
-  place-items: center;
-}
 .home-first-row-data > .stat-registration > .stat-total {
   margin-top: 0;
   border-top: 0;
-  padding-top: 12px;
+  padding-top: 0;
 }
 .home-first-row-data span { font-size: 10px; }
 .home-first-row-data strong {
@@ -7917,35 +7883,26 @@ body:has(.duel-page) .app-page-content {
   }
 }
 
-/* The legacy registration rules are more specific; keep their inner cells compact in the first row. */
+/* Keep the dynamic registration content inside the same equal-size cell. */
 .community-stats.home-checkin-stats.home-first-row-data > .stat-registration {
+  display: flex;
+  min-width: 0;
   min-height: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px 14px;
 }
 .community-stats.home-checkin-stats.home-first-row-data > .stat-registration > .stat-checkin,
 .community-stats.home-checkin-stats.home-first-row-data > .stat-registration > .stat-total {
+  width: 100%;
   min-height: 0;
-  padding: 12px 14px;
+  padding: 0;
 }
 .community-stats.home-checkin-stats.home-first-row-data > .stat-registration > .stat-total {
   margin-top: 0;
   border-top: 0;
-  padding-top: 12px;
-}
-
-@media (min-width: 768px) {
-  .community-stats.home-checkin-stats.home-first-row-data > .stat-registration {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  }
-  .community-stats.home-checkin-stats.home-first-row-data > .stat-registration > .stat-checkin {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "label icon"
-      "value icon"
-      "status icon";
-    column-gap: 8px;
-    align-items: center;
-  }
+  padding-top: 0;
 }
 
 @media (max-width: 767px) {
@@ -7955,21 +7912,12 @@ body:has(.duel-page) .app-page-content {
   .community-stats.home-checkin-stats.home-first-row-data {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
-  .home-first-row-data > .stat-members,
-  .home-first-row-data > .stat-registration,
-  .home-first-row-data > .stat-birthdays,
-  .home-first-row-data > .stat-prescription {
-    grid-column: auto;
-    grid-row: auto;
-  }
   .home-first-row-data > .stat-registration > .stat-checkin {
     display: flex;
     flex-direction: column;
   }
-  .home-first-row-data .stat-checkin > i {
-    display: none;
-    width: auto;
-    height: auto;
+  .community-stats.home-checkin-stats.home-first-row-data > .stat-registration {
+    padding: 11px 12px;
   }
   .home-first-row {
     grid-template-columns: minmax(0, 1fr);
@@ -7991,11 +7939,11 @@ body:has(.duel-page) .app-page-content {
   .home-first-row-data > a { padding: 11px 12px; }
   .home-first-row-data > .stat-registration > .stat-checkin,
   .home-first-row-data > .stat-registration > .stat-total {
-    padding: 11px 12px;
+    padding: 0;
   }
   .community-stats.home-checkin-stats.home-first-row-data > .stat-registration > .stat-checkin,
   .community-stats.home-checkin-stats.home-first-row-data > .stat-registration > .stat-total {
-    padding: 11px 12px;
+    padding: 0;
   }
   .home-first-row-data strong { font-size: 20px; }
   .home-first-row-panel > header { flex-basis: 44px; height: 44px; }

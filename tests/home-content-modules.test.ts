@@ -5,23 +5,26 @@ import { getHomeDailyPrescriptionDisplay } from '../lib/home-daily-prescription'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('homepage groups accumulated check-ins with registration and adds the prescription shortcut', () => {
+test('homepage keeps registration state in one dynamic card and uses a four-cell stats grid', () => {
   const surface = read('components/HomeLayoutSurface.tsx')
   const css = read('app/globals.css')
 
   assert.match(surface, /community-stats home-checkin-stats/)
   assert.match(surface, /className=\{`stat-registration \$\{checkinStateClass\}`\}/)
-  assert.match(surface, /<div className="stat-total">[\s\S]*homeText\.totalCheckins[\s\S]*homeText\.viewCheckin/)
+  assert.match(surface, /aria-label="E院数据与挂号状态"/)
+  assert.match(surface, /homeText\.totalRegistrations[\s\S]*homeText\.viewRegistrations/)
+  assert.match(surface, /className="stat-checkin stat-registration-cta"[\s\S]*homeText\.todayCheckins[\s\S]*homeText\.goCheckin/)
+  assert.doesNotMatch(surface, /data\.siteStats\?\.todayCheckIns/)
+  assert.doesNotMatch(surface, /homeText\.(checkedIn|notCheckedIn|totalCheckins|viewCheckin)/)
   assert.match(surface, /<div className="stat-birthdays">/)
   assert.match(surface, /href="\/games\/daily-prescription" className="stat-prescription"/)
   assert.match(surface, /dailyPrescriptionReward/)
   assert.match(surface, /homeText\.prescriptionFee/)
   assert.doesNotMatch(surface, /<strong>今日处方<\/strong>/)
-  assert.match(css, /\.community-stats\.home-checkin-stats \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
-  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*display: grid;[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);[\s\S]*min-height: 132px;/)
-  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration > \.stat-checkin \{[\s\S]*border-right: 1px solid var\(--border\);/)
-  assert.match(css, /\.community-stats\.home-checkin-stats > \.stat-registration > \.stat-total \{[\s\S]*margin-top: 0;[\s\S]*border-top: 0;/)
-  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.community-stats\.home-checkin-stats > \.stat-registration \{[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);[\s\S]*min-height: 112px;/)
+  assert.match(css, /\.home-first-row-data \{\s*display: grid;\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);\s*grid-template-rows: repeat\(2, minmax\(0, 1fr\)\);/)
+  assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
+  assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data > \.stat-registration \{[\s\S]*display: flex;[\s\S]*padding: 12px 14px;/)
+  assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data > \.stat-registration > \.stat-total \{[\s\S]*margin-top: 0;[\s\S]*border-top: 0;/)
 })
 
 test('homepage displays the stored daily prescription reward without treating an unclaimed state as zero', () => {
