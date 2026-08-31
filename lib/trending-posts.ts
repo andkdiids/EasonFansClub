@@ -6,6 +6,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 import { summarizePlainText } from '@/lib/share-metadata'
+import { POST_HOT_SCORE_SQL } from '@/lib/post-hot-score'
 
 export const TRENDING_PAGE_SIZE = 15
 export type TrendingRange = 7 | 30
@@ -52,7 +53,8 @@ export const getTrendingPosts = unstable_cache(
     const take = TRENDING_PAGE_SIZE + 1
 
     // Bounded, indexed time-window query. The score intentionally gives replies
-    // and favorites more weight than passive views.
+    // and favorites more weight than passive views. Shared formula:
+    // viewCount * 0.08 + likeCount * 3 + replyCount * 5 + favoriteCount * 4.
     const rows = await prisma.$queryRaw<TrendingPostRow[]>(Prisma.sql`
       SELECT
         p.id,
@@ -65,7 +67,7 @@ export const getTrendingPosts = unstable_cache(
         p.favoriteCount,
         p.createdAt,
         p.updatedAt,
-        (p.viewCount * 0.08 + p.likeCount * 3 + p.replyCount * 5 + p.favoriteCount * 4) AS hotScore,
+        ${POST_HOT_SCORE_SQL} AS hotScore,
         u.id AS authorId,
         u.uid AS authorUid,
         u.nicknameModerationStatus,

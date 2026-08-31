@@ -88,6 +88,29 @@ test('homepage anywhere-door module uses only the latest synced mreasonchan post
   assert.doesNotMatch(panel, /<Image|coverUrl|imageUrl|avatarUrl|MediaCarousel/)
 })
 
+test('homepage Salon preview reuses approved public posts with a bounded thumbnail projection', () => {
+  const homeData = read('lib/home-data.ts')
+  const api = read('app/api/home/route.ts')
+  const surface = read('components/HomeLayoutSurface.tsx')
+  const panelStart = surface.indexOf('const renderSalonPanel = () =>')
+  const panelEnd = surface.indexOf('\n  return (\n    <div className="community-home"', panelStart)
+  assert.ok(panelStart >= 0)
+  assert.ok(panelEnd > panelStart)
+  const panel = surface.slice(panelStart, panelEnd)
+
+  assert.match(homeData, /salonPublicBaseWhere/)
+  assert.match(homeData, /prisma\.salonPost\.findMany\(/)
+  assert.match(homeData, /status: 'APPROVED'/)
+  assert.match(homeData, /take: 3/)
+  assert.match(homeData, /select: \{ thumbnailUrl: true \}/)
+  assert.match(homeData, /publicImageUrl\(post\.media\[0\]\?\.thumbnailUrl\)/)
+  assert.match(api, /getHomeSalonPosts\(\)/)
+  assert.match(panel, /data\.salonPosts\.length/)
+  assert.match(panel, /href=\{`\/salon\/\$\{post\.id\}`\}/)
+  assert.match(panel, /home-salon-content/)
+  assert.match(panel, /homeText\.salonEmpty/)
+})
+
 test('homepage loads activities and latest anywhere-door content in the main parallel payload', () => {
   const api = read('app/api/home/route.ts')
   const callStart = api.indexOf('const [activities, albums')

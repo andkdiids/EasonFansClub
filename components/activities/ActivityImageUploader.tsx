@@ -23,11 +23,15 @@ function fileError(file: File) {
   return ''
 }
 
-export function ActivityImageUploader({ label, initialUrl, disabled = false, status = 'idle', onSelectionChange }: Readonly<{
+export function ActivityImageUploader({ label, initialUrl, disabled = false, status = 'idle', resetSignal = 0, replaceLabel = '重新选择', removeLabel = '移除', errorMessage = '', onSelectionChange }: Readonly<{
   label: string
   initialUrl?: string | null
   disabled?: boolean
   status?: ActivityImageUploadStatus
+  resetSignal?: number
+  replaceLabel?: string
+  removeLabel?: string
+  errorMessage?: string
   onSelectionChange: (selection: ActivityImageSelection) => void
 }>) {
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -41,7 +45,7 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
     objectUrlRef.current = null
     setPreviewUrl(originalUrl ? publicImageVariantUrl(originalUrl, 'card') || originalUrl : null)
     setSelectionError('')
-  }, [originalUrl])
+  }, [originalUrl, resetSignal])
 
   useEffect(() => () => { if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current) }, [])
 
@@ -66,14 +70,14 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
     onSelectionChange({ file: null, removed: true })
   }
 
-  const statusLabel = status === 'uploading' ? '上传中…' : status === 'success' ? '上传成功' : status === 'error' ? '上传失败' : ''
+  const statusLabel = status === 'uploading' ? '上传中...' : status === 'success' ? '上传成功' : status === 'error' ? '上传失败' : ''
   return (
     <div className="space-y-2 rounded-xl border border-dashed border-sky-200 p-3 dark:border-slate-700">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-black text-slate-700 dark:text-slate-200">{label}</span>
-        <button type="button" onClick={() => inputRef.current?.click()} disabled={disabled} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">{previewUrl ? '重新选择' : '上传图片'}</button>
+        <button type="button" onClick={() => inputRef.current?.click()} disabled={disabled} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">{previewUrl ? replaceLabel : '上传图片'}</button>
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={selectFile} disabled={disabled} className="sr-only" />
-        {previewUrl ? <button type="button" onClick={remove} disabled={disabled} className="rounded-full bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">移除</button> : null}
+        {previewUrl ? <button type="button" onClick={remove} disabled={disabled} className="rounded-full bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">{removeLabel}</button> : null}
         {statusLabel ? <span role="status" className={`text-xs font-black ${status === 'error' ? 'text-red-600' : status === 'success' ? 'text-emerald-600' : 'text-sky-700'}`}>{statusLabel}</span> : null}
       </div>
       {previewUrl ? (
@@ -81,6 +85,7 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
         <img src={previewUrl} alt={`${label}预览`} className="max-h-44 w-full rounded-lg object-cover" />
       ) : <p className="text-xs font-bold text-slate-400">尚未上传。支持 JPG、PNG、WebP，单张不超过 5MB。</p>}
       {selectionError ? <p role="alert" className="text-xs font-bold text-red-600">{selectionError}</p> : null}
+      {errorMessage ? <p role="alert" className="text-xs font-bold text-red-600">{errorMessage}</p> : null}
     </div>
   )
 }

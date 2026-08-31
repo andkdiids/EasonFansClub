@@ -9,6 +9,7 @@ import {
   secureShuffle,
   validateLotterySchedule,
 } from '@/lib/activity-lottery'
+import { ACTIVITY_LOTTERY_TIER_NAMES, MAX_ACTIVITY_LOTTERY_PRIZES, activityLotteryTierName } from '@/lib/activity-lottery-levels'
 
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
@@ -20,23 +21,33 @@ test('抽奖开奖时间必须不早于活动报名结束时间，并且没有�
   assert.match(validateLotterySchedule(null, new Date('2026-09-13T12:00:00.000Z')) || '', /先设置活动报名结束时间/)
 })
 
-test('抽奖输入支持多个奖项、图片、说明和数量校验', () => {
+test('抽奖输入按数组顺序自动生成固定奖项等级，并支持图片、说明和数量校验', () => {
   const normalized = normalizeActivityLotteryInput({
     title: '滨海歌友之夜抽奖',
     description: '现场抽奖说明',
     drawAt: '2026-09-13T20:00',
     prizes: [
-      { tierName: '一等奖', name: '周边礼包', imageUrl: 'https://media.ecfc.fans/prize.png', description: '限定礼盒', quantity: 2 },
-      { tierName: '二等奖', name: '徽章', quantity: 8 },
+      { tierName: '重复一等奖', name: '周边礼包', imageUrl: 'https://media.ecfc.fans/prize.png', description: '限定礼盒', quantity: 2 },
+      { tierName: '一等奖', name: '徽章', quantity: 8 },
     ],
   })
   assert.equal(normalized.valid, true)
   if (!normalized.valid) return
   assert.equal(normalized.value.prizes.length, 2)
+  assert.deepEqual(normalized.value.prizes.map((prize) => prize.tierName), ['一等奖', '二等奖'])
   assert.equal(normalized.value.prizes[0]?.quantity, 2)
   assert.equal(normalized.value.prizes[0]?.imageUrl, 'https://media.ecfc.fans/prize.png')
   assert.equal(normalized.value.prizes[0]?.description, '限定礼盒')
   assert.equal(normalizeActivityLotteryInput({ title: '无效', drawAt: '2026-09-13T20:00', prizes: [{ tierName: '一等奖', name: '奖品', quantity: 0 }] }).valid, false)
+  assert.equal(normalizeActivityLotteryInput({ title: '无效图片', drawAt: '2026-09-13T20:00', prizes: [{ name: '奖品', imageUrl: 'not-a-url', quantity: 1 }] }).valid, false)
+  assert.equal(normalizeActivityLotteryInput({ title: '超出上限', drawAt: '2026-09-13T20:00', prizes: Array.from({ length: MAX_ACTIVITY_LOTTERY_PRIZES + 1 }, (_, index) => ({ name: `奖品${index + 1}`, quantity: 1 })) }).valid, false)
+})
+
+test('活动抽奖等级只包含四档并且按索引连续', () => {
+  assert.deepEqual(ACTIVITY_LOTTERY_TIER_NAMES, ['一等奖', '二等奖', '三等奖', '参与奖'])
+  assert.equal(MAX_ACTIVITY_LOTTERY_PRIZES, 4)
+  assert.deepEqual(ACTIVITY_LOTTERY_TIER_NAMES.map((_, index) => activityLotteryTierName(index)), ['一等奖', '二等奖', '三等奖', '参与奖'])
+  assert.equal(activityLotteryTierName(4), '')
 })
 
 test('中奖率按当前有效报名计算并且最高为 100%', () => {
@@ -113,11 +124,21 @@ test('统一核销权益按当前活动隔离，并且中奖不生成独立二�
   assert.doesNotMatch(qr, /lottery|winner/i)
 })
 
-test('管理员页面支持多个抽奖的奖项图片、说明和排序编辑', () => {
+test('管理员页面使用固定等级和活动图片上传组件编辑奖项', () => {
   const manager = read('components/activities/ActivityLotteryManager.tsx')
+  const imageUploader = read('components/activities/ActivityImageUploader.tsx')
   assert.match(manager, /imageUrl: string/)
   assert.match(manager, /description: string/)
-  assert.match(manager, /奖品图片 URL/)
+  assert.match(manager, /ActivityImageUploader/)
+  assert.match(manager, /uploadActivityImage/)
+  assert.match(manager, /activityLotteryTierName\(index\)/)
+  assert.match(manager, /最多可设置 \$\{MAX_ACTIVITY_LOTTERY_PRIZES\} 个奖项/)
+  assert.match(manager, /更换图片/)
+  assert.match(manager, /删除图片/)
+  assert.doesNotMatch(manager, /奖品图片 URL/)
+  assert.doesNotMatch(manager, /updatePrize\(index, 'tierName'/)
+  assert.match(imageUploader, /resetSignal/)
+  assert.match(imageUploader, /errorMessage/)
   assert.match(manager, /↑/)
   assert.match(manager, /↓/)
   assert.match(manager, /prize\.imageUrl \|\| null/)

@@ -104,6 +104,24 @@ test('通知保留具体投稿 target，并能通过现有通知跳转解析器�
   assert.match(adminManager, /salon-post-\$\{post\.id\}/)
 })
 
+test('通知深链不会用目标投稿替换完整待审核列表，首次进入与 Tab 切换共用分页加载', () => {
+  const initialLoad = adminManager.indexOf("void load('PENDING', 1)")
+  assert.ok(initialLoad >= 0)
+  assert.match(adminManager, /void load\('PENDING', 1\)[\s\S]*\}, \[initialPostId, load\]\)/)
+  assert.match(adminManager, /const \[targetStatus, setTargetStatus\]/)
+  assert.match(adminManager, /const requestId = listRequestRef\.current \+ 1/)
+  assert.match(adminManager, /setTargetStatus\('MISSING'\)/)
+  assert.match(adminManager, /当前仍显示完整待审核列表/)
+
+  const targetStart = adminManager.indexOf('fetch(`/api/admin/salon?postId=')
+  const targetEnd = adminManager.indexOf('  useEffect(() => {', targetStart + 1)
+  assert.ok(targetStart >= 0)
+  assert.ok(targetEnd > targetStart)
+  const targetLookup = adminManager.slice(targetStart, targetEnd)
+  assert.doesNotMatch(targetLookup, /setPosts\(|setPage\(|setHasMore\(|setStatus\(/)
+  assert.match(targetLookup, /setTargetStatus\(/)
+})
+
 test('同一投稿按 recipientId + business key 去重，客户端重试不生成重复审核事件', () => {
   assert.match(submitRoute, /submissionKey/)
   assert.match(submitRoute, /error\.code === 'P2002'/)

@@ -16,6 +16,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useSyncExternalStore,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
@@ -53,6 +54,17 @@ type RichTextEditorProps = {
 }
 
 type HeadingLevel = 1 | 2 | 3
+
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    italic: {
+      toggleItalic: () => ReturnType
+    }
+    strike: {
+      toggleStrike: () => ReturnType
+    }
+  }
+}
 
 const colorLabels: Record<RichTextColorToken, string> = {
   default: '默认',
@@ -96,10 +108,65 @@ const menuItemClass = (active = false) => [
   active ? 'is-active' : '',
 ].filter(Boolean).join(' ')
 
+type InlineMarkToolbarState = Readonly<{
+  bold: boolean
+  italic: boolean
+  strike: boolean
+}>
+
+const emptyInlineMarkToolbarState: InlineMarkToolbarState = {
+  bold: false,
+  italic: false,
+  strike: false,
+}
+
+const inlineMarkEditorEvents = ['selectionUpdate', 'transaction', 'update', 'focus', 'blur'] as const
+
+function useInlineMarkToolbarState(editor: Editor | null): InlineMarkToolbarState {
+  const snapshotRef = useRef<{
+    editor: Editor | null
+    key: string
+    value: InlineMarkToolbarState
+  }>({
+    editor: null,
+    key: 'empty',
+    value: emptyInlineMarkToolbarState,
+  })
+
+  const getSnapshot = useCallback((): InlineMarkToolbarState => {
+    if (!editor) return emptyInlineMarkToolbarState
+
+    const nextValue: InlineMarkToolbarState = {
+      bold: editor.isActive('bold'),
+      italic: editor.isActive('italic'),
+      strike: editor.isActive('strike'),
+    }
+    const nextKey = `${Number(nextValue.bold)}${Number(nextValue.italic)}${Number(nextValue.strike)}`
+    const previous = snapshotRef.current
+    if (previous.editor === editor && previous.key === nextKey) return previous.value
+
+    snapshotRef.current = { editor, key: nextKey, value: nextValue }
+    return nextValue
+  }, [editor])
+
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    if (!editor) return () => {}
+
+    const listener = () => onStoreChange()
+    inlineMarkEditorEvents.forEach((eventName) => editor.on(eventName, listener))
+    return () => {
+      inlineMarkEditorEvents.forEach((eventName) => editor.off(eventName, listener))
+    }
+  }, [editor])
+
+  return useSyncExternalStore(subscribe, getSnapshot, () => emptyInlineMarkToolbarState)
+}
+
 function RichSimpleMark({
   name,
   tag,
-}: Readonly<{ name: string; tag: string }>) {
+  commandName,
+}: Readonly<{ name: string; tag: string; commandName?: 'italic' | 'strike' }>) {
   return Mark.create({
     name,
     inclusive: true,
@@ -108,6 +175,19 @@ function RichSimpleMark({
     },
     renderHTML({ HTMLAttributes }) {
       return [tag, HTMLAttributes, 0]
+    },
+    addCommands() {
+      if (commandName === 'italic') {
+        return {
+          toggleItalic: () => ({ commands }: { commands: { toggleMark: (mark: string) => boolean } }) => commands.toggleMark('italic'),
+        }
+      }
+      if (commandName === 'strike') {
+        return {
+          toggleStrike: () => ({ commands }: { commands: { toggleMark: (mark: string) => boolean } }) => commands.toggleMark('strike'),
+        }
+      }
+      return {}
     },
   })
 }
@@ -360,8 +440,8 @@ const richTextExtensions = [
   Text,
   HardBreak,
   Bold,
-  RichSimpleMark({ name: 'italic', tag: 'em' }),
-  RichSimpleMark({ name: 'strike', tag: 's' }),
+  RichSimpleMark({ name: 'italic', tag: 'em', commandName: 'italic' }),
+  RichSimpleMark({ name: 'strike', tag: 's', commandName: 'strike' }),
   RichSimpleMark({ name: 'code', tag: 'code' }),
   RichLinkMark(),
   richHeading,
@@ -504,6 +584,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     },
     onSelectionUpdate: ({ editor: selectedEditor }) => syncEditorSelection(selectedEditor),
   })
+  const inlineMarkState = useInlineMarkToolbarState(editor)
 
   const closeHeadingMenu = useCallback(() => {
     headingMenuOpenRef.current = false
@@ -553,6 +634,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   }
 
   const activeEditor = editor
+  const { bold: boldActive, italic: italicActive, strike: strikeActive } = inlineMarkState
   const activeSize = activeEditor.getAttributes('fontSize').token
   const activeColor = activeEditor.getAttributes('textColor').token
   const currentSize = isRichTextFontSizeToken(activeSize) ? activeSize : null
@@ -578,6 +660,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     const maxPosition = activeEditor.state.doc.content.size
     const from = Math.max(1, Math.min(selection.from, maxPosition))
     const to = Math.max(from, Math.min(selection.to, maxPosition))
+    const currentSelection = activeEditor.state.selection
+    if (currentSelection.from === from && currentSelection.to === to) return
     activeEditor.commands.setTextSelection({ from, to })
   }
 
@@ -638,16 +722,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   function toggleInlineMark(mark: 'bold' | 'italic' | 'strike') {
     closeHeadingMenu()
-    const command = startCommand()
+    restoreSavedSelection()
     if (mark === 'bold') {
-      command.toggleBold().run()
+      activeEditor.chain().focus(null, { scrollIntoView: false }).toggleBold().run()
       return
     }
     if (mark === 'italic') {
-      command.toggleMark('italic').run()
+      activeEditor.chain().focus(null, { scrollIntoView: false }).toggleItalic().run()
       return
     }
-    command.toggleMark('strike').run()
+    activeEditor.chain().focus(null, { scrollIntoView: false }).toggleStrike().run()
   }
 
   function applyLink() {
@@ -735,9 +819,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
         <button
           type="button"
-          className={toolbarButtonClass(activeEditor.isActive('bold'))}
+          className={toolbarButtonClass(boldActive)}
           aria-label="加粗"
-          aria-pressed={activeEditor.isActive('bold')}
+          aria-pressed={boldActive}
+          data-active={boldActive ? 'true' : 'false'}
+          onPointerDown={rememberToolbarPointerDown}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => toggleInlineMark('bold')}
         >
@@ -745,9 +831,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         </button>
         <button
           type="button"
-          className={toolbarButtonClass(activeEditor.isActive('italic'))}
+          className={toolbarButtonClass(italicActive)}
           aria-label="斜体"
-          aria-pressed={activeEditor.isActive('italic')}
+          aria-pressed={italicActive}
+          data-active={italicActive ? 'true' : 'false'}
+          onPointerDown={rememberToolbarPointerDown}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => toggleInlineMark('italic')}
         >
@@ -755,9 +843,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         </button>
         <button
           type="button"
-          className={toolbarButtonClass(activeEditor.isActive('strike'))}
+          className={toolbarButtonClass(strikeActive)}
           aria-label="删除线"
-          aria-pressed={activeEditor.isActive('strike')}
+          data-active={strikeActive ? 'true' : 'false'}
+          aria-pressed={strikeActive}
+          onPointerDown={rememberToolbarPointerDown}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={() => toggleInlineMark('strike')}
         >

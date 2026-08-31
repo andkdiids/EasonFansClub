@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ImageViewer } from '@/components/ImageViewer'
 import {
   formatSalonSession,
@@ -17,6 +17,7 @@ import {
 
 type ReviewTarget = { post: SalonPostView; action: 'approve' | 'reject' }
 type EditTarget = { post: SalonPostView; category: SalonCategoryValue; tourId: string; sessionId: string; title: string; content: string }
+type TargetLookupStatus = SalonPostStatusValue | 'MISSING' | 'UNAVAILABLE'
 
 export function AdminSalonManager({ initialPosts, initialHasMore, initialPostId, options }: Readonly<{ initialPosts: SalonPostView[]; initialHasMore: boolean; initialPostId?: string | null; options: SalonOptions }>) {
   const [posts, setPosts] = useState(initialPosts)
@@ -29,44 +30,63 @@ export function AdminSalonManager({ initialPosts, initialHasMore, initialPostId,
   const [rejectReason, setRejectReason] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [targetStatus, setTargetStatus] = useState<TargetLookupStatus | null>(null)
+  const listRequestRef = useRef(0)
 
-  useEffect(() => {
-    if (!initialPostId) return
-    let cancelled = false
-    setLoading(true)
-    setError('')
-    fetch(`/api/admin/salon?postId=${encodeURIComponent(initialPostId)}`, { cache: 'no-store' })
-      .then(async (response) => {
-        const data = await response.json().catch(() => null) as { posts?: SalonPostView[]; status?: string; message?: string } | null
-        if (!response.ok) throw new Error(data?.message || '审核作品加载失败')
-        if (cancelled) return
-        const nextStatus = SALON_POST_STATUSES.includes(data?.status as SalonPostStatusValue) ? data?.status as SalonPostStatusValue : 'PENDING'
-        setStatus(nextStatus)
-        setPage(1)
-        setHasMore(false)
-        setPosts(data?.posts || [])
-        window.setTimeout(() => {
-          if (!cancelled) document.getElementById(`salon-post-${initialPostId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        }, 0)
-      })
-      .catch((caught) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : '审核作品加载失败')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [initialPostId])
-
-  async function load(nextStatus: SalonPostStatusValue, nextPage = 1) {
+  const load = useCallback(async (nextStatus: SalonPostStatusValue, nextPage = 1) => {
+    const requestId = listRequestRef.current + 1
+    listRequestRef.current = requestId
     setLoading(true); setError('')
     try {
       const response = await fetch(`/api/admin/salon?status=${nextStatus}&page=${nextPage}`, { cache: 'no-store' })
       const data = await response.json().catch(() => null) as { posts?: SalonPostView[]; hasMore?: boolean; page?: number; message?: string } | null
       if (!response.ok) throw new Error(data?.message || '审核列表加载失败')
+      if (requestId !== listRequestRef.current) return
       setStatus(nextStatus); setPage(data?.page || nextPage); setPosts(data?.posts || []); setHasMore(data?.hasMore === true)
-    } catch (caught) { setError(caught instanceof Error ? caught.message : '审核列表加载失败') } finally { setLoading(false) }
-  }
+    } catch (caught) {
+      if (requestId === listRequestRef.current) setError(caught instanceof Error ? caught.message : '审核列表加载失败')
+    } finally {
+      if (requestId === listRequestRef.current) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    // The server sends the first PENDING page, but revalidate it on mount so
+    // direct navigation and notification deep links share the same loader.
+    void load('PENDING', 1)
+  }, [initialPostId, load])
+
+  useEffect(() => {
+    setTargetStatus(null)
+    if (!initialPostId) return
+    let cancelled = false
+    fetch(`/api/admin/salon?postId=${encodeURIComponent(initialPostId)}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null) as { status?: string } | null
+        if (cancelled) return
+        if (response.status === 404) {
+          setTargetStatus('MISSING')
+          return
+        }
+        if (!response.ok) {
+          setTargetStatus('UNAVAILABLE')
+          return
+        }
+        setTargetStatus(SALON_POST_STATUSES.includes(data?.status as SalonPostStatusValue) ? data?.status as SalonPostStatusValue : 'PENDING')
+      })
+      .catch(() => {
+        if (!cancelled) setTargetStatus('UNAVAILABLE')
+      })
+    return () => { cancelled = true }
+  }, [initialPostId])
+
+  useEffect(() => {
+    if (!initialPostId || status !== 'PENDING' || (targetStatus && targetStatus !== 'PENDING')) return
+    const timer = window.setTimeout(() => {
+      document.getElementById(`salon-post-${initialPostId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [initialPostId, posts, status, targetStatus])
 
   async function review(target: ReviewTarget, reason: string | null) {
     setLoading(true); setError('')
@@ -105,7 +125,15 @@ export function AdminSalonManager({ initialPosts, initialHasMore, initialPostId,
     setEditing({ post, category: post.category, tourId: post.concert?.tour.id || '', sessionId: post.concert?.id || '', title: post.title || '', content: post.content || '' })
   }
 
-  return <section className="admin-salon-manager" aria-busy={loading}><div className="admin-salon-tabs" role="tablist" aria-label="沙龙审核状态">{SALON_POST_STATUSES.map((item) => <button key={item} type="button" role="tab" aria-selected={status === item} onClick={() => void load(item, 1)} disabled={loading}>{SALON_STATUS_LABELS[item]}</button>)}</div>{message ? <p className="salon-form-success" role="status">{message}</p> : null}{error ? <p className="salon-form-error" role="alert">{error}</p> : null}<div className="admin-salon-list">{posts.map((post) => <AdminSalonRow key={post.id} post={post} focused={post.id === initialPostId} onApprove={() => { setRejectReason(''); setReviewing({ post, action: 'approve' }) }} onReject={() => { setRejectReason(post.rejectReason || ''); setReviewing({ post, action: 'reject' }) }} onEdit={() => openEdit(post)} onDelete={() => void remove(post)} />)}{!posts.length ? <div className="salon-empty"><strong>暂无{SALON_STATUS_LABELS[status]}作品</strong></div> : null}</div><div className="admin-salon-pagination"><button type="button" disabled={loading || page <= 1} onClick={() => void load(status, page - 1)}>上一页</button><span>第 {page} 页</span><button type="button" disabled={loading || !hasMore} onClick={() => void load(status, page + 1)}>下一页</button></div>
+  const targetNotice = targetStatus === 'MISSING'
+    ? '通知对应作品不存在或已删除，当前仍显示完整待审核列表。'
+    : targetStatus === 'UNAVAILABLE'
+      ? '通知对应作品暂时无法定位，当前仍显示完整待审核列表。'
+      : targetStatus && targetStatus !== 'PENDING'
+        ? `通知对应作品已${SALON_STATUS_LABELS[targetStatus]}，当前仍显示完整待审核列表。`
+        : ''
+
+  return <section className="admin-salon-manager" aria-busy={loading}><div className="admin-salon-tabs" role="tablist" aria-label="沙龙审核状态">{SALON_POST_STATUSES.map((item) => <button key={item} type="button" role="tab" aria-selected={status === item} onClick={() => void load(item, 1)} disabled={loading}>{SALON_STATUS_LABELS[item]}</button>)}</div>{message ? <p className="salon-form-success" role="status">{message}</p> : null}{error ? <p className="salon-form-error" role="alert">{error}</p> : null}{targetNotice ? <p className="salon-form-success" role="status">{targetNotice}</p> : null}<div className="admin-salon-list">{posts.map((post) => <AdminSalonRow key={post.id} post={post} focused={post.id === initialPostId} onApprove={() => { setRejectReason(''); setReviewing({ post, action: 'approve' }) }} onReject={() => { setRejectReason(post.rejectReason || ''); setReviewing({ post, action: 'reject' }) }} onEdit={() => openEdit(post)} onDelete={() => void remove(post)} />)}{!posts.length ? <div className="salon-empty"><strong>暂无{SALON_STATUS_LABELS[status]}作品</strong></div> : null}</div><div className="admin-salon-pagination"><button type="button" disabled={loading || page <= 1} onClick={() => void load(status, page - 1)}>上一页</button><span>第 {page} 页</span><button type="button" disabled={loading || !hasMore} onClick={() => void load(status, page + 1)}>下一页</button></div>
     {reviewing ? <div className="salon-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewing(null) }}><section className="salon-modal" role="dialog" aria-modal="true" aria-labelledby="salon-review-title"><h2 id="salon-review-title">{reviewing.action === 'approve' ? '通过这篇作品？' : '拒绝这篇作品？'}</h2><p>{reviewing.post.title || '无标题作品'}</p>{reviewing.action === 'reject' ? <label>拒绝原因 <textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} rows={5} maxLength={2000} placeholder="用户会在我的投稿和审核通知中看到。" /></label> : null}<div><button type="button" onClick={() => setReviewing(null)}>取消</button><button type="button" className={reviewing.action === 'approve' ? 'is-approve' : 'is-danger'} onClick={() => { if (reviewing.action === 'reject' && !rejectReason.trim()) { setError('拒绝时必须填写原因'); return } void review(reviewing, reviewing.action === 'reject' ? rejectReason.trim() : null) }}>{reviewing.action === 'approve' ? '确认通过' : '确认拒绝'}</button></div></section></div> : null}
     {editing ? <EditSalonModal editing={editing} options={options} onChange={setEditing} onCancel={() => setEditing(null)} onSave={() => void saveEdit()} /> : null}
   </section>

@@ -8,11 +8,12 @@ import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { summarizePlainText } from '@/lib/share-metadata'
+import { findGlobalSearchUsers, parseGlobalSearchPage, searchPublicPosts } from '@/lib/global-search'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const keyword = sanitizeText(searchParams.get('q'), 60)
-  const numericUid = /^\d+$/.test(keyword) ? Number(keyword) : null
+  const page = parseGlobalSearchPage(searchParams.get('page'))
   const user = await getCurrentUser()
 
   const limited = await enforceApiRateLimit(request, user?.id, {
@@ -60,63 +61,8 @@ export async function GET(request: Request) {
     || keyword.includes(DAILY_CHAT_LEGACY_NAME)
     || DAILY_CHAT_LEGACY_NAME.includes(keyword)
 
-  const [users, posts, boards, tags, albums, songs] = await Promise.all([
-    prisma.user.findMany({
-      where: {
-        uid: { gt: 0 },
-        isDeleted: false,
-        status: 'ACTIVE',
-        Profile: { isNot: null },
-        OR: [
-          ...(Number.isSafeInteger(numericUid) && Number(numericUid) > 0 ? [{ uid: Number(numericUid) }] : []),
-          { nickname: { contains: keyword } },
-          { Profile: { displayName: { contains: keyword } } },
-        ],
-      },
-      select: {
-        id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true,
-        Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
-        _count: { select: { Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } } } } },
-        Post: { where: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } }, orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, title: true, moderationStatus: true, createdAt: true } },
-      },
-      take: 10,
-    }),
-    prisma.post.findMany({
-      where: {
-        isDeleted: false,
-        status: 'PUBLISHED',
-        moderationStatus: { in: ['APPROVED', 'VIOLATION'] },
-        OR: [
-          { title: { contains: keyword } },
-          { content: { contains: keyword } },
-        ],
-      },
-      select: {
-        id: true,
-        title: true,
-        content: true,
-        ipRegion: true,
-        viewCount: true,
-        likeCount: true,
-        replyCount: true,
-        isPinned: true,
-        isFeatured: true,
-        createdAt: true,
-        updatedAt: true,
-        contentType: true,
-        favoriteCount: true,
-        isLocked: true,
-        isRecommended: true,
-        publishedAt: true,
-        shareCount: true,
-        moderationStatus: true,
-        summary: true,
-        User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
-        Board: { select: { name: true, slug: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-    }),
+  const [users, boards, tags, albums, songs] = await Promise.all([
+    findGlobalSearchUsers(keyword),
     prisma.board.findMany({
       where: {
         isActive: true,
@@ -179,13 +125,20 @@ export async function GET(request: Request) {
     }),
   ])
 
+  // The shared user resolver keeps the existing public search contract:
+  // /^\d+$/.test(keyword), exact `{ uid: Number(numericUid) }`,
+  // `{ nickname: { contains: keyword } }`, and `status: 'ACTIVE'`.
+  // A single bounded post query then merges direct keyword hits with posts by
+  // all matched users. The database applies the shared hot score before LIMIT.
+  const { posts, pagination } = await searchPublicPosts(keyword, users.map((item) => item.id), page)
+
   const equippedBadgeMap = await getEquippedBadgesForUsers([
     ...users.map((item) => item.id),
     ...posts.map((item) => item.User.id),
   ])
 
   return NextResponse.json({
-    users: users.map(({ Profile, Post, _count, ...item }) => ({
+    users: users.map(({ Profile, _count, ...item }) => ({
       uid: item.uid,
       nickname: getPublicUserDisplayName({ ...item, Profile }),
       equippedBadge: equippedBadgeMap.get(item.id) || null,
@@ -195,7 +148,9 @@ export async function GET(request: Request) {
         avatarUrl: toPublicMediaUrl(Profile.avatarUrl),
         bio: publicModerationText(Profile.bio, Profile.bioModerationStatus),
       } : Profile,
-      posts: Post.map((post) => ({ ...post, title: publicModerationText(post.title, post.moderationStatus) })),
+      posts: posts
+        .filter((post) => post.User.id === item.id)
+        .map(({ id, title, moderationStatus, createdAt }) => ({ id, title: publicModerationText(title, moderationStatus), moderationStatus, createdAt })),
       _count: { posts: _count.Post },
     })),
     posts: posts.map(({ User, Board, ...post }) => ({
@@ -217,6 +172,7 @@ export async function GET(request: Request) {
       publishedAt: post.publishedAt,
       shareCount: post.shareCount,
       summary: summarizePlainText(post.summary || post.content),
+      hotScore: post.hotScore,
       author: {
         uid: User.uid,
         nickname: getPublicUserDisplayName(User),
@@ -242,5 +198,6 @@ export async function GET(request: Request) {
         previewUrl: undefined,
       }
     }),
+    pagination,
   }, { headers: user ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }

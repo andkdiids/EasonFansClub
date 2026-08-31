@@ -2,14 +2,16 @@ import { randomInt } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { parseActivityDateInput } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
+import { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/activity-lottery-levels'
+import { storedActivityImageUrl } from '@/lib/activity-image-url'
 import { createNotificationWithDb } from '@/lib/notification-write'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 
 export const ACTIVITY_LOTTERY_ALGORITHM_VERSION = 'SECURE_SHUFFLE_V1'
-export const MAX_ACTIVITY_LOTTERY_PRIZES = 50
 export const MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY = 100_000
+export { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/activity-lottery-levels'
 
 export type ActivityLotteryErrorCode =
   | 'ACTIVITY_NOT_FOUND'
@@ -82,6 +84,29 @@ function parseString(value: unknown, maxLength: number) {
   return normalized || null
 }
 
+function legacyPrizeImageValue(item: Record<string, unknown>) {
+  for (const key of ['imageUrl', 'prizeImageUrl', 'rewardImage']) {
+    if (Object.prototype.hasOwnProperty.call(item, key)) return item[key]
+  }
+  return undefined
+}
+
+function parsePrizeImageUrl(value: unknown) {
+  if (value === undefined || value === null || value === '') return { valid: true, value: null as string | null }
+  if (typeof value !== 'string') return { valid: false, value: null as string | null }
+  const normalized = parseString(value, 2_000)
+  if (!normalized) return { valid: true, value: null as string | null }
+  const storedActivityUrl = storedActivityImageUrl(normalized)
+  if (storedActivityUrl) return { valid: true, value: storedActivityUrl }
+  try {
+    const parsed = new URL(normalized)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { valid: false, value: null as string | null }
+    return { valid: true, value: normalized }
+  } catch {
+    return { valid: false, value: null as string | null }
+  }
+}
+
 export function normalizeActivityLotteryInput(value: unknown): { valid: true; value: NormalizedActivityLotteryInput } | { valid: false; message: string } {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const title = sanitizeText(input.title, 160)
@@ -97,16 +122,18 @@ export function normalizeActivityLotteryInput(value: unknown): { valid: true; va
     const raw = input.prizes[index]
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { valid: false, message: `第 ${index + 1} 个奖项格式不正确。` }
     const item = raw as Record<string, unknown>
-    const tierName = sanitizeText(item.tierName ?? item.tier ?? item.name, 160)
+    const tierName = activityLotteryTierName(index)
     const name = sanitizeText(item.name ?? item.prizeName, 300)
     const quantity = typeof item.quantity === 'number' ? Math.trunc(item.quantity) : Number.parseInt(String(item.quantity ?? ''), 10)
-    if (!tierName) return { valid: false, message: `第 ${index + 1} 个奖项请填写奖项名称。` }
+    if (!tierName) return { valid: false, message: `第 ${index + 1} 个奖项等级无效。` }
     if (!name) return { valid: false, message: `第 ${index + 1} 个奖项请填写奖品名称。` }
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY) return { valid: false, message: `第 ${index + 1} 个奖项数量必须在 1-${MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY} 之间。` }
+    const image = parsePrizeImageUrl(legacyPrizeImageValue(item))
+    if (!image.valid) return { valid: false, message: `第 ${index + 1} 个奖项图片无效，请通过上传图片添加。` }
     prizes.push({
       tierName,
       name,
-      imageUrl: parseString(item.imageUrl, 2000),
+      imageUrl: image.value,
       description: parseString(item.description, 2000),
       quantity,
     })
@@ -116,6 +143,24 @@ export function normalizeActivityLotteryInput(value: unknown): { valid: true; va
 
 function iso(value: Date | null | undefined) {
   return value ? value.toISOString() : null
+}
+
+function legacyPrizeImageFromMetadata(value: Prisma.JsonValue | null | undefined) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const metadata = value as Record<string, unknown>
+  for (const key of ['imageUrl', 'prizeImageUrl', 'rewardImage']) {
+    const candidate = metadata[key]
+    if (typeof candidate === 'string' && candidate.trim()) return candidate
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      const url = (candidate as Record<string, unknown>).url
+      if (typeof url === 'string' && url.trim()) return url
+    }
+  }
+  return null
+}
+
+function publicPrizeImageUrl(imageUrl: string | null, metadata?: Prisma.JsonValue | null) {
+  return publicImageUrl(imageUrl) || publicImageUrl(legacyPrizeImageFromMetadata(metadata))
 }
 
 const adminLotterySelect = {
@@ -138,6 +183,7 @@ const adminLotterySelect = {
       tierName: true,
       name: true,
       imageUrl: true,
+      metadata: true,
       description: true,
       quantity: true,
       remaining: true,
@@ -227,7 +273,7 @@ function serializeAdminLottery(row: AdminLotteryRow): ActivityLotteryAdminView {
       id: prize.id,
       tierName: prize.tierName,
       name: prize.name,
-      imageUrl: publicImageUrl(prize.imageUrl),
+      imageUrl: publicPrizeImageUrl(prize.imageUrl, prize.metadata),
       description: prize.description,
       quantity: prize.quantity,
       remaining: prize.remaining,
@@ -295,7 +341,7 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       drawnAt: true,
       LotteryPrize: {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-        select: { id: true, tierName: true, name: true, imageUrl: true, description: true, quantity: true },
+        select: { id: true, tierName: true, name: true, imageUrl: true, metadata: true, description: true, quantity: true },
       },
     },
   })
@@ -317,7 +363,7 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       eligibleCount: lottery.eligibleCount,
       winnerCount: lottery.winnerCount,
       drawnAt: iso(lottery.drawnAt),
-      prizes: lottery.LotteryPrize.map((prize) => ({ ...prize, imageUrl: publicImageUrl(prize.imageUrl) })),
+      prizes: lottery.LotteryPrize.map((prize) => ({ ...prize, imageUrl: publicPrizeImageUrl(prize.imageUrl, prize.metadata) })),
       winner: winner && winner.LotteryPrize
         ? { tierName: winner.LotteryPrize.tierName || '中奖奖项', prizeName: winner.LotteryPrize.name, redemptionStatus: winner.redemptionStatus, redeemedAt: iso(winner.redeemedAt) }
         : null,

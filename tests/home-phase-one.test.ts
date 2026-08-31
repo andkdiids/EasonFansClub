@@ -78,19 +78,29 @@ test('Hero carousel only consumes enabled slides and supports autoplay, controls
   assert.match(manager, /\/api\/admin\/home\/hero/)
 })
 
-test('homepage keeps the original surface order and does not render shortcut cards', () => {
+test('homepage keeps the hero intact and places the requested first row before lower modules', () => {
   const surface = read('components/HomeLayoutSurface.tsx')
   assert.doesNotMatch(surface, /shortcutItems|grid-cols-6|home-hero|community-hero-actions|growthThresholds|homeText\.(level|exp|points)/)
-  const positions = [
-    surface.indexOf('<HomeHero'),
-    surface.indexOf('community-stats home-checkin-stats'),
-    surface.indexOf('home-primary-columns'),
-    surface.indexOf('homeText.randomAlbums'),
-    surface.indexOf('{renderRecentActivitiesPanel()}'),
-    surface.indexOf('{renderAnywhereDoorPanel()}'),
-  ]
-  assert.ok(positions.every((position) => position >= 0))
-  assert.deepEqual([...positions].sort((a, b) => a - b), positions)
+  const heroPosition = surface.indexOf('<HomeHero')
+  const firstRowStart = surface.indexOf('<div className="home-first-row"')
+  const dataPosition = surface.indexOf('community-stats home-checkin-stats', firstRowStart)
+  const firstRowPanelsPosition = surface.indexOf('home-primary-columns home-first-row-panels', firstRowStart)
+  const secondaryPosition = surface.indexOf('<div className="home-secondary-content"')
+  assert.ok(heroPosition >= 0)
+  assert.ok(firstRowStart > heroPosition)
+  assert.ok(dataPosition > firstRowStart)
+  assert.ok(firstRowPanelsPosition > dataPosition)
+  assert.ok(secondaryPosition > firstRowPanelsPosition)
+
+  const firstRow = surface.slice(firstRowStart, secondaryPosition)
+  assert.ok(firstRow.indexOf('{renderTodayPanel()}') < firstRow.indexOf('{renderAnywhereDoorPanel()}'))
+  assert.ok(firstRow.indexOf('{renderAnywhereDoorPanel()}') < firstRow.indexOf('{renderSalonPanel()}'))
+  assert.doesNotMatch(firstRow, /renderDailyMusicPanel|renderEntertainmentPanel/)
+
+  const secondary = surface.slice(secondaryPosition)
+  assert.ok(secondary.indexOf('{renderDailyMusicPanel()}') < secondary.indexOf('{renderEntertainmentPanel()}'))
+  assert.ok(secondary.indexOf('{renderEntertainmentPanel()}') < secondary.indexOf('homeText.randomAlbums'))
+  assert.ok(secondary.indexOf('{renderRecentActivitiesPanel()}') >= 0)
 })
 
 test('entertainment home card uses the endless-mode leaderboard without loading removed concert data', () => {

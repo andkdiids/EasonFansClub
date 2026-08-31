@@ -31,9 +31,10 @@ test('home module entry links share the >> label and no-movement hover rule', ()
   const entryCount = home.match(/className="home-module-entry"/g) || []
   const markerCount = home.match(/\{'>>'\}/g) || []
 
-  assert.equal(entryCount.length, 5)
-  assert.equal(markerCount.length, 5)
+  assert.equal(entryCount.length, 6)
+  assert.equal(markerCount.length, 6)
   assert.match(home, /homeText\.activitiesMore[^\n]*\{'>>'\}<\/Link>/)
+  assert.match(home, /homeText\.salonMore[^\n]*\{'>>'\}<\/Link>/)
   assert.match(css, /\.community-panel > header a\.home-module-entry:hover,[\s\S]*\.community-panel > header a\.home-module-entry:focus-visible/)
 
   const entryRule = css.match(/\.community-panel > header a\.home-module-entry \{([\s\S]*?)\}/)?.[1] || ''

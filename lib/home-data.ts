@@ -3,6 +3,7 @@ import { getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { withForumBoardDisplayName } from '@/lib/boards'
 import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from '@/lib/daily-music'
 import { safeDb } from '@/lib/db-timeout'
+import { publicImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getGuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -18,6 +19,7 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { getEasMusicAlbumLikeStates } from '@/lib/easmusic-likes'
 import { htmlToPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
+import { salonPublicBaseWhere, type SalonCategoryValue } from '@/lib/salon'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -302,6 +304,48 @@ export async function getHomeAnywhereDoorLatest(): Promise<HomeAnywhereDoorPost 
     publishedAt: post.publishedAt.toISOString(),
     href: `/anywhere-door/${post.id}`,
   } : null))
+}
+
+export type HomeSalonPost = Readonly<{
+  id: string
+  category: SalonCategoryValue
+  title: string | null
+  approvedAt: string
+  thumbnailUrl: string | null
+}>
+
+/**
+ * The homepage only needs a very small public Salon projection. Keep the
+ * query bounded and read thumbnails only; the full gallery remains on /salon.
+ */
+export async function getHomeSalonPosts(): Promise<HomeSalonPost[]> {
+  return cachedHomeData('home.salon.latest', () => safeDb(
+    'SalonPost.findMany home.salon.latest',
+    prisma.salonPost.findMany({
+      where: { ...salonPublicBaseWhere, status: 'APPROVED' as const, approvedAt: { not: null } },
+      orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
+      take: 3,
+      select: {
+        id: true,
+        category: true,
+        title: true,
+        approvedAt: true,
+        media: {
+          orderBy: { sortOrder: 'asc' },
+          take: 1,
+          select: { thumbnailUrl: true },
+        },
+      },
+    }).then((posts) => posts.map((post) => ({
+      id: post.id,
+      category: post.category,
+      title: post.title,
+      approvedAt: post.approvedAt?.toISOString() || '',
+      thumbnailUrl: publicImageUrl(post.media[0]?.thumbnailUrl),
+    }))),
+    [],
+    5000,
+  ))
 }
 
 export async function getHomeConcerts() {

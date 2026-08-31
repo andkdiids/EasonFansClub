@@ -55,6 +55,9 @@ const homeText = {
   anywhereDoor: '随意门',
   anywhereDoorMore: '查看',
   anywhereDoorEmpty: '暂时没有最新更新。',
+  salon: '沙龙',
+  salonMore: '查看更多',
+  salonEmpty: '暂无已通过的沙龙作品。',
   dailyPrescription: '每日处方',
   prescriptionPending: '待领取',
   prescriptionClaimed: '已领取',
@@ -89,7 +92,15 @@ type TodayEvent = { id: string; date: string; year: number; month: number; day: 
 type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: GuessSongModeHighScores['status'] | 'loading' }
 type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; startsAt: string | null; endsAt: string | null }
 type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
-type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
+type HomeSalonPost = { id: string; category: string; title: string | null; approvedAt: string; thumbnailUrl: string | null }
+type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; salonPosts: HomeSalonPost[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
+
+const salonCategoryLabels: Record<string, string> = {
+  CONCERT: '演唱会记录',
+  MOBILE_WALLPAPER: '手机壁纸',
+  DESKTOP_WALLPAPER: '电脑壁纸',
+  TIME_TRAVEL: '时光档案',
+}
 
 const modeLabels = Object.fromEntries(
   GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, GUESS_SONG_MODE_CONFIG[mode].label]),
@@ -197,7 +208,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const items = useMemo(() => getPageLayoutModules(layoutConfig, device, 'home'), [layoutConfig, device])
   const layoutModule = (key: string) => items.find((item) => item.key === key)
   const visible = (key: string) => Boolean(layoutModule(key))
-  const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
+  const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, salonPosts: [], albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const [todayPageIndex, setTodayPageIndex] = useState(0)
@@ -222,7 +233,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           // The main home payload intentionally keeps entertainment ranking in
           // its own request. Do not let its legacy null field overwrite the
           // independently loaded result.
-          setData((current) => ({ ...nextData, activities: nextData.activities || [], anywhereDoor: nextData.anywhereDoor || null, dailyPrescriptionReward: nextData.dailyPrescriptionReward ?? null, entertainmentRanking: current.entertainmentRanking }))
+          setData((current) => ({ ...nextData, activities: nextData.activities || [], anywhereDoor: nextData.anywhereDoor || null, salonPosts: nextData.salonPosts || [], dailyPrescriptionReward: nextData.dailyPrescriptionReward ?? null, entertainmentRanking: current.entertainmentRanking }))
           setFailed(false)
         }
       } catch (error) {
@@ -385,7 +396,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const renderTodayPanel = () => {
     const events = data.todayEvents
     return (
-      <section className={`community-panel concert-panel home-today-panel${device === 'mobile' ? ' mb-5' : ''}`} aria-label="Today in history">
+      <section className="community-panel concert-panel home-first-row-panel home-today-panel" aria-label="Today in history">
         <header><h2>{homeText.today}</h2><Link href="/today" className="home-module-entry">{homeText.todayMore} {'>>'}</Link></header>
         <div className="home-today-content">
         {events.length === 0 ? <p className="community-empty">{homeText.noToday}</p> : null}
@@ -454,19 +465,36 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     )
   }
 
-  const renderAnywhereDoorPanel = () => {
-    if (!data.anywhereDoor) return null
-    return (
-      <section className="community-panel home-full-panel home-anywhere-door-section" aria-label={homeText.anywhereDoor}>
+  const renderAnywhereDoorPanel = () => (
+      <section className="community-panel home-first-row-panel home-anywhere-door-section" aria-label={homeText.anywhereDoor}>
         <header><h2>{homeText.anywhereDoor}</h2><Link href="/anywhere-door" className="home-module-entry">{homeText.anywhereDoorMore} {'>>'}</Link></header>
-        <Link href={data.anywhereDoor.href} className="home-anywhere-door-item">
+        {data.anywhereDoor ? <Link href={data.anywhereDoor.href} className="home-anywhere-door-item">
           <span className="home-anywhere-door-account">@{data.anywhereDoor.authorUsername}</span>
           <strong>{data.anywhereDoor.title}</strong>
           <time dateTime={data.anywhereDoor.publishedAt}>{shortDateTime(data.anywhereDoor.publishedAt)}</time>
-        </Link>
+        </Link> : <p className="community-empty home-first-row-empty">{homeText.anywhereDoorEmpty}</p>}
       </section>
     )
-  }
+
+  const renderSalonPanel = () => (
+    <section className="community-panel home-first-row-panel home-salon-panel" aria-label={homeText.salon}>
+      <header><h2>{homeText.salon}</h2><Link href="/salon" className="home-module-entry">{homeText.salonMore} {'>>'}</Link></header>
+      {data.salonPosts.length ? <div className="home-salon-content">
+        {data.salonPosts.map((post, index) => {
+          const title = post.title?.trim() || salonCategoryLabels[post.category] || '沙龙作品'
+          return <Link key={post.id} href={`/salon/${post.id}`} className="home-salon-item">
+            <span className="home-salon-thumb">
+              {post.thumbnailUrl ? <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={post.thumbnailUrl} alt={title} loading={index === 0 ? 'eager' : 'lazy'} decoding="async" />
+              </> : '沙龙'}
+            </span>
+            <span className="home-salon-copy"><strong>{title}</strong><small>{salonCategoryLabels[post.category] || '沙龙作品'} · {shortDateTime(post.approvedAt)}</small></span>
+          </Link>
+        })}
+      </div> : <p className="community-empty home-first-row-empty">{homeText.salonEmpty}</p>}
+    </section>
+  )
 
   return (
     <div className="community-home">
@@ -479,7 +507,11 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         defaultTitle={siteConfig.text.homeSubtitle}
       />
       <div id="community-content" className="community-content">
-        <section className="community-stats home-checkin-stats mb-4 sm:mb-6" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }} aria-label="E院数据与签到状态">
+        {announcement && visible('home.announcement') ? <Link href={normalizeActionUrl(announcement.link) || normalizeActionUrl(announcement.buttonUrl) || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
+        {failed ? <p className="community-error">{homeText.loadError}</p> : null}
+
+        <div className="home-first-row" aria-label="首页第一行">
+        <section className="community-stats home-checkin-stats home-first-row-data" aria-label="E院数据与签到状态">
           <div className="stat-members"><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
           <div className={`stat-registration ${checkinStateClass}`}>
             <Link href="/checkin" className="stat-checkin">
@@ -503,24 +535,18 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           </Link>
         </section>
 
-        {announcement && visible('home.announcement') ? <Link href={normalizeActionUrl(announcement.link) || normalizeActionUrl(announcement.buttonUrl) || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
-        {failed ? <p className="community-error">{homeText.loadError}</p> : null}
+        <div className="home-primary-columns home-first-row-panels">
+          {renderTodayPanel()}
+          {renderAnywhereDoorPanel()}
+          {renderSalonPanel()}
+        </div>
+        </div>
 
-        {device === 'mobile' ? (
-          <>
-            {renderTodayPanel()}
-            <div className="home-mobile-dual">
-              {renderEntertainmentPanel()}
-              {renderDailyMusicPanel()}
-            </div>
-          </>
-        ) : (
-          <div className="community-columns home-primary-columns">
-            {renderDailyMusicPanel()}
-            {renderTodayPanel()}
-            {renderEntertainmentPanel()}
-          </div>
-        )}
+        <div className="home-secondary-content">
+        <div className="home-secondary-columns">
+          {renderDailyMusicPanel()}
+          {renderEntertainmentPanel()}
+        </div>
 
         <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="每日推荐专辑">
           <header><h2>{homeText.randomAlbums}</h2><Link href="/music/albums">{homeText.albumsMore} →</Link></header>
@@ -540,7 +566,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           </div>
         </section>
         {renderRecentActivitiesPanel()}
-        {renderAnywhereDoorPanel()}
+        </div>
       </div>
     </div>
   )
