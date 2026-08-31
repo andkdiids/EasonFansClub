@@ -13,6 +13,7 @@ const eslintConfig = [
   {
     ignores: [
       '.next/**',
+      '.next-editor-interaction/**',
       '.next_bak/**',
       '.next_old_*/**',
       'node_modules/**',

@@ -24,6 +24,35 @@ export type WantListenScoreState = {
   totalQuestions: number
 }
 
+/**
+ * 排行榜只接受真正完成、无风控标记且未被管理员排除的 Session。
+ * 将这条规则集中在纯函数中，避免写入、读取和诊断各自维护一套状态判断。
+ */
+export function isWantListenLeaderboardEligibleRecord(record: {
+  status: string
+  antiCheatStatus: string
+  excludedFromLeaderboard?: boolean | null
+  completedAt?: Date | null
+  completionTimeMs?: number | null
+}) {
+  return record.status === 'COMPLETED'
+    && record.antiCheatStatus === 'CLEAN'
+    && record.excludedFromLeaderboard !== true
+    && record.completedAt != null
+    && record.completionTimeMs != null
+}
+
+/**
+ * maxStreak=0 且已有答对题数时，不符合当前游戏结算不变量。
+ * 这类历史记录无法仅凭 correctCount 还原连击，因此对外显示为未知（—），
+ * 而答对 0 题的真实 0 仍保留为 0。
+ */
+export function normalizeWantListenMaxStreak(maxStreak: number | null | undefined, correctCount: number) {
+  if (maxStreak === null || maxStreak === undefined || !Number.isInteger(maxStreak) || maxStreak < 0) return null
+  if (correctCount > 0 && maxStreak === 0) return null
+  return maxStreak
+}
+
 export type WantListenBackfillCompensation = {
   correctAnswers: number
   startingStreak: number

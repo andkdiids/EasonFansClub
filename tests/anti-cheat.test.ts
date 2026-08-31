@@ -119,7 +119,7 @@ test('6b/重复提交同一题记录 REPEATED_SUBMIT 异常', () => {
 })
 
 test('7/排行榜只读 antiCheatStatus = CLEAN 的场次，写入侧也拦截', () => {
-  assert.match(leaderboardSource, /WantListenSession: \{ is: \{ antiCheatStatus: 'CLEAN'/)
+  assert.match(leaderboardSource, /s\.antiCheatStatus = 'CLEAN'/)
   assert.match(leaderboardSource, /antiCheatStatus !== 'CLEAN'/)
   assert.match(wantListenSource, /antiCheatStatus: 'SUSPICIOUS'/)
 })

@@ -119,7 +119,7 @@ export function PostEditForm({
         </select>
       </label>
 
-      <label className="block">
+      <div className="block">
         <span className="text-sm font-black text-slate-700">正文</span>
         <div className="mt-2">
           <RichTextEditor
@@ -131,7 +131,7 @@ export function PostEditForm({
             }}
           />
         </div>
-      </label>
+      </div>
 
       <section className="space-y-3">
         <span className="text-sm font-black text-slate-700">图片（{totalImages}/{MAX_CONTENT_IMAGES}）</span>

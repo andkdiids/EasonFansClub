@@ -123,6 +123,28 @@ test('管理员页面支持多个抽奖的奖项图片、说明和排序编辑',
   assert.match(manager, /prize\.imageUrl \|\| null/)
 })
 
+test('活动创建和编辑表单都提供现有抽奖管理入口，新活动先保存草稿避免孤儿抽奖', () => {
+  const admin = read('app/admin/activities/ActivityAdminManager.tsx')
+  const entry = read('components/activities/ActivityLotteryEntry.tsx')
+  const manager = read('components/activities/ActivityLotteryManager.tsx')
+  assert.match(admin, /ActivityLotteryEntry/)
+  assert.match(admin, /keepEditing: true/)
+  assert.match(admin, /请先设置报名结束时间，再添加自动抽奖/)
+  assert.match(entry, /活动抽奖（可选）/)
+  assert.match(entry, /\+ 添加抽奖/)
+  assert.match(entry, /ActivityLotteryManager/)
+  assert.match(manager, /openOnMount\?: boolean/)
+  assert.match(manager, /\+ 添加抽奖/)
+})
+
+test('编辑活动时不能把报名结束时间改到未开奖抽奖的开奖时间之后', () => {
+  const route = read('app/api/admin/activities/[activityId]/route.ts')
+  assert.match(route, /assertLotterySchedulesFitRegistrationEnd/)
+  assert.match(route, /status: \{ in: \['DRAFT', 'SCHEDULED'\] \}/)
+  assert.match(route, /drawAt: \{ lt: registrationEndAt \}/)
+  assert.match(route, /报名结束时间不能晚于已有抽奖开奖时间/)
+})
+
 test('中奖通知提示使用活动现有核销码，不携带中奖码', () => {
   const lottery = read('lib/activity-lottery.ts')
   assert.match(lottery, /请使用该活动现有核销码领取/)

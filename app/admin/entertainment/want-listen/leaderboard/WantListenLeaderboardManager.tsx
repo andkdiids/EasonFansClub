@@ -14,7 +14,7 @@ type ModeOverview = {
   lastUpdatedAt: string | null
 }
 type Overview = { overview: ModeOverview[]; totalAll: number; generatedAt: string }
-type UserScore = { mode: Mode; label: string; score: number; correctCount: number; completionTimeMs: number | null; achievedAt: string | null }
+type UserScore = { mode: Mode; label: string; score: number; correctCount: number; maxStreak: number | null; completionTimeMs: number | null; achievedAt: string | null }
 type RecoverableSession = {
   id: string
   mode: Mode
@@ -39,6 +39,7 @@ type ClearResult = {
   action: 'CLEAR_ALL' | 'CLEAR_MODE' | 'CLEAR_USER'
   deletedCount: number
   beforeCount: number
+  excludedSessionCount: number
   mode: Mode | null
   targetUserId: string | null
   operatedAt: string
@@ -54,7 +55,7 @@ type BonusRow = {
   periodKey: string
   score: number
   correctCount: number
-  maxStreak: number
+  maxStreak: number | null
   totalQuestions: number
   completionTimeMs: number | null
   achievedAt: string
@@ -265,7 +266,7 @@ export function WantListenLeaderboardManager() {
         }),
       })
       const actionLabel = kind === 'CLEAR_ALL' ? '全部排行榜' : kind === 'CLEAR_MODE' ? `「${MODE_LABELS[mode as Mode]}」排行榜` : `用户排行榜`
-      setMessage(`已清空${actionLabel}：删除 ${result.deletedCount} 条成绩，操作时间 ${new Date(result.operatedAt).toLocaleString()}，管理员 ${result.admin.nickname}（UID ${result.admin.uid}）`)
+      setMessage(`已清空${actionLabel}：删除 ${result.deletedCount} 条榜单投影，排除 ${result.excludedSessionCount} 局历史成绩；操作时间 ${new Date(result.operatedAt).toLocaleString()}，管理员 ${result.admin.nickname}（UID ${result.admin.uid}）`)
       setUserResult(null)
       void load()
     } catch (requestError) {
@@ -652,7 +653,7 @@ export function WantListenLeaderboardManager() {
                 : <div className="h-12 w-12 rounded-full bg-brand-200" />}
               <div>
                 <p className="font-black text-brand-900">{userResult.user.nickname}</p>
-                <p className="text-sm text-brand-600">UID {userResult.user.uid} · 排行榜记录 {userResult.totalEntries} 条 · 异常游戏记录 {userResult.recoverableSessions.length} 条</p>
+                <p className="text-sm text-brand-600">UID {userResult.user.uid} · 有效游戏记录 {userResult.totalEntries} 条 · 异常游戏记录 {userResult.recoverableSessions.length} 条</p>
               </div>
               <button
                 type="button"
@@ -668,7 +669,7 @@ export function WantListenLeaderboardManager() {
                 <div key={score.mode} className="rounded-lg border border-brand-100 bg-white p-3 text-sm">
                   <p className="font-black text-brand-900">{score.label}</p>
                   <p className="mt-1 text-brand-600">最高分：<span className="font-bold text-brand-900">{score.score}</span></p>
-                  <p className="text-brand-600">答对：{score.correctCount}</p>
+                  <p className="text-brand-600">答对：{score.correctCount} · 最高连击：{score.maxStreak ?? '—'}</p>
                   <p className="text-brand-600">完成时间：{score.completionTimeMs !== null ? `${Math.round(score.completionTimeMs / 1000)} 秒` : '—'}</p>
                 </div>
               ))}
@@ -746,7 +747,7 @@ export function WantListenLeaderboardManager() {
                     <strong className="w-8 text-center text-slate-400">#{index + 1}</strong>
                     <div>
                       <p className="font-black text-slate-900">{row.displayName} <span className="font-normal text-slate-400">UID {row.uid}</span></p>
-                      <p className="text-xs text-slate-500">{row.score} 分 · 答对 {row.correctCount} · 最高连击 {row.maxStreak} · 完成 {row.totalQuestions} 题 · {row.sessionStatus || '—'}</p>
+                      <p className="text-xs text-slate-500">{row.score} 分 · 答对 {row.correctCount} · 最高连击 {row.maxStreak ?? '—'} · 完成 {row.totalQuestions} 题 · {row.sessionStatus || '—'}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">

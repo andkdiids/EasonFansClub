@@ -7,6 +7,7 @@ import {
   getWantListenPeriod,
   parseWantListenLeaderboardPeriod,
 } from '@/lib/want-listen-period'
+import { normalizeWantListenMaxStreak } from '@/lib/want-listen-score'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 
@@ -143,7 +144,7 @@ type LeaderboardRow = {
   mode: WantListenMode
   score: number
   correctCount: number
-  maxStreak: number
+  maxStreak: number | null
   totalQuestions: number
   completionTimeMs: number
   achievedAt: Date
@@ -174,13 +175,13 @@ function serializeLeaderboardRow(row: LeaderboardRow, rank: number, equippedBadg
   }
 }
 
-type MonthlyLeaderboardQueryRow = {
+type WantListenLeaderboardQueryRow = {
   session_id: string
   user_id: string
   mode: WantListenMode
   score: number
   correct_count: number
-  max_streak: number
+  max_streak: number | null
   total_questions: number
   completion_time_ms: number
   completed_at: Date
@@ -195,22 +196,24 @@ type MonthlyLeaderboardQueryRow = {
   profile_avatar_url: string | null
 }
 
-function toMonthlyLeaderboardRow(row: MonthlyLeaderboardQueryRow): { row: LeaderboardRow; rank: number } {
+function toWantListenLeaderboardRow(row: WantListenLeaderboardQueryRow): { row: LeaderboardRow; rank: number } {
+  const score = Number(row.score)
+  const correctCount = Number(row.correct_count)
   return {
     rank: Number(row.leaderboard_rank),
     row: {
       id: row.session_id,
       userId: row.user_id,
       mode: row.mode,
-      score: row.score,
-      correctCount: row.correct_count,
-      maxStreak: row.max_streak,
-      totalQuestions: row.total_questions,
-      completionTimeMs: row.completion_time_ms,
-      achievedAt: row.completed_at,
+      score,
+      correctCount,
+      maxStreak: normalizeWantListenMaxStreak(row.max_streak === null ? null : Number(row.max_streak), correctCount),
+      totalQuestions: Number(row.total_questions),
+      completionTimeMs: Number(row.completion_time_ms),
+      achievedAt: row.completed_at instanceof Date ? row.completed_at : new Date(row.completed_at),
       User: {
         id: row.user_id,
-        uid: row.uid,
+        uid: Number(row.uid),
         nickname: row.nickname,
         nicknameModerationStatus: row.nicknameModerationStatus,
         nicknameViolationDisplay: row.nicknameViolationDisplay,
@@ -228,20 +231,35 @@ function toMonthlyLeaderboardRow(row: MonthlyLeaderboardQueryRow): { row: Leader
 }
 
 /**
- * Monthly records are resolved from the existing timestamped sessions. The
- * window function selects one best session per user before ranking, matching
- * the existing score / correct / streak / time / achieved-at rule without
- * loading a month of raw records into Node or introducing a MONTH enum.
+ * The public leaderboard is read from completed sessions, not from the
+ * leaderboard projection. This keeps every period on the same source and
+ * makes an administrator exclusion effective immediately, even when a stale
+ * projection row still exists. The window function selects one best session
+ * per user before ranking, matching the existing single-game leaderboard
+ * contract without loading a period of raw records into Node.
  */
-async function getMonthlyWantListenLeaderboard(input: {
+export async function getWantListenLeaderboardSourceRows(input: {
   mode: WantListenMode
   periodKey: string
-  start: Date
-  endExclusive: Date
+  start: Date | null
+  endExclusive: Date | null
   userId?: string
+  query?: string
   limit: number
 }) {
-  const selectedRows = await prisma.$queryRaw<MonthlyLeaderboardQueryRow[]>(Prisma.sql`
+  const periodFilter = input.start && input.endExclusive
+    ? Prisma.sql`AND s.completedAt >= ${input.start} AND s.completedAt < ${input.endExclusive}`
+    : Prisma.empty
+  const query = input.query?.trim().slice(0, 80) || ''
+  const numericQuery = /^\d+$/.test(query) ? Number(query) : -1
+  const userFilter = query
+    ? Prisma.sql`(u.uid = ${numericQuery} OR u.nickname LIKE ${`%${query}%`} OR u.username LIKE ${`%${query}%`})`
+    : Prisma.empty
+  const resultFilter = query
+    ? userFilter
+    : Prisma.sql`(ranked.leaderboard_rank <= ${input.limit} OR ranked.user_id = ${input.userId || ''})`
+
+  const selectedRows = await prisma.$queryRaw<WantListenLeaderboardQueryRow[]>(Prisma.sql`
     WITH eligible_sessions AS (
       SELECT
         s.id AS session_id,
@@ -268,9 +286,9 @@ async function getMonthlyWantListenLeaderboard(input: {
         AND s.status = 'COMPLETED'
         AND s.antiCheatStatus = 'CLEAN'
         AND s.excludedFromLeaderboard = FALSE
+        AND s.completedAt IS NOT NULL
         AND s.completionTimeMs IS NOT NULL
-        AND s.completedAt >= ${input.start}
-        AND s.completedAt < ${input.endExclusive}
+        ${periodFilter}
     ),
     best_sessions AS (
       SELECT
@@ -329,27 +347,13 @@ async function getMonthlyWantListenLeaderboard(input: {
       p.avatarUrl AS profile_avatar_url
     FROM ranked_sessions AS ranked
     INNER JOIN \`User\` AS u ON u.id = ranked.user_id
-    LEFT JOIN \`Profile\` AS p ON p.userId = ranked.user_id
-    WHERE ranked.leaderboard_rank <= ${input.limit} OR ranked.user_id = ${input.userId || ''}
+      LEFT JOIN \`Profile\` AS p ON p.userId = ranked.user_id
+    WHERE ${resultFilter}
     ORDER BY ranked.leaderboard_rank ASC
     LIMIT ${input.limit + 1}
   `)
 
-  const rankedRows = selectedRows.map(toMonthlyLeaderboardRow)
-  const topRows = rankedRows.filter((item) => item.rank <= input.limit)
-  const ownRow = input.userId ? rankedRows.find((item) => item.row.userId === input.userId) || null : null
-  const badgeTargets = [...topRows, ...(ownRow && ownRow.rank > input.limit ? [ownRow] : [])]
-  const equippedBadgeMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId))
-
-  return {
-    mode: input.mode,
-    period: 'MONTH' as const,
-    periodKey: input.periodKey,
-    rows: topRows.map((item) => serializeLeaderboardRow(item.row, item.rank, equippedBadgeMap.get(item.row.userId) || null)),
-    self: ownRow && ownRow.rank > input.limit
-      ? serializeLeaderboardRow(ownRow.row, ownRow.rank, equippedBadgeMap.get(ownRow.row.userId) || null)
-      : null,
-  }
+  return selectedRows.map(toWantListenLeaderboardRow)
 }
 
 export async function getWantListenLeaderboard(input: {
@@ -362,87 +366,26 @@ export async function getWantListenLeaderboard(input: {
   const periodType = parseWantListenLeaderboardPeriod(input.period)
   const period = getWantListenPeriod(periodType, input.now)
   const limit = Math.max(1, Math.min(100, input.limit || 50))
-  if (periodType === 'MONTH') {
-    if (!period.start || !period.endExclusive) throw new Error('MONTH 周期必须有完整时间范围')
-    return getMonthlyWantListenLeaderboard({
-      mode: input.mode,
-      periodKey: period.periodKey,
-      start: period.start,
-      endExclusive: period.endExclusive,
-      userId: input.userId,
-      limit,
-    })
-  }
-  const where = {
+  const rankedRows = await getWantListenLeaderboardSourceRows({
     mode: input.mode,
-    periodType,
     periodKey: period.periodKey,
-    // 只有 antiCheatStatus = CLEAN 且未被管理员排除的场次才进入排行榜
-    WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const, excludedFromLeaderboard: false } },
-  }
-  const rows = await prisma.wantListenLeaderboardEntry.findMany({
-    where,
-    orderBy: [
-      { score: 'desc' },
-      { correctCount: 'desc' },
-      { maxStreak: 'desc' },
-      { completionTimeMs: 'asc' },
-      { achievedAt: 'asc' },
-      { id: 'asc' },
-    ],
-    take: limit,
-    include: {
-      User: {
-        select: {
-          id: true,
-          uid: true,
-          nickname: true,
-          avatarUrl: true,
-          nicknameModerationStatus: true,
-          nicknameViolationDisplay: true,
-          Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-        },
-      },
-    },
+    start: period.start,
+    endExclusive: period.endExclusive,
+    userId: input.userId,
+    limit,
   })
-
-  const self = input.userId
-    ? await prisma.wantListenLeaderboardEntry.findFirst({
-      where: {
-        userId: input.userId,
-        mode: input.mode,
-        periodType,
-        periodKey: period.periodKey,
-        WantListenSession: { is: { antiCheatStatus: 'CLEAN' as const, excludedFromLeaderboard: false } },
-      },
-      include: {
-        User: {
-          select: {
-            id: true,
-            uid: true,
-            nickname: true,
-            avatarUrl: true,
-            nicknameModerationStatus: true,
-            nicknameViolationDisplay: true,
-            Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-          },
-        },
-      },
-    })
-    : null
-
-  const equippedBadgeMap = await getEquippedBadgesForUsers([
-    ...rows.map((row) => row.userId),
-    ...(self ? [self.userId] : []),
-  ])
-  const serialized = rows.map((row, index) => serializeLeaderboardRow(row, index + 1, equippedBadgeMap.get(row.userId) || null))
-  const selfVisible = self ? serialized.find((row) => row.userId === self.userId) : null
+  const topRows = rankedRows.filter((item) => item.rank <= limit)
+  const self = input.userId ? rankedRows.find((item) => item.row.userId === input.userId) || null : null
+  const badgeTargets = [...topRows, ...(self && self.rank > limit ? [self] : [])]
+  const equippedBadgeMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId))
   return {
     mode: input.mode,
     period: periodType,
     periodKey: period.periodKey,
-    rows: serialized,
-    self: self && !selfVisible ? serializeLeaderboardRow(self, 0, equippedBadgeMap.get(self.userId) || null) : null,
+    rows: topRows.map((item) => serializeLeaderboardRow(item.row, item.rank, equippedBadgeMap.get(item.row.userId) || null)),
+    self: self && self.rank > limit
+      ? serializeLeaderboardRow(self.row, self.rank, equippedBadgeMap.get(self.row.userId) || null)
+      : null,
   }
 }
 

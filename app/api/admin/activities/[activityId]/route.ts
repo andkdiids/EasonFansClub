@@ -65,6 +65,15 @@ async function getActivity(activityId: string) {
   return prisma.activity.findUnique({ where: { id: activityId }, select: activitySelect })
 }
 
+async function assertLotterySchedulesFitRegistrationEnd(tx: Prisma.TransactionClient, activityId: string, registrationEndAt: Date | null) {
+  if (!registrationEndAt) return
+  const conflictingLottery = await tx.lottery.findFirst({
+    where: { activityId, status: { in: ['DRAFT', 'SCHEDULED'] }, drawAt: { lt: registrationEndAt } },
+    select: { id: true },
+  })
+  if (conflictingLottery) throw new ActivityConfigurationError('报名结束时间不能晚于已有抽奖开奖时间，请先调整抽奖时间。')
+}
+
 export async function GET(_request: Request, { params }: { params: Promise<{ activityId: string }> }) {
   const guard = await requireAdmin('activity_manage')
   if (!guard.user) return guard.response
@@ -115,6 +124,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
   try {
     const activity = await prisma.$transaction(async (tx) => {
       const { linkedMaterialId, ...activityData } = normalized.value
+      await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
+      await assertLotterySchedulesFitRegistrationEnd(tx, activityId, normalized.value.registrationEndAt)
       const updated = await tx.activity.update({
         where: { id: activityId },
         data: {

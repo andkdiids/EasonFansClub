@@ -19,6 +19,10 @@ test('editor records and restores the actual caret/range before toolbar commands
 })
 
 test('heading menu is opened only by a user trigger and closes after selection', () => {
+  const editorContentStart = editor.indexOf('<EditorContent')
+  const editorContentEnd = editor.indexOf('/>', editorContentStart)
+  const editorContent = editor.slice(editorContentStart, editorContentEnd + 2)
+
   assert.match(editor, /const \[headingMenuOpen, setHeadingMenuOpen\] = useState\(false\)/u)
   assert.match(editor, /const headingMenuOpenRef = useRef\(false\)/u)
   assert.match(editor, /const currentBlockType: 'paragraph' \| HeadingLevel = activeHeadingLevel \?\? 'paragraph'/u)
@@ -37,10 +41,11 @@ test('heading menu is opened only by a user trigger and closes after selection',
   assert.match(editor, /id="rich-text-heading-menu"/u)
   assert.match(editor, /document\.addEventListener\('keydown'/u)
   assert.match(editor, /event\.key !== 'Escape'/u)
-  assert.match(editor, /onPointerDown=\{closeToolbarMenus\}/u)
-  assert.match(editor, /onFocus=\{closeToolbarMenus\}/u)
-  assert.match(editor, /onBlur=\{closeToolbarMenus\}/u)
-  assert.match(editor, /onCompositionStart=\{closeToolbarMenus\}/u)
+  assert.doesNotMatch(editorContent, /onPointerDown=\{closeToolbarMenus\}/u)
+  assert.doesNotMatch(editorContent, /onMouseDown=\{closeToolbarMenus\}/u)
+  assert.match(editorContent, /onFocus=\{closeToolbarMenus\}/u)
+  assert.match(editorContent, /onBlur=\{closeToolbarMenus\}/u)
+  assert.match(editorContent, /onCompositionStart=\{closeToolbarMenus\}/u)
   assert.match(editor, /function toggleToolbarMenu\(menu: 'size' \| 'color'\)/u)
   assert.match(editor, /setOpenMenu\(\(current\) => current === menu \? null : menu\)/u)
   assert.match(editor, /function applyBlock\(/u)
@@ -67,6 +72,29 @@ test('bold, italic and strike are real toggles with selection-sourced active sta
   assert.match(editor, /onClick=\{\(\) => toggleInlineMark\('italic'\)\}/u)
   assert.match(editor, /onClick=\{\(\) => toggleInlineMark\('strike'\)\}/u)
   assert.doesNotMatch(editor, /setBold\(|setItalic\(|setStrike\(|addMark\(/u)
+  assert.doesNotMatch(editor, /ToggleGroup|type=['"]single['"]|activeFormat|selectedFormat|aria-selected/u)
+})
+
+test('editor input does not reconfigure the view or focus-scroll as a side effect', () => {
+  assert.match(editor, /import[\s\S]*useMemo[\s\S]*from 'react'/u)
+  assert.match(editor, /const editorProps = useMemo\(\(\) => \(\{/u)
+  assert.match(editor, /editorProps,/u)
+  assert.match(editor, /function focusEditorWithoutScroll\(editor: Editor\)/u)
+  assert.match(editor, /editor\.view\.focus\(\)/u)
+  assert.doesNotMatch(editor, /onTransaction:\s*\(\) => setToolbarVersion/u)
+  assert.doesNotMatch(editor, /\.chain\(\)\.focus\(/u)
+  assert.doesNotMatch(editor, /scrollIntoView|scrollTo\(|scrollTop|window\.scroll/u)
+})
+
+test('forms keep the editor and toolbar outside label activation behavior', () => {
+  const createForm = readFileSync('components/PostCreateForm.tsx', 'utf8')
+  const editForm = readFileSync('components/PostEditForm.tsx', 'utf8')
+  const editorLabelPattern = /<label className="block">\s*<span className="text-sm font-black text-slate-700">正文<\/span>[\s\S]*?<RichTextEditor/u
+  const editorGroupPattern = /<div className="block">\s*<span className="text-sm font-black text-slate-700">正文<\/span>[\s\S]*?<RichTextEditor/u
+  assert.doesNotMatch(createForm, editorLabelPattern)
+  assert.doesNotMatch(editForm, editorLabelPattern)
+  assert.match(createForm, editorGroupPattern)
+  assert.match(editForm, editorGroupPattern)
 })
 
 test('music insertion uses the saved selection rather than forcing the document start or end', () => {

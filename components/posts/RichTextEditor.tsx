@@ -14,6 +14,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -443,6 +444,12 @@ function emitEditorChange(editor: Editor, onChange: RichTextEditorProps['onChang
   onChange(result.value, result.plainText)
 }
 
+function focusEditorWithoutScroll(editor: Editor) {
+  // ProseMirror's EditorView.focus() uses focusPreventScroll and synchronizes
+  // the current selection without scheduling a second browser focus pass.
+  editor.view.focus()
+}
+
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor({
   initialContent = '',
   initialRichContent,
@@ -461,7 +468,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const [openMenu, setOpenMenu] = useState<'size' | 'color' | null>(null)
   const [musicPickerOpen, setMusicPickerOpen] = useState(false)
   const [toolbarNotice, setToolbarNotice] = useState('')
-  const [, setToolbarVersion] = useState(0)
 
   function rememberSelection(currentEditor: Editor) {
     const { from, to } = currentEditor.state.selection
@@ -474,18 +480,20 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     setActiveHeadingLevel((currentHeadingLevel) => currentHeadingLevel === nextHeadingLevel ? currentHeadingLevel : nextHeadingLevel)
   }
 
+  const editorProps = useMemo(() => ({
+    attributes: {
+      class: 'rich-text-editor-surface',
+      'aria-label': '帖子正文',
+      spellcheck: 'true',
+    },
+    transformPastedHTML: sanitizePastedHtml,
+  }), [])
+
   const editor = useEditor({
     extensions: richTextExtensions,
     content: initialDocument,
     immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        class: 'rich-text-editor-surface',
-        'aria-label': '帖子正文',
-        spellcheck: 'true',
-      },
-      transformPastedHTML: sanitizePastedHtml,
-    },
+    editorProps,
     onCreate: ({ editor: createdEditor }) => {
       syncEditorSelection(createdEditor)
       emitEditorChange(createdEditor, onChange)
@@ -495,7 +503,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       emitEditorChange(updatedEditor, onChange)
     },
     onSelectionUpdate: ({ editor: selectedEditor }) => syncEditorSelection(selectedEditor),
-    onTransaction: () => setToolbarVersion((version) => version + 1),
   })
 
   const closeHeadingMenu = useCallback(() => {
@@ -527,12 +534,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   }, [closeToolbarMenus, headingMenuOpen, openMenu])
 
   useImperativeHandle(ref, () => ({
-    focus: () => editor?.chain().focus().run(),
+    focus: () => {
+      if (!editor) return
+      focusEditorWithoutScroll(editor)
+    },
     insertText: (text: string) => {
       if (!editor || !text) return
       const selection = savedSelectionRef.current
       if (selection) editor.commands.setTextSelection(selection)
-      editor.chain().focus().insertContent(text).run()
+      focusEditorWithoutScroll(editor)
+      editor.chain().insertContent(text).run()
       rememberSelection(editor)
     },
   }), [editor])
@@ -572,7 +583,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   function startCommand() {
     restoreSavedSelection()
-    return activeEditor.chain().focus()
+    focusEditorWithoutScroll(activeEditor)
+    return activeEditor.chain()
   }
 
   function toggleHeadingMenuFromUser() {
@@ -931,8 +943,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         editor={editor}
         className="rich-text-editor-content"
         data-placeholder={placeholder}
-        onPointerDown={closeToolbarMenus}
-        onMouseDown={closeToolbarMenus}
         onFocus={closeToolbarMenus}
         onBlur={closeToolbarMenus}
         onCompositionStart={closeToolbarMenus}

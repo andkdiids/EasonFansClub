@@ -3,7 +3,11 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { WANT_LISTEN_MAX_WRONG_COUNT } from '@/lib/want-listen-config'
-import { recordWantListenLeaderboard, recomputeUserWantListenLeaderboard } from '@/lib/want-listen-leaderboard'
+import {
+  getWantListenLeaderboardSourceRows,
+  recordWantListenLeaderboard,
+  recomputeUserWantListenLeaderboard,
+} from '@/lib/want-listen-leaderboard'
 import { getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod } from '@/lib/want-listen-period'
 import { computeWantListenManualBackfill, validateWantListenScoreConsistency } from '@/lib/want-listen-score'
 
@@ -87,29 +91,20 @@ export async function getWantListenAdminOverview() {
   }> = []
 
   for (const mode of WANT_LISTEN_ADMIN_MODES) {
-    const [total, todayCount, weekCount, top, latest] = await Promise.all([
+    const [total, todayCount, weekCount, topRows, latest] = await Promise.all([
       prisma.wantListenLeaderboardEntry.count({ where: { mode } }),
       prisma.wantListenLeaderboardEntry.count({ where: { mode, createdAt: { gte: todayStart } } }),
       prisma.wantListenLeaderboardEntry.count({ where: { mode, createdAt: { gte: weekStart } } }),
-      prisma.wantListenLeaderboardEntry.findFirst({
-        where: { mode },
-        orderBy: [{ score: 'desc' }, { correctCount: 'desc' }, { completionTimeMs: 'asc' }, { achievedAt: 'asc' }],
-        include: {
-          User: {
-            select: {
-              id: true,
-              uid: true,
-              nickname: true,
-              avatarUrl: true,
-              nicknameModerationStatus: true,
-              nicknameViolationDisplay: true,
-              Profile: { select: { displayName: true, avatarUrl: true, displayNameModerationStatus: true } },
-            },
-          },
-        },
+      getWantListenLeaderboardSourceRows({
+        mode,
+        periodKey: 'ALL',
+        start: null,
+        endExclusive: null,
+        limit: 1,
       }),
       prisma.wantListenLeaderboardEntry.findFirst({ where: { mode }, orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
     ])
+    const top = topRows[0]?.row
     overview.push({
       mode,
       label: MODE_LABELS[mode],
@@ -159,21 +154,28 @@ export async function findWantListenLeaderboardUser(rawQuery: string) {
     label: string
     score: number
     correctCount: number
+    maxStreak: number | null
     completionTimeMs: number | null
     achievedAt: string | null
   }> = []
   for (const mode of WANT_LISTEN_ADMIN_MODES) {
-    const entry = await prisma.wantListenLeaderboardEntry.findFirst({
-      where: { userId: user.id, mode },
-      orderBy: [{ score: 'desc' }, { correctCount: 'desc' }, { completionTimeMs: 'asc' }, { achievedAt: 'asc' }],
+    const rankedRows = await getWantListenLeaderboardSourceRows({
+      mode,
+      periodKey: 'ALL',
+      start: null,
+      endExclusive: null,
+      userId: user.id,
+      limit: 1,
     })
+    const source = rankedRows.find((item) => item.row.userId === user.id)?.row || null
     scores.push({
       mode,
       label: MODE_LABELS[mode],
-      score: entry?.score ?? 0,
-      correctCount: entry?.correctCount ?? 0,
-      completionTimeMs: entry?.completionTimeMs ?? null,
-      achievedAt: entry?.achievedAt?.toISOString() ?? null,
+      score: source?.score ?? 0,
+      correctCount: source?.correctCount ?? 0,
+      maxStreak: source?.maxStreak ?? null,
+      completionTimeMs: source?.completionTimeMs ?? null,
+      achievedAt: source?.achievedAt.toISOString() ?? null,
     })
   }
 
@@ -184,16 +186,26 @@ export async function findWantListenLeaderboardUser(rawQuery: string) {
       nickname: getPublicUserDisplayName(user),
       avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
     },
-    totalEntries: await prisma.wantListenLeaderboardEntry.count({ where: { userId: user.id } }),
+    totalEntries: await prisma.wantListenSession.count({
+      where: {
+        userId: user.id,
+        status: 'COMPLETED',
+        completedAt: { not: null },
+        completionTimeMs: { not: null },
+        antiCheatStatus: 'CLEAN',
+        excludedFromLeaderboard: false,
+      },
+    }),
     scores,
     recoverableSessions: (await listRecoverableWantListenSessions(user.id)).sessions,
   }
 }
 
 /**
- * 清除想听排行榜成绩（仅 WantListenLeaderboardEntry）。
+ * 清除想听排行榜成绩：保留 Session 历史，但将作用域内 Session 标记为不再参与排行榜，
+ * 同时删除当前的排行榜投影，避免后续按 Session 重新聚合时成绩复活。
  * CLEAR_ALL：清空全部模式；CLEAR_MODE：按模式；CLEAR_USER：按用户。
- * 事务内：先计数 → 删除 → 写 LeaderboardAdminLog。
+ * 事务内：先排除源 Session → 删除投影 → 写 LeaderboardAdminLog。
  */
 export async function clearWantListenAdminLeaderboard(input: {
   adminId: string
@@ -227,7 +239,15 @@ export async function clearWantListenAdminLeaderboard(input: {
     if (mode) where.mode = mode
     if (targetUserId) where.userId = targetUserId
 
+    const sessionWhere: Prisma.WantListenSessionWhereInput = {}
+    if (mode) sessionWhere.mode = mode
+    if (targetUserId) sessionWhere.userId = targetUserId
+
     const beforeCount = await tx.wantListenLeaderboardEntry.count({ where })
+    const excluded = await tx.wantListenSession.updateMany({
+      where: sessionWhere,
+      data: { excludedFromLeaderboard: true },
+    })
     const { count } = await tx.wantListenLeaderboardEntry.deleteMany({ where })
     await tx.leaderboardAdminLog.create({
       data: {
@@ -246,6 +266,7 @@ export async function clearWantListenAdminLeaderboard(input: {
       action,
       deletedCount: count,
       beforeCount,
+      excludedSessionCount: excluded.count,
       mode: mode ?? null,
       targetUserId,
     }
@@ -270,7 +291,7 @@ type AdminEntryRow = {
   periodKey: string
   score: number
   correctCount: number
-  maxStreak: number
+  maxStreak: number | null
   totalQuestions: number
   completionTimeMs: number | null
   achievedAt: Date
@@ -285,65 +306,34 @@ export async function listWantListenAdminLeaderboard(input: { mode: unknown; per
   const periodType = parseWantListenPeriod(input.period)
   const period = getWantListenPeriod(periodType)
   const query = String(input.query || '').trim().slice(0, 80)
-  const numericQuery = /^\d+$/.test(query) ? Number(query) : null
-  const rows = await prisma.wantListenLeaderboardEntry.findMany({
-    where: {
-      mode,
-      periodType,
-      periodKey: period.periodKey,
-      ...(query
-        ? {
-          User: {
-            OR: [
-              { uid: numericQuery ?? -1 },
-              { nickname: { contains: query } },
-              { username: { contains: query } },
-            ],
-          },
-        }
-        : {}),
-    },
-    orderBy: [
-      { score: 'desc' },
-      { correctCount: 'desc' },
-      { maxStreak: 'desc' },
-      { completionTimeMs: 'asc' },
-      { achievedAt: 'asc' },
-      { id: 'asc' },
-    ],
-    take: 500,
-    include: {
-      User: {
-        select: {
-          id: true,
-          uid: true,
-          nickname: true,
-          avatarUrl: true,
-          nicknameModerationStatus: true,
-          Profile: { select: { displayName: true, avatarUrl: true, displayNameModerationStatus: true } },
-        },
-      },
-      WantListenSession: { select: { id: true, status: true } },
-    },
+  const rankedRows = await getWantListenLeaderboardSourceRows({
+    mode,
+    periodKey: period.periodKey,
+    start: period.start,
+    endExclusive: period.endExclusive,
+    query,
+    limit: 500,
   })
 
-  const serialized: AdminEntryRow[] = rows.map((row) => ({
-    id: row.id,
-    userId: row.userId,
-    uid: row.User.uid,
-    displayName: getPublicUserDisplayName(row.User),
-    mode: row.mode,
-    periodType: row.periodType,
-    periodKey: row.periodKey,
-    score: row.score,
-    correctCount: row.correctCount,
-    maxStreak: row.maxStreak,
-    totalQuestions: row.totalQuestions,
-    completionTimeMs: row.completionTimeMs,
-    achievedAt: row.achievedAt,
-    sessionId: row.WantListenSession?.id ?? null,
-    sessionStatus: row.WantListenSession?.status ?? null,
-  }))
+  const serialized: AdminEntryRow[] = rankedRows
+    .filter((item) => item.rank <= 500)
+    .map(({ row }) => ({
+      id: row.id,
+      userId: row.userId,
+      uid: row.User.uid,
+      displayName: getPublicUserDisplayName(row.User),
+      mode: row.mode,
+      periodType,
+      periodKey: period.periodKey,
+      score: row.score,
+      correctCount: row.correctCount,
+      maxStreak: row.maxStreak,
+      totalQuestions: row.totalQuestions,
+      completionTimeMs: row.completionTimeMs,
+      achievedAt: row.achievedAt,
+      sessionId: row.id,
+      sessionStatus: 'COMPLETED',
+    }))
 
   return { mode, periodType, periodKey: period.periodKey, rows: serialized }
 }
@@ -596,14 +586,20 @@ async function recoverWantListenSession(
     }
   }
 
-  if (session.status !== 'COMPLETED') {
+  if (session.status !== 'COMPLETED' || session.excludedFromLeaderboard) {
     await tx.wantListenSession.update({
       where: { id: session.id },
       data: {
-        status: 'COMPLETED',
-        completedAt: playedAt,
-        completionTimeMs: Math.max(0, playedAt.getTime() - session.startedAt.getTime()),
-        activeKey: null,
+        ...(session.status !== 'COMPLETED'
+          ? {
+            status: 'COMPLETED',
+            completedAt: playedAt,
+            completionTimeMs: Math.max(0, playedAt.getTime() - session.startedAt.getTime()),
+            activeKey: null,
+          }
+          : {}),
+        // 只有管理员明确执行恢复时，才解除之前的排行榜排除状态。
+        excludedFromLeaderboard: false,
       },
     })
   }
@@ -746,6 +742,8 @@ async function adjustWantListenManual(
         completedAt: playedAt,
         completionTimeMs: baseSession.completionTimeMs ?? Math.max(0, playedAt.getTime() - baseSession.startedAt.getTime()),
         activeKey: null,
+        // 人工补题是明确的管理员恢复/补录操作，允许该 Session 重新参与排行榜。
+        excludedFromLeaderboard: false,
       },
     })
     sourceSessionId = baseSession.id

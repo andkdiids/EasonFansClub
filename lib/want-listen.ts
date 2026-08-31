@@ -805,7 +805,7 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
     }
 
     if (isFinal && !assessment.suspicious) {
-      await updateWantListenStats(database, session, current.id, isCorrect, current.hintLevel, finalScore, finalCorrectCount)
+      await updateWantListenStats(database, updated, '', false, 1, finalScore, finalCorrectCount)
       await recordWantListenLeaderboard(session.id, database)
     }
     return { duplicate: false, sessionId: updated.id, questionId: current.id, finalized: isFinal }
@@ -899,16 +899,24 @@ export async function finishWantListenSession(userId: string, sessionId: string,
     if (active.status !== 'IN_PROGRESS') return { duplicate: true, finalized: active.status === 'COMPLETED' }
 
     const finishedAt = new Date()
-    const updated = await database.wantListenSession.update({
-      where: { id: active.id },
+    const claimed = await database.wantListenSession.updateMany({
+      where: { id: active.id, userId, status: 'IN_PROGRESS' },
       data: {
         status: 'COMPLETED',
         completedAt: finishedAt,
         completionTimeMs: Math.max(0, finishedAt.getTime() - active.startedAt.getTime()),
         activeKey: null,
       },
+    })
+    if (claimed.count !== 1) {
+      const latest = await database.wantListenSession.findFirst({ where: { id: active.id, userId }, select: { status: true } })
+      return { duplicate: true, finalized: latest?.status === 'COMPLETED' }
+    }
+    const updated = await database.wantListenSession.findFirst({
+      where: { id: active.id, userId },
       include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } },
     })
+    if (!updated) throw sessionNotFound()
 
     // 反作弊评估：基于服务端记录的全部已答耗时
     const answeredLatencies = updated.WantListenSessionQuestion

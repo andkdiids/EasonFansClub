@@ -284,6 +284,16 @@ export function LikeAvatars({
                 ))}
               </ul>
             )}
+            {avatarOnly && !isLoading && !loadError && nextCursor ? (
+              <button
+                type="button"
+                onClick={() => void loadLikersPage(nextCursor)}
+                className="mt-2 min-h-8 px-1 text-xs font-black text-brand-700"
+                data-like-avatar-load-more="true"
+              >
+                加载更多点赞用户
+              </button>
+            ) : null}
             {avatarOnly && isLoading ? <p className="px-1 py-1 text-xs font-bold text-slate-400">加载中…</p> : null}
             {avatarOnly && !isLoading && !loadError && !displayLikers.length ? <p className="px-1 py-1 text-xs font-bold text-slate-400">暂无点赞用户</p> : null}
           </div>

@@ -177,7 +177,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2" placeholder="请输入帖子标题" />
         {errors.title ? <p className="mt-2 text-sm font-bold text-red-600">{errors.title}</p> : null}
       </label>
-      <label className="block">
+      <div className="block">
         <span className="text-sm font-black text-slate-700">正文</span>
         <div className="mt-2">
           {draftReady ? (
@@ -193,7 +193,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
           ) : <div className="rich-text-editor-loading" aria-live="polite">正在恢复草稿…</div>}
         </div>
         {errors.content ? <p className="mt-2 text-sm font-bold text-red-600">{errors.content}</p> : null}
-      </label>
+      </div>
       {pendingSticker ? (
         <div className="mb-3 flex items-center gap-3 rounded-xl border border-brand-100 bg-sky-50 px-3 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}

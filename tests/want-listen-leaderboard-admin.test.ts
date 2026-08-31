@@ -8,7 +8,7 @@ import { getWantListenPeriod, isWantListenScoreBetter, parseWantListenPeriod, Wa
 // 覆盖需求 一~八：
 //   - 管理员总览 / 清空全部 / 按模式 / 按用户
 //   - 普通用户 403（requireAdmin 服务端校验）
-//   - 只删 WantListenLeaderboardEntry，事务 + 计数 + 操作日志
+//   - 排除源 Session + 删除 WantListenLeaderboardEntry，事务 + 计数 + 操作日志
 //   - 不提供直接 DELETE API
 //   - 前台二次确认文案
 //   - LeaderboardAdminLog 模型与 migration 一致
@@ -37,11 +37,14 @@ const permissions = source('lib/admin-permission-config.ts')
 const schema = source('prisma/schema.prisma')
 const migration = source('prisma/migrations/20260819160000_add_leaderboard_admin_log/migration.sql')
 
-test('1/管理员可清空全部排行榜（空条件 + 事务 + 计数 + 日志）', () => {
+test('1/管理员可清空全部排行榜（空条件 + 排除源 Session + 事务 + 计数 + 日志）', () => {
   assert.match(service, /prisma\.\$transaction/)
   // 删除前计数
   assert.match(service, /beforeCount = await tx\.wantListenLeaderboardEntry\.count/)
-  // 只删除排行榜表
+  // 先排除源 Session，避免后续按 Session 重新聚合时成绩复活
+  assert.match(service, /tx\.wantListenSession\.updateMany/)
+  assert.match(service, /excludedFromLeaderboard: true/)
+  // 再删除排行榜投影
   assert.match(service, /tx\.wantListenLeaderboardEntry\.deleteMany/)
   // 写操作日志
   assert.match(service, /tx\.leaderboardAdminLog\.create/)
@@ -73,9 +76,10 @@ test('4/普通用户无法调用：路由服务端 requireAdmin 校验 + 来源�
   assert.match(page, /requireAdminPage\([^,]+, 'entertainment_manage'\)/)
 })
 
-test('5/删除只影响排行榜：服务不触碰会话/统计/用户/反作弊/成就', () => {
+test('5/清空保留会话证据：不删除会话/统计/用户/反作弊/成就，但会排除源 Session', () => {
   assert.doesNotMatch(service, /wantListenSession\.delete|wantListenSessionQuestion\.delete|wantListenStats\.delete|user\.delete|gameAntiCheatLog\.delete|userAchievement\.delete/)
-  assert.match(service, /仅 WantListenLeaderboardEntry/)
+  assert.match(service, /保留 Session 历史/)
+  assert.match(service, /excludedFromLeaderboard: true/)
 })
 
 test('6/DELETE 精确删除成绩接口存在且受管理员鉴权保护，POST 仍统一走 action', () => {

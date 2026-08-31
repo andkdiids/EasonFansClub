@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ActivityDetailView } from '@/components/activities/ActivityDetailView'
 import { ActivityImageUploader, uploadActivityImage, type ActivityImageSelection, type ActivityImageUploadStatus } from '@/components/activities/ActivityImageUploader'
 import { ActivityStatusBadge } from '@/components/activities/ActivityCard'
+import { ActivityLotteryEntry } from '@/components/activities/ActivityLotteryEntry'
 import { ActivityRegistrationFormDesigner, type ActivityQuestionDraft } from '@/components/activities/ActivityRegistrationFormDesigner'
 import { ActivityRegistrationManager } from '@/components/activities/ActivityRegistrationManager'
 import { activityDisplayStatusLabels, activityTypeLabels, activityTypeValues, getActivityDisplayStatus, type ActivityStatusValue, type ActivityTypeValue, type ActivityVerificationModeValue, type ActivityView } from '@/lib/activity'
@@ -54,6 +55,12 @@ const emptySelection: ActivityImageSelection = { file: null, removed: false }
 
 function dateInput(value: string | null) {
   return value ? formatBeijingDateTimeInput(new Date(value)) : ''
+}
+
+function dateToBeijingIso(value: string) {
+  if (!value) return null
+  const date = new Date(`${value}:00+08:00`)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
 function formFromActivity(activity: ActivityView): ActivityForm {
@@ -217,15 +224,15 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
     setError('')
   }
 
-  async function save(desiredStatus: ActivityStatusValue, event?: FormEvent<HTMLFormElement>) {
+  async function save(desiredStatus: ActivityStatusValue, event?: FormEvent<HTMLFormElement>, options: Readonly<{ keepEditing?: boolean }> = {}): Promise<ActivityView | null> {
     event?.preventDefault()
-    if (savingRef.current) return
+    if (savingRef.current) return null
     if (desiredStatus === 'PUBLISHED') {
       const validationMessage = publishValidationMessage(form)
       if (validationMessage) {
         setError(validationMessage)
         setMessage('')
-        return
+        return null
       }
     }
     savingRef.current = true
@@ -261,16 +268,28 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
         method: editingId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload),
       })
       const data = await response.json().catch(() => null)
-      if (!response.ok) { setError(data?.message || '保存活动失败'); return }
+      if (!response.ok) { setError(data?.message || '保存活动失败'); return null }
       const nextActivity = data?.activity as ActivityView
-      if (!nextActivity) { setError('保存结果无效，请刷新后重试'); return }
+      if (!nextActivity) { setError('保存结果无效，请刷新后重试'); return null }
       setActivities((current) => editingId ? current.map((item) => item.id === editingId ? nextActivity : item) : [nextActivity, ...current])
-      setMessage(desiredStatus === 'PUBLISHED' ? '活动已保存并发布' : editingId ? '活动已保存' : '草稿已保存')
-      reset()
+      setMessage(options.keepEditing ? '活动草稿已保存，现在可以添加抽奖' : desiredStatus === 'PUBLISHED' ? '活动已保存并发布' : editingId ? '活动已保存' : '草稿已保存')
+      if (options.keepEditing) {
+        setEditingId(nextActivity.id)
+        setForm(formFromActivity(nextActivity))
+        setCoverSelection(emptySelection)
+        setBannerSelection(emptySelection)
+        setCoverStatus('idle')
+        setBannerStatus('idle')
+        setPreviewOpen(false)
+      } else {
+        reset()
+      }
+      return nextActivity
     } catch (saveError) {
       if (coverSelection.file) setCoverStatus('error')
       if (bannerSelection.file) setBannerStatus('error')
       setError(saveError instanceof Error ? saveError.message : '保存活动失败，请稍后重试')
+      return null
     } finally {
       savingRef.current = false
       setSaving(false)
@@ -368,6 +387,14 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">核销后隐藏奖励（可选）<select value={rewardBadgeId} onChange={(event) => setRewardBadgeId(event.target.value)} disabled={loadingActivityConfig || form.verificationMode === 'NONE'} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="">不设置活动勋章</option>{badgeOptions.map((badge) => <option key={badge.id} value={badge.id}>{badge.name} · {badge.code}</option>)}</select></label>
         </div>
         <div className="mt-4"><ActivityRegistrationFormDesigner questions={registrationQuestions} onChange={setRegistrationQuestions} /></div>
+        <div className="mt-4"><ActivityLotteryEntry activityId={editingId} activityTitle={form.title || '未命名活动'} registrationEndAt={dateToBeijingIso(form.registrationEndAt)} disabled={saving} onPrepareActivity={async () => {
+          if (!form.registrationEndAt.trim()) {
+            setMessage('')
+            setError('请先设置报名结束时间，再添加自动抽奖。')
+            return false
+          }
+          return Boolean(await save('DRAFT', undefined, { keepEditing: true }))
+        }} /></div>
         <div className="mt-4 flex flex-wrap items-center gap-5 rounded-xl bg-sky-50/70 p-3 dark:bg-slate-800/70">
           <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.isFeatured} onChange={(event) => changeForm('isFeatured', event.target.checked)} />精选</label>
           <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.isPinned} onChange={(event) => changeForm('isPinned', event.target.checked)} />置顶</label>

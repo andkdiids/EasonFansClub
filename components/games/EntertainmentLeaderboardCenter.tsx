@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
@@ -39,10 +39,6 @@ type Board = {
   unavailableReason?: string
 }
 
-function cacheKey(gameKey: string, mode: string | null, period: string | null) {
-  return `${gameKey}:${mode || ''}:${period || ''}`
-}
-
 export function EntertainmentLeaderboardCenter() {
   const defaultGame = ENTERTAINMENT_LEADERBOARDS[0]
   const [gameKey, setGameKey] = useState<EntertainmentLeaderboardGameKey>(defaultGame.gameKey)
@@ -52,19 +48,12 @@ export function EntertainmentLeaderboardCenter() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
-  const cache = useRef<Map<string, Board>>(new Map())
   const selectedGame = useMemo(() => getEntertainmentLeaderboardDefinition(gameKey) || defaultGame, [defaultGame, gameKey])
 
   useEffect(() => {
-    const key = cacheKey(gameKey, mode, period)
-    const cached = cache.current.get(key)
     let cancelled = false
     setError('')
-    setBoard(cached || null)
-    if (cached) {
-      setLoading(false)
-      return () => { cancelled = true }
-    }
+    setBoard(null)
 
     setLoading(true)
     const params = new URLSearchParams({ game: gameKey })
@@ -82,7 +71,6 @@ export function EntertainmentLeaderboardCenter() {
       })
       .then((nextBoard) => {
         if (cancelled) return
-        cache.current.set(key, nextBoard)
         setBoard(nextBoard)
       })
       .catch((reason: unknown) => {

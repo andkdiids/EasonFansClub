@@ -128,7 +128,7 @@ function wantListenRows(rows: Awaited<ReturnType<typeof getWantListenLeaderboard
     primaryLabel: '分数',
     secondary: [
       { value: row.correctCount, label: '答对' },
-      { value: row.maxStreak, label: '最高连击' },
+      { value: row.maxStreak ?? '—', label: '最高连击' },
     ],
     achievedAt: row.achievedAt,
   }))
