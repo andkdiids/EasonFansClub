@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   activityRegistrationSuccessNotificationKey,
+  activityRegistrationVerificationWhere,
+  activityVerificationTokenFromInput,
   getActivityRegistrationState,
   parseRegistrationQuestions,
   validateRegistrationAnswers,
@@ -310,4 +312,37 @@ test('活动物料历史订单的兑换时间优先继承订单关联活动', ()
   assert.match(material, /function materialOrderSchedule\(order: Pick<MaterialOrderWithRelations, 'material' \| 'linkedActivity'>\)/)
   assert.match(material, /if \(order\.linkedActivity\)[\s\S]*activityMaterialSchedule\(order\.linkedActivity\.startsAt, order\.linkedActivity\.endsAt\)/)
   assert.match(material, /const schedule = materialOrderSchedule\(order\)/)
+})
+
+test('活动核销码和活动二维码使用统一的精确解析与活动绑定条件', () => {
+  const code = ' \n ecfc-59939b58f48a\r\n '
+  assert.equal(activityVerificationTokenFromInput(code), 'ECFC-59939B58F48A')
+
+  const activityToken = 'ActivityQrToken-AbC123'
+  assert.equal(
+    activityVerificationTokenFromInput(`https://ecfc.fans/admin/activities/activity-a/verify?token=${encodeURIComponent(activityToken)}`),
+    activityToken,
+  )
+
+  const where = activityRegistrationVerificationWhere('activity-a', code)
+  const serialized = JSON.stringify(where)
+  assert.match(serialized, /activity-a/)
+  assert.match(serialized, /verificationToken/)
+  assert.match(serialized, /redeemCode/)
+  assert.match(serialized, /ECFC-59939B58F48A/)
+  assert.match(serialized, /EFC-59939B58F48A/)
+  assert.match(serialized, /linkedActivityId/)
+})
+
+test('统一活动核销查询由服务端直接按令牌解析，手动输入和扫码不依赖分页列表', () => {
+  const redemption = read('lib/activity-redemption.ts')
+  const manager = read('components/activities/ActivityRegistrationManager.tsx')
+  const lookupRoute = read('app/api/admin/activities/[activityId]/verify/route.ts')
+  assert.match(redemption, /export async function resolveActivityVerificationToken/)
+  assert.match(redemption, /activityRegistrationVerificationWhere\(activityId, token\)/)
+  assert.match(redemption, /resolveActivityVerificationToken\(tx, activityId, token\)/)
+  assert.match(lookupRoute, /getActivityRedemptionLookup\(activityId, token\)/)
+  assert.match(manager, /void verifyToken\(token\)/)
+  assert.match(manager, /onScan=\{\(value\) => void verifyToken\(value\)\}/)
+  assert.doesNotMatch(manager, /registrations\.find\(/)
 })

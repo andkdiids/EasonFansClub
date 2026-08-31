@@ -9,6 +9,7 @@ import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { generateMaterialRedeemCode } from '@/lib/material-redemption-code'
+import { parseMaterialRedeemCode } from '@/lib/material-redemption-domain'
 import type { ActivityRegistrationQuestionType, ActivityRegistrationQuestionView, ActivityRegistrationState, ActivityRegistrationView } from '@/lib/activity-registration-shared'
 
 export {
@@ -416,13 +417,41 @@ export async function createActivityMaterialOrderInTransaction(tx: Prisma.Transa
 export type ActivityVerificationMethodValue = 'MANUAL' | 'QR'
 
 export function activityVerificationTokenFromInput(value: string) {
-  const raw = value.trim()
+  const raw = value.trim().replace(/\s+/g, '')
   if (!raw) return ''
+  let candidate = raw
   try {
     const parsed = new URL(raw)
-    return parsed.searchParams.get('token')?.trim() || parsed.pathname.split('/').filter(Boolean).pop() || ''
+    candidate = parsed.searchParams.get('token')?.trim() || parsed.pathname.split('/').filter(Boolean).pop() || ''
   } catch {
-    return raw
+    candidate = raw
+  }
+  const materialCode = parseMaterialRedeemCode(candidate)
+  return materialCode?.prefix ? materialCode.normalized : candidate
+}
+
+/**
+ * Activity verification accepts either the activity QR token or the
+ * activity-linked material identifier. Keep the matching candidates in one
+ * place so lookup and the later redemption transaction cannot diverge.
+ */
+export function activityRegistrationVerificationWhere(activityId: string, value: string): Prisma.ActivityRegistrationWhereInput {
+  const token = activityVerificationTokenFromInput(value)
+  const materialCode = parseMaterialRedeemCode(token)
+  const linkedMaterialCandidates: Prisma.ActivityRegistrationWhereInput[] = [
+    { LinkedMaterialRedemption: { is: { linkedActivityId: activityId, redeemToken: token } } },
+  ]
+  if (materialCode?.prefix) {
+    linkedMaterialCandidates.push({
+      LinkedMaterialRedemption: { is: { linkedActivityId: activityId, redeemCode: { in: materialCode.candidates } } },
+    })
+  }
+  return {
+    activityId,
+    OR: [
+      { verificationToken: token },
+      ...linkedMaterialCandidates,
+    ],
   }
 }
 
@@ -493,10 +522,7 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
   const token = input.method === 'QR' ? activityVerificationTokenFromInput(input.token || '') : ''
   if (input.method === 'QR' && !token) throw new ActivityVerificationError('INVALID_TOKEN', '二维码核销令牌无效', 400)
   const registration = await tx.activityRegistration.findFirst({
-    where: {
-      activityId: input.activityId,
-      ...(input.method === 'QR' ? { verificationToken: token } : { id: input.registrationId || '' }),
-    },
+    where: input.method === 'QR' ? activityRegistrationVerificationWhere(input.activityId, token) : { activityId: input.activityId, id: input.registrationId || '' },
     select: verificationRegistrationSelect,
   })
   if (!registration) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '找不到对应的有效报名记录', 404)

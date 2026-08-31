@@ -1,6 +1,6 @@
-import { Prisma } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
-import { activityVerificationTokenFromInput, redeemActivityLinkedMaterialInTransaction, verifyActivityRegistrationInTransaction } from '@/lib/activity-registration'
+import { activityRegistrationVerificationWhere, activityVerificationTokenFromInput, redeemActivityLinkedMaterialInTransaction, verifyActivityRegistrationInTransaction } from '@/lib/activity-registration'
 import { getActivityLotteryWinnerRedemptionState, type ActivityLotteryCheckInSnapshot, type ActivityLotteryWinnerRedemptionState } from '@/lib/activity-lottery'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -58,10 +58,20 @@ const lookupRegistrationSelect = {
 
 type LookupRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof lookupRegistrationSelect }>
 
+type ActivityRegistrationLookupDb = Pick<PrismaClient, 'activityRegistration'> | Pick<Prisma.TransactionClient, 'activityRegistration'>
+
 function tokenFromInput(value: string) {
   const token = activityVerificationTokenFromInput(value)
-  if (!token) throw new ActivityRedemptionError('INVALID_TOKEN', '二维码核销令牌无效', 400)
+  if (!token) throw new ActivityRedemptionError('INVALID_TOKEN', '活动核销码或二维码令牌无效', 400)
   return token
+}
+
+export async function resolveActivityVerificationToken(db: ActivityRegistrationLookupDb, activityId: string, rawToken: string) {
+  const token = tokenFromInput(rawToken)
+  const registration = await db.activityRegistration.findFirst({ where: activityRegistrationVerificationWhere(activityId, token), select: lookupRegistrationSelect })
+  if (!registration) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '找不到对应的有效活动报名记录', 404)
+  if (registration.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
+  return { token, registration }
 }
 
 function materialEntitlement(registration: LookupRegistration, now: Date): ActivityRedemptionEntitlement | null {
@@ -83,9 +93,7 @@ function materialEntitlement(registration: LookupRegistration, now: Date): Activ
 }
 
 async function loadLookupRows(activityId: string, token: string) {
-  const registration = await prisma.activityRegistration.findFirst({ where: { activityId, verificationToken: token }, select: lookupRegistrationSelect })
-  if (!registration) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '找不到对应的有效活动报名记录', 404)
-  if (registration.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
+  const { registration } = await resolveActivityVerificationToken(prisma, activityId, token)
   const winners = await prisma.lotteryEntry.findMany({
     where: { userId: registration.userId, Lottery: { activityId, status: 'DRAWN' } },
     orderBy: [{ wonAt: 'asc' }, { id: 'asc' }],
@@ -115,8 +123,7 @@ function lotteryWinnerSubtitle(state: ActivityLotteryWinnerRedemptionState) {
 }
 
 export async function getActivityRedemptionLookup(activityId: string, rawToken: string): Promise<ActivityRedemptionLookupView> {
-  const token = tokenFromInput(rawToken)
-  const { registration, winners } = await loadLookupRows(activityId, token)
+  const { registration, winners } = await loadLookupRows(activityId, rawToken)
   const now = new Date()
   const entitlements: ActivityRedemptionEntitlement[] = [
     {
@@ -178,8 +185,7 @@ function assertSelection(value: unknown): ActivityRedemptionSelection[] {
 }
 
 async function lockRegistration(tx: Prisma.TransactionClient, activityId: string, token: string) {
-  const registration = await tx.activityRegistration.findFirst({ where: { activityId, verificationToken: token }, select: { id: true, status: true, userId: true, linkedMaterialRedemptionId: true } })
-  if (!registration) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '找不到对应的有效活动报名记录', 404)
+  const { registration } = await resolveActivityVerificationToken(tx, activityId, token)
   await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registration.id} FOR UPDATE`
   const current = await tx.activityRegistration.findUnique({ where: { id: registration.id }, select: { id: true, status: true, userId: true, verifiedAt: true, checkedInAt: true, checkInSource: true, linkedMaterialRedemptionId: true, Activity: { select: { endsAt: true } } } })
   if (!current) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)

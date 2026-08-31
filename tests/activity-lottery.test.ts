@@ -9,6 +9,8 @@ import {
   hasValidActivityLotteryCheckIn,
   normalizeActivityLotteryInput,
   secureShuffle,
+  splitActivityLotteryResultRecipients,
+  validateActivityLotteryDrawTiming,
   validateLotterySchedule,
 } from '@/lib/activity-lottery'
 import { ACTIVITY_LOTTERY_TIER_NAMES, MAX_ACTIVITY_LOTTERY_PRIZES, activityLotteryTierName } from '@/lib/activity-lottery-levels'
@@ -24,6 +26,19 @@ test('开奖时间只要求早于活动结束时间，不受报名截止时间�
   assert.match(validateLotterySchedule(activityEndAt, activityEndAt) || '', /开奖时间必须早于活动结束时间/)
   assert.match(validateLotterySchedule(activityEndAt, new Date('2026-09-13T13:00:01.000Z')) || '', /开奖时间必须早于活动结束时间/)
   assert.match(validateLotterySchedule(null, new Date('2026-09-13T12:00:00.000Z')) || '', /先设置活动结束时间/)
+})
+
+test('自动开奖和管理员立即开奖使用不同的时间触发规则', () => {
+  const drawAt = new Date('2026-09-13T12:00:00.000Z')
+  const activityEndAt = new Date('2026-09-13T13:00:00.000Z')
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'SCHEDULED', now: new Date('2026-09-13T11:59:59.000Z'), drawAt, activityEndAt })?.code, 'LOTTERY_NOT_DUE')
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'SCHEDULED', now: drawAt, drawAt, activityEndAt }), null)
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'SCHEDULED', now: new Date('2026-09-13T12:30:00.000Z'), drawAt, activityEndAt }), null)
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'ADMIN_MANUAL', now: new Date('2026-09-13T11:00:00.000Z'), drawAt, activityEndAt }), null)
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'ADMIN_MANUAL', now: drawAt, drawAt, activityEndAt }), null)
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'ADMIN_MANUAL', now: new Date('2026-09-13T12:30:00.000Z'), drawAt, activityEndAt }), null)
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'ADMIN_MANUAL', now: activityEndAt, drawAt, activityEndAt })?.code, 'LOTTERY_ACTIVITY_ENDED')
+  assert.equal(validateActivityLotteryDrawTiming({ trigger: 'ADMIN_MANUAL', now: new Date('2026-09-13T13:00:01.000Z'), drawAt, activityEndAt })?.code, 'LOTTERY_ACTIVITY_ENDED')
 })
 
 test('中奖资格与兑奖资格分离，真实核销和活动结束自动核销结果不同', () => {
@@ -113,16 +128,41 @@ test('开奖和报名取消使用相同的活动锁顺序，开奖后取消被�
   assert.match(cancel, /isActivityRegistrationCancellationOpen\(activity, now\)/)
 })
 
-test('活动开奖只允许服务端调度触发，结果落库并且重复执行幂等', () => {
+test('活动开奖区分调度与管理员触发，结果落库并且重复执行幂等', () => {
   const lottery = read('lib/activity-lottery.ts')
   const server = read('server.ts')
   const dailyJob = read('app/api/internal/daily-jobs/activity-auto-checkin/route.ts')
+  const adminRoute = read('app/api/admin/activities/[activityId]/lotteries/[lotteryId]/draw/route.ts')
   assert.match(lottery, /tx\.lotteryEntry\.create\(/)
   assert.match(lottery, /status: 'DRAWN'/)
   assert.match(lottery, /if \(lottery\.status === 'DRAWN'\)/)
+  assert.match(lottery, /export type ActivityLotteryDrawTrigger = 'SCHEDULED' \| 'ADMIN_MANUAL'/)
+  assert.match(lottery, /trigger === 'SCHEDULED'/)
+  assert.match(lottery, /trigger: 'SCHEDULED'/)
+  assert.match(lottery, /LOTTERY_NO_ELIGIBLE_REGISTRATIONS/)
+  assert.match(lottery, /请先配置至少一个有效奖项/)
+  assert.match(adminRoute, /trigger: 'ADMIN_MANUAL'/)
   assert.match(lottery, /drawDueActivityLotteries/)
   assert.match(server, /drawDueActivityLotteries/)
   assert.match(dailyJob, /drawDueActivityLotteries/)
+})
+
+test('管理员立即开奖弹窗明确锁定名单，服务端成功后才刷新', () => {
+  const manager = read('components/activities/ActivityLotteryManager.tsx')
+  const adminRoute = read('app/api/admin/activities/[activityId]/lotteries/[lotteryId]/draw/route.ts')
+  const audit = read('lib/admin-audit.ts')
+  assert.match(manager, /drawConfirmation/)
+  assert.match(manager, /确认立即开奖\？/)
+  assert.match(manager, /当前计划开奖时间/)
+  assert.match(manager, /当前有效报名/)
+  assert.match(manager, /中奖名额/)
+  assert.match(manager, /之后新增报名者不会参与本轮抽奖/)
+  assert.match(manager, /!activityEnded && !activityCancelled/)
+  assert.match(manager, /await load\(\)/)
+  assert.match(manager, /lotteryScheduleLabel/)
+  assert.match(adminRoute, /requireAdmin\('activity_manage'\)/)
+  assert.match(audit, /ACTIVITY_LOTTERY_MANUAL_DRAW: 'LOTTERY_MANUAL_DRAW'/)
+  assert.match(audit, /LOTTERY_MANUAL_DRAW: '管理员立即开奖'/)
 })
 
 test('管理员扫码接口只查询，确认接口才执行选中权益核销', () => {
@@ -212,4 +252,24 @@ test('中奖通知提示使用活动现有核销码，不携带中奖码', () =>
   const lottery = read('lib/activity-lottery.ts')
   assert.match(lottery, /请使用该活动现有核销码领取/)
   assert.doesNotMatch(lottery, /中奖二维码|中奖码|领奖二维码/)
+})
+
+test('开奖结果通知严格使用候选快照，中奖与未中奖人数互斥且总数一致', () => {
+  const registrations = Array.from({ length: 109 }, (_, index) => ({ id: `registration-${index + 1}`, userId: `user-${index + 1}` }))
+  const winnerRegistrationIds = new Set(registrations.slice(0, 40).map((registration) => registration.id))
+  const recipients = splitActivityLotteryResultRecipients(registrations, winnerRegistrationIds)
+  assert.equal(recipients.winners.length, 40)
+  assert.equal(recipients.nonWinners.length, 69)
+  assert.equal(recipients.winners.length + recipients.nonWinners.length, 109)
+  assert.equal(new Set([...recipients.winners, ...recipients.nonWinners].map((registration) => registration.userId)).size, 109)
+
+  const lottery = read('lib/activity-lottery.ts')
+  assert.match(lottery, /createManyNotificationsWithDb/)
+  assert.match(lottery, /safeNotificationWrite/)
+  assert.match(lottery, /activity-lottery-result:/)
+  assert.match(lottery, /skipDuplicates: true/)
+  assert.match(lottery, /本次未中奖/)
+  assert.doesNotMatch(lottery, /activity-lottery-winner:/)
+  assert.ok(lottery.indexOf('const registrations = await tx.activityRegistration.findMany(') < lottery.indexOf('const resultNotifications ='))
+  assert.ok(lottery.lastIndexOf('safeNotificationWrite(') < lottery.lastIndexOf("status: 'DRAWN'"))
 })

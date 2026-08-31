@@ -16,7 +16,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   const { activityId, lotteryId } = await params
   if (!idPattern.test(activityId) || !idPattern.test(lotteryId)) return NextResponse.json({ ok: false, message: '抽奖不存在' }, { status: 404, headers: privateHeaders })
   try {
-    const result = await drawActivityLottery(lotteryId, { actorId: guard.user.id, expectedActivityId: activityId })
+    const result = await drawActivityLottery(lotteryId, { trigger: 'ADMIN_MANUAL', actorId: guard.user.id, expectedActivityId: activityId })
     revalidatePath(`/activities/${activityId}`)
     return NextResponse.json({ ok: true, ...result }, { headers: privateHeaders })
   } catch (error) {

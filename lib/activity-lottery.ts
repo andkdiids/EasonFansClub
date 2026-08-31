@@ -4,7 +4,8 @@ import { parseActivityDateInput } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/activity-lottery-levels'
 import { storedActivityImageUrl } from '@/lib/activity-image-url'
-import { createNotificationWithDb } from '@/lib/notification-write'
+import { createManyNotificationsWithDb } from '@/lib/notification-write'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
@@ -19,6 +20,8 @@ export type ActivityLotteryErrorCode =
   | 'ACTIVITY_END_REQUIRED'
   | 'INVALID_DRAW_AT'
   | 'LOTTERY_NOT_DUE'
+  | 'LOTTERY_ACTIVITY_ENDED'
+  | 'LOTTERY_NO_ELIGIBLE_REGISTRATIONS'
   | 'LOTTERY_ALREADY_DRAWN'
   | 'LOTTERY_CANCELLED'
   | 'LOTTERY_LOCKED'
@@ -81,6 +84,28 @@ export function validateLotterySchedule(activityEndAt: Date | null | undefined, 
   if (!drawAt || Number.isNaN(drawAt.getTime())) return '请设置有效的开奖时间。'
   if (!activityEndAt || Number.isNaN(activityEndAt.getTime())) return '请先设置活动结束时间，再创建抽奖。'
   if (drawAt.getTime() >= activityEndAt.getTime()) return '开奖时间必须早于活动结束时间。'
+  return null
+}
+
+export type ActivityLotteryDrawTrigger = 'SCHEDULED' | 'ADMIN_MANUAL'
+
+export type ActivityLotteryDrawTimingFailure = {
+  code: 'ACTIVITY_END_REQUIRED' | 'INVALID_DRAW_AT' | 'LOTTERY_NOT_DUE' | 'LOTTERY_ACTIVITY_ENDED'
+  message: string
+}
+
+export function validateActivityLotteryDrawTiming(input: {
+  trigger: ActivityLotteryDrawTrigger
+  now: Date
+  drawAt: Date | null | undefined
+  activityEndAt: Date | null | undefined
+}): ActivityLotteryDrawTimingFailure | null {
+  if (!input.drawAt || Number.isNaN(input.drawAt.getTime())) return { code: 'INVALID_DRAW_AT', message: '开奖时间无效，无法开奖。' }
+  if (!input.activityEndAt || Number.isNaN(input.activityEndAt.getTime())) return { code: 'ACTIVITY_END_REQUIRED', message: '活动结束时间未设置，无法开奖。' }
+  const scheduleError = validateLotterySchedule(input.activityEndAt, input.drawAt)
+  if (scheduleError) return { code: 'INVALID_DRAW_AT', message: scheduleError }
+  if (input.now.getTime() >= input.activityEndAt.getTime()) return { code: 'LOTTERY_ACTIVITY_ENDED', message: '活动已经结束，无法开奖。' }
+  if (input.trigger === 'SCHEDULED' && input.now.getTime() < input.drawAt.getTime()) return { code: 'LOTTERY_NOT_DUE', message: '自动开奖时间尚未到达。' }
   return null
 }
 
@@ -522,7 +547,7 @@ export async function cancelUndrawnActivityLotteriesInTransaction(tx: Prisma.Tra
   return tx.lottery.updateMany({ where: { activityId, status: { in: ['DRAFT', 'SCHEDULED'] } }, data: { status: 'CANCELLED', cancelledAt: now } })
 }
 
-export type DrawOptions = { now?: Date; actorId?: string; expectedActivityId?: string }
+export type DrawOptions = { trigger: ActivityLotteryDrawTrigger; now?: Date; actorId?: string; expectedActivityId?: string }
 
 export type ActivityLotteryDrawResult = {
   status: 'DRAWN' | 'ALREADY_DRAWN' | 'CANCELLED'
@@ -534,7 +559,41 @@ export type ActivityLotteryDrawResult = {
   winners: Array<{ id: string; userId: string; registrationId: string | null; prizeId: string; tierName: string; prizeName: string }>
 }
 
-export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionClient, lotteryId: string, options: DrawOptions = {}): Promise<ActivityLotteryDrawResult> {
+export type ActivityLotteryCandidate = { id: string; userId: string }
+
+export function splitActivityLotteryResultRecipients(
+  registrations: readonly ActivityLotteryCandidate[],
+  winnerRegistrationIds: ReadonlySet<string>,
+) {
+  return {
+    winners: registrations.filter((registration) => winnerRegistrationIds.has(registration.id)),
+    nonWinners: registrations.filter((registration) => !winnerRegistrationIds.has(registration.id)),
+  }
+}
+
+function activityLotteryResultNotificationData(input: {
+  lotteryId: string
+  activityId: string
+  activityTitle: string
+  lotteryTitle: string
+  userId: string
+  winner: ActivityLotteryDrawResult['winners'][number] | null
+}): Prisma.NotificationCreateManyInput {
+  const winner = input.winner
+  return {
+    recipientId: input.userId,
+    actorId: null,
+    type: 'ACTIVITY',
+    title: winner ? '恭喜你中奖了！' : '活动抽奖结果已公布',
+    content: winner
+      ? `恭喜你在「${input.activityTitle}」的「${input.lotteryTitle}」抽奖中获得：${winner.tierName} · ${winner.prizeName}。请使用该活动现有核销码领取。`
+      : `「${input.activityTitle}」的「${input.lotteryTitle}」抽奖结果已公布，很遗憾，本次未中奖，感谢参与。`,
+    link: `/activities/${input.activityId}`,
+    key: `activity-lottery-result:${input.lotteryId}:${input.userId}`,
+  }
+}
+
+export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionClient, lotteryId: string, options: DrawOptions = { trigger: 'SCHEDULED' }): Promise<ActivityLotteryDrawResult> {
   const now = options.now || new Date()
   const initial = await tx.lottery.findUnique({ where: { id: lotteryId }, select: { activityId: true } })
   if (!initial) throw new ActivityLotteryError('LOTTERY_NOT_FOUND', '抽奖不存在', 404)
@@ -573,21 +632,31 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
       winners: entries.filter((entry): entry is typeof entry & { prizeId: string; LotteryPrize: { tierName: string | null; name: string } } => Boolean(entry.prizeId && entry.LotteryPrize)).map((entry) => ({ id: entry.id, userId: entry.userId, registrationId: entry.registrationId, prizeId: entry.prizeId, tierName: entry.LotteryPrize.tierName || '中奖奖项', prizeName: entry.LotteryPrize.name })),
     }
   }
-  if (lottery.status === 'CANCELLED') return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [] }
+  if (lottery.status === 'CANCELLED') {
+    if (options.trigger === 'ADMIN_MANUAL') throw new ActivityLotteryError('LOTTERY_CANCELLED', '抽奖已经取消，无法开奖。', 409)
+    return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [] }
+  }
   if (!lottery.Activity || !lottery.activityId) throw new ActivityLotteryError('INVALID_LOTTERY', '该抽奖未绑定活动', 409)
+  const activityId = lottery.activityId
+  const activityTitle = lottery.Activity.title
   if (lottery.Activity.status === 'CANCELLED') {
+    if (options.trigger === 'ADMIN_MANUAL') throw new ActivityLotteryError('LOTTERY_CANCELLED', '活动已经取消，无法开奖。', 409)
     await tx.lottery.update({ where: { id: lottery.id }, data: { status: 'CANCELLED', cancelledAt: now }, select: { id: true } })
     return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [] }
   }
-  if (!lottery.drawAt || now.getTime() < lottery.drawAt.getTime()) throw new ActivityLotteryError('LOTTERY_NOT_DUE', '开奖时间尚未到达', 409)
-  const scheduleError = validateLotterySchedule(lottery.Activity.endsAt, lottery.drawAt)
-  if (scheduleError) throw new ActivityLotteryError(lottery.Activity.endsAt ? 'INVALID_DRAW_AT' : 'ACTIVITY_END_REQUIRED', scheduleError, 409)
+  if (options.trigger === 'ADMIN_MANUAL' && !options.actorId) throw new ActivityLotteryError('INVALID_LOTTERY', '管理员身份无效，无法立即开奖。', 403)
+  const timingFailure = validateActivityLotteryDrawTiming({ trigger: options.trigger, now, drawAt: lottery.drawAt, activityEndAt: lottery.Activity.endsAt })
+  if (timingFailure) throw new ActivityLotteryError(timingFailure.code, timingFailure.message, 409)
+
+  const prizeSlots = lottery.LotteryPrize.reduce((total, prize) => total + Math.max(0, prize.quantity), 0)
+  if (prizeSlots <= 0) throw new ActivityLotteryError('INVALID_PRIZES', '请先配置至少一个有效奖项。', 409)
 
   const registrations = await tx.activityRegistration.findMany({
     where: { activityId: lottery.activityId, status: 'ACTIVE', User: { status: 'ACTIVE', isDeleted: false } },
     orderBy: [{ registeredAt: 'asc' }, { id: 'asc' }],
     select: { id: true, userId: true },
   })
+  if (!registrations.length) throw new ActivityLotteryError('LOTTERY_NO_ELIGIBLE_REGISTRATIONS', '当前没有有效报名用户，无法开奖。', 409)
   const shuffled = secureShuffle(registrations)
   const winnerRows: Array<{ registration: { id: string; userId: string }; prize: { id: string; tierName: string | null; name: string } }> = []
   let cursor = 0
@@ -615,29 +684,35 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
       select: { id: true },
     })
     persistedWinners.push({ id: entry.id, userId: winner.registration.userId, registrationId: winner.registration.id, prizeId: winner.prize.id, tierName: winner.prize.tierName || '中奖奖项', prizeName: winner.prize.name })
-    const notificationKey = `activity-lottery-winner:${lottery.id}:${winner.registration.userId}`
-    await createNotificationWithDb(tx, {
-      data: {
-        recipientId: winner.registration.userId,
-        actorId: null,
-        type: 'ACTIVITY',
-        title: '恭喜你中奖了！',
-        content: `你在「${lottery.title}」中获得：${winner.prize.tierName || '中奖奖项'} · ${winner.prize.name}。请使用该活动现有核销码领取。`,
-        link: `/activities/${lottery.activityId}`,
-        key: notificationKey,
-      },
-    }, { operation: 'activity-lottery-winner', userId: winner.registration.userId })
   }
+  const winnerByRegistrationId = new Map(persistedWinners.filter((winner) => winner.registrationId).map((winner) => [winner.registrationId!, winner]))
+  const winnerRegistrationIds = new Set(winnerByRegistrationId.keys())
+  const resultRecipients = splitActivityLotteryResultRecipients(registrations, winnerRegistrationIds)
+  const resultNotifications = [...resultRecipients.winners, ...resultRecipients.nonWinners].map((registration) => activityLotteryResultNotificationData({
+    lotteryId: lottery.id,
+    activityId,
+    activityTitle,
+    lotteryTitle: lottery.title,
+    userId: registration.userId,
+    winner: winnerByRegistrationId.get(registration.id) || null,
+  }))
+  // Notifications are secondary side effects. Keep the candidate snapshot
+  // from this draw, make the write idempotent, and never roll back a completed
+  // lottery when notification persistence is temporarily unavailable.
+  await safeNotificationWrite(
+    () => createManyNotificationsWithDb(tx, { data: resultNotifications, skipDuplicates: true }, { operation: 'activity-lottery-result-notifications' }),
+    { operation: 'activity-lottery-result-notifications', targetId: lottery.id, notificationType: 'ACTIVITY' },
+  )
   await tx.lottery.update({ where: { id: lottery.id }, data: { status: 'DRAWN', eligibleCount: registrations.length, winnerCount: winnerRows.length, drawnAt, algorithmVersion: ACTIVITY_LOTTERY_ALGORITHM_VERSION }, select: { id: true } })
   if (options.actorId) {
     await createAdminActionAudit(tx, {
       operatorId: options.actorId,
       action: 'UPDATE_SETTING',
-      operationType: adminAuditOperations.ACTIVITY_LOTTERY_DRAW,
+      operationType: options.trigger === 'ADMIN_MANUAL' ? adminAuditOperations.ACTIVITY_LOTTERY_MANUAL_DRAW : adminAuditOperations.ACTIVITY_LOTTERY_DRAW,
       targetType: 'ACTIVITY_LOTTERY',
       targetId: lottery.id,
       targetTitle: lottery.title,
-      metadata: { activityId: lottery.activityId, eligibleCount: registrations.length, winnerCount: winnerRows.length, algorithmVersion: ACTIVITY_LOTTERY_ALGORITHM_VERSION, drawnAt: drawnAt.toISOString() } as Prisma.InputJsonValue,
+      metadata: { activityId: lottery.activityId, trigger: options.trigger, eligibleCount: registrations.length, winnerCount: winnerRows.length, algorithmVersion: ACTIVITY_LOTTERY_ALGORITHM_VERSION, drawnAt: drawnAt.toISOString() } as Prisma.InputJsonValue,
     })
   }
   return {
@@ -651,7 +726,7 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
   }
 }
 
-export async function drawActivityLottery(lotteryId: string, options: DrawOptions = {}) {
+export async function drawActivityLottery(lotteryId: string, options: DrawOptions = { trigger: 'SCHEDULED' }) {
   return prisma.$transaction((tx) => drawActivityLotteryInTransaction(tx, lotteryId, options), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
 }
 
@@ -659,7 +734,7 @@ export async function drawDueActivityLotteries(options: { activityId?: string; b
   const now = options.now || new Date()
   const batchSize = Math.min(Math.max(options.batchSize || 50, 1), 200)
   const due = await prisma.lottery.findMany({
-    where: { ...(options.activityId ? { activityId: options.activityId } : {}), status: 'SCHEDULED', drawAt: { lte: now }, Activity: { status: { not: 'CANCELLED' } } },
+    where: { ...(options.activityId ? { activityId: options.activityId } : {}), status: 'SCHEDULED', drawAt: { lte: now }, Activity: { status: { not: 'CANCELLED' }, endsAt: { gt: now } } },
     orderBy: [{ drawAt: 'asc' }, { id: 'asc' }],
     take: batchSize,
     select: { id: true },
@@ -669,7 +744,7 @@ export async function drawDueActivityLotteries(options: { activityId?: string; b
   let failed = 0
   for (const lottery of due) {
     try {
-      const result = await drawActivityLottery(lottery.id, { now })
+      const result = await drawActivityLottery(lottery.id, { trigger: 'SCHEDULED', now })
       if (result.status === 'DRAWN') drawn += 1
       if (result.status === 'ALREADY_DRAWN') alreadyDrawn += 1
     } catch (error) {

@@ -39,6 +39,19 @@ function totalSlots(lottery: Pick<ActivityLotteryAdminView, 'prizes'>) {
   return lottery.prizes.reduce((total, prize) => total + prize.quantity, 0)
 }
 
+function lotteryScheduleLabel(lottery: ActivityLotteryAdminView, activityEndAt: string | null, activityStatus: string) {
+  if (lottery.status === 'DRAWN') return `已开奖于 ${formatDate(lottery.drawnAt)}`
+  if (lottery.status === 'CANCELLED') return '已取消'
+  if (activityStatus === 'CANCELLED') return '活动已取消，无法开奖'
+  if (!activityEndAt) return '活动结束时间未设置，无法开奖'
+  const activityEnd = new Date(activityEndAt).getTime()
+  if (!Number.isFinite(activityEnd) || activityEnd <= Date.now()) return '活动已结束，无法开奖'
+  const drawAt = lottery.drawAt ? new Date(lottery.drawAt).getTime() : Number.NaN
+  const schedule = `计划开奖：${formatDate(lottery.drawAt)}`
+  if (Number.isFinite(drawAt) && drawAt > Date.now()) return `自动开奖时间尚未到达，可手动立即开奖 · ${schedule}`
+  return `自动开奖时间已到达，等待服务器执行 · ${schedule}`
+}
+
 function draftFromLottery(lottery: ActivityLotteryAdminView): LotteryDraft {
   return {
     title: lottery.title,
@@ -63,6 +76,8 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
   const [prizeUploadResetTokens, setPrizeUploadResetTokens] = useState<Record<number, number>>({})
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [drawConfirmation, setDrawConfirmation] = useState<ActivityLotteryAdminView | null>(null)
+  const [drawingId, setDrawingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,6 +96,10 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
   useEffect(() => { void load() }, [load])
 
   const currentParticipants = data?.activity.activeParticipantCount || 0
+  const effectiveActivityEndAt = data?.activity.endsAt || activityEndAt
+  const activityEnded = !effectiveActivityEndAt || !Number.isFinite(new Date(effectiveActivityEndAt).getTime()) || new Date(effectiveActivityEndAt).getTime() <= Date.now()
+  const activityStatus = data?.activity.status || ''
+  const activityCancelled = activityStatus === 'CANCELLED'
   const capacity = data?.activity.signupLimit && data.activity.signupLimit > 0 ? data.activity.signupLimit : null
   const summary = useMemo(() => {
     const slots = data?.lotteries.reduce((sum, lottery) => sum + totalSlots(lottery), 0) || 0
@@ -224,17 +243,29 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
     }
   }
 
-  async function drawLottery(lottery: ActivityLotteryAdminView) {
-    if (!window.confirm(`确认立即开奖「${lottery.title}」吗？开奖后不能修改。`)) return
-    setError(''); setMessage('')
+  function openDrawConfirmation(lottery: ActivityLotteryAdminView) {
+    setError('')
+    setMessage('')
+    setDrawConfirmation(lottery)
+  }
+
+  async function confirmDraw() {
+    if (!drawConfirmation || drawingId) return
+    const lottery = drawConfirmation
+    setDrawingId(lottery.id)
+    setError('')
+    setMessage('')
     try {
       const response = await fetch(`/api/admin/activities/${encodeURIComponent(activityId)}/lotteries/${encodeURIComponent(lottery.id)}/draw`, { method: 'POST', credentials: 'same-origin' })
       const body = await response.json().catch(() => null)
       if (!response.ok) throw new Error(body?.message || '开奖失败')
       setMessage(body?.status === 'ALREADY_DRAWN' ? '该抽奖已经开奖，本次操作幂等完成' : '开奖成功')
+      setDrawConfirmation(null)
       await load()
     } catch (drawError) {
       setError(drawError instanceof Error ? drawError.message : '开奖失败')
+    } finally {
+      setDrawingId(null)
     }
   }
 
@@ -311,8 +342,8 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
           return (
             <article key={lottery.id} className="rounded-xl border border-violet-200 bg-white p-4 dark:border-violet-900 dark:bg-slate-950">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0"><h4 className="break-words font-black text-brand-950 dark:text-slate-100">{lottery.title}</h4><p className="mt-1 text-xs font-bold text-slate-500">{lottery.status === 'DRAWN' ? `已开奖于 ${formatDate(lottery.drawnAt)}` : lottery.status === 'CANCELLED' ? '已取消' : `开奖时间：${formatDate(lottery.drawAt)}`}</p></div>
-                <div className="flex flex-wrap gap-2">{lottery.status !== 'DRAWN' && lottery.status !== 'CANCELLED' ? <><button type="button" disabled={saving || prizeUploadInProgress} onClick={() => { clearPrizeUploadState(); setEditingId(lottery.id); setDraft(draftFromLottery(lottery)); setExpanded(true) }} className="min-h-9 rounded-full border border-violet-300 px-3 text-xs font-black text-violet-700 disabled:opacity-50">编辑</button><button type="button" disabled={saving || prizeUploadInProgress} onClick={() => void cancelLottery(lottery)} className="min-h-9 rounded-full border border-rose-200 px-3 text-xs font-black text-rose-700 disabled:opacity-50">取消</button><button type="button" disabled={saving || prizeUploadInProgress} onClick={() => void drawLottery(lottery)} className="min-h-9 rounded-full bg-violet-700 px-3 text-xs font-black text-white disabled:opacity-50">立即开奖</button></> : null}</div>
+                <div className="min-w-0"><h4 className="break-words font-black text-brand-950 dark:text-slate-100">{lottery.title}</h4><p className="mt-1 text-xs font-bold text-slate-500">{lotteryScheduleLabel(lottery, effectiveActivityEndAt, activityStatus)}</p></div>
+                <div className="flex flex-wrap gap-2">{lottery.status !== 'DRAWN' && lottery.status !== 'CANCELLED' ? <><button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => { clearPrizeUploadState(); setEditingId(lottery.id); setDraft(draftFromLottery(lottery)); setExpanded(true) }} className="min-h-9 rounded-full border border-violet-300 px-3 text-xs font-black text-violet-700 disabled:opacity-50">编辑</button><button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => void cancelLottery(lottery)} className="min-h-9 rounded-full border border-rose-200 px-3 text-xs font-black text-rose-700 disabled:opacity-50">取消</button>{!activityEnded && !activityCancelled ? <button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => openDrawConfirmation(lottery)} className="min-h-9 rounded-full bg-violet-700 px-3 text-xs font-black text-white disabled:opacity-50">立即开奖</button> : <span className="inline-flex min-h-9 items-center rounded-full bg-slate-100 px-3 text-xs font-black text-slate-500 dark:bg-slate-800 dark:text-slate-400">已过期 / 无法开奖</span>}</> : null}</div>
               </div>
               <div className="mt-3 grid gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 sm:grid-cols-3"><p>有效报名：{lottery.eligibleCount ?? currentParticipants}</p><p>中奖名额：{slots} · 实际中奖：{lottery.winnerCount ?? 0}</p><p>当前理论中奖率：{currentRate.toFixed(2)}%</p></div>
               <ul className="mt-3 space-y-1 border-t border-violet-100 pt-3 text-sm font-bold dark:border-violet-900">{lottery.prizes.map((prize, index) => <li key={prize.id}>{activityLotteryTierName(index) || prize.tierName || '中奖奖项'} · {prize.name} ×{prize.quantity}{lottery.status === 'DRAWN' ? `（中奖 ${prize.winnerCount}）` : ''}</li>)}</ul>
@@ -322,6 +353,30 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
         })}
         {!loading && data && !data.lotteries.length ? <p className="py-4 text-center text-sm font-bold text-slate-500">暂无抽奖活动。</p> : null}
       </div>
+      {drawConfirmation ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby={`draw-dialog-title-${drawConfirmation.id}`}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900">
+            <h3 id={`draw-dialog-title-${drawConfirmation.id}`} className="text-lg font-black text-brand-950 dark:text-slate-100">确认立即开奖？</h3>
+            <p className="mt-2 text-sm font-bold text-slate-600 dark:text-slate-300">抽奖：{drawConfirmation.title}</p>
+            <dl className="mt-4 grid gap-2 rounded-xl bg-violet-50 p-3 text-sm font-bold text-slate-700 dark:bg-violet-950/30 dark:text-slate-200 sm:grid-cols-3">
+              <div><dt className="text-xs text-slate-500 dark:text-slate-400">当前计划开奖时间</dt><dd className="mt-1">{formatDate(drawConfirmation.drawAt)}</dd></div>
+              <div><dt className="text-xs text-slate-500 dark:text-slate-400">当前有效报名</dt><dd className="mt-1">{currentParticipants} 人</dd></div>
+              <div><dt className="text-xs text-slate-500 dark:text-slate-400">中奖名额</dt><dd className="mt-1">{totalSlots(drawConfirmation)} 人</dd></div>
+            </dl>
+            <p className="mt-4 text-sm font-black text-slate-700 dark:text-slate-200">立即开奖后：</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm font-bold text-slate-600 dark:text-slate-300">
+              <li>将使用当前有效报名名单开奖</li>
+              <li>开奖结果不可重新抽取</li>
+              <li>开奖后结果将锁定，之后新增报名者不会参与本轮抽奖。</li>
+            </ul>
+            {error ? <p role="alert" className="mt-4 rounded-lg bg-rose-100 px-3 py-2 text-sm font-black text-rose-700 dark:bg-rose-950/50 dark:text-rose-200">{error}</p> : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setDrawConfirmation(null)} disabled={drawingId !== null} className="min-h-10 rounded-lg border border-slate-200 px-4 text-sm font-black text-slate-600 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300">取消</button>
+              <button type="button" onClick={() => void confirmDraw()} disabled={drawingId !== null} className="min-h-10 rounded-lg bg-violet-700 px-4 text-sm font-black text-white disabled:opacity-50">{drawingId ? '开奖中…' : '确认立即开奖'}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
