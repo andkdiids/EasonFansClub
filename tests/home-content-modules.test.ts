@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { getHomeDailyPrescriptionDisplay } from '../lib/home-daily-prescription'
+import { getHomeActivityStatusLabel, sortHomeActivities } from '../lib/home-activity'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -52,19 +53,50 @@ test('homepage no longer requests or renders the removed featured post and hot c
   assert.doesNotMatch(surface, /data\.posts|data\.concerts|homeText\.(featured|hotConcerts)|精选帖子|热门演唱会|home-concerts-section/)
 })
 
-test('homepage recent activities query filters ongoing published activities in the database', () => {
+test('homepage activity center filters, sorts, and labels current public activities', () => {
   const homeData = read('lib/home-data.ts')
   const surface = read('components/HomeLayoutSurface.tsx')
 
   assert.match(homeData, /status: 'PUBLISHED'/)
-  assert.match(homeData, /startsAt: \{ lte: now \}/)
-  assert.match(homeData, /OR:\s*\[\{\s*endsAt:\s*\{\s*gt:\s*now\s*\}\s*\},\s*\{\s*endsAt:\s*null\s*\}\s*\]/)
-  assert.match(homeData, /orderBy:\s*\[\{\s*endsAt:\s*'asc'\s*\}/)
-  assert.match(homeData, /take: 4/)
+  assert.match(homeData, /registrationStartAt: \{ lte: now \}/)
+  assert.match(homeData, /registrationStartAt: null/)
+  assert.doesNotMatch(homeData, /startsAt: \{ lte: now \}/)
+  assert.match(homeData, /endsAt: \{ gt: now \}/)
+  assert.match(homeData, /endsAt: null/)
+  assert.match(homeData, /orderBy: \[\{ startsAt: 'asc' \}, \{ id: 'asc' \}\]/)
+  assert.match(homeData, /sortHomeActivities/)
+  assert.match(homeData, /take: 8/)
+  assert.match(homeData, /slice\(0, 2\)/)
   assert.match(surface, /home-activities-section/)
+  assert.match(surface, /aria-label=\{homeText\.activityCenter\}/)
   assert.match(surface, /href=\{`\/activities\/\$\{activity\.id\}`\}/)
   assert.match(surface, /home-concert-grid home-activity-grid/)
-  assert.match(surface, /if \(!data\.activities\.length\) return null/)
+  assert.match(surface, /activity\.locationName/)
+  assert.match(surface, /activity\.statusLabel/)
+  assert.match(surface, /homeText\.activitiesEmpty/)
+  assert.doesNotMatch(surface, /if \(!data\.activities\.length\) return null/)
+
+  const now = new Date('2026-08-31T12:00:00.000Z')
+  const activity = (overrides: Record<string, unknown> = {}) => ({
+    id: 'activity',
+    status: 'PUBLISHED' as const,
+    startsAt: '2026-08-31T10:00:00.000Z',
+    endsAt: '2026-08-31T13:00:00.000Z',
+    registrationStartAt: '2026-08-30T00:00:00.000Z',
+    registrationEndAt: '2026-09-01T00:00:00.000Z',
+    signupLimit: null,
+    signupCount: 0,
+    ...overrides,
+  })
+
+  assert.equal(getHomeActivityStatusLabel(activity(), now), '进行中')
+  assert.equal(getHomeActivityStatusLabel(activity({ registrationEndAt: '2026-08-31T11:00:00.000Z' }), now), '报名已截止')
+  assert.equal(getHomeActivityStatusLabel(activity({ startsAt: '2026-08-31T14:00:00.000Z', endsAt: '2026-08-31T16:00:00.000Z' }), now), '报名中')
+  assert.deepEqual(sortHomeActivities([
+    activity({ id: 'upcoming', startsAt: '2026-08-31T14:00:00.000Z', endsAt: '2026-08-31T16:00:00.000Z' }),
+    activity({ id: 'ongoing-late', startsAt: '2026-08-31T11:00:00.000Z' }),
+    activity({ id: 'ongoing-early', startsAt: '2026-08-31T09:00:00.000Z' }),
+  ], now).map((item) => item.id), ['ongoing-early', 'ongoing-late', 'upcoming'])
 })
 
 test('homepage anywhere-door module uses only the latest synced mreasonchan post without rendering media', () => {

@@ -18,6 +18,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { normalizeActionUrl } from '@/lib/url-safety'
 import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
+import type { HomeActivityStatusLabel } from '@/lib/home-activity'
 
 const homeText = {
   goCheckin: '去挂号',
@@ -47,9 +48,10 @@ const homeText = {
   randomAlbums: '每日推荐专辑',
   albumsMore: '更多',
   noAlbums: '暂无已发布专辑。',
-  recentActivities: '近期活动',
-  activitiesMore: '查看全部',
-  ongoing: '进行中',
+  activityCenter: '活动中心',
+  activitiesMore: '查看更多',
+  activitiesEmpty: '暂无进行中的活动',
+  activityLocationEmpty: '地点待定',
   anywhereDoor: '随意门',
   anywhereDoorMore: '查看',
   anywhereDoorEmpty: '暂时没有最新更新。',
@@ -88,7 +90,7 @@ type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: n
 type DailyMusic = { id: string; title: string; artist: string; releaseYear: number; lyrics: string | null; coverUrl: string | null; previewUrl: string; previewDuration: number; isFullPlayback: false; likedByMe: boolean; likeCount: number; album: { id: string; name: string; coverUrl: string | null } }
 type TodayEvent = { id: string; date: string; year: number; month: number; day: number; type: string; title: string; content: string; imageUrl: string | null; source: 'AUTO' | 'ADMIN'; reference: string | null; status: 'APPROVED'; href: string | null }
 type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: GuessSongModeHighScores['status'] | 'loading' }
-type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; startsAt: string | null; endsAt: string | null }
+type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; locationName: string | null; startsAt: string | null; endsAt: string | null; registrationStartAt: string | null; registrationEndAt: string | null; signupLimit: number | null; signupCount: number; statusLabel: HomeActivityStatusLabel }
 type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
 type HomeSalonPost = { id: string; category: string; title: string | null; approvedAt: string; thumbnailUrl: string | null }
 type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; salonPosts: HomeSalonPost[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
@@ -348,7 +350,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       <header><h2>{homeText.dailyMusic}</h2><Link href={data.dailyMusic ? `/music/song/${data.dailyMusic.id}` : '/music'} className="home-module-entry">{homeText.viewDetails} {'>>'}</Link></header>
       {data.dailyMusic ? <div className="home-daily-music">
         <div className="home-daily-music-cover">
-          {dailyMusicCoverUrl ? <Image src={dailyMusicCoverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="96px" priority className="object-cover" onError={() => { if (process.env.NODE_ENV === 'development') console.log('album cover load failed', dailyMusicCoverUrl) }} /> : <span aria-hidden="true">♫</span>}
+          {dailyMusicCoverUrl ? <Image src={dailyMusicCoverUrl} alt={`${data.dailyMusic.title} album cover`} fill sizes="(max-width: 767px) 64px, 72px" priority className="object-cover" onError={() => { if (process.env.NODE_ENV === 'development') console.log('album cover load failed', dailyMusicCoverUrl) }} /> : <span aria-hidden="true">♫</span>}
         </div>
         <div className="home-daily-music-copy">
           <span>{data.dailyMusic.artist}</span>
@@ -446,23 +448,25 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     )
   }
 
-  const renderRecentActivitiesPanel = () => {
-    if (!data.activities.length) return null
-    return (
-      <section className="community-panel concert-panel home-full-panel home-activities-section" aria-label={homeText.recentActivities}>
-        <header><h2>{homeText.recentActivities}</h2><Link href="/activities" className="home-module-entry">{homeText.activitiesMore} {'>>'}</Link></header>
-        <div className="home-concert-grid home-activity-grid">
-          {data.activities.map((activity) => {
-            const posterUrl = activity.coverUrl || activity.bannerUrl
-            return <Link key={activity.id} href={`/activities/${activity.id}`} className="home-concert-card home-activity-card">
-              <span className="home-concert-cover">{posterUrl ? <Image src={posterUrl} alt={`${activity.title} 海报`} fill sizes="72px" loading="lazy" className="object-cover" /> : '活动'}</span>
-              <span className="home-concert-copy"><time>{shortDateTime(activity.startsAt)}</time><strong>{activity.title}</strong><small>{homeText.ongoing}</small></span>
-            </Link>
-          })}
-        </div>
-      </section>
-    )
-  }
+  const renderActivityCenterPanel = () => (
+    <section className="community-panel concert-panel home-full-panel home-activities-section" aria-label={homeText.activityCenter}>
+      <header><h2>{homeText.activityCenter}</h2><Link href="/activities" className="home-module-entry">{homeText.activitiesMore} {'>>'}</Link></header>
+      {data.activities.length ? <div className="home-concert-grid home-activity-grid">
+        {data.activities.map((activity) => {
+          const posterUrl = activity.coverUrl || activity.bannerUrl
+          return <Link key={activity.id} href={`/activities/${activity.id}`} className="home-concert-card home-activity-card">
+            <span className="home-concert-cover">{posterUrl ? <Image src={posterUrl} alt={`${activity.title} 海报`} fill sizes="64px" loading="lazy" className="object-cover object-center" /> : '活动'}</span>
+            <span className="home-concert-copy home-activity-copy">
+              <strong className="home-activity-title">{activity.title}</strong>
+              <time>{shortDateTime(activity.startsAt) || '时间待定'}</time>
+              <small className="home-activity-location">{activity.locationName || homeText.activityLocationEmpty}</small>
+              <small className="home-activity-status">{activity.statusLabel}</small>
+            </span>
+          </Link>
+        })}
+      </div> : <p className="community-empty home-activity-empty">{homeText.activitiesEmpty}</p>}
+    </section>
+  )
 
   const renderAnywhereDoorPanel = () => (
       <section className="community-panel home-first-row-panel home-anywhere-door-section" aria-label={homeText.anywhereDoor}>
@@ -554,6 +558,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
 
         <div className="home-secondary-content">
         <div className="home-secondary-columns">
+          {renderActivityCenterPanel()}
           {renderDailyMusicPanel()}
           {renderEntertainmentPanel()}
         </div>
@@ -575,7 +580,6 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
             {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
           </div>
         </section>
-        {renderRecentActivitiesPanel()}
         </div>
       </div>
     </div>

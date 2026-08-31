@@ -98,9 +98,10 @@ test('homepage keeps the hero intact and places the requested first row before l
   assert.doesNotMatch(firstRow, /renderDailyMusicPanel|renderEntertainmentPanel/)
 
   const secondary = surface.slice(secondaryPosition)
+  assert.ok(secondary.indexOf('{renderActivityCenterPanel()}') < secondary.indexOf('{renderDailyMusicPanel()}'))
   assert.ok(secondary.indexOf('{renderDailyMusicPanel()}') < secondary.indexOf('{renderEntertainmentPanel()}'))
   assert.ok(secondary.indexOf('{renderEntertainmentPanel()}') < secondary.indexOf('homeText.randomAlbums'))
-  assert.ok(secondary.indexOf('{renderRecentActivitiesPanel()}') >= 0)
+  assert.equal(secondary.indexOf('{renderRecentActivitiesPanel()}'), -1)
 })
 
 test('entertainment home card uses the endless-mode leaderboard without loading removed concert data', () => {
@@ -124,8 +125,15 @@ test('mobile home layout uses a compact hero, two-by-two stats, and bottom safe 
   assert.match(css, /\.community-stats\.home-checkin-stats \{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\) !important; \}/)
   assert.match(css, /padding-bottom:calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-page-bottom-gap\)\)/)
   assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
+  assert.match(css, /\.home-secondary-columns \{\s*display: grid;\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/)
+  assert.match(css, /\.home-secondary-columns > \.community-panel \{[\s\S]*height: 100%;/)
+  assert.match(css, /\.home-secondary-columns > \.home-entertainment-panel \{ grid-column: 1 \/ -1; \}/)
+  const responsiveStart = css.lastIndexOf('@media (max-width: 767px)')
+  assert.ok(responsiveStart >= 0)
+  assert.match(css.slice(responsiveStart), /\.home-secondary-columns \{\s*grid-template-columns: minmax\(0, 1fr\);\s*gap: 16px;/)
   assert.doesNotMatch(css, /stat-checkin-mobile-mark|\.stat-checkin\.is-not-checked>small/)
   assert.match(surface, /checkinStateClass/)
+  assert.match(surface, /renderActivityCenterPanel\(\)/)
   assert.match(surface, /stat-registration-cta/)
   assert.doesNotMatch(surface, /stat-checkin-mobile-mark/)
 })

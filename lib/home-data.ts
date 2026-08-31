@@ -20,6 +20,7 @@ import { getEasMusicAlbumLikeStates } from '@/lib/easmusic-likes'
 import { htmlToPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
 import { salonPublicBaseWhere, type SalonCategoryValue } from '@/lib/salon'
+import { getHomeActivityStatusLabel, sortHomeActivities } from '@/lib/home-activity'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -241,36 +242,36 @@ export async function getHomeActivities() {
     prisma.activity.findMany({
       where: {
         status: 'PUBLISHED',
-        startsAt: { lte: now },
-        OR: [{ endsAt: { gt: now } }, { endsAt: null }],
+        AND: [
+          { OR: [{ registrationStartAt: { lte: now } }, { registrationStartAt: null }] },
+          { OR: [{ endsAt: { gt: now } }, { endsAt: null }] },
+        ],
       },
-      orderBy: [{ endsAt: 'asc' }, { isPinned: 'desc' }, { isFeatured: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
-      take: 4,
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+      take: 8,
       select: {
         id: true,
         title: true,
-        subtitle: true,
-        description: true,
-        type: true,
         status: true,
         coverUrl: true,
         bannerUrl: true,
+        locationName: true,
         startsAt: true,
         endsAt: true,
+        registrationStartAt: true,
+        registrationEndAt: true,
         signupLimit: true,
-        isFeatured: true,
-        isPinned: true,
-        sortOrder: true,
         _count: { select: { ActivityRegistration: { where: { status: { in: ['ACTIVE'] } } } } },
       },
     }),
     [],
     5000,
-  ).then((activities) => activities.map(({ _count, ...activity }) => ({
+  ).then((activities) => sortHomeActivities(activities.map(({ _count, ...activity }) => ({
     ...activity,
     coverUrl: publicImageVariantUrl(activity.coverUrl || activity.bannerUrl, 'card'),
     signupCount: _count.ActivityRegistration,
-  }))))
+    statusLabel: getHomeActivityStatusLabel({ ...activity, signupCount: _count.ActivityRegistration }, now),
+  })), now).slice(0, 2)))
 }
 
 export type HomeAnywhereDoorPost = Readonly<{

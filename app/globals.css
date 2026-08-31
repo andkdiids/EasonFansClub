@@ -7862,15 +7862,118 @@ body:has(.duel-page) .app-page-content {
 }
 .home-secondary-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 16px 14px;
 }
 .home-secondary-columns > .community-panel {
+  display: flex;
   min-width: 0;
-  min-height: 0;
+  min-height: 330px;
+  height: 100%;
+  flex-direction: column;
   margin: 0;
 }
-.home-secondary-columns > .home-entertainment-panel { min-height: 0; }
+.home-secondary-columns > .community-panel > header { flex: 0 0 44px; height: 44px; }
+.home-secondary-columns .home-activity-grid {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 8px;
+  padding: 10px 0 8px;
+}
+.home-secondary-columns .home-activity-card {
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+}
+.home-secondary-columns .home-activity-card .home-concert-cover { aspect-ratio: 3 / 4; }
+.home-secondary-columns .home-activity-copy { min-width: 0; }
+.home-secondary-columns .home-activity-title {
+  display: -webkit-box;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.home-secondary-columns .home-activity-copy time { margin-top: 5px; }
+.home-secondary-columns .home-activity-copy small { min-width: 0; }
+.home-secondary-columns .home-activity-status { color: var(--primary); font-weight: 800; }
+.home-secondary-columns .home-activity-empty {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  margin: 0;
+  padding: 10px 0;
+}
+.home-secondary-columns .home-daily-music {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-content: start;
+  padding: 10px 0 8px;
+}
+.home-secondary-columns .home-daily-music-cover { width: 72px; }
+.home-secondary-columns .home-daily-music-copy h3 {
+  display: -webkit-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.home-secondary-columns .home-daily-music-copy p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-secondary-columns .home-daily-music-lyrics { -webkit-line-clamp: 2; line-clamp: 2; }
+.home-secondary-columns .home-daily-music-like { margin-top: 0; }
+.home-secondary-columns .home-daily-music-button { max-width: 100%; padding-inline: 10px; font-size: 10px; }
+.home-secondary-columns .home-entertainment-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 10px 0 8px;
+}
+.home-secondary-columns .home-entertainment-desktop-scores {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.home-secondary-columns .home-entertainment-mode-score {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label label"
+    "user value";
+  align-items: center;
+  column-gap: 8px;
+  padding: 6px 0 5px;
+}
+.home-secondary-columns .home-entertainment-mode-label { grid-area: label; }
+.home-secondary-columns .home-entertainment-mode-score .home-entertainment-score-user { grid-area: user; min-width: 0; }
+.home-secondary-columns .home-entertainment-mode-score .home-entertainment-mode-score-value { grid-area: value; margin-top: 5px; text-align: right; }
+.home-secondary-columns .home-entertainment-mode-empty { grid-column: 1 / -1; }
+.home-secondary-columns .home-entertainment-button { max-width: 100%; margin-top: auto; }
 
 @media (min-width: 768px) and (max-width: 1199px) {
   .home-first-row {
@@ -7881,6 +7984,10 @@ body:has(.duel-page) .app-page-content {
   .home-first-row > .home-primary-columns > .home-first-row-panel {
     min-height: 236px;
   }
+  .home-secondary-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .home-secondary-columns > .home-entertainment-panel { grid-column: 1 / -1; }
 }
 
 /* Keep the dynamic registration content inside the same equal-size cell. */
@@ -7952,6 +8059,16 @@ body:has(.duel-page) .app-page-content {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
+  .home-secondary-columns > .community-panel {
+    min-height: 0;
+    height: auto;
+  }
+  .home-secondary-columns .home-activity-card { grid-template-columns: 64px minmax(0, 1fr); }
+  .home-secondary-columns .home-daily-music {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .home-secondary-columns .home-daily-music-cover { width: 64px; }
   .home-activity-grid { grid-template-columns: 1fr; }
   .home-salon-content { gap: 9px; }
 }
