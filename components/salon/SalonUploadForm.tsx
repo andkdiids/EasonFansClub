@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent 
 import {
   formatSalonSession,
   SALON_CATEGORIES,
-  SALON_CATEGORY_HINTS,
+  SALON_CATEGORY_CONFIG,
   SALON_CATEGORY_LABELS,
   supportsOriginal,
   type SalonCategoryValue,
@@ -49,9 +49,11 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
   const [error, setError] = useState('')
   const selectedTour = options.tours.find((tour) => tour.id === tourId)
   const sessions = selectedTour?.sessions || []
-  const requiresConcert = category === 'CONCERT'
+  const categoryConfig = SALON_CATEGORY_CONFIG[category]
+  const allowsConcert = categoryConfig.allowsConcert
+  const requiresConcert = categoryConfig.requiresConcert
   const preservesOriginal = supportsOriginal(category)
-  const hint = useMemo(() => SALON_CATEGORY_HINTS[category], [category])
+  const hint = useMemo(() => categoryConfig.hint, [categoryConfig])
   const filesRef = useRef(files)
   filesRef.current = files
 
@@ -65,7 +67,7 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
 
   function chooseCategory(value: SalonCategoryValue) {
     setCategory(value)
-    if (value !== 'CONCERT') {
+    if (!SALON_CATEGORY_CONFIG[value].allowsConcert) {
       setTourId('')
       setSessionId('')
     }
@@ -99,7 +101,11 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
     setMessage('图片正在处理并上传，请稍候…')
     const body = new FormData()
     body.set('category', category)
-    if (requiresConcert) body.set('concertId', sessionId)
+    if (tourId) body.set('tourId', tourId)
+    if (sessionId) {
+      body.set('sessionId', sessionId)
+      body.set('concertId', sessionId)
+    }
     body.set('title', title)
     body.set('content', content)
     body.set('watermarkEnabled', String(watermarkEnabled))
@@ -126,9 +132,9 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
     <section className="salon-form-section"><div className="salon-form-section-heading"><div><p className="salon-kicker">01 · CONTEXT</p><h2>作品信息</h2></div><span>{requiresConcert ? '分类、演唱会和场次为必填' : '分类为必填，演唱会关联可留空'}</span></div>
       <div className="salon-form-grid">
         <label><span>分类 <b>*</b></span><select value={category} onChange={(event) => chooseCategory(event.target.value as SalonCategoryValue)}>{SALON_CATEGORIES.map((value) => <option key={value} value={value}>{SALON_CATEGORY_LABELS[value]}</option>)}</select><small>{hint}</small></label>
-        {requiresConcert ? <>
-          <label><span>演唱会 <b>*</b></span><select value={tourId} onChange={(event) => chooseTour(event.target.value)}><option value="">请选择演唱会</option>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
-          <label><span>场次 <b>*</b></span><select value={sessionId} disabled={!tourId} onChange={(event) => setSessionId(event.target.value)}><option value="">{tourId ? '请选择场次' : '先选择演唱会'}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label>
+        {allowsConcert ? <>
+          <label><span>演唱会 {requiresConcert ? <b>*</b> : null}</span><select value={tourId} onChange={(event) => chooseTour(event.target.value)}><option value="">{requiresConcert ? '请选择演唱会' : '不关联演唱会'}</option>{options.tours.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label>
+          <label><span>场次 {requiresConcert ? <b>*</b> : null}</span><select value={sessionId} disabled={!tourId} onChange={(event) => { const value = event.target.value; setSessionId(value); if (!value) setTourId('') }}><option value="">{tourId ? (requiresConcert ? '请选择场次' : '不关联场次') : (requiresConcert ? '先选择演唱会' : '可选场次')}</option>{sessions.map((session) => <option key={session.id} value={session.id}>{formatSalonSession(session)}</option>)}</select></label>
         </> : null}
         <label><span>标题</span><input value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} placeholder="给这组照片起个名字（选填）" /></label>
         <label className="salon-form-wide"><span>描述</span><textarea value={content} maxLength={5000} onChange={(event) => setContent(event.target.value)} rows={5} placeholder="记录一些现场或图片背后的故事（选填）" /></label>

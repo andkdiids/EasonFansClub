@@ -99,7 +99,7 @@ export function ProfileHeader({
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
   <div
-  className="profile-hero-background relative isolate flex h-[210px] w-full items-end justify-start overflow-hidden bg-slate-900 px-4 pb-3 sm:block sm:aspect-[9/2] sm:h-auto sm:items-stretch sm:justify-start sm:px-0 sm:pb-0"
+  className="profile-hero-background relative isolate flex h-auto w-full items-end justify-start overflow-hidden bg-slate-900 px-4 pb-3 sm:block sm:aspect-[9/2] sm:h-auto sm:items-stretch sm:justify-start sm:px-0 sm:pb-0"
   style={{
     backgroundImage: publicBackgroundUrl ? `url(${publicBackgroundUrl})` : undefined,
     backgroundSize: 'cover',
@@ -118,7 +118,7 @@ export function ProfileHeader({
               </div>
             )}
             <div className="min-w-0 max-w-[250px] flex-1">
-              <h1 className="truncate text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]"><UserDisplayName name={displayName} uid={uid} badge={equippedBadge} showBadgeName badgeInteraction={badgeInteraction} /></h1>
+              <h1 className="min-w-0 max-w-full text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]"><UserDisplayName name={displayName} uid={uid} badge={equippedBadge} showBadgeName badgeInteraction={badgeInteraction} /></h1>
             </div>
           </div>
           <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center justify-start gap-1.5 text-xs font-bold leading-none text-white/90">

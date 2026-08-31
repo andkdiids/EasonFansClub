@@ -2,7 +2,7 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser } from '@/lib/auth'
-import { getSalonPostForViewer, parseSalonCategory, type SalonCategoryValue } from '@/lib/salon'
+import { getSalonPostForViewer, normalizeSalonConcertSelection, parseSalonCategory, SALON_CATEGORY_CONFIG, type SalonCategoryValue } from '@/lib/salon'
 import { prisma } from '@/lib/prisma'
 import { requireUser, sanitizeText } from '@/lib/security'
 
@@ -44,27 +44,52 @@ export async function PATCH(request: Request, context: RouteContext) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return NextResponse.json({ ok: false, message: '请求内容无效' }, { status: 400 })
 
-  const data: { category?: SalonCategoryValue; concertId?: string | null; title?: string | null; content?: string | null } = {}
+  const current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, category: true, concertId: true } })
+  if (!current) return NextResponse.json({ ok: false, message: '作品不存在' }, { status: 404 })
+
+  const data: { category?: SalonCategoryValue; concert?: { connect: { id: string } } | { disconnect: true }; title?: string | null; content?: string | null } = {}
   let requestedCategory: SalonCategoryValue | undefined
   if (Object.prototype.hasOwnProperty.call(body, 'category')) {
     const category = parseSalonCategory(body.category)
     if (!category) return NextResponse.json({ ok: false, message: '投稿分类无效' }, { status: 400 })
     requestedCategory = category
     data.category = category
-    if (category !== 'CONCERT') data.concertId = null
   }
-  if (Object.prototype.hasOwnProperty.call(body, 'concertId')) {
-    if (requestedCategory && requestedCategory !== 'CONCERT') return NextResponse.json({ ok: false, message: '该分类不需要关联演唱会' }, { status: 400 })
-    const concertId = sanitizeText(body.concertId, 191)
-    if (!concertId) return NextResponse.json({ ok: false, message: '请选择对应的演唱会场次' }, { status: 400 })
-    const concert = await prisma.musicConcert.findFirst({ where: { id: concertId, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } }, select: { id: true } })
-    if (!concert) return NextResponse.json({ ok: false, message: '演唱会场次不存在或暂未公开' }, { status: 400 })
-    data.concertId = concert.id
+  const hasAssociationInput = ['tourId', 'sessionId', 'concertId'].some((key) => Object.prototype.hasOwnProperty.call(body, key))
+  const selection = normalizeSalonConcertSelection({
+    tourId: sanitizeText(body.tourId, 191),
+    sessionId: sanitizeText(body.sessionId, 191),
+    concertId: sanitizeText(body.concertId, 191),
+  })
+  if (selection.hasConflict) return NextResponse.json({ ok: false, message: '演唱会和场次选择不一致，请重新选择' }, { status: 400 })
+  const effectiveCategory = requestedCategory || parseSalonCategory(current.category)
+  const categoryConfig = effectiveCategory ? SALON_CATEGORY_CONFIG[effectiveCategory] : null
+  if (!categoryConfig) return NextResponse.json({ ok: false, message: '投稿分类无效' }, { status: 400 })
+  if (!categoryConfig.allowsConcert && (selection.tourId || selection.sessionId)) return NextResponse.json({ ok: false, message: '该投稿分类不支持关联演唱会' }, { status: 400 })
+  if (body.sessionId && !selection.tourId) return NextResponse.json({ ok: false, message: '请选择对应的演唱会' }, { status: 400 })
+
+  let selectedConcertId: string | null = selection.sessionId
+  if (selection.sessionId) {
+    const concert = await prisma.musicConcert.findFirst({
+      where: {
+        id: selection.sessionId,
+        ...(selection.tourId ? { tourId: selection.tourId } : {}),
+        status: 'PUBLISHED',
+        MusicTour: { status: 'PUBLISHED' },
+      },
+      select: { id: true },
+    })
+    if (!concert) return NextResponse.json({ ok: false, message: '演唱会场次不存在、未公开或不属于所选演唱会' }, { status: 400 })
+    selectedConcertId = concert.id
+  } else if (selection.tourId) {
+    const tour = await prisma.musicTour.findFirst({ where: { id: selection.tourId, status: 'PUBLISHED' }, select: { id: true } })
+    if (!tour) return NextResponse.json({ ok: false, message: '演唱会不存在或暂未公开' }, { status: 400 })
+  } else if (!hasAssociationInput) {
+    selectedConcertId = current.concertId
   }
-  if (requestedCategory === 'CONCERT' && data.concertId === undefined) {
-    const current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { concertId: true } })
-    if (!current?.concertId) return NextResponse.json({ ok: false, message: '演唱会记录必须关联演唱会场次' }, { status: 400 })
-  }
+  if (categoryConfig.requiresConcert && !selectedConcertId) return NextResponse.json({ ok: false, message: '演唱会记录必须关联演唱会场次' }, { status: 400 })
+  if (hasAssociationInput) data.concert = selectedConcertId ? { connect: { id: selectedConcertId } } : { disconnect: true }
+  if (requestedCategory && !categoryConfig.allowsConcert) data.concert = { disconnect: true }
   if (Object.prototype.hasOwnProperty.call(body, 'title')) data.title = sanitizeText(body.title, 200) || null
   if (Object.prototype.hasOwnProperty.call(body, 'content')) data.content = sanitizeText(body.content, 5000) || null
   if (!Object.keys(data).length) return NextResponse.json({ ok: false, message: '没有需要更新的内容' }, { status: 400 })

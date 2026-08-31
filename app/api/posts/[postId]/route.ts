@@ -22,6 +22,14 @@ import {
   resolvePostContentInput,
 } from '@/lib/post-rich-content-compat'
 import { InvalidPostMusicReferenceError, validateAndNormalizePostMusicReferences } from '@/lib/post-music-references'
+import {
+  findPublicPostReferences,
+  findPublicUserMentions,
+  hydrateRichTextReferences,
+  InvalidPostReferenceError,
+  InvalidUserMentionError,
+  validateAndNormalizeRichTextReferences,
+} from '@/lib/rich-text-references'
 import { validateRichPostContent } from '@/lib/rich-text'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -368,17 +376,25 @@ export async function GET(_request: Request, { params }: Params) {
       displayName: getPublicUserDisplayName(User),
     },
   } : { ...User, nickname: getPublicUserDisplayName(User), avatarUrl: publicImageUrl(User.avatarUrl) }
+  let publicRichContent = postData.moderationStatus === 'VIOLATION'
+    ? null
+    : (() => {
+        const result = validateRichPostContent(postData.richContent)
+        return result.valid ? result.value : null
+      })()
+  if (publicRichContent) {
+    try {
+      publicRichContent = await hydrateRichTextReferences(publicRichContent, findPublicPostReferences, findPublicUserMentions)
+    } catch (error) {
+      console.warn('[posts:api-rich-content-hydration]', { postId, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
   return NextResponse.json({
     post: {
       ...postData,
       title: publicModerationText(postData.title, postData.moderationStatus),
       content: publicModerationText(publicContentImageMarkers(postData.content), postData.moderationStatus),
-      richContent: postData.moderationStatus === 'VIOLATION'
-        ? null
-        : (() => {
-            const result = validateRichPostContent(postData.richContent)
-            return result.valid ? result.value : null
-          })(),
+      richContent: publicRichContent,
       author,
       board: withForumBoardDisplayName(Board),
       media: PostMedia.map((media) => ({
@@ -717,12 +733,23 @@ async function handleEditPost(
       )
       rawContent = normalized.plainText
       nextRichContent = normalized.richContent
+
+      const normalizedReferences = await validateAndNormalizeRichTextReferences(
+        nextRichContent,
+        findPublicPostReferences,
+        findPublicUserMentions,
+      )
+      rawContent = normalizedReferences.plainText
+      nextRichContent = normalizedReferences.richContent
     } catch (error) {
       if (error instanceof InvalidPostMusicReferenceError) {
         return NextResponse.json({ message: error.message, errors: { content: '存在无效或未公开的 EasMusic 歌曲引用' } }, { status: 400 })
       }
+      if (error instanceof InvalidPostReferenceError || error instanceof InvalidUserMentionError) {
+        return NextResponse.json({ message: error.message, errors: { content: '存在无效或不可用的帖子/用户引用' } }, { status: 400 })
+      }
       logPostEditError(error, postId, user.id, 'edit-music-reference-validation')
-      return NextResponse.json({ message: '歌曲引用暂时无法验证，请稍后重试' }, { status: 503 })
+      return NextResponse.json({ message: '富文本引用暂时无法验证，请稍后重试' }, { status: 503 })
     }
   }
   const hasSticker = Boolean(existing.stickerId)

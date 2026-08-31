@@ -23,6 +23,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { MusicReferencePicker, type MusicReferenceSong } from '@/components/posts/MusicReferencePicker'
+import { PostReferencePicker, type PostReferencePost } from '@/components/posts/PostReferencePicker'
+import { UserMentionPicker, type UserMentionUser } from '@/components/posts/UserMentionPicker'
 import {
   RICH_TEXT_COLOR_TOKENS,
   RICH_TEXT_FONT_SIZE_TOKENS,
@@ -112,12 +114,20 @@ type InlineMarkToolbarState = Readonly<{
   bold: boolean
   italic: boolean
   strike: boolean
+  bulletList: boolean
+  orderedList: boolean
+  fontSize: RichTextFontSizeToken | null
+  textColor: RichTextColorToken | null
 }>
 
 const emptyInlineMarkToolbarState: InlineMarkToolbarState = {
   bold: false,
   italic: false,
   strike: false,
+  bulletList: false,
+  orderedList: false,
+  fontSize: null,
+  textColor: null,
 }
 
 const inlineMarkEditorEvents = ['selectionUpdate', 'transaction', 'update', 'focus', 'blur'] as const
@@ -140,8 +150,22 @@ function useInlineMarkToolbarState(editor: Editor | null): InlineMarkToolbarStat
       bold: editor.isActive('bold'),
       italic: editor.isActive('italic'),
       strike: editor.isActive('strike'),
+      bulletList: editor.isActive('bulletList'),
+      orderedList: editor.isActive('orderedList'),
+      fontSize: isRichTextFontSizeToken(editor.getAttributes('fontSize').token) ? editor.getAttributes('fontSize').token : null,
+      textColor: isRichTextColorToken(editor.getAttributes('textColor').token) && editor.getAttributes('textColor').token !== 'default'
+        ? editor.getAttributes('textColor').token
+        : null,
     }
-    const nextKey = `${Number(nextValue.bold)}${Number(nextValue.italic)}${Number(nextValue.strike)}`
+    const nextKey = [
+      nextValue.bold,
+      nextValue.italic,
+      nextValue.strike,
+      nextValue.bulletList,
+      nextValue.orderedList,
+      nextValue.fontSize || '',
+      nextValue.textColor || '',
+    ].map((value) => typeof value === 'boolean' ? Number(value) : value).join('|')
     const previous = snapshotRef.current
     if (previous.editor === editor && previous.key === nextKey) return previous.value
 
@@ -301,9 +325,19 @@ const richHeading = TiptapNode.create({
   },
 })
 
+function isEmptyListItemAtStart(editor: Editor) {
+  const { selection } = editor.state
+  const { $from } = selection
+  return selection.empty
+    && $from.parent.isTextblock
+    && $from.parentOffset === 0
+    && $from.parent.content.size === 0
+    && $from.node(-1).type.name === 'listItem'
+}
+
 const richListItem = TiptapNode.create({
   name: 'listItem',
-  group: 'block',
+  priority: 1100,
   content: 'paragraph block*',
   defining: true,
   parseHTML() {
@@ -311,6 +345,35 @@ const richListItem = TiptapNode.create({
   },
   renderHTML({ HTMLAttributes }) {
     return ['li', HTMLAttributes, 0]
+  },
+  addKeyboardShortcuts() {
+    const handleEnter = () => this.editor.commands.first(({ commands }) => [
+      () => commands.newlineInCode(),
+      () => commands.splitListItem('listItem'),
+      () => commands.createParagraphNear(),
+      () => commands.liftEmptyBlock(),
+      () => commands.splitBlock(),
+    ])
+    const handleBackspace = () => {
+      // Let ProseMirror's base keymap delete non-empty selections.  Running
+      // list-item navigation against a whole-document selection can otherwise
+      // leave an empty listItem at the document root.
+      if (!this.editor.state.selection.empty) return false
+      if (isEmptyListItemAtStart(this.editor)) return this.editor.commands.liftListItem('listItem')
+      return this.editor.commands.first(({ commands }) => [
+        () => commands.undoInputRule(),
+        () => commands.deleteSelection(),
+        () => commands.joinBackward(),
+        () => commands.selectNodeBackward(),
+      ])
+    }
+
+    return {
+      Enter: handleEnter,
+      Backspace: handleBackspace,
+      'Mod-Backspace': handleBackspace,
+      'Shift-Backspace': handleBackspace,
+    }
   },
 })
 
@@ -434,6 +497,114 @@ const richMusicReference = TiptapNode.create({
   },
 })
 
+function parseOptionalUid(value: string | null) {
+  return value && /^\d{1,5}$/u.test(value) ? Number(value) : null
+}
+
+const richPostReference = TiptapNode.create({
+  name: 'postReference',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      postId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-post-id'),
+        renderHTML: (attributes: { postId?: unknown }) => typeof attributes.postId === 'string' && attributes.postId ? { 'data-post-id': attributes.postId } : {},
+      },
+      title: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-post-title') || '',
+        renderHTML: (attributes: { title?: unknown }) => typeof attributes.title === 'string' && attributes.title ? { 'data-post-title': attributes.title } : {},
+      },
+      authorName: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-post-author-name') || '',
+        renderHTML: (attributes: { authorName?: unknown }) => typeof attributes.authorName === 'string' && attributes.authorName ? { 'data-post-author-name': attributes.authorName } : {},
+      },
+      authorUid: {
+        default: null,
+        parseHTML: (element: HTMLElement) => parseOptionalUid(element.getAttribute('data-post-author-uid')),
+        renderHTML: (attributes: { authorUid?: unknown }) => Number.isSafeInteger(attributes.authorUid) ? { 'data-post-author-uid': String(attributes.authorUid) } : {},
+      },
+      available: {
+        default: true,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-post-reference-available') !== 'false',
+        renderHTML: (attributes: { available?: unknown }) => ({ 'data-post-reference-available': attributes.available === false ? 'false' : 'true' }),
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-post-reference]' }]
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const unavailable = node.attrs.available === false
+    const title = unavailable ? '该引用帖子已不可用' : typeof node.attrs.title === 'string' && node.attrs.title ? node.attrs.title : '引用帖子'
+    const author = unavailable ? '' : typeof node.attrs.authorName === 'string' && node.attrs.authorName ? node.attrs.authorName : '未知作者'
+    const uid = unavailable || !Number.isSafeInteger(node.attrs.authorUid) ? '' : `UID ${String(node.attrs.authorUid).padStart(5, '0')}`
+    return ['span', mergeAttributes(HTMLAttributes, {
+      'data-post-reference': 'true',
+      class: 'rich-text-post-reference',
+      contenteditable: 'false',
+      'aria-label': `引用帖子：${title}`,
+    }),
+    ['span', { class: 'rich-text-post-reference-icon', 'aria-hidden': 'true' }, '↗'],
+    ['span', { class: 'rich-text-post-reference-copy' },
+      ['strong', {}, '引用帖子'],
+      ['span', {}, `《${title}》`],
+      ['small', {}, [author, uid].filter(Boolean).join(' · ')],
+    ]]
+  },
+})
+
+const richUserMention = TiptapNode.create({
+  name: 'userMention',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      userId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-user-id'),
+        renderHTML: (attributes: { userId?: unknown }) => typeof attributes.userId === 'string' && attributes.userId ? { 'data-user-id': attributes.userId } : {},
+      },
+      displayName: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-user-display-name') || '',
+        renderHTML: (attributes: { displayName?: unknown }) => typeof attributes.displayName === 'string' && attributes.displayName ? { 'data-user-display-name': attributes.displayName } : {},
+      },
+      uid: {
+        default: null,
+        parseHTML: (element: HTMLElement) => parseOptionalUid(element.getAttribute('data-user-uid')),
+        renderHTML: (attributes: { uid?: unknown }) => Number.isSafeInteger(attributes.uid) ? { 'data-user-uid': String(attributes.uid) } : {},
+      },
+      available: {
+        default: true,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-user-mention-available') !== 'false',
+        renderHTML: (attributes: { available?: unknown }) => ({ 'data-user-mention-available': attributes.available === false ? 'false' : 'true' }),
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-user-mention]' }]
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const displayName = node.attrs.available === false
+      ? '用户已不可用'
+      : typeof node.attrs.displayName === 'string' && node.attrs.displayName ? node.attrs.displayName : '用户'
+    return ['span', mergeAttributes(HTMLAttributes, {
+      'data-user-mention': 'true',
+      class: 'rich-text-user-mention',
+      contenteditable: 'false',
+      'aria-label': `@${displayName}`,
+    }), `@${displayName}`]
+  },
+})
+
 const richTextExtensions = [
   Document,
   Paragraph,
@@ -456,6 +627,8 @@ const richTextExtensions = [
   RichColorMark(),
   RichFontSizeMark(),
   richMusicReference,
+  richPostReference,
+  richUserMention,
 ]
 
 function sanitizePastedHtml(html: string) {
@@ -467,6 +640,11 @@ function sanitizePastedHtml(html: string) {
 
   const escapeText = (value: string) => value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;')
   const escapeAttribute = (value: string) => escapeText(value).replace(/"/gu, '&quot;')
+  const safeReferenceId = (value: string | null) => {
+    const normalized = value?.trim() || ''
+    return normalized && normalized.length <= 191 && !/[\u0000-\u001f\u007f\s]/u.test(normalized) ? normalized : null
+  }
+  const safeSnapshot = (value: string | null, fallback: string) => (value || fallback).trim().slice(0, 200)
   const renderNode = (node: globalThis.Node): string => {
     if (node.nodeType === 3) return escapeText(node.textContent || '')
     if (node.nodeType !== 1) return ''
@@ -481,6 +659,34 @@ function sanitizePastedHtml(html: string) {
       return href ? '<a href="' + escapeAttribute(href) + '">' + children + '</a>' : children
     }
     if (tag === 'span') {
+      const postId = safeReferenceId(element.getAttribute('data-post-id'))
+      if (element.hasAttribute('data-post-reference') && postId) {
+        const title = safeSnapshot(element.getAttribute('data-post-title'), element.textContent || '引用帖子')
+        const authorName = safeSnapshot(element.getAttribute('data-post-author-name'), '')
+        const authorUid = element.getAttribute('data-post-author-uid')
+        const referenceAttributes = [
+          'data-post-reference="true"',
+          'data-post-id="' + escapeAttribute(postId) + '"',
+          title ? 'data-post-title="' + escapeAttribute(title) + '"' : '',
+          authorName ? 'data-post-author-name="' + escapeAttribute(authorName) + '"' : '',
+          authorUid && /^\d{1,5}$/u.test(authorUid) ? 'data-post-author-uid="' + authorUid + '"' : '',
+          element.getAttribute('data-post-reference-available') === 'false' ? 'data-post-reference-available="false"' : '',
+        ].filter(Boolean)
+        return '<span ' + referenceAttributes.join(' ') + '>引用帖子</span>'
+      }
+      const userId = safeReferenceId(element.getAttribute('data-user-id'))
+      if (element.hasAttribute('data-user-mention') && userId) {
+        const displayName = safeSnapshot(element.getAttribute('data-user-display-name'), (element.textContent || '').replace(/^@/u, '') || '用户')
+        const uid = element.getAttribute('data-user-uid')
+        const mentionAttributes = [
+          'data-user-mention="true"',
+          'data-user-id="' + escapeAttribute(userId) + '"',
+          'data-user-display-name="' + escapeAttribute(displayName) + '"',
+          uid && /^\d{1,5}$/u.test(uid) ? 'data-user-uid="' + uid + '"' : '',
+          element.getAttribute('data-user-mention-available') === 'false' ? 'data-user-mention-available="false"' : '',
+        ].filter(Boolean)
+        return '<span ' + mentionAttributes.join(' ') + '>@' + escapeText(displayName) + '</span>'
+      }
       const songId = element.getAttribute('data-music-song-id')
       if (element.hasAttribute('data-music-reference') && songId) {
         const title = (element.getAttribute('data-music-title') || element.textContent || '').replace(/^♪\s*/u, '').trim().slice(0, 200)
@@ -545,9 +751,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   // never open it as a side effect.
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false)
   const [activeHeadingLevel, setActiveHeadingLevel] = useState<HeadingLevel | undefined>(undefined)
-  const [openMenu, setOpenMenu] = useState<'size' | 'color' | null>(null)
+  const [openMenu, setOpenMenu] = useState<'list' | 'size' | 'color' | null>(null)
   const [musicPickerOpen, setMusicPickerOpen] = useState(false)
-  const [toolbarNotice, setToolbarNotice] = useState('')
+  const [postReferencePickerOpen, setPostReferencePickerOpen] = useState(false)
+  const [userMentionPickerOpen, setUserMentionPickerOpen] = useState(false)
 
   function rememberSelection(currentEditor: Editor) {
     const { from, to } = currentEditor.state.selection
@@ -634,11 +841,15 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   }
 
   const activeEditor = editor
-  const { bold: boldActive, italic: italicActive, strike: strikeActive } = inlineMarkState
-  const activeSize = activeEditor.getAttributes('fontSize').token
-  const activeColor = activeEditor.getAttributes('textColor').token
-  const currentSize = isRichTextFontSizeToken(activeSize) ? activeSize : null
-  const currentColor = isRichTextColorToken(activeColor) && activeColor !== 'default' ? activeColor : null
+  const {
+    bold: boldActive,
+    italic: italicActive,
+    strike: strikeActive,
+    bulletList: bulletListActive,
+    orderedList: orderedListActive,
+    fontSize: currentSize,
+    textColor: currentColor,
+  } = inlineMarkState
   const currentBlockType: 'paragraph' | HeadingLevel = activeHeadingLevel ?? 'paragraph'
   const blockLabel = blockLabels[currentBlockType]
   const stopToolbarBlur = (event: MouseEvent<HTMLButtonElement>) => {
@@ -694,7 +905,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     toggleHeadingMenuFromUser()
   }
 
-  function toggleToolbarMenu(menu: 'size' | 'color') {
+  function toggleToolbarMenu(menu: 'list' | 'size' | 'color') {
     rememberSelection(activeEditor)
     closeHeadingMenu()
     setOpenMenu((current) => current === menu ? null : menu)
@@ -734,24 +945,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     activeEditor.chain().focus(null, { scrollIntoView: false }).toggleStrike().run()
   }
 
-  function applyLink() {
+  function applyList(listType: 'bulletList' | 'orderedList') {
+    startCommand().toggleList(listType, 'listItem').run()
     closeHeadingMenu()
-    rememberSelection(activeEditor)
-    const currentHref = activeEditor.getAttributes('link').href
-    const input = window.prompt('链接地址', typeof currentHref === 'string' ? currentHref : '')
-    if (input === null) return
-    if (!input.trim()) {
-      startCommand().unsetMark('link').run()
-      setToolbarNotice('')
-      return
-    }
-    const href = normalizeRichTextHref(input)
-    if (!href) {
-      setToolbarNotice('链接地址无效或不安全')
-      return
-    }
-    startCommand().setMark('link', { href }).run()
-    setToolbarNotice('')
+    setOpenMenu(null)
   }
 
   function clearFormatting() {
@@ -776,6 +973,43 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       .run()
     rememberSelection(activeEditor)
     setMusicPickerOpen(false)
+  }
+
+  function insertPostReference(post: PostReferencePost) {
+    closeHeadingMenu()
+    startCommand()
+      .insertContent({
+        type: 'postReference',
+        attrs: {
+          postId: post.id,
+          title: post.title,
+          authorName: post.authorName,
+          authorUid: post.authorUid,
+          available: true,
+        },
+      })
+      .insertContent(' ')
+      .run()
+    rememberSelection(activeEditor)
+    setPostReferencePickerOpen(false)
+  }
+
+  function insertUserMention(user: UserMentionUser) {
+    closeHeadingMenu()
+    startCommand()
+      .insertContent({
+        type: 'userMention',
+        attrs: {
+          userId: user.id,
+          displayName: user.displayName,
+          uid: user.uid,
+          available: true,
+        },
+      })
+      .insertContent(' ')
+      .run()
+    rememberSelection(activeEditor)
+    setUserMentionPickerOpen(false)
   }
 
   return (
@@ -816,119 +1050,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             </div>
           ) : null}
         </div>
-
-        <button
-          type="button"
-          className={toolbarButtonClass(boldActive)}
-          aria-label="加粗"
-          aria-pressed={boldActive}
-          data-active={boldActive ? 'true' : 'false'}
-          onPointerDown={rememberToolbarPointerDown}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => toggleInlineMark('bold')}
-        >
-          <strong>B</strong>
-        </button>
-        <button
-          type="button"
-          className={toolbarButtonClass(italicActive)}
-          aria-label="斜体"
-          aria-pressed={italicActive}
-          data-active={italicActive ? 'true' : 'false'}
-          onPointerDown={rememberToolbarPointerDown}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => toggleInlineMark('italic')}
-        >
-          <em>I</em>
-        </button>
-        <button
-          type="button"
-          className={toolbarButtonClass(strikeActive)}
-          aria-label="删除线"
-          data-active={strikeActive ? 'true' : 'false'}
-          aria-pressed={strikeActive}
-          onPointerDown={rememberToolbarPointerDown}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => toggleInlineMark('strike')}
-        >
-          <s>S</s>
-        </button>
-
-        <button
-          type="button"
-          className={toolbarButtonClass(activeEditor.isActive('bulletList'))}
-          aria-label="无序列表"
-          aria-pressed={activeEditor.isActive('bulletList')}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => {
-            closeHeadingMenu()
-            startCommand().toggleList('bulletList', 'listItem').run()
-          }}
-        >
-          • 列表
-        </button>
-        <button
-          type="button"
-          className={toolbarButtonClass(activeEditor.isActive('orderedList'))}
-          aria-label="有序列表"
-          aria-pressed={activeEditor.isActive('orderedList')}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => {
-            closeHeadingMenu()
-            startCommand().toggleList('orderedList', 'listItem').run()
-          }}
-        >
-          1. 列表
-        </button>
-        <button
-          type="button"
-          className={toolbarButtonClass(activeEditor.isActive('blockquote'))}
-          aria-label="引用"
-          aria-pressed={activeEditor.isActive('blockquote')}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => {
-            closeHeadingMenu()
-            startCommand().toggleWrap('blockquote').run()
-          }}
-        >
-          “ 引用
-        </button>
-        <button
-          type="button"
-          className={toolbarButtonClass(activeEditor.isActive('link'))}
-          aria-label="添加或编辑链接"
-          aria-pressed={activeEditor.isActive('link')}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={applyLink}
-        >
-          链接
-        </button>
-        <button
-          type="button"
-          className={toolbarButtonClass()}
-          aria-label="插入分割线"
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => {
-            closeHeadingMenu()
-            startCommand().insertContent({ type: 'horizontalRule' }).run()
-          }}
-        >
-          分割线
-        </button>
-
-        <button
-          type="button"
-          className={toolbarButtonClass()}
-          aria-label="引用 EasMusic 歌曲"
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => {
-            rememberSelection(activeEditor)
-            setOpenMenu(null)
-            setMusicPickerOpen(true)
-          }}
-        >
-          ♪ 歌曲
-        </button>
 
         <div className="relative">
           <button
@@ -995,6 +1116,139 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
         <button
           type="button"
+          className={toolbarButtonClass(boldActive)}
+          aria-label="加粗"
+          aria-pressed={boldActive}
+          data-active={boldActive ? 'true' : 'false'}
+          onPointerDown={rememberToolbarPointerDown}
+          onMouseDown={closeHeadingOnToolbarMouseDown}
+          onClick={() => toggleInlineMark('bold')}
+        >
+          <strong>B</strong>
+        </button>
+        <button
+          type="button"
+          className={toolbarButtonClass(italicActive)}
+          aria-label="斜体"
+          aria-pressed={italicActive}
+          data-active={italicActive ? 'true' : 'false'}
+          onPointerDown={rememberToolbarPointerDown}
+          onMouseDown={closeHeadingOnToolbarMouseDown}
+          onClick={() => toggleInlineMark('italic')}
+        >
+          <em>I</em>
+        </button>
+        <button
+          type="button"
+          className={toolbarButtonClass(strikeActive)}
+          aria-label="删除线"
+          data-active={strikeActive ? 'true' : 'false'}
+          aria-pressed={strikeActive}
+          onPointerDown={rememberToolbarPointerDown}
+          onMouseDown={closeHeadingOnToolbarMouseDown}
+          onClick={() => toggleInlineMark('strike')}
+        >
+          <s>S</s>
+        </button>
+
+        <div className="relative">
+          <button
+            type="button"
+            className={toolbarButtonClass(bulletListActive || orderedListActive)}
+            aria-label="列表"
+            aria-haspopup="menu"
+            aria-expanded={openMenu === 'list'}
+            aria-pressed={bulletListActive || orderedListActive}
+            onPointerDown={rememberToolbarPointerDown}
+            onMouseDown={closeHeadingOnToolbarMouseDown}
+            onClick={() => toggleToolbarMenu('list')}
+          >
+            列表<span aria-hidden="true">⌄</span>
+          </button>
+          {openMenu === 'list' ? (
+            <div className="rich-text-toolbar-menu" role="menu" aria-label="列表类型">
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={bulletListActive}
+                className={menuItemClass(bulletListActive)}
+                onPointerDown={rememberToolbarPointerDown}
+                onMouseDown={closeHeadingOnToolbarMouseDown}
+                onClick={() => applyList('bulletList')}
+              >
+                <span aria-hidden="true">{bulletListActive ? '✓' : ''}</span>无序列表
+              </button>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={orderedListActive}
+                className={menuItemClass(orderedListActive)}
+                onPointerDown={rememberToolbarPointerDown}
+                onMouseDown={closeHeadingOnToolbarMouseDown}
+                onClick={() => applyList('orderedList')}
+              >
+                <span aria-hidden="true">{orderedListActive ? '✓' : ''}</span>有序列表
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className={toolbarButtonClass()}
+          aria-label="引用一篇站内帖子"
+          onPointerDown={rememberToolbarPointerDown}
+          onMouseDown={closeHeadingOnToolbarMouseDown}
+          onClick={() => {
+            rememberSelection(activeEditor)
+            setOpenMenu(null)
+            setPostReferencePickerOpen(true)
+          }}
+        >
+          引用
+        </button>
+        <button
+          type="button"
+          className={toolbarButtonClass()}
+          aria-label="@用户"
+          onPointerDown={rememberToolbarPointerDown}
+          onMouseDown={closeHeadingOnToolbarMouseDown}
+          onClick={() => {
+            rememberSelection(activeEditor)
+            setOpenMenu(null)
+            setUserMentionPickerOpen(true)
+          }}
+        >
+          @用户
+        </button>
+        <button
+          type="button"
+          className={toolbarButtonClass()}
+          aria-label="插入分割线"
+          onMouseDown={closeHeadingOnToolbarMouseDown}
+          onClick={() => {
+            closeHeadingMenu()
+            startCommand().insertContent({ type: 'horizontalRule' }).run()
+          }}
+        >
+          分割线
+        </button>
+
+        <button
+          type="button"
+          className={toolbarButtonClass()}
+          aria-label="引用 EasMusic 歌曲"
+          onMouseDown={closeHeadingOnToolbarMouseDown}
+          onClick={() => {
+            rememberSelection(activeEditor)
+            setOpenMenu(null)
+            setMusicPickerOpen(true)
+          }}
+        >
+          ♪ 歌曲
+        </button>
+
+        <button
+          type="button"
           className={toolbarButtonClass()}
           onMouseDown={closeHeadingOnToolbarMouseDown}
           onClick={clearFormatting}
@@ -1028,7 +1282,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           ↷ <span className="sr-only">重做</span>
         </button>
       </div>
-      {toolbarNotice ? <p className="rich-text-toolbar-notice" role="status">{toolbarNotice}</p> : null}
       <EditorContent
         editor={editor}
         className="rich-text-editor-content"
@@ -1043,6 +1296,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         open={musicPickerOpen}
         onClose={() => setMusicPickerOpen(false)}
         onSelect={insertMusicReference}
+      />
+      <PostReferencePicker
+        open={postReferencePickerOpen}
+        onClose={() => setPostReferencePickerOpen(false)}
+        onSelect={insertPostReference}
+      />
+      <UserMentionPicker
+        open={userMentionPickerOpen}
+        onClose={() => setUserMentionPickerOpen(false)}
+        onSelect={insertUserMention}
       />
     </div>
   )

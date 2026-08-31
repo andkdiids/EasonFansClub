@@ -36,6 +36,7 @@ import { UserDisplayName } from '@/components/UserDisplayName'
 import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, firstShareCardImageCandidate, shareCardImageCandidates, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { validateRichPostContent } from '@/lib/rich-text'
+import { findPublicPostReferences, findPublicUserMentions, hydrateRichTextReferences } from '@/lib/rich-text-references'
 import {
   clampPostReplyPage,
   getPostReplyOffset,
@@ -978,14 +979,22 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
   const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
   const publicRichContent = richResult?.valid ? richResult.value : null
+  let renderedRichContent = publicRichContent
+  if (publicRichContent) {
+    try {
+      renderedRichContent = await hydrateRichTextReferences(publicRichContent, findPublicPostReferences, findPublicUserMentions)
+    } catch (error) {
+      console.warn('[posts:rich-content-hydration]', { postId, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
   const publicPostContentSource = publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus)
-  const publicPostContent = postContentPlainText(publicPostContentSource, publicRichContent)
-  const shareCardPostContent = postContentPlainText(publicPostContentSource, publicRichContent, { preserveLineBreaks: true })
+  const publicPostContent = postContentPlainText(publicPostContentSource, renderedRichContent)
+  const shareCardPostContent = postContentPlainText(publicPostContentSource, renderedRichContent, { preserveLineBreaks: true })
   const publicPostTitle = publicModerationText(post.title, post.moderationStatus)
   const safePublicPostContent = publicModerationText(publicPostContent, post.moderationStatus)
   const safeShareCardPostContent = publicModerationText(shareCardPostContent, post.moderationStatus)
-  const shareTitle = createPostShareTitle(publicPostTitle, safePublicPostContent, publicRichContent)
-  const shareText = createPostShareDescription(safePublicPostContent, publicRichContent)
+  const shareTitle = createPostShareTitle(publicPostTitle, safePublicPostContent, renderedRichContent)
+  const shareText = createPostShareDescription(safePublicPostContent, renderedRichContent)
   const shareCardImage = firstShareCardImageCandidate(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
   const shareCardImages = shareCardImageCandidates(post.PostMedia.map(({ url, width, height }) => ({ url, width, height })))
   const shareCardData: ShareCardData = {
@@ -1136,7 +1145,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <span>回复 {post.replyCount}</span>
           </div>
           <RichPostContent
-            richContent={publicRichContent}
+            richContent={renderedRichContent}
             fallbackContent={publicPostContentSource}
             className="mt-8 text-lg leading-9 text-slate-700 post-detail-body"
           />

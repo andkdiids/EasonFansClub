@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import sharp from 'sharp'
-import { buildSalonFeedWhere, SALON_CATEGORIES, salonPublicBaseWhere, supportsOriginal } from '@/lib/salon'
+import { buildSalonFeedWhere, SALON_CATEGORIES, SALON_CATEGORY_CONFIG, salonPublicBaseWhere, supportsOriginal } from '@/lib/salon'
 import { SALON_MAX_FILE_SIZE, SALON_MAX_FILES, validateSalonFiles } from '@/lib/salon-upload'
 import {
   calculateSalonWatermarkLayout,
@@ -170,11 +170,31 @@ test('沙龙全部分类复用公开基础条件且不隐式绑定演唱会分�
 
 test('时光倒流二十年是独立的可审核分类并沿用统一详情/分享路径', () => {
   assert.equal(SALON_CATEGORIES.at(-1), 'TIME_TRAVEL')
-  assert.match(read('components/salon/SalonHome.tsx'), /时光倒流二十年/)
-  assert.match(read('components/salon/SalonUploadForm.tsx'), /requiresConcert = category === 'CONCERT'/)
-  assert.match(read('components/salon/SalonUploadForm.tsx'), /if \(requiresConcert\) body\.set\('concertId'/)
+  assert.equal(SALON_CATEGORY_CONFIG.TIME_TRAVEL.label, '时光倒流二十年')
+  assert.match(read('components/salon/SalonHome.tsx'), /SALON_CATEGORY_CONFIG\[value\]\.label/)
+  assert.match(read('components/salon/SalonUploadForm.tsx'), /const requiresConcert = categoryConfig\.requiresConcert/)
+  assert.match(read('components/salon/SalonUploadForm.tsx'), /body\.set\('sessionId', sessionId\)/)
   assert.match(read('components/salon/SalonDetail.tsx'), /\/salon\//)
-  assert.match(read('lib/share-card-service.ts'), /SALON_CATEGORY_LABELS\[post\.category\]/)
+  assert.match(read('lib/share-card-service.ts'), /SALON_CATEGORY_CONFIG\[post\.category\]\.label/)
+})
+
+test('壁纸关联表单、服务端校验和已审核展示都使用同一套父子场次关系', () => {
+  const upload = read('components/salon/SalonUploadForm.tsx')
+  const admin = read('app/admin/salon/AdminSalonManager.tsx')
+  const createRoute = read('app/api/salon/posts/route.ts')
+  const updateRoute = read('app/api/salon/posts/[postId]/route.ts')
+  const adminRoute = read('app/api/admin/salon/route.ts')
+  const home = read('components/salon/SalonHome.tsx')
+  assert.match(upload, /const allowsConcert = categoryConfig\.allowsConcert/)
+  assert.match(upload, /演唱会 \{requiresConcert \? <b>\*<\/b> : null\}/)
+  assert.match(upload, /场次 \{requiresConcert \? <b>\*<\/b> : null\}/)
+  assert.match(admin, /const allowsConcert = SALON_CATEGORY_CONFIG\[editing\.category\]\.allowsConcert/)
+  assert.match(createRoute, /normalizeSalonConcertSelection/)
+  assert.match(createRoute, /tourId: selection\.tourId/)
+  assert.match(updateRoute, /不属于所选演唱会/)
+  assert.match(adminRoute, /normalizeSalonConcertSelection/)
+  assert.match(home, /allowsConcert === true/)
+  assert.doesNotMatch(home, /历史影像/)
 })
 
 test('沙龙详情使用统一分享系统、display 首图与独立浏览量接口', () => {

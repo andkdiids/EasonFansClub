@@ -8,7 +8,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { prisma } from '@/lib/prisma'
 import { buildPublicMediaUrl } from '@/lib/media-url'
-import { buildSalonFeedWhere, formatSalonSession, SALON_CATEGORY_LABELS } from '@/lib/salon'
+import { buildSalonFeedWhere, formatSalonSession, SALON_CATEGORY_CONFIG } from '@/lib/salon'
 import { validateRichPostContent } from '@/lib/rich-text'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { publicPostWhere } from '@/lib/post-moderation'
@@ -232,8 +232,9 @@ export async function loadSalonShareCardData(postId: string): Promise<ShareCardD
     title: post.concert.title,
     sessionNumber: post.concert.sessionNumber,
   }) : ''
-  const title = post.title?.trim() || (post.concert ? `${post.concert.MusicTour.name} · ${post.concert.city}` : SALON_CATEGORY_LABELS[post.category])
-  const description = post.content?.trim() || sessionDescription || SALON_CATEGORY_LABELS[post.category]
+  const categoryLabel = SALON_CATEGORY_CONFIG[post.category].label
+  const title = post.title?.trim() || (post.concert ? `${post.concert.MusicTour.name} · ${post.concert.city}` : categoryLabel)
+  const description = post.content?.trim() || sessionDescription || categoryLabel
   const firstMedia = firstShareCardImageCandidate(post.media.map((media) => ({ url: media.previewUrl, width: media.width, height: media.height })))
   const imageCandidates = shareCardImageCandidates(post.media.map((media) => ({ url: media.previewUrl, width: media.width, height: media.height })))
   return {
@@ -250,7 +251,7 @@ export async function loadSalonShareCardData(postId: string): Promise<ShareCardD
     authorAvatar: safeAuthorAvatar(post.author.Profile?.avatarUrl || post.author.avatarUrl),
     date: formatDate(post.createdAt),
     meta: [
-      { label: '沙龙', value: SALON_CATEGORY_LABELS[post.category] },
+      { label: '沙龙', value: categoryLabel },
       ...(post.concert ? [
         { label: '演唱会', value: post.concert.MusicTour.name },
         { label: '场次', value: sessionDescription },

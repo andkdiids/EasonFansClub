@@ -47,7 +47,7 @@ test('heading menu is opened only by a user trigger and closes after selection',
   assert.match(editorContent, /onFocus=\{closeToolbarMenus\}/u)
   assert.match(editorContent, /onBlur=\{closeToolbarMenus\}/u)
   assert.match(editorContent, /onCompositionStart=\{closeToolbarMenus\}/u)
-  assert.match(editor, /function toggleToolbarMenu\(menu: 'size' \| 'color'\)/u)
+  assert.match(editor, /function toggleToolbarMenu\(menu: 'list' \| 'size' \| 'color'\)/u)
   assert.match(editor, /setOpenMenu\(\(current\) => current === menu \? null : menu\)/u)
   assert.match(editor, /function applyBlock\(/u)
   assert.match(editor, /setOpenMenu\(null\)/u)
@@ -63,7 +63,7 @@ test('bold, italic and strike are real toggles with selection-sourced active sta
   assert.match(editor, /activeEditor\.chain\(\)\.focus\(null, \{ scrollIntoView: false \}\)\.toggleBold\(\)\.run\(\)/u)
   assert.match(editor, /activeEditor\.chain\(\)\.focus\(null, \{ scrollIntoView: false \}\)\.toggleItalic\(\)\.run\(\)/u)
   assert.match(editor, /activeEditor\.chain\(\)\.focus\(null, \{ scrollIntoView: false \}\)\.toggleStrike\(\)\.run\(\)/u)
-  assert.match(editor, /const \{ bold: boldActive, italic: italicActive, strike: strikeActive \} = inlineMarkState/u)
+  assert.match(editor, /const \{\s*bold: boldActive,\s*italic: italicActive,\s*strike: strikeActive,?[\s\S]*\} = inlineMarkState/u)
   assert.match(editor, /data-active=\{boldActive \? 'true' : 'false'\}/u)
   assert.match(editor, /data-active=\{italicActive \? 'true' : 'false'\}/u)
   assert.match(editor, /data-active=\{strikeActive \? 'true' : 'false'\}/u)
@@ -123,4 +123,9 @@ test('music insertion uses the saved selection rather than forcing the document 
   assert.match(editor, /function insertMusicReference\(song: MusicReferenceSong\)/u)
   assert.match(editor, /startCommand\(\)[\s\S]*type: 'musicReference'/u)
   assert.doesNotMatch(editor, /focus\(['"]start['"]\)|focus\(['"]end['"]\)|setSelection\(0\)/u)
+})
+
+test('list backspace delegates non-empty selections to the base keymap', () => {
+  assert.match(editor, /if \(!this\.editor\.state\.selection\.empty\) return false/u)
+  assert.match(editor, /isEmptyListItemAtStart\(this\.editor\)/u)
 })

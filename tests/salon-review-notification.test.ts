@@ -46,7 +46,7 @@ test('四种沙龙分类都使用前台中文分类名', () => {
     const content = buildSalonReviewNotificationContent({ nickname: '测试用户', category, title: '作品标题' })
     assert.equal(content, `测试用户 投稿了「${label}」《作品标题》，请审核`)
   }
-  assert.match(read('lib/salon.ts'), /TIME_TRAVEL: '时光倒流二十年'/)
+  assert.match(read('lib/salon.ts'), /TIME_TRAVEL:\s*\{[\s\S]*label: '时光倒流二十年'/)
 })
 
 test('通知 writer 只解析有 post_manage 权限的活跃管理员，并为每人写一条', async () => {

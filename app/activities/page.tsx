@@ -20,10 +20,10 @@ export default async function ActivitiesPage() {
   return (
     <>
       <main className="site-page-main flat-page mx-auto max-w-7xl space-y-6 px-5 py-8">
-        <section className={`relative isolate min-h-64 overflow-hidden border shadow-sm ${hasBanner ? 'border-slate-800 bg-[#071523] text-white' : 'border-sky-100 bg-white/85 text-brand-950'}`}>
+        <section className={`relative isolate min-h-64 overflow-hidden border shadow-sm ${hasBanner ? 'border-slate-800 bg-[#071523] text-white' : 'border-sky-100 bg-white/85 text-[var(--foreground)]'}`}>
           <HeroBackground visual={banner} fallbackImageUrl={config.images.activityCoverUrl} priority />
           {hasBanner ? <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" /> : null}
-          <div className="relative z-10 p-7 sm:p-10"><h1 className="text-4xl font-black">活动中心</h1><p className={`mt-4 max-w-2xl leading-8 ${hasBanner ? 'text-white/80' : 'text-slate-600'}`}>演唱会、线下聚会、线上活动和粉丝福利都会在这里发布。</p></div>
+          <div className="relative z-10 p-7 sm:p-10"><h1 className="text-4xl font-black">活动中心</h1><p className={`mt-4 max-w-2xl leading-8 ${hasBanner ? 'text-white/80' : 'text-[var(--foreground-muted)]'}`}>演唱会、线下聚会、线上活动和粉丝福利都会在这里发布。</p></div>
         </section>
         <ActivitiesListClient initialActivities={activities} />
       </main>

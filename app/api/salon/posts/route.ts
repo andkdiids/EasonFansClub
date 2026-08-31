@@ -5,7 +5,18 @@ import { NextResponse } from 'next/server'
 import { createImageVariants } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 import { publicImageUrl } from '@/lib/images'
-import { getSalonPosts, parseSalonCategory, parseSalonFilters, shouldPreserveOriginal } from '@/lib/salon'
+import {
+  decodeSalonCursor,
+  decodeSalonRecommendationCursor,
+  getSalonCategoryCounts,
+  getSalonPosts,
+  normalizeSalonConcertSelection,
+  parseSalonCategory,
+  parseSalonFilters,
+  parseSalonRecommendationSeed,
+  SALON_CATEGORY_CONFIG,
+  shouldPreserveOriginal,
+} from '@/lib/salon'
 import { SALON_MAX_FILES, SALON_MAX_FILE_SIZE, validateSalonFiles } from '@/lib/salon-upload'
 import { clampSalonWatermarkOpacity, createSalonWatermarkText, parseSalonWatermarkPosition } from '@/lib/salon-watermark'
 import { createSalonReviewNotifications } from '@/lib/salon-review-notifications'
@@ -18,6 +29,10 @@ import { SiteMediaStorageError, uploadSiteImage } from '@/lib/site-media-storage
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+function createSalonRecommendationSeed() {
+  return `${Date.now().toString(36)}.${randomUUID()}`
+}
 
 const MAX_FILES = SALON_MAX_FILES
 const MAX_FILE_SIZE = SALON_MAX_FILE_SIZE
@@ -61,6 +76,10 @@ async function inspectImage(file: File, index: number) {
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
+  const requestedMode = params.get('mode') || ''
+  if (requestedMode && !['latest', 'popular', 'recommend'].includes(requestedMode)) {
+    return NextResponse.json({ message: 'mode 参数无效' }, { status: 400 })
+  }
   const filters = parseSalonFilters({
     category: params.get('category') || undefined,
     concert: params.get('concert') || undefined,
@@ -68,9 +87,29 @@ export async function GET(request: Request) {
     sort: params.get('sort') || undefined,
     cursor: params.get('cursor') || undefined,
   })
+  if (requestedMode === 'recommend' && (filters.category || filters.tourId || filters.sessionId)) {
+    return NextResponse.json({ message: '推荐刷新只支持全部作品' }, { status: 400 })
+  }
+  const rawCursor = filters.cursor
+  const recommendationSeed = requestedMode === 'recommend'
+    ? params.get('feedSeed') || createSalonRecommendationSeed()
+    : null
+  if (requestedMode === 'recommend') {
+    const seed = parseSalonRecommendationSeed(recommendationSeed)
+    if (!seed) return NextResponse.json({ message: '推荐会话无效' }, { status: 400 })
+    if (rawCursor && !decodeSalonRecommendationCursor(rawCursor, seed.value)) {
+      return NextResponse.json({ message: '沙龙推荐游标无效' }, { status: 400 })
+    }
+  } else if (rawCursor && !decodeSalonCursor(rawCursor)) {
+    return NextResponse.json({ message: '沙龙游标无效' }, { status: 400 })
+  }
   const user = await requireUser().then((result) => result.user).catch(() => null)
-  const data = await getSalonPosts(filters, user?.id)
-  return NextResponse.json(data, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  const data = await getSalonPosts(filters, user?.id, {
+    mode: requestedMode === 'recommend' ? 'recommend' : undefined,
+    feedSeed: recommendationSeed,
+  })
+  const categoryCounts = rawCursor ? undefined : await getSalonCategoryCounts()
+  return NextResponse.json({ ...data, ...(categoryCounts ? { categoryCounts } : {}) }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }
 
 export async function POST(request: Request) {
@@ -91,6 +130,8 @@ export async function POST(request: Request) {
   }
 
   const category = parseSalonCategory(form.get('category'))
+  const tourId = sanitizeText(form.get('tourId'), 191)
+  const sessionId = sanitizeText(form.get('sessionId'), 191)
   const concertId = sanitizeText(form.get('concertId'), 191)
   const title = sanitizeText(form.get('title'), 200) || null
   const content = sanitizeText(form.get('content'), 5000) || null
@@ -99,16 +140,30 @@ export async function POST(request: Request) {
   const watermarkOpacity = clampSalonWatermarkOpacity(form.get('watermarkOpacity'))
   const watermarkPosition = parseSalonWatermarkPosition(form.get('watermarkPosition'))
   if (!category) return uploadError('请选择投稿分类')
-  const requiresConcert = category === 'CONCERT'
-  if (requiresConcert && !concertId) return uploadError('请选择对应的演唱会和场次')
+  const categoryConfig = SALON_CATEGORY_CONFIG[category]
+  const selection = normalizeSalonConcertSelection({ tourId, sessionId, concertId })
+  const hasAssociationInput = Boolean(selection.tourId || selection.sessionId)
+  if (selection.hasConflict) return uploadError('演唱会和场次选择不一致，请重新选择')
+  if (!categoryConfig.allowsConcert && hasAssociationInput) return uploadError('该投稿分类不支持关联演唱会')
+  if (sessionId && !selection.tourId) return uploadError('请选择对应的演唱会')
 
-  const concert = requiresConcert
+  const concert = selection.sessionId
     ? await prisma.musicConcert.findFirst({
-        where: { id: concertId!, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } },
+        where: {
+          id: selection.sessionId,
+          ...(selection.tourId ? { tourId: selection.tourId } : {}),
+          status: 'PUBLISHED',
+          MusicTour: { status: 'PUBLISHED' },
+        },
         select: { id: true },
       })
     : null
-  if (requiresConcert && !concert) return uploadError('演唱会场次不存在或暂未公开')
+  if (selection.tourId && !selection.sessionId) {
+    const tour = await prisma.musicTour.findFirst({ where: { id: selection.tourId, status: 'PUBLISHED' }, select: { id: true } })
+    if (!tour) return uploadError('演唱会不存在或暂未公开')
+  }
+  if (categoryConfig.requiresConcert && !selection.sessionId) return uploadError('请选择对应的演唱会和场次')
+  if (selection.sessionId && !concert) return uploadError('演唱会场次不存在或暂未公开')
 
   if (submissionKey) {
     const existing = await prisma.salonPost.findFirst({ where: { userId: guard.user.id, submissionKey }, select: { id: true } })

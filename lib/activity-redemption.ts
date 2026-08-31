@@ -18,6 +18,10 @@ export type ActivityRedemptionEntitlement = {
   quantity: number
   status: 'PENDING' | 'REDEEMED' | 'UNAVAILABLE'
   redeemable: boolean
+  selectable: boolean
+  defaultSelected: boolean
+  requires: ActivityRedemptionEntitlementType[]
+  blockedReason: string | null
   redeemedAt: string | null
   redemptionState?: ActivityLotteryWinnerRedemptionState
 }
@@ -66,6 +70,10 @@ function tokenFromInput(value: string) {
   return token
 }
 
+function selectionMetadata(selectable: boolean, requires: ActivityRedemptionEntitlementType[] = [], blockedReason: string | null = null) {
+  return { selectable, defaultSelected: selectable, requires, blockedReason }
+}
+
 export async function resolveActivityVerificationToken(db: ActivityRegistrationLookupDb, activityId: string, rawToken: string) {
   const token = tokenFromInput(rawToken)
   const registration = await db.activityRegistration.findFirst({ where: activityRegistrationVerificationWhere(activityId, token), select: lookupRegistrationSelect })
@@ -80,6 +88,7 @@ function materialEntitlement(registration: LookupRegistration, now: Date): Activ
   const isPending = order.status === 'SUCCESS'
   const isRedeemed = order.status === 'REDEEMED'
   const isAvailableNow = !registration.Activity.startsAt || now >= registration.Activity.startsAt
+  const selectable = isPending && isAvailableNow
   return {
     type: 'MATERIAL',
     id: order.id,
@@ -87,7 +96,8 @@ function materialEntitlement(registration: LookupRegistration, now: Date): Activ
     subtitle: order.source === 'ACTIVITY_REGISTRATION_AUTO' && !isAvailableNow && isPending ? '活动尚未开始' : '活动物料',
     quantity: order.quantity,
     status: isPending ? 'PENDING' : isRedeemed ? 'REDEEMED' : 'UNAVAILABLE',
-    redeemable: isPending && isAvailableNow,
+    redeemable: selectable,
+    ...selectionMetadata(selectable, [], !isPending ? '当前不可核销' : !isAvailableNow ? '活动尚未开始，暂不能核销活动物料' : null),
     redeemedAt: order.redeemedAt?.toISOString() || null,
   }
 }
@@ -117,14 +127,16 @@ function lotteryWinnerRegistration(registration: LookupRegistration, winner: { r
 
 function lotteryWinnerSubtitle(state: ActivityLotteryWinnerRedemptionState) {
   if (state === 'REDEEMED') return '已兑奖'
-  if (state === 'REDEEMABLE') return '已完成真实现场核销，可兑奖'
+  if (state === 'REDEEMABLE') return '已中奖 · 可兑奖'
   if (state === 'EXPIRED') return '已失效：未在活动结束前完成真实现场核销'
-  return '已中奖，请完成活动核销后兑奖'
+  return '已中奖 · 需完成活动签到后兑奖，可与活动签到一并核销'
 }
 
 export async function getActivityRedemptionLookup(activityId: string, rawToken: string): Promise<ActivityRedemptionLookupView> {
   const { registration, winners } = await loadLookupRows(activityId, rawToken)
   const now = new Date()
+  const registrationSelectable = !registration.verifiedAt
+  const material = materialEntitlement(registration, now)
   const entitlements: ActivityRedemptionEntitlement[] = [
     {
       type: 'ACTIVITY_REGISTRATION',
@@ -133,10 +145,11 @@ export async function getActivityRedemptionLookup(activityId: string, rawToken: 
       subtitle: registration.verifiedAt ? '已完成活动核销' : '活动报名资格',
       quantity: 1,
       status: registration.verifiedAt ? 'REDEEMED' : 'PENDING',
-      redeemable: !registration.verifiedAt,
+      redeemable: registrationSelectable,
+      ...selectionMetadata(registrationSelectable),
       redeemedAt: registration.verifiedAt?.toISOString() || null,
     },
-    ...(materialEntitlement(registration, now) ? [materialEntitlement(registration, now)!] : []),
+    ...(material ? [material] : []),
     ...winners.map((winner) => {
       const redemptionState = getActivityLotteryWinnerRedemptionState({
         redemptionStatus: winner.redemptionStatus,
@@ -152,6 +165,17 @@ export async function getActivityRedemptionLookup(activityId: string, rawToken: 
         quantity: 1,
         status: redemptionState === 'REDEEMED' ? 'REDEEMED' as const : redemptionState === 'EXPIRED' ? 'UNAVAILABLE' as const : 'PENDING' as const,
         redeemable: redemptionState === 'REDEEMABLE',
+        ...selectionMetadata(
+          redemptionState === 'WAITING_FOR_CHECK_IN' || redemptionState === 'REDEEMABLE',
+          ['ACTIVITY_REGISTRATION'],
+          redemptionState === 'WAITING_FOR_CHECK_IN'
+            ? '需完成活动签到，可与活动签到一并核销'
+            : redemptionState === 'EXPIRED'
+              ? '已失效，无法兑奖'
+              : redemptionState === 'REDEEMED'
+                ? '已兑奖，不能重复核销'
+                : null,
+        ),
         redemptionState,
         redeemedAt: winner.redeemedAt?.toISOString() || null,
       }
@@ -184,16 +208,44 @@ function assertSelection(value: unknown): ActivityRedemptionSelection[] {
   return selections
 }
 
+const activityRedemptionProcessingOrder: Record<ActivityRedemptionEntitlementType, number> = {
+  ACTIVITY_REGISTRATION: 0,
+  MATERIAL: 1,
+  LOTTERY_PRIZE: 2,
+}
+
+export function orderActivityRedemptionSelections(selections: readonly ActivityRedemptionSelection[]) {
+  return selections
+    .map((selection, index) => ({ selection, index }))
+    .sort((left, right) => activityRedemptionProcessingOrder[left.selection.type] - activityRedemptionProcessingOrder[right.selection.type] || left.index - right.index)
+    .map(({ selection }) => selection)
+}
+
 async function lockRegistration(tx: Prisma.TransactionClient, activityId: string, token: string) {
   const { registration } = await resolveActivityVerificationToken(tx, activityId, token)
   await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registration.id} FOR UPDATE`
-  const current = await tx.activityRegistration.findUnique({ where: { id: registration.id }, select: { id: true, status: true, userId: true, verifiedAt: true, checkedInAt: true, checkInSource: true, linkedMaterialRedemptionId: true, Activity: { select: { endsAt: true } } } })
+  return readLockedRegistration(tx, registration.id)
+}
+
+const lockedRegistrationSelect = {
+  id: true,
+  status: true,
+  userId: true,
+  verifiedAt: true,
+  checkedInAt: true,
+  checkInSource: true,
+  linkedMaterialRedemptionId: true,
+  Activity: { select: { endsAt: true } },
+} satisfies Prisma.ActivityRegistrationSelect
+
+type LockedActivityRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof lockedRegistrationSelect }>
+
+async function readLockedRegistration(tx: Prisma.TransactionClient, registrationId: string) {
+  const current = await tx.activityRegistration.findUnique({ where: { id: registrationId }, select: lockedRegistrationSelect })
   if (!current) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
   if (current.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
   return current
 }
-
-type LockedActivityRegistration = Awaited<ReturnType<typeof lockRegistration>>
 
 async function redeemLotteryWinnerInTransaction(
   tx: Prisma.TransactionClient,
@@ -212,7 +264,7 @@ async function redeemLotteryWinnerInTransaction(
   if (winner.registrationId && winner.registrationId !== registration.id) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '中奖奖品不属于当前活动报名记录', 403)
   if (winner.redemptionStatus === 'REDEEMED') return { id: winner.id, status: 'ALREADY_REDEEMED' as const, redeemedAt: winner.redeemedAt?.toISOString() || null }
   const redemptionState = getActivityLotteryWinnerRedemptionState({ redemptionStatus: winner.redemptionStatus, registration, activityEndAt: registration.Activity.endsAt, now })
-  if (redemptionState === 'WAITING_FOR_CHECK_IN') throw new ActivityRedemptionError('LOTTERY_WINNER_WAITING_FOR_CHECK_IN', '中奖后请先完成真实活动核销，再进行兑奖', 409)
+  if (redemptionState === 'WAITING_FOR_CHECK_IN') throw new ActivityRedemptionError('LOTTERY_WINNER_WAITING_FOR_CHECK_IN', '该奖品需要完成活动签到后才能兑奖，请同时勾选活动签到', 409)
   if (redemptionState === 'EXPIRED') throw new ActivityRedemptionError('LOTTERY_WINNER_EXPIRED', '该中奖资格已失效，未在活动结束前完成真实现场核销', 409)
   const updated = await tx.lotteryEntry.updateMany({ where: { id: winner.id, userId: registration.userId, redemptionStatus: 'PENDING' }, data: { redemptionStatus: 'REDEEMED', redeemedAt: now, redeemedByAdminId: adminId } })
   if (updated.count !== 1) {
@@ -226,17 +278,18 @@ async function redeemLotteryWinnerInTransaction(
 export async function confirmActivityRedemption(activityId: string, rawToken: string, rawSelections: unknown, adminId: string) {
   const token = tokenFromInput(rawToken)
   const selections = assertSelection(rawSelections)
+  const orderedSelections = orderActivityRedemptionSelections(selections)
   const results = await prisma.$transaction(async (tx) => {
     const lockedActivity = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
     if (!lockedActivity.length) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '活动不存在', 404)
     let registration = await lockRegistration(tx, activityId, token)
     const now = new Date()
     const itemResults: Array<{ type: ActivityRedemptionEntitlementType; id: string; status: 'REDEEMED' | 'ALREADY_REDEEMED' }> = []
-    for (const selection of selections) {
+    for (const selection of orderedSelections) {
       if (selection.type === 'ACTIVITY_REGISTRATION') {
         if (selection.id !== registration.id) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '活动报名权益不属于当前二维码', 403)
         const result = await verifyActivityRegistrationInTransaction(tx, { activityId, token, adminId, method: 'QR', redeemLinkedMaterial: false }, now)
-        if (!result.alreadyVerified) registration = { ...registration, verifiedAt: new Date(result.verifiedAt), checkedInAt: new Date(result.verifiedAt), checkInSource: result.checkInSource }
+        registration = await readLockedRegistration(tx, registration.id)
         itemResults.push({ type: selection.type, id: selection.id, status: result.alreadyVerified ? 'ALREADY_REDEEMED' : 'REDEEMED' })
       } else if (selection.type === 'MATERIAL') {
         if (selection.id !== registration.linkedMaterialRedemptionId) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '活动物料不属于当前二维码', 403)

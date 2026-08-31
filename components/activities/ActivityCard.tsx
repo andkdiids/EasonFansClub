@@ -3,11 +3,11 @@ import { activityDateLabel, activityStatusLabel, activityTypeLabels, type Activi
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 const statusClasses = {
-  DRAFT: 'border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  UPCOMING: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200',
-  ONGOING: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200',
-  ENDED: 'border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  CANCELLED: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200',
+  DRAFT: 'border-[var(--border)] bg-[var(--surface-subtle)] text-[var(--foreground-muted)]',
+  UPCOMING: 'border-[color-mix(in_srgb,var(--primary)_40%,var(--border))] bg-[color-mix(in_srgb,var(--primary)_12%,var(--surface))] text-[var(--primary)]',
+  ONGOING: 'border-[color-mix(in_srgb,var(--success)_40%,var(--border))] bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] text-[var(--success)]',
+  ENDED: 'border-[var(--border)] bg-[var(--surface-subtle)] text-[var(--foreground-muted)]',
+  CANCELLED: 'border-[color-mix(in_srgb,var(--danger)_40%,var(--border))] bg-[color-mix(in_srgb,var(--danger)_12%,var(--surface))] text-[var(--danger)]',
 } as const
 
 export function ActivityStatusBadge({ activity }: Readonly<{ activity: Pick<ActivityView, 'displayStatus'> }>) {
@@ -25,11 +25,11 @@ export function ActivityCard({ activity, href = `/activities/${activity.id}` }: 
         </> : <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-sky-100 via-white to-indigo-100 text-4xl font-black text-brand-700/55 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800">E</div>}
       </div>
       <div className="min-w-0 p-3 sm:p-5">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5"><ActivityStatusBadge activity={activity} /><span className="truncate text-[11px] font-black text-slate-400 dark:text-slate-500">{activityTypeLabels[activity.type]}</span>{activity.isFeatured ? <span className="text-[11px] font-black text-amber-600 dark:text-amber-300">精选</span> : null}</div>
-        <h2 className="mt-2 line-clamp-2 break-words text-base font-black text-brand-950 sm:mt-3 sm:text-xl dark:text-slate-100">{activity.title}</h2>
-        {activity.subtitle ? <p className="mt-1 line-clamp-1 break-words text-xs font-bold text-slate-500 sm:line-clamp-2 sm:text-sm dark:text-slate-400">{activity.subtitle}</p> : null}
-        <p className="mt-2 hidden line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600 sm:mt-3 sm:block dark:text-slate-300">{activity.description}</p>
-        <div className="mt-3 space-y-1 text-[11px] font-bold leading-5 text-slate-500 sm:mt-4 sm:text-xs dark:text-slate-400">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5"><ActivityStatusBadge activity={activity} /><span className="truncate text-[11px] font-black text-[var(--foreground-muted)]">{activityTypeLabels[activity.type]}</span>{activity.isFeatured ? <span className="text-[11px] font-black text-[var(--warning)]">精选</span> : null}</div>
+        <h2 className="mt-2 line-clamp-2 break-words text-base font-black text-[var(--foreground)] sm:mt-3 sm:text-xl">{activity.title}</h2>
+        {activity.subtitle ? <p className="mt-1 line-clamp-1 break-words text-xs font-bold text-[var(--foreground-muted)] sm:line-clamp-2 sm:text-sm">{activity.subtitle}</p> : null}
+        <p className="mt-2 hidden line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground-muted)] sm:mt-3 sm:block">{activity.description}</p>
+        <div className="mt-3 space-y-1 text-[11px] font-bold leading-5 text-[var(--foreground-muted)] sm:mt-4 sm:text-xs">
           {activity.startsAt ? <p className="truncate">时间：{activityDateLabel(activity.startsAt)}{activity.endsAt ? ` — ${activityDateLabel(activity.endsAt)}` : ''}</p> : null}
           {activity.locationName ? <p className="truncate">地点：{activity.locationName}</p> : null}
           <p>{activity.signupLimit !== null && activity.signupLimit > 0 ? `报名：${activity.signupCount}/${activity.signupLimit}` : `报名：${activity.signupCount}人`}</p>

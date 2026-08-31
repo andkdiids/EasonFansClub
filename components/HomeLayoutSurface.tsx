@@ -20,6 +20,7 @@ import { normalizeActionUrl } from '@/lib/url-safety'
 import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
 import { getHomeCheckInDisplay } from '@/lib/home-checkin-display'
 import type { HomeActivityStatusLabel } from '@/lib/home-activity'
+import { salonCategoryLabel } from '@/lib/salon'
 
 const homeText = {
   goCheckin: '去挂号',
@@ -93,13 +94,6 @@ type HomeActivity = { id: string; title: string; coverUrl: string | null; banner
 type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
 type HomeSalonPost = { id: string; category: string; title: string | null; approvedAt: string; thumbnailUrl: string | null }
 type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; salonPosts: HomeSalonPost[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; checkedInToday: boolean; todayCheckInCount: number; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
-
-const salonCategoryLabels: Record<string, string> = {
-  CONCERT: '演唱会记录',
-  MOBILE_WALLPAPER: '手机壁纸',
-  DESKTOP_WALLPAPER: '电脑壁纸',
-  TIME_TRAVEL: '时光档案',
-}
 
 const modeLabels = Object.fromEntries(
   GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, GUESS_SONG_MODE_CONFIG[mode].label]),
@@ -492,7 +486,8 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
       <header><h2>{homeText.salon}</h2><Link href="/salon" className="home-module-entry">{homeText.salonMore} {'>>'}</Link></header>
       {data.salonPosts.length ? <div className="home-salon-content">
         {data.salonPosts.map((post, index) => {
-          const title = post.title?.trim() || salonCategoryLabels[post.category] || '沙龙作品'
+          const categoryLabel = salonCategoryLabel(post.category) || '沙龙作品'
+          const title = post.title?.trim() || categoryLabel
           return <Link key={post.id} href={`/salon/${post.id}`} className="home-salon-item">
             <span className="home-salon-thumb">
               {post.thumbnailUrl ? <>
@@ -500,7 +495,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
                 <img src={post.thumbnailUrl} alt={title} loading={index === 0 ? 'eager' : 'lazy'} decoding="async" />
               </> : '沙龙'}
             </span>
-            <span className="home-salon-copy"><strong>{title}</strong><small>{salonCategoryLabels[post.category] || '沙龙作品'} · {shortDateTime(post.approvedAt)}</small></span>
+            <span className="home-salon-copy"><strong>{title}</strong><small>{categoryLabel} · {shortDateTime(post.approvedAt)}</small></span>
           </Link>
         })}
       </div> : <p className="community-empty home-first-row-empty">{homeText.salonEmpty}</p>}

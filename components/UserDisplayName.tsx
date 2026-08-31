@@ -157,6 +157,7 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
   }, [uid])
   const displayBadge = showBadge ? liveBadge : null
   const isStaticBadge = badgeInteraction === 'static'
+  const stackedBadge = Boolean(displayBadge && showBadgeName && !compact && showBadgeIcon)
   const style = useMemo(() => badgeNicknameStyle(displayBadge), [displayBadge])
   const nicknameShineEnabled = isBadgeNicknameShineEnabled(displayBadge)
   const badgeClick = (event: MouseEvent<HTMLSpanElement>) => {
@@ -194,14 +195,14 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
   )
 
   const content = (
-    <span className={`user-display-name ${compact ? 'user-display-name-compact' : ''} ${className}`}>
-      {nickname}
+    <span className={`user-display-name ${compact ? 'user-display-name-compact' : ''} ${stackedBadge ? 'user-display-name-stacked' : ''} ${className}`}>
+      {stackedBadge ? <span className="user-display-name-nickname-row">{nickname}</span> : nickname}
       {displayBadge && showBadgeIcon ? (
         isStaticBadge ? (
-          <span className="user-display-badge user-display-badge-static" title={displayBadge.name} aria-label={displayBadge.name}>{badgeInner}</span>
+          <span className={`user-display-badge ${stackedBadge ? 'user-display-badge-row' : ''} user-display-badge-static`} title={displayBadge.name} aria-label={displayBadge.name}>{badgeInner}</span>
         ) : (
           <span
-            className="user-display-badge user-display-badge-interactive"
+            className={`user-display-badge ${stackedBadge ? 'user-display-badge-row' : ''} user-display-badge-interactive`}
             role="button"
             tabIndex={0}
             title={`${displayBadge.name} · 点击查看详情`}
@@ -218,7 +219,7 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
 
   return (
     <>
-      {href ? <Link href={href} className="user-display-name-link">{content}</Link> : content}
+      {href ? <Link href={href} className={`user-display-name-link ${stackedBadge ? 'user-display-name-link-stacked' : ''}`}>{content}</Link> : content}
       {!isStaticBadge && detailOpen && displayBadge ? <BadgeDetail badge={displayBadge} onClose={() => setDetailOpen(false)} /> : null}
     </>
   )

@@ -11,7 +11,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { ShareButton } from '@/components/share/ShareButton'
 import { buildConcertSlugPath } from '@/lib/music-slug'
 import { formatUid } from '@/lib/uid'
-import { formatSalonSession, SALON_CATEGORY_LABELS, SALON_STATUS_LABELS, type SalonCommentView, type SalonPostView, supportsOriginal } from '@/lib/salon'
+import { formatSalonPostContext, formatSalonSession, SALON_CATEGORY_CONFIG, SALON_STATUS_LABELS, type SalonCommentView, type SalonPostView, supportsOriginal } from '@/lib/salon'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { shareCardImageCandidates } from '@/lib/share-metadata'
 import { SalonComments } from './SalonComments'
@@ -31,13 +31,14 @@ export function SalonDetail({ post, initialComments, initialCommentsHasMore, ini
   const activeMedia = post.media[activeIndex] || post.media[0]
   const gallery = post.media.map((media, index) => ({ id: media.id, src: media.previewUrl, previewSrc: media.thumbnailUrl, originalUrl: null, downloadUrl: supportsOriginal(post.category) && media.originalAvailable ? `/api/salon/media/${encodeURIComponent(media.id)}/original?mode=download` : undefined, alt: `${post.title || '沙龙作品'} · ${index + 1}` }))
   const concert = post.concert
-  const fallbackTitle = SALON_CATEGORY_LABELS[post.category]
+  const categoryLabel = SALON_CATEGORY_CONFIG[post.category].label
+  const fallbackTitle = categoryLabel
   const shareCardImages = shareCardImageCandidates(post.media.map((media) => ({ url: media.previewUrl, width: media.width, height: media.height })))
   const shareCardData: ShareCardData = {
     type: 'salon',
     contentId: post.id,
-    title: post.title || (concert ? `${concert.tour.name} · ${concert.city}` : fallbackTitle),
-    description: post.content || (concert ? formatSalonSession({ city: concert.city, concertDate: concert.date, venue: concert.venue, title: concert.title, sessionNumber: null }) : fallbackTitle),
+    title: post.title || (concert ? formatSalonPostContext(post.category, concert) : fallbackTitle),
+    description: post.content || (concert ? formatSalonSession({ city: concert.city, concertDate: concert.date, venue: concert.venue, title: concert.title, sessionNumber: concert.sessionNumber }) : fallbackTitle),
     image: shareCardImages[0]?.url || null,
     imageWidth: shareCardImages[0]?.width,
     imageHeight: shareCardImages[0]?.height,
@@ -46,7 +47,7 @@ export function SalonDetail({ post, initialComments, initialCommentsHasMore, ini
     author: post.author.nickname,
     authorAvatar: post.author.avatarUrl,
     date: new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt)),
-    meta: [{ label: '沙龙', value: SALON_CATEGORY_LABELS[post.category] }, ...(concert ? [{ label: '现场', value: concert.tour.name }] : [])],
+    meta: [{ label: '沙龙', value: categoryLabel }, ...(concert ? [{ label: '演唱会', value: concert.tour.name }, { label: '场次', value: formatSalonSession({ city: concert.city, concertDate: concert.date, venue: concert.venue, title: concert.title, sessionNumber: concert.sessionNumber }) }] : [])],
   }
 
   async function removePost() {
@@ -71,9 +72,9 @@ export function SalonDetail({ post, initialComments, initialCommentsHasMore, ini
       </div>
       <aside className="salon-detail-info">
         <div className="salon-detail-author"><Link href={`/user/${formatUid(post.author.uid)}`}><SafeAvatar src={post.author.avatarUrl} name={post.author.nickname} uid={post.author.uid} className="salon-detail-avatar" textClassName="salon-avatar-fallback" /></Link><div><Link href={`/user/${formatUid(post.author.uid)}`} className="salon-detail-author-name">{post.author.nickname}</Link><span>发布于 {new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(post.createdAt))}</span></div></div>
-        <div className="salon-detail-tags"><span>{SALON_CATEGORY_LABELS[post.category]}</span>{concert ? <span>{concert.tour.name}</span> : null}</div>
+        <div className="salon-detail-tags"><span>{categoryLabel}</span>{concert ? <span>{concert.tour.name}</span> : null}</div>
         <h1>{post.title || '无标题作品'}</h1>
-        {concert ? <Link href={buildConcertSlugPath(concert.tour.name, concert.city, concert.date, concert.stageType)} className="salon-detail-concert">{formatSalonSession({ city: concert.city, concertDate: concert.date, venue: concert.venue, title: concert.title, sessionNumber: null })}</Link> : <p className="salon-detail-concert">{SALON_CATEGORY_LABELS[post.category]}</p>}
+        {concert ? <Link href={buildConcertSlugPath(concert.tour.name, concert.city, concert.date, concert.stageType)} className="salon-detail-concert">{formatSalonSession({ city: concert.city, concertDate: concert.date, venue: concert.venue, title: concert.title, sessionNumber: concert.sessionNumber })}</Link> : <p className="salon-detail-concert">{categoryLabel}</p>}
         {post.content ? <p className="salon-detail-content">{post.content}</p> : null}
         <div className="salon-detail-actions"><SalonLikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /><span>评论 {post.commentCount}</span><SalonViewCounter postId={post.id} initialCount={post.viewCount} />{currentUserId === post.author.id || canModerate ? <button type="button" onClick={() => void removePost()} className="salon-danger-button">删除作品</button> : null}</div>
       </aside>

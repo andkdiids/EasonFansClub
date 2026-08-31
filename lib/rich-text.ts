@@ -22,6 +22,8 @@ export const MAX_RICH_TEXT_JSON_LENGTH = 256_000
 export const MAX_RICH_TEXT_NODES = 4_000
 export const MAX_RICH_TEXT_DEPTH = 12
 export const MAX_RICH_TEXT_MARKS_PER_TEXT = 6
+export const MAX_RICH_TEXT_POST_REFERENCES = 50
+export const MAX_RICH_TEXT_USER_MENTIONS = 50
 
 export type RichTextMark =
   | { type: 'bold' }
@@ -36,6 +38,8 @@ export type RichTextInlineNode =
   | { type: 'text'; text: string; marks?: RichTextMark[] }
   | { type: 'hardBreak' }
   | RichTextMusicReferenceNode
+  | RichTextPostReferenceNode
+  | RichTextUserMentionNode
 
 export type RichTextMusicReferenceNode = {
   type: 'musicReference'
@@ -44,6 +48,32 @@ export type RichTextMusicReferenceNode = {
     title?: string
     artist?: string
     album?: string
+  }
+}
+
+/**
+ * An inline reference keeps the database id as its identity. The remaining
+ * fields are only display snapshots and may be refreshed by the server.
+ */
+export type RichTextPostReferenceNode = {
+  type: 'postReference'
+  attrs: {
+    postId: string
+    title?: string
+    authorName?: string
+    authorUid?: number
+    available?: boolean
+  }
+}
+
+/** A structured user mention; userId is authoritative, snapshots are not. */
+export type RichTextUserMentionNode = {
+  type: 'userMention'
+  attrs: {
+    userId: string
+    displayName?: string
+    uid?: number
+    available?: boolean
   }
 }
 
@@ -270,6 +300,71 @@ function normalizeInlineNode(value: unknown, state: ValidationState, depth: numb
     }
     return { type: 'musicReference', attrs: metadata }
   }
+  if (value.type === 'postReference' || value.type === 'userMention') {
+    const isPostReference = value.type === 'postReference'
+    const allowedKeys = isPostReference
+      ? ['type', 'attrs']
+      : ['type', 'attrs']
+    const attributeKeys = isPostReference
+      ? ['postId', 'title', 'authorName', 'authorUid', 'available']
+      : ['userId', 'displayName', 'uid', 'available']
+    if (!hasOnlyKeys(value, allowedKeys) || !isRecord(value.attrs) || !hasOnlyKeys(value.attrs, attributeKeys)) {
+      fail(state, path + ' has invalid ' + (isPostReference ? 'post reference' : 'user mention') + ' attributes')
+      return null
+    }
+
+    const attrs = value.attrs
+    const rawId = attrs[isPostReference ? 'postId' : 'userId']
+    const id = typeof rawId === 'string' ? rawId.trim() : ''
+    if (!id || id.length > 191 || /[\u0000-\u001f\u007f\s]/u.test(id)) {
+      fail(state, path + '.attrs.' + (isPostReference ? 'postId' : 'userId') + ' is invalid')
+      return null
+    }
+
+    const metadata: RichTextPostReferenceNode['attrs'] | RichTextUserMentionNode['attrs'] = isPostReference
+      ? { postId: id }
+      : { userId: id }
+    const snapshotKeys = isPostReference
+      ? (['title', 'authorName'] as const)
+      : (['displayName'] as const)
+    for (const key of snapshotKeys) {
+      const snapshot = attrs[key]
+      if (snapshot === undefined || snapshot === null || snapshot === '') continue
+      if (typeof snapshot !== 'string' || snapshot.length > 200) {
+        fail(state, path + '.attrs.' + key + ' is invalid')
+        return null
+      }
+      const trimmed = snapshot.trim()
+      if (trimmed) (metadata as Record<string, unknown>)[key] = trimmed
+    }
+
+    const uidKey = isPostReference ? 'authorUid' : 'uid'
+    const rawUid = attrs[uidKey]
+    if (rawUid !== undefined && rawUid !== null && rawUid !== '') {
+      const uid = typeof rawUid === 'number'
+        ? rawUid
+        : typeof rawUid === 'string' && /^\d{1,5}$/u.test(rawUid.trim())
+          ? Number(rawUid.trim())
+          : Number.NaN
+      if (!Number.isSafeInteger(uid) || uid < 0 || uid > 99_999) {
+        fail(state, path + '.attrs.' + uidKey + ' is invalid')
+        return null
+      }
+      ;(metadata as Record<string, unknown>)[uidKey] = uid
+    }
+
+    if (attrs.available !== undefined && attrs.available !== null) {
+      if (typeof attrs.available !== 'boolean') {
+        fail(state, path + '.attrs.available is invalid')
+        return null
+      }
+      metadata.available = attrs.available
+    }
+
+    return isPostReference
+      ? { type: 'postReference', attrs: metadata as RichTextPostReferenceNode['attrs'] }
+      : { type: 'userMention', attrs: metadata as RichTextUserMentionNode['attrs'] }
+  }
   if (value.type !== 'text' || typeof value.text !== 'string' || value.text.length === 0) {
     fail(state, path + ' uses an unsupported inline node')
     return null
@@ -431,6 +526,8 @@ function extractInlineText(content: RichTextInlineNode[] | undefined) {
   return (content || []).map((node) => {
     if (node.type === 'hardBreak') return '\n'
     if (node.type === 'musicReference') return node.attrs.title || ''
+    if (node.type === 'postReference') return node.attrs.available === false ? '该引用帖子已不可用' : node.attrs.title || '引用帖子'
+    if (node.type === 'userMention') return '@' + (node.attrs.available === false ? '用户已不可用' : node.attrs.displayName || '用户')
     return node.text
   }).join('')
 }
@@ -507,6 +604,43 @@ export function collectMusicReferenceSongIds(value: RichTextContent) {
   return ids
 }
 
+function collectInlineReferenceIds(value: RichTextContent, type: 'postReference' | 'userMention') {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const visitInline = (node: RichTextInlineNode) => {
+    const id = type === 'postReference' && node.type === 'postReference'
+      ? node.attrs.postId
+      : type === 'userMention' && node.type === 'userMention'
+        ? node.attrs.userId
+        : null
+    if (!id) return
+    if (seen.has(id)) return
+    seen.add(id)
+    ids.push(id)
+  }
+  const visitBlock = (block: RichTextBlockNode): void => {
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      block.content?.forEach(visitInline)
+      return
+    }
+    if (block.type === 'listItem' || block.type === 'blockquote') {
+      block.content?.forEach(visitBlock)
+      return
+    }
+    if (block.type === 'bulletList' || block.type === 'orderedList') block.content?.forEach(visitBlock)
+  }
+  value.content.forEach(visitBlock)
+  return ids
+}
+
+export function collectPostReferenceIds(value: RichTextContent) {
+  return collectInlineReferenceIds(value, 'postReference')
+}
+
+export function collectUserMentionIds(value: RichTextContent) {
+  return collectInlineReferenceIds(value, 'userMention')
+}
+
 export type RichTextMusicReferenceMetadata = {
   title: string
   artist: string
@@ -545,6 +679,78 @@ export function enrichMusicReferenceMetadata(
     }
     if (block.type === 'bulletList' || block.type === 'orderedList') {
       return block.content ? { ...block, content: block.content.map((item) => mapBlock(item) as RichTextListItemNode) } : block
+    }
+    return block
+  }
+  return { type: 'doc', content: value.content.map(mapBlock) }
+}
+
+export type RichTextPostReferenceMetadata = {
+  title: string
+  authorName: string
+  authorUid?: number
+  available?: boolean
+}
+
+export type RichTextUserMentionMetadata = {
+  displayName: string
+  uid?: number
+  available?: boolean
+}
+
+function enrichInlineReference(
+  node: RichTextInlineNode,
+  postMetadata: ReadonlyMap<string, RichTextPostReferenceMetadata>,
+  userMetadata: ReadonlyMap<string, RichTextUserMentionMetadata>,
+) {
+  if (node.type === 'postReference') {
+    const metadata = postMetadata.get(node.attrs.postId)
+    if (!metadata) return node
+    return {
+      type: 'postReference' as const,
+      attrs: {
+        postId: node.attrs.postId,
+        title: metadata.title,
+        authorName: metadata.authorName,
+        ...(metadata.authorUid === undefined ? {} : { authorUid: metadata.authorUid }),
+        available: metadata.available !== false,
+      },
+    }
+  }
+  if (node.type === 'userMention') {
+    const metadata = userMetadata.get(node.attrs.userId)
+    if (!metadata) return node
+    return {
+      type: 'userMention' as const,
+      attrs: {
+        userId: node.attrs.userId,
+        displayName: metadata.displayName,
+        ...(metadata.uid === undefined ? {} : { uid: metadata.uid }),
+        available: metadata.available !== false,
+      },
+    }
+  }
+  return node
+}
+
+export function enrichRichTextReferenceMetadata(
+  value: RichTextContent,
+  postMetadata: ReadonlyMap<string, RichTextPostReferenceMetadata>,
+  userMetadata: ReadonlyMap<string, RichTextUserMentionMetadata>,
+): RichTextContent {
+  const mapBlock = (block: RichTextBlockNode): RichTextBlockNode => {
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      return block.content
+        ? { ...block, content: block.content.map((node) => enrichInlineReference(node, postMetadata, userMetadata)) }
+        : block
+    }
+    if (block.type === 'listItem' || block.type === 'blockquote') {
+      return block.content ? { ...block, content: block.content.map(mapBlock) } : block
+    }
+    if (block.type === 'bulletList' || block.type === 'orderedList') {
+      return block.content
+        ? { ...block, content: block.content.map((item) => mapBlock(item) as RichTextListItemNode) }
+        : block
     }
     return block
   }

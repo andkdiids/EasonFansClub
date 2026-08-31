@@ -20,8 +20,7 @@ import { ProfileRecordSettings } from '@/components/ProfileRecordSettings'
 import { getOrderedProfileRecordSectionKeys, getProfileRecordLabel, normalizeProfileRecordPreferences, PROFILE_RECORD_SECTIONS, type ProfileRecordPreference } from '@/lib/profile-record-sections'
 import type { ProfilePostGroupView } from '@/lib/profile-post-groups'
 import { PersonalPostGroupMenu, ProfilePostGroupBar } from '@/components/ProfilePostGroups'
-import type { SalonPostView } from '@/lib/salon'
-import { SALON_CATEGORY_LABELS } from '@/lib/salon'
+import { formatSalonPostContext, type SalonPostView } from '@/lib/salon'
 import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
 
@@ -495,7 +494,7 @@ function ModuleContent({
       <div className="space-y-3">
         {salonPosts.map((post) => {
           const media = post.media[0]
-          const context = post.concert ? `${post.concert.tour.name} · ${post.concert.city}` : SALON_CATEGORY_LABELS[post.category]
+          const context = formatSalonPostContext(post.category, post.concert)
           return <article key={post.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] sm:flex">
             {media ? <Link href={`/salon/${post.id}`} className="block shrink-0 sm:w-40">
               {/* eslint-disable-next-line @next/next/no-img-element */}

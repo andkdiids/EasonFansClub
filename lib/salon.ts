@@ -1,11 +1,57 @@
 import type { Prisma } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { stableRecommendationWeight } from '@/lib/forum-discovery'
 import { publicImageUrl } from '@/lib/images'
 import { getProfileRecordPagination } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 
 export const SALON_CATEGORIES = ['CONCERT', 'MOBILE_WALLPAPER', 'DESKTOP_WALLPAPER', 'TIME_TRAVEL'] as const
 export type SalonCategoryValue = typeof SALON_CATEGORIES[number]
+
+export type SalonCategoryConfig = {
+  label: string
+  hint: string
+  allowsConcert: boolean
+  allowsSession: boolean
+  requiresConcert: boolean
+  originalPolicy: 'PRESERVE_ORIGINAL'
+}
+
+/** Shared category rules for upload, moderation, feeds, detail and share cards. */
+export const SALON_CATEGORY_CONFIG: Record<SalonCategoryValue, SalonCategoryConfig> = {
+  CONCERT: {
+    label: '演唱会记录',
+    hint: '上传你在现场拍摄的照片。',
+    allowsConcert: true,
+    allowsSession: true,
+    requiresConcert: true,
+    originalPolicy: 'PRESERVE_ORIGINAL',
+  },
+  MOBILE_WALLPAPER: {
+    label: '手机壁纸',
+    hint: '适合手机竖屏使用的高清图片。',
+    allowsConcert: true,
+    allowsSession: true,
+    requiresConcert: false,
+    originalPolicy: 'PRESERVE_ORIGINAL',
+  },
+  DESKTOP_WALLPAPER: {
+    label: '电脑壁纸',
+    hint: '适合电脑横屏使用的高清图片。',
+    allowsConcert: true,
+    allowsSession: true,
+    requiresConcert: false,
+    originalPolicy: 'PRESERVE_ORIGINAL',
+  },
+  TIME_TRAVEL: {
+    label: '时光倒流二十年',
+    hint: '分享与陈奕迅有关的早年生活照、公开影像和珍贵历史记录。',
+    allowsConcert: false,
+    allowsSession: false,
+    requiresConcert: false,
+    originalPolicy: 'PRESERVE_ORIGINAL',
+  },
+}
 
 /** Every Salon upload retains an untouched source; only public display variants are optimized. */
 export function supportsOriginal(category: SalonCategoryValue | string) {
@@ -15,19 +61,13 @@ export function supportsOriginal(category: SalonCategoryValue | string) {
 /** Naming alias for upload code that describes the persistence decision. */
 export const shouldPreserveOriginal = supportsOriginal
 
-export const SALON_CATEGORY_LABELS: Record<SalonCategoryValue, string> = {
-  CONCERT: '演唱会记录',
-  MOBILE_WALLPAPER: '手机壁纸',
-  DESKTOP_WALLPAPER: '电脑壁纸',
-  TIME_TRAVEL: '时光倒流二十年',
-}
+export const SALON_CATEGORY_LABELS: Record<SalonCategoryValue, string> = Object.fromEntries(
+  SALON_CATEGORIES.map((category) => [category, SALON_CATEGORY_CONFIG[category].label]),
+) as Record<SalonCategoryValue, string>
 
-export const SALON_CATEGORY_HINTS: Record<SalonCategoryValue, string> = {
-  CONCERT: '上传你在现场拍摄的照片。',
-  MOBILE_WALLPAPER: '适合手机竖屏使用的高清图片。',
-  DESKTOP_WALLPAPER: '适合电脑横屏使用的高清图片。',
-  TIME_TRAVEL: '分享与陈奕迅有关的早年生活照、公开影像和珍贵历史记录。',
-}
+export const SALON_CATEGORY_HINTS: Record<SalonCategoryValue, string> = Object.fromEntries(
+  SALON_CATEGORIES.map((category) => [category, SALON_CATEGORY_CONFIG[category].hint]),
+) as Record<SalonCategoryValue, string>
 
 export const SALON_POST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const
 export type SalonPostStatusValue = typeof SALON_POST_STATUSES[number]
@@ -39,8 +79,20 @@ export const SALON_STATUS_LABELS: Record<SalonPostStatusValue, string> = {
 
 export const SALON_PAGE_SIZE = 24
 export const SALON_COMMENT_PAGE_SIZE = 40
+export const SALON_RECOMMENDATION_CANDIDATE_POOL = 120
 
 export type SalonSort = 'latest' | 'popular'
+export type SalonFeedMode = SalonSort | 'recommend'
+
+export type SalonCategoryCounts = Record<SalonCategoryValue, number> & { all: number }
+
+export type SalonFeedResult = {
+  posts: SalonPostView[]
+  hasMore: boolean
+  nextCursor: string | null
+  feedSeed: string | null
+  categoryCounts?: SalonCategoryCounts
+}
 
 export type SalonFilters = {
   category?: SalonCategoryValue
@@ -48,6 +100,13 @@ export type SalonFilters = {
   sessionId?: string
   sort?: SalonSort
   cursor?: string
+}
+
+export function createEmptySalonCategoryCounts(): SalonCategoryCounts {
+  return {
+    all: 0,
+    ...Object.fromEntries(SALON_CATEGORIES.map((category) => [category, 0])),
+  } as SalonCategoryCounts
 }
 
 export type SalonOptions = {
@@ -108,6 +167,7 @@ export type SalonPostView = {
     city: string
     stageType: string
     venue: string | null
+    sessionNumber: string | null
     tour: { id: string; name: string }
   } | null
   media: SalonPostMediaView[]
@@ -130,6 +190,39 @@ function isSalonCategory(value: unknown): value is SalonCategoryValue {
   return typeof value === 'string' && SALON_CATEGORIES.includes(value as SalonCategoryValue)
 }
 
+export function getSalonCategoryConfig(value: unknown) {
+  return isSalonCategory(value) ? SALON_CATEGORY_CONFIG[value] : null
+}
+
+export function salonCategoryAllowsConcert(value: unknown) {
+  return getSalonCategoryConfig(value)?.allowsConcert === true
+}
+
+export function salonCategoryAllowsSession(value: unknown) {
+  return getSalonCategoryConfig(value)?.allowsSession === true
+}
+
+export function salonCategoryRequiresConcert(value: unknown) {
+  return getSalonCategoryConfig(value)?.requiresConcert === true
+}
+
+/**
+ * SalonPost stores the selected concrete MusicConcert in `concertId`.
+ * `sessionId` is the explicit UI/API name; `concertId` remains supported for
+ * older callers. The parent tour is only used to validate the child session.
+ */
+export function normalizeSalonConcertSelection(input: { tourId?: unknown; sessionId?: unknown; concertId?: unknown }) {
+  const clean = (value: unknown) => typeof value === 'string' ? value.trim() : ''
+  const tourId = clean(input.tourId)
+  const sessionId = clean(input.sessionId)
+  const legacyConcertId = clean(input.concertId)
+  return {
+    tourId: tourId || null,
+    sessionId: sessionId || legacyConcertId || null,
+    hasConflict: Boolean(sessionId && legacyConcertId && sessionId !== legacyConcertId),
+  }
+}
+
 export function parseSalonCategory(value: unknown) {
   return isSalonCategory(value) ? value : undefined
 }
@@ -146,10 +239,12 @@ export function parseSalonFilters(value: Record<string, string | string[] | unde
   const category = parseSalonCategory(get('category'))
   const tourId = get('concert')?.trim() || undefined
   const sessionId = get('session')?.trim() || undefined
+  const cursor = get('cursor')?.trim() || undefined
   return {
     ...(category ? { category } : {}),
     ...(tourId ? { tourId } : {}),
     ...(sessionId ? { sessionId } : {}),
+    ...(cursor ? { cursor } : {}),
     sort: parseSalonSort(get('sort')),
   }
 }
@@ -158,6 +253,17 @@ type SalonCursor = {
   id: string
   approvedAt: string
   likeCount?: number
+}
+
+type SalonRecommendationCursor = {
+  seed: string
+  window: number
+  offset: number
+}
+
+export type SalonRecommendationSeed = {
+  value: string
+  startedAt: Date
 }
 
 export function encodeSalonCursor(cursor: SalonCursor) {
@@ -171,6 +277,39 @@ export function decodeSalonCursor(value: unknown): SalonCursor | null {
     if (typeof decoded.id !== 'string' || !decoded.id || typeof decoded.approvedAt !== 'string' || Number.isNaN(new Date(decoded.approvedAt).getTime())) return null
     if (decoded.likeCount !== undefined && (!Number.isInteger(decoded.likeCount) || decoded.likeCount < 0)) return null
     return { id: decoded.id, approvedAt: decoded.approvedAt, likeCount: decoded.likeCount }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A recommendation refresh is a bounded, deterministic snapshot. The
+ * timestamp keeps newly approved posts from shifting later windows while the
+ * random suffix gives each refresh a new ordering seed.
+ */
+export function parseSalonRecommendationSeed(value: unknown): SalonRecommendationSeed | null {
+  if (typeof value !== 'string' || !value || value.length > 160) return null
+  const [timestampPart, randomPart] = value.split('.', 2)
+  if (!timestampPart || !randomPart || randomPart.length > 100) return null
+  const timestamp = Number.parseInt(timestampPart, 36)
+  const now = Date.now()
+  if (!Number.isSafeInteger(timestamp) || timestamp <= 0 || timestamp > now + 5 * 60 * 1000) return null
+  return { value, startedAt: new Date(Math.min(timestamp, now)) }
+}
+
+export function encodeSalonRecommendationCursor(cursor: SalonRecommendationCursor) {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url')
+}
+
+export function decodeSalonRecommendationCursor(value: unknown, seed: string): SalonRecommendationCursor | null {
+  if (typeof value !== 'string' || value.length > 512) return null
+  try {
+    const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<SalonRecommendationCursor>
+    const window = decoded.window
+    const offset = decoded.offset
+    if (decoded.seed !== seed || typeof window !== 'number' || !Number.isSafeInteger(window) || window < 0 || window > 10000) return null
+    if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0 || offset >= SALON_RECOMMENDATION_CANDIDATE_POOL) return null
+    return { seed: decoded.seed, window, offset }
   } catch {
     return null
   }
@@ -192,6 +331,21 @@ export function formatSalonSession(session: Pick<SalonOptions['tours'][number]['
   const sessionNumber = session.sessionNumber?.trim() ? ` · ${session.sessionNumber.trim()}` : ''
   const venue = session.venue?.trim() ? ` · ${session.venue.trim()}` : ''
   return `${name} · ${formatSessionDate(session.concertDate)}${sessionNumber}${venue}`
+}
+
+export function formatSalonPostConcert(concert: SalonPostView['concert']) {
+  if (!concert) return ''
+  return `${concert.tour.name} · ${formatSalonSession({
+    city: concert.city,
+    concertDate: concert.date,
+    venue: concert.venue,
+    title: concert.title,
+    sessionNumber: concert.sessionNumber,
+  })}`
+}
+
+export function formatSalonPostContext(category: SalonCategoryValue | string, concert: SalonPostView['concert']) {
+  return concert ? formatSalonPostConcert(concert) : salonCategoryLabel(category)
 }
 
 export async function getSalonOptions(): Promise<SalonOptions> {
@@ -271,6 +425,7 @@ const salonPostSelect = {
       city: true,
       stageType: true,
       venue: true,
+      sessionNumber: true,
       MusicTour: { select: { id: true, name: true } },
     },
   },
@@ -349,6 +504,7 @@ export function serializeSalonPost(row: SalonPostRow, likedByMe = false, include
       city: row.concert.city,
       stageType: row.concert.stageType,
       venue: row.concert.venue,
+      sessionNumber: row.concert.sessionNumber,
       tour: row.concert.MusicTour,
     } : null,
     media: row.media.map((media) => publicMedia(media, row.category, includeOriginal)),
@@ -381,6 +537,39 @@ export const salonPublicBaseWhere = {
   ],
 } satisfies Prisma.SalonPostWhereInput
 
+/** Counts use exactly the same public visibility predicate as the feed. */
+export async function getSalonCategoryCounts(): Promise<SalonCategoryCounts> {
+  const [all, grouped] = await Promise.all([
+    prisma.salonPost.count({ where: salonPublicBaseWhere }),
+    prisma.salonPost.groupBy({
+      by: ['category'],
+      where: salonPublicBaseWhere,
+      _count: { _all: true },
+    }),
+  ])
+  const counts = createEmptySalonCategoryCounts()
+  counts.all = all
+  for (const row of grouped) {
+    if (SALON_CATEGORIES.includes(row.category)) counts[row.category] = row._count._all
+  }
+  return counts
+}
+
+export function appendUniqueSalonPosts<T extends { id: string }>(
+  current: ReadonlyArray<T>,
+  incoming: ReadonlyArray<T>,
+  reset = false,
+) {
+  const next = reset ? [] : [...current]
+  const knownIds = new Set(next.map((post) => post.id))
+  for (const post of incoming) {
+    if (knownIds.has(post.id)) continue
+    knownIds.add(post.id)
+    next.push(post)
+  }
+  return next
+}
+
 /** One public filter is shared by ALL, category tabs, latest, and popular feeds. */
 export function buildSalonFeedWhere(filters: Pick<SalonFilters, 'category' | 'tourId' | 'sessionId'> = {}): Prisma.SalonPostWhereInput {
   const concertWhere: Prisma.MusicConcertWhereInput = {
@@ -403,9 +592,9 @@ function addCursorWhere(where: Prisma.SalonPostWhereInput, sort: SalonSort, curs
       ...where,
       AND: [{
         OR: [
-          { likeCount: { lt: cursor.likeCount || 0 } },
-          { likeCount: cursor.likeCount || 0, approvedAt: { lt: approvedAt } },
-          { likeCount: cursor.likeCount || 0, approvedAt, id: { lt: cursor.id } },
+          { likeCount: { lt: cursor.likeCount ?? 0 } },
+          { likeCount: cursor.likeCount ?? 0, approvedAt: { lt: approvedAt } },
+          { likeCount: cursor.likeCount ?? 0, approvedAt, id: { lt: cursor.id } },
         ],
       }],
     }
@@ -416,33 +605,93 @@ function addCursorWhere(where: Prisma.SalonPostWhereInput, sort: SalonSort, curs
   }
 }
 
-export async function getSalonPosts(filters: SalonFilters = {}, viewerId?: string | null) {
+function salonRecommendationScore(row: SalonPostRow, seed: SalonRecommendationSeed) {
+  const publishedAt = row.approvedAt || row.createdAt
+  const ageHours = Math.max(0, (seed.startedAt.getTime() - publishedAt.getTime()) / (60 * 60 * 1000))
+  const freshnessScore = ageHours <= 6
+    ? 82
+    : ageHours <= 24
+      ? 62
+      : ageHours <= 72
+        ? 40
+        : ageHours <= 168
+          ? 20
+          : 8
+  const qualityScore = Math.log1p(row.likeCount) * 4
+    + Math.log1p(row.commentCount) * 5
+    + Math.log1p(row.viewCount) * 0.5
+  return freshnessScore + qualityScore + stableRecommendationWeight(seed.value, row.id) * 18
+}
+
+export async function getSalonPosts(filters: SalonFilters = {}, viewerId?: string | null, options: { mode?: SalonFeedMode; feedSeed?: string | null } = {}): Promise<SalonFeedResult> {
   const sort = parseSalonSort(filters.sort)
-  const cursor = decodeSalonCursor(filters.cursor)
-  const where = addCursorWhere(buildSalonFeedWhere(filters), sort, cursor)
-  const rows = await prisma.salonPost.findMany({
-    where,
-    orderBy: sort === 'popular'
-      ? [{ likeCount: 'desc' }, { approvedAt: 'desc' }, { id: 'desc' }]
-      : [{ approvedAt: 'desc' }, { id: 'desc' }],
-    take: SALON_PAGE_SIZE + 1,
-    select: salonPostSelect,
-  })
-  const hasMore = rows.length > SALON_PAGE_SIZE
-  const pageRows = rows.slice(0, SALON_PAGE_SIZE)
+  const canRecommend = options.mode === 'recommend' && !filters.category && !filters.tourId && !filters.sessionId
+  let pageRows: SalonPostRow[]
+  let hasMore = false
+  let nextCursor: string | null = null
+  let feedSeed: string | null = null
+
+  if (canRecommend) {
+    const seed = parseSalonRecommendationSeed(options.feedSeed)
+    if (!seed) throw new Error('沙龙推荐会话无效')
+    const recommendationCursor = filters.cursor ? decodeSalonRecommendationCursor(filters.cursor, seed.value) : null
+    if (filters.cursor && !recommendationCursor) throw new Error('沙龙推荐游标无效')
+    const window = recommendationCursor?.window || 0
+    const offset = recommendationCursor?.offset || 0
+    const candidateRows = await prisma.salonPost.findMany({
+      where: { AND: [buildSalonFeedWhere(filters), { approvedAt: { lte: seed.startedAt } }] },
+      orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
+      skip: window * SALON_RECOMMENDATION_CANDIDATE_POOL,
+      take: SALON_RECOMMENDATION_CANDIDATE_POOL + 1,
+      select: salonPostSelect,
+    })
+    const rankedRows = candidateRows.slice(0, SALON_RECOMMENDATION_CANDIDATE_POOL).sort((left, right) => {
+      const scoreDifference = salonRecommendationScore(right, seed) - salonRecommendationScore(left, seed)
+      if (scoreDifference) return scoreDifference
+      const leftTime = (left.approvedAt || left.createdAt).getTime()
+      const rightTime = (right.approvedAt || right.createdAt).getTime()
+      return rightTime - leftTime || right.id.localeCompare(left.id)
+    })
+    pageRows = rankedRows.slice(offset, offset + SALON_PAGE_SIZE)
+    if (offset + pageRows.length < rankedRows.length) {
+      hasMore = true
+      nextCursor = encodeSalonRecommendationCursor({ seed: seed.value, window, offset: offset + pageRows.length })
+    } else if (candidateRows.length > SALON_RECOMMENDATION_CANDIDATE_POOL) {
+      hasMore = true
+      nextCursor = encodeSalonRecommendationCursor({ seed: seed.value, window: window + 1, offset: 0 })
+    }
+    feedSeed = seed.value
+  } else {
+    const cursor = filters.cursor ? decodeSalonCursor(filters.cursor) : null
+    if (filters.cursor && !cursor) throw new Error('沙龙游标无效')
+    const where = addCursorWhere(buildSalonFeedWhere(filters), sort, cursor)
+    const rows = await prisma.salonPost.findMany({
+      where,
+      orderBy: sort === 'popular'
+        ? [{ likeCount: 'desc' }, { approvedAt: 'desc' }, { id: 'desc' }]
+        : [{ approvedAt: 'desc' }, { id: 'desc' }],
+      take: SALON_PAGE_SIZE + 1,
+      select: salonPostSelect,
+    })
+    hasMore = rows.length > SALON_PAGE_SIZE
+    pageRows = rows.slice(0, SALON_PAGE_SIZE)
+    const last = pageRows[pageRows.length - 1]
+    nextCursor = hasMore && last?.approvedAt
+      ? encodeSalonCursor({ id: last.id, approvedAt: last.approvedAt.toISOString(), likeCount: last.likeCount })
+      : null
+  }
+
   const likedIds = viewerId && pageRows.length
     ? new Set((await prisma.salonPostLike.findMany({
       where: { userId: viewerId, postId: { in: pageRows.map((row) => row.id) } },
       select: { postId: true },
     })).map((row) => row.postId))
     : new Set<string>()
-  const last = pageRows[pageRows.length - 1]
   return {
     posts: pageRows.map((row) => serializeSalonPost(row, likedIds.has(row.id))),
     hasMore,
-    nextCursor: hasMore && last?.approvedAt
-      ? encodeSalonCursor({ id: last.id, approvedAt: last.approvedAt.toISOString(), likeCount: last.likeCount })
-      : null,
+    nextCursor,
+    feedSeed,
   }
 }
 

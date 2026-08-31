@@ -23,6 +23,13 @@ import {
   resolvePostContentInput,
 } from '@/lib/post-rich-content-compat'
 import { InvalidPostMusicReferenceError, validateAndNormalizePostMusicReferences } from '@/lib/post-music-references'
+import {
+  findPublicPostReferences,
+  findPublicUserMentions,
+  InvalidPostReferenceError,
+  InvalidUserMentionError,
+  validateAndNormalizeRichTextReferences,
+} from '@/lib/rich-text-references'
 import { summarizePlainText } from '@/lib/share-metadata'
 
 function stripUnsafeHtml(value: string) {
@@ -265,12 +272,23 @@ export async function POST(request: Request) {
       )
       rawContent = normalized.plainText
       richContent = normalized.richContent
+
+      const normalizedReferences = await validateAndNormalizeRichTextReferences(
+        richContent,
+        findPublicPostReferences,
+        findPublicUserMentions,
+      )
+      rawContent = normalizedReferences.plainText
+      richContent = normalizedReferences.richContent
     } catch (error) {
       if (error instanceof InvalidPostMusicReferenceError) {
         return NextResponse.json({ message: error.message, errors: { content: '存在无效或未公开的 EasMusic 歌曲引用' } }, { status: 400 })
       }
+      if (error instanceof InvalidPostReferenceError || error instanceof InvalidUserMentionError) {
+        return NextResponse.json({ message: error.message, errors: { content: '存在无效或不可用的帖子/用户引用' } }, { status: 400 })
+      }
       logPostCreateError('music-reference-validation', error, user.id)
-      return NextResponse.json({ message: '歌曲引用暂时无法验证，请稍后重试' }, { status: 503 })
+      return NextResponse.json({ message: '富文本引用暂时无法验证，请稍后重试' }, { status: 503 })
     }
   }
   const rawStickerId = typeof body.stickerId === 'string' && body.stickerId ? body.stickerId.trim().slice(0, 191) : null

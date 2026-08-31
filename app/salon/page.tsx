@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { getCurrentUser } from '@/lib/auth'
 import { buildPageMetadata } from '@/lib/share-metadata'
-import { getSalonOptions, getSalonPosts, parseSalonFilters } from '@/lib/salon'
+import { getSalonCategoryCounts, getSalonOptions, getSalonPosts, parseSalonFilters } from '@/lib/salon'
 import { SalonHome } from '@/components/salon/SalonHome'
 
 export const dynamic = 'force-dynamic'
@@ -18,9 +18,10 @@ export default async function SalonPage({ searchParams }: { searchParams: Promis
   const params = await searchParams
   const currentUser = await getCurrentUser()
   const filters = parseSalonFilters(params)
-  const [feed, options] = await Promise.all([
+  const [feed, options, categoryCounts] = await Promise.all([
     getSalonPosts(filters, currentUser?.id),
     getSalonOptions(),
+    getSalonCategoryCounts(),
   ])
-  return <SalonHome initialPosts={feed.posts} initialHasMore={feed.hasMore} initialNextCursor={feed.nextCursor} options={options} currentUserId={currentUser?.id || null} />
+  return <SalonHome initialPosts={feed.posts} initialHasMore={feed.hasMore} initialNextCursor={feed.nextCursor} initialFeedSeed={feed.feedSeed} initialCategoryCounts={categoryCounts} options={options} currentUserId={currentUser?.id || null} />
 }

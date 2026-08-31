@@ -5,7 +5,7 @@ import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { completeSalonReviewNotifications } from '@/lib/salon-review-notifications'
 import { publicImageUrl } from '@/lib/images'
-import { parseSalonCategory, SALON_POST_STATUSES, salonCategoryLabel, supportsOriginal } from '@/lib/salon'
+import { normalizeSalonConcertSelection, parseSalonCategory, SALON_CATEGORY_CONFIG, SALON_POST_STATUSES, salonCategoryLabel, supportsOriginal } from '@/lib/salon'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime, emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
@@ -31,7 +31,7 @@ function serializeAdminPost(post: {
   createdAt: Date
   approvedAt: Date | null
   author: { id: string; uid: number; nickname: string; avatarUrl: string | null; Profile: { avatarUrl: string | null } | null }
-  concert: { id: string; title: string | null; concertDate: Date; city: string; stageType: string; venue: string | null; MusicTour: { id: string; name: string } } | null
+  concert: { id: string; title: string | null; concertDate: Date; city: string; stageType: string; venue: string | null; sessionNumber: string | null; MusicTour: { id: string; name: string } } | null
   media: Array<{ id: string; originalUrl: string | null; originalObjectKey: string | null; originalFilename: string | null; originalMimeType: string | null; originalSize: number | null; originalAvailable?: boolean; previewUrl: string; thumbnailUrl: string; width: number; height: number; sortOrder: number }>
 }) {
   return {
@@ -60,6 +60,7 @@ function serializeAdminPost(post: {
       city: post.concert.city,
       stageType: post.concert.stageType,
       venue: post.concert.venue,
+      sessionNumber: post.concert.sessionNumber,
       tour: post.concert.MusicTour,
     } : null,
     media: post.media.map((media) => {
@@ -88,7 +89,7 @@ const adminSelect = {
   createdAt: true,
   approvedAt: true,
   author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
-  concert: { select: { id: true, title: true, concertDate: true, city: true, stageType: true, venue: true, MusicTour: { select: { id: true, name: true } } } },
+  concert: { select: { id: true, title: true, concertDate: true, city: true, stageType: true, venue: true, sessionNumber: true, MusicTour: { select: { id: true, name: true } } } },
   media: { orderBy: { sortOrder: 'asc' as const }, select: { id: true, originalUrl: true, originalObjectKey: true, originalFilename: true, originalMimeType: true, originalSize: true, previewUrl: true, thumbnailUrl: true, width: true, height: true, sortOrder: true } },
 } as const
 
@@ -138,7 +139,7 @@ export async function PATCH(request: Request) {
   const action = body.action === 'approve' || body.action === 'reject' || body.action === 'update' ? body.action : ''
   if (!postId || !action) return NextResponse.json({ ok: false, message: '审核操作无效' }, { status: 400 })
 
-  const current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, status: true, userId: true, title: true, concertId: true } })
+  const current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, category: true, status: true, userId: true, title: true, concertId: true } })
   if (!current) return NextResponse.json({ ok: false, message: '作品不存在' }, { status: 404 })
 
   const data: Prisma.SalonPostUpdateInput = {}
@@ -149,17 +150,41 @@ export async function PATCH(request: Request) {
     requestedCategory = category
     data.category = category
   }
-  if (Object.prototype.hasOwnProperty.call(body, 'concertId')) {
-    if (requestedCategory && requestedCategory !== 'CONCERT') return NextResponse.json({ ok: false, message: '该分类不需要关联演唱会' }, { status: 400 })
-    const concertId = sanitizeText(body.concertId, 191)
-    const concert = await prisma.musicConcert.findFirst({ where: { id: concertId, status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } }, select: { id: true } })
-    if (!concert) return NextResponse.json({ ok: false, message: '演唱会场次不存在或暂未公开' }, { status: 400 })
-    data.concert = { connect: { id: concert.id } }
+  const hasAssociationInput = ['tourId', 'sessionId', 'concertId'].some((key) => Object.prototype.hasOwnProperty.call(body, key))
+  const selection = normalizeSalonConcertSelection({
+    tourId: sanitizeText(body.tourId, 191),
+    sessionId: sanitizeText(body.sessionId, 191),
+    concertId: sanitizeText(body.concertId, 191),
+  })
+  if (selection.hasConflict) return NextResponse.json({ ok: false, message: '演唱会和场次选择不一致，请重新选择' }, { status: 400 })
+  const effectiveCategory = requestedCategory || parseSalonCategory(current.category)
+  const categoryConfig = effectiveCategory ? SALON_CATEGORY_CONFIG[effectiveCategory] : null
+  if (!categoryConfig) return NextResponse.json({ ok: false, message: '投稿分类无效' }, { status: 400 })
+  if (!categoryConfig.allowsConcert && (selection.tourId || selection.sessionId)) return NextResponse.json({ ok: false, message: '该投稿分类不支持关联演唱会' }, { status: 400 })
+  if (body.sessionId && !selection.tourId) return NextResponse.json({ ok: false, message: '请选择对应的演唱会' }, { status: 400 })
+
+  let selectedConcertId: string | null = selection.sessionId
+  if (selection.sessionId) {
+    const concert = await prisma.musicConcert.findFirst({
+      where: {
+        id: selection.sessionId,
+        ...(selection.tourId ? { tourId: selection.tourId } : {}),
+        status: 'PUBLISHED',
+        MusicTour: { status: 'PUBLISHED' },
+      },
+      select: { id: true },
+    })
+    if (!concert) return NextResponse.json({ ok: false, message: '演唱会场次不存在、未公开或不属于所选演唱会' }, { status: 400 })
+    selectedConcertId = concert.id
+  } else if (selection.tourId) {
+    const tour = await prisma.musicTour.findFirst({ where: { id: selection.tourId, status: 'PUBLISHED' }, select: { id: true } })
+    if (!tour) return NextResponse.json({ ok: false, message: '演唱会不存在或暂未公开' }, { status: 400 })
+  } else if (!hasAssociationInput) {
+    selectedConcertId = current.concertId
   }
-  if (requestedCategory === 'CONCERT' && !Object.prototype.hasOwnProperty.call(body, 'concertId') && !current.concertId) {
-    return NextResponse.json({ ok: false, message: '演唱会记录必须关联演唱会场次' }, { status: 400 })
-  }
-  if (requestedCategory && requestedCategory !== 'CONCERT') data.concert = { disconnect: true }
+  if (categoryConfig.requiresConcert && !selectedConcertId) return NextResponse.json({ ok: false, message: '演唱会记录必须关联演唱会场次' }, { status: 400 })
+  if (hasAssociationInput) data.concert = selectedConcertId ? { connect: { id: selectedConcertId } } : { disconnect: true }
+  if (requestedCategory && !categoryConfig.allowsConcert) data.concert = { disconnect: true }
   if (Object.prototype.hasOwnProperty.call(body, 'title')) data.title = sanitizeText(body.title, 200) || null
   if (Object.prototype.hasOwnProperty.call(body, 'content')) data.content = sanitizeText(body.content, 5000) || null
 

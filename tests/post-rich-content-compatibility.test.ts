@@ -78,7 +78,7 @@ test('create, detail and edit routes all carry the same structured content field
   assert.match(detailPage, /richContent: true/)
   assert.match(detailPage, /post\.richContent/)
   assert.match(editPage, /richContent: true/)
-  assert.match(editPage, /initialRichContent=\{post\.richContent\}/)
+  assert.match(editPage, /initialRichContent=\{initialRichContent\}/)
   assert.match(createForm, /localStorage\.setItem/)
   assert.match(createForm, /initialRichContent=\{richContent\}/)
 })

@@ -11,6 +11,7 @@ import {
   type RichTextInlineNode,
   type RichTextMark,
 } from '@/lib/rich-text'
+import { formatUid } from '@/lib/uid'
 
 type RichPostContentProps = {
   richContent?: unknown | null
@@ -56,6 +57,53 @@ function renderInline(node: RichTextInlineNode, key: string) {
       </Link>
     )
   }
+  if (node.type === 'postReference') {
+    const unavailable = node.attrs.available === false
+    const title = unavailable ? '该引用帖子已不可用' : node.attrs.title || '引用帖子'
+    const author = unavailable ? '' : node.attrs.authorName || '未知作者'
+    const uid = unavailable || node.attrs.authorUid === undefined ? '' : `UID ${formatUid(node.attrs.authorUid)}`
+    const card = (
+      <>
+        <span className="rich-text-post-reference-icon" aria-hidden="true">↗</span>
+        <span className="rich-text-post-reference-copy">
+          <strong>引用帖子</strong>
+          <span>《{title}》</span>
+          <small>{[author, uid].filter(Boolean).join(' · ')}</small>
+        </span>
+      </>
+    )
+    if (unavailable) {
+      return <span key={key} className="rich-text-post-reference is-unavailable" aria-label="该引用帖子已不可用">{card}</span>
+    }
+    return (
+      <Link
+        key={key}
+        href={`/posts/${encodeURIComponent(node.attrs.postId)}`}
+        className="rich-text-post-reference"
+        aria-label={`查看引用帖子：${title}`}
+      >
+        {card}
+      </Link>
+    )
+  }
+  if (node.type === 'userMention') {
+    const displayName = node.attrs.available === false ? '用户已不可用' : node.attrs.displayName || '用户已不可用'
+    const label = `@${displayName}`
+    if (node.attrs.available === false || node.attrs.uid === undefined) {
+      return <span key={key} className="rich-text-user-mention is-unavailable">{label}</span>
+    }
+    return (
+      <Link
+        key={key}
+        href={`/user/${formatUid(node.attrs.uid)}`}
+        className="rich-text-user-mention"
+        aria-label={`查看用户：${displayName}`}
+      >
+        {label}
+      </Link>
+    )
+  }
+  if (node.type !== 'text') return null
   return <span key={key}>{renderMarks(node.text, node.marks, key)}</span>
 }
 

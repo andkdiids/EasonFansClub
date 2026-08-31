@@ -251,8 +251,10 @@ test('badge admin mutations are transactional, logged and invalidate every equip
   assert.match(route, /data\.isWearable === false/)
 })
 
-test('mobile duel rooms hide verbose badge names while retaining the badge icon', () => {
-  assert.match(read('app/globals.css'), /\.duel-room-player \.user-display-badge-name \{ display:none; \}/)
+test('mobile duel rooms keep the complete badge name in the stacked identity row', () => {
+  const css = read('app/globals.css')
+  assert.doesNotMatch(css, /\.duel-room-player \.user-display-badge-name \{ display:none; \}/)
+  assert.match(css, /\.user-display-badge-name \{[^}]*white-space:normal/)
 })
 
 test('birthday automation reuses the central badge grant service', () => {

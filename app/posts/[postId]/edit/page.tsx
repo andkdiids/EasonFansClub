@@ -8,6 +8,8 @@ import { mergeForumBoardOptions, normalizeForumBoards } from '@/lib/boards'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { findPublicPostReferences, findPublicUserMentions, hydrateRichTextReferences } from '@/lib/rich-text-references'
+import { validateRichPostContent } from '@/lib/rich-text'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,6 +67,15 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
     select: { id: true, name: true, slug: true },
   })
   const boards = mergeForumBoardOptions(boardRows)
+  let initialRichContent = post.richContent
+  const richResult = validateRichPostContent(post.richContent)
+  if (richResult.valid) {
+    try {
+      initialRichContent = await hydrateRichTextReferences(richResult.value, findPublicPostReferences, findPublicUserMentions)
+    } catch (error) {
+      console.warn('[posts:edit-rich-content-hydration]', { postId, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-3xl px-5 py-10">
@@ -74,7 +85,7 @@ export default async function EditPostPage({ params }: Readonly<{ params: Promis
           postId={post.id}
           initialTitle={post.title}
           initialContent={publicContentImageMarkers(post.content)}
-          initialRichContent={post.richContent}
+          initialRichContent={initialRichContent}
           initialBoardId={post.boardId}
           boards={normalizeForumBoards(boards)}
           initialMedia={initialMedia}
