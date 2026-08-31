@@ -50,6 +50,14 @@ test('签到 GET 不再执行全站 mood GROUP BY，页面与 summary 复用公�
   assert.doesNotMatch(preview, /checkIn\.count\(\{ where: \{ checkinDateKey/)
 })
 
+test('签到成功后会失效当天全站人数缓存，并将刷新后的 todayCount 返回给现有客户端', () => {
+  const route = read('app/api/checkin/route.ts')
+  const post = route.slice(route.indexOf('export async function POST'))
+  assert.match(post, /invalidateCheckInStatsCache\(todayKey\)/)
+  assert.match(post, /const todayCount = await getTodayCheckInCount\(todayKey\)/)
+  assert.match(post, /dailyMessage: createdMessage,[\s\S]*todayCount,/)
+})
+
 test('客户端只在 focus/跨标签日期变更后按需检查，不在午夜自动齐步 GET', () => {
   const button = read('components/CheckInButton.tsx')
   assert.doesNotMatch(button, /msUntilNextBeijingMidnight|setTimeout\(refreshTodayState/)

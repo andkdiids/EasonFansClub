@@ -39,16 +39,23 @@ test('today page sorts complete history by original year and preserves source or
   assert.match(route, /getTodayEventRecords\(\)/)
 })
 
-test('home registration statistic switches between the CTA and accumulated registration history', () => {
+test('home registration statistic separates today status from the all-site count', () => {
   const surface = read('components/HomeLayoutSurface.tsx')
+  const api = read('app/api/home/route.ts')
+  const display = read('lib/home-checkin-display.ts')
   assert.match(surface, /homeText\.goCheckin/)
-  assert.match(surface, /homeText\.totalRegistrations/)
-  assert.match(surface, /homeText\.viewRegistrations/)
-  assert.match(surface, /aria-label="已挂号"/)
-  assert.doesNotMatch(surface, /homeText\.(checkedIn|notCheckedIn)/)
-  assert.doesNotMatch(surface, /data\.siteStats\?\.todayCheckIns/)
+  assert.match(surface, /homeText\.notCheckedIn/)
+  assert.match(surface, /data\.checkedInToday/)
+  assert.match(surface, /data\.todayCheckInCount/)
+  assert.match(surface, /getHomeCheckInDisplay/)
+  assert.doesNotMatch(surface, /homeText\.(totalRegistrations|days|viewRegistrations)/)
+  assert.doesNotMatch(surface, /data\.stats\._count\.checkIns|data\.stats\.consecutiveDays/)
+  assert.match(api, /const checkedInToday = Boolean\(stats\?\.checkIns\.length\)/)
+  assert.match(api, /const todayCheckInCount = siteStats\?\.todayCheckIns \?\? 0/)
+  assert.match(api, /checkedInToday, todayCheckInCount/)
+  assert.match(display, /status: 'not-checked-in'/)
+  assert.match(display, /status: 'checked-in'/)
   assert.match(surface, /window\.addEventListener\('checkin:completed'/)
-  assert.doesNotMatch(surface, />✓<\/i>/)
 })
 
 test('homepage target files contain no literal unicode escape markers', () => {

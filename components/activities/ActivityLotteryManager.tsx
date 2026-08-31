@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActivityImageUploader, uploadActivityImage, type ActivityImageSelection, type ActivityImageUploadStatus } from '@/components/activities/ActivityImageUploader'
 import { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/activity-lottery-levels'
-import type { ActivityLotteryAdminListView, ActivityLotteryAdminView } from '@/lib/activity-lottery'
+import type { ActivityLotteryAdminListView, ActivityLotteryAdminView, ActivityLotteryWinnerRedemptionState } from '@/lib/activity-lottery'
 
 type PrizeDraft = { name: string; imageUrl: string; description: string; quantity: string }
 type LotteryDraft = { title: string; description: string; drawAt: string; prizes: PrizeDraft[] }
@@ -50,7 +50,7 @@ function draftFromLottery(lottery: ActivityLotteryAdminView): LotteryDraft {
   }
 }
 
-export function ActivityLotteryManager({ activityId, activityTitle, registrationEndAt, openOnMount = false }: Readonly<{ activityId: string; activityTitle: string; registrationEndAt: string | null; openOnMount?: boolean }>) {
+export function ActivityLotteryManager({ activityId, activityTitle, activityEndAt, openOnMount = false }: Readonly<{ activityId: string; activityTitle: string; activityEndAt: string | null; openOnMount?: boolean }>) {
   const [data, setData] = useState<ActivityLotteryAdminListView | null>(null)
   const [draft, setDraft] = useState<LotteryDraft>(emptyDraft)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -238,17 +238,19 @@ export function ActivityLotteryManager({ activityId, activityTitle, registration
     }
   }
 
+  const winnerStateLabel = (state: ActivityLotteryWinnerRedemptionState) => state === 'REDEEMABLE' ? '可兑奖' : state === 'WAITING_FOR_CHECK_IN' ? '待核销后兑奖' : state === 'EXPIRED' ? '已失效' : '已兑奖'
+
   return (
     <section className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/60 p-4 dark:border-violet-900/60 dark:bg-violet-950/20 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-black tracking-[0.18em] text-violet-700 dark:text-violet-300">活动抽奖（可选）</p>
           <h3 className="mt-1 text-xl font-black text-brand-950 dark:text-slate-100">{activityTitle}</h3>
-          <p className="mt-1 text-xs font-bold leading-5 text-slate-600 dark:text-slate-300">抽奖资格自动继承有效活动报名，不单独配置参与上限。报名结束：{formatDate(registrationEndAt)}</p>
+          <p className="mt-1 text-xs font-bold leading-5 text-slate-600 dark:text-slate-300">抽奖资格自动继承有效活动报名，不单独配置参与上限。活动结束：{formatDate(activityEndAt)}</p>
         </div>
-        <button type="button" onClick={() => setExpanded((value) => !value)} disabled={(!registrationEndAt && !editingId) || prizeUploadInProgress || saving} className="min-h-10 rounded-full bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{expanded ? '收起设置' : '+ 添加抽奖'}</button>
+        <button type="button" onClick={() => setExpanded((value) => !value)} disabled={(!activityEndAt && !editingId) || prizeUploadInProgress || saving} className="min-h-10 rounded-full bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{expanded ? '收起设置' : '+ 添加抽奖'}</button>
       </div>
-      {!registrationEndAt ? <p role="alert" className="mt-3 rounded-lg bg-amber-100 px-3 py-2 text-xs font-black leading-5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">请先设置报名结束时间，再添加自动抽奖。</p> : null}
+      {!activityEndAt ? <p role="alert" className="mt-3 rounded-lg bg-amber-100 px-3 py-2 text-xs font-black leading-5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">请先设置活动结束时间，再添加自动抽奖。</p> : null}
       <div className="mt-4 grid gap-2 rounded-xl border border-violet-200 bg-white/70 p-3 text-xs font-bold text-slate-600 dark:border-violet-900 dark:bg-slate-900/70 dark:text-slate-300 sm:grid-cols-3">
         <p>当前有效报名：{currentParticipants}</p><p>总中奖名额：{summary.slots}</p><p>当前理论中奖率：{summary.currentRate.toFixed(2)}%</p><p>活动报名上限：{capacity || '不限'}</p><p>满员理论中奖率：{capacity ? `${summary.fullRate.toFixed(2)}%` : '—'}</p>
       </div>
@@ -314,7 +316,7 @@ export function ActivityLotteryManager({ activityId, activityTitle, registration
               </div>
               <div className="mt-3 grid gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 sm:grid-cols-3"><p>有效报名：{lottery.eligibleCount ?? currentParticipants}</p><p>中奖名额：{slots} · 实际中奖：{lottery.winnerCount ?? 0}</p><p>当前理论中奖率：{currentRate.toFixed(2)}%</p></div>
               <ul className="mt-3 space-y-1 border-t border-violet-100 pt-3 text-sm font-bold dark:border-violet-900">{lottery.prizes.map((prize, index) => <li key={prize.id}>{activityLotteryTierName(index) || prize.tierName || '中奖奖项'} · {prize.name} ×{prize.quantity}{lottery.status === 'DRAWN' ? `（中奖 ${prize.winnerCount}）` : ''}</li>)}</ul>
-              {lottery.winners.length ? <details className="mt-3 border-t border-violet-100 pt-3 text-xs font-bold dark:border-violet-900"><summary className="cursor-pointer">查看中奖结果（{lottery.winners.length}）</summary><ul className="mt-2 space-y-1">{lottery.winners.map((winner) => <li key={winner.id}>E院ID {winner.uid} · {winner.nickname} · {winner.tierName} · {winner.prizeName} · {winner.redemptionStatus === 'REDEEMED' ? '已核销' : '待核销'}</li>)}</ul></details> : null}
+               {lottery.winners.length ? <details className="mt-3 border-t border-violet-100 pt-3 text-xs font-bold dark:border-violet-900"><summary className="cursor-pointer">查看中奖结果（{lottery.winners.length}）</summary><ul className="mt-2 space-y-1">{lottery.winners.map((winner) => <li key={winner.id}>E院ID {winner.uid} · {winner.nickname} · {winner.tierName} · {winner.prizeName} · {winnerStateLabel(winner.redemptionState)}</li>)}</ul></details> : null}
             </article>
           )
         })}

@@ -5,6 +5,8 @@ import test from 'node:test'
 import {
   ACTIVITY_LOTTERY_ALGORITHM_VERSION,
   calculateLotteryWinRate,
+  getActivityLotteryWinnerRedemptionState,
+  hasValidActivityLotteryCheckIn,
   normalizeActivityLotteryInput,
   secureShuffle,
   validateLotterySchedule,
@@ -14,11 +16,30 @@ import { ACTIVITY_LOTTERY_TIER_NAMES, MAX_ACTIVITY_LOTTERY_PRIZES, activityLotte
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
 
-test('抽奖开奖时间必须不早于活动报名结束时间，并且没有报名截止时间不能创建', () => {
-  const registrationEndAt = new Date('2026-09-13T10:00:00.000Z')
-  assert.equal(validateLotterySchedule(registrationEndAt, new Date('2026-09-13T12:00:00.000Z')), null)
-  assert.match(validateLotterySchedule(registrationEndAt, new Date('2026-09-13T09:59:59.000Z')) || '', /不能早于活动报名结束/)
-  assert.match(validateLotterySchedule(null, new Date('2026-09-13T12:00:00.000Z')) || '', /先设置活动报名结束时间/)
+test('开奖时间只要求早于活动结束时间，不受报名截止时间限制', () => {
+  const activityEndAt = new Date('2026-09-13T13:00:00.000Z')
+  assert.equal(validateLotterySchedule(activityEndAt, new Date('2026-09-13T12:00:00.000Z')), null)
+  assert.equal(validateLotterySchedule(activityEndAt, new Date('2026-09-13T12:30:00.000Z')), null)
+  assert.equal(validateLotterySchedule(activityEndAt, new Date('2026-09-13T12:50:00.000Z')), null)
+  assert.match(validateLotterySchedule(activityEndAt, activityEndAt) || '', /开奖时间必须早于活动结束时间/)
+  assert.match(validateLotterySchedule(activityEndAt, new Date('2026-09-13T13:00:01.000Z')) || '', /开奖时间必须早于活动结束时间/)
+  assert.match(validateLotterySchedule(null, new Date('2026-09-13T12:00:00.000Z')) || '', /先设置活动结束时间/)
+})
+
+test('中奖资格与兑奖资格分离，真实核销和活动结束自动核销结果不同', () => {
+  const activityEndAt = new Date('2026-09-13T13:00:00.000Z')
+  const unchecked = { status: 'ACTIVE', verifiedAt: null, checkedInAt: null, checkInSource: null }
+  const realCheckIn = { status: 'ACTIVE', verifiedAt: new Date('2026-09-13T12:15:00.000Z'), checkedInAt: new Date('2026-09-13T12:15:00.000Z'), checkInSource: 'QR' }
+  const autoCheckIn = { status: 'ACTIVE', verifiedAt: new Date('2026-09-13T13:00:00.000Z'), checkedInAt: new Date('2026-09-13T13:00:00.000Z'), checkInSource: 'AUTO_AFTER_ACTIVITY_END' }
+  assert.equal(getActivityLotteryWinnerRedemptionState({ redemptionStatus: 'PENDING', registration: unchecked, activityEndAt, now: new Date('2026-09-13T12:00:00.000Z') }), 'WAITING_FOR_CHECK_IN')
+  assert.equal(getActivityLotteryWinnerRedemptionState({ redemptionStatus: 'PENDING', registration: realCheckIn, activityEndAt, now: new Date('2026-09-13T12:20:00.000Z') }), 'REDEEMABLE')
+  assert.equal(getActivityLotteryWinnerRedemptionState({ redemptionStatus: 'PENDING', registration: realCheckIn, activityEndAt, now: new Date('2026-09-13T13:10:00.000Z') }), 'REDEEMABLE')
+  assert.equal(getActivityLotteryWinnerRedemptionState({ redemptionStatus: 'PENDING', registration: unchecked, activityEndAt, now: new Date('2026-09-13T13:00:00.000Z') }), 'EXPIRED')
+  assert.equal(getActivityLotteryWinnerRedemptionState({ redemptionStatus: 'PENDING', registration: autoCheckIn, activityEndAt, now: new Date('2026-09-13T13:10:00.000Z') }), 'EXPIRED')
+  assert.equal(getActivityLotteryWinnerRedemptionState({ redemptionStatus: 'PENDING', registration: { ...realCheckIn, checkedInAt: new Date('2026-09-13T13:30:00.000Z'), verifiedAt: new Date('2026-09-13T13:30:00.000Z') }, activityEndAt, now: new Date('2026-09-13T13:40:00.000Z') }), 'EXPIRED')
+  assert.equal(getActivityLotteryWinnerRedemptionState({ redemptionStatus: 'REDEEMED', registration: autoCheckIn, activityEndAt, now: new Date('2026-09-13T13:10:00.000Z') }), 'REDEEMED')
+  assert.equal(hasValidActivityLotteryCheckIn(realCheckIn, activityEndAt, new Date('2026-09-13T12:20:00.000Z')), true)
+  assert.equal(hasValidActivityLotteryCheckIn(autoCheckIn, activityEndAt, new Date('2026-09-13T13:10:00.000Z')), false)
 })
 
 test('抽奖输入按数组顺序自动生成固定奖项等级，并支持图片、说明和数量校验', () => {
@@ -74,9 +95,11 @@ test('抽奖模型允许一个活动多个抽奖，但同一抽奖一人最多�
 
 test('抽奖资格在开奖时直接读取有效活动报名，不复制参与名单', () => {
   const lottery = read('lib/activity-lottery.ts')
+  const candidateQuery = lottery.slice(lottery.indexOf('const registrations = await tx.activityRegistration.findMany('), lottery.indexOf('const shuffled = secureShuffle(registrations)'))
   assert.match(lottery, /activityRegistration\.findMany\(/)
   assert.match(lottery, /status: 'ACTIVE'/)
   assert.match(lottery, /User: \{ status: 'ACTIVE', isDeleted: false \}/)
+  assert.doesNotMatch(candidateQuery, /checkedInAt|verifiedAt|checkInSource/)
   assert.doesNotMatch(lottery, /LotteryParticipant/)
   assert.match(lottery, /registrationId: winner\.registration\.id/)
 })
@@ -150,20 +173,39 @@ test('活动创建和编辑表单都提供现有抽奖管理入口，新活动�
   const manager = read('components/activities/ActivityLotteryManager.tsx')
   assert.match(admin, /ActivityLotteryEntry/)
   assert.match(admin, /keepEditing: true/)
-  assert.match(admin, /请先设置报名结束时间，再添加自动抽奖/)
+  assert.match(admin, /activityEndAt=/)
+  assert.match(admin, /请先设置活动结束时间，再添加自动抽奖/)
   assert.match(entry, /活动抽奖（可选）/)
   assert.match(entry, /\+ 添加抽奖/)
   assert.match(entry, /ActivityLotteryManager/)
+  assert.match(entry, /activityEndAt/)
+  assert.match(entry, /开奖时间必须早于活动结束时间/)
   assert.match(manager, /openOnMount\?: boolean/)
+  assert.match(manager, /activityEndAt/)
   assert.match(manager, /\+ 添加抽奖/)
 })
 
-test('编辑活动时不能把报名结束时间改到未开奖抽奖的开奖时间之后', () => {
+test('编辑活动时不能把活动结束时间改到未开奖抽奖的开奖时间之前', () => {
   const route = read('app/api/admin/activities/[activityId]/route.ts')
-  assert.match(route, /assertLotterySchedulesFitRegistrationEnd/)
+  assert.match(route, /assertLotterySchedulesFitActivityEnd/)
   assert.match(route, /status: \{ in: \['DRAFT', 'SCHEDULED'\] \}/)
-  assert.match(route, /drawAt: \{ lt: registrationEndAt \}/)
-  assert.match(route, /报名结束时间不能晚于已有抽奖开奖时间/)
+  assert.match(route, /drawAt: activityEndAt \? \{ gte: activityEndAt \} : \{ not: null \}/)
+  assert.match(route, /活动结束时间必须晚于已有抽奖开奖时间/)
+  assert.doesNotMatch(route, /报名结束时间不能晚于已有抽奖开奖时间/)
+})
+
+test('中奖后兑奖服务端强制检查真实核销、有效期和已兑奖状态', () => {
+  const redemption = read('lib/activity-redemption.ts')
+  const registration = read('lib/activity-registration.ts')
+  assert.match(redemption, /getActivityLotteryWinnerRedemptionState/)
+  assert.match(redemption, /LOTTERY_WINNER_WAITING_FOR_CHECK_IN/)
+  assert.match(redemption, /LOTTERY_WINNER_EXPIRED/)
+  assert.match(redemption, /winner\.registrationId && winner\.registrationId !== registration\.id/)
+  assert.match(redemption, /userId: registration\.userId/)
+  assert.match(redemption, /redemptionStatus: 'PENDING'/)
+  assert.match(redemption, /registration\.Activity\.endsAt/)
+  assert.match(redemption, /checkInSource/)
+  assert.match(registration, /AUTO_AFTER_ACTIVITY_END/)
 })
 
 test('中奖通知提示使用活动现有核销码，不携带中奖码', () => {

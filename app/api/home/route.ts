@@ -38,7 +38,9 @@ export async function GET() {
     ])
 
     const growth = stats ? await getGrowthSummary(stats.experience) : null
-    const response = NextResponse.json({ messages: [], activities, albums, stats: stats && growth ? { ...stats, ...growth } : stats, dailyMusic, siteStats, todayEvents, anywhereDoor, dailyPrescriptionReward, salonPosts, entertainmentRanking: null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
+    const checkedInToday = Boolean(stats?.checkIns.length)
+    const todayCheckInCount = siteStats?.todayCheckIns ?? 0
+    const response = NextResponse.json({ messages: [], activities, albums, stats: stats && growth ? { ...stats, ...growth } : stats, checkedInToday, todayCheckInCount, dailyMusic, siteStats, todayEvents, anywhereDoor, dailyPrescriptionReward, salonPosts, entertainmentRanking: null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
     if (!user && anonymousId && !existingAnonymousId) {
       response.cookies.set(DAILY_MUSIC_ANONYMOUS_COOKIE, anonymousId, {
         httpOnly: true,

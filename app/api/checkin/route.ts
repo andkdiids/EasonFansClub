@@ -8,7 +8,7 @@ import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOf
 import { logCheckInBackgroundTask, logSlowCheckInRequest, safeErrorCode } from '@/lib/checkin-observability'
 import { CUSTOM_MOOD_BANNED_WORD_MESSAGE, CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_TYPE, PRESET_MOOD_TYPE, normalizeCustomMoodText, validateCustomMoodInput } from '@/lib/checkin-mood'
 import { getCheckInMessage, invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
-import { getTodayCheckInCount } from '@/lib/checkin-stats'
+import { getTodayCheckInCount, invalidateCheckInStatsCache } from '@/lib/checkin-stats'
 import { getMood, getStreakBonus } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience } from '@/lib/growth'
@@ -508,7 +508,9 @@ export async function POST(request: Request) {
   const transactionMs = Date.now() - transactionStartedAt
   const postCriticalStartedAt = Date.now()
   invalidateCheckInMessagesCache()
+  invalidateCheckInStatsCache(todayKey)
   invalidateHomeDataCache()
+  const todayCount = await getTodayCheckInCount(todayKey)
   const createdMessage = result.dailyMessageId
     ? await getCheckInMessage({
         messageId: result.dailyMessageId,
@@ -561,6 +563,7 @@ export async function POST(request: Request) {
     streakBonusRegistrationFee: result.streakBonusRegistrationFee,
     dailyMessageId: result.dailyMessageId,
     dailyMessage: createdMessage,
+    todayCount,
     consecutiveDays: result.streaks.currentStreak,
     currentStreak: result.streaks.currentStreak,
     longestStreak: result.streaks.longestStreak,

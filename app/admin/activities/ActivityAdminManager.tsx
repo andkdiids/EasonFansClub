@@ -387,12 +387,12 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">核销后隐藏奖励（可选）<select value={rewardBadgeId} onChange={(event) => setRewardBadgeId(event.target.value)} disabled={loadingActivityConfig || form.verificationMode === 'NONE'} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="">不设置活动勋章</option>{badgeOptions.map((badge) => <option key={badge.id} value={badge.id}>{badge.name} · {badge.code}</option>)}</select></label>
         </div>
         <div className="mt-4"><ActivityRegistrationFormDesigner questions={registrationQuestions} onChange={setRegistrationQuestions} /></div>
-        <div className="mt-4"><ActivityLotteryEntry activityId={editingId} activityTitle={form.title || '未命名活动'} registrationEndAt={dateToBeijingIso(form.registrationEndAt)} disabled={saving} onPrepareActivity={async () => {
-          if (!form.registrationEndAt.trim()) {
-            setMessage('')
-            setError('请先设置报名结束时间，再添加自动抽奖。')
-            return false
-          }
+         <div className="mt-4"><ActivityLotteryEntry activityId={editingId} activityTitle={form.title || '未命名活动'} activityEndAt={dateToBeijingIso(form.endsAt)} disabled={saving} onPrepareActivity={async () => {
+           if (!form.endsAt.trim()) {
+             setMessage('')
+             setError('请先设置活动结束时间，再添加自动抽奖。')
+             return false
+           }
           return Boolean(await save('DRAFT', undefined, { keepEditing: true }))
         }} /></div>
         <div className="mt-4 flex flex-wrap items-center gap-5 rounded-xl bg-sky-50/70 p-3 dark:bg-slate-800/70">

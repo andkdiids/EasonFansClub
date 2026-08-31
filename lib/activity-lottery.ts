@@ -16,9 +16,8 @@ export { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/acti
 export type ActivityLotteryErrorCode =
   | 'ACTIVITY_NOT_FOUND'
   | 'LOTTERY_NOT_FOUND'
-  | 'REGISTRATION_END_REQUIRED'
+  | 'ACTIVITY_END_REQUIRED'
   | 'INVALID_DRAW_AT'
-  | 'DRAW_BEFORE_REGISTRATION_END'
   | 'LOTTERY_NOT_DUE'
   | 'LOTTERY_ALREADY_DRAWN'
   | 'LOTTERY_CANCELLED'
@@ -48,10 +47,40 @@ export type NormalizedActivityLotteryInput = {
   prizes: LotteryPrizeInput[]
 }
 
-export function validateLotterySchedule(registrationEndAt: Date | null | undefined, drawAt: Date | null | undefined) {
-  if (!registrationEndAt) return '请先设置活动报名结束时间，再创建抽奖。'
+export type ActivityLotteryWinnerRedemptionState = 'REDEEMABLE' | 'WAITING_FOR_CHECK_IN' | 'EXPIRED' | 'REDEEMED'
+
+export type ActivityLotteryCheckInSnapshot = {
+  status: string
+  verifiedAt: Date | null
+  checkedInAt: Date | null
+  checkInSource: string | null
+}
+
+export function hasValidActivityLotteryCheckIn(registration: ActivityLotteryCheckInSnapshot | null | undefined, activityEndAt: Date | null | undefined, now = new Date()) {
+  if (!registration || registration.status !== 'ACTIVE') return false
+  if (registration.checkInSource !== 'MANUAL' && registration.checkInSource !== 'QR') return false
+  const checkedAt = registration.checkedInAt || registration.verifiedAt
+  if (!checkedAt || Number.isNaN(checkedAt.getTime()) || checkedAt.getTime() > now.getTime()) return false
+  return !activityEndAt || Number.isNaN(activityEndAt.getTime()) || checkedAt.getTime() < activityEndAt.getTime()
+}
+
+export function getActivityLotteryWinnerRedemptionState(input: {
+  redemptionStatus: 'PENDING' | 'REDEEMED'
+  registration: ActivityLotteryCheckInSnapshot | null | undefined
+  activityEndAt: Date | null | undefined
+  now?: Date
+}): ActivityLotteryWinnerRedemptionState {
+  if (input.redemptionStatus === 'REDEEMED') return 'REDEEMED'
+  const now = input.now || new Date()
+  if (hasValidActivityLotteryCheckIn(input.registration, input.activityEndAt, now)) return 'REDEEMABLE'
+  if (input.activityEndAt && !Number.isNaN(input.activityEndAt.getTime()) && now.getTime() >= input.activityEndAt.getTime()) return 'EXPIRED'
+  return 'WAITING_FOR_CHECK_IN'
+}
+
+export function validateLotterySchedule(activityEndAt: Date | null | undefined, drawAt: Date | null | undefined) {
   if (!drawAt || Number.isNaN(drawAt.getTime())) return '请设置有效的开奖时间。'
-  if (drawAt.getTime() < registrationEndAt.getTime()) return '开奖时间不能早于活动报名结束时间。'
+  if (!activityEndAt || Number.isNaN(activityEndAt.getTime())) return '请先设置活动结束时间，再创建抽奖。'
+  if (drawAt.getTime() >= activityEndAt.getTime()) return '开奖时间必须早于活动结束时间。'
   return null
 }
 
@@ -176,6 +205,7 @@ const adminLotterySelect = {
   algorithmVersion: true,
   createdAt: true,
   updatedAt: true,
+  Activity: { select: { endsAt: true } },
   LotteryPrize: {
     orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     select: {
@@ -196,10 +226,12 @@ const adminLotterySelect = {
     select: {
       id: true,
       userId: true,
+      registrationId: true,
       redemptionStatus: true,
       wonAt: true,
       redeemedAt: true,
       LotteryPrize: { select: { id: true, tierName: true, name: true } },
+      Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
       User: { select: { uid: true, nickname: true } },
     },
   },
@@ -238,6 +270,7 @@ export type ActivityLotteryAdminView = {
     tierName: string
     prizeName: string
     redemptionStatus: 'PENDING' | 'REDEEMED'
+    redemptionState: ActivityLotteryWinnerRedemptionState
     wonAt: string
     redeemedAt: string | null
   }>
@@ -248,6 +281,8 @@ export type ActivityLotteryAdminListView = {
     id: string
     title: string
     status: string
+    startsAt: string | null
+    endsAt: string | null
     registrationEndAt: string | null
     signupLimit: number | null
     activeParticipantCount: number
@@ -255,7 +290,7 @@ export type ActivityLotteryAdminListView = {
   lotteries: ActivityLotteryAdminView[]
 }
 
-function serializeAdminLottery(row: AdminLotteryRow): ActivityLotteryAdminView {
+function serializeAdminLottery(row: AdminLotteryRow, now = new Date()): ActivityLotteryAdminView {
   return {
     id: row.id,
     title: row.title,
@@ -287,6 +322,7 @@ function serializeAdminLottery(row: AdminLotteryRow): ActivityLotteryAdminView {
       tierName: entry.LotteryPrize?.tierName || '中奖奖项',
       prizeName: entry.LotteryPrize?.name || '奖品',
       redemptionStatus: entry.redemptionStatus,
+      redemptionState: getActivityLotteryWinnerRedemptionState({ redemptionStatus: entry.redemptionStatus, registration: entry.Registration, activityEndAt: row.Activity?.endsAt, now }),
       wonAt: entry.wonAt.toISOString(),
       redeemedAt: iso(entry.redeemedAt),
     })),
@@ -295,7 +331,7 @@ function serializeAdminLottery(row: AdminLotteryRow): ActivityLotteryAdminView {
 
 export async function getAdminActivityLotteries(activityId: string): Promise<ActivityLotteryAdminListView | null> {
   const [activity, lotteries, activeParticipantCount] = await Promise.all([
-    prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, status: true, registrationEndAt: true, signupLimit: true } }),
+    prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, status: true, startsAt: true, endsAt: true, registrationEndAt: true, signupLimit: true } }),
     prisma.lottery.findMany({ where: { activityId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: adminLotterySelect }),
     prisma.activityRegistration.count({ where: { activityId, status: 'ACTIVE', User: { status: 'ACTIVE', isDeleted: false } } }),
   ])
@@ -305,11 +341,13 @@ export async function getAdminActivityLotteries(activityId: string): Promise<Act
       id: activity.id,
       title: activity.title,
       status: activity.status,
+      startsAt: iso(activity.startsAt),
+      endsAt: iso(activity.endsAt),
       registrationEndAt: iso(activity.registrationEndAt),
       signupLimit: activity.signupLimit,
       activeParticipantCount,
     },
-    lotteries: lotteries.map(serializeAdminLottery),
+    lotteries: lotteries.map((lottery) => serializeAdminLottery(lottery)),
   }
 }
 
@@ -323,7 +361,7 @@ export type ActivityLotteryPublicView = {
   winnerCount: number | null
   drawnAt: string | null
   prizes: Array<{ id: string; tierName: string | null; name: string; imageUrl: string | null; description: string | null; quantity: number }>
-  winner: { tierName: string; prizeName: string; redemptionStatus: 'PENDING' | 'REDEEMED'; redeemedAt: string | null } | null
+  winner: { tierName: string; prizeName: string; redemptionStatus: 'PENDING' | 'REDEEMED'; redemptionState: ActivityLotteryWinnerRedemptionState; redeemable: boolean; redeemedAt: string | null } | null
 }
 
 export async function getPublicActivityLotteries(activityId: string, viewerId?: string | null): Promise<ActivityLotteryPublicView[]> {
@@ -339,6 +377,7 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       eligibleCount: true,
       winnerCount: true,
       drawnAt: true,
+      Activity: { select: { endsAt: true } },
       LotteryPrize: {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         select: { id: true, tierName: true, name: true, imageUrl: true, metadata: true, description: true, quantity: true },
@@ -348,12 +387,15 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
   const winnerRows = viewerId && lotteries.length
     ? await prisma.lotteryEntry.findMany({
         where: { userId: viewerId, lotteryId: { in: lotteries.map((lottery) => lottery.id) } },
-        select: { lotteryId: true, redemptionStatus: true, redeemedAt: true, LotteryPrize: { select: { tierName: true, name: true } } },
+        select: { lotteryId: true, redemptionStatus: true, redeemedAt: true, registrationId: true, Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } }, LotteryPrize: { select: { tierName: true, name: true } } },
       })
     : []
   const winners = new Map(winnerRows.map((winner) => [winner.lotteryId, winner]))
   return lotteries.filter((lottery): lottery is typeof lottery & { status: 'SCHEDULED' | 'DRAWN' } => lottery.status === 'SCHEDULED' || lottery.status === 'DRAWN').map((lottery) => {
     const winner = winners.get(lottery.id)
+    const redemptionState = winner
+      ? getActivityLotteryWinnerRedemptionState({ redemptionStatus: winner.redemptionStatus, registration: winner.Registration, activityEndAt: lottery.Activity?.endsAt })
+      : null
     return {
       id: lottery.id,
       title: lottery.title,
@@ -365,7 +407,7 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       drawnAt: iso(lottery.drawnAt),
       prizes: lottery.LotteryPrize.map((prize) => ({ ...prize, imageUrl: publicPrizeImageUrl(prize.imageUrl, prize.metadata) })),
       winner: winner && winner.LotteryPrize
-        ? { tierName: winner.LotteryPrize.tierName || '中奖奖项', prizeName: winner.LotteryPrize.name, redemptionStatus: winner.redemptionStatus, redeemedAt: iso(winner.redeemedAt) }
+        ? { tierName: winner.LotteryPrize.tierName || '中奖奖项', prizeName: winner.LotteryPrize.name, redemptionStatus: winner.redemptionStatus, redemptionState: redemptionState || 'WAITING_FOR_CHECK_IN', redeemable: redemptionState === 'REDEEMABLE', redeemedAt: iso(winner.redeemedAt) }
         : null,
     }
   })
@@ -374,7 +416,7 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
 async function lockActivity(tx: Prisma.TransactionClient, activityId: string) {
   const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
   if (!locked.length) throw new ActivityLotteryError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
-  const activity = await tx.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, status: true, registrationEndAt: true, signupLimit: true } })
+  const activity = await tx.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, status: true, endsAt: true, registrationEndAt: true, signupLimit: true } })
   if (!activity) throw new ActivityLotteryError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
   return activity
 }
@@ -398,8 +440,8 @@ export async function createActivityLottery(activityId: string, adminId: string,
   const result = await prisma.$transaction(async (tx) => {
     const activity = await lockActivity(tx, activityId)
     if (activity.status === 'CANCELLED') throw new ActivityLotteryError('LOTTERY_CANCELLED', '已取消的活动不能创建抽奖')
-    const scheduleError = validateLotterySchedule(activity.registrationEndAt, normalized.value.drawAt)
-    if (scheduleError) throw new ActivityLotteryError(scheduleError.includes('报名结束') ? 'REGISTRATION_END_REQUIRED' : 'DRAW_BEFORE_REGISTRATION_END', scheduleError, 400)
+    const scheduleError = validateLotterySchedule(activity.endsAt, normalized.value.drawAt)
+    if (scheduleError) throw new ActivityLotteryError(activity.endsAt ? 'INVALID_DRAW_AT' : 'ACTIVITY_END_REQUIRED', scheduleError, 400)
     const lottery = await tx.lottery.create({
       data: {
         title: normalized.value.title,
@@ -437,8 +479,8 @@ export async function updateActivityLottery(activityId: string, lotteryId: strin
     if (!lottery) throw new ActivityLotteryError('LOTTERY_NOT_FOUND', '抽奖不存在', 404)
     if (lottery.status === 'DRAWN') throw new ActivityLotteryError('LOTTERY_LOCKED', '抽奖已经开奖，不能修改')
     if (lottery.status === 'CANCELLED') throw new ActivityLotteryError('LOTTERY_CANCELLED', '已取消的抽奖不能修改')
-    const scheduleError = validateLotterySchedule(activity.registrationEndAt, normalized.value.drawAt)
-    if (scheduleError) throw new ActivityLotteryError(scheduleError.includes('报名结束') ? 'REGISTRATION_END_REQUIRED' : 'DRAW_BEFORE_REGISTRATION_END', scheduleError, 400)
+    const scheduleError = validateLotterySchedule(activity.endsAt, normalized.value.drawAt)
+    if (scheduleError) throw new ActivityLotteryError(activity.endsAt ? 'INVALID_DRAW_AT' : 'ACTIVITY_END_REQUIRED', scheduleError, 400)
     await tx.lottery.update({ where: { id: lottery.id }, data: { title: normalized.value.title, description: normalized.value.description, drawAt: normalized.value.drawAt, status: 'SCHEDULED' }, select: { id: true } })
     await tx.lotteryPrize.deleteMany({ where: { lotteryId: lottery.id } })
     await tx.lotteryPrize.createMany({ data: prizeCreateData(normalized.value.prizes).map((prize) => ({ ...prize, lotteryId: lottery.id })) })
@@ -513,7 +555,7 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
       eligibleCount: true,
       winnerCount: true,
       drawnAt: true,
-      Activity: { select: { id: true, title: true, status: true, registrationEndAt: true } },
+       Activity: { select: { id: true, title: true, status: true, endsAt: true } },
       LotteryPrize: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }], select: { id: true, tierName: true, name: true, quantity: true } },
     },
   })
@@ -538,8 +580,8 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
     return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [] }
   }
   if (!lottery.drawAt || now.getTime() < lottery.drawAt.getTime()) throw new ActivityLotteryError('LOTTERY_NOT_DUE', '开奖时间尚未到达', 409)
-  const scheduleError = validateLotterySchedule(lottery.Activity.registrationEndAt, lottery.drawAt)
-  if (scheduleError) throw new ActivityLotteryError(scheduleError.includes('报名结束') ? 'REGISTRATION_END_REQUIRED' : 'DRAW_BEFORE_REGISTRATION_END', scheduleError, 409)
+  const scheduleError = validateLotterySchedule(lottery.Activity.endsAt, lottery.drawAt)
+  if (scheduleError) throw new ActivityLotteryError(lottery.Activity.endsAt ? 'INVALID_DRAW_AT' : 'ACTIVITY_END_REQUIRED', scheduleError, 409)
 
   const registrations = await tx.activityRegistration.findMany({
     where: { activityId: lottery.activityId, status: 'ACTIVE', User: { status: 'ACTIVE', isDeleted: false } },

@@ -6,7 +6,7 @@ import { ActivityLotteryManager } from '@/components/activities/ActivityLotteryM
 type ActivityLotteryEntryProps = Readonly<{
   activityId: string | null
   activityTitle: string
-  registrationEndAt: string | null
+  activityEndAt: string | null
   disabled?: boolean
   onPrepareActivity: () => Promise<boolean>
 }>
@@ -16,7 +16,7 @@ type ActivityLotteryEntryProps = Readonly<{
  * keep the entry visible in the form and save a draft only when the admin
  * explicitly starts adding a lottery; this prevents orphan lottery rows.
  */
-export function ActivityLotteryEntry({ activityId, activityTitle, registrationEndAt, disabled = false, onPrepareActivity }: ActivityLotteryEntryProps) {
+export function ActivityLotteryEntry({ activityId, activityTitle, activityEndAt, disabled = false, onPrepareActivity }: ActivityLotteryEntryProps) {
   const [preparing, setPreparing] = useState(false)
   const [openAfterPrepare, setOpenAfterPrepare] = useState(false)
 
@@ -25,7 +25,7 @@ export function ActivityLotteryEntry({ activityId, activityTitle, registrationEn
   }, [activityId])
 
   if (activityId) {
-    return <ActivityLotteryManager key={activityId} activityId={activityId} activityTitle={activityTitle} registrationEndAt={registrationEndAt} openOnMount={openAfterPrepare} />
+    return <ActivityLotteryManager key={activityId} activityId={activityId} activityTitle={activityTitle} activityEndAt={activityEndAt} openOnMount={openAfterPrepare} />
   }
 
   async function prepareActivity() {
@@ -51,7 +51,7 @@ export function ActivityLotteryEntry({ activityId, activityTitle, registrationEn
         </button>
       </div>
       <p className="mt-3 text-xs font-bold leading-5 text-slate-500 dark:text-slate-400">
-        {registrationEndAt ? '开奖时间不得早于活动报名结束时间。' : '请先设置报名结束时间，再添加自动抽奖。'}
+        {activityEndAt ? '开奖时间必须早于活动结束时间。' : '请先设置活动结束时间，再添加自动抽奖。'}
       </p>
     </section>
   )

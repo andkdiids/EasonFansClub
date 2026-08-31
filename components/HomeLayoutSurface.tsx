@@ -18,14 +18,13 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { normalizeActionUrl } from '@/lib/url-safety'
 import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
+import { getHomeCheckInDisplay } from '@/lib/home-checkin-display'
 import type { HomeActivityStatusLabel } from '@/lib/home-activity'
 
 const homeText = {
   goCheckin: '去挂号',
+  notCheckedIn: '未挂号',
   loadingStats: '正在读取挂号数据',
-  totalRegistrations: '累计挂号',
-  days: '天',
-  viewRegistrations: '查看挂号记录',
   members: 'E院人数',
   todayCheckins: '今日挂号',
   birthdays: '今日生日',
@@ -85,7 +84,7 @@ const todayTypeLabels: Record<string, string> = {
 
 type Announcement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
 type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null; likedByMe: boolean; likeCount: number }
-type Stats = { consecutiveDays: number; checkIns: { id: string }[]; _count: { checkIns: number } }
+type Stats = { checkIns: { id: string }[] }
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
 type DailyMusic = { id: string; title: string; artist: string; releaseYear: number; lyrics: string | null; coverUrl: string | null; previewUrl: string; previewDuration: number; isFullPlayback: false; likedByMe: boolean; likeCount: number; album: { id: string; name: string; coverUrl: string | null } }
 type TodayEvent = { id: string; date: string; year: number; month: number; day: number; type: string; title: string; content: string; imageUrl: string | null; source: 'AUTO' | 'ADMIN'; reference: string | null; status: 'APPROVED'; href: string | null }
@@ -93,7 +92,7 @@ type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: 
 type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; locationName: string | null; startsAt: string | null; endsAt: string | null; registrationStartAt: string | null; registrationEndAt: string | null; signupLimit: number | null; signupCount: number; statusLabel: HomeActivityStatusLabel }
 type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
 type HomeSalonPost = { id: string; category: string; title: string | null; approvedAt: string; thumbnailUrl: string | null }
-type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; salonPosts: HomeSalonPost[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
+type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; salonPosts: HomeSalonPost[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; checkedInToday: boolean; todayCheckInCount: number; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
 
 const salonCategoryLabels: Record<string, string> = {
   CONCERT: '演唱会记录',
@@ -208,7 +207,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const items = useMemo(() => getPageLayoutModules(layoutConfig, device, 'home'), [layoutConfig, device])
   const layoutModule = (key: string) => items.find((item) => item.key === key)
   const visible = (key: string) => Boolean(layoutModule(key))
-  const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, salonPosts: [], albums: [], stats: null, dailyMusic: null, siteStats: null, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
+  const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, salonPosts: [], albums: [], stats: null, dailyMusic: null, siteStats: null, checkedInToday: false, todayCheckInCount: 0, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const [todayPageIndex, setTodayPageIndex] = useState(0)
@@ -233,7 +232,16 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
           // The main home payload intentionally keeps entertainment ranking in
           // its own request. Do not let its legacy null field overwrite the
           // independently loaded result.
-          setData((current) => ({ ...nextData, activities: nextData.activities || [], anywhereDoor: nextData.anywhereDoor || null, salonPosts: nextData.salonPosts || [], dailyPrescriptionReward: nextData.dailyPrescriptionReward ?? null, entertainmentRanking: current.entertainmentRanking }))
+          setData((current) => ({
+            ...nextData,
+            activities: nextData.activities || [],
+            anywhereDoor: nextData.anywhereDoor || null,
+            salonPosts: nextData.salonPosts || [],
+            checkedInToday: typeof nextData.checkedInToday === 'boolean' ? nextData.checkedInToday : Boolean(nextData.stats?.checkIns?.length),
+            todayCheckInCount: typeof nextData.todayCheckInCount === 'number' ? nextData.todayCheckInCount : nextData.siteStats?.todayCheckIns ?? 0,
+            dailyPrescriptionReward: nextData.dailyPrescriptionReward ?? null,
+            entertainmentRanking: current.entertainmentRanking,
+          }))
           setFailed(false)
         }
       } catch (error) {
@@ -302,9 +310,9 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     return () => window.clearInterval(timer)
   }, [data.todayEvents.length, device, todayPageCount, todayAutoplayReset])
 
-  const checkedIn = Boolean(data.stats?.checkIns.length)
   const homeDataLoaded = Boolean(data.siteStats)
-  const checkinStateClass = !homeDataLoaded ? 'is-loading' : checkedIn ? 'is-checked' : 'is-not-checked'
+  const checkinDisplay = getHomeCheckInDisplay({ loaded: homeDataLoaded, checkedInToday: data.checkedInToday, todayCheckInCount: data.todayCheckInCount })
+  const checkinStateClass = checkinDisplay.status === 'loading' ? 'is-loading' : checkinDisplay.status === 'checked-in' ? 'is-checked' : 'is-not-checked'
   const todayEvent = data.todayEvents[todayEventIndex] || null
   const desktopTodayEvents = useMemo(() => {
     if (todayPageCount <= 1) return []
@@ -517,16 +525,16 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         <section className="community-stats home-checkin-stats home-first-row-data" aria-label="E院数据与挂号状态">
           <div className="stat-members"><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
           <div className={`stat-registration ${checkinStateClass}`}>
-            {checkedIn ? (
-              <div className="stat-total stat-registration-total" aria-label="已挂号">
-                <span>{homeText.totalRegistrations}</span>
-                <strong>{data.stats ? `${fmt(data.stats._count.checkIns)} ${homeText.days}` : '—'}</strong>
-                <Link href="/checkin">{homeText.viewRegistrations} →</Link>
+            {checkinDisplay.status === 'checked-in' ? (
+              <div className="stat-total stat-registration-total" aria-label="今日挂号人数">
+                <span>{homeText.todayCheckins}</span>
+                <strong>{fmt(checkinDisplay.todayCheckInCount)}</strong>
               </div>
-            ) : homeDataLoaded ? (
+            ) : checkinDisplay.status === 'not-checked-in' ? (
               <Link href="/checkin" className="stat-checkin stat-registration-cta">
                 <span>{homeText.todayCheckins}</span>
-                <strong>{homeText.goCheckin}</strong>
+                <strong>{homeText.notCheckedIn}</strong>
+                <small>{homeText.goCheckin} →</small>
               </Link>
             ) : (
               <div className="stat-total stat-registration-total">

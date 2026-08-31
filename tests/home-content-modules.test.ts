@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { getHomeCheckInDisplay } from '../lib/home-checkin-display'
 import { getHomeDailyPrescriptionDisplay } from '../lib/home-daily-prescription'
 import { getHomeActivityStatusLabel, sortHomeActivities } from '../lib/home-activity'
 
@@ -13,10 +14,11 @@ test('homepage keeps registration state in one dynamic card and uses a four-cell
   assert.match(surface, /community-stats home-checkin-stats/)
   assert.match(surface, /className=\{`stat-registration \$\{checkinStateClass\}`\}/)
   assert.match(surface, /aria-label="E院数据与挂号状态"/)
-  assert.match(surface, /homeText\.totalRegistrations[\s\S]*homeText\.viewRegistrations/)
-  assert.match(surface, /className="stat-checkin stat-registration-cta"[\s\S]*homeText\.todayCheckins[\s\S]*homeText\.goCheckin/)
+  assert.match(surface, /data\.checkedInToday[\s\S]*data\.todayCheckInCount/)
+  assert.match(surface, /className="stat-checkin stat-registration-cta"[\s\S]*homeText\.todayCheckins[\s\S]*homeText\.notCheckedIn[\s\S]*homeText\.goCheckin/)
+  assert.doesNotMatch(surface, /homeText\.(totalRegistrations|days|viewRegistrations)/)
+  assert.doesNotMatch(surface, /data\.stats\._count\.checkIns|data\.stats\.consecutiveDays/)
   assert.doesNotMatch(surface, /data\.siteStats\?\.todayCheckIns/)
-  assert.doesNotMatch(surface, /homeText\.(checkedIn|notCheckedIn|totalCheckins|viewCheckin)/)
   assert.match(surface, /<div className="stat-birthdays">/)
   assert.match(surface, /href="\/games\/daily-prescription" className="stat-prescription"/)
   assert.match(surface, /dailyPrescriptionReward/)
@@ -26,6 +28,13 @@ test('homepage keeps registration state in one dynamic card and uses a four-cell
   assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
   assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data > \.stat-registration \{[\s\S]*display: flex;[\s\S]*padding: 12px 14px;/)
   assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data > \.stat-registration > \.stat-total \{[\s\S]*margin-top: 0;[\s\S]*border-top: 0;/)
+})
+
+test('homepage check-in display keeps the user state and today total independent', () => {
+  assert.deepEqual(getHomeCheckInDisplay({ loaded: true, checkedInToday: false, todayCheckInCount: 1999 }), { status: 'not-checked-in', todayCheckInCount: null })
+  assert.deepEqual(getHomeCheckInDisplay({ loaded: true, checkedInToday: true, todayCheckInCount: 2000 }), { status: 'checked-in', todayCheckInCount: 2000 })
+  assert.deepEqual(getHomeCheckInDisplay({ loaded: true, checkedInToday: true, todayCheckInCount: 27 }), { status: 'checked-in', todayCheckInCount: 27 })
+  assert.deepEqual(getHomeCheckInDisplay({ loaded: false, checkedInToday: false, todayCheckInCount: 2000 }), { status: 'loading', todayCheckInCount: null })
 })
 
 test('homepage displays the stored daily prescription reward without treating an unclaimed state as zero', () => {
