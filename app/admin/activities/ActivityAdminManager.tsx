@@ -126,6 +126,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const [form, setForm] = useState<ActivityForm>(emptyForm)
   const [registrationQuestions, setRegistrationQuestions] = useState<ActivityQuestionDraft[]>([])
   const [rewardBadgeId, setRewardBadgeId] = useState('')
+  const [badgeGrantAt, setBadgeGrantAt] = useState('')
   const [badgeOptions, setBadgeOptions] = useState<Array<{ id: string; name: string; code: string }>>([])
   const [materialOptions, setMaterialOptions] = useState<ActivityMaterialOption[]>([])
   const [loadingActivityConfig, setLoadingActivityConfig] = useState(false)
@@ -175,6 +176,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
     setForm(emptyForm)
     setRegistrationQuestions([])
     setRewardBadgeId('')
+    setBadgeGrantAt('')
     setCoverSelection(emptySelection)
     setBannerSelection(emptySelection)
     setCoverStatus('idle')
@@ -187,6 +189,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
     setForm(formFromActivity(activity))
     setRegistrationQuestions([])
     setRewardBadgeId('')
+    setBadgeGrantAt('')
     setCoverSelection(emptySelection)
     setBannerSelection(emptySelection)
     setCoverStatus('idle')
@@ -204,6 +207,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       if (activityResponse.ok) {
         setRegistrationQuestions(Array.isArray(detail?.registrationQuestions) ? detail.registrationQuestions.map((question: ActivityQuestionDraft) => ({ ...question, placeholder: question.placeholder || '', options: Array.isArray(question.options) ? question.options : [] })) : [])
         setRewardBadgeId(typeof detail?.activityReward?.badgeId === 'string' ? detail.activityReward.badgeId : '')
+        setBadgeGrantAt(dateInput(typeof detail?.activityReward?.badgeGrantAt === 'string' ? detail.activityReward.badgeGrantAt : null))
       }
       if (badgeResponse.ok) setBadgeOptions(Array.isArray(badgeData?.badges) ? badgeData.badges : [])
     } catch {
@@ -262,7 +266,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
         signupLimit: form.signupLimit === '' ? null : form.signupLimit,
         sortOrder: form.sortOrder || '0',
         registrationQuestions,
-        activityReward: rewardBadgeId ? { badgeId: rewardBadgeId, enabled: true } : null,
+        activityReward: rewardBadgeId ? { badgeId: rewardBadgeId, enabled: true, badgeGrantAt: dateToBeijingIso(badgeGrantAt) } : null,
       }
       const response = await fetch(editingId ? `/api/admin/activities/${editingId}` : '/api/admin/activities', {
         method: editingId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload),
@@ -383,8 +387,8 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">联系方式<input value={form.contactInfo} onChange={(event) => changeForm('contactInfo', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">现场核销方式<select value={form.verificationMode} onChange={(event) => { const mode = event.target.value as ActivityVerificationModeValue; changeForm('verificationMode', mode); if (mode === 'NONE') setRewardBadgeId('') }} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="NONE">不启用核销</option><option value="MANUAL">管理员手动核销</option><option value="QR">扫码核销</option></select></label>
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">核销后隐藏奖励（可选）<select value={rewardBadgeId} onChange={(event) => setRewardBadgeId(event.target.value)} disabled={loadingActivityConfig || form.verificationMode === 'NONE'} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="">不设置活动勋章</option>{badgeOptions.map((badge) => <option key={badge.id} value={badge.id}>{badge.name} · {badge.code}</option>)}</select></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">现场核销方式<select value={form.verificationMode} onChange={(event) => { const mode = event.target.value as ActivityVerificationModeValue; changeForm('verificationMode', mode); if (mode === 'NONE') { setRewardBadgeId(''); setBadgeGrantAt('') } }} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="NONE">不启用核销</option><option value="MANUAL">管理员手动核销</option><option value="QR">扫码核销</option></select></label>
+          <div className="space-y-3"><label className="text-sm font-black text-slate-700 dark:text-slate-200">核销后隐藏奖励（可选）<select value={rewardBadgeId} onChange={(event) => { setRewardBadgeId(event.target.value); if (!event.target.value) setBadgeGrantAt('') }} disabled={loadingActivityConfig || form.verificationMode === 'NONE'} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="">不设置活动勋章</option>{badgeOptions.map((badge) => <option key={badge.id} value={badge.id}>{badge.name} · {badge.code}</option>)}</select></label>{rewardBadgeId ? <label className="block text-sm font-black text-slate-700 dark:text-slate-200">自动发放时间（北京时间）<input type="datetime-local" value={badgeGrantAt} onChange={(event) => setBadgeGrantAt(event.target.value)} disabled={loadingActivityConfig} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /><span className="mt-1 block text-xs font-bold text-slate-500">新配置必须填写，精确到分钟；到时会为有效现场参与者自动发放。旧版未设置时间的活动留空可继续沿用原核销奖励逻辑。</span></label> : null}</div>
         </div>
         <div className="mt-4"><ActivityRegistrationFormDesigner questions={registrationQuestions} onChange={setRegistrationQuestions} /></div>
          <div className="mt-4"><ActivityLotteryEntry activityId={editingId} activityTitle={form.title || '未命名活动'} activityEndAt={dateToBeijingIso(form.endsAt)} disabled={saving} onPrepareActivity={async () => {

@@ -338,21 +338,24 @@ async function start() {
     if (activityAutoCheckInRunning) return
     activityAutoCheckInRunning = true
     try {
-      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }] = await Promise.all([
+      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }] = await Promise.all([
         import('./lib/activity-registration'),
         import('./lib/activity-lottery'),
+        import('./lib/activity-badge-rewards'),
       ])
-      const [result, lotteryResult] = await Promise.all([
+      const [result, lotteryResult, badgeRewardResult] = await Promise.all([
         autoCheckInEndedActivityRegistrations({ batchSize: 100 }),
         drawDueActivityLotteries({ batchSize: 200 }),
+        grantEligibleActivityBadges({ batchSize: 200 }),
       ])
-      if (result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed) {
+      if (result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed) {
         console.info('[activities.auto-check-in.completed]', {
           event: 'activities.auto_check_in.completed',
           scanned: result.scanned,
           processed: result.processed,
           failed: result.failed,
           lotteries: lotteryResult,
+          activityBadgeRewards: badgeRewardResult,
         })
       }
     } catch (error) {

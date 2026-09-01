@@ -10,6 +10,7 @@ import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '
 import { cancelUndrawnActivityLotteriesInTransaction } from '@/lib/activity-lottery'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
+import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,9 +87,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
   if (!activity) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
   const [questions, reward] = await Promise.all([
     getActivityRegistrationQuestions(prisma, activityId),
-    prisma.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { badgeId: true, enabled: true, Badge: { select: { id: true, name: true, code: true } } } }),
+    prisma.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { badgeId: true, enabled: true, badgeGrantAt: true, Badge: { select: { id: true, name: true, code: true } } } }),
   ])
-  return NextResponse.json({ activity: serializeActivityRow(activity), registrationQuestions: questions, activityReward: reward ? { badgeId: reward.badgeId, enabled: reward.enabled, badge: reward.Badge } : null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  return NextResponse.json({ activity: serializeActivityRow(activity), registrationQuestions: questions, activityReward: reward ? { badgeId: reward.badgeId, enabled: reward.enabled, badgeGrantAt: reward.badgeGrantAt?.toISOString() || null, badge: reward.Badge } : null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
@@ -171,6 +172,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       })
       return tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: activitySelect })
     })
+    try {
+      await grantEligibleActivityBadges({ activityId })
+    } catch (error) {
+      console.error('[admin.activities.update.badge-reward-compensation]', { activityId, error })
+    }
     revalidatePath('/activities')
     revalidatePath(`/activities/${activityId}`)
     revalidatePath('/')

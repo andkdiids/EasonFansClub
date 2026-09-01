@@ -66,17 +66,18 @@ export async function GET(request: Request, context: RouteContext) {
           },
         })
         currentMetric = count > 0 ? 1 : 0
-      } else currentMetric = await getUserBadgeMetric(target.id, ruleType)
+      } else if (ruleType !== 'ACTIVITY_PARTICIPATION') currentMetric = await getUserBadgeMetric(target.id, ruleType)
     } catch {
       currentMetric = null
     }
   }
-  if (limited && ruleType && badge.BadgeRule?.isEnabled && BADGE_RULE_REGISTRY[ruleType].supportsHistoricalBackfill) {
+  const ruleDefinition = ruleType ? BADGE_RULE_REGISTRY[ruleType] : null
+  if (limited && ruleType && badge.BadgeRule?.isEnabled && ruleDefinition?.supportsHistoricalBackfill) {
     try {
       const targetWithCreatedAt = await prisma.user.findUnique({ where: { id: target.id }, select: { id: true, createdAt: true } })
       if (targetWithCreatedAt) {
         const window = getHistoricalQualificationWindow({ availableFrom: badge.availableFrom, availableUntil: badge.availableUntil })
-        historicalMetric = (await getBatchHistoricalBadgeMetrics([targetWithCreatedAt], ruleType, badge.BadgeRule.configJson, window)).get(target.id) ?? null
+        historicalMetric = (await getBatchHistoricalBadgeMetrics([targetWithCreatedAt], ruleType, badge.BadgeRule!.configJson, window)).get(target.id) ?? null
       }
     } catch {
       historicalMetric = null

@@ -42,8 +42,8 @@ test('series reward relation is nullable and deleting a series only ungroups bad
 })
 
 test('series completion is a registry rule but is never an admin numeric rule', () => {
-  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 15)
-  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 14)
+  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 16)
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 15)
   assert.equal(BADGE_RULE_REGISTRY.BADGE_SERIES_COMPLETE.seriesCompletion, true)
   const parsed = parseBadgeRuleInput({
     ruleType: 'BADGE_SERIES_COMPLETE',

@@ -190,18 +190,20 @@ model ActivityRegistrationAnswer {
 }
 
 model ActivityReward {
-  id         String             @id @default(cuid())
-  activityId String
-  type       ActivityRewardType
-  badgeId    String
-  enabled    Boolean            @default(true)
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
-  Activity   Activity           @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  Badge      Badge              @relation(fields: [badgeId], references: [id], onDelete: Restrict)
+  id           String             @id @default(cuid())
+  activityId   String
+  type         ActivityRewardType
+  badgeId      String
+  enabled      Boolean            @default(true)
+  badgeGrantAt DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  Activity     Activity           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  Badge        Badge              @relation(fields: [badgeId], references: [id], onDelete: Restrict)
 
   @@unique([activityId, type])
   @@index([badgeId])
+  @@index([enabled, badgeGrantAt])
 }
 
 model AdminAction {
@@ -464,6 +466,7 @@ enum BadgeRuleType {
   CONCERT_TOUR_ATTENDED
   RATING_COUNT
   BADGE_SERIES_COMPLETE
+  ACTIVITY_PARTICIPATION
 }
 
 enum BadgeRuleOperator {

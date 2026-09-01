@@ -35,9 +35,9 @@ export type BadgeRuleRegistryEntry = {
   defaultAcquisitionDescription: (threshold: number | null) => string
   adminSelectable?: boolean
   seriesCompletion?: boolean
-  group: '社区' | '挂号' | '账号' | '娱乐天空' | 'EasMusic / 演唱会' | '歌·颂' | '系统'
+  group: '社区' | '挂号' | '账号' | '娱乐天空' | 'EasMusic / 演唱会' | '歌·颂' | '活动' | '系统'
   unit?: string
-  targetKind?: 'CONCERT' | 'TOUR'
+  targetKind?: 'CONCERT' | 'TOUR' | 'ACTIVITY'
   /** Whether the rule can be recomputed against a bounded historical window. */
   supportsHistoricalBackfill: boolean
   /** Human-readable evidence source shown to administrators. */
@@ -226,6 +226,19 @@ export const BADGE_RULE_REGISTRY = {
     historicalBasis: '按限定期内 Rating.createdAt 重算评分次数',
     defaultAcquisitionDescription: (threshold: number | null) => `累计完成 ${displayThreshold(threshold || 1)} 次歌·颂评分后获得`,
   },
+  ACTIVITY_PARTICIPATION: {
+    group: '活动',
+    label: '参加指定活动',
+    dataDescription: '完成指定活动的有效人工或二维码现场核销；报名和活动结束后的自动核销不计入',
+    metricLoader: 'ACTIVITY_PARTICIPATION',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: [],
+    threshold: null,
+    targetKind: 'ACTIVITY',
+    supportsHistoricalBackfill: false,
+    historicalBasis: '按指定活动中有效人工或二维码现场核销记录判断；活动结束自动核销不计入',
+    defaultAcquisitionDescription: () => '参加指定活动后获得',
+  },
   BADGE_SERIES_COMPLETE: {
     group: '系统',
     label: '系列全收集',
@@ -316,11 +329,12 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
 
   if (definition.targetKind) {
     const rawConfig = body.configJson
-    if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) return { error: `请选择${definition.targetKind === 'CONCERT' ? '演唱会' : '巡演'}` }
-    const key = definition.targetKind === 'CONCERT' ? 'concertId' : 'tourId'
+    const targetLabel = definition.targetKind === 'CONCERT' ? '演唱会' : definition.targetKind === 'TOUR' ? '巡演' : '活动'
+    if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) return { error: `请选择${targetLabel}` }
+    const key = definition.targetKind === 'CONCERT' ? 'concertId' : definition.targetKind === 'TOUR' ? 'tourId' : 'activityId'
     const targetId = (rawConfig as Record<string, unknown>)[key]
-    if (typeof targetId !== 'string' || !/^[A-Za-z0-9_-]{1,191}$/.test(targetId.trim())) return { error: `请选择有效的${definition.targetKind === 'CONCERT' ? '演唱会' : '巡演'}` }
-    if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: '指定演唱会规则不需要填写数量' }
+    if (typeof targetId !== 'string' || !/^[A-Za-z0-9_-]{1,191}$/.test(targetId.trim())) return { error: `请选择有效的${targetLabel}` }
+    if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: `指定${targetLabel}规则不需要填写数量` }
     if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
     return { rule: { ruleType: ruleTypeValue as SupportedBadgeRuleType, operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: { [key]: targetId.trim() }, isEnabled: body.isEnabled !== false } }
   }

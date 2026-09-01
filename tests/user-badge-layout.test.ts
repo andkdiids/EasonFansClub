@@ -8,20 +8,44 @@ test('shared identity cards put the equipped badge on its own content row', () =
   const component = read('components/UserDisplayName.tsx')
   const css = read('app/globals.css')
   const badgeCss = css.slice(css.indexOf('/* E院勋章'))
+  const friendCardCss = css
 
   assert.match(component, /const stackedBadge = Boolean\(displayBadge && showBadgeName && !compact && showBadgeIcon\)/)
   assert.match(component, /user-display-name-nickname-row/)
   assert.match(component, /user-display-badge-row/)
   assert.match(component, /\{badge\.name\}/)
   assert.match(badgeCss, /\.user-display-name-stacked \{[^}]*flex-direction:column/)
-  assert.match(badgeCss, /\.user-display-badge-row \{[^}]*display:flex[^}]*width:100%/)
-  assert.match(badgeCss, /\.user-display-badge-row \.badge-visual,.user-display-badge-row \.user-badge-placeholder \{ flex:0 0 auto; \}/)
+  assert.match(badgeCss, /\.user-display-name-stacked \{[^}]*gap:6px/)
+  assert.match(badgeCss, /\.user-display-badge-row \{[^}]*display:flex[^}]*width:100%[^}]*gap:8px/)
+  assert.match(badgeCss, /\.user-display-badge-row > \.badge-visual,.user-display-badge-row > \.user-badge-placeholder \{ flex:0 0 auto; width:clamp\(22px,1em,24px\); height:clamp\(22px,1em,24px\); \}/)
+
+  const friendCardNameRule = friendCardCss.match(/\.friend-profile-card h2 \.user-display-name-stacked \{[^}]*\}/)?.[0] || ''
+  const friendCardHeadingRule = friendCardCss.match(/\.friend-profile-card h2 \{[^}]*\}/)?.[0] || ''
+  const friendCardBadgeRule = friendCardCss.match(/\.friend-profile-card h2 \.user-display-badge-row \{[^}]*\}/)?.[0] || ''
+  const friendCardBadgeNameRule = friendCardCss.match(/\.friend-profile-card h2 \.user-display-badge-name \{[^}]*\}/)?.[0] || ''
+  assert.match(friendCardHeadingRule, /display:flex/)
+  assert.match(friendCardHeadingRule, /justify-content:center/)
+  assert.match(friendCardNameRule, /align-items:center/)
+  assert.match(friendCardBadgeRule, /display:inline-flex/)
+  assert.match(friendCardBadgeRule, /width:fit-content/)
+  assert.match(friendCardBadgeRule, /align-self:center/)
+  assert.match(friendCardBadgeRule, /align-items:center/)
+  assert.match(friendCardBadgeRule, /justify-content:flex-start/)
+  assert.match(friendCardBadgeRule, /gap:8px/)
+  assert.doesNotMatch(friendCardBadgeRule, /(?<!max-)width:100%/)
+  assert.doesNotMatch(friendCardBadgeRule, /justify-(?:between|around|evenly)/)
+  assert.doesNotMatch(friendCardBadgeRule, /position:absolute/)
+  assert.match(friendCardBadgeNameRule, /flex:0 1 auto/)
+  assert.match(friendCardBadgeNameRule, /max-width:calc\(100% - clamp\(22px,1em,24px\) - 8px\)/)
+  assert.match(friendCardBadgeNameRule, /text-align:left/)
 
   const visibleBadgeNameRule = badgeCss.match(/\.user-display-badge-name \{[^}]*\}/)?.[0] || ''
   assert.match(visibleBadgeNameRule, /flex:1 1 auto/)
   assert.match(visibleBadgeNameRule, /min-width:0/)
   assert.match(visibleBadgeNameRule, /overflow:visible/)
   assert.match(visibleBadgeNameRule, /white-space:normal/)
+  assert.match(visibleBadgeNameRule, /font-size:\.6em/)
+  assert.match(visibleBadgeNameRule, /font-weight:700/)
   assert.doesNotMatch(visibleBadgeNameRule, /text-overflow:\s*ellipsis/)
   assert.doesNotMatch(visibleBadgeNameRule, /line-clamp/)
 

@@ -134,6 +134,12 @@ export async function PATCH(request: Request, context: RouteContext) {
         ? `观看「${target.MusicTour.name} · ${target.city} · ${target.concertDate.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })}」后获得`
         : `观看「${'name' in target ? target.name : ''}」巡演任意一场后获得`
     }
+    if (parsed.rule?.ruleType === 'ACTIVITY_PARTICIPATION') {
+      const config = parsed.rule.configJson as { activityId?: string }
+      const activity = await prisma.activity.findUnique({ where: { id: config.activityId }, select: { id: true, title: true } })
+      if (!activity) return NextResponse.json({ message: '选择的活动不存在' }, { status: 400 })
+      targetGeneratedDescription = `参加「${activity.title}」后获得`
+    }
     if (parsed.rule?.ruleType === 'BADGE_SERIES_COMPLETE') {
       const config = parsed.rule.configJson && typeof parsed.rule.configJson === 'object' && !Array.isArray(parsed.rule.configJson) ? parsed.rule.configJson as { seriesId?: unknown } : null
       const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''

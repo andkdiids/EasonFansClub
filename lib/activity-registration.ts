@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import type { ActivityVerificationModeValue } from '@/lib/activity'
+import { parseActivityDateInput } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { grantBadgeWithTransaction } from '@/lib/badge-service'
 import { sanitizeText } from '@/lib/security'
@@ -325,12 +326,31 @@ export async function syncActivityReward(tx: Prisma.TransactionClient, activityI
     return
   }
   if (verificationMode === 'NONE') throw new ActivityConfigurationError('配置活动奖励前，请先选择手动核销或扫码核销')
+  const existing = await tx.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { id: true, badgeId: true, badgeGrantAt: true } })
+  const hasGrantAt = Boolean(rewardRecord && Object.prototype.hasOwnProperty.call(rewardRecord, 'badgeGrantAt'))
+  const rawGrantAt = hasGrantAt ? rewardRecord?.badgeGrantAt : undefined
+  let requestedGrantAt: Date | null | undefined
+  if (hasGrantAt) {
+    if (rawGrantAt === null || rawGrantAt === '') requestedGrantAt = null
+    else {
+      requestedGrantAt = parseActivityDateInput(rawGrantAt)
+      if (!requestedGrantAt) throw new ActivityConfigurationError('自动发放时间无效，请使用北京时间的日期和分钟')
+      if (requestedGrantAt.getSeconds() !== 0 || requestedGrantAt.getMilliseconds() !== 0) throw new ActivityConfigurationError('自动发放时间必须精确到分钟')
+    }
+  }
+  const sameExistingBadge = existing?.badgeId === badgeId
+  const badgeGrantAt = requestedGrantAt !== undefined ? requestedGrantAt : sameExistingBadge ? existing?.badgeGrantAt || null : null
+  // Preserve the legacy immediate reward only when an existing legacy row is
+  // saved unchanged. A new badge binding (or switching the badge) must opt in
+  // to an explicit scheduled grant time.
+  if (!badgeGrantAt && !sameExistingBadge) throw new ActivityConfigurationError('选择活动勋章后必须设置自动发放时间（北京时间）')
+  if (!badgeGrantAt && existing?.badgeGrantAt && hasGrantAt) throw new ActivityConfigurationError('选择活动勋章后必须设置自动发放时间（北京时间）')
   const badge = await tx.badge.findUnique({ where: { id: badgeId }, select: { id: true, isEnabled: true, isActive: true } })
   if (!badge || !badge.isEnabled || !badge.isActive) throw new ActivityConfigurationError('请选择有效且启用中的勋章')
   await tx.activityReward.upsert({
     where: { activityId_type: { activityId, type: 'BADGE' } },
-    update: { badgeId, enabled: true },
-    create: { activityId, type: 'BADGE', badgeId, enabled: true },
+    update: { badgeId, enabled: true, badgeGrantAt },
+    create: { activityId, type: 'BADGE', badgeId, enabled: true, badgeGrantAt },
   })
 }
 
@@ -513,7 +533,7 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
       title: true,
       verificationMode: true,
       startsAt: true,
-      ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true } },
+      ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true, badgeGrantAt: true } },
     },
   })
   const linkedMaterialVerification = input.allowLinkedMaterial === true
@@ -546,7 +566,7 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
   let rewardGranted = false
   let rewardId: string | null = null
   let rewardBadgeId: string | null = null
-  if (reward) {
+  if (reward && !reward.badgeGrantAt) {
     rewardId = reward.id
     rewardBadgeId = reward.badgeId
     const granted = await grantBadgeWithTransaction(tx, {
@@ -595,7 +615,16 @@ export async function redeemActivityLinkedMaterialInTransaction(
 }
 
 export async function verifyActivityRegistration(input: ActivityVerificationTransactionInput) {
-  return prismaTransaction((tx) => verifyActivityRegistrationInTransaction(tx, input))
+  const result = await prismaTransaction((tx) => verifyActivityRegistrationInTransaction(tx, input))
+  try {
+    const { grantEligibleActivityBadges } = await import('@/lib/activity-badge-rewards')
+    await grantEligibleActivityBadges({ activityId: input.activityId, registrationId: result.registrationId })
+  } catch (error) {
+    // Check-in is already committed. The global overdue scanner is the durable
+    // retry path if badge issuance is temporarily unavailable.
+    console.error('[activity.badge-reward.after-check-in]', { activityId: input.activityId, registrationId: result.registrationId, error })
+  }
+  return result
 }
 
 export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.TransactionClient, registrationId: string, now = new Date()) {
@@ -604,7 +633,7 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
   await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${initial.activityId} FOR UPDATE`
   await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registrationId} FOR UPDATE`
   const registration = await tx.activityRegistration.findUnique({ where: { id: registrationId }, select: verificationRegistrationSelect })
-  const activity = await tx.activity.findUnique({ where: { id: initial.activityId }, select: { id: true, title: true, endsAt: true, ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true } } } })
+  const activity = await tx.activity.findUnique({ where: { id: initial.activityId }, select: { id: true, title: true, endsAt: true, ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true, badgeGrantAt: true } } } })
   if (!registration || !activity) return { processed: false, reason: 'NOT_FOUND' as const }
   if (registration.status === 'CANCELLED') return { processed: false, reason: 'CANCELLED' as const }
   if (registration.verifiedAt) return { processed: false, reason: 'ALREADY_VERIFIED' as const }
@@ -613,7 +642,7 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
   await tx.activityRegistration.update({ where: { id: registration.id }, data: { verifiedAt: now, checkedInAt: now, verifiedById: null, verificationMethod: null, checkInSource: 'AUTO_AFTER_ACTIVITY_END' }, select: { id: true } })
   const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
   let rewardGranted = false
-  if (reward) {
+  if (reward && !reward.badgeGrantAt) {
     const granted = await grantBadgeWithTransaction(tx, {
       userId: registration.userId,
       badgeId: reward.badgeId,

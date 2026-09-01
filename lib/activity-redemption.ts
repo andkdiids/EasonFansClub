@@ -279,7 +279,7 @@ export async function confirmActivityRedemption(activityId: string, rawToken: st
   const token = tokenFromInput(rawToken)
   const selections = assertSelection(rawSelections)
   const orderedSelections = orderActivityRedemptionSelections(selections)
-  const results = await prisma.$transaction(async (tx) => {
+  const transactionResult = await prisma.$transaction(async (tx) => {
     const lockedActivity = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
     if (!lockedActivity.length) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '活动不存在', 404)
     let registration = await lockRegistration(tx, activityId, token)
@@ -309,8 +309,16 @@ export async function confirmActivityRedemption(activityId: string, rawToken: st
       targetUserId: registration.userId,
       metadata: { activityId, registrationId: registration.id, selections: itemResults } as Prisma.InputJsonValue,
     })
-    return itemResults
+    return { itemResults, registrationId: registration.id }
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
+  try {
+    const { grantEligibleActivityBadges } = await import('@/lib/activity-badge-rewards')
+    await grantEligibleActivityBadges({ activityId, registrationId: transactionResult.registrationId })
+  } catch (error) {
+    // The redemption transaction is already committed; the global scanner is
+    // the durable retry path if badge issuance is temporarily unavailable.
+    console.error('[activity.redemption.badge-reward]', { activityId, registrationId: transactionResult.registrationId, error })
+  }
   const lookup = await getActivityRedemptionLookup(activityId, token)
-  return { ...lookup, results }
+  return { ...lookup, results: transactionResult.itemResults }
 }

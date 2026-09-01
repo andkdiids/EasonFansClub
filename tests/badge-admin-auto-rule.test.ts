@@ -47,12 +47,22 @@ test('MANUAL and EVENT cannot carry a structured rule', () => {
 })
 
 test('registry is the only rule catalog used by the admin surface', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 14)
+  assert.equal(BADGE_RULE_TYPES.length, 15)
   assert.ok(BADGE_RULE_TYPES.every((ruleType) => BADGE_RULE_REGISTRY[ruleType].label && BADGE_RULE_REGISTRY[ruleType].dataDescription))
-  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 14)
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 15)
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
   assert.match(manager, /BADGE_ADMIN_RULE_TYPES\.filter/)
   assert.match(manager, /BADGE_RULE_TYPE_DESCRIPTIONS\[draft\.ruleType\]/)
+})
+
+test('指定活动参与规则使用活动目标而不是数值阈值', () => {
+  const parsed = parseBadgeRuleInput({ ruleType: 'ACTIVITY_PARTICIPATION', operator: 'GTE', threshold: null, configJson: { activityId: 'activity_1' } })
+  assert.equal(parsed.error, undefined)
+  assert.equal(parsed.rule?.ruleType, 'ACTIVITY_PARTICIPATION')
+  assert.deepEqual(parsed.rule?.configJson, { activityId: 'activity_1' })
+  assert.match(parseBadgeRuleInput({ ruleType: 'ACTIVITY_PARTICIPATION', configJson: {} }).error || '', /活动/)
+  assert.match(read('app/admin/badges/BadgeAdminManager.tsx'), /api\/admin\/badges\/activities/)
+  assert.match(read('app/api/admin/badges/activities/route.ts'), /startsAt: true/)
 })
 
 test('operator UI exposes only the supported GTE presentation', () => {

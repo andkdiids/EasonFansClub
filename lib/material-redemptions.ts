@@ -980,6 +980,14 @@ export async function redeemMaterialOrder(adminId: string, token: string) {
   })
   if (result.expired) throw new MaterialRedemptionError('REDEEM_EXPIRED', '该订单已经超过核销截止时间')
   if (!result.alreadyRedeemed) await notifyMaterialOrder(result.order.userId, result.order.id, `「${result.order.material.title}」已完成核销`, '物料已核销')
+  if (result.order.source === 'ACTIVITY_REGISTRATION_AUTO' && result.order.linkedActivity && result.order.linkedRegistration) {
+    try {
+      const { grantEligibleActivityBadges } = await import('@/lib/activity-badge-rewards')
+      await grantEligibleActivityBadges({ activityId: result.order.linkedActivity.id, registrationId: result.order.linkedRegistration.id })
+    } catch (error) {
+      console.error('[material-redemption.activity-badge-reward]', { orderId: result.order.id, registrationId: result.order.linkedRegistration.id, error })
+    }
+  }
   return { ...serializeOrder(result.order, false), alreadyRedeemed: result.alreadyRedeemed }
 }
 

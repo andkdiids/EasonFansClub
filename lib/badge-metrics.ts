@@ -87,6 +87,10 @@ const BADGE_RULE_METRIC_LOADERS: Record<SupportedBadgeRuleType, BadgeMetricLoade
   // user metric. Keeping a guarded loader here preserves the single registry
   // shape while the rule engine handles this special rule explicitly.
   BADGE_SERIES_COMPLETE: async () => 0,
+  // Activity participation is evaluated by the shared activity qualification
+  // service because its metric depends on a configured activityId and the
+  // check-in source/time window, not on a scalar user counter.
+  ACTIVITY_PARTICIPATION: async () => 0,
 }
 
 export function getBadgeMetricLoader(ruleType: SupportedBadgeRuleType) {

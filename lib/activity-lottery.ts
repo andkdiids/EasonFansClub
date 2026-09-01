@@ -9,6 +9,7 @@ import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
+import { hasValidActivityParticipation, type ActivityParticipationCheckInSnapshot } from '@/lib/activity-participation'
 
 export const ACTIVITY_LOTTERY_ALGORITHM_VERSION = 'SECURE_SHUFFLE_V1'
 export const MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY = 100_000
@@ -52,19 +53,10 @@ export type NormalizedActivityLotteryInput = {
 
 export type ActivityLotteryWinnerRedemptionState = 'REDEEMABLE' | 'WAITING_FOR_CHECK_IN' | 'EXPIRED' | 'REDEEMED'
 
-export type ActivityLotteryCheckInSnapshot = {
-  status: string
-  verifiedAt: Date | null
-  checkedInAt: Date | null
-  checkInSource: string | null
-}
+export type ActivityLotteryCheckInSnapshot = ActivityParticipationCheckInSnapshot
 
 export function hasValidActivityLotteryCheckIn(registration: ActivityLotteryCheckInSnapshot | null | undefined, activityEndAt: Date | null | undefined, now = new Date()) {
-  if (!registration || registration.status !== 'ACTIVE') return false
-  if (registration.checkInSource !== 'MANUAL' && registration.checkInSource !== 'QR') return false
-  const checkedAt = registration.checkedInAt || registration.verifiedAt
-  if (!checkedAt || Number.isNaN(checkedAt.getTime()) || checkedAt.getTime() > now.getTime()) return false
-  return !activityEndAt || Number.isNaN(activityEndAt.getTime()) || checkedAt.getTime() < activityEndAt.getTime()
+  return hasValidActivityParticipation(registration, activityEndAt, now)
 }
 
 export function getActivityLotteryWinnerRedemptionState(input: {

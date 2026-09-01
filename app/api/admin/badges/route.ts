@@ -97,6 +97,15 @@ export async function POST(request: Request) {
       data.acquisitionDescriptionCustomized = false
     }
   }
+  if (parsed.rule?.ruleType === 'ACTIVITY_PARTICIPATION') {
+    const config = parsed.rule.configJson as { activityId?: string }
+    const activity = await prisma.activity.findUnique({ where: { id: config.activityId }, select: { id: true, title: true, status: true } })
+    if (!activity) return NextResponse.json({ message: '选择的活动不存在' }, { status: 400 })
+    if (body.acquisitionDescriptionCustomized !== true) {
+      data.acquisitionDescription = `参加「${activity.title}」后获得`
+      data.acquisitionDescriptionCustomized = false
+    }
+  }
 
   try {
     const badge = await prisma.$transaction(async (tx) => {

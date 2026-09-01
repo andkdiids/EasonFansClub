@@ -129,6 +129,8 @@ export async function getBatchHistoricalBadgeMetrics(
     case 'DUEL_WIN_COUNT':
     case 'WANT_LISTEN_MAX_STREAK':
     case 'BADGE_SERIES_COMPLETE':
+    case 'ACTIVITY_PARTICIPATION':
       throw new Error(`该规则无法可靠判断限定期历史资格：${capability.basis}`)
   }
+  return metrics
 }

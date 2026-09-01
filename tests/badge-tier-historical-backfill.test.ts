@@ -59,7 +59,7 @@ test('规则注册表逐项声明限定期历史回溯能力和依据', () => {
     assert.ok(definition.historicalBasis.length > 0)
   }
   for (const ruleType of ['POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'GUESS_SONG_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT'] as const) assert.equal(BADGE_RULE_REGISTRY[ruleType].supportsHistoricalBackfill, true)
-  for (const ruleType of ['FEATURED_POST_COUNT', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'BADGE_SERIES_COMPLETE'] as const) assert.equal(BADGE_RULE_REGISTRY[ruleType].supportsHistoricalBackfill, false)
+  for (const ruleType of ['FEATURED_POST_COUNT', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION'] as const) assert.equal(BADGE_RULE_REGISTRY[ruleType].supportsHistoricalBackfill, false)
 })
 
 test('历史指标只读取限定窗口内可证明时间的事实', () => {

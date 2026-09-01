@@ -6,6 +6,7 @@ import { badgeAvailabilityWhere, getBadgeAvailability } from '@/lib/badge-phase2
 import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMetric, VALID_POST_WHERE } from '@/lib/badge-metrics'
 import { getSeriesCompletionEligibleUserIds, getSeriesCompletionPreview, processBadgeGrantEffects } from '@/lib/badge-phase3'
 import { getBatchHistoricalBadgeMetrics, getHistoricalBackfillCapability, getHistoricalQualificationWindow, type HistoricalQualificationWindow } from '@/lib/badge-historical'
+import { getActivityParticipationBadgeStats, grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
@@ -104,7 +105,9 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
 
   for (const rule of rules) {
     const type = rule.ruleType as SupportedBadgeRuleType
-    if (type === 'BADGE_SERIES_COMPLETE') continue
+    // Activity participation has an activity-scoped predicate and is handled
+    // by the shared activity scanner, never by the scalar event evaluator.
+    if (type === 'BADGE_SERIES_COMPLETE' || type === 'ACTIVITY_PARTICIPATION') continue
     const config = rule.configJson && typeof rule.configJson === 'object' && !Array.isArray(rule.configJson) ? rule.configJson as { concertId?: unknown; tourId?: unknown } : null
     const isTargetRule = type === 'CONCERT_SHOW_ATTENDED' || type === 'CONCERT_TOUR_ATTENDED'
     const metricKey = isTargetRule ? `${type}:${String(config?.concertId || config?.tourId || '')}` : type
@@ -313,8 +316,10 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
       return metrics
     }
     case 'BADGE_SERIES_COMPLETE':
+    case 'ACTIVITY_PARTICIPATION':
       return metrics
   }
+  return metrics
 }
 
 export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { badgeId: string; cursor?: string | null; batchSize?: number }): Promise<BadgeBackfillSummary> {
@@ -398,6 +403,30 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200 }: { 
       if (userGrants.length) await processBadgeGrantEffects({ userId: user.id, grants: userGrants }).catch((error) => console.error('[badge.series.backfill.effects]', { userId: user.id, error }))
     }
     return summary
+  }
+
+  if (type === 'ACTIVITY_PARTICIPATION') {
+    const config = badge.BadgeRule.configJson && typeof badge.BadgeRule.configJson === 'object' && !Array.isArray(badge.BadgeRule.configJson)
+      ? badge.BadgeRule.configJson as { activityId?: unknown }
+      : null
+    const activityId = typeof config?.activityId === 'string' ? config.activityId : ''
+    if (!activityId) throw new Error('参加指定活动规则缺少活动配置')
+    const result = await grantEligibleActivityBadges({ badgeId, activityId, batchSize: boundedBatchSize })
+    return {
+      badgeId,
+      ruleId: badge.BadgeRule.id,
+      ruleType: type,
+      scanned: result.scannedRegistrations,
+      granted: result.granted,
+      alreadyOwned: result.alreadyOwned,
+      notEligible: 0,
+      failed: result.failed,
+      failures: result.failures,
+      nextCursor: null,
+      done: true,
+      mode,
+      historicalWindow: historicalWindow ? { from: historicalWindow.from.toISOString(), until: historicalWindow.until.toISOString() } : null,
+    }
   }
 
   const users = await prisma.user.findMany({
@@ -544,6 +573,15 @@ export async function previewBadgeRule(badgeId: string): Promise<BadgeRulePrevie
     const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
     if (!seriesId) throw new Error('系列完成规则缺少系列配置')
     const stats = await getSeriesCompletionPreview(seriesId, badgeId)
+    return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats, historical }
+  }
+  if (type === 'ACTIVITY_PARTICIPATION') {
+    const config = badge.BadgeRule.configJson && typeof badge.BadgeRule.configJson === 'object' && !Array.isArray(badge.BadgeRule.configJson)
+      ? badge.BadgeRule.configJson as { activityId?: unknown }
+      : null
+    const activityId = typeof config?.activityId === 'string' ? config.activityId : ''
+    if (!activityId) throw new Error('参加指定活动规则缺少活动配置')
+    const stats = await getActivityParticipationBadgeStats({ badgeId, activityId })
     return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats, historical }
   }
   let cursor: string | undefined

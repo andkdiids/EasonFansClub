@@ -1015,7 +1015,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   return (
     <div className="rich-text-editor-shell">
       <div ref={toolbarRef} className="rich-text-toolbar" aria-label="正文排版工具栏">
-        <div className="relative">
+        <div className="rich-text-toolbar-row rich-text-toolbar-row-primary">
+        <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-heading">
           <button
             type="button"
             className={toolbarButtonClass(Boolean(activeHeadingLevel))}
@@ -1025,7 +1026,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             onPointerDown={handleHeadingTriggerPointerDown}
             onKeyDown={handleHeadingTriggerKeyDown}
           >
-            {blockLabel}<span aria-hidden="true">⌄</span>
+            <span className="rich-text-toolbar-label">{blockLabel}</span><span aria-hidden="true">⌄</span>
           </button>
           {headingMenuOpen ? (
             <div id="rich-text-heading-menu" className="rich-text-toolbar-menu" role="menu" aria-label="段落样式">
@@ -1051,7 +1052,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           ) : null}
         </div>
 
-        <div className="relative">
+        <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-size">
           <button
             type="button"
             className={toolbarButtonClass(Boolean(currentSize))}
@@ -1060,7 +1061,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             onMouseDown={closeHeadingOnToolbarMouseDown}
             onClick={() => toggleToolbarMenu('size')}
           >
-            字号<span aria-hidden="true">⌄</span>
+            <span className="rich-text-toolbar-label">字号</span><span aria-hidden="true">⌄</span>
           </button>
           {openMenu === 'size' ? (
             <div className="rich-text-toolbar-menu" role="menu" aria-label="字号">
@@ -1081,7 +1082,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           ) : null}
         </div>
 
-        <div className="relative">
+        <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-color">
           <button
             type="button"
             className={toolbarButtonClass(Boolean(currentColor))}
@@ -1091,7 +1092,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             onClick={() => toggleToolbarMenu('color')}
           >
             <span className="rich-text-color-trigger">A</span>
-            <span>{currentColor ? colorLabels[currentColor] : '颜色'}</span>
+            <span className="rich-text-toolbar-label">{currentColor ? colorLabels[currentColor] : '颜色'}</span>
             <span aria-hidden="true">⌄</span>
           </button>
           {openMenu === 'color' ? (
@@ -1151,7 +1152,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           <s>S</s>
         </button>
 
-        <div className="relative">
+        <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-list">
           <button
             type="button"
             className={toolbarButtonClass(bulletListActive || orderedListActive)}
@@ -1163,7 +1164,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             onMouseDown={closeHeadingOnToolbarMouseDown}
             onClick={() => toggleToolbarMenu('list')}
           >
-            列表<span aria-hidden="true">⌄</span>
+            <span className="rich-text-toolbar-label">列表</span><span aria-hidden="true">⌄</span>
           </button>
           {openMenu === 'list' ? (
             <div className="rich-text-toolbar-menu" role="menu" aria-label="列表类型">
@@ -1192,6 +1193,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             </div>
           ) : null}
         </div>
+        </div>
+        <div className="rich-text-toolbar-row rich-text-toolbar-row-secondary">
         <button
           type="button"
           className={toolbarButtonClass()}
@@ -1281,6 +1284,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         >
           ↷ <span className="sr-only">重做</span>
         </button>
+        </div>
       </div>
       <EditorContent
         editor={editor}

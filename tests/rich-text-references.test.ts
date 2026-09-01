@@ -173,7 +173,7 @@ test('editor and server routes expose the requested structured toolbar/search co
   assert.doesNotMatch(editor, /window\.prompt\(/u)
   assert.doesNotMatch(editor, /applyLink/u)
 
-  const sizePosition = editor.indexOf('字号<span')
+  const sizePosition = editor.indexOf('rich-text-toolbar-label">字号</span>')
   const colorPosition = editor.indexOf('rich-text-color-trigger')
   const boldPosition = editor.indexOf('aria-label="加粗"')
   const italicPosition = editor.indexOf('aria-label="斜体"')

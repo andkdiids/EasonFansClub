@@ -10,6 +10,7 @@ import { ActivityConfigurationError, syncActivityRegistrationQuestions, syncActi
 import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '@/lib/activity-material'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,6 +102,11 @@ export async function POST(request: Request) {
       }
       return tx.activity.findUniqueOrThrow({ where: { id: created.id }, select: activitySelect })
     })
+    try {
+      await grantEligibleActivityBadges({ activityId: activity.id })
+    } catch (error) {
+      console.error('[admin.activities.create.badge-reward-compensation]', { activityId: activity.id, error })
+    }
     revalidatePath('/activities')
     revalidatePath('/')
     return NextResponse.json({ activity: serializeActivityRow(activity) }, { status: 201 })

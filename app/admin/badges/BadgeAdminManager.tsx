@@ -47,6 +47,7 @@ type AdminSeries = { id: string; code: string; name: string; description: string
 type SeriesDraft = { id?: string; name: string; description: string; sortOrder: number; isEnabled: boolean; completionRewardBadgeId: string | null }
 type ConcertOption = { id: string; title: string | null; concertDate: string; city: string; venue: string | null; MusicTour: { id: string; name: string } }
 type TourOption = { id: string; name: string }
+type ActivityOption = { id: string; title: string; status: 'DRAFT' | 'PUBLISHED' | 'CANCELLED'; startsAt: string | null; endsAt: string | null }
 
 const emptyDraft: BadgeDraft = {
   name: '', code: '', slug: '', description: '', acquisitionDescription: '', acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, badgeType: 'STANDARD', seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, announceOnGrant: false, countsTowardSeriesCompletion: true, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, ruleEnabled: true, legacyAuto: false, legacyTier: false, seriesCompletionRule: false, tierEnabled: false, limitedEnabled: false, targetId: '', targetLabel: '',
@@ -78,9 +79,10 @@ function toDraft(badge: AdminBadge): BadgeDraft {
     seriesCompletionRule: rule?.ruleType === 'BADGE_SERIES_COMPLETE',
     tierEnabled: badge.tierGroupCode !== null || badge.tierLevel !== null,
     limitedEnabled: badge.availableFrom !== null || badge.availableUntil !== null,
-    targetId: typeof (rule?.configJson as { concertId?: unknown; tourId?: unknown } | null)?.concertId === 'string'
+    targetId: typeof (rule?.configJson as { concertId?: unknown; tourId?: unknown; activityId?: unknown } | null)?.concertId === 'string'
       ? String((rule?.configJson as { concertId: string }).concertId)
-      : typeof (rule?.configJson as { tourId?: unknown } | null)?.tourId === 'string' ? String((rule?.configJson as { tourId: string }).tourId) : '',
+      : typeof (rule?.configJson as { tourId?: unknown } | null)?.tourId === 'string' ? String((rule?.configJson as { tourId: string }).tourId)
+        : typeof (rule?.configJson as { activityId?: unknown } | null)?.activityId === 'string' ? String((rule?.configJson as { activityId: string }).activityId) : '',
     targetLabel: '',
   }
 }
@@ -89,11 +91,12 @@ function defaultAcquisitionDescription(draft: Pick<BadgeDraft, 'grantType' | 'ru
   if (draft.grantType !== 'AUTO' || draft.legacyAuto) return ''
   if (draft.ruleType === 'CONCERT_SHOW_ATTENDED' && draft.targetLabel) return `观看「${draft.targetLabel}」后获得`
   if (draft.ruleType === 'CONCERT_TOUR_ATTENDED' && draft.targetLabel) return `观看「${draft.targetLabel}」巡演任意一场后获得`
+  if (draft.ruleType === 'ACTIVITY_PARTICIPATION' && draft.targetLabel) return `参加「${draft.targetLabel}」后获得`
   return generateBadgeAcquisitionDescription(draft.ruleType, draft.threshold)
 }
 
-const RULE_GROUPS = ['社区', '挂号', '账号', '娱乐天空', 'EasMusic / 演唱会', '歌·颂'] as const
-function isTargetRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'CONCERT_SHOW_ATTENDED' || ruleType === 'CONCERT_TOUR_ATTENDED' }
+const RULE_GROUPS = ['社区', '挂号', '账号', '娱乐天空', 'EasMusic / 演唱会', '歌·颂', '活动'] as const
+function isTargetRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'CONCERT_SHOW_ATTENDED' || ruleType === 'CONCERT_TOUR_ATTENDED' || ruleType === 'ACTIVITY_PARTICIPATION' }
 function getRuleUnit(ruleType: SupportedBadgeRuleType) {
   const definition = BADGE_RULE_REGISTRY[ruleType]
   return 'unit' in definition ? definition.unit : ''
@@ -118,7 +121,7 @@ function getAutoRuleError(draft: Pick<BadgeDraft, 'grantType' | 'legacyAuto' | '
     ruleType: draft.ruleType,
     operator: draft.operator,
     threshold: isTargetRule(draft.ruleType) ? null : draft.threshold,
-    configJson: draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : undefined,
+    configJson: draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : undefined,
     isEnabled: draft.ruleEnabled,
   }).error || null
 }
@@ -163,6 +166,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
   const [formSections, setFormSections] = useState({ basic: true, rules: true, display: false })
   const [concertOptions, setConcertOptions] = useState<ConcertOption[]>([])
   const [tourOptions, setTourOptions] = useState<TourOption[]>([])
+  const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([])
   const [concertSearch, setConcertSearch] = useState('')
 
   const visibleBadges = useMemo(() => badges.filter((badge) => {
@@ -189,6 +193,10 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
   }, [])
 
   useEffect(() => {
+    void fetch('/api/admin/badges/activities', { cache: 'no-store' }).then((response) => response.json()).then((data: { activities?: ActivityOption[] }) => setActivityOptions(data.activities || [])).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
     if (!draft?.targetId || draft.targetLabel) return
     if (draft.ruleType === 'CONCERT_TOUR_ATTENDED') {
       const tour = tourOptions.find((item) => item.id === draft.targetId)
@@ -198,8 +206,11 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
         const concert = data.concerts?.find((item) => item.id === draft.targetId)
         if (concert) setDraft((current) => current?.targetId === concert.id ? { ...current, targetLabel: `${concert.MusicTour.name} · ${concert.city} · ${new Date(concert.concertDate).toLocaleDateString('zh-CN')}` } : current)
       }).catch(() => undefined)
+    } else if (draft.ruleType === 'ACTIVITY_PARTICIPATION') {
+      const activity = activityOptions.find((item) => item.id === draft.targetId)
+      if (activity) setDraft((current) => current?.targetId === activity.id ? { ...current, targetLabel: activity.title } : current)
     }
-  }, [draft?.ruleType, draft?.targetId, draft?.targetLabel, tourOptions])
+  }, [activityOptions, draft?.ruleType, draft?.targetId, draft?.targetLabel, tourOptions])
 
   async function searchConcertOptions() {
     const value = concertSearch.trim()
@@ -281,6 +292,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
         draft.rule.ruleType !== draft.ruleType ||
         draft.rule.operator !== draft.operator ||
         draft.rule.threshold !== draft.threshold ||
+        (isTargetRule(draft.ruleType) && (typeof (draft.rule.configJson as { concertId?: unknown; tourId?: unknown; activityId?: unknown } | null)?.concertId === 'string' ? String((draft.rule.configJson as { concertId: string }).concertId) : typeof (draft.rule.configJson as { tourId?: unknown } | null)?.tourId === 'string' ? String((draft.rule.configJson as { tourId: string }).tourId) : typeof (draft.rule.configJson as { activityId?: unknown } | null)?.activityId === 'string' ? String((draft.rule.configJson as { activityId: string }).activityId) : '') !== draft.targetId) ||
         draft.rule.isEnabled !== draft.ruleEnabled
       ),
     )
@@ -300,7 +312,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           rule: draft.grantType === 'AUTO' && !draft.legacyAuto
             ? draft.seriesCompletionRule
               ? { ruleType: 'BADGE_SERIES_COMPLETE', operator: 'GTE', threshold: null, configJson: draft.rule?.configJson, isEnabled: draft.ruleEnabled }
-              : { ruleType: draft.ruleType, operator: draft.operator, threshold: isTargetRule(draft.ruleType) ? null : draft.threshold, configJson: draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : undefined, isEnabled: draft.ruleEnabled }
+              : { ruleType: draft.ruleType, operator: draft.operator, threshold: isTargetRule(draft.ruleType) ? null : draft.threshold, configJson: draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : undefined, isEnabled: draft.ruleEnabled }
             : null,
         }),
       })
@@ -532,6 +544,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
                 {!isTargetRule(draft.ruleType) ? <label className="text-xs font-black text-slate-500">需要达到<div className="flex items-center gap-2"><input type="number" min="1" max="1000000000" value={draft.threshold} onChange={(event) => { const threshold = Number(event.target.value); setDraft((current) => { if (!current) return current; const next = { ...current, threshold: Number.isFinite(threshold) ? threshold : 1 }; return next.acquisitionDescriptionCustomized ? next : { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } }) }} className="admin-badge-input" /><span className="text-sm font-black text-brand-950">{getRuleUnit(draft.ruleType)}</span></div></label> : null}
                 {draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? <div className="sm:col-span-2"><label className="text-xs font-black text-slate-500">选择演唱会<div className="mt-1 flex gap-2"><input value={concertSearch} onChange={(event) => setConcertSearch(event.target.value)} placeholder="搜索巡演、城市、场次或日期" className="admin-badge-input" /><button type="button" onClick={() => void searchConcertOptions()} className="shrink-0 rounded-xl bg-brand-950 px-4 text-xs font-black text-white">搜索</button></div></label><div className="mt-2 max-h-48 space-y-1 overflow-auto">{concertOptions.map((concert) => { const label = `${concert.MusicTour.name} · ${concert.city} · ${new Date(concert.concertDate).toLocaleDateString('zh-CN')}`; return <button key={concert.id} type="button" onClick={() => setDraft((current) => current ? { ...current, targetId: concert.id, targetLabel: label, acquisitionDescription: current.acquisitionDescriptionCustomized ? current.acquisitionDescription : `观看「${label}」后获得` } : current)} className={`block w-full rounded-xl px-3 py-2 text-left text-xs font-bold ${draft.targetId === concert.id ? 'bg-brand-950 text-white' : 'bg-white text-brand-950'}`}>{label}</button> })}</div>{draft.targetId ? <p className="mt-2 text-xs font-black text-emerald-700">已选择：{draft.targetLabel || '当前已保存演唱会'}</p> : null}</div> : null}
                 {draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? <label className="text-xs font-black text-slate-500 sm:col-span-2">选择巡演<select required value={draft.targetId} onChange={(event) => { const selected = tourOptions.find((tour) => tour.id === event.target.value); setDraft((current) => current ? { ...current, targetId: event.target.value, targetLabel: selected?.name || '', acquisitionDescription: current.acquisitionDescriptionCustomized ? current.acquisitionDescription : selected ? `观看「${selected.name}」巡演任意一场后获得` : '' } : current) }} className="admin-badge-input"><option value="">请选择巡演</option>{tourOptions.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label> : null}
+                {draft.ruleType === 'ACTIVITY_PARTICIPATION' ? <label className="text-xs font-black text-slate-500 sm:col-span-2">选择活动<select required value={draft.targetId} onChange={(event) => { const selected = activityOptions.find((activity) => activity.id === event.target.value); setDraft((current) => current ? { ...current, targetId: event.target.value, targetLabel: selected?.title || '', acquisitionDescription: current.acquisitionDescriptionCustomized ? current.acquisitionDescription : selected ? `参加「${selected.title}」后获得` : '' } : current) }} className="admin-badge-input"><option value="">请选择活动</option>{activityOptions.map((activity) => <option key={activity.id} value={activity.id}>{activity.title} · {activity.status === 'PUBLISHED' ? '已发布' : activity.status === 'DRAFT' ? '草稿' : '已取消'} · {activity.startsAt ? new Date(activity.startsAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未设置开始时间'}</option>)}</select>{draft.targetId ? <span className="mt-1 block text-[11px] font-black text-emerald-700">已选择：{draft.targetLabel || '当前已保存活动'}；只有有效人工 / 二维码现场核销才算参加，活动结束自动核销不计入。</span> : null}</label> : null}
               </div>
               <p className="mt-2 text-xs font-bold text-violet-700">数据口径：{BADGE_RULE_TYPE_DESCRIPTIONS[draft.ruleType]}</p>
             </div>

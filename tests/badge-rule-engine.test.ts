@@ -39,14 +39,15 @@ test('规则输入只接受受控类型、正整数阈值，首版后台只开�
 })
 
 test('规则注册表统一提供指标、文案、阈值、操作符和事件映射', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 14)
+  assert.equal(BADGE_RULE_TYPES.length, 15)
   for (const ruleType of BADGE_RULE_TYPES) {
     const definition = BADGE_RULE_REGISTRY[ruleType]
     assert.equal(definition.metricLoader, ruleType)
     assert.ok(definition.label)
     assert.ok(definition.dataDescription)
     assert.deepEqual(definition.supportedOperators, ['GTE'])
-    assert.ok(definition.events.length > 0)
+    if (ruleType === 'ACTIVITY_PARTICIPATION') assert.equal(definition.events.length, 0)
+    else assert.ok(definition.events.length > 0)
     if (definition.threshold) {
       assert.equal(definition.threshold.min, 1)
       assert.equal(definition.threshold.max, 1_000_000_000)
