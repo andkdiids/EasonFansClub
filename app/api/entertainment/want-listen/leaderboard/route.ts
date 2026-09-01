@@ -12,8 +12,15 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
   const rawMode = params.get('mode')
   const mode: WantListenMode = isWantListenMode(rawMode) ? rawMode : 'WANT_LISTEN'
+  const rawRange = params.get('range')
   try {
-    return wantListenOk(await getWantListenLeaderboard({ mode, period: params.get('period'), userId: guard.user.id }))
+    return wantListenOk(await getWantListenLeaderboard({
+      mode,
+      range: rawRange || undefined,
+      date: params.get('date') || undefined,
+      period: rawRange ? undefined : params.get('period'),
+      userId: guard.user.id,
+    }))
   } catch (error) {
     return handleWantListenError(error, 'leaderboard')
   }

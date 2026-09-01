@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { WantListenServiceError } from '@/lib/want-listen'
 import { WantListenPeriodError } from '@/lib/want-listen-period'
+import { GameRankingRangeError } from '@/lib/game-ranking-range'
 
 export function wantListenOk<T>(data: T, status = 200) {
   return NextResponse.json({ ok: true, data, error: null }, { status, headers: { 'Cache-Control': 'private, no-store' } })
@@ -45,6 +46,7 @@ export function handleWantListenError(error: unknown, operation: string, context
   const isServiceError = error instanceof WantListenServiceError
     || (typeof error === 'object' && error !== null && (error as Error | null)?.constructor?.name === 'WantListenServiceError')
   if (error instanceof WantListenPeriodError) return wantListenError(error.message, error.status, error.code)
+  if (error instanceof GameRankingRangeError) return wantListenError(error.message, error.status, error.code)
   if (isServiceError) return wantListenError((error as WantListenServiceError).message, (error as WantListenServiceError).status, (error as WantListenServiceError).code)
 
   const device = detectDevice(context.userAgent)

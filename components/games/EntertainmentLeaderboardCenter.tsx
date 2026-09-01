@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { GameRankingRangeTabs } from '@/components/games/GameRankingRangeTabs'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
@@ -9,6 +10,7 @@ import {
   getEntertainmentLeaderboardDefinition,
   type EntertainmentLeaderboardGameKey,
 } from '@/lib/entertainment-leaderboard-registry'
+import { parseGameRankingRangeKey, type GameRankingRangeKey } from '@/lib/game-ranking-range'
 
 type Row = {
   rank: number
@@ -34,21 +36,59 @@ type Board = {
   period: string | null
   periodLabel: string | null
   periodKey: string | null
+  rangeKey: GameRankingRangeKey | null
+  rangeDate: string | null
   rangeLabel: string | null
+  cacheKey: string | null
   rows: Row[]
   unavailableReason?: string
 }
 
-export function EntertainmentLeaderboardCenter() {
+function pushUrlState(gameKey: EntertainmentLeaderboardGameKey, mode: string | null, range: GameRankingRangeKey | null, date: string | null) {
+  const params = new URLSearchParams(window.location.search)
+  params.set('game', gameKey)
+  if (mode) params.set('mode', mode)
+  else params.delete('mode')
+  if (range) params.set('range', range)
+  else params.delete('range')
+  if (range === 'date' && date) params.set('date', date)
+  else params.delete('date')
+  params.delete('period')
+  const query = params.toString()
+  window.history.pushState({}, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
+}
+
+export function EntertainmentLeaderboardCenter({ todayDate }: Readonly<{ todayDate: string }>) {
   const defaultGame = ENTERTAINMENT_LEADERBOARDS[0]
+  const defaultRange = defaultGame.ranges[0]?.key || 'this-week'
   const [gameKey, setGameKey] = useState<EntertainmentLeaderboardGameKey>(defaultGame.gameKey)
   const [mode, setMode] = useState<string | null>(defaultGame.defaultMode)
-  const [period, setPeriod] = useState<string | null>(defaultGame.defaultPeriod)
+  const [range, setRange] = useState<GameRankingRangeKey>(defaultRange)
+  const [date, setDate] = useState<string | null>(null)
   const [board, setBoard] = useState<Board | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
   const selectedGame = useMemo(() => getEntertainmentLeaderboardDefinition(gameKey) || defaultGame, [defaultGame, gameKey])
+
+  useEffect(() => {
+    const readUrlState = () => {
+      const params = new URLSearchParams(window.location.search)
+      const requestedGame = getEntertainmentLeaderboardDefinition(params.get('game'))
+      const nextGame = requestedGame || defaultGame
+      const requestedRange = parseGameRankingRangeKey(params.get('range'))
+      const nextRange = requestedRange && nextGame.ranges.some((item) => item.key === requestedRange)
+        ? requestedRange
+        : nextGame.ranges[0]?.key || 'this-week'
+      setGameKey(nextGame.gameKey)
+      setMode(nextGame.modes?.some((item) => item.key === params.get('mode')) ? params.get('mode') : nextGame.defaultMode)
+      setRange(nextRange)
+      setDate(nextRange === 'date' ? params.get('date') || todayDate : null)
+    }
+    readUrlState()
+    window.addEventListener('popstate', readUrlState)
+    return () => window.removeEventListener('popstate', readUrlState)
+  }, [defaultGame, todayDate])
 
   useEffect(() => {
     let cancelled = false
@@ -58,7 +98,10 @@ export function EntertainmentLeaderboardCenter() {
     setLoading(true)
     const params = new URLSearchParams({ game: gameKey })
     if (mode) params.set('mode', mode)
-    if (period) params.set('period', period)
+    if (selectedGame.ranges.some((item) => item.key === range)) {
+      params.set('range', range)
+      if (range === 'date') params.set('date', date || todayDate)
+    }
     const controller = new AbortController()
     fetch(`/api/entertainment/leaderboard?${params.toString()}`, {
       cache: 'no-store',
@@ -85,24 +128,31 @@ export function EntertainmentLeaderboardCenter() {
       cancelled = true
       controller.abort()
     }
-  }, [gameKey, mode, period, reloadToken, defaultGame])
+  }, [date, gameKey, mode, range, reloadToken, selectedGame, todayDate])
 
   function chooseGame(nextGameKey: EntertainmentLeaderboardGameKey) {
     const nextGame = getEntertainmentLeaderboardDefinition(nextGameKey)
     if (!nextGame) return
+    const nextRange = nextGame.ranges[0]?.key || 'this-week'
+    const nextDate = nextRange === 'date' ? todayDate : null
     setGameKey(nextGame.gameKey)
     setMode(nextGame.defaultMode)
-    setPeriod(nextGame.defaultPeriod)
+    setRange(nextRange)
+    setDate(nextDate)
+    pushUrlState(nextGame.gameKey, nextGame.defaultMode, nextGame.ranges.length ? nextRange : null, nextDate)
   }
 
   function chooseMode(nextMode: string) {
     setMode(nextMode)
-    setBoard(null)
+    pushUrlState(gameKey, nextMode, selectedGame.ranges.length ? range : null, range === 'date' ? date || todayDate : null)
   }
 
-  function choosePeriod(nextPeriod: string) {
-    setPeriod(nextPeriod)
-    setBoard(null)
+  function chooseRange(nextRange: GameRankingRangeKey, nextDate: string | null) {
+    if (!selectedGame.ranges.some((item) => item.key === nextRange)) return
+    const selectedDate = nextRange === 'date' ? nextDate || todayDate : null
+    setRange(nextRange)
+    setDate(selectedDate)
+    pushUrlState(gameKey, mode, nextRange, selectedDate)
   }
 
   const renderSkeleton = () => (
@@ -143,12 +193,8 @@ export function EntertainmentLeaderboardCenter() {
         </div>
       ) : null}
 
-      {selectedGame.periods.length ? (
-        <div className="entertainment-leaderboard-subtabs" role="tablist" aria-label={`${selectedGame.name}排行榜周期`}>
-          {selectedGame.periods.map((item) => (
-            <button key={item.key} type="button" role="tab" aria-selected={period === item.key} onClick={() => choosePeriod(item.key)}>{item.label}</button>
-          ))}
-        </div>
+      {selectedGame.ranges.length ? (
+        <GameRankingRangeTabs value={range} date={date} todayDate={todayDate} onChange={chooseRange} ariaLabel={`${selectedGame.name}排行榜时间范围`} />
       ) : null}
 
       {error ? (

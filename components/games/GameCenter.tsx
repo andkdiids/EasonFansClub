@@ -12,7 +12,7 @@ type LobbySummary = {
   monthlyBest: number | null
 }
 
-export function GameCenter() {
+export function GameCenter({ todayDate }: Readonly<{ todayDate: string }>) {
   const [category, setCategory] = useState<GameCategoryFilter>('全部')
   const [query, setQuery] = useState('')
   const [bestScore, setBestScore] = useState<number | null>()
@@ -89,7 +89,8 @@ return (
           <GameGrid games={filteredGames} bestScores={{ 'guess-song': bestScore }} />
         )}
       </section>
-      <EntertainmentLeaderboardCenter />
+      {/* <EntertainmentLeaderboardCenter /> remains the single leaderboard surface; todayDate is injected for the shared date input. */}
+      <EntertainmentLeaderboardCenter todayDate={todayDate} />
     </div>
   </main>
 )

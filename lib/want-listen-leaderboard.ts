@@ -6,10 +6,16 @@ import {
   compareWantListenScores,
   getWantListenPeriod,
   parseWantListenLeaderboardPeriod,
+  type WantListenLeaderboardPeriodType,
 } from '@/lib/want-listen-period'
 import { normalizeWantListenMaxStreak } from '@/lib/want-listen-score'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import {
+  getGameRankingTodayKey,
+  resolveGameRankingRange,
+  type GameRankingRange,
+} from '@/lib/game-ranking-range'
 
 type Database = Prisma.TransactionClient | typeof prisma
 
@@ -359,12 +365,46 @@ export async function getWantListenLeaderboardSourceRows(input: {
 export async function getWantListenLeaderboard(input: {
   mode: WantListenMode
   period?: unknown
+  range?: unknown
+  date?: unknown
   userId?: string
   limit?: number
   now?: Date
 }) {
-  const periodType = parseWantListenLeaderboardPeriod(input.period)
-  const period = getWantListenPeriod(periodType, input.now)
+  const now = input.now || new Date()
+  const hasUnifiedRange = input.range !== undefined && input.range !== null && input.range !== ''
+  let periodType: WantListenLeaderboardPeriodType
+  let period: ReturnType<typeof getWantListenPeriod>
+  let resolvedRange: GameRankingRange | null = null
+
+  if (hasUnifiedRange) {
+    resolvedRange = resolveGameRankingRange({ range: input.range, date: input.date, now })
+    periodType = resolvedRange.key === 'date' ? 'DAY' : resolvedRange.key === 'this-month' || resolvedRange.key === 'last-month' ? 'MONTH' : 'WEEK'
+    period = {
+      periodKey: resolvedRange.periodKey,
+      start: resolvedRange.startAt,
+      end: resolvedRange.endAt,
+      endExclusive: resolvedRange.endAt,
+    }
+  } else {
+    periodType = parseWantListenLeaderboardPeriod(input.period)
+    if (periodType === 'ALL') {
+      period = getWantListenPeriod(periodType, now)
+    } else {
+      const rangeKey = periodType === 'DAY' ? 'date' : periodType === 'MONTH' ? 'this-month' : 'this-week'
+      resolvedRange = resolveGameRankingRange({
+        range: rangeKey,
+        date: rangeKey === 'date' ? getGameRankingTodayKey(now) : undefined,
+        now,
+      })
+      period = {
+        periodKey: resolvedRange.periodKey,
+        start: resolvedRange.startAt,
+        end: resolvedRange.endAt,
+        endExclusive: resolvedRange.endAt,
+      }
+    }
+  }
   const limit = Math.max(1, Math.min(100, input.limit || 50))
   const rankedRows = await getWantListenLeaderboardSourceRows({
     mode: input.mode,
@@ -382,6 +422,12 @@ export async function getWantListenLeaderboard(input: {
     mode: input.mode,
     period: periodType,
     periodKey: period.periodKey,
+    rangeKey: resolvedRange?.key || null,
+    rangeDate: resolvedRange?.date || null,
+    rangeLabel: resolvedRange?.label || (periodType === 'ALL' ? '历史累计' : null),
+    cacheKey: resolvedRange
+      ? `want-listen:${input.mode}:${resolvedRange.cacheKey}`
+      : `want-listen:${input.mode}:${periodType}:${period.periodKey}`,
     rows: topRows.map((item) => serializeLeaderboardRow(item.row, item.rank, equippedBadgeMap.get(item.row.userId) || null)),
     self: self && self.rank > limit
       ? serializeLeaderboardRow(self.row, self.rank, equippedBadgeMap.get(self.row.userId) || null)

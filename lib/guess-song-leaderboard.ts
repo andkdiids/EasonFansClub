@@ -8,6 +8,10 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import {
+  resolveGameRankingRange,
+  type GameRankingRange,
+} from '@/lib/game-ranking-range'
 
 type GuessSongLeaderboardDatabase = Prisma.TransactionClient | typeof prisma
 type GuessSongDeletionPeriodType = GuessSongPeriodType | 'YEAR'
@@ -529,6 +533,8 @@ async function getYearGuessSongLeaderboard(input: {
   start: Date
   end: Date
   excludedSessionIds: ReadonlySet<string>
+  periodType: GuessSongPeriodType | 'YEAR' | 'DATE'
+  range: GameRankingRange | null
 }) {
   const questionCountFilter = input.mode === GUESS_SONG_SIMPLE_MODE
     ? Prisma.sql`AND s.questionCount IS NULL`
@@ -633,8 +639,14 @@ async function getYearGuessSongLeaderboard(input: {
   const equippedBadgeMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId))
 
   return {
-    periodType: 'YEAR' as const,
+    periodType: input.periodType,
     periodKey: input.periodKey,
+    rangeKey: input.range?.key || null,
+    rangeDate: input.range?.date || null,
+    rangeLabel: input.range?.label || (input.periodType === 'YEAR' ? '年度' : null),
+    cacheKey: input.range
+      ? `guess-song:${input.mode}:${input.range.cacheKey}`
+      : `guess-song:${input.mode}:${input.periodType}:${input.periodKey}`,
     mode: input.mode,
     algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
     rows: topRows.map((item) => serializeRow(item.row, item.rank, equippedBadgeMap.get(item.row.userId) || null)),
@@ -644,14 +656,47 @@ async function getYearGuessSongLeaderboard(input: {
 
 export async function getGuessSongLeaderboard(input: {
   userId: string
-  periodType: GuessSongPeriodType | 'YEAR'
+  periodType?: GuessSongPeriodType | 'YEAR'
   mode: GuessSongPublicMode
+  range?: unknown
+  date?: unknown
+  resolvedRange?: GameRankingRange
   now?: Date
 }) {
+  const now = input.now || new Date()
   const modeFilter: GuessSongMode[] = getGuessSongDatabaseModes(input.mode)
+  const hasUnifiedRange = input.range !== undefined && input.range !== null && input.range !== ''
 
-  if (input.periodType === 'YEAR') {
-    const { start, end, periodKey: yearKey } = getGuessSongPeriod('YEAR', input.now)
+  if (hasUnifiedRange) {
+    const range = input.resolvedRange || resolveGameRankingRange({ range: input.range, date: input.date, now })
+    if (range.key === 'date') {
+      const excludedSessionIds = await getGuessSongDeletedSessionIds({ mode: input.mode })
+      return getYearGuessSongLeaderboard({
+        userId: input.userId,
+        mode: input.mode,
+        modeFilter,
+        periodKey: range.periodKey,
+        start: range.startAt,
+        end: range.endAt,
+        excludedSessionIds,
+        periodType: 'DATE',
+        range,
+      })
+    }
+
+    const periodType: GuessSongPeriodType = range.key === 'this-month' || range.key === 'last-month' ? 'MONTH' : 'WEEK'
+    return getGuessSongLeaderboard({
+      userId: input.userId,
+      periodType,
+      mode: input.mode,
+      now,
+      resolvedRange: range,
+    })
+  }
+
+  const periodType = input.periodType || 'WEEK'
+  if (periodType === 'YEAR') {
+    const { start, end, periodKey: yearKey } = getGuessSongPeriod('YEAR', now)
     const excludedSessionIds = await getGuessSongDeletedYearSessionIds(yearKey)
     return getYearGuessSongLeaderboard({
       userId: input.userId,
@@ -661,18 +706,24 @@ export async function getGuessSongLeaderboard(input: {
       start,
       end,
       excludedSessionIds,
+      periodType: 'YEAR',
+      range: null,
     })
   }
 
-  const periodKey = getGuessSongPeriod(input.periodType, input.now).periodKey
+  const range = input.resolvedRange || resolveGameRankingRange({
+    range: periodType === 'MONTH' ? 'this-month' : 'this-week',
+    now,
+  })
+  const periodKey = range.periodKey
   const deletedSessionIds = await getGuessSongDeletedSessionIds({
     mode: input.mode,
-    periodType: input.periodType,
+    periodType,
     periodKey,
   })
   const entries = await prisma.guessSongLeaderboardEntry.findMany({
     where: {
-      periodType: input.periodType,
+      periodType,
       periodKey,
       mode: { in: modeFilter },
       ...(deletedSessionIds.size > 0 ? { sessionId: { notIn: [...deletedSessionIds] } } : {}),
@@ -703,8 +754,12 @@ export async function getGuessSongLeaderboard(input: {
   const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.userId))
   const ownIndex = rows.findIndex((row) => row.userId === input.userId)
   return {
-    periodType: input.periodType,
+    periodType,
     periodKey,
+    rangeKey: range.key,
+    rangeDate: range.date,
+    rangeLabel: range.label,
+    cacheKey: `guess-song:${input.mode}:${range.cacheKey}`,
     mode: input.mode,
     algorithm: '同模式按分数、答对数、最高连击、较少播放次数和更早达成时间依次排序。',
     rows: rows.slice(0, 10).map((row, index) => serializeRow(row, index + 1, equippedBadgeMap.get(row.userId) || null)),

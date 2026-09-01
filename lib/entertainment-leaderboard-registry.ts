@@ -1,5 +1,6 @@
 import type { GuessSongPublicMode } from '@/lib/guess-song-config'
 import type { WantListenMode } from '@/lib/want-listen-config'
+import { GAME_RANKING_RANGE_OPTIONS, type GameRankingRangeOption } from '@/lib/game-ranking-range'
 
 export type EntertainmentLeaderboardPeriod = 'DAY' | 'WEEK' | 'MONTH' | 'ALL' | 'YEAR'
 
@@ -28,6 +29,8 @@ export type EntertainmentLeaderboardDefinition = {
   /** null means this game has no mode selector in the unified center. */
   modes: readonly EntertainmentLeaderboardMode[] | null
   periods: readonly EntertainmentLeaderboardPeriodDefinition[]
+  /** The four shared public date filters. Empty means no public leaderboard exists yet. */
+  ranges: readonly GameRankingRangeOption[]
   defaultMode: string | null
   defaultPeriod: EntertainmentLeaderboardPeriod | null
   source: 'want-listen' | 'guess-song' | null
@@ -73,6 +76,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/want-listen',
     modes: null,
     periods: WANT_LISTEN_PERIODS,
+    ranges: GAME_RANKING_RANGE_OPTIONS,
     defaultMode: null,
     defaultPeriod: 'WEEK',
     source: 'want-listen',
@@ -84,6 +88,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/want-listen',
     modes: null,
     periods: WANT_LISTEN_PERIODS,
+    ranges: GAME_RANKING_RANGE_OPTIONS,
     defaultMode: null,
     defaultPeriod: 'WEEK',
     source: 'want-listen',
@@ -95,6 +100,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/want-listen',
     modes: null,
     periods: WANT_LISTEN_PERIODS,
+    ranges: GAME_RANKING_RANGE_OPTIONS,
     defaultMode: null,
     defaultPeriod: 'WEEK',
     source: 'want-listen',
@@ -106,6 +112,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/guess-song',
     modes: GUESS_SONG_MODES,
     periods: GUESS_SONG_PERIODS,
+    ranges: GAME_RANKING_RANGE_OPTIONS,
     defaultMode: 'EASY',
     defaultPeriod: 'WEEK',
     source: 'guess-song',
@@ -117,6 +124,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/guess-song/duel',
     modes: DUEL_MODES,
     periods: [],
+    ranges: [],
     defaultMode: 'SCORE',
     defaultPeriod: null,
     source: null,
@@ -128,6 +136,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/undercover-star',
     modes: null,
     periods: [],
+    ranges: [],
     defaultMode: null,
     defaultPeriod: null,
     source: null,

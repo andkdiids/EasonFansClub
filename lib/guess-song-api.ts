@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { GuessSongServiceError } from '@/lib/guess-song-session'
+import { GameRankingRangeError } from '@/lib/game-ranking-range'
 
 export function guessSongOk<T>(data: T, status = 200) {
   return NextResponse.json(
@@ -23,6 +24,7 @@ export function guessSongError(error: string, status: number, code?: string) {
 }
 
 export function handleGuessSongError(error: unknown, operation: string) {
+  if (error instanceof GameRankingRangeError) return guessSongError(error.message, error.status, error.code)
   if (error instanceof GuessSongServiceError) {
     return guessSongError(error.message, error.status, error.code)
   }

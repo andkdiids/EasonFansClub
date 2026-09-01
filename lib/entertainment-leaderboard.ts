@@ -10,6 +10,12 @@ import {
   type EntertainmentLeaderboardPeriod,
 } from '@/lib/entertainment-leaderboard-registry'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import {
+  GameRankingRangeError,
+  resolveGameRankingRange,
+  type GameRankingRange,
+  type GameRankingRangeKey,
+} from '@/lib/game-ranking-range'
 
 export class EntertainmentLeaderboardError extends Error {
   readonly status: number
@@ -48,7 +54,10 @@ export type EntertainmentLeaderboardResult = {
   period: EntertainmentLeaderboardPeriod | null
   periodLabel: string | null
   periodKey: string | null
+  rangeKey: GameRankingRangeKey | null
+  rangeDate: string | null
   rangeLabel: string | null
+  cacheKey: string | null
   rows: EntertainmentLeaderboardRow[]
   unavailableReason?: string
 }
@@ -165,7 +174,10 @@ function unavailableResult(definition: EntertainmentLeaderboardDefinition): Ente
     period: null,
     periodLabel: null,
     periodKey: null,
+    rangeKey: null,
+    rangeDate: null,
     rangeLabel: null,
+    cacheKey: null,
     rows: [],
     unavailableReason: '该游戏暂未开放排行榜',
   }
@@ -180,6 +192,8 @@ export async function getEntertainmentLeaderboard(input: {
   gameKey: unknown
   mode?: unknown
   period?: unknown
+  range?: unknown
+  date?: unknown
   userId: string
   limit?: number
 }): Promise<EntertainmentLeaderboardResult> {
@@ -187,15 +201,37 @@ export async function getEntertainmentLeaderboard(input: {
   if (!definition) throw new EntertainmentLeaderboardError('请选择有效的娱乐天空游戏')
 
   const mode = resolveMode(definition, input.mode)
-  const period = resolvePeriod(definition, input.period)
-  if (!definition.source || !period) return unavailableResult(definition)
+  if (!definition.source || definition.ranges.length === 0) return unavailableResult(definition)
 
   const now = new Date()
-  const range = resolvedRange(definition, period.key, now)
+  const hasUnifiedRange = input.range !== undefined && input.range !== null && input.range !== ''
+  let unifiedRange: GameRankingRange | null = null
+  if (hasUnifiedRange) {
+    try {
+      unifiedRange = resolveGameRankingRange({ range: input.range, date: input.date, now })
+    } catch (error) {
+      if (error instanceof GameRankingRangeError) throw new EntertainmentLeaderboardError(error.message, error.status, error.code)
+      throw error
+    }
+  }
+  const period = unifiedRange
+    ? null
+    : resolvePeriod(definition, input.period)
+  if (!period && !unifiedRange) return unavailableResult(definition)
+
+  const range = unifiedRange
+    ? { start: unifiedRange.startAt, endExclusive: unifiedRange.endAt }
+    : resolvedRange(definition, period!.key, now)
+  const resultPeriod = unifiedRange
+    ? unifiedRange.key === 'date' ? 'DAY' : unifiedRange.key === 'this-month' || unifiedRange.key === 'last-month' ? 'MONTH' : 'WEEK'
+    : period!.key
+  const resultPeriodLabel = unifiedRange?.label || period?.label || null
   if (definition.source === 'want-listen') {
     const result = await getWantListenLeaderboard({
       mode: definition.sourceMode as WantListenMode,
-      period: period.key,
+      period: unifiedRange ? undefined : period!.key,
+      range: unifiedRange?.key,
+      date: unifiedRange?.date || undefined,
       userId: input.userId,
       limit: input.limit || 10,
       now,
@@ -207,18 +243,23 @@ export async function getEntertainmentLeaderboard(input: {
       gameName: definition.name,
       route: definition.route,
       mode: null,
-      period: period.key,
-      periodLabel: period.label,
+      period: resultPeriod,
+      periodLabel: resultPeriodLabel,
       periodKey: result.periodKey,
       rangeLabel: formatLeaderboardRange(range.start, range.endExclusive),
+      rangeKey: result.rangeKey,
+      rangeDate: result.rangeDate,
+      cacheKey: result.cacheKey,
       rows,
     }
   }
 
   const result = await getGuessSongLeaderboard({
     userId: input.userId,
-    periodType: period.key as GuessSongPeriodType | 'YEAR',
+    periodType: resultPeriod as GuessSongPeriodType | 'YEAR',
     mode: mode as 'EASY' | 'ADVANCED' | 'HARD' | 'EXPERT',
+    range: unifiedRange?.key,
+    date: unifiedRange?.date || undefined,
     now,
   })
   const rows = guessSongRows(result.rows)
@@ -228,10 +269,13 @@ export async function getEntertainmentLeaderboard(input: {
     gameName: definition.name,
     route: definition.route,
     mode,
-    period: period.key,
-    periodLabel: period.label,
+    period: resultPeriod,
+    periodLabel: resultPeriodLabel,
     periodKey: result.periodKey,
     rangeLabel: formatLeaderboardRange(range.start, range.endExclusive),
+    rangeKey: result.rangeKey,
+    rangeDate: result.rangeDate,
+    cacheKey: result.cacheKey,
     rows,
   }
 }

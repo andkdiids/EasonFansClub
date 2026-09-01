@@ -28,7 +28,9 @@ export async function GET(request: Request) {
     return ok(await getEntertainmentLeaderboard({
       gameKey: params.get('game') || params.get('gameKey'),
       mode: params.get('mode') || undefined,
-      period: params.get('period') || undefined,
+      period: params.get('range') ? undefined : params.get('period') || undefined,
+      range: params.get('range') || undefined,
+      date: params.get('date') || undefined,
       userId: guard.user.id,
       limit: 10,
     }))
