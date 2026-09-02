@@ -326,10 +326,13 @@
 .paletteModeSwitch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; background: var(--surface-subtle); }
 .paletteModeButton { min-height: 31px; border: 1px solid transparent; color: var(--studio-muted); background: transparent; font-size: 9px; font-weight: 900; }
 .paletteModeButton:hover, .paletteModeButtonActive { border-color: var(--studio-blue); color: var(--studio-blue); background: var(--studio-card); }
-.generateButton { display: inline-flex; width: 100%; min-height: 44px; align-items: center; justify-content: center; gap: 8px; margin-top: 17px; border: 1px solid var(--studio-blue); color: #fff; background: var(--studio-blue); font-size: 12px; font-weight: 950; }
+.generateButton { display: flex; width: 100%; height: 52px; min-height: 52px; max-height: 56px; min-width: 0; box-sizing: border-box; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; border: 1px solid var(--studio-blue); padding: 0 14px; color: #fff; background: var(--studio-blue); font-size: 12px; font-weight: 950; white-space: nowrap; }
+.generateButtonIcon { width: 20px; height: 20px; flex: none; }
+.generateButtonText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .generateButton:hover { background: #0e55ba; }
 .generateButton:disabled { cursor: wait; opacity: .6; }
 .settingsSubtle { margin-top: 9px; color: var(--studio-muted); font-size: 9px; font-weight: 700; line-height: 1.6; }
+.generateHint { margin-top: 10px; font-size: 12px; }
 
 .beadsPreviewPanel { min-width: 0; border: 1px solid var(--studio-line-strong); background: var(--studio-card); }
 .previewHeader { display: flex; min-height: 63px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--studio-line); padding: 11px 16px; }
@@ -521,6 +524,7 @@
   .toolTitle { max-width: 136px; font-size: 15px; }
   .toolEyebrow { font-size: 8px; }
   .toolHeaderActions { display: none; }
+  .generateButton { height: 48px; min-height: 48px; max-height: 48px; padding-inline: 12px; }
   .mobileActionBar { position: sticky; z-index: 8; bottom: var(--mobile-bottom-nav-total, 0px); display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--studio-line-strong); padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--studio-card) 96%, transparent); }
   .mobileActionBar .actionButton { flex: 1; min-width: 0; padding: 0 6px; font-size: 9px; }
   .mobileActionBar .actionButtonPrimary { flex: 1.25; }
