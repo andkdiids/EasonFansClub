@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { UiIcon } from '@/components/UiIcon'
 import { shareContent } from '@/lib/share'
-import { createStudioId, clearStudioDraft, deleteLocalStudioProject, getLocalStudioProject, readStudioDraft, recordStudioEvent, saveLocalStudioProject, writeStudioDraft } from '@/lib/studio/storage'
+import { createStudioId, clearStudioDraft, deleteLocalStudioProject, getLocalStudioProject, listLocalStudioProjects, listRecentStudioEvents, readStudioDraft, recordStudioEvent, saveLocalStudioProject, writeStudioDraft } from '@/lib/studio/storage'
+import { hasSeenBeadStudioOnboarding, markBeadStudioOnboardingSeen } from '@/lib/studio/beads/onboarding'
 import { getStudioTool } from '@/lib/studio/tools'
 import { createBeadPatternPdf } from '@/lib/studio/beads/pdf'
 import { getDefaultPalette, getPalette, getPaletteCoverage, getPaletteModeDefinition, getPaletteSourceNote, getSeriesForBrand, findPaletteColorByCode, normalizePaletteCode, PALETTE_MODES, supportedBeadBrands } from '@/lib/studio/beads/palette'
@@ -19,15 +20,29 @@ import type { StudioExportFormat } from '@/lib/studio/tools'
 import type { StudioLocalProject, StudioReviewStatus, StudioVisibility } from '@/lib/studio/types'
 import { StudioToolShell, type StudioSaveStatus } from './StudioToolShell'
 import { BeadPalettePicker } from './BeadPalettePicker'
+import { BeadStudioOnboarding } from './BeadStudioOnboarding'
 import styles from './studio.module.css'
 
 const beadsTool = getStudioTool('beads')!
 
 const MIN_ZOOM = .5
 const MAX_ZOOM = 3
+const hasPreviousBeadStudioUse = typeof window !== 'undefined' && (
+  listRecentStudioEvents().some((event) => event.toolSlug === 'beads')
+  || listLocalStudioProjects().some((project) => project.toolSlug === 'beads')
+)
+
+function getBeadStudioOnboardingStorage() {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage
+  } catch {
+    return null
+  }
+}
 
 type EditorTool = 'brush' | 'eraser' | 'eyedropper' | 'fill' | 'select' | 'pan'
-type MobilePanel = 'settings' | 'color' | 'layers' | 'materials'
+type RightPanel = 'color' | 'layers' | 'materials' | 'view' | 'more'
+type MobilePanel = 'settings' | RightPanel
 type CellPatch = { index: number; before: number; after: number }
 type GridSnapshot = { width: number; height: number; palette: BeadPatternGrid['palette']; cells: number[] }
 type PaletteSettingsSnapshot = Pick<BeadSettings, 'brand' | 'series' | 'paletteMode'>
@@ -43,6 +58,14 @@ type PointerState = {
 type PointerPoint = { x: number; y: number }
 type PinchState = { distance: number; center: PointerPoint; zoom: number; pan: PointerPoint }
 type Selection = { xStart: number; yStart: number; xEnd: number; yEnd: number }
+
+const RIGHT_PANEL_OPTIONS = [
+  { id: 'color', label: '颜色', icon: 'palette' },
+  { id: 'layers', label: '图层', icon: 'layers' },
+  { id: 'materials', label: '材料', icon: 'grid' },
+  { id: 'view', label: '视图', icon: 'eye' },
+  { id: 'more', label: '更多', icon: 'menu' },
+] as const
 
 function isBeadProjectData(value: unknown): value is BeadProjectData {
   return normalizeBeadProjectData(value) !== null
@@ -120,7 +143,10 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
-  const [activePanel, setActivePanel] = useState<MobilePanel>('settings')
+  const [hasExistingBeadWork, setHasExistingBeadWork] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [activeRightPanel, setActiveRightPanel] = useState<RightPanel>('color')
+  const [activeMobilePanel, setActiveMobilePanel] = useState<MobilePanel>('color')
   const [viewMode, setViewMode] = useState<'grid' | 'bead'>('grid')
   const [editorTool, setEditorTool] = useState<EditorTool>('brush')
   const [currentColorIndex, setCurrentColorIndex] = useState(5)
@@ -359,8 +385,10 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         }
       }
       const draft = !localProject && !requestedProject ? await readStudioDraft<BeadProjectData>('beads') : null
+      const hasExistingWork = Boolean(requestedProject || localProject || draft || listLocalStudioProjects().some((project) => project.toolSlug === 'beads'))
       const data = normalizeBeadProjectData(localProject?.data) || normalizeBeadProjectData(draft)
       if (cancelled) return
+      setHasExistingBeadWork(hasExistingWork)
       if (data) {
         setSettings(data.settings)
         setPattern(data.pattern)
@@ -395,6 +423,18 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     void loadProject()
     return () => { cancelled = true }
   }, [isAuthenticated, requestedMode, requestedProject])
+
+  useEffect(() => {
+    if (!loaded) return
+    const storage = getBeadStudioOnboardingStorage()
+    if (hasSeenBeadStudioOnboarding(storage)) return
+    if (hasExistingBeadWork || hasPreviousBeadStudioUse) {
+      markBeadStudioOnboardingSeen(storage)
+      return
+    }
+    markBeadStudioOnboardingSeen(storage)
+    setOnboardingOpen(true)
+  }, [hasExistingBeadWork, loaded])
 
   useEffect(() => {
     if (!loaded) return
@@ -798,6 +838,20 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     updateSettings({ brightness: 0, contrast: 0, saturation: 0 })
   }
 
+  function renderAdvancedImageSettings() {
+    return <details className={styles.advancedDetails} open>
+      <summary className={styles.advancedSummary}>高级图片调整</summary>
+      <div className={styles.fieldGroup}><label className={styles.formLabel}>最大颜色数 <span className={styles.formHint}>量化后不超过此数</span></label><select className={styles.select} value={settings.maxColors} onChange={(event) => updateSettings({ maxColors: Number(event.target.value) as BeadSettings['maxColors'] })}>{[8, 12, 16, 24, 32, 0].map((value) => <option key={value} value={value}>{value || '不限'}</option>)}</select></div>
+      <div className={styles.fieldGroup}><label className={styles.formLabel}>亮度 <span className={styles.rangeValue}>{settings.brightness}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.brightness} onChange={(event) => updateSettings({ brightness: Number(event.target.value) })} /></div>
+      <div className={styles.fieldGroup}><label className={styles.formLabel}>对比度 <span className={styles.rangeValue}>{settings.contrast}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.contrast} onChange={(event) => updateSettings({ contrast: Number(event.target.value) })} /></div>
+      <div className={styles.fieldGroup}><label className={styles.formLabel}>饱和度 <span className={styles.rangeValue}>{settings.saturation}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.saturation} onChange={(event) => updateSettings({ saturation: Number(event.target.value) })} /><button type="button" className={styles.panelToggle} onClick={resetImageAdjustments}>重置亮度 / 对比度 / 饱和度</button></div>
+      <label className={styles.checkboxRow} style={{ marginTop: 12 }}><input className={styles.checkbox} type="checkbox" checked={settings.whiteAsEmpty} onChange={(event) => updateSettings({ whiteAsEmpty: event.target.checked })} />接近白色的区域视为空白</label>
+      <label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={settings.removeBackground} onChange={(event) => updateSettings({ removeBackground: event.target.checked })} />吸管去背景（使用左上角颜色）</label>
+      <div className={styles.fieldGroup}><label className={styles.formLabel}>抖动</label><select className={styles.select} value={settings.dithering} onChange={(event) => updateSettings({ dithering: event.target.value as BeadSettings['dithering'] })}><option value="none">关闭</option><option value="floyd-steinberg">Floyd–Steinberg</option></select></div>
+      <div className={styles.fieldGroup}><label className={styles.formLabel}>清理零碎颜色</label><select className={styles.select} value={settings.cleanupThreshold} onChange={(event) => updateSettings({ cleanupThreshold: Number(event.target.value) as BeadSettings['cleanupThreshold'] })}><option value="0">关闭</option><option value="2">≤ 2 颗</option><option value="3">≤ 3 颗</option><option value="5">≤ 5 颗</option><option value="10">≤ 10 颗</option></select></div>
+    </details>
+  }
+
   function clearSourceImage() {
     if (sourceObjectUrlRef.current) URL.revokeObjectURL(sourceObjectUrlRef.current)
     sourceObjectUrlRef.current = null
@@ -847,12 +901,12 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     const source = sourceImageRef.current
     if (!source) {
       setError('请先上传一张图片，再生成拼豆图纸。')
-      setActivePanel('settings')
+      setActiveMobilePanel('settings')
       return
     }
     setError('')
     setProcessing(true)
-    setActivePanel('settings')
+    setActiveMobilePanel('settings')
     window.setTimeout(async () => {
       try {
         const next = await generatePatternFromImageInWorker(source, settings, getPalette(settings.brand, settings.series, settings.paletteMode))
@@ -1053,19 +1107,31 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     setPan({ x: 0, y: 0 })
   }
 
-  const mobilePanelClass = (panel: MobilePanel) => activePanel === panel ? '' : styles.mobilePanelHidden
-  const mobilePanelStateClass = activePanel === 'color'
-    ? styles.mobilePanelColor
-    : activePanel === 'layers'
-      ? styles.mobilePanelLayers
-      : activePanel === 'materials' ? styles.mobilePanelMaterials : styles.mobilePanelSettings
+  function dismissOnboarding() {
+    markBeadStudioOnboardingSeen(getBeadStudioOnboardingStorage())
+    setOnboardingOpen(false)
+  }
+
+  function selectRightPanel(panel: RightPanel) {
+    setActiveRightPanel(panel)
+    setActiveMobilePanel(panel)
+  }
+
+  function selectMobilePanel(panel: MobilePanel) {
+    setActiveMobilePanel(panel)
+    if (panel !== 'settings') setActiveRightPanel(panel)
+  }
+
+  const mobilePanelClass = (panel: MobilePanel) => activeMobilePanel === panel ? '' : styles.mobilePanelHidden
+  const rightPanelClass = (panel: RightPanel) => activeRightPanel === panel ? '' : styles.rightPanelHidden
   const palette = pattern.palette
   const replacementAmount = pattern.cells.filter((cell) => cell === replaceFrom).length
   return <>
   <StudioToolShell tool={beadsTool} title={title} saveStatus={saveStatus} onSave={() => void persistProject(false)} onShare={share} onExport={exportFile} openExportOnMount={requestedExport}>
     <div className={styles.beadsPage}>
+      {onboardingOpen ? <BeadStudioOnboarding onDismiss={dismissOnboarding} /> : null}
       <div className={styles.mobilePanelTabs} role="tablist" aria-label="拼豆工具面板">
-        {([['settings', '设置'], ['color', '颜色'], ['layers', '图层'], ['materials', '材料']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={activePanel === key} className={`${styles.mobilePanelTab} ${activePanel === key ? styles.mobilePanelTabActive : ''}`} onClick={() => setActivePanel(key)}>{label}</button>)}
+        {([['settings', '设置'], ['color', '颜色'], ['layers', '图层'], ['materials', '材料'], ['view', '视图'], ['more', '更多']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={activeMobilePanel === key} className={`${styles.mobilePanelTab} ${activeMobilePanel === key ? styles.mobilePanelTabActive : ''}`} onClick={() => selectMobilePanel(key)}>{label}</button>)}
       </div>
       <div className={styles.beadsWorkspace}>
         <aside className={`${styles.beadsPanel} ${styles.beadsSettingsPanel} ${mobilePanelClass('settings')}`}>
@@ -1104,8 +1170,11 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
           {selection ? <div className={styles.selectionBar}><span>已选 {Math.abs(selection.xEnd - selection.xStart) + 1} × {Math.abs(selection.yEnd - selection.yStart) + 1} 格</span><button type="button" className={styles.selectionAction} onClick={() => updateSelection(currentColorIndex)}>填充选区</button><button type="button" className={styles.selectionAction} onClick={() => updateSelection(EMPTY_CELL)}>清除选区</button><button type="button" className={styles.selectionAction} onClick={() => setSelection(null)}>取消</button></div> : null}
         </section>
 
-        <aside className={`${styles.beadsStatsPanel} ${mobilePanelStateClass}`}>
-          <section className={`${styles.panelSection} ${styles.colorPanel} ${mobilePanelClass('color')}`}>
+        <aside className={styles.beadsStatsPanel}>
+          <nav className={styles.rightPanelToolbar} role="tablist" aria-label="右侧编辑面板">
+            {RIGHT_PANEL_OPTIONS.map(({ id, label, icon }) => <button key={id} type="button" role="tab" aria-selected={activeRightPanel === id} className={`${styles.rightPanelTab} ${activeRightPanel === id ? styles.rightPanelTabActive : ''}`} onClick={() => selectRightPanel(id)}><UiIcon name={icon} /><span>{label}</span></button>)}
+          </nav>
+          <section className={`${styles.panelSection} ${styles.rightPanelPanel} ${styles.colorPanel} ${rightPanelClass('color')} ${mobilePanelClass('color')}`}>
             <div className={styles.panelHeader}><div><span className={styles.panelStep}>COLOR / 03</span><h2 className={styles.panelTitle}><UiIcon name="palette" className={styles.inlineIcon} /> 颜色面板</h2></div><span className={styles.formHint}>{palette.length} 色</span></div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>品牌 / 系列</label><div className={styles.sizeRow}><select className={styles.select} value={settings.brand} onChange={(event) => changeBrand(event.target.value as BeadSettings['brand'])}><option value="MARD">MARD</option></select><select className={styles.select} value={settings.series} onChange={(event) => changeSeries(event.target.value)}><option value="221">221</option></select></div></div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>颜色模式 <span className={styles.rangeValue}>{palette.length} / {paletteCoverage.requested} 色</span></label><div className={styles.paletteModeSwitch}>{PALETTE_MODES.map((mode) => <button key={mode.id} type="button" className={`${styles.paletteModeButton} ${settings.paletteMode === mode.id ? styles.paletteModeButtonActive : ''}`} onClick={() => changePaletteMode(mode.id)}>{mode.shortLabel}</button>)}</div><p className={styles.settingsSubtle}>{getPaletteSourceNote(settings.brand, settings.series)} 当前可用 {paletteCoverage.available} 色。</p></div>
@@ -1113,18 +1182,21 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
             <BeadPalettePicker palette={palette} selectedIndex={currentColorIndex} onSelect={selectColor} recentCodes={recentColorCodes} onRecentChange={rememberColorCode} label="画笔颜色" compact />
             <p className={styles.settingsSubtle}>支持搜索 A1、A01、HEX、色号和颜色名称；点击画布中的颜色可用吸管取色。</p>
           </section>
-          <section className={styles.panelSection}>
+          <section className={`${styles.panelSection} ${styles.rightPanelPanel} ${styles.layersPanel} ${rightPanelClass('layers')} ${mobilePanelClass('layers')}`}>
             <div className={styles.panelHeader}><div><span className={styles.panelStep}>LAYERS / 02</span><h2 className={styles.panelTitle}><UiIcon name="layers" className={styles.inlineIcon} /> 图层</h2></div><span className={styles.formHint}>参考图不计入统计</span></div>
             <div className={styles.layerList}>{layers.layers.map((layer) => <div key={layer.id} className={`${styles.layerRow} ${layers.activeLayerId === layer.id ? styles.layerRowActive : ''}`}><button type="button" className={styles.layerMain} onClick={() => setActiveLayer(layer.id)}><UiIcon name={layer.visible ? 'eye' : 'eye-off'} className={styles.layerEye} /><span><b>{layer.name}</b><small>{layer.kind === 'reference-image' ? (layer.imageUrl ? '图片参考层' : '尚未添加图片') : '可编辑拼豆网格'}</small></span></button><button type="button" className={styles.layerVisibility} onClick={() => updateLayerStack((current) => ({ ...current, layers: current.layers.map((item) => item.id === layer.id ? { ...item, visible: !item.visible } : item) }))} aria-label={`${layer.visible ? '隐藏' : '显示'}${layer.name}`}><UiIcon name={layer.visible ? 'eye' : 'eye-off'} /></button></div>)}</div>
             {referenceLayer.imageUrl ? <><div className={styles.referenceControls}><label className={styles.formLabel}>透明度 <span className={styles.rangeValue}>{referenceLayer.opacity}%</span></label><input className={styles.range} type="range" min="0" max="100" value={referenceLayer.opacity} onChange={(event) => updateReferenceLayer({ opacity: Number(event.target.value) })} /><label className={styles.formLabel}>缩放 <span className={styles.rangeValue}>{referenceLayer.transform.scale.toFixed(2)}×</span></label><input className={styles.range} type="range" min="0.25" max="4" step="0.05" value={referenceLayer.transform.scale} onChange={(event) => updateReferenceTransform({ scale: Number(event.target.value) })} /><label className={styles.formLabel}>移动 X / Y <span className={styles.rangeValue}>{Math.round(referenceLayer.transform.x)} / {Math.round(referenceLayer.transform.y)}</span></label><input className={styles.range} type="range" min="-100" max="100" value={referenceLayer.transform.x} onChange={(event) => updateReferenceTransform({ x: Number(event.target.value) })} /><input className={styles.range} type="range" min="-100" max="100" value={referenceLayer.transform.y} onChange={(event) => updateReferenceTransform({ y: Number(event.target.value) })} /><label className={styles.formLabel}>旋转 <span className={styles.rangeValue}>{Math.round(referenceLayer.transform.rotation)}°</span></label><input className={styles.range} type="range" min="-180" max="180" value={referenceLayer.transform.rotation} onChange={(event) => updateReferenceTransform({ rotation: Number(event.target.value) })} /></div><div className={styles.layerActions}><button type="button" className={styles.actionButton} onClick={alignReferenceImage}><UiIcon name="align" />对齐画布</button><button type="button" className={styles.actionButton} onClick={clearReferenceImage}><UiIcon name="trash" />删除图片</button></div></> : <label className={styles.referenceUpload}><input className={styles.uploadInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" onChange={(event) => { handleReferenceFile(event.target.files?.[0] || null); event.target.value = '' }} /><UiIcon name="upload" /><span>{referenceUploading ? '正在安全保存参考图…' : '上传参考图片'}</span><small>垫在豆板下方，透明度、缩放和位置可调</small></label>}
           </section>
-          <div className={styles.statsGrid}><div className={styles.statCard}><span className={styles.statLabel}>总拼豆</span><strong className={styles.statValue}>{materials.totalBeads.toLocaleString()}</strong><small className={styles.statNote}>非空格子</small></div><div className={styles.statCard}><span className={styles.statLabel}>空白格</span><strong className={styles.statValue}>{materials.emptyCells.toLocaleString()}</strong><small className={styles.statNote}>无需放豆</small></div><div className={styles.statCard}><span className={styles.statLabel}>颜色</span><strong className={styles.statValue}>{materials.colorCount}</strong><small className={styles.statNote}>当前色板</small></div><div className={styles.statCard}><span className={styles.statLabel}>底板</span><strong className={styles.statValue}>{materials.boardCount}</strong><small className={styles.statNote}>{materials.boardColumns} × {materials.boardRows}</small></div></div>
-          <div className={styles.craftToolbar}><span className={`${styles.craftMode} ${craftMode ? styles.craftModeActive : ''}`}>{craftMode ? `制作中 · ${progressCount}/${materials.totalBeads}` : '制作模式'}</span><button type="button" className={`${styles.actionButton} ${craftMode ? styles.actionButtonPrimary : ''}`} onClick={() => { setCraftMode((current) => !current); setActivePanel('materials') }}>{craftMode ? '退出' : '开始拼豆'}</button></div>
+           <section className={`${styles.rightPanelPanel} ${styles.materialsPanel} ${rightPanelClass('materials')} ${mobilePanelClass('materials')}`}>
+             <div className={styles.statsGrid}><div className={styles.statCard}><span className={styles.statLabel}>总拼豆</span><strong className={styles.statValue}>{materials.totalBeads.toLocaleString()}</strong><small className={styles.statNote}>非空格子</small></div><div className={styles.statCard}><span className={styles.statLabel}>空白格</span><strong className={styles.statValue}>{materials.emptyCells.toLocaleString()}</strong><small className={styles.statNote}>无需放豆</small></div><div className={styles.statCard}><span className={styles.statLabel}>颜色</span><strong className={styles.statValue}>{materials.colorCount}</strong><small className={styles.statNote}>当前色板</small></div><div className={styles.statCard}><span className={styles.statLabel}>底板</span><strong className={styles.statValue}>{materials.boardCount}</strong><small className={styles.statNote}>{materials.boardColumns} × {materials.boardRows}</small></div></div>
+           <div className={styles.craftToolbar}><span className={`${styles.craftMode} ${craftMode ? styles.craftModeActive : ''}`}>{craftMode ? `制作中 · ${progressCount}/${materials.totalBeads}` : '制作模式'}</span><button type="button" className={`${styles.actionButton} ${craftMode ? styles.actionButtonPrimary : ''}`} onClick={() => { setCraftMode((current) => !current); selectRightPanel('materials') }}>{craftMode ? '退出' : '开始拼豆'}</button></div>
           {craftMode ? <><div className={styles.progressTrack}><div className={styles.progressFill} style={{ width: `${progressPercent}%` }} /></div><div className={styles.craftBanner}>{activeMaterial ? `${activeMaterial.code} · ${activeMaterial.quantity} 颗 · 已完成 ${[...completed].filter((index) => pattern.cells[index] === activeMaterial.index).length} 颗` : `完成 ${progressCount} / ${materials.totalBeads} 颗 · ${progressPercent}%`}</div></> : null}
-          <div className={styles.materialsHeader}><h2>材料统计</h2><span>每包 {packSize} 颗</span></div>
+           <div className={styles.materialsHeader}><div><h2>材料统计</h2><small className={styles.materialsSummary}>{palette.length} 色 · {materials.colorCount} 种实际使用</small></div><span>每包 {packSize} 颗</span></div>
           <div className={styles.materialsList}>{materials.materials.length ? materials.materials.map((material) => <div key={material.code} className={styles.materialRow}><button type="button" className={styles.materialMainButton} onClick={() => selectColor(material.index)}><i className={styles.materialSwatch} style={{ background: material.hex }} /><span className={styles.materialInfo}><b className={styles.materialCode}>{material.code} · {material.brand}</b><small className={styles.materialName}>{material.name}<span className={styles.materialBar}><i className={styles.materialBarFill} style={{ width: `${Math.max(4, material.percentage)}%` }} /></span></small></span><span className={styles.materialQuantity}>{material.quantity}<small className={styles.materialPercentage}>{material.percentage.toFixed(1)}%</small></span></button><button type="button" className={styles.materialReplaceButton} onClick={() => openReplaceDialog(material.index)} aria-label={`将${material.code}换成其他颜色`}>换色</button></div>) : <p className={styles.settingsSubtle}>生成图纸后会显示需要的颜色和数量。</p>}</div>
           <div className={styles.materialsTools}><label htmlFor="studio-pack-size">材料包计算</label><div className={styles.sizeRow}><select id="studio-pack-size" className={styles.miniSelect} value={packSize === 500 || packSize === 1000 || packSize === 2000 ? packSize : 'custom'} onChange={(event) => setPackSize(event.target.value === 'custom' ? (packSize === 500 || packSize === 1000 || packSize === 2000 ? 750 : packSize) : Number(event.target.value))}><option value="500">500 / 包</option><option value="1000">1000 / 包</option><option value="2000">2000 / 包</option><option value="custom">自定义</option></select><button type="button" className={styles.actionButton} onClick={() => openReplaceDialog()}><UiIcon name="replace" />换色</button></div>{packSize !== 500 && packSize !== 1000 && packSize !== 2000 ? <input className={styles.miniNumberInput} type="number" min="1" max="100000" value={packSize} onChange={(event) => setPackSize(Math.max(1, Math.min(100000, Number(event.target.value) || 1)))} aria-label="自定义每包拼豆数量" /> : null}</div>
-          <div className={styles.panelSection}><div className={styles.panelHeader}><div><span className={styles.panelStep}>VIEW / OPTIONS</span><h2 className={styles.panelTitle}>显示与导出</h2></div></div><label className={styles.checkboxRow}><input className={styles.checkbox} type="checkbox" checked={displayBoardLines} onChange={(event) => setDisplayBoardLines(event.target.checked)} />显示 29 × 29 底板边界</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayCoordinates} onChange={(event) => setDisplayCoordinates(event.target.checked)} />显示全局坐标</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={transparentBackground} onChange={(event) => setTransparentBackground(event.target.checked)} />PNG 导出透明空白格</label><p className={styles.notice}>透明像素会保留为空白格；暗色主题只改变界面，不会改变拼豆本身的颜色。</p></div>
+           </section>
+           <section className={[styles.panelSection, styles.rightPanelPanel, styles.viewPanel, rightPanelClass('view'), mobilePanelClass('view')].join(' ')}><div className={styles.panelHeader}><div><span className={styles.panelStep}>VIEW / OPTIONS</span><h2 className={styles.panelTitle}>显示与导出</h2></div></div><label className={styles.checkboxRow}><input className={styles.checkbox} type="checkbox" checked={displayGrid} onChange={(event) => setDisplayGrid(event.target.checked)} />显示网格</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayCodes} onChange={(event) => setDisplayCodes(event.target.checked)} />显示色号</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayCoordinates} onChange={(event) => setDisplayCoordinates(event.target.checked)} />显示全局坐标</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayBoardLines} onChange={(event) => setDisplayBoardLines(event.target.checked)} />显示 29 × 29 底板边界</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={transparentBackground} onChange={(event) => setTransparentBackground(event.target.checked)} />PNG 导出透明空白格</label><p className={styles.notice}>透明像素会保留为空白格；暗色主题只改变界面，不会改变拼豆本身的颜色。</p></section>
+           <section className={[styles.panelSection, styles.rightPanelPanel, styles.morePanel, rightPanelClass('more'), mobilePanelClass('more')].join(' ')}><div className={styles.panelHeader}><div><span className={styles.panelStep}>MORE / 05</span><h2 className={styles.panelTitle}><UiIcon name="menu" className={styles.inlineIcon} /> 更多</h2></div><span className={styles.formHint}>低频设置</span></div><div className={styles.moreActions}><button type="button" className={styles.moreAction} onClick={clearPattern}><UiIcon name="trash" /><span><b>清理图纸</b><small>清除当前网格内容，可撤回</small></span></button><button type="button" className={styles.moreAction} onClick={clearSourceImage} disabled={!sourceImageUrl}><UiIcon name="trash" /><span><b>删除原图</b><small>{sourceImageUrl ? '移除当前上传图片' : '当前没有上传图片'}</small></span></button><button type="button" className={styles.moreAction} onClick={clearReferenceImage} disabled={!referenceLayer.imageUrl}><UiIcon name="trash" /><span><b>删除参考图</b><small>{referenceLayer.imageUrl ? '移除参考图层图片' : '当前没有参考图'}</small></span></button><button type="button" className={styles.moreAction} onClick={alignReferenceImage} disabled={!referenceLayer.imageUrl}><UiIcon name="align" /><span><b>对齐参考图</b><small>重置参考图位置、缩放和旋转</small></span></button></div>{renderAdvancedImageSettings()}</section>
         </aside>
       </div>
       {error ? <div className={`${styles.notice} ${styles.noticeError}`} role="alert">{error}</div> : null}

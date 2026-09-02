@@ -10,6 +10,7 @@ import { EMPTY_CELL } from '../lib/studio/beads/types'
 import { calculateMaterialList, createDemoPattern, floodFill, removeTinyColorRegions, replaceColor, splitIntoBoards } from '../lib/studio/beads/grid'
 import { createBeadPatternPdf } from '../lib/studio/beads/pdf'
 import { patternCellColor, renderPatternToDataUrl } from '../lib/studio/beads/renderer'
+import { BEAD_STUDIO_ONBOARDING_STORAGE_KEY, hasSeenBeadStudioOnboarding, markBeadStudioOnboardingSeen } from '../lib/studio/beads/onboarding'
 import { isTrustedShareCardDataUrl, shareCardApiPath } from '../lib/share-card'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -141,8 +142,14 @@ test('MARD 221 的 brand+series+code ID 唯一且 A1/A01 只做输入兼容', ()
   assert.match(editor, /<option value="221">221<\/option>/)
   assert.doesNotMatch(editor, /<option[^>]*>291<\/option>/)
   assert.match(editor, /COLOR \/ 03/)
-  assert.match(editor, /mobilePanelColor/)
-  assert.match(editor, /mobilePanelLayers/)
+  assert.match(editor, /RIGHT_PANEL_OPTIONS/)
+  assert.match(editor, /rightPanelToolbar/)
+  assert.match(editor, /activeRightPanel/)
+  assert.match(editor, /selectRightPanel/)
+  assert.match(editor, /renderAdvancedImageSettings/)
+  assert.match(editor, /MORE \/ 05/)
+  assert.match(editor, /rightPanelClass\('color'\)/)
+  assert.match(editor, /rightPanelClass\('layers'\)/)
   assert.match(editor, /beforePaletteSettings/)
   assert.match(editor, /findNearestBeadColor/)
 })
@@ -341,10 +348,53 @@ test('制作模式、导出、移动端和错误提示均由工作台接线', ()
   assert.match(css, /\.beadsWorkspace \{[^}]*minmax\(300px, 320px\)/)
   assert.match(css, /\.beadsSettingsPanel[^}]*nth-child\(5\)[^}]*nth-child\(6\)/)
   assert.match(css, /\.colorPanel \.palettePickerPanel \{[^}]*max-height/)
-  assert.match(css, /\.mobilePanelTabs \{[^}]*repeat\(4, minmax\(0, 1fr\)\)/)
-  assert.match(css, /\.beadsStatsPanel\.mobilePanelColor/)
-  assert.match(css, /\.beadsStatsPanel\.mobilePanelLayers/)
+  assert.match(css, /\.rightPanelToolbar \{[^}]*position: sticky/)
+  assert.match(css, /\.rightPanelTab \{[^}]*min-height: 38px/)
+  assert.match(css, /\.rightPanelHidden \{[^}]*display: none/)
+  assert.match(css, /\.mobilePanelTabs \{[^}]*repeat\(6, minmax\(0, 1fr\)\)/)
+  assert.match(css, /\.beadsStatsPanel > \.rightPanelPanel\.mobilePanelHidden/)
+  assert.match(css, /\.layersPanel \.layerActions \{ display: none; \}/)
+  assert.match(css, /\.beadsSettingsPanel \.advancedDetails \{ display: none; \}/)
   assert.match(read('lib/studio/beads/image.ts'), /EMPTY_CELL/)
+})
+
+test('拼豆首次使用引导只展示一次，并且不阻塞工作台', () => {
+  const editor = read('components/studio/StudioBeadsTool.tsx')
+  const onboarding = read('components/studio/BeadStudioOnboarding.tsx')
+  const storageSource = read('lib/studio/beads/onboarding.ts')
+  const css = read('components/studio/studio.module.css')
+  assert.match(storageSource, /studio_beads_onboarding_seen/)
+  assert.match(storageSource, /getItem\(BEAD_STUDIO_ONBOARDING_STORAGE_KEY\)/)
+  assert.match(storageSource, /setItem\(BEAD_STUDIO_ONBOARDING_STORAGE_KEY, '1'\)/)
+  assert.match(editor, /hasSeenBeadStudioOnboarding/)
+  assert.match(editor, /markBeadStudioOnboardingSeen/)
+  assert.match(editor, /hasExistingBeadWork/)
+  assert.match(editor, /listRecentStudioEvents\(\)/)
+  assert.match(editor, /listLocalStudioProjects\(\)/)
+  assert.match(editor, /<BeadStudioOnboarding onDismiss=\{dismissOnboarding\}/)
+  assert.match(onboarding, /欢迎来到贝多芬与我/)
+  assert.match(onboarding, /把喜欢的图片，做成专属拼豆图纸。/)
+  assert.match(onboarding, /上传图片/)
+  assert.match(onboarding, /调整参数/)
+  assert.match(onboarding, /生成图纸/)
+  assert.match(onboarding, /开始创作/)
+  assert.match(onboarding, /以后再看/)
+  assert.match(onboarding, /role="dialog"/)
+  assert.match(css, /\.onboardingCard \{[^}]*position: absolute[^}]*border: 1px solid[^}]*box-shadow/)
+  assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.onboardingCard \{ position: relative/)
+  assert.doesNotMatch(editor, /onboardingBackdrop/)
+
+  const values = new Map<string, string>()
+  const storage = {
+    getItem: (key: string) => values.get(key) || null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+  }
+  assert.equal(hasSeenBeadStudioOnboarding(storage), false)
+  markBeadStudioOnboardingSeen(storage)
+  assert.equal(values.get(BEAD_STUDIO_ONBOARDING_STORAGE_KEY), '1')
+  assert.equal(hasSeenBeadStudioOnboarding(storage), true)
+  values.clear()
+  assert.equal(hasSeenBeadStudioOnboarding(storage), false)
 })
 
 test('P3 公开广场、互动、审核和统一分享能力保持在 Studio 层', () => {
