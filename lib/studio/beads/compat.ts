@@ -18,7 +18,7 @@ export const defaultBeadSettings: BeadSettings = {
   cropY: 0,
   rotation: 0,
   brand: 'MARD',
-  series: '291',
+  series: '221',
   paletteMode: 'standard',
   matchingMode: 'balanced',
   maxColors: 16,

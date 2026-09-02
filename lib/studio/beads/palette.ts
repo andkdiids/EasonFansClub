@@ -1,4 +1,4 @@
-import { hexToRgb, rgbToLab } from './color'
+import { deltaE76, hexToRgb, rgbToLab } from './color'
 import type { BeadBrand, BeadLab, BeadPaletteColor, BeadPaletteMode, BeadPaletteSource, BeadRgb } from './types'
 
 export type PaletteModeDefinition = Readonly<{
@@ -24,9 +24,9 @@ export type PaletteRegistryEntry = Readonly<{
   source: BeadPaletteSource
 }>
 
-/** Source marker retained for the existing 24-row MARD/291 catalogue. */
+/** Source marker retained for the existing legacy catalogue. */
 export const PALETTE_SOURCE = 'EXISTING' as const
-export const PALETTE_SOURCE_NOTE = '仓库现有 MARD / 291 色号；MARD / 221 使用下方已核验的完整色板。'
+export const PALETTE_SOURCE_NOTE = '当前使用 MARD / 221 完整色板。'
 export const MARD_221_SOURCE = 'VERIFIED' as const
 export const MARD_221_PDF_SOURCE = 'E:/电脑管家迁移文件/xwechat_files/linyoujia110_a122/msg/file/2026-09/色值数据-总表-221色表格7584396780075656452.pdf'
 export const MARD_221_SOURCE_NOTE = 'MARD / 221：来自用户提供的《色值数据-总表-221色表格7584396780075656452.pdf》；HEX 与色块为颜色基准，Lab 已静态预计算。'
@@ -329,11 +329,14 @@ const mard221PaletteRows: readonly Mard221PaletteRow[] = [
 ]
 
 const brandSeries: Record<BeadBrand, readonly string[]> = {
-  MARD: ['291', '221'],
+  MARD: ['221'],
   Perler: ['Standard'],
   Hama: ['Midi'],
   Artkal: ['S-Series'],
 }
+
+const LEGACY_MARD_SERIES = '291'
+const DEFAULT_MARD_SERIES = '221'
 
 function registryEntry(spec: ExistingPaletteSpec, brand = 'MARD', series = '291', code = spec.code): PaletteRegistryEntry {
   const rgb = hexToRgb(spec.hex)
@@ -373,7 +376,7 @@ export const MARD_221_PALETTE_REGISTRY: readonly PaletteRegistryEntry[] = mard22
   }
 })
 
-/** Single source of truth for legacy MARD/291 and verified MARD/221 rows. */
+/** Single source of truth for the verified MARD/221 rows and legacy data. */
 export const PALETTE_REGISTRY: readonly PaletteRegistryEntry[] = [
   ...existingPaletteSpecs.map((spec) => registryEntry(spec)),
   ...MARD_221_PALETTE_REGISTRY,
@@ -392,11 +395,15 @@ export function getPaletteModeDefinition(mode: BeadPaletteMode) {
 function resolveBrandSeries(brand: string, series: string) {
   const safeBrand = (brand in brandSeries ? brand : 'MARD') as BeadBrand
   const seriesForBrand = getSeriesForBrand(safeBrand)
-  const safeSeries = seriesForBrand.includes(series) ? series : seriesForBrand[0] || '291'
+  // Keep an explicit legacy series resolvable so saved projects can still be
+  // opened, while it is never returned as a selectable MARD option.
+  const safeSeries = safeBrand === 'MARD' && series === LEGACY_MARD_SERIES
+    ? LEGACY_MARD_SERIES
+    : seriesForBrand.includes(series) ? series : seriesForBrand[0] || DEFAULT_MARD_SERIES
   return { safeBrand, safeSeries }
 }
 
-export function getPaletteCoverage(mode: BeadPaletteMode, brand = 'MARD', series = '291') {
+export function getPaletteCoverage(mode: BeadPaletteMode, brand = 'MARD', series = DEFAULT_MARD_SERIES) {
   const definition = getPaletteModeDefinition(mode)
   const entries = registryForBrand(brand, series)
   const available = entries.filter((entry) => entry.enabled).length
@@ -411,13 +418,50 @@ function registryForBrand(brand: string, series: string) {
   // verified catalogue is added, every selectable row remains explicitly
   // tied to the existing MARD source and can be extended per brand later.
   return PALETTE_REGISTRY
-    .filter((entry) => entry.brand === 'MARD' && entry.series === '291')
+    .filter((entry) => entry.brand === 'MARD' && entry.series === DEFAULT_MARD_SERIES)
 }
 
-/** Return enabled rows up to the requested mode's target capacity. */
+function selectRepresentativeEntries(entries: readonly PaletteRegistryEntry[], target: number) {
+  const enabled = entries.filter((entry) => entry.enabled)
+  if (target >= enabled.length) return enabled
+  if (target <= 0) return []
+
+  // Keep useful neutral anchors in reduced palettes, then fill the remaining
+  // slots with farthest-point sampling in Lab space. This gives deterministic
+  // coverage of the 221-colour registry without changing image quantization.
+  const anchorCodes = ['A01', 'A04', 'H2', 'H7']
+  const selectedIndexes = new Set<number>()
+  for (const code of anchorCodes) {
+    const index = enabled.findIndex((entry) => entry.code === code)
+    if (index >= 0 && selectedIndexes.size < target) selectedIndexes.add(index)
+  }
+  if (!selectedIndexes.size) selectedIndexes.add(0)
+
+  while (selectedIndexes.size < target) {
+    let bestIndex = -1
+    let bestDistance = Number.NEGATIVE_INFINITY
+    enabled.forEach((candidate, candidateIndex) => {
+      if (selectedIndexes.has(candidateIndex)) return
+      let nearestDistance = Number.POSITIVE_INFINITY
+      selectedIndexes.forEach((selectedIndex) => {
+        nearestDistance = Math.min(nearestDistance, deltaE76(candidate.lab, enabled[selectedIndex].lab))
+      })
+      if (nearestDistance > bestDistance) {
+        bestDistance = nearestDistance
+        bestIndex = candidateIndex
+      }
+    })
+    if (bestIndex < 0) break
+    selectedIndexes.add(bestIndex)
+  }
+
+  return enabled.filter((_, index) => selectedIndexes.has(index))
+}
+
+/** Return the complete registry or a deterministic representative subset. */
 export function getPaletteRegistry(brand: string, series: string, mode: BeadPaletteMode = 'standard') {
   const target = getPaletteModeDefinition(mode).targetCount
-  return registryForBrand(brand, series).filter((entry) => entry.enabled).slice(0, target)
+  return selectRepresentativeEntries(registryForBrand(brand, series), target)
 }
 
 export function getPalette(brand: string, series: string, mode: BeadPaletteMode = 'standard') {
@@ -472,7 +516,8 @@ export function getSeriesForBrand(brand: string) {
 }
 
 export function getDefaultPalette() {
-  return getPalette('MARD', '291', 'standard')
+  return getPalette('MARD', DEFAULT_MARD_SERIES, 'standard')
 }
 
-export const supportedBeadBrands: readonly BeadBrand[] = Object.keys(brandSeries) as BeadBrand[]
+/** Only verified palettes are exposed to the current editor UI. */
+export const supportedBeadBrands: readonly BeadBrand[] = ['MARD']

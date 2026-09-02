@@ -9,6 +9,7 @@ import { createStudioId, clearStudioDraft, deleteLocalStudioProject, getLocalStu
 import { getStudioTool } from '@/lib/studio/tools'
 import { createBeadPatternPdf } from '@/lib/studio/beads/pdf'
 import { getDefaultPalette, getPalette, getPaletteCoverage, getPaletteModeDefinition, getPaletteSourceNote, getSeriesForBrand, findPaletteColorByCode, normalizePaletteCode, PALETTE_MODES, supportedBeadBrands } from '@/lib/studio/beads/palette'
+import { findNearestBeadColor } from '@/lib/studio/beads/color'
 import { calculateMaterialList, createDemoPattern, floodFill, replaceColor } from '@/lib/studio/beads/grid'
 import { generatePatternFromImageInWorker } from '@/lib/studio/beads/image'
 import { renderPatternToCanvas, renderPatternToDataUrl } from '@/lib/studio/beads/renderer'
@@ -26,10 +27,11 @@ const MIN_ZOOM = .5
 const MAX_ZOOM = 3
 
 type EditorTool = 'brush' | 'eraser' | 'eyedropper' | 'fill' | 'select' | 'pan'
-type MobilePanel = 'settings' | 'preview' | 'materials'
+type MobilePanel = 'settings' | 'color' | 'layers' | 'materials'
 type CellPatch = { index: number; before: number; after: number }
 type GridSnapshot = { width: number; height: number; palette: BeadPatternGrid['palette']; cells: number[] }
-type HistoryEntry = { patches: CellPatch[]; label: string; beforeGrid?: GridSnapshot; afterGrid?: GridSnapshot }
+type PaletteSettingsSnapshot = Pick<BeadSettings, 'brand' | 'series' | 'paletteMode'>
+type HistoryEntry = { patches: CellPatch[]; label: string; beforeGrid?: GridSnapshot; afterGrid?: GridSnapshot; beforePaletteSettings?: PaletteSettingsSnapshot; afterPaletteSettings?: PaletteSettingsSnapshot }
 type PointerState = {
   kind: 'draw' | 'pan' | 'select' | 'craft' | null
   before: number[] | null
@@ -118,7 +120,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
-  const [activePanel, setActivePanel] = useState<MobilePanel>('preview')
+  const [activePanel, setActivePanel] = useState<MobilePanel>('settings')
   const [viewMode, setViewMode] = useState<'grid' | 'bead'>('grid')
   const [editorTool, setEditorTool] = useState<EditorTool>('brush')
   const [currentColorIndex, setCurrentColorIndex] = useState(5)
@@ -403,17 +405,18 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     return () => window.clearTimeout(timer)
   }, [completed, layers, loaded, pattern, settings])
 
-  const persistPattern = useCallback((cells: number[], label: string, withHistory = true, replacementGrid?: BeadPatternGrid) => {
+  const persistPattern = useCallback((cells: number[], label: string, withHistory = true, replacementGrid?: BeadPatternGrid, paletteHistory?: { before: PaletteSettingsSnapshot; after: PaletteSettingsSnapshot }) => {
     const current = patternRef.current
     const next = replacementGrid ? { ...replacementGrid, palette: [...replacementGrid.palette], cells: [...cells] } : { ...current, cells: [...cells] }
     const structuralChange = current.width !== next.width || current.height !== next.height || current.palette !== next.palette
-    if (!structuralChange && sameCells(current.cells, cells)) return false
+    if (!structuralChange && sameCells(current.cells, cells) && !paletteHistory) return false
     const patches = diffCells(current.cells, next.cells)
     if (withHistory) {
       const entry: HistoryEntry = {
         patches,
         label,
         ...(structuralChange ? { beforeGrid: snapshotGrid(current), afterGrid: snapshotGrid(next) } : {}),
+        ...(paletteHistory ? { beforePaletteSettings: paletteHistory.before, afterPaletteSettings: paletteHistory.after } : {}),
       }
       setHistory((items) => [...items, entry].slice(-100))
     }
@@ -655,6 +658,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       patternRef.current = next
       setPattern(next)
       setSaveStatus('unsaved')
+      if (entry.beforePaletteSettings) setSettings((currentSettings) => ({ ...currentSettings, ...entry.beforePaletteSettings }))
       return items.slice(0, -1)
     })
   }, [])
@@ -675,6 +679,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       patternRef.current = next
       setPattern(next)
       setSaveStatus('unsaved')
+      if (entry.afterPaletteSettings) setSettings((currentSettings) => ({ ...currentSettings, ...entry.afterPaletteSettings }))
       return items.slice(0, -1)
     })
   }, [])
@@ -737,24 +742,37 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   function switchPalette(brand: BeadSettings['brand'], series: string, mode: BeadSettings['paletteMode']) {
     const current = patternRef.current
     const nextPalette = getPalette(brand, series, mode)
+    const samePalette = current.palette.length === nextPalette.length && current.palette.every((color, index) => {
+      const next = nextPalette[index]
+      return Boolean(next && color.brand === next.brand && color.series === next.series && color.code === next.code && color.hex === next.hex)
+    })
+    if (brand === settings.brand && series === settings.series && mode === settings.paletteMode && samePalette) return
+    const mapColorIndex = (previous: BeadPatternGrid['palette'][number] | undefined) => {
+      if (!previous) return -1
+      const exact = findPaletteColorByCode(nextPalette, previous.code)
+      if (exact) return nextPalette.indexOf(exact)
+      return findNearestBeadColor(previous.rgb, nextPalette, settings.matchingMode)
+    }
     const nextCells = current.cells.map((cell) => {
       if (cell === EMPTY_CELL) return EMPTY_CELL
       const previous = current.palette[cell]
-      const replacement = previous ? findPaletteColorByCode(nextPalette, previous.code) : null
-      return replacement ? nextPalette.indexOf(replacement) : EMPTY_CELL
+      const mappedIndex = mapColorIndex(previous)
+      return mappedIndex >= 0 ? mappedIndex : EMPTY_CELL
     })
     const currentSelected = current.palette[currentColorIndex]
-    const nextSelected = currentSelected ? findPaletteColorByCode(nextPalette, currentSelected.code) : null
+    const nextSelectedIndex = mapColorIndex(currentSelected)
     const currentReplaceFrom = current.palette[replaceFrom]
     const currentReplaceWith = current.palette[replaceWith]
-    const nextReplaceFrom = currentReplaceFrom ? findPaletteColorByCode(nextPalette, currentReplaceFrom.code) : null
-    const nextReplaceWith = currentReplaceWith ? findPaletteColorByCode(nextPalette, currentReplaceWith.code) : null
+    const nextReplaceFromIndex = mapColorIndex(currentReplaceFrom)
+    const nextReplaceWithIndex = mapColorIndex(currentReplaceWith)
+    const beforePaletteSettings: PaletteSettingsSnapshot = { brand: settings.brand, series: settings.series, paletteMode: settings.paletteMode }
+    const afterPaletteSettings: PaletteSettingsSnapshot = { brand, series, paletteMode: mode }
     updateSettings({ brand, series, paletteMode: mode })
-    if (persistPattern(nextCells, '切换色板', true, { ...current, palette: nextPalette, cells: nextCells })) {
-      if (nextSelected) selectColor(nextPalette.indexOf(nextSelected))
+    if (persistPattern(nextCells, '切换色板', true, { ...current, palette: nextPalette, cells: nextCells }, { before: beforePaletteSettings, after: afterPaletteSettings })) {
+      if (nextSelectedIndex >= 0) selectColor(nextSelectedIndex)
       else selectColor(Math.min(currentColorIndex, Math.max(0, nextPalette.length - 1)))
-      setReplaceFrom(nextReplaceFrom ? nextPalette.indexOf(nextReplaceFrom) : 0)
-      setReplaceWith(nextReplaceWith ? nextPalette.indexOf(nextReplaceWith) : Math.min(1, Math.max(0, nextPalette.length - 1)))
+      setReplaceFrom(nextReplaceFromIndex >= 0 ? nextReplaceFromIndex : 0)
+      setReplaceWith(nextReplaceWithIndex >= 0 ? nextReplaceWithIndex : Math.min(1, Math.max(0, nextPalette.length - 1)))
       showToast(`已切换为${getPaletteModeDefinition(mode).label}。`)
     }
   }
@@ -834,7 +852,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
     setError('')
     setProcessing(true)
-    setActivePanel('preview')
+    setActivePanel('settings')
     window.setTimeout(async () => {
       try {
         const next = await generatePatternFromImageInWorker(source, settings, getPalette(settings.brand, settings.series, settings.paletteMode))
@@ -1036,16 +1054,21 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   }
 
   const mobilePanelClass = (panel: MobilePanel) => activePanel === panel ? '' : styles.mobilePanelHidden
+  const mobilePanelStateClass = activePanel === 'color'
+    ? styles.mobilePanelColor
+    : activePanel === 'layers'
+      ? styles.mobilePanelLayers
+      : activePanel === 'materials' ? styles.mobilePanelMaterials : styles.mobilePanelSettings
   const palette = pattern.palette
   const replacementAmount = pattern.cells.filter((cell) => cell === replaceFrom).length
   return <>
   <StudioToolShell tool={beadsTool} title={title} saveStatus={saveStatus} onSave={() => void persistProject(false)} onShare={share} onExport={exportFile} openExportOnMount={requestedExport}>
     <div className={styles.beadsPage}>
       <div className={styles.mobilePanelTabs} role="tablist" aria-label="拼豆工具面板">
-        {([['settings', '设置'], ['preview', '预览'], ['materials', '材料']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={activePanel === key} className={`${styles.mobilePanelTab} ${activePanel === key ? styles.mobilePanelTabActive : ''}`} onClick={() => setActivePanel(key)}>{label}</button>)}
+        {([['settings', '设置'], ['color', '颜色'], ['layers', '图层'], ['materials', '材料']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={activePanel === key} className={`${styles.mobilePanelTab} ${activePanel === key ? styles.mobilePanelTabActive : ''}`} onClick={() => setActivePanel(key)}>{label}</button>)}
       </div>
       <div className={styles.beadsWorkspace}>
-        <aside className={`${styles.beadsPanel} ${mobilePanelClass('settings')}`}>
+        <aside className={`${styles.beadsPanel} ${styles.beadsSettingsPanel} ${mobilePanelClass('settings')}`}>
           <section className={`${styles.panelSection} ${styles.panelSectionFirst}`}>
             <div className={styles.panelHeader}><div><span className={styles.panelStep}>01 / START</span><h2 className={styles.panelTitle}>上传图片</h2></div><button type="button" className={styles.panelToggle} onClick={clearSourceImage}>清空</button></div>
             {sourceImageUrl ? <div className={styles.sourcePreview}><img src={sourceImageUrl} alt="已选择的本地图片预览" className={styles.sourcePreviewImage} style={{ transform: `translate(${settings.cropX / 2}%, ${settings.cropY / 2}%) scale(${settings.cropZoom}) rotate(${settings.rotation}deg)` }} /><span className={styles.sourcePreviewOverlay}>{sourceImageName || '本地图片'}</span></div> : null}
@@ -1081,14 +1104,22 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
           {selection ? <div className={styles.selectionBar}><span>已选 {Math.abs(selection.xEnd - selection.xStart) + 1} × {Math.abs(selection.yEnd - selection.yStart) + 1} 格</span><button type="button" className={styles.selectionAction} onClick={() => updateSelection(currentColorIndex)}>填充选区</button><button type="button" className={styles.selectionAction} onClick={() => updateSelection(EMPTY_CELL)}>清除选区</button><button type="button" className={styles.selectionAction} onClick={() => setSelection(null)}>取消</button></div> : null}
         </section>
 
-        <aside className={`${styles.beadsStatsPanel} ${mobilePanelClass('materials')}`}>
+        <aside className={`${styles.beadsStatsPanel} ${mobilePanelStateClass}`}>
+          <section className={`${styles.panelSection} ${styles.colorPanel} ${mobilePanelClass('color')}`}>
+            <div className={styles.panelHeader}><div><span className={styles.panelStep}>COLOR / 03</span><h2 className={styles.panelTitle}><UiIcon name="palette" className={styles.inlineIcon} /> 颜色面板</h2></div><span className={styles.formHint}>{palette.length} 色</span></div>
+            <div className={styles.fieldGroup}><label className={styles.formLabel}>品牌 / 系列</label><div className={styles.sizeRow}><select className={styles.select} value={settings.brand} onChange={(event) => changeBrand(event.target.value as BeadSettings['brand'])}><option value="MARD">MARD</option></select><select className={styles.select} value={settings.series} onChange={(event) => changeSeries(event.target.value)}><option value="221">221</option></select></div></div>
+            <div className={styles.fieldGroup}><label className={styles.formLabel}>颜色模式 <span className={styles.rangeValue}>{palette.length} / {paletteCoverage.requested} 色</span></label><div className={styles.paletteModeSwitch}>{PALETTE_MODES.map((mode) => <button key={mode.id} type="button" className={`${styles.paletteModeButton} ${settings.paletteMode === mode.id ? styles.paletteModeButtonActive : ''}`} onClick={() => changePaletteMode(mode.id)}>{mode.shortLabel}</button>)}</div><p className={styles.settingsSubtle}>{getPaletteSourceNote(settings.brand, settings.series)} 当前可用 {paletteCoverage.available} 色。</p></div>
+            <div className={styles.fieldGroup}><label className={styles.formLabel}>颜色匹配</label><div className={styles.segmented}><button type="button" className={`${styles.segment} ${settings.matchingMode === 'fast' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'fast' })}>快速</button><button type="button" className={`${styles.segment} ${settings.matchingMode === 'balanced' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'balanced' })}>均衡</button><button type="button" className={`${styles.segment} ${settings.matchingMode === 'precise' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'precise' })}>精确</button></div></div>
+            <BeadPalettePicker palette={palette} selectedIndex={currentColorIndex} onSelect={selectColor} recentCodes={recentColorCodes} onRecentChange={rememberColorCode} label="画笔颜色" compact />
+            <p className={styles.settingsSubtle}>支持搜索 A1、A01、HEX、色号和颜色名称；点击画布中的颜色可用吸管取色。</p>
+          </section>
           <section className={styles.panelSection}>
             <div className={styles.panelHeader}><div><span className={styles.panelStep}>LAYERS / 02</span><h2 className={styles.panelTitle}><UiIcon name="layers" className={styles.inlineIcon} /> 图层</h2></div><span className={styles.formHint}>参考图不计入统计</span></div>
             <div className={styles.layerList}>{layers.layers.map((layer) => <div key={layer.id} className={`${styles.layerRow} ${layers.activeLayerId === layer.id ? styles.layerRowActive : ''}`}><button type="button" className={styles.layerMain} onClick={() => setActiveLayer(layer.id)}><UiIcon name={layer.visible ? 'eye' : 'eye-off'} className={styles.layerEye} /><span><b>{layer.name}</b><small>{layer.kind === 'reference-image' ? (layer.imageUrl ? '图片参考层' : '尚未添加图片') : '可编辑拼豆网格'}</small></span></button><button type="button" className={styles.layerVisibility} onClick={() => updateLayerStack((current) => ({ ...current, layers: current.layers.map((item) => item.id === layer.id ? { ...item, visible: !item.visible } : item) }))} aria-label={`${layer.visible ? '隐藏' : '显示'}${layer.name}`}><UiIcon name={layer.visible ? 'eye' : 'eye-off'} /></button></div>)}</div>
             {referenceLayer.imageUrl ? <><div className={styles.referenceControls}><label className={styles.formLabel}>透明度 <span className={styles.rangeValue}>{referenceLayer.opacity}%</span></label><input className={styles.range} type="range" min="0" max="100" value={referenceLayer.opacity} onChange={(event) => updateReferenceLayer({ opacity: Number(event.target.value) })} /><label className={styles.formLabel}>缩放 <span className={styles.rangeValue}>{referenceLayer.transform.scale.toFixed(2)}×</span></label><input className={styles.range} type="range" min="0.25" max="4" step="0.05" value={referenceLayer.transform.scale} onChange={(event) => updateReferenceTransform({ scale: Number(event.target.value) })} /><label className={styles.formLabel}>移动 X / Y <span className={styles.rangeValue}>{Math.round(referenceLayer.transform.x)} / {Math.round(referenceLayer.transform.y)}</span></label><input className={styles.range} type="range" min="-100" max="100" value={referenceLayer.transform.x} onChange={(event) => updateReferenceTransform({ x: Number(event.target.value) })} /><input className={styles.range} type="range" min="-100" max="100" value={referenceLayer.transform.y} onChange={(event) => updateReferenceTransform({ y: Number(event.target.value) })} /><label className={styles.formLabel}>旋转 <span className={styles.rangeValue}>{Math.round(referenceLayer.transform.rotation)}°</span></label><input className={styles.range} type="range" min="-180" max="180" value={referenceLayer.transform.rotation} onChange={(event) => updateReferenceTransform({ rotation: Number(event.target.value) })} /></div><div className={styles.layerActions}><button type="button" className={styles.actionButton} onClick={alignReferenceImage}><UiIcon name="align" />对齐画布</button><button type="button" className={styles.actionButton} onClick={clearReferenceImage}><UiIcon name="trash" />删除图片</button></div></> : <label className={styles.referenceUpload}><input className={styles.uploadInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" onChange={(event) => { handleReferenceFile(event.target.files?.[0] || null); event.target.value = '' }} /><UiIcon name="upload" /><span>{referenceUploading ? '正在安全保存参考图…' : '上传参考图片'}</span><small>垫在豆板下方，透明度、缩放和位置可调</small></label>}
           </section>
           <div className={styles.statsGrid}><div className={styles.statCard}><span className={styles.statLabel}>总拼豆</span><strong className={styles.statValue}>{materials.totalBeads.toLocaleString()}</strong><small className={styles.statNote}>非空格子</small></div><div className={styles.statCard}><span className={styles.statLabel}>空白格</span><strong className={styles.statValue}>{materials.emptyCells.toLocaleString()}</strong><small className={styles.statNote}>无需放豆</small></div><div className={styles.statCard}><span className={styles.statLabel}>颜色</span><strong className={styles.statValue}>{materials.colorCount}</strong><small className={styles.statNote}>当前色板</small></div><div className={styles.statCard}><span className={styles.statLabel}>底板</span><strong className={styles.statValue}>{materials.boardCount}</strong><small className={styles.statNote}>{materials.boardColumns} × {materials.boardRows}</small></div></div>
-          <div className={styles.craftToolbar}><span className={`${styles.craftMode} ${craftMode ? styles.craftModeActive : ''}`}>{craftMode ? `制作中 · ${progressCount}/${materials.totalBeads}` : '制作模式'}</span><button type="button" className={`${styles.actionButton} ${craftMode ? styles.actionButtonPrimary : ''}`} onClick={() => { setCraftMode((current) => !current); setActivePanel('preview') }}>{craftMode ? '退出' : '开始拼豆'}</button></div>
+          <div className={styles.craftToolbar}><span className={`${styles.craftMode} ${craftMode ? styles.craftModeActive : ''}`}>{craftMode ? `制作中 · ${progressCount}/${materials.totalBeads}` : '制作模式'}</span><button type="button" className={`${styles.actionButton} ${craftMode ? styles.actionButtonPrimary : ''}`} onClick={() => { setCraftMode((current) => !current); setActivePanel('materials') }}>{craftMode ? '退出' : '开始拼豆'}</button></div>
           {craftMode ? <><div className={styles.progressTrack}><div className={styles.progressFill} style={{ width: `${progressPercent}%` }} /></div><div className={styles.craftBanner}>{activeMaterial ? `${activeMaterial.code} · ${activeMaterial.quantity} 颗 · 已完成 ${[...completed].filter((index) => pattern.cells[index] === activeMaterial.index).length} 颗` : `完成 ${progressCount} / ${materials.totalBeads} 颗 · ${progressPercent}%`}</div></> : null}
           <div className={styles.materialsHeader}><h2>材料统计</h2><span>每包 {packSize} 颗</span></div>
           <div className={styles.materialsList}>{materials.materials.length ? materials.materials.map((material) => <div key={material.code} className={styles.materialRow}><button type="button" className={styles.materialMainButton} onClick={() => selectColor(material.index)}><i className={styles.materialSwatch} style={{ background: material.hex }} /><span className={styles.materialInfo}><b className={styles.materialCode}>{material.code} · {material.brand}</b><small className={styles.materialName}>{material.name}<span className={styles.materialBar}><i className={styles.materialBarFill} style={{ width: `${Math.max(4, material.percentage)}%` }} /></span></small></span><span className={styles.materialQuantity}>{material.quantity}<small className={styles.materialPercentage}>{material.percentage.toFixed(1)}%</small></span></button><button type="button" className={styles.materialReplaceButton} onClick={() => openReplaceDialog(material.index)} aria-label={`将${material.code}换成其他颜色`}>换色</button></div>) : <p className={styles.settingsSubtle}>生成图纸后会显示需要的颜色和数量。</p>}</div>

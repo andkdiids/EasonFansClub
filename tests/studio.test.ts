@@ -4,7 +4,7 @@ import test from 'node:test'
 import { STUDIO_TOOLS, getAvailableStudioTools, getVisibleStudioTools } from '../lib/studio/tools'
 import { applyFloydSteinberg, deltaE2000, findNearestBeadColor, hexToRgb, quantizeColors, rgbToLab } from '../lib/studio/beads/color'
 import { defaultBeadSettings, createDefaultLayerStack, isValidBeadDimensions, normalizeBeadProjectData } from '../lib/studio/beads/compat'
-import { findPaletteColorByCode, getDefaultPalette, getPalette, getPaletteCoverage, getPaletteModeDefinition, MARD_221_PALETTE_REGISTRY, MARD_221_SOURCE, MARD_221_SOURCE_EXCEPTIONS, normalizePaletteCode, PALETTE_MODES, PALETTE_REGISTRY, PALETTE_SOURCE } from '../lib/studio/beads/palette'
+import { findPaletteColorByCode, getDefaultPalette, getPalette, getPaletteCoverage, getPaletteModeDefinition, getPaletteRegistry, getSeriesForBrand, MARD_221_PALETTE_REGISTRY, MARD_221_SOURCE, MARD_221_SOURCE_EXCEPTIONS, normalizePaletteCode, PALETTE_MODES, PALETTE_REGISTRY, PALETTE_SOURCE, supportedBeadBrands } from '../lib/studio/beads/palette'
 import { generatePatternFromPixels } from '../lib/studio/beads/image'
 import { EMPTY_CELL } from '../lib/studio/beads/types'
 import { calculateMaterialList, createDemoPattern, floodFill, removeTinyColorRegions, replaceColor, splitIntoBoards } from '../lib/studio/beads/grid'
@@ -75,7 +75,11 @@ test('Palette Registry 提供 48 / 96 / 221 档位并保留旧 MARD/291 数据',
   assert.equal(getPaletteModeDefinition('standard').targetCount, 48)
   assert.equal(getPaletteModeDefinition('expert').targetCount, 96)
   assert.equal(getPaletteModeDefinition('complete').targetCount, 221)
+  assert.deepEqual(supportedBeadBrands, ['MARD'])
+  assert.deepEqual(getSeriesForBrand('MARD'), ['221'])
   assert.equal(getPaletteCoverage('standard').requested, 48)
+  assert.equal(getPaletteCoverage('standard').available, 48)
+  assert.equal(getPaletteCoverage('standard').source, 'VERIFIED')
   assert.equal(getPaletteCoverage('standard', 'MARD', '221').available, 48)
   assert.equal(getPaletteCoverage('complete', 'MARD', '221').available, 221)
   assert.equal(getPaletteCoverage('complete', 'MARD', '221').source, 'VERIFIED')
@@ -85,6 +89,13 @@ test('Palette Registry 提供 48 / 96 / 221 档位并保留旧 MARD/291 数据',
   assert.equal(getPalette('MARD', '221', 'standard').length, 48)
   assert.equal(getPalette('MARD', '221', 'expert').length, 96)
   assert.equal(getPalette('MARD', '221', 'complete').length, 221)
+  const completeCodes = new Set(getPalette('MARD', '221', 'complete').map((color) => color.code))
+  for (const [mode, count] of [['standard', 48], ['expert', 96], ['complete', 221]] as const) {
+    const selected = getPaletteRegistry('MARD', '221', mode)
+    assert.equal(selected.length, count)
+    assert.equal(selected.every((color) => color.brand === 'MARD' && color.series === '221' && completeCodes.has(color.code)), true)
+  }
+  assert.equal(getDefaultPalette().every((color) => color.brand === 'MARD' && color.series === '221'), true)
 })
 
 test('MARD 221 的 brand+series+code ID 唯一且 A1/A01 只做输入兼容', () => {
@@ -126,6 +137,14 @@ test('MARD 221 的 brand+series+code ID 唯一且 A1/A01 只做输入兼容', ()
   assert.match(editor, /value=\{settings\.brand\}/)
   assert.match(editor, /value=\{settings\.series\}/)
   assert.match(editor, /<BeadPalettePicker palette=\{palette\}/)
+  assert.match(editor, /<option value="MARD">MARD<\/option>/)
+  assert.match(editor, /<option value="221">221<\/option>/)
+  assert.doesNotMatch(editor, /<option[^>]*>291<\/option>/)
+  assert.match(editor, /COLOR \/ 03/)
+  assert.match(editor, /mobilePanelColor/)
+  assert.match(editor, /mobilePanelLayers/)
+  assert.match(editor, /beforePaletteSettings/)
+  assert.match(editor, /findNearestBeadColor/)
 })
 
 test('手动色号输入 trim / 大小写归一化且非法色号不 fallback', () => {
@@ -234,6 +253,10 @@ test('102×102 尺寸边界和 legacy → current 兼容归一化', () => {
   const normalized = normalizeBeadProjectData(legacy)
   assert.equal(normalized?.version, 2)
   assert.deepEqual(normalized?.layers.layers.map((layer) => layer.id), ['beads', 'reference'])
+  const legacyPalette = getPalette('MARD', '291', 'complete')
+  const oldSeriesProject = normalizeBeadProjectData({ ...legacy, settings: { ...legacy.settings, series: '291' }, pattern: { ...legacy.pattern, palette: legacyPalette, cells: new Array(29 * 29).fill(0) } })
+  assert.equal(oldSeriesProject?.settings.series, '221')
+  assert.equal(oldSeriesProject?.pattern.palette.length, 24)
   assert.equal(normalizeBeadProjectData({ ...legacy, version: 2, pattern: { ...legacy.pattern, width: 103, cells: new Array(103 * 29).fill(0) } }), null)
   const legacyOversize = normalizeBeadProjectData({ ...legacy, pattern: { ...legacy.pattern, width: 103, cells: new Array(103 * 29).fill(0) } })
   assert.equal(legacyOversize?.legacyOversize, true)
@@ -315,6 +338,12 @@ test('制作模式、导出、移动端和错误提示均由工作台接线', ()
   assert.match(css, /\.generateButtonIcon \{[^}]*width: 20px/)
   assert.match(css, /\.generateHint \{[^}]*margin-top: 10px[^}]*font-size: 12px/)
   assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.generateButton \{[^}]*height: 48px/)
+  assert.match(css, /\.beadsWorkspace \{[^}]*minmax\(300px, 320px\)/)
+  assert.match(css, /\.beadsSettingsPanel[^}]*nth-child\(5\)[^}]*nth-child\(6\)/)
+  assert.match(css, /\.colorPanel \.palettePickerPanel \{[^}]*max-height/)
+  assert.match(css, /\.mobilePanelTabs \{[^}]*repeat\(4, minmax\(0, 1fr\)\)/)
+  assert.match(css, /\.beadsStatsPanel\.mobilePanelColor/)
+  assert.match(css, /\.beadsStatsPanel\.mobilePanelLayers/)
   assert.match(read('lib/studio/beads/image.ts'), /EMPTY_CELL/)
 })
 
