@@ -1,4 +1,4 @@
-export type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker' | 'stethoscope' | 'pill' | 'gift' | 'camera' | 'eye' | 'palette'
+export type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker' | 'stethoscope' | 'pill' | 'gift' | 'camera' | 'eye' | 'palette' | 'brush' | 'eraser' | 'eyedropper' | 'fill' | 'select' | 'move' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'fit' | 'fullscreen' | 'fullscreen-exit' | 'replace' | 'layers' | 'download' | 'trash' | 'eye-off' | 'align' | 'upload'
 
 const paths: Record<IconName, React.ReactNode> = {
   home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></>,
@@ -30,6 +30,26 @@ const paths: Record<IconName, React.ReactNode> = {
   camera: <><path d="M4 7h3l1.5-2h7L17 7h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></>,
   eye: <><path d="M2.5 12s3.2-5 9.5-5 9.5 5 9.5 5-3.2 5-9.5 5-9.5-5-9.5-5Z"/><circle cx="12" cy="12" r="2.2"/></>,
   palette: <><path d="M12 3a9 9 0 0 0 0 18h1.3a1.8 1.8 0 0 0 0-3.6h-.8a1.7 1.7 0 0 1 0-3.4H15a6 6 0 0 0 0-12Z"/><circle cx="7.5" cy="10" r=".8" fill="currentColor" stroke="none"/><circle cx="10" cy="7" r=".8" fill="currentColor" stroke="none"/><circle cx="14" cy="7" r=".8" fill="currentColor" stroke="none"/></>,
+  brush: <><path d="m14 5 5 5"/><path d="m4 20 1.4-4.2L15.8 5.4a1.8 1.8 0 0 1 2.5 0l.3.3a1.8 1.8 0 0 1 0 2.5L8.2 18.6Z"/><path d="M4 20c2.7-.2 4.4.4 5.4 1"/></>,
+  eraser: <><path d="m7 17-3-3 8.9-8.9a2.2 2.2 0 0 1 3.1 0l2.9 2.9a2.2 2.2 0 0 1 0 3.1L10 20H4Z"/><path d="m12 8 4 4"/></>,
+  eyedropper: <><path d="m14 4 6 6"/><path d="m13 5 6 6-8.5 8.5H6v-4.5Z"/><path d="M4 20h4"/></>,
+  fill: <><path d="m5 4 9 9"/><path d="m4 5 4-1 8 8-1 4-4 1-8-8Z"/><path d="M17 16c0 2-1.2 3.5-2.5 4.5C13.2 19.5 12 18 12 16c0-1.5 1.4-2.9 2.5-4 1.1 1.1 2.5 2.5 2.5 4Z"/></>,
+  select: <><rect x="4" y="4" width="16" height="16" strokeDasharray="3 2"/><path d="m9 12 2 2 4-5"/></>,
+  move: <><path d="M12 3v18M3 12h18"/><path d="m9 6 3-3 3 3m-6 12 3 3 3-3m6-6-3-3-3 3M6 9l-3 3 3 3"/></>,
+  undo: <><path d="M9 7 4 12l5 5"/><path d="M5 12h8a6 6 0 0 1 6 6"/></>,
+  redo: <><path d="m15 7 5 5-5 5"/><path d="M19 12h-8a6 6 0 0 0-6 6"/></>,
+  'zoom-in': <><circle cx="10.5" cy="10.5" r="6.5"/><path d="M10.5 7.5v6m-3-3h6M16 16l5 5"/></>,
+  'zoom-out': <><circle cx="10.5" cy="10.5" r="6.5"/><path d="M7.5 10.5h6M16 16l5 5"/></>,
+  fit: <><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5"/><rect x="7" y="7" width="10" height="10"/></>,
+  fullscreen: <><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5"/></>,
+  'fullscreen-exit': <><path d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/></>,
+  replace: <><path d="M7 7h13l-3-3m3 3-3 3M17 17H4l3 3m-3-3 3-3"/></>,
+  layers: <><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></>,
+  download: <><path d="M12 3v12m-5-5 5 5 5-5M4 20h16"/></>,
+  trash: <><path d="M4 7h16M10 11v5m4-5v5M9 7V4h6v3m-9 0 1 14h10l1-14"/></>,
+  'eye-off': <><path d="m3 3 18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6.3 0 9.5 6 9.5 6a16 16 0 0 1-3 3.7M6.6 6.7C3.6 8.5 2.5 12 2.5 12S5.7 18 12 18c1 0 1.9-.2 2.7-.4"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
+  align: <><rect x="5" y="5" width="14" height="14"/><path d="M2 9h3m14 0h3M2 15h3m14 0h3"/></>,
+  upload: <><path d="M12 16V4m-5 5 5-5 5 5M4 20h16"/></>,
 }
 
 export function UiIcon({ name, className = '' }: { name: IconName; className?: string }) {

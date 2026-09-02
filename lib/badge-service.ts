@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import type { BadgeCollectionView, BadgeGalleryView, BadgeShowcaseItemView, BadgeView, EquippedBadgeView } from '@/lib/badge-types'
 import { calculateBadgeRuleProgress, canExposeLiveBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats, getUserBadgeRuleProgress, type BadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
+import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 
 const BADGE_SELECT = {
   id: true,
@@ -59,7 +60,7 @@ const EQUIPPED_BADGE_SELECT = {
 type DbBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_SELECT }>
 const BADGE_COLLECTION_SELECT = {
   ...BADGE_SELECT,
-  BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, isEnabled: true } },
+  BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, configJson: true, isEnabled: true } },
 } as const
 type DbCollectionBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_COLLECTION_SELECT }>
 type DbUserBadge = {
@@ -134,14 +135,17 @@ export async function lockBadgeForMutation(tx: Prisma.TransactionClient, badgeId
   if (!rows.length) throw new BadgeServiceError('BADGE_NOT_FOUND', '勋章不存在')
 }
 
-function publicBadge(badge: DbBadge): Omit<BadgeView, 'status' | 'obtainedAt' | 'isEquipped'> {
+function publicBadge(badge: DbBadge | DbCollectionBadge): Omit<BadgeView, 'status' | 'obtainedAt' | 'isEquipped'> {
+  const rule = 'BadgeRule' in badge ? badge.BadgeRule : null
   return {
     id: badge.id,
     code: badge.code,
     name: badge.name,
     imageUrl: toPublicMediaUrl(badge.iconUrl),
     description: badge.description,
-    acquisitionDescription: badge.acquisitionDescription,
+    acquisitionDescription: badge.acquisitionDescription || (rule
+      ? generateBadgeAcquisitionDescription(rule.ruleType as SupportedBadgeRuleType, rule.threshold, rule.configJson)
+      : null),
     visibility: badge.visibility,
     rarity: badge.rarity,
     grantType: badge.grantType,

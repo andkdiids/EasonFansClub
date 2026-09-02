@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { BadgeEffectType, BadgeGrantType, BadgeNicknameEffect, BadgeRarity, BadgeVisibility } from '@/lib/badge-types'
 import { BADGE_EFFECT_TYPE_LABELS, BADGE_GRANT_TYPE_LABELS, BADGE_NICKNAME_SHINE_FALLBACK, BADGE_RARITY_LABELS, BADGE_VISIBILITY_LABELS, getBadgeNicknameShineColor, isBadgeNicknameShineEnabled } from '@/lib/badge-types'
-import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, generateBadgeAcquisitionDescription, parseBadgeRuleInput, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, generateBadgeAcquisitionDescription, getZodiacFromRuleConfig, parseBadgeRuleInput, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { formatZodiacDateRange, formatZodiacLabel, ZODIAC_LABELS, ZODIAC_SIGNS, type ZodiacSign } from '@/lib/zodiac'
 import { BadgeImage, BadgeName, UserDisplayName } from '@/components/UserDisplayName'
 
 export type AdminBadge = {
@@ -42,7 +43,7 @@ export type AdminBadge = {
   createdAt: string
 }
 
-type BadgeDraft = Omit<AdminBadge, 'id' | 'ownerCount' | 'createdAt' | 'isEnabled'> & { id?: string; isEnabled: boolean; imageUrl?: string | null; badgeType: 'STANDARD' | 'SERIES'; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number; ruleEnabled: boolean; legacyAuto: boolean; legacyTier: boolean; seriesCompletionRule: boolean; tierEnabled: boolean; limitedEnabled: boolean; targetId: string; targetLabel: string }
+type BadgeDraft = Omit<AdminBadge, 'id' | 'ownerCount' | 'createdAt' | 'isEnabled'> & { id?: string; isEnabled: boolean; imageUrl?: string | null; badgeType: 'STANDARD' | 'SERIES'; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number; zodiac: ZodiacSign; ruleEnabled: boolean; legacyAuto: boolean; legacyTier: boolean; seriesCompletionRule: boolean; tierEnabled: boolean; limitedEnabled: boolean; targetId: string; targetLabel: string }
 type AdminSeries = { id: string; code: string; name: string; description: string | null; sortOrder: number; isEnabled: boolean; completionRewardBadgeId: string | null; _count?: { Badges: number } }
 type SeriesDraft = { id?: string; name: string; description: string; sortOrder: number; isEnabled: boolean; completionRewardBadgeId: string | null }
 type ConcertOption = { id: string; title: string | null; concertDate: string; city: string; venue: string | null; MusicTour: { id: string; name: string } }
@@ -50,15 +51,16 @@ type TourOption = { id: string; name: string }
 type ActivityOption = { id: string; title: string; status: 'DRAFT' | 'PUBLISHED' | 'CANCELLED'; startsAt: string | null; endsAt: string | null }
 
 const emptyDraft: BadgeDraft = {
-  name: '', code: '', slug: '', description: '', acquisitionDescription: '', acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, badgeType: 'STANDARD', seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, announceOnGrant: false, countsTowardSeriesCompletion: true, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, ruleEnabled: true, legacyAuto: false, legacyTier: false, seriesCompletionRule: false, tierEnabled: false, limitedEnabled: false, targetId: '', targetLabel: '',
+  name: '', code: '', slug: '', description: '', acquisitionDescription: '', acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, badgeType: 'STANDARD', seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, announceOnGrant: false, countsTowardSeriesCompletion: true, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, zodiac: 'ARIES', ruleEnabled: true, legacyAuto: false, legacyTier: false, seriesCompletionRule: false, tierEnabled: false, limitedEnabled: false, targetId: '', targetLabel: '',
 }
 
 function toDraft(badge: AdminBadge): BadgeDraft {
   const rule = badge.rule
   const followsGeneratedDescription = badge.grantType === 'AUTO' && Boolean(rule) && !badge.acquisitionDescriptionCustomized && !isTargetRule(rule!.ruleType)
   const acquisitionDescription = followsGeneratedDescription
-    ? generateBadgeAcquisitionDescription(rule!.ruleType, rule!.threshold)
+    ? generateBadgeAcquisitionDescription(rule!.ruleType, rule!.threshold, rule!.configJson)
     : badge.acquisitionDescription
+  const zodiac = rule?.ruleType === 'BIRTHDAY_ZODIAC' ? getZodiacFromRuleConfig(rule.configJson) || 'ARIES' : 'ARIES'
   return {
     ...badge,
     imageUrl: badge.iconUrl,
@@ -73,6 +75,7 @@ function toDraft(badge: AdminBadge): BadgeDraft {
     ruleType: rule?.ruleType || 'POST_COUNT',
     operator: rule?.operator || 'GTE',
     threshold: rule?.threshold || 1,
+    zodiac,
     ruleEnabled: rule?.isEnabled ?? true,
     legacyAuto: badge.grantType === 'AUTO' && !badge.rule,
     legacyTier: badge.seriesId === null && badge.tierGroupCode !== null,
@@ -87,16 +90,19 @@ function toDraft(badge: AdminBadge): BadgeDraft {
   }
 }
 
-function defaultAcquisitionDescription(draft: Pick<BadgeDraft, 'grantType' | 'ruleType' | 'threshold'> & { legacyAuto?: boolean; targetLabel?: string }) {
+function defaultAcquisitionDescription(draft: Pick<BadgeDraft, 'grantType' | 'ruleType' | 'threshold' | 'zodiac'> & { legacyAuto?: boolean; targetLabel?: string }) {
   if (draft.grantType !== 'AUTO' || draft.legacyAuto) return ''
   if (draft.ruleType === 'CONCERT_SHOW_ATTENDED' && draft.targetLabel) return `观看「${draft.targetLabel}」后获得`
   if (draft.ruleType === 'CONCERT_TOUR_ATTENDED' && draft.targetLabel) return `观看「${draft.targetLabel}」巡演任意一场后获得`
   if (draft.ruleType === 'ACTIVITY_PARTICIPATION' && draft.targetLabel) return `参加「${draft.targetLabel}」后获得`
-  return generateBadgeAcquisitionDescription(draft.ruleType, draft.threshold)
+  return generateBadgeAcquisitionDescription(draft.ruleType, draft.threshold, draft.ruleType === 'BIRTHDAY_ZODIAC' ? { zodiac: draft.zodiac } : undefined)
 }
 
 const RULE_GROUPS = ['社区', '挂号', '账号', '娱乐天空', 'EasMusic / 演唱会', '歌·颂', '活动'] as const
 function isTargetRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'CONCERT_SHOW_ATTENDED' || ruleType === 'CONCERT_TOUR_ATTENDED' || ruleType === 'ACTIVITY_PARTICIPATION' }
+function isBirthdayRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY' }
+function isZodiacRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'BIRTHDAY_ZODIAC' }
+function isBirthdayTodayRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'BIRTHDAY_TODAY' }
 function getRuleUnit(ruleType: SupportedBadgeRuleType) {
   const definition = BADGE_RULE_REGISTRY[ruleType]
   return 'unit' in definition ? definition.unit : ''
@@ -107,6 +113,16 @@ function getBackfillUiState(badge: Pick<AdminBadge, 'rule' | 'availabilityStatus
   if (badge.availabilityStatus === 'UPCOMING') return { disabled: true, label: '限定尚未开始', reason: '限定勋章尚未开始，不能进行历史扫描' }
   const definition = BADGE_RULE_REGISTRY[badge.rule.ruleType]
   const limited = Boolean(badge.availableFrom || badge.availableUntil)
+  if (isZodiacRule(badge.rule.ruleType)) {
+    return limited
+      ? { disabled: true, label: '需手动补发', reason: '星座规则只按当前星座周期扫描；星座周期结束后如需处理，请使用管理员手动授予。' }
+      : { disabled: false, label: '扫描当前星座周期', reason: '只扫描当前上海时区星座周期内、生日属于该星座的用户；已获得勋章永久保留。' }
+  }
+  if (isBirthdayTodayRule(badge.rule.ruleType)) {
+    return limited
+      ? { disabled: true, label: '需手动补发', reason: '生日当天规则不能可靠回溯限定期历史资格，请使用管理员手动授予。' }
+      : { disabled: false, label: '扫描今日生日', reason: '只扫描今天生日的用户；2 月 29 日仅在真实 2 月 29 日发放，已获得勋章永久保留。' }
+  }
   if (limited && !definition.supportsHistoricalBackfill) return { disabled: true, label: '需手动补发', reason: `该规则无法可靠判断限定期历史资格：${definition.historicalBasis}` }
   return {
     disabled: false,
@@ -115,15 +131,28 @@ function getBackfillUiState(badge: Pick<AdminBadge, 'rule' | 'availabilityStatus
   }
 }
 
-function getAutoRuleError(draft: Pick<BadgeDraft, 'grantType' | 'legacyAuto' | 'seriesCompletionRule' | 'ruleType' | 'operator' | 'threshold' | 'ruleEnabled' | 'targetId'>) {
+function getAutoRuleError(draft: Pick<BadgeDraft, 'grantType' | 'legacyAuto' | 'seriesCompletionRule' | 'ruleType' | 'operator' | 'threshold' | 'zodiac' | 'ruleEnabled' | 'targetId'>) {
   if (draft.grantType !== 'AUTO' || draft.legacyAuto || draft.seriesCompletionRule) return null
   return parseBadgeRuleInput({
     ruleType: draft.ruleType,
     operator: draft.operator,
-    threshold: isTargetRule(draft.ruleType) ? null : draft.threshold,
-    configJson: draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : undefined,
+    threshold: isTargetRule(draft.ruleType) || isBirthdayRule(draft.ruleType) ? null : draft.threshold,
+    configJson: draft.ruleType === 'BIRTHDAY_ZODIAC' ? { zodiac: draft.zodiac } : draft.ruleType === 'BIRTHDAY_TODAY' ? {} : draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : undefined,
     isEnabled: draft.ruleEnabled,
   }).error || null
+}
+
+function formatRuleSummary(rule: AdminBadge['rule']) {
+  if (!rule) return ''
+  if (rule.ruleType === 'BIRTHDAY_ZODIAC') {
+    const zodiac = getZodiacFromRuleConfig(rule.configJson)
+    const label = formatZodiacLabel(zodiac)
+    return `用户生日属于${label}，并在${label}星座周期内自动获得`
+  }
+  if (rule.ruleType === 'BIRTHDAY_TODAY') return '生日当天自动获得'
+  if (rule.ruleType === 'BADGE_SERIES_COMPLETE') return '集齐指定系列全部勋章后获得'
+  const operator = rule.operator === 'GTE' ? '≥' : rule.operator === 'LTE' ? '≤' : '='
+  return `${BADGE_RULE_TYPE_LABELS[rule.ruleType]} ${operator} ${rule.threshold}`
 }
 
 function formatDate(value: string) { return new Date(value).toLocaleDateString('zh-CN') }
@@ -291,8 +320,9 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
       draft.id && draft.rule && draft.grantType === 'AUTO' && !draft.legacyAuto && !draft.seriesCompletionRule && (
         draft.rule.ruleType !== draft.ruleType ||
         draft.rule.operator !== draft.operator ||
-        draft.rule.threshold !== draft.threshold ||
+        (!isTargetRule(draft.ruleType) && !isBirthdayRule(draft.ruleType) && draft.rule.threshold !== draft.threshold) ||
         (isTargetRule(draft.ruleType) && (typeof (draft.rule.configJson as { concertId?: unknown; tourId?: unknown; activityId?: unknown } | null)?.concertId === 'string' ? String((draft.rule.configJson as { concertId: string }).concertId) : typeof (draft.rule.configJson as { tourId?: unknown } | null)?.tourId === 'string' ? String((draft.rule.configJson as { tourId: string }).tourId) : typeof (draft.rule.configJson as { activityId?: unknown } | null)?.activityId === 'string' ? String((draft.rule.configJson as { activityId: string }).activityId) : '') !== draft.targetId) ||
+        (isZodiacRule(draft.ruleType) && getZodiacFromRuleConfig(draft.rule.configJson) !== draft.zodiac) ||
         draft.rule.isEnabled !== draft.ruleEnabled
       ),
     )
@@ -312,7 +342,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           rule: draft.grantType === 'AUTO' && !draft.legacyAuto
             ? draft.seriesCompletionRule
               ? { ruleType: 'BADGE_SERIES_COMPLETE', operator: 'GTE', threshold: null, configJson: draft.rule?.configJson, isEnabled: draft.ruleEnabled }
-              : { ruleType: draft.ruleType, operator: draft.operator, threshold: isTargetRule(draft.ruleType) ? null : draft.threshold, configJson: draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : undefined, isEnabled: draft.ruleEnabled }
+              : { ruleType: draft.ruleType, operator: draft.operator, threshold: isTargetRule(draft.ruleType) || isBirthdayRule(draft.ruleType) ? null : draft.threshold, configJson: draft.ruleType === 'BIRTHDAY_ZODIAC' ? { zodiac: draft.zodiac } : draft.ruleType === 'BIRTHDAY_TODAY' ? {} : draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : undefined, isEnabled: draft.ruleEnabled }
             : null,
         }),
       })
@@ -541,7 +571,9 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
               <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-black text-brand-950">自动获得条件</p><p className="mt-1 text-xs font-bold text-slate-500">选择条件并填写中文参数，系统会按真实业务数据判断。</p></div><label className="flex items-center gap-2 text-xs font-black text-brand-950"><input type="checkbox" checked={draft.ruleEnabled} onChange={(event) => setDraft({ ...draft, ruleEnabled: event.target.checked })} />启用规则</label></div>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="text-xs font-black text-slate-500">获得规则<select value={draft.ruleType} onChange={(event) => { const ruleType = event.target.value as SupportedBadgeRuleType; setDraft((current) => { if (!current) return current; const next = { ...current, ruleType, targetId: '', targetLabel: '' }; return next.acquisitionDescriptionCustomized ? next : { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } }) }} className="admin-badge-input">{RULE_GROUPS.map((group) => <optgroup key={group} label={group}>{BADGE_ADMIN_RULE_TYPES.filter((value) => BADGE_RULE_REGISTRY[value].group === group).map((value) => <option key={value} value={value}>{BADGE_RULE_TYPE_LABELS[value]}</option>)}</optgroup>)}</select></label>
-                {!isTargetRule(draft.ruleType) ? <label className="text-xs font-black text-slate-500">需要达到<div className="flex items-center gap-2"><input type="number" min="1" max="1000000000" value={draft.threshold} onChange={(event) => { const threshold = Number(event.target.value); setDraft((current) => { if (!current) return current; const next = { ...current, threshold: Number.isFinite(threshold) ? threshold : 1 }; return next.acquisitionDescriptionCustomized ? next : { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } }) }} className="admin-badge-input" /><span className="text-sm font-black text-brand-950">{getRuleUnit(draft.ruleType)}</span></div></label> : null}
+                 {!isTargetRule(draft.ruleType) && !isBirthdayRule(draft.ruleType) ? <label className="text-xs font-black text-slate-500">需要达到<div className="flex items-center gap-2"><input type="number" min="1" max="1000000000" value={draft.threshold} onChange={(event) => { const threshold = Number(event.target.value); setDraft((current) => { if (!current) return current; const next = { ...current, threshold: Number.isFinite(threshold) ? threshold : 1 }; return next.acquisitionDescriptionCustomized ? next : { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } }) }} className="admin-badge-input" /><span className="text-sm font-black text-brand-950">{getRuleUnit(draft.ruleType)}</span></div></label> : null}
+                  {isZodiacRule(draft.ruleType) ? <div className="rounded-2xl border border-amber-100 bg-amber-50/80 p-4 sm:col-span-2"><label className="text-xs font-black text-slate-500">所属星座<select value={draft.zodiac} onChange={(event) => { const zodiac = event.target.value as ZodiacSign; setDraft((current) => { if (!current) return current; const next = { ...current, zodiac }; return next.acquisitionDescriptionCustomized ? next : { ...next, acquisitionDescription: defaultAcquisitionDescription(next) } }) }} className="admin-badge-input">{ZODIAC_SIGNS.map((zodiac) => <option key={zodiac} value={zodiac}>{ZODIAC_LABELS[zodiac]}</option>)}</select></label><p className="mt-2 text-sm font-black text-brand-950">生日属于{ZODIAC_LABELS[draft.zodiac]}</p><p className="mt-1 text-xs font-bold text-slate-600">{formatZodiacDateRange(draft.zodiac)}</p><p className="mt-2 text-xs font-bold leading-5 text-amber-800">用户生日属于{ZODIAC_LABELS[draft.zodiac]}，并在{ZODIAC_LABELS[draft.zodiac]}星座周期内自动获得。数据口径：用户生日属于指定星座，并在该星座周期内满足条件。</p></div> : null}
+                  {isBirthdayTodayRule(draft.ruleType) ? <div className="rounded-2xl border border-rose-100 bg-rose-50/80 p-4 sm:col-span-2"><p className="text-sm font-black text-brand-950">生日当天自动获得</p><p className="mt-1 text-xs font-bold leading-5 text-rose-800">用户仅在自己的生日当天自动获得，不需要选择星座；2 月 29 日生日在非闰年不顺延到 2 月 28 日或 3 月 1 日。</p></div> : null}
                 {draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? <div className="sm:col-span-2"><label className="text-xs font-black text-slate-500">选择演唱会<div className="mt-1 flex gap-2"><input value={concertSearch} onChange={(event) => setConcertSearch(event.target.value)} placeholder="搜索巡演、城市、场次或日期" className="admin-badge-input" /><button type="button" onClick={() => void searchConcertOptions()} className="shrink-0 rounded-xl bg-brand-950 px-4 text-xs font-black text-white">搜索</button></div></label><div className="mt-2 max-h-48 space-y-1 overflow-auto">{concertOptions.map((concert) => { const label = `${concert.MusicTour.name} · ${concert.city} · ${new Date(concert.concertDate).toLocaleDateString('zh-CN')}`; return <button key={concert.id} type="button" onClick={() => setDraft((current) => current ? { ...current, targetId: concert.id, targetLabel: label, acquisitionDescription: current.acquisitionDescriptionCustomized ? current.acquisitionDescription : `观看「${label}」后获得` } : current)} className={`block w-full rounded-xl px-3 py-2 text-left text-xs font-bold ${draft.targetId === concert.id ? 'bg-brand-950 text-white' : 'bg-white text-brand-950'}`}>{label}</button> })}</div>{draft.targetId ? <p className="mt-2 text-xs font-black text-emerald-700">已选择：{draft.targetLabel || '当前已保存演唱会'}</p> : null}</div> : null}
                 {draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? <label className="text-xs font-black text-slate-500 sm:col-span-2">选择巡演<select required value={draft.targetId} onChange={(event) => { const selected = tourOptions.find((tour) => tour.id === event.target.value); setDraft((current) => current ? { ...current, targetId: event.target.value, targetLabel: selected?.name || '', acquisitionDescription: current.acquisitionDescriptionCustomized ? current.acquisitionDescription : selected ? `观看「${selected.name}」巡演任意一场后获得` : '' } : current) }} className="admin-badge-input"><option value="">请选择巡演</option>{tourOptions.map((tour) => <option key={tour.id} value={tour.id}>{tour.name}</option>)}</select></label> : null}
                 {draft.ruleType === 'ACTIVITY_PARTICIPATION' ? <label className="text-xs font-black text-slate-500 sm:col-span-2">选择活动<select required value={draft.targetId} onChange={(event) => { const selected = activityOptions.find((activity) => activity.id === event.target.value); setDraft((current) => current ? { ...current, targetId: event.target.value, targetLabel: selected?.title || '', acquisitionDescription: current.acquisitionDescriptionCustomized ? current.acquisitionDescription : selected ? `参加「${selected.title}」后获得` : '' } : current) }} className="admin-badge-input"><option value="">请选择活动</option>{activityOptions.map((activity) => <option key={activity.id} value={activity.id}>{activity.title} · {activity.status === 'PUBLISHED' ? '已发布' : activity.status === 'DRAFT' ? '草稿' : '已取消'} · {activity.startsAt ? new Date(activity.startsAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未设置开始时间'}</option>)}</select>{draft.targetId ? <span className="mt-1 block text-[11px] font-black text-emerald-700">已选择：{draft.targetLabel || '当前已保存活动'}；只有有效人工 / 二维码现场核销才算参加，活动结束自动核销不计入。</span> : null}</label> : null}
@@ -576,7 +608,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
               </div>
               <p className="mt-1 line-clamp-2 text-xs font-bold text-slate-500">{badge.description || '暂无简介'}</p>
               {badge.tierGroupCode ? <p className="mt-1 text-xs font-bold text-amber-700">成长等级：{badge.series?.name || '旧版成长系列'} · {badge.tierLevel}级</p> : null}
-              {badge.rule ? <p className="mt-1 text-xs font-bold text-violet-700">自动规则：{badge.rule.ruleType === 'BADGE_SERIES_COMPLETE' ? '系列全收集' : `${BADGE_RULE_TYPE_LABELS[badge.rule.ruleType]} ${badge.rule.operator === 'GTE' ? '≥' : badge.rule.operator === 'LTE' ? '≤' : '='} ${badge.rule.threshold}`}{badge.rule.isEnabled ? '' : ' · 已停用'}{badge.acquisitionDescriptionCustomized ? ' · 自定义文案' : ''}</p> : badge.grantType === 'AUTO' ? <p className="mt-1 text-xs font-bold text-amber-700">旧业务自动：由生日/演唱会等现有事件服务管理</p> : null}
+              {badge.rule ? <p className="mt-1 text-xs font-bold text-violet-700">自动规则：{formatRuleSummary(badge.rule)}{badge.rule.isEnabled ? '' : ' · 已停用'}{badge.acquisitionDescriptionCustomized ? ' · 自定义文案' : ''}</p> : badge.grantType === 'AUTO' ? <p className="mt-1 text-xs font-bold text-amber-700">旧业务自动：由生日/演唱会等现有事件服务管理</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => setDraft(toDraft(badge))} className="admin-badge-list-button">编辑</button>
@@ -594,7 +626,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
         {!visibleBadges.length ? <p className="p-8 text-center text-sm font-bold text-slate-500">没有符合条件的勋章。</p> : null}
       </section>
 
-      {preview ? <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => setPreview(null)}><section className="badge-admin-dialog max-w-md" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => setPreview(null)} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button><h2 className="text-xl font-black text-brand-950">「{preview.name}」达标预览</h2><p className="mt-2 text-xs font-bold leading-5 text-slate-500">只读计算，不会授予勋章。规则修改也不会撤销已经获得的历史荣誉。</p>{previewData ? <div className="mt-4 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-violet-50 p-3"><strong className="block text-xl font-black text-violet-800">{previewData.eligibleCount}</strong><span className="text-[11px] font-bold text-slate-500">符合条件</span></div><div className="rounded-xl bg-emerald-50 p-3"><strong className="block text-xl font-black text-emerald-800">{previewData.ownedCount}</strong><span className="text-[11px] font-bold text-slate-500">已获得</span></div><div className="rounded-xl bg-amber-50 p-3"><strong className="block text-xl font-black text-amber-800">{previewData.pendingCount}</strong><span className="text-[11px] font-bold text-slate-500">待补发</span></div></div> : <p className="mt-5 text-sm font-bold text-slate-500">正在聚合统计…</p>}{previewData ? <><p className="mt-3 text-center text-xs font-black text-slate-500">当前状态：{previewData.availability === 'PERMANENT' ? '永久可获得' : previewData.availability === 'AVAILABLE' ? '限定开放中' : previewData.availability === 'UPCOMING' ? '尚未开放' : '已绝版'}</p>{previewData.historical?.message ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">{previewData.historical.message}；如需补发，请使用“手动补发”并填写原因。</p> : previewData.historical?.mode === 'HISTORICAL_WINDOW' ? <p className="mt-2 rounded-xl bg-violet-50 p-3 text-xs font-bold leading-5 text-violet-800">本次预览按限定期历史数据计算：{previewData.historical.basis}。</p> : null}</> : null}</section></div> : null}
+      {preview ? <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => setPreview(null)}><section className="badge-admin-dialog max-w-md" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => setPreview(null)} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button><h2 className="text-xl font-black text-brand-950">「{preview.name}」达标预览</h2><p className="mt-2 text-xs font-bold leading-5 text-slate-500">只读计算，不会授予勋章。规则修改也不会撤销已经获得的历史荣誉。</p>{preview.rule ? <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-black leading-5 text-amber-900">规则：{formatRuleSummary(preview.rule)}。</p> : null}{previewData ? <div className="mt-4 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-violet-50 p-3"><strong className="block text-xl font-black text-violet-800">{previewData.eligibleCount}</strong><span className="text-[11px] font-bold text-slate-500">符合条件</span></div><div className="rounded-xl bg-emerald-50 p-3"><strong className="block text-xl font-black text-emerald-800">{previewData.ownedCount}</strong><span className="text-[11px] font-bold text-slate-500">已获得</span></div><div className="rounded-xl bg-amber-50 p-3"><strong className="block text-xl font-black text-amber-800">{previewData.pendingCount}</strong><span className="text-[11px] font-bold text-slate-500">待补发</span></div></div> : <p className="mt-5 text-sm font-bold text-slate-500">正在聚合统计…</p>}{previewData ? <><p className="mt-3 text-center text-xs font-black text-slate-500">当前状态：{previewData.availability === 'PERMANENT' ? '永久可获得' : previewData.availability === 'AVAILABLE' ? '限定开放中' : previewData.availability === 'UPCOMING' ? '尚未开放' : '已绝版'}</p>{previewData.historical?.message ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">{previewData.historical.message}；如需补发，请使用“手动补发”并填写原因。</p> : previewData.historical?.mode === 'HISTORICAL_WINDOW' ? <p className="mt-2 rounded-xl bg-violet-50 p-3 text-xs font-bold leading-5 text-violet-800">本次预览按限定期历史数据计算：{previewData.historical.basis}。</p> : null}</> : null}</section></div> : null}
       {ownersBadge ? <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => setOwnersBadge(null)}><section className="badge-admin-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => setOwnersBadge(null)} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button><h2 className="text-xl font-black text-brand-950">{ownersBadge.name} · 获得用户</h2><p className="mt-1 text-xs font-bold text-slate-500">共 {owners.length} 人</p><div className="mt-4 max-h-80 space-y-2 overflow-auto">{owners.map((owner) => <div key={owner.id} className="flex items-center justify-between gap-3 rounded-xl bg-sky-50 px-3 py-2 text-sm"><span className="font-black text-brand-950">{owner.user.displayName} <small className="text-slate-500">UID {owner.user.uid}</small></span><span className="flex items-center gap-2 text-right text-[11px] font-bold text-slate-500"><span>{formatDate(owner.obtainedAt)}{owner.grantReason ? <><br />{owner.grantReason}</> : null}</span><button type="button" onClick={() => void revokeOwner(owner)} disabled={busy} className="admin-badge-list-button danger">收回</button></span></div>)}</div></section></div> : null}
       {grantBadgeTarget ? <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => setGrantBadgeTarget(null)}><section className="badge-admin-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => setGrantBadgeTarget(null)} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button><h2 className="text-xl font-black text-brand-950">{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '手动补发' : '发放'}「{grantBadgeTarget.name}」</h2>{grantBadgeTarget.availabilityStatus === 'UPCOMING' ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">该勋章限定期尚未开始；本次仅是管理员人工发放，不代表历史资格补发。</p> : null}<div className="mt-4 flex gap-2"><input value={grantQuery} onChange={(event) => setGrantQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void searchGrantUsers() } }} placeholder="昵称 / UID / 登录账号" className="admin-badge-input" /><button type="button" onClick={() => void searchGrantUsers()} className="admin-badge-list-button">搜索</button></div><div className="mt-2 space-y-1">{grantUsers.map((user) => <button type="button" key={user.id} onClick={() => void selectGrantUser(user)} className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-black ${grantUserId === user.id ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-950'}`}>{user.displayName} · UID {user.uid}</button>)}</div>{grantUserStatus ? <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 p-3 text-xs font-bold text-slate-600"><p className="font-black text-brand-950">{grantUserStatus.user.displayName} · E院ID {grantUserStatus.user.uid}</p><p className="mt-1">状态：{grantUserStatus.ownership.owned ? `已于 ${grantUserStatus.ownership.obtainedAt ? formatDate(grantUserStatus.ownership.obtainedAt) : '此前'} 获得` : '尚未获得'}</p>{grantUserStatus.rule && grantUserStatus.rule.threshold !== null && (grantUserStatus.historicalMetric !== null || grantUserStatus.currentMetric !== null) ? <p className="mt-1">{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '限定期历史进度' : '当前规则进度'}：{grantUserStatus.historicalMetric ?? grantUserStatus.currentMetric} / {grantUserStatus.rule.threshold}</p> : null}{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? <p className="mt-1 text-amber-800">{grantUserStatus.rule?.historicalSupported ? `历史依据：${grantUserStatus.rule.historicalBasis}` : '系统无法可靠证明限定期历史达标时间，请以人工核实为准。'}</p> : null}</div> : null}<textarea value={grantReason} onChange={(event) => setGrantReason(event.target.value)} placeholder={grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '限定勋章补发原因（必填）' : '发放原因（可选）'} className="admin-badge-input mt-3 min-h-20" />{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? <label className="mt-3 flex items-start gap-2 text-xs font-bold text-slate-600"><input type="checkbox" checked={grantConfirmed} onChange={(event) => setGrantConfirmed(event.target.checked)} className="mt-0.5" />我已核实该用户在限定时间内符合获得条件</label> : null}<button type="button" onClick={() => void grantSelected()} disabled={busy || !grantUserId || !grantUserStatus || grantUserStatus.ownership.owned || Boolean((grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil) && (!grantReason.trim() || !grantConfirmed))} className="mt-3 min-h-10 rounded-xl bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{busy ? '处理中…' : grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '确认手动补发' : '确认发放'}</button></section></div> : null}
     </div>

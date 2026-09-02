@@ -13,6 +13,7 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 type RouteContext = { params: Promise<{ messageId: string }> }
 
@@ -115,7 +116,11 @@ export async function POST(request: Request, context: RouteContext) {
   void updateUserIpRegion(guard.user.id, ipLocation)
   const { messageId } = await context.params
   const body = await request.json().catch(() => null)
-  const content = sanitizeText(body?.content, 300)
+  const contentLength = getReplyLengthMetrics(body?.content)
+  if (contentLength.exceededBy > 0) {
+    return NextResponse.json({ ok: false, ...replyTooLongPayload(contentLength, '评论') }, { status: 400 })
+  }
+  const content = contentLength.content
   const parentId = sanitizeText(body?.parentId, 80)
 
   if (!content) {

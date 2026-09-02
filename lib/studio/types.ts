@@ -19,6 +19,7 @@ export type StudioProjectSummary = {
   likeCount?: number
   favoriteCount?: number
   viewCount?: number
+  downloadCount?: number
   isLiked?: boolean
   isFavorited?: boolean
   visibility: StudioVisibility

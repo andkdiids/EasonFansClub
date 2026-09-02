@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ImageViewer } from '@/components/ImageViewer'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { Pagination } from '@/components/ui/Pagination'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 
 type FeedbackItem = {
   id: string
@@ -255,6 +257,11 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
   async function submitReply(event: FormEvent) {
     event.preventDefault()
     if (!detail || actionBusy) return
+    const replyLength = getReplyLengthMetrics(reply)
+    if (replyLength.exceededBy > 0) {
+      setError(replyTooLongMessage(replyLength))
+      return
+    }
     setReplying(true)
     setError('')
     setMessage('')
@@ -456,7 +463,7 @@ export function AdminFeedbackPanel({ initialFeedbackId }: { initialFeedbackId?: 
                     placeholder="回复用户"
                     aria-label="管理员回复内容"
                   />
-                  <button type="submit" disabled={actionBusy} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : '回复并通知用户'}</button>
+                  <div className="flex flex-wrap items-center justify-between gap-3"><ReplyLengthCounter value={reply} /><button type="submit" disabled={actionBusy || getReplyLengthMetrics(reply).exceededBy > 0} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : '回复并通知用户'}</button></div>
                 </form>
               ) : (
                 <p className="rounded-2xl bg-slate-50 px-4 py-2 text-sm font-black text-slate-500">该反馈已完成，如需回复请先改为处理中或已回复。</p>

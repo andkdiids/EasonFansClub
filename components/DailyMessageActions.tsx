@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { EmojiPicker } from '@/components/EmojiPicker'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 
 export function DailyMessageActions({
   messageId,
@@ -39,6 +41,8 @@ export function DailyMessageActions({
   const [favorites, setFavorites] = useState(Math.max(favoriteCount, 0))
   const [comments, setComments] = useState(Math.max(commentCount, 0))
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const commentLength = getReplyLengthMetrics(comment)
+  const isOverLimit = commentLength.exceededBy > 0
   // 点赞请求独立的 pending 标记（每条留言各自一个组件实例，天然按记录隔离），
   // 不与评论提交 / 收藏共享，避免一个操作禁用全部按钮。
   const [isLikePending, setIsLikePending] = useState(false)
@@ -107,7 +111,12 @@ export function DailyMessageActions({
   }
 
   async function submitComment() {
-    if (isSubmitting || !comment.trim()) return
+    if (isSubmitting) return
+    if (isOverLimit) {
+      setError(replyTooLongMessage(commentLength, '评论'))
+      return
+    }
+    if (!comment.trim()) return
     setError('')
     setIsSubmitting(true)
     const response = await fetch(`/api/daily-messages/${messageId}/comments`, {
@@ -168,8 +177,9 @@ export function DailyMessageActions({
           <textarea
             ref={textareaRef}
             value={comment}
-            onChange={(event) => setComment(event.target.value.slice(0, 300))}
+            onChange={(event) => setComment(event.target.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 submitComment()
@@ -181,10 +191,10 @@ export function DailyMessageActions({
           />
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <EmojiPicker textareaRef={textareaRef} value={comment} onChange={setComment} maxLength={300} disabled={isSubmitting} />
-              <span className="text-xs font-bold text-slate-400">{comment.length}/300</span>
+              <EmojiPicker textareaRef={textareaRef} value={comment} onChange={setComment} disabled={isSubmitting} />
+              <ReplyLengthCounter value={comment} />
             </div>
-            <button onClick={submitComment} disabled={isSubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-black text-white disabled:opacity-60">
+            <button onClick={submitComment} disabled={isSubmitting || isOverLimit} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-black text-white disabled:opacity-60">
               {isSubmitting ? '发送中...' : '发送评论'}
             </button>
           </div>

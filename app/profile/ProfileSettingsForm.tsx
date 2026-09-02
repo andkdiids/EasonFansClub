@@ -629,10 +629,9 @@ export function ProfileSettingsForm({
         birthdayPublic: Boolean(form.birthdayPublic),
         showBadgeActivity: Boolean(form.showBadgeActivity),
         showBadgeProgressNotifications: Boolean(form.showBadgeProgressNotifications),
-        // 生日仅在未设置时提交；已设置则由服务端忽略。
-        ...(form.birthdaySetAt
-          ? {}
-          : { birthMonth: form.birthMonth, birthDay: form.birthDay }),
+        // 生日允许修正；服务端会复用统一的月/日合法性校验，且不会回收历史勋章。
+        birthMonth: form.birthMonth,
+        birthDay: form.birthDay,
       }),
     })
     const data = await response.json().catch(() => null)
@@ -654,6 +653,10 @@ export function ProfileSettingsForm({
         showBadgeActivity: typeof data.profile.showBadgeActivity === 'boolean' ? data.profile.showBadgeActivity : current.showBadgeActivity,
         showBadgeProgressNotifications: typeof data.profile.showBadgeProgressNotifications === 'boolean' ? data.profile.showBadgeProgressNotifications : current.showBadgeProgressNotifications,
         location: data.profile.location || null,
+        birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : current.birthMonth,
+        birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : current.birthDay,
+        birthdaySetAt: typeof data.profile.birthdaySetAt === 'string' ? data.profile.birthdaySetAt : data.profile.birthdaySetAt === null ? null : current.birthdaySetAt,
+        birthdayPublic: typeof data.profile.birthdayPublic === 'boolean' ? data.profile.birthdayPublic : current.birthdayPublic,
       }))
       const nextPhone = data.profile.phone || ''
       const nextPhoneParts = getPhoneInputParts(nextPhone, phoneCountry)
@@ -870,17 +873,10 @@ export function ProfileSettingsForm({
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">生日纪念</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">我的生日</h3>
-            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">生日仅用于「生日纪念」徽章与今日生日统计，填写后不可修改，不会向其他用户展示具体日期。</p>
+            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">生日仅用于「生日纪念」徽章与今日生日统计，可随时修正，不会向其他用户展示具体日期。</p>
           </div>
 
-          {form.birthdaySetAt ? (
-            <div className="rounded-2xl border border-white bg-white/78 p-4">
-              <p className="text-sm font-black text-slate-700">生日已设置</p>
-              <p className="mt-2 text-2xl font-black text-brand-950">{form.birthMonth}月{form.birthDay}日</p>
-              <p className="mt-2 text-xs font-bold text-slate-500">已设置，不可再次修改。</p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
               <label className="block rounded-2xl border border-white bg-white/78 p-4">
                 <span className="text-sm font-black text-slate-700">月份</span>
                 <select
@@ -907,8 +903,11 @@ export function ProfileSettingsForm({
                   ))}
                 </select>
               </label>
+            <div className="rounded-2xl border border-white bg-white/78 p-4 text-xs font-bold leading-5 text-slate-500 md:col-span-2">
+              <p className="font-black text-brand-950">{form.birthdaySetAt ? `当前生日：${form.birthMonth}月${form.birthDay}日` : '尚未设置生日'}</p>
+              <p className="mt-1">修改生日后只会影响之后的生日判断；已经获得的生日星座勋章永久保留，不会被回收。</p>
             </div>
-          )}
+          </div>
 
           <label className="flex items-center justify-between rounded-2xl border border-white bg-white/78 p-4">
             <span>

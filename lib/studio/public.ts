@@ -21,6 +21,7 @@ const gallerySelect = {
   likeCount: true,
   favoriteCount: true,
   viewCount: true,
+  downloadCount: true,
   visibility: true,
   reviewStatus: true,
   createdAt: true,
@@ -57,6 +58,7 @@ function publicProjectSummary(row: GalleryRow, liked: boolean, favorited: boolea
     likeCount: row.likeCount,
     favoriteCount: row.favoriteCount,
     viewCount: row.viewCount,
+    downloadCount: row.downloadCount,
     isLiked: liked,
     isFavorited: favorited,
     visibility: row.visibility,
@@ -87,7 +89,7 @@ export async function listPublicStudioProjects(options: PublicStudioProjectListO
     ...(selectedTool ? { toolSlug: selectedTool } : {}),
   }
   const orderBy: Prisma.StudioProjectOrderByWithRelationInput[] = sort === 'hot'
-    ? [{ likeCount: 'desc' }, { favoriteCount: 'desc' }, { viewCount: 'desc' }, { updatedAt: 'desc' }, { id: 'desc' }]
+    ? [{ likeCount: 'desc' }, { favoriteCount: 'desc' }, { downloadCount: 'desc' }, { viewCount: 'desc' }, { updatedAt: 'desc' }, { id: 'desc' }]
     : [{ updatedAt: 'desc' }, { id: 'desc' }]
   const [rows, total] = await Promise.all([
     prisma.studioProject.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize + 1, select: gallerySelect }),

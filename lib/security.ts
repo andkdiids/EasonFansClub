@@ -6,6 +6,7 @@ import { getCurrentUser, isAuthServiceUnavailableError, type SessionUser } from 
 import { getClientIp } from '@/lib/client-ip'
 import { containsBannedWord, getEnabledBannedWords } from '@/lib/content-moderation'
 import { prisma } from '@/lib/prisma'
+import { sanitizeTextPreservingLength } from '@/lib/text'
 
 export { getClientIp, normalizeIp } from '@/lib/client-ip'
 
@@ -87,14 +88,11 @@ export async function requireSuperAdmin(): Promise<GuardResult> {
   return result
 }
 
+export { sanitizeTextPreservingLength } from '@/lib/text'
+
 export function sanitizeText(value: unknown, maxLength = 5000) {
   const bounded = String(value ?? '').slice(0, Math.max(maxLength * 2, maxLength))
-
-  return bounded
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-    .replace(/javascript:/gi, '')
-    .trim()
-    .slice(0, maxLength)
+  return sanitizeTextPreservingLength(bounded).slice(0, maxLength)
 }
 
 export async function filterSensitiveWords(content: string) {

@@ -38,25 +38,27 @@ test('homepage birthday count uses real user month/day, not TodayEvent', () => {
   assert.doesNotMatch(home, /type:\s*'BIRTHDAY', status:\s*'APPROVED'/)
 })
 
-test('profile API exposes birthday to self and enforces one-time, immutable set', () => {
+test('profile API exposes birthday, validates it centrally, and permits correction without revoking history', () => {
   const route = read('app/api/users/me/route.ts')
   assert.match(route, /birthMonth:\s*true/)
   assert.match(route, /birthDay:\s*true/)
   assert.match(route, /birthdaySetAt:\s*true/)
-  // 一次性写入逻辑：已设置则忽略，未设置才接受首次填写
-  assert.match(route, /const birthdayAlreadySet = Boolean\(current\?\.birthdaySetAt\)/)
+  // 已设置生日也允许修正；历史勋章不由资料更新撤销。
+  assert.match(route, /const birthdayFieldsProvided = birthMonthRaw !== undefined \|\| birthDayRaw !== undefined/)
+  assert.match(route, /isValidBirthdayParts/)
+  assert.match(route, /birthdayChanged = current\.birthMonth !== birthMonthRaw/)
   assert.match(route, /data\.birthdaySetAt = now/)
-  // 日期合法性校验（含闰年 2 月 29 日）
-  assert.match(route, /new Date\(2020, birthMonthRaw - 1, birthDayRaw\)/)
+  assert.match(route, /USER_BIRTHDAY_UPDATED/)
 })
 
-test('profile form has month/day picker and locked-after-set UI', () => {
+test('profile form keeps the month/day picker editable after the initial set', () => {
   const form = read('app/profile/ProfileSettingsForm.tsx')
-  assert.match(form, /生日已设置/)
+  assert.match(form, /当前生日/)
   assert.match(form, /请选择月份/)
   assert.match(form, /请选择日期/)
-  // 已设置时不提交生日，避免被服务端忽略之外的前端误传
-  assert.match(form, /form\.birthdaySetAt\s*\?\s*\{\}\s*:\s*\{ birthMonth/)
+  assert.match(form, /birthMonth: form\.birthMonth/)
+  assert.match(form, /可随时修正/)
+  assert.match(form, /生日星座勋章永久保留/)
 })
 
 test('birthday badge is auto-granted on login and on visiting own profile', () => {

@@ -8,6 +8,7 @@ import { getShanghaiDateKey, parseBeijingDate } from '@/lib/checkin'
 import { runDailyJob } from '@/lib/daily-job-execution'
 import { getTodayMonthDay } from '@/lib/today'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { evaluateUserAutoBadges, grantCurrentZodiacBadgeRewards } from '@/lib/badge-rule-engine'
 
 /** 生日祝福通知标题与内容（不出现用户名、不写「祝 xxx 生日快乐」、不写生日日期）。 */
 export const BIRTHDAY_GREETING_TITLE = '🎂 生日纪念'
@@ -251,8 +252,9 @@ export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()
 }
 
 /**
- * 统一生日奖励服务：扫描今天过生日的有效用户，逐个授予「生日纪念」徽章并发送生日祝福通知，
- * 同时给这些生日用户的「好友」发送生日提醒。
+ * 统一生日奖励服务：先扫描当前上海时区星座周期内、生日属于该星座的用户，
+ * 再扫描今天过生日的有效用户，分别处理星座规则与生日当天规则；同时保留既有「生日纪念」徽章和生日祝福通知，
+ * 并给这些生日用户的「好友」发送生日提醒。
  * - 幂等：徽章靠 UserBadge(userId, badgeId) 唯一约束，通知靠 key 唯一约束，重复执行安全。
  * - 单用户失败不影响其他生日用户；失败计数会让每日任务失败并允许后续重试。
  * - 由受保护的内部每日任务调用；重复执行由通知、徽章唯一约束共同保证安全。
@@ -260,7 +262,9 @@ export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()
 export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()): Promise<void> {
   let failedUserCount = 0
   try {
-    const { month, day } = getBirthdayDateContext(dateKey)
+    const { date, month, day } = getBirthdayDateContext(dateKey)
+    const zodiacScan = await grantCurrentZodiacBadgeRewards(date)
+    if (zodiacScan.failed > 0) throw new Error(`ZODIAC_BADGE_RULE_PARTIAL_FAILURE:${zodiacScan.failed}`)
     const users = await withDbTimeout(
       'User.findMany birthday.rewards',
       prisma.user.findMany({
@@ -278,6 +282,8 @@ export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()):
     for (const user of users) {
       try {
         await ensureBirthdayBadge(user.id, dateKey)
+        const badgeEvaluation = await evaluateUserAutoBadges(user.id, ['BIRTHDAY_TODAY'], date)
+        if (badgeEvaluation.failed > 0) throw new Error(`BIRTHDAY_BADGE_RULE_PARTIAL_FAILURE:${badgeEvaluation.failed}`)
         await sendBirthdayGreeting(user.id, dateKey)
       } catch (error) {
         failedUserCount += 1

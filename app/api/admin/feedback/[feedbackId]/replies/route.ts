@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server'
 import { feedbackInclude, parseFeedbackAttachments, serializeFeedback } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { requireAdmin } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 export async function POST(request: Request, { params }: { params: Promise<{ feedbackId: string }> }) {
   const guard = await requireAdmin('feedback_manage')
@@ -13,9 +14,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ fee
 
   const { feedbackId } = await params
   const body = await request.json().catch(() => null)
-  const rawContent = typeof body?.content === 'string' ? body.content : ''
-  if (rawContent.length > 2000) return NextResponse.json({ message: '回复内容最多 2000 个字' }, { status: 400 })
-  const content = sanitizeText(body?.content, 2000)
+  const contentLength = getReplyLengthMetrics(body?.content)
+  if (contentLength.exceededBy > 0) return NextResponse.json({ ok: false, ...replyTooLongPayload(contentLength) }, { status: 400 })
+  const content = contentLength.content
   const attachments = parseFeedbackAttachments(body?.attachments)
 
   if (!content && attachments.length === 0) {

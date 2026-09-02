@@ -12,6 +12,8 @@ import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-loca
 import { updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { computeNicknameCooldownDays, generateUniqueViolationNickname } from '@/lib/nickname-violation'
+import { isValidBirthdayParts } from '@/lib/zodiac'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -446,23 +448,23 @@ export async function PATCH(request: Request) {
 
   const now = new Date()
 
-  // 生日：填写一次后不可修改。仅在尚未设置时接受首次填写。
-  const birthdayAlreadySet = Boolean(current?.birthdaySetAt)
-  if (!birthdayAlreadySet && birthMonthRaw !== undefined && birthDayRaw !== undefined) {
-    if (!Number.isInteger(birthMonthRaw) || birthMonthRaw < 1 || birthMonthRaw > 12) {
+  // 生日只保存月/日；允许用户修正资料，但任何历史勋章都不会因此被回收。
+  const birthdayFieldsProvided = birthMonthRaw !== undefined || birthDayRaw !== undefined
+  let birthdayChanged = false
+  if (birthdayFieldsProvided) {
+    if (birthMonthRaw === undefined || !Number.isInteger(birthMonthRaw) || birthMonthRaw < 1 || birthMonthRaw > 12) {
       return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
     }
-    if (!Number.isInteger(birthDayRaw) || birthDayRaw < 1 || birthDayRaw > 31) {
+    if (birthDayRaw === undefined || !Number.isInteger(birthDayRaw) || birthDayRaw < 1 || birthDayRaw > 31) {
       return NextResponse.json({ message: '请选择有效的出生日期' }, { status: 400 })
     }
-    // 校验该日期真实存在（含闰年 2 月 29 日，用闰年 2020 校验）。
-    const probe = new Date(2020, birthMonthRaw - 1, birthDayRaw)
-    if (probe.getMonth() !== birthMonthRaw - 1 || probe.getDate() !== birthDayRaw) {
+    if (!isValidBirthdayParts({ month: birthMonthRaw, day: birthDayRaw })) {
       return NextResponse.json({ message: '该日期不存在，请重新选择' }, { status: 400 })
     }
     data.birthMonth = birthMonthRaw
     data.birthDay = birthDayRaw
-    data.birthdaySetAt = now
+    if (!current.birthdaySetAt) data.birthdaySetAt = now
+    birthdayChanged = current.birthMonth !== birthMonthRaw || current.birthDay !== birthDayRaw || !current.birthdaySetAt
   }
 
   if (birthdayPublic !== undefined) data.birthdayPublic = birthdayPublic
@@ -528,6 +530,10 @@ export async function PATCH(request: Request) {
         nicknameViolationCount: true,
         showBadgeActivity: true,
         showBadgeProgressNotifications: true,
+        birthMonth: true,
+        birthDay: true,
+        birthdaySetAt: true,
+        birthdayPublic: true,
       },
     })
 
@@ -611,6 +617,10 @@ export async function PATCH(request: Request) {
       nicknameViolationDisplay: updated.nicknameViolationDisplay,
       showBadgeActivity: updated.showBadgeActivity,
       showBadgeProgressNotifications: updated.showBadgeProgressNotifications,
+      birthMonth: updated.birthMonth,
+      birthDay: updated.birthDay,
+      birthdaySetAt: updated.birthdaySetAt,
+      birthdayPublic: updated.birthdayPublic,
       wallVisibility: profileRecord.wallVisibility,
       location: profileRecord.locationCountryCode ? {
         countryCode: profileRecord.locationCountryCode,
@@ -623,6 +633,7 @@ export async function PATCH(request: Request) {
 
   invalidateCurrentUserCache(guard.user.id)
   void updateUserIpRegion(guard.user.id, request)
+  if (birthdayChanged) triggerBadgeEvaluation(guard.user.id, 'USER_BIRTHDAY_UPDATED')
 
   profile.avatarUrl = publicImageUrl(profile.avatarUrl)
   profile.backgroundUrl = publicImageUrl(profile.backgroundUrl)

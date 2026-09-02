@@ -14,6 +14,7 @@ import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
 import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -70,7 +71,11 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ message: '该表情不可用或已被隐藏' }, { status: 400 })
   }
 
-  const textContent = sanitizeText(body?.content, 5000)
+  const textLength = getReplyLengthMetrics(body?.content)
+  if (textLength.exceededBy > 0) {
+    return NextResponse.json({ ok: false, ...replyTooLongPayload(textLength) }, { status: 400 })
+  }
+  const textContent = textLength.content
   const imageUrls = parseContentImageUrls(body?.imageUrls)
   const content = appendContentImages(textContent, imageUrls)
   if ((await checkBannedWords(content)).blocked) {
@@ -83,7 +88,7 @@ export async function POST(request: Request, { params }: Params) {
   }
   const requestedMentions = parsedMentions.mentions
 
-  if (textContent.length < 2 && imageUrls.length === 0 && !stickerId) {
+  if (textLength.actualLength < 2 && imageUrls.length === 0 && !stickerId) {
     return NextResponse.json({ message: '回复内容至少需要 2 个字符', errors: { content: '回复太短了' } }, { status: 400 })
   }
 

@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { isZodiacSign, ZODIAC_LABELS, type ZodiacSign } from '@/lib/zodiac'
 
 export const BADGE_EVALUATION_EVENTS = [
   'POST_CREATED',
@@ -13,6 +14,8 @@ export const BADGE_EVALUATION_EVENTS = [
   'WANT_LISTEN_SESSION_FINISHED',
   'RATING_CREATED',
   'CONCERT_ATTENDANCE_CREATED',
+  'USER_ACTIVE',
+  'USER_BIRTHDAY_UPDATED',
 ] as const
 
 export type BadgeEvaluationEvent = typeof BADGE_EVALUATION_EVENTS[number]
@@ -32,9 +35,10 @@ export type BadgeRuleRegistryEntry = {
   supportedOperators: readonly string[]
   events: readonly BadgeEvaluationEvent[]
   threshold: typeof BADGE_RULE_THRESHOLD_LIMITS | null
-  defaultAcquisitionDescription: (threshold: number | null) => string
+  defaultAcquisitionDescription: (threshold: number | null, configJson?: unknown) => string
   adminSelectable?: boolean
   seriesCompletion?: boolean
+  specialKind?: 'BIRTHDAY_ZODIAC' | 'BIRTHDAY_TODAY'
   group: '社区' | '挂号' | '账号' | '娱乐天空' | 'EasMusic / 演唱会' | '歌·颂' | '活动' | '系统'
   unit?: string
   targetKind?: 'CONCERT' | 'TOUR' | 'ACTIVITY'
@@ -239,6 +243,37 @@ export const BADGE_RULE_REGISTRY = {
     historicalBasis: '按指定活动中有效人工或二维码现场核销记录判断；活动结束自动核销不计入',
     defaultAcquisitionDescription: () => '参加指定活动后获得',
   },
+  BIRTHDAY_ZODIAC: {
+    group: '账号',
+    label: '星座',
+    dataDescription: '用户生日属于指定星座，并在该星座周期内满足条件',
+    metricLoader: 'BIRTHDAY_ZODIAC',
+    supportedOperators: ['GTE'],
+    events: ['USER_LOGIN', 'USER_ACTIVE', 'USER_BIRTHDAY_UPDATED'],
+    threshold: null,
+    specialKind: 'BIRTHDAY_ZODIAC',
+    supportsHistoricalBackfill: false,
+    historicalBasis: '仅按上海时区当前星座周期与用户生日月日判断，不追溯已经结束的星座周期',
+    defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => {
+      const zodiac = getZodiacFromRuleConfig(configJson)
+      return zodiac
+        ? `用户生日属于${ZODIAC_LABELS[zodiac]}，并在${ZODIAC_LABELS[zodiac]}星座周期内自动获得。`
+        : '用户生日属于指定星座，并在对应星座周期内自动获得。'
+    },
+  },
+  BIRTHDAY_TODAY: {
+    group: '账号',
+    label: '生日当天',
+    dataDescription: '用户仅在上海时区自己的生日当天满足条件，不区分所属星座',
+    metricLoader: 'BIRTHDAY_TODAY',
+    supportedOperators: ['GTE'],
+    events: ['USER_LOGIN', 'USER_ACTIVE', 'USER_BIRTHDAY_UPDATED'],
+    threshold: null,
+    specialKind: 'BIRTHDAY_TODAY',
+    supportsHistoricalBackfill: false,
+    historicalBasis: '仅按上海时区当前月日判断；2 月 29 日生日在非闰年不顺延',
+    defaultAcquisitionDescription: () => '生日当天自动获得。',
+  },
   BADGE_SERIES_COMPLETE: {
     group: '系统',
     label: '系列全收集',
@@ -257,7 +292,7 @@ export const BADGE_RULE_REGISTRY = {
 
 export type SupportedBadgeRuleType = keyof typeof BADGE_RULE_REGISTRY
 export const BADGE_RULE_TYPES_WITH_SPECIAL = Object.keys(BADGE_RULE_REGISTRY) as SupportedBadgeRuleType[]
-/** Numeric/event rules exposed to the existing event registry and admin catalog. */
+/** Rules exposed to the existing event registry and admin catalog. */
 export const BADGE_RULE_TYPES = BADGE_RULE_TYPES_WITH_SPECIAL
   .filter((ruleType) => !('seriesCompletion' in BADGE_RULE_REGISTRY[ruleType]))
 export const BADGE_ADMIN_RULE_TYPES = BADGE_RULE_TYPES.filter((ruleType) => !('adminSelectable' in BADGE_RULE_REGISTRY[ruleType]) || BADGE_RULE_REGISTRY[ruleType].adminSelectable !== false)
@@ -277,6 +312,14 @@ export type ParsedBadgeRule = {
   secondaryThreshold: number | null
   configJson: Prisma.InputJsonValue | null
   isEnabled: boolean
+}
+
+export function getZodiacFromRuleConfig(value: unknown): ZodiacSign | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = (value as Record<string, unknown>).zodiac
+  if (typeof raw !== 'string') return null
+  const normalized = raw.trim().toUpperCase()
+  return isZodiacSign(normalized) ? normalized : null
 }
 
 function parsePositiveInteger(value: unknown, label: string, limits = BADGE_RULE_THRESHOLD_LIMITS) {
@@ -306,6 +349,46 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
       : ''
   if (!(BADGE_RULE_OPERATORS as readonly string[]).includes(operator)) return { error: '自动获取规则操作符无效' }
   if (!definition.supportedOperators.includes(operator)) return { error: '当前版本后台仅支持达到（≥）操作符' }
+
+  if (definition.specialKind === 'BIRTHDAY_ZODIAC' || definition.specialKind === 'BIRTHDAY_TODAY') {
+    const ruleLabel = definition.specialKind === 'BIRTHDAY_ZODIAC' ? '星座' : '生日当天'
+    if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: `${ruleLabel}规则不需要数值阈值` }
+    if (body.secondaryThreshold !== undefined && body.secondaryThreshold !== null && body.secondaryThreshold !== '') return { error: `${ruleLabel}规则不需要次级阈值` }
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
+
+    if (definition.specialKind === 'BIRTHDAY_ZODIAC') {
+      const zodiac = getZodiacFromRuleConfig(body.configJson)
+      if (!zodiac) return { error: '请选择有效的所属星座' }
+      return {
+        rule: {
+          ruleType: ruleTypeValue as SupportedBadgeRuleType,
+          // BadgeRule.operator is non-null for legacy compatibility. It is
+          // deliberately inert for this non-numeric rule.
+          operator: 'GTE',
+          threshold: null,
+          secondaryThreshold: null,
+          configJson: { zodiac },
+          isEnabled: body.isEnabled !== false,
+        },
+      }
+    }
+
+    if (body.configJson !== undefined && body.configJson !== null) {
+      if (typeof body.configJson !== 'object' || Array.isArray(body.configJson) || Object.keys(body.configJson).length > 0) {
+        return { error: '生日当天规则不需要星座或其他配置' }
+      }
+    }
+    return {
+      rule: {
+        ruleType: ruleTypeValue as SupportedBadgeRuleType,
+        operator: 'GTE',
+        threshold: null,
+        secondaryThreshold: null,
+        configJson: {},
+        isEnabled: body.isEnabled !== false,
+      },
+    }
+  }
 
   if (definition.seriesCompletion) {
     const rawConfig = body.configJson
@@ -364,9 +447,9 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
   }
 }
 
-export function generateBadgeAcquisitionDescription(ruleType: SupportedBadgeRuleType, threshold: number | null) {
+export function generateBadgeAcquisitionDescription(ruleType: SupportedBadgeRuleType, threshold: number | null, configJson?: unknown) {
   const definition = BADGE_RULE_REGISTRY[ruleType]
-  return definition?.defaultAcquisitionDescription(threshold) || '达成自动获取条件后获得'
+  return definition?.defaultAcquisitionDescription(threshold, configJson) || '达成自动获取条件后获得'
 }
 
 export function isSupportedBadgeRuleType(value: string): value is SupportedBadgeRuleType {

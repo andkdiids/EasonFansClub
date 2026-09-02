@@ -9,7 +9,9 @@ import { parseClinicIdentityMode } from '@/lib/clinic-config'
 import { ShareButton } from '@/components/share/ShareButton'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { appendAspirinClinicListRestoreParam, updateAspirinClinicListHistoryState } from '@/lib/clinic-scroll-state'
+import { countReplyCharacters, getReplyLengthMetrics, replyTooLongMessage, REPLY_MAX_LENGTH } from '@/lib/reply-length'
 import type { ClinicPublicConsultation, ClinicPublicRecordDetail } from '@/lib/clinic-service'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { ClinicIdentityBadge } from './ClinicIdentityBadge'
 import { ClinicReportDialog } from './ClinicReportDialog'
 import { ClinicTime } from './ClinicTime'
@@ -83,8 +85,14 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
   }
 
   async function submitConsultation() {
-    if (!(await requireLogin()) || sending) return
-    if (draft.trim().length < 2) {
+    if (sending) return
+    const length = getReplyLengthMetrics(draft)
+    if (length.exceededBy > 0) {
+      setActionError(replyTooLongMessage(length, '会诊内容'))
+      return
+    }
+    if (!(await requireLogin())) return
+    if (length.content.replace(/\s/gu, '').length < 2) {
       setActionError('会诊内容至少需要 2 个有效字符。')
       return
     }
@@ -209,8 +217,8 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
       <section id="clinic-consultation-composer" className="clinic-composer-section">
         <div className="clinic-composer-heading"><div><h2>{replyTo ? `回复 @${findParentName(record.consultations, replyTo)}` : '各位医师点睇？'}</h2></div>{replyTo ? <button type="button" className="clinic-text-link" onClick={() => setReplyTo(null)}>取消回复</button> : null}</div>
         <div className="clinic-identity-switch" role="group" aria-label="会诊身份"><button type="button" className={identityMode === 'PUBLIC' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('PUBLIC'))}>用自己的身份</button><button type="button" className={identityMode === 'ANONYMOUS' ? 'is-active' : ''} onClick={() => setIdentityMode(parseClinicIdentityMode('ANONYMOUS'))}>匿名会诊</button></div>
-        <textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder="跟患者说点什么……" aria-label="会诊内容" />
-        <div className="clinic-composer-footer"><span>普通病友无法看到匿名医师的真实身份。</span><button type="button" className="clinic-primary-button" disabled={sending} onClick={() => void submitConsultation()}>{sending ? '提交中…' : '参与会诊'}</button></div>
+        <textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="跟患者说点什么……" aria-label="会诊内容" />
+        <div className="clinic-composer-footer"><span>普通病友无法看到匿名医师的真实身份。</span><div className="clinic-composer-submit"><ReplyLengthCounter value={draft} /><button type="button" className="clinic-primary-button" disabled={sending || countReplyCharacters(draft) > REPLY_MAX_LENGTH} onClick={() => void submitConsultation()}>{sending ? '提交中…' : '参与会诊'}</button></div></div>
       </section>
 
       {actionError ? <p className="clinic-inline-message" role="status">{actionError}</p> : null}
@@ -222,10 +230,11 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
 
 function ClinicConsultationItem({ item, focusId, onAspirin, onMouthpiece, onReply, onDelete, onReport }: Readonly<{ item: ClinicPublicConsultation; focusId: string; onAspirin: (id: string) => void; onMouthpiece: (id: string) => void; onReply: (id: string) => void; onDelete: (id: string) => void; onReport: (id: string) => void }>) {
   return (
-    <article className={`clinic-consultation ${item.isDeleted ? 'is-deleted' : ''} ${focusId === item.id ? 'is-focused' : ''}`} id={`clinic-consultation-${item.id}`}>
+    <article className={`clinic-consultation ${item.parentId ? 'is-reply' : ''} ${item.isDeleted ? 'is-deleted' : ''} ${focusId === item.id ? 'is-focused' : ''}`} id={`clinic-consultation-${item.id}`}>
       <header><div>{item.author ? <ClinicIdentityBadge identity={item.author} compact /> : <span className="clinic-deleted-author">已删除会诊</span>}<ClinicTime value={item.createdAt} /></div><div className="clinic-consultation-menu"><button type="button" className="clinic-more-button" aria-label="会诊更多操作" onClick={() => onReport(item.id)}>···</button>{item.canDelete ? <button type="button" className="clinic-danger-link" onClick={() => onDelete(item.id)}>删除</button> : null}</div></header>
+      {item.replyToName ? <p className="clinic-consultation-target">回复 @{item.replyToName}</p> : null}
       <p className="clinic-consultation-content">{item.content}</p>
-      {!item.isDeleted ? <footer className="clinic-consultation-actions"><button type="button" className={`clinic-action-button ${item.viewerHasAspirin ? 'is-active' : ''}`} onClick={() => onAspirin(item.id)} aria-label={item.viewerHasAspirin ? '取消会诊阿士匹灵' : '给会诊一颗阿士匹灵'}><UiIcon name="pill" /><span>阿士匹灵</span><b>{item.aspirinCount}</b></button><button type="button" className={`clinic-action-button clinic-mouthpiece-button ${item.viewerHasMouthpiece ? 'is-active' : ''}`} onClick={() => onMouthpiece(item.id)} aria-label={item.viewerHasMouthpiece ? '取消嘴替' : '你是我的嘴替'}>🗣️ <span>{item.viewerHasMouthpiece ? '已标记嘴替' : '你是我的嘴替'}</span><b>{item.mouthpieceCount}</b></button>{!item.parentId ? <button type="button" className="clinic-action-button" onClick={() => onReply(item.id)}>回复</button> : null}</footer> : null}
+      {!item.isDeleted ? <footer className="clinic-consultation-actions"><button type="button" className={`clinic-action-button ${item.viewerHasAspirin ? 'is-active' : ''}`} onClick={() => onAspirin(item.id)} aria-label={item.viewerHasAspirin ? '取消会诊阿士匹灵' : '给会诊一颗阿士匹灵'}><UiIcon name="pill" /><span>阿士匹灵</span><b>{item.aspirinCount}</b></button><button type="button" className={`clinic-action-button clinic-mouthpiece-button ${item.viewerHasMouthpiece ? 'is-active' : ''}`} onClick={() => onMouthpiece(item.id)} aria-label={item.viewerHasMouthpiece ? '取消嘴替' : '你是我的嘴替'}>🗣️ <span>{item.viewerHasMouthpiece ? '已标记嘴替' : '你是我的嘴替'}</span><b>{item.mouthpieceCount}</b></button><button type="button" className="clinic-action-button" onClick={() => onReply(item.id)}>回复</button></footer> : null}
       {item.replies.length ? <div className="clinic-replies">{item.replies.map((reply) => <ClinicConsultationItem key={reply.id} item={reply} focusId={focusId} onAspirin={onAspirin} onMouthpiece={onMouthpiece} onReply={onReply} onDelete={onDelete} onReport={onReport} />)}</div> : null}
     </article>
   )

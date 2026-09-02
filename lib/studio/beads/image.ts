@@ -1,7 +1,7 @@
-import { applyFloydSteinberg, findNearestBeadColor, quantizeColors, rgbToLab, type ColorMatchMode } from './color'
+import { applyFloydSteinberg, deltaE76, findNearestBeadColor, quantizeColors, rgbToLab, type ColorMatchMode } from './color'
 import { removeTinyColorRegions } from './grid'
 import type { BeadPaletteColor, BeadPatternGrid, BeadRgb, BeadSettings } from './types'
-import { EMPTY_CELL } from './types'
+import { EMPTY_CELL, MAX_BEAD_DIMENSION } from './types'
 
 function cropAspectRatio(value: BeadSettings['cropRatio']) {
   if (value === '1:1') return 1
@@ -35,8 +35,9 @@ function distanceRgb(left: BeadRgb, right: BeadRgb) {
 function nearestQuantizedColor(rgb: BeadRgb, colors: readonly BeadRgb[]) {
   let nearest = 0
   let distance = Number.POSITIVE_INFINITY
+  const lab = rgbToLab(rgb)
   colors.forEach((color, index) => {
-    const nextDistance = (rgb.r - color.r) ** 2 + (rgb.g - color.g) ** 2 + (rgb.b - color.b) ** 2
+    const nextDistance = deltaE76(lab, rgbToLab(color))
     if (nextDistance < distance) {
       distance = nextDistance
       nearest = index
@@ -88,9 +89,11 @@ function samplesFromImageData(imageData: ImageData, settings: BeadSettings) {
 
 /** Pure pixel-to-grid processing. It can run on the main thread or in a worker. */
 export function generatePatternFromPixels(samples: readonly BeadRgb[], transparent: readonly boolean[], settings: BeadSettings, palette: readonly BeadPaletteColor[]): BeadPatternGrid {
-  const width = Math.max(1, Math.min(200, Math.round(settings.width)))
-  const height = Math.max(1, Math.min(200, Math.round(settings.height)))
+  const width = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(settings.width)))
+  const height = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(settings.height)))
   if (samples.length !== width * height || transparent.length !== samples.length) throw new Error('图片采样尺寸不正确')
+  const activePalette = palette.filter((color) => color.enabled !== false)
+  if (!activePalette.length) throw new Error('当前色板没有可用颜色')
   let backgroundColor: BeadRgb | null = null
   for (let index = 0; index < width * height; index += 1) {
     if (!backgroundColor && !transparent[index]) backgroundColor = samples[index]
@@ -98,8 +101,8 @@ export function generatePatternFromPixels(samples: readonly BeadRgb[], transpare
   const quantized = settings.maxColors > 0 ? quantizeColors(samples, settings.maxColors) : samples
   const mode: ColorMatchMode = settings.matchingMode
   const ditheringPalette = settings.maxColors > 0
-    ? [...new Set(quantized.map((color) => findNearestBeadColor(color, palette, mode)))].filter((index) => index >= 0).map((index) => palette[index])
-    : palette
+    ? [...new Set(quantized.map((color) => findNearestBeadColor(color, activePalette, mode)))].filter((index) => index >= 0).map((index) => activePalette[index])
+    : activePalette
   const ditheredIndexes = settings.dithering === 'floyd-steinberg'
     ? applyFloydSteinberg(samples, width, height, ditheringPalette, mode).map((index) => {
       const color = ditheringPalette[index]
@@ -112,7 +115,7 @@ export function generatePatternFromPixels(samples: readonly BeadRgb[], transpare
     if (settings.removeBackground && backgroundColor && distanceRgb(rgb, backgroundColor) <= settings.backgroundTolerance) return EMPTY_CELL
     if (ditheredIndexes) return ditheredIndexes[index]
     const sourceColor = settings.maxColors > 0 ? quantized[nearestQuantizedColor(rgb, quantized)] : rgb
-    return findNearestBeadColor(sourceColor, palette, mode)
+    return palette.indexOf(activePalette[findNearestBeadColor(sourceColor, activePalette, mode)])
   })
   return {
     width,
@@ -123,16 +126,16 @@ export function generatePatternFromPixels(samples: readonly BeadRgb[], transpare
 }
 
 export function generatePatternFromImage(source: CanvasImageSource, settings: BeadSettings, palette: readonly BeadPaletteColor[]): BeadPatternGrid {
-  const width = Math.max(1, Math.min(200, Math.round(settings.width)))
-  const height = Math.max(1, Math.min(200, Math.round(settings.height)))
+  const width = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(settings.width)))
+  const height = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(settings.height)))
   const { samples, transparent } = samplesFromImageData(drawImageToTarget(source, width, height, settings), settings)
   return generatePatternFromPixels(samples, transparent, settings, palette)
 }
 
 /** Run color-heavy processing off the UI thread when module workers are available. */
 export function generatePatternFromImageInWorker(source: CanvasImageSource, settings: BeadSettings, palette: readonly BeadPaletteColor[]): Promise<BeadPatternGrid> {
-  const width = Math.max(1, Math.min(200, Math.round(settings.width)))
-  const height = Math.max(1, Math.min(200, Math.round(settings.height)))
+  const width = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(settings.width)))
+  const height = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(settings.height)))
   const { samples, transparent } = samplesFromImageData(drawImageToTarget(source, width, height, settings), settings)
   const fallback = () => generatePatternFromPixels(samples, transparent, settings, palette)
   if (typeof Worker === 'undefined') return Promise.resolve(fallback())

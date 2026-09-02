@@ -10,6 +10,8 @@ import { toPublicMediaUrl } from '@/lib/media-url'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, sanitizeText } from '@/lib/security'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
+import { sanitizeTextPreservingLength } from '@/lib/text'
 import { prisma } from '@/lib/prisma'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
@@ -63,6 +65,7 @@ export class ClinicServiceError extends Error {
     readonly code: string,
     message: string,
     readonly status = 400,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message)
     this.name = 'ClinicServiceError'
@@ -99,6 +102,7 @@ export type ClinicPublicConsultation = {
   viewerHasMouthpiece: boolean
   canDelete: boolean
   isDeleted: boolean
+  replyToName: string | null
   replies: ClinicPublicConsultation[]
 }
 
@@ -173,9 +177,7 @@ function publicContent(value: string, words: ModerationWord[]) {
 }
 
 function cleanClinicContent(value: unknown, maxLength: number, label = '内容') {
-  // Ask sanitizeText for one extra character so oversized requests are
-  // rejected instead of silently truncated before validation.
-  const content = sanitizeText(value, maxLength + 1)
+  const content = sanitizeTextPreservingLength(value)
   if (content.length > maxLength) {
     throw new ClinicServiceError('CONTENT_TOO_LONG', `${label}不能超过 ${maxLength} 个字符。`)
   }
@@ -183,6 +185,18 @@ function cleanClinicContent(value: unknown, maxLength: number, label = '内容')
     throw new ClinicServiceError('CONTENT_TOO_SHORT', `${label}至少需要 2 个有效字符。`)
   }
   return content
+}
+
+function cleanClinicConsultationContent(value: unknown) {
+  const metrics = getReplyLengthMetrics(value, CLINIC_CONSULTATION_MAX_LENGTH)
+  if (metrics.exceededBy > 0) {
+    const tooLong = replyTooLongPayload(metrics, '会诊内容')
+    throw new ClinicServiceError(tooLong.code, tooLong.message, 400, tooLong)
+  }
+  if (metrics.content.replace(/\s/gu, '').length < 2) {
+    throw new ClinicServiceError('CONTENT_TOO_SHORT', '会诊内容至少需要 2 个有效字符。')
+  }
+  return metrics.content
 }
 
 function randomAnonymousNumber() {
@@ -258,7 +272,7 @@ export async function createClinicConsultation(input: {
   identityMode: ClinicIdentityMode
   parentId?: string | null
 }): Promise<ClinicConsultationCreateResult> {
-  const content = cleanClinicContent(input.content, CLINIC_CONSULTATION_MAX_LENGTH, '会诊内容')
+  const content = cleanClinicConsultationContent(input.content)
   const moderation = await checkClinicModeration(content)
   if (moderation.blocked) {
     throw new ClinicServiceError('STRICT_BANNED_WORD', '内容包含严格违禁词，请修改后再提交。')
@@ -281,7 +295,6 @@ export async function createClinicConsultation(input: {
         select: { id: true, authorId: true, parentId: true },
       })
       if (!parent) throw new ClinicServiceError('PARENT_NOT_FOUND', '这条会诊不存在或已经被删除。', 400)
-      if (parent.parentId) throw new ClinicServiceError('NESTING_TOO_DEEP', '门诊部只支持顶层会诊下的一级回复。', 400)
     }
 
     let anonymousNumber = randomAnonymousNumber()
@@ -484,18 +497,40 @@ function toPublicConsultation(
     viewerHasMouthpiece: mouthpieceIds.has(row.id),
     canDelete: Boolean(viewerId && row.authorId === viewerId && !isDeleted),
     isDeleted,
+    replyToName: null,
     replies: [],
   }
 }
 
 function buildConsultationTree(rows: ClinicConsultationRow[], viewerId: string | null, aspirinIds: Set<string>, mouthpieceIds: Set<string>, publicWords: ModerationWord[]) {
   const mapped = new Map(rows.map((row) => [row.id, toPublicConsultation(row, viewerId, aspirinIds, mouthpieceIds, publicWords)]))
+  const rowsById = new Map(rows.map((row) => [row.id, row]))
   const roots: ClinicPublicConsultation[] = []
+
+  function resolveRootId(id: string) {
+    let current = rowsById.get(id)
+    const visited = new Set<string>()
+    while (current?.parentId && rowsById.has(current.parentId) && !visited.has(current.id)) {
+      visited.add(current.id)
+      current = rowsById.get(current.parentId)
+    }
+    return current?.id || id
+  }
+
   for (const row of rows) {
     const item = mapped.get(row.id)
     if (!item) continue
     const parent = row.parentId ? mapped.get(row.parentId) : null
-    if (parent) parent.replies.push(item)
+    item.replyToName = row.parentId
+      ? parent?.author?.displayName || (parent?.isDeleted ? '已删除会诊' : null)
+      : null
+    const rootId = resolveRootId(row.id)
+    if (rootId === row.id) {
+      roots.push(item)
+      continue
+    }
+    const root = mapped.get(rootId)
+    if (root) root.replies.push(item)
     else roots.push(item)
   }
   return roots

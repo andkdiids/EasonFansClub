@@ -2,6 +2,8 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 import { formatAverageScore } from '@/lib/rating-types'
 import type { OwnRatingView, OwnReviewView, RatingStatsView } from '@/lib/rating-service'
 import { RatingSelector, RatingStars } from './RatingStars'
@@ -20,9 +22,14 @@ export function RatingComposer({ target, targetId, myRating, myReview, stats }: 
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const contentLength = getReplyLengthMetrics(content)
 
   async function submitRating() {
     if (!score || pending) return
+    if (contentLength.exceededBy > 0) {
+      setError(replyTooLongMessage(contentLength, '评价'))
+      return
+    }
     setPending(true)
     setError('')
     setMessage('')
@@ -46,7 +53,12 @@ export function RatingComposer({ target, targetId, myRating, myReview, stats }: 
   }
 
   async function submitReview() {
-    if (!content.trim() || pending) return
+    if (pending) return
+    if (contentLength.exceededBy > 0) {
+      setError(replyTooLongMessage(contentLength, '评价'))
+      return
+    }
+    if (!content.trim()) return
     setPending(true)
     setError('')
     setMessage('')
@@ -94,10 +106,11 @@ export function RatingComposer({ target, targetId, myRating, myReview, stats }: 
             </div>
           ) : reviewMode ? (
             <div className="mt-5">
-              <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={1000} autoFocus rows={4} placeholder="写下你的想法（选填）" className="w-full resize-y border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none placeholder:text-slate-400 focus:border-brand-400" />
+              <textarea value={content} onChange={(event) => setContent(event.target.value)} autoFocus rows={4} placeholder="写下你的想法（选填）" className="w-full resize-y border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none placeholder:text-slate-400 focus:border-brand-400" />
+              <ReplyLengthCounter value={content} />
               <div className="mt-3 flex flex-wrap gap-2">
                 <button type="button" onClick={() => { setReviewMode(false); setContent('') }} className="border border-sky-200 px-4 py-2 text-sm font-black text-slate-600">取消</button>
-                <button type="button" onClick={() => void submitReview()} disabled={pending || !content.trim()} className="bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? '发表中…' : '发表评价'}</button>
+                <button type="button" onClick={() => void submitReview()} disabled={pending || contentLength.exceededBy > 0 || !content.trim()} className="bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? '发表中…' : '发表评价'}</button>
               </div>
             </div>
           ) : (
@@ -115,8 +128,9 @@ export function RatingComposer({ target, targetId, myRating, myReview, stats }: 
             <strong className="min-w-[3.5rem] text-2xl font-black tabular-nums text-amber-600">{score ? `${score}分` : '—'}</strong>
           </div>
           <p className="mt-2 text-xs font-bold text-slate-500">每半颗星为 1 分；点击第 4 颗星左半是 7 分，右半是 8 分。</p>
-          <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={1000} rows={4} placeholder="写下你的想法（选填）" className="mt-5 w-full resize-y border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none placeholder:text-slate-400 focus:border-brand-400" />
-          <button type="button" onClick={() => void submitRating()} disabled={pending || !score} className="mt-3 bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? '提交中…' : '提交评分'}</button>
+          <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="写下你的想法（选填）" className="mt-5 w-full resize-y border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 outline-none placeholder:text-slate-400 focus:border-brand-400" />
+          <ReplyLengthCounter value={content} />
+          <button type="button" onClick={() => void submitRating()} disabled={pending || contentLength.exceededBy > 0 || !score} className="mt-3 bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? '提交中…' : '提交评分'}</button>
         </div>
       )}
 

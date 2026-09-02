@@ -8,6 +8,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { getSalonComments, getSalonPostVisibilityWhere, serializeSalonComment } from '@/lib/salon'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
@@ -37,9 +38,11 @@ export async function POST(request: Request, context: RouteContext) {
   if (limited) return limited
   const { postId } = await context.params
   const body = await request.json().catch(() => null) as { content?: unknown; parentId?: unknown } | null
-  const content = sanitizeText(body?.content, 2000)
   const parentId = sanitizeText(body?.parentId, 191) || null
-  if (content.length < 2) return NextResponse.json({ ok: false, message: '评论至少需要 2 个字符' }, { status: 400 })
+  const contentLength = getReplyLengthMetrics(body?.content)
+  if (contentLength.exceededBy > 0) return NextResponse.json({ ok: false, ...replyTooLongPayload(contentLength, parentId ? '回复' : '评论') }, { status: 400 })
+  const content = contentLength.content
+  if (contentLength.actualLength < 2) return NextResponse.json({ ok: false, message: '评论至少需要 2 个字符' }, { status: 400 })
   if ((await checkBannedWords(content)).blocked) return NextResponse.json({ ok: false, message: BANNED_WORD_MESSAGE }, { status: 400 })
 
   const canModerate = await canModerateSalon(guard.user)

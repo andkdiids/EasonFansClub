@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 import type { SocialCommentView } from '@/lib/social-posts'
 
 function formatDate(value: string) {
@@ -14,6 +16,7 @@ export function AnywhereDoorCommentPanel({ postId, initialComments, initialNextC
   const [replyTo, setReplyTo] = useState<SocialCommentView | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const contentLength = getReplyLengthMetrics(content)
 
   async function loadComments(cursor?: string | null) {
     const query = new URLSearchParams({ limit: '20' })
@@ -40,7 +43,12 @@ export function AnywhereDoorCommentPanel({ postId, initialComments, initialNextC
   }
 
   async function submit() {
-    if (!content.trim() || busy) return
+    if (busy) return
+    if (contentLength.exceededBy > 0) {
+      setMessage(replyTooLongMessage(contentLength, replyTo ? '回复' : '评论'))
+      return
+    }
+    if (!content.trim()) return
     setBusy(true)
     setMessage('')
     try {
@@ -95,9 +103,9 @@ export function AnywhereDoorCommentPanel({ postId, initialComments, initialNextC
       {nextCursor ? <button type="button" onClick={() => void loadComments(nextCursor)} className="anywhere-door-load-more-comments mt-4 min-h-10 shrink-0 px-4 text-xs font-black">加载更多评论</button> : null}
       <div className="anywhere-door-comment-composer mt-5 shrink-0 border-t pt-4">
         {replyTo ? <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"><span>正在回复 {replyTo.author.nickname}</span><button type="button" onClick={() => setReplyTo(null)} className="font-black">取消</button></div> : null}
-        <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={500} rows={3} placeholder="写下你的评论…" className="anywhere-door-comment-input w-full resize-y rounded-xl px-3 py-3 text-sm font-medium outline-none ring-brand-200 focus:ring-2" />
+        <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={3} placeholder="写下你的评论…" className="anywhere-door-comment-input w-full resize-y rounded-xl px-3 py-3 text-sm font-medium outline-none ring-brand-200 focus:ring-2" />
         {message ? <p className="mt-2 text-xs font-bold text-red-600 dark:text-red-300" role="alert">{message}</p> : null}
-        <button type="button" disabled={busy || !content.trim()} onClick={() => void submit()} className="anywhere-door-comment-submit mt-3 min-h-10 rounded-full px-5 text-sm font-black disabled:opacity-40">{busy ? '发送中…' : '发表评论'}</button>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><ReplyLengthCounter value={content} /><button type="button" disabled={busy || contentLength.exceededBy > 0 || !content.trim()} onClick={() => void submit()} className="anywhere-door-comment-submit min-h-10 rounded-full px-5 text-sm font-black disabled:opacity-40">{busy ? '发送中…' : '发表评论'}</button></div>
       </div>
     </section>
   )

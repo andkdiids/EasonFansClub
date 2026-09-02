@@ -42,8 +42,8 @@ test('series reward relation is nullable and deleting a series only ungroups bad
 })
 
 test('series completion is a registry rule but is never an admin numeric rule', () => {
-  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 16)
-  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 15)
+  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 18)
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 17)
   assert.equal(BADGE_RULE_REGISTRY.BADGE_SERIES_COMPLETE.seriesCompletion, true)
   const parsed = parseBadgeRuleInput({
     ruleType: 'BADGE_SERIES_COMPLETE',
@@ -78,7 +78,8 @@ test('grant effects batch notifications and never notify already-owned records',
   assert.doesNotMatch(phase3, /from ['"]node:crypto['"]/)
   assert.match(service, /if \(result\.created && !input\.deferPhase3Effects\)/)
   assert.match(engine, /newlyGranted/)
-  assert.match(engine, /processBadgeGrantEffects\(\{ userId, grants: newlyGranted \}\)/)
+  assert.match(engine, /regularGrants/)
+  assert.match(engine, /same-day zodiac \+ birthday grant produces two/)
   assert.match(phase3, /badges\.length === 1 \? '🎖 获得新勋章' : `🎖 获得 \$\{badges\.length\} 枚新勋章`/)
   assert.match(phase3, /type: 'BADGE'/)
   assert.match(phase3, /grants\.map\(\(grant\) => grant\.recordId\)/)

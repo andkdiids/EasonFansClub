@@ -5,6 +5,7 @@ import { ShareButton } from '@/components/share/ShareButton'
 import type { ShareCardData } from '@/lib/share-card'
 import type { BeadProjectData } from '@/lib/studio/beads/types'
 import { calculateMaterialList } from '@/lib/studio/beads/grid'
+import { createBeadPatternPdf } from '@/lib/studio/beads/pdf'
 import { renderPatternToCanvas } from '@/lib/studio/beads/renderer'
 import { UiIcon } from '@/components/UiIcon'
 import styles from './studio.module.css'
@@ -17,6 +18,7 @@ type PublicProject = {
   likeCount: number
   favoriteCount: number
   viewCount: number
+  downloadCount: number
   createdAt: string
   updatedAt: string
   author: string
@@ -29,9 +31,12 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
   const [likeCount, setLikeCount] = useState(project.likeCount)
   const [favoriteCount, setFavoriteCount] = useState(project.favoriteCount)
   const [viewCount] = useState(project.viewCount)
+  const [downloadCount, setDownloadCount] = useState(project.downloadCount)
   const [isLiked, setIsLiked] = useState(false)
   const [isFavorited, setIsFavorited] = useState(false)
   const [interactionBusy, setInteractionBusy] = useState<'like' | 'favorite' | null>(null)
+  const [downloadBusy, setDownloadBusy] = useState(false)
+  const downloadBusyRef = useRef(false)
   const pattern = project.data.pattern
   const materials = calculateMaterialList(pattern)
 
@@ -79,6 +84,34 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
     }
   }
 
+  async function downloadPattern() {
+    if (downloadBusyRef.current || downloadBusy) return
+    downloadBusyRef.current = true
+    setDownloadBusy(true)
+    let downloadStarted = false
+    try {
+      const filename = `${(project.title.trim() || '拼豆图纸').replace(/[\\/:*?"<>|]/g, '_')}.pdf`
+      const url = URL.createObjectURL(createBeadPatternPdf(pattern, project.title))
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      anchor.click()
+      downloadStarted = true
+      window.setTimeout(() => URL.revokeObjectURL(url), 1200)
+
+      const response = await fetch(`/api/studio/projects/${encodeURIComponent(project.id)}/download`, { method: 'POST' })
+      const body = await response.json().catch(() => null) as { downloadCount?: number; message?: string } | null
+      if (!response.ok) throw new Error(body?.message || '下载统计暂时未同步')
+      if (typeof body?.downloadCount === 'number') setDownloadCount(body.downloadCount)
+      setMessage('图纸 PDF 已开始下载。')
+    } catch {
+      setMessage(downloadStarted ? '图纸已开始下载，但下载统计暂时未同步。' : '图纸生成失败，请稍后重试。')
+    } finally {
+      downloadBusyRef.current = false
+      setDownloadBusy(false)
+    }
+  }
+
   const shareCardData: ShareCardData = {
     type: 'studio',
     contentId: project.id,
@@ -110,6 +143,7 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
         <div className={styles.publicInteractions} aria-label="作品互动">
           <button type="button" className={`${styles.publicInteraction} ${isLiked ? styles.publicInteractionActive : ''}`} onClick={() => void toggleInteraction('like')} disabled={interactionBusy !== null} aria-pressed={isLiked}>{isLiked ? '♥' : '♡'} {likeCount} <span>点赞</span></button>
           <button type="button" className={`${styles.publicInteraction} ${isFavorited ? styles.publicInteractionFavorite : ''}`} onClick={() => void toggleInteraction('favorite')} disabled={interactionBusy !== null} aria-pressed={isFavorited}>{isFavorited ? '★' : '☆'} {favoriteCount} <span>收藏</span></button>
+          <button type="button" className={styles.publicInteraction} onClick={() => void downloadPattern()} disabled={downloadBusy || interactionBusy !== null}><UiIcon name="download" /> {downloadCount} <span>{downloadBusy ? '准备中' : '下载图纸'}</span></button>
         </div>
         <div className={styles.publicMaterialList}>{materials.materials.slice(0, 12).map((material) => <div key={material.code} className={styles.publicMaterial}><i style={{ background: material.hex }} /><span>{material.code} · {material.name}</span><strong>{material.quantity}</strong></div>)}</div>
       </aside>

@@ -7,6 +7,8 @@ import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
 import { parseStudioThumbnail } from '@/lib/studio/thumbnail'
 import { uploadSiteImage } from '@/lib/site-media-storage'
+import { normalizeBeadProjectData } from '@/lib/studio/beads/compat'
+import { CURRENT_BEAD_PROJECT_VERSION } from '@/lib/studio/beads/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +33,14 @@ async function uploadStudioThumbnail(value: string | null, userId: string, proje
 
 function parseData(value: unknown, toolSlug: string): Prisma.InputJsonValue | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  if (toolSlug === 'beads') {
+    const normalized = normalizeBeadProjectData(value)
+    if (!normalized) return null
+    let serialized: string
+    try { serialized = JSON.stringify(normalized) } catch { return null }
+    if (new TextEncoder().encode(serialized).byteLength > MAX_DATA_BYTES) return null
+    return JSON.parse(serialized) as Prisma.InputJsonValue
+  }
   const candidate = value as Record<string, unknown>
   if (candidate.tool !== toolSlug || candidate.version !== 1) return null
   const pattern = candidate.pattern
@@ -63,7 +73,7 @@ function projectMetadata(data: Prisma.JsonValue) {
   return { width, height, totalBeads: cells.filter((cell) => typeof cell === 'number' && cell >= 0).length, colorCount: usedColors.size }
 }
 
-function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; likeCount: number; favoriteCount: number; viewCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }, includeData = false) {
+function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; likeCount: number; favoriteCount: number; viewCount: number; downloadCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }, includeData = false) {
   return {
     id: project.id,
     toolSlug: project.toolSlug,
@@ -74,6 +84,7 @@ function projectView(project: { id: string; toolSlug: string; title: string; des
     likeCount: project.likeCount,
     favoriteCount: project.favoriteCount,
     viewCount: project.viewCount,
+    downloadCount: project.downloadCount,
     visibility: project.visibility,
     reviewStatus: project.reviewStatus,
     createdAt: project.createdAt.toISOString(),
@@ -121,8 +132,8 @@ export async function POST(request: Request) {
   const requestedId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
   const existing = requestedId ? await prisma.studioProject.findFirst({ where: { id: requestedId, userId: guard.user.id }, select: { id: true, thumbnailUrl: true } }) : null
   const project = existing
-    ? await prisma.studioProject.update({ where: { id: existing.id }, data: { toolSlug, title, description, version: 1, data, ...(thumbnailUrl ? { thumbnailUrl } : {}), lastOpenedAt: new Date() } })
-    : await prisma.studioProject.create({ data: { userId: guard.user.id, toolSlug, title, description, version: 1, data, ...(thumbnailUrl ? { thumbnailUrl } : {}), lastOpenedAt: new Date() } })
+    ? await prisma.studioProject.update({ where: { id: existing.id }, data: { toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, ...(thumbnailUrl ? { thumbnailUrl } : {}), lastOpenedAt: new Date() } })
+    : await prisma.studioProject.create({ data: { userId: guard.user.id, toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, ...(thumbnailUrl ? { thumbnailUrl } : {}), lastOpenedAt: new Date() } })
   const uploadedThumbnail = await uploadStudioThumbnail(thumbnailUrl, guard.user.id, project.id, existing?.thumbnailUrl || null)
   const persistedProject = uploadedThumbnail && uploadedThumbnail !== project.thumbnailUrl
     ? await prisma.studioProject.update({ where: { id: project.id }, data: { thumbnailUrl: uploadedThumbnail } })

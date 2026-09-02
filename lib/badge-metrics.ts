@@ -91,6 +91,10 @@ const BADGE_RULE_METRIC_LOADERS: Record<SupportedBadgeRuleType, BadgeMetricLoade
   // service because its metric depends on a configured activityId and the
   // check-in source/time window, not on a scalar user counter.
   ACTIVITY_PARTICIPATION: async () => 0,
+  // Birthday/zodiac qualification is a typed month/day predicate handled by
+  // evaluateBadgeRule; these scalar loaders are intentionally inert.
+  BIRTHDAY_ZODIAC: async () => 0,
+  BIRTHDAY_TODAY: async () => 0,
 }
 
 export function getBadgeMetricLoader(ruleType: SupportedBadgeRuleType) {

@@ -1,7 +1,9 @@
 import type { BeadMaterial, BeadMaterialSummary, BeadPaletteColor, BeadPatternGrid } from './types'
-import { EMPTY_CELL } from './types'
+import { EMPTY_CELL, MAX_BEAD_DIMENSION } from './types'
 
 export function createDemoPattern(palette: BeadPaletteColor[], width = 29, height = 29): BeadPatternGrid {
+  width = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(width)))
+  height = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(height)))
   const cells = new Array<number>(width * height).fill(EMPTY_CELL)
   const set = (x: number, y: number, color: number) => {
     if (x >= 0 && y >= 0 && x < width && y < height) cells[y * width + x] = color
@@ -34,7 +36,7 @@ export function calculateMaterialList(pattern: BeadPatternGrid, packSize = 500):
   })
   const totalBeads = [...counts.values()].reduce((sum, value) => sum + value, 0)
   const materials: BeadMaterial[] = [...counts.entries()]
-    .sort((left, right) => right[1] - left[1])
+    .sort((left, right) => right[1] - left[1] || (pattern.palette[left[0]]?.code || '').localeCompare(pattern.palette[right[0]]?.code || ''))
     .map(([index, quantity]) => ({
       ...pattern.palette[index],
       index,

@@ -120,6 +120,22 @@ test('clinic consultation input preserves business validation and safe diagnosti
   assert.doesNotMatch(clinicApi, /console\.error\([^\n]*(content|body)/i)
 })
 
+test('clinic nested replies keep the direct target, notify only that author, and flatten visually', () => {
+  const service = read('lib/clinic-service.ts')
+  const api = read('app/api/clinic/[recordId]/consultations/route.ts')
+  const detail = read('components/clinic/ClinicDetailClient.tsx')
+
+  assert.match(api, /parentId: sanitizeText\(body\?\.parentId, 80\) \|\| null/)
+  assert.match(service, /parentId: parent\?\.id \|\| null/)
+  assert.doesNotMatch(service, /NESTING_TOO_DEEP/)
+  assert.match(service, /const rootId = resolveRootId\(row\.id\)/)
+  assert.match(service, /if \(root\) root\.replies\.push\(item\)/)
+  assert.match(service, /const recipientId = \(parent\?\.authorId \|\| record\.authorId\)/)
+  assert.match(detail, /onReply=\{\(id\) =>/)
+  assert.match(detail, /onClick=\{\(\) => onReply\(item\.id\)\}/)
+  assert.match(detail, /item\.replyToName/)
+})
+
 test('clinic mobile layout uses one-column hero, scrollable tabs, compact actions and bounded composer', () => {
   const css = read('app/globals.css')
   const mobileCss = css

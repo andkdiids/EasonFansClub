@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 import { formatUid } from '@/lib/uid'
 import type { SalonCommentView } from '@/lib/salon'
 
@@ -39,11 +41,14 @@ export function SalonComments({ postId, initialComments, initialCommentCount, in
   const [nextCursor, setNextCursor] = useState(initialNextCursor)
   const [error, setError] = useState('')
   const tree = useMemo(() => buildCommentTree(comments), [comments])
+  const contentLength = getReplyLengthMetrics(content)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!currentUserId) { window.location.href = `/login?redirect=${encodeURIComponent(`/salon/${postId}#salon-comments`)}`; return }
-    if (submitting || content.trim().length < 2) { setError('评论至少需要 2 个字符'); return }
+    if (submitting) return
+    if (contentLength.exceededBy > 0) { setError(replyTooLongMessage(contentLength, replyTo ? '回复' : '评论')); return }
+    if (contentLength.actualLength < 2) { setError('评论至少需要 2 个字符'); return }
     setSubmitting(true)
     setError('')
     try {
@@ -98,7 +103,7 @@ export function SalonComments({ postId, initialComments, initialCommentCount, in
   }
 
   return <section id="salon-comments" className="salon-comments"><div className="salon-comments-heading"><div><p className="salon-kicker">DISCUSSION</p><h2>评论 {commentCount}</h2></div>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="salon-secondary-button">{loadingMore ? '加载中…' : '加载更多'}</button> : null}</div>
-    {currentUserId ? <form className="salon-comment-form" onSubmit={submit}>{replyTo ? <div className="salon-reply-target">正在回复 {replyTo.author.nickname}<button type="button" onClick={() => setReplyTo(null)}>取消</button></div> : null}<textarea value={content} onChange={(event) => setContent(event.target.value)} rows={3} maxLength={2000} placeholder={replyTo ? `回复 ${replyTo.author.nickname}…` : '留下你的现场感受…'} /><div><span>{content.length}/2000</span><button type="submit" disabled={submitting}>{submitting ? '发布中…' : '发表评论'}</button></div></form> : <p className="salon-comment-login"><Link href={`/login?redirect=${encodeURIComponent(`/salon/${postId}#salon-comments`)}`}>登录</Link> 后参与评论。</p>}
+    {currentUserId ? <form className="salon-comment-form" onSubmit={submit}>{replyTo ? <div className="salon-reply-target">正在回复 {replyTo.author.nickname}<button type="button" onClick={() => setReplyTo(null)}>取消</button></div> : null}<textarea value={content} onChange={(event) => setContent(event.target.value)} rows={3} placeholder={replyTo ? `回复 ${replyTo.author.nickname}…` : '留下你的现场感受…'} /><div><ReplyLengthCounter value={content} /><button type="submit" disabled={submitting || contentLength.exceededBy > 0}>{submitting ? '发布中…' : '发表评论'}</button></div></form> : <p className="salon-comment-login"><Link href={`/login?redirect=${encodeURIComponent(`/salon/${postId}#salon-comments`)}`}>登录</Link> 后参与评论。</p>}
     {error ? <p className="salon-form-error" role="alert">{error}</p> : null}
     {!tree.length ? <p className="salon-comments-empty">还没有评论，来留下第一句吧。</p> : <div className="salon-comment-list">{tree.map((comment) => <SalonCommentItem key={comment.id} comment={comment} depth={0} currentUserId={currentUserId} canModerate={canModerate} onReply={setReplyTo} onDelete={remove} />)}</div>}
   </section>

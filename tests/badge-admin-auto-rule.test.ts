@@ -47,9 +47,9 @@ test('MANUAL and EVENT cannot carry a structured rule', () => {
 })
 
 test('registry is the only rule catalog used by the admin surface', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 15)
+  assert.equal(BADGE_RULE_TYPES.length, 17)
   assert.ok(BADGE_RULE_TYPES.every((ruleType) => BADGE_RULE_REGISTRY[ruleType].label && BADGE_RULE_REGISTRY[ruleType].dataDescription))
-  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 15)
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 17)
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
   assert.match(manager, /BADGE_ADMIN_RULE_TYPES\.filter/)
   assert.match(manager, /BADGE_RULE_TYPE_DESCRIPTIONS\[draft\.ruleType\]/)
@@ -63,6 +63,23 @@ test('指定活动参与规则使用活动目标而不是数值阈值', () => {
   assert.match(parseBadgeRuleInput({ ruleType: 'ACTIVITY_PARTICIPATION', configJson: {} }).error || '', /活动/)
   assert.match(read('app/admin/badges/BadgeAdminManager.tsx'), /api\/admin\/badges\/activities/)
   assert.match(read('app/api/admin/badges/activities/route.ts'), /startsAt: true/)
+})
+
+test('星座与生日当天规则使用独立配置并隐藏数值条件', () => {
+  const parsed = parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', operator: 'GTE', threshold: null, configJson: { zodiac: 'TAURUS' } })
+  assert.equal(parsed.error, undefined)
+  assert.equal(parsed.rule?.threshold, null)
+  assert.deepEqual(parsed.rule?.configJson, { zodiac: 'TAURUS' })
+  assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', configJson: { zodiac: 'TAURUS' }, threshold: 1 }).error || '', /不需要数值阈值/)
+  const manager = read('app/admin/badges/BadgeAdminManager.tsx')
+  assert.match(manager, /所属星座/)
+  assert.match(manager, /!isBirthdayRule\(draft\.ruleType\)/)
+  assert.match(manager, /星座周期内自动获得/)
+  assert.match(manager, /生日当天自动获得/)
+  const birthdayToday = parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', operator: 'GTE', configJson: {} })
+  assert.equal(birthdayToday.error, undefined)
+  assert.deepEqual(birthdayToday.rule?.configJson, {})
+  assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', configJson: { zodiac: 'ARIES' } }).error || '', /不需要星座/)
 })
 
 test('operator UI exposes only the supported GTE presentation', () => {
@@ -98,7 +115,7 @@ test('editing a legacy AUTO badge keeps the historical flow visible', () => {
 test('missing stored default copy is regenerated when a structured AUTO badge is opened', () => {
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
   assert.match(manager, /followsGeneratedDescription/)
-  assert.match(manager, /generateBadgeAcquisitionDescription\(rule!\.ruleType, rule!\.threshold\)/)
+  assert.match(manager, /generateBadgeAcquisitionDescription\(rule!\.ruleType, rule!\.threshold(?:, rule!\.configJson)?\)/)
 })
 
 test('explicit reset-to-default is enforced server-side', () => {

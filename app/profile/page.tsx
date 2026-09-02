@@ -4,6 +4,7 @@ import { ProfilePageSurface } from '@/components/ProfilePageSurface'
 import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { getCurrentUser } from '@/lib/auth'
 import { ensureBirthdayBadge } from '@/lib/birthday'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getGrowthSummarySafe } from '@/lib/growth'
 import { profileImageUrl } from '@/lib/images'
 import { loadProfileRecentMessagesPage } from '@/lib/profile-page'
@@ -72,6 +73,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   await ensureBirthdayBadge(user.id).catch((error) => {
     console.error('[profile.ensureBirthdayBadge]', error)
   })
+  triggerBadgeEvaluation(user.id, 'USER_ACTIVE')
 
   const displayName = getPublicUserDisplayName(profile)
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)

@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 
 export function ReplyForm({
   postId,
@@ -33,6 +35,8 @@ export function ReplyForm({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const contentLength = getReplyLengthMetrics(content)
+  const isOverLimit = contentLength.exceededBy > 0
 
   useEffect(() => {
     if (!autoFocus) return
@@ -57,6 +61,10 @@ export function ReplyForm({
   async function submitReply(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault()
     if (submittingRef.current) return
+    if (isOverLimit) {
+      setError(replyTooLongMessage(contentLength))
+      return
+    }
     if (!content.trim() && imageUrls.length === 0 && !pendingSticker) {
       setError('回复内容不能为空')
       return
@@ -137,7 +145,7 @@ export function ReplyForm({
           onChange={setContent}
           onMentionsChange={setMentions}
           onSubmitShortcut={() => void submitReply()}
-          canSubmitShortcut={!isSubmitting && (content.trim().length >= 2 || imageUrls.length > 0 || Boolean(pendingSticker))}
+          canSubmitShortcut={!isSubmitting && !isOverLimit && (content.trim().length >= 2 || imageUrls.length > 0 || Boolean(pendingSticker))}
         />
       </label>
       <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
@@ -153,8 +161,9 @@ export function ReplyForm({
           >
             😊 表情
           </button>
+          <ReplyLengthCounter value={content} />
         </div>
-        <button type="submit" disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
+        <button type="submit" disabled={isSubmitting || isOverLimit} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
           {isSubmitting ? '发布中...' : '发布回复'}
         </button>
         <StickerPicker

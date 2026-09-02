@@ -21,7 +21,7 @@ function projectMetadata(data: Prisma.JsonValue) {
   }
 }
 
-function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; likeCount: number; favoriteCount: number; viewCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }) {
+function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; likeCount: number; favoriteCount: number; viewCount: number; downloadCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }) {
   return {
     id: project.id,
     toolSlug: project.toolSlug,
@@ -33,6 +33,7 @@ function projectView(project: { id: string; toolSlug: string; title: string; des
     likeCount: project.likeCount,
     favoriteCount: project.favoriteCount,
     viewCount: project.viewCount,
+    downloadCount: project.downloadCount,
     visibility: project.visibility,
     reviewStatus: project.reviewStatus,
     createdAt: project.createdAt.toISOString(),

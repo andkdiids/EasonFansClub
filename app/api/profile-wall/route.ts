@@ -13,6 +13,7 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { upsertNotification } from '@/lib/notification-write'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -297,7 +298,9 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const receiverUid = Number(body?.receiverUid)
   const parentId = sanitizeText(body?.parentId, 80) || null
-  const rawContent = sanitizeText(body?.content, 500)
+  const contentLength = getReplyLengthMetrics(body?.content)
+  if (contentLength.exceededBy > 0) return NextResponse.json({ ok: false, ...replyTooLongPayload(contentLength, parentId ? '回复' : '留言') }, { status: 400 })
+  const rawContent = contentLength.content
   if ((await checkBannedWords(rawContent)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   if (!rawContent) return NextResponse.json({ message: '留言内容不能为空' }, { status: 400 })
   if (!Number.isSafeInteger(receiverUid) || receiverUid <= 0) return NextResponse.json({ message: '用户不存在' }, { status: 404 })

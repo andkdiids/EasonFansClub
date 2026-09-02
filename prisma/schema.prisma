@@ -467,6 +467,8 @@ enum BadgeRuleType {
   RATING_COUNT
   BADGE_SERIES_COMPLETE
   ACTIVITY_PARTICIPATION
+  BIRTHDAY_ZODIAC
+  BIRTHDAY_TODAY
 }
 
 enum BadgeRuleOperator {
@@ -3618,6 +3620,7 @@ model StudioProject {
   likeCount             Int                       @default(0)
   favoriteCount         Int                       @default(0)
   viewCount             Int                       @default(0)
+  downloadCount         Int                       @default(0)
   visibility            StudioProjectVisibility   @default(PRIVATE)
   reviewStatus          StudioProjectReviewStatus @default(NONE)
   createdAt             DateTime                  @default(now())

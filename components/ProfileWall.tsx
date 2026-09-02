@@ -10,6 +10,8 @@ import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 
 type WallSender = {
   uid: number
@@ -144,6 +146,8 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   const [error, setError] = useState('')
   const [pagination, setPagination] = useState<WallPagination>(EMPTY_WALL_PAGINATION)
   const replyComposerRef = useRef<HTMLTextAreaElement | null>(null)
+  const contentLength = getReplyLengthMetrics(content)
+  const replyContentLength = getReplyLengthMetrics(replyContent)
 
   const replaceWallPage = useCallback((nextPage: number, clearFocus = false) => {
     const safePage = Math.max(1, Math.trunc(nextPage) || 1)
@@ -235,7 +239,12 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   }
 
   async function submitRoot() {
-    if (submitting || !content.trim()) return
+    if (submitting) return
+    if (contentLength.exceededBy > 0) {
+      setError(replyTooLongMessage(contentLength, '留言'))
+      return
+    }
+    if (!content.trim()) return
     setSubmitting(true)
     setError('')
     try {
@@ -263,7 +272,12 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   }
 
   async function submitReply() {
-    if (replySubmitting || !replyTarget || !replyContent.trim()) return
+    if (replySubmitting || !replyTarget) return
+    if (replyContentLength.exceededBy > 0) {
+      setError(replyTooLongMessage(replyContentLength))
+      return
+    }
+    if (!replyContent.trim()) return
     setReplySubmitting(true)
     setError('')
     const parentId = replyTarget.id
@@ -323,13 +337,13 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
         <div className="mt-4 rounded-2xl bg-sky-50/75 p-3">
           <textarea
             value={content}
-            onChange={(event) => setContent(event.target.value.slice(0, 500))}
+            onChange={(event) => setContent(event.target.value)}
             className="min-h-20 w-full resize-none rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 outline-none"
             placeholder="发表新的一级留言..."
           />
           <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="text-xs font-bold text-slate-400">{content.length}/500</span>
-            <button onClick={submitRoot} disabled={submitting || !content.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
+            <ReplyLengthCounter value={content} />
+            <button onClick={submitRoot} disabled={submitting || contentLength.exceededBy > 0 || !content.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
               {submitting ? '发布中...' : '发布'}
             </button>
           </div>
@@ -358,22 +372,23 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
 }
 
 function WallInlineReplyComposer({ target, value, submitting, textareaRef, onChange, onSubmit, onCancel }: { target: WallReplyTarget; value: string; submitting: boolean; textareaRef: RefObject<HTMLTextAreaElement | null>; onChange: (value: string) => void; onSubmit: () => void; onCancel: () => void }) {
+  const length = getReplyLengthMetrics(value)
   return (
     <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/80 p-3">
       <p className="text-xs font-black text-brand-700">回复 @{target.name}</p>
       <textarea
         ref={textareaRef}
         value={value}
-        onChange={(event) => onChange(event.target.value.slice(0, 500))}
+        onChange={(event) => onChange(event.target.value)}
         className="mt-2 min-h-20 w-full resize-none rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 outline-none placeholder:text-slate-400"
         placeholder="请输入回复内容..."
         aria-label={`回复 @${target.name}`}
       />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-        <span className="text-xs font-bold text-slate-400">{value.length}/500</span>
+        <ReplyLengthCounter value={value} />
         <div className="flex items-center gap-2">
           <button onClick={onCancel} className="rounded-full border border-sky-200 px-4 py-2 text-xs font-black text-brand-700" type="button">取消</button>
-          <button onClick={onSubmit} disabled={submitting || !value.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
+          <button onClick={onSubmit} disabled={submitting || length.exceededBy > 0 || !value.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
             {submitting ? '发送中...' : '发送'}
           </button>
         </div>

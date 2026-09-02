@@ -134,6 +134,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         ? `观看「${target.MusicTour.name} · ${target.city} · ${target.concertDate.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })}」后获得`
         : `观看「${'name' in target ? target.name : ''}」巡演任意一场后获得`
     }
+    if (parsed.rule?.ruleType === 'BIRTHDAY_ZODIAC' || parsed.rule?.ruleType === 'BIRTHDAY_TODAY') data.category = 'BIRTHDAY'
     if (parsed.rule?.ruleType === 'ACTIVITY_PARTICIPATION') {
       const config = parsed.rule.configJson as { activityId?: string }
       const activity = await prisma.activity.findUnique({ where: { id: config.activityId }, select: { id: true, title: true } })
@@ -170,7 +171,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const hasDescription = 'acquisitionDescription' in body
     const requestedDescription = typeof data.acquisitionDescription === 'string' ? data.acquisitionDescription.trim() : ''
     if (nextGrantType === 'AUTO' && effectiveRule) {
-      const generatedDescription = targetGeneratedDescription || generateBadgeAcquisitionDescription(effectiveRule.ruleType, effectiveRule.threshold)
+      const generatedDescription = targetGeneratedDescription || generateBadgeAcquisitionDescription(effectiveRule.ruleType, effectiveRule.threshold, effectiveRule.configJson)
       const explicitlyResetToDefault = body.acquisitionDescriptionCustomized === false
       const explicitlyCustomized = body.acquisitionDescriptionCustomized === true
       if (explicitlyResetToDefault) {
@@ -266,7 +267,7 @@ export async function PATCH(request: Request, context: RouteContext) {
           actorId: guard.user.id,
           action: previous.BadgeRule ? 'BADGE_AUTO_RULE_UPDATE' : 'BADGE_AUTO_RULE_CREATE',
           badgeId,
-          detail: { ruleType: effectiveRule.ruleType, operator: effectiveRule.operator, threshold: effectiveRule.threshold, isEnabled: nextGrantType === 'AUTO' && effectiveRule.isEnabled },
+          detail: { ruleType: effectiveRule.ruleType, operator: effectiveRule.operator, threshold: effectiveRule.threshold, configJson: effectiveRule.configJson, isEnabled: nextGrantType === 'AUTO' && effectiveRule.isEnabled },
         })
       }
       return { updated, affectedUsers }

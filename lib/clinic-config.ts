@@ -1,8 +1,9 @@
 import type { ClinicCategory, ClinicIdentityMode, ClinicNeedType } from '@prisma/client'
+import { REPLY_MAX_LENGTH } from '@/lib/reply-length'
 
 export const CLINIC_PAGE_SIZE = 20
 export const CLINIC_RECORD_MAX_LENGTH = 2000
-export const CLINIC_CONSULTATION_MAX_LENGTH = 1000
+export const CLINIC_CONSULTATION_MAX_LENGTH = REPLY_MAX_LENGTH
 export const CLINIC_RECORD_DAILY_LIMIT = 20
 export const CLINIC_RECORD_RATE_LIMIT_SECONDS = 60
 export const CLINIC_CONSULTATION_RATE_LIMIT_SECONDS = 10

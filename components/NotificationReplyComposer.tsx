@@ -8,6 +8,8 @@ import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { shouldSubmitCommentOnEnter } from '@/lib/comment-keyboard'
 import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
+import { getReplyLengthMetrics, replyTooLongMessage, REPLY_MAX_LENGTH } from '@/lib/reply-length'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 
 export type NotificationReplyPayload = {
   content: string
@@ -19,7 +21,7 @@ export type NotificationReplyPayload = {
 export function NotificationReplyComposer({
   actorName,
   initialContent = '',
-  maxLength = 2000,
+  maxLength = REPLY_MAX_LENGTH,
   rich = false,
   submitting = false,
   disabled = false,
@@ -47,7 +49,9 @@ export function NotificationReplyComposer({
   const [error, setError] = useState('')
   const isDisabled = disabled || submitting
   const isDesktop = useIsDesktopMediaQuery()
-  const canSubmitShortcut = !isDisabled && (content.trim().length > 0 || imageUrls.length > 0 || Boolean(pendingSticker))
+  const length = getReplyLengthMetrics(content, maxLength)
+  const isOverLimit = length.exceededBy > 0
+  const canSubmitShortcut = !isDisabled && !isOverLimit && (content.trim().length > 0 || imageUrls.length > 0 || Boolean(pendingSticker))
 
   function updateContent(next: string) {
     setContent(next)
@@ -58,7 +62,7 @@ export function NotificationReplyComposer({
     const input = textareaRef.current
     const start = input?.selectionStart ?? content.length
     const end = input?.selectionEnd ?? content.length
-    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`.slice(0, maxLength)
+    const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`
     const cursor = Math.min(start + emoji.length, next.length)
     updateContent(next)
     window.requestAnimationFrame(() => {
@@ -69,6 +73,10 @@ export function NotificationReplyComposer({
 
   async function submit() {
     if (isDisabled) return
+    if (isOverLimit) {
+      setError(replyTooLongMessage(length))
+      return
+    }
     if (!content.trim() && imageUrls.length === 0 && !pendingSticker) {
       setError('回复内容不能为空')
       return
@@ -109,13 +117,11 @@ export function NotificationReplyComposer({
           onMentionsChange={setMentions}
           onSubmitShortcut={() => void submit()}
           canSubmitShortcut={canSubmitShortcut}
-          maxLength={maxLength}
         />
       ) : (
         <textarea
           ref={textareaRef}
           value={content}
-          maxLength={maxLength}
           onChange={(event) => updateContent(event.target.value)}
           onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
             if (!shouldSubmitCommentOnEnter(event, { isDesktop, canSubmit: canSubmitShortcut })) return
@@ -147,17 +153,17 @@ export function NotificationReplyComposer({
               textareaRef={textareaRef}
               value={content}
               onChange={updateContent}
-              maxLength={maxLength}
               disabled={isDisabled}
               triggerLabel="选择 Emoji 表情"
             />
           )}
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <ReplyLengthCounter value={content} maxLength={maxLength} />
           <button type="button" onClick={onCancel} className="min-h-9 rounded-sm border border-sky-100 px-3 text-xs font-black text-slate-600">取消</button>
           <button
             type="button"
-            disabled={isDisabled}
+            disabled={isDisabled || isOverLimit}
             onClick={() => void submit()}
             className="min-h-9 max-w-full rounded-sm bg-brand-950 px-3 text-xs font-black text-white disabled:opacity-50"
           >

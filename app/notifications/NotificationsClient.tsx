@@ -18,6 +18,7 @@ import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy
 import { safeInternalPathOrNull } from '@/lib/url-safety'
 import type { FriendDockUser } from '@/lib/friend-types'
 import { getFriendDisplayName, normalizeFriendRemark } from '@/lib/friend-display-name'
+import { REPLY_MAX_LENGTH } from '@/lib/reply-length'
 
 // 系统类通知（使用网站 Logo 头像，而非用户头像或默认黑色方块）
 const SYSTEM_LIKE_TYPES = new Set(['SYSTEM', 'ADMIN', 'BADGE', 'BIRTHDAY_GREETING'])
@@ -1118,7 +1119,7 @@ export function NotificationsClient({
           <NotificationReplyComposer
             actorName={item.actorName}
             initialContent={replyDrafts[itemKey] || ''}
-            maxLength={item.replyTarget.kind === 'daily-message' ? 300 : item.replyTarget.kind === 'profile-wall' ? 500 : 5000}
+            maxLength={REPLY_MAX_LENGTH}
             rich={item.replyTarget.kind === 'post'}
             submitting={sendingReply === itemKey}
             disabled={sendingReply === itemKey}

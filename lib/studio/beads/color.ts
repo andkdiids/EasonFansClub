@@ -32,6 +32,11 @@ export function rgbToLab(rgb: BeadRgb) {
   return xyzToLab(rgbToXyz(rgb))
 }
 
+/** CIE76 (Euclidean distance in the perceptual LAB space). */
+export function deltaE76(left: BeadLab, right: BeadLab) {
+  return Math.hypot(left.L - right.L, left.a - right.a, left.b - right.b)
+}
+
 /** CIEDE2000 color difference. */
 export function deltaE2000(left: BeadLab, right: BeadLab) {
   const c1 = Math.hypot(left.a, left.b)
@@ -77,16 +82,17 @@ export function deltaE2000(left: BeadLab, right: BeadLab) {
 
 function colorDistance(left: BeadRgb, leftLab: BeadLab | null, right: BeadPaletteColor, mode: ColorMatchMode) {
   if (mode === 'fast') return (left.r - right.rgb.r) ** 2 + (left.g - right.rgb.g) ** 2 + (left.b - right.rgb.b) ** 2
-  const difference = deltaE2000(leftLab || rgbToLab(left), right.lab)
-  return mode === 'precise' ? difference : difference * 1.02
+  const lab = leftLab || rgbToLab(left)
+  return mode === 'precise' ? deltaE2000(lab, right.lab) : deltaE76(lab, right.lab)
 }
 
 export function findNearestBeadColor(rgb: BeadRgb, palette: readonly BeadPaletteColor[], mode: ColorMatchMode = 'balanced') {
   if (!palette.length) return -1
-  let bestIndex = 0
+  let bestIndex = -1
   let bestDistance = Number.POSITIVE_INFINITY
   const lab = mode === 'fast' ? null : rgbToLab(rgb)
   palette.forEach((color, index) => {
+    if (color.enabled === false) return
     const distance = colorDistance(rgb, lab, color, mode)
     if (distance < bestDistance) {
       bestDistance = distance
@@ -172,5 +178,5 @@ export function hexToRgb(hex: string): BeadRgb {
 
 export function paletteColor(brand: string, series: string, code: string, name: string, hex: string): BeadPaletteColor {
   const rgb = hexToRgb(hex)
-  return { brand, series, code, name, hex: hex.toUpperCase(), rgb, lab: rgbToLab(rgb) }
+  return { brand, series, code, name, hex: hex.toUpperCase(), rgb, lab: rgbToLab(rgb), enabled: true, groups: [], source: 'existing' }
 }

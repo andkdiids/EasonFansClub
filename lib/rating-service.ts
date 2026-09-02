@@ -3,6 +3,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { publicImageVariantUrl, type ImageVariant } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 import {
   formatAverageScore,
   normalizeRatingLanguage,
@@ -138,9 +139,10 @@ export type AdminRatingOverview = {
 
 export class RatingServiceError extends Error {
   constructor(
-    public readonly code: 'TARGET_NOT_FOUND' | 'INVALID_SCORE' | 'ALREADY_RATED' | 'RATING_REQUIRED' | 'ALREADY_REVIEWED' | 'REVIEW_NOT_FOUND' | 'FORBIDDEN' | 'LIKE_TARGET_NOT_FOUND',
+    public readonly code: 'TARGET_NOT_FOUND' | 'INVALID_SCORE' | 'ALREADY_RATED' | 'RATING_REQUIRED' | 'ALREADY_REVIEWED' | 'REVIEW_NOT_FOUND' | 'FORBIDDEN' | 'LIKE_TARGET_NOT_FOUND' | 'REPLY_TOO_LONG',
     message: string,
     public readonly status = 400,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message)
     this.name = 'RatingServiceError'
@@ -687,6 +689,11 @@ export async function createRatingWithOptionalReview({
   content?: string | null
 }) {
   if (!Number.isInteger(score) || score < 1 || score > 10) throw new RatingServiceError('INVALID_SCORE', '评分必须是 1 到 10 的整数', 400)
+  const reviewLength = getReplyLengthMetrics(content)
+  if (reviewLength.exceededBy > 0) {
+    const tooLong = replyTooLongPayload(reviewLength, '评价')
+    throw new RatingServiceError(tooLong.code, tooLong.message, 400, tooLong)
+  }
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -712,7 +719,7 @@ export async function createRatingWithOptionalReview({
         },
         select: { id: true, score: true, createdAt: true },
       })
-      const reviewContent = content?.trim() || ''
+      const reviewContent = reviewLength.content
       let review: { id: string; content: string; createdAt: Date } | null = null
       if (reviewContent) {
         review = await tx.ratingReview.create({
@@ -738,7 +745,12 @@ export async function createRatingWithOptionalReview({
 }
 
 export async function createRatingReview({ target, targetId, userId, content }: { target: RatingTarget; targetId: string; userId: string; content: string }) {
-  const value = content.trim()
+  const reviewLength = getReplyLengthMetrics(content)
+  if (reviewLength.exceededBy > 0) {
+    const tooLong = replyTooLongPayload(reviewLength, '评价')
+    throw new RatingServiceError(tooLong.code, tooLong.message, 400, tooLong)
+  }
+  const value = reviewLength.content
   if (!value) throw new RatingServiceError('RATING_REQUIRED', '评价内容不能为空', 400)
   try {
     return await prisma.$transaction(async (tx) => {

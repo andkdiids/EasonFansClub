@@ -7381,6 +7381,29 @@ body:has(.duel-page) .app-page-content {
   background: transparent;
 }
 .community-home .community-content { box-sizing: border-box; }
+
+/* Keep the home notice compact even if a legacy page-layout parent tries to
+   stretch its direct children. The notice stays a single horizontal row;
+   only the message text is allowed to shrink and ellipsize. */
+.community-home #community-content > .community-announcement {
+  align-self: flex-start;
+  align-items: center;
+  box-sizing: border-box;
+  height: auto;
+  max-height: none;
+  overflow: hidden;
+  padding-block: 14px;
+}
+.community-home #community-content > .community-announcement > strong {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.community-home #community-content > .community-announcement > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .home-first-row > .home-primary-columns {
   display: contents;
   height: auto;
@@ -8039,4 +8062,13 @@ body:has(.duel-page) .app-page-content {
   .page-layout-editor-stage {
     padding: 0.75rem;
   }
+}
+
+/* Reply controls shared by the clinic composer. */
+.clinic-consultation-target { margin:10px 0 0; color:var(--primary); font-size:11px; font-weight:900; }
+.clinic-composer-submit { display:flex; align-items:center; gap:10px; }
+.clinic-composer-submit .clinic-primary-button { width:auto; }
+@media (max-width: 767px) {
+  .clinic-composer-submit { width:100%; justify-content:space-between; }
+  .clinic-composer-submit .clinic-primary-button { flex:1; width:auto; }
 }

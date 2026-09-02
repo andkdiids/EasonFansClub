@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation'
 import { BackButton } from '@/components/BackButton'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FeedbackImageUploader, type UploadedFeedbackAttachment } from '@/components/FeedbackImageUploader'
+import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH } from '@/lib/feedback'
+import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
@@ -208,6 +210,11 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
   async function submitReply(event: FormEvent) {
     event.preventDefault()
     if (!detail || replying || uploadingReply) return
+    const replyLength = getReplyLengthMetrics(reply)
+    if (replyLength.exceededBy > 0) {
+      setError(replyTooLongMessage(replyLength))
+      return
+    }
     setReplying(true)
     setError('')
     setMessage('')
@@ -342,6 +349,7 @@ function FeedbackThread({
   uploadingReply: boolean
 }) {
   const isClosed = detail.status === 'RESOLVED' || detail.status === 'CLOSED'
+  const replyLength = getReplyLengthMetrics(reply)
   const focusMissing = Boolean(focusId && !(detail.replies || []).some((item) => item.id === focusId))
   useEffect(() => {
     if (!focusId || focusMissing) return
@@ -388,8 +396,9 @@ function FeedbackThread({
       {!isClosed ? (
         <form onSubmit={submitReply} className="space-y-3">
           <textarea value={reply} onChange={(e) => setReply(e.target.value)} className="min-h-28 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="继续补充说明或回复管理员" />
+          <ReplyLengthCounter value={reply} />
           <FeedbackImageUploader key={`reply-${uploadReset}-${detail.id}`} onChange={setReplyAttachments} onBusyChange={setUploadingReply} />
-          <button disabled={replying || uploadingReply || !reply.trim()} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : uploadingReply ? '请等待图片上传完成' : '发送回复'}</button>
+          <button disabled={replying || uploadingReply || replyLength.exceededBy > 0 || !reply.trim()} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">{replying ? '发送中...' : uploadingReply ? '请等待图片上传完成' : '发送回复'}</button>
         </form>
       ) : (
         <p className="rounded-2xl bg-slate-50 px-4 py-2 text-sm font-black text-slate-500">该反馈已完成，不能继续追加。如需继续沟通，请提交新的反馈。</p>

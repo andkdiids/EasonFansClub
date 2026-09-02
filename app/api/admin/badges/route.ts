@@ -58,7 +58,7 @@ export async function POST(request: Request) {
   data.code = generatedCode
   data.slug = generatedCode
   if (parsed.rule) {
-    const generatedDescription = generateBadgeAcquisitionDescription(parsed.rule.ruleType, parsed.rule.threshold)
+    const generatedDescription = generateBadgeAcquisitionDescription(parsed.rule.ruleType, parsed.rule.threshold, parsed.rule.configJson)
     const requestedDescription = typeof body.acquisitionDescription === 'string' ? body.acquisitionDescription.trim() : ''
     const customized = body.acquisitionDescriptionCustomized === false
       ? false
@@ -97,6 +97,7 @@ export async function POST(request: Request) {
       data.acquisitionDescriptionCustomized = false
     }
   }
+  if (parsed.rule?.ruleType === 'BIRTHDAY_ZODIAC' || parsed.rule?.ruleType === 'BIRTHDAY_TODAY') data.category = 'BIRTHDAY'
   if (parsed.rule?.ruleType === 'ACTIVITY_PARTICIPATION') {
     const config = parsed.rule.configJson as { activityId?: string }
     const activity = await prisma.activity.findUnique({ where: { id: config.activityId }, select: { id: true, title: true, status: true } })
@@ -136,6 +137,7 @@ export async function POST(request: Request) {
               ruleType: parsed.rule.ruleType,
               operator: parsed.rule.operator,
               threshold: parsed.rule.threshold,
+              configJson: parsed.rule.configJson,
               isEnabled: parsed.rule.isEnabled,
             },
           } : {}),
@@ -145,7 +147,7 @@ export async function POST(request: Request) {
         actorId: guard.user.id,
         action: 'BADGE_AUTO_RULE_CREATE',
         badgeId: created.id,
-        detail: { ruleType: parsed.rule.ruleType, operator: parsed.rule.operator, threshold: parsed.rule.threshold },
+        detail: { ruleType: parsed.rule.ruleType, operator: parsed.rule.operator, threshold: parsed.rule.threshold, configJson: parsed.rule.configJson },
       })
       return badgeWithRule
     })

@@ -9,6 +9,7 @@ import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireUser, sanitizeT
 import { checkBannedWords, BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD } from '@/lib/content-moderation'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { decodeSocialCommentCursor, getPublicSocialPostComments } from '@/lib/social-posts'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
@@ -27,8 +28,10 @@ export async function POST(request: Request, context: RouteContext) {
   const { postId } = await context.params
   if (!/^[a-zA-Z0-9_-]{1,191}$/.test(postId)) return NextResponse.json({ message: '动态不存在' }, { status: 404 })
   const body = await request.json().catch(() => null)
-  const content = sanitizeText(body?.content, 500)
   const parentId = sanitizeText(body?.parentId, 191)
+  const contentLength = getReplyLengthMetrics(body?.content)
+  if (contentLength.exceededBy > 0) return NextResponse.json({ ok: false, ...replyTooLongPayload(contentLength, parentId ? '回复' : '评论') }, { status: 400 })
+  const content = contentLength.content
   if (!content) return NextResponse.json({ message: '评论内容不能为空' }, { status: 400 })
   if ((await checkBannedWords(content)).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })

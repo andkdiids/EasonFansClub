@@ -8,14 +8,15 @@ import {
 } from '@/lib/rating-service'
 import { parseRatingReviewSort, parseRatingScore } from '@/lib/rating-types'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
+import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 type Context = { params: Promise<{ albumId: string }> }
 
 function errorResponse(error: unknown) {
   if (isAuthServiceUnavailableError(error)) return NextResponse.json({ code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后重试' }, { status: 503 })
-  if (error instanceof RatingServiceError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status })
+  if (error instanceof RatingServiceError) return NextResponse.json({ code: error.code, message: error.message, ...(error.details || {}) }, { status: error.status })
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return NextResponse.json({ code: 'ALREADY_RATED', message: '你已经评价过这张专辑' }, { status: 409 })
   console.error('[ratings.album]', error)
   return NextResponse.json({ message: '评分服务暂时不可用，请稍后重试' }, { status: 503 })
@@ -42,7 +43,9 @@ export async function POST(request: Request, { params }: Context) {
   const body = await request.json().catch(() => null)
   const score = parseRatingScore(body?.score)
   if (score === null) return NextResponse.json({ code: 'INVALID_SCORE', message: '评分必须是 1 到 10 的整数' }, { status: 400 })
-  const content = sanitizeText(body?.content, 1000)
+  const contentLength = getReplyLengthMetrics(body?.content)
+  if (contentLength.exceededBy > 0) return NextResponse.json({ ok: false, ...replyTooLongPayload(contentLength, '评价') }, { status: 400 })
+  const content = contentLength.content
   if (content && (await checkBannedWords(content)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   try {
     const result = await createRatingWithOptionalReview({ target: 'album', targetId: albumId, userId: guard.user.id, score, content })

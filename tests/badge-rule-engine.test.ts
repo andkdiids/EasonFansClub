@@ -39,7 +39,7 @@ test('规则输入只接受受控类型、正整数阈值，首版后台只开�
 })
 
 test('规则注册表统一提供指标、文案、阈值、操作符和事件映射', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 15)
+  assert.equal(BADGE_RULE_TYPES.length, 17)
   for (const ruleType of BADGE_RULE_TYPES) {
     const definition = BADGE_RULE_REGISTRY[ruleType]
     assert.equal(definition.metricLoader, ruleType)
@@ -52,7 +52,7 @@ test('规则注册表统一提供指标、文案、阈值、操作符和事件�
       assert.equal(definition.threshold.min, 1)
       assert.equal(definition.threshold.max, 1_000_000_000)
     } else {
-      assert.ok('targetKind' in definition)
+      assert.ok('targetKind' in definition || ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY')
     }
   }
 })
@@ -74,6 +74,8 @@ test('默认获取文案集中生成，并覆盖所有首版支持指标', () =>
   assert.equal(generateBadgeAcquisitionDescription('ACCOUNT_AGE_DAYS', 365), '注册满 365 天后获得')
   assert.equal(generateBadgeAcquisitionDescription('DUEL_WIN_COUNT', 5), '累计赢得 5 场听听 1v1 对决后获得')
   assert.equal(generateBadgeAcquisitionDescription('RATING_COUNT', 10), '累计完成 10 次歌·颂评分后获得')
+  assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_ZODIAC', null, { zodiac: 'ARIES' }), '用户生日属于白羊座，并在白羊座星座周期内自动获得。')
+  assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_TODAY', null, {}), '生日当天自动获得。')
 })
 
 test('指标操作符支持 GTE、LTE、EQ，且边界值按规则计算', () => {
