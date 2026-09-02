@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   getDefaultPageLayoutConfig,
   getPageLayoutRegistry,
+  isEditablePageLayoutPageKey,
   PAGE_LAYOUT_REGISTRY,
   PAGE_MODULE_REGISTRY,
 } from '../lib/page-layout/registry'
@@ -34,12 +35,14 @@ function assertNoVisibleOverlap(config: PageLayoutConfig, device: PageLayoutDevi
 }
 
 test('页面与模块只由共享 Registry 驱动', () => {
-  assert.deepEqual(PAGE_LAYOUT_REGISTRY.map((page) => page.key), [...pageLayoutPageKeys])
+  assert.deepEqual(PAGE_LAYOUT_REGISTRY.map((page) => page.key), pageLayoutPageKeys.filter((page) => page !== 'home'))
+  assert.equal(isEditablePageLayoutPageKey('home'), false)
+  assert.equal(isEditablePageLayoutPageKey('checkin'), true)
   assert.equal(new Set(PAGE_LAYOUT_REGISTRY.map((page) => page.key)).size, PAGE_LAYOUT_REGISTRY.length)
   assert.equal(new Set(PAGE_MODULE_REGISTRY.map((module) => module.key)).size, PAGE_MODULE_REGISTRY.length)
 
   for (const definition of PAGE_MODULE_REGISTRY) {
-    assert.ok(PAGE_LAYOUT_REGISTRY.some((page) => page.key === definition.page), `${definition.key} references an unregistered page`)
+    assert.ok(definition.page === 'home' || PAGE_LAYOUT_REGISTRY.some((page) => page.key === definition.page), `${definition.key} references an unregistered page`)
     assert.ok(definition.componentKey, `${definition.key} has no component identity`)
     assert.ok(definition.name, `${definition.key} has no administrator-facing name`)
     assert.ok(definition.category, `${definition.key} has no category`)
@@ -87,14 +90,18 @@ test('严格保存拒绝可见模块重叠，读取旧布局时使用同一整�
   assert.equal(warnings.some((warning) => warning.key === 'home.featuredPosts' && warning.kind === 'DEPRECATED'), true)
 })
 
-test('真实首页与编辑器使用同一模块来源和真实 Renderer', () => {
+test('首页使用固定结构，其他页面继续使用真实 PageLayout Renderer', () => {
   const home = readFileSync('components/HomeLayoutSurface.tsx', 'utf8')
+  const communityPage = readFileSync('app/community/page.tsx', 'utf8')
   const editor = readFileSync('app/admin/layout-editor/LayoutEditorClient.tsx', 'utf8')
   const renderer = readFileSync('components/page-layout/PageLayoutRenderer.tsx', 'utf8')
 
-  for (const definition of getPageLayoutRegistry('home')) assert.match(home, new RegExp(`['"]${definition.key}['"]`))
-  assert.match(home, /<PageLayoutRenderer/)
-  assert.match(editor, /<HomeLayoutSurface/)
+  assert.match(home, /<HomeHero/)
+  assert.match(home, /home-first-row-data/)
+  assert.match(home, /home-secondary-columns/)
+  assert.doesNotMatch(home, /PageLayoutConfig|PageLayoutDevice|getPageLayoutModules|layoutConfig|layoutModule|visible\(/)
+  assert.doesNotMatch(communityPage, /getPublishedPageLayoutConfig|layoutConfig/)
+  assert.doesNotMatch(editor, /HomeLayoutSurface|homeSurface|pageKey === 'home'/)
   assert.match(editor, /<PageLayoutRenderer[\s\S]*mode="editor"/)
   assert.match(renderer, /data-layout-mode="editor"/)
   assert.match(renderer, /data-layout-mode="live"/)
@@ -103,7 +110,6 @@ test('真实首页与编辑器使用同一模块来源和真实 Renderer', () =>
 
 test('所有支持布局的前台页面都经过共享 PageLayoutRenderer', () => {
   const files = [
-    'components/HomeLayoutSurface.tsx',
     'components/CheckInLayoutSurface.tsx',
     'app/forum/page.tsx',
     'app/music/page.tsx',
@@ -112,4 +118,5 @@ test('所有支持布局的前台页面都经过共享 PageLayoutRenderer', () =
     'app/admin/page.tsx',
   ]
   for (const file of files) assert.match(readFileSync(file, 'utf8'), /PageLayoutRenderer/)
+  assert.doesNotMatch(readFileSync('components/HomeLayoutSurface.tsx', 'utf8'), /PageLayoutRenderer/)
 })

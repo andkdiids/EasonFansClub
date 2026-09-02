@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { HomeLayoutSurface, type HomeAnnouncement } from '@/components/HomeLayoutSurface'
 import { autoArrangePageLayoutItems, PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { createPageLayoutEditorModules, type LayoutEditorPreviewData } from '@/components/page-layout/LayoutEditorPreviewModules'
 import { PAGE_LAYOUT_REGISTRY } from '@/lib/page-layout/registry'
@@ -20,15 +19,9 @@ import {
   type SerializedPageLayout,
   type SerializedPageLayoutRevision,
 } from '@/lib/page-layout/types'
-import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 type PreviewPayload = LayoutEditorPreviewData & {
   pageKey: PageLayoutPageKey
   generatedAt: string
-  homeSurface?: {
-    siteConfig: SiteAppearanceConfig
-    slides: SiteHeroSlide[]
-    announcement: HomeAnnouncement | null
-  }
 }
 type CheckInPreviewState = 'pending' | 'completed'
 
@@ -383,7 +376,6 @@ export function LayoutEditorClient({
 
   const editorPreviewModules = createPageLayoutEditorModules({ pageKey, previewConfig, previewData, checkInPreviewState })
 
-  const homeSurface = previewData?.homeSurface
   const currentGrid = selected?.grid[device]
 
   return (
@@ -476,35 +468,21 @@ export function LayoutEditorClient({
               <button disabled={readOnly} onClick={() => updateDeviceItems((items) => autoArrangePageLayoutItems(pageKey, items, device))} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-black text-brand-700 disabled:opacity-50">自动整理</button>
             </div>
           </div>
-          {pageKey === 'home' ? (
-            homeSurface ? (
-              <EditorScaleStage viewportWidth={deviceMeta.viewportWidth}>
-                <HomeLayoutSurface
-                  layoutConfig={previewConfig}
-                  siteConfig={homeSurface.siteConfig}
-                  slides={homeSurface.slides}
-                  announcement={homeSurface.announcement}
-                  editor={{ mode: 'editor', device, selectedKey: selected?.key, readOnly, onSelect: (key) => { setSelectedKey(key); setSelectedRevision(null) }, onChange: (items) => updateDeviceItems(() => items), onAutoHeightChange: updateAutoHeight }}
-                />
-              </EditorScaleStage>
-            ) : <p className="rounded-md bg-white px-4 py-8 text-center text-sm font-black text-slate-500">正在加载真实首页组件预览…</p>
-          ) : (
-            <EditorScaleStage viewportWidth={deviceMeta.viewportWidth}>
-              <PageLayoutRenderer
-                pageKey={pageKey}
-                config={previewConfig}
-                modules={editorPreviewModules}
-                device={device}
-                mode="editor"
-                selectedKey={selected?.key || ''}
-                readOnly={readOnly}
-                onSelect={(key) => { setSelectedKey(key); setSelectedRevision(null) }}
-                onChange={(items) => updateDeviceItems(() => items)}
-                onAutoHeightChange={updateAutoHeight}
-                viewportWidth={deviceMeta.viewportWidth}
-              />
-            </EditorScaleStage>
-          )}
+          <EditorScaleStage viewportWidth={deviceMeta.viewportWidth}>
+            <PageLayoutRenderer
+              pageKey={pageKey}
+              config={previewConfig}
+              modules={editorPreviewModules}
+              device={device}
+              mode="editor"
+              selectedKey={selected?.key || ''}
+              readOnly={readOnly}
+              onSelect={(key) => { setSelectedKey(key); setSelectedRevision(null) }}
+              onChange={(items) => updateDeviceItems(() => items)}
+              onAutoHeightChange={updateAutoHeight}
+              viewportWidth={deviceMeta.viewportWidth}
+            />
+          </EditorScaleStage>
         </section>
 
         <aside className="space-y-4">
