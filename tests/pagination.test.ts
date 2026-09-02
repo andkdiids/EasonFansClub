@@ -55,12 +55,12 @@ test('pagination jump accepts valid pages, clamps overflow, and ignores invalid 
   assert.equal(parsePaginationJump('1.5', 3), null)
 })
 
-test('forum page data uses the URL page and only corrects it after a clamped response', () => {
-  const forumHome = readFileSync('components/ForumHome.tsx', 'utf8')
-  assert.match(forumHome, /page: String\(page\)/)
-  assert.match(forumHome, /currentPage=\{page\}/)
-  assert.match(forumHome, /if \(payload\.page !== page\) \{\s*router\.replace\(/)
-  assert.doesNotMatch(forumHome, /data\.page === page\) return\s*\n\s*router\.replace\(/)
+test('forum discovery feed uses a cursor for infinite scrolling instead of the removed list view page state', () => {
+  const forumDiscovery = readFileSync('components/ForumDiscoveryHome.tsx', 'utf8')
+  assert.match(forumDiscovery, /cursor: requestCursor/)
+  assert.match(forumDiscovery, /nextCursorRef/)
+  assert.match(forumDiscovery, /loadPage\(false\)/)
+  assert.doesNotMatch(forumDiscovery, /currentPage=|page: String\(page\)/)
 })
 
 test('pagination layout keeps controls aligned and hides edge buttons on very narrow forum screens', () => {
@@ -88,7 +88,6 @@ test('pagination component delegates to getPaginationItems and keeps UI unchange
 
 test('all list pages reference the unified Pagination component', () => {
   const referencing = [
-    'components/ForumHome.tsx',
     'components/CheckInMessagesPanel.tsx',
     'components/clinic/ClinicHomeClient.tsx',
     'components/FriendActivityPanel.tsx',

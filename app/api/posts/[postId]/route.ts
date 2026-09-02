@@ -26,6 +26,8 @@ import {
   findPublicPostReferences,
   findPublicUserMentions,
   hydrateRichTextReferences,
+  InvalidActivityReferenceError,
+  InvalidMaterialReferenceError,
   InvalidPostReferenceError,
   InvalidUserMentionError,
   validateAndNormalizeRichTextReferences,
@@ -745,8 +747,8 @@ async function handleEditPost(
       if (error instanceof InvalidPostMusicReferenceError) {
         return NextResponse.json({ message: error.message, errors: { content: '存在无效或未公开的 EasMusic 歌曲引用' } }, { status: 400 })
       }
-      if (error instanceof InvalidPostReferenceError || error instanceof InvalidUserMentionError) {
-        return NextResponse.json({ message: error.message, errors: { content: '存在无效或不可用的帖子/用户引用' } }, { status: 400 })
+      if (error instanceof InvalidPostReferenceError || error instanceof InvalidUserMentionError || error instanceof InvalidActivityReferenceError || error instanceof InvalidMaterialReferenceError) {
+        return NextResponse.json({ message: error.message, errors: { content: '存在无效或不可用的帖子/用户/活动/物料引用' } }, { status: 400 })
       }
       logPostEditError(error, postId, user.id, 'edit-music-reference-validation')
       return NextResponse.json({ message: '富文本引用暂时无法验证，请稍后重试' }, { status: 503 })

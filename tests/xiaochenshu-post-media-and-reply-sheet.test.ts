@@ -51,19 +51,18 @@ test('广场分区入口从共享目录补齐缺失的吟游诗人，并保留�
   assert.match(read('app/posts/[postId]/edit/page.tsx'), /boards=\{normalizeForumBoards\(boards\)\}/)
 })
 
-test('模式入口和热门文案位于统一的顶部操作区', () => {
+test('小臣书首页不显示模式切换入口，热门文案仍位于发现流顶部', () => {
   const home = read('components/ForumHome.tsx')
   const discovery = read('components/ForumDiscoveryHome.tsx')
   const replies = read('components/PostRepliesSection.tsx')
   const css = read('app/globals.css')
 
-  assert.match(home, /forum-hero-actions/)
-  assert.match(home, /forum-plaza-mode-button/)
-  assert.match(home, /切换到小臣书模式/)
-  assert.doesNotMatch(home, /forum-theme-switch-floating/)
-  assert.match(discovery, /forum-discovery-mode-button/)
-  assert.match(discovery, /切换到广场模式|onSwitchToPlaza/)
+  assert.match(home, /ForumDiscoveryHome/)
+  assert.doesNotMatch(home, /forum-hero-actions|forum-plaza-mode-button|切换到小臣书模式|forum-theme-switch-floating/)
+  assert.match(discovery, /forum-discovery-header-actions/)
+  assert.doesNotMatch(discovery, /forum-discovery-mode-button|切换到广场模式|onSwitchToPlaza/)
   assert.doesNotMatch(css, /forum-theme-switch-floating/)
+  assert.doesNotMatch(css, /forum-discovery-mode-button|forum-plaza-mode-button/)
   assert.match(replies, /热门 #\{index \+ 1\}/)
   assert.doesNotMatch(replies, /热度最高|最高热度/)
 })

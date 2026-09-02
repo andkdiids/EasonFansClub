@@ -3,10 +3,11 @@ import { Prisma } from '@prisma/client'
 import type { ActivityVerificationModeValue } from '@/lib/activity'
 import { parseActivityDateInput } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
+import { cancelUndrawnActivityLotteriesInTransaction } from '@/lib/activity-lottery'
 import { grantBadgeWithTransaction } from '@/lib/badge-service'
 import { sanitizeText } from '@/lib/security'
-import { ACTIVITY_REGISTRATION_CANCEL_CLOSED, activityRegistrationQuestionTypeValues } from '@/lib/activity-registration-shared'
-import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration-fee'
+import { ACTIVITY_REGISTRATION_CANCEL_CLOSED, activityRegistrationCancelClosedMessage, activityRegistrationQuestionTypeValues, isActivityRegistrationCancellationOpen } from '@/lib/activity-registration-shared'
+import { awardRegistrationFee } from '@/lib/registration-fee'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { generateMaterialRedeemCode } from '@/lib/material-redemption-code'
@@ -32,7 +33,7 @@ export function activityRegistrationSuccessNotificationKey(activityId: string, u
   return `activity-registration-success:${activityId}:${userId}:${registrationId}:${lifecycleKey}`
 }
 
-type RegistrationErrorCode = Exclude<ActivityRegistrationState, 'AVAILABLE'> | typeof ACTIVITY_REGISTRATION_CANCEL_CLOSED | 'ACTIVITY_NOT_FOUND' | 'INVALID_ANSWERS' | 'CONFIRMATION_REQUIRED' | 'ALREADY_VERIFIED' | 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'CANNOT_CANCEL' | 'ALREADY_CANCELLED' | 'INSUFFICIENT_BALANCE' | 'ACTIVITY_MATERIAL_UNAVAILABLE' | 'ACTIVITY_MATERIAL_INVALID'
+type RegistrationErrorCode = Exclude<ActivityRegistrationState, 'AVAILABLE'> | typeof ACTIVITY_REGISTRATION_CANCEL_CLOSED | 'ACTIVITY_NOT_FOUND' | 'INVALID_ANSWERS' | 'CONFIRMATION_REQUIRED' | 'ALREADY_VERIFIED' | 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'CANNOT_CANCEL' | 'REGISTRATION_ALREADY_CHECKED_IN' | 'ALREADY_CANCELLED' | 'ACTIVITY_CANCELLED' | 'INSUFFICIENT_BALANCE' | 'ACTIVITY_MATERIAL_UNAVAILABLE' | 'ACTIVITY_MATERIAL_INVALID'
 
 export class ActivityRegistrationError extends Error {
   constructor(readonly code: RegistrationErrorCode, message: string, readonly status: number) {
@@ -50,7 +51,7 @@ export class ActivityConfigurationError extends Error {
 
 export class ActivityVerificationError extends Error {
   constructor(
-    readonly code: 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'REGISTRATION_CANCELLED' | 'ALREADY_VERIFIED' | 'LINKED_MATERIAL_UNAVAILABLE',
+    readonly code: 'VERIFICATION_DISABLED' | 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'REGISTRATION_CANCELLED' | 'ACTIVITY_CANCELLED' | 'ALREADY_VERIFIED' | 'LINKED_MATERIAL_UNAVAILABLE',
     message: string,
     readonly status = 409,
   ) {
@@ -284,6 +285,347 @@ export async function syncActivitySignupCount(tx: Prisma.TransactionClient, acti
   const count = await countActiveActivityRegistrations(tx, activityId)
   await tx.activity.update({ where: { id: activityId }, data: { signupCount: count }, select: { id: true } })
   return count
+}
+
+export type ActivityRegistrationCancellationSource = 'USER' | 'ADMIN' | 'ACTIVITY'
+
+export type ActivityRegistrationCancellationInput = {
+  activityId: string
+  registrationId?: string
+  userId?: string
+  source: ActivityRegistrationCancellationSource
+  actorId?: string | null
+  now?: Date
+}
+
+export type ActivityRegistrationCancellationResult = {
+  registrationId: string
+  cancelled: boolean
+  alreadyCancelled: boolean
+  refundedAmount: number
+  refundDuplicate: boolean
+  materialCancelled: boolean
+  materialRestored: boolean
+  materialWasRedeemed: boolean
+  registrationCount: number
+}
+
+export type ActivityRegistrationCancellationBatchInput = {
+  activityId: string
+  source: 'ADMIN' | 'ACTIVITY'
+  actorId?: string | null
+  now?: Date
+  writeAudit?: boolean
+}
+
+export type ActivityRegistrationCancellationBatchResult = {
+  activityId: string
+  activeBefore: number
+  total: number
+  cancelled: number
+  alreadyCancelled: number
+  refundedCount: number
+  refundedAmount: number
+  duplicateRefunds: number
+  materialCancelled: number
+  materialRestored: number
+  materialWasRedeemed: number
+  activeRemaining: number
+}
+
+const cancellationRegistrationSelect = {
+  id: true,
+  activityId: true,
+  userId: true,
+  status: true,
+  paidRegistrationFee: true,
+  verifiedAt: true,
+  linkedMaterialRedemptionId: true,
+  LinkedMaterialRedemption: {
+    select: { id: true, status: true, source: true, quantity: true, materialId: true },
+  },
+} satisfies Prisma.ActivityRegistrationSelect
+
+type CancellationRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof cancellationRegistrationSelect }>
+
+type CancellationActivity = {
+  id: string
+  title: string
+  status: 'DRAFT' | 'PUBLISHED' | 'CANCELLED'
+  registrationEndAt: Date | null
+}
+
+async function lockActivityForCancellation(tx: Prisma.TransactionClient, activityId: string): Promise<CancellationActivity> {
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
+  if (!locked.length) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
+  const activity = await tx.activity.findUnique({
+    where: { id: activityId },
+    select: { id: true, title: true, status: true, registrationEndAt: true },
+  })
+  if (!activity) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
+  return activity
+}
+
+async function lockRegistrationForCancellation(
+  tx: Prisma.TransactionClient,
+  input: Pick<ActivityRegistrationCancellationInput, 'activityId' | 'registrationId' | 'userId'>,
+) {
+  const where: Prisma.ActivityRegistrationWhereInput = { activityId: input.activityId }
+  if (input.registrationId) where.id = input.registrationId
+  else if (input.userId) where.userId = input.userId
+  else throw new ActivityRegistrationError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
+
+  const initial = await tx.activityRegistration.findFirst({ where, select: cancellationRegistrationSelect })
+  if (!initial) throw new ActivityRegistrationError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
+  await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${initial.id} FOR UPDATE`
+  const current = await tx.activityRegistration.findUnique({ where: { id: initial.id }, select: cancellationRegistrationSelect })
+  if (!current) throw new ActivityRegistrationError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
+  return current
+}
+
+async function cancelLinkedActivityMaterialInTransaction(
+  tx: Prisma.TransactionClient,
+  registration: CancellationRegistration,
+  input: Pick<ActivityRegistrationCancellationInput, 'source' | 'actorId'>,
+  now: Date,
+) {
+  const linkedOrder = registration.LinkedMaterialRedemption
+  if (!linkedOrder) {
+    if (registration.linkedMaterialRedemptionId) throw new ActivityRegistrationError('ACTIVITY_MATERIAL_INVALID', '报名关联的活动物料记录不存在，不能取消报名', 409)
+    return { cancelled: false, restored: false, wasRedeemed: false }
+  }
+
+  await tx.$queryRaw`SELECT \`id\` FROM \`MaterialRedemptionOrder\` WHERE \`id\` = ${linkedOrder.id} FOR UPDATE`
+  const order = await tx.materialRedemptionOrder.findUnique({
+    where: { id: linkedOrder.id },
+    select: { id: true, status: true, source: true, quantity: true, materialId: true },
+  })
+  if (!order) throw new ActivityRegistrationError('ACTIVITY_MATERIAL_INVALID', '报名关联的活动物料记录不存在，不能取消报名', 409)
+  if (order.source !== 'ACTIVITY_REGISTRATION_AUTO') throw new ActivityRegistrationError('ACTIVITY_MATERIAL_INVALID', '报名关联的物料记录来源无效，不能取消报名', 409)
+
+  if (order.status === 'CANCELLED' || order.status === 'REFUNDED' || order.status === 'EXPIRED') {
+    return { cancelled: order.status === 'CANCELLED', restored: false, wasRedeemed: false }
+  }
+  if (order.status === 'REDEEMED') {
+    if (input.source === 'USER') throw new ActivityRegistrationError('CANNOT_CANCEL', '绑定活动物料已核销，不能取消报名', 409)
+    // A physically redeemed item cannot be put back into inventory. Keep the
+    // redemption fact for audit, while the cancelled registration and its QR
+    // code become invalid. This avoids a second redemption side effect.
+    return { cancelled: false, restored: false, wasRedeemed: true }
+  }
+  if (order.status !== 'SUCCESS') throw new ActivityRegistrationError('CANNOT_CANCEL', '绑定活动物料当前不能取消', 409)
+
+  await tx.$queryRaw`SELECT \`id\` FROM \`MaterialRedemption\` WHERE \`id\` = ${order.materialId} FOR UPDATE`
+  const material = await tx.materialRedemption.findUnique({ where: { id: order.materialId }, select: { id: true, stockTotal: true, stockRemaining: true } })
+  if (!material) throw new ActivityRegistrationError('ACTIVITY_MATERIAL_INVALID', '报名关联的活动物料不存在，不能取消报名', 409)
+  const maxRestorableStock = material.stockTotal - order.quantity
+  if (maxRestorableStock < 0) throw new ActivityRegistrationError('ACTIVITY_MATERIAL_INVALID', '报名关联的活动物料库存数据无效，不能取消报名', 409)
+
+  const cancelled = await tx.materialRedemptionOrder.updateMany({
+    where: { id: order.id, status: 'SUCCESS' },
+    data: {
+      status: 'CANCELLED',
+      cancelledAt: now,
+      cancelledByAdminId: input.source === 'USER' ? null : input.actorId || null,
+    },
+  })
+  if (cancelled.count !== 1) throw new ActivityRegistrationError('CANNOT_CANCEL', '绑定活动物料状态已发生变化，请刷新后重试', 409)
+  const restored = await tx.materialRedemption.updateMany({
+    where: { id: material.id, stockRemaining: { lte: maxRestorableStock } },
+    data: { stockRemaining: { increment: order.quantity } },
+  })
+  if (restored.count !== 1) throw new ActivityRegistrationError('ACTIVITY_MATERIAL_UNAVAILABLE', '活动物料库存恢复失败，请联系管理员', 409)
+  return { cancelled: true, restored: true, wasRedeemed: false }
+}
+
+async function cancelActivityRegistrationLockedInTransaction(
+  tx: Prisma.TransactionClient,
+  activity: CancellationActivity,
+  registration: CancellationRegistration,
+  input: ActivityRegistrationCancellationInput,
+  now: Date,
+): Promise<ActivityRegistrationCancellationResult> {
+  if (registration.status === 'CANCELLED') {
+    return {
+      registrationId: registration.id,
+      cancelled: false,
+      alreadyCancelled: true,
+      refundedAmount: 0,
+      refundDuplicate: false,
+      materialCancelled: false,
+      materialRestored: false,
+      materialWasRedeemed: false,
+      registrationCount: await syncActivitySignupCount(tx, activity.id),
+    }
+  }
+  if (registration.status !== 'ACTIVE') throw new ActivityRegistrationError('CANNOT_CANCEL', '当前报名状态不能取消', 409)
+  if (registration.verifiedAt) throw new ActivityRegistrationError('REGISTRATION_ALREADY_CHECKED_IN', '已核销的报名不能取消', 409)
+
+  if (input.source === 'USER') {
+    if (activity.status === 'CANCELLED') throw new ActivityRegistrationError('ACTIVITY_CANCELLED', '活动已取消，报名已由系统处理', 409)
+    const drawnLottery = await tx.lottery.findFirst({ where: { activityId: activity.id, status: 'DRAWN' }, select: { id: true } })
+    if (drawnLottery) throw new ActivityRegistrationError('CANNOT_CANCEL', '活动已经开奖，不能取消报名', 409)
+    if (!isActivityRegistrationCancellationOpen(activity, now)) throw new ActivityRegistrationError(ACTIVITY_REGISTRATION_CANCEL_CLOSED, activityRegistrationCancelClosedMessage, 409)
+  }
+
+  const material = await cancelLinkedActivityMaterialInTransaction(tx, registration, input, now)
+  let refundedAmount = 0
+  let refundDuplicate = false
+  if (registration.paidRegistrationFee > 0) {
+    const refund = await awardRegistrationFee(tx, {
+      userId: registration.userId,
+      requestedAmount: registration.paidRegistrationFee,
+      action: 'ACTIVITY_REGISTRATION_REFUND',
+      reason: input.source === 'ACTIVITY' ? `活动取消，退回报名费用：${activity.title}` : `取消活动报名，退回报名费用：${activity.title}`,
+      businessKey: `activity-registration-refund:${registration.id}`,
+      activityId: activity.id,
+      activityRegistrationId: registration.id,
+      now,
+    })
+    refundedAmount = refund.awardedAmount
+    refundDuplicate = refund.duplicate
+  }
+
+  await tx.activityRegistration.update({
+    where: { id: registration.id },
+    data: { status: 'CANCELLED', cancelledAt: now },
+    select: { id: true },
+  })
+  const registrationCount = await syncActivitySignupCount(tx, activity.id)
+
+  if (input.source === 'ADMIN' && input.actorId) {
+    await createAdminActionAudit(tx, {
+      operatorId: input.actorId,
+      action: 'UPDATE_SETTING',
+      operationType: adminAuditOperations.ACTIVITY_REGISTRATION_CANCEL,
+      targetType: 'ACTIVITY_REGISTRATION',
+      targetId: registration.id,
+      targetTitle: activity.title,
+      targetUserId: registration.userId,
+      metadata: {
+        activityId: activity.id,
+        registrationId: registration.id,
+        source: input.source,
+        refundedAmount,
+        refundDuplicate,
+        materialCancelled: material.cancelled,
+        materialRestored: material.restored,
+        materialWasRedeemed: material.wasRedeemed,
+      } as Prisma.InputJsonValue,
+    })
+  }
+
+  return {
+    registrationId: registration.id,
+    cancelled: true,
+    alreadyCancelled: false,
+    refundedAmount,
+    refundDuplicate,
+    materialCancelled: material.cancelled,
+    materialRestored: material.restored,
+    materialWasRedeemed: material.wasRedeemed,
+    registrationCount,
+  }
+}
+
+export async function cancelActivityRegistration(input: ActivityRegistrationCancellationInput) {
+  const now = input.now || new Date()
+  return prisma.$transaction(async (tx) => {
+    const activity = await lockActivityForCancellation(tx, input.activityId)
+    const registration = await lockRegistrationForCancellation(tx, input)
+    return cancelActivityRegistrationLockedInTransaction(tx, activity, registration, input, now)
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
+}
+
+export async function cancelAllActivityRegistrationsInTransaction(
+  tx: Prisma.TransactionClient,
+  input: ActivityRegistrationCancellationBatchInput,
+) {
+  const now = input.now || new Date()
+  const activity = await lockActivityForCancellation(tx, input.activityId)
+  const candidates = await tx.activityRegistration.findMany({
+    where: { activityId: input.activityId, status: 'ACTIVE', verifiedAt: null },
+    orderBy: [{ id: 'asc' }],
+    select: { id: true },
+  })
+  const summary: ActivityRegistrationCancellationBatchResult = {
+    activityId: input.activityId,
+    activeBefore: candidates.length,
+    total: candidates.length,
+    cancelled: 0,
+    alreadyCancelled: 0,
+    refundedCount: 0,
+    refundedAmount: 0,
+    duplicateRefunds: 0,
+    materialCancelled: 0,
+    materialRestored: 0,
+    materialWasRedeemed: 0,
+    activeRemaining: candidates.length,
+  }
+
+  for (const candidate of candidates) {
+    const registration = await lockRegistrationForCancellation(tx, { activityId: input.activityId, registrationId: candidate.id })
+    const result = await cancelActivityRegistrationLockedInTransaction(tx, activity, registration, input, now)
+    if (result.alreadyCancelled) summary.alreadyCancelled += 1
+    if (result.cancelled) summary.cancelled += 1
+    if (result.refundedAmount > 0) {
+      summary.refundedCount += 1
+      summary.refundedAmount += result.refundedAmount
+    }
+    if (result.refundDuplicate) summary.duplicateRefunds += 1
+    if (result.materialCancelled) summary.materialCancelled += 1
+    if (result.materialRestored) summary.materialRestored += 1
+    if (result.materialWasRedeemed) summary.materialWasRedeemed += 1
+  }
+  summary.activeRemaining = await syncActivitySignupCount(tx, input.activityId)
+
+  if (input.writeAudit && input.source === 'ADMIN' && input.actorId) {
+    await createAdminActionAudit(tx, {
+      operatorId: input.actorId,
+      action: 'UPDATE_SETTING',
+      operationType: adminAuditOperations.ACTIVITY_REGISTRATION_CANCEL,
+      targetType: 'ACTIVITY',
+      targetId: activity.id,
+      targetTitle: activity.title,
+      metadata: { source: input.source, ...summary } as Prisma.InputJsonValue,
+    })
+  }
+  return summary
+}
+
+export async function cancelAllActivityRegistrations(input: ActivityRegistrationCancellationBatchInput) {
+  return prisma.$transaction((tx) => cancelAllActivityRegistrationsInTransaction(tx, input), {
+    isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    timeout: 60_000,
+    maxWait: 5_000,
+  })
+}
+
+export async function cancelActivityInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { activityId: string; adminId: string; now?: Date },
+) {
+  const now = input.now || new Date()
+  const activity = await lockActivityForCancellation(tx, input.activityId)
+  if (activity.status !== 'CANCELLED') {
+    await tx.activity.update({ where: { id: activity.id }, data: { status: 'CANCELLED', updatedById: input.adminId }, select: { id: true } })
+  }
+  const registrations = await cancelAllActivityRegistrationsInTransaction(tx, {
+    activityId: input.activityId,
+    source: 'ACTIVITY',
+    actorId: input.adminId,
+    now,
+  })
+  const lotteries = await cancelUndrawnActivityLotteriesInTransaction(tx, input.activityId, now)
+  return { activityId: input.activityId, registrations, lotteriesCancelled: lotteries.count }
+}
+
+export async function cancelActivity(activityId: string, adminId: string, now = new Date()) {
+  return prisma.$transaction((tx) => cancelActivityInTransaction(tx, { activityId, adminId, now }), {
+    isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+    timeout: 60_000,
+    maxWait: 5_000,
+  })
 }
 
 export async function syncActivityRegistrationQuestions(tx: Prisma.TransactionClient, activityId: string, rawQuestions: unknown) {
@@ -531,13 +873,16 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
     select: {
       id: true,
       title: true,
+      status: true,
       verificationMode: true,
       startsAt: true,
       ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true, badgeGrantAt: true } },
     },
   })
   const linkedMaterialVerification = input.allowLinkedMaterial === true
-  if (!activity || (!linkedMaterialVerification && (activity.verificationMode === 'NONE' || activity.verificationMode !== input.method))) throw new ActivityVerificationError('VERIFICATION_DISABLED', '这场活动未启用当前核销方式')
+  if (!activity) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '活动不存在', 404)
+  if (activity.status === 'CANCELLED') throw new ActivityVerificationError('ACTIVITY_CANCELLED', '活动已取消，无法核销')
+  if (!linkedMaterialVerification && (activity.verificationMode === 'NONE' || activity.verificationMode !== input.method)) throw new ActivityVerificationError('VERIFICATION_DISABLED', '这场活动未启用当前核销方式')
 
   const token = input.method === 'QR' ? activityVerificationTokenFromInput(input.token || '') : ''
   if (input.method === 'QR' && !token) throw new ActivityVerificationError('INVALID_TOKEN', '二维码核销令牌无效', 400)
@@ -598,8 +943,9 @@ export async function redeemActivityLinkedMaterialInTransaction(
   input: { activityId: string; registrationId: string; orderId: string; adminId: string },
   now = new Date(),
 ) {
-  const activity = await tx.activity.findUnique({ where: { id: input.activityId }, select: { id: true, startsAt: true } })
+  const activity = await tx.activity.findUnique({ where: { id: input.activityId }, select: { id: true, status: true, startsAt: true } })
   if (!activity) throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '活动不存在', 404)
+  if (activity.status === 'CANCELLED') throw new ActivityVerificationError('ACTIVITY_CANCELLED', '活动已取消，活动物料不可核销')
   const registration = await tx.activityRegistration.findFirst({ where: { id: input.registrationId, activityId: input.activityId }, select: verificationRegistrationSelect })
   if (!registration) {
     throw new ActivityVerificationError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
@@ -633,8 +979,9 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
   await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${initial.activityId} FOR UPDATE`
   await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registrationId} FOR UPDATE`
   const registration = await tx.activityRegistration.findUnique({ where: { id: registrationId }, select: verificationRegistrationSelect })
-  const activity = await tx.activity.findUnique({ where: { id: initial.activityId }, select: { id: true, title: true, endsAt: true, ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true, badgeGrantAt: true } } } })
+  const activity = await tx.activity.findUnique({ where: { id: initial.activityId }, select: { id: true, title: true, status: true, endsAt: true, ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true, badgeGrantAt: true } } } })
   if (!registration || !activity) return { processed: false, reason: 'NOT_FOUND' as const }
+  if (activity.status === 'CANCELLED') return { processed: false, reason: 'ACTIVITY_CANCELLED' as const }
   if (registration.status === 'CANCELLED') return { processed: false, reason: 'CANCELLED' as const }
   if (registration.verifiedAt) return { processed: false, reason: 'ALREADY_VERIFIED' as const }
   if (!activity.endsAt || activity.endsAt >= now) return { processed: false, reason: 'NOT_ENDED' as const }
@@ -664,7 +1011,7 @@ export async function autoCheckInEndedActivityRegistrations(options: { activityI
       ...(options.activityId ? { activityId: options.activityId } : {}),
       status: 'ACTIVE',
       verifiedAt: null,
-      Activity: { endsAt: { lt: now } },
+      Activity: { status: { not: 'CANCELLED' }, endsAt: { lt: now } },
     },
     orderBy: [{ registeredAt: 'asc' }, { id: 'asc' }],
     take: batchSize,

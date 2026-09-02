@@ -56,7 +56,7 @@ test('guess-song leaderboard admin actions are permissioned, rule-based and audi
 test('guess-song leaderboard administration is a standalone page with all three periods', () => {
   const questionBank = source('app/admin/entertainment/guess-song/page.tsx')
   const leaderboardPage = source('app/admin/entertainment/guess-song/leaderboard/page.tsx')
-  const navigation = source('app/admin/page.tsx')
+  const navigation = source('lib/admin-navigation.ts')
   const permissions = source('lib/admin-permission-config.ts')
   const manager = source('app/admin/entertainment/guess-song/GuessSongLeaderboardManager.tsx')
   assert.doesNotMatch(questionBank, /GuessSongLeaderboardManager/)

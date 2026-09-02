@@ -544,6 +544,7 @@ model Badge {
   createdAt                        DateTime            @default(now())
   updatedAt                        DateTime            @updatedAt
   UserBadge                        UserBadge[]
+  LotteryPrize                     LotteryPrize[]
   ActivityReward                   ActivityReward[]
   UserBadgeShowcase                UserBadgeShowcase[]
   UserBadgeTracking                UserBadgeTracking[]
@@ -2213,46 +2214,56 @@ model Lottery {
 }
 
 model LotteryEntry {
-  id                String                  @id @default(cuid())
-  createdAt         DateTime                @default(now())
-  wonAt             DateTime                @default(now())
+  id                String                           @id @default(cuid())
+  createdAt         DateTime                         @default(now())
+  wonAt             DateTime                         @default(now())
   lotteryId         String
   prizeId           String?
   userId            String
   registrationId    String?
-  redemptionStatus  LotteryRedemptionStatus @default(PENDING)
+  redemptionStatus  LotteryRedemptionStatus          @default(PENDING)
   redeemedAt        DateTime?
   redeemedByAdminId String?
-  Lottery           Lottery                 @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
-  LotteryPrize      LotteryPrize?           @relation(fields: [prizeId], references: [id])
-  User              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  Registration      ActivityRegistration?   @relation(fields: [registrationId], references: [id], onDelete: SetNull)
-  RedeemedByAdmin   User?                   @relation("LotteryEntryRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
+  fulfillmentStatus ActivityLotteryFulfillmentStatus @default(NOT_REQUIRED)
+  fulfilledAt       DateTime?
+  fulfillmentError  String?                          @db.VarChar(500)
+  Lottery           Lottery                          @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+  LotteryPrize      LotteryPrize?                    @relation(fields: [prizeId], references: [id])
+  User              User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Registration      ActivityRegistration?            @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  RedeemedByAdmin   User?                            @relation("LotteryEntryRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
 
   @@unique([lotteryId, userId])
   @@index([lotteryId, createdAt])
   @@index([userId, createdAt])
   @@index([registrationId])
   @@index([redeemedByAdminId, redeemedAt])
+  @@index([lotteryId, fulfillmentStatus])
 }
 
 model LotteryPrize {
-  id           String         @id @default(cuid())
-  name         String
-  tierName     String?        @db.VarChar(160)
-  description  String?        @db.Text
-  imageUrl     String?        @db.Text
-  type         RewardType
-  quantity     Int            @default(1)
-  remaining    Int            @default(1)
-  pointsValue  Int?
-  metadata     Json?
-  sortOrder    Int            @default(0)
-  lotteryId    String
-  LotteryEntry LotteryEntry[]
-  Lottery      Lottery        @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+  id                    String                           @id @default(cuid())
+  name                  String
+  tierName              String?                          @db.VarChar(160)
+  description           String?                          @db.Text
+  imageUrl              String?                          @db.Text
+  type                  RewardType
+  prizeType             ActivityLotteryPrizeType         @default(PHYSICAL)
+  virtualPrizeType      ActivityLotteryVirtualPrizeType?
+  badgeId               String?
+  registrationFeeAmount Int?
+  quantity              Int                              @default(1)
+  remaining             Int                              @default(1)
+  pointsValue           Int?
+  metadata              Json?
+  sortOrder             Int                              @default(0)
+  lotteryId             String
+  LotteryEntry          LotteryEntry[]
+  Lottery               Lottery                          @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+  Badge                 Badge?                           @relation(fields: [badgeId], references: [id], onDelete: Restrict)
 
   @@index([lotteryId, sortOrder, id])
+  @@index([badgeId])
 }
 
 enum ActivityLotteryStatus {
@@ -2265,6 +2276,23 @@ enum ActivityLotteryStatus {
 enum LotteryRedemptionStatus {
   PENDING
   REDEEMED
+}
+
+enum ActivityLotteryPrizeType {
+  PHYSICAL
+  VIRTUAL
+}
+
+enum ActivityLotteryVirtualPrizeType {
+  BADGE
+  REGISTRATION_FEE
+}
+
+enum ActivityLotteryFulfillmentStatus {
+  NOT_REQUIRED
+  PENDING
+  FULFILLED
+  FAILED
 }
 
 model LyricCard {
@@ -3565,6 +3593,71 @@ model DailyJobExecution {
   @@index([status, startedAt])
 }
 
+enum StudioProjectVisibility {
+  PRIVATE
+  PUBLIC
+  UNLISTED
+}
+
+enum StudioProjectReviewStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model StudioProject {
+  id                    String                    @id @default(cuid())
+  userId                String
+  toolSlug              String                    @db.VarChar(64)
+  title                 String                    @db.VarChar(160)
+  description           String?                   @db.Text
+  version               Int                       @default(1)
+  data                  Json
+  thumbnailUrl          String?                   @db.Text
+  likeCount             Int                       @default(0)
+  favoriteCount         Int                       @default(0)
+  viewCount             Int                       @default(0)
+  visibility            StudioProjectVisibility   @default(PRIVATE)
+  reviewStatus          StudioProjectReviewStatus @default(NONE)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  lastOpenedAt          DateTime?
+  User                  User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  StudioProjectLike     StudioProjectLike[]
+  StudioProjectFavorite StudioProjectFavorite[]
+
+  @@index([userId, updatedAt])
+  @@index([toolSlug, visibility, reviewStatus, updatedAt])
+  @@index([visibility, reviewStatus, likeCount, updatedAt])
+}
+
+model StudioProjectLike {
+  id            String        @id @default(cuid())
+  createdAt     DateTime      @default(now())
+  projectId     String
+  userId        String
+  StudioProject StudioProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  User          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model StudioProjectFavorite {
+  id            String        @id @default(cuid())
+  createdAt     DateTime      @default(now())
+  projectId     String
+  userId        String
+  StudioProject StudioProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  User          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
+}
+
 model SiteSetting {
   id        String               @id @default(cuid())
   key       String               @unique
@@ -4033,7 +4126,10 @@ model User {
   EHospitalCheckAttempt                                  EHospitalCheckAttempt[]
   StickerPack_StickerPackCreator                         StickerPack[]                  @relation("StickerPackCreator")
   UserStickerPack_UserStickerPackUser                    UserStickerPack[]              @relation("UserStickerPackUser")
+  StudioProjectLike                                      StudioProjectLike[]
+  StudioProjectFavorite                                  StudioProjectFavorite[]
   stickerReports                                         StickerReport[]
+  StudioProject                                          StudioProject[]
 
   @@index([createdAt])
   @@index([email])
@@ -4664,6 +4760,7 @@ enum PointActionType {
   MATERIAL_REDEMPTION_REFUND
   ACTIVITY_REGISTRATION_FEE
   ACTIVITY_REGISTRATION_REFUND
+  ACTIVITY_LOTTERY_PRIZE
 }
 
 enum CheckInType {

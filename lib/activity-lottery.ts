@@ -10,9 +10,13 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 import { hasValidActivityParticipation, type ActivityParticipationCheckInSnapshot } from '@/lib/activity-participation'
+import { fulfillActivityLotteryWinners, type ActivityLotteryFulfillmentSummary } from '@/lib/activity-lottery-fulfillment'
+import { ACTIVITY_LOTTERY_PRIZE_TYPES, ACTIVITY_LOTTERY_VIRTUAL_PRIZE_TYPES, MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE, type ActivityLotteryPrizeType, type ActivityLotteryVirtualPrizeType } from '@/lib/activity-lottery-types'
 
 export const ACTIVITY_LOTTERY_ALGORITHM_VERSION = 'SECURE_SHUFFLE_V1'
 export const MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY = 100_000
+export { ACTIVITY_LOTTERY_PRIZE_TYPES, ACTIVITY_LOTTERY_VIRTUAL_PRIZE_TYPES, MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE } from '@/lib/activity-lottery-types'
+export type { ActivityLotteryPrizeType, ActivityLotteryVirtualPrizeType } from '@/lib/activity-lottery-types'
 export { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/activity-lottery-levels'
 
 export type ActivityLotteryErrorCode =
@@ -42,6 +46,10 @@ export type LotteryPrizeInput = {
   imageUrl: string | null
   description: string | null
   quantity: number
+  prizeType: ActivityLotteryPrizeType
+  virtualPrizeType: ActivityLotteryVirtualPrizeType | null
+  badgeId: string | null
+  registrationFeeAmount: number | null
 }
 
 export type NormalizedActivityLotteryInput = {
@@ -63,9 +71,11 @@ export function getActivityLotteryWinnerRedemptionState(input: {
   redemptionStatus: 'PENDING' | 'REDEEMED'
   registration: ActivityLotteryCheckInSnapshot | null | undefined
   activityEndAt: Date | null | undefined
+  activityCancelled?: boolean
   now?: Date
 }): ActivityLotteryWinnerRedemptionState {
   if (input.redemptionStatus === 'REDEEMED') return 'REDEEMED'
+  if (input.activityCancelled) return 'EXPIRED'
   const now = input.now || new Date()
   if (hasValidActivityLotteryCheckIn(input.registration, input.activityEndAt, now)) return 'REDEEMABLE'
   if (input.activityEndAt && !Number.isNaN(input.activityEndAt.getTime()) && now.getTime() >= input.activityEndAt.getTime()) return 'EXPIRED'
@@ -153,6 +163,18 @@ function parsePrizeImageUrl(value: unknown) {
   }
 }
 
+function parsePositiveInteger(value: unknown, max: number) {
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : ''
+  if (!/^[1-9]\d*$/.test(text)) return null
+  const parsed = Number(text)
+  return Number.isSafeInteger(parsed) && parsed <= max ? parsed : null
+}
+
+function parseBadgeId(value: unknown) {
+  const badgeId = parseString(value, 191)
+  return badgeId && /^[A-Za-z0-9_-]+$/.test(badgeId) ? badgeId : null
+}
+
 export function normalizeActivityLotteryInput(value: unknown): { valid: true; value: NormalizedActivityLotteryInput } | { valid: false; message: string } {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const title = sanitizeText(input.title, 160)
@@ -171,17 +193,37 @@ export function normalizeActivityLotteryInput(value: unknown): { valid: true; va
     const tierName = activityLotteryTierName(index)
     const name = sanitizeText(item.name ?? item.prizeName, 300)
     const quantity = typeof item.quantity === 'number' ? Math.trunc(item.quantity) : Number.parseInt(String(item.quantity ?? ''), 10)
+    const prizeType = item.prizeType === undefined ? 'PHYSICAL' : item.prizeType
     if (!tierName) return { valid: false, message: `第 ${index + 1} 个奖项等级无效。` }
     if (!name) return { valid: false, message: `第 ${index + 1} 个奖项请填写奖品名称。` }
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY) return { valid: false, message: `第 ${index + 1} 个奖项数量必须在 1-${MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY} 之间。` }
+    if (!ACTIVITY_LOTTERY_PRIZE_TYPES.includes(prizeType as ActivityLotteryPrizeType)) return { valid: false, message: `第 ${index + 1} 个奖项类型无效。` }
     const image = parsePrizeImageUrl(legacyPrizeImageValue(item))
     if (!image.valid) return { valid: false, message: `第 ${index + 1} 个奖项图片无效，请通过上传图片添加。` }
+    let virtualPrizeType: ActivityLotteryVirtualPrizeType | null = null
+    let badgeId: string | null = null
+    let registrationFeeAmount: number | null = null
+    if (prizeType === 'VIRTUAL') {
+      if (!ACTIVITY_LOTTERY_VIRTUAL_PRIZE_TYPES.includes(item.virtualPrizeType as ActivityLotteryVirtualPrizeType)) return { valid: false, message: `第 ${index + 1} 个虚拟奖品请选择具体类型。` }
+      virtualPrizeType = item.virtualPrizeType as ActivityLotteryVirtualPrizeType
+      if (virtualPrizeType === 'BADGE') {
+        badgeId = parseBadgeId(item.badgeId)
+        if (!badgeId) return { valid: false, message: `第 ${index + 1} 个虚拟奖品请选择有效勋章。` }
+      } else {
+        registrationFeeAmount = parsePositiveInteger(item.registrationFeeAmount, MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE)
+        if (!registrationFeeAmount) return { valid: false, message: `第 ${index + 1} 个虚拟奖品挂号费必须是 1-${MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE} 的整数。` }
+      }
+    }
     prizes.push({
       tierName,
       name,
       imageUrl: image.value,
       description: parseString(item.description, 2000),
       quantity,
+      prizeType: prizeType as ActivityLotteryPrizeType,
+      virtualPrizeType,
+      badgeId,
+      registrationFeeAmount,
     })
   }
   return { valid: true, value: { title, description: parseString(input.description, 2000), drawAt, prizes } }
@@ -222,7 +264,7 @@ const adminLotterySelect = {
   algorithmVersion: true,
   createdAt: true,
   updatedAt: true,
-  Activity: { select: { endsAt: true } },
+  Activity: { select: { status: true, endsAt: true } },
   LotteryPrize: {
     orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     select: {
@@ -232,6 +274,11 @@ const adminLotterySelect = {
       imageUrl: true,
       metadata: true,
       description: true,
+      prizeType: true,
+      virtualPrizeType: true,
+      badgeId: true,
+      registrationFeeAmount: true,
+      Badge: { select: { id: true, name: true, iconUrl: true } },
       quantity: true,
       remaining: true,
       sortOrder: true,
@@ -247,7 +294,10 @@ const adminLotterySelect = {
       redemptionStatus: true,
       wonAt: true,
       redeemedAt: true,
-      LotteryPrize: { select: { id: true, tierName: true, name: true } },
+      fulfillmentStatus: true,
+      fulfilledAt: true,
+      fulfillmentError: true,
+      LotteryPrize: { select: { id: true, tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true } },
       Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
       User: { select: { uid: true, nickname: true } },
     },
@@ -272,10 +322,15 @@ export type ActivityLotteryAdminView = {
   prizes: Array<{
     id: string
     tierName: string | null
-    name: string
-    imageUrl: string | null
-    description: string | null
-    quantity: number
+     name: string
+     imageUrl: string | null
+     description: string | null
+     prizeType: ActivityLotteryPrizeType
+     virtualPrizeType: ActivityLotteryVirtualPrizeType | null
+     badgeId: string | null
+     badge: { id: string; name: string; imageUrl: string | null } | null
+     registrationFeeAmount: number | null
+     quantity: number
     remaining: number
     sortOrder: number
     winnerCount: number
@@ -285,10 +340,16 @@ export type ActivityLotteryAdminView = {
     uid: number
     nickname: string
     tierName: string
-    prizeName: string
-    redemptionStatus: 'PENDING' | 'REDEEMED'
-    redemptionState: ActivityLotteryWinnerRedemptionState
-    wonAt: string
+     prizeName: string
+     prizeType: ActivityLotteryPrizeType
+     virtualPrizeType: ActivityLotteryVirtualPrizeType | null
+     registrationFeeAmount: number | null
+     redemptionStatus: 'PENDING' | 'REDEEMED'
+     redemptionState: ActivityLotteryWinnerRedemptionState | null
+     fulfillmentStatus: 'NOT_REQUIRED' | 'PENDING' | 'FULFILLED' | 'FAILED'
+     fulfilledAt: string | null
+     fulfillmentError: string | null
+     wonAt: string
     redeemedAt: string | null
   }>
 }
@@ -327,6 +388,11 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date()): Activity
       name: prize.name,
       imageUrl: publicPrizeImageUrl(prize.imageUrl, prize.metadata),
       description: prize.description,
+      prizeType: prize.prizeType,
+      virtualPrizeType: prize.virtualPrizeType,
+      badgeId: prize.badgeId,
+      badge: prize.Badge ? { id: prize.Badge.id, name: prize.Badge.name, imageUrl: publicImageUrl(prize.Badge.iconUrl) } : null,
+      registrationFeeAmount: prize.registrationFeeAmount,
       quantity: prize.quantity,
       remaining: prize.remaining,
       sortOrder: prize.sortOrder,
@@ -338,8 +404,14 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date()): Activity
       nickname: entry.User.nickname,
       tierName: entry.LotteryPrize?.tierName || '中奖奖项',
       prizeName: entry.LotteryPrize?.name || '奖品',
+      prizeType: entry.LotteryPrize?.prizeType || 'PHYSICAL',
+      virtualPrizeType: entry.LotteryPrize?.virtualPrizeType || null,
+      registrationFeeAmount: entry.LotteryPrize?.registrationFeeAmount || null,
       redemptionStatus: entry.redemptionStatus,
-      redemptionState: getActivityLotteryWinnerRedemptionState({ redemptionStatus: entry.redemptionStatus, registration: entry.Registration, activityEndAt: row.Activity?.endsAt, now }),
+      redemptionState: entry.LotteryPrize?.prizeType === 'VIRTUAL' ? null : getActivityLotteryWinnerRedemptionState({ redemptionStatus: entry.redemptionStatus, registration: entry.Registration, activityEndAt: row.Activity?.endsAt, activityCancelled: row.Activity?.status === 'CANCELLED', now }),
+      fulfillmentStatus: entry.fulfillmentStatus,
+      fulfilledAt: iso(entry.fulfilledAt),
+      fulfillmentError: entry.fulfillmentError,
       wonAt: entry.wonAt.toISOString(),
       redeemedAt: iso(entry.redeemedAt),
     })),
@@ -377,13 +449,50 @@ export type ActivityLotteryPublicView = {
   eligibleCount: number | null
   winnerCount: number | null
   drawnAt: string | null
-  prizes: Array<{ id: string; tierName: string | null; name: string; imageUrl: string | null; description: string | null; quantity: number }>
-  winner: { tierName: string; prizeName: string; redemptionStatus: 'PENDING' | 'REDEEMED'; redemptionState: ActivityLotteryWinnerRedemptionState; redeemable: boolean; redeemedAt: string | null } | null
+  prizes: Array<{
+    id: string
+    tierName: string | null
+    name: string
+    imageUrl: string | null
+    description: string | null
+    quantity: number
+    prizeType: ActivityLotteryPrizeType
+    virtualPrizeType: ActivityLotteryVirtualPrizeType | null
+    badge: { id: string; name: string; imageUrl: string | null } | null
+    registrationFeeAmount: number | null
+  }>
+  winner: {
+    tierName: string
+    prizeName: string
+    prizeType: 'PHYSICAL'
+    virtualPrizeType: null
+    badge: null
+    registrationFeeAmount: null
+    redemptionStatus: 'PENDING' | 'REDEEMED'
+    redemptionState: ActivityLotteryWinnerRedemptionState
+    redeemable: boolean
+    fulfillmentStatus: 'NOT_REQUIRED'
+    fulfilledAt: null
+    redeemedAt: string | null
+  } | {
+    tierName: string
+    prizeName: string
+    prizeType: 'VIRTUAL'
+    virtualPrizeType: ActivityLotteryVirtualPrizeType
+    badge: { id: string; name: string; imageUrl: string | null } | null
+    registrationFeeAmount: number | null
+    redemptionStatus: 'PENDING' | 'REDEEMED'
+    redemptionState: null
+    redeemable: false
+    fulfillmentStatus: 'PENDING' | 'FULFILLED' | 'FAILED' | 'NOT_REQUIRED'
+    fulfilledAt: string | null
+    redeemedAt: string | null
+  } | null
 }
 
 export async function getPublicActivityLotteries(activityId: string, viewerId?: string | null): Promise<ActivityLotteryPublicView[]> {
   const lotteries = await prisma.lottery.findMany({
-    where: { activityId, status: { in: ['SCHEDULED', 'DRAWN'] } },
+    where: { activityId, status: { in: ['SCHEDULED', 'DRAWN'] }, Activity: { status: 'PUBLISHED' } },
     orderBy: [{ drawAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
@@ -394,23 +503,44 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       eligibleCount: true,
       winnerCount: true,
       drawnAt: true,
-      Activity: { select: { endsAt: true } },
+      Activity: { select: { status: true, endsAt: true } },
       LotteryPrize: {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-        select: { id: true, tierName: true, name: true, imageUrl: true, metadata: true, description: true, quantity: true },
+        select: {
+          id: true,
+          tierName: true,
+          name: true,
+          imageUrl: true,
+          metadata: true,
+          description: true,
+          quantity: true,
+          prizeType: true,
+          virtualPrizeType: true,
+          registrationFeeAmount: true,
+          Badge: { select: { id: true, name: true, iconUrl: true } },
+        },
       },
     },
   })
   const winnerRows = viewerId && lotteries.length
     ? await prisma.lotteryEntry.findMany({
         where: { userId: viewerId, lotteryId: { in: lotteries.map((lottery) => lottery.id) } },
-        select: { lotteryId: true, redemptionStatus: true, redeemedAt: true, registrationId: true, Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } }, LotteryPrize: { select: { tierName: true, name: true } } },
+        select: {
+          lotteryId: true,
+          redemptionStatus: true,
+          redeemedAt: true,
+          registrationId: true,
+          fulfillmentStatus: true,
+          fulfilledAt: true,
+          Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
+          LotteryPrize: { select: { tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true, Badge: { select: { id: true, name: true, iconUrl: true } } } },
+        },
       })
     : []
   const winners = new Map(winnerRows.map((winner) => [winner.lotteryId, winner]))
   return lotteries.filter((lottery): lottery is typeof lottery & { status: 'SCHEDULED' | 'DRAWN' } => lottery.status === 'SCHEDULED' || lottery.status === 'DRAWN').map((lottery) => {
     const winner = winners.get(lottery.id)
-    const redemptionState = winner
+    const redemptionState = winner && winner.LotteryPrize?.prizeType !== 'VIRTUAL'
       ? getActivityLotteryWinnerRedemptionState({ redemptionStatus: winner.redemptionStatus, registration: winner.Registration, activityEndAt: lottery.Activity?.endsAt })
       : null
     return {
@@ -422,9 +552,48 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       eligibleCount: lottery.eligibleCount,
       winnerCount: lottery.winnerCount,
       drawnAt: iso(lottery.drawnAt),
-      prizes: lottery.LotteryPrize.map((prize) => ({ ...prize, imageUrl: publicPrizeImageUrl(prize.imageUrl, prize.metadata) })),
+      prizes: lottery.LotteryPrize.map((prize) => ({
+        id: prize.id,
+        tierName: prize.tierName,
+        name: prize.name,
+        imageUrl: publicPrizeImageUrl(prize.imageUrl, prize.metadata),
+        description: prize.description,
+        quantity: prize.quantity,
+        prizeType: prize.prizeType,
+        virtualPrizeType: prize.virtualPrizeType,
+        badge: prize.Badge ? { id: prize.Badge.id, name: prize.Badge.name, imageUrl: publicImageUrl(prize.Badge.iconUrl) } : null,
+        registrationFeeAmount: prize.registrationFeeAmount,
+      })),
       winner: winner && winner.LotteryPrize
-        ? { tierName: winner.LotteryPrize.tierName || '中奖奖项', prizeName: winner.LotteryPrize.name, redemptionStatus: winner.redemptionStatus, redemptionState: redemptionState || 'WAITING_FOR_CHECK_IN', redeemable: redemptionState === 'REDEEMABLE', redeemedAt: iso(winner.redeemedAt) }
+        ? winner.LotteryPrize.prizeType === 'VIRTUAL'
+          ? {
+              tierName: winner.LotteryPrize.tierName || '中奖奖项',
+              prizeName: winner.LotteryPrize.name,
+              prizeType: 'VIRTUAL' as const,
+              virtualPrizeType: winner.LotteryPrize.virtualPrizeType || 'BADGE',
+              badge: winner.LotteryPrize.Badge ? { id: winner.LotteryPrize.Badge.id, name: winner.LotteryPrize.Badge.name, imageUrl: publicImageUrl(winner.LotteryPrize.Badge.iconUrl) } : null,
+              registrationFeeAmount: winner.LotteryPrize.registrationFeeAmount,
+              redemptionStatus: winner.redemptionStatus,
+              redemptionState: null,
+              redeemable: false as const,
+              fulfillmentStatus: winner.fulfillmentStatus,
+              fulfilledAt: iso(winner.fulfilledAt),
+              redeemedAt: iso(winner.redeemedAt),
+            }
+          : {
+              tierName: winner.LotteryPrize.tierName || '中奖奖项',
+              prizeName: winner.LotteryPrize.name,
+              prizeType: 'PHYSICAL' as const,
+              virtualPrizeType: null,
+              badge: null,
+              registrationFeeAmount: null,
+              redemptionStatus: winner.redemptionStatus,
+              redemptionState: redemptionState || 'WAITING_FOR_CHECK_IN',
+              redeemable: redemptionState === 'REDEEMABLE',
+              fulfillmentStatus: 'NOT_REQUIRED' as const,
+              fulfilledAt: null,
+              redeemedAt: iso(winner.redeemedAt),
+            }
         : null,
     }
   })
@@ -444,11 +613,25 @@ function prizeCreateData(prizes: LotteryPrizeInput[]) {
     tierName: prize.tierName,
     imageUrl: prize.imageUrl,
     description: prize.description,
-    type: 'PHYSICAL' as const,
+    // Keep the old RewardType column populated for legacy readers while the
+    // explicit prizeType/virtualPrizeType columns are the source of truth.
+    type: prize.prizeType === 'VIRTUAL' && prize.virtualPrizeType === 'BADGE' ? 'BADGE' as const : prize.prizeType === 'VIRTUAL' ? 'POINTS' as const : 'PHYSICAL' as const,
+    prizeType: prize.prizeType,
+    virtualPrizeType: prize.virtualPrizeType,
+    badgeId: prize.badgeId,
+    registrationFeeAmount: prize.registrationFeeAmount,
     quantity: prize.quantity,
     remaining: prize.quantity,
     sortOrder,
   }))
+}
+
+async function validateLotteryPrizeReferences(tx: Prisma.TransactionClient, prizes: LotteryPrizeInput[]) {
+  const badgeIds = [...new Set(prizes.flatMap((prize) => prize.badgeId ? [prize.badgeId] : []))]
+  if (!badgeIds.length) return
+  const badges = await tx.badge.findMany({ where: { id: { in: badgeIds }, isEnabled: true, isActive: true }, select: { id: true } })
+  const availableIds = new Set(badges.map((badge) => badge.id))
+  if (badgeIds.some((badgeId) => !availableIds.has(badgeId))) throw new ActivityLotteryError('INVALID_PRIZES', '所选勋章不存在或当前未启用。', 400)
 }
 
 export async function createActivityLottery(activityId: string, adminId: string, input: unknown) {
@@ -459,6 +642,7 @@ export async function createActivityLottery(activityId: string, adminId: string,
     if (activity.status === 'CANCELLED') throw new ActivityLotteryError('LOTTERY_CANCELLED', '已取消的活动不能创建抽奖')
     const scheduleError = validateLotterySchedule(activity.endsAt, normalized.value.drawAt)
     if (scheduleError) throw new ActivityLotteryError(activity.endsAt ? 'INVALID_DRAW_AT' : 'ACTIVITY_END_REQUIRED', scheduleError, 400)
+    await validateLotteryPrizeReferences(tx, normalized.value.prizes)
     const lottery = await tx.lottery.create({
       data: {
         title: normalized.value.title,
@@ -498,6 +682,7 @@ export async function updateActivityLottery(activityId: string, lotteryId: strin
     if (lottery.status === 'CANCELLED') throw new ActivityLotteryError('LOTTERY_CANCELLED', '已取消的抽奖不能修改')
     const scheduleError = validateLotterySchedule(activity.endsAt, normalized.value.drawAt)
     if (scheduleError) throw new ActivityLotteryError(activity.endsAt ? 'INVALID_DRAW_AT' : 'ACTIVITY_END_REQUIRED', scheduleError, 400)
+    await validateLotteryPrizeReferences(tx, normalized.value.prizes)
     await tx.lottery.update({ where: { id: lottery.id }, data: { title: normalized.value.title, description: normalized.value.description, drawAt: normalized.value.drawAt, status: 'SCHEDULED' }, select: { id: true } })
     await tx.lotteryPrize.deleteMany({ where: { lotteryId: lottery.id } })
     await tx.lotteryPrize.createMany({ data: prizeCreateData(normalized.value.prizes).map((prize) => ({ ...prize, lotteryId: lottery.id })) })
@@ -536,7 +721,10 @@ export async function cancelActivityLottery(activityId: string, lotteryId: strin
 }
 
 export async function cancelUndrawnActivityLotteriesInTransaction(tx: Prisma.TransactionClient, activityId: string, now = new Date()) {
-  return tx.lottery.updateMany({ where: { activityId, status: { in: ['DRAFT', 'SCHEDULED'] } }, data: { status: 'CANCELLED', cancelledAt: now } })
+  // Activity cancellation supersedes the normal rule that a drawn lottery is
+  // locked. Keep its entries, prizes, and drawnAt for history, but mark the
+  // lottery unavailable so no later draw or prize redemption can proceed.
+  return tx.lottery.updateMany({ where: { activityId, status: { not: 'CANCELLED' } }, data: { status: 'CANCELLED', cancelledAt: now } })
 }
 
 export type DrawOptions = { trigger: ActivityLotteryDrawTrigger; now?: Date; actorId?: string; expectedActivityId?: string }
@@ -548,7 +736,18 @@ export type ActivityLotteryDrawResult = {
   eligibleCount: number
   winnerCount: number
   drawnAt: string | null
-  winners: Array<{ id: string; userId: string; registrationId: string | null; prizeId: string; tierName: string; prizeName: string }>
+  winners: Array<{
+    id: string
+    userId: string
+    registrationId: string | null
+    prizeId: string
+    tierName: string
+    prizeName: string
+    prizeType: ActivityLotteryPrizeType
+    virtualPrizeType: ActivityLotteryVirtualPrizeType | null
+    registrationFeeAmount: number | null
+  }>
+  fulfillment: ActivityLotteryFulfillmentSummary
 }
 
 export type ActivityLotteryCandidate = { id: string; userId: string }
@@ -570,8 +769,9 @@ function activityLotteryResultNotificationData(input: {
   lotteryTitle: string
   userId: string
   winner: ActivityLotteryDrawResult['winners'][number] | null
-}): Prisma.NotificationCreateManyInput {
+}): Prisma.NotificationCreateManyInput | null {
   const winner = input.winner
+  if (winner?.prizeType === 'VIRTUAL') return null
   return {
     recipientId: input.userId,
     actorId: null,
@@ -607,13 +807,13 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
       winnerCount: true,
       drawnAt: true,
        Activity: { select: { id: true, title: true, status: true, endsAt: true } },
-      LotteryPrize: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }], select: { id: true, tierName: true, name: true, quantity: true } },
+       LotteryPrize: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }], select: { id: true, tierName: true, name: true, quantity: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true } },
     },
   })
   if (!lottery) throw new ActivityLotteryError('LOTTERY_NOT_FOUND', '抽奖不存在', 404)
   if (options.expectedActivityId && lottery.activityId !== options.expectedActivityId) throw new ActivityLotteryError('INVALID_LOTTERY', '抽奖不属于当前活动', 403)
   if (lottery.status === 'DRAWN') {
-    const entries = await tx.lotteryEntry.findMany({ where: { lotteryId }, orderBy: [{ wonAt: 'asc' }, { id: 'asc' }], select: { id: true, userId: true, registrationId: true, prizeId: true, LotteryPrize: { select: { tierName: true, name: true } } } })
+    const entries = await tx.lotteryEntry.findMany({ where: { lotteryId }, orderBy: [{ wonAt: 'asc' }, { id: 'asc' }], select: { id: true, userId: true, registrationId: true, prizeId: true, LotteryPrize: { select: { tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true } } } })
     return {
       status: 'ALREADY_DRAWN',
       lotteryId,
@@ -621,12 +821,13 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
       eligibleCount: lottery.eligibleCount || 0,
       winnerCount: lottery.winnerCount || entries.length,
       drawnAt: iso(lottery.drawnAt),
-      winners: entries.filter((entry): entry is typeof entry & { prizeId: string; LotteryPrize: { tierName: string | null; name: string } } => Boolean(entry.prizeId && entry.LotteryPrize)).map((entry) => ({ id: entry.id, userId: entry.userId, registrationId: entry.registrationId, prizeId: entry.prizeId, tierName: entry.LotteryPrize.tierName || '中奖奖项', prizeName: entry.LotteryPrize.name })),
+      winners: entries.filter((entry): entry is typeof entry & { prizeId: string; LotteryPrize: { tierName: string | null; name: string; prizeType: ActivityLotteryPrizeType; virtualPrizeType: ActivityLotteryVirtualPrizeType | null; registrationFeeAmount: number | null } } => Boolean(entry.prizeId && entry.LotteryPrize)).map((entry) => ({ id: entry.id, userId: entry.userId, registrationId: entry.registrationId, prizeId: entry.prizeId, tierName: entry.LotteryPrize.tierName || '中奖奖项', prizeName: entry.LotteryPrize.name, prizeType: entry.LotteryPrize.prizeType, virtualPrizeType: entry.LotteryPrize.virtualPrizeType, registrationFeeAmount: entry.LotteryPrize.registrationFeeAmount })),
+      fulfillment: { lotteryId, attempted: 0, fulfilled: 0, alreadyFulfilled: 0, failed: 0, blocked: 0 },
     }
   }
   if (lottery.status === 'CANCELLED') {
     if (options.trigger === 'ADMIN_MANUAL') throw new ActivityLotteryError('LOTTERY_CANCELLED', '抽奖已经取消，无法开奖。', 409)
-    return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [] }
+    return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [], fulfillment: { lotteryId, attempted: 0, fulfilled: 0, alreadyFulfilled: 0, failed: 0, blocked: 0 } }
   }
   if (!lottery.Activity || !lottery.activityId) throw new ActivityLotteryError('INVALID_LOTTERY', '该抽奖未绑定活动', 409)
   const activityId = lottery.activityId
@@ -634,7 +835,7 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
   if (lottery.Activity.status === 'CANCELLED') {
     if (options.trigger === 'ADMIN_MANUAL') throw new ActivityLotteryError('LOTTERY_CANCELLED', '活动已经取消，无法开奖。', 409)
     await tx.lottery.update({ where: { id: lottery.id }, data: { status: 'CANCELLED', cancelledAt: now }, select: { id: true } })
-    return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [] }
+    return { status: 'CANCELLED', lotteryId, activityId: lottery.activityId, eligibleCount: 0, winnerCount: 0, drawnAt: null, winners: [], fulfillment: { lotteryId, attempted: 0, fulfilled: 0, alreadyFulfilled: 0, failed: 0, blocked: 0 } }
   }
   if (options.trigger === 'ADMIN_MANUAL' && !options.actorId) throw new ActivityLotteryError('INVALID_LOTTERY', '管理员身份无效，无法立即开奖。', 403)
   const timingFailure = validateActivityLotteryDrawTiming({ trigger: options.trigger, now, drawAt: lottery.drawAt, activityEndAt: lottery.Activity.endsAt })
@@ -650,7 +851,7 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
   })
   if (!registrations.length) throw new ActivityLotteryError('LOTTERY_NO_ELIGIBLE_REGISTRATIONS', '当前没有有效报名用户，无法开奖。', 409)
   const shuffled = secureShuffle(registrations)
-  const winnerRows: Array<{ registration: { id: string; userId: string }; prize: { id: string; tierName: string | null; name: string } }> = []
+  const winnerRows: Array<{ registration: { id: string; userId: string }; prize: { id: string; tierName: string | null; name: string; prizeType: ActivityLotteryPrizeType; virtualPrizeType: ActivityLotteryVirtualPrizeType | null; registrationFeeAmount: number | null } }> = []
   let cursor = 0
   for (const prize of lottery.LotteryPrize) {
     const assigned = Math.min(prize.quantity, Math.max(0, shuffled.length - cursor))
@@ -671,11 +872,12 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
         userId: winner.registration.userId,
         registrationId: winner.registration.id,
         redemptionStatus: 'PENDING',
+        fulfillmentStatus: winner.prize.prizeType === 'VIRTUAL' ? 'PENDING' : 'NOT_REQUIRED',
         wonAt: drawnAt,
       },
       select: { id: true },
     })
-    persistedWinners.push({ id: entry.id, userId: winner.registration.userId, registrationId: winner.registration.id, prizeId: winner.prize.id, tierName: winner.prize.tierName || '中奖奖项', prizeName: winner.prize.name })
+    persistedWinners.push({ id: entry.id, userId: winner.registration.userId, registrationId: winner.registration.id, prizeId: winner.prize.id, tierName: winner.prize.tierName || '中奖奖项', prizeName: winner.prize.name, prizeType: winner.prize.prizeType, virtualPrizeType: winner.prize.virtualPrizeType, registrationFeeAmount: winner.prize.registrationFeeAmount })
   }
   const winnerByRegistrationId = new Map(persistedWinners.filter((winner) => winner.registrationId).map((winner) => [winner.registrationId!, winner]))
   const winnerRegistrationIds = new Set(winnerByRegistrationId.keys())
@@ -687,7 +889,7 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
     lotteryTitle: lottery.title,
     userId: registration.userId,
     winner: winnerByRegistrationId.get(registration.id) || null,
-  }))
+  })).filter((notification): notification is Prisma.NotificationCreateManyInput => Boolean(notification))
   // Notifications are secondary side effects. Keep the candidate snapshot
   // from this draw, make the write idempotent, and never roll back a completed
   // lottery when notification persistence is temporarily unavailable.
@@ -715,11 +917,15 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
     winnerCount: winnerRows.length,
     drawnAt: drawnAt.toISOString(),
     winners: persistedWinners,
+    fulfillment: { lotteryId: lottery.id, attempted: 0, fulfilled: 0, alreadyFulfilled: 0, failed: 0, blocked: 0 },
   }
 }
 
 export async function drawActivityLottery(lotteryId: string, options: DrawOptions = { trigger: 'SCHEDULED' }) {
-  return prisma.$transaction((tx) => drawActivityLotteryInTransaction(tx, lotteryId, options), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
+  const result = await prisma.$transaction((tx) => drawActivityLotteryInTransaction(tx, lotteryId, options), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
+  if (result.status !== 'DRAWN' && result.status !== 'ALREADY_DRAWN') return result
+  const fulfillment = await fulfillActivityLotteryWinners(result.lotteryId, { actorId: options.actorId })
+  return { ...result, fulfillment }
 }
 
 export async function drawDueActivityLotteries(options: { activityId?: string; batchSize?: number; now?: Date } = {}) {

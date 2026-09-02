@@ -24,7 +24,7 @@ const deleteRoute = read('app/api/replies/[replyId]/route.ts')
 const detailPage = read('app/posts/[postId]/page.tsx')
 const replySection = read('components/PostRepliesSection.tsx')
 const replyApi = read('app/api/posts/[postId]/replies/route.ts')
-const forumHome = read('components/ForumHome.tsx')
+const forumHome = read('components/ForumDiscoveryHome.tsx')
 const forumFeed = read('app/api/forum/feed/route.ts')
 const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260814120000_add_reply_pinned/migration.sql')
@@ -245,17 +245,15 @@ function pinnedReplyFixture() {
   return { id: 'pinned', parentId: null, isPinned: true }
 }
 
-test('E院广场搜索通过 form submit 复用同一搜索逻辑，并重置页码', () => {
+test('E院广场搜索通过发现流 form submit 复用同一搜索逻辑，并重置 cursor', () => {
   assert.ok(forumHome.includes('<form'))
-  assert.ok(forumHome.includes('className="forum-search"'))
-  assert.ok(forumHome.includes('onSubmit={(event) => {'))
+  assert.ok(forumHome.includes('className="forum-discovery-search"'))
+  assert.ok(forumHome.includes('function submitSearch(event'))
   assert.ok(forumHome.includes('event.preventDefault()'))
-  assert.ok(forumHome.includes('applySearch(searchValue)'))
-  assert.ok(forumHome.includes('const normalized = value.trim()'))
-  assert.ok(forumHome.includes('query: normalized || null, page: null'))
+  assert.ok(forumHome.includes('const normalized = searchValue.trim()'))
+  assert.ok(forumHome.includes("next.delete('page')"))
+  assert.ok(forumHome.includes("next.set('query', normalized)"))
   assert.ok(forumHome.includes('enterKeyHint="search"'))
-  assert.ok(forumHome.includes('searchComposingRef'))
-  assert.ok(forumHome.includes('if (searchComposingRef.current) return'))
   assert.ok(forumFeed.includes('title: { contains: query }'))
   assert.ok(forumFeed.includes('summary: { contains: query }'))
 })

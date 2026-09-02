@@ -7,7 +7,7 @@ const read = (path: string) => readFileSync(path, 'utf8')
 const birthdayLib = read('lib/birthday.ts')
 const schema = read('prisma/schema.prisma')
 const permissionConfig = read('lib/admin-permission-config.ts')
-const adminPage = read('app/admin/page.tsx')
+const adminNavigation = read('lib/admin-navigation.ts')
 const listRoute = read('app/api/admin/birthday-messages/route.ts')
 const itemRoute = read('app/api/admin/birthday-messages/[id]/route.ts')
 
@@ -87,5 +87,5 @@ test('admin CRUD routes are guarded by the dedicated permission', () => {
 test('dashboard link and permission key are registered', () => {
   assert.match(permissionConfig, /'birthday_messages_manage'/)
   assert.match(permissionConfig, /\/admin\/birthday-messages': 'birthday_messages_manage'/)
-  assert.match(adminPage, /\/admin\/birthday-messages/)
+  assert.match(adminNavigation, /\/admin\/birthday-messages/)
 })

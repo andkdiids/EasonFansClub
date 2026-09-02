@@ -6,7 +6,7 @@ import { getMediaPublicBaseUrl, PUBLIC_COS_HOST } from '@/lib/media-url'
 import { publicImageUrl } from '@/lib/images'
 import { createBrandedQrBuffer } from '@/lib/branded-qr-server'
 import { shareCardEmojiAssetUrl, tokenizeShareCardText } from '@/lib/share-card-emoji'
-import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, shareCardTypeLabel, type ShareCardData, type ShareCardImageCandidate } from '@/lib/share-card'
+import { canonicalShareUrl, isTrustedShareCardDataUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_HEIGHT, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, shareCardTypeLabel, type ShareCardData, type ShareCardImageCandidate } from '@/lib/share-card'
 import {
   calculateShareCardLayout,
   estimatedShareCardTextWidth,
@@ -102,6 +102,7 @@ function isTrustedImageOrigin(parsed: URL) {
 
 /** Only database-originated, project-controlled HTTPS media can reach Sharp. */
 export function isTrustedShareCardImageUrl(value: string | null | undefined) {
+  if (isTrustedShareCardDataUrl(value)) return true
   const parsed = normalizedTrustedUrl(value)
   return Boolean(parsed && isTrustedImageOrigin(parsed) && !VIDEO_FILE_PATTERN.test(parsed.pathname))
 }
@@ -117,6 +118,13 @@ async function readKnownLocalAsset(parsed: URL) {
 async function loadTrustedImage(value: string | null | undefined): Promise<ImageBuffer> {
   if (!isTrustedShareCardImageUrl(value)) return null
   try {
+    if (typeof value === 'string' && isTrustedShareCardDataUrl(value)) {
+      const base64 = value.slice(value.indexOf(',') + 1)
+      const buffer = Buffer.from(base64, 'base64')
+      if (buffer.length > MAX_REMOTE_IMAGE_BYTES) return null
+      await sharp(buffer, { failOn: 'error', limitInputPixels: 30_000_000 }).metadata()
+      return buffer
+    }
     const parsed = normalizedTrustedUrl(value)
     if (!parsed) return null
     const local = await readKnownLocalAsset(parsed)

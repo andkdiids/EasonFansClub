@@ -74,7 +74,7 @@ test('奖励事务复用经验值与挂号费流水，绕过每日经验上限�
 
 test('用户奖励入口和 API 使用独立权限，且通知接入统一通知中心', () => {
   const permissionConfig = read('lib/admin-permission-config.ts')
-  const adminPage = read('app/admin/page.tsx')
+  const adminNavigation = read('lib/admin-navigation.ts')
   const page = read('app/admin/user-rewards/page.tsx')
   const route = read('app/api/admin/user-rewards/route.ts')
   const usersRoute = read('app/api/admin/user-rewards/users/route.ts')
@@ -82,7 +82,7 @@ test('用户奖励入口和 API 使用独立权限，且通知接入统一通知
   const notifications = read('lib/notifications.ts')
   const client = read('app/notifications/NotificationsClient.tsx')
   assert.match(permissionConfig, /user_reward_manage/)
-  assert.match(adminPage, /\/admin\/user-rewards/)
+  assert.match(adminNavigation, /\/admin\/user-rewards/)
   assert.match(page, /requireAdminPage\([^\n]*USER_REWARD_PERMISSION/)
   assert.match(route, /requireAdmin\(USER_REWARD_PERMISSION\)/)
   assert.match(usersRoute, /requireAdmin\(USER_REWARD_PERMISSION\)/)

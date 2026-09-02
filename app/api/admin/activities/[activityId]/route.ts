@@ -5,11 +5,10 @@ import { activitySelect, serializeActivityRow, type ActivityRow } from '@/lib/ac
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { checkBannedWords, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE } from '@/lib/content-moderation'
 import { normalizeActivityInput, type ActivityEditableValues } from '@/lib/activity-validation'
-import { ActivityConfigurationError, getActivityRegistrationQuestions, syncActivityRegistrationQuestions, syncActivityReward } from '@/lib/activity-registration'
+import { ActivityConfigurationError, ActivityRegistrationError, cancelActivityInTransaction, getActivityRegistrationQuestions, syncActivityRegistrationQuestions, syncActivityReward } from '@/lib/activity-registration'
 import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '@/lib/activity-material'
-import { cancelUndrawnActivityLotteriesInTransaction } from '@/lib/activity-lottery'
 import { prisma } from '@/lib/prisma'
-import { requireAdmin } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 
 export const dynamic = 'force-dynamic'
@@ -93,6 +92,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
+  const invalidOrigin = rejectInvalidRequestOrigin(request)
+  if (invalidOrigin) return invalidOrigin
   const guard = await requireAdmin('activity_manage')
   if (!guard.user) return guard.response
   const { activityId } = await params
@@ -103,6 +104,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
   const normalized = normalizeActivityInput(body, editableActivity(current))
   if (!normalized.valid) return NextResponse.json({ message: normalized.message }, { status: 400 })
+  if (current.status === 'CANCELLED' && normalized.value.status !== 'CANCELLED') {
+    return NextResponse.json({ code: 'ACTIVITY_CANCELLED', message: '已取消的活动不能恢复或重新发布' }, { status: 409 })
+  }
   if ((await checkBannedWords(moderationText(normalized.value))).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
@@ -126,10 +130,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     : adminAuditOperations.ACTIVITY_UPDATE
 
   try {
-    const activity = await prisma.$transaction(async (tx) => {
+    const transactionResult = await prisma.$transaction(async (tx) => {
       const { linkedMaterialId, ...activityData } = normalized.value
       await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
-      await assertLotterySchedulesFitActivityEnd(tx, activityId, normalized.value.endsAt)
+      const lockedCurrent = await tx.activity.findUnique({ where: { id: activityId }, select: { status: true } })
+      if (!lockedCurrent) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
+      if (lockedCurrent.status === 'CANCELLED' && normalized.value.status !== 'CANCELLED') {
+        throw new ActivityRegistrationError('ACTIVITY_CANCELLED', '已取消的活动不能恢复或重新发布', 409)
+      }
+      // Cancelling is a terminal business action and must not be blocked by
+      // an unrelated legacy lottery schedule that would otherwise prevent a
+      // normal activity edit.
+      if (normalized.value.status !== 'CANCELLED') await assertLotterySchedulesFitActivityEnd(tx, activityId, normalized.value.endsAt)
       const updated = await tx.activity.update({
         where: { id: activityId },
         data: {
@@ -139,8 +151,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         },
         select: activitySelect,
       })
-      await syncActivityLinkedMaterial(tx, { activityId, linkedMaterialId, startsAt: updated.startsAt, endsAt: updated.endsAt })
-      if (updated.status === 'CANCELLED') await cancelUndrawnActivityLotteriesInTransaction(tx, updated.id, now)
+      if (normalized.value.status !== 'CANCELLED') await syncActivityLinkedMaterial(tx, { activityId, linkedMaterialId, startsAt: updated.startsAt, endsAt: updated.endsAt })
+      const cancellation = updated.status === 'CANCELLED'
+        ? await cancelActivityInTransaction(tx, { activityId: updated.id, adminId: guard.user.id, now })
+        : null
       if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, activityId, input.registrationQuestions)
       if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, activityId, input.activityReward, normalized.value.verificationMode)
       await createAdminActionAudit(tx, {
@@ -150,7 +164,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         targetType: 'ACTIVITY',
         targetId: updated.id,
         targetTitle: updated.title,
-        metadata: { activityId: updated.id, changedFields: fields, fromStatus: current.status, toStatus: updated.status } as Prisma.InputJsonValue,
+        metadata: { activityId: updated.id, changedFields: fields, fromStatus: current.status, toStatus: updated.status, cancellation: cancellation ? { registrationsCancelled: cancellation.registrations.cancelled, refundedCount: cancellation.registrations.refundedCount, refundedAmount: cancellation.registrations.refundedAmount, lotteriesCancelled: cancellation.lotteriesCancelled } : null } as Prisma.InputJsonValue,
       })
       if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await createAdminActionAudit(tx, {
         operatorId: guard.user.id,
@@ -170,19 +184,34 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         targetTitle: updated.title,
         metadata: { activityId: updated.id, activityReward: input.activityReward as Prisma.InputJsonValue } as Prisma.InputJsonValue,
       })
-      return tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: activitySelect })
+      return { activity: await tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: activitySelect }), cancellation }
     })
-    try {
-      await grantEligibleActivityBadges({ activityId })
-    } catch (error) {
-      console.error('[admin.activities.update.badge-reward-compensation]', { activityId, error })
+    if (transactionResult.activity.status !== 'CANCELLED') {
+      try {
+        await grantEligibleActivityBadges({ activityId })
+      } catch (error) {
+        console.error('[admin.activities.update.badge-reward-compensation]', { activityId, error })
+      }
     }
     revalidatePath('/activities')
     revalidatePath(`/activities/${activityId}`)
     revalidatePath('/')
-    return NextResponse.json({ activity: serializeActivityRow(activity) })
+    const cancellation = transactionResult.cancellation ? {
+      registrationsCancelled: transactionResult.cancellation.registrations.cancelled,
+      refundedCount: transactionResult.cancellation.registrations.refundedCount,
+      refundedAmount: transactionResult.cancellation.registrations.refundedAmount,
+      lotteriesCancelled: transactionResult.cancellation.lotteriesCancelled,
+    } : null
+    return NextResponse.json({
+      success: true,
+      activityId,
+      activity: serializeActivityRow(transactionResult.activity),
+      cancellation,
+      ...(cancellation || {}),
+    })
   } catch (error) {
     if (error instanceof ActivityConfigurationError || error instanceof ActivityMaterialConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
+    if (error instanceof ActivityRegistrationError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status })
     console.error('[admin.activities.update]', error instanceof Error ? error.message : error)
     return NextResponse.json({ message: '保存活动失败，请稍后重试' }, { status: 500 })
   }

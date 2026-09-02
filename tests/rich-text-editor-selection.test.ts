@@ -125,7 +125,9 @@ test('music insertion uses the saved selection rather than forcing the document 
   assert.doesNotMatch(editor, /focus\(['"]start['"]\)|focus\(['"]end['"]\)|setSelection\(0\)/u)
 })
 
-test('list backspace delegates non-empty selections to the base keymap', () => {
-  assert.match(editor, /if \(!this\.editor\.state\.selection\.empty\) return false/u)
+test('list backspace only handles an empty list item and otherwise delegates to the base keymap', () => {
+  assert.match(editor, /if \(!isEmptyListItemAtStart\(this\.editor\)\) return false/u)
   assert.match(editor, /isEmptyListItemAtStart\(this\.editor\)/u)
+  assert.match(editor, /return this\.editor\.commands\.liftListItem\('listItem'\)/u)
+  assert.doesNotMatch(editor, /'Mod-Backspace'|'Shift-Backspace'/u)
 })

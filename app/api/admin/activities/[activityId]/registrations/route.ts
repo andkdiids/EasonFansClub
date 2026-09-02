@@ -36,12 +36,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
     } : {}),
   }
 
-  const [activity, registrations, total, activeCount, verifiedCount, cancelledCount] = await prisma.$transaction([
+  const [activity, registrations, total, activeCount, verifiedCount, unverifiedActiveCount, cancelledCount, activePaidFeeTotal, unverifiedActivePaidFeeTotal] = await prisma.$transaction([
     prisma.activity.findUnique({
       where: { id: activityId },
       select: {
         id: true,
         title: true,
+        status: true,
         startsAt: true,
         endsAt: true,
         registrationFee: true,
@@ -81,7 +82,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
     prisma.activityRegistration.count({ where }),
     prisma.activityRegistration.count({ where: { activityId, status: 'ACTIVE' } }),
     prisma.activityRegistration.count({ where: { activityId, status: 'ACTIVE', verifiedAt: { not: null } } }),
+    prisma.activityRegistration.count({ where: { activityId, status: 'ACTIVE', verifiedAt: null } }),
     prisma.activityRegistration.count({ where: { activityId, status: 'CANCELLED' } }),
+    prisma.activityRegistration.aggregate({ where: { activityId, status: 'ACTIVE' }, _sum: { paidRegistrationFee: true } }),
+    prisma.activityRegistration.aggregate({ where: { activityId, status: 'ACTIVE', verifiedAt: null }, _sum: { paidRegistrationFee: true } }),
   ])
   if (!activity) return NextResponse.json({ message: '活动不存在' }, { status: 404, headers: privateHeaders })
 
@@ -93,9 +97,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
       registrationStartAt: activity.registrationStartAt?.toISOString() || null,
       registrationEndAt: activity.registrationEndAt?.toISOString() || null,
       reward: activity.ActivityReward[0]?.Badge || null,
+      activityCancelled: activity.status === 'CANCELLED',
     },
     registrations: registrations.map((registration) => ({
       ...registration,
+      displayStatus: registration.status === 'CANCELLED' ? 'CANCELLED' : registration.verifiedAt ? 'VERIFIED' : 'ACTIVE',
       registeredAt: registration.registeredAt.toISOString(),
       cancelledAt: registration.cancelledAt?.toISOString() || null,
       verifiedAt: registration.verifiedAt?.toISOString() || null,
@@ -112,6 +118,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
       answers: registration.Answers.map((answer) => ({ ...answer, value: answer.value.startsWith('[') ? (() => { try { const parsed = JSON.parse(answer.value); return Array.isArray(parsed) ? parsed : answer.value } catch { return answer.value } })() : answer.value })),
     })),
     pagination: { total, limit: 200 },
-    summary: { activeCount, verifiedCount, cancelledCount },
+    summary: {
+      activeCount,
+      verifiedCount,
+      unverifiedActiveCount,
+      cancelledCount,
+      activePaidFeeTotal: Math.max(0, activePaidFeeTotal._sum.paidRegistrationFee || 0),
+      unverifiedActivePaidFeeTotal: Math.max(0, unverifiedActivePaidFeeTotal._sum.paidRegistrationFee || 0),
+    },
   }, { headers: privateHeaders })
 }

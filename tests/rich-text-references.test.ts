@@ -7,6 +7,8 @@ import { RichPostContent } from '../components/posts/RichPostContent'
 import { parseMentionSearchQuery } from '../lib/mention-search'
 import {
   collectPostReferenceIds,
+  collectActivityReferenceIds,
+  collectMaterialReferenceIds,
   collectUserMentionIds,
   extractPlainText,
   validateRichPostContent,
@@ -14,6 +16,8 @@ import {
 import {
   InvalidPostReferenceError,
   InvalidUserMentionError,
+  InvalidActivityReferenceError,
+  InvalidMaterialReferenceError,
   hydrateRichTextReferences,
   validateAndNormalizeRichTextReferences,
 } from '../lib/rich-text-references'
@@ -189,4 +193,172 @@ test('editor and server routes expose the requested structured toolbar/search co
   assert.match(postRoute, /take: 15/u)
 
   assert.equal(extractPlainText(referenceDocument), '看这里：客户端伪造标题，以及 @伪造名称')
+})
+
+test('activity and material references keep canonical ids and discard dynamic metadata on save', async () => {
+  const document = {
+    type: 'doc',
+    content: [{
+      type: 'paragraph',
+      content: [
+        { type: 'activityReference', attrs: { activityId: 'activity-1', title: '伪造活动', displayStatus: 'ENDED', available: false } },
+        { type: 'text', text: ' / ' },
+        { type: 'materialReference', attrs: { materialId: 'material-1', title: '伪造物料', state: 'ARCHIVED', stockRemaining: 0 } },
+      ],
+    }],
+  }
+  const validated = validateRichPostContent(document)
+  assert.equal(validated.valid, true)
+  if (!validated.valid) return
+
+  assert.deepEqual(collectActivityReferenceIds(validated.value), ['activity-1'])
+  assert.deepEqual(collectMaterialReferenceIds(validated.value), ['material-1'])
+
+  const normalized = await validateAndNormalizeRichTextReferences(
+    validated.value,
+    async () => [],
+    async () => [],
+    async () => [{
+      id: 'activity-1',
+      title: '真实活动',
+      coverUrl: null,
+      bannerUrl: null,
+      startsAt: '2026-09-01T10:00:00.000Z',
+      endsAt: '2026-09-01T12:00:00.000Z',
+      locationName: 'E院现场',
+      displayStatus: 'ONGOING',
+      statusLabel: '进行中',
+    }],
+    async () => [{
+      id: 'material-1',
+      title: '真实物料',
+      coverImageUrl: null,
+      cost: 5,
+      stockRemaining: 8,
+      state: 'ACTIVE',
+      stateLabel: '兑换中',
+      linkedActivity: null,
+    }],
+  )
+
+  const paragraph = normalized.richContent.content[0]
+  assert.equal(paragraph.type, 'paragraph')
+  if (paragraph.type !== 'paragraph') return
+  assert.deepEqual(paragraph.content?.[0], { type: 'activityReference', attrs: { activityId: 'activity-1', titleSnapshot: '真实活动' } })
+  assert.deepEqual(paragraph.content?.[2], { type: 'materialReference', attrs: { materialId: 'material-1', titleSnapshot: '真实物料' } })
+  assert.equal(normalized.plainText, '真实活动 / 真实物料')
+})
+
+test('activity and material hydration refreshes current display data and falls back safely', async () => {
+  const validated = validateRichPostContent({
+    type: 'doc',
+    content: [{
+      type: 'paragraph',
+      content: [
+        { type: 'activityReference', attrs: { activityId: 'activity-1', titleSnapshot: '旧活动标题' } },
+        { type: 'text', text: ' ' },
+        { type: 'materialReference', attrs: { materialId: 'missing-material', titleSnapshot: '旧物料标题' } },
+      ],
+    }],
+  })
+  assert.equal(validated.valid, true)
+  if (!validated.valid) return
+
+  const hydrated = await hydrateRichTextReferences(
+    validated.value,
+    async () => [],
+    async () => [],
+    async () => [{
+      id: 'activity-1',
+      title: '活动最新标题',
+      coverUrl: null,
+      bannerUrl: null,
+      startsAt: null,
+      endsAt: null,
+      locationName: null,
+      displayStatus: 'CANCELLED',
+      statusLabel: '已取消',
+    }],
+    async () => [],
+  )
+  const paragraph = hydrated.content[0]
+  assert.equal(paragraph.type, 'paragraph')
+  if (paragraph.type !== 'paragraph') return
+  assert.deepEqual(paragraph.content?.[0], {
+    type: 'activityReference',
+    attrs: { activityId: 'activity-1', title: '活动最新标题', displayStatus: 'CANCELLED', statusLabel: '已取消', available: true },
+  })
+  assert.deepEqual(paragraph.content?.[2], {
+    type: 'materialReference',
+    attrs: { materialId: 'missing-material', title: '该引用物料已不可用', available: false },
+  })
+})
+
+test('activity and material identities are required to exist in the public server lookup', async () => {
+  const activityDocument = validateRichPostContent({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'activityReference', attrs: { activityId: 'missing-activity' } }] }],
+  })
+  assert.equal(activityDocument.valid, true)
+  if (!activityDocument.valid) return
+  await assert.rejects(
+    () => validateAndNormalizeRichTextReferences(activityDocument.value, async () => [], async () => [], async () => [], async () => []),
+    InvalidActivityReferenceError,
+  )
+
+  const materialDocument = validateRichPostContent({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'materialReference', attrs: { materialId: 'missing-material' } }] }],
+  })
+  assert.equal(materialDocument.valid, true)
+  if (!materialDocument.valid) return
+  await assert.rejects(
+    () => validateAndNormalizeRichTextReferences(materialDocument.value, async () => [], async () => [], async () => [], async () => []),
+    InvalidMaterialReferenceError,
+  )
+})
+
+test('activity and material reference cards link to existing detail routes and render unavailable fallbacks', () => {
+  const markup = renderToStaticMarkup(createElement(RichPostContent, {
+    richContent: {
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'activityReference', attrs: { activityId: 'activity-1', title: '活动标题', statusLabel: '进行中', available: true } },
+          { type: 'text', text: ' ' },
+          { type: 'materialReference', attrs: { materialId: 'material-1', title: '物料标题', cost: 5, stockRemaining: 3, stateLabel: '兑换中', available: true } },
+          { type: 'text', text: ' ' },
+          { type: 'activityReference', attrs: { activityId: 'deleted-activity', title: '旧活动', available: false } },
+          { type: 'text', text: ' ' },
+          { type: 'materialReference', attrs: { materialId: 'deleted-material', title: '旧物料', available: false } },
+        ],
+      }],
+    },
+    fallbackContent: '',
+  }))
+  assert.match(markup, /href="\/activities\/activity-1"/u)
+  assert.match(markup, /href="\/material-redemptions\/material-1"/u)
+  assert.match(markup, /进行中/u)
+  assert.match(markup, /该引用活动已不可用/u)
+  assert.match(markup, /该引用物料已不可用/u)
+})
+
+test('reference menu exposes post, activity and material pickers without removing historical link support', () => {
+  const editor = read('components/posts/RichTextEditor.tsx')
+  const activityRoute = read('app/api/activities/reference-search/route.ts')
+  const materialRoute = read('app/api/material-redemptions/reference-search/route.ts')
+  assert.match(editor, /name: 'postReference'/u)
+  assert.match(editor, /name: 'activityReference'/u)
+  assert.match(editor, /name: 'materialReference'/u)
+  assert.match(editor, /toggleReferenceMenu/u)
+  assert.match(editor, /openReferencePicker\('post'\)/u)
+  assert.match(editor, /openReferencePicker\('activity'\)/u)
+  assert.match(editor, /openReferencePicker\('material'\)/u)
+  assert.match(editor, /type: 'activityReference'/u)
+  assert.match(editor, /type: 'materialReference'/u)
+  assert.match(activityRoute, /searchPublicActivityReferences/u)
+  assert.match(materialRoute, /searchPublicMaterialReferences/u)
+  assert.match(materialRoute, /requireUser/u)
+  assert.match(activityRoute, /requireUser/u)
 })

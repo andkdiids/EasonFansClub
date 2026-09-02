@@ -97,10 +97,10 @@ const materialWithRulesInclude = {
 type MaterialWithRules = Prisma.MaterialRedemptionGetPayload<{ include: typeof materialWithRulesInclude }>
 
 const materialOrderInclude = {
-  material: { include: { linkedActivity: { select: { id: true, title: true, startsAt: true, endsAt: true, registrationFee: true } } } },
+  material: { include: { linkedActivity: { select: { id: true, title: true, status: true, startsAt: true, endsAt: true, registrationFee: true } } } },
   user: { select: { id: true, uid: true, nickname: true, username: true } },
   redeemedByAdmin: { select: { id: true, uid: true, nickname: true, username: true } },
-  linkedActivity: { select: { id: true, title: true, startsAt: true, endsAt: true, registrationFee: true } },
+  linkedActivity: { select: { id: true, title: true, status: true, startsAt: true, endsAt: true, registrationFee: true } },
   linkedRegistration: { select: { id: true, activityId: true, status: true, registeredAt: true, cancelledAt: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
 } satisfies Prisma.MaterialRedemptionOrderInclude
 
@@ -114,6 +114,11 @@ function materialOrderSchedule(order: Pick<MaterialOrderWithRelations, 'material
     if (inherited) return inherited
   }
   return materialScheduleFromRow(order.material)
+}
+
+function isCancelledActivityMaterialOrder(order: Pick<MaterialOrderWithRelations, 'material' | 'linkedActivity' | 'source'>) {
+  return order.source === 'ACTIVITY_REGISTRATION_AUTO'
+    && (order.linkedActivity?.status === 'CANCELLED' || order.material.linkedActivity?.status === 'CANCELLED')
 }
 
 function getRuleReferenceType(type: MaterialRuleType) {
@@ -905,12 +910,14 @@ export async function getAdminMaterialOrderPreview(token: string) {
   if (!order) throw new MaterialRedemptionError('ORDER_NOT_FOUND', '兑换订单不存在', 404)
   const now = new Date()
   const activityBound = order.source === 'ACTIVITY_REGISTRATION_AUTO'
+  const activityCancelled = isCancelledActivityMaterialOrder(order)
   const effectiveSchedule = materialOrderSchedule(order)
   const notStarted = activityBound && order.status === 'SUCCESS' && now < effectiveSchedule.exchangeStartAt
   const expired = !activityBound && (order.status === 'EXPIRED' || (order.status === 'SUCCESS' && !canRedeemMaterial(order.material.status, effectiveSchedule.redeemEndAt, now)))
   return {
     ...serializeOrder(order, false),
-    canRedeem: order.status === 'SUCCESS' && !expired && !notStarted,
+    canRedeem: order.status === 'SUCCESS' && !expired && !notStarted && !activityCancelled,
+    activityCancelled,
     expired,
     notStarted,
     redeemTokenLast4: order.redeemToken.slice(-4),
@@ -922,6 +929,7 @@ export async function redeemMaterialOrder(adminId: string, token: string) {
   const result = await prisma.$transaction(async (tx) => {
     const order = await findMaterialOrderByRedeemIdentifier(tx, token)
     if (!order) throw new MaterialRedemptionError('ORDER_NOT_FOUND', '兑换订单不存在', 404)
+    if (isCancelledActivityMaterialOrder(order)) throw new MaterialRedemptionError('ACTIVITY_CANCELLED', '活动已取消，活动物料不可核销', 409)
     // Activity-bound orders are the second half of the one-scan operation.
     // Re-scanning their material code must be idempotent just like
     // re-scanning the activity code, while ordinary material orders retain

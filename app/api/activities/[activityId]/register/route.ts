@@ -78,6 +78,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
         },
       })
       if (!activity) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
+      if (activity.status === 'CANCELLED') throw new ActivityRegistrationError('ACTIVITY_CANCELLED', '活动已取消，无法报名', 409)
 
       const existing = await tx.activityRegistration.findUnique({
         where: { activityId_userId: { activityId, userId: guard.user.id } },

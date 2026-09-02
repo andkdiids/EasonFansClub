@@ -3,7 +3,7 @@
 import { publicImageUrl } from '@/lib/images'
 import { drawBrandedQrToCanvas } from '@/lib/branded-qr-client'
 import { shareCardEmojiAssetUrl, tokenizeShareCardText } from '@/lib/share-card-emoji'
-import { canonicalShareUrl, createShareCardFilename, shareCardQrPayload, shareCardTypeLabel, isTrustedShareCardHttpsUrl, SHARE_CARD_LOGO_PATH, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { canonicalShareUrl, createShareCardFilename, shareCardQrPayload, shareCardTypeLabel, isTrustedShareCardDataUrl, isTrustedShareCardHttpsUrl, SHARE_CARD_LOGO_PATH, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import {
   calculateShareCardLayout,
   shareCardHeroFit,
@@ -66,6 +66,7 @@ function safePublicImageUrl(value: string | null | undefined) {
 }
 
 function loadImage(value: string | null | undefined, allowRemoteImages: boolean): Promise<LoadedImage> {
+  if (typeof value === 'string' && isTrustedShareCardDataUrl(value)) return loadLocalImage(value)
   const imageUrl = allowRemoteImages ? safePublicImageUrl(value) : null
   if (!imageUrl) return Promise.resolve(null)
 

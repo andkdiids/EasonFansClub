@@ -1,42 +1,30 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
-import { AdminInlineLayoutEditor } from '@/components/AdminInlineLayoutEditor'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { pageLayoutPages } from '@/lib/page-layout/registry'
 import type { PageLayoutPageKey } from '@/lib/page-layout/types'
 
 const editablePageMap = Object.fromEntries(
-  Object.entries(pageLayoutPages).map(([key, page]) => [page.path, key as PageLayoutPageKey]),
+  Object.entries(pageLayoutPages)
+    .filter(([, page]) => !page.path.includes('?') && !page.path.includes('#'))
+    .map(([key, page]) => [page.path, key as PageLayoutPageKey]),
 ) as Record<string, PageLayoutPageKey>
 
 export function AdminLayoutQuickLink({ enabled }: { enabled: boolean }) {
   const pathname = usePathname()
-  const [inlineEdit, setInlineEdit] = useState(false)
-
-  useEffect(() => {
-    setInlineEdit(new URLSearchParams(window.location.search).get('layoutEdit') === '1')
-  }, [pathname])
+  const searchParams = useSearchParams()
 
   if (!enabled) return null
 
-  const pageKey = editablePageMap[pathname || '']
+  const isAnnouncementBoard = pathname === '/forum' && searchParams.get('board') === 'announcements'
+  const pageKey = isAnnouncementBoard ? 'announcement' : editablePageMap[pathname || '']
   if (!pageKey) return null
-  const inlineHref = `${pathname || '/'}?layoutEdit=1`
 
   return (
-    <>
-      {inlineEdit ? <AdminInlineLayoutEditor pageKey={pageKey} /> : null}
-      {!inlineEdit ? (
-        <details className="app-layout-tools">
-          <summary>布局</summary>
-          <div>
-            <Link href={inlineHref}>前台编辑布局</Link>
-            <Link href={`/admin/layout-editor?page=${pageKey}`}>完整布局编辑器</Link>
-          </div>
-        </details>
-      ) : null}
-    </>
+    <details className="app-layout-tools">
+      <summary>布局</summary>
+      <div><Link href={`/admin/layout-editor?page=${pageKey}`}>打开页面布局编辑器</Link></div>
+    </details>
   )
 }

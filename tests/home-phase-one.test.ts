@@ -78,30 +78,23 @@ test('Hero carousel only consumes enabled slides and supports autoplay, controls
   assert.match(manager, /\/api\/admin\/home\/hero/)
 })
 
-test('homepage keeps the hero intact and places the requested first row before lower modules', () => {
+test('homepage keeps the hero and module order in the shared layout registry', () => {
   const surface = read('components/HomeLayoutSurface.tsx')
+  const registry = read('lib/page-layout/registry.ts')
   assert.doesNotMatch(surface, /shortcutItems|grid-cols-6|home-hero|community-hero-actions|growthThresholds|homeText\.(level|exp|points)/)
-  const heroPosition = surface.indexOf('<HomeHero')
-  const firstRowStart = surface.indexOf('<div className="home-first-row"')
-  const dataPosition = surface.indexOf('community-stats home-checkin-stats', firstRowStart)
-  const firstRowPanelsPosition = surface.indexOf('home-primary-columns home-first-row-panels', firstRowStart)
-  const secondaryPosition = surface.indexOf('<div className="home-secondary-content"')
-  assert.ok(heroPosition >= 0)
-  assert.ok(firstRowStart > heroPosition)
-  assert.ok(dataPosition > firstRowStart)
-  assert.ok(firstRowPanelsPosition > dataPosition)
-  assert.ok(secondaryPosition > firstRowPanelsPosition)
-
-  const firstRow = surface.slice(firstRowStart, secondaryPosition)
-  assert.ok(firstRow.indexOf('{renderTodayPanel()}') < firstRow.indexOf('{renderAnywhereDoorPanel()}'))
-  assert.ok(firstRow.indexOf('{renderAnywhereDoorPanel()}') < firstRow.indexOf('{renderSalonPanel()}'))
-  assert.doesNotMatch(firstRow, /renderDailyMusicPanel|renderEntertainmentPanel/)
-
-  const secondary = surface.slice(secondaryPosition)
-  assert.ok(secondary.indexOf('{renderActivityCenterPanel()}') < secondary.indexOf('{renderDailyMusicPanel()}'))
-  assert.ok(secondary.indexOf('{renderDailyMusicPanel()}') < secondary.indexOf('{renderEntertainmentPanel()}'))
-  assert.ok(secondary.indexOf('{renderEntertainmentPanel()}') < secondary.indexOf('homeText.randomAlbums'))
-  assert.equal(secondary.indexOf('{renderRecentActivitiesPanel()}'), -1)
+  assert.match(surface, /<HomeHero/)
+  assert.match(surface, /<PageLayoutRenderer/)
+  const homeKeys = ['home.hero', 'home.announcement', 'home.stats', 'home.today', 'home.anywhereDoor', 'home.salon', 'home.activityCenter', 'home.dailyMusic', 'home.entertainment', 'home.albums']
+  let previousRegistryPosition = -1
+  let previousSurfacePosition = -1
+  for (const key of homeKeys) {
+    const registryPosition = registry.indexOf(`'${key}'`)
+    const surfacePosition = surface.indexOf(`'${key}'`)
+    assert.ok(registryPosition > previousRegistryPosition, `${key} registry order`)
+    assert.ok(surfacePosition > previousSurfacePosition, `${key} renderer order`)
+    previousRegistryPosition = registryPosition
+    previousSurfacePosition = surfacePosition
+  }
 })
 
 test('entertainment home card uses the endless-mode leaderboard without loading removed concert data', () => {
@@ -125,15 +118,12 @@ test('mobile home layout uses a compact hero, two-by-two stats, and bottom safe 
   assert.match(css, /\.community-stats\.home-checkin-stats \{ grid-template-columns:repeat\(2,minmax\(0,1fr\)\) !important; \}/)
   assert.match(css, /padding-bottom:calc\(var\(--mobile-bottom-nav-total\) \+ var\(--mobile-page-bottom-gap\)\)/)
   assert.match(css, /\.community-stats\.home-checkin-stats\.home-first-row-data \{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\) !important;/)
-  assert.match(css, /\.home-secondary-columns \{\s*display: grid;\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/)
-  assert.match(css, /\.home-secondary-columns > \.community-panel \{[\s\S]*height: 100%;/)
-  assert.match(css, /\.home-secondary-columns > \.home-entertainment-panel \{ grid-column: 1 \/ -1; \}/)
-  const responsiveStart = css.lastIndexOf('@media (max-width: 767px)')
-  assert.ok(responsiveStart >= 0)
-  assert.match(css.slice(responsiveStart), /\.home-secondary-columns \{\s*grid-template-columns: minmax\(0, 1fr\);\s*gap: 16px;/)
+  assert.match(css, /\.home-primary-columns \{\s*grid-template-columns: repeat\(3,minmax\(0,1fr\)\);\s*gap:18px;\s*height:330px;/)
+  assert.match(css, /\.home-primary-columns > \.community-panel \{ height:100%; \}/)
+  assert.match(css, /\.home-primary-columns \{ display:flex; flex-direction:column; gap:20px; \}/)
   assert.doesNotMatch(css, /stat-checkin-mobile-mark|\.stat-checkin\.is-not-checked>small/)
   assert.match(surface, /checkinStateClass/)
-  assert.match(surface, /renderActivityCenterPanel\(\)/)
+  assert.match(surface, /const renderActivityCenterPanel = \(\) =>/)
   assert.match(surface, /stat-registration-cta/)
   assert.doesNotMatch(surface, /stat-checkin-mobile-mark/)
 })

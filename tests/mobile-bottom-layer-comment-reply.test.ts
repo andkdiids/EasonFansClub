@@ -14,7 +14,7 @@ const friendDock = read('components/FriendDock.tsx')
 const mobileNavigation = read('components/layout/MobileNavigation.tsx')
 const navigationRegistry = read('lib/navigation-registry.ts')
 const appShell = read('components/layout/AppShell.tsx')
-const forum = read('components/ForumHome.tsx')
+const forum = read('components/ForumDiscoveryHome.tsx')
 const pagination = read('components/ui/Pagination.tsx')
 
 test('回复 API 返回前端可直接渲染且可序列化的 author 结构', () => {
@@ -105,10 +105,11 @@ test('页面容器和社区内容不再重复叠加固定 86 或 88 像素补偿
   assert.doesNotMatch(css, /\.community-content \{ padding: [^}]*calc\(86px/)
 })
 
-test('E院广场分页采用独立间距和足够触控高度', () => {
-  assert.match(forum, /<Pagination[\s\S]*className="forum-pagination"/)
-  assert.match(css, /\.forum-pagination \{ margin:24px 0 36px;/)
-  assert.match(css, /\.forum-pagination>\* \{ min-height:40px; \}/)
+test('E院广场发现流使用可持续加载的 sentinel，并保留独立滚动底部间距', () => {
+  assert.match(forum, /forum-discovery-sentinel/)
+  assert.match(forum, /IntersectionObserver/)
+  assert.match(forum, /rootMargin: '420px 0px'/)
+  assert.match(css, /\.forum-discovery-page \{ display:block; min-height:100dvh;/)
 })
 
 test('320px 分页隐藏首末页且不依赖横向滚动', () => {

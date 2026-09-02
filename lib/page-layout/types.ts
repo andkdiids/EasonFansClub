@@ -16,6 +16,11 @@ export type LayoutDensity = (typeof layoutDensities)[number]
 export const pageLayoutBehaviors = ['fixed', 'auto'] as const
 export type PageLayoutBehavior = (typeof pageLayoutBehaviors)[number]
 
+export const pageLayoutHeightModes = ['AUTO', 'FIXED'] as const
+export type PageLayoutHeightMode = (typeof pageLayoutHeightModes)[number]
+
+export type PageLayoutModuleCategory = '首页' | '挂号' | '广场' | '公告' | 'EasMusic' | '消息' | '个人资料' | '后台'
+
 export const pageLayoutDevices = ['desktop', 'tablet', 'mobile'] as const
 export type PageLayoutDevice = (typeof pageLayoutDevices)[number]
 
@@ -43,11 +48,21 @@ export type PageLayoutModuleConfig = {
 
 export type PageLayoutConfig = Record<PageLayoutDevice, PageLayoutModuleConfig[]>
 
+export type PageLayoutWarning = {
+  device: PageLayoutDevice
+  key: string
+  kind: 'UNKNOWN' | 'DEPRECATED'
+  message: string
+}
+
 export type PageLayoutModuleDefinition = {
   key: string
   page: PageLayoutPageKey
   name: string
   description: string
+  /** Stable component identity. The renderer resolves this key to the real UI component. */
+  componentKey: string
+  category: PageLayoutModuleCategory
   defaultOrder: number
   defaultVisible: boolean
   defaultGrid: Record<PageLayoutDevice, PageLayoutGridItem>
@@ -63,6 +78,7 @@ export type PageLayoutModuleDefinition = {
   supportsTablet: boolean
   supportsMobile: boolean
   layoutBehavior: PageLayoutBehavior
+  heightMode: PageLayoutHeightMode
   minW: number
   minH: number
   maxW?: number
@@ -70,12 +86,26 @@ export type PageLayoutModuleDefinition = {
   canMove: boolean
   canResize: boolean
   canHide: boolean
+  /** User-facing aliases used by the editor and kept alongside legacy fields. */
+  core: boolean
+  resizable: boolean
+  hideable: boolean
+  surfaceClassName?: string
   required?: boolean
+}
+
+export type PageLayoutPageDefinition = {
+  key: PageLayoutPageKey
+  name: string
+  description: string
+  path: string
+  navigationFeatureKey?: string
 }
 
 export type SerializedPageLayout = {
   pageKey: PageLayoutPageKey
   registry: PageLayoutModuleDefinition[]
+  warnings: PageLayoutWarning[]
   defaults: PageLayoutConfig
   draftConfig: PageLayoutConfig
   publishedConfig: PageLayoutConfig

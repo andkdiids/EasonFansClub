@@ -8,7 +8,7 @@ import {
   pageLayoutPages,
 } from '@/lib/page-layout/registry'
 import type { PageLayoutConfig, PageLayoutPageKey, SerializedPageLayout, SerializedPageLayoutRevision } from '@/lib/page-layout/types'
-import { PageLayoutValidationError, repairPageLayoutConfig, validatePageLayoutConfig } from '@/lib/page-layout/validation'
+import { collectPageLayoutWarnings, PageLayoutValidationError, repairPageLayoutConfig, validatePageLayoutConfig } from '@/lib/page-layout/validation'
 import { prisma } from '@/lib/prisma'
 
 const pageLayoutCacheTagPrefix = 'page-layout'
@@ -88,6 +88,7 @@ function serializeLayout(pageKey: PageLayoutPageKey, layout: {
   return {
     pageKey,
     registry: getPageLayoutRegistry(pageKey).map((item) => ({ ...item })),
+    warnings: layout ? collectPageLayoutWarnings(pageKey, layout.draftConfig) : [],
     defaults,
     draftConfig: layout ? fromJson(pageKey, layout.draftConfig) : defaults,
     publishedConfig: layout ? fromJson(pageKey, layout.publishedConfig) : defaults,
@@ -391,7 +392,7 @@ export async function publishPageLayoutRevision(pageKey: PageLayoutPageKey, revi
     })
     if (!revision) throw new PageLayoutRevisionNotFoundError()
 
-    const config = repairPageLayoutConfig(pageKey, revision.config)
+    const config = validatePageLayoutConfig(pageKey, repairPageLayoutConfig(pageKey, revision.config))
     const next = await tx.pageLayout.update({
       where: { pageKey },
       data: {

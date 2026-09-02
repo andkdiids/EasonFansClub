@@ -9,7 +9,7 @@ test('推荐页桌面刷新按钮复用现有 loadPage，移动端隐藏且避�
   const discovery = read('components/ForumDiscoveryHome.tsx')
   const css = read('app/globals.css')
 
-  assert.match(home, /showDesktopRefresh=\{isMobile === false\}/)
+  assert.match(home, /showDesktopRefresh=\{!previewMode\}/)
   assert.match(discovery, /showDesktopRefresh && mode === 'recommend'/)
   assert.match(discovery, /onClick=\{\(\) => void refresh\(true\)\}/)
   assert.match(discovery, /disabled=\{isRefreshing\}/)

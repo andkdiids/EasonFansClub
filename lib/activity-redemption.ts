@@ -33,7 +33,7 @@ export type ActivityRedemptionLookupView = {
 }
 
 export class ActivityRedemptionError extends Error {
-  constructor(readonly code: 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'REGISTRATION_CANCELLED' | 'NO_SELECTION' | 'INVALID_ENTITLEMENT' | 'LOTTERY_WINNER_WAITING_FOR_CHECK_IN' | 'LOTTERY_WINNER_EXPIRED' | 'REDEMPTION_FAILED', message: string, readonly status = 409) {
+  constructor(readonly code: 'INVALID_TOKEN' | 'REGISTRATION_NOT_FOUND' | 'REGISTRATION_CANCELLED' | 'ACTIVITY_CANCELLED' | 'NO_SELECTION' | 'INVALID_ENTITLEMENT' | 'LOTTERY_WINNER_WAITING_FOR_CHECK_IN' | 'LOTTERY_WINNER_EXPIRED' | 'REDEMPTION_FAILED', message: string, readonly status = 409) {
     super(message)
     this.name = 'ActivityRedemptionError'
   }
@@ -57,7 +57,7 @@ const lookupRegistrationSelect = {
     },
   },
   User: { select: { uid: true, nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
-  Activity: { select: { id: true, title: true, startsAt: true, endsAt: true } },
+  Activity: { select: { id: true, title: true, status: true, startsAt: true, endsAt: true } },
 } satisfies Prisma.ActivityRegistrationSelect
 
 type LookupRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof lookupRegistrationSelect }>
@@ -78,6 +78,7 @@ export async function resolveActivityVerificationToken(db: ActivityRegistrationL
   const token = tokenFromInput(rawToken)
   const registration = await db.activityRegistration.findFirst({ where: activityRegistrationVerificationWhere(activityId, token), select: lookupRegistrationSelect })
   if (!registration) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '找不到对应的有效活动报名记录', 404)
+  if (registration.Activity.status === 'CANCELLED') throw new ActivityRedemptionError('ACTIVITY_CANCELLED', '活动已取消，无法核销', 409)
   if (registration.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
   return { token, registration }
 }
@@ -113,11 +114,13 @@ async function loadLookupRows(activityId: string, token: string) {
       redemptionStatus: true,
       redeemedAt: true,
       Lottery: { select: { title: true } },
-      LotteryPrize: { select: { tierName: true, name: true } },
+       LotteryPrize: { select: { tierName: true, name: true, prizeType: true } },
       Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
     },
   })
-  return { registration, winners }
+  // Virtual prizes are fulfilled automatically after the draw and must never
+  // enter the physical check-in/redemption flow.
+  return { registration, winners: winners.filter((winner) => winner.LotteryPrize?.prizeType !== 'VIRTUAL') }
 }
 
 function lotteryWinnerRegistration(registration: LookupRegistration, winner: { registrationId: string | null; Registration: ActivityLotteryCheckInSnapshot | null }) {
@@ -235,7 +238,7 @@ const lockedRegistrationSelect = {
   checkedInAt: true,
   checkInSource: true,
   linkedMaterialRedemptionId: true,
-  Activity: { select: { endsAt: true } },
+  Activity: { select: { status: true, endsAt: true } },
 } satisfies Prisma.ActivityRegistrationSelect
 
 type LockedActivityRegistration = Prisma.ActivityRegistrationGetPayload<{ select: typeof lockedRegistrationSelect }>
@@ -243,6 +246,7 @@ type LockedActivityRegistration = Prisma.ActivityRegistrationGetPayload<{ select
 async function readLockedRegistration(tx: Prisma.TransactionClient, registrationId: string) {
   const current = await tx.activityRegistration.findUnique({ where: { id: registrationId }, select: lockedRegistrationSelect })
   if (!current) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '报名记录不存在', 404)
+  if (current.Activity.status === 'CANCELLED') throw new ActivityRedemptionError('ACTIVITY_CANCELLED', '活动已取消，无法核销', 409)
   if (current.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
   return current
 }
@@ -258,9 +262,10 @@ async function redeemLotteryWinnerInTransaction(
   await tx.$queryRaw`SELECT \`id\` FROM \`LotteryEntry\` WHERE \`id\` = ${winnerId} FOR UPDATE`
   const winner = await tx.lotteryEntry.findFirst({
     where: { id: winnerId, userId: registration.userId, Lottery: { activityId, status: 'DRAWN' } },
-    select: { id: true, registrationId: true, redemptionStatus: true, redeemedAt: true },
+    select: { id: true, registrationId: true, redemptionStatus: true, redeemedAt: true, LotteryPrize: { select: { prizeType: true } } },
   })
   if (!winner) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '中奖奖品不属于当前活动或当前用户', 403)
+  if (winner.LotteryPrize?.prizeType === 'VIRTUAL') throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '虚拟奖品已自动发放，无需现场兑奖', 409)
   if (winner.registrationId && winner.registrationId !== registration.id) throw new ActivityRedemptionError('INVALID_ENTITLEMENT', '中奖奖品不属于当前活动报名记录', 403)
   if (winner.redemptionStatus === 'REDEEMED') return { id: winner.id, status: 'ALREADY_REDEEMED' as const, redeemedAt: winner.redeemedAt?.toISOString() || null }
   const redemptionState = getActivityLotteryWinnerRedemptionState({ redemptionStatus: winner.redemptionStatus, registration, activityEndAt: registration.Activity.endsAt, now })

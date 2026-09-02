@@ -16,12 +16,22 @@ import type { PageLayoutPageKey } from '@/lib/page-layout/types'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationPolicy } from '@/lib/registration'
 import { getSiteAppearance, type SiteAppearanceConfig, type SiteHeroSlide } from '@/lib/site-config'
+import { formatMusicReleaseDate } from '@/lib/music-display'
+import { resolveMusicPlayback } from '@/lib/music-playback'
+import { getEnabledConcertCategories } from '@/lib/music-concert-category'
+import { publicImageVariantUrl } from '@/lib/image-variants'
+import type { HomeAnnouncement } from '@/components/HomeLayoutSurface'
 
 type PreviewModulePayload = { ok: true; data: unknown } | { ok: false; message: string }
 export type PageLayoutPreviewPayload = {
   pageKey: PageLayoutPageKey
   generatedAt: string
   modules: Record<string, PreviewModulePayload>
+  homeSurface?: {
+    siteConfig: SiteAppearanceConfig
+    slides: SiteHeroSlide[]
+    announcement: HomeAnnouncement | null
+  }
 }
 
 type PreviewLoader = (user: SessionUser) => Promise<Record<string, PreviewModulePayload>>
@@ -72,15 +82,14 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     return {
       'home.hero': { ok: true, data: { siteName: config.text.siteName, slides } },
       'home.announcement': announcement,
-      'home.checkinEntry': { ok: true, data: { text: config.text } },
-      'home.forumEntry': { ok: true, data: { text: config.text } },
-      'home.musicEntry': { ok: true, data: { text: config.text } },
-      'home.featuredPosts': posts,
-      'home.latestPosts': posts,
-      'home.dailyMessages': messages,
-      'home.music': tracks,
-      'home.culture': activities,
-      'home.footer': { ok: true, data: { text: config.text.footerText } },
+      'home.stats': { ok: true, data: { text: config.text } },
+      'home.today': messages,
+      'home.anywhereDoor': posts,
+      'home.salon': activities,
+      'home.activityCenter': activities,
+      'home.dailyMusic': tracks,
+      'home.entertainment': { ok: true, data: {} },
+      'home.albums': tracks,
     }
   },
   checkin: async (user) => {
@@ -126,23 +135,82 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
   },
   forum: async () => ({ 'forum.main': { ok: true, data: {} } }),
   announcement: async () => ({
-    'announcement.header': await moduleData(() => prisma.board.findFirst({
+    'announcement.main': await moduleData(() => prisma.board.findFirst({
       where: { slug: 'announcements', isActive: true },
       select: { name: true, description: true, postCount: true },
     })),
-    'announcement.pinned': { ok: true, data: {} },
-    'announcement.list': { ok: true, data: {} },
-    'announcement.updateLogEntry': { ok: true, data: {} },
-    'announcement.sidebar': { ok: true, data: {} },
-    'announcement.pagination': { ok: true, data: {} },
   }),
-  music: async () => ({
-    'music.main': await moduleData(() => prisma.musicTrack.findMany({
-      where: { isVisible: true },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      take: 5,
-      select: { title: true, artist: true },
-    })),
+  music: async (user) => ({
+    'music.main': await moduleData(async () => {
+      const [albums, songs, categories] = await Promise.all([
+        prisma.musicAlbum.findMany({
+          where: { status: 'PUBLISHED' },
+          orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }],
+          take: 12,
+          include: { _count: { select: { MusicSong: true } } },
+        }),
+        prisma.musicSong.findMany({
+          where: {
+            OR: [{ previewUrl: { not: null } }, { sourceAudioPath: { not: null } }],
+            MusicAlbum: { status: 'PUBLISHED' },
+          },
+          orderBy: [{ releaseYear: 'desc' }, { trackNumber: 'asc' }, { createdAt: 'asc' }],
+          take: 8,
+          select: {
+            id: true,
+            title: true,
+            artist: true,
+            releaseYear: true,
+            language: true,
+            coverUrl: true,
+            previewUrl: true,
+            previewDuration: true,
+            sourceAudioPath: true,
+            sourceAudioDurationMs: true,
+            MusicAlbum: { select: { id: true, name: true, coverUrl: true } },
+          },
+        }),
+        getEnabledConcertCategories(),
+      ])
+
+      return {
+        cassetteSongs: songs.flatMap((song) => {
+          const playback = resolveMusicPlayback(song, user)
+          if (!playback.previewUrl) return []
+          return [{
+            id: song.id,
+            title: song.title,
+            artist: song.artist,
+            albumId: song.MusicAlbum.id,
+            albumTitle: song.MusicAlbum.name,
+            releaseYear: song.releaseYear,
+            language: song.language,
+            coverUrl: publicImageVariantUrl(song.MusicAlbum.coverUrl || song.coverUrl, 'thumb-sm'),
+            ...playback,
+          }]
+        }),
+        carouselAlbums: albums.filter((album) => Boolean(album.coverUrl)).map((album) => ({
+          id: album.id,
+          name: album.name,
+          artist: album.artist,
+          releaseYear: album.releaseYear,
+          language: album.language,
+          coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-md')!,
+          songCount: album._count.MusicSong,
+          releaseLabel: formatMusicReleaseDate(album.releaseDate, album.releaseYear),
+        })),
+        archiveAlbums: albums.map((album) => ({
+          id: album.id,
+          name: album.name,
+          artist: album.artist,
+          releaseYear: album.releaseYear,
+          language: album.language,
+          coverUrl: publicImageVariantUrl(album.coverUrl, 'thumb-md'),
+          songCount: album._count.MusicSong,
+        })),
+        categories,
+      }
+    }),
   }),
   message: async (user) => ({
     'message.main': await moduleData(() => prisma.notification.count({ where: { recipientId: user.id, readAt: null } })),
@@ -152,9 +220,6 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
       where: { id: user.id },
       select: { nickname: true, uid: true, level: true, points: true },
     })),
-    'profile.calendar': { ok: true, data: {} },
-    'profile.recentMessages': { ok: true, data: {} },
-    'profile.posts': { ok: true, data: {} },
   }),
   'admin-home': async (user) => {
     const permissionSet = await getAdminPermissionSet(user)
@@ -174,19 +239,26 @@ const previewLoaders: Record<PageLayoutPageKey, PreviewLoader> = {
     ])
 
     return {
-      'admin.header': { ok: true, data: { nickname: user.nickname } },
-      'admin.registrationStatus': registrationPolicy,
-      'admin.stats': stats,
-      'admin.modules': { ok: true, data: { visibleModules } },
-      'admin.deploymentStatus': { ok: true, data: { processName: 'easonfansclub' } },
+      'admin.main': { ok: true, data: { nickname: user.nickname, visibleModules, registrationPolicy, stats } },
     }
   },
 }
 
 export async function getPageLayoutPreviewData(pageKey: PageLayoutPageKey, user: SessionUser): Promise<PageLayoutPreviewPayload> {
+  const modules = await previewLoaders[pageKey](user)
+  if (pageKey !== 'home') {
+    return { pageKey, generatedAt: new Date().toISOString(), modules }
+  }
+  const siteConfig = await getSiteAppearance()
+  const slides = siteConfig.heroSlides.some((item) => item.isVisible) ? siteConfig.heroSlides : fallbackHeroSlides(siteConfig)
   return {
     pageKey,
     generatedAt: new Date().toISOString(),
-    modules: await previewLoaders[pageKey](user),
+    modules,
+    homeSurface: {
+      siteConfig,
+      slides,
+      announcement: await getHomeAnnouncement().catch(() => null),
+    },
   }
 }

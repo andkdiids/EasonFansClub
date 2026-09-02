@@ -113,7 +113,7 @@ test('homepage anywhere-door module uses only the latest synced mreasonchan post
   const api = read('app/api/home/route.ts')
   const surface = read('components/HomeLayoutSurface.tsx')
   const panelStart = surface.indexOf('const renderAnywhereDoorPanel = () =>')
-  const panelEnd = surface.indexOf('\n  return (\n    <div className="community-home"', panelStart)
+  const panelEnd = surface.indexOf('\n  const renderSalonPanel = () =>', panelStart)
   assert.ok(panelStart >= 0)
   assert.ok(panelEnd > panelStart)
   const panel = surface.slice(panelStart, panelEnd)
@@ -172,12 +172,12 @@ test('homepage loads activities and latest anywhere-door content in the main par
 
 test('new homepage modules keep compact responsive and theme-token based styles', () => {
   const css = read('app/globals.css')
-  const responsiveStart = css.lastIndexOf('@media (max-width: 767px)')
+  const responsiveStart = css.indexOf('@media (max-width:767px)', css.indexOf('.home-concert-grid'))
   assert.ok(responsiveStart >= 0)
   const responsive = css.slice(responsiveStart)
 
-  assert.match(css, /\.home-activity-grid \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/)
-  assert.match(responsive, /\.home-activity-grid \{ grid-template-columns: 1fr; \}/)
+  assert.match(css, /\.home-concert-grid \{ display:grid; grid-template-columns:repeat\(4,minmax\(0,1fr\)\);/)
+  assert.match(responsive, /\.home-concert-grid \{ grid-template-columns:1fr; \}/)
   assert.match(css, /\.home-anywhere-door-item[\s\S]*background: var\(--surface-subtle\)/)
   assert.match(css, /\.home-anywhere-door-item strong[\s\S]*-webkit-line-clamp: 2/)
   assert.match(css, /\.home-checkin-stats \.stat-prescription[\s\S]*align-items: flex-start/)

@@ -73,7 +73,21 @@ function writeRecentRecommendedPostIds(values: ReadonlyArray<string>) {
 
 const DISCOVERY_SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six'] as const
 
-export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, showDesktopRefresh = false }: Readonly<{ onSwitchToPlaza?: () => void; showModeSwitch?: boolean; showDesktopRefresh?: boolean }>) {
+const previewBoards: ForumDiscoveryResponse['boards'] = [
+  { id: 'preview-announcements', name: '公告区', slug: 'announcements', description: null, postCount: 8, isAnnouncement: true },
+  { id: 'preview-chat', name: '吹水', slug: 'daily-chat', description: null, postCount: 36, isAnnouncement: false },
+  { id: 'preview-concert', name: '演唱会', slug: 'concert', description: null, postCount: 18, isAnnouncement: false },
+  { id: 'preview-bard', name: '吟游诗人', slug: 'bard', description: null, postCount: 0, isAnnouncement: false },
+]
+
+const previewPosts: ForumDiscoveryPost[] = [
+  { id: 'forum-preview-1', title: '欢迎来到 E院广场', ipRegion: null, likeCount: 12, favoriteCount: 3, replyCount: 6, isPinned: true, isFeatured: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', likedByMe: false, favoritedByMe: false, board: { name: '公告区', slug: 'announcements' }, author: { id: 'forum-preview-user-1', uid: 1, nickname: 'E院用户', displayName: 'E院用户', avatarUrl: null, level: 1 }, cover: null },
+  { id: 'forum-preview-2', title: '今天也来分享一点喜欢的歌', ipRegion: null, likeCount: 28, favoriteCount: 5, replyCount: 14, isPinned: false, isFeatured: true, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', likedByMe: false, favoritedByMe: false, board: { name: '吹水', slug: 'daily-chat' }, author: { id: 'forum-preview-user-2', uid: 2, nickname: 'E友', displayName: 'E友', avatarUrl: null, level: 2 }, cover: null },
+  { id: 'forum-preview-3', title: '演唱会现场记录与回顾', ipRegion: null, likeCount: 19, favoriteCount: 2, replyCount: 9, isPinned: false, isFeatured: false, createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z', likedByMe: false, favoritedByMe: false, board: { name: '演唱会', slug: 'concert' }, author: { id: 'forum-preview-user-3', uid: 3, nickname: '吟游诗人', displayName: '吟游诗人', avatarUrl: null, level: 3 }, cover: null },
+  { id: 'forum-preview-4', title: '把每一次相遇都写进歌里', ipRegion: null, likeCount: 7, favoriteCount: 1, replyCount: 3, isPinned: false, isFeatured: false, createdAt: '2026-01-04T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z', likedByMe: false, favoritedByMe: false, board: { name: '吟游诗人', slug: 'bard' }, author: { id: 'forum-preview-user-4', uid: 4, nickname: 'Eason Fans', displayName: 'Eason Fans', avatarUrl: null, level: 1 }, cover: null },
+]
+
+export function ForumDiscoveryHome({ previewMode = false, showDesktopRefresh = false }: Readonly<{ previewMode?: boolean; showDesktopRefresh?: boolean }>) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -87,12 +101,12 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
     : 'latest'
   const sessionKey = `forum-discovery-session:${pathname}${queryString ? `?${queryString}` : ''}`
   const [searchValue, setSearchValue] = useState(query)
-  const [posts, setPosts] = useState<ForumDiscoveryPost[]>([])
-  const [boards, setBoards] = useState<ForumDiscoveryResponse['boards']>([])
-  const [permissions, setPermissions] = useState<ForumDiscoveryResponse['permissions']>({ canCreatePost: false, canCreateAnnouncement: false })
+  const [posts, setPosts] = useState<ForumDiscoveryPost[]>(previewMode ? previewPosts : [])
+  const [boards, setBoards] = useState<ForumDiscoveryResponse['boards']>(previewMode ? previewBoards : [])
+  const [permissions, setPermissions] = useState<ForumDiscoveryResponse['permissions']>(previewMode ? { canCreatePost: true, canCreateAnnouncement: false } : { canCreatePost: false, canCreateAnnouncement: false })
   const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [hasMore, setHasMore] = useState(true)
-  const [loading, setLoading] = useState(true)
+  const [hasMore, setHasMore] = useState(!previewMode)
+  const [loading, setLoading] = useState(!previewMode)
   const [loadingMore, setLoadingMore] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -128,6 +142,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
   }, [sessionKey])
 
   const loadPage = useCallback(async (reset: boolean, manual = false) => {
+    if (previewMode) return
     if (!reset && autoLoadBlockedRef.current && !manual) return
     if (!reset && requestRef.current) return requestRef.current.promise
 
@@ -249,7 +264,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
       if (requestRef.current?.promise === request) requestRef.current = null
     })
     return request
-  }, [boardValue, mode, persistSession, query, sessionKey])
+  }, [boardValue, mode, persistSession, previewMode, query, sessionKey])
 
   useEffect(() => setSearchValue(query), [query])
 
@@ -302,6 +317,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
   }, [])
 
   useEffect(() => {
+    if (previewMode) return
     if (initializedSessionKeyRef.current === sessionKey) return
     initializedSessionKeyRef.current = sessionKey
     const cleanupRequest = () => {
@@ -344,7 +360,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
     }
     void loadPage(true)
     return cleanupRequest
-  }, [loadPage, mode, sessionKey])
+  }, [loadPage, mode, previewMode, sessionKey])
 
   useEffect(() => {
     if (restoreScrollY === null || !posts.length || loading) return
@@ -363,6 +379,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
   }, [loading, posts.length, restoreScrollY])
 
   useEffect(() => {
+    if (previewMode) return
     const sentinel = sentinelRef.current
     if (!sentinel) return
     const observer = new IntersectionObserver((entries) => {
@@ -372,15 +389,16 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
     }, { rootMargin: '420px 0px' })
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [hasMore, loadingMore, loadPage])
+  }, [hasMore, loadPage, loadingMore, previewMode])
 
   useEffect(() => {
+    if (previewMode) return
     if (loading || loadingMore || !hasMore || error || autoLoadBlockedRef.current) return
     const sentinel = sentinelRef.current
     if (!sentinel) return
     const distanceToViewport = sentinel.getBoundingClientRect().top - window.innerHeight
     if (distanceToViewport <= 420) void loadPage(false)
-  }, [error, hasMore, loading, loadingMore, loadPage, posts.length])
+  }, [error, hasMore, loading, loadingMore, loadPage, posts.length, previewMode])
 
   useEffect(() => {
     let frame = 0
@@ -415,6 +433,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
   }, [loadPage])
 
   useEffect(() => {
+    if (previewMode) return
     const onTouchStart = (event: TouchEvent) => {
       touchStartRef.current = window.scrollY <= 0 ? event.touches[0]?.clientY ?? null : null
     }
@@ -441,7 +460,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
       window.removeEventListener('touchmove', onTouchMove)
       window.removeEventListener('touchend', onTouchEnd)
     }
-  }, [refresh])
+  }, [previewMode, refresh])
 
   function updateTab(value: string) {
     const next = new URLSearchParams(queryString)
@@ -468,6 +487,7 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
   }
 
   function openPost(postId: string) {
+    if (previewMode) return
     persistSession({
       posts,
       boards,
@@ -509,9 +529,6 @@ export function ForumDiscoveryHome({ onSwitchToPlaza, showModeSwitch = true, sho
               </button>
             ) : null}
             {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
-            {showModeSwitch && onSwitchToPlaza ? (
-              <button type="button" className="forum-discovery-mode-button" onClick={onSwitchToPlaza} aria-label="切换到广场模式">广场模式</button>
-            ) : null}
           </div>
         </div>
         <form className="forum-discovery-search" onSubmit={submitSearch} role="search">

@@ -47,6 +47,22 @@ type ActivityMaterialOption = {
   isCurrent?: boolean
 }
 
+type ActivityCancellationPreview = {
+  unverifiedActiveCount: number
+  unverifiedActivePaidFeeTotal: number
+}
+
+type ActivityStatusResponse = {
+  message?: string
+  activity?: ActivityView
+  cancellation?: {
+    registrationsCancelled: number
+    refundedCount: number
+    refundedAmount: number
+    lotteriesCancelled: number
+  } | null
+}
+
 const emptyForm: ActivityForm = {
   title: '', subtitle: '', description: '', type: 'OTHER', coverUrl: null, bannerUrl: null, locationName: '', locationAddress: '', onlineUrl: '',
   startsAt: '', endsAt: '', registrationStartAt: '', registrationEndAt: '', registrationFee: '0', feeDescription: '', linkedMaterialId: '', verificationMode: 'NONE', signupLimit: '', organizer: '', contactInfo: '', isFeatured: false, isPinned: false, sortOrder: '0',
@@ -138,6 +154,10 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const savingRef = useRef(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [confirmAction, setConfirmAction] = useState<{ kind: 'cancel' | 'delete'; id: string } | null>(null)
+  const [cancelSummary, setCancelSummary] = useState<ActivityCancellationPreview | null>(null)
+  const [cancelSummaryLoading, setCancelSummaryLoading] = useState(false)
+  const [cancelSummaryError, setCancelSummaryError] = useState('')
+  const [registrationRefreshSignal, setRegistrationRefreshSignal] = useState(0)
   const [registrationActivityId, setRegistrationActivityId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -160,6 +180,32 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       .then((data) => { if (Array.isArray(data?.materials)) setMaterialOptions(data.materials) })
       .catch(() => undefined)
   }, [editingId])
+
+  useEffect(() => {
+    if (confirmAction?.kind !== 'cancel') {
+      setCancelSummary(null)
+      setCancelSummaryLoading(false)
+      setCancelSummaryError('')
+      return
+    }
+    let disposed = false
+    setCancelSummary(null)
+    setCancelSummaryError('')
+    setCancelSummaryLoading(true)
+    void fetch(`/api/admin/activities/${encodeURIComponent(confirmAction.id)}/registrations?status=ACTIVE`, { credentials: 'same-origin', cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null)
+        if (!response.ok) throw new Error(data?.message || '有效报名数据加载失败')
+        if (!disposed) setCancelSummary({ unverifiedActiveCount: Number(data?.summary?.unverifiedActiveCount) || 0, unverifiedActivePaidFeeTotal: Number(data?.summary?.unverifiedActivePaidFeeTotal) || 0 })
+      })
+      .catch((previewError) => {
+        if (!disposed) setCancelSummaryError(previewError instanceof Error ? previewError.message : '有效报名数据加载失败')
+      })
+      .finally(() => {
+        if (!disposed) setCancelSummaryLoading(false)
+      })
+    return () => { disposed = true }
+  }, [confirmAction])
 
   const editingActivity = editingId ? activities.find((item) => item.id === editingId) || null : null
   const visibleActivities = useMemo(() => {
@@ -300,19 +346,27 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
     }
   }
 
-  async function updateStatus(id: string, status: ActivityStatusValue) {
-    if (actionLoading || saving) return
+  async function updateStatus(id: string, status: ActivityStatusValue): Promise<ActivityStatusResponse | null> {
+    if (actionLoading || saving) return null
     setActionLoading(true)
     setMessage('')
     setError('')
     try {
       const response = await fetch(`/api/admin/activities/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ status }) })
-      const data = await response.json().catch(() => null)
-      if (!response.ok) { setError(data?.message || '更新活动状态失败'); return }
+      const data = await response.json().catch(() => null) as ActivityStatusResponse | null
+      if (!response.ok) { setError(data?.message || '更新活动状态失败'); return null }
+      if (!data?.activity) { setError('活动状态更新结果无效，请刷新后重试'); return null }
       setActivities((current) => current.map((item) => item.id === id ? data.activity as ActivityView : item))
-      setMessage(status === 'PUBLISHED' ? '活动已发布' : status === 'DRAFT' ? '活动已撤下并保存为草稿' : '活动已取消')
+      setRegistrationRefreshSignal((value) => value + 1)
+      if (status === 'CANCELLED' && data.cancellation) {
+        setMessage(`活动已取消：自动取消未核销报名 ${data.cancellation.registrationsCancelled} 人，退款 ${data.cancellation.refundedCount} 笔，共 ${data.cancellation.refundedAmount} 挂号费；已核销报名保留`)
+      } else {
+        setMessage(status === 'PUBLISHED' ? '活动已发布' : status === 'DRAFT' ? '活动已撤下并保存为草稿' : '活动已取消')
+      }
+      return data
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : '更新活动状态失败')
+      return null
     } finally {
       setActionLoading(false)
     }
@@ -342,12 +396,22 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
     if (!confirmAction) return
     if (confirmAction.kind === 'delete') await deleteActivity(confirmAction.id)
     else {
-      await updateStatus(confirmAction.id, 'CANCELLED')
-      setConfirmAction(null)
+      const result = await updateStatus(confirmAction.id, 'CANCELLED')
+      if (result) {
+        setConfirmAction(null)
+        setCancelSummary(null)
+      }
     }
   }
 
   const preview = toPreview(form, editingId, editingActivity?.status || 'DRAFT')
+  const cancelDescription = cancelSummaryLoading
+    ? '正在读取当前有效报名人数和预计退款金额，请稍候。'
+      : cancelSummaryError
+      ? `${cancelSummaryError} 请关闭弹窗后重试。`
+      : cancelSummary
+        ? `此操作不可撤销。取消后活动将立即停止，所有未核销有效报名会自动取消，按每条报名实际支付金额退回挂号费，相关二维码失效，本活动抽奖不再开奖或兑奖。当前未核销有效报名：${cancelSummary.unverifiedActiveCount} 人；预计退款：${cancelSummary.unverifiedActivePaidFeeTotal} 挂号费。已核销报名不会取消或退款，报名历史不会删除。`
+        : '取消后活动将立即停止，并自动处理所有未核销报名、退款、二维码和抽奖状态；已核销报名会保留。'
 
   return (
     <>
@@ -406,7 +470,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
           <button type="submit" disabled={saving} className="min-h-11 rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-50">{saving ? '保存中…' : editingId ? '保存修改' : '保存草稿'}</button>
-          <button type="button" onClick={() => void save('PUBLISHED')} disabled={saving} className="min-h-11 rounded-full bg-emerald-600 px-5 py-2 text-sm font-black text-white disabled:opacity-50">{editingId ? '保存并发布' : '保存并发布活动'}</button>
+          {editingActivity?.status !== 'CANCELLED' ? <button type="button" onClick={() => void save('PUBLISHED')} disabled={saving} className="min-h-11 rounded-full bg-emerald-600 px-5 py-2 text-sm font-black text-white disabled:opacity-50">{editingId ? '保存并发布' : '保存并发布活动'}</button> : null}
         </div>
       </form>
 
@@ -422,8 +486,8 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           {!visibleActivities.length ? <p className="py-8 text-center text-sm font-bold text-slate-500">暂无符合条件的活动。</p> : null}
         </div>
       </section>
-      {registrationActivityId ? <ActivityRegistrationManager activityId={registrationActivityId} activityTitle={activities.find((activity) => activity.id === registrationActivityId)?.title || '活动报名'} verificationMode={activities.find((activity) => activity.id === registrationActivityId)?.verificationMode || 'NONE'} onClose={() => setRegistrationActivityId(null)} /> : null}
-      <ConfirmDialog open={Boolean(confirmAction)} title={confirmAction?.kind === 'delete' ? '删除活动？' : '取消活动？'} description={confirmAction?.kind === 'delete' ? '删除后将无法恢复。只有没有发布、报名或其他关联数据的草稿可以删除。' : '取消后活动仍会保留并显示“已取消”，不会删除历史数据。'} confirmLabel={confirmAction?.kind === 'delete' ? '确认删除' : '确认取消'} loading={actionLoading} onConfirm={() => void confirmActionNow()} onCancel={() => { if (!actionLoading) setConfirmAction(null) }} />
+      {registrationActivityId ? <ActivityRegistrationManager activityId={registrationActivityId} activityTitle={activities.find((activity) => activity.id === registrationActivityId)?.title || '活动报名'} verificationMode={activities.find((activity) => activity.id === registrationActivityId)?.verificationMode || 'NONE'} refreshSignal={registrationRefreshSignal} onClose={() => setRegistrationActivityId(null)} /> : null}
+      <ConfirmDialog open={Boolean(confirmAction)} title={confirmAction?.kind === 'delete' ? '删除活动？' : '确认取消活动？'} description={confirmAction?.kind === 'delete' ? '删除后将无法恢复。只有没有发布、报名或其他关联数据的草稿可以删除。' : cancelDescription} confirmLabel={confirmAction?.kind === 'delete' ? '确认删除' : '确认取消活动'} loading={actionLoading || (confirmAction?.kind === 'cancel' && cancelSummaryLoading)} confirmDisabled={confirmAction?.kind === 'cancel' && !cancelSummary} onConfirm={() => void confirmActionNow()} onCancel={() => { if (!actionLoading && !cancelSummaryLoading) setConfirmAction(null) }} />
     </>
   )
 }

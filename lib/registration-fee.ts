@@ -32,6 +32,7 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   MATERIAL_REDEMPTION_REFUND: '物料兑换退款',
   ACTIVITY_REGISTRATION_FEE: '活动报名挂号费',
   ACTIVITY_REGISTRATION_REFUND: '活动报名退款',
+  ACTIVITY_LOTTERY_PRIZE: '活动抽奖虚拟奖品',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {

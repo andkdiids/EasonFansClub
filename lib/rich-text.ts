@@ -24,6 +24,8 @@ export const MAX_RICH_TEXT_DEPTH = 12
 export const MAX_RICH_TEXT_MARKS_PER_TEXT = 6
 export const MAX_RICH_TEXT_POST_REFERENCES = 50
 export const MAX_RICH_TEXT_USER_MENTIONS = 50
+export const MAX_RICH_TEXT_ACTIVITY_REFERENCES = 50
+export const MAX_RICH_TEXT_MATERIAL_REFERENCES = 50
 
 export type RichTextMark =
   | { type: 'bold' }
@@ -40,6 +42,8 @@ export type RichTextInlineNode =
   | RichTextMusicReferenceNode
   | RichTextPostReferenceNode
   | RichTextUserMentionNode
+  | RichTextActivityReferenceNode
+  | RichTextMaterialReferenceNode
 
 export type RichTextMusicReferenceNode = {
   type: 'musicReference'
@@ -73,6 +77,42 @@ export type RichTextUserMentionNode = {
     userId: string
     displayName?: string
     uid?: number
+    available?: boolean
+  }
+}
+
+/** A structured activity reference. activityId is the only authoritative id. */
+export type RichTextActivityReferenceNode = {
+  type: 'activityReference'
+  attrs: {
+    activityId: string
+    titleSnapshot?: string
+    title?: string
+    coverUrl?: string
+    bannerUrl?: string
+    startsAt?: string
+    endsAt?: string
+    locationName?: string
+    displayStatus?: string
+    statusLabel?: string
+    available?: boolean
+  }
+}
+
+/** A structured material definition reference. materialId is authoritative. */
+export type RichTextMaterialReferenceNode = {
+  type: 'materialReference'
+  attrs: {
+    materialId: string
+    titleSnapshot?: string
+    title?: string
+    coverImageUrl?: string
+    cost?: number
+    stockRemaining?: number
+    state?: string
+    stateLabel?: string
+    linkedActivityId?: string
+    linkedActivityTitle?: string
     available?: boolean
   }
 }
@@ -365,6 +405,64 @@ function normalizeInlineNode(value: unknown, state: ValidationState, depth: numb
       ? { type: 'postReference', attrs: metadata as RichTextPostReferenceNode['attrs'] }
       : { type: 'userMention', attrs: metadata as RichTextUserMentionNode['attrs'] }
   }
+  if (value.type === 'activityReference' || value.type === 'materialReference') {
+    const isActivityReference = value.type === 'activityReference'
+    const attributeKeys = isActivityReference
+      ? ['activityId', 'titleSnapshot', 'title', 'coverUrl', 'bannerUrl', 'startsAt', 'endsAt', 'locationName', 'displayStatus', 'statusLabel', 'available']
+      : ['materialId', 'titleSnapshot', 'title', 'coverImageUrl', 'cost', 'stockRemaining', 'state', 'stateLabel', 'linkedActivityId', 'linkedActivityTitle', 'available']
+    if (!hasOnlyKeys(value, ['type', 'attrs']) || !isRecord(value.attrs) || !hasOnlyKeys(value.attrs, attributeKeys)) {
+      fail(state, path + ' has invalid ' + (isActivityReference ? 'activity reference' : 'material reference') + ' attributes')
+      return null
+    }
+
+    const attrs = value.attrs
+    const idKey = isActivityReference ? 'activityId' : 'materialId'
+    const rawId = attrs[idKey]
+    const id = typeof rawId === 'string' ? rawId.trim() : ''
+    if (!id || id.length > 191 || /[\u0000-\u001f\u007f\s]/u.test(id)) {
+      fail(state, path + '.attrs.' + idKey + ' is invalid')
+      return null
+    }
+
+    const metadata = { [idKey]: id } as Record<string, unknown>
+    const stringKeys = isActivityReference
+      ? ['titleSnapshot', 'title', 'coverUrl', 'bannerUrl', 'startsAt', 'endsAt', 'locationName', 'displayStatus', 'statusLabel']
+      : ['titleSnapshot', 'title', 'coverImageUrl', 'state', 'stateLabel', 'linkedActivityId', 'linkedActivityTitle']
+    for (const key of stringKeys) {
+      const snapshot = attrs[key]
+      if (snapshot === undefined || snapshot === null || snapshot === '') continue
+      if (typeof snapshot !== 'string' || snapshot.length > 1000) {
+        fail(state, path + '.attrs.' + key + ' is invalid')
+        return null
+      }
+      const trimmed = snapshot.trim()
+      if (trimmed) metadata[key] = trimmed
+    }
+
+    if (!isActivityReference) {
+      for (const key of ['cost', 'stockRemaining'] as const) {
+        const rawNumber = attrs[key]
+        if (rawNumber === undefined || rawNumber === null || rawNumber === '') continue
+        if (typeof rawNumber !== 'number' || !Number.isSafeInteger(rawNumber) || rawNumber < 0) {
+          fail(state, path + '.attrs.' + key + ' is invalid')
+          return null
+        }
+        metadata[key] = rawNumber
+      }
+    }
+
+    if (attrs.available !== undefined && attrs.available !== null) {
+      if (typeof attrs.available !== 'boolean') {
+        fail(state, path + '.attrs.available is invalid')
+        return null
+      }
+      metadata.available = attrs.available
+    }
+
+    return isActivityReference
+      ? { type: 'activityReference', attrs: metadata as RichTextActivityReferenceNode['attrs'] }
+      : { type: 'materialReference', attrs: metadata as RichTextMaterialReferenceNode['attrs'] }
+  }
   if (value.type !== 'text' || typeof value.text !== 'string' || value.text.length === 0) {
     fail(state, path + ' uses an unsupported inline node')
     return null
@@ -528,6 +626,8 @@ function extractInlineText(content: RichTextInlineNode[] | undefined) {
     if (node.type === 'musicReference') return node.attrs.title || ''
     if (node.type === 'postReference') return node.attrs.available === false ? '该引用帖子已不可用' : node.attrs.title || '引用帖子'
     if (node.type === 'userMention') return '@' + (node.attrs.available === false ? '用户已不可用' : node.attrs.displayName || '用户')
+    if (node.type === 'activityReference') return node.attrs.available === false ? '该引用活动已不可用' : node.attrs.title || node.attrs.titleSnapshot || '引用活动'
+    if (node.type === 'materialReference') return node.attrs.available === false ? '该引用物料已不可用' : node.attrs.title || node.attrs.titleSnapshot || '引用物料'
     return node.text
   }).join('')
 }
@@ -604,7 +704,7 @@ export function collectMusicReferenceSongIds(value: RichTextContent) {
   return ids
 }
 
-function collectInlineReferenceIds(value: RichTextContent, type: 'postReference' | 'userMention') {
+function collectInlineReferenceIds(value: RichTextContent, type: 'postReference' | 'userMention' | 'activityReference' | 'materialReference') {
   const ids: string[] = []
   const seen = new Set<string>()
   const visitInline = (node: RichTextInlineNode) => {
@@ -612,6 +712,10 @@ function collectInlineReferenceIds(value: RichTextContent, type: 'postReference'
       ? node.attrs.postId
       : type === 'userMention' && node.type === 'userMention'
         ? node.attrs.userId
+        : type === 'activityReference' && node.type === 'activityReference'
+          ? node.attrs.activityId
+          : type === 'materialReference' && node.type === 'materialReference'
+            ? node.attrs.materialId
         : null
     if (!id) return
     if (seen.has(id)) return
@@ -639,6 +743,14 @@ export function collectPostReferenceIds(value: RichTextContent) {
 
 export function collectUserMentionIds(value: RichTextContent) {
   return collectInlineReferenceIds(value, 'userMention')
+}
+
+export function collectActivityReferenceIds(value: RichTextContent) {
+  return collectInlineReferenceIds(value, 'activityReference')
+}
+
+export function collectMaterialReferenceIds(value: RichTextContent) {
+  return collectInlineReferenceIds(value, 'materialReference')
 }
 
 export type RichTextMusicReferenceMetadata = {
@@ -698,10 +810,36 @@ export type RichTextUserMentionMetadata = {
   available?: boolean
 }
 
+export type RichTextActivityReferenceMetadata = {
+  title: string
+  coverUrl?: string | null
+  bannerUrl?: string | null
+  startsAt?: string | null
+  endsAt?: string | null
+  locationName?: string | null
+  displayStatus?: string
+  statusLabel?: string
+  available?: boolean
+}
+
+export type RichTextMaterialReferenceMetadata = {
+  title: string
+  coverImageUrl?: string | null
+  cost?: number
+  stockRemaining?: number
+  state?: string
+  stateLabel?: string
+  linkedActivityId?: string | null
+  linkedActivityTitle?: string | null
+  available?: boolean
+}
+
 function enrichInlineReference(
   node: RichTextInlineNode,
   postMetadata: ReadonlyMap<string, RichTextPostReferenceMetadata>,
   userMetadata: ReadonlyMap<string, RichTextUserMentionMetadata>,
+  activityMetadata: ReadonlyMap<string, RichTextActivityReferenceMetadata>,
+  materialMetadata: ReadonlyMap<string, RichTextMaterialReferenceMetadata>,
 ) {
   if (node.type === 'postReference') {
     const metadata = postMetadata.get(node.attrs.postId)
@@ -730,6 +868,44 @@ function enrichInlineReference(
       },
     }
   }
+  if (node.type === 'activityReference') {
+    const metadata = activityMetadata.get(node.attrs.activityId)
+    if (!metadata) return node
+    return {
+      type: 'activityReference' as const,
+      attrs: {
+        activityId: node.attrs.activityId,
+        title: metadata.title,
+        ...(metadata.coverUrl ? { coverUrl: metadata.coverUrl } : {}),
+        ...(metadata.bannerUrl ? { bannerUrl: metadata.bannerUrl } : {}),
+        ...(metadata.startsAt ? { startsAt: metadata.startsAt } : {}),
+        ...(metadata.endsAt ? { endsAt: metadata.endsAt } : {}),
+        ...(metadata.locationName ? { locationName: metadata.locationName } : {}),
+        ...(metadata.displayStatus ? { displayStatus: metadata.displayStatus } : {}),
+        ...(metadata.statusLabel ? { statusLabel: metadata.statusLabel } : {}),
+        available: metadata.available !== false,
+      },
+    }
+  }
+  if (node.type === 'materialReference') {
+    const metadata = materialMetadata.get(node.attrs.materialId)
+    if (!metadata) return node
+    return {
+      type: 'materialReference' as const,
+      attrs: {
+        materialId: node.attrs.materialId,
+        title: metadata.title,
+        ...(metadata.coverImageUrl ? { coverImageUrl: metadata.coverImageUrl } : {}),
+        ...(metadata.cost === undefined ? {} : { cost: metadata.cost }),
+        ...(metadata.stockRemaining === undefined ? {} : { stockRemaining: metadata.stockRemaining }),
+        ...(metadata.state ? { state: metadata.state } : {}),
+        ...(metadata.stateLabel ? { stateLabel: metadata.stateLabel } : {}),
+        ...(metadata.linkedActivityId ? { linkedActivityId: metadata.linkedActivityId } : {}),
+        ...(metadata.linkedActivityTitle ? { linkedActivityTitle: metadata.linkedActivityTitle } : {}),
+        available: metadata.available !== false,
+      },
+    }
+  }
   return node
 }
 
@@ -737,11 +913,13 @@ export function enrichRichTextReferenceMetadata(
   value: RichTextContent,
   postMetadata: ReadonlyMap<string, RichTextPostReferenceMetadata>,
   userMetadata: ReadonlyMap<string, RichTextUserMentionMetadata>,
+  activityMetadata: ReadonlyMap<string, RichTextActivityReferenceMetadata> = new Map(),
+  materialMetadata: ReadonlyMap<string, RichTextMaterialReferenceMetadata> = new Map(),
 ): RichTextContent {
   const mapBlock = (block: RichTextBlockNode): RichTextBlockNode => {
     if (block.type === 'paragraph' || block.type === 'heading') {
       return block.content
-        ? { ...block, content: block.content.map((node) => enrichInlineReference(node, postMetadata, userMetadata)) }
+        ? { ...block, content: block.content.map((node) => enrichInlineReference(node, postMetadata, userMetadata, activityMetadata, materialMetadata)) }
         : block
     }
     if (block.type === 'listItem' || block.type === 'blockquote') {
@@ -751,6 +929,60 @@ export function enrichRichTextReferenceMetadata(
       return block.content
         ? { ...block, content: block.content.map((item) => mapBlock(item) as RichTextListItemNode) }
         : block
+    }
+    return block
+  }
+  return { type: 'doc', content: value.content.map(mapBlock) }
+}
+
+/**
+ * Keep persistence compact for dynamic references. Post/user snapshots remain
+ * useful for compatibility, while activity/material status and presentation
+ * fields are deliberately hydrated at read time instead of being stored as
+ * stale rich-content data.
+ */
+export function normalizeRichTextReferenceSnapshots(
+  value: RichTextContent,
+  postMetadata: ReadonlyMap<string, RichTextPostReferenceMetadata>,
+  userMetadata: ReadonlyMap<string, RichTextUserMentionMetadata>,
+  activityMetadata: ReadonlyMap<string, RichTextActivityReferenceMetadata> = new Map(),
+  materialMetadata: ReadonlyMap<string, RichTextMaterialReferenceMetadata> = new Map(),
+): RichTextContent {
+  const mapInline = (node: RichTextInlineNode): RichTextInlineNode => {
+    if (node.type === 'postReference' || node.type === 'userMention') {
+      return enrichInlineReference(node, postMetadata, userMetadata, activityMetadata, materialMetadata)
+    }
+    if (node.type === 'activityReference') {
+      const metadata = activityMetadata.get(node.attrs.activityId)
+      return {
+        type: 'activityReference',
+        attrs: {
+          activityId: node.attrs.activityId,
+          ...(metadata?.title ? { titleSnapshot: metadata.title } : node.attrs.titleSnapshot ? { titleSnapshot: node.attrs.titleSnapshot } : {}),
+        },
+      }
+    }
+    if (node.type === 'materialReference') {
+      const metadata = materialMetadata.get(node.attrs.materialId)
+      return {
+        type: 'materialReference',
+        attrs: {
+          materialId: node.attrs.materialId,
+          ...(metadata?.title ? { titleSnapshot: metadata.title } : node.attrs.titleSnapshot ? { titleSnapshot: node.attrs.titleSnapshot } : {}),
+        },
+      }
+    }
+    return node
+  }
+  const mapBlock = (block: RichTextBlockNode): RichTextBlockNode => {
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      return block.content ? { ...block, content: block.content.map(mapInline) } : block
+    }
+    if (block.type === 'listItem' || block.type === 'blockquote') {
+      return block.content ? { ...block, content: block.content.map(mapBlock) } : block
+    }
+    if (block.type === 'bulletList' || block.type === 'orderedList') {
+      return block.content ? { ...block, content: block.content.map((item) => mapBlock(item) as RichTextListItemNode) } : block
     }
     return block
   }

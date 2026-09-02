@@ -1,11 +1,14 @@
 'use client'
+/* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActivityImageUploader, uploadActivityImage, type ActivityImageSelection, type ActivityImageUploadStatus } from '@/components/activities/ActivityImageUploader'
 import { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/activity-lottery-levels'
+import { ACTIVITY_LOTTERY_VIRTUAL_PRIZE_TYPES, MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE, type ActivityLotteryPrizeType, type ActivityLotteryVirtualPrizeType } from '@/lib/activity-lottery-types'
 import type { ActivityLotteryAdminListView, ActivityLotteryAdminView, ActivityLotteryWinnerRedemptionState } from '@/lib/activity-lottery'
 
-type PrizeDraft = { name: string; imageUrl: string; description: string; quantity: string }
+type BadgeOption = { id: string; name: string; code: string; iconUrl: string | null }
+type PrizeDraft = { name: string; imageUrl: string; description: string; quantity: string; prizeType: ActivityLotteryPrizeType; virtualPrizeType: ActivityLotteryVirtualPrizeType | ''; badgeId: string; registrationFeeAmount: string }
 type LotteryDraft = { title: string; description: string; drawAt: string; prizes: PrizeDraft[] }
 
 function calculateLotteryWinRate(totalPrizeSlots: number, participantCount: number) {
@@ -13,7 +16,7 @@ function calculateLotteryWinRate(totalPrizeSlots: number, participantCount: numb
   return Math.min(100, (totalPrizeSlots / participantCount) * 100)
 }
 
-const emptyPrize = (): PrizeDraft => ({ name: '', imageUrl: '', description: '', quantity: '1' })
+const emptyPrize = (): PrizeDraft => ({ name: '', imageUrl: '', description: '', quantity: '1', prizeType: 'PHYSICAL', virtualPrizeType: '', badgeId: '', registrationFeeAmount: '' })
 
 function emptyDraft(): LotteryDraft {
   return { title: '', description: '', drawAt: '', prizes: [emptyPrize()] }
@@ -59,11 +62,11 @@ function draftFromLottery(lottery: ActivityLotteryAdminView): LotteryDraft {
     drawAt: dateInput(lottery.drawAt),
     // The stored tierName is intentionally ignored. The editor derives it from
     // the current array position so legacy duplicate names are corrected on save.
-    prizes: lottery.prizes.map((prize) => ({ name: prize.name, imageUrl: prize.imageUrl || '', description: prize.description || '', quantity: String(prize.quantity) })),
+    prizes: lottery.prizes.map((prize) => ({ name: prize.name, imageUrl: prize.imageUrl || '', description: prize.description || '', quantity: String(prize.quantity), prizeType: prize.prizeType || 'PHYSICAL', virtualPrizeType: prize.virtualPrizeType || '', badgeId: prize.badgeId || '', registrationFeeAmount: prize.registrationFeeAmount === null ? '' : String(prize.registrationFeeAmount) })),
   }
 }
 
-export function ActivityLotteryManager({ activityId, activityTitle, activityEndAt, openOnMount = false }: Readonly<{ activityId: string; activityTitle: string; activityEndAt: string | null; openOnMount?: boolean }>) {
+export function ActivityLotteryManager({ activityId, activityTitle, activityEndAt, openOnMount = false, refreshSignal = 0 }: Readonly<{ activityId: string; activityTitle: string; activityEndAt: string | null; openOnMount?: boolean; refreshSignal?: number }>) {
   const [data, setData] = useState<ActivityLotteryAdminListView | null>(null)
   const [draft, setDraft] = useState<LotteryDraft>(emptyDraft)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -78,6 +81,10 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
   const [error, setError] = useState('')
   const [drawConfirmation, setDrawConfirmation] = useState<ActivityLotteryAdminView | null>(null)
   const [drawingId, setDrawingId] = useState<string | null>(null)
+  const [badgeOptions, setBadgeOptions] = useState<BadgeOption[]>([])
+  const [badgesLoading, setBadgesLoading] = useState(false)
+  const [badgesRequested, setBadgesRequested] = useState(false)
+  const [retryingWinnerId, setRetryingWinnerId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -93,13 +100,44 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
     }
   }, [activityId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load() }, [load, refreshSignal])
+
+  const loadBadges = useCallback(async () => {
+    setBadgesRequested(true)
+    setBadgesLoading(true)
+    try {
+      const response = await fetch('/api/admin/activities/badges', { credentials: 'same-origin', cache: 'no-store' })
+      const body = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(body?.message || '勋章加载失败')
+      setBadgeOptions(Array.isArray(body?.badges) ? body.badges as BadgeOption[] : [])
+    } catch (badgeError) {
+      setError(badgeError instanceof Error ? badgeError.message : '勋章加载失败')
+    } finally {
+      setBadgesLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (expanded && !badgesRequested && !badgesLoading) void loadBadges()
+  }, [badgesLoading, badgesRequested, expanded, loadBadges])
 
   const currentParticipants = data?.activity.activeParticipantCount || 0
   const effectiveActivityEndAt = data?.activity.endsAt || activityEndAt
   const activityEnded = !effectiveActivityEndAt || !Number.isFinite(new Date(effectiveActivityEndAt).getTime()) || new Date(effectiveActivityEndAt).getTime() <= Date.now()
   const activityStatus = data?.activity.status || ''
   const activityCancelled = activityStatus === 'CANCELLED'
+
+  useEffect(() => {
+    if (!activityCancelled) return
+    setExpanded(false)
+    setEditingId(null)
+    setDrawConfirmation(null)
+    setUploadingPrizeIndex(null)
+    setPrizeUploadStatuses({})
+    setPrizeUploadErrors({})
+    setPrizeUploadResetTokens({})
+  }, [activityCancelled])
+
   const capacity = data?.activity.signupLimit && data.activity.signupLimit > 0 ? data.activity.signupLimit : null
   const summary = useMemo(() => {
     const slots = data?.lotteries.reduce((sum, lottery) => sum + totalSlots(lottery), 0) || 0
@@ -123,6 +161,24 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
 
   function updatePrize(index: number, key: keyof PrizeDraft, value: string) {
     setDraft((current) => ({ ...current, prizes: current.prizes.map((prize, prizeIndex) => prizeIndex === index ? { ...prize, [key]: value } : prize) }))
+  }
+
+  function setPrizeType(index: number, prizeType: ActivityLotteryPrizeType) {
+    setDraft((current) => ({
+      ...current,
+      prizes: current.prizes.map((prize, prizeIndex) => prizeIndex === index
+        ? { ...prize, prizeType, virtualPrizeType: prizeType === 'VIRTUAL' ? (prize.virtualPrizeType || 'BADGE') : '', badgeId: prizeType === 'VIRTUAL' && prize.virtualPrizeType === 'BADGE' ? prize.badgeId : '', registrationFeeAmount: prizeType === 'VIRTUAL' && prize.virtualPrizeType === 'REGISTRATION_FEE' ? prize.registrationFeeAmount : '' }
+        : prize),
+    }))
+  }
+
+  function setVirtualPrizeType(index: number, virtualPrizeType: ActivityLotteryVirtualPrizeType) {
+    setDraft((current) => ({
+      ...current,
+      prizes: current.prizes.map((prize, prizeIndex) => prizeIndex === index
+        ? { ...prize, virtualPrizeType, badgeId: virtualPrizeType === 'BADGE' ? prize.badgeId : '', registrationFeeAmount: virtualPrizeType === 'REGISTRATION_FEE' ? prize.registrationFeeAmount : '' }
+        : prize),
+    }))
   }
 
   async function handlePrizeImageSelection(index: number, selection: ActivityImageSelection) {
@@ -200,13 +256,39 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
       setError('请设置开奖时间')
       return
     }
+    for (let index = 0; index < draft.prizes.length; index += 1) {
+      const prize = draft.prizes[index]
+      if (prize.prizeType !== 'VIRTUAL') continue
+      if (!prize.virtualPrizeType) {
+        setError(`第 ${index + 1} 个虚拟奖品请选择具体类型`)
+        return
+      }
+      if (prize.virtualPrizeType === 'BADGE' && !prize.badgeId) {
+        setError(`第 ${index + 1} 个虚拟奖品请选择勋章`)
+        return
+      }
+      if (prize.virtualPrizeType === 'REGISTRATION_FEE' && (!/^[1-9]\d*$/.test(prize.registrationFeeAmount) || Number(prize.registrationFeeAmount) > MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE)) {
+        setError(`第 ${index + 1} 个虚拟奖品挂号费必须是 1-${MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE} 的整数`)
+        return
+      }
+    }
     setSaving(true); setError(''); setMessage('')
     try {
       const payload = {
         title: draft.title,
         description: draft.description,
         drawAt: toBeijingIso(draft.drawAt),
-        prizes: draft.prizes.map((prize, index) => ({ tierName: activityLotteryTierName(index), name: prize.name, imageUrl: prize.imageUrl || null, description: prize.description || null, quantity: Number(prize.quantity) })),
+        prizes: draft.prizes.map((prize, index) => ({
+          tierName: activityLotteryTierName(index),
+          name: prize.name,
+          imageUrl: prize.imageUrl || null,
+          description: prize.description || null,
+          quantity: Number(prize.quantity),
+          prizeType: prize.prizeType,
+          virtualPrizeType: prize.prizeType === 'VIRTUAL' ? prize.virtualPrizeType : null,
+          badgeId: prize.prizeType === 'VIRTUAL' && prize.virtualPrizeType === 'BADGE' ? prize.badgeId : null,
+          registrationFeeAmount: prize.prizeType === 'VIRTUAL' && prize.virtualPrizeType === 'REGISTRATION_FEE' && prize.registrationFeeAmount ? Number(prize.registrationFeeAmount) : null,
+        })),
       }
       const response = await fetch(editingId
         ? `/api/admin/activities/${encodeURIComponent(activityId)}/lotteries/${encodeURIComponent(editingId)}`
@@ -259,7 +341,8 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
       const response = await fetch(`/api/admin/activities/${encodeURIComponent(activityId)}/lotteries/${encodeURIComponent(lottery.id)}/draw`, { method: 'POST', credentials: 'same-origin' })
       const body = await response.json().catch(() => null)
       if (!response.ok) throw new Error(body?.message || '开奖失败')
-      setMessage(body?.status === 'ALREADY_DRAWN' ? '该抽奖已经开奖，本次操作幂等完成' : '开奖成功')
+      const fulfillmentMessage = body?.fulfillment?.failed ? `，其中 ${body.fulfillment.failed} 个虚拟奖品发放失败，可在中奖结果中重试` : body?.fulfillment?.attempted ? '，虚拟奖品已自动处理' : ''
+      setMessage(`${body?.status === 'ALREADY_DRAWN' ? '该抽奖已经开奖，本次操作幂等完成' : '开奖成功'}${fulfillmentMessage}`)
       setDrawConfirmation(null)
       await load()
     } catch (drawError) {
@@ -269,7 +352,31 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
     }
   }
 
-  const winnerStateLabel = (state: ActivityLotteryWinnerRedemptionState) => state === 'REDEEMABLE' ? '可兑奖' : state === 'WAITING_FOR_CHECK_IN' ? '待核销后兑奖' : state === 'EXPIRED' ? '已失效' : '已兑奖'
+  async function retryWinnerFulfillment(lottery: ActivityLotteryAdminView, winnerId: string) {
+    if (retryingWinnerId) return
+    setRetryingWinnerId(winnerId)
+    setError('')
+    setMessage('')
+    try {
+      const response = await fetch(`/api/admin/activities/${encodeURIComponent(activityId)}/lotteries/${encodeURIComponent(lottery.id)}/winners/${encodeURIComponent(winnerId)}/fulfill`, { method: 'POST', credentials: 'same-origin' })
+      const body = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(body?.message || '虚拟奖品重新发放失败')
+      setMessage(body?.status === 'ALREADY_FULFILLED' ? '该虚拟奖品已经发放，本次操作幂等完成' : body?.status === 'FAILED' ? `虚拟奖品发放失败：${body?.error || '请稍后重试'}` : '虚拟奖品已重新发放')
+      await load()
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : '虚拟奖品重新发放失败')
+    } finally {
+      setRetryingWinnerId(null)
+    }
+  }
+
+  const winnerStateLabel = (state: ActivityLotteryWinnerRedemptionState | null) => state === 'REDEEMABLE' ? '可兑奖' : state === 'WAITING_FOR_CHECK_IN' ? '待核销后兑奖' : state === 'EXPIRED' ? '已失效' : state === 'REDEEMED' ? '已兑奖' : '无需现场兑奖'
+  const fulfillmentLabel = (winner: ActivityLotteryAdminView['winners'][number]) => {
+    if (winner.fulfillmentStatus === 'FULFILLED') return winner.virtualPrizeType === 'BADGE' ? '勋章已自动发放' : '挂号费已自动到账'
+    if (winner.fulfillmentStatus === 'FAILED') return '自动发放失败，可重试'
+    if (winner.fulfillmentStatus === 'PENDING') return '自动发放中'
+    return '无需自动发放'
+  }
 
   return (
     <section className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/60 p-4 dark:border-violet-900/60 dark:bg-violet-950/20 sm:p-5">
@@ -279,7 +386,7 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
           <h3 className="mt-1 text-xl font-black text-brand-950 dark:text-slate-100">{activityTitle}</h3>
           <p className="mt-1 text-xs font-bold leading-5 text-slate-600 dark:text-slate-300">抽奖资格自动继承有效活动报名，不单独配置参与上限。活动结束：{formatDate(activityEndAt)}</p>
         </div>
-        <button type="button" onClick={() => setExpanded((value) => !value)} disabled={(!activityEndAt && !editingId) || prizeUploadInProgress || saving} className="min-h-10 rounded-full bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{expanded ? '收起设置' : '+ 添加抽奖'}</button>
+        <button type="button" onClick={() => setExpanded((value) => !value)} disabled={activityCancelled || (!activityEndAt && !editingId) || prizeUploadInProgress || saving} className="min-h-10 rounded-full bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{activityCancelled ? '活动已取消' : expanded ? '收起设置' : '+ 添加抽奖'}</button>
       </div>
       {!activityEndAt ? <p role="alert" className="mt-3 rounded-lg bg-amber-100 px-3 py-2 text-xs font-black leading-5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">请先设置活动结束时间，再添加自动抽奖。</p> : null}
       <div className="mt-4 grid gap-2 rounded-xl border border-violet-200 bg-white/70 p-3 text-xs font-bold text-slate-600 dark:border-violet-900 dark:bg-slate-900/70 dark:text-slate-300 sm:grid-cols-3">
@@ -296,16 +403,23 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
             {draft.prizes.map((prize, index) => {
               const tierName = activityLotteryTierName(index) || `超出 ${MAX_ACTIVITY_LOTTERY_PRIZES} 档上限`
               const controlsDisabled = saving || prizeUploadInProgress
+              const selectedBadge = badgeOptions.find((badge) => badge.id === prize.badgeId)
               return (
                 <div key={`${index}-${tierName}`} className="min-w-0 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(8rem,1fr)_minmax(0,1.5fr)_7rem_auto_auto_auto]">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(8rem,1fr)_minmax(0,1.5fr)_7rem_minmax(8rem,auto)_auto_auto_auto]">
                     <div aria-label={`奖项等级：${tierName}`} className="flex min-h-10 min-w-0 items-center rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-black text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"><span className="truncate">{tierName}</span></div>
                     <input aria-label={`${tierName}奖品名称`} value={prize.name} onChange={(event) => updatePrize(index, 'name', event.target.value)} placeholder="奖品名称" className="min-h-10 min-w-0 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
                     <input aria-label={`${tierName}中奖人数`} type="number" min={1} value={prize.quantity} onChange={(event) => updatePrize(index, 'quantity', event.target.value)} placeholder="数量" className="min-h-10 min-w-0 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
+                    <select aria-label={`${tierName}奖品类型`} value={prize.prizeType} disabled={controlsDisabled} onChange={(event) => setPrizeType(index, event.target.value as ActivityLotteryPrizeType)} className="min-h-10 min-w-0 rounded-lg border border-slate-200 px-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"><option value="PHYSICAL">实物奖品</option><option value="VIRTUAL">虚拟奖品</option></select>
                     <button type="button" disabled={index === 0 || controlsDisabled} onClick={() => movePrize(index, -1)} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300">↑</button>
                     <button type="button" disabled={index === draft.prizes.length - 1 || controlsDisabled} onClick={() => movePrize(index, 1)} className="min-h-10 rounded-lg border border-slate-200 px-3 text-xs font-black text-slate-600 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300">↓</button>
                     <button type="button" disabled={draft.prizes.length <= 1 || controlsDisabled} title={draft.prizes.length <= 1 ? '至少保留一等奖' : undefined} onClick={() => removePrize(index)} className="min-h-10 rounded-lg border border-rose-200 px-3 text-xs font-black text-rose-700 disabled:opacity-40">删除</button>
                   </div>
+                  {prize.prizeType === 'VIRTUAL' ? <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-3">
+                    <select aria-label={`${tierName}虚拟奖品类型`} value={prize.virtualPrizeType} disabled={controlsDisabled} onChange={(event) => setVirtualPrizeType(index, event.target.value as ActivityLotteryVirtualPrizeType)} className="min-h-10 min-w-0 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-bold text-violet-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-100"><option value="">选择虚拟奖品类型</option>{ACTIVITY_LOTTERY_VIRTUAL_PRIZE_TYPES.map((type) => <option key={type} value={type}>{type === 'BADGE' ? '勋章' : '挂号费'}</option>)}</select>
+                    {prize.virtualPrizeType === 'BADGE' ? <div className="flex min-w-0 flex-wrap items-center gap-2"><select aria-label={`${tierName}勋章`} value={prize.badgeId} disabled={controlsDisabled || badgesLoading} onChange={(event) => updatePrize(index, 'badgeId', event.target.value)} className="min-h-10 min-w-0 flex-1 rounded-lg border border-violet-200 px-3 text-sm font-bold dark:border-violet-800 dark:bg-slate-900 dark:text-slate-100"><option value="">{badgesLoading ? '勋章加载中…' : '选择已启用勋章'}</option>{badgeOptions.map((badge) => <option key={badge.id} value={badge.id}>{badge.name}（{badge.code}）</option>)}</select>{selectedBadge ? <span className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-lg bg-violet-50 px-2 py-1 text-xs font-black text-violet-800 dark:bg-violet-950/30 dark:text-violet-200"><span className="grid size-7 shrink-0 place-items-center overflow-hidden rounded-md bg-white dark:bg-slate-900">{selectedBadge.iconUrl ? <img src={selectedBadge.iconUrl} alt="" className="size-full object-cover" /> : null}</span><span className="max-w-48 break-words whitespace-normal">{selectedBadge.name}</span></span> : null}</div> : prize.virtualPrizeType === 'REGISTRATION_FEE' ? <label className="flex min-w-0 items-center gap-2 text-xs font-black text-violet-800 dark:text-violet-200"><span className="shrink-0">挂号费</span><input aria-label={`${tierName}挂号费金额`} type="number" min={1} max={MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE} step={1} value={prize.registrationFeeAmount} disabled={controlsDisabled} onChange={(event) => updatePrize(index, 'registrationFeeAmount', event.target.value)} placeholder="整数金额" className="min-h-10 min-w-0 flex-1 rounded-lg border border-violet-200 px-3 text-sm font-bold dark:border-violet-800 dark:bg-slate-900 dark:text-slate-100" /></label> : <span className="flex min-h-10 items-center text-xs font-bold text-slate-500">请选择虚拟奖品类型</span>}
+                    {prize.virtualPrizeType === 'BADGE' ? <span className="flex min-h-10 items-center text-xs font-bold text-slate-500">开奖后自动发放，用户无需现场兑奖</span> : prize.virtualPrizeType === 'REGISTRATION_FEE' ? <span className="flex min-h-10 items-center text-xs font-bold text-slate-500">使用挂号费流水自动入账，支持幂等重试</span> : null}
+                  </div> : null}
                   <div className="mt-2 grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                     <ActivityImageUploader
                       label="奖品图片（可选）"
@@ -343,11 +457,11 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
             <article key={lottery.id} className="rounded-xl border border-violet-200 bg-white p-4 dark:border-violet-900 dark:bg-slate-950">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0"><h4 className="break-words font-black text-brand-950 dark:text-slate-100">{lottery.title}</h4><p className="mt-1 text-xs font-bold text-slate-500">{lotteryScheduleLabel(lottery, effectiveActivityEndAt, activityStatus)}</p></div>
-                <div className="flex flex-wrap gap-2">{lottery.status !== 'DRAWN' && lottery.status !== 'CANCELLED' ? <><button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => { clearPrizeUploadState(); setEditingId(lottery.id); setDraft(draftFromLottery(lottery)); setExpanded(true) }} className="min-h-9 rounded-full border border-violet-300 px-3 text-xs font-black text-violet-700 disabled:opacity-50">编辑</button><button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => void cancelLottery(lottery)} className="min-h-9 rounded-full border border-rose-200 px-3 text-xs font-black text-rose-700 disabled:opacity-50">取消</button>{!activityEnded && !activityCancelled ? <button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => openDrawConfirmation(lottery)} className="min-h-9 rounded-full bg-violet-700 px-3 text-xs font-black text-white disabled:opacity-50">立即开奖</button> : <span className="inline-flex min-h-9 items-center rounded-full bg-slate-100 px-3 text-xs font-black text-slate-500 dark:bg-slate-800 dark:text-slate-400">已过期 / 无法开奖</span>}</> : null}</div>
+                <div className="flex flex-wrap gap-2">{lottery.status !== 'DRAWN' && lottery.status !== 'CANCELLED' && !activityCancelled ? <><button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => { clearPrizeUploadState(); setEditingId(lottery.id); setDraft(draftFromLottery(lottery)); setExpanded(true) }} className="min-h-9 rounded-full border border-violet-300 px-3 text-xs font-black text-violet-700 disabled:opacity-50">编辑</button><button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => void cancelLottery(lottery)} className="min-h-9 rounded-full border border-rose-200 px-3 text-xs font-black text-rose-700 disabled:opacity-50">取消</button>{!activityEnded && !activityCancelled ? <button type="button" disabled={saving || prizeUploadInProgress || drawingId !== null} onClick={() => openDrawConfirmation(lottery)} className="min-h-9 rounded-full bg-violet-700 px-3 text-xs font-black text-white disabled:opacity-50">立即开奖</button> : <span className="inline-flex min-h-9 items-center rounded-full bg-slate-100 px-3 text-xs font-black text-slate-500 dark:bg-slate-800 dark:text-slate-400">已过期 / 无法开奖</span>}</> : null}</div>
               </div>
               <div className="mt-3 grid gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 sm:grid-cols-3"><p>有效报名：{lottery.eligibleCount ?? currentParticipants}</p><p>中奖名额：{slots} · 实际中奖：{lottery.winnerCount ?? 0}</p><p>当前理论中奖率：{currentRate.toFixed(2)}%</p></div>
-              <ul className="mt-3 space-y-1 border-t border-violet-100 pt-3 text-sm font-bold dark:border-violet-900">{lottery.prizes.map((prize, index) => <li key={prize.id}>{activityLotteryTierName(index) || prize.tierName || '中奖奖项'} · {prize.name} ×{prize.quantity}{lottery.status === 'DRAWN' ? `（中奖 ${prize.winnerCount}）` : ''}</li>)}</ul>
-               {lottery.winners.length ? <details className="mt-3 border-t border-violet-100 pt-3 text-xs font-bold dark:border-violet-900"><summary className="cursor-pointer">查看中奖结果（{lottery.winners.length}）</summary><ul className="mt-2 space-y-1">{lottery.winners.map((winner) => <li key={winner.id}>E院ID {winner.uid} · {winner.nickname} · {winner.tierName} · {winner.prizeName} · {winnerStateLabel(winner.redemptionState)}</li>)}</ul></details> : null}
+              <ul className="mt-3 space-y-1 border-t border-violet-100 pt-3 text-sm font-bold dark:border-violet-900">{lottery.prizes.map((prize, index) => <li key={prize.id}>{activityLotteryTierName(index) || prize.tierName || '中奖奖项'} · {prize.name} · {prize.prizeType === 'VIRTUAL' ? prize.virtualPrizeType === 'BADGE' ? '虚拟·勋章' : `虚拟·挂号费${prize.registrationFeeAmount ? ` ${prize.registrationFeeAmount}` : ''}` : '实物'} ×{prize.quantity}{lottery.status === 'DRAWN' ? `（中奖 ${prize.winnerCount}）` : ''}</li>)}</ul>
+              {lottery.winners.length ? <details className="mt-3 border-t border-violet-100 pt-3 text-xs font-bold dark:border-violet-900"><summary className="cursor-pointer">查看中奖结果（{lottery.winners.length}）</summary><ul className="mt-2 space-y-2">{lottery.winners.map((winner) => <li key={winner.id} className="flex flex-wrap items-center gap-2"><span>E院ID {winner.uid} · {winner.nickname} · {winner.tierName} · {winner.prizeName} · {winner.prizeType === 'VIRTUAL' ? fulfillmentLabel(winner) : winnerStateLabel(winner.redemptionState)}{winner.fulfillmentStatus === 'FAILED' && winner.fulfillmentError ? `（${winner.fulfillmentError}）` : ''}</span>{winner.prizeType === 'VIRTUAL' && (winner.fulfillmentStatus === 'FAILED' || winner.fulfillmentStatus === 'PENDING') ? <button type="button" disabled={retryingWinnerId !== null} onClick={() => void retryWinnerFulfillment(lottery, winner.id)} className="min-h-8 rounded-full border border-violet-300 px-3 text-xs font-black text-violet-700 disabled:opacity-50">{retryingWinnerId === winner.id ? '发放中…' : '重新发放'}</button> : null}</li>)}</ul></details> : null}
             </article>
           )
         })}

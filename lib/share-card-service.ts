@@ -3,7 +3,7 @@ import { getForumBoardDisplayName } from '@/lib/boards'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
-import { profileImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { publicModerationText } from '@/lib/content-moderation'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { prisma } from '@/lib/prisma'
@@ -19,6 +19,8 @@ import { createShareCardContentHash } from '@/lib/share-card-hash'
 import { renderShareCardPngWithInfo, isTrustedShareCardImageUrl, type ShareCardRenderResult } from '@/lib/share-card-renderer'
 import { headCosObject } from '@/lib/tencent-cos'
 import { uploadSiteImage } from '@/lib/site-media-storage'
+import { getStudioTool } from '@/lib/studio/tools'
+import { PUBLIC_STUDIO_PROJECT_WHERE, studioProjectMetadata } from '@/lib/studio/public'
 
 const shareCardIdPattern = /^[a-zA-Z0-9_-]{1,191}$/
 
@@ -110,6 +112,26 @@ const salonShareCardSelect = {
   },
 } satisfies Prisma.SalonPostSelect
 
+const studioShareCardSelect = {
+  id: true,
+  title: true,
+  description: true,
+  toolSlug: true,
+  data: true,
+  thumbnailUrl: true,
+  createdAt: true,
+  updatedAt: true,
+  User: {
+    select: {
+      nickname: true,
+      status: true,
+      isDeleted: true,
+      avatarUrl: true,
+      Profile: { select: { avatarUrl: true } },
+    },
+  },
+} satisfies Prisma.StudioProjectSelect
+
 type ShareCardResult = Readonly<{
   url: string
   cached: boolean
@@ -119,10 +141,10 @@ type ShareCardResult = Readonly<{
   mimeType: typeof SHARE_CARD_MIME_TYPE
 }>
 
-export type ShareCardContentType = 'post' | 'activity' | 'salon'
+export type ShareCardContentType = 'post' | 'activity' | 'salon' | 'studio'
 
 function isShareCardContentType(type: ShareCardData['type']): type is ShareCardContentType {
-  return type === 'post' || type === 'activity' || type === 'salon'
+  return type === 'post' || type === 'activity' || type === 'salon' || type === 'studio'
 }
 
 export class ShareCardContentNotFoundError extends Error {
@@ -260,16 +282,47 @@ export async function loadSalonShareCardData(postId: string): Promise<ShareCardD
   }
 }
 
+export async function loadStudioShareCardData(projectId: string): Promise<ShareCardData | null> {
+  const project = await prisma.studioProject.findFirst({
+    where: { ...PUBLIC_STUDIO_PROJECT_WHERE, id: projectId },
+    select: studioShareCardSelect,
+  })
+  if (!project) return null
+  const tool = getStudioTool(project.toolSlug)
+  if (!tool) return null
+  const metadata = studioProjectMetadata(project.data)
+  const dimensions = metadata.width && metadata.height ? `${metadata.width} × ${metadata.height}` : '自定义尺寸图纸'
+  const image = publicImageUrl(project.thumbnailUrl)
+  const author = project.User.status === 'ACTIVE' && !project.User.isDeleted ? project.User.nickname : '私家E院'
+  return {
+    type: 'studio',
+    contentId: project.id,
+    title: project.title,
+    description: project.description || `${tool.name}作品 · ${dimensions}`,
+    image,
+    imageCandidates: image ? [{ url: image }] : [],
+    url: canonicalShareUrl(`/studio/project/${project.id}`),
+    author,
+    authorAvatar: safeAuthorAvatar(project.User.Profile?.avatarUrl || project.User.avatarUrl),
+    date: formatDate(project.updatedAt),
+    meta: [
+      { label: '工具', value: tool.name },
+      { label: '尺寸', value: dimensions },
+    ],
+  }
+}
+
 export async function loadPublicShareCardData(type: ShareCardContentType, contentId: string) {
   if (type === 'post') return loadPostShareCardData(contentId)
   if (type === 'activity') return loadActivityShareCardData(contentId)
-  return loadSalonShareCardData(contentId)
+  if (type === 'salon') return loadSalonShareCardData(contentId)
+  return loadStudioShareCardData(contentId)
 }
 
 export function shareCardObjectKey(type: ShareCardContentType, contentId: string, hash: string) {
   if (!isValidShareCardContentId(contentId)) throw new Error('SHARE_CARD_CONTENT_ID_INVALID')
   if (!/^[a-f0-9]{64}$/i.test(hash)) throw new Error('SHARE_CARD_HASH_INVALID')
-  const folder = type === 'post' ? 'posts' : type === 'activity' ? 'activities' : 'salon'
+  const folder = type === 'post' ? 'posts' : type === 'activity' ? 'activities' : type === 'salon' ? 'salon' : 'studio'
   return `share-cards/${folder}/${contentId}/${hash}.png`
 }
 

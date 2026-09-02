@@ -7,6 +7,8 @@ import type {
   PageLayoutGridItem,
   PageLayoutModuleConfig,
   PageLayoutModuleDefinition,
+  PageLayoutModuleCategory,
+  PageLayoutPageDefinition,
   PageLayoutPageKey,
 } from '@/lib/page-layout/types'
 import { pageLayoutPageKeys } from '@/lib/page-layout/types'
@@ -16,232 +18,119 @@ const contentWidths = ['full', 'wide', 'medium', 'narrow'] as const satisfies re
 const cardWidths = ['full', 'wide', 'medium', 'half', 'third'] as const satisfies readonly LayoutWidth[]
 const allSpacing = ['none', 'xs', 'sm', 'md', 'lg', 'xl'] as const satisfies readonly LayoutSpacing[]
 
-const fullGrid = grid(0, 0, 12, 3)
-const mobileGrid = grid(0, 0, 4, 2)
+/**
+ * The page registry is the only source used by the layout editor's tabs and
+ * by page-layout service APIs. Paths intentionally mirror real navigation.
+ */
+export const PAGE_LAYOUT_REGISTRY = [
+  { key: 'home', name: '首页', description: '社区首页业务模块编排', path: '/community', navigationFeatureKey: 'HOME' },
+  { key: 'checkin', name: '每日挂号', description: '每日挂号页面模块编排', path: '/checkin', navigationFeatureKey: 'CHECKIN' },
+  { key: 'forum', name: 'E院广场', description: 'E院广场标题、分区、搜索与帖子内容', path: '/forum', navigationFeatureKey: 'FORUM' },
+  { key: 'announcement', name: '公告', description: '公告板块页面基础布局', path: '/forum?board=announcements', navigationFeatureKey: 'FORUM' },
+  { key: 'music', name: 'EasMusic', description: 'EasMusic 专辑、歌曲资料与播放框架', path: '/music', navigationFeatureKey: 'MUSIC' },
+  { key: 'message', name: '消息中心', description: '通知中心页面基础布局', path: '/notifications', navigationFeatureKey: 'NOTIFICATIONS' },
+  { key: 'profile', name: '个人病历', description: '个人病历与成长资料页面布局', path: '/profile', navigationFeatureKey: 'PROFILE' },
+  { key: 'admin-home', name: '管理后台首页', description: '管理后台首页模块编排', path: '/admin', navigationFeatureKey: 'ADMIN' },
+] as const satisfies readonly PageLayoutPageDefinition[]
 
-export const pageLayoutPages: Record<PageLayoutPageKey, { name: string; description: string; path: string }> = {
-  home: { name: '社区首页', description: '社区首页业务模块编排', path: '/community' },
-  checkin: { name: '每日挂号', description: '每日挂号页面模块编排', path: '/checkin' },
-  forum: { name: 'E院广场', description: '单页论坛首页布局', path: '/forum' },
-  announcement: { name: '公告', description: '公告板块页面基础布局', path: '/boards/announcements' },
-  music: { name: '音乐馆', description: 'EasMusic 页面基础布局', path: '/music' },
-  message: { name: '消息中心', description: '通知中心页面基础布局', path: '/notifications' },
-  profile: { name: '个人病历', description: '个人病历页面基础布局', path: '/profile' },
-  'admin-home': { name: '管理后台首页', description: '后台首页模块编排', path: '/admin' },
-}
+export const pageLayoutPages = PAGE_LAYOUT_REGISTRY.reduce((result, page) => {
+  result[page.key] = page
+  return result
+}, {} as Record<PageLayoutPageKey, PageLayoutPageDefinition>)
 
-export const pageLayoutRegistry: readonly PageLayoutModuleDefinition[] = [
+/**
+ * The module registry is shared by live rendering, draft normalization and
+ * the admin editor. componentKey is stable UI identity, not a user-provided
+ * component name or a persisted implementation detail.
+ */
+export const PAGE_MODULE_REGISTRY: readonly PageLayoutModuleDefinition[] = [
   defineLayoutModule('home', 'home.hero', '首页主视觉', '首页轮播与主要入口', 10, {
-    desktop: grid(0, 0, 12, 5),
-    minH: 2,
-    mobile: grid(0, 0, 4, 4),
-    width: 'full',
-    allowedWidths: ['full', 'wide'],
-    required: true,
+    componentKey: 'HOME_HERO', category: '首页',
+    desktop: grid(0, 0, 12, 5), tablet: grid(0, 0, 8, 5), mobile: grid(0, 0, 4, 4),
+    width: 'full', allowedWidths: ['full', 'wide'], heightMode: 'FIXED', layoutBehavior: 'fixed',
+    core: true, minW: 4, minH: 2,
   }),
   defineLayoutModule('home', 'home.announcement', '首页公告', '轻量公告提示', 20, {
-    desktop: grid(0, 5, 12, 2),
-    minH: 2,
-    mobile: grid(0, 4, 4, 2),
-    supportsTitle: false,
-    supportsSubtitle: false,
+    componentKey: 'HOME_ANNOUNCEMENT', category: '公告',
+    desktop: grid(0, 5, 12, 2), tablet: grid(0, 5, 8, 2), mobile: grid(0, 4, 4, 2),
+    supportsTitle: false, supportsSubtitle: false, heightMode: 'FIXED', layoutBehavior: 'fixed',
+    minW: 4, minH: 1,
   }),
-  defineLayoutModule('home', 'home.checkinEntry', '今日挂号', '每日挂号快捷入口', 30, {
-    desktop: grid(0, 7, 4, 2), minH: 2, mobile: grid(0, 6, 4, 2), width: 'third', allowedWidths: cardWidths,
+  defineLayoutModule('home', 'home.stats', 'E院数据与挂号状态', 'E院人数、今日挂号、累计签到、今日生日与每日处方', 30, {
+    componentKey: 'HOME_STATS', category: '首页',
+    desktop: grid(0, 7, 12, 3), tablet: grid(0, 7, 8, 4), mobile: grid(0, 6, 4, 4),
+    heightMode: 'FIXED', layoutBehavior: 'fixed', core: true, minW: 4, minH: 2,
   }),
-  defineLayoutModule('home', 'home.forumEntry', '去E院广场看看', '论坛快捷入口', 31, {
-    desktop: grid(4, 7, 4, 2), minH: 2, mobile: grid(0, 8, 4, 2), width: 'third', allowedWidths: cardWidths,
+  defineLayoutModule('home', 'home.today', '今日', '今日历史内容与挂号记录', 40, {
+    componentKey: 'HOME_TODAY', category: '挂号',
+    desktop: grid(0, 10, 4, 4), tablet: grid(0, 11, 4, 5), mobile: grid(0, 10, 4, 4),
+    width: 'third', allowedWidths: cardWidths, heightMode: 'AUTO', layoutBehavior: 'auto', minW: 2, minH: 3,
   }),
-  defineLayoutModule('home', 'home.musicEntry', 'EasMusic', '音乐快捷入口', 32, {
-    desktop: grid(8, 7, 4, 2), minH: 2, mobile: grid(0, 10, 4, 2), width: 'third', allowedWidths: cardWidths,
+  defineLayoutModule('home', 'home.anywhereDoor', '随意门', '随意门最新动态与快捷入口', 50, {
+    componentKey: 'HOME_ANYWHERE_DOOR', category: '挂号',
+    desktop: grid(4, 10, 4, 4), tablet: grid(4, 11, 4, 5), mobile: grid(0, 14, 4, 3),
+    width: 'third', allowedWidths: cardWidths, heightMode: 'AUTO', layoutBehavior: 'auto', minW: 2, minH: 2,
   }),
-  defineLayoutModule('home', 'home.featuredPosts', '精选帖子', '首页精选帖子列表', 40, {
-    desktop: grid(0, 10, 12, 5),
-    minH: 2,
-    mobile: grid(0, 9, 4, 5),
-    required: true,
-    layoutBehavior: 'auto',
+  defineLayoutModule('home', 'home.salon', '沙龙', '社区沙龙与每日动态', 60, {
+    componentKey: 'HOME_SALON', category: '广场',
+    desktop: grid(8, 10, 4, 4), tablet: grid(0, 16, 8, 5), mobile: grid(0, 17, 4, 5),
+    width: 'third', allowedWidths: cardWidths, heightMode: 'AUTO', layoutBehavior: 'auto', minW: 2, minH: 3,
   }),
-  defineLayoutModule('home', 'home.dailyMessages', '病友留言', '每日留言精选', 50, {
-    desktop: grid(0, 15, 6, 4),
-    minH: 2,
-    mobile: grid(0, 14, 4, 4),
-    width: 'half',
-    allowedWidths: cardWidths,
-    layoutBehavior: 'auto',
+  defineLayoutModule('home', 'home.activityCenter', '活动中心', '正在进行与即将开始的活动', 70, {
+    componentKey: 'HOME_ACTIVITY_CENTER', category: '首页',
+    desktop: grid(0, 14, 4, 5), tablet: grid(0, 21, 4, 5), mobile: grid(0, 22, 4, 5),
+    width: 'third', allowedWidths: cardWidths, heightMode: 'AUTO', layoutBehavior: 'auto', minW: 2, minH: 3,
   }),
-  defineLayoutModule('home', 'home.music', 'EasMusic', '音乐推荐入口', 60, {
-    desktop: grid(6, 15, 6, 4),
-    minH: 2,
-    mobile: grid(0, 18, 4, 4),
-    width: 'half',
-    allowedWidths: cardWidths,
-    layoutBehavior: 'auto',
+  defineLayoutModule('home', 'home.dailyMusic', 'EasMusic 今日推荐', '每日音乐推荐与播放入口', 80, {
+    componentKey: 'HOME_DAILY_MUSIC', category: 'EasMusic',
+    desktop: grid(4, 14, 4, 5), tablet: grid(4, 21, 4, 5), mobile: grid(0, 27, 4, 6),
+    width: 'third', allowedWidths: cardWidths, heightMode: 'AUTO', layoutBehavior: 'auto', minW: 2, minH: 3,
   }),
-  defineLayoutModule('home', 'home.culture', '活动与文化', '活动和文化内容入口', 70, {
-    desktop: grid(0, 19, 6, 4),
-    minH: 2,
-    mobile: grid(0, 22, 4, 4),
-    width: 'half',
-    allowedWidths: cardWidths,
-    layoutBehavior: 'auto',
+  defineLayoutModule('home', 'home.entertainment', '娱乐天空', '娱乐榜单与今日热度', 90, {
+    componentKey: 'HOME_ENTERTAINMENT', category: '首页',
+    desktop: grid(8, 14, 4, 5), tablet: grid(0, 26, 8, 5), mobile: grid(0, 33, 4, 5),
+    width: 'third', allowedWidths: cardWidths, heightMode: 'AUTO', layoutBehavior: 'auto', minW: 2, minH: 3,
   }),
-  defineLayoutModule('home', 'home.latestPosts', '最新动态', '预留的首页动态模块', 80, {
-    desktop: grid(6, 19, 6, 4),
-    minH: 2,
-    mobile: grid(0, 26, 4, 4),
-    visible: false,
-    width: 'half',
-    allowedWidths: cardWidths,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('home', 'home.footer', '页脚', '首页页脚文案', 90, {
-    desktop: grid(0, 23, 12, 2),
-    mobile: grid(0, 30, 4, 2),
-    supportsSubtitle: false,
+  defineLayoutModule('home', 'home.albums', '每日推荐专辑', '每日歌曲与专辑内容', 100, {
+    componentKey: 'HOME_ALBUMS', category: 'EasMusic',
+    desktop: grid(0, 19, 12, 6), tablet: grid(0, 31, 8, 6), mobile: grid(0, 38, 4, 6),
+    width: 'full', allowedWidths: allWidths, heightMode: 'AUTO', layoutBehavior: 'auto', core: true, minW: 4, minH: 3,
   }),
 
   defineLayoutModule('checkin', 'checkin.header', '每日挂号', '根据今日挂号状态显示挂号表单或完成结果', 10, {
-    desktop: grid(0, 0, 12, 8),
-    tablet: grid(0, 0, 8, 10),
-    mobile: grid(0, 0, 4, 12),
-    required: true,
-    minH: 5,
-    layoutBehavior: 'auto',
+    componentKey: 'CHECKIN_HEADER', category: '挂号',
+    desktop: grid(0, 0, 12, 8), tablet: grid(0, 0, 8, 10), mobile: grid(0, 0, 4, 12),
+    heightMode: 'AUTO', layoutBehavior: 'auto', core: true, minW: 4, minH: 5,
   }),
   defineLayoutModule('checkin', 'checkin.publicMessages', '病友留言', '匿名展示所有用户每日挂号留言', 20, {
-    desktop: grid(0, 8, 6, 6),
-    tablet: grid(0, 8, 8, 6),
-    mobile: grid(0, 8, 4, 6),
-    required: true,
-    minH: 4,
-    layoutBehavior: 'auto',
+    componentKey: 'CHECKIN_PUBLIC_MESSAGES', category: '挂号',
+    desktop: grid(0, 8, 6, 6), tablet: grid(0, 10, 8, 6), mobile: grid(0, 12, 4, 6),
+    heightMode: 'AUTO', layoutBehavior: 'auto', core: true, minW: 3, minH: 4,
   }),
   defineLayoutModule('checkin', 'checkin.friendMessages', '好友挂号留言', '展示好友每日挂号留言和互动', 30, {
-    desktop: grid(6, 8, 6, 6),
-    tablet: grid(0, 14, 8, 6),
-    mobile: grid(0, 14, 4, 6),
-    required: true,
-    minH: 4,
-    layoutBehavior: 'auto',
+    componentKey: 'CHECKIN_FRIEND_MESSAGES', category: '挂号',
+    desktop: grid(6, 8, 6, 6), tablet: grid(0, 16, 8, 6), mobile: grid(0, 18, 4, 6),
+    heightMode: 'AUTO', layoutBehavior: 'auto', core: true, minW: 3, minH: 4,
   }),
 
-  singlePageModule('forum', 'forum.main', 'E院广场', '标题、分区、搜索、筛选、帖子列表与分页', 'auto'),
-
-  defineLayoutModule('announcement', 'announcement.header', '公告头部', '公告页面标题与说明', 10, {
-    desktop: grid(0, 0, 12, 3),
-    tablet: grid(0, 0, 8, 3),
-    mobile: grid(0, 0, 4, 3),
-    minW: 4,
-    minH: 2,
-  }),
-  defineLayoutModule('announcement', 'announcement.pinned', '置顶公告', '置顶公告列表区域', 20, {
-    desktop: grid(0, 3, 8, 5),
-    tablet: grid(0, 3, 8, 5),
-    mobile: grid(0, 3, 4, 5),
-    minW: 3,
-    minH: 3,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('announcement', 'announcement.list', '公告列表', '公告列表主体区域', 30, {
-    desktop: grid(0, 8, 8, 8),
-    tablet: grid(0, 8, 8, 8),
-    mobile: grid(0, 8, 4, 8),
-    minW: 3,
-    minH: 4,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('announcement', 'announcement.updateLogEntry', '更新日志入口', '更新日志与版本信息入口', 40, {
-    desktop: grid(8, 3, 4, 3),
-    tablet: grid(0, 16, 8, 3),
-    mobile: grid(0, 16, 4, 3),
-    minW: 2,
-    minH: 2,
-  }),
-  defineLayoutModule('announcement', 'announcement.sidebar', '侧边区域', '公告页侧边信息区域', 50, {
-    desktop: grid(8, 6, 4, 5),
-    tablet: grid(0, 19, 8, 4),
-    mobile: grid(0, 19, 4, 4),
-    minW: 2,
-    minH: 3,
-  }),
-  defineLayoutModule('announcement', 'announcement.pagination', '分页区域', '公告分页或加载更多区域', 60, {
-    desktop: grid(0, 16, 8, 2),
-    tablet: grid(0, 23, 8, 2),
-    mobile: grid(0, 23, 4, 2),
-    minW: 3,
-    minH: 1,
-  }),
-  singlePageModule('music', 'music.main', '音乐馆内容', 'EasMusic 专辑、歌曲资料与播放框架'),
-  singlePageModule('message', 'message.main', '消息中心内容', '通知列表与未读状态', 'auto'),
-  defineLayoutModule('profile', 'profile.main', '个人简介与成长资料', '本人可见的简介、资料操作与成长数据', 10, {
-    desktop: grid(0, 0, 12, 5),
-    tablet: grid(0, 0, 8, 5),
-    mobile: grid(0, 0, 4, 5),
-    minW: 3,
-    minH: 2,
-    required: true,
-    supportsTitle: false,
-    supportsSubtitle: false,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('profile', 'profile.calendar', '本月挂号日历', '个人本月挂号日历', 30, {
-    desktop: grid(0, 4, 5, 8),
-    tablet: grid(0, 6, 8, 7),
-    mobile: grid(0, 6, 4, 7),
-    minW: 3,
-    minH: 4,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('profile', 'profile.recentMessages', '最近留言', '个人最近留言记录', 40, {
-    desktop: grid(5, 4, 7, 8),
-    tablet: grid(0, 13, 8, 5),
-    mobile: grid(0, 13, 4, 5),
-    minW: 3,
-    minH: 3,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('profile', 'profile.posts', '发帖与个人记录', '发帖、回复、成就、收藏等个人记录', 50, {
-    desktop: grid(0, 12, 12, 7),
-    tablet: grid(0, 18, 8, 7),
-    mobile: grid(0, 18, 4, 7),
-    minW: 3,
-    minH: 3,
-    layoutBehavior: 'auto',
-  }),
-  defineLayoutModule('admin-home', 'admin.header', '后台页头', '管理后台欢迎与说明', 10, {
-    desktop: grid(0, 0, 12, 3),
-    mobile: grid(0, 0, 4, 3),
-    required: true,
-  }),
-  defineLayoutModule('admin-home', 'admin.registrationStatus', '注册状态', '注册模式与环境状态', 20, {
-    desktop: grid(0, 3, 12, 3),
-    mobile: grid(0, 3, 4, 3),
-    supportsSubtitle: false,
-  }),
-  defineLayoutModule('admin-home', 'admin.stats', '后台数据', '后台核心统计卡片', 30, {
-    desktop: grid(0, 6, 12, 3),
-    mobile: grid(0, 6, 4, 3),
-    supportsTitle: false,
-    supportsSubtitle: false,
-  }),
-  defineLayoutModule('admin-home', 'admin.modules', '后台模块', '后台管理入口列表', 40, {
-    desktop: grid(0, 9, 12, 5),
-    mobile: grid(0, 9, 4, 5),
-  }),
-  defineLayoutModule('admin-home', 'admin.deploymentStatus', '部署状态', '预留的部署状态提示模块', 50, {
-    desktop: grid(0, 14, 12, 3),
-    mobile: grid(0, 14, 4, 3),
-    visible: false,
-  }),
+  singlePageModule('forum', 'forum.main', 'E院广场', '标题、分区、搜索、筛选、帖子列表与分页', 'FORUM_MAIN', '广场'),
+  singlePageModule('announcement', 'announcement.main', '公告', '公告列表与公告详情入口', 'ANNOUNCEMENT_MAIN', '公告'),
+  singlePageModule('music', 'music.main', 'EasMusic', 'EasMusic 专辑、歌曲资料与播放框架', 'MUSIC_MAIN', 'EasMusic'),
+  singlePageModule('message', 'message.main', '消息中心', '通知列表与未读状态', 'MESSAGE_MAIN', '消息'),
+  singlePageModule('profile', 'profile.main', '个人病历', '本人可见的简介、资料操作与成长数据', 'PROFILE_MAIN', '个人资料'),
+  singlePageModule('admin-home', 'admin.main', '管理后台首页', '管理后台欢迎信息、统计与管理入口', 'ADMIN_MAIN', '后台'),
 ]
+
+/** Compatibility name retained for existing service and API consumers. */
+export const pageLayoutRegistry = PAGE_MODULE_REGISTRY
+export const MODULE_REGISTRY = PAGE_MODULE_REGISTRY
 
 export function isPageLayoutPageKey(value: unknown): value is PageLayoutPageKey {
   return typeof value === 'string' && pageLayoutPageKeys.includes(value as PageLayoutPageKey)
 }
 
 export function getPageLayoutRegistry(pageKey: PageLayoutPageKey) {
-  return pageLayoutRegistry.filter((item) => item.page === pageKey)
+  return PAGE_MODULE_REGISTRY.filter((item) => item.page === pageKey)
 }
 
 export function getPageLayoutModule(pageKey: PageLayoutPageKey, key: string) {
@@ -249,17 +138,11 @@ export function getPageLayoutModule(pageKey: PageLayoutPageKey, key: string) {
 }
 
 export function getPageLayoutPagePath(pageKey: PageLayoutPageKey) {
-  return pageLayoutPages[pageKey].path
+  return pageLayoutPages[pageKey].path.split(/[?#]/, 1)[0]
 }
 
 function grid(x: number, y: number, w: number, h: number): PageLayoutGridItem {
   return { x, y, w, h }
-}
-
-function tabletFrom(desktop: PageLayoutGridItem): PageLayoutGridItem {
-  const w = Math.max(1, Math.min(8, Math.round((desktop.w / 12) * 8)))
-  const x = Math.max(0, Math.min(8 - w, Math.round((desktop.x / 12) * 8)))
-  return { x, y: desktop.y, w, h: desktop.h }
 }
 
 function defineLayoutModule(
@@ -269,11 +152,14 @@ function defineLayoutModule(
   description: string,
   defaultOrder: number,
   options: {
+    componentKey: string
+    category: PageLayoutModuleCategory
     desktop?: PageLayoutGridItem
     tablet?: PageLayoutGridItem
     mobile?: PageLayoutGridItem
     visible?: boolean
     width?: LayoutWidth
+    mobileWidth?: LayoutWidth
     allowedWidths?: readonly LayoutWidth[]
     allowedSpacing?: readonly LayoutSpacing[]
     supportsTitle?: boolean
@@ -288,24 +174,32 @@ function defineLayoutModule(
     canMove?: boolean
     canResize?: boolean
     canHide?: boolean
+    core?: boolean
     required?: boolean
+    heightMode?: 'AUTO' | 'FIXED'
     layoutBehavior?: PageLayoutBehavior
-  } = {},
+    surfaceClassName?: string
+  },
 ): PageLayoutModuleDefinition {
+  const core = options.core ?? options.required ?? false
+  const heightMode = options.heightMode ?? (options.layoutBehavior === 'fixed' ? 'FIXED' : 'AUTO')
+  const layoutBehavior = options.layoutBehavior ?? (heightMode === 'FIXED' ? 'fixed' : 'auto')
   return {
     key,
     page,
     name,
     description,
+    componentKey: options.componentKey,
+    category: options.category,
     defaultOrder,
     defaultVisible: options.visible ?? true,
     defaultGrid: {
-      desktop: options.desktop || fullGrid,
-      tablet: options.tablet || tabletFrom(options.desktop || fullGrid),
-      mobile: options.mobile || mobileGrid,
+      desktop: options.desktop || grid(0, 0, 12, 4),
+      tablet: options.tablet || grid(0, 0, 8, 4),
+      mobile: options.mobile || grid(0, 0, 4, 4),
     },
     defaultWidth: options.width || 'wide',
-    defaultMobileWidth: 'full',
+    defaultMobileWidth: options.mobileWidth || 'full',
     defaultGapTop: 'sm',
     defaultGapBottom: 'sm',
     allowedWidths: options.allowedWidths || contentWidths,
@@ -315,29 +209,46 @@ function defineLayoutModule(
     supportsDesktop: options.supportsDesktop ?? true,
     supportsTablet: options.supportsTablet ?? true,
     supportsMobile: options.supportsMobile ?? true,
-    layoutBehavior: options.layoutBehavior || 'fixed',
+    layoutBehavior,
+    heightMode,
     minW: options.minW ?? 1,
     minH: options.minH ?? 1,
     maxW: options.maxW,
     maxH: options.maxH ?? 40,
     canMove: options.canMove ?? true,
     canResize: options.canResize ?? true,
-    canHide: options.canHide ?? !options.required,
-    required: options.required,
+    canHide: options.canHide ?? !core,
+    core,
+    resizable: options.canResize ?? true,
+    hideable: options.canHide ?? !core,
+    surfaceClassName: options.surfaceClassName,
+    required: core,
   }
 }
 
-function singlePageModule(page: PageLayoutPageKey, key: string, name: string, description: string, layoutBehavior: PageLayoutBehavior = 'fixed') {
+function singlePageModule(
+  page: PageLayoutPageKey,
+  key: string,
+  name: string,
+  description: string,
+  componentKey: string,
+  category: PageLayoutModuleCategory,
+) {
   return defineLayoutModule(page, key, name, description, 10, {
-    desktop: grid(0, 0, 12, 8),
-    tablet: grid(0, 0, 8, 8),
-    mobile: grid(0, 0, 4, 8),
+    componentKey,
+    category,
+    desktop: grid(0, 0, 12, 12),
+    tablet: grid(0, 0, 8, 12),
+    mobile: grid(0, 0, 4, 12),
     width: 'full',
     allowedWidths: allWidths,
-    required: true,
     supportsTitle: false,
     supportsSubtitle: false,
-    layoutBehavior,
+    heightMode: 'AUTO',
+    layoutBehavior: 'auto',
+    core: true,
+    minW: 4,
+    minH: 4,
   })
 }
 
@@ -353,8 +264,8 @@ function defaultModuleConfig(moduleDefinition: PageLayoutModuleDefinition, devic
       mobile: { ...moduleDefinition.defaultGrid.mobile },
     },
     width: device === 'mobile' ? moduleDefinition.defaultMobileWidth || 'full' : moduleDefinition.defaultWidth,
-    gapTop: device === 'mobile' && moduleDefinition.defaultGapTop === 'md' ? 'sm' : moduleDefinition.defaultGapTop,
-    gapBottom: device === 'mobile' && moduleDefinition.defaultGapBottom === 'md' ? 'sm' : moduleDefinition.defaultGapBottom,
+    gapTop: moduleDefinition.defaultGapTop,
+    gapBottom: moduleDefinition.defaultGapBottom,
     alignment: 'left',
     density: 'normal',
     title: null,
@@ -364,29 +275,9 @@ function defaultModuleConfig(moduleDefinition: PageLayoutModuleDefinition, devic
 
 export function getDefaultPageLayoutConfig(pageKey: PageLayoutPageKey): PageLayoutConfig {
   const modules = getPageLayoutRegistry(pageKey)
-  const config = {
+  return {
     desktop: modules.filter((item) => item.supportsDesktop).map((item) => defaultModuleConfig(item, 'desktop')),
     tablet: modules.filter((item) => item.supportsTablet).map((item) => defaultModuleConfig(item, 'tablet')),
     mobile: modules.filter((item) => item.supportsMobile).map((item) => defaultModuleConfig(item, 'mobile')),
   }
-  if (pageKey !== 'checkin') return config
-  return {
-    desktop: upgradeCheckInDefault(config.desktop, 'desktop'),
-    tablet: upgradeCheckInDefault(config.tablet, 'tablet'),
-    mobile: upgradeCheckInDefault(config.mobile, 'mobile'),
-  }
-}
-
-function upgradeCheckInDefault(items: PageLayoutModuleConfig[], device: PageLayoutDevice) {
-  const header = items.find((item) => item.key === 'checkin.header')
-  const headerEnd = header ? header.grid[device].y + header.grid[device].h : 0
-  const publicMessages = items.find((item) => item.key === 'checkin.publicMessages')
-  const friendY = device === 'desktop'
-    ? headerEnd
-    : headerEnd + (publicMessages?.grid[device].h ?? 0)
-  return items.map((item) => {
-    if (item.key === 'checkin.publicMessages') return { ...item, grid: { ...item.grid, [device]: { ...item.grid[device], y: headerEnd } } }
-    if (item.key === 'checkin.friendMessages') return { ...item, grid: { ...item.grid, [device]: { ...item.grid[device], y: friendY } } }
-    return item
-  })
 }

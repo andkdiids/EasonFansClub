@@ -46,22 +46,26 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
   }
   const layoutClass = preview
     ? 'min-w-0'
-    : 'grid min-w-0 items-start lg:grid-cols-[340px_minmax(0,1fr)_320px] xl:grid-cols-[380px_minmax(0,1fr)_340px]'
-  const contentClass = preview ? 'p-4 sm:p-7' : 'p-4 sm:p-7 lg:contents'
+    : 'activity-detail-layout grid min-w-0 items-start lg:grid-cols-[340px_minmax(0,1fr)_320px] xl:grid-cols-[380px_minmax(0,1fr)_340px]'
+  // Keep the contents wrapper so the desktop grid can place poster, main,
+  // registration and lower content independently while mobile follows DOM order.
+  const contentClass = preview ? 'p-4 sm:p-7' : 'contents lg:contents'
   const posterClass = preview ? 'min-w-0' : 'min-w-0 self-start h-auto lg:border-r lg:border-[var(--border)] lg:p-4 xl:p-3'
-  const detailsClass = preview ? 'min-w-0' : 'min-w-0 self-start h-auto lg:p-7 xl:p-8'
+  const primaryClass = preview ? 'min-w-0' : 'min-w-0 self-start h-auto p-4 sm:p-7 lg:p-7 xl:p-8'
+  const lowerClass = preview ? 'min-w-0' : 'min-w-0 p-4 sm:p-7 lg:p-7 xl:p-8'
   return (
     <article className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-elevated)] text-[var(--foreground)] shadow-sm">
+      {!preview ? <div className="activity-detail-topbar flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 sm:px-7 lg:px-8"><Link href="/activities" className="inline-flex min-h-10 items-center rounded-lg bg-[var(--navigation-active)] px-4 py-2 text-sm font-black text-[var(--primary)] hover:opacity-80">← 返回活动中心</Link><ActivityShareButton data={shareCardData} title={activity.title} text={createActivityShareDescription(activity)} /></div> : null}
       <div className={layoutClass}>
         <div className={contentClass}>
-          <div className={posterClass}>
+          <div className={`${posterClass} activity-detail-poster`}>
             {cover ? <div className="mb-6 flex min-h-[15rem] items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-subtle)] p-3 sm:min-h-[22rem] sm:p-5 lg:mb-0 lg:min-h-0 lg:p-2 xl:p-1"><img src={cover} alt={`${activity.title}活动海报`} className="max-h-[60vh] w-auto max-w-full object-contain sm:max-h-[34rem] lg:h-auto lg:w-full lg:max-w-[360px] lg:max-h-[38rem]" loading={preview ? 'lazy' : 'eager'} /></div> : null}
           </div>
-          <div className={detailsClass}>
+          <div className={`${primaryClass} activity-detail-main`}>
           <div className="flex flex-wrap items-center gap-2"><ActivityStatusBadge activity={activity} /><span className="text-xs font-black text-[var(--foreground-muted)]">{activityTypeLabels[activity.type]}</span>{activity.isPinned ? <span className="text-xs font-black text-[var(--primary)]">置顶</span> : null}</div>
           <h1 className="mt-3 break-words text-3xl font-black text-[var(--foreground)] sm:text-4xl">{activity.title}</h1>
           {activity.subtitle ? <p className="mt-2 break-words text-base font-bold text-[var(--foreground-muted)]">{activity.subtitle}</p> : null}
-          <div className="mt-5 grid min-w-0 gap-2 text-sm font-bold leading-6 text-[var(--foreground-muted)] sm:grid-cols-2">
+          <div className="mt-5 grid min-w-0 break-words gap-2 text-sm font-bold leading-6 text-[var(--foreground-muted)] sm:grid-cols-2">
             {activity.startsAt ? <p>活动时间：{activityDateLabel(activity.startsAt)}{activity.endsAt ? ` — ${activityDateLabel(activity.endsAt)}` : ''}</p> : null}
             {activity.registrationStartAt || activity.registrationEndAt ? <p>报名时间：{activity.registrationStartAt ? activityDateLabel(activity.registrationStartAt) : '不限开始时间'}{activity.registrationEndAt ? ` — ${activityDateLabel(activity.registrationEndAt)}` : ' — 不限截止时间'}</p> : null}
             {activity.locationName ? <p>活动地点：{activity.locationName}</p> : null}
@@ -70,13 +74,27 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
             {activity.organizer ? <p>主办方：{activity.organizer}</p> : null}
             {activity.contactInfo ? <p>联系方式：{activity.contactInfo}</p> : null}
           </div>
-          <section className="mt-5 rounded-2xl border border-[color-mix(in_srgb,var(--success)_40%,var(--border))] bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] p-4 text-sm text-[var(--foreground)]"><p className="font-black">报名费用：{activity.registrationFee > 0 ? `${activity.registrationFee} 挂号费` : '免费'}</p><p className="mt-2 font-bold leading-6">{activity.registrationFee > 0 ? `报名成功后将立即扣除 ${activity.registrationFee} 挂号费。` : '这是一次免费报名。'}</p><p className="mt-2 font-bold leading-6">{activity.registrationFee > 0 ? '在报名结束前取消报名可退回本次实际支付费用。' : '免费报名也会保留报名记录。'}取消报名后不可再次报名本活动。</p>{activity.feeDescription ? <p className="mt-2 whitespace-pre-wrap break-words font-bold leading-6">{activity.feeDescription}</p> : null}{activity.linkedMaterial ? <div className="mt-3 border-t-[color-mix(in_srgb,var(--success)_40%,var(--border))] pt-3"><p className="font-black">报名福利</p><div className="mt-2 flex items-center gap-3"><div className="size-14 shrink-0 overflow-hidden rounded-lg bg-white/70 dark:bg-slate-900/60">{activity.linkedMaterial.coverImageUrl ? <img src={activity.linkedMaterial.coverImageUrl} alt="" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-2xl">🎁</div>}</div><p className="min-w-0 break-words font-black">{activity.linkedMaterial.title} ×1</p></div><p className="mt-2 font-bold leading-6">报名成功后自动兑换；现场活动签到时将同步完成物料核销，无需重复扫码。</p>{activity.linkedMaterial.stockRemaining < 1 || activity.linkedMaterial.status !== 'PUBLISHED' ? <p className="mt-2 font-black text-[var(--danger)]">{activity.linkedMaterial.stockRemaining < 1 ? '活动物料已兑换完' : '活动物料暂不可用'}，暂时无法报名。</p> : null}</div> : null}</section>
-          <div className="mt-7 whitespace-pre-wrap break-words text-[15px] leading-8 text-[var(--foreground)]">{activity.description || '暂无活动说明。'}</div>
-          {!preview && lotteries?.length ? <ActivityLotteryPanel lotteries={lotteries} isRegistered={initialRegistration?.status === 'ACTIVE'} /> : null}
-          <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-[var(--border)] pt-5">{!preview ? <Link href="/activities" className="min-h-10 rounded-full bg-[var(--navigation-active)] px-4 py-2 text-sm font-black text-[var(--primary)] hover:opacity-80">← 返回活动中心</Link> : null}{!preview ? <ActivityShareButton data={shareCardData} title={activity.title} text={createActivityShareDescription(activity)} /> : null}</div>
+          </div>
+          {!preview ? <aside className="activity-detail-aside min-w-0 self-start h-auto border-t border-[var(--border)] bg-[var(--surface-subtle)] p-4 sm:p-7 lg:border-l lg:border-t-0 lg:p-6 lg:[&>section]:mt-0"><ActivityRegistrationButton activity={activity} isAuthenticated={isAuthenticated} initialRegistration={initialRegistration} questions={initialQuestions} initialRegistrationCount={activity.signupCount} initialRegistrationState={initialRegistrationState} initialCanRegister={initialCanRegister} /></aside> : null}
+          <div className={`${lowerClass} activity-detail-lower`}>
+          <section aria-labelledby={`activity-registration-info-${activity.id}`} className="rounded-xl border border-[color-mix(in_srgb,var(--success)_40%,var(--border))] bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] p-4 text-sm text-[var(--foreground)] sm:p-5">
+            <p className="text-xs font-black tracking-[0.16em] text-[var(--success)]">报名说明 / 报名福利</p>
+            <h2 id={`activity-registration-info-${activity.id}`} className="mt-1 text-xl font-black text-[var(--foreground)]">报名信息</h2>
+            <div className="mt-4">
+              <p className="font-black">报名费用：{activity.registrationFee > 0 ? `${activity.registrationFee} 挂号费` : '免费'}</p>
+              <p className="mt-2 font-bold leading-6">{activity.registrationFee > 0 ? `报名成功后将立即扣除 ${activity.registrationFee} 挂号费。` : '这是一次免费报名。'}</p>
+              <p className="mt-2 font-bold leading-6">{activity.registrationFee > 0 ? '在报名结束前取消报名可退回本次实际支付费用。' : '免费报名也会保留报名记录。'}取消报名后不可再次报名本活动。</p>
+              {activity.feeDescription ? <p className="mt-2 whitespace-pre-wrap break-words font-bold leading-6">{activity.feeDescription}</p> : null}
+            </div>
+            {activity.linkedMaterial ? <div className="mt-4 border-t-[color-mix(in_srgb,var(--success)_40%,var(--border))] pt-4"><p className="font-black">报名福利</p><div className="mt-2 flex min-w-0 items-center gap-3"><div className="size-14 shrink-0 overflow-hidden rounded-lg bg-white/70 dark:bg-slate-900/60">{activity.linkedMaterial.coverImageUrl ? <img src={activity.linkedMaterial.coverImageUrl} alt="" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-2xl">🎁</div>}</div><p className="min-w-0 break-words font-black">{activity.linkedMaterial.title} ×1</p></div><p className="mt-2 font-bold leading-6">报名成功后自动兑换；现场活动签到时将同步完成物料核销，无需重复扫码。</p>{activity.linkedMaterial.stockRemaining < 1 || activity.linkedMaterial.status !== 'PUBLISHED' ? <p className="mt-2 font-black text-[var(--danger)]">{activity.linkedMaterial.stockRemaining < 1 ? '活动物料已兑换完' : '活动物料暂不可用'}，暂时无法报名。</p> : null}</div> : null}
+            {!preview && activity.status !== 'CANCELLED' && lotteries.length ? <ActivityLotteryPanel lotteries={lotteries} isRegistered={initialRegistration?.status === 'ACTIVE'} embedded /> : null}
+          </section>
+          <section aria-labelledby={`activity-description-${activity.id}`} className="mt-7 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
+            <h2 id={`activity-description-${activity.id}`} className="text-xl font-black text-[var(--foreground)]">活动详情</h2>
+            <div className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-8 text-[var(--foreground)]">{activity.description || '暂无活动说明。'}</div>
+          </section>
           </div>
         </div>
-        {!preview ? <aside className="min-w-0 self-start h-auto border-t border-[var(--border)] bg-[var(--surface-subtle)] p-4 sm:p-7 lg:border-l lg:border-t-0 lg:p-6 lg:[&>section]:mt-0"><ActivityRegistrationButton activity={activity} isAuthenticated={isAuthenticated} initialRegistration={initialRegistration} questions={initialQuestions} initialRegistrationCount={activity.signupCount} initialRegistrationState={initialRegistrationState} initialCanRegister={initialCanRegister} /></aside> : null}
       </div>
     </article>
   )

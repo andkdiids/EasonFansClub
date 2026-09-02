@@ -60,6 +60,7 @@ export function PageLayoutFrame({
   'data-grid-h': gridH,
   'data-layout-density': density,
   'data-layout-behavior': behavior,
+  'data-layout-label': label,
 }: {
   config: PageLayoutModuleConfig
   children: ReactNode
@@ -69,11 +70,12 @@ export function PageLayoutFrame({
   'data-grid-h'?: number
   'data-layout-density'?: PageLayoutModuleDensity
   'data-layout-behavior'?: PageLayoutBehavior
+  'data-layout-label'?: string
 }) {
   return (
     <section
       data-layout-module={config.key}
-      data-layout-label={config.key}
+      data-layout-label={label}
       data-grid-w={gridW}
       data-grid-h={gridH}
       data-layout-density={density}

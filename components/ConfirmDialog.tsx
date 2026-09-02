@@ -16,6 +16,7 @@ export function ConfirmDialog({
   confirmLabel = '确认',
   cancelLabel = '取消',
   loading = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: Readonly<{
@@ -25,6 +26,7 @@ export function ConfirmDialog({
   confirmLabel?: string
   cancelLabel?: string
   loading?: boolean
+  confirmDisabled?: boolean
   onConfirm: () => void
   onCancel: () => void
 }>) {
@@ -86,7 +88,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className="min-h-10 rounded-sm bg-red-600 px-4 text-sm font-black text-white hover:bg-red-700 disabled:opacity-50"
           >
             {loading ? '处理中…' : confirmLabel}

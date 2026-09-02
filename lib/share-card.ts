@@ -7,8 +7,10 @@ export const SHARE_CARD_MIME_TYPE = 'image/png'
 
 export const SHARE_CARD_CANONICAL_ORIGIN = 'https://ecfc.fans'
 export const SHARE_CARD_LOGO_PATH = '/icon.png'
+const TRUSTED_INLINE_IMAGE_PATTERN = /^data:image\/(?:png|webp);base64,[A-Za-z0-9+/]+={0,2}$/i
+const TRUSTED_INLINE_IMAGE_MAX_CHARS = 480_000
 
-export type ShareCardType = 'home' | 'post' | 'activity' | 'salon' | 'clinic'
+export type ShareCardType = 'home' | 'post' | 'activity' | 'salon' | 'clinic' | 'studio'
 
 export type ShareCardMeta = Readonly<{
   label: string
@@ -67,6 +69,7 @@ export function shareCardApiPath(data: Pick<ShareCardData, 'type' | 'contentId'>
   if (data.type === 'post') return `/api/posts/${encodeURIComponent(data.contentId)}/share-card`
   if (data.type === 'activity') return `/api/activities/${encodeURIComponent(data.contentId)}/share-card`
   if (data.type === 'salon') return `/api/salon/posts/${encodeURIComponent(data.contentId)}/share-card`
+  if (data.type === 'studio') return `/api/studio/projects/${encodeURIComponent(data.contentId)}/share-card`
   return null
 }
 
@@ -85,6 +88,11 @@ export function isTrustedShareCardHttpsUrl(value: string | null | undefined) {
   } catch {
     return false
   }
+}
+
+/** Small, generated Pattern Grid thumbnails may remain inline in a project. */
+export function isTrustedShareCardDataUrl(value: string | null | undefined) {
+  return typeof value === 'string' && value.length <= TRUSTED_INLINE_IMAGE_MAX_CHARS && TRUSTED_INLINE_IMAGE_PATTERN.test(value)
 }
 
 function redactSensitiveText(value: string) {
@@ -123,5 +131,6 @@ export function shareCardTypeLabel(type: ShareCardType) {
   if (type === 'post') return 'E院广场'
   if (type === 'salon') return '沙龙'
   if (type === 'clinic') return '病友会诊'
+  if (type === 'studio') return '贝多芬与我'
   return 'Eason Fans Club'
 }

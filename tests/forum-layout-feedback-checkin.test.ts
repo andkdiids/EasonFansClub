@@ -49,12 +49,14 @@ test('单密保迁移先备份和统计，再在同一事务中清理', () => {
   assert.ok(migration.indexOf('CREATE TABLE "UserSecurityQuestion_backup_20260718"') < migration.indexOf('DELETE FROM "UserSecurityQuestion"'))
 })
 
-test('profile.posts 注册到布局并且真实前台不再布局外渲染', () => {
+test('profile.main 注册到布局并且真实前台不再布局外渲染', () => {
   const registry = readFileSync('lib/page-layout/registry.ts', 'utf8')
   const profile = readFileSync('components/ProfilePageSurface.tsx', 'utf8')
-  assert.match(registry, /'profile\.posts'/)
+  const page = readFileSync('app/profile/page.tsx', 'utf8')
+  assert.match(registry, /'profile\.main'/)
   assert.match(profile, /<PublicUserModules/)
   assert.equal((profile.match(/<PublicUserModules/g) || []).length, 1)
+  assert.match(page, /<PageLayoutRenderer/)
 })
 
 test('统一返回按钮优先返回历史，无历史时回首页或业务列表', () => {
@@ -145,12 +147,14 @@ test('每日挂号费与经验区域提供成长体系说明', () => {
 
 test('移动端资料卡与布局编辑器使用独立尺寸和显式网格', () => {
   const profile = readFileSync('components/ProfileSummary.tsx', 'utf8')
-  const editor = readFileSync('components/page-layout/PageLayoutCanvasEditor.tsx', 'utf8')
+  const editor = readFileSync('app/admin/layout-editor/LayoutEditorClient.tsx', 'utf8')
+  const renderer = readFileSync('components/page-layout/PageLayoutRenderer.tsx', 'utf8')
   assert.match(profile, /w-40 max-w-full sm:w-56/)
-  assert.match(editor, /cols=\{cols\[device\]\}/)
-  assert.match(editor, /layout=\{layout\}/)
-  assert.match(editor, /resizeHandles=\{\['e', 's', 'se'\]\}/)
-  assert.doesNotMatch(editor, /ResponsiveGridLayout/)
+  assert.match(editor, /<PageLayoutRenderer[\s\S]*mode="editor"/)
+  assert.match(renderer, /cols=\{getPageLayoutColumns\(device\)\}/)
+  assert.match(renderer, /layout=\{layout\}/)
+  assert.match(renderer, /resizeHandles=\{\['e', 's', 'se'\]\}/)
+  assert.doesNotMatch(editor, /AdminCanvasRenderer|预览数据已加载/)
 })
 
 test('论坛默认排序与非法排序统一回退到最新', () => {
@@ -214,19 +218,16 @@ test('论坛分页窗口始终显示连续页码并在边界正确收缩', () =>
   assert.equal(buildForumHref('/forum', 'board=concert&page=2', { sort: 'latest', page: null }), '/forum?board=concert&sort=latest')
 })
 
-test('论坛翻页同步 URL、重新请求并用新 props 刷新扁平单列列表', () => {
-  const forumHome = readFileSync('components/ForumHome.tsx', 'utf8')
-  const postList = readFileSync('components/PostList.tsx', 'utf8')
-  assert.match(forumHome, /page: String\(page\)/)
-  assert.match(forumHome, /buildForumHref\(pathname, query, \{ page \}\)/)
-  assert.match(forumHome, /<Pagination/)
-  assert.match(forumHome, /onPageChange=\{goToForumPage\}/)
-  assert.match(forumHome, /scrollRestoreAttemptedRef/)
-  assert.match(forumHome, /responsiveColumns/)
-  assert.match(postList, /useEffect\(\(\) => setVisiblePosts\(posts\), \[posts\]\)/)
-  assert.match(postList, /className="post-list-flat"/)
-  assert.match(postList, /onPostOpen/)
-  assert.doesNotMatch(postList, /md:grid-cols-2/)
+test('小臣书发现流用 cursor 同步搜索、追加帖子并恢复滚动位置', () => {
+  const forumHome = readFileSync('components/ForumDiscoveryHome.tsx', 'utf8')
+  assert.match(forumHome, /cursor: requestCursor/)
+  assert.match(forumHome, /loadPage\(false\)/)
+  assert.match(forumHome, /<div ref=\{sentinelRef\} className="forum-discovery-sentinel"/)
+  assert.match(forumHome, /IntersectionObserver/)
+  assert.match(forumHome, /persistSession\(/)
+  assert.match(forumHome, /scrollY: window\.scrollY/)
+  assert.match(forumHome, /appendUniqueDiscoveryPosts\(currentPosts, incoming, reset\)/)
+  assert.doesNotMatch(forumHome, /ForumPlazaHome|forum-plaza-mode-button|<Pagination/)
 })
 
 test('好友挂号留言只查询当前用户好友且空好友缓存不与公开缓存碰撞', () => {

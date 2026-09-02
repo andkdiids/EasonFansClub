@@ -15,8 +15,9 @@ import {
   type PageLayoutGridItem,
   type PageLayoutModuleConfig,
   type PageLayoutPageKey,
+  type PageLayoutWarning,
 } from '@/lib/page-layout/types'
-import { isDeprecatedLayoutModule, normalizeLayoutItemHeight } from '@/lib/page-layout/normalize'
+import { compactPageLayoutItems, isDeprecatedLayoutModule, normalizeLayoutItemHeight } from '@/lib/page-layout/normalize'
 
 export class PageLayoutValidationError extends Error {
   constructor(message: string, public readonly details: Record<string, string> = {}) {
@@ -91,6 +92,46 @@ function supportsDevice(moduleDefinition: { supportsDesktop: boolean; supportsTa
   if (device === 'desktop') return moduleDefinition.supportsDesktop
   if (device === 'tablet') return moduleDefinition.supportsTablet
   return moduleDefinition.supportsMobile
+}
+
+function gridOverlaps(a: PageLayoutGridItem, b: PageLayoutGridItem) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+function validateNoVisibleOverlap(errors: Record<string, string>, device: PageLayoutDevice, items: PageLayoutModuleConfig[]) {
+  const visibleItems = items.filter((item) => item.visible && !item.isHidden)
+  for (let index = 0; index < visibleItems.length; index += 1) {
+    for (let nextIndex = index + 1; nextIndex < visibleItems.length; nextIndex += 1) {
+      const current = visibleItems[index]
+      const next = visibleItems[nextIndex]
+      if (!gridOverlaps(current.grid[device], next.grid[device])) continue
+      errors[`${device}.${next.key}.grid`] = `不能与 ${current.key} 重叠`
+    }
+  }
+}
+
+/** Report legacy module keys without allowing them into the rendered layout. */
+export function collectPageLayoutWarnings(pageKey: PageLayoutPageKey, input: unknown): PageLayoutWarning[] {
+  if (!isPlainObject(input)) return []
+  const warnings: PageLayoutWarning[] = []
+  for (const device of ['desktop', 'tablet', 'mobile'] as const) {
+    const items = input[device]
+    if (!Array.isArray(items)) continue
+    const seen = new Set<string>()
+    for (const rawItem of items) {
+      if (!isPlainObject(rawItem) || typeof rawItem.key !== 'string' || !rawItem.key || seen.has(rawItem.key)) continue
+      seen.add(rawItem.key)
+      const deprecated = isDeprecatedLayoutModule(pageKey, rawItem.key)
+      if (!deprecated && getPageLayoutModule(pageKey, rawItem.key)) continue
+      warnings.push({
+        device,
+        key: rawItem.key,
+        kind: deprecated ? 'DEPRECATED' : 'UNKNOWN',
+        message: deprecated ? '该模块已废弃' : '该模块不再属于当前页面 Registry',
+      })
+    }
+  }
+  return warnings
 }
 
 function validateDeviceConfig(
@@ -228,10 +269,11 @@ function validateDeviceConfig(
     }
   }
 
+  const missingDefaults = fallback.filter((item) => !seen.has(item.key) && Boolean(getPageLayoutModule(pageKey, item.key)?.required))
+  const merged = [...sanitized, ...missingDefaults]
+  if (strict) validateNoVisibleOverlap(errors, device, merged)
   if (Object.keys(errors).length) throw new PageLayoutValidationError('页面布局配置不正确', errors)
 
-  const missingDefaults = fallback.filter((item) => !seen.has(item.key))
-  const merged = [...sanitized, ...missingDefaults]
   if (pageKey !== 'checkin') return merged
 
   const headerDefaultGrid = fallback.find((item) => item.key === 'checkin.header')?.grid[device]
@@ -269,18 +311,17 @@ export function repairPageLayoutConfig(pageKey: PageLayoutPageKey, input: unknow
   const defaults = getDefaultPageLayoutConfig(pageKey)
   if (!isPlainObject(input)) return defaults
 
-  const repaired = {
-    desktop: validateDeviceConfig(pageKey, 'desktop', input.desktop, defaults.desktop, false),
-    tablet: validateDeviceConfig(pageKey, 'tablet', input.tablet, defaults.tablet, false),
-    mobile: validateDeviceConfig(pageKey, 'mobile', input.mobile, defaults.mobile, false),
-  }
+  const repaired = (['desktop', 'tablet', 'mobile'] as const).reduce((result, device) => {
+    const items = validateDeviceConfig(pageKey, device, input[device], defaults[device], false)
+    result[device] = compactPageLayoutItems(
+      pageKey === 'checkin' ? upgradeCheckInHeader(items, device) : items,
+      device,
+    )
+    return result
+  }, {} as PageLayoutConfig)
   if (pageKey !== 'checkin') return repaired
 
-  return {
-    desktop: upgradeCheckInHeader(repaired.desktop, 'desktop'),
-    tablet: upgradeCheckInHeader(repaired.tablet, 'tablet'),
-    mobile: upgradeCheckInHeader(repaired.mobile, 'mobile'),
-  }
+  return repaired
 }
 
 function upgradeCheckInHeader(items: PageLayoutModuleConfig[], device: PageLayoutDevice) {

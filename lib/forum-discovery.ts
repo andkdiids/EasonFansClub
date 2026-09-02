@@ -6,7 +6,6 @@ export const FORUM_DISCOVERY_MAX_PAGE_SIZE = 20
 export const FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT = 60
 
 export type ForumDiscoveryMode = 'recommend' | 'latest' | 'hot'
-export type ForumTheme = 'plaza' | 'xiaochenshu'
 
 export type ForumDiscoveryTab = { value: string; label: string }
 

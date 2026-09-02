@@ -103,6 +103,13 @@ export const NAVIGATION_REGISTRY = [
     activePrefixes: ['/activities'],
   },
   {
+    featureKey: 'STUDIO', label: '贝多芬与我', href: '/studio', icon: 'palette', title: '贝多芬与我',
+    defaultSortOrder: 11, defaultEnabled: true, isManageable: true,
+    showInCenter: true, showInQuickNavigation: true, showInDesktopSidebar: true,
+    sidebarSection: 'primary', editable: true, hideable: true,
+    activePrefixes: ['/studio'],
+  },
+  {
     featureKey: 'NOTIFICATIONS', label: '消息', href: '/notifications', icon: 'bell', title: '消息',
     defaultSortOrder: 11, defaultEnabled: true, isManageable: true,
     showInCenter: true, showInQuickNavigation: false, showInDesktopSidebar: true,

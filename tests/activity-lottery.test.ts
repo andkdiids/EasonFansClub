@@ -122,10 +122,13 @@ test('抽奖资格在开奖时直接读取有效活动报名，不复制参与�
 test('开奖和报名取消使用相同的活动锁顺序，开奖后取消被服务端拒绝', () => {
   const lottery = read('lib/activity-lottery.ts')
   const cancel = read('app/api/activities/[activityId]/register/cancel/route.ts')
+  const registration = read('lib/activity-registration.ts')
   assert.match(lottery, /lockActivity\(tx, initial\.activityId\)/)
-  assert.match(cancel, /FOR UPDATE/)
-  assert.match(cancel, /status: 'DRAWN'/)
-  assert.match(cancel, /isActivityRegistrationCancellationOpen\(activity, now\)/)
+  assert.match(registration, /lockActivityForCancellation\(tx, input\.activityId\)/)
+  assert.match(registration, /FOR UPDATE/)
+  assert.match(registration, /status: 'DRAWN'/)
+  assert.match(registration, /isActivityRegistrationCancellationOpen\(activity, now\)/)
+  assert.match(cancel, /cancelActivityRegistration\(\{ activityId, userId: guard\.user\.id, source: 'USER' \}\)/)
 })
 
 test('活动开奖区分调度与管理员触发，结果落库并且重复执行幂等', () => {

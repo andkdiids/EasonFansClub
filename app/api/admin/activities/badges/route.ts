@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/security'
+import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,5 +14,5 @@ export async function GET() {
     select: { id: true, name: true, code: true, iconUrl: true },
     take: 500,
   })
-  return NextResponse.json({ badges }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
+  return NextResponse.json({ badges: badges.map((badge) => ({ ...badge, iconUrl: toPublicMediaUrl(badge.iconUrl) })) }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
 }

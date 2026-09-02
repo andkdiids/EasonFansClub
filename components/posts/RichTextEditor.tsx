@@ -25,6 +25,8 @@ import {
 import { MusicReferencePicker, type MusicReferenceSong } from '@/components/posts/MusicReferencePicker'
 import { PostReferencePicker, type PostReferencePost } from '@/components/posts/PostReferencePicker'
 import { UserMentionPicker, type UserMentionUser } from '@/components/posts/UserMentionPicker'
+import { ActivityReferencePicker, type ActivityReferenceActivity } from '@/components/posts/ActivityReferencePicker'
+import { MaterialReferencePicker, type MaterialReferenceMaterial } from '@/components/posts/MaterialReferencePicker'
 import {
   RICH_TEXT_COLOR_TOKENS,
   RICH_TEXT_FONT_SIZE_TOKENS,
@@ -64,6 +66,12 @@ declare module '@tiptap/core' {
     }
     strike: {
       toggleStrike: () => ReturnType
+    }
+    bulletList: {
+      toggleBulletList: () => ReturnType
+    }
+    orderedList: {
+      toggleOrderedList: () => ReturnType
     }
   }
 }
@@ -335,6 +343,12 @@ function isEmptyListItemAtStart(editor: Editor) {
     && $from.node(-1).type.name === 'listItem'
 }
 
+type RichListCommandContext = {
+  commands: {
+    toggleList: (listTypeOrName: string, itemTypeOrName: string) => boolean
+  }
+}
+
 const richListItem = TiptapNode.create({
   name: 'listItem',
   priority: 1100,
@@ -355,24 +369,16 @@ const richListItem = TiptapNode.create({
       () => commands.splitBlock(),
     ])
     const handleBackspace = () => {
-      // Let ProseMirror's base keymap delete non-empty selections.  Running
-      // list-item navigation against a whole-document selection can otherwise
-      // leave an empty listItem at the document root.
-      if (!this.editor.state.selection.empty) return false
-      if (isEmptyListItemAtStart(this.editor)) return this.editor.commands.liftListItem('listItem')
-      return this.editor.commands.first(({ commands }) => [
-        () => commands.undoInputRule(),
-        () => commands.deleteSelection(),
-        () => commands.joinBackward(),
-        () => commands.selectNodeBackward(),
-      ])
+      // Only intercept the one list-specific case.  Returning false for every
+      // other caret/selection lets ProseMirror's native keymap handle normal
+      // character deletion, range deletion, and IME-generated Backspace.
+      if (!isEmptyListItemAtStart(this.editor)) return false
+      return this.editor.commands.liftListItem('listItem')
     }
 
     return {
       Enter: handleEnter,
       Backspace: handleBackspace,
-      'Mod-Backspace': handleBackspace,
-      'Shift-Backspace': handleBackspace,
     }
   },
 })
@@ -381,6 +387,11 @@ const richBulletList = TiptapNode.create({
   name: 'bulletList',
   group: 'block list',
   content: 'listItem+',
+  addCommands() {
+    return {
+      toggleBulletList: () => ({ commands }: RichListCommandContext) => commands.toggleList('bulletList', 'listItem'),
+    }
+  },
   parseHTML() {
     return [{ tag: 'ul' }]
   },
@@ -393,6 +404,11 @@ const richOrderedList = TiptapNode.create({
   name: 'orderedList',
   group: 'block list',
   content: 'listItem+',
+  addCommands() {
+    return {
+      toggleOrderedList: () => ({ commands }: RichListCommandContext) => commands.toggleList('orderedList', 'listItem'),
+    }
+  },
   addAttributes() {
     return {
       start: {
@@ -559,6 +575,188 @@ const richPostReference = TiptapNode.create({
   },
 })
 
+const richActivityReference = TiptapNode.create({
+  name: 'activityReference',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      activityId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-id'),
+        renderHTML: (attributes: { activityId?: unknown }) => typeof attributes.activityId === 'string' && attributes.activityId ? { 'data-activity-id': attributes.activityId } : {},
+      },
+      titleSnapshot: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-title-snapshot') || '',
+        renderHTML: (attributes: { titleSnapshot?: unknown }) => typeof attributes.titleSnapshot === 'string' && attributes.titleSnapshot ? { 'data-activity-title-snapshot': attributes.titleSnapshot } : {},
+      },
+      title: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-title') || '',
+        renderHTML: (attributes: { title?: unknown }) => typeof attributes.title === 'string' && attributes.title ? { 'data-activity-title': attributes.title } : {},
+      },
+      coverUrl: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-cover-url') || '',
+        renderHTML: (attributes: { coverUrl?: unknown }) => typeof attributes.coverUrl === 'string' && attributes.coverUrl ? { 'data-activity-cover-url': attributes.coverUrl } : {},
+      },
+      bannerUrl: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-banner-url') || '',
+        renderHTML: (attributes: { bannerUrl?: unknown }) => typeof attributes.bannerUrl === 'string' && attributes.bannerUrl ? { 'data-activity-banner-url': attributes.bannerUrl } : {},
+      },
+      startsAt: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-starts-at') || '',
+        renderHTML: (attributes: { startsAt?: unknown }) => typeof attributes.startsAt === 'string' && attributes.startsAt ? { 'data-activity-starts-at': attributes.startsAt } : {},
+      },
+      endsAt: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-ends-at') || '',
+        renderHTML: (attributes: { endsAt?: unknown }) => typeof attributes.endsAt === 'string' && attributes.endsAt ? { 'data-activity-ends-at': attributes.endsAt } : {},
+      },
+      locationName: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-location') || '',
+        renderHTML: (attributes: { locationName?: unknown }) => typeof attributes.locationName === 'string' && attributes.locationName ? { 'data-activity-location': attributes.locationName } : {},
+      },
+      displayStatus: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-display-status') || '',
+        renderHTML: (attributes: { displayStatus?: unknown }) => typeof attributes.displayStatus === 'string' && attributes.displayStatus ? { 'data-activity-display-status': attributes.displayStatus } : {},
+      },
+      statusLabel: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-status-label') || '',
+        renderHTML: (attributes: { statusLabel?: unknown }) => typeof attributes.statusLabel === 'string' && attributes.statusLabel ? { 'data-activity-status-label': attributes.statusLabel } : {},
+      },
+      available: {
+        default: true,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-activity-reference-available') !== 'false',
+        renderHTML: (attributes: { available?: unknown }) => ({ 'data-activity-reference-available': attributes.available === false ? 'false' : 'true' }),
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-activity-reference]' }]
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const unavailable = node.attrs.available === false
+    const title = unavailable ? '该引用活动已不可用' : typeof node.attrs.title === 'string' && node.attrs.title ? node.attrs.title : typeof node.attrs.titleSnapshot === 'string' && node.attrs.titleSnapshot ? node.attrs.titleSnapshot : '引用活动'
+    const statusLabel = unavailable ? '' : typeof node.attrs.statusLabel === 'string' ? node.attrs.statusLabel : ''
+    const coverUrl = typeof node.attrs.coverUrl === 'string' && node.attrs.coverUrl ? node.attrs.coverUrl : ''
+    return ['span', mergeAttributes(HTMLAttributes, {
+      'data-activity-reference': 'true',
+      class: `rich-text-activity-reference${unavailable ? ' is-unavailable' : ''}`,
+      contenteditable: 'false',
+      'aria-label': `引用活动：${title}`,
+    }),
+    ['span', { class: 'rich-text-activity-reference-icon', 'aria-hidden': 'true' }, coverUrl ? ['img', { src: coverUrl, alt: '', class: 'rich-text-reference-media' }] : '活动'],
+    ['span', { class: 'rich-text-activity-reference-copy' },
+      ['strong', {}, '引用活动'],
+      ['span', {}, title],
+      statusLabel ? ['small', {}, statusLabel] : '',
+    ]]
+  },
+})
+
+const richMaterialReference = TiptapNode.create({
+  name: 'materialReference',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      materialId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-id'),
+        renderHTML: (attributes: { materialId?: unknown }) => typeof attributes.materialId === 'string' && attributes.materialId ? { 'data-material-id': attributes.materialId } : {},
+      },
+      titleSnapshot: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-title-snapshot') || '',
+        renderHTML: (attributes: { titleSnapshot?: unknown }) => typeof attributes.titleSnapshot === 'string' && attributes.titleSnapshot ? { 'data-material-title-snapshot': attributes.titleSnapshot } : {},
+      },
+      title: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-title') || '',
+        renderHTML: (attributes: { title?: unknown }) => typeof attributes.title === 'string' && attributes.title ? { 'data-material-title': attributes.title } : {},
+      },
+      coverImageUrl: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-cover-url') || '',
+        renderHTML: (attributes: { coverImageUrl?: unknown }) => typeof attributes.coverImageUrl === 'string' && attributes.coverImageUrl ? { 'data-material-cover-url': attributes.coverImageUrl } : {},
+      },
+      cost: {
+        default: null,
+        parseHTML: (element: HTMLElement) => {
+          const value = Number(element.getAttribute('data-material-cost'))
+          return Number.isSafeInteger(value) && value >= 0 ? value : null
+        },
+        renderHTML: (attributes: { cost?: unknown }) => Number.isSafeInteger(attributes.cost) ? { 'data-material-cost': String(attributes.cost) } : {},
+      },
+      stockRemaining: {
+        default: null,
+        parseHTML: (element: HTMLElement) => {
+          const value = Number(element.getAttribute('data-material-stock'))
+          return Number.isSafeInteger(value) && value >= 0 ? value : null
+        },
+        renderHTML: (attributes: { stockRemaining?: unknown }) => Number.isSafeInteger(attributes.stockRemaining) ? { 'data-material-stock': String(attributes.stockRemaining) } : {},
+      },
+      state: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-state') || '',
+        renderHTML: (attributes: { state?: unknown }) => typeof attributes.state === 'string' && attributes.state ? { 'data-material-state': attributes.state } : {},
+      },
+      stateLabel: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-state-label') || '',
+        renderHTML: (attributes: { stateLabel?: unknown }) => typeof attributes.stateLabel === 'string' && attributes.stateLabel ? { 'data-material-state-label': attributes.stateLabel } : {},
+      },
+      linkedActivityId: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-activity-id') || '',
+        renderHTML: (attributes: { linkedActivityId?: unknown }) => typeof attributes.linkedActivityId === 'string' && attributes.linkedActivityId ? { 'data-material-activity-id': attributes.linkedActivityId } : {},
+      },
+      linkedActivityTitle: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-activity-title') || '',
+        renderHTML: (attributes: { linkedActivityTitle?: unknown }) => typeof attributes.linkedActivityTitle === 'string' && attributes.linkedActivityTitle ? { 'data-material-activity-title': attributes.linkedActivityTitle } : {},
+      },
+      available: {
+        default: true,
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-material-reference-available') !== 'false',
+        renderHTML: (attributes: { available?: unknown }) => ({ 'data-material-reference-available': attributes.available === false ? 'false' : 'true' }),
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-material-reference]' }]
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const unavailable = node.attrs.available === false
+    const title = unavailable ? '该引用物料已不可用' : typeof node.attrs.title === 'string' && node.attrs.title ? node.attrs.title : typeof node.attrs.titleSnapshot === 'string' && node.attrs.titleSnapshot ? node.attrs.titleSnapshot : '引用物料'
+    const stateLabel = unavailable ? '' : typeof node.attrs.stateLabel === 'string' ? node.attrs.stateLabel : ''
+    const coverImageUrl = typeof node.attrs.coverImageUrl === 'string' && node.attrs.coverImageUrl ? node.attrs.coverImageUrl : ''
+    return ['span', mergeAttributes(HTMLAttributes, {
+      'data-material-reference': 'true',
+      class: `rich-text-material-reference${unavailable ? ' is-unavailable' : ''}`,
+      contenteditable: 'false',
+      'aria-label': `引用物料：${title}`,
+    }),
+    ['span', { class: 'rich-text-material-reference-icon', 'aria-hidden': 'true' }, coverImageUrl ? ['img', { src: coverImageUrl, alt: '', class: 'rich-text-reference-media' }] : '物料'],
+    ['span', { class: 'rich-text-material-reference-copy' },
+      ['strong', {}, '引用物料'],
+      ['span', {}, title],
+      stateLabel ? ['small', {}, stateLabel] : '',
+    ]]
+  },
+})
+
 const richUserMention = TiptapNode.create({
   name: 'userMention',
   group: 'inline',
@@ -628,6 +826,8 @@ const richTextExtensions = [
   RichFontSizeMark(),
   richMusicReference,
   richPostReference,
+  richActivityReference,
+  richMaterialReference,
   richUserMention,
 ]
 
@@ -673,6 +873,26 @@ function sanitizePastedHtml(html: string) {
           element.getAttribute('data-post-reference-available') === 'false' ? 'data-post-reference-available="false"' : '',
         ].filter(Boolean)
         return '<span ' + referenceAttributes.join(' ') + '>引用帖子</span>'
+      }
+      const activityId = safeReferenceId(element.getAttribute('data-activity-id'))
+      if (element.hasAttribute('data-activity-reference') && activityId) {
+        const title = safeSnapshot(element.getAttribute('data-activity-title-snapshot') || element.getAttribute('data-activity-title'), element.textContent || '引用活动')
+        const referenceAttributes = [
+          'data-activity-reference="true"',
+          'data-activity-id="' + escapeAttribute(activityId) + '"',
+          title ? 'data-activity-title-snapshot="' + escapeAttribute(title) + '"' : '',
+        ].filter(Boolean)
+        return '<span ' + referenceAttributes.join(' ') + '>引用活动</span>'
+      }
+      const materialId = safeReferenceId(element.getAttribute('data-material-id'))
+      if (element.hasAttribute('data-material-reference') && materialId) {
+        const title = safeSnapshot(element.getAttribute('data-material-title-snapshot') || element.getAttribute('data-material-title'), element.textContent || '引用物料')
+        const referenceAttributes = [
+          'data-material-reference="true"',
+          'data-material-id="' + escapeAttribute(materialId) + '"',
+          title ? 'data-material-title-snapshot="' + escapeAttribute(title) + '"' : '',
+        ].filter(Boolean)
+        return '<span ' + referenceAttributes.join(' ') + '>引用物料</span>'
       }
       const userId = safeReferenceId(element.getAttribute('data-user-id'))
       if (element.hasAttribute('data-user-mention') && userId) {
@@ -751,9 +971,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   // never open it as a side effect.
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false)
   const [activeHeadingLevel, setActiveHeadingLevel] = useState<HeadingLevel | undefined>(undefined)
-  const [openMenu, setOpenMenu] = useState<'list' | 'size' | 'color' | null>(null)
+  const [openMenu, setOpenMenu] = useState<'list' | 'size' | 'color' | 'reference' | null>(null)
   const [musicPickerOpen, setMusicPickerOpen] = useState(false)
   const [postReferencePickerOpen, setPostReferencePickerOpen] = useState(false)
+  const [activityReferencePickerOpen, setActivityReferencePickerOpen] = useState(false)
+  const [materialReferencePickerOpen, setMaterialReferencePickerOpen] = useState(false)
   const [userMentionPickerOpen, setUserMentionPickerOpen] = useState(false)
 
   function rememberSelection(currentEditor: Editor) {
@@ -911,6 +1133,21 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     setOpenMenu((current) => current === menu ? null : menu)
   }
 
+  function toggleReferenceMenu() {
+    rememberSelection(activeEditor)
+    closeHeadingMenu()
+    setOpenMenu((current) => current === 'reference' ? null : 'reference')
+  }
+
+  function openReferencePicker(kind: 'post' | 'activity' | 'material') {
+    rememberSelection(activeEditor)
+    closeHeadingMenu()
+    setOpenMenu(null)
+    setPostReferencePickerOpen(kind === 'post')
+    setActivityReferencePickerOpen(kind === 'activity')
+    setMaterialReferencePickerOpen(kind === 'material')
+  }
+
   function applySize(token: RichTextFontSizeToken) {
     startCommand().setMark('fontSize', { token }).run()
     closeHeadingMenu()
@@ -946,7 +1183,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   }
 
   function applyList(listType: 'bulletList' | 'orderedList') {
-    startCommand().toggleList(listType, 'listItem').run()
+    if (listType === 'bulletList') startCommand().toggleBulletList().run()
+    else startCommand().toggleOrderedList().run()
     closeHeadingMenu()
     setOpenMenu(null)
   }
@@ -992,6 +1230,51 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       .run()
     rememberSelection(activeEditor)
     setPostReferencePickerOpen(false)
+  }
+
+  function insertActivityReference(activity: ActivityReferenceActivity) {
+    closeHeadingMenu()
+    startCommand()
+      .insertContent({
+        type: 'activityReference',
+        attrs: {
+          activityId: activity.id,
+          titleSnapshot: activity.title,
+          ...(activity.coverUrl ? { coverUrl: activity.coverUrl } : {}),
+          ...(activity.bannerUrl ? { bannerUrl: activity.bannerUrl } : {}),
+          ...(activity.startsAt ? { startsAt: activity.startsAt } : {}),
+          ...(activity.endsAt ? { endsAt: activity.endsAt } : {}),
+          ...(activity.locationName ? { locationName: activity.locationName } : {}),
+          displayStatus: activity.displayStatus,
+          statusLabel: activity.statusLabel,
+        },
+      })
+      .insertContent(' ')
+      .run()
+    rememberSelection(activeEditor)
+    setActivityReferencePickerOpen(false)
+  }
+
+  function insertMaterialReference(material: MaterialReferenceMaterial) {
+    closeHeadingMenu()
+    startCommand()
+      .insertContent({
+        type: 'materialReference',
+        attrs: {
+          materialId: material.id,
+          titleSnapshot: material.title,
+          ...(material.coverImageUrl ? { coverImageUrl: material.coverImageUrl } : {}),
+          cost: material.cost,
+          stockRemaining: material.stockRemaining,
+          state: material.state,
+          stateLabel: material.stateLabel,
+          ...(material.linkedActivity ? { linkedActivityId: material.linkedActivity.id, linkedActivityTitle: material.linkedActivity.title } : {}),
+        },
+      })
+      .insertContent(' ')
+      .run()
+    rememberSelection(activeEditor)
+    setMaterialReferencePickerOpen(false)
   }
 
   function insertUserMention(user: UserMentionUser) {
@@ -1195,20 +1478,55 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         </div>
         </div>
         <div className="rich-text-toolbar-row rich-text-toolbar-row-secondary">
-        <button
-          type="button"
-          className={toolbarButtonClass()}
-          aria-label="引用一篇站内帖子"
-          onPointerDown={rememberToolbarPointerDown}
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => {
-            rememberSelection(activeEditor)
-            setOpenMenu(null)
-            setPostReferencePickerOpen(true)
-          }}
-        >
-          引用
-        </button>
+        <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-reference">
+          <button
+            type="button"
+            className={toolbarButtonClass()}
+            aria-label="引用"
+            aria-haspopup="menu"
+            aria-expanded={openMenu === 'reference'}
+            onPointerDown={rememberToolbarPointerDown}
+            onMouseDown={closeHeadingOnToolbarMouseDown}
+            onClick={toggleReferenceMenu}
+          >
+            引用 <span aria-hidden="true">⌄</span>
+          </button>
+          {openMenu === 'reference' ? (
+            <div className="rich-text-toolbar-menu" role="menu" aria-label="引用类型">
+              <button
+                type="button"
+                role="menuitem"
+                aria-label="引用一篇站内帖子"
+                className={menuItemClass()}
+                onPointerDown={rememberToolbarPointerDown}
+                onMouseDown={closeHeadingOnToolbarMouseDown}
+                onClick={() => openReferencePicker('post')}
+              >
+                引用帖子
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass()}
+                onPointerDown={rememberToolbarPointerDown}
+                onMouseDown={closeHeadingOnToolbarMouseDown}
+                onClick={() => openReferencePicker('activity')}
+              >
+                引用活动
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass()}
+                onPointerDown={rememberToolbarPointerDown}
+                onMouseDown={closeHeadingOnToolbarMouseDown}
+                onClick={() => openReferencePicker('material')}
+              >
+                引用物料
+              </button>
+            </div>
+          ) : null}
+        </div>
         <button
           type="button"
           className={toolbarButtonClass()}
@@ -1305,6 +1623,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         open={postReferencePickerOpen}
         onClose={() => setPostReferencePickerOpen(false)}
         onSelect={insertPostReference}
+      />
+      <ActivityReferencePicker
+        open={activityReferencePickerOpen}
+        onClose={() => setActivityReferencePickerOpen(false)}
+        onSelect={insertActivityReference}
+      />
+      <MaterialReferencePicker
+        open={materialReferencePickerOpen}
+        onClose={() => setMaterialReferencePickerOpen(false)}
+        onSelect={insertMaterialReference}
       />
       <UserMentionPicker
         open={userMentionPickerOpen}

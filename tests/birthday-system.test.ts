@@ -67,7 +67,7 @@ test('birthday badge is auto-granted on login and on visiting own profile', () =
 })
 
 test('admin can see today birthday count and a privacy-safe list page', () => {
-  const admin = read('app/admin/page.tsx')
+  const admin = read('lib/admin-navigation.ts')
   const list = read('app/admin/birthdays/page.tsx')
   const dailyJob = read('app/api/internal/daily-jobs/birthday/route.ts')
   const execution = read('lib/daily-job-execution.ts')

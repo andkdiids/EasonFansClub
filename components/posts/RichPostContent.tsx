@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import {
   legacyHtmlToRichContent,
   plainTextToRichContent,
@@ -37,6 +38,19 @@ function renderMarks(content: ReactNode, marks: RichTextMark[] | undefined, key:
     }
     return <span key={key + '-size-' + index} className={richTextFontSizeClass(mark.attrs.token)}>{current}</span>
   }, content)
+}
+
+function formatReferenceDate(value: string | undefined) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }
 
 function renderInline(node: RichTextInlineNode, key: string) {
@@ -81,6 +95,73 @@ function renderInline(node: RichTextInlineNode, key: string) {
         href={`/posts/${encodeURIComponent(node.attrs.postId)}`}
         className="rich-text-post-reference"
         aria-label={`查看引用帖子：${title}`}
+      >
+        {card}
+      </Link>
+    )
+  }
+  if (node.type === 'activityReference') {
+    const unavailable = node.attrs.available === false
+    const title = unavailable ? '该引用活动已不可用' : node.attrs.title || node.attrs.titleSnapshot || '引用活动'
+    const cover = node.attrs.coverUrl || node.attrs.bannerUrl
+    const dateText = [formatReferenceDate(node.attrs.startsAt), formatReferenceDate(node.attrs.endsAt)].filter(Boolean).join(' - ')
+    const details = [dateText, node.attrs.locationName, node.attrs.statusLabel].filter(Boolean).join(' · ')
+    const card = (
+      <>
+        <span className="rich-text-activity-reference-icon" aria-hidden="true">
+          {cover ? <Image src={cover} alt="" width={40} height={40} className="rich-text-reference-media" /> : '活动'}
+        </span>
+        <span className="rich-text-activity-reference-copy">
+          <strong>引用活动</strong>
+          <span>{title}</span>
+          {details ? <small>{details}</small> : null}
+        </span>
+      </>
+    )
+    if (unavailable) {
+      return <span key={key} className="rich-text-activity-reference is-unavailable" aria-label="该引用活动已不可用">{card}</span>
+    }
+    return (
+      <Link
+        key={key}
+        href={`/activities/${encodeURIComponent(node.attrs.activityId)}`}
+        className="rich-text-activity-reference"
+        aria-label={`查看引用活动：${title}`}
+      >
+        {card}
+      </Link>
+    )
+  }
+  if (node.type === 'materialReference') {
+    const unavailable = node.attrs.available === false
+    const title = unavailable ? '该引用物料已不可用' : node.attrs.title || node.attrs.titleSnapshot || '引用物料'
+    const details = [
+      node.attrs.cost === undefined ? '' : `挂号费 ${node.attrs.cost}`,
+      node.attrs.stockRemaining === undefined ? '' : `库存 ${node.attrs.stockRemaining}`,
+      node.attrs.stateLabel,
+      node.attrs.linkedActivityTitle,
+    ].filter(Boolean).join(' · ')
+    const card = (
+      <>
+        <span className="rich-text-material-reference-icon" aria-hidden="true">
+          {node.attrs.coverImageUrl ? <Image src={node.attrs.coverImageUrl} alt="" width={40} height={40} className="rich-text-reference-media" /> : '物料'}
+        </span>
+        <span className="rich-text-material-reference-copy">
+          <strong>引用物料</strong>
+          <span>{title}</span>
+          {details ? <small>{details}</small> : null}
+        </span>
+      </>
+    )
+    if (unavailable) {
+      return <span key={key} className="rich-text-material-reference is-unavailable" aria-label="该引用物料已不可用">{card}</span>
+    }
+    return (
+      <Link
+        key={key}
+        href={`/material-redemptions/${encodeURIComponent(node.attrs.materialId)}`}
+        className="rich-text-material-reference"
+        aria-label={`查看引用物料：${title}`}
       >
         {card}
       </Link>
