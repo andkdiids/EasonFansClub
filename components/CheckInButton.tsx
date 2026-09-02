@@ -1,11 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { CheckInGrowthGuideCard } from '@/components/CheckInGrowthGuideCard'
 import { EmojiPicker } from '@/components/EmojiPicker'
 import { BEIJING_TIME_ZONE, formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_MAX_GRAPHEMES, getMoodDisplay, NO_MOOD_LABEL, countGraphemes, truncateGraphemes, validateCustomMoodInput } from '@/lib/checkin-mood'
-import { DAILY_MOODS } from '@/lib/daily'
+import { DAILY_MOODS, getStreakBonus } from '@/lib/daily'
 import { CHECK_IN_MESSAGE_MAX_LENGTH } from '@/lib/checkin-message-constants'
 import type { CheckInMessageItem } from '@/lib/checkin-messages'
 
@@ -43,6 +42,12 @@ export type CheckInStateChange = {
 function formatBeijingTime(value?: string | Date | null) {
   if (!value) return '暂无'
   return formatBeijingDateTimeMinute(value)
+}
+
+function formatCheckInResultMessage(todayCheckIn: NonNullable<TodayCheckIn>) {
+  const baseMessage = `今日挂号成功，获得 +${todayCheckIn.points} 挂号费、+${todayCheckIn.exp} 经验`
+  const bonus = getStreakBonus(todayCheckIn.streakDay)
+  return bonus ? `${baseMessage}（含${bonus.label} +${bonus.points} 挂号费）` : baseMessage
 }
 
 function getCurrentBeijingDateKey() {
@@ -448,13 +453,7 @@ export function CheckInButton({
     const selectedMood = getMoodDisplay(todayCheckIn)
     return (
       <div className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">Lv.{stats.level}</span>
-          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">{stats.points} 挂号费</span>
-          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-black text-brand-700 sm:text-xs">{stats.exp} 经验</span>
-        </div>
-        <CheckInGrowthGuideCard />
-        <div className="rounded-3xl border border-sky-100 bg-sky-50/70 p-5">
+        <div data-checkin-mood-card="true" className="rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
           <p className="text-xs font-black tracking-[0.14em] text-brand-700 sm:text-sm">今日心情</p>
           <h3 className="mt-2 text-3xl font-black text-brand-950">今日心情</h3>
           <div className="mt-4 flex items-center gap-3">
@@ -465,15 +464,15 @@ export function CheckInButton({
             </div>
           </div>
           {todayCheckIn.message ? (
-            <p className="mt-4 whitespace-pre-wrap rounded-2xl bg-white/80 px-4 py-2 text-sm font-bold leading-7 text-slate-700">{todayCheckIn.message}</p>
+            <p className="mt-5 whitespace-pre-wrap text-sm font-bold leading-7 text-slate-700">{todayCheckIn.message}</p>
           ) : (
-            <p className="mt-4 rounded-2xl bg-white/80 px-4 py-2 text-sm font-bold text-slate-500">今天没有填写留言。</p>
+            <p className="mt-5 text-sm font-bold text-slate-500">今天没有填写留言。</p>
           )}
           {renderMessageSupplement()}
           <p className="mt-4 text-sm font-black text-emerald-700">本次获得 +{todayCheckIn.points} 挂号费、+{todayCheckIn.exp} 经验</p>
           {todayCheckIn.streakDay >= 7 ? <p className="mt-1 text-xs font-black text-amber-700">长期患者奖励已生效：每日额外 +7 挂号费。</p> : null}
         </div>
-        {message ? <p className="text-sm font-bold text-brand-700">{message}</p> : null}
+        <p className="text-sm font-black text-brand-700">{message || formatCheckInResultMessage(todayCheckIn)}</p>
         {supplementNotice ? <p className="text-sm font-black text-emerald-700">{supplementNotice}</p> : null}
       </div>
     )

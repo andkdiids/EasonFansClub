@@ -539,6 +539,7 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
 .checkin-history-message p { margin:10px 0 0; overflow-wrap:anywhere; color:var(--foreground); font-size:14px; font-weight:700; line-height:1.8; white-space:pre-wrap; }
 .checkin-history-message p.is-muted { color:var(--foreground-muted); }
 .checkin-makeup-entry-trigger { margin-top:8px; }
+.checkin-page-actions .checkin-history-trigger { width:100%; margin-top:0; border-radius:2px; }
 .checkin-makeup-entry-intro { margin:0 0 12px; color:var(--foreground-muted); font-size:12px; font-weight:750; line-height:1.7; }
 .checkin-makeup-entry-count { margin:0 0 8px; color:var(--foreground-muted); font-size:12px; font-weight:850; }
 .checkin-makeup-entry-list { display:grid; max-height:min(56vh, 460px); gap:8px; overflow-y:auto; padding-right:2px; }
