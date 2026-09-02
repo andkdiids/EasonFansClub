@@ -184,9 +184,10 @@ test('E院中心支持再次点击和 Esc 关闭并锁定后恢复背景滚动',
   assert.match(mobileNavigation, /window\.scrollTo\(\{ top: scrollY, behavior: 'auto' \}\)/)
 })
 
-test('E院中心打开时隐藏好友、返回顶部和布局工具', () => {
+test('E院中心打开时隐藏好友和返回顶部按钮，且不再存在布局工具', () => {
   assert.match(mobileNavigation, /root\.dataset\.easonCenterOpen = 'true'/)
-  assert.match(css, /data-eason-center-open='true'[\s\S]*\.friend-dock[\s\S]*\.back-to-top-button[\s\S]*\.app-layout-tools/)
+  assert.match(css, /data-eason-center-open='true'[\s\S]*\.friend-dock[\s\S]*\.back-to-top-button/)
+  assert.doesNotMatch(css, /\.app-layout-tools/)
 })
 
 test('E院中心保留三列且活动中心入口继续可用', () => {

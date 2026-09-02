@@ -1,6 +1,4 @@
 import Link from 'next/link'
-import { Suspense } from 'react'
-import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { measureBootstrap } from '@/lib/bootstrap-timing'
@@ -14,11 +12,6 @@ import { BrandMark } from '@/components/BrandMark'
 type SiteHeaderProps = {
   user?: SessionUser | null
   config?: SiteAppearanceConfig
-}
-
-async function HeaderLayoutQuickLink({ user }: { user: SessionUser }) {
-  const canManageLayout = await measureBootstrap('header.layoutPermission', hasAdminPermission(user, 'layout.manage'))
-  return <AdminLayoutQuickLink enabled={canManageLayout} />
 }
 
 export async function SiteHeader({ user: providedUser, config: providedConfig }: SiteHeaderProps = {}) {
@@ -56,11 +49,6 @@ export async function SiteHeader({ user: providedUser, config: providedConfig }:
       </SiteHeaderFrame>
 
       <MobileSiteNavigation items={mobileNav} />
-      {user ? (
-        <Suspense fallback={null}>
-          <HeaderLayoutQuickLink user={user} />
-        </Suspense>
-      ) : null}
     </>
   )
 }

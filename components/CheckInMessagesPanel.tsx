@@ -11,7 +11,6 @@ import { DeleteCommentButton } from '@/components/DeleteCommentButton'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
-import type { PageLayoutModuleDensity } from '@/components/page-layout/PageLayoutRenderer'
 import { anonymizeCheckInMessages, type CheckInDisplayMessageItem, type CheckInMessageItem, type CheckInMessagePagination, type CheckInMessageSort, type CheckInNotificationResolutionStatus } from '@/lib/checkin-messages'
 import { getCheckInMessagePageSize, CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/checkin-pagination'
 import { formatBeijingDateTime } from '@/lib/beijing-time'
@@ -134,7 +133,6 @@ function getCommentAuthorBadge(author: DailyComment['author']) {
 
 export function CheckInMessagesPanel({
   title,
-  density = 'normal',
   anonymous = false,
   scope = 'public',
   emptyText,
@@ -145,14 +143,12 @@ export function CheckInMessagesPanel({
   maxDate,
   initialSort,
   sessionUserId,
-  previewMode = false,
   focusMessageId,
   focusCommentId,
   focusErrorKind,
   canManageMessages = false,
 }: Readonly<{
   title?: string
-  density?: PageLayoutModuleDensity
   anonymous?: boolean
   scope?: 'public' | 'friends'
   emptyText?: string
@@ -163,7 +159,6 @@ export function CheckInMessagesPanel({
   maxDate: string
   initialSort: CheckInMessageSort
   sessionUserId?: string
-  previewMode?: boolean
   focusMessageId?: string
   focusCommentId?: string
   focusErrorKind?: CheckInNotificationResolutionStatus
@@ -203,12 +198,9 @@ export function CheckInMessagesPanel({
   useEffect(() => {
     sessionUserIdRef.current = sessionUserId
   }, [sessionUserId])
-  const isCompact = density !== 'normal'
-  const isMinimal = density === 'minimal'
-  const serverPaginated = Boolean(initialPagination && !previewMode)
-  const previewPageSize = previewMode ? (isMinimal ? 1 : isCompact ? 2 : messagesPerPage) : messagesPerPage
-  const activePageSize = serverPaginated ? pagination?.pageSize || messagesPerPage : previewPageSize
-  const totalPages = serverPaginated ? pagination?.totalPages || 1 : Math.max(1, Math.ceil(messages.length / previewPageSize))
+  const serverPaginated = Boolean(initialPagination)
+  const activePageSize = serverPaginated ? pagination?.pageSize || messagesPerPage : messagesPerPage
+  const totalPages = serverPaginated ? pagination?.totalPages || 1 : Math.max(1, Math.ceil(messages.length / messagesPerPage))
   const visibleMessages = useMemo(() => {
     const safePage = Math.min(Math.max(page, 1), totalPages)
     const start = (safePage - 1) * activePageSize
@@ -340,7 +332,7 @@ export function CheckInMessagesPanel({
   }, [initialDate, initialFollowedUserIds, initialMessages, initialPagination, initialSort])
 
   useEffect(() => {
-    if (previewMode || !serverPaginated) return
+    if (!serverPaginated) return
     const mediaQuery = window.matchMedia('(min-width: 768px)')
     const syncPageSize = () => {
       const nextPageSize = getCheckInMessagePageSize(mediaQuery.matches)
@@ -351,7 +343,7 @@ export function CheckInMessagesPanel({
     syncPageSize()
     mediaQuery.addEventListener('change', syncPageSize)
     return () => mediaQuery.removeEventListener('change', syncPageSize)
-  }, [date, initialPagination?.page, loadMessages, page, previewMode, serverPaginated, sort])
+  }, [date, initialPagination?.page, loadMessages, page, serverPaginated, sort])
 
   useEffect(() => {
     currentPageRef.current = page
@@ -362,7 +354,6 @@ export function CheckInMessagesPanel({
   }, [page, totalPages])
 
   useEffect(() => {
-    if (previewMode) return
     if (!focusMessageId && !focusCommentId) {
       handledFocusKeyRef.current = ''
       setFocusError('')
@@ -388,8 +379,8 @@ export function CheckInMessagesPanel({
       return
     }
     setFocusError('')
-    if (!serverPaginated && page !== Math.floor(messageIndex / previewPageSize) + 1) {
-      setPage(Math.floor(messageIndex / previewPageSize) + 1)
+    if (!serverPaginated && page !== Math.floor(messageIndex / messagesPerPage) + 1) {
+      setPage(Math.floor(messageIndex / messagesPerPage) + 1)
       return
     }
     const message = messages[messageIndex]
@@ -420,10 +411,9 @@ export function CheckInMessagesPanel({
       window.cancelAnimationFrame(frame)
       if (highlightTimer !== undefined) window.clearTimeout(highlightTimer)
     }
-  }, [expandedReplies, focusCommentId, focusErrorKind, focusMessageId, messages, page, previewMode, previewPageSize, serverPaginated])
+  }, [expandedReplies, focusCommentId, focusErrorKind, focusMessageId, messages, page, serverPaginated])
 
   useEffect(() => {
-    if (previewMode) return
     function handleCheckInCompleted(event: Event) {
       if (scope !== 'public' && scope !== 'friends') return
       const detail = (event as CustomEvent<CheckInCompletedDetail>).detail
@@ -466,10 +456,9 @@ export function CheckInMessagesPanel({
       window.removeEventListener('checkin:completed', handleCheckInCompleted)
       window.removeEventListener('checkin:dayChanged', handleDayChanged)
     }
-  }, [anonymous, date, loadMessages, maxDate, previewMode, scope, sort])
+  }, [anonymous, date, loadMessages, maxDate, scope, sort])
 
   useEffect(() => {
-    if (previewMode) return
     function handleMessagesChanged(event: Event) {
       const detail = (event as CustomEvent<CheckInMessagesChangedDetail>).detail
       if (detail?.date && detail.date !== date) return
@@ -479,10 +468,10 @@ export function CheckInMessagesPanel({
 
     window.addEventListener('checkin:messages-changed', handleMessagesChanged)
     return () => window.removeEventListener('checkin:messages-changed', handleMessagesChanged)
-  }, [date, loadMessages, messages, previewMode, sort])
+  }, [date, loadMessages, messages, sort])
 
   useEffect(() => {
-    if (previewMode || anonymous || scope !== 'friends') return
+    if (anonymous || scope !== 'friends') return
     const updateRemark = (event: Event) => {
       const detail = (event as CustomEvent<{ targetUserId?: string; remark?: string | null }>).detail
       if (!detail?.targetUserId) return
@@ -524,7 +513,7 @@ export function CheckInMessagesPanel({
     }
     window.addEventListener('friend-remark:updated', updateRemark)
     return () => window.removeEventListener('friend-remark:updated', updateRemark)
-  }, [anonymous, previewMode, scope])
+  }, [anonymous, scope])
 
   // 管理员删除留言：复用后台既有软删除接口（服务端校验 daily_message_manage 权限），
   // 成功后只从当前列表局部移除目标留言，不重新加载列表、不改动分页/筛选/滚动位置。
@@ -555,13 +544,13 @@ export function CheckInMessagesPanel({
   }
 
   return (
-    <div ref={messagesSectionRef} className={`checkin-messages-panel ${isMinimal ? 'p-2' : 'p-3 sm:p-4'} flex ${previewMode ? 'h-full' : ''} flex-col rounded-[24px] border shadow-sm scroll-mt-24 ${previewMode ? 'checkin-messages-preview pointer-events-none select-none' : 'min-h-0 overflow-visible'}`}>
+    <div ref={messagesSectionRef} className="checkin-messages-panel flex min-w-0 flex-col rounded-[24px] border p-3 shadow-sm scroll-mt-24 sm:p-4">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
-          {!isMinimal ? <p className="text-xs font-black uppercase text-brand-700">{scope === 'public' ? 'Public Check-ins' : 'Friend Check-ins'}</p> : null}
-          <h2 className={isMinimal ? 'text-base font-black leading-tight text-brand-950' : 'mt-1 text-2xl font-black leading-tight text-brand-950'}>{title || '病友留言'}</h2>
+          <p className="text-xs font-black uppercase text-brand-700">{scope === 'public' ? 'Public Check-ins' : 'Friend Check-ins'}</p>
+          <h2 className="mt-1 text-2xl font-black leading-tight text-brand-950">{title || '病友留言'}</h2>
         </div>
-        {!isMinimal ? <form
+        <form
           className="flex flex-wrap gap-1.5"
           onSubmit={(event) => {
             event.preventDefault()
@@ -574,7 +563,6 @@ export function CheckInMessagesPanel({
             value={date}
             max={maxDate}
             onChange={(event) => setDate(event.target.value)}
-            disabled={previewMode}
             className="rounded-full border border-sky-100 px-3 py-1.5 text-xs font-bold outline-none sm:text-sm"
           />
           <select
@@ -585,7 +573,6 @@ export function CheckInMessagesPanel({
               setSort(nextSort)
               loadMessages(date, nextSort)
             }}
-            disabled={previewMode}
             className="rounded-full border border-sky-100 px-3 py-1.5 text-xs font-bold outline-none sm:text-sm"
           >
             <option value="latest">最新</option>
@@ -593,18 +580,18 @@ export function CheckInMessagesPanel({
           </select>
           <button
             type="submit"
-            disabled={previewMode || isLoading}
+            disabled={isLoading}
             className="rounded-full bg-brand-700 px-3 py-1.5 text-xs font-black text-white disabled:opacity-60 sm:text-sm"
           >
             {isLoading ? '加载中' : '查看'}
           </button>
-        </form> : null}
+        </form>
       </div>
 
       {error ? <p className="mt-3 shrink-0 rounded-2xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
       {focusError ? <p className="mt-3 shrink-0 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800">{focusError}</p> : null}
 
-      <div className={`${isMinimal ? 'mt-1 space-y-1.5' : 'mt-3 space-y-3'} ${previewMode ? 'flex-1' : ''} ${previewMode ? '' : 'min-h-0 overflow-visible'}`}>
+      <div className="mt-3 space-y-3">
         {messages.length ? visibleMessages.map((item) => {
           const mood = getMoodDisplay(item)
           const fullIdentity = 'author' in item && 'uid' in item.author ? item.author : null
@@ -629,25 +616,25 @@ export function CheckInMessagesPanel({
              : threadComments.slice(0, getVisibleCheckInReplyCount(threadComments.length, showAllReplies))
           const replyToggleLabel = getCheckInReplyToggleLabel(threadComments.length, showAllReplies)
           return (
-            <article key={item.id} id={`message-${item.id}`} data-checkin-message-id={item.id} className={`checkin-message-card ${isMinimal ? 'rounded-xl p-1.5' : 'rounded-2xl p-3'} border shadow-sm`}>
-              <div className={isMinimal ? 'flex gap-2' : 'flex gap-3'}>
+            <article key={item.id} id={`message-${item.id}`} data-checkin-message-id={item.id} className="checkin-message-card rounded-2xl border p-3 shadow-sm">
+              <div className="flex gap-3">
                 {anonymous ? (
-                  <div className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
+                  <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl bg-sky-50 text-xl">
                     {mood?.icon || 'E'}
                   </div>
                 ) : fullIdentity ? (
-                  <a href={`/user/${formatUid(fullIdentity.uid)}`} className={`${isMinimal ? 'h-7 w-7 rounded-xl text-base' : 'h-10 w-10 rounded-2xl text-xl'} grid shrink-0 place-items-center overflow-hidden bg-sky-50`}>
+                  <a href={`/user/${formatUid(fullIdentity.uid)}`} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl bg-sky-50 text-xl">
                     {avatar ? <SafeAvatar src={avatar} name={name} uid={fullIdentity?.uid} className="h-full w-full" /> : mood?.icon || '🎵'}
                   </a>
                 ) : null}
                 <div className="min-w-0 flex-1">
-                  <div className={isMinimal ? 'flex min-w-0 items-center gap-1.5' : 'flex flex-wrap items-center gap-2'}>
+                  <div className="flex flex-wrap items-center gap-2">
                     {anonymous ? (
-                      <span className={isMinimal ? 'truncate text-xs font-black text-brand-950' : 'font-black text-brand-950'}>E院病友</span>
+                      <span className="font-black text-brand-950">E院病友</span>
                     ) : (
-                      fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className={isMinimal ? 'min-w-0 max-w-[9rem] truncate text-xs font-black text-brand-950' : 'min-w-0 max-w-[12rem] truncate font-black text-brand-950 sm:max-w-[16rem]'}><UserDisplayName name={name} uid={fullIdentity.uid} badge={fullIdentity.equippedBadge} compact /></a> : null
+                      fullIdentity ? <a href={`/user/${formatUid(fullIdentity.uid)}`} className="min-w-0 max-w-[12rem] truncate font-black text-brand-950 sm:max-w-[16rem]"><UserDisplayName name={name} uid={fullIdentity.uid} badge={fullIdentity.equippedBadge} compact /></a> : null
                     )}
-                    {scope === 'friends' && !previewMode && !anonymous && fullIdentity && fullIdentity.id !== sessionUserId && !followedUserIds.has(fullIdentity.id) ? (
+                    {scope === 'friends' && !anonymous && fullIdentity && fullIdentity.id !== sessionUserId && !followedUserIds.has(fullIdentity.id) ? (
                       <FriendFollowButton
                         userId={fullIdentity.id}
                         initialFollowed={false}
@@ -664,11 +651,11 @@ export function CheckInMessagesPanel({
                         }}
                       />
                     ) : null}
-                    {!isMinimal ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood.formatted || NO_MOOD_LABEL}</span> : mood.formatted ? <span className="break-words text-xs">{mood.formatted}</span> : null}
-                    {!isCompact ? <span className="text-xs font-bold text-slate-400">留言日 {date}</span> : null}
-                    {!isCompact ? <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span> : null}
+                    <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{mood.formatted || NO_MOOD_LABEL}</span>
+                    <span className="text-xs font-bold text-slate-400">留言日 {date}</span>
+                    <span className="text-xs font-bold text-slate-400">发布 {beijingDateTime(item.createdAt)}</span>
                     <IpRegionLabel ipRegion={item.ipRegion} />
-                    {canManageMessages && !previewMode && !isMinimal ? (
+                    {canManageMessages ? (
                       <button
                         type="button"
                         aria-label="删除留言"
@@ -683,8 +670,8 @@ export function CheckInMessagesPanel({
                       </button>
                     ) : null}
                   </div>
-                  <p className={isMinimal ? 'mt-0.5 whitespace-pre-wrap text-xs leading-4 text-slate-700' : 'mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700'}>{item.content}</p>
-                  {threadComments.length && !isMinimal ? (
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>
+                  {threadComments.length ? (
                     <div className="checkin-comment-thread mt-2 space-y-2">
                       {visibleThreadComments.map(({ comment, replyToName, isRoot }) => {
                         const commentIdentity = 'uid' in comment.author ? comment.author : null
@@ -733,7 +720,7 @@ export function CheckInMessagesPanel({
                       ) : null}
                     </div>
                   ) : null}
-                  {!isMinimal ? <DailyMessageActions
+                  <DailyMessageActions
                     messageId={item.id}
                     liked={effectiveLiked}
                     likeCount={effectiveLikeCount}
@@ -744,8 +731,8 @@ export function CheckInMessagesPanel({
                     onReplyCancel={() => setReplyTargets((current) => ({ ...current, [item.id]: null }))}
                     onCommentCreated={() => notifyCheckInMessagesChanged(item.id, date)}
                     onLikeChange={(value) => likeCtx.setLike(item.id, value)}
-                  /> : null}
-                  {!isMinimal && !previewMode && !anonymous ? (
+                  />
+                  {!anonymous ? (
                     // 朋友圈式点赞头像行：最多 10 个头像，超出 +N，点击展开全部点赞用户。
                     // 头像列表以服务端数据为准（点赞动作本身只即时更新 likeCount / liked）。
                     // 匿名墙（anonymous）不展示点赞者身份，仅保留 DailyMessageActions 的 ♥ 数量。
@@ -771,7 +758,7 @@ export function CheckInMessagesPanel({
           onPageChange={handlePageChange}
           disabled={isLoading}
           ariaLabel="病友留言分页"
-          className={isMinimal ? 'checkin-message-pagination checkin-message-pagination--minimal' : 'checkin-message-pagination'}
+          className="checkin-message-pagination"
         />
       ) : null}
       <ConfirmDialog

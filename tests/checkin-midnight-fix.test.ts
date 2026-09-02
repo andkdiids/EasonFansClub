@@ -40,14 +40,12 @@ test('签到 GET 不再执行全站 mood GROUP BY，页面与 summary 复用公�
   const getRoute = route.slice(0, route.indexOf('export async function POST'))
   const page = read('app/checkin/page.tsx')
   const summary = read('app/api/checkin/summary/route.ts')
-  const preview = read('lib/page-layout/preview-data.ts')
 
   assert.match(getRoute, /getTodayCheckInCount\(todayKey\)/)
   assert.doesNotMatch(getRoute, /checkIn\.groupBy|moodStats/)
   assert.match(page, /getCheckInPublicStats\(todayKey\)/)
   assert.match(summary, /getCheckInPublicStats\(todayKey\)/)
-  assert.match(preview, /getTodayCheckInCount\(getShanghaiDateKey\(today\)\)/)
-  assert.doesNotMatch(preview, /checkIn\.count\(\{ where: \{ checkinDateKey/)
+  assert.doesNotMatch(page + summary, /PageLayoutRenderer|layoutConfig|previewMode/)
 })
 
 test('签到成功后会失效当天全站人数缓存，并将刷新后的 todayCount 返回给现有客户端', () => {

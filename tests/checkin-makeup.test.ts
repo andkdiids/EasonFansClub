@@ -53,7 +53,7 @@ test('前台补签入口复用用户历史 API、现有补签弹窗和完成后�
   assert.equal((entry.match(/checkin-history-backdrop/g) || []).length, 1)
   assert.match(entry, /monthlyChallengeAvailable/)
   assert.match(entry, /void loadAvailability\(\)/)
-  assert.match(source('components/CheckInLayoutSurface.tsx'), /CheckInMakeupEntry/)
+  assert.match(source('components/CheckInPageSurface.tsx'), /CheckInMakeupEntry/)
   assert.match(source('components/CheckInButton.tsx'), /checkin:completed/)
 })
 

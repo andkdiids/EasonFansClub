@@ -21,7 +21,7 @@ test('每日处方只保留今日处方领取入口并脱离游戏详情 Hero', 
   assert.match(gamesLayout, /daily-prescription-route-root/)
   assert.match(gamesLayout, /games-route-root games-center-background games-full-width/)
   assert.doesNotMatch(layout, /game-detail-banner.*daily-prescription/)
-  assert.match(detail, /className="checkin-layout-card daily-prescription-panel"/)
+  assert.match(detail, /className="daily-prescription-panel"/)
   assert.equal(detail.match(/领取今日处方/g)?.length, 1)
   assert.match(detail, /fetch\('\/api\/entertainment\/daily-draw'/)
   assert.match(detail, /method: 'POST'/)

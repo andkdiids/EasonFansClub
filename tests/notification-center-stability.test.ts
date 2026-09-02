@@ -9,8 +9,8 @@ function read(path: string) {
 test('notification page isolates non-core first-screen failures', () => {
   const page = read('app/notifications/page.tsx')
   assert.match(page, /Promise\.allSettled\(/)
-  assert.match(page, /getDefaultPageLayoutConfig\('message'\)/)
   assert.match(page, /initialLoadError/)
+  assert.doesNotMatch(page, /PageLayoutRenderer|getPublishedPageLayoutConfig|getDefaultPageLayoutConfig|layoutConfig|layout-editor/)
   assert.doesNotMatch(page, /const \[notifications, layoutConfig, appearance\] = await Promise\.all\(/)
 })
 

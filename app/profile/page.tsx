@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { ProfilePageSurface } from '@/components/ProfilePageSurface'
-import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { getCurrentUser } from '@/lib/auth'
 import { ensureBirthdayBadge } from '@/lib/birthday'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
@@ -16,7 +15,6 @@ import { getBadgeProfileSummary, getEquippedBadgeForUser } from '@/lib/badge-ser
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
-import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -79,14 +77,13 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
-  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge, badgeSummary, recordPreferences, layoutConfig] = await Promise.all([
+  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge, badgeSummary, recordPreferences] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
     getEquippedBadgeForUser(profile.id),
     getBadgeProfileSummary(profile.id, user.id),
     getProfileRecordPreferencesSafe(profile.id),
-    getPublishedPageLayoutConfig('profile'),
   ])
 
   const profileEditorInitialProfile = {
@@ -114,45 +111,37 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   return (
     <>
       <ProfileEditorDrawer initialOpen={query?.edit === '1'} initialProfile={profileEditorInitialProfile} hideTrigger />
-      <PageLayoutRenderer
-        pageKey="profile"
-        config={layoutConfig}
-        modules={{
-          'profile.main': (
-            <ProfilePageSurface
-              profile={{
-                id: profile.id,
-                uid: profile.uid,
-                displayName,
-                baseDisplayName: displayName,
-                bio,
-                location: locationFromProfile(profile.Profile),
-                ipRegion: resolvedIpRegion,
-                avatarUrl: avatar,
-                backgroundUrl: background,
-                createdAt: profile.createdAt,
-                wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
-                publicLiveCount: 0,
-                equippedBadge,
-                badgeSummary,
-                privacy: visibility.settings,
-                recordPreferences,
-              }}
-              growth={growth}
-              relationship={{
-                isSelf: true,
-                isFriend: false,
-                isBlocked: false,
-                isFollowed: false,
-                hasViewer: true,
-                friendStatus: 'NONE',
-                initialRemark: null,
-              }}
-              recentMessages={recentMessagesPage.messages}
-              recentMessagesPagination={recentMessagesPage.pagination}
-            />
-          ),
+      <ProfilePageSurface
+        profile={{
+          id: profile.id,
+          uid: profile.uid,
+          displayName,
+          baseDisplayName: displayName,
+          bio,
+          location: locationFromProfile(profile.Profile),
+          ipRegion: resolvedIpRegion,
+          avatarUrl: avatar,
+          backgroundUrl: background,
+          createdAt: profile.createdAt,
+          wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
+          publicLiveCount: 0,
+          equippedBadge,
+          badgeSummary,
+          privacy: visibility.settings,
+          recordPreferences,
         }}
+        growth={growth}
+        relationship={{
+          isSelf: true,
+          isFriend: false,
+          isBlocked: false,
+          isFollowed: false,
+          hasViewer: true,
+          friendStatus: 'NONE',
+          initialRemark: null,
+        }}
+        recentMessages={recentMessagesPage.messages}
+        recentMessagesPagination={recentMessagesPage.pagination}
       />
     </>
   )

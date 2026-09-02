@@ -5,7 +5,7 @@ import test from 'node:test'
 const read = (path: string) => readFileSync(path, 'utf8')
 
 const page = read('app/checkin/page.tsx')
-const surface = read('components/CheckInLayoutSurface.tsx')
+const surface = read('components/CheckInPageSurface.tsx')
 const panel = read('components/CheckInMessagesPanel.tsx')
 const adminRoute = read('app/api/admin/daily-messages/[messageId]/route.ts')
 
@@ -13,7 +13,8 @@ test('挂号页把当前用户角色透传到留言面板，仅管理员可见�
   assert.match(page, /sessionUserRole=\{sessionUser\.role\}/)
   assert.match(surface, /sessionUserRole === 'ADMIN' \|\| sessionUserRole === 'SUPER_ADMIN'/)
   assert.match(surface, /canManageMessages=\{canManageMessages\}/)
-  assert.match(panel, /canManageMessages && !previewMode && !isMinimal/)
+  assert.match(panel, /canManageMessages \?/)
+  assert.doesNotMatch(panel, /previewMode|isMinimal|density/)
   assert.match(panel, /aria-label="删除留言"/)
 })
 

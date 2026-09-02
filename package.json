@@ -76,8 +76,6 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-grid-layout": "^2.2.3",
-    "react-resizable": "^4.0.2",
     "sharp": "^0.35.3",
     "tsx": "^4.20.0",
     "twemoji": "^14.0.2",

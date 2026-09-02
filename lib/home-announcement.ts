@@ -1,25 +1,49 @@
 import { prisma } from '@/lib/prisma'
-import { effectiveSystemNotificationOrder, effectiveSystemNotificationWhere } from '@/lib/system-notifications'
-import { normalizeActionUrl } from '@/lib/url-safety'
+import { effectiveSystemNotificationWhere } from '@/lib/system-notifications'
 
-export async function getHomeAnnouncement() {
-  const announcement = await prisma.systemNotification.findFirst({
+export type HomeUpdate = {
+  id: string
+  title: string
+  content: string
+  type: 'UPDATE'
+  createdAt: Date
+  isPublished: boolean
+  priority: number
+  publishAt: Date
+}
+
+/**
+ * The homepage update bar is backed by the existing published changelog
+ * records. Keeping this query separate from generic system announcements
+ * prevents the home entry from accidentally becoming a forum/post link.
+ */
+export async function getHomeUpdate(): Promise<HomeUpdate | null> {
+  const update = await prisma.systemNotification.findFirst({
     where: {
       ...effectiveSystemNotificationWhere(new Date()),
-      sticky: true,
+      type: 'UPDATE',
+      isPublished: true,
     },
-    orderBy: effectiveSystemNotificationOrder,
+    orderBy: [{ publishAt: 'desc' }, { priority: 'desc' }, { createdAt: 'desc' }],
     select: {
       id: true,
       title: true,
       content: true,
       type: true,
-      buttonUrl: true,
-      link: true,
+      createdAt: true,
+      isPublished: true,
+      priority: true,
+      publishAt: true,
     },
   })
 
-  return announcement
-    ? { ...announcement, link: normalizeActionUrl(announcement.link), buttonUrl: normalizeActionUrl(announcement.buttonUrl) }
+  return update
+    ? { ...update, type: 'UPDATE' as const }
     : null
+}
+
+// Keep the old helper name available to layout preview callers while the
+// homepage now explicitly consumes the update-only data source above.
+export async function getHomeAnnouncement() {
+  return getHomeUpdate()
 }

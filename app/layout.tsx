@@ -57,12 +57,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   }) : null
   const fallbackGrowth = calculateGrowthSummary(sessionUser?.experience || 0, [...defaultGrowthLevels])
   const emptyUnreadSummary = { notifications: 0, system: 0, replies: 0, likes: 0, wall: 0, feedbackReplies: 0, feedback: 0, friendRequests: 0, directMessages: 0, messages: 0, review: 0, total: 0 }
-  const [appearance, canManageLayout, canAccessAdmin, growth] = sessionUser ? await Promise.all([
+  const [appearance, canAccessAdmin, growth] = sessionUser ? await Promise.all([
     getSiteAppearance().catch(() => null),
-    hasAdminPermission(sessionUser, 'layout.manage').catch(() => false),
     hasAdminPermission(sessionUser).catch(() => false),
     getGrowthSummary(sessionUser.experience || 0).catch(() => fallbackGrowth),
-  ]) : [null, false, false, fallbackGrowth]
+  ]) : [null, false, fallbackGrowth]
   const unreadSummary: UnreadSummary | null = sessionUser
     ? await getUnreadSummary(sessionUser.id, Boolean(canAccessAdmin)).catch((error) => {
         logNotificationError('layout.unread-summary', { userId: sessionUser.id }, error)
@@ -93,7 +92,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <VirtualKeyboardManager />
         <NotificationProvider userId={sessionUser?.id || null} initialSummary={unreadSummary}>
           <MusicPlayerProvider>
-            <AppShell user={shellUser} growth={growth} logoUrl={logoUrl} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures}>
+            <AppShell user={shellUser} growth={growth} logoUrl={logoUrl} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures}>
               {children}
             </AppShell>
           </MusicPlayerProvider>

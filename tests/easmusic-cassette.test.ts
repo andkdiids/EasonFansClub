@@ -44,7 +44,7 @@ test('consecutive cassette batches exclude the previous batch when enough songs 
 
 test('EasMusic 首页仅查询公开试听所需字段并过滤已发布专辑', () => {
   const page = read('app/music/page.tsx')
-  const query = page.slice(page.indexOf('prisma.musicSong.findMany'), page.lastIndexOf('getPublishedPageLayoutConfig'))
+  const query = page.slice(page.indexOf('prisma.musicSong.findMany'))
   assert.match(query, /previewUrl: \{ not: null \}/)
   assert.match(query, /MusicAlbum: \{ status: 'PUBLISHED' \}/)
   assert.doesNotMatch(query, /take:\s*60/)

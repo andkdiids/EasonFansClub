@@ -46,7 +46,7 @@ test('目标页面会展开、滚动、高亮并报告丢失内容', () => {
     assert.match(source, /notification-focus-target/)
     assert.match(source, /该内容已被删除或无法查看/)
   }
-  assert.match(read('components/CheckInMessagesPanel.tsx'), /setPage\(Math\.floor\(messageIndex \/ previewPageSize\) \+ 1\)/)
+  assert.match(read('components/CheckInMessagesPanel.tsx'), /setPage\(Math\.floor\(messageIndex \/ messagesPerPage\) \+ 1\)/)
   assert.match(read('components/CheckInMessagesPanel.tsx'), /setExpandedReplies/)
 })
 

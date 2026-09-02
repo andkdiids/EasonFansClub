@@ -2,7 +2,6 @@
 
 import { usePathname } from 'next/navigation'
 import { type ReactNode, useEffect, useState } from 'react'
-import { AdminLayoutQuickLink } from '@/components/AdminLayoutQuickLink'
 import { BackToTopButton } from '@/components/BackToTopButton'
 import { FriendDock } from '@/components/FriendDock'
 import { IcpRecord } from '@/components/IcpRecord'
@@ -24,7 +23,7 @@ function isImmersiveRoute(pathname: string) {
   return immersiveRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 
-export function AppShell({ children, user, growth, logoUrl, canManageLayout, canAccessAdmin, ecenterFeatures }: Readonly<{ children: ReactNode; user: SessionShellUser | null; growth: AppShellGrowth; logoUrl: string | null; canManageLayout: boolean; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
+export function AppShell({ children, user, growth, logoUrl, canAccessAdmin, ecenterFeatures }: Readonly<{ children: ReactNode; user: SessionShellUser | null; growth: AppShellGrowth; logoUrl: string | null; canAccessAdmin: boolean; ecenterFeatures: readonly EcenterFeatureItem[] }>) {
   const pathname = usePathname()
   const isMusicRoute = pathname === '/music' || pathname.startsWith('/music/')
   const isImmersiveGameRoute = /^\/games\/[^/]+\/play(?:\/|$)/.test(pathname) || pathname === '/games/guess-song/duel' || pathname.startsWith('/games/guess-song/duel/')
@@ -48,10 +47,9 @@ export function AppShell({ children, user, growth, logoUrl, canManageLayout, can
   >
     <Sidebar user={user} growth={growth} logoUrl={logoUrl} unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures} />
     <div className="app-main-area">
-      <Topbar user={user} logoUrl={logoUrl} unreadCount={currentUnreadCount} canManageLayout={canManageLayout} canAccessAdmin={canAccessAdmin} />
+      <Topbar user={user} logoUrl={logoUrl} canAccessAdmin={canAccessAdmin} />
       <div className="app-page-content">{children}</div>
       <footer className="site-footer-info"><IcpRecord /></footer>
-      <AdminLayoutQuickLink enabled={canManageLayout} />
     </div>
     <MobileNavigation unreadCount={currentUnreadCount} canAccessAdmin={canAccessAdmin} ecenterFeatures={ecenterFeatures} />
     <BackToTopButton />

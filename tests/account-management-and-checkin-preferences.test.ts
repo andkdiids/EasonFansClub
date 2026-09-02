@@ -104,6 +104,6 @@ test('心情可选，关闭偏好后前端隐藏选择区并显示无心情而�
   assert.match(button, /checkinMoodEnabled \? <div>/)
   assert.doesNotMatch(button, /checkinMoodEnabled && !mood/)
   assert.match(button, /NO_MOOD_LABEL/)
-  assert.match(button, /disabled=\{previewMode \|\| isSubmitting\}/)
+  assert.match(button, /disabled=\{isSubmitting\}/)
   assert.doesNotMatch(button, /selectedMood\?\.icon \|\| '♪'/)
 })

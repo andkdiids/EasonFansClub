@@ -4,24 +4,13 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { buildStudioReviewNotification, STUDIO_REVIEW_NOTIFICATION_TYPE } from '@/lib/studio/review-notifications'
+import { extractStudioReviewPattern, getStudioReviewMetadata } from '@/lib/studio/review-data'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 const reviewStatuses = new Set(['PENDING', 'APPROVED', 'REJECTED'])
-
-function metadata(data: unknown) {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return {}
-  const pattern = (data as Record<string, unknown>).pattern
-  if (!pattern || typeof pattern !== 'object' || Array.isArray(pattern)) return {}
-  const row = pattern as Record<string, unknown>
-  const cells = Array.isArray(row.cells) ? row.cells : []
-  return {
-    width: typeof row.width === 'number' ? row.width : null,
-    height: typeof row.height === 'number' ? row.height : null,
-    totalBeads: cells.filter((cell) => typeof cell === 'number' && cell >= 0).length,
-  }
-}
 
 export async function GET(request: Request) {
   const guard = await requireAdmin('studio_manage')
@@ -29,13 +18,17 @@ export async function GET(request: Request) {
   const status = new URL(request.url).searchParams.get('status')
   const where = status && reviewStatuses.has(status) ? { reviewStatus: status as 'PENDING' | 'APPROVED' | 'REJECTED' } : undefined
   const [projects, total, pending, published, engagement] = await Promise.all([
-    prisma.studioProject.findMany({ where, orderBy: { updatedAt: 'desc' }, take: 100, select: { id: true, toolSlug: true, title: true, description: true, version: true, data: true, visibility: true, reviewStatus: true, createdAt: true, updatedAt: true, User: { select: { uid: true, nickname: true } } } }),
+    prisma.studioProject.findMany({ where, orderBy: { updatedAt: 'desc' }, take: 100, select: { id: true, toolSlug: true, title: true, description: true, version: true, data: true, thumbnailUrl: true, visibility: true, reviewStatus: true, createdAt: true, updatedAt: true, User: { select: { uid: true, nickname: true } } } }),
     prisma.studioProject.count(),
     prisma.studioProject.count({ where: { reviewStatus: 'PENDING' } }),
     prisma.studioProject.count({ where: { visibility: 'PUBLIC', reviewStatus: 'APPROVED' } }),
     prisma.studioProject.aggregate({ _sum: { likeCount: true, favoriteCount: true, viewCount: true } }),
   ])
-  return NextResponse.json({ total, pending, published, engagement: { likes: engagement._sum.likeCount || 0, favorites: engagement._sum.favoriteCount || 0, views: engagement._sum.viewCount || 0 }, projects: projects.map((project) => ({ ...project, data: undefined, metadata: metadata(project.data), createdAt: project.createdAt.toISOString(), updatedAt: project.updatedAt.toISOString(), toolName: getStudioTool(project.toolSlug)?.name || '创作项目' })) }, { headers: { 'Cache-Control': 'private, no-store' } })
+  const rows = projects.map(({ data, ...project }) => {
+    const pattern = extractStudioReviewPattern(data)
+    return { ...project, pattern, metadata: getStudioReviewMetadata(pattern), createdAt: project.createdAt.toISOString(), updatedAt: project.updatedAt.toISOString(), toolName: getStudioTool(project.toolSlug)?.name || '创作项目' }
+  })
+  return NextResponse.json({ total, pending, published, engagement: { likes: engagement._sum.likeCount || 0, favorites: engagement._sum.favoriteCount || 0, views: engagement._sum.viewCount || 0 }, projects: rows }, { headers: { 'Cache-Control': 'private, no-store' } })
 }
 
 export async function PATCH(request: Request) {
@@ -57,7 +50,7 @@ export async function PATCH(request: Request) {
   const project = await prisma.studioProject.findUnique({ where: { id: projectId }, select: { id: true, title: true, userId: true, reviewStatus: true } })
   if (!project) return NextResponse.json({ ok: false, message: '项目不存在' }, { status: 404 })
   if (project.reviewStatus !== 'PENDING') return NextResponse.json({ ok: false, message: '该作品已被其他管理员处理，请刷新列表' }, { status: 409 })
-  const reviewedAt = Date.now()
+  const reviewedAt = new Date()
   const updated = await prisma.$transaction(async (tx) => {
     const changed = await tx.studioProject.updateMany({
       where: { id: project.id, reviewStatus: 'PENDING' },
@@ -70,21 +63,22 @@ export async function PATCH(request: Request) {
   }, { timeout: 15_000, maxWait: 5_000 })
   if (!updated) return NextResponse.json({ ok: false, message: '项目不存在' }, { status: 404 })
   if (reviewStatus === 'APPROVED' || reviewStatus === 'REJECTED') {
-    await safeNotificationWrite(
+    const notification = await safeNotificationWrite(
       () => createNotification({
-        data: {
+        data: buildStudioReviewNotification({
+          projectId: updated.id,
           recipientId: updated.userId,
           actorId: guard.user.id,
-          type: 'ADMIN',
-          title: reviewStatus === 'APPROVED' ? '你的创作已通过审核' : '你的创作未通过审核',
-          content: reviewStatus === 'APPROVED' ? `作品《${updated.title}》已进入创作广场。` : `作品《${updated.title}》未通过公开审核，请修改后重新提交。`,
-          link: reviewStatus === 'APPROVED' ? `/studio/project/${updated.id}` : `/studio/beads?project=${encodeURIComponent(updated.id)}`,
-          key: `studio-project-review:${updated.id}:${reviewStatus.toLowerCase()}:${reviewedAt}`,
-        },
+          title: updated.title,
+          status: reviewStatus,
+          reviewedAt,
+        }),
       }),
-      { operation: 'studio-project-review', userId: updated.userId, notificationType: 'ADMIN' },
+      { operation: 'studio-review.result-notification', userId: updated.userId, targetId: updated.id, notificationType: STUDIO_REVIEW_NOTIFICATION_TYPE },
     )
-    try { emitRealtime(updated.userId, 'notification') } catch { /* notification persistence is authoritative */ }
+    if (notification) {
+      try { emitRealtime(updated.userId, 'notification') } catch { /* notification persistence is authoritative */ }
+    }
   }
   return NextResponse.json({ ok: true, project: updated })
 }

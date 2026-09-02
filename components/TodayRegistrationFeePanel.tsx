@@ -21,11 +21,6 @@ type TodayRegistrationFeeSummary = {
   records: TodayRegistrationFeeRecord[]
 }
 
-type TodayRegistrationFeePanelProps = {
-  initialBalance: number
-  previewMode?: boolean
-}
-
 function isSummary(value: unknown): value is TodayRegistrationFeeSummary {
   if (!value || typeof value !== 'object') return false
   const item = value as Partial<TodayRegistrationFeeSummary>
@@ -37,16 +32,15 @@ function isSummary(value: unknown): value is TodayRegistrationFeeSummary {
   )
 }
 
-export function TodayRegistrationFeePanel({ initialBalance, previewMode = false }: TodayRegistrationFeePanelProps) {
+export function TodayRegistrationFeePanel() {
   const [summary, setSummary] = useState<TodayRegistrationFeeSummary | null>(null)
-  const [loading, setLoading] = useState(!previewMode)
+  const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const recordsId = useId()
 
   const loadSummary = useCallback(async () => {
-    if (previewMode) return
     setLoading(true)
     setFailed(false)
     setSummary(null)
@@ -61,14 +55,13 @@ export function TodayRegistrationFeePanel({ initialBalance, previewMode = false 
     } finally {
       setLoading(false)
     }
-  }, [previewMode])
+  }, [])
 
   useEffect(() => {
-    if (!previewMode) void loadSummary()
-  }, [loadSummary, previewMode])
+    void loadSummary()
+  }, [loadSummary])
 
   useEffect(() => {
-    if (previewMode) return
     const refresh = () => void loadSummary()
     const refreshFromRealtime = (event: Event) => {
       const detail = (event as CustomEvent<{ changed?: string[]; type?: string }>).detail
@@ -82,11 +75,11 @@ export function TodayRegistrationFeePanel({ initialBalance, previewMode = false 
       window.removeEventListener('user:points-updated', refresh)
       window.removeEventListener('realtime:event', refreshFromRealtime)
     }
-  }, [loadSummary, previewMode])
+  }, [loadSummary])
 
   const visibleSummary = useMemo(
-    () => (previewMode ? { currentBalance: initialBalance, todayEarned: 0, dateKey: '', records: [] } : summary),
-    [initialBalance, previewMode, summary],
+    () => summary,
+    [summary],
   )
   const visibleRecords = useMemo(() => {
     if (!visibleSummary) return []
@@ -108,12 +101,12 @@ export function TodayRegistrationFeePanel({ initialBalance, previewMode = false 
             <path d="m5 7 5 5 5-5" fill="none" stroke="currentColor" strokeLinecap="square" strokeLinejoin="miter" strokeWidth="1.7" />
           </svg>
         </button>
-        {!previewMode && failed ? (
+        {failed ? (
           <button type="button" onClick={() => void loadSummary()} className="flex-none border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-black text-[var(--primary)]">
             重试
           </button>
         ) : null}
-        {!previewMode ? <Link href="/registration-fee" className="flex-none border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-black text-[var(--primary)]">全部记录</Link> : null}
+        <Link href="/registration-fee" className="flex-none border border-[var(--border)] px-2.5 py-1.5 text-[11px] font-black text-[var(--primary)]">全部记录</Link>
       </div>
 
       {loading ? (

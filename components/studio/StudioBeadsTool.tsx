@@ -27,6 +27,7 @@ const beadsTool = getStudioTool('beads')!
 
 const MIN_ZOOM = .5
 const MAX_ZOOM = 3
+const PAN_BUFFER_RATIO = .5
 const hasPreviousBeadStudioUse = typeof window !== 'undefined' && (
   listRecentStudioEvents().some((event) => event.toolSlug === 'beads')
   || listLocalStudioProjects().some((project) => project.toolSlug === 'beads')
@@ -58,6 +59,24 @@ type PointerState = {
 type PointerPoint = { x: number; y: number }
 type PinchState = { distance: number; center: PointerPoint; zoom: number; pan: PointerPoint }
 type Selection = { xStart: number; yStart: number; xEnd: number; yEnd: number }
+
+function clampPanToViewport(nextPan: PointerPoint, viewport: HTMLElement | null, canvas: HTMLCanvasElement | null, currentZoom: number, nextZoom = currentZoom): PointerPoint {
+  if (!viewport || !canvas) return nextPan
+  const viewportRect = viewport.getBoundingClientRect()
+  const canvasRect = canvas.getBoundingClientRect()
+  if (!viewportRect.width || !viewportRect.height || !canvasRect.width || !canvasRect.height) return nextPan
+  const safeCurrentZoom = Math.max(MIN_ZOOM, currentZoom)
+  const baseWidth = canvasRect.width / safeCurrentZoom
+  const baseHeight = canvasRect.height / safeCurrentZoom
+  const contentWidth = baseWidth * nextZoom
+  const contentHeight = baseHeight * nextZoom
+  const xLimit = Math.max(0, (contentWidth - viewportRect.width) / 2) + viewportRect.width * PAN_BUFFER_RATIO
+  const yLimit = Math.max(0, (contentHeight - viewportRect.height) / 2) + viewportRect.height * PAN_BUFFER_RATIO
+  return {
+    x: Math.max(-xLimit, Math.min(xLimit, nextPan.x)),
+    y: Math.max(-yLimit, Math.min(yLimit, nextPan.y)),
+  }
+}
 
 const RIGHT_PANEL_OPTIONS = [
   { id: 'color', label: '颜色', icon: 'palette' },
@@ -158,6 +177,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const [transparentBackground, setTransparentBackground] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([])
   const [completed, setCompleted] = useState<Set<number>>(() => new Set())
@@ -173,6 +193,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const previewStageRef = useRef<HTMLDivElement>(null)
+  const canvasViewportRef = useRef<HTMLDivElement>(null)
   const sourceImageRef = useRef<HTMLImageElement | null>(null)
   const sourceObjectUrlRef = useRef<string | null>(null)
   const referenceObjectUrlRef = useRef<string | null>(null)
@@ -317,20 +338,23 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
 
   const setZoomAroundPoint = useCallback((requestedZoom: number, point?: PointerPoint) => {
     const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, requestedZoom))
-    const stage = previewStageRef.current
-    if (!stage || !point) {
+    const viewport = canvasViewportRef.current
+    if (!viewport || !point) {
+      const nextPan = clampPanToViewport(panRef.current, viewport, canvasRef.current, zoomRef.current, nextZoom)
       zoomRef.current = nextZoom
+      panRef.current = nextPan
       setZoom(nextZoom)
+      setPan(nextPan)
       return
     }
-    const rect = stage.getBoundingClientRect()
+    const rect = viewport.getBoundingClientRect()
     const originX = rect.left + rect.width / 2
     const originY = rect.top + rect.height / 2
     const currentZoom = zoomRef.current
     const currentPan = panRef.current
     const contentX = (point.x - originX - currentPan.x) / currentZoom
     const contentY = (point.y - originY - currentPan.y) / currentZoom
-    const nextPan = { x: point.x - originX - contentX * nextZoom, y: point.y - originY - contentY * nextZoom }
+    const nextPan = clampPanToViewport({ x: point.x - originX - contentX * nextZoom, y: point.y - originY - contentY * nextZoom }, viewport, canvasRef.current, currentZoom, nextZoom)
     zoomRef.current = nextZoom
     panRef.current = nextPan
     setZoom(nextZoom)
@@ -338,17 +362,19 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   }, [])
 
   useEffect(() => {
-    const stage = previewStageRef.current
-    if (!stage) return undefined
+    const viewport = canvasViewportRef.current
+    if (!viewport) return undefined
     const handleWheel = (event: WheelEvent) => {
-      const target = event.target
-      if (!(target instanceof Node) || !canvasRef.current?.contains(target)) return
       event.preventDefault()
       setZoomAroundPoint(zoomRef.current * Math.exp(-event.deltaY * 0.001), { x: event.clientX, y: event.clientY })
     }
-    stage.addEventListener('wheel', handleWheel, { passive: false })
-    return () => stage.removeEventListener('wheel', handleWheel)
+    viewport.addEventListener('wheel', handleWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', handleWheel)
   }, [setZoomAroundPoint])
+
+  useEffect(() => {
+    if (editorTool !== 'pan') setIsPanning(false)
+  }, [editorTool])
 
   useEffect(() => {
     let cancelled = false
@@ -550,8 +576,10 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
   }
 
-  function cellFromPointer(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const rect = event.currentTarget.getBoundingClientRect()
+  function cellFromPointer(event: { clientX: number; clientY: number }) {
+    const canvas = canvasRef.current
+    if (!canvas) return -1
+    const rect = canvas.getBoundingClientRect()
     if (!rect.width || !rect.height) return -1
     const x = Math.floor((event.clientX - rect.left) / rect.width * patternRef.current.width)
     const y = Math.floor((event.clientY - rect.top) / rect.height * patternRef.current.height)
@@ -577,24 +605,33 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
   }
 
-  function onCanvasPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
+  function onCanvasPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const isCanvasTarget = event.target === canvasRef.current
+    if (!isCanvasTarget && editorTool !== 'pan') return
     if (!craftMode && layers.activeLayerId !== 'beads' && editorTool !== 'pan') {
       showToast('请先选择拼豆层，再使用编辑工具。')
       return
     }
-    const index = cellFromPointer(event)
+    const index = isCanvasTarget ? cellFromPointer(event) : -1
+    if (craftMode && editorTool !== 'pan' && (index < 0 || (editorTool !== 'select' && (patternRef.current.cells[index] === EMPTY_CELL || (craftColor !== null && patternRef.current.cells[index] !== craftColor))))) return
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    event.currentTarget.setPointerCapture(event.pointerId)
+    if (pointersRef.current.size >= 2) {
+      event.preventDefault()
+      finishGesture()
+      selectionStartRef.current = null
+      const points = [...pointersRef.current.values()]
+      pinchRef.current = { distance: Math.max(1, pointerDistance(points[0], points[1])), center: pointerCenter(points[0], points[1]), zoom: zoomRef.current, pan: panRef.current }
+      setIsPanning(true)
+      return
+    }
+    if (editorTool === 'pan') {
+      event.preventDefault()
+      setIsPanning(true)
+      pointerRef.current = { kind: 'pan', before: null, changed: false, lastCell: -1, lastX: event.clientX, lastY: event.clientY }
+      return
+    }
     if (craftMode) {
-      if (editorTool === 'pan') {
-        event.currentTarget.setPointerCapture(event.pointerId)
-        pointerRef.current = { kind: 'pan', before: null, changed: false, lastCell: -1, lastX: event.clientX, lastY: event.clientY }
-        return
-      }
-      if (index < 0 || (editorTool !== 'select' && (patternRef.current.cells[index] === EMPTY_CELL || (craftColor !== null && patternRef.current.cells[index] !== craftColor)))) {
-        pointersRef.current.delete(event.pointerId)
-        return
-      }
-      event.currentTarget.setPointerCapture(event.pointerId)
       craftCompletedRef.current = new Set(completed)
       craftActionRef.current = patternRef.current.cells[index] !== EMPTY_CELL && (craftColor === null || patternRef.current.cells[index] === craftColor) ? !craftCompletedRef.current.has(index) : true
       if (editorTool === 'select') {
@@ -605,18 +642,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         pointerRef.current = { kind: 'craft', before: null, changed: false, lastCell: -1, lastX: event.clientX, lastY: event.clientY }
         applyCraftCell(index, craftActionRef.current)
       }
-      return
-    }
-    event.currentTarget.setPointerCapture(event.pointerId)
-    if (pointersRef.current.size >= 2) {
-      finishGesture()
-      selectionStartRef.current = null
-      const points = [...pointersRef.current.values()]
-      pinchRef.current = { distance: Math.max(1, pointerDistance(points[0], points[1])), center: pointerCenter(points[0], points[1]), zoom: zoomRef.current, pan: panRef.current }
-      return
-    }
-    if (editorTool === 'pan') {
-      pointerRef.current = { kind: 'pan', before: null, changed: false, lastCell: -1, lastX: event.clientX, lastY: event.clientY }
       return
     }
     if (editorTool === 'select') {
@@ -630,16 +655,17 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     else editCell(index)
   }
 
-  function onCanvasPointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
+  function onCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     if (pointersRef.current.has(event.pointerId)) pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     if (pointersRef.current.size >= 2) {
       const points = [...pointersRef.current.values()]
       const pinch = pinchRef.current
       if (pinch) {
+        event.preventDefault()
         const distanceRatio = pointerDistance(points[0], points[1]) / pinch.distance
         const center = pointerCenter(points[0], points[1])
         const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinch.zoom * distanceRatio))
-        const nextPan = { x: pinch.pan.x + center.x - pinch.center.x, y: pinch.pan.y + center.y - pinch.center.y }
+        const nextPan = clampPanToViewport({ x: pinch.pan.x + center.x - pinch.center.x, y: pinch.pan.y + center.y - pinch.center.y }, canvasViewportRef.current, canvasRef.current, pinch.zoom, nextZoom)
         zoomRef.current = nextZoom
         panRef.current = nextPan
         setZoom(nextZoom)
@@ -649,11 +675,15 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
     const pointer = pointerRef.current
     if (pointer.kind === 'pan') {
-      setPan((current) => ({ x: current.x + event.clientX - pointer.lastX, y: current.y + event.clientY - pointer.lastY }))
+      event.preventDefault()
+      const nextPan = clampPanToViewport({ x: panRef.current.x + event.clientX - pointer.lastX, y: panRef.current.y + event.clientY - pointer.lastY }, canvasViewportRef.current, canvasRef.current, zoomRef.current)
+      panRef.current = nextPan
+      setPan(nextPan)
       pointer.lastX = event.clientX
       pointer.lastY = event.clientY
       return
     }
+    if (pointer.kind) event.preventDefault()
     if (pointer.kind === 'craft') {
       applyCraftCell(cellFromPointer(event), craftActionRef.current)
       return
@@ -666,8 +696,10 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     if (pointer.kind === 'draw' && (editorTool === 'brush' || editorTool === 'eraser')) applyGestureCell(cellFromPointer(event))
   }
 
-  function onCanvasPointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
+  function onCanvasPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
     const pointer = pointerRef.current
+    const wasPinching = Boolean(pinchRef.current)
+    if (pointer.kind === 'pan' || wasPinching) event.preventDefault()
     if (pointer.kind === 'select' && craftMode && selectionStartRef.current !== null) {
       const finalSelection = selectionFromIndexes(selectionStartRef.current, cellFromPointer(event))
       if (finalSelection) {
@@ -676,10 +708,17 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       }
     }
     pointersRef.current.delete(event.pointerId)
-    if (pinchRef.current && pointersRef.current.size < 2) pinchRef.current = null
+    if (wasPinching && pointersRef.current.size < 2) pinchRef.current = null
     try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* pointer may already be released */ }
     if (pointer.kind === 'select') selectionStartRef.current = null
     finishGesture()
+    const remainingPoints = [...pointersRef.current.values()]
+    if (wasPinching && remainingPoints.length === 1 && editorTool === 'pan') {
+      setIsPanning(true)
+      pointerRef.current = { kind: 'pan', before: null, changed: false, lastCell: -1, lastX: remainingPoints[0].x, lastY: remainingPoints[0].y }
+    } else if (!remainingPoints.length || wasPinching) {
+      setIsPanning(false)
+    }
   }
 
   const undo = useCallback(() => {
@@ -1124,6 +1163,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
 
   const mobilePanelClass = (panel: MobilePanel) => activeMobilePanel === panel ? '' : styles.mobilePanelHidden
   const rightPanelClass = (panel: RightPanel) => activeRightPanel === panel ? '' : styles.rightPanelHidden
+  const canvasViewportClassName = [styles.canvasViewport, editorTool === 'pan' ? styles.canvasViewportPan : '', isPanning ? styles.canvasViewportPanning : ''].filter(Boolean).join(' ')
   const palette = pattern.palette
   const replacementAmount = pattern.cells.filter((cell) => cell === replaceFrom).length
   return <>
@@ -1137,11 +1177,17 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         <aside className={`${styles.beadsPanel} ${styles.beadsSettingsPanel} ${mobilePanelClass('settings')}`}>
           <section className={`${styles.panelSection} ${styles.panelSectionFirst}`}>
             <div className={styles.panelHeader}><div><span className={styles.panelStep}>01 / START</span><h2 className={styles.panelTitle}>上传图片</h2></div><button type="button" className={styles.panelToggle} onClick={clearSourceImage}>清空</button></div>
-            {sourceImageUrl ? <div className={styles.sourcePreview}><img src={sourceImageUrl} alt="已选择的本地图片预览" className={styles.sourcePreviewImage} style={{ transform: `translate(${settings.cropX / 2}%, ${settings.cropY / 2}%) scale(${settings.cropZoom}) rotate(${settings.rotation}deg)` }} /><span className={styles.sourcePreviewOverlay}>{sourceImageName || '本地图片'}</span></div> : null}
-            <label className={`${styles.uploadDropzone} ${dragActive ? styles.uploadDropzoneActive : ''}`} onDragOver={(event) => { event.preventDefault(); setDragActive(true) }} onDragLeave={() => setDragActive(false)} onDrop={onDrop}>
+            {sourceImageUrl ? <div className={styles.sourcePreview}>
+              <img src={sourceImageUrl} alt="已选择的本地图片预览" className={styles.sourcePreviewImage} style={{ transform: `translate(${settings.cropX / 2}%, ${settings.cropY / 2}%) scale(${settings.cropZoom}) rotate(${settings.rotation}deg)` }} draggable={false} />
+              <span className={styles.sourcePreviewOverlay}>{sourceImageName || '本地图片'}</span>
+              <label className={styles.sourceReplaceButton}>
+                <input className={styles.sourceReplaceInput} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={onFileChange} aria-label="更换图片" />
+                <UiIcon name="edit" /><span className={styles.sourceReplaceText}>更换图片</span>
+              </label>
+            </div> : <label className={`${styles.uploadDropzone} ${dragActive ? styles.uploadDropzoneActive : ''}`} onDragOver={(event) => { event.preventDefault(); setDragActive(true) }} onDragLeave={() => setDragActive(false)} onDrop={onDrop}>
               <input className={styles.uploadInput} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={onFileChange} aria-label="选择图片" />
-              <span className={styles.uploadIcon}><UiIcon name="camera" /></span><span className={styles.uploadTitle}>{sourceImageUrl ? '更换图片' : '点击或拖入图片'}</span><span className={styles.uploadHint}>JPG / PNG / WebP · 最大 20MB<br />原图只在本地处理</span>
-            </label>
+              <span className={styles.uploadIcon}><UiIcon name="camera" /></span><span className={styles.uploadTitle}>点击或拖入图片</span><span className={styles.uploadHint}>JPG / PNG / WebP · 最大 20MB<br />原图只在本地处理</span>
+            </label>}
             {sourceImageUrl ? <div className={styles.fieldGroup}><label className={styles.formLabel}>缩放 <span className={styles.rangeValue}>{settings.cropZoom.toFixed(2)}×</span></label><input className={styles.range} type="range" min="1" max="2.5" step="0.05" value={settings.cropZoom} onChange={(event) => updateSettings({ cropZoom: Number(event.target.value) })} /><label className={styles.formLabel}>水平 / 垂直 <span className={styles.rangeValue}>{settings.cropX} / {settings.cropY}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.cropX} onChange={(event) => updateSettings({ cropX: Number(event.target.value) })} /><input className={styles.range} type="range" min="-100" max="100" value={settings.cropY} onChange={(event) => updateSettings({ cropY: Number(event.target.value) })} /><label className={styles.formLabel}>旋转 <span className={styles.rangeValue}>{settings.rotation}°</span></label><input className={styles.range} type="range" min="-180" max="180" value={settings.rotation} onChange={(event) => updateSettings({ rotation: Number(event.target.value) })} /><button type="button" className={styles.panelToggle} onClick={resetCropSettings}>重置裁切</button></div> : null}
             <div className={styles.fieldGroup}><label className={styles.formLabel}>裁切比例</label><div className={styles.ratioGrid}>{(['free', '1:1', '4:3', '3:4', '16:9', '9:16'] as const).map((ratio) => <button key={ratio} type="button" className={`${styles.ratioButton} ${settings.cropRatio === ratio ? styles.ratioActive : ''}`} onClick={() => updateSettings({ cropRatio: ratio })}>{ratio === 'free' ? '自由' : ratio}</button>)}</div></div>
           </section>
@@ -1165,7 +1211,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
 
           <section className={styles.beadsPreviewPanel}>
             <header className={styles.previewHeader}><div><strong className={styles.previewTitle}>图纸预览</strong><p className={styles.previewMeta}>{pattern.width} × {pattern.height} 颗 · {settings.brand} {settings.series}{craftMode && activeMaterial ? ` · 正在拼 ${activeMaterial.code}` : ''}</p></div><div className={styles.viewToggle}><button type="button" className={`${styles.viewToggleButton} ${viewMode === 'grid' ? styles.viewToggleActive : ''}`} onClick={() => setViewMode('grid')}>图纸</button><button type="button" className={`${styles.viewToggleButton} ${viewMode === 'bead' ? styles.viewToggleActive : ''}`} onClick={() => setViewMode('bead')}>圆豆</button></div></header>
-          <div ref={previewStageRef} className={`${styles.previewStage} ${isFullscreen ? styles.previewStageFullscreen : ''}`}><div className={styles.canvasViewport}><div className={styles.canvasFrame} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>{referenceLayer.imageUrl ? <img src={referenceLayer.imageUrl} alt="参考图层" className={styles.referenceImage} style={{ opacity: referenceLayer.visible ? referenceLayer.opacity / 100 : 0, transform: `translate(${referenceLayer.transform.x}%, ${referenceLayer.transform.y}%) scale(${referenceLayer.transform.scale}) rotate(${referenceLayer.transform.rotation}deg)` }} draggable={false} /> : null}<canvas ref={canvasRef} className={styles.previewCanvas} style={{ opacity: beadsLayer.visible ? beadsLayer.opacity / 100 : 0 }} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} aria-label="拼豆图纸编辑画布" /></div></div>{processing ? <div className={styles.processing}><i className={styles.processingMark} /><span>正在分析图片并匹配色板…</span></div> : null}</div>
+          <div ref={previewStageRef} className={`${styles.previewStage} ${isFullscreen ? styles.previewStageFullscreen : ''}`}><div ref={canvasViewportRef} className={canvasViewportClassName} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp}><div className={`${styles.canvasFrame} ${styles.canvasStage}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>{referenceLayer.imageUrl ? <img src={referenceLayer.imageUrl} alt="参考图层" className={styles.referenceImage} style={{ opacity: referenceLayer.visible ? referenceLayer.opacity / 100 : 0, transform: `translate(${referenceLayer.transform.x}%, ${referenceLayer.transform.y}%) scale(${referenceLayer.transform.scale}) rotate(${referenceLayer.transform.rotation}deg)` }} draggable={false} /> : null}<canvas ref={canvasRef} className={styles.previewCanvas} style={{ opacity: beadsLayer.visible ? beadsLayer.opacity / 100 : 0 }} aria-label="拼豆图纸编辑画布" /></div></div>{processing ? <div className={styles.processing}><i className={styles.processingMark} /><span>正在分析图片并匹配色板…</span></div> : null}</div>
           <div className={styles.previewFooter}><div className={styles.previewTools} aria-label="图纸工具"><button type="button" className={`${styles.iconButton} ${editorTool === 'brush' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('brush')} aria-label="画笔" title="画笔（B）"><UiIcon name="brush" /><span className={styles.toolButtonText}>画笔</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'eraser' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('eraser')} aria-label="橡皮擦" title="橡皮擦（E）"><UiIcon name="eraser" /><span className={styles.toolButtonText}>橡皮</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'eyedropper' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('eyedropper')} aria-label="吸管" title="吸管（I）"><UiIcon name="eyedropper" /><span className={styles.toolButtonText}>吸管</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'fill' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('fill')} aria-label="填充" title="填充（G）"><UiIcon name="fill" /><span className={styles.toolButtonText}>填充</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'select' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('select')} aria-label="选区" title="选区（S）"><UiIcon name="select" /><span className={styles.toolButtonText}>选区</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'pan' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('pan')} aria-label="移动画布" title="移动画布（P）"><UiIcon name="move" /><span className={styles.toolButtonText}>移动</span></button><button type="button" className={styles.iconButton} onClick={() => openReplaceDialog()} aria-label="换色" title="换色（R）"><UiIcon name="replace" /><span className={styles.toolButtonText}>换色</span></button><button type="button" className={styles.iconButton} onClick={undo} disabled={!history.length} aria-label="撤回" title="撤回（Ctrl+Z）"><UiIcon name="undo" /><span className={styles.toolButtonText}>撤回</span></button><button type="button" className={styles.iconButton} onClick={redo} disabled={!redoStack.length} aria-label="重做" title="重做（Ctrl+Shift+Z）"><UiIcon name="redo" /><span className={styles.toolButtonText}>重做</span></button><button type="button" className={styles.iconButton} onClick={() => setZoomAroundPoint(zoomRef.current + .2)} aria-label="放大" title="放大"><UiIcon name="zoom-in" /><span className={styles.toolButtonText}>放大</span></button><button type="button" className={styles.iconButton} onClick={() => setZoomAroundPoint(zoomRef.current - .2)} aria-label="缩小" title="缩小"><UiIcon name="zoom-out" /><span className={styles.toolButtonText}>缩小</span></button><button type="button" className={styles.iconButton} onClick={resetView} aria-label="适应画布" title="适应画布"><UiIcon name="fit" /><span className={styles.toolButtonText}>适应</span></button><button type="button" className={styles.iconButton} onClick={() => void toggleFullscreen()} aria-label={isFullscreen ? '退出全屏' : '全屏预览'} title={isFullscreen ? '退出全屏' : '全屏预览'}><UiIcon name={isFullscreen ? 'fullscreen-exit' : 'fullscreen'} /><span className={styles.toolButtonText}>{isFullscreen ? '退出' : '全屏'}</span></button><button type="button" className={styles.iconButton} onClick={clearPattern} aria-label="清空图纸" title="清空图纸"><UiIcon name="trash" /><span className={styles.toolButtonText}>清空</span></button></div><div className={styles.previewLegend}><label className={styles.legendItem}><input className={styles.checkbox} type="checkbox" checked={displayGrid} onChange={(event) => setDisplayGrid(event.target.checked)} />网格</label><label className={styles.legendItem}><input className={styles.checkbox} type="checkbox" checked={displayCodes} onChange={(event) => setDisplayCodes(event.target.checked)} />色号</label><label className={styles.legendItem}><input className={styles.checkbox} type="checkbox" checked={displayCoordinates} onChange={(event) => setDisplayCoordinates(event.target.checked)} />坐标</label></div></div>
           {selection ? <div className={styles.selectionBar}><span>已选 {Math.abs(selection.xEnd - selection.xStart) + 1} × {Math.abs(selection.yEnd - selection.yStart) + 1} 格</span><button type="button" className={styles.selectionAction} onClick={() => updateSelection(currentColorIndex)}>填充选区</button><button type="button" className={styles.selectionAction} onClick={() => updateSelection(EMPTY_CELL)}>清除选区</button><button type="button" className={styles.selectionAction} onClick={() => setSelection(null)}>取消</button></div> : null}
         </section>

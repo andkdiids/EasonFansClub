@@ -81,8 +81,9 @@ test('Hero carousel only consumes enabled slides and supports autoplay, controls
 test('homepage uses the fixed surface and is excluded from page-layout editing', () => {
   const surface = read('components/HomeLayoutSurface.tsx')
   const communityPage = read('app/community/page.tsx')
-  const editor = read('app/admin/layout-editor/LayoutEditorClient.tsx')
-  const registry = read('lib/page-layout/registry.ts')
+  const adminPage = read('app/admin/page.tsx')
+  const adminNavigation = read('lib/admin-navigation.ts')
+  const rootLayout = read('app/layout.tsx')
   assert.doesNotMatch(surface, /shortcutItems|grid-cols-6|home-hero|community-hero-actions|growthThresholds|homeText\.(level|exp|points)/)
   assert.match(surface, /<HomeHero/)
   assert.match(surface, /className="community-announcement"/)
@@ -99,8 +100,8 @@ test('homepage uses the fixed surface and is excluded from page-layout editing',
   assert.match(surface, /announcement \?/)
   assert.doesNotMatch(surface, /PageLayoutConfig|PageLayoutDevice|getPageLayoutModules|layoutConfig|layoutModule|visible\(/)
   assert.doesNotMatch(communityPage, /getPublishedPageLayoutConfig|layoutConfig/)
-  assert.doesNotMatch(editor, /HomeLayoutSurface|homeSurface|pageKey === 'home'/)
-  assert.match(registry, /PAGE_LAYOUT_REGISTRY = PAGE_LAYOUT_PAGE_DEFINITIONS\.filter\(\(page\) => page\.key !== 'home'\)/)
+  assert.doesNotMatch(`${adminPage}\n${adminNavigation}\n${rootLayout}`, /PageLayoutRenderer|getPublishedPageLayoutConfig|layoutConfig|layout-editor|AdminLayoutQuickLink|canManageLayout/)
+  assert.doesNotMatch(adminNavigation, /布局|页面结构/)
 })
 
 test('entertainment home card uses the endless-mode leaderboard without loading removed concert data', () => {

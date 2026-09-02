@@ -89,7 +89,7 @@ export function DailyPrescriptionDetail() {
   }
 
   return (
-    <section className="checkin-layout-card daily-prescription-panel">
+    <section className="daily-prescription-panel">
       <header className="daily-prescription-page-header">
         <h2>今日处方</h2>
         <Link href="/prescription/history" className="daily-prescription-history-link">查看历史处方 →</Link>

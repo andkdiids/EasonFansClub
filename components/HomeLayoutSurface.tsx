@@ -4,17 +4,18 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
+import { HomeUpdateModal } from '@/components/HomeUpdateModal'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
 import { GUESS_SONG_MODE_CONFIG, GUESS_SONG_PUBLIC_MODES, type GuessSongPublicMode } from '@/lib/guess-song-config'
 import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
+import type { HomeUpdate } from '@/lib/home-announcement'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
-import { normalizeActionUrl } from '@/lib/url-safety'
 import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
 import { getHomeCheckInDisplay } from '@/lib/home-checkin-display'
 import type { HomeActivityStatusLabel } from '@/lib/home-activity'
@@ -81,7 +82,6 @@ const todayTypeLabels: Record<string, string> = {
   OTHER: '其他',
 }
 
-type Announcement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
 type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null; likedByMe: boolean; likeCount: number }
 type Stats = { checkIns: { id: string }[] }
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
@@ -196,10 +196,11 @@ function HomeDailyMusicPreview({ music }: { music: DailyMusic }) {
   )
 }
 
-export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteConfig: SiteAppearanceConfig; slides: SiteHeroSlide[]; announcement: Announcement | null }) {
+export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteConfig: SiteAppearanceConfig; slides: SiteHeroSlide[]; announcement: HomeUpdate | null }) {
   const device = useDevice()
   const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, salonPosts: [], albums: [], stats: null, dailyMusic: null, siteStats: null, checkedInToday: false, todayCheckInCount: 0, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
   const [failed, setFailed] = useState(false)
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
   const [todayPageIndex, setTodayPageIndex] = useState(0)
   const [todayAutoplayReset, setTodayAutoplayReset] = useState(0)
@@ -510,7 +511,19 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
         defaultTitle={siteConfig.text.homeSubtitle}
       />
       <div id="community-content" className="community-content">
-        {announcement ? <Link href={normalizeActionUrl(announcement.link) || normalizeActionUrl(announcement.buttonUrl) || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
+        {announcement ? <>
+          <button
+            type="button"
+            className="community-announcement"
+            aria-haspopup="dialog"
+            aria-expanded={isUpdateOpen}
+            onClick={() => setIsUpdateOpen(true)}
+          >
+            <strong>📢 私家E院近期更新</strong>
+            <span>最近更新：{excerpt(announcement.title || announcement.content)}</span>
+          </button>
+          {isUpdateOpen ? <HomeUpdateModal update={announcement} onClose={() => setIsUpdateOpen(false)} /> : null}
+        </> : null}
         {failed ? <p className="community-error">{homeText.loadError}</p> : null}
 
         <div className="home-first-row" aria-label="首页第一行">

@@ -12,7 +12,8 @@ import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-loca
 import { updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { computeNicknameCooldownDays, generateUniqueViolationNickname } from '@/lib/nickname-violation'
-import { isValidBirthdayParts } from '@/lib/zodiac'
+import { isValidBirthdayParts, type BirthdayParts } from '@/lib/zodiac'
+import { BIRTHDAY_ALREADY_SET, BIRTHDAY_ALREADY_SET_MESSAGE, BirthdayAlreadySetError, writeBirthdayOnce } from '@/lib/birthday-immutability'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
@@ -89,6 +90,14 @@ function usernameChangeErrorResponse(error: UsernameChangeError) {
     code: error.code,
     ...(error.nextAllowedAt ? { nextAllowedAt: error.nextAllowedAt.toISOString() } : {}),
   }, { status })
+}
+
+function birthdayAlreadySetResponse() {
+  return NextResponse.json({
+    code: BIRTHDAY_ALREADY_SET,
+    error: BIRTHDAY_ALREADY_SET,
+    message: BIRTHDAY_ALREADY_SET_MESSAGE,
+  }, { status: 409 })
 }
 
 async function updateUsername(userId: string, rawUsername: unknown, request: Request) {
@@ -349,8 +358,43 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ message: '地区选择无效，请重新选择' }, { status: 400 })
   }
 
-  const birthMonthRaw = body?.birthMonth === undefined || body?.birthMonth === null ? undefined : Number(body.birthMonth)
-  const birthDayRaw = body?.birthDay === undefined || body?.birthDay === null ? undefined : Number(body.birthDay)
+  const hasBodyField = (field: string) => Boolean(
+    body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, field),
+  )
+  const hasBirthMonth = hasBodyField('birthMonth')
+  const hasBirthDay = hasBodyField('birthDay')
+  const birthdayFieldsProvided = hasBirthMonth || hasBirthDay
+  let requestedBirthday: BirthdayParts | null | undefined
+  if (birthdayFieldsProvided) {
+    const monthInput = hasBirthMonth ? body.birthMonth : null
+    const dayInput = hasBirthDay ? body.birthDay : null
+    const isEmptyBirthdayInput = (value: unknown) => value == null || (typeof value === 'string' && value.trim() === '')
+    const monthEmpty = isEmptyBirthdayInput(monthInput)
+    const dayEmpty = isEmptyBirthdayInput(dayInput)
+
+    if (monthEmpty && dayEmpty) {
+      // An unconfigured form submits two empty fields when saving other data.
+      // writeBirthdayOnce will turn this into a no-op, but will reject it if a
+      // birthday already exists.
+      requestedBirthday = null
+    } else {
+      if (monthEmpty) return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
+      if (dayEmpty) return NextResponse.json({ message: '请选择有效的出生日期' }, { status: 400 })
+
+      const birthMonthRaw = Number(monthInput)
+      const birthDayRaw = Number(dayInput)
+      if (!Number.isInteger(birthMonthRaw) || birthMonthRaw < 1 || birthMonthRaw > 12) {
+        return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
+      }
+      if (!Number.isInteger(birthDayRaw) || birthDayRaw < 1 || birthDayRaw > 31) {
+        return NextResponse.json({ message: '请选择有效的出生日期' }, { status: 400 })
+      }
+      if (!isValidBirthdayParts({ month: birthMonthRaw, day: birthDayRaw })) {
+        return NextResponse.json({ message: '该日期不存在，请重新选择' }, { status: 400 })
+      }
+      requestedBirthday = { month: birthMonthRaw, day: birthDayRaw }
+    }
+  }
 
   const data: {
     nickname?: string
@@ -364,9 +408,6 @@ export async function PATCH(request: Request) {
     emailVerifiedAt?: Date | null
     phoneVerifiedAt?: Date | null
     verificationStatus?: VerificationStatus
-    birthMonth?: number
-    birthDay?: number
-    birthdaySetAt?: Date
     birthdayPublic?: boolean
     showBadgeActivity?: boolean
     showBadgeProgressNotifications?: boolean
@@ -405,9 +446,6 @@ export async function PATCH(request: Request) {
       nicknameViolationCount: true,
       email: true,
       phone: true,
-      birthMonth: true,
-      birthDay: true,
-      birthdaySetAt: true,
     },
   })
 
@@ -448,23 +486,15 @@ export async function PATCH(request: Request) {
 
   const now = new Date()
 
-  // 生日只保存月/日；允许用户修正资料，但任何历史勋章都不会因此被回收。
-  const birthdayFieldsProvided = birthMonthRaw !== undefined || birthDayRaw !== undefined
   let birthdayChanged = false
   if (birthdayFieldsProvided) {
-    if (birthMonthRaw === undefined || !Number.isInteger(birthMonthRaw) || birthMonthRaw < 1 || birthMonthRaw > 12) {
-      return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
+    try {
+      const result = await writeBirthdayOnce(prisma, guard.user.id, requestedBirthday || null, now)
+      birthdayChanged = result.status === 'set'
+    } catch (error) {
+      if (error instanceof BirthdayAlreadySetError) return birthdayAlreadySetResponse()
+      throw error
     }
-    if (birthDayRaw === undefined || !Number.isInteger(birthDayRaw) || birthDayRaw < 1 || birthDayRaw > 31) {
-      return NextResponse.json({ message: '请选择有效的出生日期' }, { status: 400 })
-    }
-    if (!isValidBirthdayParts({ month: birthMonthRaw, day: birthDayRaw })) {
-      return NextResponse.json({ message: '该日期不存在，请重新选择' }, { status: 400 })
-    }
-    data.birthMonth = birthMonthRaw
-    data.birthDay = birthDayRaw
-    if (!current.birthdaySetAt) data.birthdaySetAt = now
-    birthdayChanged = current.birthMonth !== birthMonthRaw || current.birthDay !== birthDayRaw || !current.birthdaySetAt
   }
 
   if (birthdayPublic !== undefined) data.birthdayPublic = birthdayPublic

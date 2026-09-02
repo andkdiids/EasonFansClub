@@ -50,7 +50,7 @@ function formatDate(dateKey: string) {
   return `${year}年${month}月${day}日`
 }
 
-export function CheckInMakeupEntry({ previewMode = false }: Readonly<{ previewMode?: boolean }>) {
+export function CheckInMakeupEntry() {
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -59,7 +59,6 @@ export function CheckInMakeupEntry({ previewMode = false }: Readonly<{ previewMo
   const [completionMessage, setCompletionMessage] = useState('')
 
   async function loadAvailability() {
-    if (previewMode) return
     setIsLoading(true)
     setLoadError('')
     try {
@@ -74,7 +73,6 @@ export function CheckInMakeupEntry({ previewMode = false }: Readonly<{ previewMo
   }
 
   function openEntry() {
-    if (previewMode) return
     setCompletionMessage('')
     setIsOpen(true)
     void loadAvailability()
@@ -118,7 +116,7 @@ export function CheckInMakeupEntry({ previewMode = false }: Readonly<{ previewMo
 
   return (
     <>
-      <button type="button" className="checkin-history-trigger checkin-makeup-entry-trigger" disabled={previewMode} onClick={openEntry} aria-haspopup="dialog">
+      <button type="button" className="checkin-history-trigger checkin-makeup-entry-trigger" onClick={openEntry} aria-haspopup="dialog">
         <span aria-hidden="true">↺</span>
         补签
       </button>

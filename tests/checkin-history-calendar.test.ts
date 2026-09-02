@@ -12,7 +12,7 @@ import {
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const page = read('app/checkin/page.tsx')
-const surface = read('components/CheckInLayoutSurface.tsx')
+const surface = read('components/CheckInPageSurface.tsx')
 const dialog = read('components/CheckInHistoryDialog.tsx')
 const monthRoute = read('app/api/checkin/history/route.ts')
 const detailRoute = read('app/api/checkin/history/[dateKey]/route.ts')

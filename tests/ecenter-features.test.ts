@@ -322,7 +322,7 @@ test('编辑态提供拖拽、移动端上下按钮、隐藏恢复和二次确�
   assert.match(editor, /将\$\{feature\.label\}下移/)
   assert.match(editor, /隐藏功能/)
   assert.match(editor, /恢复显示/)
-  assert.match(editor, /确定恢复 E院中心默认布局吗/)
+  assert.match(editor, /确定恢复 E院中心默认顺序吗/)
   assert.match(mobile, /EcenterShortcutEditorPanel/)
   assert.match(sidebar, /EcenterShortcutEditorPanel/)
   assert.match(read('app/games/[slug]/page.tsx'), /export default/)

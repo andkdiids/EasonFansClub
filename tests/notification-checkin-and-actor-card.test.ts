@@ -45,7 +45,7 @@ test('目标回复超出第一页时仍加载精确回复和祖先链', () => {
 
 test('本人或好友区域的精确留言只注入所属面板，并向好友面板传递 focus', () => {
   const page = read('app/checkin/page.tsx')
-  const layout = read('components/CheckInLayoutSurface.tsx')
+  const layout = read('components/CheckInPageSurface.tsx')
 
   assert.match(page, /let friendMessagesForDisplay = friendMessages\.messages/)
   assert.match(page, /const isFriendTarget = focusedMessage\.userId === sessionUser\.id/)

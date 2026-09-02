@@ -9,6 +9,7 @@ import { profileImageUrl } from '@/lib/images'
 import { validateNicknameValue } from '@/lib/login-account'
 import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import type { UserLocation } from '@/lib/user-location'
+import { isBirthdayConfigured } from '@/lib/birthday-immutability'
 
 type InitialProfile = {
   nickname: string
@@ -608,9 +609,20 @@ export function ProfileSettingsForm({
       setError('手机号格式不正确')
       return
     }
+
+    const birthdayConfigured = isBirthdayConfigured(form)
+    if (!birthdayConfigured && form.birthMonth != null && form.birthDay != null) {
+      const confirmed = window.confirm(`确认生日为：${form.birthMonth}月${form.birthDay}日？\n生日保存后将无法修改。`)
+      if (!confirmed) return
+    }
+
     setIsSaving(true)
     setMessage('')
     setError('')
+
+    const birthdayPayload = birthdayConfigured
+      ? {}
+      : { birthMonth: form.birthMonth, birthDay: form.birthDay }
 
     const response = await fetch('/api/users/me', {
       method: 'PATCH',
@@ -629,9 +641,8 @@ export function ProfileSettingsForm({
         birthdayPublic: Boolean(form.birthdayPublic),
         showBadgeActivity: Boolean(form.showBadgeActivity),
         showBadgeProgressNotifications: Boolean(form.showBadgeProgressNotifications),
-        // 生日允许修正；服务端会复用统一的月/日合法性校验，且不会回收历史勋章。
-        birthMonth: form.birthMonth,
-        birthDay: form.birthDay,
+        // 已设置生日不再提交生日字段；首次设置才提交一次性生日 payload。
+        ...birthdayPayload,
       }),
     })
     const data = await response.json().catch(() => null)
@@ -873,10 +884,19 @@ export function ProfileSettingsForm({
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">生日纪念</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">我的生日</h3>
-            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">生日仅用于「生日纪念」徽章与今日生日统计，可随时修正，不会向其他用户展示具体日期。</p>
+            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">生日仅用于「生日纪念」徽章与今日生日统计。</p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          {isBirthdayConfigured(form) ? (
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
+              <p className="text-xs font-black tracking-[0.14em] text-emerald-700">当前生日</p>
+              <p className="mt-1 text-lg font-black text-brand-950">
+                {form.birthMonth != null && form.birthDay != null ? `${form.birthMonth}月${form.birthDay}日` : '已设置'}
+              </p>
+              <p className="mt-1">生日设置后不可修改。</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="block rounded-2xl border border-white bg-white/78 p-4">
                 <span className="text-sm font-black text-slate-700">月份</span>
                 <select
@@ -903,16 +923,16 @@ export function ProfileSettingsForm({
                   ))}
                 </select>
               </label>
-            <div className="rounded-2xl border border-white bg-white/78 p-4 text-xs font-bold leading-5 text-slate-500 md:col-span-2">
-              <p className="font-black text-brand-950">{form.birthdaySetAt ? `当前生日：${form.birthMonth}月${form.birthDay}日` : '尚未设置生日'}</p>
-              <p className="mt-1">修改生日后只会影响之后的生日判断；已经获得的生日星座勋章永久保留，不会被回收。</p>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900 md:col-span-2">
+                生日仅可设置一次，保存后不可修改，请确认日期无误。
+              </div>
             </div>
-          </div>
+          )}
 
           <label className="flex items-center justify-between rounded-2xl border border-white bg-white/78 p-4">
             <span>
               <span className="text-sm font-black text-slate-700">生日公开</span>
-              <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">开启后，生日祝福卡片上会展示你的生日日期；关闭仅隐藏日期，不影响生日纪念通知与卡片。</span>
+              <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">关闭「生日公开」后，不向其他用户展示生日日期，不影响生日纪念通知及相关规则。</span>
             </span>
             <input
               type="checkbox"

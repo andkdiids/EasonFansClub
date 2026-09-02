@@ -27,7 +27,7 @@ test('Sidebar 与 Topbar 共用头像组件且成长文案不再显示 Lv', () =
   assert.doesNotMatch(sidebar + summary, /Lv\./)
 })
 
-test('用户菜单、后台入口与布局编辑入口沿用权限结果', () => {
+test('用户菜单与后台入口沿用权限结果且不再提供布局编辑入口', () => {
   const layout = read('app/layout.tsx')
   const shell = read('components/layout/AppShell.tsx')
   const topbar = read('components/layout/Topbar.tsx')
@@ -36,10 +36,8 @@ test('用户菜单、后台入口与布局编辑入口沿用权限结果', () =>
     assert.match(topbar, new RegExp(label))
   }
   assert.doesNotMatch(topbar + sidebar, /签到记录/)
-  assert.match(layout, /hasAdminPermission\(sessionUser, 'layout\.manage'\)/)
   assert.match(layout, /hasAdminPermission\(sessionUser\)/)
-  assert.match(shell, /canManageLayout=\{canManageLayout\}/)
-  assert.match(shell, /<AdminLayoutQuickLink enabled=\{canManageLayout\} \/>/)
+  assert.doesNotMatch(layout + shell + topbar, /layout\.manage|layout\.publish|AdminLayoutQuickLink|canManageLayout|layout-editor/)
   assert.match(topbar, /canAccessAdmin \? \(/)
   assert.match(topbar, /<Link href="\/admin"/)
   assert.match(sidebar, /!item\.requiresAdmin \|\| canAccessAdmin/)

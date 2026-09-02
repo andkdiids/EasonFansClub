@@ -1,10 +1,7 @@
 import { redirect } from 'next/navigation'
-import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, getSessionUserFromCookie, isAuthServiceUnavailableError } from '@/lib/auth'
 import { listUnifiedNotificationsPage, parseNotificationCategory } from '@/lib/notifications'
-import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
-import { getDefaultPageLayoutConfig } from '@/lib/page-layout/registry'
 import { getSiteAppearance } from '@/lib/site-config'
 import { publicImageUrl } from '@/lib/images'
 import { logNotificationError } from '@/lib/notification-errors'
@@ -29,9 +26,8 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   const requestedCategory = parseNotificationCategory(params.category)
   const category = requestedCategory === 'review' && !canReview ? 'all' : requestedCategory
 
-  const [notificationsResult, layoutResult, appearanceResult] = await Promise.allSettled([
+  const [notificationsResult, appearanceResult] = await Promise.allSettled([
     listUnifiedNotificationsPage(user.id, { page, pageSize: NOTIFICATION_PAGE_SIZE, category, canReview }),
-    getPublishedPageLayoutConfig('message'),
     getSiteAppearance(),
   ])
 
@@ -48,12 +44,6 @@ export default async function NotificationsPage({ searchParams }: { searchParams
           degraded: true,
           failed: true,
         }
-      })()
-  const layoutConfig = layoutResult.status === 'fulfilled'
-    ? layoutResult.value
-    : (() => {
-        logNotificationError('page.layout', { userId: user.id, pageKey: 'message' }, layoutResult.reason)
-        return getDefaultPageLayoutConfig('message')
       })()
   const appearance = appearanceResult.status === 'fulfilled'
     ? appearanceResult.value
@@ -80,22 +70,14 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   return (
     <>
       <main className="site-page-main flat-page mx-auto max-w-7xl px-4 py-6 sm:px-5 sm:py-8">
-        <PageLayoutRenderer
-          pageKey="message"
-          config={layoutConfig}
-          modules={{
-            'message.main': (
-              <NotificationsClient
-                initialNotifications={notifications.items}
-                initialPagination={initialPagination}
-                initialCategory={category}
-                canReview={canReview}
-                siteLogoUrl={siteLogoUrl}
-                initialLoadError={initialLoadError}
-                initialLoadWarning={initialLoadWarning}
-              />
-            ),
-          }}
+        <NotificationsClient
+          initialNotifications={notifications.items}
+          initialPagination={initialPagination}
+          initialCategory={category}
+          canReview={canReview}
+          siteLogoUrl={siteLogoUrl}
+          initialLoadError={initialLoadError}
+          initialLoadWarning={initialLoadWarning}
         />
       </main>
     </>

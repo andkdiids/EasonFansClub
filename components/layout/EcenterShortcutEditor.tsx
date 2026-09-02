@@ -196,7 +196,7 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
   }
 
   async function handleReset() {
-    if (!window.confirm('确定恢复 E院中心默认布局吗？你的自定义排序和隐藏设置将被重置。')) return
+    if (!window.confirm('确定恢复 E院中心默认顺序吗？你的自定义排序和隐藏设置将被重置。')) return
     await persist(true)
   }
 
@@ -217,7 +217,7 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
       </div>
       <button type="button" className="ecenter-editor-done" onClick={() => void handleDone()} disabled={loading || saving}>{saving ? '保存中…' : '完成'}</button>
     </div>
-    {loading ? <p className="ecenter-editor-state">正在读取你的布局…</p> : null}
+    {loading ? <p className="ecenter-editor-state">正在读取你的快捷入口…</p> : null}
     <p className="ecenter-editor-hint">按住左侧手柄拖动调整顺序；手机端也可以使用上下按钮。</p>
     <div className="ecenter-editor-list-heading"><h4>快捷入口列表</h4></div>
     <div className="ecenter-editor-list" aria-label="可见快捷入口" onPointerMove={handlePointerMove} onPointerUp={handlePointerEnd} onPointerCancel={handlePointerEnd}>
@@ -272,7 +272,7 @@ export function EcenterShortcutEditorPanel({ initialFeatures, onSaved, onDone, v
       </div>
     </details>
     <div className="ecenter-editor-footer">
-      <button type="button" className="ecenter-reset-layout" onClick={() => void handleReset()} disabled={loading || saving}>恢复默认布局</button>
+      <button type="button" className="ecenter-reset-order" onClick={() => void handleReset()} disabled={loading || saving}>恢复默认顺序</button>
       {message ? <p role="status">{message}</p> : null}
     </div>
   </section>

@@ -80,7 +80,7 @@ export async function PATCH(request: Request) {
 
     const state = await getEcenterFeatureEditorState(guard.user.id, await canAccessAdmin(guard.user))
     return NextResponse.json({
-      message: reset ? 'E院中心已恢复默认布局' : 'E院中心设置已保存',
+      message: reset ? 'E院中心已恢复默认顺序' : 'E院中心设置已保存',
       features: serializeFeatures(state),
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })
   } catch (error) {

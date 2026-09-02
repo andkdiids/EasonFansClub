@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { getVisibleStudioTools } from '@/lib/studio/tools'
+import { STUDIO_GALLERY_RETURN_STORAGE_KEY } from '@/lib/studio/navigation'
 import type { StudioGalleryProject, StudioGallerySort } from '@/lib/studio/types'
 import styles from './studio.module.css'
 
@@ -28,19 +29,21 @@ function GalleryCard({ project, busy, onInteract }: Readonly<{ project: StudioGa
   const likeCount = project.likeCount || 0
   const favoriteCount = project.favoriteCount || 0
   const downloadCount = project.downloadCount || 0
+  const href = `/studio/project/${encodeURIComponent(project.id)}`
   return <article className={styles.galleryCard}>
-    <Link href={`/studio/project/${encodeURIComponent(project.id)}`} className={styles.galleryThumbLink} aria-label={`查看作品：${project.title}`}>
+    <Link href={href} className={styles.galleryCardLink} aria-label={`查看作品：${project.title}`} onClick={() => {
+      try { window.sessionStorage.setItem(STUDIO_GALLERY_RETURN_STORAGE_KEY, JSON.stringify({ id: project.id, path: window.location.href })) } catch { /* storage may be unavailable */ }
+    }}>
       <div className={styles.galleryThumb}>{project.thumbnailUrl ? <img src={project.thumbnailUrl} alt="作品缩略图" /> : <PatternThumb />}</div>
-    </Link>
-    <div className={styles.galleryContent}>
-      <div className={styles.galleryTopline}><strong className={styles.galleryTitle} title={project.title}>{project.title}</strong><span className={styles.galleryTool}>{tool?.name || project.toolSlug}</span></div>
-      <p className={styles.galleryMeta}>{project.author} · {formatDate(project.updatedAt)}</p>
-      <div className={styles.galleryFacts}><span>{project.metadata?.width || '—'} × {project.metadata?.height || '—'}</span><span>{project.metadata?.totalBeads ?? '—'} 颗</span><span>{project.metadata?.colorCount ?? '—'} 色</span><span>↓ {downloadCount}</span></div>
-      <div className={styles.galleryActions}>
-        <button type="button" className={`${styles.galleryInteraction} ${project.isLiked ? styles.galleryInteractionActive : ''}`} onClick={() => onInteract(project, 'like')} disabled={busy === `${project.id}:like`} aria-pressed={project.isLiked}>{project.isLiked ? '♥' : '♡'} {likeCount}</button>
-        <button type="button" className={`${styles.galleryInteraction} ${project.isFavorited ? styles.galleryInteractionFavorite : ''}`} onClick={() => onInteract(project, 'favorite')} disabled={busy === `${project.id}:favorite`} aria-pressed={project.isFavorited}>{project.isFavorited ? '★' : '☆'} {favoriteCount}</button>
-        <Link href={`/studio/project/${encodeURIComponent(project.id)}`} className={`${styles.projectAction} ${styles.projectActionPrimary}`}>查看作品</Link>
+      <div className={styles.galleryContent}>
+        <div className={styles.galleryTopline}><strong className={styles.galleryTitle} title={project.title}>{project.title}</strong><span className={styles.galleryTool}>{tool?.name || project.toolSlug}</span></div>
+        <p className={styles.galleryMeta}>{project.author} · {formatDate(project.updatedAt)}</p>
+        <div className={styles.galleryFacts}><span>{project.metadata?.width || '—'} × {project.metadata?.height || '—'}</span><span>{project.metadata?.totalBeads ?? '—'} 颗</span><span>{project.metadata?.colorCount ?? '—'} 色</span><span>↓ {downloadCount}</span></div>
       </div>
+    </Link>
+    <div className={styles.galleryActions}>
+      <button type="button" className={`${styles.galleryInteraction} ${project.isLiked ? styles.galleryInteractionActive : ''}`} onClick={() => onInteract(project, 'like')} disabled={busy === `${project.id}:like`} aria-pressed={project.isLiked}>{project.isLiked ? '♥' : '♡'} {likeCount}</button>
+      <button type="button" className={`${styles.galleryInteraction} ${project.isFavorited ? styles.galleryInteractionFavorite : ''}`} onClick={() => onInteract(project, 'favorite')} disabled={busy === `${project.id}:favorite`} aria-pressed={project.isFavorited}>{project.isFavorited ? '★' : '☆'} {favoriteCount}</button>
     </div>
   </article>
 }

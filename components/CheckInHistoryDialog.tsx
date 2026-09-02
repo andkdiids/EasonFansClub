@@ -59,7 +59,7 @@ function cellClassName(cell: CheckInCalendarCell, record: CheckInHistoryMonthRec
   ].filter(Boolean).join(' ')
 }
 
-export function CheckInHistoryDialog({ initialDate, previewMode = false }: Readonly<{ initialDate: string; previewMode?: boolean }>) {
+export function CheckInHistoryDialog({ initialDate }: Readonly<{ initialDate: string }>) {
   const initialMonth = useMemo(() => parseInitialMonth(initialDate), [initialDate])
   const currentMonthFallback = useMemo(() => getCurrentCheckInMonth(), [])
   const [isOpen, setIsOpen] = useState(false)
@@ -230,7 +230,6 @@ export function CheckInHistoryDialog({ initialDate, previewMode = false }: Reado
       <button
         type="button"
         className="checkin-history-trigger"
-        disabled={previewMode}
         onClick={() => setIsOpen(true)}
         aria-haspopup="dialog"
       >

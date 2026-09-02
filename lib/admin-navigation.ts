@@ -77,11 +77,10 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
   },
   {
     title: '页面视觉设置',
-    desc: '统一管理网站外观、页面媒体与布局。',
+    desc: '统一管理网站外观与页面媒体。',
     items: [
       { href: '/admin/home', title: '首页 Hero 管理', desc: '管理首页 Hero 图片、文案和排序。' },
       { href: '/admin/appearance', title: '网站整体外观', desc: '修改前台文案、颜色、图片和导航图标。' },
-      { href: '/admin/layout-editor', title: '页面布局编辑器', desc: '调整页面模块顺序、宽度、间距和发布状态。' },
       { href: '/admin/visuals', title: '页面视觉总览', desc: '进入登录、注册、欢迎页和首页视觉设置。' },
       { href: '/admin/visuals/login', title: '登录页视觉', desc: '设置登录页背景与响应式构图。' },
       { href: '/admin/visuals/register', title: '注册页视觉', desc: '设置注册页背景与响应式构图。' },
@@ -146,4 +145,3 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     ],
   },
 ] as const
-

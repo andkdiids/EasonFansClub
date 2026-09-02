@@ -38,27 +38,32 @@ test('homepage birthday count uses real user month/day, not TodayEvent', () => {
   assert.doesNotMatch(home, /type:\s*'BIRTHDAY', status:\s*'APPROVED'/)
 })
 
-test('profile API exposes birthday, validates it centrally, and permits correction without revoking history', () => {
+test('profile API exposes birthday and enforces one-time immutable writes without revoking history', () => {
   const route = read('app/api/users/me/route.ts')
   assert.match(route, /birthMonth:\s*true/)
   assert.match(route, /birthDay:\s*true/)
   assert.match(route, /birthdaySetAt:\s*true/)
-  // 已设置生日也允许修正；历史勋章不由资料更新撤销。
-  assert.match(route, /const birthdayFieldsProvided = birthMonthRaw !== undefined \|\| birthDayRaw !== undefined/)
+  // 首次设置使用条件 updateMany；已经设置的生日只能同值 no-op，不能修改或清空。
+  assert.match(route, /writeBirthdayOnce\(prisma, guard\.user\.id/)
+  assert.match(read('lib/birthday-immutability.ts'), /birthMonth:\s*null/)
+  assert.match(read('lib/birthday-immutability.ts'), /birthDay:\s*null/)
+  assert.match(read('lib/birthday-immutability.ts'), /BIRTHDAY_ALREADY_SET/)
   assert.match(route, /isValidBirthdayParts/)
-  assert.match(route, /birthdayChanged = current\.birthMonth !== birthMonthRaw/)
-  assert.match(route, /data\.birthdaySetAt = now/)
+  assert.doesNotMatch(route, /data\.birthMonth\s*=/)
+  assert.doesNotMatch(route, /data\.birthDay\s*=/)
   assert.match(route, /USER_BIRTHDAY_UPDATED/)
 })
 
-test('profile form keeps the month/day picker editable after the initial set', () => {
+test('profile form shows one-time setup and read-only state after the initial set', () => {
   const form = read('app/profile/ProfileSettingsForm.tsx')
   assert.match(form, /当前生日/)
   assert.match(form, /请选择月份/)
   assert.match(form, /请选择日期/)
-  assert.match(form, /birthMonth: form\.birthMonth/)
-  assert.match(form, /可随时修正/)
-  assert.match(form, /生日星座勋章永久保留/)
+  assert.match(form, /生日仅可设置一次，保存后不可修改，请确认日期无误。/)
+  assert.match(form, /window\.confirm\(`确认生日为：/)
+  assert.match(form, /isBirthdayConfigured\(form\)/)
+  assert.doesNotMatch(form, /可随时修正/)
+  assert.doesNotMatch(form, /修改生日后只会影响之后的生日判断/)
 })
 
 test('birthday badge is auto-granted on login and on visiting own profile', () => {

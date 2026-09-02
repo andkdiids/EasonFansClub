@@ -7,15 +7,6 @@ import { anonymizeCheckInMessages } from '../lib/checkin-messages'
 import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE } from '../lib/feedback'
 import { buildForumHref, clampForumPage, excerptForumPost, getForumOffset, getForumPageWindow, getForumTotalPages, parseForumSort } from '../lib/forum'
 import { getNotificationTarget } from '../lib/notification-target'
-import { calculateGridHeightFromPixels, isDeprecatedLayoutModule, normalizeLayoutItemHeight } from '../lib/page-layout/normalize'
-
-test('旧好友动态与论坛碎片模块会被过滤', () => {
-  assert.equal(isDeprecatedLayoutModule('profile', 'profile.friendActivity'), true)
-  assert.equal(isDeprecatedLayoutModule('forum', 'forum.pinnedPosts'), true)
-  assert.equal(isDeprecatedLayoutModule('forum', 'forum.main'), false)
-  assert.equal(isDeprecatedLayoutModule('profile', 'profile.wall'), true)
-  assert.equal(isDeprecatedLayoutModule('home', 'home.checkinSummary'), true)
-})
 
 test('公开 E友留言隐藏身份，好友留言保留原始身份', () => {
   const message = {
@@ -49,14 +40,13 @@ test('单密保迁移先备份和统计，再在同一事务中清理', () => {
   assert.ok(migration.indexOf('CREATE TABLE "UserSecurityQuestion_backup_20260718"') < migration.indexOf('DELETE FROM "UserSecurityQuestion"'))
 })
 
-test('profile.main 注册到布局并且真实前台不再布局外渲染', () => {
-  const registry = readFileSync('lib/page-layout/registry.ts', 'utf8')
+test('个人主页保持自己的代码布局并直接渲染业务模块', () => {
   const profile = readFileSync('components/ProfilePageSurface.tsx', 'utf8')
   const page = readFileSync('app/profile/page.tsx', 'utf8')
-  assert.match(registry, /'profile\.main'/)
   assert.match(profile, /<PublicUserModules/)
   assert.equal((profile.match(/<PublicUserModules/g) || []).length, 1)
-  assert.match(page, /<PageLayoutRenderer/)
+  assert.match(page, /<ProfilePageSurface/)
+  assert.doesNotMatch(page, /PageLayoutRenderer|getPublishedPageLayoutConfig|layoutConfig/)
 })
 
 test('统一返回按钮优先返回历史，无历史时回首页或业务列表', () => {
@@ -89,11 +79,6 @@ test('帖子与回复图片在浏览器压缩为 WebP 且服务端限制格式',
   assert.match(posts, /postMedia\.createMany/)
 })
 
-test('异常旧布局高度会按默认高度规范化', () => {
-  assert.equal(normalizeLayoutItemHeight({ x: 0, y: 0, w: 12, h: 40 }, { x: 0, y: 0, w: 12, h: 4 }, { auto: true }).h, 4)
-  assert.equal(calculateGridHeightFromPixels(173), 3)
-})
-
 test('连续九个北京时间自然日计算为九天', () => {
   const keys = Array.from({ length: 9 }, (_, index) => `2026-07-${String(index + 9).padStart(2, '0')}`)
   assert.deepEqual(calculateCheckinStreaks(keys, new Date('2026-07-17T12:00:00+08:00')), { currentStreak: 9, longestStreak: 9, totalDays: 9 })
@@ -123,9 +108,9 @@ test('挂号时间按北京时间显示真实创建分钟', () => {
 test('每日挂号费与经验区域提供成长体系说明', () => {
   const button = readFileSync('components/CheckInButton.tsx', 'utf8')
   const guide = readFileSync('components/CheckInGrowthGuideCard.tsx', 'utf8')
-  const layout = readFileSync('components/CheckInLayoutSurface.tsx', 'utf8')
+  const layout = readFileSync('components/CheckInPageSurface.tsx', 'utf8')
   const feePanel = readFileSync('components/TodayRegistrationFeePanel.tsx', 'utf8')
-  assert.match(button, /<CheckInGrowthGuideCard compact=\{isCompact\} \/>/)
+  assert.match(button, /<CheckInGrowthGuideCard \/>/)
   assert.match(guide, /🏥 挂号费获取指南/)
   assert.match(guide, /title="经验值 EXP"/)
   assert.match(guide, /title="什么是挂号费"/)
@@ -145,16 +130,12 @@ test('每日挂号费与经验区域提供成长体系说明', () => {
   assert.match(feePanel, /record\.displayTime/)
 })
 
-test('移动端资料卡与布局编辑器使用独立尺寸和显式网格', () => {
+test('移动端资料卡和个人主页继续使用页面自身尺寸', () => {
   const profile = readFileSync('components/ProfileSummary.tsx', 'utf8')
-  const editor = readFileSync('app/admin/layout-editor/LayoutEditorClient.tsx', 'utf8')
-  const renderer = readFileSync('components/page-layout/PageLayoutRenderer.tsx', 'utf8')
+  const page = readFileSync('app/profile/page.tsx', 'utf8')
   assert.match(profile, /w-40 max-w-full sm:w-56/)
-  assert.match(editor, /<PageLayoutRenderer[\s\S]*mode="editor"/)
-  assert.match(renderer, /cols=\{getPageLayoutColumns\(device\)\}/)
-  assert.match(renderer, /layout=\{layout\}/)
-  assert.match(renderer, /resizeHandles=\{\['e', 's', 'se'\]\}/)
-  assert.doesNotMatch(editor, /AdminCanvasRenderer|预览数据已加载/)
+  assert.match(page, /<ProfilePageSurface/)
+  assert.doesNotMatch(page, /PageLayoutRenderer|getPublishedPageLayoutConfig|layoutConfig/)
 })
 
 test('论坛默认排序与非法排序统一回退到最新', () => {

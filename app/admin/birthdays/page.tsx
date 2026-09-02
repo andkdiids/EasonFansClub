@@ -46,7 +46,7 @@ export default async function AdminBirthdaysPage() {
           </Link>
         </div>
 
-        <section className="layout-card rounded-[28px] border border-sky-100 bg-white/85 p-4 shadow-sm">
+        <section className="rounded-[28px] border border-sky-100 bg-white/85 p-4 shadow-sm">
           {birthdayUsers.length === 0 ? (
             <p className="py-10 text-center text-sm font-bold text-slate-500">今天还没有 E友填写生日，或暂无匹配用户。</p>
           ) : (

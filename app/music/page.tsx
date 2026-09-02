@@ -5,8 +5,6 @@ import { MusicArchiveShell } from '@/components/music/MusicArchiveShell'
 import { EasMusicCassetteHero } from '@/components/music/cassette/EasMusicCassetteHero'
 import { MusicConcertTimeline } from '@/components/music/MusicConcertTimeline'
 import { MusicSectionNavigation } from '@/components/music/MusicSectionNavigation'
-import { PageLayoutRenderer } from '@/components/page-layout/PageLayoutRenderer'
-import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { getCurrentUser } from '@/lib/auth'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { firstPosterUrl, resolveConcertPoster } from '@/lib/music-concert-poster'
@@ -21,7 +19,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function MusicPage() {
   const currentUser = await getCurrentUser()
-  const [albums, tours, cassetteSourceSongs, layoutConfig, config, categories] = await Promise.all([
+  const [albums, tours, cassetteSourceSongs, config, categories] = await Promise.all([
     prisma.musicAlbum.findMany({ where: { status: 'PUBLISHED' }, orderBy: [{ displayOrder: 'asc' }, { releaseYear: 'desc' }, { createdAt: 'asc' }], include: { _count: { select: { MusicSong: true } } } }),
     prisma.musicTour.findMany({
       where: currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN') ? {} : { status: 'PUBLISHED' },
@@ -60,7 +58,6 @@ export default async function MusicPage() {
         },
       },
     }),
-    getPublishedPageLayoutConfig('music'),
     getSiteAppearance(),
     getEnabledConcertCategories().catch(() => []),
   ])
@@ -100,5 +97,5 @@ export default async function MusicPage() {
     </section>
   </div>
 
-  return <MusicArchiveShell variant="home" backgroundVisual={config.heroVisuals.music}><PageLayoutRenderer pageKey="music" config={layoutConfig} modules={{ 'music.main': musicMain }} /></MusicArchiveShell>
+  return <MusicArchiveShell variant="home" backgroundVisual={config.heroVisuals.music}>{musicMain}</MusicArchiveShell>
 }

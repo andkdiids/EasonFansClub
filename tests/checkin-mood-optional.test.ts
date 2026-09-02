@@ -33,7 +33,7 @@ test('每日挂号页面初始不自动选择任何心情', () => {
 test('不选择心情且不填写留言时，前端不再阻止提交', () => {
   assert.doesNotMatch(button, /if \(checkinMoodEnabled && !mood\)/)
   assert.doesNotMatch(button, /请选择今日心情/)
-  assert.match(button, /disabled=\{previewMode \|\| isSubmitting\}/)
+  assert.match(button, /disabled=\{isSubmitting\}/)
 })
 
 test('不选择心情且填写留言时，留言仍按可选字段提交', () => {

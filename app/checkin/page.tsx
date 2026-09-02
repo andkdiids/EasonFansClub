@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { CheckInLayoutSurface } from '@/components/CheckInLayoutSurface'
+import { CheckInPageSurface } from '@/components/CheckInPageSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, parseBeijingDate, startOfLocalDay } from '@/lib/checkin'
 import { getCheckInMessage, getCheckInMessagesPage, getCheckInReplyStatus, resolveCheckInNotificationTarget, type CheckInMessagePagination, type CheckInMessageSort, type CheckInNotificationResolutionStatus, type CheckInNotificationTarget } from '@/lib/checkin-messages'
@@ -8,7 +8,6 @@ import { getCheckInPublicStats } from '@/lib/checkin-stats'
 import { calcMoodIndex, getDailyQuote } from '@/lib/daily'
 import { safeDb, withDbTimeout } from '@/lib/db-timeout'
 import { getFriendFollowedIds, getFriendIds } from '@/lib/friends'
-import { getPublishedPageLayoutConfig } from '@/lib/page-layout/service'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
@@ -225,7 +224,6 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
   const moodIndex = calcMoodIndex(moodStats.map((item) => ({ mood: item.mood || '', _count: { mood: item._count.mood } })))
   const selectedDateValue = formatBeijingDate(selectedDate)
   const todayValue = formatBeijingDate(today)
-  const layoutConfig = await getPublishedPageLayoutConfig('checkin')
   const todayCheckInPayload = todayCheckIn
     ? (() => {
         const { DailyMessage, ...checkIn } = todayCheckIn
@@ -240,9 +238,8 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <main className="site-page-main flat-page mx-auto max-w-7xl px-4 py-5 sm:px-5">
-        <CheckInLayoutSurface
-          layoutConfig={layoutConfig}
+      <main className="site-page-main flat-page mx-auto max-w-[1500px] px-4 py-6 sm:px-5">
+        <CheckInPageSurface
           dailyQuote={getDailyQuote(today)}
           activeUsers={activeUsers}
           todayCount={todayCount}
