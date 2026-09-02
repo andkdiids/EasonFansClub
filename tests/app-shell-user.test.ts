@@ -27,6 +27,14 @@ test('Sidebar 与 Topbar 共用头像组件且成长文案不再显示 Lv', () =
   assert.doesNotMatch(sidebar + summary, /Lv\./)
 })
 
+test('个人主页与公开主页成长进度使用 EXP 单位', () => {
+  const profileSummary = read('components/ProfileSummary.tsx')
+  const profileSurface = read('components/ProfilePageSurface.tsx')
+  assert.match(profileSurface, /<ProfileHeader/)
+  assert.match(profileSummary, /\{experience\} \/ \{nextRequiredExp \?\? experience\} EXP/)
+  assert.doesNotMatch(profileSummary, /\{experience\} \/ \{nextRequiredExp \?\? experience\} XP/)
+})
+
 test('用户菜单与后台入口沿用权限结果且不再提供布局编辑入口', () => {
   const layout = read('app/layout.tsx')
   const shell = read('components/layout/AppShell.tsx')
