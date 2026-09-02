@@ -20,9 +20,9 @@ import { formatMusicReleaseDate } from '@/lib/music-display'
 import { resolveMusicPlayback } from '@/lib/music-playback'
 import { getEnabledConcertCategories } from '@/lib/music-concert-category'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import type { HomeAnnouncement } from '@/components/HomeLayoutSurface'
 
 type PreviewModulePayload = { ok: true; data: unknown } | { ok: false; message: string }
+type PreviewHomeAnnouncement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
 export type PageLayoutPreviewPayload = {
   pageKey: PageLayoutPageKey
   generatedAt: string
@@ -30,7 +30,7 @@ export type PageLayoutPreviewPayload = {
   homeSurface?: {
     siteConfig: SiteAppearanceConfig
     slides: SiteHeroSlide[]
-    announcement: HomeAnnouncement | null
+    announcement: PreviewHomeAnnouncement | null
   }
 }
 

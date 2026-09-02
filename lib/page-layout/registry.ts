@@ -19,10 +19,12 @@ const cardWidths = ['full', 'wide', 'medium', 'half', 'third'] as const satisfie
 const allSpacing = ['none', 'xs', 'sm', 'md', 'lg', 'xl'] as const satisfies readonly LayoutSpacing[]
 
 /**
- * The page registry is the only source used by the layout editor's tabs and
- * by page-layout service APIs. Paths intentionally mirror real navigation.
+ * These definitions cover both the editable pages and the historical home
+ * layout key. The home entry remains available to service/API consumers so
+ * existing rows can be read safely, but it is deliberately omitted from the
+ * editor-facing registry below.
  */
-export const PAGE_LAYOUT_REGISTRY = [
+const PAGE_LAYOUT_PAGE_DEFINITIONS = [
   { key: 'home', name: '首页', description: '社区首页业务模块编排', path: '/community', navigationFeatureKey: 'HOME' },
   { key: 'checkin', name: '每日挂号', description: '每日挂号页面模块编排', path: '/checkin', navigationFeatureKey: 'CHECKIN' },
   { key: 'forum', name: 'E院广场', description: 'E院广场标题、分区、搜索与帖子内容', path: '/forum', navigationFeatureKey: 'FORUM' },
@@ -33,7 +35,10 @@ export const PAGE_LAYOUT_REGISTRY = [
   { key: 'admin-home', name: '管理后台首页', description: '管理后台首页模块编排', path: '/admin', navigationFeatureKey: 'ADMIN' },
 ] as const satisfies readonly PageLayoutPageDefinition[]
 
-export const pageLayoutPages = PAGE_LAYOUT_REGISTRY.reduce((result, page) => {
+/** Pages currently offered by the admin layout editor. Home is fixed. */
+export const PAGE_LAYOUT_REGISTRY = PAGE_LAYOUT_PAGE_DEFINITIONS.filter((page) => page.key !== 'home')
+
+export const pageLayoutPages = PAGE_LAYOUT_PAGE_DEFINITIONS.reduce((result, page) => {
   result[page.key] = page
   return result
 }, {} as Record<PageLayoutPageKey, PageLayoutPageDefinition>)
@@ -127,6 +132,12 @@ export const MODULE_REGISTRY = PAGE_MODULE_REGISTRY
 
 export function isPageLayoutPageKey(value: unknown): value is PageLayoutPageKey {
   return typeof value === 'string' && pageLayoutPageKeys.includes(value as PageLayoutPageKey)
+}
+
+export type EditablePageLayoutPageKey = Exclude<PageLayoutPageKey, 'home'>
+
+export function isEditablePageLayoutPageKey(value: unknown): value is EditablePageLayoutPageKey {
+  return typeof value === 'string' && PAGE_LAYOUT_REGISTRY.some((page) => page.key === value)
 }
 
 export function getPageLayoutRegistry(pageKey: PageLayoutPageKey) {

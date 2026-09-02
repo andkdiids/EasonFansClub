@@ -137,7 +137,7 @@ test('homepage Salon preview reuses approved public posts with a bounded thumbna
   const api = read('app/api/home/route.ts')
   const surface = read('components/HomeLayoutSurface.tsx')
   const panelStart = surface.indexOf('const renderSalonPanel = () =>')
-  const panelEnd = surface.indexOf('\n  return (\n    <div className="community-home"', panelStart)
+  const panelEnd = surface.indexOf('\n  return (', panelStart)
   assert.ok(panelStart >= 0)
   assert.ok(panelEnd > panelStart)
   const panel = surface.slice(panelStart, panelEnd)

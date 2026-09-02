@@ -1,7 +1,7 @@
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { measureBootstrap } from '@/lib/bootstrap-timing'
-import { isPageLayoutPageKey } from '@/lib/page-layout/registry'
+import { isEditablePageLayoutPageKey, PAGE_LAYOUT_REGISTRY } from '@/lib/page-layout/registry'
 import { getPageLayoutPreviewData } from '@/lib/page-layout/preview-data'
 import { getAdminPageLayout, listPageLayoutRevisions } from '@/lib/page-layout/service'
 import type { PageLayoutPreviewPayload } from '@/lib/page-layout/preview-data'
@@ -29,7 +29,7 @@ export default async function LayoutEditorPage({ searchParams }: { searchParams:
     measureBootstrap('LayoutEditor.currentUser', requireAdminPage('/admin/layout-editor', 'layout.manage')),
     searchParams,
   ])
-  const initialPage = isPageLayoutPageKey(params.page) ? params.page : 'home'
+  const initialPage = isEditablePageLayoutPageKey(params.page) ? params.page : PAGE_LAYOUT_REGISTRY[0].key
   const [initialLayout, initialPreviewData, initialRevisions] = await Promise.all([
     measureBootstrap('LayoutEditor.layout', getAdminPageLayout(initialPage)),
     optionalBootstrap<PageLayoutPreviewPayload | null>(

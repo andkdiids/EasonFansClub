@@ -78,23 +78,29 @@ test('Hero carousel only consumes enabled slides and supports autoplay, controls
   assert.match(manager, /\/api\/admin\/home\/hero/)
 })
 
-test('homepage keeps the hero and module order in the shared layout registry', () => {
+test('homepage uses the fixed surface and is excluded from page-layout editing', () => {
   const surface = read('components/HomeLayoutSurface.tsx')
+  const communityPage = read('app/community/page.tsx')
+  const editor = read('app/admin/layout-editor/LayoutEditorClient.tsx')
   const registry = read('lib/page-layout/registry.ts')
   assert.doesNotMatch(surface, /shortcutItems|grid-cols-6|home-hero|community-hero-actions|growthThresholds|homeText\.(level|exp|points)/)
   assert.match(surface, /<HomeHero/)
-  assert.match(surface, /<PageLayoutRenderer/)
-  const homeKeys = ['home.hero', 'home.announcement', 'home.stats', 'home.today', 'home.anywhereDoor', 'home.salon', 'home.activityCenter', 'home.dailyMusic', 'home.entertainment', 'home.albums']
-  let previousRegistryPosition = -1
-  let previousSurfacePosition = -1
-  for (const key of homeKeys) {
-    const registryPosition = registry.indexOf(`'${key}'`)
-    const surfacePosition = surface.indexOf(`'${key}'`)
-    assert.ok(registryPosition > previousRegistryPosition, `${key} registry order`)
-    assert.ok(surfacePosition > previousSurfacePosition, `${key} renderer order`)
-    previousRegistryPosition = registryPosition
-    previousSurfacePosition = surfacePosition
-  }
+  assert.match(surface, /className="community-announcement"/)
+  assert.match(surface, /className="home-first-row"/)
+  assert.match(surface, /className="community-stats home-checkin-stats home-first-row-data"/)
+  assert.match(surface, /className="home-primary-columns home-first-row-panels"/)
+  assert.match(surface, /renderTodayPanel\(\)/)
+  assert.match(surface, /renderAnywhereDoorPanel\(\)/)
+  assert.match(surface, /renderSalonPanel\(\)/)
+  assert.match(surface, /renderActivityCenterPanel\(\)/)
+  assert.match(surface, /renderDailyMusicPanel\(\)/)
+  assert.match(surface, /renderEntertainmentPanel\(\)/)
+  assert.match(surface, /className="community-panel music-panel home-full-panel home-albums-section"/)
+  assert.match(surface, /announcement \?/)
+  assert.doesNotMatch(surface, /PageLayoutConfig|PageLayoutDevice|getPageLayoutModules|layoutConfig|layoutModule|visible\(/)
+  assert.doesNotMatch(communityPage, /getPublishedPageLayoutConfig|layoutConfig/)
+  assert.doesNotMatch(editor, /HomeLayoutSurface|homeSurface|pageKey === 'home'/)
+  assert.match(registry, /PAGE_LAYOUT_REGISTRY = PAGE_LAYOUT_PAGE_DEFINITIONS\.filter\(\(page\) => page\.key !== 'home'\)/)
 })
 
 test('entertainment home card uses the endless-mode leaderboard without loading removed concert data', () => {

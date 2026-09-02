@@ -8,10 +8,8 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
-import { PageLayoutRenderer, type PageLayoutModuleRenderer, type PageLayoutRenderMode } from '@/components/page-layout/PageLayoutRenderer'
 import { GUESS_SONG_MODE_CONFIG, GUESS_SONG_PUBLIC_MODES, type GuessSongPublicMode } from '@/lib/guess-song-config'
 import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
-import type { PageLayoutConfig, PageLayoutDevice, PageLayoutModuleConfig } from '@/lib/page-layout/types'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -83,8 +81,7 @@ const todayTypeLabels: Record<string, string> = {
   OTHER: '其他',
 }
 
-export type HomeAnnouncement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
-type Announcement = HomeAnnouncement
+type Announcement = { id: string; title: string; content: string; link: string | null; buttonUrl: string | null }
 type Album = { id: string; name: string; releaseYear: number; coverUrl: string | null; likedByMe: boolean; likeCount: number }
 type Stats = { checkIns: { id: string }[] }
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
@@ -112,24 +109,19 @@ const loadingEntertainmentRanking: EntertainmentRanking = {
   mobileBest: null,
 }
 
-function useDevice(forcedDevice?: PageLayoutDevice): PageLayoutDevice {
-  const [device, setDevice] = useState<PageLayoutDevice>('desktop')
+type HomeDevice = 'desktop' | 'mobile'
+
+function useDevice(): HomeDevice {
+  const [device, setDevice] = useState<HomeDevice>('desktop')
   useEffect(() => {
-    if (forcedDevice) {
-      setDevice(forcedDevice)
-      return
-    }
     const mobile = matchMedia('(max-width:767px)')
-    const tablet = matchMedia('(min-width:768px) and (max-width:1199px)')
-    const update = () => setDevice(mobile.matches ? 'mobile' : tablet.matches ? 'tablet' : 'desktop')
+    const update = () => setDevice(mobile.matches ? 'mobile' : 'desktop')
     update()
     mobile.addEventListener('change', update)
-    tablet.addEventListener('change', update)
     return () => {
       mobile.removeEventListener('change', update)
-      tablet.removeEventListener('change', update)
     }
-  }, [forcedDevice])
+  }, [])
   return device
 }
 
@@ -204,24 +196,8 @@ function HomeDailyMusicPreview({ music }: { music: DailyMusic }) {
   )
 }
 
-export type HomeLayoutSurfaceProps = {
-  layoutConfig: PageLayoutConfig
-  siteConfig: SiteAppearanceConfig
-  slides: SiteHeroSlide[]
-  announcement: Announcement | null
-  editor?: {
-    mode?: PageLayoutRenderMode
-    device?: PageLayoutDevice
-    selectedKey?: string
-    readOnly?: boolean
-    onSelect?: (key: string) => void
-    onChange?: (items: PageLayoutModuleConfig[]) => void
-    onAutoHeightChange?: (key: string, nextH: number) => void
-  }
-}
-
-export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announcement, editor }: HomeLayoutSurfaceProps) {
-  const device = useDevice(editor?.device)
+export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteConfig: SiteAppearanceConfig; slides: SiteHeroSlide[]; announcement: Announcement | null }) {
+  const device = useDevice()
   const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, salonPosts: [], albums: [], stats: null, dailyMusic: null, siteStats: null, checkedInToday: false, todayCheckInCount: 0, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
   const [failed, setFailed] = useState(false)
   const [todayEventIndex, setTodayEventIndex] = useState(0)
@@ -420,7 +396,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   const renderTodayPanel = () => {
     const events = data.todayEvents
     return (
-      <section className="community-panel concert-panel home-today-panel" aria-label="Today in history">
+      <section className="community-panel concert-panel home-first-row-panel home-today-panel" aria-label="Today in history">
         <header><h2>{homeText.today}</h2><Link href="/today" className="home-module-entry">{homeText.todayMore} {'>>'}</Link></header>
         <div className="home-today-content">
         {events.length === 0 ? <p className="community-empty">{homeText.noToday}</p> : null}
@@ -472,7 +448,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   }
 
   const renderActivityCenterPanel = () => (
-    <section className="community-panel concert-panel home-activities-section" aria-label={homeText.activityCenter}>
+    <section className="community-panel concert-panel home-full-panel home-activities-section" aria-label={homeText.activityCenter}>
       <header><h2>{homeText.activityCenter}</h2><Link href="/activities" className="home-module-entry">{homeText.activitiesMore} {'>>'}</Link></header>
       {data.activities.length ? <div className="home-concert-grid home-activity-grid">
         {data.activities.map((activity) => {
@@ -492,7 +468,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
   )
 
   const renderAnywhereDoorPanel = () => (
-      <section className="community-panel home-anywhere-door-section" aria-label={homeText.anywhereDoor}>
+      <section className="community-panel home-first-row-panel home-anywhere-door-section" aria-label={homeText.anywhereDoor}>
         <header><h2>{homeText.anywhereDoor}</h2><Link href="/anywhere-door" className="home-module-entry">{homeText.anywhereDoorMore} {'>>'}</Link></header>
         {data.anywhereDoor ? <Link href={data.anywhereDoor.href} className="home-anywhere-door-item">
           <span className="home-anywhere-door-account">@{data.anywhereDoor.authorUsername}</span>
@@ -503,7 +479,7 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     )
 
   const renderSalonPanel = () => (
-    <section className="community-panel home-salon-panel" aria-label={homeText.salon}>
+    <section className="community-panel home-first-row-panel home-salon-panel" aria-label={homeText.salon}>
       <header><h2>{homeText.salon}</h2><Link href="/salon" className="home-module-entry">{homeText.salonMore} {'>>'}</Link></header>
       {data.salonPosts.length ? <div className="home-salon-content">
         {data.salonPosts.map((post, index) => {
@@ -523,65 +499,8 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
     </section>
   )
 
-  const renderStatsPanel = () => (
-    <section className="community-stats home-checkin-stats" aria-label="E院数据与挂号状态">
-      <div className="stat-members"><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
-      <div className={`stat-registration ${checkinStateClass}`}>
-        {checkinDisplay.status === 'checked-in' ? (
-          <div className="stat-total stat-registration-total" aria-label="今日挂号人数">
-            <span>{homeText.todayCheckins}</span>
-            <strong>{fmt(checkinDisplay.todayCheckInCount)}</strong>
-          </div>
-        ) : checkinDisplay.status === 'not-checked-in' ? (
-          <Link href="/checkin" className="stat-checkin stat-registration-cta">
-            <span>{homeText.todayCheckins}</span>
-            <strong>{homeText.notCheckedIn}</strong>
-            <small>{homeText.goCheckin} →</small>
-          </Link>
-        ) : (
-          <div className="stat-total stat-registration-total">
-            <span>{homeText.todayCheckins}</span>
-            <strong>—</strong>
-            <small>{homeText.loadingStats}</small>
-          </div>
-        )}
-      </div>
-      <div className="stat-birthdays"><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
-      <Link href="/games/daily-prescription" className="stat-prescription">
-        <span>{homeText.dailyPrescription}</span>
-        {dailyPrescription.status === 'claimed' ? <>
-          <strong>+{fmt(dailyPrescription.points)} {homeText.prescriptionFee}</strong>
-          <small>{homeText.prescriptionClaimed} / {homeText.prescriptionView} →</small>
-        </> : <>
-          <strong>{homeText.prescriptionPending}</strong>
-          <small>{homeText.goPrescription} →</small>
-        </>}
-      </Link>
-    </section>
-  )
-
-  const renderAlbumsPanel = () => (
-    <section className="community-panel music-panel home-albums-section" aria-label="每日推荐专辑">
-      <header><h2>{homeText.randomAlbums}</h2><Link href="/music/albums">{homeText.albumsMore} →</Link></header>
-      <div className="album-strip home-album-strip">
-        {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <article key={album.id} className="home-album-card">
-          <Link href={`/music/album/${album.id}`} className="home-album-link">
-            <span>{album.coverUrl ? <Image src={publicImageVariantUrl(album.coverUrl, 'thumb-sm') || album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" loading="lazy" className="object-cover" /> : '♫'}</span>
-          </Link>
-          <div className="home-album-meta-row">
-            <Link href={`/music/album/${album.id}`} className="home-album-info">
-              <strong>{album.name}</strong><small>{album.releaseYear}</small>
-            </Link>
-            <EasMusicLikeButton type="album" targetId={album.id} initialLiked={album.likedByMe} initialCount={album.likeCount} loggedIn variant="inline" className="home-album-like-button" containerClassName="home-album-like" />
-          </div>
-        </article>)}
-        {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
-      </div>
-    </section>
-  )
-
-  const moduleRenderers: Record<string, PageLayoutModuleRenderer> = {
-    'home.hero': () => (
+  return (
+    <div className="community-home">
       <HomeHero
         slides={slides}
         siteName={siteConfig.text.siteName}
@@ -590,39 +509,79 @@ export function HomeLayoutSurface({ layoutConfig, siteConfig, slides, announceme
         visual={siteConfig.heroVisuals.home}
         defaultTitle={siteConfig.text.homeSubtitle}
       />
-    ),
-    'home.announcement': () => announcement || failed ? (
-      <div className="home-announcement-stack">
+      <div id="community-content" className="community-content">
         {announcement ? <Link href={normalizeActionUrl(announcement.link) || normalizeActionUrl(announcement.buttonUrl) || '/forum'} className="community-announcement"><strong>{announcement.title}</strong><span>{announcement.content}</span></Link> : null}
         {failed ? <p className="community-error">{homeText.loadError}</p> : null}
-      </div>
-    ) : null,
-    'home.stats': renderStatsPanel,
-    'home.today': renderTodayPanel,
-    'home.anywhereDoor': renderAnywhereDoorPanel,
-    'home.salon': renderSalonPanel,
-    'home.activityCenter': renderActivityCenterPanel,
-    'home.dailyMusic': renderDailyMusicPanel,
-    'home.entertainment': renderEntertainmentPanel,
-    'home.albums': renderAlbumsPanel,
-  }
 
-  return (
-    <div className="community-home">
-      <PageLayoutRenderer
-        pageKey="home"
-        config={layoutConfig}
-        modules={moduleRenderers}
-        device={device}
-        previewMode={editor?.mode === 'editor'}
-        mode={editor?.mode || 'live'}
-        className="community-content home-layout-surface"
-        selectedKey={editor?.selectedKey}
-        readOnly={editor?.readOnly}
-        onSelect={editor?.onSelect}
-        onChange={editor?.onChange}
-        onAutoHeightChange={editor?.onAutoHeightChange}
-      />
+        <div className="home-first-row" aria-label="首页第一行">
+        <section className="community-stats home-checkin-stats home-first-row-data" aria-label="E院数据与挂号状态">
+          <div className="stat-members"><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
+          <div className={`stat-registration ${checkinStateClass}`}>
+            {checkinDisplay.status === 'checked-in' ? (
+              <div className="stat-total stat-registration-total" aria-label="今日挂号人数">
+                <span>{homeText.todayCheckins}</span>
+                <strong>{fmt(checkinDisplay.todayCheckInCount)}</strong>
+              </div>
+            ) : checkinDisplay.status === 'not-checked-in' ? (
+              <Link href="/checkin" className="stat-checkin stat-registration-cta">
+                <span>{homeText.todayCheckins}</span>
+                <strong>{homeText.notCheckedIn}</strong>
+                <small>{homeText.goCheckin} →</small>
+              </Link>
+            ) : (
+              <div className="stat-total stat-registration-total">
+                <span>{homeText.todayCheckins}</span>
+                <strong>—</strong>
+                <small>{homeText.loadingStats}</small>
+              </div>
+            )}
+          </div>
+          <div className="stat-birthdays"><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
+          <Link href="/games/daily-prescription" className="stat-prescription">
+            <span>{homeText.dailyPrescription}</span>
+            {dailyPrescription.status === 'claimed' ? <>
+              <strong>+{fmt(dailyPrescription.points)} {homeText.prescriptionFee}</strong>
+              <small>{homeText.prescriptionClaimed} / {homeText.prescriptionView} →</small>
+            </> : <>
+              <strong>{homeText.prescriptionPending}</strong>
+              <small>{homeText.goPrescription} →</small>
+            </>}
+          </Link>
+        </section>
+
+        <div className="home-primary-columns home-first-row-panels">
+          {renderTodayPanel()}
+          {renderAnywhereDoorPanel()}
+          {renderSalonPanel()}
+        </div>
+        </div>
+
+        <div className="home-secondary-content">
+        <div className="home-secondary-columns">
+          {renderActivityCenterPanel()}
+          {renderDailyMusicPanel()}
+          {renderEntertainmentPanel()}
+        </div>
+
+        <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="每日推荐专辑">
+          <header><h2>{homeText.randomAlbums}</h2><Link href="/music/albums">{homeText.albumsMore} →</Link></header>
+          <div className="album-strip home-album-strip">
+            {data.albums.slice(0, device === 'mobile' ? 3 : data.albums.length).map((album) => <article key={album.id} className="home-album-card">
+              <Link href={`/music/album/${album.id}`} className="home-album-link">
+                <span>{album.coverUrl ? <Image src={publicImageVariantUrl(album.coverUrl, 'thumb-sm') || album.coverUrl} alt={`${album.name} album cover`} fill sizes="(max-width:767px) 35vw, 130px" loading="lazy" className="object-cover" /> : '♫'}</span>
+              </Link>
+              <div className="home-album-meta-row">
+                <Link href={`/music/album/${album.id}`} className="home-album-info">
+                  <strong>{album.name}</strong><small>{album.releaseYear}</small>
+                </Link>
+                <EasMusicLikeButton type="album" targetId={album.id} initialLiked={album.likedByMe} initialCount={album.likeCount} loggedIn variant="inline" className="home-album-like-button" containerClassName="home-album-like" />
+              </div>
+            </article>)}
+            {!data.albums.length && !failed ? <p className="community-empty">{homeText.noAlbums}</p> : null}
+          </div>
+        </section>
+        </div>
+      </div>
     </div>
   )
 }
