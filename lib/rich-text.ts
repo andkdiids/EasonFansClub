@@ -26,6 +26,7 @@ export const MAX_RICH_TEXT_POST_REFERENCES = 50
 export const MAX_RICH_TEXT_USER_MENTIONS = 50
 export const MAX_RICH_TEXT_ACTIVITY_REFERENCES = 50
 export const MAX_RICH_TEXT_MATERIAL_REFERENCES = 50
+export const MAX_RICH_TEXT_MUSIC_REFERENCES = 1
 
 export type RichTextMark =
   | { type: 'bold' }
@@ -702,6 +703,27 @@ export function collectMusicReferenceSongIds(value: RichTextContent) {
   }
   value.content.forEach(visitBlock)
   return ids
+}
+
+/** Count music reference nodes rather than distinct song ids. */
+export function countMusicReferenceNodes(value: RichTextContent) {
+  let count = 0
+  const visitInline = (node: RichTextInlineNode) => {
+    if (node.type === 'musicReference') count += 1
+  }
+  const visitBlock = (block: RichTextBlockNode): void => {
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      block.content?.forEach(visitInline)
+      return
+    }
+    if (block.type === 'listItem' || block.type === 'blockquote') {
+      block.content?.forEach(visitBlock)
+      return
+    }
+    if (block.type === 'bulletList' || block.type === 'orderedList') block.content?.forEach(visitBlock)
+  }
+  value.content.forEach(visitBlock)
+  return count
 }
 
 function collectInlineReferenceIds(value: RichTextContent, type: 'postReference' | 'userMention' | 'activityReference' | 'materialReference') {

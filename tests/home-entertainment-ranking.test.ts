@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildGuessSongModeHighScores, type GuessSongModeHighScore } from '../lib/guess-song-leaderboard'
 import type { GuessSongPublicMode } from '../lib/guess-song-config'
+import { getRankableEntertainmentLeaderboardTargets } from '../lib/entertainment-leaderboard-registry'
 
 function source(path: string) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
@@ -89,24 +90,37 @@ test('部分模式无成绩时保留其它模式，全部无成绩才是 empty',
   assert.equal(empty.modes.EXPERT, null)
 })
 
-test('首页消费历史四模式 service，区分查询失败并使用 no-store 请求', () => {
+test('首页消费 registry 中所有公开榜单的 THIS_WEEK 榜首，区分查询失败并使用 no-store 请求', () => {
   const homeData = source('lib/home-data.ts')
-  const service = source('lib/guess-song-leaderboard.ts')
+  const service = source('lib/entertainment-leaderboard.ts')
+  const registry = source('lib/entertainment-leaderboard-registry.ts')
   const surface = source('components/HomeLayoutSurface.tsx')
   const route = source('app/api/home/entertainment-ranking/route.ts')
   const styles = source('app/globals.css')
 
-  assert.match(homeData, /getGuessSongModeHighScores\(\)/)
-  assert.doesNotMatch(homeData, /getGuessSongPersonalBest\(\{ userId, mode:/)
-  assert.match(service, /periodKey: 'ALL'/)
-  assert.match(service, /emptyGuessSongModeHighScores\('unavailable'\)/)
-  assert.match(service, /User: \{\s*select:/)
-  assert.match(service, /\{ score: 'desc' \}/)
-  assert.match(surface, /home-entertainment-desktop-scores/)
-  assert.match(surface, /home-entertainment-mobile-score/)
+  assert.match(homeData, /getEntertainmentLeaderboard/)
+  assert.match(homeData, /getRankableEntertainmentLeaderboardTargets/)
+  assert.match(homeData, /range: 'THIS_WEEK'/)
+  assert.match(homeData, /periodType: 'THIS_WEEK'/)
+  assert.doesNotMatch(homeData, /getGuessSongModeHighScores\(\)/)
+  assert.match(service, /resolveGameRankingRange/)
+  assert.match(registry, /getRankableEntertainmentLeaderboardTargets/)
+  assert.deepEqual(getRankableEntertainmentLeaderboardTargets().map((item) => item.key), [
+    'WANT_LISTEN',
+    'CANTONESE_FRAGMENT',
+    'FALSE_TITLE',
+    'LISTEN:EASY',
+    'LISTEN:ADVANCED',
+    'LISTEN:HARD',
+    'LISTEN:EXPERT',
+  ])
+  assert.match(surface, /home-entertainment-ranking-list/)
+  assert.match(surface, /homeText\.rankingBest/)
+  assert.match(surface, /暂无成绩/)
   assert.match(surface, /<SafeAvatar/)
   assert.match(surface, /status === 'unavailable'/)
   assert.match(route, /dynamic = 'force-dynamic'/)
   assert.match(route, /Cache-Control.*no-store/)
-  assert.match(styles, /home-entertainment-score-name[^\n]*text-overflow:ellipsis/)
+  assert.match(styles, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
+  assert.match(styles, /home-entertainment-mode-empty/)
 })

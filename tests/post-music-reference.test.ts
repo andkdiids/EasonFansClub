@@ -6,10 +6,13 @@ import test from 'node:test'
 import { RichPostContent } from '../components/posts/RichPostContent'
 import {
   collectMusicReferenceSongIds,
+  countMusicReferenceNodes,
   enrichMusicReferenceMetadata,
   extractPlainText,
+  MAX_RICH_TEXT_MUSIC_REFERENCES,
   validateRichPostContent,
 } from '../lib/rich-text'
+import { InvalidPostMusicReferenceError, validateAndNormalizePostMusicReferences } from '../lib/post-music-references'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -55,10 +58,60 @@ test('server song metadata enrichment keeps the song id and replaces forged disp
 test('music reference renderer links to the existing EasMusic song page', () => {
   const markup = renderToStaticMarkup(createElement(RichPostContent, { richContent: musicDocument, fallbackContent: '' }))
   assert.match(markup, /href="\/music\/song\/song-1"/u)
+  assert.match(markup, /class="rich-text-music-reference-play"/u)
+  assert.match(markup, /▶ 播放/u)
+  assert.match(markup, /<a[^>]*rich-text-music-reference-link[^>]*>[\s\S]*<\/a><button[^>]*rich-text-music-reference-play/u)
   assert.match(markup, /陀飞轮/u)
   assert.match(markup, /陈奕迅/u)
   assert.match(markup, /Time Flies/u)
   assert.doesNotMatch(markup, /musicReference|songId/u)
+})
+
+test('one music reference is enforced by the shared server normalization boundary', async () => {
+  const twoReferenceDocument = {
+    type: 'doc',
+    content: [{
+      type: 'paragraph',
+      content: [
+        { type: 'musicReference', attrs: { songId: 'song-1', title: '第一首' } },
+        { type: 'text', text: ' ' },
+        { type: 'musicReference', attrs: { songId: 'song-2', title: '第二首' } },
+      ],
+    }],
+  }
+  const validated = validateRichPostContent(twoReferenceDocument)
+  assert.equal(validated.valid, true)
+  if (!validated.valid) return
+
+  assert.equal(MAX_RICH_TEXT_MUSIC_REFERENCES, 1)
+  assert.equal(countMusicReferenceNodes(validated.value), 2)
+  await assert.rejects(
+    () => validateAndNormalizePostMusicReferences(validated.value, async () => []),
+    (error: unknown) => error instanceof InvalidPostMusicReferenceError
+      && error.reason === 'TOO_MANY'
+      && error.message === '每篇帖子最多引用 1 首歌曲',
+  )
+})
+
+test('post song playback is scoped to the detail component and only accepts full playback responses', () => {
+  const renderer = read('components/posts/RichPostContent.tsx')
+  const detailPage = read('app/posts/[postId]/page.tsx')
+  const editor = read('components/posts/RichTextEditor.tsx')
+  const css = read('app/globals.css')
+
+  assert.match(renderer, /getMusicPlaybackUrl\(songId\)/u)
+  assert.match(renderer, /body\.isFullPlayback !== true/u)
+  assert.match(renderer, /audio\.pause\(\)/u)
+  assert.match(renderer, /audio\.removeAttribute\('src'\)/u)
+  assert.match(renderer, /audio\.removeEventListener\('ended'/u)
+  assert.doesNotMatch(renderer, /MusicPlayerProvider|currentTrack|queue|recent/u)
+  assert.match(detailPage, /musicReferences=\{musicReferences\}/u)
+  assert.match(detailPage, /enableSongPlayback/u)
+  assert.match(detailPage, /scopeKey=\{post\.id\}/u)
+  assert.match(editor, /handlePaste:/u)
+  assert.match(editor, /openReferencePicker\('music'\)/u)
+  assert.match(editor, /createPortal\(referenceMenu, document\.body\)/u)
+  assert.match(css, /rich-text-reference-menu-viewport \{ position: fixed;[^}]*z-index: 70/u)
 })
 
 test('post editor and APIs use the existing search endpoint and validate references on create/edit', () => {

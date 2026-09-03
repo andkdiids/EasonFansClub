@@ -38,6 +38,14 @@ export type EntertainmentLeaderboardDefinition = {
   sourceMode: WantListenMode | GuessSongPublicMode | null
 }
 
+export type EntertainmentLeaderboardTarget = {
+  key: string
+  gameKey: EntertainmentLeaderboardGameKey
+  gameName: string
+  mode: string | null
+  modeLabel: string | null
+}
+
 const WANT_LISTEN_PERIODS = [
   { key: 'DAY', label: '今日榜' },
   { key: 'WEEK', label: '周榜' },
@@ -143,6 +151,39 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     sourceMode: null,
   },
 ] as const satisfies readonly EntertainmentLeaderboardDefinition[]
+
+/**
+ * Expands the canonical leaderboard registry into the concrete boards that
+ * can be shown in compact surfaces such as the home page. Games without a
+ * public ranking range are intentionally excluded; mode names are never
+ * duplicated in a second home-specific list.
+ */
+export function getRankableEntertainmentLeaderboardTargets(): EntertainmentLeaderboardTarget[] {
+  const targets: EntertainmentLeaderboardTarget[] = []
+  for (const definition of ENTERTAINMENT_LEADERBOARDS) {
+    if (!definition.ranges.length) continue
+    if (definition.modes?.length) {
+      for (const mode of definition.modes) {
+        targets.push({
+          key: `${definition.gameKey}:${mode.key}`,
+          gameKey: definition.gameKey,
+          gameName: definition.name,
+          mode: mode.key,
+          modeLabel: mode.label,
+        })
+      }
+      continue
+    }
+    targets.push({
+      key: definition.gameKey,
+      gameKey: definition.gameKey,
+      gameName: definition.name,
+      mode: null,
+      modeLabel: null,
+    })
+  }
+  return targets
+}
 
 export function getEntertainmentLeaderboardDefinition(gameKey: unknown) {
   return ENTERTAINMENT_LEADERBOARDS.find((item) => item.gameKey === gameKey) || null

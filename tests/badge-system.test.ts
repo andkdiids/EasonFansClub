@@ -236,8 +236,8 @@ test('major nickname surfaces render through the shared UserDisplayName componen
 
 test('homepage entertainment scores include equipped badges and link to profiles', () => {
   assert.match(read('lib/guess-song-leaderboard.ts'), /equippedBadgeMap = await getEquippedBadgesForUsers\(availableRows/)
-  assert.match(read('components/HomeLayoutSurface.tsx'), /score\.user\.equippedBadge/)
-  assert.match(read('components/HomeLayoutSurface.tsx'), /formatUid\(score\.user\.uid\)/)
+  assert.match(read('components/HomeLayoutSurface.tsx'), /user\.equippedBadge/)
+  assert.match(read('components/HomeLayoutSurface.tsx'), /formatUid\(user\.uid\)/)
 })
 
 test('badge admin mutations are transactional, logged and invalidate every equipped owner', () => {

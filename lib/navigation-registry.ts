@@ -162,6 +162,13 @@ export const NAVIGATION_REGISTRY = [
     activePrefixes: ['/badges'],
   },
   {
+    featureKey: 'ANGEL_GIFT', label: '天使的礼物', href: '/angel-gift', icon: 'gift', title: '天使的礼物',
+    defaultSortOrder: 18, defaultEnabled: true, isManageable: true,
+    showInCenter: true, showInQuickNavigation: true, showInDesktopSidebar: true,
+    sidebarSection: 'quick', editable: true, hideable: true,
+    activePrefixes: ['/angel-gift'],
+  },
+  {
     featureKey: 'MATERIAL_REDEMPTIONS', label: '还有什么可以送给你', href: '/material-redemptions', icon: 'gift', title: '还有什么可以送给你',
     defaultSortOrder: 18, defaultEnabled: true, isManageable: true,
     showInCenter: true, showInQuickNavigation: true, showInDesktopSidebar: true,

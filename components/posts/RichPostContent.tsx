@@ -1,7 +1,10 @@
+'use client'
+
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   legacyHtmlToRichContent,
   plainTextToRichContent,
@@ -9,15 +12,229 @@ import {
   richTextFontSizeClass,
   validateRichPostContent,
   type RichTextBlockNode,
+  type RichTextContent,
   type RichTextInlineNode,
   type RichTextMark,
 } from '@/lib/rich-text'
 import { formatUid } from '@/lib/uid'
+import { getMusicPlaybackUrl } from '@/lib/music-playback'
+
+export type PostMusicReferenceDisplay = {
+  id: string
+  title: string
+  artist: string
+  album: string
+  coverUrl?: string | null
+}
 
 type RichPostContentProps = {
   richContent?: unknown | null
   fallbackContent: string
   className?: string
+  musicReferences?: readonly PostMusicReferenceDisplay[]
+  enableSongPlayback?: boolean
+  scopeKey?: string
+}
+
+type PostSongPlayerContextValue = {
+  songId: string
+  playing: boolean
+  loading: boolean
+  ended: boolean
+  ready: boolean
+  unavailable: boolean
+  toggle: () => void
+}
+
+const PostSongPlayerContext = React.createContext<PostSongPlayerContextValue | null>(null)
+
+function resetPostSongAudio(audio: HTMLAudioElement) {
+  audio.pause()
+  try {
+    audio.currentTime = 0
+  } catch {
+    // The media element can be in an unloaded state during teardown.
+  }
+  audio.removeAttribute('src')
+  audio.load()
+}
+
+function PostScopedSongPlayer({
+  songId,
+  scopeKey,
+  children,
+}: Readonly<{
+  songId: string
+  scopeKey?: string
+  children: ReactNode
+}>) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const requestControllerRef = useRef<AbortController | null>(null)
+  const requestGenerationRef = useRef(0)
+  const playerScopeRef = useRef(`${scopeKey || ''}:${songId}`)
+  const [playing, setPlaying] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [ended, setEnded] = useState(false)
+  const [ready, setReady] = useState(false)
+  const [unavailable, setUnavailable] = useState(false)
+  const [resolvedUrl, setResolvedUrl] = useState('')
+
+  const stopPlayback = useCallback(() => {
+    requestGenerationRef.current += 1
+    requestControllerRef.current?.abort()
+    requestControllerRef.current = null
+    const audio = audioRef.current
+    if (audio) resetPostSongAudio(audio)
+    setPlaying(false)
+    setLoading(false)
+    setEnded(false)
+    setReady(false)
+    setUnavailable(false)
+    setResolvedUrl('')
+  }, [])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.preload = 'metadata'
+
+    const onPlaying = () => {
+      setPlaying(true)
+      setLoading(false)
+      setEnded(false)
+    }
+    const onPause = () => setPlaying(false)
+    const onEnded = () => {
+      setPlaying(false)
+      setLoading(false)
+      setEnded(true)
+    }
+    const onError = () => {
+      if (!audio.currentSrc && !audio.src) return
+      setPlaying(false)
+      setLoading(false)
+      setUnavailable(true)
+    }
+
+    audio.addEventListener('playing', onPlaying)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('error', onError)
+
+    return () => {
+      requestGenerationRef.current += 1
+      requestControllerRef.current?.abort()
+      requestControllerRef.current = null
+      audio.removeEventListener('playing', onPlaying)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('error', onError)
+      resetPostSongAudio(audio)
+    }
+  }, [])
+
+  useEffect(() => {
+    const nextScope = `${scopeKey || ''}:${songId}`
+    if (playerScopeRef.current === nextScope) return
+    playerScopeRef.current = nextScope
+    stopPlayback()
+  }, [scopeKey, songId, stopPlayback])
+
+  const toggle = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio || loading || unavailable) return
+
+    if (ready && resolvedUrl && audio.currentSrc) {
+      if (!audio.paused) {
+        audio.pause()
+        return
+      }
+      if (audio.ended || ended) {
+        audio.currentTime = 0
+        setEnded(false)
+      }
+      setLoading(true)
+      void audio.play().catch(() => {
+        setPlaying(false)
+        setLoading(false)
+        setUnavailable(true)
+      })
+      return
+    }
+
+    const generation = requestGenerationRef.current + 1
+    requestGenerationRef.current = generation
+    const controller = new AbortController()
+    requestControllerRef.current = controller
+    setLoading(true)
+    setPlaying(false)
+    setEnded(false)
+    setUnavailable(false)
+
+    void (async () => {
+      try {
+        const response = await fetch(getMusicPlaybackUrl(songId), {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        })
+        let payload: unknown = null
+        try {
+          payload = await response.json()
+        } catch {
+          payload = null
+        }
+        const body = payload && typeof payload === 'object'
+          ? payload as { ok?: unknown; url?: unknown; isFullPlayback?: unknown }
+          : null
+        if (requestGenerationRef.current !== generation) return
+        if (!response.ok || body?.ok !== true || body.isFullPlayback !== true || typeof body.url !== 'string' || !body.url) {
+          setUnavailable(true)
+          return
+        }
+
+        audio.src = body.url
+        audio.currentTime = 0
+        audio.load()
+        setResolvedUrl(body.url)
+        setReady(true)
+        try {
+          await audio.play()
+        } catch {
+          if (requestGenerationRef.current === generation) {
+            setPlaying(false)
+            setUnavailable(true)
+          }
+        }
+      } catch (error) {
+        if (requestGenerationRef.current !== generation) return
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setUnavailable(true)
+      } finally {
+        if (requestGenerationRef.current === generation) {
+          requestControllerRef.current = null
+          setLoading(false)
+        }
+      }
+    })()
+  }, [ended, loading, ready, resolvedUrl, songId, unavailable])
+
+  const contextValue = useMemo<PostSongPlayerContextValue>(() => ({
+    songId,
+    playing,
+    loading,
+    ended,
+    ready,
+    unavailable,
+    toggle,
+  }), [ended, loading, playing, ready, songId, toggle, unavailable])
+
+  return (
+    <PostSongPlayerContext.Provider value={contextValue}>
+      {children}
+      <audio ref={audioRef} className="post-scoped-song-audio" aria-hidden="true" preload="metadata" />
+    </PostSongPlayerContext.Provider>
+  )
 }
 
 function renderMarks(content: ReactNode, marks: RichTextMark[] | undefined, key: string) {
@@ -53,23 +270,72 @@ function formatReferenceDate(value: string | undefined) {
   }).format(date)
 }
 
-function renderInline(node: RichTextInlineNode, key: string) {
-  if (node.type === 'hardBreak') return <br key={key} />
-  if (node.type === 'musicReference') {
-    return (
+type RichPostRenderContext = {
+  musicReferences: ReadonlyMap<string, PostMusicReferenceDisplay>
+  enableSongPlayback: boolean
+}
+
+function MusicReferenceInline({
+  node,
+  context,
+}: Readonly<{
+  node: Extract<RichTextInlineNode, { type: 'musicReference' }>
+  context: RichPostRenderContext
+}>) {
+  const player = useContext(PostSongPlayerContext)
+  const currentSong = context.musicReferences.get(node.attrs.songId)
+  const title = currentSong?.title || node.attrs.title || '歌曲引用'
+  const artist = currentSong?.artist || node.attrs.artist || ''
+  const album = currentSong?.album || node.attrs.album || ''
+  const coverUrl = currentSong?.coverUrl || null
+  const songPlayer = context.enableSongPlayback && player?.songId === node.attrs.songId ? player : null
+  const playLabel = songPlayer?.unavailable
+    ? '暂不可播放'
+    : songPlayer?.loading
+      ? '加载中…'
+      : songPlayer?.playing
+        ? '❚❚ 暂停'
+        : songPlayer?.ready && !songPlayer.ended
+          ? '▶ 继续播放'
+          : '▶ 播放'
+
+  return (
+    <span className="rich-text-music-reference" role="group" aria-label={`歌曲引用：${title}`}>
       <Link
-        key={key}
         href={`/music/song/${encodeURIComponent(node.attrs.songId)}`}
-        className="rich-text-music-reference"
-        aria-label={`查看歌曲：${node.attrs.title || '歌曲引用'}`}
+        className="rich-text-music-reference-link"
+        aria-label={`查看歌曲：${title}`}
       >
-        <span className="rich-text-music-reference-icon" aria-hidden="true">♪</span>
+        <span className="rich-text-music-reference-icon" aria-hidden="true">
+          {coverUrl ? <Image src={coverUrl} alt="" width={40} height={40} className="rich-text-music-reference-cover" /> : '♪'}
+        </span>
         <span className="rich-text-music-reference-copy">
-          <strong>{node.attrs.title || '歌曲引用'}</strong>
-          {node.attrs.artist || node.attrs.album ? <small>{[node.attrs.artist, node.attrs.album ? `《${node.attrs.album}》` : ''].filter(Boolean).join(' · ')}</small> : null}
+          <strong>{title}</strong>
+          {artist || album ? <small>{[artist, album ? `《${album}》` : ''].filter(Boolean).join(' · ')}</small> : null}
         </span>
       </Link>
-    )
+      {songPlayer ? (
+        <button
+          type="button"
+          className="rich-text-music-reference-play"
+          aria-label={playLabel}
+          disabled={songPlayer.unavailable || songPlayer.loading}
+          onClick={(event) => {
+            event.stopPropagation()
+            songPlayer.toggle()
+          }}
+        >
+          {playLabel}
+        </button>
+      ) : null}
+    </span>
+  )
+}
+
+function renderInline(node: RichTextInlineNode, key: string, context: RichPostRenderContext) {
+  if (node.type === 'hardBreak') return <br key={key} />
+  if (node.type === 'musicReference') {
+    return <MusicReferenceInline key={key} node={node} context={context} />
   }
   if (node.type === 'postReference') {
     const unavailable = node.attrs.available === false
@@ -188,31 +454,31 @@ function renderInline(node: RichTextInlineNode, key: string) {
   return <span key={key}>{renderMarks(node.text, node.marks, key)}</span>
 }
 
-function renderInlineContent(content: RichTextInlineNode[] | undefined, key: string) {
-  return (content || []).map((node, index) => renderInline(node, key + '-' + index))
+function renderInlineContent(content: RichTextInlineNode[] | undefined, key: string, context: RichPostRenderContext) {
+  return (content || []).map((node, index) => renderInline(node, key + '-' + index, context))
 }
 
-function renderBlock(block: RichTextBlockNode, key: string): ReactNode {
+function renderBlock(block: RichTextBlockNode, key: string, context: RichPostRenderContext): ReactNode {
   if (block.type === 'paragraph') {
-    return <p key={key}>{renderInlineContent(block.content, key)}</p>
+    return <p key={key}>{renderInlineContent(block.content, key, context)}</p>
   }
   if (block.type === 'heading') {
     const tag = ('h' + block.attrs.level) as 'h1' | 'h2' | 'h3'
     const Heading = tag
-    return <Heading key={key}>{renderInlineContent(block.content, key)}</Heading>
+    return <Heading key={key}>{renderInlineContent(block.content, key, context)}</Heading>
   }
   if (block.type === 'bulletList') {
-    return <ul key={key}>{(block.content || []).map((item, index) => renderBlock(item, key + '-item-' + index))}</ul>
+    return <ul key={key}>{(block.content || []).map((item, index) => renderBlock(item, key + '-item-' + index, context))}</ul>
   }
   if (block.type === 'orderedList') {
     const start = block.attrs?.start && block.attrs.start > 1 ? block.attrs.start : undefined
-    return <ol key={key} start={start}>{(block.content || []).map((item, index) => renderBlock(item, key + '-item-' + index))}</ol>
+    return <ol key={key} start={start}>{(block.content || []).map((item, index) => renderBlock(item, key + '-item-' + index, context))}</ol>
   }
   if (block.type === 'listItem') {
-    return <li key={key}>{(block.content || []).map((child, index) => renderBlock(child, key + '-block-' + index))}</li>
+    return <li key={key}>{(block.content || []).map((child, index) => renderBlock(child, key + '-block-' + index, context))}</li>
   }
   if (block.type === 'blockquote') {
-    return <blockquote key={key}>{(block.content || []).map((child, index) => renderBlock(child, key + '-block-' + index))}</blockquote>
+    return <blockquote key={key}>{(block.content || []).map((child, index) => renderBlock(child, key + '-block-' + index, context))}</blockquote>
   }
   if (block.type === 'horizontalRule') return <hr key={key} />
   return (
@@ -222,7 +488,35 @@ function renderBlock(block: RichTextBlockNode, key: string): ReactNode {
   )
 }
 
-export function RichPostContent({ richContent, fallbackContent, className = '' }: RichPostContentProps) {
+function findFirstMusicReference(value: RichTextContent): Extract<RichTextInlineNode, { type: 'musicReference' }> | null {
+  let found: Extract<RichTextInlineNode, { type: 'musicReference' }> | null = null
+  const visitInline = (node: RichTextInlineNode) => {
+    if (!found && node.type === 'musicReference') found = node
+  }
+  const visitBlock = (block: RichTextBlockNode): void => {
+    if (found) return
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      block.content?.forEach(visitInline)
+      return
+    }
+    if (block.type === 'listItem' || block.type === 'blockquote') {
+      block.content?.forEach(visitBlock)
+      return
+    }
+    if (block.type === 'bulletList' || block.type === 'orderedList') block.content?.forEach(visitBlock)
+  }
+  value.content.forEach(visitBlock)
+  return found as Extract<RichTextInlineNode, { type: 'musicReference' }> | null
+}
+
+export function RichPostContent({
+  richContent,
+  fallbackContent,
+  className = '',
+  musicReferences = [],
+  enableSongPlayback = true,
+  scopeKey,
+}: RichPostContentProps) {
   const result = validateRichPostContent(richContent)
   const legacy = legacyHtmlToRichContent(fallbackContent)
   const fallbackDocument = legacy || (fallbackContent ? plainTextToRichContent(fallbackContent) : null)
@@ -230,14 +524,33 @@ export function RichPostContent({ richContent, fallbackContent, className = '' }
     ? result.value
     : fallbackDocument
   const wrapperClassName = className ? 'rich-post-content ' + className : 'rich-post-content'
+  const musicReferenceMap = useMemo(() => new Map(musicReferences.map((song) => [song.id, song])), [musicReferences])
 
   if (!document) {
     return <div className={wrapperClassName + ' whitespace-pre-wrap break-words'}>{fallbackContent}</div>
   }
 
-  return (
+  const renderContext: RichPostRenderContext = {
+    musicReferences: musicReferenceMap,
+    enableSongPlayback,
+  }
+  const firstReference = findFirstMusicReference(document)
+  const firstSong = firstReference
+    ? musicReferenceMap.get(firstReference.attrs.songId) || {
+        id: firstReference.attrs.songId,
+        title: firstReference.attrs.title || '歌曲引用',
+        artist: firstReference.attrs.artist || '',
+        album: firstReference.attrs.album || '',
+      }
+    : null
+  const contentMarkup = (
     <div className={wrapperClassName}>
-      {document.content.map((block, index) => renderBlock(block, 'block-' + index))}
+      {document.content.map((block, index) => renderBlock(block, 'block-' + index, renderContext))}
     </div>
   )
+
+  if (enableSongPlayback && firstSong) {
+    return <PostScopedSongPlayer key={`${scopeKey || ''}:${firstSong.id}`} songId={firstSong.id} scopeKey={scopeKey}>{contentMarkup}</PostScopedSongPlayer>
+  }
+  return contentMarkup
 }

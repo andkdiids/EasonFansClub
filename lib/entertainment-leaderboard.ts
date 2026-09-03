@@ -196,6 +196,7 @@ export async function getEntertainmentLeaderboard(input: {
   date?: unknown
   userId: string
   limit?: number
+  now?: Date
 }): Promise<EntertainmentLeaderboardResult> {
   const definition = getEntertainmentLeaderboardDefinition(input.gameKey)
   if (!definition) throw new EntertainmentLeaderboardError('请选择有效的娱乐天空游戏')
@@ -203,7 +204,7 @@ export async function getEntertainmentLeaderboard(input: {
   const mode = resolveMode(definition, input.mode)
   if (!definition.source || definition.ranges.length === 0) return unavailableResult(definition)
 
-  const now = new Date()
+  const now = input.now || new Date()
   const hasUnifiedRange = input.range !== undefined && input.range !== null && input.range !== ''
   let unifiedRange: GameRankingRange | null = null
   if (hasUnifiedRange) {

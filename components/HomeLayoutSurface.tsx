@@ -9,8 +9,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
-import { GUESS_SONG_MODE_CONFIG, GUESS_SONG_PUBLIC_MODES, type GuessSongPublicMode } from '@/lib/guess-song-config'
-import type { GuessSongModeHighScore, GuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
+import type { HomeEntertainmentRanking, HomeEntertainmentRankingMode } from '@/lib/home-data'
 import type { HomeUpdate } from '@/lib/home-announcement'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
@@ -40,9 +39,9 @@ const homeText = {
   noToday: '今天还没有历史记录，先留下一个占位。',
   entertainment: '娱乐天空',
   rankingMore: '进入游戏中心',
-  rankingBest: '历史最高分',
+  rankingBest: '本周最高分',
   noRanking: '暂无成绩，快去挑战吧。',
-  rankingLoading: '正在读取历史成绩...',
+  rankingLoading: '正在读取本周成绩...',
   rankingUnavailable: '成绩暂时无法读取，请稍后刷新。',
   randomAlbums: '每日推荐专辑',
   albumsMore: '更多',
@@ -87,26 +86,19 @@ type Stats = { checkIns: { id: string }[] }
 type SiteStats = { memberCount: number; todayCheckIns: number; todayBirthdays: number }
 type DailyMusic = { id: string; title: string; artist: string; releaseYear: number; lyrics: string | null; coverUrl: string | null; previewUrl: string; previewDuration: number; isFullPlayback: false; likedByMe: boolean; likeCount: number; album: { id: string; name: string; coverUrl: string | null } }
 type TodayEvent = { id: string; date: string; year: number; month: number; day: number; type: string; title: string; content: string; imageUrl: string | null; source: 'AUTO' | 'ADMIN'; reference: string | null; status: 'APPROVED'; href: string | null }
-type EntertainmentRanking = Omit<GuessSongModeHighScores, 'status'> & { status: GuessSongModeHighScores['status'] | 'loading' }
+type EntertainmentRanking = Omit<HomeEntertainmentRanking, 'status'> & { status: HomeEntertainmentRanking['status'] | 'loading' }
 type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; locationName: string | null; startsAt: string | null; endsAt: string | null; registrationStartAt: string | null; registrationEndAt: string | null; signupLimit: number | null; signupCount: number; statusLabel: HomeActivityStatusLabel }
 type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
 type HomeSalonPost = { id: string; category: string; title: string | null; approvedAt: string; thumbnailUrl: string | null }
 type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; salonPosts: HomeSalonPost[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; checkedInToday: boolean; todayCheckInCount: number; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
 
-const modeLabels = Object.fromEntries(
-  GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, GUESS_SONG_MODE_CONFIG[mode].label]),
-) as Record<GuessSongPublicMode, string>
-
-function emptyEntertainmentModes() {
-  return Object.fromEntries(GUESS_SONG_PUBLIC_MODES.map((mode) => [mode, null])) as Record<GuessSongPublicMode, GuessSongModeHighScore | null>
-}
-
 const loadingEntertainmentRanking: EntertainmentRanking = {
   status: 'loading',
-  periodType: 'HISTORY',
-  periodKey: 'ALL',
-  modes: emptyEntertainmentModes(),
-  mobileBest: null,
+  periodType: 'THIS_WEEK',
+  timezone: 'Asia/Shanghai',
+  rangeKey: 'this-week',
+  periodKey: null,
+  modes: [],
 }
 
 type HomeDevice = 'desktop' | 'mobile'
@@ -148,11 +140,11 @@ function yearsFromToday(value: string) {
   return Math.max(0, today.year - eventDate.year)
 }
 
-function EntertainmentScoreUser({ score }: { score: GuessSongModeHighScore }) {
+function EntertainmentScoreUser({ user }: { user: NonNullable<HomeEntertainmentRankingMode['user']> }) {
   return (
-    <div className="home-entertainment-score-user" title={score.user.name}>
-      <span className="home-entertainment-score-avatar"><SafeAvatar src={score.user.avatarUrl} name={score.user.name} uid={score.user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
-      <Link href={`/user/${formatUid(score.user.uid)}`} className="home-entertainment-score-name"><UserDisplayName name={score.user.name} uid={score.user.uid} badge={score.user.equippedBadge} compact /></Link>
+    <div className="home-entertainment-score-user" title={user.displayName || user.nickname}>
+      <span className="home-entertainment-score-avatar"><SafeAvatar src={user.avatarUrl} name={user.displayName || user.nickname} uid={user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
+      <Link href={`/user/${formatUid(user.uid)}`} className="home-entertainment-score-name"><UserDisplayName name={user.displayName || user.nickname} uid={user.uid} badge={user.equippedBadge} compact /></Link>
     </div>
   )
 }
@@ -209,8 +201,6 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
   const todayTouchCurrent = useRef<{ x: number; y: number } | null>(null)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
   const dailyPrescription = getHomeDailyPrescriptionDisplay(data.dailyPrescriptionReward)
-  const topRanking = data.entertainmentRanking?.mobileBest || null
-  const entertainmentModes = data.entertainmentRanking?.modes || emptyEntertainmentModes()
   const dailyMusicCoverUrl = publicImageVariantUrl(data.dailyMusic?.album.coverUrl, 'thumb-sm') || null
   useEffect(() => {
     const controller = new AbortController()
@@ -364,33 +354,33 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
     </section>
   )
 
-  const renderEntertainmentPanel = () => (
-    <section className="community-panel home-entertainment-panel" aria-label="Entertainment ranking">
-      <header><h2>{homeText.entertainment}</h2><Link href="/games" className="home-module-entry">{homeText.rankingMore} {'>>'}</Link></header>
-      <div className="home-entertainment-content">
-        <div className="home-entertainment-mobile-score">
-          {data.entertainmentRanking?.status === 'ready' && topRanking ? <>
-            <span className="home-entertainment-ranking-caption">{homeText.rankingBest}</span>
-            <EntertainmentScoreUser score={topRanking} />
-            <strong className="home-entertainment-mobile-mode">{modeLabels[topRanking.mode]}模式</strong>
-            <strong className="home-entertainment-mobile-score-value">{fmt(topRanking.score)} <small>分</small></strong>
-          </> : data.entertainmentRanking?.status === 'empty' ? <p className="community-empty home-entertainment-empty">{homeText.noRanking}</p> : data.entertainmentRanking?.status === 'unavailable' ? <p className="community-empty home-entertainment-empty">{homeText.rankingUnavailable}</p> : <p className="community-empty home-entertainment-empty">{homeText.rankingLoading}</p>}
-        </div>
-        <div className="home-entertainment-desktop-scores">
-          {data.entertainmentRanking?.status === 'ready' ? GUESS_SONG_PUBLIC_MODES.map((mode) => {
-            const score = entertainmentModes[mode]
-            return <div className="home-entertainment-mode-score" key={mode}>
-              <span className="home-entertainment-mode-label">{modeLabels[mode]}模式</span>
-              {score ? <>
-                <EntertainmentScoreUser score={score} />
-                <strong className="home-entertainment-mode-score-value">{fmt(score.score)} <small>分</small></strong>
-              </> : <span className="home-entertainment-mode-empty">暂无成绩</span>}
+  const renderEntertainmentPanel = () => {
+    const ranking = data.entertainmentRanking
+    return (
+      <section className="community-panel home-entertainment-panel" aria-label="Entertainment ranking">
+        <header><h2>{homeText.entertainment}</h2><Link href="/games" className="home-module-entry">{homeText.rankingMore} {'>>'}</Link></header>
+        <div className="home-entertainment-content">
+          {ranking?.status === 'loading' ? <p className="community-empty home-entertainment-empty">{homeText.rankingLoading}</p> : null}
+          {ranking?.status === 'unavailable' ? <p className="community-empty home-entertainment-empty">{homeText.rankingUnavailable}</p> : null}
+          {ranking && ranking.status !== 'loading' && ranking.status !== 'unavailable' ? (
+            <div className="home-entertainment-ranking-list" aria-label="本周各模式最高分">
+              <p className="home-entertainment-ranking-caption">{homeText.rankingBest}</p>
+              <div className="home-entertainment-ranking-head" aria-hidden="true"><span>模式</span><span>玩家</span><span>分数</span></div>
+              {ranking.modes.map((item) => (
+                <div className="home-entertainment-mode-score" key={item.key}>
+                  <span className="home-entertainment-mode-label">{item.gameName}{item.modeLabel ? ` · ${item.modeLabel}` : ''}</span>
+                  <div className="home-entertainment-score-cell">
+                    {item.user && item.score !== null ? <EntertainmentScoreUser user={item.user} /> : <span className="home-entertainment-mode-empty">{item.status === 'unavailable' ? '暂时无法读取' : '暂无成绩'}</span>}
+                  </div>
+                  <strong className="home-entertainment-mode-score-value">{item.score !== null ? <>{fmt(item.score)} <small>分</small></> : '—'}</strong>
+                </div>
+              ))}
             </div>
-          }) : <p className="community-empty home-entertainment-empty">{data.entertainmentRanking?.status === 'empty' ? homeText.noRanking : data.entertainmentRanking?.status === 'unavailable' ? homeText.rankingUnavailable : homeText.rankingLoading}</p>}
+          ) : null}
         </div>
-      </div>
-    </section>
-  )
+      </section>
+    )
+  }
 
   // 今日模块：≤2 条直接展开为普通列表；桌面端 >2 条显示双卡轮播，移动端保留单卡轮播。
   const renderTodayPanel = () => {
@@ -454,7 +444,7 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
         {data.activities.map((activity) => {
           const posterUrl = activity.coverUrl || activity.bannerUrl
           return <Link key={activity.id} href={`/activities/${activity.id}`} className="home-concert-card home-activity-card">
-            <span className="home-concert-cover">{posterUrl ? <Image src={posterUrl} alt={`${activity.title} 海报`} fill sizes="64px" loading="lazy" className="object-cover object-center" /> : '活动'}</span>
+            <span className="home-concert-cover">{posterUrl ? <Image src={posterUrl} alt={`${activity.title} 海报`} fill sizes="52px" loading="lazy" className="object-cover object-center" /> : '活动'}</span>
             <span className="home-concert-copy home-activity-copy">
               <strong className="home-activity-title">{activity.title}</strong>
               <time>{shortDateTime(activity.startsAt) || '时间待定'}</time>

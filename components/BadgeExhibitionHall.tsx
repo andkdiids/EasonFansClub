@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { BadgeCenterTabs } from '@/components/BadgeCenterTabs'
 import { BadgeDetailDialog } from '@/components/BadgeCollectionPanel'
 import { BadgeImage, BadgeName } from '@/components/UserDisplayName'
@@ -148,6 +149,12 @@ export function BadgeExhibitionHall({ gallery }: Props) {
           <small>完成度 {gallery.completionPercentage}%</small>
         </div>
       </header>
+
+      <Link href="/angel-gift" className="badge-museum-angel-gift-entry">
+        <span aria-hidden="true">✦</span>
+        <span><strong>天使的礼物</strong><small>去药房执一味不知道名字的药。</small></span>
+        <span aria-hidden="true">→</span>
+      </Link>
 
       <BadgeCenterTabs active="all" />
 

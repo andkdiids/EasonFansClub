@@ -33,6 +33,9 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   ACTIVITY_REGISTRATION_FEE: '活动报名挂号费',
   ACTIVITY_REGISTRATION_REFUND: '活动报名退款',
   ACTIVITY_LOTTERY_PRIZE: '活动抽奖虚拟奖品',
+  PHARMACY_DRAW_COST: '天使的礼物·执药消耗',
+  PHARMACY_PRIZE_REWARD: '天使的礼物·药房找零',
+  PHARMACY_DUPLICATE_RECYCLE: '天使的礼物·余药回收',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
@@ -59,6 +62,8 @@ type RegistrationFeeAwardInput = {
   activityRegistrationId?: string
   badgeId?: string
   dailyDrawId?: string
+  pharmacyDrawId?: string
+  pharmacyRecycleLogId?: string
 }
 
 export async function awardRegistrationFee(
@@ -121,6 +126,8 @@ export async function awardRegistrationFee(
       activityRegistrationId: input.activityRegistrationId,
       badgeId: input.badgeId,
       dailyDrawId: input.dailyDrawId,
+      pharmacyDrawId: input.pharmacyDrawId,
+      pharmacyRecycleLogId: input.pharmacyRecycleLogId,
       createdAt: now,
     },
   })
@@ -200,6 +207,8 @@ type RegistrationFeeConsumptionInput = {
   checkInId?: string
   activityId?: string
   activityRegistrationId?: string
+  pharmacyDrawId?: string
+  pharmacyRecycleLogId?: string
 }
 
 /** Atomically consumes registration fees without ever allowing a negative balance. */
@@ -235,6 +244,8 @@ export async function consumeRegistrationFee(
       checkInId: input.checkInId,
       activityId: input.activityId,
       activityRegistrationId: input.activityRegistrationId,
+      pharmacyDrawId: input.pharmacyDrawId,
+      pharmacyRecycleLogId: input.pharmacyRecycleLogId,
       dateKey,
       createdAt: now,
     },

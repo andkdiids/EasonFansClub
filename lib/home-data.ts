@@ -5,7 +5,8 @@ import { getDailyMusicRecommendation, getFallbackDailyMusicRecommendation } from
 import { safeDb } from '@/lib/db-timeout'
 import { publicImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { getGuessSongModeHighScores } from '@/lib/guess-song-leaderboard'
+import { getEntertainmentLeaderboard, type EntertainmentLeaderboardResult } from '@/lib/entertainment-leaderboard'
+import { getRankableEntertainmentLeaderboardTargets, type EntertainmentLeaderboardTarget } from '@/lib/entertainment-leaderboard-registry'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { buildConcertSlugPath } from '@/lib/music-slug'
@@ -437,9 +438,85 @@ export async function getHomeTodayEvents() {
   return cachedHomeData(`home.today:${month}-${day}`, () => getTodayEventRecords())
 }
 
-export async function getHomeEntertainmentRanking(userId?: string) {
-  void userId
-  return getGuessSongModeHighScores()
+type HomeEntertainmentTopUser = Pick<EntertainmentLeaderboardResult['rows'][number]['user'], 'id' | 'uid' | 'nickname' | 'displayName' | 'avatarUrl' | 'equippedBadge'>
+
+export type HomeEntertainmentRankingMode = {
+  key: string
+  gameKey: string
+  gameName: string
+  mode: string | null
+  modeLabel: string | null
+  status: 'ready' | 'empty' | 'unavailable'
+  score: number | null
+  user: HomeEntertainmentTopUser | null
+}
+
+export type HomeEntertainmentRanking = {
+  status: 'ready' | 'empty' | 'unavailable'
+  periodType: 'THIS_WEEK'
+  timezone: 'Asia/Shanghai'
+  rangeKey: 'this-week'
+  periodKey: string | null
+  modes: HomeEntertainmentRankingMode[]
+}
+
+function homeEntertainmentModeResult(
+  target: EntertainmentLeaderboardTarget,
+  result: EntertainmentLeaderboardResult | null,
+): HomeEntertainmentRankingMode {
+  const top = result?.rows.find((row) => row.rank === 1) || result?.rows[0] || null
+  return {
+    key: target.key,
+    gameKey: target.gameKey,
+    gameName: target.gameName,
+    mode: target.mode,
+    modeLabel: target.modeLabel,
+    status: result?.status || 'unavailable',
+    score: top?.primaryValue ?? null,
+    user: top ? {
+      id: top.user.id,
+      uid: top.user.uid,
+      nickname: top.user.nickname,
+      displayName: top.user.displayName,
+      avatarUrl: top.user.avatarUrl,
+      equippedBadge: top.user.equippedBadge || null,
+    } : null,
+  }
+}
+
+/**
+ * The home card reads the same concrete boards as the formal entertainment
+ * center. Only the shared THIS_WEEK range is requested here; its resolver,
+ * filtering, tie-breaks and mode mapping all stay in the existing services.
+ */
+export async function getHomeEntertainmentRanking(userId?: string, now = new Date()): Promise<HomeEntertainmentRanking> {
+  const targets = getRankableEntertainmentLeaderboardTargets()
+  const results = await Promise.all(targets.map(async (target) => {
+    try {
+      return await getEntertainmentLeaderboard({
+        gameKey: target.gameKey,
+        mode: target.mode || undefined,
+        range: 'THIS_WEEK',
+        userId: userId || '',
+        limit: 1,
+        now,
+      })
+    } catch (error) {
+      console.error('[home.entertainment-ranking]', { gameKey: target.gameKey, mode: target.mode }, error)
+      return null
+    }
+  }))
+  const modes = targets.map((target, index) => homeEntertainmentModeResult(target, results[index]))
+  const successfulResults = results.filter((result): result is EntertainmentLeaderboardResult => result !== null)
+  const hasScore = modes.some((mode) => mode.status === 'ready' && mode.score !== null)
+  return {
+    status: successfulResults.length === 0 ? 'unavailable' : hasScore ? 'ready' : 'empty',
+    periodType: 'THIS_WEEK',
+    timezone: 'Asia/Shanghai',
+    rangeKey: 'this-week',
+    periodKey: successfulResults.find((result) => result.periodKey)?.periodKey || null,
+    modes,
+  }
 }
 
 export async function getHomeSiteStats() {

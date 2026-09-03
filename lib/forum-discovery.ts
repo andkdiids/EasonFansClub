@@ -4,8 +4,11 @@ export const FORUM_DISCOVERY_PAGE_SIZE = 12
 export const FORUM_DISCOVERY_MIN_PAGE_SIZE = 8
 export const FORUM_DISCOVERY_MAX_PAGE_SIZE = 20
 export const FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT = 60
+export const FORUM_PRESENTATION_MODE_STORAGE_KEY = 'forum-presentation-mode'
+export const FORUM_FISH_MINIMAL_STORAGE_KEY = 'forum-fish-minimal'
 
 export type ForumDiscoveryMode = 'recommend' | 'latest' | 'hot'
+export type ForumPresentationMode = 'xiaochenshu' | 'fish'
 
 export type ForumDiscoveryTab = { value: string; label: string }
 
@@ -28,6 +31,10 @@ export function parseForumDiscoveryMode(value: unknown): ForumDiscoveryMode | nu
   return value === 'recommend' || value === 'latest' || value === 'hot' ? value : null
 }
 
+export function parseForumPresentationMode(value: unknown): ForumPresentationMode {
+  return value === 'fish' ? 'fish' : 'xiaochenshu'
+}
+
 export function parseForumDiscoveryLimit(value: unknown) {
   if (value === undefined) return FORUM_DISCOVERY_PAGE_SIZE
   if (typeof value !== 'number' || !Number.isInteger(value)) return null
@@ -40,10 +47,35 @@ export type ForumDiscoveryCover = {
   width: number | null
   height: number | null
 }
+
+export type ForumDiscoveryMedia = {
+  id: string
+  type: 'IMAGE' | 'VIDEO'
+  url: string
+  thumbnail: string | null
+  width: number | null
+  height: number | null
+  sortOrder: number
+}
+
+export type ForumDiscoverySticker = {
+  url: string
+  type: 'STATIC' | 'GIF'
+}
+
+export type ForumDiscoveryMediaSummary = {
+  imageCount: number
+  gifCount: number
+  videoCount: number
+}
+
 export type ForumDiscoveryPost = {
   id: string
   title: string
+  contentPreview: string
+  contentImages: string[]
   ipRegion: string | null
+  viewCount: number
   likeCount: number
   favoriteCount: number
   replyCount: number
@@ -53,6 +85,9 @@ export type ForumDiscoveryPost = {
   updatedAt: string
   likedByMe: boolean
   favoritedByMe: boolean
+  media: ForumDiscoveryMedia[]
+  sticker: ForumDiscoverySticker | null
+  mediaSummary: ForumDiscoveryMediaSummary
   board: { name: string; slug: string }
   author: {
     id: string

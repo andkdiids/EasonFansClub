@@ -29,6 +29,10 @@ export const adminAuditOperations = {
   ACTIVITY_LOTTERY_DRAW: 'ACTIVITY_LOTTERY_DRAW',
   ACTIVITY_LOTTERY_MANUAL_DRAW: 'LOTTERY_MANUAL_DRAW',
   ACTIVITY_REDEMPTION_CONFIRM: 'ACTIVITY_REDEMPTION_CONFIRM',
+  ANGEL_GIFT_CAMPAIGN_CREATE: 'ANGEL_GIFT_CAMPAIGN_CREATE',
+  ANGEL_GIFT_CAMPAIGN_UPDATE: 'ANGEL_GIFT_CAMPAIGN_UPDATE',
+  ANGEL_GIFT_CAMPAIGN_STATUS: 'ANGEL_GIFT_CAMPAIGN_STATUS',
+  ANGEL_GIFT_PRIZE_UPDATE: 'ANGEL_GIFT_PRIZE_UPDATE',
 } as const
 
 export type AdminAuditOperation = typeof adminAuditOperations[keyof typeof adminAuditOperations]
@@ -60,6 +64,10 @@ export const adminAuditOperationLabels: Record<AdminAuditOperation, string> = {
   ACTIVITY_LOTTERY_DRAW: '活动抽奖开奖',
   LOTTERY_MANUAL_DRAW: '管理员立即开奖',
   ACTIVITY_REDEMPTION_CONFIRM: '确认活动权益核销',
+  ANGEL_GIFT_CAMPAIGN_CREATE: '创建天使的礼物主题',
+  ANGEL_GIFT_CAMPAIGN_UPDATE: '编辑天使的礼物主题',
+  ANGEL_GIFT_CAMPAIGN_STATUS: '更新天使的礼物主题状态',
+  ANGEL_GIFT_PRIZE_UPDATE: '更新天使的礼物奖池',
 }
 
 type AuditDatabaseClient = Pick<Prisma.TransactionClient, 'user' | 'adminAction' | 'postModerationHistory'>

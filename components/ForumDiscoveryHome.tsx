@@ -4,15 +4,22 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ForumDiscoveryCard } from '@/components/ForumDiscoveryCard'
+import { ForumFishModePostRow } from '@/components/ForumFishModePostRow'
+import { ForumFishModePreview } from '@/components/ForumFishModePreview'
+import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
 import {
   buildForumDiscoveryTabs,
   appendUniqueDiscoveryPosts,
   FORUM_DISCOVERY_PAGE_SIZE,
+  FORUM_FISH_MINIMAL_STORAGE_KEY,
+  FORUM_PRESENTATION_MODE_STORAGE_KEY,
   FORUM_DISCOVERY_RECENT_RECOMMENDATION_LIMIT,
   mergeRecentRecommendedPostIds,
   type ForumDiscoveryMode,
   type ForumDiscoveryPost,
   type ForumDiscoveryResponse,
+  parseForumPresentationMode,
+  type ForumPresentationMode,
 } from '@/lib/forum-discovery'
 
 type DiscoverySession = {
@@ -73,10 +80,28 @@ function writeRecentRecommendedPostIds(values: ReadonlyArray<string>) {
 
 const DISCOVERY_SKELETON_KEYS = ['one', 'two', 'three', 'four', 'five', 'six'] as const
 
+function readFishPreviewId(hash: string) {
+  const prefix = '#fish-post='
+  if (!hash.startsWith(prefix)) return null
+  try {
+    const value = decodeURIComponent(hash.slice(prefix.length)).trim()
+    return value || null
+  } catch {
+    return null
+  }
+}
+
+function currentUrlWithoutFishPreview() {
+  const url = new URL(window.location.href)
+  url.hash = ''
+  return `${url.pathname}${url.search}`
+}
+
 export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ showDesktopRefresh?: boolean }>) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const isDesktop = useIsDesktopMediaQuery()
   const queryString = searchParams.toString()
   const boardValue = searchParams.get('board') || ''
   const query = searchParams.get('query') || ''
@@ -99,6 +124,10 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const [showBackTop, setShowBackTop] = useState(false)
   const [pullDistance, setPullDistance] = useState(0)
   const [restoreScrollY, setRestoreScrollY] = useState<number | null>(null)
+  const [presentationPreference, setPresentationPreference] = useState<ForumPresentationMode>('xiaochenshu')
+  const [minimalMode, setMinimalMode] = useState(false)
+  const [fishActivePostId, setFishActivePostId] = useState<string | null>(null)
+  const [fishPreviewPostId, setFishPreviewPostId] = useState<string | null>(null)
   const seenPostIdsRef = useRef(new Set<string>())
   const seenAuthorIdsRef = useRef(new Set<string>())
   const loadingMoreRef = useRef(false)
@@ -115,9 +144,13 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const sentinelRef = useRef<HTMLDivElement>(null)
   const touchStartRef = useRef<number | null>(null)
   const pullDistanceRef = useRef(0)
+  const fishPreviewHistoryRef = useRef(false)
+  const initializedFishHashRef = useRef(false)
+  const previousDiscoveryQueryStringRef = useRef(queryString)
 
   const activeTab = query ? '' : boardValue || mode
   const createHref = activeBoard ? `/posts/new?board=${encodeURIComponent(activeBoard)}` : '/posts/new'
+  const presentationMode: ForumPresentationMode = isDesktop && presentationPreference === 'fish' ? 'fish' : 'xiaochenshu'
 
   const persistSession = useCallback((session: DiscoverySession) => {
     try {
@@ -126,6 +159,31 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
       // Feed restoration is best effort; browsing remains usable when storage is disabled.
     }
   }, [sessionKey])
+
+  const openFishPreview = useCallback((postId: string) => {
+    if (!isDesktop || presentationMode !== 'fish') return
+    const url = new URL(window.location.href)
+    url.hash = `fish-post=${encodeURIComponent(postId)}`
+    setFishActivePostId(postId)
+    setFishPreviewPostId(postId)
+    if (fishPreviewPostId) {
+      window.history.replaceState({ ...window.history.state, fishPreviewPostId: postId }, '', `${url.pathname}${url.search}${url.hash}`)
+    } else {
+      fishPreviewHistoryRef.current = true
+      window.history.pushState({ ...window.history.state, fishPreviewPostId: postId }, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+  }, [fishPreviewPostId, isDesktop, presentationMode])
+
+  const closeFishPreview = useCallback(() => {
+    if (!fishPreviewPostId) return
+    setFishPreviewPostId(null)
+    if (fishPreviewHistoryRef.current) {
+      fishPreviewHistoryRef.current = false
+      window.history.back()
+      return
+    }
+    window.history.replaceState(window.history.state, '', currentUrlWithoutFishPreview())
+  }, [fishPreviewPostId])
 
   const loadPage = useCallback(async (reset: boolean, manual = false) => {
     if (!reset && autoLoadBlockedRef.current && !manual) return
@@ -252,6 +310,120 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   }, [boardValue, mode, persistSession, query, sessionKey])
 
   useEffect(() => setSearchValue(query), [query])
+
+  useEffect(() => {
+    try {
+      setPresentationPreference(parseForumPresentationMode(window.localStorage.getItem(FORUM_PRESENTATION_MODE_STORAGE_KEY)))
+      setMinimalMode(window.localStorage.getItem(FORUM_FISH_MINIMAL_STORAGE_KEY) === 'true')
+    } catch {
+      // Presentation preferences are optional; the default view remains usable without storage.
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isDesktop || presentationMode !== 'fish') {
+      initializedFishHashRef.current = false
+      setFishActivePostId(null)
+      setFishPreviewPostId(null)
+      if (readFishPreviewId(window.location.hash)) {
+        fishPreviewHistoryRef.current = false
+        window.history.replaceState(window.history.state, '', currentUrlWithoutFishPreview())
+      }
+      return
+    }
+    const syncFromHash = () => {
+      const postId = readFishPreviewId(window.location.hash)
+      if (!postId) {
+        fishPreviewHistoryRef.current = false
+        setFishPreviewPostId(null)
+      } else if (postsRef.current.length && postsRef.current.some((post) => post.id === postId)) {
+        fishPreviewHistoryRef.current = false
+        setFishActivePostId(postId)
+        setFishPreviewPostId(postId)
+      }
+    }
+    window.addEventListener('popstate', syncFromHash)
+    syncFromHash()
+    return () => window.removeEventListener('popstate', syncFromHash)
+  }, [isDesktop, presentationMode])
+
+  useEffect(() => {
+    if (!isDesktop || presentationMode !== 'fish' || !posts.length || initializedFishHashRef.current) return
+    initializedFishHashRef.current = true
+    const postId = readFishPreviewId(window.location.hash)
+    if (postId && posts.some((post) => post.id === postId)) {
+      fishPreviewHistoryRef.current = false
+      setFishActivePostId(postId)
+      setFishPreviewPostId(postId)
+    }
+  }, [isDesktop, posts, presentationMode])
+
+  useEffect(() => {
+    if (!isDesktop || presentationMode !== 'fish' || !fishActivePostId) return
+    const row = Array.from(document.querySelectorAll<HTMLElement>('[data-fish-mode-post-row]')).find((item) => item.dataset.postId === fishActivePostId)
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [fishActivePostId, isDesktop, presentationMode])
+
+  useEffect(() => {
+    if (!isDesktop || presentationMode !== 'fish') return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      const target = event.target
+      if (target instanceof HTMLElement) {
+        const tagName = target.tagName.toLowerCase()
+        if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable || target.closest('[contenteditable="true"]')) return
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+
+      if (event.key === 'Escape') {
+        if (!fishPreviewPostId) return
+        event.preventDefault()
+        closeFishPreview()
+        return
+      }
+      if (!posts.length) return
+
+      const key = event.key.toLowerCase()
+      const currentIndex = posts.findIndex((post) => post.id === fishActivePostId)
+      if (key === 'j' || key === 'k') {
+        const startIndex = currentIndex >= 0 ? currentIndex : key === 'j' ? -1 : 1
+        const nextIndex = key === 'j' ? startIndex + 1 : startIndex - 1
+        const nextPost = posts[nextIndex]
+        if (!nextPost) return
+        event.preventDefault()
+        setFishActivePostId(nextPost.id)
+        if (fishPreviewPostId) openFishPreview(nextPost.id)
+        return
+      }
+      if (event.key === 'Enter') {
+        const currentPost = posts[currentIndex >= 0 ? currentIndex : 0]
+        if (!currentPost) return
+        event.preventDefault()
+        openFishPreview(currentPost.id)
+        return
+      }
+      if (key === 'l') {
+        const currentPost = posts[currentIndex >= 0 ? currentIndex : 0]
+        if (!currentPost) return
+        const row = Array.from(document.querySelectorAll<HTMLElement>('[data-fish-mode-post-row]')).find((item) => item.dataset.postId === currentPost.id)
+        const likeButton = row?.querySelector<HTMLButtonElement>('.fish-mode-like-button')
+        if (!likeButton) return
+        event.preventDefault()
+        likeButton.click()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [closeFishPreview, fishActivePostId, fishPreviewPostId, isDesktop, openFishPreview, posts, presentationMode])
+
+  useEffect(() => {
+    if (previousDiscoveryQueryStringRef.current === queryString) return
+    previousDiscoveryQueryStringRef.current = queryString
+    setFishActivePostId(null)
+    setFishPreviewPostId(null)
+    fishPreviewHistoryRef.current = false
+    if (readFishPreviewId(window.location.hash)) window.history.replaceState(window.history.state, '', currentUrlWithoutFishPreview())
+  }, [queryString])
 
   useEffect(() => {
     const syncPostInteraction = (event: Event) => {
@@ -467,6 +639,25 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
     router.push(`${pathname}${next.toString() ? `?${next.toString()}` : ''}`, { scroll: true })
   }
 
+  function updatePresentationMode(next: ForumPresentationMode) {
+    setPresentationPreference(next)
+    try {
+      window.localStorage.setItem(FORUM_PRESENTATION_MODE_STORAGE_KEY, next)
+    } catch {
+      // The mode still applies for this render when localStorage is unavailable.
+    }
+    if (next !== 'fish') closeFishPreview()
+  }
+
+  function updateMinimalMode(next: boolean) {
+    setMinimalMode(next)
+    try {
+      window.localStorage.setItem(FORUM_FISH_MINIMAL_STORAGE_KEY, String(next))
+    } catch {
+      // Minimal mode is a presentation preference and does not affect feed data.
+    }
+  }
+
   function openPost(postId: string) {
     persistSession({
       posts,
@@ -485,15 +676,24 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   }
 
   const tabItems = useMemo(() => buildForumDiscoveryTabs(boards), [boards])
+  const fishPreviewPost = fishPreviewPostId ? posts.find((post) => post.id === fishPreviewPostId) || null : null
+  const fishPreviewIndex = fishPreviewPost ? posts.findIndex((post) => post.id === fishPreviewPost.id) : -1
 
   return (
-    <section className="forum-discovery-page" data-forum-discovery>
+    <section className="forum-discovery-page" data-forum-discovery data-forum-presentation={presentationMode} data-forum-minimal={minimalMode ? 'true' : 'false'}>
       <div className="forum-discovery-pull-indicator" style={{ height: pullDistance ? `${pullDistance}px` : undefined }} aria-live="polite">
         {pullDistance >= 64 ? '松开刷新' : pullDistance > 8 ? '下拉刷新' : ''}
       </div>
       <header className="forum-discovery-header">
         <div className="forum-discovery-header-row">
-          <h1>小臣书</h1>
+          <div className="forum-discovery-title-group">
+            <h1>小臣书</h1>
+            <div className="forum-presentation-switcher" role="group" aria-label="广场展示模式">
+              <button type="button" aria-pressed={presentationMode === 'xiaochenshu'} onClick={() => updatePresentationMode('xiaochenshu')}>小臣书</button>
+              <span aria-hidden="true">｜</span>
+              <button type="button" aria-pressed={presentationMode === 'fish'} onClick={() => updatePresentationMode('fish')}>摸鱼模式</button>
+            </div>
+          </div>
           <div className="forum-discovery-header-actions">
             {showDesktopRefresh && mode === 'recommend' ? (
               <button
@@ -507,6 +707,12 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
                 <span aria-hidden="true">↻</span>
                 {isRefreshing ? '刷新中…' : '刷新'}
               </button>
+            ) : null}
+            {presentationMode === 'fish' ? (
+              <label className="forum-fish-minimal-control">
+                <input type="checkbox" checked={minimalMode} onChange={(event) => updateMinimalMode(event.target.checked)} />
+                <span>极简</span>
+              </label>
             ) : null}
             {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
           </div>
@@ -539,21 +745,50 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
         </div>
       ) : null}
       {loading && !posts.length ? (
-        <div className="forum-discovery-grid" aria-label="正在加载">
-          {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`skeleton-${key}`} className="forum-discovery-skeleton" />)}
-        </div>
+        presentationMode === 'fish' ? (
+          <div className="fish-mode-feed fish-mode-feed-skeleton" aria-label="正在加载">
+            {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`fish-skeleton-${key}`} className="fish-mode-post-skeleton" />)}
+          </div>
+        ) : (
+          <div className="forum-discovery-grid" aria-label="正在加载">
+            {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`skeleton-${key}`} className="forum-discovery-skeleton" />)}
+          </div>
+        )
       ) : null}
       {!loading && !error && !posts.length ? <p className="forum-discovery-empty">暂时没有可展示的帖子</p> : null}
       {posts.length ? (
-        <div className="forum-discovery-grid">
-          {posts.map((post, index) => <ForumDiscoveryCard key={post.id} post={post} priority={index < 2} onOpen={openPost} />)}
-        </div>
+        presentationMode === 'fish' ? (
+          <div className="fish-mode-feed" aria-label="摸鱼模式帖子列表">
+            <div className="fish-mode-feed-heading">
+              <span>文字优先 · 已加载 {posts.length} 条</span>
+              <span className="fish-mode-keyboard-hint">J/K 浏览 · Enter 预览 · Esc 关闭 · L 点赞</span>
+            </div>
+            {posts.map((post) => <ForumFishModePostRow key={post.id} post={post} minimal={minimalMode} active={fishActivePostId === post.id} onOpen={openFishPreview} />)}
+          </div>
+        ) : (
+          <div className="forum-discovery-grid">
+            {posts.map((post, index) => <ForumDiscoveryCard key={post.id} post={post} priority={index < 2} onOpen={openPost} />)}
+          </div>
+        )
       ) : null}
       {error && posts.length ? <div className="forum-discovery-load-error" role="alert"><span>{error}</span><button type="button" onClick={() => void loadPage(false, true)}>重试</button></div> : null}
       {loadingMore ? <div className="forum-discovery-loading-more" aria-live="polite">正在加载更多</div> : null}
       {!hasMore && posts.length ? <p className="forum-discovery-end">已经看到这里了</p> : null}
       <div ref={sentinelRef} className="forum-discovery-sentinel" aria-hidden="true" />
       {showBackTop ? <button type="button" className="forum-discovery-back-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="回到顶部">↑</button> : null}
+      {presentationMode === 'fish' && fishPreviewPost ? (
+        <ForumFishModePreview
+          post={fishPreviewPost}
+          minimal={minimalMode}
+          hasPrevious={fishPreviewIndex > 0}
+          hasNext={fishPreviewIndex >= 0 && fishPreviewIndex < posts.length - 1}
+          onClose={closeFishPreview}
+          onNavigate={(direction) => {
+            const nextPost = posts[fishPreviewIndex + direction]
+            if (nextPost) openFishPreview(nextPost.id)
+          }}
+        />
+      ) : null}
     </section>
   )
 }

@@ -5,7 +5,7 @@ import type { Metadata } from 'next'
 import { AdminPostActions, DeletePostButton, FavoriteButton, LikeButton, PostManagementMenu } from '@/components/PostActions'
 import { BackButton } from '@/components/BackButton'
 import { CommentSectionBoundary } from '@/components/CommentSectionBoundary'
-import { RichPostContent } from '@/components/posts/RichPostContent'
+import { RichPostContent, type PostMusicReferenceDisplay } from '@/components/posts/RichPostContent'
 import { PostMediaCarousel } from '@/components/PostMediaCarousel'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
@@ -35,7 +35,7 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { buildPostMetadata, createPostShareDescription, createPostShareTitle, firstAbsoluteMetadataImageUrl, firstShareCardImageCandidate, shareCardImageCandidates, metadataImageVariantUrl, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
-import { validateRichPostContent } from '@/lib/rich-text'
+import { collectMusicReferenceSongIds, validateRichPostContent } from '@/lib/rich-text'
 import { findPublicPostReferences, findPublicUserMentions, hydrateRichTextReferences } from '@/lib/rich-text-references'
 import {
   clampPostReplyPage,
@@ -987,6 +987,37 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       console.warn('[posts:rich-content-hydration]', { postId, error: error instanceof Error ? error.message : String(error) })
     }
   }
+  let musicReferences: PostMusicReferenceDisplay[] = []
+  const musicReferenceSongIds = renderedRichContent ? collectMusicReferenceSongIds(renderedRichContent) : []
+  if (musicReferenceSongIds.length) {
+    try {
+      const songs = await readPostDetailQuery(
+        postId,
+        'musicReference.findMany',
+        () => prisma.musicSong.findMany({
+          where: { id: { in: musicReferenceSongIds }, MusicAlbum: { status: 'PUBLISHED' } },
+          select: {
+            id: true,
+            title: true,
+            artist: true,
+            coverUrl: true,
+            MusicAlbum: { select: { name: true, coverUrl: true } },
+          },
+        }),
+        'detail',
+        user?.id,
+      )
+      musicReferences = songs.map((song) => ({
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        album: song.MusicAlbum.name,
+        coverUrl: publicImageVariantUrl(song.coverUrl || song.MusicAlbum.coverUrl, 'thumb-sm'),
+      }))
+    } catch (error) {
+      console.warn('[posts:music-reference-hydration]', { postId, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
   const publicPostContentSource = publicModerationText(publicContentImageMarkers(post.content), post.moderationStatus)
   const publicPostContent = postContentPlainText(publicPostContentSource, renderedRichContent)
   const shareCardPostContent = postContentPlainText(publicPostContentSource, renderedRichContent, { preserveLineBreaks: true })
@@ -1148,6 +1179,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             richContent={renderedRichContent}
             fallbackContent={publicPostContentSource}
             className="mt-8 text-lg leading-9 text-slate-700 post-detail-body"
+            musicReferences={musicReferences}
+            enableSongPlayback
+            scopeKey={post.id}
           />
           {post.sticker?.url ? (
             <div className="mt-6 post-detail-sticker">

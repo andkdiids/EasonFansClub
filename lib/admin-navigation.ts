@@ -118,6 +118,7 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     items: [
       { href: '/admin/achievements', title: '成就 / 勋章管理', desc: '管理成就、勋章、稀有度、条件和手动发放。' },
       { href: '/admin/badges', title: 'E院勋章管理', desc: '维护 PNG 勋章、图鉴可见性、昵称闪光、佩戴和发放记录。' },
+      { href: '/admin/angel-gift', title: '天使的礼物', desc: '管理可配置主题、奖池、余药回收规则与执药统计。' },
       { href: '/admin/growth', title: '成长系统管理', desc: '维护等级名称、升级经验和任务奖励。' },
     ],
   },

@@ -104,17 +104,19 @@ test('homepage uses the fixed surface and is excluded from page-layout editing',
   assert.doesNotMatch(adminNavigation, /布局|页面结构/)
 })
 
-test('entertainment home card uses the endless-mode leaderboard without loading removed concert data', () => {
+test('entertainment home card uses every registry board in THIS_WEEK without loading removed concert data', () => {
   const home = read('lib/home-data.ts')
-  const leaderboard = read('lib/guess-song-leaderboard.ts')
   const api = read('app/api/home/route.ts')
   const surface = read('components/HomeLayoutSurface.tsx')
-  assert.match(home, /getGuessSongModeHighScores\(\)/)
-  assert.match(leaderboard, /periodType: 'HISTORY'/)
-  assert.match(leaderboard, /periodKey: 'ALL'/)
+  assert.match(home, /getEntertainmentLeaderboard/)
+  assert.match(home, /getRankableEntertainmentLeaderboardTargets/)
+  assert.match(home, /range: 'THIS_WEEK'/)
+  assert.doesNotMatch(home, /getGuessSongModeHighScores\(\)/)
   assert.doesNotMatch(api, /getHomeConcerts\(\)|getHomePosts\(\)/)
   assert.match(api, /activities, albums, stats/)
   assert.match(surface, /homeText\.entertainment/)
+  assert.match(surface, /home-entertainment-ranking-list/)
+  assert.match(surface, /homeText\.rankingBest/)
   assert.doesNotMatch(surface, /homeText\.hotConcerts|data\.concerts|home-concerts-section/)
 })
 

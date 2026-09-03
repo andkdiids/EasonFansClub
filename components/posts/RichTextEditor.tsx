@@ -9,11 +9,13 @@ import Paragraph from '@tiptap/extension-paragraph'
 import Placeholder from '@tiptap/extension-placeholder'
 import Text from '@tiptap/extension-text'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { createPortal } from 'react-dom'
 import {
   forwardRef,
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useSyncExternalStore,
@@ -30,6 +32,7 @@ import { MaterialReferencePicker, type MaterialReferenceMaterial } from '@/compo
 import {
   RICH_TEXT_COLOR_TOKENS,
   RICH_TEXT_FONT_SIZE_TOKENS,
+  countMusicReferenceNodes,
   isRichTextColorToken,
   isRichTextFontSizeToken,
   legacyHtmlToRichContent,
@@ -37,6 +40,7 @@ import {
   plainTextToRichContent,
   richTextColorClass,
   richTextFontSizeClass,
+  MAX_RICH_TEXT_MUSIC_REFERENCES,
   validateRichPostContent,
   type RichTextColorToken,
   type RichTextContent,
@@ -831,6 +835,18 @@ const richTextExtensions = [
   richUserMention,
 ]
 
+type ProseMirrorDescendable = {
+  descendants: (callback: (node: { type: { name: string } }) => boolean | void) => void
+}
+
+function countMusicReferencesInProseMirrorDocument(document: ProseMirrorDescendable) {
+  let count = 0
+  document.descendants((node) => {
+    if (node.type.name === 'musicReference') count += 1
+  })
+  return count
+}
+
 function sanitizePastedHtml(html: string) {
   if (typeof window === 'undefined') return html
   const parsed = new window.DOMParser().parseFromString(html, 'text/html')
@@ -963,8 +979,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   placeholder = '分享你的想法...',
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const referenceTriggerRef = useRef<HTMLButtonElement>(null)
+  const referenceMenuRef = useRef<HTMLDivElement>(null)
   const savedSelectionRef = useRef<{ from: number; to: number } | null>(null)
   const headingMenuOpenRef = useRef(false)
+  const musicReferenceLimitCallbackRef = useRef<() => void>(() => undefined)
   const [initialDocument] = useState(() => initialEditorContent(initialRichContent, initialContent))
   // The active block type is a formatting snapshot.  Keep the heading menu's
   // visibility entirely interaction-driven so a selection or transaction can
@@ -977,6 +996,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const [activityReferencePickerOpen, setActivityReferencePickerOpen] = useState(false)
   const [materialReferencePickerOpen, setMaterialReferencePickerOpen] = useState(false)
   const [userMentionPickerOpen, setUserMentionPickerOpen] = useState(false)
+  const [editorNotice, setEditorNotice] = useState('')
+  const [referenceMenuMobile, setReferenceMenuMobile] = useState(false)
+  const [referenceMenuPosition, setReferenceMenuPosition] = useState<{ left: number; top: number } | null>(null)
+
+  musicReferenceLimitCallbackRef.current = () => setEditorNotice(`每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲`)
 
   function rememberSelection(currentEditor: Editor) {
     const { from, to } = currentEditor.state.selection
@@ -996,6 +1020,17 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       spellcheck: 'true',
     },
     transformPastedHTML: sanitizePastedHtml,
+    handlePaste: (view: unknown, _event: ClipboardEvent, slice: unknown) => {
+      const editorView = view as { state: { doc: ProseMirrorDescendable } }
+      const pastedSlice = slice as { content: ProseMirrorDescendable }
+      const currentCount = countMusicReferencesInProseMirrorDocument(editorView.state.doc)
+      const pastedCount = countMusicReferencesInProseMirrorDocument(pastedSlice.content)
+      if (pastedCount > 0 && currentCount + pastedCount > MAX_RICH_TEXT_MUSIC_REFERENCES) {
+        musicReferenceLimitCallbackRef.current()
+        return true
+      }
+      return false
+    },
   }), [])
 
   const editor = useEditor({
@@ -1005,14 +1040,20 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     editorProps,
     onCreate: ({ editor: createdEditor }) => {
       syncEditorSelection(createdEditor)
+      const result = validateRichPostContent(createdEditor.getJSON())
+      if (result.valid && countMusicReferenceNodes(result.value) > MAX_RICH_TEXT_MUSIC_REFERENCES) {
+        setEditorNotice(`每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲，请删除多余引用后再保存`)
+      }
       emitEditorChange(createdEditor, onChange)
     },
     onUpdate: ({ editor: updatedEditor }) => {
       syncEditorSelection(updatedEditor)
+      const result = validateRichPostContent(updatedEditor.getJSON())
+      if (result.valid && countMusicReferenceNodes(result.value) <= MAX_RICH_TEXT_MUSIC_REFERENCES) setEditorNotice('')
       emitEditorChange(updatedEditor, onChange)
     },
     onSelectionUpdate: ({ editor: selectedEditor }) => syncEditorSelection(selectedEditor),
-  })
+  }, [])
   const inlineMarkState = useInlineMarkToolbarState(editor)
 
   const closeHeadingMenu = useCallback(() => {
@@ -1020,15 +1061,57 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     setHeadingMenuOpen(false)
   }, [])
 
+  const closeReferenceMenuPosition = useCallback(() => {
+    setReferenceMenuMobile(false)
+    setReferenceMenuPosition(null)
+  }, [])
+
   const closeToolbarMenus = useCallback(() => {
     closeHeadingMenu()
     setOpenMenu(null)
-  }, [closeHeadingMenu])
+    closeReferenceMenuPosition()
+  }, [closeHeadingMenu, closeReferenceMenuPosition])
+
+  const updateReferenceMenuPosition = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const trigger = referenceTriggerRef.current
+    const isMobile = window.matchMedia('(max-width: 640px)').matches
+    setReferenceMenuMobile(isMobile)
+    if (!isMobile || !trigger) {
+      setReferenceMenuPosition(null)
+      return
+    }
+
+    const safeGap = 10
+    const triggerRect = trigger.getBoundingClientRect()
+    const menuRect = referenceMenuRef.current?.getBoundingClientRect()
+    const maxWidth = Math.max(1, window.innerWidth - safeGap * 2)
+    const menuWidth = Math.min(menuRect?.width || 160, maxWidth)
+    const maxHeight = Math.max(1, window.innerHeight - safeGap * 2)
+    const menuHeight = Math.min(menuRect?.height || 168, maxHeight)
+    const left = Math.max(safeGap, Math.min(triggerRect.right - menuWidth, window.innerWidth - menuWidth - safeGap))
+    let top = triggerRect.bottom + 4
+    if (top + menuHeight > window.innerHeight - safeGap) top = triggerRect.top - menuHeight - 4
+    top = Math.max(safeGap, Math.min(top, window.innerHeight - menuHeight - safeGap))
+    setReferenceMenuPosition({ left, top })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (openMenu !== 'reference') return
+    updateReferenceMenuPosition()
+    window.addEventListener('resize', updateReferenceMenuPosition)
+    window.addEventListener('scroll', updateReferenceMenuPosition, true)
+    return () => {
+      window.removeEventListener('resize', updateReferenceMenuPosition)
+      window.removeEventListener('scroll', updateReferenceMenuPosition, true)
+    }
+  }, [openMenu, updateReferenceMenuPosition])
 
   useEffect(() => {
     if (!headingMenuOpen && !openMenu) return
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!toolbarRef.current?.contains(event.target as globalThis.Node)) closeToolbarMenus()
+      const target = event.target as globalThis.Node | null
+      if (!toolbarRef.current?.contains(target) && !referenceMenuRef.current?.contains(target)) closeToolbarMenus()
     }
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
@@ -1136,13 +1219,26 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   function toggleReferenceMenu() {
     rememberSelection(activeEditor)
     closeHeadingMenu()
-    setOpenMenu((current) => current === 'reference' ? null : 'reference')
+    const nextOpen = openMenu !== 'reference'
+    if (nextOpen) updateReferenceMenuPosition()
+    else closeReferenceMenuPosition()
+    setOpenMenu(nextOpen ? 'reference' : null)
   }
 
-  function openReferencePicker(kind: 'post' | 'activity' | 'material') {
+  function openReferencePicker(kind: 'post' | 'activity' | 'material' | 'music') {
     rememberSelection(activeEditor)
     closeHeadingMenu()
     setOpenMenu(null)
+    closeReferenceMenuPosition()
+    if (kind === 'music') {
+      const result = validateRichPostContent(activeEditor.getJSON())
+      if (result.valid && countMusicReferenceNodes(result.value) >= MAX_RICH_TEXT_MUSIC_REFERENCES) {
+        setEditorNotice(`每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲`)
+        setMusicPickerOpen(false)
+        return
+      }
+    }
+    setMusicPickerOpen(kind === 'music')
     setPostReferencePickerOpen(kind === 'post')
     setActivityReferencePickerOpen(kind === 'activity')
     setMaterialReferencePickerOpen(kind === 'material')
@@ -1197,6 +1293,12 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   function insertMusicReference(song: MusicReferenceSong) {
     closeHeadingMenu()
+    const result = validateRichPostContent(activeEditor.getJSON())
+    if (result.valid && countMusicReferenceNodes(result.value) >= MAX_RICH_TEXT_MUSIC_REFERENCES) {
+      setEditorNotice(`每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲`)
+      setMusicPickerOpen(false)
+      return
+    }
     startCommand()
       .insertContent({
         type: 'musicReference',
@@ -1210,6 +1312,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       .insertContent(' ')
       .run()
     rememberSelection(activeEditor)
+    setEditorNotice('')
     setMusicPickerOpen(false)
   }
 
@@ -1294,6 +1397,20 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     rememberSelection(activeEditor)
     setUserMentionPickerOpen(false)
   }
+
+  const referenceMenu = (
+    <ReferenceMenu
+      referenceMenuRef={referenceMenuRef}
+      mobile={referenceMenuMobile}
+      position={referenceMenuPosition}
+      onPointerDown={rememberToolbarPointerDown}
+      onMouseDown={closeHeadingOnToolbarMouseDown}
+      onPost={() => openReferencePicker('post')}
+      onActivity={() => openReferencePicker('activity')}
+      onMaterial={() => openReferencePicker('material')}
+      onMusic={() => openReferencePicker('music')}
+    />
+  )
 
   return (
     <div className="rich-text-editor-shell">
@@ -1482,6 +1599,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           <button
             type="button"
             className={toolbarButtonClass()}
+            ref={referenceTriggerRef}
             aria-label="引用"
             aria-haspopup="menu"
             aria-expanded={openMenu === 'reference'}
@@ -1491,41 +1609,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           >
             引用 <span aria-hidden="true">⌄</span>
           </button>
-          {openMenu === 'reference' ? (
-            <div className="rich-text-toolbar-menu" role="menu" aria-label="引用类型">
-              <button
-                type="button"
-                role="menuitem"
-                aria-label="引用一篇站内帖子"
-                className={menuItemClass()}
-                onPointerDown={rememberToolbarPointerDown}
-                onMouseDown={closeHeadingOnToolbarMouseDown}
-                onClick={() => openReferencePicker('post')}
-              >
-                引用帖子
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={menuItemClass()}
-                onPointerDown={rememberToolbarPointerDown}
-                onMouseDown={closeHeadingOnToolbarMouseDown}
-                onClick={() => openReferencePicker('activity')}
-              >
-                引用活动
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={menuItemClass()}
-                onPointerDown={rememberToolbarPointerDown}
-                onMouseDown={closeHeadingOnToolbarMouseDown}
-                onClick={() => openReferencePicker('material')}
-              >
-                引用物料
-              </button>
-            </div>
-          ) : null}
+          {openMenu === 'reference' ? referenceMenuMobile && typeof document !== 'undefined' ? createPortal(referenceMenu, document.body) : referenceMenu : null}
         </div>
         <button
           type="button"
@@ -1552,20 +1636,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           }}
         >
           分割线
-        </button>
-
-        <button
-          type="button"
-          className={toolbarButtonClass()}
-          aria-label="引用 EasMusic 歌曲"
-          onMouseDown={closeHeadingOnToolbarMouseDown}
-          onClick={() => {
-            rememberSelection(activeEditor)
-            setOpenMenu(null)
-            setMusicPickerOpen(true)
-          }}
-        >
-          ♪ 歌曲
         </button>
 
         <button
@@ -1604,6 +1674,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         </button>
         </div>
       </div>
+      {editorNotice ? <p className="rich-text-toolbar-notice" role="status">{editorNotice}</p> : null}
       <EditorContent
         editor={editor}
         className="rich-text-editor-content"
@@ -1642,3 +1713,82 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     </div>
   )
 })
+
+type ReferenceMenuProps = {
+  referenceMenuRef: React.Ref<HTMLDivElement>
+  mobile: boolean
+  position: { left: number; top: number } | null
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void
+  onPost: () => void
+  onActivity: () => void
+  onMaterial: () => void
+  onMusic: () => void
+}
+
+function ReferenceMenu({
+  referenceMenuRef,
+  mobile,
+  position,
+  onPointerDown,
+  onMouseDown,
+  onPost,
+  onActivity,
+  onMaterial,
+  onMusic,
+}: Readonly<ReferenceMenuProps>) {
+  return (
+    <div
+      ref={referenceMenuRef}
+      className={`rich-text-toolbar-menu${mobile ? ' rich-text-reference-menu-viewport' : ''}`}
+      role="menu"
+      aria-label="引用类型"
+      style={mobile && position ? { left: `${position.left}px`, top: `${position.top}px` } : undefined}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        aria-label="引用一篇站内帖子"
+        className={menuItemClass()}
+        onPointerDown={onPointerDown}
+        onMouseDown={onMouseDown}
+        onClick={onPost}
+      >
+        引用帖子
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        aria-label="引用一场活动"
+        className={menuItemClass()}
+        onPointerDown={onPointerDown}
+        onMouseDown={onMouseDown}
+        onClick={onActivity}
+      >
+        引用活动
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        aria-label="引用一个物料"
+        className={menuItemClass()}
+        onPointerDown={onPointerDown}
+        onMouseDown={onMouseDown}
+        onClick={onMaterial}
+      >
+        引用物料
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        aria-label="引用 EasMusic 歌曲"
+        className={menuItemClass()}
+        onPointerDown={onPointerDown}
+        onMouseDown={onMouseDown}
+        onClick={onMusic}
+      >
+        引用歌曲
+      </button>
+    </div>
+  )
+}

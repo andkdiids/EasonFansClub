@@ -1,7 +1,9 @@
 import {
   collectMusicReferenceSongIds,
+  countMusicReferenceNodes,
   enrichMusicReferenceMetadata,
   extractPlainText,
+  MAX_RICH_TEXT_MUSIC_REFERENCES,
   validateRichPostContent,
   type RichTextContent,
   type RichTextMusicReferenceMetadata,
@@ -17,8 +19,11 @@ export type PostMusicReferenceSong = {
 export class InvalidPostMusicReferenceError extends Error {
   readonly code = 'INVALID_MUSIC_REFERENCE'
 
-  constructor(readonly songIds: string[]) {
-    super('帖子包含不存在或未公开的 EasMusic 歌曲引用')
+  constructor(
+    readonly songIds: string[],
+    readonly reason: 'INVALID_SONG' | 'TOO_MANY' = 'INVALID_SONG',
+  ) {
+    super(reason === 'TOO_MANY' ? `每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲` : '帖子包含不存在或未公开的 EasMusic 歌曲引用')
     this.name = 'InvalidPostMusicReferenceError'
   }
 }
@@ -34,6 +39,9 @@ export async function validateAndNormalizePostMusicReferences(
   findSongs: (songIds: string[]) => Promise<PostMusicReferenceSong[]>,
 ) {
   const songIds = collectMusicReferenceSongIds(richContent)
+  if (countMusicReferenceNodes(richContent) > MAX_RICH_TEXT_MUSIC_REFERENCES) {
+    throw new InvalidPostMusicReferenceError(songIds, 'TOO_MANY')
+  }
   if (!songIds.length) {
     return { richContent, plainText: extractPlainText(richContent), songIds }
   }

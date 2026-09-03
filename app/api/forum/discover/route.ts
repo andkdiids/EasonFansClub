@@ -7,6 +7,7 @@ import { isConfiguredForumBoardId, mergeForumBoardSummaries, normalizeForumBoard
 import { splitContentImages } from '@/lib/content-images'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { publicImageUrl } from '@/lib/images'
 import {
   parseForumDiscoveryLimit,
   parseForumDiscoveryMode,
@@ -20,6 +21,7 @@ import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
+import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 
 export const dynamic = 'force-dynamic'
 
@@ -129,19 +131,49 @@ function buildHotCursor(row: Pick<DiscoveryRow, 'likeCount' | 'replyCount' | 'cr
   return `h|${row.likeCount}|${row.replyCount}|${row.createdAt.toISOString()}|${row.id}`
 }
 
+function isGifUrl(value: string | null | undefined) {
+  return typeof value === 'string' && /\.gif(?:[?#]|$)/i.test(value)
+}
+
 function serializePost(row: DiscoveryRow) {
   const contentImages = splitContentImages(row.content).images
-  const media = row.PostMedia[0]
-  const coverSource = contentImages[0] || media?.thumbnail || media?.url || row.sticker?.url || null
+  const imageMedia = row.PostMedia.find((item) => item.type === 'IMAGE')
+  const coverSource = contentImages[0] || imageMedia?.thumbnail || imageMedia?.url || row.sticker?.url || null
   const cover = coverSource ? {
     url: publicImageVariantUrl(coverSource, 'card') || coverSource,
-    width: contentImages[0] ? null : media?.width || null,
-    height: contentImages[0] ? null : media?.height || null,
+    width: contentImages[0] ? null : imageMedia?.width || null,
+    height: contentImages[0] ? null : imageMedia?.height || null,
   } : null
+  const media = row.PostMedia.map((item) => ({
+    id: item.id,
+    type: item.type,
+    url: publicImageUrl(item.url) || item.url,
+    thumbnail: item.thumbnail ? publicImageVariantUrl(item.thumbnail, 'card') || item.thumbnail : null,
+    width: item.width,
+    height: item.height,
+    sortOrder: item.sortOrder,
+  }))
+  const sticker = row.sticker ? {
+    url: publicImageUrl(row.sticker.url) || row.sticker.url,
+    type: row.sticker.type,
+  } : null
+  const mediaSummary = { imageCount: 0, gifCount: 0, videoCount: 0 }
+  const seenMediaUrls = new Set<string>()
+  const addMediaSummary = (type: 'image' | 'gif' | 'video', url: string | null | undefined) => {
+    if (url && seenMediaUrls.has(url)) return
+    if (url) seenMediaUrls.add(url)
+    mediaSummary[`${type}Count`] += 1
+  }
+  contentImages.forEach((url) => addMediaSummary(isGifUrl(url) ? 'gif' : 'image', url))
+  media.forEach((item) => addMediaSummary(item.type === 'VIDEO' ? 'video' : isGifUrl(item.url) ? 'gif' : 'image', item.url))
+  if (sticker) addMediaSummary(sticker.type === 'GIF' || isGifUrl(sticker.url) ? 'gif' : 'image', sticker.url)
   return {
     id: row.id,
     title: publicModerationText(row.title, row.moderationStatus),
+    contentPreview: publicModerationText(summarizePlainText(postContentPlainText(row.content), 220), row.moderationStatus),
+    contentImages,
     ipRegion: row.ipRegion,
+    viewCount: row.viewCount,
     likeCount: row.likeCount,
     favoriteCount: row.favoriteCount,
     replyCount: row.replyCount,
@@ -151,6 +183,9 @@ function serializePost(row: DiscoveryRow) {
     updatedAt: row.updatedAt.toISOString(),
     likedByMe: row.Like.length > 0,
     favoritedByMe: row.PostFavorite.length > 0,
+    media,
+    sticker,
+    mediaSummary,
     board: withForumBoardDisplayName(row.Board),
     author: {
       id: row.User.id,
@@ -196,12 +231,10 @@ const discoverySelect = {
   Like: { select: { id: true } },
   PostFavorite: { select: { id: true } },
   PostMedia: {
-    where: { type: 'IMAGE' as const },
     orderBy: { sortOrder: 'asc' as const },
-    take: 1,
-    select: { url: true, thumbnail: true, width: true, height: true },
+    select: { id: true, type: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true },
   },
-  sticker: { select: { url: true } },
+  sticker: { select: { url: true, type: true } },
 } satisfies Prisma.PostSelect
 
 type DiscoveryRow = Prisma.PostGetPayload<{ select: typeof discoverySelect }>

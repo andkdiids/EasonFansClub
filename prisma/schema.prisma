@@ -509,49 +509,51 @@ model BadgeSeries {
 }
 
 model Badge {
-  id                               String              @id @default(cuid())
-  name                             String              @unique
-  slug                             String              @unique
-  code                             String              @unique
-  description                      String?             @db.VarChar(500)
-  acquisitionDescription           String?             @db.VarChar(500)
-  acquisitionDescriptionCustomized Boolean             @default(false)
+  id                               String                       @id @default(cuid())
+  name                             String                       @unique
+  slug                             String                       @unique
+  code                             String                       @unique
+  description                      String?                      @db.VarChar(500)
+  acquisitionDescription           String?                      @db.VarChar(500)
+  acquisitionDescriptionCustomized Boolean                      @default(false)
   iconUrl                          String?
   pointsCost                       Int?
-  category                         BadgeCategory       @default(SYSTEM)
-  visibility                       BadgeVisibility     @default(PUBLIC)
-  rarity                           BadgeRarity         @default(COMMON)
-  grantType                        BadgeGrantType      @default(MANUAL)
-  isWearable                       Boolean             @default(true)
-  isEnabled                        Boolean             @default(true)
-  effectType                       BadgeEffectType     @default(NONE)
-  nicknameEffect                   BadgeNicknameEffect @default(NONE)
-  nicknameColor                    String?             @db.VarChar(20)
-  nicknameGradientStart            String?             @db.VarChar(20)
-  nicknameGradientEnd              String?             @db.VarChar(20)
-  sortOrder                        Int                 @default(0)
+  category                         BadgeCategory                @default(SYSTEM)
+  visibility                       BadgeVisibility              @default(PUBLIC)
+  rarity                           BadgeRarity                  @default(COMMON)
+  grantType                        BadgeGrantType               @default(MANUAL)
+  isWearable                       Boolean                      @default(true)
+  isEnabled                        Boolean                      @default(true)
+  effectType                       BadgeEffectType              @default(NONE)
+  nicknameEffect                   BadgeNicknameEffect          @default(NONE)
+  nicknameColor                    String?                      @db.VarChar(20)
+  nicknameGradientStart            String?                      @db.VarChar(20)
+  nicknameGradientEnd              String?                      @db.VarChar(20)
+  sortOrder                        Int                          @default(0)
   seriesId                         String?
-  tierGroupCode                    String?             @db.VarChar(64)
+  tierGroupCode                    String?                      @db.VarChar(64)
   tierLevel                        Int?
   availableFrom                    DateTime?
   availableUntil                   DateTime?
-  announceOnGrant                  Boolean             @default(false)
-  countsTowardSeriesCompletion     Boolean             @default(true)
-  Series                           BadgeSeries?        @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  CompletionRewardForSeries        BadgeSeries[]       @relation("BadgeSeriesCompletionReward")
+  announceOnGrant                  Boolean                      @default(false)
+  countsTowardSeriesCompletion     Boolean                      @default(true)
+  Series                           BadgeSeries?                 @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  CompletionRewardForSeries        BadgeSeries[]                @relation("BadgeSeriesCompletionReward")
   musicTourId                      String?
-  musicTour                        MusicTour?          @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
-  isAutoGrant                      Boolean             @default(false)
-  isActive                         Boolean             @default(true)
-  createdAt                        DateTime            @default(now())
-  updatedAt                        DateTime            @updatedAt
+  musicTour                        MusicTour?                   @relation(fields: [musicTourId], references: [id], onDelete: SetNull)
+  isAutoGrant                      Boolean                      @default(false)
+  isActive                         Boolean                      @default(true)
+  createdAt                        DateTime                     @default(now())
+  updatedAt                        DateTime                     @updatedAt
   UserBadge                        UserBadge[]
   LotteryPrize                     LotteryPrize[]
   ActivityReward                   ActivityReward[]
   UserBadgeShowcase                UserBadgeShowcase[]
   UserBadgeTracking                UserBadgeTracking[]
   BadgeRule                        BadgeRule?
-  EquippedByUsers                  User[]              @relation("UserEquippedBadge")
+  PharmacyPrize                    PharmacyPrize[]
+  PharmacyDuplicateSourceBadge     PharmacyDuplicateInventory[] @relation("PharmacyDuplicateSourceBadge")
+  EquippedByUsers                  User[]                       @relation("UserEquippedBadge")
 
   @@unique([tierGroupCode, tierLevel])
   @@index([isActive])
@@ -3027,9 +3029,13 @@ model PointLog {
   activityRegistrationId String?
   badgeId                String?
   dailyDrawId            String?                 @unique
+  pharmacyDrawId         String?
+  pharmacyRecycleLogId   String?
   dateKey                String?
   businessKey            String?                 @unique
   EntertainmentDailyDraw EntertainmentDailyDraw? @relation(fields: [dailyDrawId], references: [id])
+  PharmacyDraw           PharmacyDraw?           @relation("PharmacyDrawPointLogs", fields: [pharmacyDrawId], references: [id], onDelete: SetNull)
+  PharmacyRecycleLog     PharmacyRecycleLog?     @relation("PharmacyRecyclePointLogs", fields: [pharmacyRecycleLogId], references: [id], onDelete: SetNull)
   ActivityRegistration   ActivityRegistration?   @relation(fields: [activityRegistrationId], references: [id], onDelete: SetNull)
   User                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -3042,6 +3048,137 @@ model PointLog {
   @@index([replyId])
   @@index([userId, createdAt])
   @@index([userId, action, dateKey])
+  @@index([pharmacyDrawId])
+  @@index([pharmacyRecycleLogId])
+}
+
+model PharmacyCampaign {
+  id                         String                       @id @default(cuid())
+  title                      String                       @db.VarChar(191)
+  subtitle                   String?                      @db.VarChar(300)
+  description                String?                      @db.Text
+  status                     PharmacyCampaignStatus       @default(DRAFT)
+  startsAt                   DateTime?
+  endsAt                     DateTime?
+  drawCost                   Int
+  duplicateRecycleEnabled    Boolean                      @default(false)
+  duplicateRecycleRequired   Int?
+  duplicateRecycleReward     Int?
+  recycleAfterEndEnabled     Boolean                      @default(true)
+  probabilityPublic          Boolean                      @default(false)
+  dailyDrawLimit             Int?
+  totalDrawLimit             Int?
+  visualUrl                  String?                      @db.Text
+  createdById                String?
+  updatedById                String?
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+  CreatedBy                  User?                        @relation("PharmacyCampaignCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  UpdatedBy                  User?                        @relation("PharmacyCampaignUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  PharmacyPrize              PharmacyPrize[]
+  PharmacyDraw               PharmacyDraw[]
+  PharmacyDuplicateInventory PharmacyDuplicateInventory[]
+  PharmacyRecycleLog         PharmacyRecycleLog[]
+
+  @@index([status, startsAt, endsAt])
+  @@index([createdAt])
+}
+
+model PharmacyPrize {
+  id           String            @id @default(cuid())
+  campaignId   String
+  type         PharmacyPrizeType @default(BADGE)
+  name         String?           @db.VarChar(191)
+  quantity     Int               @default(1)
+  rewardAmount Int?
+  weight       Int               @default(0)
+  enabled      Boolean           @default(true)
+  sortOrder    Int               @default(0)
+  badgeId      String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  Campaign     PharmacyCampaign  @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  Badge        Badge?            @relation(fields: [badgeId], references: [id], onDelete: SetNull)
+  PharmacyDraw PharmacyDraw[]
+
+  @@index([campaignId, enabled, sortOrder])
+  @@index([badgeId])
+  @@index([campaignId, type])
+}
+
+model PharmacyDraw {
+  id                    String                 @id @default(cuid())
+  userId                String
+  campaignId            String
+  prizeId               String?
+  idempotencyKey        String
+  drawAt                DateTime               @default(now())
+  campaignTitle         String                 @db.VarChar(191)
+  drawCost              Int
+  prizeType             PharmacyPrizeType
+  prizeName             String                 @db.VarChar(191)
+  badgeId               String?
+  badgeName             String?
+  badgeIconUrl          String?                @db.Text
+  rarity                BadgeRarity?
+  rewardAmount          Int?
+  configuredWeight      Int
+  calculatedProbability Decimal                @db.Decimal(10, 6)
+  resultType            PharmacyDrawResultType
+  isNewBadge            Boolean                @default(false)
+  isDuplicate           Boolean                @default(false)
+  duplicateQuantity     Int                    @default(0)
+  balanceBefore         Int
+  balanceAfter          Int
+  createdAt             DateTime               @default(now())
+  User                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Campaign              PharmacyCampaign       @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  Prize                 PharmacyPrize?         @relation(fields: [prizeId], references: [id], onDelete: SetNull)
+  PointLogs             PointLog[]             @relation("PharmacyDrawPointLogs")
+
+  @@unique([userId, idempotencyKey])
+  @@index([campaignId, drawAt])
+  @@index([userId, campaignId, drawAt])
+  @@index([prizeId, drawAt])
+}
+
+model PharmacyDuplicateInventory {
+  id            String           @id @default(cuid())
+  userId        String
+  campaignId    String
+  sourceBadgeId String
+  quantity      Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  User          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Campaign      PharmacyCampaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  SourceBadge   Badge            @relation("PharmacyDuplicateSourceBadge", fields: [sourceBadgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, campaignId, sourceBadgeId])
+  @@index([userId, campaignId])
+  @@index([sourceBadgeId])
+}
+
+model PharmacyRecycleLog {
+  id             String           @id @default(cuid())
+  userId         String
+  campaignId     String
+  idempotencyKey String
+  campaignTitle  String           @db.VarChar(191)
+  requiredCount  Int
+  rewardAmount   Int
+  beforeQuantity Int
+  afterQuantity  Int
+  balanceBefore  Int
+  balanceAfter   Int
+  createdAt      DateTime         @default(now())
+  User           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Campaign       PharmacyCampaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  PointLogs      PointLog[]       @relation("PharmacyRecyclePointLogs")
+
+  @@unique([userId, idempotencyKey])
+  @@index([campaignId, createdAt])
+  @@index([userId, campaignId, createdAt])
 }
 
 model Poll {
@@ -3990,6 +4127,8 @@ model User {
   RatingReviewLike                                       RatingReviewLike[]
   PersonalRanking                                        PersonalRanking[]
   UserCenterShortcutPreference                           UserCenterShortcutPreference[]
+  PharmacyCampaignsCreated                               PharmacyCampaign[]             @relation("PharmacyCampaignCreatedBy")
+  PharmacyCampaignsUpdated                               PharmacyCampaign[]             @relation("PharmacyCampaignUpdatedBy")
   AdminAction_AdminAction_adminIdToUser                  AdminAction[]                  @relation("AdminAction_adminIdToUser")
   AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                  @relation("AdminAction_targetUserIdToUser")
   PostReviewedBy                                         Post[]                         @relation("PostReviewedBy")
@@ -4086,6 +4225,9 @@ model User {
   PageLayoutRevision                                     PageLayoutRevision[]
   PasswordResetToken                                     PasswordResetToken[]
   PointLog                                               PointLog[]
+  PharmacyDraws                                          PharmacyDraw[]
+  PharmacyDuplicateInventories                           PharmacyDuplicateInventory[]
+  PharmacyRecycleLogs                                    PharmacyRecycleLog[]
   Post                                                   Post[]
   UserPostGroup                                          UserPostGroup[]
   PostFavorite                                           PostFavorite[]
@@ -4764,6 +4906,36 @@ enum PointActionType {
   ACTIVITY_REGISTRATION_FEE
   ACTIVITY_REGISTRATION_REFUND
   ACTIVITY_LOTTERY_PRIZE
+  PHARMACY_DRAW_COST
+  PHARMACY_PRIZE_REWARD
+  PHARMACY_DUPLICATE_RECYCLE
+}
+
+enum PharmacyCampaignStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum PharmacyPrizeType {
+  BADGE
+  POINTS
+  EMPTY
+  ITEM
+  COUPON
+  CUSTOM
+}
+
+enum PharmacyDrawResultType {
+  BADGE_NEW
+  BADGE_DUPLICATE
+  POINTS_REWARD
+  EMPTY
+  ITEM
+  COUPON
+  CUSTOM
 }
 
 enum CheckInType {

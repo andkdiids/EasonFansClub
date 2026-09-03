@@ -32,7 +32,7 @@ import {
   InvalidUserMentionError,
   validateAndNormalizeRichTextReferences,
 } from '@/lib/rich-text-references'
-import { validateRichPostContent } from '@/lib/rich-text'
+import { countMusicReferenceNodes, MAX_RICH_TEXT_MUSIC_REFERENCES, validateRichPostContent } from '@/lib/rich-text'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -724,6 +724,12 @@ async function handleEditPost(
     const existingRichContentValidation = validateRichPostContent(existing.richContent)
     nextRichContent = existingRichContentValidation.valid ? existingRichContentValidation.value : null
   }
+  if (nextRichContent && countMusicReferenceNodes(nextRichContent) > MAX_RICH_TEXT_MUSIC_REFERENCES) {
+    return NextResponse.json({
+      message: `每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲`,
+      errors: { content: `每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲` },
+    }, { status: 400 })
+  }
   if (shouldUpdateContent && contentInput.validation?.valid && nextRichContent) {
     try {
       const normalized = await validateAndNormalizePostMusicReferences(
@@ -745,7 +751,10 @@ async function handleEditPost(
       nextRichContent = normalizedReferences.richContent
     } catch (error) {
       if (error instanceof InvalidPostMusicReferenceError) {
-        return NextResponse.json({ message: error.message, errors: { content: '存在无效或未公开的 EasMusic 歌曲引用' } }, { status: 400 })
+        return NextResponse.json({
+          message: error.message,
+          errors: { content: error.reason === 'TOO_MANY' ? error.message : '存在无效或未公开的 EasMusic 歌曲引用' },
+        }, { status: 400 })
       }
       if (error instanceof InvalidPostReferenceError || error instanceof InvalidUserMentionError || error instanceof InvalidActivityReferenceError || error instanceof InvalidMaterialReferenceError) {
         return NextResponse.json({ message: error.message, errors: { content: '存在无效或不可用的帖子/用户/活动/物料引用' } }, { status: 400 })

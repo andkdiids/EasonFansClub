@@ -66,6 +66,7 @@ type DbCollectionBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_COLLECTIO
 type DbUserBadge = {
   obtainedAt: Date
   grantedAt: Date
+  sourceType: string | null
   Badge: DbCollectionBadge
 }
 
@@ -174,8 +175,10 @@ function publicBadge(badge: DbBadge | DbCollectionBadge): Omit<BadgeView, 'statu
 }
 
 function obtainedBadgeView(record: DbUserBadge, isEquipped: boolean, ownershipStats?: BadgeOwnershipStats | null, isHighestTier = false): BadgeView {
+  const badge = publicBadge(record.Badge)
   return {
-    ...publicBadge(record.Badge),
+    ...badge,
+    acquisitionDescription: record.sourceType === 'ANGEL_GIFT' ? '于「天使的礼物」执药获得' : badge.acquisitionDescription,
     status: 'OBTAINED',
     obtainedAt: record.obtainedAt.toISOString(),
     isEquipped,
@@ -345,7 +348,7 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
     prisma.userBadge.findMany({
       where: { userId, ...(isSelf ? {} : { isHidden: false }) },
       orderBy: [{ obtainedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
-      select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
+      select: { obtainedAt: true, grantedAt: true, sourceType: true, Badge: { select: BADGE_COLLECTION_SELECT } },
     }),
     isSelf
       ? prisma.badge.findMany({
@@ -435,7 +438,7 @@ export async function getBadgeDetailForUser(userId: string, badgeId: string): Pr
     prisma.badge.findUnique({ where: { id: badgeId }, select: BADGE_COLLECTION_SELECT }),
     prisma.userBadge.findUnique({
       where: { userId_badgeId: { userId, badgeId } },
-      select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
+      select: { obtainedAt: true, grantedAt: true, sourceType: true, Badge: { select: BADGE_COLLECTION_SELECT } },
     }),
     prisma.user.findUnique({ where: { id: userId }, select: { equippedBadgeId: true } }),
   ])
@@ -482,7 +485,7 @@ export async function getBadgeExhibitionGallery(viewerId?: string | null): Promi
       ? prisma.userBadge.findMany({
           where: { userId: viewerId },
           orderBy: [{ obtainedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
-          select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
+          select: { obtainedAt: true, grantedAt: true, sourceType: true, Badge: { select: BADGE_COLLECTION_SELECT } },
         })
       : Promise.resolve([] as DbUserBadge[]),
     viewerId
@@ -613,7 +616,7 @@ export async function getBadgeProfileSummary(userId: string, viewerId?: string |
       where: { userId, ...(isSelf ? {} : { isHidden: false }) },
       orderBy: [{ obtainedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
       take: 5,
-      select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
+      select: { obtainedAt: true, grantedAt: true, sourceType: true, Badge: { select: BADGE_COLLECTION_SELECT } },
     }),
     prisma.userBadgeShowcase.findMany({
       where: {
@@ -635,7 +638,7 @@ export async function getBadgeProfileSummary(userId: string, viewerId?: string |
     ? await prisma.userBadge.findMany({
         where: { userId, badgeId: { in: showcaseRows.map((row) => row.badgeId) }, ...(isSelf ? {} : { isHidden: false }) },
         orderBy: [{ obtainedAt: 'desc' }, { id: 'desc' }],
-        select: { obtainedAt: true, grantedAt: true, Badge: { select: BADGE_COLLECTION_SELECT } },
+        select: { obtainedAt: true, grantedAt: true, sourceType: true, Badge: { select: BADGE_COLLECTION_SELECT } },
       })
     : []
   const recordByBadgeId = new Map(showcaseOwnedRecords.filter((record) => isSelf || record.Badge.visibility !== 'SECRET').map((record) => [record.Badge.id, record]))
