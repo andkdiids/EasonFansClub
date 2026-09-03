@@ -9,7 +9,8 @@ import { profileImageUrl } from '@/lib/images'
 import { validateNicknameValue } from '@/lib/login-account'
 import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import type { UserLocation } from '@/lib/user-location'
-import { isBirthdayConfigured } from '@/lib/birthday-immutability'
+import { BIRTHDAY_ALREADY_SET, isBirthdayConfigured } from '@/lib/birthday-immutability'
+import { decideBirthdaySave, daysForBirthdayMonth, resetInvalidBirthdayDay, type BirthdayDraft } from '@/lib/birthday-profile-flow'
 
 type InitialProfile = {
   nickname: string
@@ -188,13 +189,6 @@ function maskEmail(email: string) {
   return email
 }
 
-function daysForMonth(month: number | null): number {
-  if (!month || month < 1 || month > 12) return 31
-  // 二月返回 29，允许闰年 2 月 29 日生日；由服务端最终校验日期合法性。
-  const days = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  return days[month - 1]
-}
-
 async function cropAvatarToWebp(crop: CropState) {
   const image = await loadImage(crop.url)
   const canvas = document.createElement('canvas')
@@ -303,6 +297,14 @@ export function ProfileSettingsForm({
 }) {
   const router = useRouter()
   const [form, setForm] = useState(initialProfile)
+  // form.birthMonth / form.birthDay are draft selections only. Locking is
+  // driven exclusively by this server-backed snapshot.
+  const [persistedBirthday, setPersistedBirthday] = useState(() => ({
+    birthMonth: initialProfile.birthMonth,
+    birthDay: initialProfile.birthDay,
+    birthdaySetAt: initialProfile.birthdaySetAt,
+  }))
+  const [birthdayConfirmation, setBirthdayConfirmation] = useState<BirthdayDraft | null>(null)
   const initialPhoneParts = getPhoneInputParts(initialProfile.phone)
   const [phoneCountry, setPhoneCountry] = useState<PhoneCountryCode>(initialPhoneParts.country)
   const [phoneValue, setPhoneValue] = useState(initialPhoneParts.value)
@@ -376,6 +378,14 @@ export function ProfileSettingsForm({
 
   function update<K extends keyof InitialProfile>(key: K, value: InitialProfile[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateBirthdayMonth(month: number | null) {
+    setForm((current) => ({
+      ...current,
+      birthMonth: month,
+      birthDay: resetInvalidBirthdayDay(month, current.birthDay),
+    }))
   }
 
   function openDefaultAvatarPicker() {
@@ -594,6 +604,121 @@ export function ProfileSettingsForm({
     }
   }
 
+  async function refreshPersistedBirthday() {
+    try {
+      const response = await fetch('/api/users/me', { cache: 'no-store' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data?.profile) return
+
+      const nextBirthday = {
+        birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : null,
+        birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : null,
+        birthdaySetAt: typeof data.profile.birthdaySetAt === 'string' ? data.profile.birthdaySetAt : null,
+      }
+      setPersistedBirthday(nextBirthday)
+      setForm((current) => ({ ...current, ...nextBirthday }))
+    } catch {
+      // Keep the original error visible if the follow-up refresh is unavailable.
+    }
+  }
+
+  async function saveProfile(birthdayToSave: BirthdayDraft | null, partialBirthdayDraft = false) {
+    setIsSaving(true)
+    setMessage('')
+    setError('')
+
+    const birthdayConfigured = isBirthdayConfigured(persistedBirthday)
+    const birthdayPayload = !birthdayConfigured && birthdayToSave
+      ? { birthMonth: birthdayToSave.month, birthDay: birthdayToSave.day }
+      : {}
+    const rawPhone = phoneValue.trim()
+    const normalizedPhone = rawPhone ? normalizePhoneNumber(rawPhone, phoneCountry) : null
+
+    try {
+      const response = await fetch('/api/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nickname: form.nickname,
+          bio: form.bio,
+          location: form.location,
+          avatarUrl: form.avatarUrl,
+          backgroundUrl: form.backgroundUrl,
+          email: form.email,
+          phone: normalizedPhone?.e164 || '',
+          phoneCountry: normalizedPhone?.country || phoneCountry,
+          wallVisibility: form.wallVisibility,
+          // 生日公开开关：始终提交，服务端直接写回（不影响生日纪念通知与卡片本身）。
+          birthdayPublic: Boolean(form.birthdayPublic),
+          showBadgeActivity: Boolean(form.showBadgeActivity),
+          showBadgeProgressNotifications: Boolean(form.showBadgeProgressNotifications),
+          // 只有确认弹窗后才添加首次生日；未完成的 draft 永远不进入请求。
+          ...birthdayPayload,
+        }),
+      })
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        setBirthdayConfirmation(null)
+        if (data?.code === BIRTHDAY_ALREADY_SET) await refreshPersistedBirthday()
+        setError(data?.message || '保存失败，请稍后再试')
+        return
+      }
+
+      if (data?.profile) {
+        const nextBirthday = {
+          birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : null,
+          birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : null,
+          birthdaySetAt: typeof data.profile.birthdaySetAt === 'string' ? data.profile.birthdaySetAt : null,
+        }
+        setPersistedBirthday(nextBirthday)
+        setForm((current) => ({
+          ...current,
+          email: data.profile.email || '',
+          phone: data.profile.phone || '',
+          emailVerifiedAt: data.profile.emailVerifiedAt || null,
+          phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
+          wallVisibility: data.profile.wallVisibility || current.wallVisibility,
+          showBadgeActivity: typeof data.profile.showBadgeActivity === 'boolean' ? data.profile.showBadgeActivity : current.showBadgeActivity,
+          showBadgeProgressNotifications: typeof data.profile.showBadgeProgressNotifications === 'boolean' ? data.profile.showBadgeProgressNotifications : current.showBadgeProgressNotifications,
+          location: data.profile.location || null,
+          // Keep an incomplete draft visible after saving other fields, but use
+          // the server response as the persisted lock source.
+          birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : current.birthMonth,
+          birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : current.birthDay,
+          birthdaySetAt: nextBirthday.birthdaySetAt || current.birthdaySetAt,
+          birthdayPublic: typeof data.profile.birthdayPublic === 'boolean' ? data.profile.birthdayPublic : current.birthdayPublic,
+        }))
+        const nextPhone = data.profile.phone || ''
+        const nextPhoneParts = getPhoneInputParts(nextPhone, phoneCountry)
+        setPhoneCountry(nextPhoneParts.country)
+        setPhoneValue(nextPhoneParts.value)
+      }
+      setBirthdayConfirmation(null)
+      if (typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('profile-avatar-updated', {
+          detail: { avatarUrl: data?.profile?.avatarUrl || form.avatarUrl },
+        }))
+        window.dispatchEvent(new CustomEvent('profile-updated', {
+          detail: {
+            nickname: data?.profile?.nickname || form.nickname,
+            avatarUrl: data?.profile?.avatarUrl || form.avatarUrl,
+          },
+        }))
+      }
+      setMessage(partialBirthdayDraft
+        ? '资料已保存。生日尚未完整设置，本次不会保存生日。'
+        : data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证。' : data?.nicknameMessage || '资料已保存。')
+      router.refresh()
+      onSaved?.()
+    } catch (saveError) {
+      setBirthdayConfirmation(null)
+      setError(saveError instanceof Error ? saveError.message : '保存失败，请稍后再试')
+    } finally {
+      if (mountedRef.current) setIsSaving(false)
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nicknameValidation = form.nickname !== initialProfile.nickname
@@ -610,84 +735,26 @@ export function ProfileSettingsForm({
       return
     }
 
-    const birthdayConfigured = isBirthdayConfigured(form)
-    if (!birthdayConfigured && form.birthMonth != null && form.birthDay != null) {
-      const confirmed = window.confirm(`确认生日为：${form.birthMonth}月${form.birthDay}日？\n生日保存后将无法修改。`)
-      if (!confirmed) return
-    }
-
-    setIsSaving(true)
-    setMessage('')
-    setError('')
-
-    const birthdayPayload = birthdayConfigured
-      ? {}
-      : { birthMonth: form.birthMonth, birthDay: form.birthDay }
-
-    const response = await fetch('/api/users/me', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nickname: form.nickname,
-        bio: form.bio,
-        location: form.location,
-        avatarUrl: form.avatarUrl,
-        backgroundUrl: form.backgroundUrl,
-        email: form.email,
-        phone: normalizedPhone?.e164 || '',
-        phoneCountry: normalizedPhone?.country || phoneCountry,
-        wallVisibility: form.wallVisibility,
-        // 生日公开开关：始终提交，服务端直接写回（不影响生日纪念通知与卡片本身）。
-        birthdayPublic: Boolean(form.birthdayPublic),
-        showBadgeActivity: Boolean(form.showBadgeActivity),
-        showBadgeProgressNotifications: Boolean(form.showBadgeProgressNotifications),
-        // 已设置生日不再提交生日字段；首次设置才提交一次性生日 payload。
-        ...birthdayPayload,
-      }),
+    const birthdayDecision = decideBirthdaySave(persistedBirthday, {
+      month: form.birthMonth,
+      day: form.birthDay,
     })
-    const data = await response.json().catch(() => null)
-
-    setIsSaving(false)
-    if (!response.ok) {
-      setError(data?.message || '保存失败，请稍后再试')
+    if (birthdayDecision.kind === 'confirm') {
+      setBirthdayConfirmation(birthdayDecision.birthday)
       return
     }
 
-    if (data?.profile) {
-      setForm((current) => ({
-        ...current,
-        email: data.profile.email || '',
-        phone: data.profile.phone || '',
-        emailVerifiedAt: data.profile.emailVerifiedAt || null,
-        phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
-        wallVisibility: data.profile.wallVisibility || current.wallVisibility,
-        showBadgeActivity: typeof data.profile.showBadgeActivity === 'boolean' ? data.profile.showBadgeActivity : current.showBadgeActivity,
-        showBadgeProgressNotifications: typeof data.profile.showBadgeProgressNotifications === 'boolean' ? data.profile.showBadgeProgressNotifications : current.showBadgeProgressNotifications,
-        location: data.profile.location || null,
-        birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : current.birthMonth,
-        birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : current.birthDay,
-        birthdaySetAt: typeof data.profile.birthdaySetAt === 'string' ? data.profile.birthdaySetAt : data.profile.birthdaySetAt === null ? null : current.birthdaySetAt,
-        birthdayPublic: typeof data.profile.birthdayPublic === 'boolean' ? data.profile.birthdayPublic : current.birthdayPublic,
-      }))
-      const nextPhone = data.profile.phone || ''
-      const nextPhoneParts = getPhoneInputParts(nextPhone, phoneCountry)
-      setPhoneCountry(nextPhoneParts.country)
-      setPhoneValue(nextPhoneParts.value)
-    }
-    if (typeof CustomEvent === 'function') {
-      window.dispatchEvent(new CustomEvent('profile-avatar-updated', {
-        detail: { avatarUrl: data?.profile?.avatarUrl || form.avatarUrl },
-      }))
-      window.dispatchEvent(new CustomEvent('profile-updated', {
-        detail: {
-          nickname: data?.profile?.nickname || form.nickname,
-          avatarUrl: data?.profile?.avatarUrl || form.avatarUrl,
-        },
-      }))
-    }
-    setMessage(data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证。' : data?.nicknameMessage || '资料已保存。')
-    router.refresh()
-    onSaved?.()
+    await saveProfile(null, birthdayDecision.kind === 'incomplete')
+  }
+
+  async function confirmBirthday() {
+    if (!birthdayConfirmation || isSaving) return
+    await saveProfile(birthdayConfirmation)
+  }
+
+  function cancelBirthdayConfirmation() {
+    if (isSaving) return
+    setBirthdayConfirmation(null)
   }
 
   const avatarPreview = profileImageUrl(form.avatarUrl)
@@ -887,11 +954,11 @@ export function ProfileSettingsForm({
             <p className="mt-1 text-sm font-bold leading-6 text-slate-500">生日仅用于「生日纪念」徽章与今日生日统计。</p>
           </div>
 
-          {isBirthdayConfigured(form) ? (
+          {isBirthdayConfigured(persistedBirthday) ? (
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
               <p className="text-xs font-black tracking-[0.14em] text-emerald-700">当前生日</p>
               <p className="mt-1 text-lg font-black text-brand-950">
-                {form.birthMonth != null && form.birthDay != null ? `${form.birthMonth}月${form.birthDay}日` : '已设置'}
+                {persistedBirthday.birthMonth != null && persistedBirthday.birthDay != null ? `${persistedBirthday.birthMonth}月${persistedBirthday.birthDay}日` : '已设置'}
               </p>
               <p className="mt-1">生日设置后不可修改。</p>
             </div>
@@ -901,7 +968,7 @@ export function ProfileSettingsForm({
                 <span className="text-sm font-black text-slate-700">月份</span>
                 <select
                   value={form.birthMonth ?? ''}
-                  onChange={(event) => update('birthMonth', event.target.value ? Number(event.target.value) : null)}
+                  onChange={(event) => updateBirthdayMonth(event.target.value ? Number(event.target.value) : null)}
                   className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
                 >
                   <option value="">请选择月份</option>
@@ -918,7 +985,7 @@ export function ProfileSettingsForm({
                   className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
                 >
                   <option value="">请选择日期</option>
-                  {Array.from({ length: daysForMonth(form.birthMonth) }, (_, index) => index + 1).map((day) => (
+                  {Array.from({ length: daysForBirthdayMonth(form.birthMonth) }, (_, index) => index + 1).map((day) => (
                     <option key={day} value={day}>{day}日</option>
                   ))}
                 </select>
@@ -1008,6 +1075,30 @@ export function ProfileSettingsForm({
           </button>
         </div>
       </form>
+
+      {birthdayConfirmation ? (
+        <div className="fixed inset-0 z-[var(--layer-dialog)] grid place-items-center bg-slate-950/55 px-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="birthday-confirm-title"
+            className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl"
+          >
+            <h2 id="birthday-confirm-title" className="text-xl font-black text-brand-950">确认生日</h2>
+            <p className="mt-4 text-sm font-bold leading-6 text-slate-600">请确认你的生日为：</p>
+            <p className="mt-1 text-2xl font-black text-brand-950">{birthdayConfirmation.month}月{birthdayConfirmation.day}日</p>
+            <p className="mt-3 text-sm font-bold leading-6 text-slate-500">生日仅可设置一次，确认保存后将无法修改。</p>
+            <div className="mt-6 flex gap-3">
+              <button type="button" onClick={cancelBirthdayConfirmation} disabled={isSaving} className="flex-1 rounded-2xl bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-60">
+                取消
+              </button>
+              <button type="button" onClick={() => void confirmBirthday()} disabled={isSaving} className="flex-1 rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60">
+                {isSaving ? '保存中...' : '确认并保存'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {crop ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 px-4">

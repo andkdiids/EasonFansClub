@@ -113,15 +113,15 @@ test('CASES 6/8/9/10: the API and UI keep birthday writes separate from other pr
   const form = read('app/profile/ProfileSettingsForm.tsx')
   const dataBlock = route.slice(route.indexOf('const data:'), route.indexOf('if (body?.bio !== undefined)'))
 
-  assert.match(route, /writeBirthdayOnce\(prisma, guard\.user\.id, requestedBirthday \|\| null, now\)/)
+  assert.match(route, /writeBirthdayOnce\(tx, guard\.user\.id, requestedBirthday \|\| null, now\)/)
   assert.match(helper, /updateMany\(/)
   assert.match(helper, /birthMonth:\s*null/)
   assert.match(helper, /birthDay:\s*null/)
   assert.match(helper, /birthdaySetAt:\s*null/)
   assert.match(route, /birthdayPublic !== undefined\) data\.birthdayPublic = birthdayPublic/)
   assert.doesNotMatch(dataBlock, /birthMonth|birthDay|birthdaySetAt/)
-  assert.match(form, /isBirthdayConfigured\(form\)/)
-  assert.match(form, /const birthdayPayload = birthdayConfigured\s*\n\s*\? \{\}/)
+  assert.match(form, /isBirthdayConfigured\(persistedBirthday\)/)
+  assert.match(form, /const birthdayPayload = !birthdayConfigured && birthdayToSave/)
   assert.match(form, /birthdayPublic: Boolean\(form\.birthdayPublic\)/)
 })
 
@@ -129,7 +129,7 @@ test('CASE 10: any historical birthday value is read-only, even without birthday
   assert.equal(isBirthdayConfigured({ birthMonth: 5, birthDay: 21, birthdaySetAt: null }), true)
   assert.equal(isBirthdayConfigured({ birthMonth: null, birthDay: null, birthdaySetAt: new Date() }), true)
   assert.equal(isBirthdayConfigured(blankBirthday()), false)
-  assert.match(read('app/profile/ProfileSettingsForm.tsx'), /isBirthdayConfigured\(form\) \? \(/)
+  assert.match(read('app/profile/ProfileSettingsForm.tsx'), /isBirthdayConfigured\(persistedBirthday\) \? \(/)
 })
 
 test('CASE 11/12: birthday validation accepts February 29 and rejects February 30', () => {

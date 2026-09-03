@@ -486,17 +486,6 @@ export async function PATCH(request: Request) {
 
   const now = new Date()
 
-  let birthdayChanged = false
-  if (birthdayFieldsProvided) {
-    try {
-      const result = await writeBirthdayOnce(prisma, guard.user.id, requestedBirthday || null, now)
-      birthdayChanged = result.status === 'set'
-    } catch (error) {
-      if (error instanceof BirthdayAlreadySetError) return birthdayAlreadySetResponse()
-      throw error
-    }
-  }
-
   if (birthdayPublic !== undefined) data.birthdayPublic = birthdayPublic
   if (showBadgeActivity !== undefined) data.showBadgeActivity = showBadgeActivity
   if (showBadgeProgressNotifications !== undefined) data.showBadgeProgressNotifications = showBadgeProgressNotifications
@@ -518,7 +507,14 @@ export async function PATCH(request: Request) {
     }, { status: 429, headers: { 'Retry-After': String(daysRemaining * 24 * 60 * 60) } })
   }
 
-  const profile = await prisma.$transaction(async (tx) => {
+  let birthdayChanged = false
+  try {
+    const profile = await prisma.$transaction(async (tx) => {
+      if (birthdayFieldsProvided) {
+        const result = await writeBirthdayOnce(tx, guard.user.id, requestedBirthday || null, now)
+        birthdayChanged = result.status === 'set'
+      }
+
     // 昵称处理：违规 → 系统自动替换并生成唯一展示昵称；正常 / 修正 → 清除违规标记。
     const isNicknameViolation = Boolean(nicknameViolation)
     const nicknameUpdate: Prisma.UserUpdateInput = {}
@@ -659,7 +655,7 @@ export async function PATCH(request: Request) {
         regionName: profileRecord.locationRegion,
       } : null,
     }
-  })
+    })
 
   invalidateCurrentUserCache(guard.user.id)
   void updateUserIpRegion(guard.user.id, request)
@@ -675,7 +671,7 @@ export async function PATCH(request: Request) {
     emailVerificationSent = true
   }
 
-  return NextResponse.json({
+    return NextResponse.json({
     profile,
     emailVerificationSent,
     nicknameUpdated: !nicknameChanged || canChangeNickname,
@@ -685,5 +681,9 @@ export async function PATCH(request: Request) {
       : nicknameViolation
         ? '昵称包含违禁词，已被系统替换为临时展示昵称，整改后可重新修改'
         : undefined,
-  })
+    })
+  } catch (error) {
+    if (error instanceof BirthdayAlreadySetError) return birthdayAlreadySetResponse()
+    throw error
+  }
 }
