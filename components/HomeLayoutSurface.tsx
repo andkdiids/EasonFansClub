@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeUpdateModal } from '@/components/HomeUpdateModal'
 import { SafeAvatar } from '@/components/SafeAvatar'
-import { UserDisplayName } from '@/components/UserDisplayName'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
 import type { HomeEntertainmentRanking, HomeEntertainmentRankingMode } from '@/lib/home-data'
@@ -141,10 +140,11 @@ function yearsFromToday(value: string) {
 }
 
 function EntertainmentScoreUser({ user }: { user: NonNullable<HomeEntertainmentRankingMode['user']> }) {
+  const name = user.displayName || user.nickname
   return (
-    <div className="home-entertainment-score-user" title={user.displayName || user.nickname}>
-      <span className="home-entertainment-score-avatar"><SafeAvatar src={user.avatarUrl} name={user.displayName || user.nickname} uid={user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
-      <Link href={`/user/${formatUid(user.uid)}`} className="home-entertainment-score-name"><UserDisplayName name={user.displayName || user.nickname} uid={user.uid} badge={user.equippedBadge} compact /></Link>
+    <div className="home-entertainment-score-user" title={name}>
+      <span className="home-entertainment-score-avatar"><SafeAvatar src={user.avatarUrl} name={name} uid={user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
+      <Link href={`/user/${formatUid(user.uid)}`} className="home-entertainment-score-name">{name}</Link>
     </div>
   )
 }
@@ -369,7 +369,7 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
               {ranking.modes.map((item) => (
                 <div className="home-entertainment-mode-score" key={item.key}>
                   <span className="home-entertainment-mode-label">{item.gameName}{item.modeLabel ? ` · ${item.modeLabel}` : ''}</span>
-                  <div className="home-entertainment-score-cell">
+                  <div className="home-entertainment-player-cell home-entertainment-score-cell">
                     {item.user && item.score !== null ? <EntertainmentScoreUser user={item.user} /> : <span className="home-entertainment-mode-empty">{item.status === 'unavailable' ? '暂时无法读取' : '暂无成绩'}</span>}
                   </div>
                   <strong className="home-entertainment-mode-score-value">{item.score !== null ? <>{fmt(item.score)} <small>分</small></> : '—'}</strong>

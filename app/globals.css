@@ -8205,7 +8205,7 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
 .home-secondary-columns .home-entertainment-mode-score {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.2fr) auto;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.2fr) max-content;
   align-items: center;
   column-gap: 7px;
 }
@@ -8247,16 +8247,30 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
   min-width: 0;
   overflow: hidden;
 }
+.home-secondary-columns .home-entertainment-player-cell {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
 .home-secondary-columns .home-entertainment-score-user {
-  gap: 5px;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
   margin-top: 0;
 }
 .home-secondary-columns .home-entertainment-score-avatar {
+  display: block;
   width: 20px;
   height: 20px;
+  flex: 0 0 auto;
 }
 .home-secondary-columns .home-entertainment-score-name {
+  display: block;
   min-width: 0;
+  flex: 1 1 0;
   font-size: 9px;
 }
 .home-secondary-columns .home-entertainment-mode-score-value {
@@ -8265,6 +8279,7 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
   color: var(--primary);
   font-size: clamp(12px, 1.1vw, 16px);
   line-height: 1.1;
+  justify-self: end;
   text-align: right;
   white-space: nowrap;
 }
@@ -8359,7 +8374,7 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
   .home-secondary-columns .home-entertainment-ranking-head,
   .home-secondary-columns .home-entertainment-mode-score {
     column-gap: 5px;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content;
   }
   .home-secondary-columns .home-entertainment-mode-label {
     font-size: 9px;
