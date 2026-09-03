@@ -685,96 +685,100 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
         {pullDistance >= 64 ? '松开刷新' : pullDistance > 8 ? '下拉刷新' : ''}
       </div>
       <header className="forum-discovery-header">
-        <div className="forum-discovery-header-row">
-          <div className="forum-discovery-title-group">
-            <h1>小臣书</h1>
-            <div className="forum-presentation-switcher" role="group" aria-label="广场展示模式">
-              <button type="button" aria-pressed={presentationMode === 'xiaochenshu'} onClick={() => updatePresentationMode('xiaochenshu')}>小臣书</button>
-              <span aria-hidden="true">｜</span>
-              <button type="button" aria-pressed={presentationMode === 'fish'} onClick={() => updatePresentationMode('fish')}>摸鱼模式</button>
+        <div className="forum-discovery-content">
+          <div className="forum-discovery-header-row">
+            <div className="forum-discovery-title-group">
+              <h1>小臣书</h1>
+              <div className="forum-presentation-switcher" role="group" aria-label="广场展示模式">
+                <button type="button" aria-pressed={presentationMode === 'xiaochenshu'} onClick={() => updatePresentationMode('xiaochenshu')}>小臣书</button>
+                <span aria-hidden="true">｜</span>
+                <button type="button" aria-pressed={presentationMode === 'fish'} onClick={() => updatePresentationMode('fish')}>摸鱼模式</button>
+              </div>
+            </div>
+            <div className="forum-discovery-header-actions">
+              {showDesktopRefresh && mode === 'recommend' ? (
+                <button
+                  type="button"
+                  className={`forum-discovery-refresh-button${isRefreshing ? ' is-refreshing' : ''}`}
+                  onClick={() => void refresh(true)}
+                  disabled={isRefreshing}
+                  aria-busy={isRefreshing}
+                  aria-label={isRefreshing ? '正在刷新推荐' : '刷新推荐'}
+                >
+                  <span aria-hidden="true">↻</span>
+                  {isRefreshing ? '刷新中…' : '刷新'}
+                </button>
+              ) : null}
+              {presentationMode === 'fish' ? (
+                <label className="forum-fish-minimal-control">
+                  <input type="checkbox" checked={minimalMode} onChange={(event) => updateMinimalMode(event.target.checked)} />
+                  <span>极简</span>
+                </label>
+              ) : null}
+              {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
             </div>
           </div>
-          <div className="forum-discovery-header-actions">
-            {showDesktopRefresh && mode === 'recommend' ? (
-              <button
-                type="button"
-                className={`forum-discovery-refresh-button${isRefreshing ? ' is-refreshing' : ''}`}
-                onClick={() => void refresh(true)}
-                disabled={isRefreshing}
-                aria-busy={isRefreshing}
-                aria-label={isRefreshing ? '正在刷新推荐' : '刷新推荐'}
-              >
-                <span aria-hidden="true">↻</span>
-                {isRefreshing ? '刷新中…' : '刷新'}
+          <form className="forum-discovery-search" onSubmit={submitSearch} role="search">
+            <label htmlFor="forum-discovery-search-input">搜索帖子</label>
+            <input
+              id="forum-discovery-search-input"
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
+              placeholder="搜索帖子"
+              enterKeyHint="search"
+            />
+            <button type="submit" aria-label="执行搜索">⌕</button>
+          </form>
+          <nav className="forum-discovery-tabs" aria-label="广场分区">
+            {tabItems.map((tab) => (
+              <button key={tab.value} type="button" onClick={() => updateTab(tab.value)} aria-current={activeTab === tab.value ? 'page' : undefined}>
+                {tab.label}
               </button>
-            ) : null}
-            {presentationMode === 'fish' ? (
-              <label className="forum-fish-minimal-control">
-                <input type="checkbox" checked={minimalMode} onChange={(event) => updateMinimalMode(event.target.checked)} />
-                <span>极简</span>
-              </label>
-            ) : null}
-            {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
-          </div>
+            ))}
+            {query ? <span className="forum-discovery-search-label">搜索：{query}</span> : null}
+          </nav>
         </div>
-        <form className="forum-discovery-search" onSubmit={submitSearch} role="search">
-          <label htmlFor="forum-discovery-search-input">搜索帖子</label>
-          <input
-            id="forum-discovery-search-input"
-            value={searchValue}
-            onChange={(event) => setSearchValue(event.target.value)}
-            placeholder="搜索帖子"
-            enterKeyHint="search"
-          />
-          <button type="submit" aria-label="执行搜索">⌕</button>
-        </form>
-        <nav className="forum-discovery-tabs" aria-label="广场分区">
-          {tabItems.map((tab) => (
-            <button key={tab.value} type="button" onClick={() => updateTab(tab.value)} aria-current={activeTab === tab.value ? 'page' : undefined}>
-              {tab.label}
-            </button>
-          ))}
-          {query ? <span className="forum-discovery-search-label">搜索：{query}</span> : null}
-        </nav>
       </header>
 
-      {error && !posts.length ? (
-        <div className="forum-discovery-error" role="alert">
-          <p>{error}</p>
-          <button type="button" onClick={() => void loadPage(true)}>重试</button>
-        </div>
-      ) : null}
-      {loading && !posts.length ? (
-        presentationMode === 'fish' ? (
-          <div className="fish-mode-feed fish-mode-feed-skeleton" aria-label="正在加载">
-            {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`fish-skeleton-${key}`} className="fish-mode-post-skeleton" />)}
+      <div className="forum-discovery-content">
+        {error && !posts.length ? (
+          <div className="forum-discovery-error" role="alert">
+            <p>{error}</p>
+            <button type="button" onClick={() => void loadPage(true)}>重试</button>
           </div>
-        ) : (
-          <div className="forum-discovery-grid" aria-label="正在加载">
-            {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`skeleton-${key}`} className="forum-discovery-skeleton" />)}
-          </div>
-        )
-      ) : null}
-      {!loading && !error && !posts.length ? <p className="forum-discovery-empty">暂时没有可展示的帖子</p> : null}
-      {posts.length ? (
-        presentationMode === 'fish' ? (
-          <div className="fish-mode-feed" aria-label="摸鱼模式帖子列表">
-            <div className="fish-mode-feed-heading">
-              <span>文字优先 · 已加载 {posts.length} 条</span>
-              <span className="fish-mode-keyboard-hint">J/K 浏览 · Enter 预览 · Esc 关闭 · L 点赞</span>
+        ) : null}
+        {loading && !posts.length ? (
+          presentationMode === 'fish' ? (
+            <div className="fish-mode-feed fish-mode-feed-skeleton" aria-label="正在加载">
+              {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`fish-skeleton-${key}`} className="fish-mode-post-skeleton" />)}
             </div>
-            {posts.map((post) => <ForumFishModePostRow key={post.id} post={post} minimal={minimalMode} active={fishActivePostId === post.id} onOpen={openFishPreview} />)}
-          </div>
-        ) : (
-          <div className="forum-discovery-grid">
-            {posts.map((post, index) => <ForumDiscoveryCard key={post.id} post={post} priority={index < 2} onOpen={openPost} />)}
-          </div>
-        )
-      ) : null}
-      {error && posts.length ? <div className="forum-discovery-load-error" role="alert"><span>{error}</span><button type="button" onClick={() => void loadPage(false, true)}>重试</button></div> : null}
-      {loadingMore ? <div className="forum-discovery-loading-more" aria-live="polite">正在加载更多</div> : null}
-      {!hasMore && posts.length ? <p className="forum-discovery-end">已经看到这里了</p> : null}
-      <div ref={sentinelRef} className="forum-discovery-sentinel" aria-hidden="true" />
+          ) : (
+            <div className="forum-discovery-grid" aria-label="正在加载">
+              {DISCOVERY_SKELETON_KEYS.map((key) => <div key={`skeleton-${key}`} className="forum-discovery-skeleton" />)}
+            </div>
+          )
+        ) : null}
+        {!loading && !error && !posts.length ? <p className="forum-discovery-empty">暂时没有可展示的帖子</p> : null}
+        {posts.length ? (
+          presentationMode === 'fish' ? (
+            <div className="fish-mode-feed" aria-label="摸鱼模式帖子列表">
+              <div className="fish-mode-feed-heading">
+                <span>文字优先 · 已加载 {posts.length} 条</span>
+                <span className="fish-mode-keyboard-hint">J/K 浏览 · Enter 预览 · Esc 关闭 · L 点赞</span>
+              </div>
+              {posts.map((post) => <ForumFishModePostRow key={post.id} post={post} minimal={minimalMode} active={fishActivePostId === post.id} onOpen={openFishPreview} />)}
+            </div>
+          ) : (
+            <div className="forum-discovery-grid">
+              {posts.map((post, index) => <ForumDiscoveryCard key={post.id} post={post} priority={index < 2} onOpen={openPost} />)}
+            </div>
+          )
+        ) : null}
+        {error && posts.length ? <div className="forum-discovery-load-error" role="alert"><span>{error}</span><button type="button" onClick={() => void loadPage(false, true)}>重试</button></div> : null}
+        {loadingMore ? <div className="forum-discovery-loading-more" aria-live="polite">正在加载更多</div> : null}
+        {!hasMore && posts.length ? <p className="forum-discovery-end">已经看到这里了</p> : null}
+        <div ref={sentinelRef} className="forum-discovery-sentinel" aria-hidden="true" />
+      </div>
       {showBackTop ? <button type="button" className="forum-discovery-back-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="回到顶部">↑</button> : null}
       {presentationMode === 'fish' && fishPreviewPost ? (
         <ForumFishModePreview

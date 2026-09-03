@@ -687,9 +687,10 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
 .forum-discovery-page { display:block; min-height:100dvh; padding-bottom:34px; color:var(--foreground); background:var(--background); }
 
 @media (min-width:768px) {
+  .forum-discovery-content { width:min(1360px,calc(100% - 40px)); margin:0 auto; }
   .forum-discovery-pull-indicator { display:none; }
   .forum-discovery-header { border-bottom:1px solid var(--border); background:var(--background); }
-  .forum-discovery-header-row { display:flex; width:min(80rem,calc(100% - 40px)); min-height:72px; margin:0 auto; align-items:center; justify-content:space-between; gap:20px; }
+  .forum-discovery-header-row { display:flex; width:100%; min-height:72px; margin:0 auto; align-items:center; justify-content:space-between; gap:20px; }
   .forum-discovery-header-row h1 { margin:0; color:var(--foreground); font-size:24px; font-weight:900; letter-spacing:.02em; }
   .forum-discovery-header-actions { display:flex; align-items:center; gap:10px; }
   .forum-discovery-publish { display:grid; width:40px; height:40px; place-items:center; border-radius:50%; color:#fff; background:var(--primary); font-size:27px; line-height:1; text-decoration:none; }
@@ -698,15 +699,15 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   .forum-discovery-refresh-button:disabled { cursor:wait; opacity:.65; }
   .forum-discovery-refresh-button span { display:inline-block; font-size:18px; line-height:1; }
   .forum-discovery-refresh-button.is-refreshing span { animation:forum-discovery-refresh-spin .8s linear infinite; }
-  .forum-discovery-search { display:flex; width:min(720px,calc(100% - 40px)); height:42px; margin:18px auto 14px; align-items:center; gap:8px; border:1px solid var(--border); border-radius:2px; padding:0 12px; color:var(--foreground-muted); background:var(--surface-elevated); }
+  .forum-discovery-search { display:flex; width:min(720px,100%); height:42px; margin:18px auto 14px; align-items:center; gap:8px; border:1px solid var(--border); border-radius:2px; padding:0 12px; color:var(--foreground-muted); background:var(--surface-elevated); }
   .forum-discovery-search input { min-width:0; flex:1; border:0; outline:0; color:var(--foreground); background:transparent; font-size:13px; }
   .forum-discovery-search button { border:0; padding:0 4px; color:var(--foreground-muted); background:transparent; font-size:20px; line-height:1; }
-  .forum-discovery-tabs { display:flex; width:min(80rem,calc(100% - 40px)); min-width:0; margin:0 auto; overflow-x:auto; border:1px solid var(--border); border-bottom:0; background:var(--surface); scrollbar-width:none; }
+  .forum-discovery-tabs { display:flex; width:100%; min-width:0; margin:0 auto; overflow-x:auto; border:1px solid var(--border); border-bottom:0; background:var(--surface); scrollbar-width:none; }
   .forum-discovery-tabs::-webkit-scrollbar { display:none; }
   .forum-discovery-tabs button { flex:none; min-height:48px; border:0; border-right:1px solid var(--border); border-radius:0; padding:0 20px; color:var(--foreground-muted); background:transparent; font-size:12px; font-weight:800; }
   .forum-discovery-tabs button[aria-current='page'] { color:var(--primary); background:var(--navigation-active); box-shadow:inset 0 -2px var(--primary); }
   .forum-discovery-search-label { flex:none; min-height:48px; color:var(--foreground-muted); font-size:12px; line-height:48px; white-space:nowrap; }
-  .forum-discovery-grid { display:grid; width:min(80rem,calc(100% - 40px)); margin:24px auto 0; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
+  .forum-discovery-grid { display:grid; width:100%; margin:24px auto 0; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
   .forum-discovery-card { min-width:0; overflow:hidden; border:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
   .forum-discovery-card-link { display:block; color:inherit; text-decoration:none; }
   .forum-discovery-cover { position:relative; width:100%; aspect-ratio:4 / 3; overflow:hidden; background:var(--surface); }
@@ -733,7 +734,7 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   .forum-discovery-like-button button[data-liked='true'] { color:var(--danger); }
   .forum-discovery-like-button p { display:none; }
   .forum-discovery-skeleton { width:100%; height:230px; background:linear-gradient(100deg,var(--surface) 25%,var(--surface-subtle) 37%,var(--surface) 63%); background-size:400% 100%; animation:forum-discovery-skeleton 1.2s ease infinite; }
-  .forum-discovery-error,.forum-discovery-empty,.forum-discovery-end,.forum-discovery-loading-more,.forum-discovery-load-error { width:min(80rem,calc(100% - 40px)); margin:24px auto; color:var(--foreground-muted); font-size:13px; font-weight:750; text-align:center; }
+  .forum-discovery-error,.forum-discovery-empty,.forum-discovery-end,.forum-discovery-loading-more,.forum-discovery-load-error { width:100%; margin:24px auto; color:var(--foreground-muted); font-size:13px; font-weight:750; text-align:center; }
   .forum-discovery-error { padding:20px; border:1px solid var(--border); background:var(--surface-elevated); }
   .forum-discovery-error button,.forum-discovery-load-error button { margin-left:8px; border:0; color:var(--primary); background:transparent; font-weight:900; }
   .forum-discovery-load-error { padding:10px; color:var(--danger); }
@@ -4308,6 +4309,9 @@ html[data-keyboard-open='true'] [data-mobile-main-nav] {
 /* Final cascade for the shared container and immersive authentication screen. */
 .page-container,
 .site-page-main { max-width: 1500px; padding-inline: clamp(24px, 3vw, 48px); }
+@media (min-width:768px) {
+  .forum-page-main { max-width:none; padding-inline:0; }
+}
 .auth-page {
   position:relative;
   display:flex;
@@ -7879,7 +7883,7 @@ body:has(.duel-page) .app-page-content {
   .forum-discovery-page[data-forum-presentation='fish'] .badge-name-glow,
   .forum-discovery-page[data-forum-presentation='fish'] .badge-name-sparkle { animation:none !important; transition:none !important; }
 
-  .fish-mode-feed { width:min(1180px,calc(100% - 40px)); margin:22px auto 0; border-top:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
+  .fish-mode-feed { width:100%; margin:22px auto 0; border-top:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
   .fish-mode-feed-heading { display:flex; min-height:32px; align-items:center; justify-content:space-between; gap:14px; padding:0 13px; border-bottom:1px solid var(--border); color:var(--foreground-muted); font-size:10px; font-weight:800; letter-spacing:.02em; }
   .fish-mode-keyboard-hint { color:var(--foreground-muted); font-weight:700; }
   .fish-mode-post-row { min-width:0; border-bottom:1px solid var(--border); padding:12px 14px 11px; background:var(--surface-elevated); }

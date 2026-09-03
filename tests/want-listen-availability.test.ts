@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getWantListenSummary } from '../lib/want-listen'
+import { getWantListenSummary, isRetryableWantListenTransactionError } from '../lib/want-listen'
 import { isWantListenModeEnabled, WANT_LISTEN_MODES } from '../lib/want-listen-config'
 import { settleOptionalWantListenRead } from '../lib/want-listen-summary'
 
@@ -75,6 +75,32 @@ test('服务层：配置 mock 失败仍作为核心错误抛出，不默认放�
     getWantListenSummary('fixture-user', mockSummaryDatabase({ configError: coreError })),
     (error: unknown) => error === coreError,
   )
+})
+
+test('启动事务会重试可恢复的 Prisma 事务断连，并为创建预留足够的等待窗口', () => {
+  const retryable = Object.assign(new Error('Transaction API error'), { code: 'P2028' })
+  const deadlock = Object.assign(new Error('deadlock found when trying to get lock'), { code: 'P2034' })
+  const permanent = Object.assign(new Error('invalid input'), { code: 'P2003' })
+  assert.equal(isRetryableWantListenTransactionError(retryable), true)
+  assert.equal(isRetryableWantListenTransactionError(deadlock), true)
+  assert.equal(isRetryableWantListenTransactionError(permanent), false)
+
+  const service = source('lib/want-listen.ts')
+  assert.match(service, /code === 'P2028'/)
+  assert.match(service, /maxWait: 10_000, timeout: 15_000/)
+})
+
+test('历史 session 唯一键残留可精确释放，清理异常不吞掉并继续走权威创建链路', () => {
+  const service = source('lib/want-listen.ts')
+  const home = source('app/games/want-listen/WantListenHome.tsx')
+  assert.match(service, /async function clearStaleWantListenActiveKey\(userId: string, mode: WantListenMode\)/)
+  assert.match(service, /activeKey, status: \{ not: 'IN_PROGRESS' \}/)
+  assert.match(service, /WANT_LISTEN_STARTUP_CLEANUP_DEGRADED/)
+  assert.match(service, /await ensureModeAvailable\(mode\)/)
+  assert.match(service, /for \(let attempt = 0; attempt < 2 && !created; attempt \+= 1\)/)
+  assert.match(home, /summaryUnavailable/)
+  assert.match(home, /summary && !isWantListenModeEnabled\(summary\.config, mode\)/)
+  assert.doesNotMatch(home, /if \(starting \|\| !summary/)
 })
 
 test('想听首页将配置作为核心依赖，统计与进行中会话失败不阻断开始', () => {

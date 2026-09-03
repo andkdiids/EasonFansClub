@@ -115,19 +115,26 @@ export async function saveWantListenConfig(config: WantListenConfig, database: P
   return config
 }
 
-function isRetryableTransactionError(error: unknown) {
+function prismaErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) return ''
+  return typeof error.code === 'string' ? error.code : ''
+}
+
+export function isRetryableWantListenTransactionError(error: unknown) {
   if (!error || typeof error !== 'object') return false
-  const code = 'code' in error ? String(error.code) : ''
+  const code = prismaErrorCode(error)
   const message = error instanceof Error ? error.message.toLowerCase() : ''
-  return code === 'P2034' || message.includes('deadlock') || message.includes('serialization')
+  // P2028 means Prisma lost/closed the interactive transaction. The callback is
+  // rolled back in that case, so retrying the whole idempotent operation is safe.
+  return code === 'P2028' || code === 'P2034' || message.includes('deadlock') || message.includes('serialization')
 }
 
 async function transactionWithRetry<T>(callback: (database: Prisma.TransactionClient) => Promise<T>) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await prisma.$transaction(callback)
+      return await prisma.$transaction(callback, { maxWait: 10_000, timeout: 15_000 })
     } catch (error) {
-      if (!isRetryableTransactionError(error) || attempt === 2) throw error
+      if (!isRetryableWantListenTransactionError(error) || attempt === 2) throw error
     }
   }
   throw new Error('transaction retry exhausted')
@@ -339,7 +346,28 @@ async function refreshWantListenExpiry(userId: string, sessionId: string, now = 
 }
 
 function isUniqueConstraintError(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+  return prismaErrorCode(error) === 'P2002'
+}
+
+function logWantListenStartupCleanupFailure(userId: string, mode: WantListenMode, phase: string, error: unknown) {
+  const errorCode = prismaErrorCode(error)
+  console.warn('WANT_LISTEN_STARTUP_CLEANUP_DEGRADED', JSON.stringify({
+    userId,
+    mode,
+    phase,
+    errorCode: errorCode || undefined,
+    errorName: error instanceof Error ? error.name : undefined,
+    message: error instanceof Error ? error.message : String(error),
+  }))
+}
+
+async function clearStaleWantListenActiveKey(userId: string, mode: WantListenMode) {
+  const activeKey = `${userId}:${mode}`
+  const result = await prisma.wantListenSession.updateMany({
+    where: { userId, mode, activeKey, status: { not: 'IN_PROGRESS' } },
+    data: { activeKey: null },
+  })
+  return result.count
 }
 
 /**
@@ -533,15 +561,68 @@ function wantListenGameType(mode: WantListenMode) {
   return `want-listen:${mode}`
 }
 
+async function persistWantListenSession(
+  userId: string,
+  mode: WantListenMode,
+  firstQuestion: PreparedQuestion,
+  now: Date,
+  meta: { ip?: string | null; userAgent?: string | null },
+) {
+  return transactionWithRetry(async (database) => {
+    const sessionId = randomUUID()
+    const session = await database.wantListenSession.create({
+      data: {
+        id: sessionId,
+        activeKey: `${userId}:${mode}`,
+        userId,
+        mode,
+        currentQuestion: 1,
+        questionCount: null,
+        totalQuestions: 0,
+        currentStreak: 0,
+        maxStreak: 0,
+        wrongCount: 0,
+        livesRemaining: WANT_LISTEN_MAX_WRONG_COUNT,
+        expiresAt: new Date(now.getTime() + WANT_LISTEN_SESSION_TTL_MS),
+        ipAddress: meta.ip?.slice(0, 64) || null,
+        userAgent: meta.userAgent?.slice(0, 500) || null,
+        WantListenSessionQuestion: {
+          create: {
+            publicId: randomUUID(),
+            position: 1,
+            questionData: firstQuestion.data as unknown as Prisma.InputJsonValue,
+            correctOptionKey: firstQuestion.correctOptionKey,
+            // 服务端记录第 1 题的开始时间，后续题目在 next 时记录
+            questionStartedAt: now,
+          },
+        },
+      },
+      select: { id: true },
+    })
+    if (firstQuestion.fakeTitleId) await database.wantListenFakeTitle.update({ where: { id: firstQuestion.fakeTitleId }, data: { usageCount: { increment: 1 } } })
+    return session
+  })
+}
+
 export async function createWantListenSession(userId: string, rawMode: unknown, meta: { ip?: string | null; userAgent?: string | null } = {}) {
   const mode = ensureMode(rawMode)
   const now = new Date()
   // 1) 已过期的进行中会话 → EXPIRED（清理 TTL 过期残留）
-  await prisma.wantListenSession.updateMany({ where: { userId, mode, status: 'IN_PROGRESS', expiresAt: { lte: now } }, data: { status: 'EXPIRED', activeKey: null } })
+  try {
+    await prisma.wantListenSession.updateMany({ where: { userId, mode, status: 'IN_PROGRESS', expiresAt: { lte: now } }, data: { status: 'EXPIRED', activeKey: null } })
+  } catch (error) {
+    // 过期清理是 housekeeping；后面的权威 active 查询和创建仍继续执行。
+    logWantListenStartupCleanupFailure(userId, mode, 'expire-stale-sessions', error)
+  }
   // 2) 同模式所有有效进行中会话：保留最新一次，其余历史残留 → ABANDONED（不删除数据）
   const activeSessions = await prisma.wantListenSession.findMany({ where: { userId, mode, status: 'IN_PROGRESS' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
   if (activeSessions.length > 1) {
-    await prisma.wantListenSession.updateMany({ where: { id: { in: activeSessions.slice(1).map((session) => session.id) } }, data: { status: 'ABANDONED', activeKey: null } })
+    try {
+      await prisma.wantListenSession.updateMany({ where: { id: { in: activeSessions.slice(1).map((session) => session.id) } }, data: { status: 'ABANDONED', activeKey: null } })
+    } catch (error) {
+      // 只保留最新会话的清理失败不应阻断恢复；唯一键冲突由创建恢复分支处理。
+      logWantListenStartupCleanupFailure(userId, mode, 'abandon-duplicate-sessions', error)
+    }
   }
   // 3) 已有唯一有效进行中会话 → 直接返回其 sessionId（继续游戏），不重复创建
   const existing = activeSessions[0]
@@ -553,57 +634,42 @@ export async function createWantListenSession(userId: string, rawMode: unknown, 
     return { resumed: true, session: toPublicState(restored) }
   }
   await ensureModeAvailable(mode)
+  try {
+    // 历史完成/退出/过期记录不应永久占用 `${userId}:${mode}` 唯一键。
+    await clearStaleWantListenActiveKey(userId, mode)
+  } catch (error) {
+    // 这是可恢复的数据修复；若仍发生 P2002，下面会再次尝试精确释放并重试。
+    logWantListenStartupCleanupFailure(userId, mode, 'release-stale-active-key', error)
+  }
 
   // 无尽模式：仅生成第 1 题，后续题目在「下一题」时动态生成
   const firstQuestion = await buildQuestionAtPosition(mode, 1, new Set(), new Set())
-  try {
-    const created = await transactionWithRetry(async (database) => {
-      const sessionId = randomUUID()
-      const session = await database.wantListenSession.create({
-        data: {
-          id: sessionId,
-          activeKey: `${userId}:${mode}`,
-          userId,
-          mode,
-          currentQuestion: 1,
-          questionCount: null,
-          totalQuestions: 0,
-          currentStreak: 0,
-          maxStreak: 0,
-          wrongCount: 0,
-          livesRemaining: WANT_LISTEN_MAX_WRONG_COUNT,
-          expiresAt: new Date(now.getTime() + WANT_LISTEN_SESSION_TTL_MS),
-          ipAddress: meta.ip?.slice(0, 64) || null,
-          userAgent: meta.userAgent?.slice(0, 500) || null,
-          WantListenSessionQuestion: {
-            create: {
-              publicId: randomUUID(),
-              position: 1,
-              questionData: firstQuestion.data as unknown as Prisma.InputJsonValue,
-              correctOptionKey: firstQuestion.correctOptionKey,
-              // 服务端记录第 1 题的开始时间，后续题目在 next 时记录
-              questionStartedAt: now,
-            },
-          },
-        },
-        select: { id: true },
-      })
-      if (firstQuestion.fakeTitleId) await database.wantListenFakeTitle.update({ where: { id: firstQuestion.fakeTitleId }, data: { usageCount: { increment: 1 } } })
-      return session
-    })
-    const session = await loadSession(userId, created.id)
-    if (!session) throw sessionNotFound()
-    return { resumed: false, session: toPublicState(session) }
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+  let created: { id: string } | undefined
+  for (let attempt = 0; attempt < 2 && !created; attempt += 1) {
+    try {
+      created = await persistWantListenSession(userId, mode, firstQuestion, now, meta)
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error
+      // 并发点击/重试：若已有进行中会话，直接恢复而不是创建第二局。
       const concurrent = await prisma.wantListenSession.findFirst({ where: { userId, mode, status: 'IN_PROGRESS' }, orderBy: { createdAt: 'desc' } })
       if (concurrent) {
         const restored = await loadSession(userId, concurrent.id)
         if (restored) return { resumed: true, session: toPublicState(restored) }
       }
+      if (attempt === 1) throw error
+      try {
+        const released = await clearStaleWantListenActiveKey(userId, mode)
+        if (!released) throw error
+      } catch (recoveryError) {
+        logWantListenStartupCleanupFailure(userId, mode, 'recover-unique-active-key', recoveryError)
+        throw error
+      }
     }
-    throw error
   }
+  if (!created) throw new Error('想听对局创建未返回会话。')
+  const session = await loadSession(userId, created.id)
+  if (!session) throw sessionNotFound()
+  return { resumed: false, session: toPublicState(session) }
 }
 
 export async function getWantListenSessionState(userId: string, sessionId: string) {

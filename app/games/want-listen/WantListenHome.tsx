@@ -48,13 +48,18 @@ export function WantListenHome() {
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState<WantListenMode | null>(null)
   const [error, setError] = useState('')
+  const [summaryUnavailable, setSummaryUnavailable] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
     request<Summary>('/api/entertainment/want-listen/summary', { cache: 'no-store', signal: controller.signal })
-      .then(setSummary)
+      .then((value) => {
+        setSummary(value)
+        setSummaryUnavailable(false)
+      })
       .catch((reason: unknown) => {
         if (reason instanceof DOMException && reason.name === 'AbortError') return
+        setSummaryUnavailable(true)
         setError(reason instanceof Error ? reason.message : '想听数据加载失败，请稍后重试。')
       })
       .finally(() => setLoading(false))
@@ -63,7 +68,7 @@ export function WantListenHome() {
 
   async function start(mode: WantListenMode) {
     const active = summary?.activeSessions.find((session) => session.mode === mode)
-    if (starting || !summary || (!isWantListenModeEnabled(summary.config, mode) && !active)) return
+    if (starting || (loading && !summaryUnavailable) || (summary && !isWantListenModeEnabled(summary.config, mode) && !active)) return
     setStarting(mode)
     setError('')
     try {
@@ -93,16 +98,18 @@ export function WantListenHome() {
 
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
       {!summary && loading ? <p className="want-listen-loading">正在读取想听状态…</p> : null}
+      {summaryUnavailable ? <p className="want-listen-degraded" role="status">状态摘要暂时无法加载，但仍可尝试开始游戏，服务端会再次校验模式状态。</p> : null}
       {summary && !summary.config.enabled ? <p className="want-listen-disabled" role="status">想听板块目前暂停开放，请稍后再来。</p> : null}
       {summary && (summary.statsUnavailable || summary.activeSessionsUnavailable) ? <p className="want-listen-degraded" role="status">个人数据暂时无法完整加载，但游戏仍可开始。</p> : null}
 
       <section className="want-listen-mode-grid" aria-label="想听游戏模式">
         {WANT_LISTEN_MODES.map((mode) => {
-          const enabled = Boolean(summary && isWantListenModeEnabled(summary.config, mode))
+          const enabled = summary ? isWantListenModeEnabled(summary.config, mode) : summaryUnavailable
           const active = activeByMode.get(mode)
           const stats = summary?.modes[mode]
+          const modeDisabled = Boolean(summary && !enabled && !active)
           return (
-            <article key={mode} className={`want-listen-mode-card${enabled || active ? '' : ' is-disabled'}`}>
+            <article key={mode} className={`want-listen-mode-card${modeDisabled ? ' is-disabled' : ''}`}>
               <span>模式 0{WANT_LISTEN_MODES.indexOf(mode) + 1}</span>
               <h2>{WANT_LISTEN_MODE_LABELS[mode]}</h2>
               <p>{WANT_LISTEN_MODE_DESCRIPTIONS[mode]}</p>
@@ -110,8 +117,8 @@ export function WantListenHome() {
                 <span>无尽模式 · 答错 3 次结束</span>
                 <span>最佳 {personalStatsUnavailable ? '—' : stats?.bestScore ?? '—'} 分</span>
               </div>
-              <button type="button" onClick={() => void start(mode)} disabled={(!enabled && !active) || Boolean(starting)}>
-                {active ? `继续第 ${active.currentQuestion} 题` : !enabled ? '暂未开放' : starting === mode ? '创建对局中…' : '开始游戏'}
+              <button type="button" onClick={() => void start(mode)} disabled={modeDisabled || Boolean(starting) || (loading && !summaryUnavailable)}>
+                {active ? `继续第 ${active.currentQuestion} 题` : starting === mode ? '创建对局中…' : !enabled ? '暂未开放' : '开始游戏'}
               </button>
             </article>
           )
