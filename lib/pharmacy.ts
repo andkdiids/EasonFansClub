@@ -695,18 +695,20 @@ export async function getPharmacyHistoryPage(userId: string, campaignId: string,
 }
 
 export async function getPharmacyPageData(userId?: string | null, campaignId?: string | null): Promise<PharmacyPageData> {
-  const campaign = await findPublicCampaign(campaignId)
-  if (!campaign) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: 0, todayCount: 0, totalCount: 0 } : null, campaign: null, duplicate: { total: 0, required: null, byBadge: [] }, history: [], historyHasMore: false }
+  const [campaign, userRow] = await Promise.all([
+    findPublicCampaign(campaignId),
+    userId ? prisma.user.findUnique({ where: { id: userId }, select: { points: true } }) : Promise.resolve(null),
+  ])
+  if (!campaign) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, duplicate: { total: 0, required: null, byBadge: [] }, history: [], historyHasMore: false }
   const now = new Date()
   const effectiveStatus = effectivePharmacyCampaignStatus(campaign, now)
   const enabledPrizeRows = campaign.PharmacyPrize.filter((prize) => prize.enabled)
   const prizePoolValid = enabledPrizeRows.length > 0 && enabledPrizeRows.every((prize) => prize.weight > 0 && (prize.type === 'BADGE' ? usableBadge(prize) : prize.type === 'POINTS' && Boolean(prize.rewardAmount && prize.rewardAmount > 0)))
   const badgePrizeRows = campaign.PharmacyPrize.filter((prize) => prize.type === 'BADGE' && prize.Badge && prize.badgeId)
   const badgeIds = [...new Set(badgePrizeRows.map((prize) => prize.badgeId!).filter(Boolean))]
-  const [ownedRows, inventoryRows, userRow, history] = await Promise.all([
+  const [ownedRows, inventoryRows, history] = await Promise.all([
     userId && badgeIds.length ? prisma.userBadge.findMany({ where: { userId, badgeId: { in: badgeIds } }, select: { badgeId: true, obtainedAt: true } }) : Promise.resolve([]),
     userId ? prisma.pharmacyDuplicateInventory.findMany({ where: { userId, campaignId: campaign.id, quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { sourceBadgeId: true, quantity: true, SourceBadge: { select: { id: true, name: true, iconUrl: true } } } }) : Promise.resolve([]),
-    userId ? prisma.user.findUnique({ where: { id: userId }, select: { points: true } }) : Promise.resolve(null),
     userId ? getPharmacyHistoryPage(userId, campaign.id) : Promise.resolve({ items: [] as PharmacyHistoryItem[], hasMore: false, page: 1, pageSize: PHARMACY_HISTORY_PAGE_SIZE }),
   ])
   const ownedById = new Map(ownedRows.map((row) => [row.badgeId, row]))
@@ -734,7 +736,7 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
     moduleName: ANGEL_GIFT_MODULE_NAME,
     moduleSubtitle: ANGEL_GIFT_SUBTITLE,
     isAuthenticated: Boolean(userId),
-    user: userId ? { balance: userRow?.points || 0, todayCount: campaign.dailyDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id, drawAt: { gte: getShanghaiDayRange(now).start, lt: getShanghaiDayRange(now).end } } }), totalCount: campaign.totalDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id } }) } : null,
+    user: userId ? { balance: userRow?.points ?? 0, todayCount: campaign.dailyDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id, drawAt: { gte: getShanghaiDayRange(now).start, lt: getShanghaiDayRange(now).end } } }), totalCount: campaign.totalDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id } }) } : null,
     campaign: { id: campaign.id, title: campaign.title, subtitle: campaign.subtitle, description: campaign.description, status: effectiveStatus, startsAt: campaign.startsAt?.toISOString() || null, endsAt: campaign.endsAt?.toISOString() || null, drawCost: campaign.drawCost, duplicateRecycleEnabled: campaign.duplicateRecycleEnabled, duplicateRecycleRequired: campaign.duplicateRecycleRequired, duplicateRecycleReward: campaign.duplicateRecycleReward, recycleAfterEndEnabled: campaign.recycleAfterEndEnabled, probabilityPublic: campaign.probabilityPublic, dailyDrawLimit: campaign.dailyDrawLimit, totalDrawLimit: campaign.totalDrawLimit, visualUrl: publicImageUrl(campaign.visualUrl), prizePoolValid, prizes, cabinet },
     duplicate: { total: duplicateTotal, required: campaign.duplicateRecycleEnabled ? campaign.duplicateRecycleRequired : null, byBadge: inventoryRows.map((row) => ({ badgeId: row.sourceBadgeId, badgeName: row.SourceBadge.name, imageUrl: publicImageUrl(row.SourceBadge.iconUrl), quantity: row.quantity })) },
     history: history.items,

@@ -132,3 +132,32 @@ test('权限与前后台路由均使用天使的礼物固定命名', () => {
   assert.match(read('app/angel-gift/page.tsx'), /title: '天使的礼物 \| 私家E院'/)
 })
 
+test('无当前主题时仍从 User.points 返回登录用户真实余额', () => {
+  const source = read('lib/pharmacy.ts')
+  assert.match(source, /const \[campaign, userRow\] = await Promise\.all\(/u)
+  assert.match(source, /userId \? prisma\.user\.findUnique\(\{ where: \{ id: userId \}, select: \{ points: true \} \}\)/u)
+  assert.match(source, /if \(!campaign\)[\s\S]*userRow\?\.points \?\? 0/u)
+  assert.doesNotMatch(source, /if \(!campaign\)[\s\S]*balance: 0/u)
+})
+
+test('有当前主题时也复用 User.points，执药与余药回收使用服务端最终余额', () => {
+  const source = read('lib/pharmacy.ts')
+  const client = read('components/AngelGiftClient.tsx')
+  assert.match(source, /user: userId \? \{ balance: userRow\?\.points \?\? 0/u)
+  assert.match(client, /const nextPage = payload\.data\.page[\s\S]*if \(nextPage\) setData\(nextPage\)/u)
+  assert.match(client, /if \(payload\.data\?\.page\) setData\(payload\.data\.page\)/u)
+  assert.match(client, /balance: payload\.data!\.draw\.balanceAfter/u)
+  assert.match(client, /balance: payload\.data\.balance/u)
+  assert.doesNotMatch(client, /balance\s*[-+]\s*(?:drawCost|rewardAmount)/u)
+})
+
+test('Angel Gift GET 使用当前登录态、动态响应和 no-store，匿名不返回用户余额', () => {
+  const route = read('app/api/angel-gift/route.ts')
+  const page = read('app/angel-gift/page.tsx')
+  assert.match(route, /export const dynamic = 'force-dynamic'/u)
+  assert.match(route, /Cache-Control.*private, no-store/u)
+  assert.match(route, /const user = await getCurrentUser\(\)/u)
+  assert.match(route, /getPharmacyPageData\(user\?\.id, campaignId\)/u)
+  assert.match(page, /export const dynamic = 'force-dynamic'/u)
+  assert.match(read('lib/pharmacy.ts'), /user: userId \?[\s\S]*: null/u)
+})

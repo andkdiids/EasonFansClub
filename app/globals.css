@@ -7879,7 +7879,7 @@ body:has(.duel-page) .app-page-content {
   .forum-discovery-page[data-forum-presentation='fish'] .badge-name-glow,
   .forum-discovery-page[data-forum-presentation='fish'] .badge-name-sparkle { animation:none !important; transition:none !important; }
 
-  .fish-mode-feed { width:min(860px,calc(100% - 40px)); margin:22px auto 0; border-top:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
+  .fish-mode-feed { width:min(1180px,calc(100% - 40px)); margin:22px auto 0; border-top:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); }
   .fish-mode-feed-heading { display:flex; min-height:32px; align-items:center; justify-content:space-between; gap:14px; padding:0 13px; border-bottom:1px solid var(--border); color:var(--foreground-muted); font-size:10px; font-weight:800; letter-spacing:.02em; }
   .fish-mode-keyboard-hint { color:var(--foreground-muted); font-weight:700; }
   .fish-mode-post-row { min-width:0; border-bottom:1px solid var(--border); padding:12px 14px 11px; background:var(--surface-elevated); }
