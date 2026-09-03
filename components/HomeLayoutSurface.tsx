@@ -388,7 +388,6 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
             </div>
           }) : <p className="community-empty home-entertainment-empty">{data.entertainmentRanking?.status === 'empty' ? homeText.noRanking : data.entertainmentRanking?.status === 'unavailable' ? homeText.rankingUnavailable : homeText.rankingLoading}</p>}
         </div>
-        <Link href="/games" className="hero-primary-button home-entertainment-button">{homeText.rankingMore} →</Link>
       </div>
     </section>
   )
@@ -571,9 +570,9 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
 
         <div className="home-secondary-content">
         <div className="home-secondary-columns">
-          {renderActivityCenterPanel()}
-          {renderDailyMusicPanel()}
           {renderEntertainmentPanel()}
+          {renderDailyMusicPanel()}
+          {renderActivityCenterPanel()}
         </div>
 
         <section className="community-panel music-panel home-full-panel home-albums-section" aria-label="每日推荐专辑">

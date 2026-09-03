@@ -70,11 +70,22 @@ function DetailField({ label, value }: Readonly<{ label: string; value: string }
   return <div className="border border-slate-100 bg-slate-50/70 p-3"><dt className="text-[10px] font-black tracking-[0.12em] text-slate-400">{label}</dt><dd className="mt-1 break-words text-sm font-black text-brand-950">{value}</dd></div>
 }
 
-export function StudioAdminPanel({ initialProjects }: Readonly<{ initialProjects: ProjectRow[] }>) {
+export function StudioAdminPanel({ initialProjects, initialProjectId }: Readonly<{ initialProjects: ProjectRow[]; initialProjectId?: string | null }>) {
   const [projects, setProjects] = useState(initialProjects)
   const [selectedProject, setSelectedProject] = useState<ProjectRow | null>(null)
   const [message, setMessage] = useState('')
   const [busyId, setBusyId] = useState('')
+
+  useEffect(() => {
+    if (!initialProjectId) return
+    const project = projects.find((item) => item.id === initialProjectId)
+    if (!project) return
+    setSelectedProject(project)
+    const timer = window.setTimeout(() => {
+      document.getElementById(`studio-review-project-${project.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [initialProjectId, projects])
 
   useEffect(() => {
     if (!selectedProject) return
@@ -107,7 +118,7 @@ export function StudioAdminPanel({ initialProjects }: Readonly<{ initialProjects
     <div className="overflow-hidden border border-sky-100 bg-white/90">
       <div className="border-b border-sky-100 px-4 py-3"><h2 className="text-lg font-black text-brand-950">待审核公开作品</h2><p className="mt-1 text-xs font-bold text-slate-500">只有通过审核的作品才会进入公开访问流程；点击缩略图或详情可查看完整图纸。</p></div>
       <div className="divide-y divide-sky-100">
-        {projects.map((project) => <article key={project.id} className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[220px_minmax(0,1fr)_auto] lg:items-center">
+        {projects.map((project) => <article key={project.id} id={`studio-review-project-${project.id}`} className={`grid gap-4 p-4 sm:p-5 lg:grid-cols-[220px_minmax(0,1fr)_auto] lg:items-center ${project.id === initialProjectId ? 'bg-amber-50/45' : ''}`}>
           <button type="button" onClick={() => setSelectedProject(project)} className="group min-w-0 border border-sky-100 bg-sky-50/35 p-2 text-left hover:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-300" aria-label={`查看${project.title}的审核详情`}>
             <div className="flex h-40 items-center justify-center overflow-hidden bg-white sm:h-44"><PatternPreview thumbnailUrl={project.thumbnailUrl} pattern={project.pattern} label={`${project.title}图纸缩略图`} /></div>
             <span className="mt-2 block text-[10px] font-black text-sky-700 group-hover:text-sky-900">查看完整详情 →</span>

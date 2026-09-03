@@ -81,6 +81,20 @@ test('审核中心展示已有缩略图，缺失时使用 Pattern Grid renderer�
   assert.doesNotMatch(adminPanel, /uploadSiteImage|studio-reference/)
 })
 
+test('审核页面统计使用紧凑响应式 Grid，且不改变真实统计来源', () => {
+  const statsSection = adminPage.match(/<section aria-label="创作平台统计"[\s\S]*?<\/section>/)?.[0]
+  assert.ok(statsSection)
+  assert.match(statsSection, /className="grid grid-cols-2 gap-2\.5 sm:grid-cols-3 lg:grid-cols-6"/)
+  assert.equal((statsSection.match(/min-h-\[92px\]/g) || []).length, 6)
+  assert.equal((statsSection.match(/p-3 sm:p-4/g) || []).length, 6)
+  assert.equal((statsSection.match(/text-sm font-black/g) || []).length, 6)
+  assert.equal((statsSection.match(/text-3xl font-black/g) || []).length, 6)
+  assert.doesNotMatch(statsSection, /col-span|p-5/)
+  assert.match(adminPage, /prisma\.studioProject\.count\(\)/)
+  assert.match(adminPage, /reviewStatus: 'PENDING'/)
+  assert.match(adminPage, /likeCount: true, favoriteCount: true, viewCount: true/)
+})
+
 test('贝多芬与我首页 Hero 降高且工具入口紧随其后，移动端没有固定大空白', () => {
   assert.match(studioCss, /\.homeHero \{[^}]*height: clamp\(280px, 24vw, 360px\)[^}]*max-height: 360px/)
   assert.match(studioCss, /\.heroCopy \{[^}]*padding: clamp\(22px, 3\.5vw, 44px\)/)

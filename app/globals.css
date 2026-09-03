@@ -7512,19 +7512,31 @@ body:has(.duel-page) .app-page-content {
 }
 .home-secondary-columns {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
   gap: 16px 14px;
 }
 .home-secondary-columns > .community-panel {
   display: flex;
   min-width: 0;
-  min-height: 330px;
+  min-height: 220px;
   height: 100%;
   flex-direction: column;
   margin: 0;
+  padding-inline: 14px;
 }
-.home-secondary-columns > .community-panel > header { flex: 0 0 44px; height: 44px; }
+.home-secondary-columns > .community-panel > header {
+  flex: 0 0 44px;
+  height: 44px;
+  gap: 8px;
+}
+.home-secondary-columns > .community-panel > header h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-secondary-columns > .home-activities-section { grid-column: 1 / -1; }
 .home-secondary-columns .home-activity-grid {
   display: grid;
   min-width: 0;
@@ -7572,19 +7584,27 @@ body:has(.duel-page) .app-page-content {
   display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  grid-template-columns: 72px minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 8px;
   align-content: start;
   padding: 10px 0 8px;
 }
-.home-secondary-columns .home-daily-music-cover { width: 72px; }
+.home-secondary-columns .home-daily-music-cover { width: 64px; }
+.home-secondary-columns .home-daily-music-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.home-secondary-columns .home-daily-music-copy > span { font-size: 9px; }
 .home-secondary-columns .home-daily-music-copy h3 {
   display: -webkit-box;
   min-width: 0;
   max-width: 100%;
+  margin-top: 4px;
   overflow: hidden;
   overflow-wrap: anywhere;
-  line-height: 1.25;
+  font-size: clamp(14px, 1.4vw, 18px);
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: normal;
   -webkit-box-orient: vertical;
@@ -7592,22 +7612,66 @@ body:has(.duel-page) .app-page-content {
   line-clamp: 2;
 }
 .home-secondary-columns .home-daily-music-copy p {
+  margin-top: 4px;
   min-width: 0;
   overflow: hidden;
+  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.home-secondary-columns .home-daily-music-lyrics { -webkit-line-clamp: 2; line-clamp: 2; }
-.home-secondary-columns .home-daily-music-like { margin-top: 0; }
-.home-secondary-columns .home-daily-music-button { max-width: 100%; padding-inline: 10px; font-size: 10px; }
+.home-secondary-columns .home-daily-music-lyrics {
+  max-width: 100%;
+  margin-top: 6px;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.home-secondary-columns .home-daily-music-like {
+  margin-top: 0;
+  overflow: hidden;
+}
+.home-secondary-columns .home-daily-music-like-button {
+  max-width: 100%;
+  padding-inline: 3px;
+  font-size: 10px;
+}
+.home-secondary-columns .home-daily-music-button {
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 30px;
+  margin-top: 8px;
+  padding-inline: 10px;
+  font-size: 10px;
+}
 .home-secondary-columns .home-entertainment-content {
+  display: flex;
   min-height: 0;
   flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-start;
   padding: 10px 0 8px;
 }
+.home-secondary-columns .home-entertainment-mobile-score {
+  display: block;
+  min-width: 0;
+}
+.home-secondary-columns .home-entertainment-mobile-mode {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-secondary-columns .home-entertainment-mobile-score-value {
+  margin-top: 6px;
+  font-size: clamp(18px, 2vw, 26px);
+}
 .home-secondary-columns .home-entertainment-desktop-scores {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
+  display: none;
 }
 .home-secondary-columns .home-entertainment-mode-score {
   display: grid;
@@ -7623,7 +7687,6 @@ body:has(.duel-page) .app-page-content {
 .home-secondary-columns .home-entertainment-mode-score .home-entertainment-score-user { grid-area: user; min-width: 0; }
 .home-secondary-columns .home-entertainment-mode-score .home-entertainment-mode-score-value { grid-area: value; margin-top: 5px; text-align: right; }
 .home-secondary-columns .home-entertainment-mode-empty { grid-column: 1 / -1; }
-.home-secondary-columns .home-entertainment-button { max-width: 100%; margin-top: auto; }
 
 @media (min-width: 768px) and (max-width: 1199px) {
   .home-first-row {
@@ -7637,7 +7700,6 @@ body:has(.duel-page) .app-page-content {
   .home-secondary-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .home-secondary-columns > .home-entertainment-panel { grid-column: 1 / -1; }
 }
 
 /* Keep the dynamic registration content inside the same equal-size cell. */
@@ -7706,21 +7768,34 @@ body:has(.duel-page) .app-page-content {
   .home-first-row-panel > header { flex-basis: 44px; height: 44px; }
   .home-secondary-content { padding-top: 16px; }
   .home-secondary-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .home-secondary-columns > .community-panel {
+    min-height: 220px;
+    height: 100%;
+    padding-inline: 10px;
+  }
+  .home-secondary-columns .home-activity-card { grid-template-columns: 64px minmax(0, 1fr); }
+  .home-secondary-columns .home-daily-music {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .home-secondary-columns .home-daily-music-cover { width: 44px; }
+  .home-activity-grid { grid-template-columns: 1fr; }
+  .home-salon-content { gap: 9px; }
+}
+
+@media (max-width: 339px) {
+  .home-secondary-columns {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
+  .home-secondary-columns > .home-activities-section { grid-column: auto; }
   .home-secondary-columns > .community-panel {
     min-height: 0;
     height: auto;
   }
-  .home-secondary-columns .home-activity-card { grid-template-columns: 64px minmax(0, 1fr); }
-  .home-secondary-columns .home-daily-music {
-    grid-template-columns: 64px minmax(0, 1fr) auto;
-    gap: 8px;
-  }
-  .home-secondary-columns .home-daily-music-cover { width: 64px; }
-  .home-activity-grid { grid-template-columns: 1fr; }
-  .home-salon-content { gap: 9px; }
 }
 
 /* Activity detail keeps the poster and registration rail stable on desktop,
