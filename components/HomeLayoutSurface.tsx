@@ -142,10 +142,12 @@ function yearsFromToday(value: string) {
 function EntertainmentScoreUser({ user }: { user: NonNullable<HomeEntertainmentRankingMode['user']> }) {
   const name = user.displayName || user.nickname
   return (
-    <div className="home-entertainment-score-user" title={name}>
-      <span className="home-entertainment-score-avatar"><SafeAvatar src={user.avatarUrl} name={name} uid={user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" /></span>
-      <Link href={`/user/${formatUid(user.uid)}`} className="home-entertainment-score-name">{name}</Link>
-    </div>
+    <>
+      <span className="home-entertainment-score-avatar home-entertainment-score-avatar-slot">
+        <SafeAvatar src={user.avatarUrl} name={name} uid={user.uid} className="home-entertainment-score-avatar-image" textClassName="home-entertainment-score-avatar-fallback" />
+      </span>
+      <Link href={`/user/${formatUid(user.uid)}`} className="home-entertainment-score-name" title={name}>{name}</Link>
+    </>
   )
 }
 

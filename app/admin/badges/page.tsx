@@ -19,6 +19,7 @@ export default async function AdminBadgesPage() {
     slug: badge.slug,
     description: badge.description,
     acquisitionDescription: badge.acquisitionDescription,
+    resolvedAcquisitionDescription: badge.resolvedAcquisitionDescription,
     acquisitionDescriptionCustomized: badge.acquisitionDescriptionCustomized,
     rule: badge.BadgeRule ? {
       id: badge.BadgeRule.id,

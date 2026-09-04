@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import type { BadgeCollectionView, BadgeGalleryView, BadgeShowcaseItemView, BadgeView, EquippedBadgeView } from '@/lib/badge-types'
 import { calculateBadgeRuleProgress, canExposeLiveBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats, getUserBadgeRuleProgress, type BadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
+import { resolveBadgeAcquisitionDescription } from '@/lib/badge-acquisition'
 import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 
 const BADGE_SELECT = {
@@ -61,6 +62,11 @@ type DbBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_SELECT }>
 const BADGE_COLLECTION_SELECT = {
   ...BADGE_SELECT,
   BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, configJson: true, isEnabled: true } },
+  PharmacyPrize: {
+    where: { type: 'BADGE', enabled: true, Campaign: { status: { not: 'ENDED' } } },
+    select: { id: true },
+    take: 1,
+  },
 } as const
 type DbCollectionBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_COLLECTION_SELECT }>
 type DbUserBadge = {
@@ -138,15 +144,20 @@ export async function lockBadgeForMutation(tx: Prisma.TransactionClient, badgeId
 
 function publicBadge(badge: DbBadge | DbCollectionBadge): Omit<BadgeView, 'status' | 'obtainedAt' | 'isEquipped'> {
   const rule = 'BadgeRule' in badge ? badge.BadgeRule : null
+  const generatedDescription = rule
+    ? generateBadgeAcquisitionDescription(rule.ruleType as SupportedBadgeRuleType, rule.threshold, rule.configJson)
+    : null
   return {
     id: badge.id,
     code: badge.code,
     name: badge.name,
     imageUrl: toPublicMediaUrl(badge.iconUrl),
     description: badge.description,
-    acquisitionDescription: badge.acquisitionDescription || (rule
-      ? generateBadgeAcquisitionDescription(rule.ruleType as SupportedBadgeRuleType, rule.threshold, rule.configJson)
-      : null),
+    acquisitionDescription: resolveBadgeAcquisitionDescription({
+      storedDescription: badge.acquisitionDescription,
+      generatedDescription,
+      hasAngelGiftPrize: 'PharmacyPrize' in badge && badge.PharmacyPrize.length > 0,
+    }),
     visibility: badge.visibility,
     rarity: badge.rarity,
     grantType: badge.grantType,
@@ -176,9 +187,14 @@ function publicBadge(badge: DbBadge | DbCollectionBadge): Omit<BadgeView, 'statu
 
 function obtainedBadgeView(record: DbUserBadge, isEquipped: boolean, ownershipStats?: BadgeOwnershipStats | null, isHighestTier = false): BadgeView {
   const badge = publicBadge(record.Badge)
+  // Keep the public source wording stable: 于「天使的礼物」执药获得.
   return {
     ...badge,
-    acquisitionDescription: record.sourceType === 'ANGEL_GIFT' ? '于「天使的礼物」执药获得' : badge.acquisitionDescription,
+    acquisitionDescription: resolveBadgeAcquisitionDescription({
+      storedDescription: badge.acquisitionDescription,
+      hasAngelGiftPrize: 'PharmacyPrize' in record.Badge && record.Badge.PharmacyPrize.length > 0,
+      obtainedFromAngelGift: record.sourceType === 'ANGEL_GIFT',
+    }),
     status: 'OBTAINED',
     obtainedAt: record.obtainedAt.toISOString(),
     isEquipped,
@@ -1085,8 +1101,34 @@ export const badgeAdminSelect = {
   _count: { select: { UserBadge: true } },
 } as const
 
+export const badgeAdminDisplaySelect = {
+  ...badgeAdminSelect,
+  PharmacyPrize: {
+    where: { type: 'BADGE', enabled: true, Campaign: { status: { not: 'ENDED' } } },
+    select: { id: true },
+    take: 1,
+  },
+} as const
+
+type DbAdminBadge = Prisma.BadgeGetPayload<{ select: typeof badgeAdminDisplaySelect }>
+
+function resolveAdminBadgeAcquisition(badge: DbAdminBadge) {
+  const generatedDescription = badge.BadgeRule
+    ? generateBadgeAcquisitionDescription(badge.BadgeRule.ruleType as SupportedBadgeRuleType, badge.BadgeRule.threshold, badge.BadgeRule.configJson)
+    : null
+  return {
+    ...badge,
+    resolvedAcquisitionDescription: resolveBadgeAcquisitionDescription({
+      storedDescription: badge.acquisitionDescription,
+      generatedDescription,
+      hasAngelGiftPrize: badge.PharmacyPrize.length > 0,
+    }),
+  }
+}
+
 export async function findBadgeForAdmin(badgeId: string) {
-  return prisma.badge.findUnique({ where: { id: badgeId }, select: badgeAdminSelect })
+  const badge = await prisma.badge.findUnique({ where: { id: badgeId }, select: badgeAdminDisplaySelect })
+  return badge ? resolveAdminBadgeAcquisition(badge) : null
 }
 
 export async function listBadgesForAdmin({ query, enabled, visibility, grantType, rarity, seriesId, tierGroupCode, availability, order }: { query?: string; enabled?: boolean; visibility?: string; grantType?: string; rarity?: string; seriesId?: string; tierGroupCode?: string; availability?: string; order?: 'sortOrder' | 'ownerCount' | 'rate' | 'createdAt' } = {}) {
@@ -1110,10 +1152,11 @@ export async function listBadgesForAdmin({ query, enabled, visibility, grantType
   ] }]
 
   const orderBy = order === 'createdAt' ? [{ createdAt: 'desc' as const }] : [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }]
-  const badges = await prisma.badge.findMany({ where, orderBy, select: badgeAdminSelect })
-  if (order !== 'ownerCount' && order !== 'rate') return badges
-  const stats = await getBadgeOwnershipStats(badges.map((badge) => badge.id))
-  return badges.sort((left, right) => {
+  const badges = await prisma.badge.findMany({ where, orderBy, select: badgeAdminDisplaySelect })
+  const resolvedBadges = badges.map(resolveAdminBadgeAcquisition)
+  if (order !== 'ownerCount' && order !== 'rate') return resolvedBadges
+  const stats = await getBadgeOwnershipStats(resolvedBadges.map((badge) => badge.id))
+  return resolvedBadges.sort((left, right) => {
     const leftValue = order === 'rate' ? stats.get(left.id)?.rate || 0 : stats.get(left.id)?.ownerCount || 0
     const rightValue = order === 'rate' ? stats.get(right.id)?.rate || 0 : stats.get(right.id)?.ownerCount || 0
     return rightValue - leftValue || left.sortOrder - right.sortOrder || left.createdAt.getTime() - right.createdAt.getTime()

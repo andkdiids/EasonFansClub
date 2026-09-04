@@ -3101,6 +3101,7 @@ model PharmacyPrize {
   Badge        Badge?            @relation(fields: [badgeId], references: [id], onDelete: SetNull)
   PharmacyDraw PharmacyDraw[]
 
+  @@unique([campaignId, badgeId, type])
   @@index([campaignId, enabled, sortOrder])
   @@index([badgeId])
   @@index([campaignId, type])

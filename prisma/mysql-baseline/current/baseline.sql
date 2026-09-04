@@ -2916,6 +2916,7 @@ CREATE TABLE `PharmacyPrize` (
     INDEX `PharmacyPrize_campaignId_enabled_sortOrder_idx`(`campaignId`, `enabled`, `sortOrder`),
     INDEX `PharmacyPrize_badgeId_idx`(`badgeId`),
     INDEX `PharmacyPrize_campaignId_type_idx`(`campaignId`, `type`),
+    UNIQUE INDEX `PharmacyPrize_campaignId_badgeId_type_key`(`campaignId`, `badgeId`, `type`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

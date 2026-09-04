@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createPharmacyPrize, PharmacyError } from '@/lib/pharmacy'
+import { createPharmacyPrize, createPharmacyPrizes, PharmacyError } from '@/lib/pharmacy'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -17,6 +17,10 @@ export async function POST(request: Request, context: { params: Promise<{ campai
   const body = objectBody(await request.json().catch(() => null))
   if (!body) return NextResponse.json({ ok: false, code: 'INVALID_PRIZE', message: '奖品参数格式不正确' }, { status: 400 })
   try {
+    if (Array.isArray(body.badgeIds)) {
+      const prizes = await createPharmacyPrizes({ operatorId: guard.user.id, campaignId, data: body })
+      return NextResponse.json({ ok: true, prizes }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
+    }
     const prize = await createPharmacyPrize({ operatorId: guard.user.id, campaignId, data: body })
     return NextResponse.json({ ok: true, prize }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
@@ -25,4 +29,3 @@ export async function POST(request: Request, context: { params: Promise<{ campai
     return NextResponse.json({ ok: false, code: 'SERVER_ERROR', message: '奖品暂时无法保存，请稍后重试' }, { status: 500 })
   }
 }
-
