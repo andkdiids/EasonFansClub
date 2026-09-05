@@ -13,6 +13,11 @@ import { CURRENT_BEAD_PROJECT_VERSION } from '@/lib/studio/beads/types'
 export const dynamic = 'force-dynamic'
 
 const MAX_DATA_BYTES = 1_200_000
+const MAX_BODY_BYTES = MAX_DATA_BYTES + 10000
+
+function errorResponse(code: string, message: string, status: number) {
+  return NextResponse.json({ ok: false, code, message }, { status })
+}
 
 async function uploadStudioThumbnail(value: string | null, userId: string, projectId: string, previousUrl: string | null) {
   if (!value) return null
@@ -61,7 +66,7 @@ function parseData(value: unknown, toolSlug: string): Prisma.InputJsonValue | nu
   return JSON.parse(serialized) as Prisma.InputJsonValue
 }
 
-function projectMetadata(data: Prisma.JsonValue) {
+function projectMetadata(data: Prisma.InputJsonValue | Prisma.JsonValue | null) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined
   const pattern = (data as Record<string, unknown>).pattern
   if (!pattern || typeof pattern !== 'object' || Array.isArray(pattern)) return undefined
@@ -112,31 +117,60 @@ export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
   let body: Record<string, unknown>
+  let rawText = ''
   try {
-    const raw = await request.text()
-    if (raw.length > MAX_DATA_BYTES + 10000) return NextResponse.json({ ok: false, message: '项目数据过大' }, { status: 413 })
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return NextResponse.json({ ok: false, message: '项目数据格式不正确' }, { status: 400 })
+    rawText = await request.text()
+    if (rawText.length > MAX_BODY_BYTES) return errorResponse('PAYLOAD_TOO_LARGE', '作品数据过大，无法保存到云端', 413)
+    const parsed = JSON.parse(rawText) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse('INVALID_PROJECT_DATA', '作品数据格式错误，请重新尝试保存', 400)
     body = parsed as Record<string, unknown>
   } catch {
-    return NextResponse.json({ ok: false, message: '项目数据格式不正确' }, { status: 400 })
+    return errorResponse('INVALID_PROJECT_DATA', '作品数据格式错误，请重新尝试保存', 400)
   }
   const toolSlug = typeof body.toolSlug === 'string' ? body.toolSlug.trim() : ''
   const tool = getStudioTool(toolSlug)
-  if (!tool || !tool.enabled || (tool.status !== 'AVAILABLE' && tool.status !== 'BETA')) return NextResponse.json({ ok: false, message: '创作工具暂不可用' }, { status: 400 })
+  if (!tool || !tool.enabled || (tool.status !== 'AVAILABLE' && tool.status !== 'BETA')) return errorResponse('TOOL_UNAVAILABLE', '创作工具暂不可用', 400)
   const data = parseData(body.data, toolSlug)
-  if (!data) return NextResponse.json({ ok: false, message: '项目数据校验失败' }, { status: 400 })
+  if (!data) return errorResponse('INVALID_PROJECT_DATA', '作品数据格式错误，请重新尝试保存', 400)
   const title = sanitizeText(body.title, 160) || '未命名作品'
   const description = sanitizeText(body.description, 500) || null
   const thumbnailUrl = parseStudioThumbnail(body.thumbnailUrl)
   const requestedId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
-  const existing = requestedId ? await prisma.studioProject.findFirst({ where: { id: requestedId, userId: guard.user.id }, select: { id: true, thumbnailUrl: true } }) : null
-  const project = existing
-    ? await prisma.studioProject.update({ where: { id: existing.id }, data: { toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, ...(thumbnailUrl ? { thumbnailUrl } : {}), lastOpenedAt: new Date() } })
-    : await prisma.studioProject.create({ data: { userId: guard.user.id, toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, ...(thumbnailUrl ? { thumbnailUrl } : {}), lastOpenedAt: new Date() } })
-  const uploadedThumbnail = await uploadStudioThumbnail(thumbnailUrl, guard.user.id, project.id, existing?.thumbnailUrl || null)
-  const persistedProject = uploadedThumbnail && uploadedThumbnail !== project.thumbnailUrl
-    ? await prisma.studioProject.update({ where: { id: project.id }, data: { thumbnailUrl: uploadedThumbnail } })
-    : project
-  return NextResponse.json({ ok: true, project: projectView(persistedProject, true) }, { headers: { 'Cache-Control': 'private, no-store' } })
+  try {
+    const existing = requestedId ? await prisma.studioProject.findFirst({ where: { id: requestedId, userId: guard.user.id }, select: { id: true, thumbnailUrl: true } }) : null
+    // Core work data is persisted WITHOUT the preview image so a preview/upload
+    // failure can never lose the saved work. The preview is attached only after
+    // it is successfully generated and uploaded.
+    const project = existing
+      ? await prisma.studioProject.update({ where: { id: existing.id }, data: { toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, lastOpenedAt: new Date() } })
+      : await prisma.studioProject.create({
+          data: {
+            ...(requestedId ? { id: requestedId } : {}),
+            userId: guard.user.id,
+            toolSlug,
+            title,
+            description,
+            version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1,
+            data,
+            lastOpenedAt: new Date(),
+          },
+        })
+    const uploadedThumbnail = await uploadStudioThumbnail(thumbnailUrl, guard.user.id, project.id, existing?.thumbnailUrl || null)
+    const persistedProject = uploadedThumbnail ? await prisma.studioProject.update({ where: { id: project.id }, data: { thumbnailUrl: uploadedThumbnail } }) : project
+    return NextResponse.json(
+      { ok: true, project: projectView(persistedProject, true), previewSaved: Boolean(uploadedThumbnail) },
+      { headers: { 'Cache-Control': 'private, no-store' } },
+    )
+  } catch (error) {
+    const meta = projectMetadata(data)
+    console.error('[BEETHOVEN_CLOUD_SAVE_FAILED]', JSON.stringify({
+      userId: guard.user.id,
+      width: meta?.width ?? null,
+      height: meta?.height ?? null,
+      payloadSize: rawText.length,
+      errorCode: error instanceof Error ? error.name : 'UNKNOWN',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    }))
+    return errorResponse('DB_SAVE_FAILED', '云端存档失败，请稍后重试', 500)
+  }
 }

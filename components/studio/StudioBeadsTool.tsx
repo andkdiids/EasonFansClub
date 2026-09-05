@@ -203,6 +203,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const panRef = useRef(pan)
   const pointerRef = useRef<PointerState>({ kind: null, before: null, changed: false, lastCell: -1, lastX: 0, lastY: 0 })
   const gestureCellsRef = useRef<number[] | null>(null)
+  const savingRef = useRef(false)
   const pointersRef = useRef(new Map<number, PointerPoint>())
   const pinchRef = useRef<PinchState | null>(null)
   const selectionStartRef = useRef<number | null>(null)
@@ -963,6 +964,8 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   }
 
   const persistProject = useCallback(async (silent = false) => {
+    if (savingRef.current) return
+    savingRef.current = true
     const now = new Date().toISOString()
     const localId = projectId || createStudioId()
     const data: BeadProjectData = { version: CURRENT_BEAD_PROJECT_VERSION, tool: 'beads', settings, pattern: patternRef.current, completed: [...completed], layers: layersForPersistence(layers) }
@@ -989,20 +992,34 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       let resolvedId = localId
       let remoteProject: Partial<StudioLocalProject> | null = null
       if (isAuthenticated) {
-        const response = await fetch('/api/studio/projects', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId: projectId && !projectId.startsWith('local-') ? projectId : undefined,
-            toolSlug: 'beads',
-            title: localProject.title,
-            description: localProject.description,
-            version: CURRENT_BEAD_PROJECT_VERSION,
-            data,
-            thumbnailUrl: localProject.thumbnailUrl,
-          }),
-        })
-        if (!response.ok) throw new Error('cloud save failed')
+        let response: Response
+        try {
+          response = await fetch('/api/studio/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId: localId,
+              toolSlug: 'beads',
+              title: localProject.title,
+              description: localProject.description,
+              version: CURRENT_BEAD_PROJECT_VERSION,
+              data,
+              thumbnailUrl: localProject.thumbnailUrl,
+            }),
+          })
+        } catch {
+          savingRef.current = false
+          setSaveStatus('failed')
+          if (!silent) showToast('云端保存失败，请检查网络后重试。')
+          return
+        }
+        if (!response.ok) {
+          const message = await readStudioSaveErrorMessage(response)
+          savingRef.current = false
+          setSaveStatus('failed')
+          if (!silent) showToast(message)
+          return
+        }
         const body = await response.json() as { project?: Partial<StudioLocalProject> }
         remoteProject = body.project || null
         if (remoteProject?.id && remoteProject.id !== localId) {
@@ -1016,12 +1033,29 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       clearStudioDraft('beads')
       setSaveStatus('saved')
       recordStudioEvent('beads', 'project_save')
-      if (!silent) showToast(isAuthenticated ? '作品已保存到我的创作。' : '作品已保存到此设备；登录后可跨设备同步。')
+      if (!silent) showToast(isAuthenticated ? '作品已保存到云端。' : '作品已保存到此设备；登录后可跨设备同步。')
     } catch {
       setSaveStatus('failed')
       if (!silent) showToast(isAuthenticated ? '已保存到此设备，但云端同步失败。' : '已保存到此设备。')
+    } finally {
+      savingRef.current = false
     }
   }, [completed, createdAt, isAuthenticated, layers, packSize, projectId, reviewStatus, settings, showToast, title, visibility])
+
+  async function readStudioSaveErrorMessage(response: Response): Promise<string> {
+    try {
+      const payload = await response.clone().json() as { message?: string; code?: string }
+      if (payload && typeof payload.message === 'string' && payload.message) return payload.message
+    } catch {
+      // ignore JSON parse errors and fall back to status-based classification
+    }
+    if (response.status === 401) return '登录状态已失效，请重新登录'
+    if (response.status === 403) return '请求来源校验失败，请刷新页面后重试'
+    if (response.status === 413) return '作品数据过大，无法保存到云端'
+    if (response.status === 400) return '作品数据格式错误，请重新尝试保存'
+    if (response.status === 503) return '登录服务暂时不可用，请稍后再试'
+    return '云端保存失败，请稍后重试'
+  }
 
   useEffect(() => {
     if (!loaded || !projectId || saveStatus !== 'unsaved') return
