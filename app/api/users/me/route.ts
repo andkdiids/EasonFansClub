@@ -4,6 +4,7 @@ import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { validateLoginAccountValue, validateNicknameValue } from '@/lib/login-account'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
@@ -187,6 +188,7 @@ export async function GET(request: Request) {
   })
   if (limited) return limited
 
+  const now = new Date()
   const profile = await prisma.user.findUnique({
     where: { id: guard.user.id },
     select: {
@@ -227,7 +229,7 @@ export async function GET(request: Request) {
         },
       },
       UserBadge: {
-        where: { isHidden: false },
+        where: { isHidden: false, ...activeUserBadgeWhere(now) },
         orderBy: { displayOrder: 'asc' },
         select: {
           grantedAt: true,
@@ -659,7 +661,7 @@ export async function PATCH(request: Request) {
 
   invalidateCurrentUserCache(guard.user.id)
   void updateUserIpRegion(guard.user.id, request)
-  if (birthdayChanged) triggerBadgeEvaluation(guard.user.id, 'USER_BIRTHDAY_UPDATED')
+  if (birthdayChanged) triggerBadgeEvaluation(guard.user.id, 'USER_BIRTHDAY_UPDATED', profile.birthdaySetAt?.toISOString() || new Date().toISOString())
 
   profile.avatarUrl = publicImageUrl(profile.avatarUrl)
   profile.backgroundUrl = publicImageUrl(profile.backgroundUrl)

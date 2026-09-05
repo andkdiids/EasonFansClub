@@ -149,7 +149,7 @@ export async function GET(request: Request) {
   const directoryRows = directory ? orderedFriendRows : visibleRows
   const visibleFriendIds = directoryRows.map(({ friend }) => friend.id)
   const visibleConversationIds = directoryRows.flatMap(({ conversation }) => conversation ? [conversation.id] : [])
-  const [unreadByConversation, remarkMap, presenceByFriend, equippedBadgeMap] = await Promise.all([
+  const [unreadByConversation, remarkMap, presenceByFriend, equippedBadgesMap] = await Promise.all([
     getUnreadCounts(user.id, visibleConversationIds),
     loadFriendRemarkMap(user.id, visibleFriendIds),
     getUndercoverPresenceForUsers(visibleFriendIds),
@@ -159,7 +159,7 @@ export async function GET(request: Request) {
   const friends = directoryRows.map(({ friend, conversation }) => {
     const growth = calculateGrowthSummary(friend.experience, growthLevels)
     return {
-      ...serializePublicUser(friend, growth.level, growth.levelName, remarkMap.get(friend.id) || null, equippedBadgeMap.get(friend.id) || null, true),
+      ...serializePublicUser(friend, growth.level, growth.levelName, remarkMap.get(friend.id) || null, equippedBadgesMap.get(friend.id) || [], true),
       groupId: groupByFriend.get(friend.id) || null,
       conversationId: conversation?.id || null,
       lastMessage: conversation?.DirectMessage[0] || null,
@@ -259,7 +259,7 @@ async function searchUsers(currentUserId: string, q: string) {
   ]) : [[], [], []]
   const friendIds = new Set(friendships.flatMap((item) => [item.userAId, item.userBId]).filter((id) => id !== currentUserId))
   const blockedIds = new Set(blocks.flatMap((item) => [item.blockerId, item.blockedId]).filter((id) => id !== currentUserId))
-  const [remarkMap, groupMembers, equippedBadgeMap] = await Promise.all([
+  const [remarkMap, groupMembers, equippedBadgesMap] = await Promise.all([
     loadFriendRemarkMap(currentUserId, friendIds),
     friendIds.size
       ? prisma.friendGroupMember.findMany({
@@ -285,7 +285,7 @@ async function searchUsers(currentUserId: string, q: string) {
       return {
         // A contact search is private. Only an actual current friend gets
         // the viewer-owned alias; pending/non-friend results stay public.
-        ...serializePublicUser(item, growth.level, growth.levelName, remarkMap.get(item.id) || null, equippedBadgeMap.get(item.id) || null, relationshipStatus === 'FRIEND'),
+        ...serializePublicUser(item, growth.level, growth.levelName, remarkMap.get(item.id) || null, equippedBadgesMap.get(item.id) || [], relationshipStatus === 'FRIEND'),
         groupId: groupByFriend.get(item.id) || null,
         relationshipStatus,
         requestId: relationshipStatus === 'INCOMING_PENDING' ? request?.id : null,
@@ -370,7 +370,7 @@ function serializePublicUser(
   level: number,
   levelName: string,
   friendRemark: string | null = null,
-  equippedBadge: EquippedBadgeView | null = null,
+  equippedBadges: EquippedBadgeView[] = [],
   isFriendContext = Boolean(friendRemark),
 ) {
   const nickname = getPublicUserDisplayName(friend)
@@ -388,7 +388,8 @@ function serializePublicUser(
     createdAt: friend.createdAt,
     level,
     levelName,
-    equippedBadge,
+    equippedBadges,
+    equippedBadge: equippedBadges[0] || null,
     // Profile.displayName is a public profile field.  Never replace it with a
     // viewer-owned friend remark.
     profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl) } : friend.Profile,

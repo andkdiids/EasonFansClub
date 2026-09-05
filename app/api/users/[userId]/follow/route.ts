@@ -19,14 +19,16 @@ export async function POST(_request: Request, context: RouteContext) {
   }
 
   let created = false
+  let followId: string | null = null
   try {
-    await prisma.follow.create({
+    const follow = await prisma.follow.create({
       data: {
         followerId: guard.user.id,
         followingId: userId,
       },
     })
     created = true
+    followId = follow.id
   } catch (error) {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error
   }
@@ -45,7 +47,7 @@ export async function POST(_request: Request, context: RouteContext) {
       }),
       { operation: 'follow-created', userId, notificationType: 'FOLLOW' },
     )
-    triggerBadgeEvaluation(userId, 'FOLLOW_CREATED')
+    triggerBadgeEvaluation(userId, 'FOLLOW_CREATED', followId)
     emitRealtime(userId, 'notification')
   }
 

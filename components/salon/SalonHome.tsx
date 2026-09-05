@@ -18,7 +18,7 @@ import {
   type SalonOptions,
   type SalonPostView,
   type SalonSort,
-} from '@/lib/salon'
+} from '@/lib/salon-shared'
 import { SalonLikeButton } from './SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
 

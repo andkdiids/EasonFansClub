@@ -90,7 +90,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const sentIds = new Set(sentRequests.map((item) => item.receiverId))
   const receivedIds = new Set(receivedRequests.map((item) => item.senderId))
   const receivedRequestBySender = new Map(receivedRequests.map((item) => [item.senderId, item.id]))
-  const equippedBadgeMap = await getEquippedBadgesForUsers([
+  const equippedBadges = await getEquippedBadgesForUsers([
     ...users.map((item) => item.id),
     ...posts.map((post) => post.User.id),
   ])
@@ -137,7 +137,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                       {avatar ? <img src={publicImageVariantUrl(avatar, 'avatar-md') || avatar} alt={name} className="h-full w-full object-cover" loading="lazy" /> : formatUid(item.uid).slice(0, 1)}
                     </span>
                     <span className="min-w-0">
-                      <strong className="block break-words text-brand-950"><UserDisplayName name={name} uid={item.uid} badge={equippedBadgeMap.get(item.id) || null} compact /></strong>
+                      <strong className="block break-words text-brand-950"><UserDisplayName name={name} uid={item.uid} badges={equippedBadges.get(item.id) || []} compact /></strong>
                       <small className="break-words">UID {formatUid(item.uid)} · {growth.levelName} Lv.{growth.level} · {item._count.Post} 帖</small>
                     </span>
                   </Link>
@@ -155,7 +155,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
                 <p className="break-words font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
                 <p className="mt-2 break-words text-sm text-slate-500">
-                  {getForumBoardDisplayName(post.Board)} · <UserDisplayName name={getPublicUserDisplayName(post.User)} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · 回复 {post.replyCount}
+                  {getForumBoardDisplayName(post.Board)} · <UserDisplayName name={getPublicUserDisplayName(post.User)} uid={post.User.uid} badges={equippedBadges.get(post.User.id) || []} compact /> · 回复 {post.replyCount}
                 </p>
               </Link>
             ))}

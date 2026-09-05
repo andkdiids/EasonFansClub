@@ -138,7 +138,7 @@ async function runCheckInPostProcess(input: {
     {
       phase: 'badgeEvaluation',
       run: async () => {
-        const completed = await triggerBadgeEvaluation(input.userId, 'CHECKIN_CREATED')
+        const completed = await triggerBadgeEvaluation(input.userId, 'CHECKIN_CREATED', input.requestId)
         if (!completed) throw new Error('BADGE_EVALUATION_FAILED')
       },
     },

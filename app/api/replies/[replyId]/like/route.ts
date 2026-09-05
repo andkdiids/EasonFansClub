@@ -7,6 +7,7 @@ import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { publicPostWhere } from '@/lib/post-moderation'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
 
@@ -22,7 +23,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { replyId } = await context.params
   const likes = await prisma.replyLike.findMany({
-    where: { replyId, Reply: { isDeleted: false } },
+    where: { replyId, Reply: { isDeleted: false, Post: publicPostWhere } },
     orderBy: { createdAt: 'desc' },
     take: 50,
     select: {
@@ -40,7 +41,7 @@ export async function GET(request: Request, context: RouteContext) {
       },
     },
   })
-  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
+  const equippedBadges = await getEquippedBadgesForUsers(likes.map((like) => like.User.id))
   return NextResponse.json({
     likers: likes.map((like) => ({
       id: like.User.id,
@@ -49,7 +50,8 @@ export async function GET(request: Request, context: RouteContext) {
       friendRemark: null,
       displayName: getPublicUserDisplayName(like.User),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
-      equippedBadge: equippedBadgeMap.get(like.User.id) || null,
+      equippedBadges: equippedBadges.get(like.User.id) || [],
+      equippedBadge: equippedBadges.get(like.User.id)?.[0] || null,
     })),
   })
 }
@@ -67,8 +69,14 @@ export async function POST(request: Request, context: RouteContext) {
   const { replyId } = await context.params
   let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
-    const reply = await tx.reply.findFirst({
+    const replyPost = await tx.reply.findFirst({
       where: { id: replyId, isDeleted: false },
+      select: { postId: true },
+    })
+    if (!replyPost) return null
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${replyPost.postId} FOR UPDATE`
+    const reply = await tx.reply.findFirst({
+      where: { id: replyId, isDeleted: false, Post: publicPostWhere },
       select: { id: true, authorId: true, postId: true },
     })
     if (!reply) return null
@@ -131,8 +139,14 @@ export async function DELETE(request: Request, context: RouteContext) {
   const { replyId } = await context.params
   let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
-    const reply = await tx.reply.findFirst({
+    const replyPost = await tx.reply.findFirst({
       where: { id: replyId, isDeleted: false },
+      select: { postId: true },
+    })
+    if (!replyPost) return null
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${replyPost.postId} FOR UPDATE`
+    const reply = await tx.reply.findFirst({
+      where: { id: replyId, isDeleted: false, Post: publicPostWhere },
       select: { id: true, authorId: true, postId: true },
     })
     if (!reply) return null

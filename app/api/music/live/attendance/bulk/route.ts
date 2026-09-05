@@ -172,7 +172,7 @@ export async function POST(request: Request) {
 
   if (result.addedCount > 0) {
     try {
-      await evaluateConcertBadges(guard.user.id)
+      await evaluateConcertBadges(guard.user.id, addShowIds[addShowIds.length - 1])
     } catch (error) {
       console.error('[attendance.bulk.concertBadge]', { userId: guard.user.id, error })
     }

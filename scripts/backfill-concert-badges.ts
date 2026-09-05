@@ -5,6 +5,7 @@ import {
   planConcertBadgeAwards,
   type ConcertAttendanceFact,
 } from '@/lib/concert-badge'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { prisma } from '@/lib/prisma'
 
 const BATCH_SIZE = 200
@@ -144,7 +145,7 @@ async function main() {
         select: { userId: true, concertId: true, createdAt: true, MusicConcert: { select: { tourId: true } } },
       }),
       inventoryBadgeIds.length
-        ? prisma.userBadge.findMany({ where: { userId: { in: userIds }, badgeId: { in: inventoryBadgeIds } }, select: { userId: true, badgeId: true } })
+        ? prisma.userBadge.findMany({ where: { userId: { in: userIds }, badgeId: { in: inventoryBadgeIds }, ...activeUserBadgeWhere() }, select: { userId: true, badgeId: true } })
         : Promise.resolve([]),
     ])
     const factsByUser = new Map<string, ConcertAttendanceFact[]>()

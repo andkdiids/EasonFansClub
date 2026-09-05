@@ -7,6 +7,7 @@ import { formatUid } from '@/lib/uid'
 type Props = {
   uid: number
   summary: BadgeCollectionView | null
+  equippedBadges?: EquippedBadgeView[] | null
   equippedBadge?: EquippedBadgeView | null
   isSelf?: boolean
 }
@@ -15,11 +16,11 @@ function isBadgeView(item: BadgeMuseumItem): item is BadgeView {
   return 'status' in item
 }
 
-export function BadgeMiniShowcase({ uid, summary, equippedBadge, isSelf = false }: Props) {
+export function BadgeMiniShowcase({ uid, summary, equippedBadges, equippedBadge, isSelf = false }: Props) {
   const items = selectMiniShowcase({
     showcase: [...(summary?.showcase || [])].sort((left, right) => left.slot - right.slot).map((item) => item.badge),
     recent: summary?.recent || [],
-    equipped: equippedBadge,
+    equipped: equippedBadges?.length ? equippedBadges : equippedBadge,
   })
   const href = `/user/${formatUid(uid)}/badges`
 

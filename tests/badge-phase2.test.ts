@@ -230,8 +230,8 @@ test('changing a rule does not revoke historical UserBadge records', () => {
 test('automatic evaluation keeps failures out of the primary request', () => {
   const engine = read('lib/badge-rule-engine.ts')
   const checkinRoute = read('app/api/checkin/route.ts')
-  assert.match(engine, /export function triggerBadgeEvaluation\(userId: string, eventType: BadgeEvaluationEvent\)/)
-  assert.match(engine, /const task = evaluateBadgesForEvent\(userId, eventType\)/)
+  assert.match(engine, /export function triggerBadgeEvaluation\(userId: string, eventType: BadgeEvaluationEvent, eventId\?: string \| null\)/)
+  assert.match(engine, /const task = evaluateBadgesForEvent\(userId, eventType, eventId\)/)
   assert.match(engine, /\.catch\(\(error\) => \{/)
   assert.match(engine, /void task/)
   assert.match(engine, /return task/)
@@ -263,11 +263,12 @@ test('obtained badges show history instead of live progress', () => {
   assert.match(read('components/BadgeCollectionPanel.tsx'), /获得于/)
 })
 
-test('expired badges remain visible and wearable when already owned', () => {
+test('badge availability and badge validity are separate concerns', () => {
   const service = read('lib/badge-service.ts')
   assert.match(service, /availabilityStatus: getBadgeAvailability\(badge\)/)
   assert.match(service, /if \(!record\.Badge\.isEnabled \|\| !record\.Badge\.isActive\)/)
-  assert.doesNotMatch(service, /getBadgeAvailability\(record\.Badge\).*BADGE_NOT_WEARABLE/)
+  assert.match(service, /activeUserBadgeWhere/)
+  assert.match(service, /isUserBadgeActive/)
 })
 
 test('equippedBadgeId remains the single wearable relation', () => {
@@ -278,7 +279,7 @@ test('equippedBadgeId remains the single wearable relation', () => {
 test('high-frequency equipped badge lookups use the minimal presentation select', () => {
   const service = read('lib/badge-service.ts')
   assert.match(service, /const EQUIPPED_BADGE_SELECT = \{[\s\S]*isActive: true,[\s\S]*\} as const/)
-  assert.match(service, /EquippedBadge: \{ select: EQUIPPED_BADGE_SELECT \}/)
+  assert.match(service, /select: USER_EQUIPPED_BADGE_SELECT/)
   const start = service.indexOf('export async function getEquippedBadgesForUsers')
   const end = service.indexOf('export async function grantBadge', start)
   assert.doesNotMatch(service.slice(start, end), /Series:/)

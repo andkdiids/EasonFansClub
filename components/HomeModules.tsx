@@ -19,7 +19,7 @@ type Post = {
   isPinned: boolean
   isFeatured: boolean
   board: { name: string; slug: string }
-  author: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null }
+  author: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null; equippedBadges?: EquippedBadgeView[]; equippedBadge?: EquippedBadgeView | null }
 }
 type DailyMessage = {
   id: string
@@ -28,7 +28,7 @@ type DailyMessage = {
   moodEmoji?: string | null
   moodText?: string | null
   content: string
-  user: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null }
+  user: { uid: number; nickname: string; level: number; profile?: { displayName: string | null } | null; equippedBadges?: EquippedBadgeView[]; equippedBadge?: EquippedBadgeView | null }
 }
 type Activity = { id: string; title: string; description: string | null }
 type Track = { id: string; title: string; artist: string }
@@ -91,7 +91,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
                   <Link href={`/posts/${post.id}`} className="text-2xl font-black text-brand-950 hover:text-brand-700">{post.title}</Link>
                   <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
                   <p className="mt-4 text-xs font-bold text-slate-500">
-                    <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950"><UserDisplayName name={authorName} uid={post.author.uid} badge={post.author.equippedBadge} compact /></Link>
+                    <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950"><UserDisplayName name={authorName} uid={post.author.uid} badges={post.author.equippedBadges} badge={post.author.equippedBadge} compact /></Link>
                     {' '}· 回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}
                   </p>
                 </article>
@@ -114,7 +114,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
               const name = item.user.nickname || 'E院用户'
               return (
                 <article key={item.id} className="rounded-3xl bg-sky-50/80 p-5">
-              <p className="font-black text-brand-950">{mood.formatted ? `${mood.formatted} · ` : ''}<UserDisplayName name={name} uid={item.user.uid} badge={item.user.equippedBadge} compact /> · Lv.{item.user.level}</p>
+              <p className="font-black text-brand-950">{mood.formatted ? `${mood.formatted} · ` : ''}<UserDisplayName name={name} uid={item.user.uid} badges={item.user.equippedBadges} badge={item.user.equippedBadge} compact /> · Lv.{item.user.level}</p>
                   <p className="mt-2 line-clamp-2 leading-7 text-slate-600">{item.content}</p>
                 </article>
               )

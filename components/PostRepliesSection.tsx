@@ -50,6 +50,7 @@ type ReplyItem = {
     uid: number
     nickname: string
     level: number
+    equippedBadges?: EquippedBadgeView[]
     avatarUrl?: string | null
     profile?: { displayName: string | null; avatarUrl: string | null } | null
     equippedBadge?: EquippedBadgeView | null
@@ -114,6 +115,7 @@ export function PostRepliesSection({
   initialMyReplies,
   initialReplyCount,
   currentUserId,
+  canInteract = true,
   canManageReplies,
   postAuthorId,
   focusId,
@@ -128,6 +130,7 @@ export function PostRepliesSection({
   initialMyReplies?: ReplyItem[]
   initialReplyCount: number
   currentUserId?: string
+  canInteract?: boolean
   canManageReplies?: boolean
   postAuthorId: string
   focusId?: string
@@ -227,6 +230,7 @@ export function PostRepliesSection({
   }
 
   async function toggleLike(replyId: string) {
+    if (!canInteract) return
     const response = await fetch(`/api/replies/${replyId}/like`, { method: 'POST' })
     if (await redirectToLoginAfterConfirmedSessionInvalid(response, `/api/replies/${replyId}/like`)) return
     const data = await response.json().catch(() => ({}))
@@ -239,7 +243,7 @@ export function PostRepliesSection({
   }
 
   async function togglePin(reply: ReplyItem) {
-    if (!canPinPostReply({ currentUserId, postAuthorId, parentId: reply.parentId }) || pinningReplyId) return
+    if (!canInteract || !canPinPostReply({ currentUserId, postAuthorId, parentId: reply.parentId }) || pinningReplyId) return
     const pinned = !reply.isPinned
     setPinningReplyId(reply.id)
     const response = await fetch(`/api/replies/${reply.id}/pin`, {
@@ -273,6 +277,7 @@ export function PostRepliesSection({
   }
 
   function replyLikeButton(reply: ReplyItem) {
+    if (!canInteract) return <span className="text-xs font-black text-slate-400">点赞 {reply.likeCount}</span>
     return (
       <button type="button" onClick={() => void toggleLike(reply.id)} className="text-xs font-black text-brand-700">
         {reply.liked ? '取消点赞' : '点赞'} {reply.likeCount}
@@ -281,6 +286,7 @@ export function PostRepliesSection({
   }
 
   function openReplyComposer(target: { id: string; name: string }) {
+    if (!canInteract) return
     setReplyTo(target)
     if (window.matchMedia('(max-width: 767px)').matches) setMobileReplySheetOpen(true)
   }
@@ -327,7 +333,7 @@ export function PostRepliesSection({
   useEffect(() => {
     const onFocusComposer = (event: Event) => {
       const detail = (event as CustomEvent<{ postId?: string }>).detail
-      if (detail?.postId !== postId || !currentUserId) return
+      if (detail?.postId !== postId || !currentUserId || !canInteract) return
       setReplyTo(null)
       if (window.matchMedia('(max-width: 767px)').matches) {
         setMobileReplySheetOpen(true)
@@ -341,18 +347,18 @@ export function PostRepliesSection({
     }
     window.addEventListener('ecfc:focus-post-composer', onFocusComposer)
     return () => window.removeEventListener('ecfc:focus-post-composer', onFocusComposer)
-  }, [currentUserId, postId])
+  }, [canInteract, currentUserId, postId])
 
   useEffect(() => {
     const onOpenReplySheet = (event: Event) => {
       const detail = (event as CustomEvent<{ postId?: string }>).detail
-      if (detail?.postId !== postId || !currentUserId) return
+      if (detail?.postId !== postId || !currentUserId || !canInteract) return
       setReplyTo(null)
       setMobileReplySheetOpen(true)
     }
     window.addEventListener('ecfc:open-post-reply-sheet', onOpenReplySheet)
     return () => window.removeEventListener('ecfc:open-post-reply-sheet', onOpenReplySheet)
-  }, [currentUserId, postId])
+  }, [canInteract, currentUserId, postId])
 
   function findRootReplyId(replyId: string) {
     let current = replyMap.get(replyId)
@@ -424,7 +430,7 @@ export function PostRepliesSection({
           </Link>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-              <Link href={`/user/${formatUid(reply.author.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /></Link>
+              <Link href={`/user/${formatUid(reply.author.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /></Link>
               <span className="font-bold text-slate-400">UID {formatUid(reply.author.uid)}</span>
               <span className="font-bold text-slate-400">Lv.{reply.author.level}</span>
               <span className="font-bold text-slate-400">{formatDate(new Date(reply.createdAt))}</span>
@@ -443,7 +449,7 @@ export function PostRepliesSection({
             {replyBody.images.length ? <div className="mt-2 grid grid-cols-2 gap-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-48 w-full object-contain" />)}</div> : null}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               {replyLikeButton(reply)}
-              {currentUserId ? (
+              {currentUserId && canInteract ? (
                 <button
                   type="button"
                   onClick={() => openReplyComposer({ id: reply.id, name })}
@@ -462,7 +468,7 @@ export function PostRepliesSection({
               listUrl={`/api/replies/${reply.id}/like`}
               className="mt-1.5"
             />
-            {currentUserId && replyTo?.id === reply.id ? (
+            {currentUserId && canInteract && replyTo?.id === reply.id ? (
               <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
                 <ReplyForm
                   postId={postId}
@@ -495,7 +501,7 @@ export function PostRepliesSection({
               <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                 <SafeAvatar src={avatar} name={name} uid={reply.author.uid} />
               </span>
-              <span><UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /> · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
+              <span><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /> · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
             </Link>
             {reply.isPinned ? <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
             <span>{reply.parentId === null && reply.floorNumber !== null ? `${reply.floorNumber}楼 · ` : ''}{formatDate(new Date(reply.createdAt))}</span>
@@ -513,7 +519,7 @@ export function PostRepliesSection({
           {replyBody.images.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{replyBody.images.map((url, imageIndex) => <ImageViewer key={url} src={url} alt={`${name} 的回复图片 ${imageIndex + 1}`} imageClassName="h-auto max-h-72 w-full object-contain" />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {replyLikeButton(reply)}
-            {currentUserId ? (
+            {currentUserId && canInteract ? (
               <button
                 type="button"
                 onClick={() => openReplyComposer({ id: reply.id, name })}
@@ -522,7 +528,7 @@ export function PostRepliesSection({
                 回复
               </button>
             ) : null}
-            {canPinPostReply({ currentUserId, postAuthorId, parentId: reply.parentId }) ? (
+            {canInteract && canPinPostReply({ currentUserId, postAuthorId, parentId: reply.parentId }) ? (
               <button
                 type="button"
                 disabled={pinningReplyId === reply.id}
@@ -543,7 +549,7 @@ export function PostRepliesSection({
             className="mt-2"
           />
         </div>
-        {currentUserId && replyTo?.id === reply.id ? (
+        {currentUserId && canInteract && replyTo?.id === reply.id ? (
           <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
             <ReplyForm
               postId={postId}
@@ -574,7 +580,7 @@ export function PostRepliesSection({
   return (
     <>
     <section id={`post-comments-${postId}`} className="post-replies-section scroll-mt-16 space-y-3">
-      {currentUserId && !replyTo ? (
+      {currentUserId && canInteract && !replyTo ? (
         <div id={`post-primary-composer-${postId}`} data-post-primary-composer={postId}>
           <div className="post-replies-desktop-composer">
             <ReplyForm
@@ -660,7 +666,7 @@ export function PostRepliesSection({
               const reply = replyMap.get(id)
               if (!reply) return null
               const name = reply.author.nickname || 'E院用户'
-              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · <UserDisplayName name={name} uid={reply.author.uid} badge={reply.author.equippedBadge} compact /> · {reply.likeCount} 赞</a>
+              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · <UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /> · {reply.likeCount} 赞</a>
             })}
           </div>
         </div>
@@ -684,7 +690,7 @@ export function PostRepliesSection({
       ) : null}
 
     </section>
-    {currentUserId ? (
+    {currentUserId && canInteract ? (
       <PostReplyBottomSheet
         open={mobileReplySheetOpen}
         postId={postId}

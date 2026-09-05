@@ -264,7 +264,7 @@ async function executePostDelete(postId: string, user: SessionUser, canManagePos
       select: { id: true, isDeleted: true, deletedAt: true },
     })
     const postCount = await tx.post.count({
-      where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false },
+      where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
     })
     await tx.board.update({ where: { id: lockedExisting.boardId }, data: { postCount } })
 
@@ -347,6 +347,7 @@ export async function GET(_request: Request, { params }: Params) {
   const viewer = await getCurrentUser()
   const { postId } = await params
   const viewerCanManagePosts = Boolean(viewer && await hasAdminPermission(viewer, 'post_manage'))
+  const viewerCanManageReplies = Boolean(viewer && await hasAdminPermission(viewer, 'reply_manage'))
   const post = await prisma.post.findFirst({
     where: {
       id: postId,
@@ -368,6 +369,12 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   const { User, Board, Reply, PostMedia, ...postData } = post
+  const viewerLikedReplyIds = viewer && Reply.length
+    ? new Set((await prisma.replyLike.findMany({
+      where: { userId: viewer.id, replyId: { in: Reply.map((reply) => reply.id) } },
+      select: { replyId: true },
+    })).map((like) => like.replyId))
+    : new Set<string>()
   const author = User.Profile ? {
     ...User,
     nickname: getPublicUserDisplayName(User),
@@ -406,6 +413,8 @@ export async function GET(_request: Request, { params }: Params) {
       })),
       replies: Reply.map(({ User: replyAuthor, ...reply }) => ({
         ...reply,
+        canDelete: Boolean(viewer && (viewer.id === replyAuthor.id || viewerCanManageReplies)),
+        liked: viewerLikedReplyIds.has(reply.id),
         content: publicModerationText(publicContentImageMarkers(reply.content), reply.moderationStatus),
         author: replyAuthor.Profile ? {
           ...replyAuthor,
@@ -567,7 +576,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
     if (data.isDeleted !== undefined && lockedExisting.isDeleted !== data.isDeleted) {
       const postCount = await tx.post.count({
-        where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false },
+        where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
       })
       await tx.board.update({
         where: { id: lockedExisting.boardId },
@@ -642,7 +651,7 @@ export async function PATCH(request: Request, { params }: Params) {
     return updated
     })
 
-    if (data.isFeatured === true && !existing.isFeatured) triggerBadgeEvaluation(existing.authorId, 'POST_FEATURED')
+    if (data.isFeatured === true && !existing.isFeatured) triggerBadgeEvaluation(existing.authorId, 'POST_FEATURED', postId)
 
     phase = `${mutationKind}-cache`
     revalidatePath('/forum')

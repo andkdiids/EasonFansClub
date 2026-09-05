@@ -74,7 +74,7 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
     [],
   )
   const requestUserIds = requests.map((request) => request.receiverId === user.id ? request.senderId : request.receiverId)
-  const equippedBadgeMap = await getEquippedBadgesForUsers(requestUserIds)
+  const equippedBadges = await getEquippedBadgesForUsers(requestUserIds)
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-6xl space-y-6 px-5 py-8">
@@ -109,7 +109,8 @@ export default async function FriendsPage({ searchParams }: { searchParams: Prom
               updatedAt={request.updatedAt}
               message={request.message}
               direction={incoming ? 'received' : 'sent'}
-              equippedBadge={equippedBadgeMap.get(requestUser.id) || null}
+              equippedBadges={equippedBadges.get(requestUser.id) || []}
+              equippedBadge={equippedBadges.get(requestUser.id)?.[0] || null}
               action={incoming
                   ? <FriendRequestDecision requestId={request.id} />
                   : <FriendRequestCancel requestId={request.id} />}
@@ -152,6 +153,7 @@ function RequestCard({
   updatedAt,
   message,
   direction,
+  equippedBadges,
   equippedBadge,
   action,
 }: {
@@ -160,6 +162,7 @@ function RequestCard({
   updatedAt: Date
   message: string | null
   direction: 'received' | 'sent'
+  equippedBadges?: import('@/lib/badge-types').EquippedBadgeView[]
   equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
   action?: ReactNode
 }) {
@@ -173,7 +176,7 @@ function RequestCard({
             <SafeAvatar src={avatar} name={name} uid={user.uid} className="h-full w-full" />
           </span>
           <span className="min-w-0">
-            <span className="block truncate font-black text-brand-950"><UserDisplayName name={name} uid={user.uid} badge={equippedBadge} compact /></span>
+            <span className="block truncate font-black text-brand-950"><UserDisplayName name={name} uid={user.uid} badges={equippedBadges} badge={equippedBadge} compact /></span>
             <span className="block text-xs font-bold text-slate-500">UID {formatUid(user.uid)}</span>
           </span>
         </Link>

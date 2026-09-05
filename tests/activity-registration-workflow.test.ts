@@ -98,7 +98,8 @@ test('限定奖励只在核销事务内复用统一勋章服务，前台不返�
   assert.match(service, /sourceType: 'ACTIVITY_VERIFICATION'/)
   assert.match(service, /grantReason: `活动「\$\{activity\.title\}」完成现场核销`/)
   assert.match(service, /registrationId: current\.id, rewardId/)
-  assert.match(grant, /where: \{ userId_badgeId: \{ userId: input\.userId, badgeId: input\.badgeId \} \}/)
+  assert.match(grant, /activeUserBadgeWhere/)
+  assert.match(service, /grantKey: `activity-registration:\$\{current\.id\}/)
   assert.doesNotMatch(detail, /ActivityReward|限定勋章|rewardBadge/)
 })
 

@@ -29,6 +29,7 @@ type PostItem = {
     nickname: string
     avatarUrl?: string | null
     level: number
+    equippedBadges?: EquippedBadgeView[]
     equippedBadge?: EquippedBadgeView | null
     profile?: { displayName: string | null; avatarUrl: string | null } | null
   }
@@ -85,14 +86,14 @@ export function PostList({
                   <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                     <SafeAvatar src={authorAvatar} name={authorName} uid={post.author.uid} />
                   </span>
-                  <span><UserDisplayName name={authorName} uid={post.author.uid} badge={post.author.equippedBadge} compact /> · UID {formatUid(post.author.uid)} · Lv.{post.author.level}</span>
+                  <span><UserDisplayName name={authorName} uid={post.author.uid} badges={post.author.equippedBadges} badge={post.author.equippedBadge} compact /> · UID {formatUid(post.author.uid)} · Lv.{post.author.level}</span>
                 </Link>
               ) : post.author.uid !== undefined ? (
                 <span className="flex items-center gap-2 text-brand-950">
                   <span className="grid h-7 w-7 place-items-center overflow-hidden rounded-full bg-slate-900 text-white">
                     {post.author.uid === 0 ? 'E' : formatUid(post.author.uid).slice(0, 1)}
                   </span>
-                  <UserDisplayName name={authorName} uid={post.author.uid} badge={post.author.equippedBadge} compact />
+                  <UserDisplayName name={authorName} uid={post.author.uid} badges={post.author.equippedBadges} badge={post.author.equippedBadge} compact />
                 </span>
               ) : null}
               <span>{formatDate(post.createdAt instanceof Date ? post.createdAt : new Date(post.createdAt))}</span>

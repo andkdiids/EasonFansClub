@@ -20,6 +20,7 @@ type Row = {
   maxStreak: number
   totalPlayCount: number
   achievedAt: string
+  equippedBadges?: EquippedBadgeView[]
   equippedBadge?: EquippedBadgeView | null
 }
 type Data = {
@@ -174,7 +175,7 @@ export function GuessSongLeaderboard({
     <article key={key} className={className}>
       <strong className="guess-song-rank">{row.rank}</strong>
       <span className="guess-song-rank-avatar"><SafeAvatar src={row.avatarUrl} name={row.nickname} uid={row.uid} /></span>
-      <div className="guess-song-rank-user"><strong><UserDisplayName name={row.nickname} uid={row.uid} badge={row.equippedBadge} compact /></strong></div>
+      <div className="guess-song-rank-user"><strong><UserDisplayName name={row.nickname} uid={row.uid} badges={row.equippedBadges} badge={row.equippedBadge} compact /></strong></div>
       <span className="guess-song-stat">{row.score}</span>
       <span className="guess-song-stat is-desktop-only">{row.correctCount}</span>
       <span className="guess-song-stat is-desktop-only">{row.maxStreak}</span>

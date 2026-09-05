@@ -21,13 +21,14 @@ test('seed inserts the birthday-commemorative badge with auto-grant', () => {
   assert.match(seed, /isAutoGrant:\s*true/)
 })
 
-test('birthday service exports count + idempotent grant helpers', () => {
+test('birthday service exports count + period-idempotent grant helpers', () => {
   const lib = read('lib/birthday.ts')
   assert.match(lib, /export async function countTodayBirthdays/)
   assert.match(lib, /export async function ensureBirthdayBadge/)
   assert.match(lib, /BIRTHDAY_BADGE_SLUG = 'birthday-commemorative'/)
-  // 授予依赖唯一约束，保证只授一次、永久保留
-  assert.match(lib, /userId_badgeId/)
+  // 授予使用生日日期作为周期键；过期历史不会阻止新年份再次获得。
+  assert.match(lib, /grantKey:\s*`birthday:\$\{dateKey\}`/)
+  assert.match(lib, /历史获得记录会保留|expired history/i)
 })
 
 test('homepage birthday count uses real user month/day, not TodayEvent', () => {

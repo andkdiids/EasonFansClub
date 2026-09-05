@@ -6,6 +6,8 @@ import { getBadgeAvailability, getBadgeOwnershipStats } from '@/lib/badge-phase2
 import { randomUUID } from 'node:crypto'
 import { getBadgeDuplicateMessage, parseBadgeDefinition } from '@/lib/badge-admin'
 import { generateBadgeAcquisitionDescription } from '@/lib/badge-rules'
+import { syncBadgeOwnershipDependencies, validateBadgeOwnershipRule } from '@/lib/badge-ownership'
+import { getBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 
@@ -55,8 +57,18 @@ export async function POST(request: Request) {
   if (parsed.rule?.ruleType === 'BADGE_SERIES_COMPLETE') return NextResponse.json({ message: '系列完成规则只能通过勋章系列的完成奖励配置' }, { status: 400 })
   const data = { ...parsed.data } as Prisma.BadgeUncheckedCreateInput
   const generatedCode = `badge-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
+  // Allocate the id before validation so a newly created badge cannot depend
+  // on itself and can participate in the graph check atomically.
+  data.id = randomUUID()
   data.code = generatedCode
   data.slug = generatedCode
+  if (parsed.rule?.ruleType === 'BADGE_OWNERSHIP') {
+    const config = getBadgeOwnershipRuleConfig(parsed.rule.configJson)
+    if (!config) return NextResponse.json({ message: '拥有指定勋章规则配置无效' }, { status: 400 })
+    const validated = await validateBadgeOwnershipRule({ targetBadgeId: data.id, config })
+    if (validated.error) return NextResponse.json({ message: validated.error }, { status: 400 })
+    parsed.rule.configJson = validated.config
+  }
   if (parsed.rule) {
     const generatedDescription = generateBadgeAcquisitionDescription(parsed.rule.ruleType, parsed.rule.threshold, parsed.rule.configJson)
     const requestedDescription = typeof body.acquisitionDescription === 'string' ? body.acquisitionDescription.trim() : ''
@@ -124,6 +136,11 @@ export async function POST(request: Request) {
           },
         })
       }
+      await syncBadgeOwnershipDependencies(
+        tx,
+        created.id,
+        parsed.rule?.ruleType === 'BADGE_OWNERSHIP' ? getBadgeOwnershipRuleConfig(parsed.rule.configJson) : null,
+      )
       const badgeWithRule = await tx.badge.findUniqueOrThrow({ where: { id: created.id }, select: badgeAdminSelect })
       await writeBadgeAdminAction(tx, {
         actorId: guard.user.id,

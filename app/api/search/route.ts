@@ -132,7 +132,7 @@ export async function GET(request: Request) {
   // all matched users. The database applies the shared hot score before LIMIT.
   const { posts, pagination } = await searchPublicPosts(keyword, users.map((item) => item.id), page)
 
-  const equippedBadgeMap = await getEquippedBadgesForUsers([
+  const equippedBadges = await getEquippedBadgesForUsers([
     ...users.map((item) => item.id),
     ...posts.map((item) => item.User.id),
   ])
@@ -141,7 +141,8 @@ export async function GET(request: Request) {
     users: users.map(({ Profile, _count, ...item }) => ({
       uid: item.uid,
       nickname: getPublicUserDisplayName({ ...item, Profile }),
-      equippedBadge: equippedBadgeMap.get(item.id) || null,
+       equippedBadges: equippedBadges.get(item.id) || [],
+       equippedBadge: equippedBadges.get(item.id)?.[0] || null,
       avatarUrl: toPublicMediaUrl(item.avatarUrl),
       profile: Profile ? {
         displayName: getPublicUserDisplayName({ ...item, Profile }),
@@ -176,7 +177,8 @@ export async function GET(request: Request) {
       author: {
         uid: User.uid,
         nickname: getPublicUserDisplayName(User),
-        equippedBadge: equippedBadgeMap.get(User.id) || null,
+         equippedBadges: equippedBadges.get(User.id) || [],
+         equippedBadge: equippedBadges.get(User.id)?.[0] || null,
         avatarUrl: toPublicMediaUrl(User.avatarUrl),
         Profile: User.Profile ? {
           displayName: getPublicUserDisplayName(User),

@@ -38,13 +38,13 @@ test('通知中心隐藏勋章不改变全局 UserDisplayName 默认勋章能力
   assert.doesNotMatch(client, /import \{ UserDisplayName \}/)
   assert.match(displayName, /showBadge = true/)
   // 资料卡仍使用 actorProfile.equippedBadge；通知卡片只不再渲染该字段。
-  assert.match(service, /equippedBadge: actorBadgeMap\.get\(actor\.id\) \|\| null/)
+  assert.match(service, /equippedBadge: actorBadgeMap\.get\(actor\.id\)\?\.\[0\] \|\| null/)
   assert.match(client, /<FriendProfileCard/)
 })
 
 test('通知 actor 名称由服务端按好友备注优先、昵称回退解析', () => {
   const service = read('lib/notifications.ts')
-  const remarks = read('lib/friend-remarks.ts')
+  const remarks = read('lib/friend-display.ts')
 
   assert.match(service, /loadFriendRemarkMap\(userId, actorIds\)/)
   assert.match(service, /getFriendDisplayName\(/)

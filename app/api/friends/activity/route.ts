@@ -86,7 +86,7 @@ export async function GET(request: Request) {
   ])
   const totalPages = Math.max(1, Math.ceil(total / limit))
   const remarkMap = await loadFriendRemarkMap(viewer.id, activities.map((item) => item.actorId))
-  const equippedBadgeMap = await getEquippedBadgesForUsers(activities.map((item) => item.actorId))
+  const equippedBadges = await getEquippedBadgesForUsers(activities.map((item) => item.actorId))
 
   return NextResponse.json({
     activities: activities.map((item) => ({
@@ -108,7 +108,8 @@ export async function GET(request: Request) {
           friendRemark: remarkMap.get(item.actorId),
           isFriendContext: true,
         }),
-        equippedBadge: equippedBadgeMap.get(item.actorId) || null,
+        equippedBadges: equippedBadges.get(item.actorId) || [],
+        equippedBadge: equippedBadges.get(item.actorId)?.[0] || null,
         avatarUrl: publicImageUrl(item.User.avatarUrl),
         profile: item.User.Profile ? {
           ...item.User.Profile,

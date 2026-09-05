@@ -63,7 +63,7 @@ export function ForumDiscoveryCard({ post, priority = false, onOpen }: Readonly<
               <img src={post.author.avatarUrl} alt="" loading="lazy" />
             ) : post.author.displayName.slice(0, 1)}
           </span>
-          <span title={post.author.displayName}><UserDisplayName name={post.author.displayName} uid={post.author.uid} badge={post.author.equippedBadge} compact /></span>
+          <span title={post.author.displayName}><UserDisplayName name={post.author.displayName} uid={post.author.uid} badges={post.author.equippedBadges} badge={post.author.equippedBadge} compact /></span>
         </div>
         <LikeButton
           postId={post.id}

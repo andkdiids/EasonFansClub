@@ -56,7 +56,7 @@ test('recommendations are safe, available, stable and limited to three', () => {
   assert.equal(BADGE_RECOMMENDATION_LIMIT, 3)
   assert.match(source, /visibility: 'PUBLIC', grantType: 'AUTO'/)
   assert.match(source, /badgeAvailabilityWhere\(now\)/)
-  assert.match(source, /UserBadge: \{ none: \{ userId \} \}/)
+  assert.match(source, /UserBadge: \{ none: \{ userId, \.\.\.activeUserBadgeWhere\(now\) \} \}/)
   assert.match(source, /UserBadgeTracking: \{ none: \{ userId \} \}/)
   assert.match(source, /dailyTieBreaker/)
   assert.match(source, /slice\(0, BADGE_RECOMMENDATION_LIMIT\)/)

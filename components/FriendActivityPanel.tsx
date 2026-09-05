@@ -29,6 +29,7 @@ type FriendActivity = {
     nickname: string
     displayName?: string | null
     friendRemark?: string | null
+    equippedBadges?: import('@/lib/badge-types').EquippedBadgeView[]
     equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
     avatarUrl: string | null
     profile: { displayName: string | null; avatarUrl: string | null } | null
@@ -182,7 +183,7 @@ export function FriendActivityPanel({ compact = false }: Readonly<{ compact?: bo
                 </a>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <a href={`/user/${formatUid(item.actor.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={item.actor.uid} badge={item.actor.equippedBadge} compact /></a>
+                    <a href={`/user/${formatUid(item.actor.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={item.actor.uid} badges={item.actor.equippedBadges} badge={item.actor.equippedBadge} compact /></a>
                     <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(item.actor.uid)}</span>
                     <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-brand-700">{item.type === 'CHECKIN' ? `${mood?.icon || '✚'} ${mood?.label || typeLabel}` : item.type === 'BADGE' ? `🎖 ${typeLabel}` : `✎ ${typeLabel}`}</span>
                   </div>

@@ -71,10 +71,11 @@ test('birthday greeting never leaks birthday date or user name (4: 不泄露生�
 })
 
 test('multiple grant calls never duplicate UserBadge (5: 多次调用不重复 UserBadge)', () => {
-  assert.match(birthdayLib, /userId_badgeId/)
-  assert.match(birthdayLib, /upsert/)
-  // 唯一约束 (userId, badgeId) 兜底
-  assert.match(schema.slice(schema.indexOf('model UserBadge')), /@@unique\(\[userId, badgeId\]\)/)
+  assert.match(birthdayLib, /grantKey:\s*`birthday:\$\{dateKey\}`/)
+  assert.match(birthdayLib, /ensureBirthdayBadge\(user\.id, dateKey\)/)
+  const userBadge = schema.slice(schema.indexOf('model UserBadge'), schema.indexOf('model UserBadgeShowcase'))
+  assert.match(userBadge, /grantKey\s+String\?\s+@unique/)
+  assert.match(userBadge, /activeKey\s+String\?\s+@unique/)
 })
 
 test('login flow keeps an idempotent per-user greeting fallback while the batch stays in the daily job', () => {

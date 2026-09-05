@@ -113,7 +113,7 @@ export function selectMiniShowcase({
 }: {
   showcase: readonly BadgeView[]
   recent: readonly BadgeView[]
-  equipped?: EquippedBadgeView | null
+  equipped?: EquippedBadgeView | readonly EquippedBadgeView[] | null
   limit?: number
 }) {
   const safeLimit = Math.max(1, Math.min(6, Math.trunc(limit) || 6))
@@ -121,10 +121,9 @@ export function selectMiniShowcase({
 
   const selected: BadgeMuseumItem[] = []
   const seen = new Set<string>()
-  if (equipped) {
-    selected.push(equipped)
-    seen.add(equipped.id)
-  }
+  const equippedBadges = Array.isArray(equipped) ? equipped : equipped ? [equipped] : []
+  selected.push(...equippedBadges)
+  equippedBadges.forEach((badge) => seen.add(badge.id))
 
   const candidates = [...recent]
     .filter((badge) => badge.status === 'OBTAINED' && !seen.has(badge.id))

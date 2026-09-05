@@ -81,6 +81,7 @@ export async function POST(request: Request, { params }: Params) {
   const { postId } = await params
   let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
       where: { ...publicPostWhere, id: postId },
       select: { id: true, authorId: true, likeCount: true },
@@ -149,6 +150,7 @@ export async function DELETE(request: Request, { params }: Params) {
   const { postId } = await params
   let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({ where: { ...publicPostWhere, id: postId }, select: { likeCount: true, authorId: true } })
     if (!post) return null
 

@@ -12,7 +12,7 @@ export async function POST(_request: Request, context: RouteContext) {
 
   const { requestId } = await context.params
   const result = await decideFriendRequest(user.id, requestId, 'accept')
-  for (const userId of result.badgeEvaluationUserIds) triggerBadgeEvaluation(userId, 'FRIENDSHIP_CREATED')
+  for (const userId of result.badgeEvaluationUserIds) triggerBadgeEvaluation(userId, 'FRIENDSHIP_CREATED', requestId)
   return NextResponse.json(result.body, {
     status: result.status,
     headers: { 'Cache-Control': 'private, no-store, max-age=0' },

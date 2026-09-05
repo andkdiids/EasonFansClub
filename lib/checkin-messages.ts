@@ -1,11 +1,12 @@
 import { prisma } from '@/lib/prisma'
-import type { LikeAvatarUser } from '@/components/LikeAvatars'
 import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { planFriendCheckInMessagePage } from '@/lib/checkin-message-order'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { CHECK_IN_MESSAGE_PAGE_SIZE } from '@/lib/checkin-pagination'
+export { anonymizeCheckInMessages } from '@/lib/checkin-message-display'
+export type { AnonymousCheckInMessageItem } from '@/lib/checkin-message-display'
 
 export { CHECK_IN_DESKTOP_MESSAGE_PAGE_SIZE, CHECK_IN_MESSAGE_PAGE_SIZE, getCheckInMessagePageSize } from '@/lib/checkin-pagination'
 
@@ -154,73 +155,9 @@ export async function resolveCheckInNotificationTarget({
   }
 }
 
-export type AnonymousCheckInMessageItem = {
-  id: string
-  date: string
-  mood: string | null
-  moodType: string | null
-  moodEmoji: string | null
-  moodText: string | null
-  content: string
-  isPinned: boolean
-  isFeatured: boolean
-  likeCount: number
-  favoriteCount: number
-  commentCount: number
-  createdAt: string
-  ipRegion: string | null
-  liked: boolean
-  favorited: boolean
-  canDelete: boolean
-  /** 最新点赞用户（最多 10 个，朋友圈式头像展示）。 */
-  likers: LikeAvatarUser[]
-  author: { type: 'anonymous'; name: '匿名E友' }
-  comments: Array<{
-    id: string
-    parentId: string | null
-    content: string
-    createdAt: string
-    ipRegion: string | null
-    canDelete: boolean
-    author: { type: 'anonymous'; name: '匿名E友' }
-  }>
-}
+import type { AnonymousCheckInMessageItem } from '@/lib/checkin-message-display'
 
 export type CheckInDisplayMessageItem = CheckInMessageItem | AnonymousCheckInMessageItem
-
-export function anonymizeCheckInMessages(messages: CheckInMessageItem[]): AnonymousCheckInMessageItem[] {
-  return messages.map((item) => ({
-    id: item.id,
-    date: item.date,
-    mood: item.mood,
-    moodType: item.moodType,
-    moodEmoji: item.moodEmoji,
-    moodText: item.moodText,
-    content: item.content,
-    isPinned: item.isPinned,
-    isFeatured: item.isFeatured,
-    likeCount: item.likeCount,
-    favoriteCount: item.favoriteCount,
-    commentCount: item.commentCount,
-    createdAt: item.createdAt,
-    ipRegion: item.ipRegion,
-    liked: item.likes.length > 0,
-    favorited: item.favorites.length > 0,
-    canDelete: item.canDelete,
-    // 匿名墙不返回点赞者身份，保护点赞者隐私（点赞数量仍通过 likeCount 公开）。
-    likers: [],
-    author: { type: 'anonymous', name: '匿名E友' },
-    comments: item.comments.map((comment) => ({
-      id: comment.id,
-      parentId: comment.parentId,
-      content: comment.content,
-      createdAt: comment.createdAt,
-      ipRegion: comment.ipRegion,
-      canDelete: comment.canDelete,
-      author: { type: 'anonymous', name: '匿名E友' },
-    })),
-  }))
-}
 
 const checkInMessagesCacheTtlMs = Number(process.env.CHECKIN_MESSAGES_CACHE_TTL_MS || 10000)
 const checkInMessagesCache = new Map<string, { expiresAt: number; promise: Promise<CheckInMessagesResult> }>()
@@ -706,17 +643,17 @@ async function getCheckInMessagesUncached({
     ...rowsWithFocus.flatMap((item) => item.DailyMessageLike.map((like) => like.userId)),
     ...rowsWithFocus.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
   ]
-  const [equippedBadgeMap, friendRemarkMap] = await Promise.all([
+  const [equippedBadges, friendRemarkMap] = await Promise.all([
     getEquippedBadgesForUsers(displayNameUserIds),
     friendContext ? loadFriendRemarkMap(viewerId, displayNameUserIds) : Promise.resolve(new Map<string, string>()),
   ])
-
   return rowsWithFocus.map((item) => {
     const publicUser = {
       ...item.User,
       nickname: getPublicUserDisplayName(item.User),
       avatarUrl: publicImageUrl(item.User.avatarUrl),
-      equippedBadge: equippedBadgeMap.get(item.User.id) || null,
+      equippedBadges: equippedBadges.get(item.User.id) || [],
+      equippedBadge: equippedBadges.get(item.User.id)?.[0] || null,
       Profile: item.User.Profile ? { ...item.User.Profile, avatarUrl: publicImageUrl(item.User.Profile.avatarUrl) } : item.User.Profile,
     }
     const publicLikes = item.DailyMessageLike.map((like) => ({
@@ -725,7 +662,8 @@ async function getCheckInMessagesUncached({
         ...like.User,
         nickname: getPublicUserDisplayName(like.User),
         avatarUrl: publicImageUrl(like.User.avatarUrl),
-        equippedBadge: equippedBadgeMap.get(like.User.id) || null,
+        equippedBadges: equippedBadges.get(like.User.id) || [],
+        equippedBadge: equippedBadges.get(like.User.id)?.[0] || null,
         Profile: like.User.Profile ? { ...like.User.Profile, avatarUrl: publicImageUrl(like.User.Profile.avatarUrl) } : like.User.Profile,
       },
     }))
@@ -736,7 +674,8 @@ async function getCheckInMessagesUncached({
         ...comment.User,
         nickname: getPublicUserDisplayName(comment.User),
         avatarUrl: publicImageUrl(comment.User.avatarUrl),
-        equippedBadge: equippedBadgeMap.get(comment.User.id) || null,
+        equippedBadges: equippedBadges.get(comment.User.id) || [],
+        equippedBadge: equippedBadges.get(comment.User.id)?.[0] || null,
         Profile: comment.User.Profile ? { ...comment.User.Profile, avatarUrl: publicImageUrl(comment.User.Profile.avatarUrl) } : comment.User.Profile,
       },
     }))
@@ -767,7 +706,8 @@ async function getCheckInMessagesUncached({
           isFriendContext: friendContext,
         }),
         avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl || null),
-        equippedBadge: equippedBadgeMap.get(like.User.id) || null,
+        equippedBadges: equippedBadges.get(like.User.id) || [],
+        equippedBadge: equippedBadges.get(like.User.id)?.[0] || null,
       })),
       favorites: item.DailyMessageFavorite,
       canDelete: viewerCanModerate || item.userId === viewerId,

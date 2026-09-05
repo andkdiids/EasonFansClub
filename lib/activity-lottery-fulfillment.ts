@@ -129,6 +129,7 @@ async function fulfillInTransaction(
       badgeId: prize.badgeId,
       sourceType: FULFILLMENT_SOURCE_TYPE,
       sourceId: winner.id,
+      grantKey: `activity-lottery-winner:${winner.id}`,
       grantReason: reason,
       actorId: options.actorId || null,
       obtainedAt: now,
@@ -178,7 +179,22 @@ async function fulfillInTransaction(
 /** Fulfill one persisted winner. Retries always use the same winner row. */
 export async function fulfillActivityLotteryPrize(winnerId: string, options: ActivityLotteryFulfillmentOptions = {}) {
   try {
-    return await prisma.$transaction((tx) => fulfillInTransaction(tx, winnerId, options), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
+    const result = await prisma.$transaction((tx) => fulfillInTransaction(tx, winnerId, options), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
+    if (result.status === 'FULFILLED' || result.status === 'ALREADY_FULFILLED') {
+      const badgePrize = await prisma.lotteryEntry.findUnique({
+        where: { id: winnerId },
+        select: { userId: true, LotteryPrize: { select: { virtualPrizeType: true, badgeId: true } } },
+      })
+      if (badgePrize?.LotteryPrize?.virtualPrizeType === 'BADGE' && badgePrize.LotteryPrize.badgeId) {
+        try {
+          const { triggerBadgeOwnershipRecheck } = await import('@/lib/badge-ownership')
+          await triggerBadgeOwnershipRecheck(badgePrize.userId, badgePrize.LotteryPrize.badgeId)
+        } catch (error) {
+          console.error('[activity-lottery.badge-ownership-recheck]', { winnerId, badgeId: badgePrize.LotteryPrize.badgeId, error })
+        }
+      }
+    }
+    return result
   } catch (error) {
     if (error instanceof ActivityLotteryFulfillmentError) throw error
     const message = errorMessage(error)

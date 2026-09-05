@@ -165,6 +165,19 @@ export async function POST(request: Request, { params }: Params) {
   const replyRecipientId = parentReply?.authorId || post.authorId
   const reply = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+    // The first visibility query above is only an early response optimization.
+    // Re-check after the row lock so a post rejected while this request was
+    // being prepared cannot receive a new reply.
+    const currentPost = await tx.post.findFirst({
+      where: {
+        ...publicPostWhere,
+        id: postId,
+        isLocked: false,
+        Board: { isActive: true },
+      },
+      select: { id: true, authorId: true },
+    })
+    if (!currentPost) return { unavailable: true as const }
     for (const userId of [...new Set([user.id, post.authorId])].sort()) {
       await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
     }
@@ -253,6 +266,9 @@ export async function POST(request: Request, { params }: Params) {
     }
   }, { timeout: 15_000, maxWait: 5_000 })
 
+  if ('unavailable' in reply) {
+    return NextResponse.json({ message: '帖子不存在或当前不允许回复' }, { status: 404 })
+  }
   if ('duplicateReplyId' in reply) {
     return NextResponse.json({
       message: '相同回复正在处理中，请勿重复提交',

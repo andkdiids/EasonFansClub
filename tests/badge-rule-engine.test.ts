@@ -39,20 +39,20 @@ test('规则输入只接受受控类型、正整数阈值，首版后台只开�
 })
 
 test('规则注册表统一提供指标、文案、阈值、操作符和事件映射', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 17)
+  assert.equal(BADGE_RULE_TYPES.length, 18)
   for (const ruleType of BADGE_RULE_TYPES) {
     const definition = BADGE_RULE_REGISTRY[ruleType]
     assert.equal(definition.metricLoader, ruleType)
     assert.ok(definition.label)
     assert.ok(definition.dataDescription)
     assert.deepEqual(definition.supportedOperators, ['GTE'])
-    if (ruleType === 'ACTIVITY_PARTICIPATION') assert.equal(definition.events.length, 0)
+    if (ruleType === 'ACTIVITY_PARTICIPATION' || ruleType === 'BADGE_OWNERSHIP') assert.equal(definition.events.length, 0)
     else assert.ok(definition.events.length > 0)
     if (definition.threshold) {
       assert.equal(definition.threshold.min, 1)
       assert.equal(definition.threshold.max, 1_000_000_000)
     } else {
-      assert.ok('targetKind' in definition || ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY')
+      assert.ok('targetKind' in definition || ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY' || ruleType === 'BADGE_OWNERSHIP')
     }
   }
 })
@@ -101,12 +101,12 @@ test('规则引擎复用中心授予服务、按事件筛选规则并提供游�
 
 test('事件触发不阻塞主流程，且关键业务成功后才调用', () => {
   const engine = read('lib/badge-rule-engine.ts')
-  assert.match(engine, /const task = evaluateBadgesForEvent\(userId, eventType\)/)
+  assert.match(engine, /const task = evaluateBadgesForEvent\(userId, eventType, eventId\)/)
   assert.match(engine, /void task/)
-  assert.match(read('app/api/posts/route.ts'), /moderationStatus === 'APPROVED'\) triggerBadgeEvaluation\(user\.id, 'POST_CREATED'\)/)
-  assert.match(read('app/api/checkin/route.ts'), /triggerBadgeEvaluation\(input\.userId, 'CHECKIN_CREATED'\)/)
-  assert.match(read('app/api/admin/posts/review/route.ts'), /triggerBadgeEvaluation\(current\.authorId, 'POST_APPROVED'\)/)
-  assert.match(read('lib/guess-song-session.ts'), /triggerBadgeEvaluation\(input\.userId, 'GUESS_SONG_SESSION_FINISHED'\)/)
+  assert.match(read('app/api/posts/route.ts'), /moderationStatus === 'APPROVED'\) triggerBadgeEvaluation\(user\.id, 'POST_CREATED', result\.post\.id\)/)
+  assert.match(read('app/api/checkin/route.ts'), /triggerBadgeEvaluation\(input\.userId, 'CHECKIN_CREATED', input\.requestId\)/)
+  assert.match(read('app/api/admin/posts/review/route.ts'), /triggerBadgeEvaluation\(current\.authorId, 'POST_APPROVED', postId\)/)
+  assert.match(read('lib/guess-song-session.ts'), /triggerBadgeEvaluation\(input\.userId, 'GUESS_SONG_SESSION_FINISHED', input\.sessionId\)/)
   assert.match(read('lib/guess-song-session.ts'), /!outcome\.duplicate && session\.status === 'COMPLETED'/)
   assert.match(read('app/api/users/[userId]/follow/route.ts'), /prisma\.follow\.create/)
   assert.match(read('app/api/users/[userId]/follow/route.ts'), /error\.code === 'P2002'/)

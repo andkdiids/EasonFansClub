@@ -36,7 +36,7 @@ test('缺少审核历史表只降级附加历史，不会回滚发帖、编辑�
 
 test('审核 GET 不执行违禁词扫描或通知发送，状态仍只使用 moderationStatus', () => {
   assert.doesNotMatch(reviewList, /checkPostForbiddenWords|notification\.create|notification\.updateMany/)
-  assert.match(reviewList, /where: \{ moderationStatus: status, isDeleted: false \}/)
+  assert.match(reviewList, /status === 'ALL' \? \{ isDeleted: false \} : \{ moderationStatus: status, isDeleted: false \}/)
   assert.match(postModeration, /The moderation state is deliberately separate from Post\.status/)
 })
 

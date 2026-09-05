@@ -46,7 +46,7 @@ export async function POST(request: Request, { params }: Context) {
     })
     // 按数据库当前事实统一补齐巡演纪念与累计场次勋章；失败不影响主流程。
     try {
-      await evaluateConcertBadges(guard.user.id)
+      await evaluateConcertBadges(guard.user.id, concertId)
     } catch (error) {
       console.error('[attendance.concertBadge]', error)
     }

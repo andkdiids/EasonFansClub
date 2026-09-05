@@ -3,6 +3,7 @@ import type { BannedWordPriority } from '@prisma/client'
 import { isAdminUser } from '@/lib/admin-permissions'
 import type { SessionUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { VIOLATION_USER_TEXT } from '@/lib/public-user-name'
 
 export const CONTENT_CONTAINS_BANNED_WORD = 'CONTENT_CONTAINS_BANNED_WORD' as const
 export const USERNAME_CONTAINS_BANNED_WORD = 'USERNAME_CONTAINS_BANNED_WORD' as const
@@ -10,7 +11,12 @@ export const BANNED_WORD_MESSAGE = '内容包含违禁词，请修改后再提�
 export const USERNAME_BANNED_WORD_MESSAGE = '用户名包含违禁词，请修改。'
 export const NICKNAME_BANNED_WORD_MESSAGE = '昵称包含违禁词，请修改。'
 export const VIOLATION_CONTENT_TEXT = '违规内容'
-export const VIOLATION_USER_TEXT = '违规用户'
+/**
+ * Re-exported for backward compatibility. `lib/content-moderation` is
+ * server-only (it owns Prisma queries), so client-safe code must import
+ * VIOLATION_USER_TEXT from '@/lib/public-user-name' directly.
+ */
+export { VIOLATION_USER_TEXT }
 
 export const DEFAULT_HIGH_PRIORITY_BANNED_WORDS = [
   '神经研究所',

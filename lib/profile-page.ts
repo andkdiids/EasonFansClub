@@ -1,5 +1,5 @@
 import { profileImageUrl } from '@/lib/images'
-import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 

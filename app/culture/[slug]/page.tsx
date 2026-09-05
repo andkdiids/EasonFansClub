@@ -36,7 +36,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
   })
   if (!item) notFound()
   item.coverUrl = publicImageVariantUrl(item.coverUrl, 'large')
-  const equippedBadgeMap = await getEquippedBadgesForUsers(item.CultureComment.map((comment) => comment.User.id))
+  const equippedBadges = await getEquippedBadgesForUsers(item.CultureComment.map((comment) => comment.User.id))
 
   const facts = [
     ['专辑', item.albumName],
@@ -89,7 +89,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
             {item.CultureComment.map((comment) => (
               <div key={comment.id} className="rounded-2xl bg-sky-50/80 p-4">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <p className="text-sm font-black text-brand-950"><UserDisplayName name={getPublicUserDisplayName(comment.User)} uid={comment.User.uid} badge={equippedBadgeMap.get(comment.User.id) || null} compact /></p>
+                  <p className="text-sm font-black text-brand-950"><UserDisplayName name={getPublicUserDisplayName(comment.User)} uid={comment.User.uid} badges={equippedBadges.get(comment.User.id) || []} compact /></p>
                   <time className="text-xs font-bold text-slate-400" dateTime={comment.createdAt.toISOString()}>{comment.createdAt.toLocaleString('zh-CN')}</time>
                   <IpRegionLabel ipRegion={comment.ipRegion} />
                 </div>

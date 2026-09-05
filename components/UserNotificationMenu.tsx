@@ -18,6 +18,7 @@ export function UserNotificationMenu({
   avatarUrl,
   isAdmin,
   currentUserId,
+  equippedBadges,
   equippedBadge,
 }: {
   displayName: string
@@ -25,6 +26,7 @@ export function UserNotificationMenu({
   avatarUrl?: string | null
   isAdmin: boolean
   currentUserId: string
+  equippedBadges?: EquippedBadgeView[]
   equippedBadge?: EquippedBadgeView | null
 }) {
   const { summary, summaryAvailable } = useNotificationSummary()
@@ -65,7 +67,7 @@ export function UserNotificationMenu({
         </span>
         {summaryAvailable && summary.total > 0 ? <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-sky-50 bg-red-500" /> : null}
       </span>
-      <span className="site-user-menu-name hidden max-w-40 truncate text-sm font-black text-brand-950 transition-colors duration-500 sm:block"><UserDisplayName name={displayName} uid={uid} badge={equippedBadge} compact /></span>
+      <span className="site-user-menu-name hidden max-w-40 truncate text-sm font-black text-brand-950 transition-colors duration-500 sm:block"><UserDisplayName name={displayName} uid={uid} badges={equippedBadges} badge={equippedBadge} compact /></span>
     </summary>
     <div data-user-menu-panel className="pointer-events-auto absolute right-0 z-[var(--layer-popover)] mt-2 w-60 rounded-sm border border-sky-100 bg-white p-2 shadow-sm">
       <Link href="/profile" className={itemClass}>个人病历</Link>

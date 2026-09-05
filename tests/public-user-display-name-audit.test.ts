@@ -21,7 +21,7 @@ test('公开展示名称只取 nickname，异常时不泄露 username', () => {
   )
 
   const helper = read('lib/friend-display-name.ts')
-  const publicHelper = read('lib/friend-remarks.ts')
+  const publicHelper = read('lib/friend-display.ts')
   assert.match(helper, /nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
   assert.match(publicHelper, /user\.nickname\?\.trim\(\) \|\| PUBLIC_USER_FALLBACK_NAME/)
   assert.doesNotMatch(helper, /user\.username\b/)

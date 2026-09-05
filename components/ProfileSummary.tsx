@@ -15,6 +15,7 @@ type ProfileHeaderProps = {
   createdAt: Date
   avatarUrl?: string | null
   backgroundUrl?: string | null
+  equippedBadges?: EquippedBadgeView[]
   equippedBadge?: EquippedBadgeView | null
   badgeInteraction?: 'interactive' | 'static'
   showGrowth?: boolean
@@ -86,6 +87,7 @@ export function ProfileHeader({
   createdAt,
   avatarUrl,
   backgroundUrl,
+  equippedBadges,
   equippedBadge = null,
   badgeInteraction = 'interactive',
   showGrowth = true,
@@ -118,7 +120,7 @@ export function ProfileHeader({
               </div>
             )}
             <div className="min-w-0 max-w-[250px] flex-1">
-              <h1 className="min-w-0 max-w-full text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]"><UserDisplayName name={displayName} uid={uid} badge={equippedBadge} showBadgeName badgeInteraction={badgeInteraction} /></h1>
+              <h1 className="min-w-0 max-w-full text-[24px] font-black leading-none text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.38)] sm:text-[26px]"><UserDisplayName name={displayName} uid={uid} badges={equippedBadges} badge={equippedBadge} showBadgeName badgeInteraction={badgeInteraction} /></h1>
             </div>
           </div>
           <div className="profile-identity-badges mt-2.5 flex flex-wrap items-center justify-start gap-1.5 text-xs font-bold leading-none text-white/90">

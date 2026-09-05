@@ -1,4 +1,4 @@
-import { Prisma, type BadgeCategory, type BadgeEffectType, type BadgeGrantType, type BadgeRarity, type BadgeVisibility } from '@prisma/client'
+import { Prisma, type BadgeCategory, type BadgeEffectType, type BadgeGrantType, type BadgeRarity, type BadgeValidityType, type BadgeVisibility } from '@prisma/client'
 import { sanitizeText } from '@/lib/security'
 import { BADGE_NICKNAME_SHINE_FALLBACK, normalizeBadgeColor } from '@/lib/badge-types'
 import { toStoredMediaUrl } from '@/lib/media-url'
@@ -11,6 +11,8 @@ const RARITIES = new Set(['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED'])
 const GRANT_TYPES = new Set(['AUTO', 'MANUAL', 'EVENT'])
 const EFFECT_TYPES = new Set(['NONE', 'SHINE', 'GLOW', 'SPARKLE'])
 const NICKNAME_EFFECTS = new Set(['NONE', 'COLOR', 'GOLD', 'GRADIENT', 'GLOW'])
+const VALIDITY_TYPES = new Set(['PERMANENT', 'DAYS'])
+const MAX_VALIDITY_DAYS = 1_000_000
 
 type BadgeInput = Record<string, unknown>
 
@@ -91,6 +93,40 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
   if (!partial || 'countsTowardSeriesCompletion' in body) {
     if (body.countsTowardSeriesCompletion !== undefined && typeof body.countsTowardSeriesCompletion !== 'boolean') return { error: '系列完成度开关无效' }
     data.countsTowardSeriesCompletion = body.countsTowardSeriesCompletion !== false
+  }
+
+  if (!partial || 'validityType' in body || 'validityDays' in body) {
+    const requestedType = typeof body.validityType === 'string'
+      ? body.validityType.toUpperCase()
+      : !partial
+        ? body.validityDays !== null && body.validityDays !== undefined ? 'DAYS' : 'PERMANENT'
+        : ('validityDays' in body && body.validityDays !== null && body.validityDays !== undefined) ? 'DAYS' : undefined
+    if (requestedType !== undefined && !VALIDITY_TYPES.has(requestedType)) return { error: '勋章有效期类型无效' }
+    if (requestedType === 'PERMANENT') {
+      data.validityType = 'PERMANENT' as BadgeValidityType
+      data.validityDays = null
+    } else if (requestedType === 'DAYS') {
+      const rawDays = body.validityDays
+      const validityDays = typeof rawDays === 'number'
+        ? rawDays
+        : typeof rawDays === 'string' && /^\d+$/.test(rawDays.trim())
+          ? Number(rawDays.trim())
+          : Number.NaN
+      if (!Number.isSafeInteger(validityDays) || validityDays <= 0 || validityDays > MAX_VALIDITY_DAYS) return { error: `有效天数必须是 1 到 ${MAX_VALIDITY_DAYS} 的正整数` }
+      data.validityType = 'DAYS' as BadgeValidityType
+      data.validityDays = validityDays
+    } else if ('validityDays' in body) {
+      const rawDays = body.validityDays
+      if (rawDays !== null && rawDays !== undefined) {
+        const validityDays = typeof rawDays === 'number'
+          ? rawDays
+          : typeof rawDays === 'string' && /^\d+$/.test(rawDays.trim())
+            ? Number(rawDays.trim())
+            : Number.NaN
+        if (!Number.isSafeInteger(validityDays) || validityDays <= 0 || validityDays > MAX_VALIDITY_DAYS) return { error: `有效天数必须是 1 到 ${MAX_VALIDITY_DAYS} 的正整数` }
+      }
+      data.validityDays = rawDays === null || rawDays === undefined ? null : Number(rawDays)
+    }
   }
 
   if (!partial || 'effectType' in body) {

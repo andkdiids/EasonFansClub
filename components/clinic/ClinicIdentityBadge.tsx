@@ -17,7 +17,7 @@ export function ClinicIdentityBadge({ identity, compact = false }: Readonly<{ id
   const badge = (
     <span className={`clinic-identity-badge ${compact ? 'is-compact' : ''}`}>
       <span className="clinic-public-avatar"><SafeAvatar src={identity.avatarUrl} name={identity.displayName} uid={identity.uid} /></span>
-      <span className="clinic-identity-name"><UserDisplayName name={identity.displayName} uid={identity.uid} badge={identity.equippedBadge} compact /></span>
+      <span className="clinic-identity-name"><UserDisplayName name={identity.displayName} uid={identity.uid} badges={identity.equippedBadges} badge={identity.equippedBadge} compact /></span>
     </span>
   )
   return identity.canOpenProfile ? <Link href={identity.profileUrl} className="clinic-identity-link">{badge}</Link> : badge

@@ -96,6 +96,7 @@ export type ForumDiscoveryPost = {
     displayName: string
     avatarUrl: string | null
     level: number
+    equippedBadges?: import('@/lib/badge-types').EquippedBadgeView[]
     equippedBadge?: import('@/lib/badge-types').EquippedBadgeView | null
   }
   cover: ForumDiscoveryCover | null

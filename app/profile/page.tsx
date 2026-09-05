@@ -4,6 +4,7 @@ import { ProfilePageSurface } from '@/components/ProfilePageSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { ensureBirthdayBadge } from '@/lib/birthday'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { getShanghaiDateKey } from '@/lib/checkin'
 import { getGrowthSummarySafe } from '@/lib/growth'
 import { profileImageUrl } from '@/lib/images'
 import { loadProfileRecentMessagesPage } from '@/lib/profile-page'
@@ -11,7 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
-import { getBadgeProfileSummary, getEquippedBadgeForUser } from '@/lib/badge-service'
+import { getBadgeProfileSummary, getEquippedBadgesForUser } from '@/lib/badge-service'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
@@ -71,17 +72,17 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   await ensureBirthdayBadge(user.id).catch((error) => {
     console.error('[profile.ensureBirthdayBadge]', error)
   })
-  triggerBadgeEvaluation(user.id, 'USER_ACTIVE')
+  triggerBadgeEvaluation(user.id, 'USER_ACTIVE', getShanghaiDateKey())
 
   const displayName = getPublicUserDisplayName(profile)
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
   const bio = profile.Profile.bio || profile.bio || ''
-  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadge, badgeSummary, recordPreferences] = await Promise.all([
+  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadges, badgeSummary, recordPreferences] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
-    getEquippedBadgeForUser(profile.id),
+    getEquippedBadgesForUser(profile.id),
     getBadgeProfileSummary(profile.id, user.id),
     getProfileRecordPreferencesSafe(profile.id),
   ])
@@ -125,7 +126,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           createdAt: profile.createdAt,
           wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
           publicLiveCount: 0,
-          equippedBadge,
+          equippedBadges,
+          equippedBadge: equippedBadges[0] || null,
           badgeSummary,
           privacy: visibility.settings,
           recordPreferences,

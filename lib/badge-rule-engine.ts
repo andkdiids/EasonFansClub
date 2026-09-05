@@ -1,4 +1,4 @@
-import { calculateCheckinStreaks } from '@/lib/checkin'
+import { calculateCheckinStreaks, getShanghaiDateKey } from '@/lib/checkin'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
 import { prisma } from '@/lib/prisma'
 import { grantBadge } from '@/lib/badge-service'
@@ -7,8 +7,11 @@ import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMet
 import { getSeriesCompletionEligibleUserIds, getSeriesCompletionPreview, processBadgeGrantEffects } from '@/lib/badge-phase3'
 import { getBatchHistoricalBadgeMetrics, getHistoricalBackfillCapability, getHistoricalQualificationWindow, type HistoricalQualificationWindow } from '@/lib/badge-historical'
 import { getActivityParticipationBadgeStats, grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
-import { getBirthdayWhereForZodiac, getCurrentZodiacSign, getZodiacSignFromBirthday, isBirthdayToday, type ZodiacSign } from '@/lib/zodiac'
+import { getBirthdayWhereForZodiac, getCurrentZodiacSign, getZodiacPeriodKey, getZodiacSignFromBirthday, isBirthdayToday, type ZodiacSign } from '@/lib/zodiac'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { getTodayMonthDay } from '@/lib/today'
+import { backfillBadgeOwnershipRule, getBadgeOwnershipRuleStats } from '@/lib/badge-ownership'
+import { getBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
@@ -116,6 +119,22 @@ function isBirthdayRuleType(ruleType: SupportedBadgeRuleType) {
 }
 
 /**
+ * Keep persistent and periodic rules idempotent without turning a login into
+ * a new earning event. Event-driven rules still inherit the event key passed
+ * by their caller, so a genuinely new event can earn a badge again later.
+ */
+function grantKeyForRule(
+  rule: { id: string; ruleType: SupportedBadgeRuleType; threshold: number | null },
+  now: Date,
+  grantKeyPrefix?: string,
+) {
+  if (rule.ruleType === 'ACCOUNT_AGE_DAYS') return `account-age:${rule.id}:${rule.threshold ?? 'none'}`
+  if (rule.ruleType === 'BIRTHDAY_TODAY') return `birthday:${getShanghaiDateKey(now)}`
+  if (rule.ruleType === 'BIRTHDAY_ZODIAC') return `zodiac:${getZodiacPeriodKey(now, 'Asia/Shanghai') || getShanghaiDateKey(now)}`
+  return grantKeyPrefix ? `${grantKeyPrefix}:rule:${rule.id}` : undefined
+}
+
+/**
  * Pure rule predicate shared by event evaluation, daily scans and admin
  * backfill/preview. Non-numeric rules must not be represented by a made-up
  * threshold; birthday rules are evaluated from their typed month/day facts.
@@ -153,7 +172,7 @@ export function evaluateBadgeRule({
   return evaluateBadgeMetric(metric, (rule.operator || 'GTE') as BadgeRuleOperatorValue, target)
 }
 
-export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonly SupportedBadgeRuleType[], now = new Date()) {
+export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonly SupportedBadgeRuleType[], now = new Date(), grantKeyPrefix?: string) {
   const summary = emptySummary(userId)
   const rules = await loadEnabledRules(ruleTypes, now)
   const metrics = new Map<string, number>()
@@ -175,7 +194,7 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
     const type = rule.ruleType as SupportedBadgeRuleType
     // Activity participation has an activity-scoped predicate and is handled
     // by the shared activity scanner, never by the scalar event evaluator.
-    if (type === 'BADGE_SERIES_COMPLETE' || type === 'ACTIVITY_PARTICIPATION') continue
+    if (type === 'BADGE_SERIES_COMPLETE' || type === 'ACTIVITY_PARTICIPATION' || type === 'BADGE_OWNERSHIP') continue
     const config = rule.configJson && typeof rule.configJson === 'object' && !Array.isArray(rule.configJson) ? rule.configJson as { concertId?: unknown; tourId?: unknown } : null
     const isTargetRule = type === 'CONCERT_SHOW_ATTENDED' || type === 'CONCERT_TOUR_ATTENDED'
     const metricKey = isTargetRule ? `${type}:${String(config?.concertId || config?.tourId || '')}` : type
@@ -205,6 +224,7 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
         badgeId: rule.badgeId,
         sourceType: 'AUTO_RULE',
         sourceId: rule.id,
+        grantKey: grantKeyForRule(rule, now, grantKeyPrefix),
         grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: rule.threshold, configJson: rule.configJson })}`,
         deferPhase3Effects: true,
       })
@@ -305,6 +325,7 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
             badgeId: rule.badgeId,
             sourceType: 'AUTO_RULE',
             sourceId: rule.id,
+            grantKey: `zodiac:${getZodiacPeriodKey(now, 'Asia/Shanghai') || getShanghaiDateKey(now)}:rule:${rule.id}`,
             grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: rule.threshold, configJson: rule.configJson })}`,
             obtainedAt: now,
             availabilityMode: 'CURRENT',
@@ -331,18 +352,19 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
   return summary
 }
 
-export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEvaluationEvent) {
+export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEvaluationEvent, eventId?: string | null) {
   const ruleTypes = EVENT_RULE_TYPES[eventType]
   if (!ruleTypes) {
     console.warn('[badge-rule.event.invalid]', { userId, eventType })
     return emptySummary(userId)
   }
-  return evaluateUserAutoBadges(userId, ruleTypes)
+  const eventKey = eventId?.trim() ? `event:${eventType}:${eventId.trim()}` : `event:${eventType}`
+  return evaluateUserAutoBadges(userId, ruleTypes, new Date(), eventKey)
 }
 
 /** Event hooks deliberately do not await this function, so badge rules cannot slow or roll back the primary action. */
-export function triggerBadgeEvaluation(userId: string, eventType: BadgeEvaluationEvent): Promise<boolean> {
-  const task = evaluateBadgesForEvent(userId, eventType).then((summary) => {
+export function triggerBadgeEvaluation(userId: string, eventType: BadgeEvaluationEvent, eventId?: string | null): Promise<boolean> {
+  const task = evaluateBadgesForEvent(userId, eventType, eventId).then((summary) => {
     if (summary.failed > 0) {
       console.error('[badge-rule.event.partial]', { userId, eventType, failed: summary.failed, failures: summary.failures.slice(0, 10) })
       return false
@@ -490,6 +512,7 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
     }
     case 'BADGE_SERIES_COMPLETE':
     case 'ACTIVITY_PARTICIPATION':
+    case 'BADGE_OWNERSHIP':
     case 'BIRTHDAY_ZODIAC':
     case 'BIRTHDAY_TODAY':
       return metrics
@@ -525,6 +548,27 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
     ? getHistoricalQualificationWindow({ availableFrom: badge.availableFrom, availableUntil: badge.availableUntil }, now)
     : null
   if (isLimited && !historicalCapability.supported) throw new Error(`该规则无法可靠判断限定期历史资格：${historicalCapability.basis}`)
+
+  if (type === 'BADGE_OWNERSHIP') {
+    const config = getBadgeOwnershipRuleConfig(badge.BadgeRule.configJson)
+    if (!config) throw new Error('拥有指定勋章规则缺少前置勋章配置')
+    const result = await backfillBadgeOwnershipRule({
+      userIdsAfter: normalizedCursor,
+      batchSize: boundedBatchSize,
+      targetBadgeId: badgeId,
+      ruleId: badge.BadgeRule.id,
+      config,
+      now,
+    })
+    return {
+      badgeId,
+      ruleId: badge.BadgeRule.id,
+      ruleType: type,
+      ...result,
+      mode,
+      historicalWindow: historicalWindow ? { from: historicalWindow.from.toISOString(), until: historicalWindow.until.toISOString() } : null,
+    }
+  }
 
   if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY') {
     const currentZodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
@@ -602,6 +646,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
           badgeId,
           sourceType: 'AUTO_RULE',
           sourceId: badge.BadgeRule.id,
+          grantKey: `backfill:${badge.BadgeRule.id}:${type === 'BIRTHDAY_ZODIAC' ? `zodiac:${getZodiacPeriodKey(now, 'Asia/Shanghai') || getShanghaiDateKey(now)}` : `birthday:${getShanghaiDateKey(now)}`}`,
           grantReason: `自动达成：${ruleDescription(rule)}`,
           obtainedAt: now,
           availabilityMode: 'CURRENT',
@@ -655,6 +700,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
           badgeId,
           sourceType: 'AUTO_RULE',
           sourceId: badge.BadgeRule.id,
+          grantKey: `backfill:${badge.BadgeRule.id}:series:${seriesId}:${historicalWindow ? `${historicalWindow.from.toISOString()}:${historicalWindow.until.toISOString()}` : 'current'}`,
           grantReason: '完成勋章系列后获得',
           availabilityMode: mode,
           ...(historicalWindow ? { historicalWindow } : {}),
@@ -701,7 +747,6 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
       historicalWindow: historicalWindow ? { from: historicalWindow.from.toISOString(), until: historicalWindow.until.toISOString() } : null,
     }
   }
-
   const users = await prisma.user.findMany({
     where: { status: 'ACTIVE', isDeleted: false, ...(normalizedCursor ? { id: { gt: normalizedCursor } } : {}) },
     orderBy: { id: 'asc' },
@@ -752,6 +797,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
         badgeId,
         sourceType: 'AUTO_RULE',
         sourceId: badge.BadgeRule.id,
+        grantKey: `backfill:${badge.BadgeRule.id}:${mode}:${historicalWindow ? `${historicalWindow.from.toISOString()}:${historicalWindow.until.toISOString()}` : 'current'}`,
         grantReason: mode === 'HISTORICAL_WINDOW'
           ? `限定期历史资格补发：${historicalWindow!.from.toISOString()} 至 ${historicalWindow!.until.toISOString()}；${ruleDescription({ ruleType: type, threshold: badge.BadgeRule.threshold, configJson: badge.BadgeRule.configJson })}`
           : `自动达成：${ruleDescription({ ruleType: type, threshold: badge.BadgeRule.threshold, configJson: badge.BadgeRule.configJson })}`,
@@ -835,7 +881,7 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     until: historicalWindow?.until.toISOString() || null,
     message: availability === 'UPCOMING' ? '限定勋章尚未开始，当前没有可扫描的历史资格' : isLimited && !capability.supported ? `该规则无法可靠判断限定期历史资格：${capability.basis}` : null,
   }
-  const ownedCount = await prisma.userBadge.count({ where: { badgeId, User: ACTIVE_RELATION_USER_WHERE } })
+  const ownedCount = await prisma.userBadge.count({ where: { badgeId, ...activeUserBadgeWhere(now), User: ACTIVE_RELATION_USER_WHERE } })
   if (availability === 'UPCOMING' || (isLimited && !capability.supported)) {
     return {
       badgeId,
@@ -865,6 +911,12 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     const activityId = typeof config?.activityId === 'string' ? config.activityId : ''
     if (!activityId) throw new Error('参加指定活动规则缺少活动配置')
     const stats = await getActivityParticipationBadgeStats({ badgeId, activityId })
+    return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats, historical }
+  }
+  if (type === 'BADGE_OWNERSHIP') {
+    const config = getBadgeOwnershipRuleConfig(badge.BadgeRule.configJson)
+    if (!config) throw new Error('拥有指定勋章规则缺少前置勋章配置')
+    const stats = await getBadgeOwnershipRuleStats({ targetBadgeId: badgeId, config, now, batchSize: BACKFILL_BATCH_MAX })
     return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats, historical }
   }
   if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY') {
@@ -913,7 +965,7 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
       const eligibleIds = users.filter((user) => evaluateBadgeRule({ user, rule, now })).map((user) => user.id)
       eligibleCount += eligibleIds.length
       if (eligibleIds.length) {
-        const ownedEligibleCount = await prisma.userBadge.count({ where: { badgeId, userId: { in: eligibleIds } } })
+        const ownedEligibleCount = await prisma.userBadge.count({ where: { badgeId, userId: { in: eligibleIds }, ...activeUserBadgeWhere(now) } })
         pendingCount += Math.max(0, eligibleIds.length - ownedEligibleCount)
       }
       cursor = users.at(-1)?.id
@@ -957,7 +1009,7 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     eligibleCount += eligibleIds.length
     if (eligibleIds.length) {
       const ownedEligibleCount = await prisma.userBadge.count({
-        where: { badgeId, userId: { in: eligibleIds } },
+        where: { badgeId, userId: { in: eligibleIds }, ...activeUserBadgeWhere(now) },
       })
       pendingCount += Math.max(0, eligibleIds.length - ownedEligibleCount)
     }

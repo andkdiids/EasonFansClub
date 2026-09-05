@@ -11,6 +11,9 @@ import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { Prisma } from '@prisma/client'
 import { getBadgeAvailability, getBadgeOwnershipStats, validateBadgeAvailability } from '@/lib/badge-phase2'
+import { normalizeBadgeValidity } from '@/lib/badge-validity'
+import { syncBadgeOwnershipDependencies, validateBadgeOwnershipRule } from '@/lib/badge-ownership'
+import { getBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,6 +85,8 @@ export async function PATCH(request: Request, context: RouteContext) {
         tierLevel: true,
         availableFrom: true,
         availableUntil: true,
+        validityType: true,
+        validityDays: true,
         BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true } },
       },
     })
@@ -109,6 +114,19 @@ export async function PATCH(request: Request, context: RouteContext) {
     const effectiveAvailableUntil = data.availableUntil !== undefined ? data.availableUntil as Date | null : previous.availableUntil
     const availabilityError = validateBadgeAvailability(effectiveAvailableFrom, effectiveAvailableUntil)
     if (availabilityError) return NextResponse.json({ message: availabilityError }, { status: 400 })
+
+    if ('validityType' in data || 'validityDays' in data) {
+      try {
+        const validity = normalizeBadgeValidity(
+          data.validityType !== undefined ? data.validityType : previous.validityType,
+          data.validityDays !== undefined ? data.validityDays : previous.validityDays,
+        )
+        data.validityType = validity.validityType
+        data.validityDays = validity.validityDays
+      } catch (error) {
+        return NextResponse.json({ message: error instanceof Error ? error.message : '勋章有效期设置无效' }, { status: 400 })
+      }
+    }
 
     const nextGrantType = typeof data.grantType === 'string' ? data.grantType : previous.grantType
     if (previous.BadgeRule?.ruleType === 'BADGE_SERIES_COMPLETE' && nextGrantType !== 'AUTO') {
@@ -168,6 +186,14 @@ export async function PATCH(request: Request, context: RouteContext) {
       && (parsed.rule === undefined || parsed.rule === null)
     if (nextGrantType === 'AUTO' && !effectiveRule && !keepsLegacyAutoFlow) return NextResponse.json({ message: '自动授予勋章必须配置获取条件' }, { status: 400 })
 
+    if (effectiveRule?.ruleType === 'BADGE_OWNERSHIP') {
+      const config = getBadgeOwnershipRuleConfig(effectiveRule.configJson)
+      if (!config) return NextResponse.json({ message: '拥有指定勋章规则配置无效' }, { status: 400 })
+      const validated = await validateBadgeOwnershipRule({ targetBadgeId: badgeId, config })
+      if (validated.error) return NextResponse.json({ message: validated.error }, { status: 400 })
+      effectiveRule.configJson = validated.config
+    }
+
     const hasDescription = 'acquisitionDescription' in body
     const requestedDescription = typeof data.acquisitionDescription === 'string' ? data.acquisitionDescription.trim() : ''
     if (nextGrantType === 'AUTO' && effectiveRule) {
@@ -213,6 +239,11 @@ export async function PATCH(request: Request, context: RouteContext) {
       } else if (nextGrantType !== 'AUTO' && previous.BadgeRule) {
         await tx.badgeRule.delete({ where: { badgeId } })
       }
+      await syncBadgeOwnershipDependencies(
+        tx,
+        badgeId,
+        nextGrantType === 'AUTO' && effectiveRule?.ruleType === 'BADGE_OWNERSHIP' ? getBadgeOwnershipRuleConfig(effectiveRule.configJson) : null,
+      )
       const updated = await tx.badge.findUniqueOrThrow({ where: { id: badgeId }, select: badgeAdminSelect })
       const trackingStillValid = updated.grantType === 'AUTO'
         && updated.isEnabled && updated.isActive
@@ -221,9 +252,23 @@ export async function PATCH(request: Request, context: RouteContext) {
         && updated.BadgeRule.threshold !== null
         && ['PERMANENT', 'AVAILABLE'].includes(getBadgeAvailability(updated))
       if (!trackingStillValid) await tx.userBadgeTracking.deleteMany({ where: { badgeId } })
-      const affectedUsers = await tx.user.findMany({ where: { equippedBadgeId: badgeId }, select: { id: true, uid: true } })
       const shouldClearEquipped = data.isEnabled === false || data.isActive === false || data.isWearable === false
-      if (shouldClearEquipped) await tx.user.updateMany({ where: { equippedBadgeId: badgeId }, data: { equippedBadgeId: null } })
+      const [legacyAffectedUsers, relationAffectedUsers] = await Promise.all([
+        tx.user.findMany({ where: { equippedBadgeId: badgeId }, select: { id: true } }),
+        tx.userEquippedBadge.findMany({ where: { badgeId }, select: { userId: true } }),
+      ])
+      const affectedUserIds = [...new Set([
+        ...legacyAffectedUsers.map((user) => user.id),
+        ...relationAffectedUsers.map((row) => row.userId),
+      ])]
+      const affectedUsers = affectedUserIds.length
+        ? await tx.user.findMany({ where: { id: { in: affectedUserIds } }, select: { id: true, uid: true } })
+        : []
+      if (shouldClearEquipped) {
+        await tx.userEquippedBadge.deleteMany({ where: { badgeId } })
+        // Legacy cleanup remains until the old single-value column is removed.
+        await tx.user.updateMany({ where: { equippedBadgeId: badgeId }, data: { equippedBadgeId: null } })
+      }
       if (data.isEnabled === false || data.isActive === false) await tx.userBadgeShowcase.deleteMany({ where: { badgeId } })
       const action = data.isEnabled === false || data.isActive === false
         ? 'BADGE_DISABLE'

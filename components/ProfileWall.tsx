@@ -17,6 +17,7 @@ type WallSender = {
   uid: number
   nickname: string
   avatarUrl: string | null
+  equippedBadges?: EquippedBadgeView[]
   equippedBadge?: EquippedBadgeView | null
   profile: { displayName: string | null; avatarUrl: string | null } | null
 }
@@ -429,7 +430,7 @@ function WallMessageCard({ message, expanded, isOwner = false, canReply, replyTa
 function WallMessageHeader({ message, name }: { message: WallMessage; name: string }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <a href={`/user/${formatUid(message.sender.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={message.sender.uid} badge={message.sender.equippedBadge} compact /></a>
+      <a href={`/user/${formatUid(message.sender.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={message.sender.uid} badges={message.sender.equippedBadges} badge={message.sender.equippedBadge} compact /></a>
       <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(message.sender.uid)}</span>
       <span className="text-xs font-bold text-slate-400">{new Date(message.createdAt).toLocaleString('zh-CN')}</span>
       <IpRegionLabel ipRegion={message.ipRegion} />

@@ -41,23 +41,25 @@ test('审核状态只写入 Post.moderationStatus，并清理互斥审核元数�
     reviewedById: 'admin-1',
     rejectionReason: '内容需要修改',
   })
-  assert.match(reviewRoute, /where: \{ moderationStatus: status, isDeleted: false \}/)
+  assert.match(reviewRoute, /status === 'ALL' \? \{ isDeleted: false \} : \{ moderationStatus: status, isDeleted: false \}/)
   assert.match(reviewRoute, /data: buildPostReviewUpdate\(\{ status, reviewedAt, reviewedById: guard\.user\.id, rejectionReason \}\)/)
   assert.doesNotMatch(reviewRoute, /data:\s*\{\s*status:\s*status/)
 })
 
 test('审核 API 具备四种状态迁移、幂等守卫和并发锁', () => {
   assert.match(reviewRoute, /SELECT \\`id\\` FROM \\`Post\\` WHERE \\`id\\` = \$\{postId\} FOR UPDATE/)
-  assert.match(reviewRoute, /where: \{ id: postId, isDeleted: false, moderationStatus: 'PENDING' \}/)
+  assert.match(reviewRoute, /canTransitionPostModerationStatus\(current\.moderationStatus, status\)/)
+  assert.match(reviewRoute, /moderationStatus: current\.moderationStatus/)
   assert.match(reviewRoute, /reviewStatus === 'APPROVED'/)
   assert.match(reviewRoute, /writeApprovalFriendActivity/)
   assert.doesNotMatch(reviewRoute, /tx\.notification\.create/)
   assert.match(reviewRoute, /previousStatus: result\.previousStatus/)
+  assert.match(reviewRoute, /changed: false/)
 })
 
 test('后台三个列表和重新审核按钮都直接对应 PENDING / APPROVED / REJECTED', () => {
-  assert.match(reviewManager, /postModerationStatuses\.map/)
-  assert.match(reviewManager, /重新拒绝/)
+  assert.match(reviewManager, /reviewFilters\.map/)
+  assert.match(reviewManager, /拒绝通过/)
   assert.match(reviewManager, /重新通过/)
   assert.match(reviewManager, /拒绝原因（必填）/)
   assert.match(reviewManager, /rejectionReason: reason/)
@@ -71,7 +73,8 @@ test('帖子详情和公开查询使用同一审核访问规则', () => {
   assert.equal(getPostModerationAccess('REJECTED', false), 'REJECTED')
   assert.equal(getPostModerationAccess('REJECTED', true), 'VISIBLE')
   assert.equal(getPostModerationAccess('PENDING', false, true), 'VISIBLE')
-  assert.match(postDetail, /getPostModerationAccess\(post\.moderationStatus, viewerIsAdmin, viewerIsAuthor\)/)
+  assert.match(postDetail, /getPostModerationAccess\(postCore\.moderationStatus, viewerIsAdmin, viewerIsAuthor\)/)
+  assert.match(postDetail, /isPublicPostModerationStatus\(post\.moderationStatus\)/)
   assert.match(postDetail, /if \(moderationAccess === 'REJECTED'\)/)
 })
 

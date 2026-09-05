@@ -8,6 +8,7 @@ import { getEnabledBannedWords, type ModerationWord } from '@/lib/content-modera
 import { publicImageUrl, profileImageUrl } from '@/lib/images'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
 import { consumeRateLimit, sanitizeText } from '@/lib/security'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
@@ -84,6 +85,7 @@ export type ClinicPublicIdentity =
       displayName: string
       uid: number
       avatarUrl: string | null
+      equippedBadges: EquippedBadgeView[]
       equippedBadge: EquippedBadgeView | null
       profileUrl: string
       canOpenProfile: true
@@ -129,7 +131,7 @@ export type ClinicPublicRecordDetail = ClinicPublicRecord & {
   consultations: ClinicPublicConsultation[]
 }
 
-function publicIdentity(author: ClinicAuthorRow, mode: ClinicIdentityMode, anonymousNumber: number, role: 'patient' | 'doctor') : ClinicPublicIdentity {
+function publicIdentity(author: ClinicAuthorRow, mode: ClinicIdentityMode, anonymousNumber: number, role: 'patient' | 'doctor', equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>) : ClinicPublicIdentity {
   if (mode === 'ANONYMOUS') {
     return {
       type: 'anonymous',
@@ -141,26 +143,14 @@ function publicIdentity(author: ClinicAuthorRow, mode: ClinicIdentityMode, anony
 
   const displayName = getPublicUserDisplayName(author)
   const avatarUrl = profileImageUrl(author.Profile?.avatarUrl || author.avatarUrl) || publicImageUrl(author.Profile?.avatarUrl || author.avatarUrl)
-  const equippedBadge = author.EquippedBadge && author.EquippedBadge.isEnabled && author.EquippedBadge.isActive
-    ? {
-        id: author.EquippedBadge.id,
-        code: author.EquippedBadge.code,
-        name: author.EquippedBadge.name,
-        imageUrl: toPublicMediaUrl(author.EquippedBadge.iconUrl),
-        effectType: author.EquippedBadge.effectType,
-        nicknameEffect: author.EquippedBadge.nicknameEffect,
-        nicknameColor: author.EquippedBadge.nicknameColor,
-        nicknameGradientStart: author.EquippedBadge.nicknameGradientStart,
-        nicknameGradientEnd: author.EquippedBadge.nicknameGradientEnd,
-        rarity: author.EquippedBadge.rarity,
-      } satisfies EquippedBadgeView
-    : null
+  const equippedBadges = equippedBadgeMap?.get(author.id) || []
   return {
     type: 'public',
     displayName,
     uid: author.uid,
     avatarUrl,
-    equippedBadge,
+    equippedBadges,
+    equippedBadge: equippedBadges[0] || null,
     profileUrl: `/user/${author.uid}`,
     canOpenProfile: true,
   }
@@ -409,9 +399,10 @@ export async function listPublicClinicRecords(input: {
     : []
   const aspirinIds = new Set(aspirinRows.map((row) => row.recordId).filter((value): value is string => Boolean(value)))
   const publicWords = await getEnabledBannedWords()
+  const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.author.id))
 
   return {
-    items: rows.map((row) => toPublicRecord(row, input.viewerId || null, aspirinIds, publicWords)),
+    items: rows.map((row) => toPublicRecord(row, input.viewerId || null, aspirinIds, publicWords, equippedBadgeMap)),
     page,
     pageSize,
     total,
@@ -438,6 +429,7 @@ function toPublicRecord(
   viewerId: string | null,
   aspirinIds: Set<string>,
   publicWords: ModerationWord[],
+  equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>,
 ): ClinicPublicRecord {
   const category = getClinicCategoryOption(row.category)
   const best = row.consultations[0]
@@ -449,7 +441,7 @@ function toPublicRecord(
     categoryDescription: category.description,
     needType: row.needType,
     needLabel: getClinicNeedLabel(row.needType),
-    author: publicIdentity(row.author, row.identityMode, row.anonymousNumber, 'patient'),
+    author: publicIdentity(row.author, row.identityMode, row.anonymousNumber, 'patient', equippedBadgeMap),
     aspirinCount: row.aspirinCount,
     consultationCount: row.consultationCount,
     mouthpieceCount: row.mouthpieceCount,
@@ -482,13 +474,14 @@ function toPublicConsultation(
   aspirinIds: Set<string>,
   mouthpieceIds: Set<string>,
   publicWords: ModerationWord[],
+  equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>,
 ): ClinicPublicConsultation {
   const isDeleted = row.status !== 'ACTIVE'
   return {
     id: row.id,
     recordId: row.recordId,
     content: isDeleted ? '这条会诊已被删除。' : publicContent(row.content, publicWords),
-    author: isDeleted ? null : publicIdentity(row.author, row.identityMode, row.anonymousNumber, 'doctor'),
+    author: isDeleted ? null : publicIdentity(row.author, row.identityMode, row.anonymousNumber, 'doctor', equippedBadgeMap),
     createdAt: publicDate(row.createdAt),
     parentId: row.parentId,
     aspirinCount: row.aspirinCount,
@@ -502,8 +495,8 @@ function toPublicConsultation(
   }
 }
 
-function buildConsultationTree(rows: ClinicConsultationRow[], viewerId: string | null, aspirinIds: Set<string>, mouthpieceIds: Set<string>, publicWords: ModerationWord[]) {
-  const mapped = new Map(rows.map((row) => [row.id, toPublicConsultation(row, viewerId, aspirinIds, mouthpieceIds, publicWords)]))
+function buildConsultationTree(rows: ClinicConsultationRow[], viewerId: string | null, aspirinIds: Set<string>, mouthpieceIds: Set<string>, publicWords: ModerationWord[], equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>) {
+  const mapped = new Map(rows.map((row) => [row.id, toPublicConsultation(row, viewerId, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap)]))
   const rowsById = new Map(rows.map((row) => [row.id, row]))
   const roots: ClinicPublicConsultation[] = []
 
@@ -589,6 +582,7 @@ export async function getPublicClinicRecordDetail(recordId: string, viewerId?: s
   const aspirinIds = new Set(aspirinRows.map((item) => item.consultationId).filter((value): value is string => Boolean(value)))
   const mouthpieceIds = new Set(mouthpieceRows.map((item) => item.consultationId))
   const category = getClinicCategoryOption(row.category)
+  const equippedBadgeMap = await getEquippedBadgesForUsers([row.author.id, ...row.consultations.map((item) => item.author.id)])
   const bestMouthpieceRow = row.consultations
     .filter((item) => item.status === 'ACTIVE' && item.parentId === null)
     .sort((left, right) => right.mouthpieceCount - left.mouthpieceCount || left.createdAt.getTime() - right.createdAt.getTime())[0]
@@ -600,7 +594,7 @@ export async function getPublicClinicRecordDetail(recordId: string, viewerId?: s
     categoryDescription: category.description,
     needType: row.needType,
     needLabel: getClinicNeedLabel(row.needType),
-    author: publicIdentity(row.author, row.identityMode, row.anonymousNumber, 'patient'),
+    author: publicIdentity(row.author, row.identityMode, row.anonymousNumber, 'patient', equippedBadgeMap),
     aspirinCount: row.aspirinCount,
     consultationCount: row.consultationCount,
     mouthpieceCount: row.mouthpieceCount,
@@ -614,7 +608,7 @@ export async function getPublicClinicRecordDetail(recordId: string, viewerId?: s
   } satisfies ClinicPublicRecord
   return {
     ...record,
-    consultations: buildConsultationTree(row.consultations as ClinicConsultationRow[], viewerId || null, aspirinIds, mouthpieceIds, publicWords),
+    consultations: buildConsultationTree(row.consultations as ClinicConsultationRow[], viewerId || null, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap),
   }
 }
 
@@ -827,9 +821,10 @@ export async function getClinicMe(userId: string) {
   ])
   const aspirinIds = new Set<string>()
   const publicWords = await getEnabledBannedWords()
+  const equippedBadgeMap = await getEquippedBadgesForUsers(records.map((row) => row.author.id))
   return {
     records: records.map((row) => {
-      const base = toPublicRecord(row, userId, aspirinIds, publicWords)
+      const base = toPublicRecord(row, userId, aspirinIds, publicWords, equippedBadgeMap)
       if (row.status === 'ACTIVE') return base
       return { ...base, content: row.status === 'DELETED' ? '这份病历已经被患者烧掉了。' : '这份病历暂时无法公开。', canDelete: false }
     }),

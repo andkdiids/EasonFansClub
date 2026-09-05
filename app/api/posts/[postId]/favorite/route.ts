@@ -19,6 +19,7 @@ export async function POST(request: Request, context: RouteContext) {
   const body = await request.json().catch(() => null) as { isFavorited?: unknown } | null
   const requestedState = typeof body?.isFavorited === 'boolean' ? body.isFavorited : null
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
       where: { ...publicPostWhere, id: postId },
       select: { id: true },
@@ -64,6 +65,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
   const { postId } = await context.params
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
       where: { ...publicPostWhere, id: postId },
       select: { id: true },

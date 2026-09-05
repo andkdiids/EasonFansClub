@@ -414,6 +414,17 @@ enum BadgeGrantType {
   EVENT
 }
 
+enum BadgeValidityType {
+  PERMANENT
+  DAYS
+}
+
+enum UserBadgeStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
 enum ActivityRegistrationStatus {
   ACTIVE
   CANCELLED
@@ -469,6 +480,7 @@ enum BadgeRuleType {
   ACTIVITY_PARTICIPATION
   BIRTHDAY_ZODIAC
   BIRTHDAY_TODAY
+  BADGE_OWNERSHIP
 }
 
 enum BadgeRuleOperator {
@@ -522,6 +534,8 @@ model Badge {
   visibility                       BadgeVisibility              @default(PUBLIC)
   rarity                           BadgeRarity                  @default(COMMON)
   grantType                        BadgeGrantType               @default(MANUAL)
+  validityType                     BadgeValidityType            @default(PERMANENT)
+  validityDays                     Int?
   isWearable                       Boolean                      @default(true)
   isEnabled                        Boolean                      @default(true)
   effectType                       BadgeEffectType              @default(NONE)
@@ -550,6 +564,10 @@ model Badge {
   ActivityReward                   ActivityReward[]
   UserBadgeShowcase                UserBadgeShowcase[]
   UserBadgeTracking                UserBadgeTracking[]
+  EquippedByUsersMany              UserEquippedBadge[]          @relation("BadgeEquippedUsers")
+  UserBadgeSource                  UserBadgeSource[]
+  BadgeRuleDependenciesAsSource    BadgeRuleDependency[]        @relation("BadgeRuleDependencySource")
+  BadgeRuleDependenciesAsTarget    BadgeRuleDependency[]        @relation("BadgeRuleDependencyTarget")
   BadgeRule                        BadgeRule?
   PharmacyPrize                    PharmacyPrize[]
   PharmacyDuplicateSourceBadge     PharmacyDuplicateInventory[] @relation("PharmacyDuplicateSourceBadge")
@@ -581,6 +599,24 @@ model BadgeRule {
   Badge              Badge             @relation(fields: [badgeId], references: [id], onDelete: Cascade)
 
   @@index([ruleType, isEnabled])
+}
+
+/**
+ * Normalized reverse index for BADGE_OWNERSHIP rules. The rule JSON remains
+ * the source of truth for configuration; this table only makes affected-rule
+ * lookup bounded by the badge that changed.
+ */
+model BadgeRuleDependency {
+  id            String   @id @default(cuid())
+  sourceBadgeId String
+  targetBadgeId String
+  createdAt     DateTime @default(now())
+  SourceBadge   Badge    @relation("BadgeRuleDependencySource", fields: [sourceBadgeId], references: [id], onDelete: Cascade)
+  TargetBadge   Badge    @relation("BadgeRuleDependencyTarget", fields: [targetBadgeId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceBadgeId, targetBadgeId])
+  @@index([sourceBadgeId])
+  @@index([targetBadgeId])
 }
 
 model Banner {
@@ -4253,10 +4289,13 @@ model User {
   UserAchievement                                        UserAchievement[]
   UserAlbumCollection                                    UserAlbumCollection[]
   UserBadge                                              UserBadge[]
+  UserBadgeSource                                        UserBadgeSource[]
   UserBadgeShowcase                                      UserBadgeShowcase[]
   UserBadgeTracking                                      UserBadgeTracking[]
+  EquippedBadges                                         UserEquippedBadge[]            @relation("UserEquippedBadges")
   EquippedBadge                                          Badge?                         @relation("UserEquippedBadge", fields: [equippedBadgeId], references: [id], onDelete: SetNull)
   UserBadgeGrantedBy                                     UserBadge[]                    @relation("UserBadgeGrantedBy")
+  UserBadgeSourceGrantedBy                               UserBadgeSource[]              @relation("UserBadgeSourceGrantedBy")
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
   MyLivePhoto                                            MyLivePhoto[]
@@ -4344,27 +4383,68 @@ model UserAlbumCollection {
 }
 
 model UserBadge {
-  id           String   @id @default(cuid())
-  isHidden     Boolean  @default(false)
-  displayOrder Int      @default(0)
-  grantedAt    DateTime @default(now())
-  obtainedAt   DateTime @default(now())
-  sourceType   String?  @db.VarChar(32)
-  sourceId     String?  @db.VarChar(191)
-  grantReason  String?  @db.VarChar(500)
-  grantedBy    String?
-  createdAt    DateTime @default(now())
-  userId       String
-  badgeId      String
-  Badge        Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
-  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  GrantedBy    User?    @relation("UserBadgeGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
+  id              String            @id @default(cuid())
+  isHidden        Boolean           @default(false)
+  displayOrder    Int               @default(0)
+  grantedAt       DateTime          @default(now())
+  obtainedAt      DateTime          @default(now())
+  awardedAt       DateTime          @default(now())
+  expiresAt       DateTime?
+  expiredAt       DateTime?
+  revokedAt       DateTime?
+  status          UserBadgeStatus   @default(ACTIVE)
+  activeKey       String?           @unique @db.VarChar(191)
+  grantKey        String?           @unique @db.VarChar(191)
+  sourceType      String?           @db.VarChar(32)
+  sourceId        String?           @db.VarChar(191)
+  grantReason     String?           @db.VarChar(500)
+  grantedBy       String?
+  createdAt       DateTime          @default(now())
+  userId          String
+  badgeId         String
+  Badge           Badge             @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  User            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  GrantedBy       User?             @relation("UserBadgeGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
+  UserBadgeSource UserBadgeSource[]
 
-  @@unique([userId, badgeId])
   @@index([userId, displayOrder])
   @@index([userId, obtainedAt])
-  @@index([badgeId])
+  @@index([userId, status, expiresAt])
+  @@index([userId, badgeId, status])
+  @@index([badgeId, status])
   @@index([grantedBy, createdAt])
+}
+
+/**
+ * Current earning sources for one aggregate UserBadge. A user can have a
+ * manual grant and several automatic/event sources at the same time; removing
+ * one source must not erase the other valid sources.
+ */
+model UserBadgeSource {
+  id          String    @id @default(cuid())
+  sourceKey   String    @unique @db.VarChar(191)
+  sourceType  String    @db.VarChar(32)
+  sourceId    String?   @db.VarChar(191)
+  isActive    Boolean   @default(true)
+  grantedAt   DateTime  @default(now())
+  expiresAt   DateTime?
+  expiredAt   DateTime?
+  revokedAt   DateTime?
+  grantReason String?   @db.VarChar(500)
+  grantedBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  userId      String
+  badgeId     String
+  userBadgeId String
+  UserBadge   UserBadge @relation(fields: [userBadgeId], references: [id], onDelete: Cascade)
+  User        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Badge       Badge     @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  GrantedBy   User?     @relation("UserBadgeSourceGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@index([userId, badgeId, isActive])
+  @@index([badgeId, sourceType, sourceId, isActive])
+  @@index([userBadgeId, isActive])
 }
 
 model UserBadgeShowcase {
@@ -4380,6 +4460,28 @@ model UserBadgeShowcase {
   @@unique([userId, badgeId])
   @@unique([userId, slot])
   @@index([badgeId])
+}
+
+/**
+ * The durable, ordered relation for badges a user has chosen to wear.
+ * User.equippedBadgeId remains temporarily for the legacy migration boundary;
+ * all new reads and writes use this relation.
+ */
+model UserEquippedBadge {
+  id         String   @id @default(cuid())
+  position   Int      @default(0)
+  equippedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  userId     String
+  badgeId    String
+  User       User     @relation("UserEquippedBadges", fields: [userId], references: [id], onDelete: Cascade)
+  Badge      Badge    @relation("BadgeEquippedUsers", fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+  @@index([badgeId])
+  @@index([userId, position])
 }
 
 model UserBadgeTracking {

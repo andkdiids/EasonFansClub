@@ -919,6 +919,7 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
       badgeId: reward.badgeId,
       sourceType: 'ACTIVITY_VERIFICATION',
       sourceId: activity.id,
+      grantKey: `activity-registration:${current.id}`,
       grantReason: `活动「${activity.title}」完成现场核销`,
       actorId: input.adminId,
       availabilityMode: 'ADMIN_MANUAL',
@@ -962,6 +963,18 @@ export async function redeemActivityLinkedMaterialInTransaction(
 
 export async function verifyActivityRegistration(input: ActivityVerificationTransactionInput) {
   const result = await prismaTransaction((tx) => verifyActivityRegistrationInTransaction(tx, input))
+  const [registration, reward] = await Promise.all([
+    prisma.activityRegistration.findUnique({ where: { id: result.registrationId }, select: { userId: true } }),
+    prisma.activityReward.findFirst({ where: { activityId: input.activityId, type: 'BADGE', enabled: true }, select: { badgeId: true } }),
+  ])
+  if (registration && reward?.badgeId) {
+    try {
+      const { triggerBadgeOwnershipRecheck } = await import('@/lib/badge-ownership')
+      await triggerBadgeOwnershipRecheck(registration.userId, reward.badgeId)
+    } catch (error) {
+      console.error('[activity.badge-reward.ownership-recheck]', { activityId: input.activityId, registrationId: result.registrationId, badgeId: reward.badgeId, error })
+    }
+  }
   try {
     const { grantEligibleActivityBadges } = await import('@/lib/activity-badge-rewards')
     await grantEligibleActivityBadges({ activityId: input.activityId, registrationId: result.registrationId })
@@ -989,18 +1002,21 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
   await tx.activityRegistration.update({ where: { id: registration.id }, data: { verifiedAt: now, checkedInAt: now, verifiedById: null, verificationMethod: null, checkInSource: 'AUTO_AFTER_ACTIVITY_END' }, select: { id: true } })
   const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
   let rewardGranted = false
+  let rewardBadgeId: string | null = null
   if (reward && !reward.badgeGrantAt) {
+    rewardBadgeId = reward.badgeId
     const granted = await grantBadgeWithTransaction(tx, {
       userId: registration.userId,
       badgeId: reward.badgeId,
       sourceType: 'ACTIVITY_VERIFICATION',
       sourceId: activity.id,
+      grantKey: `activity-registration:${registration.id}`,
       grantReason: `活动「${activity.title}」结束后自动完成核销`,
       availabilityMode: 'ADMIN_MANUAL',
     })
     rewardGranted = granted.created
   }
-  return { processed: true, registrationId: registration.id, activityId: activity.id, linkedMaterialRedemptionId: linkedMaterial.orderId, rewardGranted }
+  return { processed: true, registrationId: registration.id, activityId: activity.id, linkedMaterialRedemptionId: linkedMaterial.orderId, rewardGranted, rewardBadgeId }
 }
 
 export async function autoCheckInEndedActivityRegistrations(options: { activityId?: string; batchSize?: number; now?: Date } = {}) {
@@ -1023,6 +1039,15 @@ export async function autoCheckInEndedActivityRegistrations(options: { activityI
     try {
       const result = await prismaTransaction((tx) => autoCheckInActivityRegistrationInTransaction(tx, candidate.id, now))
       if (result.processed) processed += 1
+      if (result.processed && 'rewardBadgeId' in result && result.rewardBadgeId) {
+        try {
+          const { triggerBadgeOwnershipRecheck } = await import('@/lib/badge-ownership')
+          const registration = await prisma.activityRegistration.findUnique({ where: { id: result.registrationId }, select: { userId: true } })
+          if (registration) await triggerBadgeOwnershipRecheck(registration.userId, result.rewardBadgeId)
+        } catch (error) {
+          console.error('[activities.auto-check-in.ownership-recheck]', { registrationId: result.registrationId, badgeId: result.rewardBadgeId, error })
+        }
+      }
     } catch (error) {
       failed += 1
       console.error('[activities.auto-check-in]', { registrationId: candidate.id, error: error instanceof Error ? error.message : String(error) })

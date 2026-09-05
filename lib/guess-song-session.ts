@@ -1145,7 +1145,7 @@ export async function answerGuessSongQuestion(input: {
   if (!outcome.duplicate && session.status === 'COMPLETED') {
     await recordGuessSongLeaderboard(input.sessionId)
     ranks = await getGuessSongRanks(input.userId, session.mode, now)
-    triggerBadgeEvaluation(input.userId, 'GUESS_SONG_SESSION_FINISHED')
+    triggerBadgeEvaluation(input.userId, 'GUESS_SONG_SESSION_FINISHED', input.sessionId)
   }
   return { ...outcome, session, ranks }
 }

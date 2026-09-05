@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client'
 import { withForumBoardDisplayName } from '@/lib/boards'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory, userSnapshotName } from '@/lib/admin-audit'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
-import { buildPostReviewUpdate, isPostModerationStatus, POST_REVIEW_PAGE_SIZE } from '@/lib/post-moderation'
+import { buildPostReviewUpdate, canTransitionPostModerationStatus, isPostModerationStatus, POST_REVIEW_PAGE_SIZE, type PostModerationStatus, type PostReviewableStatus } from '@/lib/post-moderation'
 import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds, type PostModerationHistoryRow } from '@/lib/post-moderation-history'
 import { postContentPlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
@@ -77,12 +77,18 @@ async function writeReviewAudit(input: {
   authorId: string
   authorName: string
   authorUid: number
+  previousStatus: PostReviewableStatus
   rejectionReason: string | null
 }) {
   const operationType = input.status === 'APPROVED'
     ? adminAuditOperations.POST_REVIEW_APPROVED
     : adminAuditOperations.POST_REVIEW_REJECTED
-  const metadata = { moderationStatus: input.status, rejectionReason: input.rejectionReason }
+  const metadata = {
+    fromStatus: input.previousStatus,
+    toStatus: input.status,
+    moderationStatus: input.status,
+    rejectionReason: input.rejectionReason,
+  }
 
   try {
     // Prefer the snapshot-rich audit row when the matching schema is present.
@@ -146,6 +152,7 @@ async function writeReviewNotification(input: {
   title: string
   rejectionReason: string | null
   reviewedAt: Date
+  notificationKey?: string
 }) {
   try {
     await prisma.notification.updateMany({
@@ -170,7 +177,7 @@ async function writeReviewNotification(input: {
         recipientId: input.authorId,
         actorId: input.operatorId,
         type: 'ADMIN',
-        key: `post-review-result:${input.postId}:${input.status}:${input.reviewedAt.getTime()}`,
+        key: input.notificationKey || `post-review-result:${input.postId}:${input.status}:${input.reviewedAt.getTime()}`,
         title: input.status === 'APPROVED' ? '帖子审核通过' : '帖子未通过审核',
         content: input.status === 'APPROVED'
           ? `你发布的帖子《${input.title}》已通过审核，现在可以在 E院广场查看。`
@@ -201,11 +208,23 @@ async function refreshReviewBoardCount(boardId: string, postId: string, action: 
 
 async function writeApprovalFriendActivity(input: { postId: string; authorId: string; title: string; action: ReviewAction }) {
   try {
+    const targetUrl = `/posts/${input.postId}`
+    // This activity is a derived public feed entry. Re-approval must not
+    // create a second entry for the same post.
+    await prisma.friendActivity.deleteMany({ where: { type: 'POST', targetUrl } })
     await prisma.friendActivity.create({
-      data: { actorId: input.authorId, type: 'POST', content: input.title, targetUrl: `/posts/${input.postId}` },
+      data: { actorId: input.authorId, type: 'POST', content: input.title, targetUrl },
     })
   } catch (error) {
     logReviewError('friend-activity', input.postId, input.action, error)
+  }
+}
+
+async function clearApprovalFriendActivity(input: { postId: string; action: ReviewAction }) {
+  try {
+    await prisma.friendActivity.deleteMany({ where: { type: 'POST', targetUrl: `/posts/${input.postId}` } })
+  } catch (error) {
+    logReviewError('friend-activity-cleanup', input.postId, input.action, error)
   }
 }
 
@@ -231,13 +250,15 @@ export async function GET(request: Request) {
   const guard = await requireAdmin('post_manage')
   if (!guard.user) return guard.response
   const rawStatus = new URL(request.url).searchParams.get('status')
-  const status = isPostModerationStatus(rawStatus) ? rawStatus : 'PENDING'
+  const status: PostModerationStatus | 'ALL' = rawStatus === 'ALL'
+    ? 'ALL'
+    : isPostModerationStatus(rawStatus) ? rawStatus : 'PENDING'
   const rawPage = Number(new URL(request.url).searchParams.get('page') || '1')
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
   try {
     const pageRows = await prisma.post.findMany({
-      where: { moderationStatus: status, isDeleted: false },
-      orderBy: status === 'PENDING'
+      where: status === 'ALL' ? { isDeleted: false } : { moderationStatus: status, isDeleted: false },
+      orderBy: status === 'PENDING' || status === 'ALL'
         ? [{ createdAt: 'desc' as const }]
         : [{ reviewedAt: 'desc' as const }, { createdAt: 'desc' as const }],
       skip: (page - 1) * POST_REVIEW_PAGE_SIZE,
@@ -291,14 +312,35 @@ export async function PATCH(request: Request) {
           boardId: true,
           title: true,
           moderationStatus: true,
+          reviewedAt: true,
+          rejectionReason: true,
           User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
         },
       })
       if (!current) throw new Error('POST_NOT_FOUND')
-      if (String(current.moderationStatus) !== 'PENDING') throw new Error('POST_ALREADY_REVIEWED')
+      if (!canTransitionPostModerationStatus(current.moderationStatus, status)) throw new Error('POST_REVIEW_STATUS_UNSUPPORTED')
+
+      // Retrying the same request after the first commit is a safe no-op. The
+      // existing review timestamp keeps the author notification key stable,
+      // so a notification retry cannot create a duplicate row.
+      if (current.moderationStatus === status) {
+        return {
+          changed: false,
+          post: {
+            id: current.id,
+            moderationStatus: current.moderationStatus,
+            reviewedAt: current.reviewedAt,
+            rejectionReason: current.rejectionReason,
+          },
+          previousStatus: current.moderationStatus,
+          reviewedAt: current.reviewedAt || reviewedAt,
+          notificationKey: current.reviewedAt ? undefined : `post-review-result:${postId}:${current.moderationStatus}:legacy`,
+          current,
+        }
+      }
 
       const updateResult = await tx.post.updateMany({
-        where: { id: postId, isDeleted: false, moderationStatus: 'PENDING' },
+        where: { id: postId, isDeleted: false, moderationStatus: current.moderationStatus },
         data: buildPostReviewUpdate({ status, reviewedAt, reviewedById: guard.user.id, rejectionReason }),
       })
       if (updateResult.count !== 1) throw new Error('POST_ALREADY_REVIEWED')
@@ -307,6 +349,7 @@ export async function PATCH(request: Request) {
         select: { id: true, moderationStatus: true, reviewedAt: true, rejectionReason: true },
       })
       return {
+        changed: true,
         post: updated,
         previousStatus: current.moderationStatus,
         reviewedAt,
@@ -315,6 +358,20 @@ export async function PATCH(request: Request) {
     })
     const current = result.current
     const reviewStatus = result.post.moderationStatus as ReviewStatus
+    if (!result.changed) {
+      await writeReviewNotification({
+        postId,
+        action,
+        status: reviewStatus,
+        authorId: current.authorId,
+        operatorId: guard.user.id,
+        title: current.title,
+        rejectionReason: result.post.rejectionReason,
+        reviewedAt: result.reviewedAt,
+        notificationKey: result.notificationKey,
+      })
+      return NextResponse.json({ post: result.post, previousStatus: result.previousStatus, changed: false })
+    }
     await writeReviewAudit({
       operatorId: guard.user.id,
       postId,
@@ -324,6 +381,7 @@ export async function PATCH(request: Request) {
       authorId: current.authorId,
       authorName: current.User.nickname || 'E院用户',
       authorUid: current.User.uid,
+      previousStatus: result.previousStatus,
       rejectionReason: result.post.rejectionReason,
     })
     await writeReviewHistory({
@@ -347,7 +405,12 @@ export async function PATCH(request: Request) {
     await refreshReviewBoardCount(current.boardId, postId, action)
     if (reviewStatus === 'APPROVED') {
       await writeApprovalFriendActivity({ postId, authorId: current.authorId, title: current.title, action })
-      triggerBadgeEvaluation(current.authorId, 'POST_APPROVED')
+      // Re-approval must not re-run one-time approval side effects. The badge
+      // grant itself is idempotent, while the first pending review remains the
+      // existing trigger point for this evaluation.
+      if (String(result.previousStatus) === 'PENDING') triggerBadgeEvaluation(current.authorId, 'POST_APPROVED', postId)
+    } else {
+      await clearApprovalFriendActivity({ postId, action })
     }
 
     try {
@@ -358,6 +421,10 @@ export async function PATCH(request: Request) {
     try {
       revalidatePath('/community')
       revalidatePath('/forum')
+      revalidatePath('/trending')
+      revalidatePath('/rankings')
+      revalidatePath('/search')
+      revalidatePath('/profile')
       revalidatePath('/admin/posts/review')
       revalidatePath('/user/[uid]', 'page')
       revalidatePath(`/posts/${postId}`)
@@ -371,6 +438,9 @@ export async function PATCH(request: Request) {
     logReviewError('core', postId, action, error)
     if (error instanceof Error && error.message === 'POST_ALREADY_REVIEWED') {
       return NextResponse.json({ message: '该帖子已被其他管理员审核，请刷新后查看最新状态' }, { status: 409 })
+    }
+    if (error instanceof Error && error.message === 'POST_REVIEW_STATUS_UNSUPPORTED') {
+      return NextResponse.json({ message: '该帖子当前状态不支持普通审核操作，请刷新后重试' }, { status: 409 })
     }
     if (error instanceof Error && error.message === 'POST_NOT_FOUND') {
       return NextResponse.json({ message: '帖子不存在或已删除' }, { status: 404 })

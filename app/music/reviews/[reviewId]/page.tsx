@@ -32,7 +32,7 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
     prisma.albumReviewLike.findUnique({ where: { reviewId_userId: { reviewId, userId: user.id } } }),
     prisma.albumReviewFavorite.findUnique({ where: { reviewId_userId: { reviewId, userId: user.id } } }),
   ]) : [null, null]
-  const equippedBadgeMap = await getEquippedBadgesForUsers([review.User.id])
+  const equippedBadges = await getEquippedBadgesForUsers([review.User.id])
   const reviewAuthorName = getPublicUserDisplayName(review.User)
   const images = readAlbumReviewImages(review.images).map((url) => publicImageVariantUrl(url, 'large') || url)
   const albumCoverForHero = publicImageVariantUrl(review.MusicAlbum.coverUrl, 'large')
@@ -45,7 +45,7 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
       <div className="p-6 sm:p-10">
         <p className="text-xs font-black tracking-[0.2em] text-sky-300/65">ALBUM REVIEW · {review.MusicAlbum.releaseYear}</p>
         <h1 className="mt-3 text-4xl font-black leading-tight text-white sm:text-6xl">{review.title}</h1>
-        <p className="mt-5 text-sm font-bold text-slate-300/60">所属专辑：<Link href={`/music/album/${review.MusicAlbum.id}`} className="text-sky-200 hover:text-white">《{review.MusicAlbum.name}》</Link> · <UserDisplayName name={reviewAuthorName} uid={review.User.uid} badge={equippedBadgeMap.get(review.User.id) || null} compact /> · {new Intl.DateTimeFormat('zh-CN').format(review.publishedAt || review.createdAt)}</p>
+        <p className="mt-5 text-sm font-bold text-slate-300/60">所属专辑：<Link href={`/music/album/${review.MusicAlbum.id}`} className="text-sky-200 hover:text-white">《{review.MusicAlbum.name}》</Link> · <UserDisplayName name={reviewAuthorName} uid={review.User.uid} badges={equippedBadges.get(review.User.id) || []} compact /> · {new Intl.DateTimeFormat('zh-CN').format(review.publishedAt || review.createdAt)}</p>
         <div className="mt-8"><AlbumReviewActions reviewId={review.id} initialLiked={Boolean(liked)} initialFavorited={Boolean(favorited)} initialLikeCount={review.likeCount} initialFavoriteCount={review.favoriteCount} /></div>
         <div className="mt-10 whitespace-pre-wrap text-[15px] font-medium leading-8 text-slate-200/85 sm:text-base">{review.content}</div>
         {images.length ? <div className="mt-10 grid gap-5">{images.map((url, index) => <figure key={url} className="relative aspect-[16/10] overflow-hidden rounded-[24px] border border-white/10 bg-[#0b2038]"><Image src={url} alt={`${review.title} 资料图片 ${index + 1}`} fill sizes="(max-width: 767px) 100vw, 900px" loading="lazy" className="object-contain" /></figure>)}</div> : null}

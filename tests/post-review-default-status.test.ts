@@ -9,7 +9,7 @@ const route = read('app/api/admin/posts/review/route.ts')
 
 test('首次进入审核中心默认选中并请求待审核（PENDING）', () => {
   // 客户端默认状态为 PENDING
-  assert.match(manager, /useState<ReviewStatus>\('PENDING'\)/)
+  assert.match(manager, /useState<ReviewFilter>\('PENDING'\)/)
   // 服务端首屏预取也只取 PENDING，保证默认数据与默认 Tab 一致
   assert.match(page, /where: \{ moderationStatus: 'PENDING', isDeleted: false \}/)
 })
@@ -28,14 +28,14 @@ test('挂载时若初始列表与当前 Tab 不一致会按当前状态重拉，
   // 存在按 queueStatus 触发的挂载/切换副作用
   assert.match(manager, /useEffect\(\(\) => \{[\s\S]*\}, \[queueStatus\]\)/)
   // 副作用内：检查初始列表状态是否与当前 queueStatus 一致
-  assert.match(manager, /initialPosts\.some\(\(post\) => post\.moderationStatus !== queueStatus\)/)
+  assert.match(manager, /queueStatus !== 'ALL' && initialPosts\.some\(\(post\) => post\.moderationStatus !== queueStatus\)/)
   // 不一致时按当前状态重新拉取（修复「待审核 Tab 显示已通过列表」）
   assert.match(manager, /void loadStatus\(queueStatus, 1\)/)
 })
 
 test('四种审核状态均可作为 Tab 切换目标', () => {
   // postModerationStatuses 提供 PENDING/APPROVED/REJECTED/VIOLATION 四个 Tab
-  assert.match(manager, /postModerationStatuses\.map\(\(status\) =>/)
+  assert.match(manager, /reviewFilters\.map\(\(status\) =>/)
   // 状态文案覆盖待审核 / 已通过 / 已拒绝 / 违规内容
   assert.match(manager, /PENDING: '待审核', APPROVED: '已通过', REJECTED: '已拒绝', VIOLATION: '违规内容'/)
 })

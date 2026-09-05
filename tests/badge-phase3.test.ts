@@ -42,8 +42,8 @@ test('series reward relation is nullable and deleting a series only ungroups bad
 })
 
 test('series completion is a registry rule but is never an admin numeric rule', () => {
-  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 18)
-  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 17)
+  assert.equal(BADGE_RULE_TYPES_WITH_SPECIAL.length, 19)
+  assert.equal(BADGE_ADMIN_RULE_TYPES.length, 18)
   assert.equal(BADGE_RULE_REGISTRY.BADGE_SERIES_COMPLETE.seriesCompletion, true)
   const parsed = parseBadgeRuleInput({
     ruleType: 'BADGE_SERIES_COMPLETE',
@@ -115,7 +115,7 @@ test('profile payload keeps recent and showcase bounded and avoids full progress
   assert.match(service, /take: 5/)
   assert.match(service, /showcaseRows/)
   assert.match(service, /equippedOwnership/)
-  assert.match(service, /const equippedIsVisible = Boolean\(target\.EquippedBadge && equippedOwnership/)
+  assert.match(service, /const visibleEquippedBadges = equippedBadges\.filter\(/)
   assert.match(route, /preview[\s\S]*getBadgeProfileSummary/)
   assert.match(read('components/BadgeCollectionPanel.tsx'), /最多选择 6 枚已获得勋章/)
   assert.match(read('components/BadgeCollectionPanel.tsx'), /最近获得/)
@@ -128,7 +128,7 @@ test('public badge surfaces keep SECRET absent and only expose obtained hidden b
   assert.match(service, /visibility: \{ not: 'SECRET'/)
   assert.match(phase3, /visibility: \{ not: 'SECRET' \}/)
   assert.match(phase3, /badge\.visibility !== 'SECRET'/)
-  assert.match(read('lib/badge-share-card.ts'), /只能分享自己已经获得|where: \{ userId_badgeId/)
+  assert.match(read('lib/badge-share-card.ts'), /只能分享自己已经获得|activeUserBadgeWhere/)
 })
 
 test('share card is rate-limited, server-owned, escaped and bounded', () => {

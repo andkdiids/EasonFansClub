@@ -174,7 +174,7 @@ export async function GET(request: Request) {
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
-    const equippedBadgeMap = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id))
+    const equippedBadges = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id))
     const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, ...post }) => ({
       ...post,
       title: publicModerationText(post.title, moderationStatus),
@@ -182,7 +182,8 @@ export async function GET(request: Request) {
         ...User,
         nickname: getPublicUserDisplayName(User),
         avatarUrl: publicImageUrl(User.avatarUrl),
-        equippedBadge: equippedBadgeMap.get(User.id) || null,
+        equippedBadges: equippedBadges.get(User.id) || [],
+        equippedBadge: equippedBadges.get(User.id)?.[0] || null,
         profile: User.Profile ? {
           ...User.Profile,
           avatarUrl: publicImageUrl(User.Profile.avatarUrl),
@@ -475,7 +476,7 @@ export async function POST(request: Request) {
       runPostCreateSideEffect('achievement-sync', () => syncUserAchievements(user.id, ['POST']), user.id, board.id),
     ])
 
-    if (moderationStatus === 'APPROVED') triggerBadgeEvaluation(user.id, 'POST_CREATED')
+    if (moderationStatus === 'APPROVED') triggerBadgeEvaluation(user.id, 'POST_CREATED', result.post.id)
 
     return NextResponse.json({
       post: { ...result.post, detailUrl },

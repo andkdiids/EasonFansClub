@@ -13,7 +13,7 @@ import {
   supportsOriginal,
   type SalonCategoryValue,
   type SalonOptions,
-} from '@/lib/salon'
+} from '@/lib/salon-shared'
 import { validateSalonFiles, SALON_MAX_FILES } from '@/lib/salon-upload'
 import { SALON_DEFAULT_WATERMARK_OPACITY, SALON_WATERMARK_POSITIONS, type SalonWatermarkPosition } from '@/lib/salon-watermark'
 

@@ -31,8 +31,11 @@ test('Badge 模型新增 category 枚举与 musicTourId 关联（复用现有 Ba
   assert.match(schema, /enum BadgeCategory\s*\{[\s\S]*?SYSTEM[\s\S]*?BIRTHDAY[\s\S]*?CONCERT/)
   assert.match(schema, /model Badge\s*\{[\s\S]*?musicTourId\s+String\?/)
   assert.match(schema, /musicTour\s+MusicTour\?\s+@relation\(fields:\s*\[musicTourId\]/)
-  // 不破坏生日徽章逻辑：仍按 slug 唯一授予
-  assert.match(schema, /model UserBadge\s*\{[\s\S]*?@@unique\(\[userId,\s*badgeId\]\)/)
+  // UserBadge now keeps repeatable history; current ownership is protected by
+  // the nullable active key instead of a permanent user/badge unique pair.
+  const userBadge = schema.slice(schema.indexOf('model UserBadge'), schema.indexOf('model UserBadgeShowcase'))
+  assert.match(userBadge, /activeKey\s+String\?\s+@unique/)
+  assert.doesNotMatch(userBadge, /@@unique\(\[userId,\s*badgeId\]\)/)
 })
 
 test('0 场演唱会不会产生任何演唱会勋章计划', () => {
@@ -63,9 +66,19 @@ test('连续 dry-run 规划保持幂等，写入后第二次新增数为 0', () 
   assert.equal(second.length, 0)
 })
 
-test('并发最终由 UserBadge 唯一键与 grantBadge P2002 处理保护', () => {
-  assert.match(schema, /model UserBadge\s*\{[\s\S]*?@@unique\(\[userId,\s*badgeId\]\)/)
-  assert.match(read('lib/badge-service.ts'), /error\.code === 'P2002'[\s\S]*?userId_badgeId/)
+test('实时演唱会事件只使用触发场次作为新的累计达标事实', () => {
+  const award = planConcertBadgeAwards({ attendances: facts, badges: [countBadge(1)], triggerConcertId: 'concert-3' })[0]
+  assert.equal(award?.sourceId, 'concert-3')
+  assert.equal(award?.obtainedAt.toISOString(), facts[2]?.createdAt.toISOString())
+  assert.equal(planConcertBadgeAwards({ attendances: facts, badges: [countBadge(1)], triggerConcertId: 'missing-concert' }).length, 0)
+})
+
+test('并发最终由 UserBadge activeKey 与 grantBadge P2002 处理保护', () => {
+  const userBadge = schema.slice(schema.indexOf('model UserBadge'), schema.indexOf('model UserBadgeShowcase'))
+  assert.match(userBadge, /activeKey\s+String\?\s+@unique/)
+  const service = read('lib/badge-service.ts')
+  assert.match(service, /error\.code === 'P2002'/)
+  assert.match(service, /where: \{ activeKey: activeBadgeKey\(input\.userId, input\.badgeId\) \}/)
 })
 
 test('5. 普通用户不能创建徽章（创建接口必须管理员权限）', () => {
@@ -78,7 +91,7 @@ test('5. 普通用户不能创建徽章（创建接口必须管理员权限）',
 
 test('接入我的现场：成功保存后触发自动授予且失败不影响主流程', () => {
   assert.match(attendance, /import\s*\{[^}]*evaluateConcertBadges[^}]*\}\s*from\s*'@\/lib\/concert-badge'/)
-  assert.match(attendance, /await evaluateConcertBadges\(guard\.user\.id\)/)
+  assert.match(attendance, /await evaluateConcertBadges\(guard\.user\.id, concertId\)/)
   // 包在 try/catch 中，异常仅记录日志
   assert.match(attendance, /catch\s*\(error\)\s*\{\s*\n?\s*console\.error\('\[attendance\.concertBadge\]'/)
 })
@@ -86,8 +99,8 @@ test('接入我的现场：成功保存后触发自动授予且失败不影响�
 test('批量入口也只调用一次事实评估器，历史数据由只读 dry-run/backfill 覆盖', () => {
   const bulk = read('app/api/music/live/attendance/bulk/route.ts')
   const script = read('scripts/backfill-concert-badges.ts')
-  assert.match(bulk, /result\.addedCount > 0[\s\S]*?await evaluateConcertBadges\(guard\.user\.id\)/)
-  assert.equal((bulk.match(/evaluateConcertBadges\(guard\.user\.id\)/g) || []).length, 1)
+  assert.match(bulk, /result\.addedCount > 0[\s\S]*?await evaluateConcertBadges\(guard\.user\.id, addShowIds\[addShowIds\.length - 1\]\)/)
+  assert.equal((bulk.match(/evaluateConcertBadges\(guard\.user\.id/g) || []).length, 1)
   assert.match(script, /READ-ONLY DRY RUN/)
   assert.equal(['CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED'].every((ruleType) => script.includes(ruleType)), true)
   assert.match(script, /if \(options\.apply\)[\s\S]*?evaluateConcertBadges/)

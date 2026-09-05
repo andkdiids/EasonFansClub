@@ -9,6 +9,8 @@ export type DuelPublicUser = {
   name: string
   avatarUrl: string | null
   isOnline: boolean
+  equippedBadges: EquippedBadgeView[]
+  /** @deprecated use equippedBadges */
   equippedBadge: EquippedBadgeView | null
 }
 

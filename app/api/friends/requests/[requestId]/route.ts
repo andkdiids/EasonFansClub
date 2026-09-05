@@ -74,7 +74,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
   const action = body?.action === 'accept' ? 'accept' : 'reject'
   const result = await decideFriendRequest(user.id, requestId, action)
-  for (const userId of result.badgeEvaluationUserIds) triggerBadgeEvaluation(userId, 'FRIENDSHIP_CREATED')
+  for (const userId of result.badgeEvaluationUserIds) triggerBadgeEvaluation(userId, 'FRIENDSHIP_CREATED', requestId)
 
   return NextResponse.json(result.body, { status: result.status })
 }

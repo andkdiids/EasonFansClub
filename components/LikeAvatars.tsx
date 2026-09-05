@@ -21,6 +21,7 @@ export type LikeAvatarUser = {
   nickname?: string
   friendRemark?: string | null
   displayName?: string
+  equippedBadges?: EquippedBadgeView[]
   equippedBadge?: EquippedBadgeView | null
 }
 
@@ -278,7 +279,7 @@ export function LikeAvatars({
                       className="flex items-center gap-1.5 text-xs font-black text-brand-700 hover:text-brand-950"
                     >
                       <LikerAvatar liker={liker} avatarOnly={false} size="expanded" link={false} />
-                      <UserDisplayName name={likerDisplayName(liker)} uid={liker.uid} badge={liker.equippedBadge} compact />
+                      <UserDisplayName name={likerDisplayName(liker)} uid={liker.uid} badges={liker.equippedBadges} badge={liker.equippedBadge} compact />
                     </a>
                   </li>
                 ))}

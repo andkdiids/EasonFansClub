@@ -45,9 +45,18 @@ import type {
 } from '@/lib/guess-song-duel-protocol'
 import type { DuelMode } from '@/lib/guess-song-duel-config'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { isUserBadgeActive } from '@/lib/badge-validity'
 import { normalizeGuessSongAnswer } from '@/lib/guess-song-config'
 import { getGuessSongQuizConfigOrDefault, GUESS_SONG_QUESTION_TYPE_AUTO, GUESS_SONG_QUESTION_TYPE_MANUAL } from '@/lib/guess-song-quiz-config'
 import { createUUID } from '@/lib/utils/uuid'
+
+// Declared separately as a mutable array: Prisma's generated `orderBy` types
+// reject the readonly tuples that `as const` produces on the select below.
+const equippedBadgesOrderBy: Prisma.UserEquippedBadgeOrderByWithRelationInput[] = [
+  { position: 'asc' },
+  { equippedAt: 'asc' },
+  { id: 'asc' },
+]
 
 const publicUserSelect = {
   id: true,
@@ -59,7 +68,16 @@ const publicUserSelect = {
   avatarUrl: true,
   isOnline: true,
   Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
-  EquippedBadge: { select: { id: true, code: true, name: true, iconUrl: true, isEnabled: true, isActive: true, effectType: true, nicknameEffect: true, nicknameColor: true, nicknameGradientStart: true, nicknameGradientEnd: true, rarity: true } },
+  EquippedBadges: {
+    where: { Badge: { isEnabled: true, isActive: true, isWearable: true } },
+    orderBy: equippedBadgesOrderBy,
+    select: {
+      position: true,
+      equippedAt: true,
+      Badge: { select: { id: true, code: true, name: true, iconUrl: true, isEnabled: true, isActive: true, isWearable: true, effectType: true, nicknameEffect: true, nicknameColor: true, nicknameGradientStart: true, nicknameGradientEnd: true, rarity: true } },
+    },
+  },
+  UserBadge: { where: { status: 'ACTIVE' }, select: { badgeId: true, obtainedAt: true, expiresAt: true, status: true } },
 } as const
 
 const roomMemberInclude = {
@@ -194,27 +212,34 @@ function hashToken(value: string) {
 }
 
 function publicUser(user: PublicUserRow, isOnline = user.isOnline): DuelPublicUser {
-  const badge = user.EquippedBadge && user.EquippedBadge.isEnabled && user.EquippedBadge.isActive
-    ? {
-        id: user.EquippedBadge.id,
-        code: user.EquippedBadge.code,
-        name: user.EquippedBadge.name,
-        imageUrl: toPublicMediaUrl(user.EquippedBadge.iconUrl),
-        effectType: user.EquippedBadge.effectType,
-        nicknameEffect: user.EquippedBadge.nicknameEffect,
-        nicknameColor: user.EquippedBadge.nicknameColor,
-        nicknameGradientStart: user.EquippedBadge.nicknameGradientStart,
-        nicknameGradientEnd: user.EquippedBadge.nicknameGradientEnd,
-        rarity: user.EquippedBadge.rarity,
-      } satisfies EquippedBadgeView
-    : null
+  const ownershipByBadgeId = new Map(user.UserBadge.map((record) => [record.badgeId, record]))
+  const equippedBadges = user.EquippedBadges.flatMap((row) => {
+    const ownership = ownershipByBadgeId.get(row.Badge.id)
+    if (!ownership || !isUserBadgeActive(ownership) || !row.Badge.isEnabled || !row.Badge.isActive || !row.Badge.isWearable) return []
+    return [{
+      id: row.Badge.id,
+      code: row.Badge.code,
+      name: row.Badge.name,
+      imageUrl: toPublicMediaUrl(row.Badge.iconUrl),
+      effectType: row.Badge.effectType,
+      nicknameEffect: row.Badge.nicknameEffect,
+      nicknameColor: row.Badge.nicknameColor,
+      nicknameGradientStart: row.Badge.nicknameGradientStart,
+      nicknameGradientEnd: row.Badge.nicknameGradientEnd,
+      rarity: row.Badge.rarity,
+      obtainedAt: ownership.obtainedAt.toISOString(),
+      expiresAt: ownership.expiresAt?.toISOString() || null,
+      position: row.position,
+    } satisfies EquippedBadgeView]
+  })
   return {
     id: user.id,
     uid: user.uid,
     name: getPublicUserDisplayName(user),
     avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl),
     isOnline,
-    equippedBadge: badge,
+    equippedBadges,
+    equippedBadge: equippedBadges[0] || null,
   }
 }
 
@@ -2145,9 +2170,9 @@ async function completeQuestionTx(tx: Prisma.TransactionClient, matchId: string,
   return completeResolvedQuestionTx(tx, match, question, answers, now)
 }
 
-async function syncDuelUsers(userIds: readonly string[]) {
+async function syncDuelUsers(userIds: readonly string[], eventId?: string | null) {
   await Promise.all([...new Set(userIds)].map((userId) => {
-    triggerBadgeEvaluation(userId, 'DUEL_FINISHED')
+    triggerBadgeEvaluation(userId, 'DUEL_FINISHED', eventId)
     return syncUserAchievements(userId, ['DUEL']).catch((error) => {
     console.error('[guess-song-duel.achievements]', { userId, error })
     })
@@ -2286,14 +2311,14 @@ export async function submitDuelAnswer(input: {
     return { duplicate: false, accepted: true, matchId: input.matchId, questionIndex: question.questionIndex, roundId: question.id, questionId: question.publicToken, questionToken: question.publicToken, userId: input.userId, selectedOptionKey: optionKey, correct, correctOptionKey: question.correctOptionKey, questionCompletion }
   }, { timeout: 15_000 })
   const questionCompletion = await finalizeCompletionReward(outcome.questionCompletion, receivedAt)
-  if (questionCompletion?.syncUserIds.length) await syncDuelUsers(questionCompletion.syncUserIds)
+  if (questionCompletion?.syncUserIds.length) await syncDuelUsers(questionCompletion.syncUserIds, input.matchId)
   return questionCompletion === outcome.questionCompletion ? outcome : { ...outcome, questionCompletion }
 }
 
 export async function finalizeDuelQuestion(matchId: string, questionIndex: number, now = new Date()) {
   const outcome = await duelTransaction((tx) => completeQuestionTx(tx, matchId, questionIndex, now), { timeout: 15_000 })
   const finalized = await finalizeCompletionReward(outcome, now)
-  if (finalized?.syncUserIds.length) await syncDuelUsers(finalized.syncUserIds)
+  if (finalized?.syncUserIds.length) await syncDuelUsers(finalized.syncUserIds, matchId)
   return finalized
 }
 
@@ -2351,7 +2376,7 @@ export async function settleDuelDisconnect(matchId: string, userId: string, now 
   }, { timeout: 15_000 })
   if (!outcome) return outcome
   const result = await getFinalizedDuelResult(matchId, now)
-  if (outcome.userIds.length) await syncDuelUsers(outcome.userIds)
+  if (outcome.userIds.length) await syncDuelUsers(outcome.userIds, matchId)
   return { ...outcome, result }
 }
 
@@ -2374,7 +2399,7 @@ export async function forfeitDuelMatch(userId: string, matchId: string, now = ne
     })
     return { ...settled, result: await resultForTransaction(tx, matchId) }
   }, { timeout: 15_000 })
-  if (outcome.userIds.length) await syncDuelUsers(outcome.userIds)
+  if (outcome.userIds.length) await syncDuelUsers(outcome.userIds, matchId)
   return getFinalizedDuelResult(matchId, now)
 }
 

@@ -432,8 +432,8 @@ export async function executeBirthdayHistoryBackfill(input: BirthdayHistoryBackf
           category.granted += 1
           newlyGrantedByUser.set(plan.userId, [...(newlyGrantedByUser.get(plan.userId) || []), { badgeId: plan.badgeId, recordId: result.recordId }])
         } else {
-          // Another execution may have won the unique user/badge row after
-          // preview. Treat it as an idempotent skip, not a failure.
+          // Another execution may have won the same historical grant key
+          // after preview. Treat it as an idempotent skip, not a failure.
           category.alreadyOwned += 1
         }
       } catch (error) {

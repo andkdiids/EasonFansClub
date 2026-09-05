@@ -16,9 +16,11 @@ test('审核状态先独立提交，通知在提交后发送且不再使用 tx.n
   assert.match(reviewRoute, /type: 'ADMIN'/)
 })
 
-test('并发审核只允许 PENDING 状态转换，通知使用本次审核时间生成幂等 key', () => {
-  assert.match(reviewRoute, /moderationStatus: 'PENDING'/)
-  assert.match(reviewRoute, /key: `post-review-result:\$\{input\.postId\}:\$\{input\.status\}:\$\{input\.reviewedAt\.getTime\(\)\}`/)
+test('并发审核基于锁定后的当前状态转换，通知使用本次审核时间生成幂等 key', () => {
+  assert.match(reviewRoute, /moderationStatus: current\.moderationStatus/)
+  assert.match(reviewRoute, /canTransitionPostModerationStatus\(current\.moderationStatus, status\)/)
+  assert.match(reviewRoute, /key: input\.notificationKey \|\| `post-review-result:\$\{input\.postId\}:\$\{input\.status\}:\$\{input\.reviewedAt\.getTime\(\)\}`/)
+  assert.match(reviewRoute, /notificationKey/)
   assert.match(reviewRoute, /POST_ALREADY_REVIEWED/)
 })
 

@@ -1,6 +1,9 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getFriendRequestAcceptedNotificationKey, getFriendRequestNotificationKey } from '@/lib/notifications'
+// Imported from the browser-safe key module, not from '@/lib/notifications':
+// that module owns Prisma queries and badge lookups, and pulling it in would
+// carry `node:crypto` (via badge-service) into any bundle that reaches friends.
+import { getFriendRequestAcceptedNotificationKey, getFriendRequestNotificationKey } from '@/lib/notification-keys'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'

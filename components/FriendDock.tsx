@@ -1587,7 +1587,7 @@ export function FriendDock({
               <button type="button" onClick={leaveChat} aria-label="返回好友列表">←</button>
               <button type="button" className="friend-dock-chat-person" onClick={() => setProfileFriend(chatFriend)}>
                 <SafeAvatar src={profileImageUrl(chatFriend.profile?.avatarUrl || chatFriend.avatarUrl)} name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} className="h-8 w-8" />
-                <span><strong><UserDisplayName name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} uid={chatFriend.uid} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
+                <span><strong><UserDisplayName name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} uid={chatFriend.uid} badges={chatFriend.equippedBadges} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
@@ -2101,7 +2101,7 @@ function ConversationRow({
         <SafeAvatar src={profileImageUrl(peer.profile?.avatarUrl || peer.avatarUrl)} name={name} uid={peer.uid} className="friend-chat-row-avatar" />
         <span className="friend-chat-row-copy">
           <span className="friend-chat-row-heading">
-            <strong><UserDisplayName name={name} uid={peer.uid} badge={peer.equippedBadge} compact /></strong>
+            <strong><UserDisplayName name={name} uid={peer.uid} badges={peer.equippedBadges} badge={peer.equippedBadge} compact /></strong>
             {conversation.lastMessageAt ? <time>{formatConversationTime(conversation.lastMessageAt)}</time> : null}
           </span>
           <span className="friend-chat-row-preview">
@@ -2148,7 +2148,7 @@ function FriendRow({
       </button>
       <div className="friend-dock-row-main">
         <button type="button" className="friend-dock-row-name" onClick={status === 'FRIEND' ? onChat : onProfile}>
-          <strong><UserDisplayName name={name} uid={friend.uid} badge={friend.equippedBadge} compact /></strong>
+          <strong><UserDisplayName name={name} uid={friend.uid} badges={friend.equippedBadges} badge={friend.equippedBadge} compact /></strong>
           <small>UID {formatUid(friend.uid)} · {friend.levelName || '初入E院'}</small>
         </button>
         {!searching ? (

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { ImageViewer, type ImageViewerItem } from '@/components/ImageViewer'
+import { FishModeCommentComposer } from '@/components/FishModeCommentComposer'
 import { FavoriteButton, LikeButton } from '@/components/PostActions'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
@@ -15,6 +16,10 @@ export type FishModeMediaSource = {
   contentImages?: readonly string[]
   media?: readonly ForumDiscoveryMedia[]
   sticker?: ForumDiscoverySticker | null
+}
+
+export type FishModeOpenOptions = {
+  focusComments?: boolean
 }
 
 type FishModeMediaEntry = {
@@ -196,10 +201,43 @@ export function ForumFishModePostRow({ post, minimal = false, active = false, on
   post: ForumDiscoveryPost
   minimal?: boolean
   active?: boolean
-  onOpen: (postId: string) => void
+  onOpen: (postId: string, options?: FishModeOpenOptions) => void
 }>) {
+  const [replyCount, setReplyCount] = useState(Math.max(post.replyCount, 0))
+  const [commentOpen, setCommentOpen] = useState(false)
+  const [feedback, setFeedback] = useState('')
   const authorName = post.author.displayName || post.author.nickname
   const openPost = () => onOpen(post.id)
+  const openComments = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onOpen(post.id, { focusComments: true })
+  }
+  const openQuickComment = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setFeedback('')
+    setCommentOpen(true)
+  }
+
+  useEffect(() => {
+    setReplyCount(Math.max(post.replyCount, 0))
+  }, [post.id, post.replyCount])
+
+  useEffect(() => {
+    const onReplyCount = (event: Event) => {
+      const detail = (event as CustomEvent<{ postId?: string; count?: number }>).detail
+      if (detail?.postId !== post.id || typeof detail.count !== 'number') return
+      setReplyCount(Math.max(detail.count, 0))
+    }
+    window.addEventListener('ecfc:post-reply-count', onReplyCount)
+    return () => window.removeEventListener('ecfc:post-reply-count', onReplyCount)
+  }, [post.id])
+
+  useEffect(() => {
+    if (!feedback) return
+    const timer = window.setTimeout(() => setFeedback(''), 2200)
+    return () => window.clearTimeout(timer)
+  }, [feedback])
+
   const onContentKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
@@ -214,7 +252,7 @@ export function ForumFishModePostRow({ post, minimal = false, active = false, on
           <span className="fish-mode-avatar" aria-hidden="true">
             <SafeAvatar src={post.author.avatarUrl} name={authorName} uid={post.author.uid} variant="avatar-sm" className="fish-mode-avatar-image" textClassName="fish-mode-avatar-fallback" />
           </span>
-          <UserDisplayName name={authorName} uid={post.author.uid} badge={post.author.equippedBadge} badgeInteraction="static" compact />
+          <UserDisplayName name={authorName} uid={post.author.uid} badges={post.author.equippedBadges} badge={post.author.equippedBadge} badgeInteraction="static" compact />
         </Link>
         <span className="fish-mode-uid">· UID {formatUid(post.author.uid)}</span>
         {post.board.name && !minimal ? <span className="fish-mode-board">· {post.board.name}</span> : null}
@@ -230,7 +268,7 @@ export function ForumFishModePostRow({ post, minimal = false, active = false, on
       <FishModeMediaDisclosure source={postMediaSource(post)} minimal={minimal} />
 
       <footer className="fish-mode-post-footer">
-        <span className="fish-mode-post-stat">评论 {post.replyCount}</span>
+        <button type="button" className="fish-mode-post-stat fish-mode-post-comment" onClick={openComments} aria-label="查看评论">评论 {replyCount}</button>
         <LikeButton
           postId={post.id}
           initialLiked={post.likedByMe}
@@ -245,8 +283,23 @@ export function ForumFishModePostRow({ post, minimal = false, active = false, on
           refreshOnSuccess={false}
           className="fish-mode-favorite-button"
         />
-        <button type="button" className="fish-mode-preview-button" onClick={openPost}>打开预览</button>
+        <button type="button" className="fish-mode-quick-comment-trigger" onClick={openQuickComment}>说点什么</button>
+        <span className="fish-mode-post-stat">浏览 {post.viewCount}</span>
       </footer>
+      {commentOpen ? (
+        <FishModeCommentComposer
+          postId={post.id}
+          onCancel={() => setCommentOpen(false)}
+          onSubmitted={() => {
+            const nextCount = replyCount + 1
+            setReplyCount(nextCount)
+            setCommentOpen(false)
+            setFeedback('已评论')
+            window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId: post.id, count: nextCount } }))
+          }}
+        />
+      ) : null}
+      {feedback ? <span className="fish-mode-inline-feedback" role="status">{feedback}</span> : null}
     </article>
   )
 }

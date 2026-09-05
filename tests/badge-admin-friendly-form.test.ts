@@ -73,7 +73,9 @@ test('targeted concert reconciliation remains additive and idempotent', () => {
   assert.equal(planConcertBadgeAwards({ attendances: facts, badges: [badge] }).length, 1)
   assert.equal(planConcertBadgeAwards({ attendances: facts, badges: [badge], ownedBadgeIds: new Set(['show_badge']) }).length, 0)
   const schema = read('prisma/schema.prisma')
-  assert.match(schema, /@@unique\(\[userId, badgeId\]\)/)
+  const userBadge = schema.slice(schema.indexOf('model UserBadge'), schema.indexOf('model UserBadgeShowcase'))
+  assert.match(userBadge, /activeKey\s+String\?\s+@unique/)
+  assert.doesNotMatch(userBadge, /@@unique\(\[userId, badgeId\]\)/)
 })
 
 test('admin image flow previews PNG/WebP and never converts alpha images to JPEG', () => {

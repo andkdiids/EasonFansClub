@@ -28,6 +28,7 @@ export type ProfilePageSurfaceProfile = {
   createdAt: Date
   wallVisibility: ProfileWallVisibility
   publicLiveCount: number
+  equippedBadges?: EquippedBadgeView[]
   equippedBadge: EquippedBadgeView | null
   badgeSummary?: BadgeCollectionView | null
   privacy: UserPrivacySettings
@@ -95,6 +96,7 @@ export function ProfilePageSurface({
         createdAt={profile.createdAt}
         avatarUrl={profile.avatarUrl}
         backgroundUrl={profile.backgroundUrl}
+        equippedBadges={profile.equippedBadges}
         equippedBadge={profile.equippedBadge}
         badgeInteraction={isSelf ? 'static' : 'interactive'}
         showGrowth
@@ -120,7 +122,7 @@ export function ProfilePageSurface({
         </p>
       </section>
 
-      {isSelf || profile.privacy.showBadgeHistory ? <BadgeMiniShowcase uid={profile.uid} summary={profile.badgeSummary || null} equippedBadge={profile.equippedBadge} isSelf={isSelf} /> : null}
+      {isSelf || profile.privacy.showBadgeHistory ? <BadgeMiniShowcase uid={profile.uid} summary={profile.badgeSummary || null} equippedBadges={profile.equippedBadges} equippedBadge={profile.equippedBadge} isSelf={isSelf} /> : null}
 
       <div className="profile-actions-scroll min-w-0" aria-label={isSelf ? '个人操作' : '好友操作'}>
         <div className="flex w-max min-w-full flex-nowrap items-center gap-2 py-0.5">

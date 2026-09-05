@@ -13,7 +13,8 @@ import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { parseNotificationCategory, type NotificationCategory, type UnifiedNotification, type UnreadSummary } from '@/lib/notifications'
+import { parseNotificationCategory, type NotificationCategory } from '@/lib/notification-categories'
+import type { UnifiedNotification, UnreadSummary } from '@/lib/notifications'
 import { shouldRefreshNotificationList } from '@/lib/notification-refresh-policy'
 import { safeInternalPathOrNull } from '@/lib/url-safety'
 import type { FriendDockUser } from '@/lib/friend-types'
@@ -155,6 +156,7 @@ function getNotificationActorCardFriend(item: UnifiedNotification): FriendDockUs
     createdAt,
     level: 1,
     levelName: '初入E院',
+    equippedBadges: item.actorBadges || [],
     equippedBadge: item.actorBadge,
     profile: null,
     relationshipStatus: 'NONE',

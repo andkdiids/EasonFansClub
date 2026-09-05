@@ -3,6 +3,7 @@ import { Prisma, type PharmacyCampaignStatus, type PharmacyDrawResultType, type 
 import { createAdminActionAudit, adminAuditOperations } from '@/lib/admin-audit'
 import { getBadgeAvailability } from '@/lib/badge-phase2'
 import { grantBadgeWithTransaction } from '@/lib/badge-service'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { processBadgeGrantEffects } from '@/lib/badge-phase3'
 import { resolveBadgeAcquisitionDescription } from '@/lib/badge-acquisition'
 import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from '@/lib/badge-rules'
@@ -447,7 +448,7 @@ export async function executePharmacyDraw(input: { userId: string; campaignId: s
     const drawId = randomUUID()
     const isBadge = selected.type === 'BADGE'
     const ownedBadge = isBadge && selected.badgeId
-      ? await tx.userBadge.findUnique({ where: { userId_badgeId: { userId: input.userId, badgeId: selected.badgeId } }, select: { id: true } })
+      ? await tx.userBadge.findFirst({ where: { userId: input.userId, badgeId: selected.badgeId, ...activeUserBadgeWhere(now) }, select: { id: true } })
       : null
     const predictedDuplicate = Boolean(ownedBadge)
     const resultType: PharmacyDrawResultType = isBadge ? (predictedDuplicate ? 'BADGE_DUPLICATE' : 'BADGE_NEW') : 'POINTS_REWARD'
@@ -502,6 +503,7 @@ export async function executePharmacyDraw(input: { userId: string; campaignId: s
         badgeId: selected.badgeId,
         sourceType: ANGEL_GIFT_BADGE_SOURCE,
         sourceId: drawId,
+        grantKey: `pharmacy-draw:${drawId}`,
         grantReason: `于「${ANGEL_GIFT_MODULE_NAME}」主题「${campaign.title}」执药获得`,
         obtainedAt: now,
         deferPhase3Effects: true,
@@ -710,7 +712,7 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
   const badgePrizeRows = campaign.PharmacyPrize.filter((prize) => prize.type === 'BADGE' && prize.Badge && prize.badgeId)
   const badgeIds = [...new Set(badgePrizeRows.map((prize) => prize.badgeId!).filter(Boolean))]
   const [ownedRows, inventoryRows, history] = await Promise.all([
-    userId && badgeIds.length ? prisma.userBadge.findMany({ where: { userId, badgeId: { in: badgeIds } }, select: { badgeId: true, obtainedAt: true } }) : Promise.resolve([]),
+    userId && badgeIds.length ? prisma.userBadge.findMany({ where: { userId, badgeId: { in: badgeIds }, ...activeUserBadgeWhere(now) }, select: { badgeId: true, obtainedAt: true } }) : Promise.resolve([]),
     userId ? prisma.pharmacyDuplicateInventory.findMany({ where: { userId, campaignId: campaign.id, quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { sourceBadgeId: true, quantity: true, SourceBadge: { select: { id: true, name: true, iconUrl: true } } } }) : Promise.resolve([]),
     userId ? getPharmacyHistoryPage(userId, campaign.id) : Promise.resolve({ items: [] as PharmacyHistoryItem[], hasMore: false, page: 1, pageSize: PHARMACY_HISTORY_PAGE_SIZE }),
   ])

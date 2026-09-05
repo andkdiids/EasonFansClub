@@ -5,7 +5,7 @@ import { UserDisplayName } from '@/components/UserDisplayName'
 import { BackButton } from '@/components/BackButton'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
-import { getEquippedBadgeForUser } from '@/lib/badge-service'
+import { getEquippedBadgesForUser } from '@/lib/badge-service'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
@@ -37,7 +37,7 @@ export default async function ProfileWallPage({ params, searchParams }: { params
     })
     if (markedNotifications > 0) emitRealtime(viewer.id, 'notification')
   }
-  const equippedBadge = await getEquippedBadgeForUser(target.id)
+  const equippedBadges = await getEquippedBadgesForUser(target.id)
   const name = getPublicUserDisplayName(target)
 
   return (
@@ -47,7 +47,7 @@ export default async function ProfileWallPage({ params, searchParams }: { params
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-sky-100 bg-white/85 p-5 shadow-sm">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Profile Wall</p>
-            <h1 className="mt-1 text-2xl font-black text-brand-950">给 <UserDisplayName name={name} uid={target.uid} badge={equippedBadge} compact /> 留言</h1>
+            <h1 className="mt-1 text-2xl font-black text-brand-950">给 <UserDisplayName name={name} uid={target.uid} badges={equippedBadges} compact /> 留言</h1>
           </div>
           <Link href={viewer?.uid === target.uid ? '/profile' : `/user/${formatUid(target.uid)}`} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">返回主页</Link>
         </div>

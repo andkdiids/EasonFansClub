@@ -403,6 +403,8 @@ CREATE TABLE `Badge` (
     `visibility` ENUM('PUBLIC', 'HIDDEN', 'SECRET') NOT NULL DEFAULT 'PUBLIC',
     `rarity` ENUM('COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED') NOT NULL DEFAULT 'COMMON',
     `grantType` ENUM('AUTO', 'MANUAL', 'EVENT') NOT NULL DEFAULT 'MANUAL',
+    `validityType` ENUM('PERMANENT', 'DAYS') NOT NULL DEFAULT 'PERMANENT',
+    `validityDays` INTEGER NULL,
     `isWearable` BOOLEAN NOT NULL DEFAULT true,
     `isEnabled` BOOLEAN NOT NULL DEFAULT true,
     `effectType` ENUM('NONE', 'SHINE', 'GLOW', 'SPARKLE') NOT NULL DEFAULT 'NONE',
@@ -444,7 +446,7 @@ CREATE TABLE `Badge` (
 CREATE TABLE `BadgeRule` (
     `id` VARCHAR(191) NOT NULL,
     `badgeId` VARCHAR(191) NOT NULL,
-    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY') NOT NULL,
+    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY', 'BADGE_OWNERSHIP') NOT NULL,
     `operator` ENUM('GTE', 'LTE', 'EQ') NOT NULL DEFAULT 'GTE',
     `threshold` INTEGER NULL,
     `secondaryThreshold` INTEGER NULL,
@@ -455,6 +457,19 @@ CREATE TABLE `BadgeRule` (
 
     UNIQUE INDEX `BadgeRule_badgeId_key`(`badgeId`),
     INDEX `BadgeRule_ruleType_isEnabled_idx`(`ruleType`, `isEnabled`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `BadgeRuleDependency` (
+    `id` VARCHAR(191) NOT NULL,
+    `sourceBadgeId` VARCHAR(191) NOT NULL,
+    `targetBadgeId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `BadgeRuleDependency_sourceBadgeId_idx`(`sourceBadgeId`),
+    INDEX `BadgeRuleDependency_targetBadgeId_idx`(`targetBadgeId`),
+    UNIQUE INDEX `BadgeRuleDependency_sourceBadgeId_targetBadgeId_key`(`sourceBadgeId`, `targetBadgeId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3942,6 +3957,13 @@ CREATE TABLE `UserBadge` (
     `displayOrder` INTEGER NOT NULL DEFAULT 0,
     `grantedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `obtainedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `awardedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `expiresAt` DATETIME(3) NULL,
+    `expiredAt` DATETIME(3) NULL,
+    `revokedAt` DATETIME(3) NULL,
+    `status` ENUM('ACTIVE', 'EXPIRED', 'REVOKED') NOT NULL DEFAULT 'ACTIVE',
+    `activeKey` VARCHAR(191) NULL,
+    `grantKey` VARCHAR(191) NULL,
     `sourceType` VARCHAR(32) NULL,
     `sourceId` VARCHAR(191) NULL,
     `grantReason` VARCHAR(500) NULL,
@@ -3950,11 +3972,40 @@ CREATE TABLE `UserBadge` (
     `userId` VARCHAR(191) NOT NULL,
     `badgeId` VARCHAR(191) NOT NULL,
 
+    UNIQUE INDEX `UserBadge_activeKey_key`(`activeKey`),
+    UNIQUE INDEX `UserBadge_grantKey_key`(`grantKey`),
     INDEX `UserBadge_userId_displayOrder_idx`(`userId`, `displayOrder`),
     INDEX `UserBadge_userId_obtainedAt_idx`(`userId`, `obtainedAt`),
-    INDEX `UserBadge_badgeId_idx`(`badgeId`),
+    INDEX `UserBadge_userId_status_expiresAt_idx`(`userId`, `status`, `expiresAt`),
+    INDEX `UserBadge_userId_badgeId_status_idx`(`userId`, `badgeId`, `status`),
+    INDEX `UserBadge_badgeId_status_idx`(`badgeId`, `status`),
     INDEX `UserBadge_grantedBy_createdAt_idx`(`grantedBy`, `createdAt`),
-    UNIQUE INDEX `UserBadge_userId_badgeId_key`(`userId`, `badgeId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserBadgeSource` (
+    `id` VARCHAR(191) NOT NULL,
+    `sourceKey` VARCHAR(191) NOT NULL,
+    `sourceType` VARCHAR(32) NOT NULL,
+    `sourceId` VARCHAR(191) NULL,
+    `isActive` BOOLEAN NOT NULL DEFAULT true,
+    `grantedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `expiresAt` DATETIME(3) NULL,
+    `expiredAt` DATETIME(3) NULL,
+    `revokedAt` DATETIME(3) NULL,
+    `grantReason` VARCHAR(500) NULL,
+    `grantedBy` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+    `userBadgeId` VARCHAR(191) NOT NULL,
+
+    UNIQUE INDEX `UserBadgeSource_sourceKey_key`(`sourceKey`),
+    INDEX `UserBadgeSource_userId_badgeId_isActive_idx`(`userId`, `badgeId`, `isActive`),
+    INDEX `UserBadgeSource_badgeId_sourceType_sourceId_isActive_idx`(`badgeId`, `sourceType`, `sourceId`, `isActive`),
+    INDEX `UserBadgeSource_userBadgeId_isActive_idx`(`userBadgeId`, `isActive`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3970,6 +4021,23 @@ CREATE TABLE `UserBadgeShowcase` (
     INDEX `UserBadgeShowcase_badgeId_idx`(`badgeId`),
     UNIQUE INDEX `UserBadgeShowcase_userId_badgeId_key`(`userId`, `badgeId`),
     UNIQUE INDEX `UserBadgeShowcase_userId_slot_key`(`userId`, `slot`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserEquippedBadge` (
+    `id` VARCHAR(191) NOT NULL,
+    `position` INTEGER NOT NULL DEFAULT 0,
+    `equippedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+
+    INDEX `UserEquippedBadge_userId_idx`(`userId`),
+    INDEX `UserEquippedBadge_badgeId_idx`(`badgeId`),
+    INDEX `UserEquippedBadge_userId_position_idx`(`userId`, `position`),
+    UNIQUE INDEX `UserEquippedBadge_userId_badgeId_key`(`userId`, `badgeId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -4289,6 +4357,12 @@ ALTER TABLE `Badge` ADD CONSTRAINT `Badge_musicTourId_fkey` FOREIGN KEY (`musicT
 
 -- AddForeignKey
 ALTER TABLE `BadgeRule` ADD CONSTRAINT `BadgeRule_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `BadgeRuleDependency` ADD CONSTRAINT `BadgeRuleDependency_sourceBadgeId_fkey` FOREIGN KEY (`sourceBadgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `BadgeRuleDependency` ADD CONSTRAINT `BadgeRuleDependency_targetBadgeId_fkey` FOREIGN KEY (`targetBadgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `TodayEvent` ADD CONSTRAINT `TodayEvent_submittedById_fkey` FOREIGN KEY (`submittedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -5149,10 +5223,28 @@ ALTER TABLE `UserBadge` ADD CONSTRAINT `UserBadge_userId_fkey` FOREIGN KEY (`use
 ALTER TABLE `UserBadge` ADD CONSTRAINT `UserBadge_grantedBy_fkey` FOREIGN KEY (`grantedBy`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_userBadgeId_fkey` FOREIGN KEY (`userBadgeId`) REFERENCES `UserBadge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_grantedBy_fkey` FOREIGN KEY (`grantedBy`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `UserBadgeShowcase` ADD CONSTRAINT `UserBadgeShowcase_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `UserBadgeShowcase` ADD CONSTRAINT `UserBadgeShowcase_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserEquippedBadge` ADD CONSTRAINT `UserEquippedBadge_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserEquippedBadge` ADD CONSTRAINT `UserEquippedBadge_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `UserBadgeTracking` ADD CONSTRAINT `UserBadgeTracking_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

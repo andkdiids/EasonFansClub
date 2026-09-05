@@ -130,6 +130,7 @@ export async function getBatchHistoricalBadgeMetrics(
     case 'WANT_LISTEN_MAX_STREAK':
     case 'BADGE_SERIES_COMPLETE':
     case 'ACTIVITY_PARTICIPATION':
+    case 'BADGE_OWNERSHIP':
     case 'BIRTHDAY_ZODIAC':
     case 'BIRTHDAY_TODAY':
       throw new Error(`该规则无法可靠判断限定期历史资格：${capability.basis}`)

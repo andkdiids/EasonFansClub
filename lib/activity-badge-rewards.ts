@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { hasValidActivityParticipation, type ActivityParticipationCheckInSnapshot } from '@/lib/activity-participation'
 import { grantBadge } from '@/lib/badge-service'
 import { prisma } from '@/lib/prisma'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
 export const ACTIVITY_PARTICIPATION_BADGE_SOURCE = 'ACTIVITY_PARTICIPATION'
 
@@ -193,6 +194,7 @@ export async function grantEligibleActivityBadges(options: GrantEligibleActivity
             sourceType: ACTIVITY_PARTICIPATION_BADGE_SOURCE,
             sourceId: activityId,
             grantReason: plan.reason,
+            grantKey: `activity:${activityId}`,
             obtainedAt: now,
             availabilityMode: 'CURRENT',
           })
@@ -217,6 +219,6 @@ export async function getActivityParticipationBadgeStats(input: { badgeId: strin
   const registrations = await loadValidActivityRegistrations(input.activityId, activity.endsAt, {}, now, 500)
   const userIds = [...new Set(registrations.map((registration) => registration.userId))]
   if (!userIds.length) return { eligibleCount: 0, ownedCount: 0, pendingCount: 0 }
-  const ownedCount = await prisma.userBadge.count({ where: { badgeId: input.badgeId, userId: { in: userIds } } })
+  const ownedCount = await prisma.userBadge.count({ where: { badgeId: input.badgeId, userId: { in: userIds }, ...activeUserBadgeWhere(now) } })
   return { eligibleCount: userIds.length, ownedCount, pendingCount: Math.max(0, userIds.length - ownedCount) }
 }

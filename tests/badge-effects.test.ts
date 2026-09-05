@@ -30,7 +30,7 @@ test('BadgeName applies badge animationEffect without coupling it to nickname sh
   assert.match(component, /export function BadgeName/)
   assert.match(component, /badgeNameEffectClass/)
   assert.match(component, /isBadgeNicknameShineEnabled/)
-  assert.match(component, /displayBadge && showBadgeIcon/)
+  assert.match(component, /displayBadgeName && showBadgeIcon/)
   assert.match(component, /<BadgeName badge=\{displayBadge\}/)
   assert.match(read('components/BadgeExhibitionHall.tsx'), /<BadgeName badge=\{badge\}/)
   assert.match(read('components/BadgeCollectionPanel.tsx'), /<BadgeName badge=\{badge\}/)

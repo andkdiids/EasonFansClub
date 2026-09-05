@@ -118,6 +118,21 @@ export function getCurrentZodiacSign(now = new Date(), timezone = BEIJING_TIME_Z
   return getZodiacSignFromBirthday(today)
 }
 
+/** Stable yearly business key for the zodiac period currently in progress. */
+export function getZodiacPeriodKey(now = new Date(), timezone = BEIJING_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(now)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  const sign = getZodiacSignFromBirthday({ month: Number(values.month), day: Number(values.day) })
+  if (!sign) return null
+  const range = ZODIAC_DATE_RANGES[sign]
+  const currentOrdinal = Number(values.month) * 100 + Number(values.day)
+  const startOrdinal = range.start.month * 100 + range.start.day
+  const endOrdinal = range.end.month * 100 + range.end.day
+  const crossesYear = startOrdinal > endOrdinal
+  const startYear = Number(values.year) - (crossesYear && currentOrdinal <= endOrdinal ? 1 : 0)
+  return `${startYear}-${String(range.start.month).padStart(2, '0')}-${String(range.start.day).padStart(2, '0')}:${sign}`
+}
+
 export function isCurrentDateWithinZodiac(sign: ZodiacSign | string | null | undefined, now = new Date(), timezone = BEIJING_TIME_ZONE) {
   return isZodiacSign(sign) && getCurrentZodiacSign(now, timezone) === sign
 }

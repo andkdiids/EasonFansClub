@@ -12,7 +12,7 @@ import { withDbTimeout } from '@/lib/db-timeout'
 import { locationFromProfile } from '@/lib/user-location'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationText } from '@/lib/content-moderation'
-import { getBadgeProfileSummary, getEquippedBadgeForUser } from '@/lib/badge-service'
+import { getBadgeProfileSummary, getEquippedBadgesForUser } from '@/lib/badge-service'
 import { getProfileRecordPagination } from '@/lib/profile-page'
 import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
@@ -123,12 +123,12 @@ export default async function PublicUserPage({ params }: PageProps) {
   const avatar = profileImageUrl(user.Profile.avatarUrl || user.avatarUrl)
   const background = profileImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
   const bio = publicModerationText(user.Profile.bio || user.bio || '', user.Profile.bioModerationStatus === 'VIOLATION' || user.bioModerationStatus === 'VIOLATION' ? 'VIOLATION' : 'NORMAL')
-  const [growth, recentMessagesPage, equippedBadge, badgeSummary, publicLiveCount, recordPreferences] = await Promise.all([
+  const [growth, recentMessagesPage, equippedBadges, badgeSummary, publicLiveCount, recordPreferences] = await Promise.all([
     getGrowthSummarySafe(user.experience),
     visibility.isSelf || visibility.settings.showCheckInMessages
       ? loadProfileRecentMessagesPage(user.id, viewer?.id)
       : Promise.resolve({ messages: [], pagination: getProfileRecordPagination(0, 1) }),
-    getEquippedBadgeForUser(user.id),
+    getEquippedBadgesForUser(user.id),
     visibility.isSelf || visibility.settings.showBadgeHistory ? getBadgeProfileSummary(user.id, viewer?.id) : Promise.resolve(null),
     visibility.isSelf || visibility.settings.showConcertHistory
       ? prisma.userMusicConcert.count({ where: { userId: user.id, isPublic: true, MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } } } })
@@ -161,7 +161,8 @@ export default async function PublicUserPage({ params }: PageProps) {
         createdAt: user.createdAt,
         wallVisibility: user.Profile.wallVisibility || 'PUBLIC',
         publicLiveCount,
-        equippedBadge,
+        equippedBadges,
+        equippedBadge: equippedBadges[0] || null,
         badgeSummary,
         privacy: visibility.settings,
         recordPreferences,

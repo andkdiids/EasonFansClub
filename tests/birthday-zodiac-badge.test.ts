@@ -119,10 +119,10 @@ test('daily scans select the current zodiac period while birthday scans stay on 
   assert.match(birthdayBranch, /evaluateBadgeRule\(/)
   assert.doesNotMatch(birthdayBranch, /isBirthdayToday/)
   assert.match(read('lib/birthday.ts'), /grantCurrentZodiacBadgeRewards\(date\)/)
-  assert.match(read('lib/birthday.ts'), /evaluateUserAutoBadges\(user\.id, \['BIRTHDAY_TODAY'\], date\)/)
-  assert.match(read('app/api/auth/login/route.ts'), /triggerBadgeEvaluation\(user\.id, 'USER_LOGIN'\)/)
-  assert.match(read('app/profile/page.tsx'), /triggerBadgeEvaluation\(user\.id, 'USER_ACTIVE'\)/)
-  assert.match(read('app/api/users/me/route.ts'), /triggerBadgeEvaluation\(guard\.user\.id, 'USER_BIRTHDAY_UPDATED'\)/)
+  assert.match(read('lib/birthday.ts'), /evaluateUserAutoBadges\(user\.id, \['BIRTHDAY_TODAY'\], date, `birthday:\$\{dateKey\}`\)/)
+  assert.match(read('app/api/auth/login/route.ts'), /triggerBadgeEvaluation\(user\.id, 'USER_LOGIN', randomUUID\(\)\)/)
+  assert.match(read('app/profile/page.tsx'), /triggerBadgeEvaluation\(user\.id, 'USER_ACTIVE', getShanghaiDateKey\(\)\)/)
+  assert.match(read('app/api/users/me/route.ts'), /triggerBadgeEvaluation\(guard\.user\.id, 'USER_BIRTHDAY_UPDATED', profile\.birthdaySetAt/)
 })
 
 test('admin and public acquisition copy keep zodiac period and birthday-day rules separate', () => {
@@ -149,11 +149,13 @@ test('schema and migration add only the controlled birthday rule enums; seed doe
   assert.doesNotMatch(read('prisma/seed.ts'), /BIRTHDAY_ZODIAC|白羊座生日|金牛座生日/)
 })
 
-test('central grant contract remains unique and no revoke path is attached to birthday updates', () => {
+test('central grant contract is repeatable by period and no revoke path is attached to birthday updates', () => {
   const schema = read('prisma/schema.prisma')
   const service = read('lib/badge-service.ts')
   const route = read('app/api/users/me/route.ts')
-  assert.match(schema.slice(schema.indexOf('model UserBadge')), /@@unique\(\[userId, badgeId\]\)/)
-  assert.match(service, /userId_badgeId/)
+  const userBadge = schema.slice(schema.indexOf('model UserBadge'), schema.indexOf('model UserBadgeShowcase'))
+  assert.match(userBadge, /activeKey\s+String\?\s+@unique/)
+  assert.match(service, /activeUserBadgeWhere/)
+  assert.match(service, /grantKey/)
   assert.doesNotMatch(route, /revokeBadge\(/)
 })

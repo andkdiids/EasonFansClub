@@ -157,7 +157,7 @@ type LeaderboardRow = {
   User: LeaderboardUser
 }
 
-function serializeLeaderboardRow(row: LeaderboardRow, rank: number, equippedBadge?: EquippedBadgeView | null) {
+function serializeLeaderboardRow(row: LeaderboardRow, rank: number, equippedBadges: readonly EquippedBadgeView[] = []) {
   const safeName = getPublicUserDisplayName(row.User)
   return {
     rank,
@@ -176,7 +176,8 @@ function serializeLeaderboardRow(row: LeaderboardRow, rank: number, equippedBadg
       nickname: safeName,
       displayName: safeName,
       avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
-      equippedBadge: equippedBadge || null,
+      equippedBadges: [...equippedBadges],
+      equippedBadge: equippedBadges[0] || null,
     },
   }
 }
@@ -417,7 +418,7 @@ export async function getWantListenLeaderboard(input: {
   const topRows = rankedRows.filter((item) => item.rank <= limit)
   const self = input.userId ? rankedRows.find((item) => item.row.userId === input.userId) || null : null
   const badgeTargets = [...topRows, ...(self && self.rank > limit ? [self] : [])]
-  const equippedBadgeMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId))
+  const equippedBadgesMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId))
   return {
     mode: input.mode,
     period: periodType,
@@ -428,9 +429,9 @@ export async function getWantListenLeaderboard(input: {
     cacheKey: resolvedRange
       ? `want-listen:${input.mode}:${resolvedRange.cacheKey}`
       : `want-listen:${input.mode}:${periodType}:${period.periodKey}`,
-    rows: topRows.map((item) => serializeLeaderboardRow(item.row, item.rank, equippedBadgeMap.get(item.row.userId) || null)),
+    rows: topRows.map((item) => serializeLeaderboardRow(item.row, item.rank, equippedBadgesMap.get(item.row.userId) || [])),
     self: self && self.rank > limit
-      ? serializeLeaderboardRow(self.row, self.rank, equippedBadgeMap.get(self.row.userId) || null)
+      ? serializeLeaderboardRow(self.row, self.rank, equippedBadgesMap.get(self.row.userId) || [])
       : null,
   }
 }

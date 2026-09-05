@@ -15,7 +15,15 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import type { FriendDockUser } from '@/lib/friend-types'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
+import { notificationCategoryValues, parseNotificationCategory, type NotificationCategory } from '@/lib/notification-categories'
+// Friend-request identity keys live in the browser-safe `@/lib/notification-keys`
+// module. Re-exported below so existing importers keep working, but anything
+// client-reachable must import them from there instead of from this module,
+// which owns Prisma queries and badge lookups (badge-service -> node:crypto).
+import { FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX, FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX } from '@/lib/notification-keys'
 export { getNotificationTarget } from '@/lib/notification-target'
+export { notificationCategoryValues, parseNotificationCategory } from '@/lib/notification-categories'
+export type { NotificationCategory } from '@/lib/notification-categories'
 
 const MAX_NOTIFICATION_PAGE_SIZE = 50
 const CONTENT_IMAGE_MARKER = /\[\[content-image:[^\]]+\]\]/g
@@ -23,8 +31,6 @@ const REPLY_UNAVAILABLE_TEXT = '该回复已被删除或不可查看'
 const REPLY_NOT_FOUND_TEXT = '该回复不存在或已失效'
 const REPLY_DELETED_TEXT = '该回复已被删除'
 const REPLY_NO_PERMISSION_TEXT = '你暂时无法查看这条回复'
-export const notificationCategoryValues = ['all', 'reply', 'like', 'application', 'feedback', 'system', 'review'] as const
-export type NotificationCategory = typeof notificationCategoryValues[number]
 const POPUP_SYSTEM_TYPES: SystemNotificationType[] = ['SYSTEM', 'ANNOUNCEMENT', 'MAINTENANCE', 'SECURITY']
 const NOTIFICATION_RECONCILIATION_TTL_MS = 60_000
 const MAX_NOTIFICATION_RECONCILIATION_USERS = 10_000
@@ -160,14 +166,6 @@ export function getNotificationCategoryFilter(category: string, canReview = fals
   }
 }
 
-export function parseNotificationCategory(value: unknown): NotificationCategory {
-  if (notificationCategoryValues.includes(value as NotificationCategory)) return value as NotificationCategory
-  // Keep old bookmarked URLs harmless: the removed tabs resolve to the main
-  // feed instead of querying private-message or wall-only rows.
-  if (value === 'friend') return 'application'
-  return 'all'
-}
-
 function getSystemNotificationCategoryFilter(category: NotificationCategory): Prisma.SystemNotificationWhereInput {
   if (category === 'all') return {}
   if (category === 'feedback') return { link: { startsWith: '/feedback/' } }
@@ -216,16 +214,20 @@ function getSystemNotificationCategorySql(category: NotificationCategory) {
   return Prisma.empty
 }
 
-export const FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX = 'friend-request:'
-export const FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX = 'friend-request-accepted:'
-
-export function getFriendRequestNotificationKey(requestId: string) {
-  return `${FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX}${requestId}`
-}
-
-export function getFriendRequestAcceptedNotificationKey(requestId: string) {
-  return `${FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX}${requestId}`
-}
+/**
+ * Re-exported for backward compatibility with existing importers.
+ *
+ * The definitions live in '@/lib/notification-keys', a browser-safe module.
+ * Anything client-reachable must import them from there instead of from this
+ * module, which owns Prisma queries and badge lookups and reaches `node:crypto`
+ * through badge-service.
+ */
+export {
+  FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX,
+  FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX,
+  getFriendRequestAcceptedNotificationKey,
+  getFriendRequestNotificationKey,
+} from '@/lib/notification-keys'
 
 function getNotificationTypeLabel(type: string, link?: string | null, source?: 'personal' | 'system', key?: string | null) {
   if (type === 'FEEDBACK' || link?.startsWith('/feedback/') || isLegacyFeedbackNotification(type, key)) return '反馈'
@@ -299,6 +301,8 @@ export type UnifiedNotification = {
   actorName: string | null
   actorUid: number | null
   actorAvatarUrl: string | null
+  actorBadges: EquippedBadgeView[]
+  /** @deprecated use actorBadges */
   actorBadge: EquippedBadgeView | null
   /** 当前登录用户可见的公开资料卡数据；系统通知和无 actor 通知为 null。 */
   actorProfile: FriendDockUser | null
@@ -981,7 +985,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
     ? actorBadgeResult.value
     : (() => {
         logNotificationError('list.actor-badge', { userId, page, pageSize, category }, actorBadgeResult.reason)
-        return new Map<string, EquippedBadgeView>()
+        return new Map<string, EquippedBadgeView[]>()
       })()
   const actorFriendshipRows = friendshipResult.status === 'fulfilled'
     ? friendshipResult.value
@@ -1049,7 +1053,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
               createdAt: actor.createdAt.toISOString(),
               level: growth.level,
               levelName: growth.levelName,
-              equippedBadge: actorBadgeMap.get(actor.id) || null,
+              equippedBadges: actorBadgeMap.get(actor.id) || [],
+              equippedBadge: actorBadgeMap.get(actor.id)?.[0] || null,
               profile: actor.Profile
                 ? {
                     // Keep the public profile field public; the private
@@ -1085,7 +1090,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         actorName: actorDisplayName,
         actorUid: actor?.uid || null,
         actorAvatarUrl: publicImageUrl(actor?.Profile?.avatarUrl || actor?.avatarUrl),
-        actorBadge: actor ? actorBadgeMap.get(actor.id) || null : null,
+        actorBadges: actor ? actorBadgeMap.get(actor.id) || [] : [],
+        actorBadge: actor ? actorBadgeMap.get(actor.id)?.[0] || null : null,
         actorProfile,
         actorUnavailable: Boolean(actor && !actorProfile),
         likeCount,
@@ -1124,6 +1130,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       actorName: null,
       actorUid: null,
       actorAvatarUrl: null,
+      actorBadges: [],
       actorBadge: null,
       actorProfile: null,
       actorUnavailable: false,
@@ -1383,6 +1390,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       actorName: null,
       actorUid: null,
       actorAvatarUrl: null,
+      actorBadges: [],
       actorBadge: null,
       actorProfile: null,
       actorUnavailable: false,

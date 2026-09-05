@@ -879,7 +879,7 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
   const state = await getWantListenSessionState(input.userId, input.sessionId)
   if (result.finalized && !result.duplicate) {
     await syncUserAchievements(input.userId, ['SPECIAL']).catch((error) => console.error('[want-listen.achievements]', error))
-    triggerBadgeEvaluation(input.userId, 'WANT_LISTEN_SESSION_FINISHED')
+    triggerBadgeEvaluation(input.userId, 'WANT_LISTEN_SESSION_FINISHED', input.sessionId)
   }
   const answerQuestion = state.question
   return {
@@ -1017,7 +1017,7 @@ export async function finishWantListenSession(userId: string, sessionId: string,
 
   if (result.finalized && !result.duplicate) {
     await syncUserAchievements(userId, ['SPECIAL']).catch((error) => console.error('[want-listen.achievements]', error))
-    triggerBadgeEvaluation(userId, 'WANT_LISTEN_SESSION_FINISHED')
+    triggerBadgeEvaluation(userId, 'WANT_LISTEN_SESSION_FINISHED', sessionId)
   }
   return getWantListenSessionState(userId, sessionId)
 }

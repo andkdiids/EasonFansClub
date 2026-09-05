@@ -37,6 +37,8 @@ export type EntertainmentLeaderboardRow = {
     nickname: string
     displayName: string
     avatarUrl: string | null
+    equippedBadges?: EquippedBadgeView[]
+    /** @deprecated use equippedBadges */
     equippedBadge?: EquippedBadgeView | null
   }
   primaryValue: number
@@ -131,6 +133,7 @@ function wantListenRows(rows: Awaited<ReturnType<typeof getWantListenLeaderboard
       nickname: row.user.nickname,
       displayName: row.user.displayName,
       avatarUrl: row.user.avatarUrl,
+      equippedBadges: row.user.equippedBadges || [],
       equippedBadge: row.user.equippedBadge,
     },
     primaryValue: row.score,
@@ -152,6 +155,7 @@ function guessSongRows(rows: Awaited<ReturnType<typeof getGuessSongLeaderboard>>
       nickname: row.nickname,
       displayName: row.nickname,
       avatarUrl: row.avatarUrl,
+      equippedBadges: row.equippedBadges || [],
       equippedBadge: row.equippedBadge,
     },
     primaryValue: row.score,

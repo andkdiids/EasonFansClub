@@ -7,15 +7,17 @@ import type { EquippedBadgeView } from '@/lib/badge-types'
 import type { ShareCardData } from '@/lib/share-card'
 import { ShareButton } from '@/components/share/ShareButton'
 
-export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid, authorBadge, postActions, shareTitle, shareText, shareCardData }: Readonly<{
+export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid, authorBadges, authorBadge, postActions, shareTitle, shareText, shareCardData, canShare }: Readonly<{
   authorName: string
   authorAvatar: string | null
   authorUid: number
+  authorBadges?: EquippedBadgeView[]
   authorBadge?: EquippedBadgeView | null
   postActions?: ReactNode
   shareTitle: string
   shareText: string
   shareCardData: ShareCardData
+  canShare?: boolean
 }>) {
   const router = useRouter()
 
@@ -34,17 +36,17 @@ export function ForumDiscoveryDetailTopbar({ authorName, authorAvatar, authorUid
             <img src={authorAvatar} alt="" />
           ) : String(authorUid).slice(0, 1)}
         </span>
-        <UserDisplayName name={authorName} uid={authorUid} badge={authorBadge} compact />
+        <UserDisplayName name={authorName} uid={authorUid} badges={authorBadges} badge={authorBadge} compact />
       </div>
       {postActions ? <span className="forum-discovery-detail-post-actions">{postActions}</span> : null}
-      <ShareButton
+      {canShare !== false ? <ShareButton
         data={shareCardData}
         linkTitle={shareTitle}
         linkText={shareText}
         triggerClassName="forum-discovery-detail-share shrink-0 whitespace-nowrap"
         messageClassName="forum-discovery-share-message"
         ariaLabel="分享帖子"
-      />
+      /> : null}
     </header>
   )
 }

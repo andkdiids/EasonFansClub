@@ -23,7 +23,7 @@ export function UserProfileSummary({ user, growth, onActivate }: Readonly<{ user
   const summary = <>
       <span className="sidebar-avatar"><UserAvatar user={user} /></span>
       <span>
-  <strong><UserDisplayName name={name} uid={user.uid} badge={user.equippedBadge} compact /></strong>
+  <strong><UserDisplayName name={name} uid={user.uid} badges={user.equippedBadges} badge={user.equippedBadge} compact /></strong>
   <small>{resolveGrowthLevelName(growth.level, growth.levelName)}</small>
 </span>
     </>

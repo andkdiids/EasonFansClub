@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ForumDiscoveryCard } from '@/components/ForumDiscoveryCard'
-import { ForumFishModePostRow } from '@/components/ForumFishModePostRow'
+import { ForumFishModePostRow, type FishModeOpenOptions } from '@/components/ForumFishModePostRow'
 import { ForumFishModePreview } from '@/components/ForumFishModePreview'
 import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
 import {
@@ -128,6 +128,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const [minimalMode, setMinimalMode] = useState(false)
   const [fishActivePostId, setFishActivePostId] = useState<string | null>(null)
   const [fishPreviewPostId, setFishPreviewPostId] = useState<string | null>(null)
+  const [fishPreviewFocusComments, setFishPreviewFocusComments] = useState(false)
   const seenPostIdsRef = useRef(new Set<string>())
   const seenAuthorIdsRef = useRef(new Set<string>())
   const loadingMoreRef = useRef(false)
@@ -160,12 +161,13 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
     }
   }, [sessionKey])
 
-  const openFishPreview = useCallback((postId: string) => {
+  const openFishPreview = useCallback((postId: string, options?: FishModeOpenOptions) => {
     if (!isDesktop || presentationMode !== 'fish') return
     const url = new URL(window.location.href)
     url.hash = `fish-post=${encodeURIComponent(postId)}`
     setFishActivePostId(postId)
     setFishPreviewPostId(postId)
+    setFishPreviewFocusComments(Boolean(options?.focusComments))
     if (fishPreviewPostId) {
       window.history.replaceState({ ...window.history.state, fishPreviewPostId: postId }, '', `${url.pathname}${url.search}${url.hash}`)
     } else {
@@ -177,6 +179,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const closeFishPreview = useCallback(() => {
     if (!fishPreviewPostId) return
     setFishPreviewPostId(null)
+    setFishPreviewFocusComments(false)
     if (fishPreviewHistoryRef.current) {
       fishPreviewHistoryRef.current = false
       window.history.back()
@@ -325,6 +328,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
       initializedFishHashRef.current = false
       setFishActivePostId(null)
       setFishPreviewPostId(null)
+      setFishPreviewFocusComments(false)
       if (readFishPreviewId(window.location.hash)) {
         fishPreviewHistoryRef.current = false
         window.history.replaceState(window.history.state, '', currentUrlWithoutFishPreview())
@@ -336,10 +340,12 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
       if (!postId) {
         fishPreviewHistoryRef.current = false
         setFishPreviewPostId(null)
+        setFishPreviewFocusComments(false)
       } else if (postsRef.current.length && postsRef.current.some((post) => post.id === postId)) {
         fishPreviewHistoryRef.current = false
         setFishActivePostId(postId)
         setFishPreviewPostId(postId)
+        setFishPreviewFocusComments(false)
       }
     }
     window.addEventListener('popstate', syncFromHash)
@@ -421,6 +427,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
     previousDiscoveryQueryStringRef.current = queryString
     setFishActivePostId(null)
     setFishPreviewPostId(null)
+    setFishPreviewFocusComments(false)
     fishPreviewHistoryRef.current = false
     if (readFishPreviewId(window.location.hash)) window.history.replaceState(window.history.state, '', currentUrlWithoutFishPreview())
   }, [queryString])
@@ -784,6 +791,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
         <ForumFishModePreview
           post={fishPreviewPost}
           minimal={minimalMode}
+          focusComments={fishPreviewFocusComments}
           hasPrevious={fishPreviewIndex > 0}
           hasNext={fishPreviewIndex >= 0 && fishPreviewIndex < posts.length - 1}
           onClose={closeFishPreview}

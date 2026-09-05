@@ -4,6 +4,7 @@ import { evaluateBadgeMetric } from '@/lib/badge-rule-engine'
 import { processBadgeGrantEffects } from '@/lib/badge-phase3'
 import { grantBadge } from '@/lib/badge-service'
 import { prisma } from '@/lib/prisma'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
 export type ConcertAttendanceFact = { concertId: string; tourId: string; createdAt: Date }
 
@@ -97,13 +98,17 @@ export function planConcertBadgeAwards({
   attendances,
   badges,
   ownedBadgeIds,
+  triggerConcertId,
 }: {
   attendances: readonly ConcertAttendanceFact[]
   badges: readonly ConcertBadgeDefinition[]
   ownedBadgeIds?: ReadonlySet<string>
+  /** The newly recorded event. Omit for historical reconciliation/backfill. */
+  triggerConcertId?: string | null
 }) {
   const facts = [...attendances].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.concertId.localeCompare(right.concertId))
   const owned = ownedBadgeIds || new Set<string>()
+  const triggerFact = triggerConcertId ? facts.find((fact) => fact.concertId === triggerConcertId) : undefined
   const awards: PlannedConcertBadgeAward[] = []
 
   for (const badge of badges) {
@@ -113,17 +118,17 @@ export function planConcertBadgeAwards({
     // badges have no BadgeRule and continue to match their MusicTour relation.
     if (badge.ruleId) {
       let achievementFact: ConcertAttendanceFact | undefined
-      if (badge.ruleType === 'CONCERT_SHOW_ATTENDED') achievementFact = badge.targetConcertId ? facts.find((fact) => fact.concertId === badge.targetConcertId) : undefined
-      else if (badge.ruleType === 'CONCERT_TOUR_ATTENDED') achievementFact = badge.targetTourId ? facts.find((fact) => fact.tourId === badge.targetTourId) : undefined
+      if (badge.ruleType === 'CONCERT_SHOW_ATTENDED') achievementFact = triggerConcertId ? (triggerFact && triggerFact.concertId === badge.targetConcertId ? triggerFact : undefined) : badge.targetConcertId ? facts.find((fact) => fact.concertId === badge.targetConcertId) : undefined
+      else if (badge.ruleType === 'CONCERT_TOUR_ATTENDED') achievementFact = triggerConcertId ? (triggerFact && triggerFact.tourId === badge.targetTourId ? triggerFact : undefined) : badge.targetTourId ? facts.find((fact) => fact.tourId === badge.targetTourId) : undefined
       else {
         if (badge.threshold === null || !badge.operator || !evaluateBadgeMetric(facts.length, badge.operator, badge.threshold)) continue
-        achievementFact = badge.operator === 'GTE' ? facts[Math.min(facts.length - 1, Math.max(0, badge.threshold - 1))] : facts.at(-1)
+        achievementFact = triggerConcertId ? triggerFact : badge.operator === 'GTE' ? facts[Math.min(facts.length - 1, Math.max(0, badge.threshold - 1))] : facts.at(-1)
       }
       if (!achievementFact) continue
       awards.push({
         badge,
         sourceType: 'AUTO_RULE',
-        sourceId: badge.ruleId,
+        sourceId: achievementFact.concertId,
         grantReason: badge.ruleType === 'CONCERT_SHOW_ATTENDED'
           ? '自动达成：观看指定演唱会后获得'
           : badge.ruleType === 'CONCERT_TOUR_ATTENDED'
@@ -150,7 +155,7 @@ export function planConcertBadgeAwards({
 }
 
 /** Recalculate additive awards from the current UserMusicConcert facts. */
-export async function evaluateConcertBadges(userId: string): Promise<ConcertBadgeEvaluationSummary> {
+export async function evaluateConcertBadges(userId: string, triggerConcertId?: string | null): Promise<ConcertBadgeEvaluationSummary> {
   const [attendanceRows, badges] = await Promise.all([
     prisma.userMusicConcert.findMany({
       where: { userId },
@@ -162,9 +167,9 @@ export async function evaluateConcertBadges(userId: string): Promise<ConcertBadg
   const attendances = attendanceRows.map((row) => ({ concertId: row.concertId, tourId: row.MusicConcert.tourId, createdAt: row.createdAt }))
   const badgeIds = badges.map((badge) => badge.id)
   const ownedRows = badgeIds.length
-    ? await prisma.userBadge.findMany({ where: { userId, badgeId: { in: badgeIds } }, select: { badgeId: true } })
+    ? await prisma.userBadge.findMany({ where: { userId, badgeId: { in: badgeIds }, ...activeUserBadgeWhere() }, select: { badgeId: true } })
     : []
-  const awards = planConcertBadgeAwards({ attendances, badges, ownedBadgeIds: new Set(ownedRows.map((row) => row.badgeId)) })
+  const awards = planConcertBadgeAwards({ attendances, badges, ownedBadgeIds: new Set(ownedRows.map((row) => row.badgeId)), triggerConcertId })
   const summary: ConcertBadgeEvaluationSummary = {
     attendanceCount: attendances.length,
     eligible: awards.length,
@@ -183,6 +188,7 @@ export async function evaluateConcertBadges(userId: string): Promise<ConcertBadg
         badgeId: award.badge.id,
         sourceType: award.sourceType,
         sourceId: award.sourceId,
+        grantKey: `concert:${award.sourceType}:${award.sourceId}`,
         grantReason: award.grantReason,
         obtainedAt: award.obtainedAt,
         deferPhase3Effects: true,
@@ -209,9 +215,8 @@ export async function evaluateConcertBadges(userId: string): Promise<ConcertBadg
 
 /** Backward-compatible entry point for older callers. */
 export async function checkConcertBadge(userId: string, concertId?: string): Promise<boolean> {
-  void concertId
   try {
-    return (await evaluateConcertBadges(userId)).granted > 0
+    return (await evaluateConcertBadges(userId, concertId)).granted > 0
   } catch (error) {
     console.error('[concert-badge.check]', { userId, error })
     return false

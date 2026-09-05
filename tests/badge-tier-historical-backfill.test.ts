@@ -125,9 +125,10 @@ test('自动历史补发仍使用游标和100到500批次，并把窗口写入�
 test('历史补发不伪造获得时间、不改变限定状态，且幂等删除追踪', () => {
   const service = read('lib/badge-service.ts')
   const engine = read('lib/badge-rule-engine.ts')
-  assert.match(service, /const obtainedAt = input\.obtainedAt \|\| new Date\(\)/)
+  assert.match(service, /const awardedAt = input\.obtainedAt \|\| now/)
   assert.match(service, /userBadgeTracking\.deleteMany/)
-  assert.match(service, /userId_badgeId/)
+  assert.match(service, /calculateBadgeExpiresAt/)
+  assert.match(service, /grantKey/)
   assert.doesNotMatch(engine, /obtainedAt: .*availableUntil/)
 })
 

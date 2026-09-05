@@ -9,6 +9,7 @@ import { runDailyJob } from '@/lib/daily-job-execution'
 import { getTodayMonthDay } from '@/lib/today'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { evaluateUserAutoBadges, grantCurrentZodiacBadgeRewards } from '@/lib/badge-rule-engine'
+import { expireUserBadges } from '@/lib/badge-expiration'
 
 /** 生日祝福通知标题与内容（不出现用户名、不写「祝 xxx 生日快乐」、不写生日日期）。 */
 export const BIRTHDAY_GREETING_TITLE = '🎂 生日纪念'
@@ -74,8 +75,8 @@ export async function countTodayBirthdays(dateKey = getShanghaiDateKey()): Promi
 
 /**
  * 若今天是该用户的生日，则授予「生日纪念」徽章。
- * - 幂等：依靠 UserBadge 的 (userId, badgeId) 唯一约束，每年生日只会保留一条。
- * - 不绑定年份：只要月日匹配即授予，因此永久保留。
+ * - 幂等：以生日 dateKey 作为周期 grantKey，同一用户同一天只发一次。
+ * - 新年份会生成新的周期 key；若上一次记录已过期，下一次生日可以重新获得。
  * - 失败向调用方抛出：登录 / 资料页调用方自行隔离；每日任务据此标记失败并重试。
  */
 export async function ensureBirthdayBadge(userId: string, dateKey = getShanghaiDateKey()): Promise<void> {
@@ -95,12 +96,14 @@ export async function ensureBirthdayBadge(userId: string, dateKey = getShanghaiD
     })
     if (!badge || !badge.isActive || !badge.isEnabled) return
 
-    // The unified service owns the existing prisma.userBadge.upsert idempotency contract (userId_badgeId).
+    // The unified service snapshots validity and uses the birthday date as a
+    // repeatable period grant key; expired history never blocks a new year.
     await grantBadge({
       userId,
       badgeId: badge.id,
       sourceType: 'AUTO',
       sourceId: BIRTHDAY_BADGE_SLUG,
+      grantKey: `birthday:${dateKey}`,
       grantReason: '生日自动获得',
     })
   } catch (error) {
@@ -255,13 +258,14 @@ export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()
  * 统一生日奖励服务：先扫描当前上海时区星座周期内、生日属于该星座的用户，
  * 再扫描今天过生日的有效用户，分别处理星座规则与生日当天规则；同时保留既有「生日纪念」徽章和生日祝福通知，
  * 并给这些生日用户的「好友」发送生日提醒。
- * - 幂等：徽章靠 UserBadge(userId, badgeId) 唯一约束，通知靠 key 唯一约束，重复执行安全。
+ * - 幂等：徽章靠生日周期 grantKey，通知靠 key 唯一约束，重复执行安全。
  * - 单用户失败不影响其他生日用户；失败计数会让每日任务失败并允许后续重试。
  * - 由受保护的内部每日任务调用；重复执行由通知、徽章唯一约束共同保证安全。
  */
 export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()): Promise<void> {
   let failedUserCount = 0
   try {
+    await expireUserBadges()
     const { date, month, day } = getBirthdayDateContext(dateKey)
     const zodiacScan = await grantCurrentZodiacBadgeRewards(date)
     if (zodiacScan.failed > 0) throw new Error(`ZODIAC_BADGE_RULE_PARTIAL_FAILURE:${zodiacScan.failed}`)
@@ -282,7 +286,7 @@ export async function grantTodayBirthdayRewards(dateKey = getShanghaiDateKey()):
     for (const user of users) {
       try {
         await ensureBirthdayBadge(user.id, dateKey)
-        const badgeEvaluation = await evaluateUserAutoBadges(user.id, ['BIRTHDAY_TODAY'], date)
+        const badgeEvaluation = await evaluateUserAutoBadges(user.id, ['BIRTHDAY_TODAY'], date, `birthday:${dateKey}`)
         if (badgeEvaluation.failed > 0) throw new Error(`BIRTHDAY_BADGE_RULE_PARTIAL_FAILURE:${badgeEvaluation.failed}`)
         await sendBirthdayGreeting(user.id, dateKey)
       } catch (error) {

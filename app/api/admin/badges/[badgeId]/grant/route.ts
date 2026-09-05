@@ -9,6 +9,8 @@ import { getBatchHistoricalBadgeMetrics, getHistoricalQualificationWindow } from
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { formatUid } from '@/lib/uid'
 import { prisma } from '@/lib/prisma'
+import { randomUUID } from 'node:crypto'
+import { activeUserBadgeWhere, badgeValidityLabel, calculateBadgeExpiresAt } from '@/lib/badge-validity'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +34,7 @@ export async function GET(request: Request, context: RouteContext) {
   if (!guard.user) return guard.response
   const { badgeId } = await context.params
   const params = new URL(request.url).searchParams
+  const now = new Date()
   const target = await resolveTarget({ userId: params.get('userId') || '', uid: params.get('uid') || '' })
   if (!target) return NextResponse.json({ message: '目标用户不存在或已停用' }, { status: 404 })
   const badge = await prisma.badge.findUnique({
@@ -44,11 +47,13 @@ export async function GET(request: Request, context: RouteContext) {
       isActive: true,
       availableFrom: true,
       availableUntil: true,
+      validityType: true,
+      validityDays: true,
       BadgeRule: { select: { ruleType: true, threshold: true, configJson: true, isEnabled: true } },
     },
   })
   if (!badge) return NextResponse.json({ message: '勋章不存在' }, { status: 404 })
-  const owned = await prisma.userBadge.findUnique({ where: { userId_badgeId: { userId: target.id, badgeId } }, select: { id: true, obtainedAt: true } })
+  const owned = await prisma.userBadge.findFirst({ where: { userId: target.id, badgeId, ...activeUserBadgeWhere(now) }, orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }], select: { id: true, obtainedAt: true, expiresAt: true, status: true } })
   const ruleType = badge.BadgeRule?.ruleType as SupportedBadgeRuleType | undefined
   const limited = Boolean(badge.availableFrom || badge.availableUntil)
   let currentMetric: number | null = null
@@ -85,9 +90,9 @@ export async function GET(request: Request, context: RouteContext) {
   }
   return NextResponse.json({
     user: target,
-    badge: { id: badge.id, name: badge.name, grantType: badge.grantType, isEnabled: badge.isEnabled && badge.isActive, availability: getBadgeAvailability(badge), availableFrom: badge.availableFrom?.toISOString() || null, availableUntil: badge.availableUntil?.toISOString() || null },
+    badge: { id: badge.id, name: badge.name, grantType: badge.grantType, isEnabled: badge.isEnabled && badge.isActive, availability: getBadgeAvailability(badge), availableFrom: badge.availableFrom?.toISOString() || null, availableUntil: badge.availableUntil?.toISOString() || null, validityType: badge.validityType, validityDays: badge.validityDays, validityLabel: badgeValidityLabel(badge.validityType, badge.validityDays), previewExpiresAt: calculateBadgeExpiresAt(now, badge.validityType, badge.validityDays)?.toISOString() || null },
     rule: badge.BadgeRule ? { ruleType: badge.BadgeRule.ruleType, threshold: badge.BadgeRule.threshold, isEnabled: badge.BadgeRule.isEnabled, historicalSupported: Boolean(ruleType && BADGE_RULE_REGISTRY[ruleType].supportsHistoricalBackfill), historicalBasis: ruleType ? BADGE_RULE_REGISTRY[ruleType].historicalBasis : null } : null,
-    ownership: owned ? { owned: true, obtainedAt: owned.obtainedAt.toISOString() } : { owned: false, obtainedAt: null },
+    ownership: owned ? { owned: true, obtainedAt: owned.obtainedAt.toISOString(), expiresAt: owned.expiresAt?.toISOString() || null, status: owned.status } : { owned: false, obtainedAt: null, expiresAt: null, status: null },
     currentMetric,
     historicalMetric,
   }, { headers: { 'Cache-Control': 'no-store' } })
@@ -103,21 +108,23 @@ export async function POST(request: Request, context: RouteContext) {
   if (!target) return NextResponse.json({ message: '目标用户不存在或已停用' }, { status: 404 })
 
   try {
-    const badge = await prisma.badge.findUnique({ where: { id: badgeId }, select: { name: true, availableFrom: true, availableUntil: true } })
+    const badge = await prisma.badge.findUnique({ where: { id: badgeId }, select: { name: true, availableFrom: true, availableUntil: true, validityType: true, validityDays: true } })
     if (!badge) return NextResponse.json({ message: '勋章不存在' }, { status: 404 })
     const limited = Boolean(badge.availableFrom || badge.availableUntil)
     const grantReason = sanitizeText(body.grantReason, 500) || null
+    const operationId = sanitizeText(body.operationId, 191) || request.headers.get('idempotency-key')?.trim().slice(0, 191) || randomUUID()
     if (limited && !grantReason) return NextResponse.json({ message: '限定勋章手动补发必须填写补发原因' }, { status: 400 })
     const result = await grantBadge({
       userId: target.id,
       badgeId,
       actorId: guard.user.id,
-      sourceType: limited ? 'ADMIN_BACKFILL' : sanitizeText(body.sourceType, 32) || 'MANUAL',
+      sourceType: limited ? 'ADMIN_BACKFILL' : 'ADMIN_GRANT',
       sourceId: sanitizeText(body.sourceId, 191) || null,
+      grantKey: `admin:${operationId}`,
       grantReason,
       ...(limited ? { availabilityMode: 'ADMIN_MANUAL' as const } : {}),
     })
-    if (!result.created) return NextResponse.json({ ...result, message: '该用户已经拥有此勋章' }, { status: 409 })
+    if (!result.created && !result.sourceAttached) return NextResponse.json({ ...result, message: '该用户已经拥有此勋章' }, { status: 409 })
     invalidateCurrentUserCache(target.id)
     revalidatePath(`/user/${formatUid(target.uid)}`)
     revalidatePath(`/user/${formatUid(target.uid)}/badges`)
@@ -131,7 +138,7 @@ export async function POST(request: Request, context: RouteContext) {
         },
       })
     })
-    return NextResponse.json(result, { status: 201 })
+    return NextResponse.json({ ...result, message: result.created ? '勋章已发放' : '已为该用户补充管理员授予来源' }, { status: result.created ? 201 : 200 })
   } catch (error) {
     return NextResponse.json({ message: error instanceof Error ? error.message : '发放失败' }, { status: 400 })
   }

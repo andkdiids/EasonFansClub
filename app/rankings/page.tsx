@@ -17,6 +17,7 @@ type RankingRow = {
   name: string
   suffix: string
   uid?: number
+  badges?: EquippedBadgeView[]
   badge?: EquippedBadgeView | null
 }
 
@@ -53,7 +54,7 @@ export default async function RankingsPage() {
     select: { id: true, uid: true, nickname: true, level: true, Profile: { select: { displayName: true } } },
   })
   const userById = new Map(streakUsers.map((item) => [item.id, item]))
-  const equippedBadgeMap = await getEquippedBadgesForUsers([
+  const equippedBadges = await getEquippedBadgesForUsers([
     ...points.map((item) => item.id),
     ...streakTop.map((item) => item.userId),
   ])
@@ -61,14 +62,14 @@ export default async function RankingsPage() {
 
   const streakRows: RankingRow[] = streakTop.flatMap((item) => {
     const u = userById.get(item.userId)
-    return u ? [{ name: displayName(u), uid: u.uid, badge: equippedBadgeMap.get(u.id) || null, suffix: `连续${item.currentStreak}天` }] : []
+    return u ? [{ name: displayName(u), uid: u.uid, badges: equippedBadges.get(u.id) || [], badge: equippedBadges.get(u.id)?.[0] || null, suffix: `连续${item.currentStreak}天` }] : []
   })
   const rankingGroups: RankingGroup[] = [
     {
       title: '挂号费榜',
       rows: points.map((u) => {
         const growth = calculateGrowthSummary(u.experience, growthLevels)
-        return { name: displayName(u), uid: u.uid, badge: equippedBadgeMap.get(u.id) || null, suffix: `${growth.levelName} · Lv.${growth.level} · ${u.points}挂号费` }
+        return { name: displayName(u), uid: u.uid, badges: equippedBadges.get(u.id) || [], badge: equippedBadges.get(u.id)?.[0] || null, suffix: `${growth.levelName} · Lv.${growth.level} · ${u.points}挂号费` }
       }),
     },
     {
@@ -91,7 +92,7 @@ export default async function RankingsPage() {
               <h2 className="text-2xl font-black text-brand-950">{group.title}</h2>
               <div className="mt-4 space-y-3">
                 {group.rows.map((row, index) => (
-                  <p key={`${row.name}-${index}`} className="rounded-xl bg-sky-50 p-3 text-sm font-bold text-slate-700">#{index + 1} {row.uid ? <UserDisplayName name={row.name} uid={row.uid} badge={row.badge} compact /> : row.name} · {row.suffix}</p>
+                  <p key={`${row.name}-${index}`} className="rounded-xl bg-sky-50 p-3 text-sm font-bold text-slate-700">#{index + 1} {row.uid ? <UserDisplayName name={row.name} uid={row.uid} badges={row.badges} badge={row.badge} compact /> : row.name} · {row.suffix}</p>
                 ))}
               </div>
             </div>

@@ -25,6 +25,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [draftStatus, setDraftStatus] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [imagesUploading, setImagesUploading] = useState(false)
   const draftPublishedRef = useRef(false)
 
   useEffect(() => {
@@ -114,6 +115,10 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   async function submitPost(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (isSubmitting) return
+    if (imagesUploading) {
+      setErrors({ form: '图片仍在处理中，请等待上传完成后再发布。' })
+      return
+    }
     setErrors({})
     setIsSubmitting(true)
     try {
@@ -171,7 +176,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         </select>
         {errors.boardId ? <p className="mt-2 text-sm font-bold text-red-600">{errors.boardId}</p> : null}
       </label>
-      <ContentImageUploader value={imageUrls} onChange={setImageUrls} />
+      <ContentImageUploader value={imageUrls} onChange={setImageUrls} onBusyChange={setImagesUploading} />
       <label className="block">
         <span className="text-sm font-black text-slate-700">标题</span>
         <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2" placeholder="请输入帖子标题" />
@@ -218,8 +223,8 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
             😊 表情
           </button>
         </div>
-        <button disabled={isSubmitting} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
-          {isSubmitting ? '发布中...' : '发布帖子'}
+        <button disabled={isSubmitting || imagesUploading} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
+          {isSubmitting ? '发布中...' : imagesUploading ? '图片处理中...' : '发布帖子'}
         </button>
         <StickerPicker
           open={pickerOpen}

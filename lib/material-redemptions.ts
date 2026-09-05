@@ -4,6 +4,7 @@ import { accountAgeDays } from '@/lib/badge-metrics'
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration-fee'
 import { generateMaterialRedeemCode } from '@/lib/material-redemption-code'
 import {
@@ -699,7 +700,7 @@ async function evaluateMaterialEligibility(db: MaterialDb, userId: string, rules
       actual = calculateCheckinStreaks(rows.map((row) => row.checkinDateKey), now).currentStreak
       qualified = compareMaterialRuleValue(actual, rule.operator as MaterialRuleOperator, Number(rule.value))
     } else if (rule.type === 'HAS_BADGE') {
-      actual = Boolean(await db.userBadge.findUnique({ where: { userId_badgeId: { userId, badgeId: rule.value } }, select: { id: true } }))
+      actual = Boolean(await db.userBadge.findFirst({ where: { userId, badgeId: rule.value, ...activeUserBadgeWhere(now) }, select: { id: true } }))
       qualified = actual
     } else if (rule.type === 'ATTENDED_CONCERT') {
       actual = Boolean(await db.userMusicConcert.findUnique({ where: { userId_concertId: { userId, concertId: rule.value } }, select: { id: true } }))
@@ -992,6 +993,11 @@ export async function redeemMaterialOrder(adminId: string, token: string) {
     try {
       const { grantEligibleActivityBadges } = await import('@/lib/activity-badge-rewards')
       await grantEligibleActivityBadges({ activityId: result.order.linkedActivity.id, registrationId: result.order.linkedRegistration.id })
+      const reward = await prisma.activityReward.findFirst({ where: { activityId: result.order.linkedActivity.id, type: 'BADGE', enabled: true }, select: { badgeId: true } })
+      if (reward?.badgeId) {
+        const { triggerBadgeOwnershipRecheck } = await import('@/lib/badge-ownership')
+        await triggerBadgeOwnershipRecheck(result.order.userId, reward.badgeId)
+      }
     } catch (error) {
       console.error('[material-redemption.activity-badge-reward]', { orderId: result.order.id, registrationId: result.order.linkedRegistration.id, error })
     }

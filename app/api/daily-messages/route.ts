@@ -102,7 +102,7 @@ export async function GET(request: Request) {
       ...visibleRows.map((row) => row.User.id),
       ...visibleRows.flatMap((row) => row.DailyMessageComment.map((comment) => comment.User.id)),
     ]
-    const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
+    const equippedBadges = await getEquippedBadgesForUsers(displayNameUserIds)
     const messages = visibleRows.map(({ User, DailyMessageComment, ...message }) => ({
       ...message,
       content: publicModerationText(message.content, message.moderationStatus),
@@ -110,7 +110,8 @@ export async function GET(request: Request) {
         ...User,
         nickname: getPublicUserDisplayName(User),
         avatarUrl: publicImageUrl(User.avatarUrl),
-        equippedBadge: equippedBadgeMap.get(User.id) || null,
+        equippedBadges: equippedBadges.get(User.id) || [],
+        equippedBadge: equippedBadges.get(User.id)?.[0] || null,
         Profile: User.Profile ? {
           ...User.Profile,
           avatarUrl: publicImageUrl(User.Profile.avatarUrl),
@@ -127,7 +128,8 @@ export async function GET(request: Request) {
         user: {
           ...commentUser,
           nickname: getPublicUserDisplayName(commentUser),
-          equippedBadge: equippedBadgeMap.get(commentUser.id) || null,
+          equippedBadges: equippedBadges.get(commentUser.id) || [],
+          equippedBadge: equippedBadges.get(commentUser.id)?.[0] || null,
           Profile: commentUser.Profile ? {
             ...commentUser.Profile,
             avatarUrl: publicImageUrl(commentUser.Profile.avatarUrl),

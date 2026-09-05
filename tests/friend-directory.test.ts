@@ -135,7 +135,7 @@ test('索引只驱动好友列表内部滚动，并覆盖触控、键盘和安�
 test('目录请求一次返回完整好友人口，备注/存在状态/徽章继续批量读取', () => {
   assert.match(friendListRoute, /prisma\.friendship\.findMany\(/)
   assert.match(friendListRoute, /const directoryRows = directory \? orderedFriendRows : visibleRows/)
-  assert.match(friendListRoute, /const \[unreadByConversation, remarkMap, presenceByFriend, equippedBadgeMap\] = await Promise\.all\(/)
+  assert.match(friendListRoute, /const \[unreadByConversation, remarkMap, presenceByFriend, equippedBadgesMap\] = await Promise\.all\(/)
   assert.match(friendListRoute, /friendTotal: total/)
   assert.match(friendListRoute, /hasMore: directory \? false : pageStart \+ pageSize < scopedTotal/)
 })

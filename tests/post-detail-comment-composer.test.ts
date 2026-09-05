@@ -7,7 +7,7 @@ const replySection = read('components/PostRepliesSection.tsx')
 const replyForm = read('components/ReplyForm.tsx')
 
 test('post detail primary composer is before the comment list while thread replies stay inline', () => {
-  const primaryGate = '{currentUserId && !replyTo ? ('
+  const primaryGate = '{currentUserId && canInteract && !replyTo ? ('
   const primaryGateCount = replySection.split(primaryGate).length - 1
   const composerIndex = replySection.indexOf(primaryGate)
   const headingIndex = replySection.indexOf('<h2 className="text-2xl font-black text-brand-950">', composerIndex)

@@ -20,6 +20,7 @@ type Row = {
     nickname: string
     displayName: string
     avatarUrl: string | null
+    equippedBadges?: EquippedBadgeView[]
     equippedBadge?: EquippedBadgeView | null
   }
   primaryValue: number
@@ -217,7 +218,7 @@ export function EntertainmentLeaderboardCenter({ todayDate }: Readonly<{ todayDa
               <span className="entertainment-leaderboard-user">
                 <SafeAvatar src={row.user.avatarUrl} name={row.user.nickname} uid={row.user.uid} />
                 <span className="entertainment-leaderboard-user-copy">
-                  <UserDisplayName name={row.user.nickname} uid={row.user.uid} badge={row.user.equippedBadge} compact />
+                  <UserDisplayName name={row.user.nickname} uid={row.user.uid} badges={row.user.equippedBadges} badge={row.user.equippedBadge} compact />
                   <small>UID {String(row.user.uid).padStart(5, '0')}</small>
                 </span>
               </span>

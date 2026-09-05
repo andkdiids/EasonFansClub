@@ -49,7 +49,7 @@ function serializeComment(comment: {
     level: number
     Profile: { displayName: string | null; displayNameModerationStatus: string; avatarUrl: string | null } | null
   }
-}, equippedBadge?: EquippedBadgeView | null) {
+}, equippedBadges: EquippedBadgeView[] = []) {
   const { User, ...row } = comment
   const publicName = getPublicUserDisplayName(User)
   return {
@@ -63,7 +63,8 @@ function serializeComment(comment: {
       nicknameViolationDisplay: User.nicknameViolationDisplay,
       avatarUrl: publicImageUrl(User.avatarUrl),
       level: User.level,
-      equippedBadge: equippedBadge || null,
+      equippedBadges,
+      equippedBadge: equippedBadges[0] || null,
       Profile: User.Profile ? {
         displayName: publicName,
         avatarUrl: publicImageUrl(User.Profile.avatarUrl),
@@ -97,8 +98,8 @@ export async function GET(request: Request, context: RouteContext) {
     },
   })
 
-  const equippedBadgeMap = await getEquippedBadgesForUsers(comments.map((comment) => comment.User.id))
-  return NextResponse.json({ comments: comments.map((comment) => serializeComment(comment, equippedBadgeMap.get(comment.User.id) || null)) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
+  const equippedBadges = await getEquippedBadgesForUsers(comments.map((comment) => comment.User.id))
+  return NextResponse.json({ comments: comments.map((comment) => serializeComment(comment, equippedBadges.get(comment.User.id) || [])) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }
 
 export async function POST(request: Request, context: RouteContext) {
@@ -194,8 +195,8 @@ export async function POST(request: Request, context: RouteContext) {
     )
   }
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
-  const equippedBadge = await getEquippedBadgesForUsers([guard.user.id])
+  const equippedBadges = await getEquippedBadgesForUsers([guard.user.id])
   return NextResponse.json({
-    comment: serializeComment(comment, equippedBadge.get(guard.user.id) || null),
+    comment: serializeComment(comment, equippedBadges.get(guard.user.id) || []),
   }, { status: 201 })
 }

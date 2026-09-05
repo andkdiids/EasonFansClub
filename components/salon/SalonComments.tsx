@@ -6,7 +6,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 import { formatUid } from '@/lib/uid'
-import type { SalonCommentView } from '@/lib/salon'
+import type { SalonCommentView } from '@/lib/salon-shared'
 
 type CommentNode = SalonCommentView & { children: CommentNode[] }
 

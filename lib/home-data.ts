@@ -142,12 +142,13 @@ async function getHomePostsUncached() {
 type HomePostPublicProjection = Awaited<ReturnType<typeof queryHomePosts>>[number]
 
 async function addHomePostPublicDetails(posts: readonly HomePostPublicProjection[]) {
-  const equippedBadgeMap = await getEquippedBadgesForUsers(posts.map((post) => post.author.id))
+  const equippedBadgesMap = await getEquippedBadgesForUsers(posts.map((post) => post.author.id))
   return posts.map((post) => ({
     ...post,
     author: {
       ...post.author,
-      equippedBadge: equippedBadgeMap.get(post.author.id) || null,
+      equippedBadges: equippedBadgesMap.get(post.author.id) || [],
+      equippedBadge: equippedBadgesMap.get(post.author.id)?.[0] || null,
       profile: post.author.profile ? {
         ...post.author.profile,
         displayName: getPublicUserDisplayName(post.author),
@@ -185,8 +186,15 @@ async function getCachedHomePostsWithFallback() {
 
 export async function getHomeDailyMessages() {
   const messages = await cachedHomeData('home.dailyMessages', getHomeDailyMessagesUncached)
-  const equippedBadgeMap = await getEquippedBadgesForUsers(messages.map((message) => message.user.id))
-  const withBadges = messages.map((message) => ({ ...message, user: { ...message.user, equippedBadge: equippedBadgeMap.get(message.user.id) || null } }))
+  const equippedBadgesMap = await getEquippedBadgesForUsers(messages.map((message) => message.user.id))
+  const withBadges = messages.map((message) => ({
+    ...message,
+    user: {
+      ...message.user,
+      equippedBadges: equippedBadgesMap.get(message.user.id) || [],
+      equippedBadge: equippedBadgesMap.get(message.user.id)?.[0] || null,
+    },
+  }))
   return withBadges
 }
 
@@ -438,7 +446,7 @@ export async function getHomeTodayEvents() {
   return cachedHomeData(`home.today:${month}-${day}`, () => getTodayEventRecords())
 }
 
-type HomeEntertainmentTopUser = Pick<EntertainmentLeaderboardResult['rows'][number]['user'], 'id' | 'uid' | 'nickname' | 'displayName' | 'avatarUrl' | 'equippedBadge'>
+type HomeEntertainmentTopUser = Pick<EntertainmentLeaderboardResult['rows'][number]['user'], 'id' | 'uid' | 'nickname' | 'displayName' | 'avatarUrl' | 'equippedBadges' | 'equippedBadge'>
 
 export type HomeEntertainmentRankingMode = {
   key: string
@@ -479,6 +487,7 @@ function homeEntertainmentModeResult(
       nickname: top.user.nickname,
       displayName: top.user.displayName,
       avatarUrl: top.user.avatarUrl,
+      equippedBadges: top.user.equippedBadges || [],
       equippedBadge: top.user.equippedBadge || null,
     } : null,
   }

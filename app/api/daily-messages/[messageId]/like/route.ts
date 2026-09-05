@@ -35,7 +35,7 @@ type LikerRow = {
 
 function serializeLiker(
   row: LikerRow,
-  equippedBadgeMap: ReadonlyMap<string, import('@/lib/badge-types').EquippedBadgeView>,
+  equippedBadgesMap: ReadonlyMap<string, import('@/lib/badge-types').EquippedBadgeView[]>,
   friendRemarkMap: ReadonlyMap<string, string>,
 ) {
   const nickname = getPublicUserDisplayName(row.User)
@@ -47,7 +47,8 @@ function serializeLiker(
     friendRemark,
     displayName: getFriendDisplayName({ nickname, friendRemark, isFriendContext: Boolean(friendRemark) }),
     avatarUrl: publicImageUrl(row.User.Profile?.avatarUrl || row.User.avatarUrl),
-    equippedBadge: equippedBadgeMap.get(row.User.id) || null,
+    equippedBadges: equippedBadgesMap.get(row.User.id) || [],
+    equippedBadge: equippedBadgesMap.get(row.User.id)?.[0] || null,
   }
 }
 
@@ -69,11 +70,11 @@ export async function GET(_request: Request, context: RouteContext) {
     select: { User: { select: likerUserSelect } },
   })
   const likerIds = likes.map((like) => like.User.id)
-  const [equippedBadgeMap, friendRemarkMap] = await Promise.all([
+  const [equippedBadges, friendRemarkMap] = await Promise.all([
     getEquippedBadgesForUsers(likerIds),
     loadFriendRemarkMap(guard.user.id, likerIds),
   ])
-  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, equippedBadgeMap, friendRemarkMap)) })
+  return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, equippedBadges, friendRemarkMap)) })
 }
 
 export async function POST(_request: Request, context: RouteContext) {

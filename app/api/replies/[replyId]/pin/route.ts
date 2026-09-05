@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { canPinPostReply } from '@/lib/post-replies'
+import { publicPostWhere } from '@/lib/post-moderation'
 import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
@@ -16,8 +17,16 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const result = await prisma.$transaction(async (tx) => {
-    const reply = await tx.reply.findFirst({
+    const replyPost = await tx.reply.findFirst({
       where: { id: replyId, isDeleted: false },
+      select: { postId: true },
+    })
+    if (!replyPost) return { kind: 'not-found' as const }
+    // Lock before checking visibility so a concurrent moderation reversal
+    // cannot let a stale APPROVED read mutate a now-rejected post.
+    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${replyPost.postId} FOR UPDATE`
+    const reply = await tx.reply.findFirst({
+      where: { id: replyId, isDeleted: false, Post: publicPostWhere },
       select: {
         id: true,
         postId: true,
@@ -33,7 +42,6 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     // Serialise pin operations per post so two concurrent requests cannot leave two pinned roots.
-    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${reply.postId} FOR UPDATE`
     if (body.pinned) {
       await tx.reply.updateMany({
         where: { postId: reply.postId, parentId: null, isDeleted: false, isPinned: true },

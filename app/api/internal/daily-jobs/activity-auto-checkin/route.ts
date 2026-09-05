@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { autoCheckInEndedActivityRegistrations } from '@/lib/activity-registration'
 import { drawDueActivityLotteries } from '@/lib/activity-lottery'
 import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
+import { expireUserBadges } from '@/lib/badge-expiration'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,12 +30,13 @@ export async function POST(request: Request) {
   const batchSize = requestedBatchSize === undefined ? undefined : Math.min(Math.max(Math.trunc(requestedBatchSize), 1), 500)
   const startedAt = Date.now()
   try {
-    const [checkInResult, lotteryResult, badgeRewardResult] = await Promise.all([
+    const [expirationResult, checkInResult, lotteryResult, badgeRewardResult] = await Promise.all([
+      expireUserBadges(),
       autoCheckInEndedActivityRegistrations({ activityId, batchSize }),
       drawDueActivityLotteries({ activityId, batchSize: batchSize ? Math.min(batchSize, 200) : undefined }),
       grantEligibleActivityBadges({ activityId, batchSize }),
     ])
-    const result = { ...checkInResult, lottery: lotteryResult, activityBadgeRewards: badgeRewardResult }
+    const result = { ...checkInResult, lottery: lotteryResult, activityBadgeRewards: badgeRewardResult, badgeExpiration: expirationResult }
     console.info('[daily-job.activity-auto-checkin.completed]', {
       event: 'daily_job.completed',
       jobKey: 'activity-auto-checkin',

@@ -78,6 +78,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     uid: sessionUser.uid,
     nickname: sessionUser.nickname,
     avatarUrl: sessionUser.avatarUrl,
+    equippedBadges: sessionUser.equippedBadges,
     equippedBadge: sessionUser.equippedBadge,
   } : null
   return (

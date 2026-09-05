@@ -38,8 +38,13 @@ test('badge schema keeps a unique code and one equipped badge relation', () => {
   assert.match(schema, /@relation\("UserEquippedBadge"/)
 })
 
-test('user badge records remain idempotent per user and badge', () => {
-  assert.match(read('prisma/schema.prisma'), /@@unique\(\[userId, badgeId\]\)/)
+test('user badge records preserve history while enforcing one active grant', () => {
+  const schema = read('prisma/schema.prisma')
+  const userBadge = schema.slice(schema.indexOf('model UserBadge'), schema.indexOf('model UserBadgeShowcase'))
+  assert.match(userBadge, /status\s+UserBadgeStatus\s+@default\(ACTIVE\)/)
+  assert.match(userBadge, /activeKey\s+String\?\s+@unique/)
+  assert.match(userBadge, /grantKey\s+String\?\s+@unique/)
+  assert.doesNotMatch(userBadge, /@@unique\(\[userId, badgeId\]\)/)
 })
 
 test('badge migration backfills legacy slugs into codes', () => {
@@ -62,7 +67,8 @@ test('badge migration stores obtained and grant audit metadata', () => {
 test('badge service has a central idempotent grant operation', () => {
   const service = read('lib/badge-service.ts')
   assert.match(service, /export async function grantBadge/)
-  assert.match(service, /userId_badgeId/)
+  assert.match(service, /activeBadgeKey/)
+  assert.match(service, /namespacedGrantKey/)
 })
 
 test('badge service has a central revoke operation', () => {
@@ -99,7 +105,8 @@ test('public badge collection uses a redacted HIDDEN placeholder', () => {
 })
 
 test('non-owners cannot read hidden UserBadge records', () => {
-  assert.match(read('lib/badge-service.ts'), /where: \{ userId, \.\.\.\(isSelf \? \{\} : \{ isHidden: false \}\) \}/)
+  const service = read('lib/badge-service.ts')
+  assert.match(service, /where: \{ userId, \.\.\.activeUserBadgeWhere\(now\), \.\.\.\(isSelf \? \{\} : \{ isHidden: false \}\) \}/)
 })
 
 test('equip API requires an authenticated user and rate limits writes', () => {
@@ -111,7 +118,7 @@ test('equip API requires an authenticated user and rate limits writes', () => {
 test('equip API calls central equip and unequip services', () => {
   const route = read('app/api/users/me/badge/equip/route.ts')
   assert.match(route, /equipBadge\(guard\.user\.id, badgeId\)/)
-  assert.match(route, /unequipBadge\(guard\.user\.id\)/)
+  assert.match(route, /unequipBadge\(guard\.user\.id(?:, badgeId)?\)/)
 })
 
 test('equip API invalidates current-user and badge profile views', () => {
@@ -202,7 +209,8 @@ test('badge animations respect prefers-reduced-motion', () => {
 test('equipped badge lookups use a bounded batch loader', () => {
   const service = read('lib/badge-service.ts')
   assert.match(service, /getEquippedBadgesForUsers/)
-  assert.match(service, /two bounded queries/)
+  assert.match(service, /userEquippedBadge\.findMany/)
+  assert.match(service, /userBadge\.findMany/)
 })
 
 test('post, forum, check-in, friend, search and leaderboard surfaces use batch badge data', () => {
@@ -235,7 +243,7 @@ test('major nickname surfaces render through the shared UserDisplayName componen
 })
 
 test('homepage entertainment scores omit badges while retaining avatar, nickname and profile links', () => {
-  assert.match(read('lib/guess-song-leaderboard.ts'), /equippedBadgeMap = await getEquippedBadgesForUsers\(availableRows/)
+  assert.match(read('lib/guess-song-leaderboard.ts'), /getEquippedBadgesForUsers\(availableRows/)
   const surface = read('components/HomeLayoutSurface.tsx')
   assert.match(surface, /<SafeAvatar/)
   assert.match(surface, /formatUid\(user\.uid\)/)
@@ -249,7 +257,8 @@ test('badge admin mutations are transactional, logged and invalidate every equip
   assert.match(service, /writeBadgeAdminAction/)
   for (const action of ['BADGE_CREATE', 'BADGE_UPDATE', 'BADGE_ENABLE', 'BADGE_DISABLE']) assert.match(route + createRoute, new RegExp(action))
   for (const action of ['BADGE_DELETE', 'BADGE_GRANT', 'BADGE_REVOKE']) assert.match(service, new RegExp(action))
-  assert.match(route, /affectedUsers = await tx\.user\.findMany/)
+  assert.match(route, /affectedUserIds =/)
+  assert.match(route, /tx\.user\.findMany\(\{ where: \{ id: \{ in: affectedUserIds \}/)
   assert.match(route, /data\.isWearable === false/)
 })
 

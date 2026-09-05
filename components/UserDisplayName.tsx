@@ -12,6 +12,7 @@ type UserDisplayNameProps = {
   uid?: number | null
   href?: string | null
   badge?: UserDisplayNameBadge | null
+  badges?: UserDisplayNameBadge[] | null
   showBadge?: boolean
   showBadgeName?: boolean
   badgeInteraction?: 'interactive' | 'static'
@@ -142,39 +143,49 @@ function BadgeDetail({ badge, onClose }: { badge: UserDisplayNameBadge; onClose:
   )
 }
 
-export function UserDisplayName({ name, uid, href, badge, showBadge = true, showBadgeName = false, badgeInteraction = 'interactive', compact = false, showBadgeIcon = true, className = '', nameClassName = '' }: UserDisplayNameProps) {
-  const [detailOpen, setDetailOpen] = useState(false)
-  const [liveBadge, setLiveBadge] = useState<UserDisplayNameBadge | null | undefined>(badge)
-  useEffect(() => setLiveBadge(badge), [badge])
+export function UserDisplayName({ name, uid, href, badge, badges, showBadge = true, showBadgeName = false, badgeInteraction = 'interactive', compact = false, showBadgeIcon = true, className = '', nameClassName = '' }: UserDisplayNameProps) {
+  const [detailBadge, setDetailBadge] = useState<UserDisplayNameBadge | null>(null)
+  const initialBadges = Array.isArray(badges) ? badges : badge ? [badge] : []
+  const [liveBadges, setLiveBadges] = useState<UserDisplayNameBadge[]>(initialBadges)
+  useEffect(() => setLiveBadges(Array.isArray(badges) ? badges : badge ? [badge] : []), [badge, badges])
   useEffect(() => {
     const updateBadge = (event: Event) => {
-      const detail = (event as CustomEvent<{ uid?: number; equippedBadge?: UserDisplayNameBadge | null }>).detail
+      const detail = (event as CustomEvent<{ uid?: number; equippedBadge?: UserDisplayNameBadge | null; equippedBadges?: UserDisplayNameBadge[] | null }>).detail
       if (detail?.uid !== undefined && uid !== undefined && detail.uid !== uid) return
-      if (detail && 'equippedBadge' in detail) setLiveBadge(detail.equippedBadge)
+      if (!detail) return
+      if (Array.isArray(detail.equippedBadges)) setLiveBadges(detail.equippedBadges)
+      else if ('equippedBadge' in detail) setLiveBadges(detail.equippedBadge ? [detail.equippedBadge] : [])
     }
     window.addEventListener('eason-badge-updated', updateBadge)
     return () => window.removeEventListener('eason-badge-updated', updateBadge)
   }, [uid])
-  const displayBadge = showBadge ? liveBadge : null
+  const displayBadges = showBadge
+    ? liveBadges
+      .map((item, index) => ({ item, index }))
+      .sort((left, right) => (left.item.position ?? left.index) - (right.item.position ?? right.index) || left.index - right.index)
+      .map(({ item }) => item)
+    : []
+  const nicknameBadge = displayBadges.find((item) => isBadgeNicknameShineEnabled(item) || Boolean(normalizeBadgeColor(item.nicknameColor))) || displayBadges[0]
   const isStaticBadge = badgeInteraction === 'static'
-  const stackedBadge = Boolean(displayBadge && showBadgeName && !compact && showBadgeIcon)
-  const style = useMemo(() => badgeNicknameStyle(displayBadge), [displayBadge])
-  const nicknameShineEnabled = isBadgeNicknameShineEnabled(displayBadge)
-  const badgeClick = (event: MouseEvent<HTMLSpanElement>) => {
+  const displayBadgeName = showBadgeName && !compact && displayBadges.length === 1
+  const stackedBadge = Boolean(displayBadgeName && showBadgeIcon)
+  const style = useMemo(() => badgeNicknameStyle(nicknameBadge), [nicknameBadge])
+  const nicknameShineEnabled = isBadgeNicknameShineEnabled(nicknameBadge)
+  const badgeClick = (displayBadge: UserDisplayNameBadge, event: MouseEvent<HTMLSpanElement>) => {
     event.preventDefault()
     event.stopPropagation()
-    if (displayBadge) setDetailOpen(true)
+    setDetailBadge(displayBadge)
   }
-  const badgeKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
+  const badgeKeyDown = (displayBadge: UserDisplayNameBadge, event: KeyboardEvent<HTMLSpanElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     event.stopPropagation()
-    if (displayBadge) setDetailOpen(true)
+    setDetailBadge(displayBadge)
   }
-  const badgeInner = displayBadge ? (
+  const badgeInner = (displayBadge: UserDisplayNameBadge) => (
     <>
       <BadgeImage badge={displayBadge} />
-      {showBadgeName && !compact ? <span className="user-display-badge-name"><BadgeName badge={displayBadge} /></span> : null}
+      {displayBadgeName ? <span className="user-display-badge-name"><BadgeName badge={displayBadge} /></span> : null}
       <span className="user-display-badge-tooltip" role="tooltip">
         <BadgeImage badge={displayBadge} size="wall" />
         <span>
@@ -183,7 +194,7 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
         </span>
       </span>
     </>
-  ) : null
+  )
 
   const nickname = nicknameShineEnabled ? (
     <span className={`user-display-name-text user-display-name-shine ${nameClassName}`.trim()} style={style}>
@@ -197,22 +208,25 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
   const content = (
     <span className={`user-display-name ${compact ? 'user-display-name-compact' : ''} ${stackedBadge ? 'user-display-name-stacked' : ''} ${className}`}>
       {stackedBadge ? <span className="user-display-name-nickname-row">{nickname}</span> : nickname}
-      {displayBadge && showBadgeIcon ? (
-        isStaticBadge ? (
-          <span className={`user-display-badge ${stackedBadge ? 'user-display-badge-row' : ''} user-display-badge-static`} title={displayBadge.name} aria-label={displayBadge.name}>{badgeInner}</span>
-        ) : (
-          <span
-            className={`user-display-badge ${stackedBadge ? 'user-display-badge-row' : ''} user-display-badge-interactive`}
-            role="button"
-            tabIndex={0}
-            title={`${displayBadge.name} · 点击查看详情`}
-            aria-label={`${displayBadge.name}，点击查看详情`}
-            onClick={badgeClick}
-            onKeyDown={badgeKeyDown}
-          >
-            {badgeInner}
-          </span>
-        )
+      {displayBadges.length && showBadgeIcon ? (
+        <span className={`user-display-badge-list ${stackedBadge ? 'user-display-badge-row' : ''}`}>
+          {displayBadges.map((displayBadge) => isStaticBadge ? (
+            <span key={displayBadge.id} className="user-display-badge user-display-badge-static" title={displayBadge.name} aria-label={displayBadge.name}>{badgeInner(displayBadge)}</span>
+          ) : (
+            <span
+              key={displayBadge.id}
+              className="user-display-badge user-display-badge-interactive"
+              role="button"
+              tabIndex={0}
+              title={`${displayBadge.name} · 点击查看详情`}
+              aria-label={`${displayBadge.name}，点击查看详情`}
+              onClick={(event) => badgeClick(displayBadge, event)}
+              onKeyDown={(event) => badgeKeyDown(displayBadge, event)}
+            >
+              {badgeInner(displayBadge)}
+            </span>
+          ))}
+        </span>
       ) : null}
     </span>
   )
@@ -220,7 +234,7 @@ export function UserDisplayName({ name, uid, href, badge, showBadge = true, show
   return (
     <>
       {href ? <Link href={href} className={`user-display-name-link ${stackedBadge ? 'user-display-name-link-stacked' : ''}`}>{content}</Link> : content}
-      {!isStaticBadge && detailOpen && displayBadge ? <BadgeDetail badge={displayBadge} onClose={() => setDetailOpen(false)} /> : null}
+      {!isStaticBadge && detailBadge ? <BadgeDetail badge={detailBadge} onClose={() => setDetailBadge(null)} /> : null}
     </>
   )
 }

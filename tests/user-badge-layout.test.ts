@@ -10,7 +10,7 @@ test('shared identity cards put the equipped badge on its own content row', () =
   const badgeCss = css.slice(css.indexOf('/* E院勋章'))
   const friendCardCss = css
 
-  assert.match(component, /const stackedBadge = Boolean\(displayBadge && showBadgeName && !compact && showBadgeIcon\)/)
+  assert.match(component, /const stackedBadge = Boolean\(displayBadgeName && showBadgeIcon\)/)
   assert.match(component, /user-display-name-nickname-row/)
   assert.match(component, /user-display-badge-row/)
   assert.match(component, /\{badge\.name\}/)
@@ -71,7 +71,7 @@ test('long badge names remain literal and the profile information block can grow
 
   assert.equal(badgeNames.length, 4)
   assert.match(component, /badge-name-display[\s\S]*>\s*\{badge\.name\}\s*<\/span>/)
-  assert.match(component, /displayBadge && showBadgeIcon/)
+  assert.match(component, /displayBadgeName && showBadgeIcon/)
   assert.match(css, /\.user-display-name-stacked \{[^}]*height:auto/)
   assert.match(css, /\.user-display-name-nickname-row \{[^}]*white-space:normal/)
   assert.doesNotMatch(profileSummary, /<h1 className="truncate/)
@@ -82,9 +82,9 @@ test('long badge names remain literal and the profile information block can grow
 
 test('badge rows are omitted when a user has no equipped badge', () => {
   const component = read('components/UserDisplayName.tsx')
-  assert.match(component, /const displayBadge = showBadge \? liveBadge : null/)
-  assert.match(component, /const stackedBadge = Boolean\(displayBadge && showBadgeName/)
-  assert.match(component, /displayBadge && showBadgeIcon \?/)
+  assert.match(component, /const displayBadges = showBadge[\s\S]*?: \[\]/)
+  assert.match(component, /const stackedBadge = Boolean\(displayBadgeName && showBadgeIcon\)/)
+  assert.match(component, /displayBadges\.length && showBadgeIcon \?/)
   assert.match(component, /\{stackedBadge \? <span className="user-display-name-nickname-row">\{nickname\}<\/span> : nickname\}/)
 })
 

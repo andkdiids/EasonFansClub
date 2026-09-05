@@ -14,7 +14,7 @@ import {
   type SalonOptions,
   type SalonPostStatusValue,
   type SalonPostView,
-} from '@/lib/salon'
+} from '@/lib/salon-shared'
 
 type ReviewTarget = { post: SalonPostView; action: 'approve' | 'reject' }
 type EditTarget = { post: SalonPostView; category: SalonCategoryValue; tourId: string; sessionId: string; title: string; content: string }

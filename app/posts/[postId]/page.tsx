@@ -23,7 +23,7 @@ import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicModerationText } from '@/lib/content-moderation'
 import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
-import { getPostModerationAccess, publicPostWhere } from '@/lib/post-moderation'
+import { getPostModerationAccess, isPublicPostModerationStatus, publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { isRetryableDatabaseConnectionError } from '@/lib/db-timeout'
@@ -777,6 +777,22 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       startedAt: currentUserStartedAt,
     })
   }
+  const viewerIsAdmin = Boolean(user && await loadPostAdminPermission(user, 'post_manage', postId))
+  const viewerIsAuthor = Boolean(user && user.id === postCore.authorId)
+  if (postCore.isDeleted || postCore.status !== 'PUBLISHED') {
+    return <PostUnavailableFallback reason="POST" />
+  }
+
+  // 审核状态处理：用户可能通过通知/收藏/历史链接进入未审核帖子。
+  // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非暴露正文；
+  // 管理员和作者保留项目原有的私有查看能力。
+  const moderationAccess = getPostModerationAccess(postCore.moderationStatus, viewerIsAdmin, viewerIsAuthor)
+  if (moderationAccess === 'PENDING') {
+    return <ModerationPendingFallback postId={postId} canEdit={viewerIsAuthor} />
+  }
+  if (moderationAccess === 'REJECTED') {
+    return <ModerationRejectedFallback postId={postId} canEdit={viewerIsAuthor} rejectionReason={viewerIsAuthor || viewerIsAdmin ? postCore.rejectionReason : null} />
+  }
 
   const support = await loadPostSupport(postCore, user?.id)
   const post = {
@@ -788,23 +804,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     PostMedia: support.media,
   }
   const authorLoadFailed = support.authorLoadFailed
-
-  // 审核状态处理：用户可能通过通知/收藏/历史链接进入未审核帖子。
-  // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非 404。
-  // 管理员可查看全部（保持现有权限）；普通用户只能查看 APPROVED。
-  const viewerIsAdmin = Boolean(user && await loadPostAdminPermission(user, 'post_manage', postId))
-  const viewerIsAuthor = Boolean(user && user.id === post.authorId)
-  const moderationAccess = getPostModerationAccess(post.moderationStatus, viewerIsAdmin, viewerIsAuthor)
-  if (moderationAccess === 'PENDING') {
-    return <ModerationPendingFallback postId={postId} canEdit={viewerIsAuthor} />
-  }
-  if (moderationAccess === 'REJECTED') {
-    return <ModerationRejectedFallback postId={postId} canEdit={viewerIsAuthor} rejectionReason={post.rejectionReason} />
-  }
-
-  if (post.isDeleted || post.status !== 'PUBLISHED') {
-    return <PostUnavailableFallback reason="POST" />
-  }
+  const canInteractWithPost = isPublicPostModerationStatus(post.moderationStatus)
 
   if (!authorLoadFailed && (support.authorMissing || post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile)) {
     console.warn('[post:detail:unavailable]', {
@@ -938,11 +938,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       userId: user?.id,
     })
   }
-
   // 当前用户的点赞状态：两次恒定数量的批量查询（避免 N+1）；点赞用户头像列表由 Like / ReplyLike include 提供。
   let viewerPostLiked = false
   const viewerLikedReplyIds = new Set<string>()
-  if (user) {
+  if (user && canInteractWithPost) {
     const replyIds = Array.from(new Set(allLoadedReplies.map((reply) => reply.id)))
     const [viewerPostLike, viewerReplyLikes] = await Promise.allSettled([
       readPostDetailQuery(
@@ -1049,7 +1048,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     stickerId: reply.stickerId ?? null,
     stickerUrl: publicImageUrl(reply.sticker?.url),
     author: User.status === 'ACTIVE' && !User.isDeleted
-      ? { ...User, nickname: getPublicUserDisplayName(User), equippedBadge: equippedBadgeMap.get(User.id) || null, profile: User.Profile ? {
+      ? { ...User, nickname: getPublicUserDisplayName(User), equippedBadges: equippedBadgeMap.get(User.id) || [], equippedBadge: equippedBadgeMap.get(User.id)?.[0] || null, profile: User.Profile ? {
           ...User.Profile,
           displayName: getPublicUserDisplayName(User),
         } : User.Profile }
@@ -1063,7 +1062,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           friendRemark: null,
           displayName: getPublicUserDisplayName(like.User),
           avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
-          equippedBadge: equippedBadgeMap.get(like.User.id) || null,
+          equippedBadges: equippedBadgeMap.get(like.User.id) || [],
+          equippedBadge: equippedBadgeMap.get(like.User.id)?.[0] || null,
         }))
       : [],
     mentions: ReplyMention.map(({ User_ReplyMention_mentionedUserIdToUser: mentionedUser, ...mention }) => ({
@@ -1114,10 +1114,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           authorName={authorName}
           authorAvatar={authorAvatar}
           authorUid={post.User.uid}
-          authorBadge={equippedBadgeMap.get(post.User.id) || null}
+          authorBadges={equippedBadgeMap.get(post.User.id) || []}
+          authorBadge={equippedBadgeMap.get(post.User.id)?.[0] || null}
           shareTitle={shareTitle}
           shareText={shareText}
           shareCardData={shareCardData}
+          canShare={canInteractWithPost}
           postActions={canManagePost || canDeletePost || canEditPost ? (
             <PostManagementMenu
               postId={post.id}
@@ -1145,14 +1147,14 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               )}
             </div>
             <div className="post-detail-desktop-share">
-              <ShareButton
+              {canInteractWithPost ? <ShareButton
                 data={shareCardData}
                 linkTitle={shareTitle}
                 linkText={shareText}
                 triggerClassName="forum-discovery-detail-share shrink-0 whitespace-nowrap"
                 messageClassName="forum-discovery-share-message"
                 ariaLabel="分享帖子"
-              />
+              /> : null}
             </div>
           </div>
           <h1 className="text-4xl font-black leading-tight text-brand-950">{publicPostTitle}</h1>
@@ -1167,12 +1169,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
                 <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                   {authorAvatar ? <img src={authorAvatar} alt={authorName} className="h-full w-full object-cover" /> : formatUid(post.User.uid).slice(0, 1)}
                 </span>
-                <span><UserDisplayName name={authorName} uid={post.User.uid} badge={equippedBadgeMap.get(post.User.id) || null} compact /> · Lv.{post.User.level}</span>
+                <span><UserDisplayName name={authorName} uid={post.User.uid} badges={equippedBadgeMap.get(post.User.id) || []} badge={equippedBadgeMap.get(post.User.id)?.[0] || null} compact /> · Lv.{post.User.level}</span>
               </Link>
             )}
             <span>{formatDate(post.createdAt)}</span>
             <IpRegionLabel ipRegion={post.ipRegion} />
-            <PostViewCounter postId={post.id} initialCount={post.viewCount} />
+            {canInteractWithPost ? <PostViewCounter postId={post.id} initialCount={post.viewCount} /> : null}
             <span>回复 {post.replyCount}</span>
           </div>
           <RichPostContent
@@ -1200,8 +1202,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           ) : null}
           <div className="post-detail-legacy-actions mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-sky-100 pt-5">
             <div className="flex flex-wrap gap-2">
-              <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} currentUserLiker={currentUserLiker} />
-              <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
+              {canInteractWithPost ? <>
+                <LikeButton postId={post.id} initialLiked={liked} initialCount={post.likeCount} currentUserLiker={currentUserLiker} />
+                <FavoriteButton postId={post.id} initialFavorited={favorited} initialCount={post.favoriteCount} />
+              </> : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {canEditPost ? (
@@ -1239,6 +1243,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             initialMyReplies={myReplyRows}
             initialReplyCount={post.replyCount}
             currentUserId={user?.id}
+            canInteract={canInteractWithPost}
             canManageReplies={canManageReplies}
             postAuthorId={post.User.id}
             focusId={focusId}
@@ -1250,7 +1255,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           />
         </CommentSectionBoundary>
       </main>
-      <ForumDiscoveryActionBar
+      {canInteractWithPost ? <ForumDiscoveryActionBar
         postId={post.id}
         currentUserId={user?.id}
         currentUserLiker={currentUserLiker}
@@ -1259,7 +1264,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         initialFavorited={favorited}
         initialFavoriteCount={post.favoriteCount}
         initialReplyCount={post.replyCount}
-      />
+      /> : null}
       </>
     </ForumDiscoveryDetailController>
   )

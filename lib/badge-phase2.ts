@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { parseBeijingDateTime } from '@/lib/registration-availability'
 import type { BadgeProgressView } from '@/lib/badge-types'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
@@ -152,11 +153,13 @@ export async function getBadgeOwnershipStats(badgeIds: readonly string[]) {
   const result = new Map<string, BadgeOwnershipStats>()
   if (!ids.length) return result
 
+  const now = new Date()
   const [rows, totalUsers] = await Promise.all([
     prisma.userBadge.groupBy({
       by: ['badgeId'],
       where: {
         badgeId: { in: ids },
+        ...activeUserBadgeWhere(now),
         User: { status: 'ACTIVE', isDeleted: false },
       },
       _count: { _all: true },

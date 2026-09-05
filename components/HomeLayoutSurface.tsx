@@ -17,7 +17,7 @@ import { formatUid } from '@/lib/uid'
 import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
 import { getHomeCheckInDisplay } from '@/lib/home-checkin-display'
 import type { HomeActivityStatusLabel } from '@/lib/home-activity'
-import { salonCategoryLabel } from '@/lib/salon'
+import { salonCategoryLabel } from '@/lib/salon-shared'
 
 const homeText = {
   goCheckin: '去挂号',
@@ -520,18 +520,18 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
         <div className="home-first-row" aria-label="首页第一行">
         <section className="community-stats home-checkin-stats home-first-row-data" aria-label="E院数据与挂号状态">
           <div className="stat-members"><span>{homeText.members}</span><strong>{data.siteStats ? fmt(data.siteStats.memberCount) : '—'}</strong></div>
-          <div className={`stat-registration ${checkinStateClass}`}>
+          <Link href="/checkin" className={`stat-registration ${checkinStateClass}`}>
             {checkinDisplay.status === 'checked-in' ? (
               <div className="stat-total stat-registration-total" aria-label="今日挂号人数">
                 <span>{homeText.todayCheckins}</span>
                 <strong>{fmt(checkinDisplay.todayCheckInCount)}</strong>
               </div>
             ) : checkinDisplay.status === 'not-checked-in' ? (
-              <Link href="/checkin" className="stat-checkin stat-registration-cta">
+              <div className="stat-checkin stat-registration-cta">
                 <span>{homeText.todayCheckins}</span>
                 <strong>{homeText.notCheckedIn}</strong>
                 <small>{homeText.goCheckin} →</small>
-              </Link>
+              </div>
             ) : (
               <div className="stat-total stat-registration-total">
                 <span>{homeText.todayCheckins}</span>
@@ -539,7 +539,7 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
                 <small>{homeText.loadingStats}</small>
               </div>
             )}
-          </div>
+          </Link>
           <div className="stat-birthdays"><span>{homeText.birthdays}</span><strong>{data.siteStats ? fmt(data.siteStats.todayBirthdays) : '—'}</strong></div>
           <Link href="/games/daily-prescription" className="stat-prescription">
             <span>{homeText.dailyPrescription}</span>

@@ -50,7 +50,7 @@ export async function reconcileCheckInDerivedState(input: { userId: string; date
     })
   }
   await syncUserAchievements(input.userId, ['CHECKIN_STREAK', 'CHECKIN_TOTAL'])
-  const badgeSummary = await evaluateBadgesForEvent(input.userId, 'CHECKIN_CREATED')
+  const badgeSummary = await evaluateBadgesForEvent(input.userId, 'CHECKIN_CREATED', checkIn.id)
   if (badgeSummary.failed > 0) throw new Error(`BADGE_RECONCILIATION_FAILED:${badgeSummary.failed}`)
 
   return {

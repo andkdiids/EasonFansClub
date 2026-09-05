@@ -101,7 +101,7 @@ export async function GET(request: Request) {
   const otherUserIds = conversations.flatMap((row) => row.ConversationParticipant
     .filter((participant) => participant.userId !== user.id)
     .map((participant) => participant.userId))
-  const [remarkMap, equippedBadgeMap] = await Promise.all([
+  const [remarkMap, equippedBadges] = await Promise.all([
     loadFriendRemarkMap(user.id, otherUserIds),
     getEquippedBadgesForUsers(otherUserIds),
   ])
@@ -133,7 +133,8 @@ export async function GET(request: Request) {
           createdAt: other.User.createdAt,
           level: growth?.level || 0,
           levelName: growth?.levelName || '',
-          equippedBadge: equippedBadgeMap.get(other.User.id) || null,
+           equippedBadges: equippedBadges.get(other.User.id) || [],
+           equippedBadge: equippedBadges.get(other.User.id)?.[0] || null,
           profile: publicProfile,
           // Keep the legacy public key for older clients while the new
           // FriendDock consumes the lower-case normalized shape above.

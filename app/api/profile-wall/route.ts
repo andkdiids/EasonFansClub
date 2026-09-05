@@ -66,12 +66,13 @@ type SerializedWallMessage = {
   canDelete: boolean
   liked: boolean
   likeCount: number
-  likers: Array<{ id: string; uid: number; nickname: string; friendRemark: string | null; displayName: string; avatarUrl: string | null; equippedBadge: EquippedBadgeView | null }>
+  likers: Array<{ id: string; uid: number; nickname: string; friendRemark: string | null; displayName: string; avatarUrl: string | null; equippedBadges: EquippedBadgeView[]; equippedBadge: EquippedBadgeView | null }>
   commentCount: number
   sender: {
     uid: number
     nickname: string
     avatarUrl: string | null
+    equippedBadges: EquippedBadgeView[]
     equippedBadge: EquippedBadgeView | null
     profile: { displayName: string | null; avatarUrl: string | null } | null
   }
@@ -128,7 +129,7 @@ function buildWallTree(rows: WallRow[]) {
     .map((row) => buildNode(row, new Set()))
 }
 
-function serializeWallLikers(likes: WallLiker[], equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>) {
+function serializeWallLikers(likes: WallLiker[], equippedBadgesMap: ReadonlyMap<string, EquippedBadgeView[]>) {
   return likes.map((like) => ({
     id: like.userId,
     uid: like.User.uid,
@@ -136,7 +137,8 @@ function serializeWallLikers(likes: WallLiker[], equippedBadgeMap: ReadonlyMap<s
     friendRemark: null,
     displayName: getPublicUserDisplayName(like.User),
     avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
-    equippedBadge: equippedBadgeMap.get(like.userId) || null,
+    equippedBadges: equippedBadgesMap.get(like.userId) || [],
+    equippedBadge: equippedBadgesMap.get(like.userId)?.[0] || null,
   }))
 }
 
@@ -146,7 +148,7 @@ function serializeWallNode(
   receiverId: string,
   isOwner: boolean,
   viewerLikedIds: ReadonlySet<string>,
-  equippedBadgeMap: ReadonlyMap<string, EquippedBadgeView>,
+  equippedBadgesMap: ReadonlyMap<string, EquippedBadgeView[]>,
 ): SerializedWallMessage {
   const sender = node.row.User_ProfileWallMessage_senderIdToUser
   const displayName = getPublicUserDisplayName(sender)
@@ -161,16 +163,17 @@ function serializeWallNode(
     canDelete: canManageWallMessage(viewer, node.row.senderId, receiverId),
     liked: viewerLikedIds.has(node.row.id),
     likeCount: node.row.likeCount,
-    likers: isOwner ? serializeWallLikers(node.row.ProfileWallLike, equippedBadgeMap) : [],
+    likers: isOwner ? serializeWallLikers(node.row.ProfileWallLike, equippedBadgesMap) : [],
     commentCount: node.commentCount,
     sender: {
       uid: sender.uid,
       nickname: getPublicUserDisplayName(sender),
       avatarUrl: publicImageUrl(sender.avatarUrl),
-      equippedBadge: equippedBadgeMap.get(node.row.senderId) || null,
+      equippedBadges: equippedBadgesMap.get(node.row.senderId) || [],
+      equippedBadge: equippedBadgesMap.get(node.row.senderId)?.[0] || null,
       profile: sender.Profile ? { ...sender.Profile, avatarUrl: publicImageUrl(sender.Profile.avatarUrl), displayName } : null,
     },
-    children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, equippedBadgeMap)),
+    children: node.children.map((child) => serializeWallNode(child, viewer, receiverId, isOwner, viewerLikedIds, equippedBadgesMap)),
   }
 }
 
@@ -270,13 +273,13 @@ export async function GET(request: Request) {
     ...rows.map((row) => row.senderId),
     ...rows.flatMap((row) => row.ProfileWallLike.map((like) => like.userId)),
   ]
-  const equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
+  const equippedBadgesMap = await getEquippedBadgesForUsers(displayNameUserIds)
   const tree = buildWallTree(rows)
 
   return NextResponse.json({
     visibility: receiver.Profile?.wallVisibility || 'PUBLIC',
     canPost: Boolean(viewer && receiver.Profile?.wallVisibility !== 'CLOSED'),
-    messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, equippedBadgeMap)),
+    messages: tree.map((node) => serializeWallNode(node, viewer, receiver.id, isOwner, viewerLikedIds, equippedBadgesMap)),
     pagination: {
       page,
       pageSize: PROFILE_WALL_PAGE_SIZE,
@@ -378,7 +381,7 @@ export async function POST(request: Request) {
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
   const createdRow = await loadWallMessage(message.id)
   if (!createdRow) return NextResponse.json({ message: '留言已保存，但读取新留言失败' }, { status: 500 })
-  const equippedBadgeMap = await getEquippedBadgesForUsers([
+  const equippedBadgesMap = await getEquippedBadgesForUsers([
     createdRow.senderId,
     ...createdRow.ProfileWallLike.map((like) => like.userId),
   ])
@@ -388,7 +391,7 @@ export async function POST(request: Request) {
     receiver.id,
     viewer.id === receiver.id,
     new Set<string>(),
-    equippedBadgeMap,
+    equippedBadgesMap,
   )
 
   return NextResponse.json({ message: '留言已发布', id: message.id, wallMessage }, { status: 201 })

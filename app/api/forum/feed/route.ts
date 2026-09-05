@@ -86,7 +86,7 @@ export async function GET(request: Request) {
 
   const announcement = selectedBoard?.slug === 'announcements'
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
-  const equippedBadgeMap = await getEquippedBadgesForUsers(rows.map((row) => row.User.id))
+  const equippedBadges = await getEquippedBadgesForUsers(rows.map((row) => row.User.id))
   return NextResponse.json({
     boards: publicBoards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: publicSelectedBoard ? { ...publicSelectedBoard, isAnnouncement: announcement } : null,
@@ -96,7 +96,8 @@ export async function GET(request: Request) {
       author: {
         ...User,
         nickname: getPublicUserDisplayName(User),
-        equippedBadge: equippedBadgeMap.get(User.id) || null,
+        equippedBadges: equippedBadges.get(User.id) || [],
+        equippedBadge: equippedBadges.get(User.id)?.[0] || null,
         avatarUrl: publicImageUrl(User.avatarUrl),
         profile: User.Profile ? {
           ...User.Profile,

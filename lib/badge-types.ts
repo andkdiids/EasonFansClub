@@ -4,6 +4,8 @@ export type BadgeGrantType = 'AUTO' | 'MANUAL' | 'EVENT'
 export type BadgeEffectType = 'NONE' | 'SHINE' | 'GLOW' | 'SPARKLE'
 export type BadgeNicknameEffect = 'NONE' | 'COLOR' | 'GOLD' | 'GRADIENT' | 'GLOW'
 export type BadgeAvailabilityStatus = 'PERMANENT' | 'UPCOMING' | 'AVAILABLE' | 'ENDED'
+export type BadgeValidityType = 'PERMANENT' | 'DAYS'
+export type UserBadgeStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED'
 
 export type BadgeSeriesView = {
   id: string
@@ -46,6 +48,8 @@ export type BadgeSeriesCompletionView = {
 
 export type EquippedBadgeView = {
   id: string
+  /** Stable user-selected order in the equipped-badge relation. */
+  position?: number
   code?: string
   name: string
   imageUrl: string | null
@@ -56,6 +60,9 @@ export type EquippedBadgeView = {
   nicknameGradientEnd: string | null
   rarity?: BadgeRarity
   obtainedAt?: string | null
+  expiresAt?: string | null
+  validityType?: BadgeValidityType
+  validityDays?: number | null
   description?: string | null
   acquisitionDescription?: string | null
   isWearable?: boolean
@@ -77,6 +84,10 @@ export type BadgeView = Omit<EquippedBadgeView, 'rarity' | 'obtainedAt'> & {
   sortOrder: number
   status: 'OBTAINED' | 'NOT_OBTAINED' | 'HIDDEN'
   obtainedAt: string | null
+  expiresAt?: string | null
+  validityType?: BadgeValidityType
+  validityDays?: number | null
+  remainingDays?: number | null
   isEquipped: boolean
   series?: BadgeSeriesView | null
   tierGroupCode?: string | null
@@ -89,9 +100,25 @@ export type BadgeView = Omit<EquippedBadgeView, 'rarity' | 'obtainedAt'> & {
   ownershipStats?: BadgeOwnershipStatsView | null
 }
 
+export type BadgeHistoryView = {
+  recordId: string
+  badge: Pick<BadgeView, 'id' | 'code' | 'name' | 'imageUrl' | 'effectType' | 'rarity' | 'description' | 'acquisitionDescription' | 'visibility' | 'series' | 'validityType' | 'validityDays'>
+  awardedAt: string
+  obtainedAt: string
+  expiresAt: string | null
+  expiredAt: string | null
+  revokedAt: string | null
+  status: UserBadgeStatus
+  sourceType: string | null
+  grantReason?: string | null
+}
+
 export type BadgeCollectionView = {
   target: { id: string; uid: number }
   isSelf: boolean
+  /** All currently equipped badges, ordered by position. */
+  equippedBadges: EquippedBadgeView[]
+  /** Legacy compatibility field; always mirrors equippedBadges[0] when present. */
   equippedBadgeId: string | null
   obtainedCount: number
   visibleTotal: number
@@ -103,6 +130,7 @@ export type BadgeCollectionView = {
   items: BadgeView[]
   showcase?: BadgeShowcaseItemView[]
   recent?: BadgeView[]
+  history?: BadgeHistoryView[]
   seriesCompletions?: BadgeSeriesCompletionView[]
 }
 
@@ -145,6 +173,7 @@ export const BADGE_RARITIES: BadgeRarity[] = ['COMMON', 'RARE', 'EPIC', 'LEGENDA
 export const BADGE_GRANT_TYPES: BadgeGrantType[] = ['AUTO', 'MANUAL', 'EVENT']
 export const BADGE_EFFECT_TYPES: BadgeEffectType[] = ['NONE', 'SHINE', 'GLOW', 'SPARKLE']
 export const BADGE_NICKNAME_EFFECTS: BadgeNicknameEffect[] = ['NONE', 'COLOR', 'GOLD', 'GRADIENT', 'GLOW']
+export const BADGE_VALIDITY_TYPE_LABELS: Record<BadgeValidityType, string> = { PERMANENT: '永久有效', DAYS: '自定义有效期' }
 
 export const BADGE_RARITY_LABELS: Record<BadgeRarity, string> = {
   COMMON: '普通',

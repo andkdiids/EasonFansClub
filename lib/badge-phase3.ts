@@ -3,6 +3,7 @@ import { formatUid } from '@/lib/uid'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { prisma } from '@/lib/prisma'
 import { createNotification } from '@/lib/notification-write'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
 export const MAX_BADGE_SHOWCASE_SLOTS = 6
 export const BADGE_PHASE3_MAX_DEPTH = 5
@@ -49,7 +50,7 @@ export async function getSeriesCompletionEligibleUserIds(seriesId: string) {
   if (!data || !data.requiredBadgeIds.length) return []
   const rows = await prisma.userBadge.groupBy({
     by: ['userId'],
-    where: { badgeId: { in: data.requiredBadgeIds }, User: { status: 'ACTIVE', isDeleted: false } },
+    where: { badgeId: { in: data.requiredBadgeIds }, ...activeUserBadgeWhere(), User: { status: 'ACTIVE', isDeleted: false } },
     _count: { _all: true },
   })
   return rows.filter((row) => row._count._all === data.requiredBadgeIds.length).map((row) => row.userId).sort()
@@ -57,9 +58,9 @@ export async function getSeriesCompletionEligibleUserIds(seriesId: string) {
 
 export async function getSeriesCompletionPreview(seriesId: string, rewardBadgeId: string) {
   const eligibleIds = await getSeriesCompletionEligibleUserIds(seriesId)
-  const ownedCount = await prisma.userBadge.count({ where: { badgeId: rewardBadgeId, User: { status: 'ACTIVE', isDeleted: false } } })
+  const ownedCount = await prisma.userBadge.count({ where: { badgeId: rewardBadgeId, ...activeUserBadgeWhere(), User: { status: 'ACTIVE', isDeleted: false } } })
   const pending = eligibleIds.length
-    ? await prisma.userBadge.count({ where: { badgeId: rewardBadgeId, userId: { in: eligibleIds } } })
+    ? await prisma.userBadge.count({ where: { badgeId: rewardBadgeId, userId: { in: eligibleIds }, ...activeUserBadgeWhere() } })
     : 0
   return { eligibleCount: eligibleIds.length, ownedCount, pendingCount: Math.max(0, eligibleIds.length - pending) }
 }
@@ -114,10 +115,11 @@ async function createBadgeGrantNotification(userId: string, grants: readonly Gra
   const tierLines: string[] = []
   const groups = [...new Set(badges.map((badge) => badge.tierGroupCode).filter((value): value is string => Boolean(value)))]
   const ownedTierRows = groups.length
-    ? await prisma.userBadge.findMany({
-        where: {
-          userId,
-          Badge: {
+      ? await prisma.userBadge.findMany({
+          where: {
+            userId,
+            ...activeUserBadgeWhere(),
+            Badge: {
             tierGroupCode: { in: groups },
             tierLevel: { not: null },
             isEnabled: true,
@@ -209,11 +211,11 @@ async function collectSeriesRewards(userId: string, sourceGrants: readonly Grant
     checkedSeriesIds.add(series.id)
     const data = await loadSeriesCompletionData(series.id)
     if (!data || !data.requiredBadgeIds.length) continue
-    const owned = await prisma.userBadge.count({ where: { userId, badgeId: { in: data.requiredBadgeIds } } })
+    const owned = await prisma.userBadge.count({ where: { userId, badgeId: { in: data.requiredBadgeIds }, ...activeUserBadgeWhere() } })
     if (owned !== data.requiredBadgeIds.length) continue
     if (state.visitedSeriesIds.has(series.id)) continue
     state.visitedSeriesIds.add(series.id)
-    const reward = await prisma.userBadge.findUnique({ where: { userId_badgeId: { userId, badgeId: series.completionRewardBadgeId } }, select: { id: true } })
+    const reward = await prisma.userBadge.findFirst({ where: { userId, badgeId: series.completionRewardBadgeId, ...activeUserBadgeWhere() }, select: { id: true } })
     if (reward) continue
     try {
       const { grantBadge } = await import('@/lib/badge-service')
@@ -223,6 +225,7 @@ async function collectSeriesRewards(userId: string, sourceGrants: readonly Grant
         badgeId: series.completionRewardBadgeId,
         sourceType: 'AUTO_RULE',
         sourceId: rewardRule?.id || series.id,
+        grantKey: `series:${series.id}:${sourceGrants.map((grant) => grant.recordId).sort().join('|')}`,
         grantReason: `集齐「${series.name}」系列后获得`,
         deferPhase3Effects: true,
       })
@@ -240,9 +243,9 @@ async function collectSeriesRewards(userId: string, sourceGrants: readonly Grant
   await collectSeriesRewards(userId, nextRewards, state)
 }
 
-export async function processBadgeGrantEffects(input: { userId: string; grants: readonly GrantRecord[] }) {
+export async function processBadgeGrantEffects(input: { userId: string; grants: readonly GrantRecord[]; skipOwnershipRecheck?: boolean }): Promise<readonly GrantRecord[]> {
   const grants = [...new Map(input.grants.map((grant) => [grant.recordId, grant])).values()]
-  if (!grants.length) return
+  if (!grants.length) return []
   const state: GrantEffectState = { depth: 0, visitedBadgeIds: new Set(), visitedSeriesIds: new Set(), grants: [...grants], completedSeriesIds: [] }
   await collectSeriesRewards(input.userId, grants, state)
   await createBadgeGrantNotification(input.userId, state.grants)
@@ -269,4 +272,18 @@ export async function processBadgeGrantEffects(input: { userId: string; grants: 
       }
     }
   }
+
+  // Badge ownership rules are presentation-independent and must also see
+  // rewards created by the series phase above. The evaluator uses the
+  // dependency index and is idempotent, so this single post-commit hook keeps
+  // all normal grant paths on the same rule engine.
+  if (!input.skipOwnershipRecheck) {
+    try {
+      const { triggerBadgeOwnershipRecheck } = await import('@/lib/badge-ownership')
+      for (const grant of state.grants) await triggerBadgeOwnershipRecheck(input.userId, grant.badgeId)
+    } catch (error) {
+      console.error('[badge.grant.ownership-recheck.phase3]', { userId: input.userId, error })
+    }
+  }
+  return state.grants
 }

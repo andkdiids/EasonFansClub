@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { randomUUID } from 'node:crypto'
 import { createSessionToken } from '@/lib/auth'
 import { authCookieName, getSessionCookieOptions } from '@/lib/auth-cookie'
 import { appendLegacyHostCookieDeletion } from '@/lib/auth-session-cookie'
@@ -162,7 +163,7 @@ export async function POST(request: Request) {
     await sendBirthdayGreeting(user.id).catch((greetingError) => {
       console.error('[auth.login.birthday-greeting]', greetingError)
     })
-    triggerBadgeEvaluation(user.id, 'USER_LOGIN')
+    triggerBadgeEvaluation(user.id, 'USER_LOGIN', randomUUID())
 
     const token = await createSessionToken(sessionUser)
     const response = NextResponse.json({ user: responseUser }, { headers: noStoreHeaders })

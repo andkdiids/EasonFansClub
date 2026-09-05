@@ -9,6 +9,7 @@ import { formatUid } from '@/lib/uid'
 import { evaluateBadgeMetric, getBatchBadgeMetrics } from '@/lib/badge-rule-engine'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { upsertNotification } from '@/lib/notification-write'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
 export const MAX_BADGE_TRACKING = 10
 export const BADGE_RECOMMENDATION_LIMIT = 3
@@ -86,7 +87,7 @@ export async function getBadgeTaskCenter(userId: string, now = new Date()) {
         visibility: 'PUBLIC', grantType: 'AUTO', isEnabled: true, isActive: true,
         ...badgeAvailabilityWhere(now),
         BadgeRule: { is: { isEnabled: true, operator: 'GTE', threshold: { not: null }, ruleType: { in: TRACKABLE_RULE_TYPES } } },
-        UserBadge: { none: { userId } },
+        UserBadge: { none: { userId, ...activeUserBadgeWhere(now) } },
         UserBadgeTracking: { none: { userId } },
       },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
@@ -125,7 +126,7 @@ export async function trackBadge(userId: string, badgeId: string) {
       id: true, visibility: true, grantType: true, isEnabled: true, isActive: true,
       availableFrom: true, availableUntil: true,
       BadgeRule: { select: { ruleType: true, operator: true, threshold: true, isEnabled: true } },
-      UserBadge: { where: { userId }, select: { id: true }, take: 1 },
+       UserBadge: { where: { userId, ...activeUserBadgeWhere() }, select: { id: true }, take: 1 },
     },
   })
   if (!badge) throw new Error('勋章不存在')
@@ -233,7 +234,7 @@ export async function getBadgeYearReview(userId: string, year: number) {
       where: { seriesId: { not: null }, countsTowardSeriesCompletion: true, isEnabled: true, isActive: true, visibility: { not: 'SECRET' } },
       select: { id: true, seriesId: true },
     }),
-    prisma.userBadge.findMany({ where: { userId, Badge: { seriesId: { not: null }, countsTowardSeriesCompletion: true, isEnabled: true, isActive: true, visibility: { not: 'SECRET' } } }, select: { badgeId: true } }),
+    prisma.userBadge.findMany({ where: { userId, ...activeUserBadgeWhere(), Badge: { seriesId: { not: null }, countsTowardSeriesCompletion: true, isEnabled: true, isActive: true, visibility: { not: 'SECRET' } } }, select: { badgeId: true } }),
   ])
   const ownedRequiredIds = new Set(ownedRequired.map((item) => item.badgeId))
   const requiredBySeries = new Map<string, string[]>()
@@ -301,7 +302,7 @@ export async function getBadgeAnalytics(range: BadgeAnalyticsRange, page = 1, pa
     })
     if (!users.length) break
     const ownedRows = await prisma.userBadge.findMany({
-      where: { userId: { in: users.map((user) => user.id) }, badgeId: { in: previewBadges.map((badge) => badge.id) } },
+      where: { userId: { in: users.map((user) => user.id) }, badgeId: { in: previewBadges.map((badge) => badge.id) }, ...activeUserBadgeWhere(now) },
       select: { userId: true, badgeId: true },
     })
     const owned = new Set(ownedRows.map((row) => `${row.userId}:${row.badgeId}`))

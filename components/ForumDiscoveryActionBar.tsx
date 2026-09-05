@@ -50,7 +50,7 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, currentUserLike
 
   return (
     <div className="forum-discovery-action-bar" data-forum-discovery-action-bar>
-      <button type="button" className="forum-discovery-comment-trigger" onClick={() => void openComposer()}>说点什么…</button>
+      <button type="button" className="forum-discovery-action-count" onClick={focusComments} aria-label="查看评论">评论 {replyCount}</button>
       <LikeButton
         postId={postId}
         initialLiked={initialLiked}
@@ -66,7 +66,7 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, currentUserLike
         refreshOnSuccess={false}
         className="forum-discovery-action-button forum-discovery-action-favorite"
       />
-      <button type="button" className="forum-discovery-action-count" onClick={focusComments} aria-label="查看评论">评论 {replyCount}</button>
+      <button type="button" className="forum-discovery-comment-trigger" onClick={() => void openComposer()}>说点什么</button>
     </div>
   )
 }

@@ -4,9 +4,11 @@ import { createSalonWatermarkSvg, type SalonWatermarkRenderOptions } from '@/lib
 
 /**
  * 允许作为「输入」解码的常见图片格式（由 sharp 真实解码后再校验，不信任浏览器 MIME）。
+ * HEIF/HEIC 是否可用仍取决于部署环境的 libvips 编解码器；客户端会先
+ * 尝试原生转换，失败时返回明确的 JPG fallback 提示。
  * 输出统一为 WebP。
  */
-export const WEBP_SOURCE_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif', 'avif'])
+export const WEBP_SOURCE_FORMATS = new Set(['jpeg', 'png', 'webp', 'gif', 'avif', 'heif'])
 
 export class ImageNormalizeError extends Error {
   constructor(message: string) {

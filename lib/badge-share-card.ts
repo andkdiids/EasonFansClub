@@ -7,6 +7,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getMediaPublicBaseUrl, PUBLIC_COS_HOST, toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
 const CARD_WIDTH = 900
 const CARD_HEIGHT = 1200
@@ -92,8 +93,9 @@ export async function createBadgeShareTextLayer(input: ShareTextLayerInput) {
 }
 
 export async function generateBadgeShareCard(userId: string, badgeId: string) {
-  const record = await prisma.userBadge.findUnique({
-    where: { userId_badgeId: { userId, badgeId } },
+  const record = await prisma.userBadge.findFirst({
+    where: { userId, badgeId, ...activeUserBadgeWhere() },
+    orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
     select: {
       obtainedAt: true,
       Badge: {

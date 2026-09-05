@@ -37,6 +37,22 @@ test('homepage check-in display keeps the user state and today total independent
   assert.deepEqual(getHomeCheckInDisplay({ loaded: false, checkedInToday: false, todayCheckInCount: 2000 }), { status: 'loading', todayCheckInCount: null })
 })
 
+test('homepage registration cell uses one whole-cell check-in link without changing state content', () => {
+  const surface = read('components/HomeLayoutSurface.tsx')
+  const start = surface.indexOf('<Link href="/checkin" className={`stat-registration ${checkinStateClass}`}>')
+  const end = surface.indexOf('</Link>', start)
+  assert.ok(start >= 0)
+  assert.ok(end > start)
+  const registrationCell = surface.slice(start, end)
+
+  assert.equal((registrationCell.match(/<Link href="\/checkin"/g) || []).length, 1)
+  assert.match(registrationCell, /checkinDisplay\.status === 'checked-in'/)
+  assert.match(registrationCell, /fmt\(checkinDisplay\.todayCheckInCount\)/)
+  assert.match(registrationCell, /checkinDisplay\.status === 'not-checked-in'/)
+  assert.match(registrationCell, /homeText\.goCheckin/)
+  assert.doesNotMatch(registrationCell, /<Link href="\/checkin" className="stat-checkin/)
+})
+
 test('homepage displays the stored daily prescription reward without treating an unclaimed state as zero', () => {
   const homeData = read('lib/home-data.ts')
   const api = read('app/api/home/route.ts')

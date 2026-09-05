@@ -66,6 +66,11 @@ export function FriendMentionInput({
   onSubmitShortcut,
   canSubmitShortcut = true,
   maxLength,
+  rows = 5,
+  placeholder = '写下你的回复，输入 @ 提及好友…',
+  textareaClassName = 'w-full rounded-lg border border-sky-100 px-4 py-2 outline-none ring-brand-500/20 focus:ring-4',
+  rootClassName = 'relative mt-3',
+  onEscape,
 }: Readonly<{
   textareaRef: RefObject<HTMLTextAreaElement | null>
   value: string
@@ -75,6 +80,11 @@ export function FriendMentionInput({
   onSubmitShortcut: () => void
   canSubmitShortcut?: boolean
   maxLength?: number
+  rows?: number
+  placeholder?: string
+  textareaClassName?: string
+  rootClassName?: string
+  onEscape?: () => void
 }>) {
   const rootRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
@@ -196,9 +206,14 @@ export function FriendMentionInput({
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Escape' && trigger) {
-      event.preventDefault()
-      closePicker()
+    if (event.key === 'Escape') {
+      if (trigger) {
+        event.preventDefault()
+        closePicker()
+      } else if (onEscape) {
+        event.preventDefault()
+        onEscape?.()
+      }
       return
     }
     if (shouldSubmitCommentOnEnter(event, {
@@ -213,7 +228,7 @@ export function FriendMentionInput({
   }
 
   return (
-    <div ref={rootRef} className="relative mt-3">
+    <div ref={rootRef} className={rootClassName}>
       {trigger ? (
         <div role="listbox" aria-label="选择要提及的好友" className="absolute bottom-full left-0 z-[90] mb-2 max-h-56 w-full max-w-md overflow-y-auto border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_24px_rgba(2,12,27,.18)]">
           {loading ? <p className="px-3 py-3 text-sm font-bold text-[var(--foreground-muted)]">正在查找好友…</p> : null}
@@ -256,9 +271,9 @@ export function FriendMentionInput({
           composingRef.current = false
           refreshTrigger(event.currentTarget.value)
         }}
-        rows={5}
-        className="w-full rounded-lg border border-sky-100 px-4 py-2 outline-none ring-brand-500/20 focus:ring-4"
-        placeholder="写下你的回复，输入 @ 提及好友…"
+        rows={rows}
+        className={textareaClassName}
+        placeholder={placeholder}
       />
     </div>
   )

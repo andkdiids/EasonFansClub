@@ -19,7 +19,7 @@ test('个人主页公开发帖条件只允许已发布且未删除的正常审�
   assert.equal(where.moderationStatus.in.includes('PENDING'), false)
 })
 
-test('作者/管理员保留待审核可见性，但拒绝状态仍然永远排除', () => {
+test('作者/管理员保留待审核和拒绝状态的私有可见性', () => {
   const where = buildProfilePostWhere('user-a', true)
 
   assert.equal(where.isDeleted, false)
@@ -27,7 +27,7 @@ test('作者/管理员保留待审核可见性，但拒绝状态仍然永远排�
   assert.equal(where.moderationStatus.in.includes('PENDING'), true)
   assert.equal(where.moderationStatus.in.includes('APPROVED'), true)
   assert.equal(where.moderationStatus.in.includes('VIOLATION'), true)
-  assert.equal(where.moderationStatus.in.includes('REJECTED'), false)
+  assert.equal(where.moderationStatus.in.includes('REJECTED'), true)
 })
 
 test('正常、拒绝、删除混合数据在服务端过滤后只会进入有效集合', () => {
@@ -42,7 +42,7 @@ test('正常、拒绝、删除混合数据在服务端过滤后只会进入有�
   ]
   const visible = rows.filter((row) => row.status === where.status && row.isDeleted === where.isDeleted && allowedModerationStatuses.has(row.moderationStatus as never))
 
-  assert.deepEqual(visible.map((row) => row.moderationStatus), ['APPROVED', 'PENDING'])
+  assert.deepEqual(visible.map((row) => row.moderationStatus), ['APPROVED', 'PENDING', 'REJECTED'])
 })
 
 test('个人主页列表和数量共用同一个服务端 where，审核/删除后失效个人主页缓存', () => {

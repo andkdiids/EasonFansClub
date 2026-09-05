@@ -17,6 +17,7 @@ import { buildProfilePostWhere } from '@/lib/post-moderation'
 import { postContentPlainText } from '@/lib/share-metadata'
 import { PROFILE_POST_GROUP_UNGROUPED } from '@/lib/profile-post-groups'
 import { getProfileVisibility, isProfileModuleVisible, PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -35,6 +36,7 @@ export async function GET(request: Request, context: RouteContext) {
   const moduleKey = searchParams.get('module') || 'posts'
   const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
   const viewer = await getCurrentUser()
+  const now = new Date()
   const target = await safeDb('userModules.findUser', findPublicUserId(userId), null)
 
   if (!target) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
@@ -171,8 +173,8 @@ export async function GET(request: Request, context: RouteContext) {
     const badges = await safeDb(
       'userModules.badges',
       prisma.userBadge.findMany({
-        where: { userId: target.id, isHidden: false },
-        orderBy: { grantedAt: 'desc' },
+        where: { userId: target.id, isHidden: false, ...activeUserBadgeWhere(now) },
+        orderBy: { awardedAt: 'desc' },
         take: 12,
         select: { id: true, grantedAt: true, Badge: { select: { name: true, description: true, iconUrl: true } } },
       }),
@@ -226,7 +228,7 @@ export async function GET(request: Request, context: RouteContext) {
       [],
     )
     const authorIds = favorites.map((item) => item.Post.User.id)
-    const equippedBadgeMap = await getEquippedBadgesForUsers(authorIds)
+    const equippedBadges = await getEquippedBadgesForUsers(authorIds)
     return NextResponse.json({
       items: favorites.map(({ Post, ...favorite }) => ({
         ...favorite,
@@ -239,7 +241,8 @@ export async function GET(request: Request, context: RouteContext) {
             author: {
               ...Post.User,
               nickname: getPublicUserDisplayName(Post.User),
-              equippedBadge: equippedBadgeMap.get(Post.User.id) || null,
+              equippedBadges: equippedBadges.get(Post.User.id) || [],
+              equippedBadge: equippedBadges.get(Post.User.id)?.[0] || null,
               profile: Post.User.Profile ? {
                 ...Post.User.Profile,
                 displayName: getPublicUserDisplayName(Post.User),

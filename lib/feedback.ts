@@ -1,6 +1,6 @@
 import type { FeedbackStatus, FeedbackType, Prisma } from '@prisma/client'
 import { publicImageUrl, storedImageUrl } from '@/lib/images'
-import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { publicModerationText } from '@/lib/content-moderation'
 
 export const FEEDBACK_DESCRIPTION_MIN_LENGTH = 10

@@ -20,7 +20,7 @@ import { ProfileRecordSettings } from '@/components/ProfileRecordSettings'
 import { getOrderedProfileRecordSectionKeys, getProfileRecordLabel, normalizeProfileRecordPreferences, PROFILE_RECORD_SECTIONS, type ProfileRecordPreference } from '@/lib/profile-record-sections'
 import type { ProfilePostGroupView } from '@/lib/profile-post-groups'
 import { PersonalPostGroupMenu, ProfilePostGroupBar } from '@/components/ProfilePostGroups'
-import { formatSalonPostContext, type SalonPostView } from '@/lib/salon'
+import { formatSalonPostContext, type SalonPostView } from '@/lib/salon-shared'
 import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
 
@@ -49,7 +49,7 @@ type FavoriteItem = {
     id: string
     title: string
     content: string
-    author: { uid: number; nickname: string; profile?: { displayName: string | null } | null; equippedBadge?: EquippedBadgeView | null }
+    author: { uid: number; nickname: string; profile?: { displayName: string | null } | null; equippedBadges?: EquippedBadgeView[]; equippedBadge?: EquippedBadgeView | null }
   }
 }
 type ModuleItem = PostItem | ReplyItem | ProfileRecentMessage | AchievementItem | BadgeItem | AlbumItem | FavoriteItem | SalonPostView
@@ -565,7 +565,7 @@ function ModuleContent({
   className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
 >            <h3 className="text-lg font-black text-brand-950">{item.post.title}</h3>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{item.post.content}</p>
-            <p className="mt-2 text-xs font-bold text-slate-500">作者 <UserDisplayName name={authorName} uid={author.uid} badge={author.equippedBadge} compact /> · UID {formatUid(author.uid)}</p>
+            <p className="mt-2 text-xs font-bold text-slate-500">作者 <UserDisplayName name={authorName} uid={author.uid} badges={author.equippedBadges} badge={author.equippedBadge} compact /> · UID {formatUid(author.uid)}</p>
           </Link>
         )
       })}

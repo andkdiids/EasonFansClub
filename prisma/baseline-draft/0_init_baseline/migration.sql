@@ -403,6 +403,8 @@ CREATE TABLE `Badge` (
     `visibility` ENUM('PUBLIC', 'HIDDEN', 'SECRET') NOT NULL DEFAULT 'PUBLIC',
     `rarity` ENUM('COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED') NOT NULL DEFAULT 'COMMON',
     `grantType` ENUM('AUTO', 'MANUAL', 'EVENT') NOT NULL DEFAULT 'MANUAL',
+    `validityType` ENUM('PERMANENT', 'DAYS') NOT NULL DEFAULT 'PERMANENT',
+    `validityDays` INTEGER NULL,
     `isWearable` BOOLEAN NOT NULL DEFAULT true,
     `isEnabled` BOOLEAN NOT NULL DEFAULT true,
     `effectType` ENUM('NONE', 'SHINE', 'GLOW', 'SPARKLE') NOT NULL DEFAULT 'NONE',
@@ -444,7 +446,7 @@ CREATE TABLE `Badge` (
 CREATE TABLE `BadgeRule` (
     `id` VARCHAR(191) NOT NULL,
     `badgeId` VARCHAR(191) NOT NULL,
-    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION') NOT NULL,
+    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY', 'BADGE_OWNERSHIP') NOT NULL,
     `operator` ENUM('GTE', 'LTE', 'EQ') NOT NULL DEFAULT 'GTE',
     `threshold` INTEGER NULL,
     `secondaryThreshold` INTEGER NULL,
@@ -455,6 +457,19 @@ CREATE TABLE `BadgeRule` (
 
     UNIQUE INDEX `BadgeRule_badgeId_key`(`badgeId`),
     INDEX `BadgeRule_ruleType_isEnabled_idx`(`ruleType`, `isEnabled`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `BadgeRuleDependency` (
+    `id` VARCHAR(191) NOT NULL,
+    `sourceBadgeId` VARCHAR(191) NOT NULL,
+    `targetBadgeId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `BadgeRuleDependency_sourceBadgeId_idx`(`sourceBadgeId`),
+    INDEX `BadgeRuleDependency_targetBadgeId_idx`(`targetBadgeId`),
+    UNIQUE INDEX `BadgeRuleDependency_sourceBadgeId_targetBadgeId_key`(`sourceBadgeId`, `targetBadgeId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -2105,11 +2120,15 @@ CREATE TABLE `LotteryEntry` (
     `redemptionStatus` ENUM('PENDING', 'REDEEMED') NOT NULL DEFAULT 'PENDING',
     `redeemedAt` DATETIME(3) NULL,
     `redeemedByAdminId` VARCHAR(191) NULL,
+    `fulfillmentStatus` ENUM('NOT_REQUIRED', 'PENDING', 'FULFILLED', 'FAILED') NOT NULL DEFAULT 'NOT_REQUIRED',
+    `fulfilledAt` DATETIME(3) NULL,
+    `fulfillmentError` VARCHAR(500) NULL,
 
     INDEX `LotteryEntry_lotteryId_createdAt_idx`(`lotteryId`, `createdAt`),
     INDEX `LotteryEntry_userId_createdAt_idx`(`userId`, `createdAt`),
     INDEX `LotteryEntry_registrationId_idx`(`registrationId`),
     INDEX `LotteryEntry_redeemedByAdminId_redeemedAt_idx`(`redeemedByAdminId`, `redeemedAt`),
+    INDEX `LotteryEntry_lotteryId_fulfillmentStatus_idx`(`lotteryId`, `fulfillmentStatus`),
     UNIQUE INDEX `LotteryEntry_lotteryId_userId_key`(`lotteryId`, `userId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -2122,6 +2141,10 @@ CREATE TABLE `LotteryPrize` (
     `description` TEXT NULL,
     `imageUrl` TEXT NULL,
     `type` ENUM('BADGE', 'PHYSICAL', 'COUPON', 'POINTS') NOT NULL,
+    `prizeType` ENUM('PHYSICAL', 'VIRTUAL') NOT NULL DEFAULT 'PHYSICAL',
+    `virtualPrizeType` ENUM('BADGE', 'REGISTRATION_FEE') NULL,
+    `badgeId` VARCHAR(191) NULL,
+    `registrationFeeAmount` INTEGER NULL,
     `quantity` INTEGER NOT NULL DEFAULT 1,
     `remaining` INTEGER NOT NULL DEFAULT 1,
     `pointsValue` INTEGER NULL,
@@ -2130,6 +2153,7 @@ CREATE TABLE `LotteryPrize` (
     `lotteryId` VARCHAR(191) NOT NULL,
 
     INDEX `LotteryPrize_lotteryId_sortOrder_id_idx`(`lotteryId`, `sortOrder`, `id`),
+    INDEX `LotteryPrize_badgeId_idx`(`badgeId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -2826,7 +2850,7 @@ CREATE TABLE `PasswordResetToken` (
 -- CreateTable
 CREATE TABLE `PointLog` (
     `id` VARCHAR(191) NOT NULL,
-    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD', 'CHECK_IN_MAKEUP', 'MATERIAL_REDEMPTION', 'MATERIAL_REDEMPTION_REFUND', 'ACTIVITY_REGISTRATION_FEE', 'ACTIVITY_REGISTRATION_REFUND') NOT NULL,
+    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD', 'CHECK_IN_MAKEUP', 'MATERIAL_REDEMPTION', 'MATERIAL_REDEMPTION_REFUND', 'ACTIVITY_REGISTRATION_FEE', 'ACTIVITY_REGISTRATION_REFUND', 'ACTIVITY_LOTTERY_PRIZE', 'PHARMACY_DRAW_COST', 'PHARMACY_PRIZE_REWARD', 'PHARMACY_DUPLICATE_RECYCLE') NOT NULL,
     `points` INTEGER NOT NULL,
     `before` INTEGER NOT NULL,
     `after` INTEGER NOT NULL,
@@ -2840,6 +2864,8 @@ CREATE TABLE `PointLog` (
     `activityRegistrationId` VARCHAR(191) NULL,
     `badgeId` VARCHAR(191) NULL,
     `dailyDrawId` VARCHAR(191) NULL,
+    `pharmacyDrawId` VARCHAR(191) NULL,
+    `pharmacyRecycleLogId` VARCHAR(191) NULL,
     `dateKey` VARCHAR(191) NULL,
     `businessKey` VARCHAR(191) NULL,
 
@@ -2853,7 +2879,130 @@ CREATE TABLE `PointLog` (
     INDEX `PointLog_replyId_idx`(`replyId`),
     INDEX `PointLog_userId_createdAt_idx`(`userId`, `createdAt`),
     INDEX `PointLog_userId_action_dateKey_idx`(`userId`, `action`, `dateKey`),
+    INDEX `PointLog_pharmacyDrawId_idx`(`pharmacyDrawId`),
+    INDEX `PointLog_pharmacyRecycleLogId_idx`(`pharmacyRecycleLogId`),
     UNIQUE INDEX `PointLog_action_checkInId_key`(`action`, `checkInId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PharmacyCampaign` (
+    `id` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(191) NOT NULL,
+    `subtitle` VARCHAR(300) NULL,
+    `description` TEXT NULL,
+    `status` ENUM('DRAFT', 'SCHEDULED', 'ACTIVE', 'PAUSED', 'ENDED') NOT NULL DEFAULT 'DRAFT',
+    `startsAt` DATETIME(3) NULL,
+    `endsAt` DATETIME(3) NULL,
+    `drawCost` INTEGER NOT NULL,
+    `duplicateRecycleEnabled` BOOLEAN NOT NULL DEFAULT false,
+    `duplicateRecycleRequired` INTEGER NULL,
+    `duplicateRecycleReward` INTEGER NULL,
+    `recycleAfterEndEnabled` BOOLEAN NOT NULL DEFAULT true,
+    `probabilityPublic` BOOLEAN NOT NULL DEFAULT false,
+    `dailyDrawLimit` INTEGER NULL,
+    `totalDrawLimit` INTEGER NULL,
+    `visualUrl` TEXT NULL,
+    `createdById` VARCHAR(191) NULL,
+    `updatedById` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `PharmacyCampaign_status_startsAt_endsAt_idx`(`status`, `startsAt`, `endsAt`),
+    INDEX `PharmacyCampaign_createdAt_idx`(`createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PharmacyPrize` (
+    `id` VARCHAR(191) NOT NULL,
+    `campaignId` VARCHAR(191) NOT NULL,
+    `type` ENUM('BADGE', 'POINTS', 'EMPTY', 'ITEM', 'COUPON', 'CUSTOM') NOT NULL DEFAULT 'BADGE',
+    `name` VARCHAR(191) NULL,
+    `quantity` INTEGER NOT NULL DEFAULT 1,
+    `rewardAmount` INTEGER NULL,
+    `weight` INTEGER NOT NULL DEFAULT 0,
+    `enabled` BOOLEAN NOT NULL DEFAULT true,
+    `sortOrder` INTEGER NOT NULL DEFAULT 0,
+    `badgeId` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `PharmacyPrize_campaignId_enabled_sortOrder_idx`(`campaignId`, `enabled`, `sortOrder`),
+    INDEX `PharmacyPrize_badgeId_idx`(`badgeId`),
+    INDEX `PharmacyPrize_campaignId_type_idx`(`campaignId`, `type`),
+    UNIQUE INDEX `PharmacyPrize_campaignId_badgeId_type_key`(`campaignId`, `badgeId`, `type`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PharmacyDraw` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `campaignId` VARCHAR(191) NOT NULL,
+    `prizeId` VARCHAR(191) NULL,
+    `idempotencyKey` VARCHAR(191) NOT NULL,
+    `drawAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `campaignTitle` VARCHAR(191) NOT NULL,
+    `drawCost` INTEGER NOT NULL,
+    `prizeType` ENUM('BADGE', 'POINTS', 'EMPTY', 'ITEM', 'COUPON', 'CUSTOM') NOT NULL,
+    `prizeName` VARCHAR(191) NOT NULL,
+    `badgeId` VARCHAR(191) NULL,
+    `badgeName` VARCHAR(191) NULL,
+    `badgeIconUrl` TEXT NULL,
+    `rarity` ENUM('COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED') NULL,
+    `rewardAmount` INTEGER NULL,
+    `configuredWeight` INTEGER NOT NULL,
+    `calculatedProbability` DECIMAL(10, 6) NOT NULL,
+    `resultType` ENUM('BADGE_NEW', 'BADGE_DUPLICATE', 'POINTS_REWARD', 'EMPTY', 'ITEM', 'COUPON', 'CUSTOM') NOT NULL,
+    `isNewBadge` BOOLEAN NOT NULL DEFAULT false,
+    `isDuplicate` BOOLEAN NOT NULL DEFAULT false,
+    `duplicateQuantity` INTEGER NOT NULL DEFAULT 0,
+    `balanceBefore` INTEGER NOT NULL,
+    `balanceAfter` INTEGER NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `PharmacyDraw_campaignId_drawAt_idx`(`campaignId`, `drawAt`),
+    INDEX `PharmacyDraw_userId_campaignId_drawAt_idx`(`userId`, `campaignId`, `drawAt`),
+    INDEX `PharmacyDraw_prizeId_drawAt_idx`(`prizeId`, `drawAt`),
+    UNIQUE INDEX `PharmacyDraw_userId_idempotencyKey_key`(`userId`, `idempotencyKey`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PharmacyDuplicateInventory` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `campaignId` VARCHAR(191) NOT NULL,
+    `sourceBadgeId` VARCHAR(191) NOT NULL,
+    `quantity` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `PharmacyDuplicateInventory_userId_campaignId_idx`(`userId`, `campaignId`),
+    INDEX `PharmacyDuplicateInventory_sourceBadgeId_idx`(`sourceBadgeId`),
+    UNIQUE INDEX `PharmacyDuplicateInventory_userId_campaignId_sourceBadgeId_key`(`userId`, `campaignId`, `sourceBadgeId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PharmacyRecycleLog` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `campaignId` VARCHAR(191) NOT NULL,
+    `idempotencyKey` VARCHAR(191) NOT NULL,
+    `campaignTitle` VARCHAR(191) NOT NULL,
+    `requiredCount` INTEGER NOT NULL,
+    `rewardAmount` INTEGER NOT NULL,
+    `beforeQuantity` INTEGER NOT NULL,
+    `afterQuantity` INTEGER NOT NULL,
+    `balanceBefore` INTEGER NOT NULL,
+    `balanceAfter` INTEGER NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `PharmacyRecycleLog_campaignId_createdAt_idx`(`campaignId`, `createdAt`),
+    INDEX `PharmacyRecycleLog_userId_campaignId_createdAt_idx`(`userId`, `campaignId`, `createdAt`),
+    UNIQUE INDEX `PharmacyRecycleLog_userId_idempotencyKey_key`(`userId`, `idempotencyKey`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3392,6 +3541,7 @@ CREATE TABLE `StudioProject` (
     `likeCount` INTEGER NOT NULL DEFAULT 0,
     `favoriteCount` INTEGER NOT NULL DEFAULT 0,
     `viewCount` INTEGER NOT NULL DEFAULT 0,
+    `downloadCount` INTEGER NOT NULL DEFAULT 0,
     `visibility` ENUM('PRIVATE', 'PUBLIC', 'UNLISTED') NOT NULL DEFAULT 'PRIVATE',
     `reviewStatus` ENUM('NONE', 'PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'NONE',
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -3807,6 +3957,13 @@ CREATE TABLE `UserBadge` (
     `displayOrder` INTEGER NOT NULL DEFAULT 0,
     `grantedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `obtainedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `awardedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `expiresAt` DATETIME(3) NULL,
+    `expiredAt` DATETIME(3) NULL,
+    `revokedAt` DATETIME(3) NULL,
+    `status` ENUM('ACTIVE', 'EXPIRED', 'REVOKED') NOT NULL DEFAULT 'ACTIVE',
+    `activeKey` VARCHAR(191) NULL,
+    `grantKey` VARCHAR(191) NULL,
     `sourceType` VARCHAR(32) NULL,
     `sourceId` VARCHAR(191) NULL,
     `grantReason` VARCHAR(500) NULL,
@@ -3815,11 +3972,40 @@ CREATE TABLE `UserBadge` (
     `userId` VARCHAR(191) NOT NULL,
     `badgeId` VARCHAR(191) NOT NULL,
 
+    UNIQUE INDEX `UserBadge_activeKey_key`(`activeKey`),
+    UNIQUE INDEX `UserBadge_grantKey_key`(`grantKey`),
     INDEX `UserBadge_userId_displayOrder_idx`(`userId`, `displayOrder`),
     INDEX `UserBadge_userId_obtainedAt_idx`(`userId`, `obtainedAt`),
-    INDEX `UserBadge_badgeId_idx`(`badgeId`),
+    INDEX `UserBadge_userId_status_expiresAt_idx`(`userId`, `status`, `expiresAt`),
+    INDEX `UserBadge_userId_badgeId_status_idx`(`userId`, `badgeId`, `status`),
+    INDEX `UserBadge_badgeId_status_idx`(`badgeId`, `status`),
     INDEX `UserBadge_grantedBy_createdAt_idx`(`grantedBy`, `createdAt`),
-    UNIQUE INDEX `UserBadge_userId_badgeId_key`(`userId`, `badgeId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserBadgeSource` (
+    `id` VARCHAR(191) NOT NULL,
+    `sourceKey` VARCHAR(191) NOT NULL,
+    `sourceType` VARCHAR(32) NOT NULL,
+    `sourceId` VARCHAR(191) NULL,
+    `isActive` BOOLEAN NOT NULL DEFAULT true,
+    `grantedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `expiresAt` DATETIME(3) NULL,
+    `expiredAt` DATETIME(3) NULL,
+    `revokedAt` DATETIME(3) NULL,
+    `grantReason` VARCHAR(500) NULL,
+    `grantedBy` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+    `userBadgeId` VARCHAR(191) NOT NULL,
+
+    UNIQUE INDEX `UserBadgeSource_sourceKey_key`(`sourceKey`),
+    INDEX `UserBadgeSource_userId_badgeId_isActive_idx`(`userId`, `badgeId`, `isActive`),
+    INDEX `UserBadgeSource_badgeId_sourceType_sourceId_isActive_idx`(`badgeId`, `sourceType`, `sourceId`, `isActive`),
+    INDEX `UserBadgeSource_userBadgeId_isActive_idx`(`userBadgeId`, `isActive`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3835,6 +4021,23 @@ CREATE TABLE `UserBadgeShowcase` (
     INDEX `UserBadgeShowcase_badgeId_idx`(`badgeId`),
     UNIQUE INDEX `UserBadgeShowcase_userId_badgeId_key`(`userId`, `badgeId`),
     UNIQUE INDEX `UserBadgeShowcase_userId_slot_key`(`userId`, `slot`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `UserEquippedBadge` (
+    `id` VARCHAR(191) NOT NULL,
+    `position` INTEGER NOT NULL DEFAULT 0,
+    `equippedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `badgeId` VARCHAR(191) NOT NULL,
+
+    INDEX `UserEquippedBadge_userId_idx`(`userId`),
+    INDEX `UserEquippedBadge_badgeId_idx`(`badgeId`),
+    INDEX `UserEquippedBadge_userId_position_idx`(`userId`, `position`),
+    UNIQUE INDEX `UserEquippedBadge_userId_badgeId_key`(`userId`, `badgeId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -4154,6 +4357,12 @@ ALTER TABLE `Badge` ADD CONSTRAINT `Badge_musicTourId_fkey` FOREIGN KEY (`musicT
 
 -- AddForeignKey
 ALTER TABLE `BadgeRule` ADD CONSTRAINT `BadgeRule_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `BadgeRuleDependency` ADD CONSTRAINT `BadgeRuleDependency_sourceBadgeId_fkey` FOREIGN KEY (`sourceBadgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `BadgeRuleDependency` ADD CONSTRAINT `BadgeRuleDependency_targetBadgeId_fkey` FOREIGN KEY (`targetBadgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `TodayEvent` ADD CONSTRAINT `TodayEvent_submittedById_fkey` FOREIGN KEY (`submittedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -4534,6 +4743,9 @@ ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_redeemedByAdminId_fkey` 
 ALTER TABLE `LotteryPrize` ADD CONSTRAINT `LotteryPrize_lotteryId_fkey` FOREIGN KEY (`lotteryId`) REFERENCES `Lottery`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `LotteryPrize` ADD CONSTRAINT `LotteryPrize_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `LyricCard` ADD CONSTRAINT `LyricCard_songId_fkey` FOREIGN KEY (`songId`) REFERENCES `CultureItem`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -4726,10 +4938,52 @@ ALTER TABLE `PasswordResetToken` ADD CONSTRAINT `PasswordResetToken_userId_fkey`
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_dailyDrawId_fkey` FOREIGN KEY (`dailyDrawId`) REFERENCES `EntertainmentDailyDraw`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_pharmacyDrawId_fkey` FOREIGN KEY (`pharmacyDrawId`) REFERENCES `PharmacyDraw`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_pharmacyRecycleLogId_fkey` FOREIGN KEY (`pharmacyRecycleLogId`) REFERENCES `PharmacyRecycleLog`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_activityRegistrationId_fkey` FOREIGN KEY (`activityRegistrationId`) REFERENCES `ActivityRegistration`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyCampaign` ADD CONSTRAINT `PharmacyCampaign_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyCampaign` ADD CONSTRAINT `PharmacyCampaign_updatedById_fkey` FOREIGN KEY (`updatedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyPrize` ADD CONSTRAINT `PharmacyPrize_campaignId_fkey` FOREIGN KEY (`campaignId`) REFERENCES `PharmacyCampaign`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyPrize` ADD CONSTRAINT `PharmacyPrize_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyDraw` ADD CONSTRAINT `PharmacyDraw_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyDraw` ADD CONSTRAINT `PharmacyDraw_campaignId_fkey` FOREIGN KEY (`campaignId`) REFERENCES `PharmacyCampaign`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyDraw` ADD CONSTRAINT `PharmacyDraw_prizeId_fkey` FOREIGN KEY (`prizeId`) REFERENCES `PharmacyPrize`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyDuplicateInventory` ADD CONSTRAINT `PharmacyDuplicateInventory_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyDuplicateInventory` ADD CONSTRAINT `PharmacyDuplicateInventory_campaignId_fkey` FOREIGN KEY (`campaignId`) REFERENCES `PharmacyCampaign`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyDuplicateInventory` ADD CONSTRAINT `PharmacyDuplicateInventory_sourceBadgeId_fkey` FOREIGN KEY (`sourceBadgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyRecycleLog` ADD CONSTRAINT `PharmacyRecycleLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyRecycleLog` ADD CONSTRAINT `PharmacyRecycleLog_campaignId_fkey` FOREIGN KEY (`campaignId`) REFERENCES `PharmacyCampaign`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `Poll` ADD CONSTRAINT `Poll_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `Post`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -4969,10 +5223,28 @@ ALTER TABLE `UserBadge` ADD CONSTRAINT `UserBadge_userId_fkey` FOREIGN KEY (`use
 ALTER TABLE `UserBadge` ADD CONSTRAINT `UserBadge_grantedBy_fkey` FOREIGN KEY (`grantedBy`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_userBadgeId_fkey` FOREIGN KEY (`userBadgeId`) REFERENCES `UserBadge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserBadgeSource` ADD CONSTRAINT `UserBadgeSource_grantedBy_fkey` FOREIGN KEY (`grantedBy`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `UserBadgeShowcase` ADD CONSTRAINT `UserBadgeShowcase_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `UserBadgeShowcase` ADD CONSTRAINT `UserBadgeShowcase_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserEquippedBadge` ADD CONSTRAINT `UserEquippedBadge_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `UserEquippedBadge` ADD CONSTRAINT `UserEquippedBadge_badgeId_fkey` FOREIGN KEY (`badgeId`) REFERENCES `Badge`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `UserBadgeTracking` ADD CONSTRAINT `UserBadgeTracking_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

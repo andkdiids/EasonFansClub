@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { isZodiacSign, ZODIAC_LABELS, type ZodiacSign } from '@/lib/zodiac'
+import { describeBadgeOwnershipRule, normalizeBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
 
 export const BADGE_EVALUATION_EVENTS = [
   'POST_CREATED',
@@ -288,6 +289,18 @@ export const BADGE_RULE_REGISTRY = {
     historicalBasis: '没有可靠的系列首次完成时间，不能用当前完成状态倒推历史资格',
     defaultAcquisitionDescription: () => '集齐指定系列全部勋章后获得',
   },
+  BADGE_OWNERSHIP: {
+    group: '系统',
+    label: '拥有指定勋章',
+    dataDescription: '当前有效拥有指定勋章，支持全部拥有、任意拥有或至少拥有 N 个',
+    metricLoader: 'BADGE_OWNERSHIP',
+    supportedOperators: ['GTE'],
+    events: [],
+    threshold: null,
+    supportsHistoricalBackfill: true,
+    historicalBasis: '按当前仍有效的 UserBadge 记录判断；已过期或已收回的勋章不计入',
+    defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => describeBadgeOwnershipRule(configJson),
+  },
 } as const satisfies Record<string, BadgeRuleRegistryEntry>
 
 export type SupportedBadgeRuleType = keyof typeof BADGE_RULE_REGISTRY
@@ -405,6 +418,24 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         threshold: null,
         secondaryThreshold: null,
         configJson: { seriesId: seriesId.trim() },
+        isEnabled: body.isEnabled !== false,
+      },
+    }
+  }
+
+  if (ruleTypeValue === 'BADGE_OWNERSHIP') {
+    if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: '拥有指定勋章规则不需要数值阈值' }
+    if (body.secondaryThreshold !== undefined && body.secondaryThreshold !== null && body.secondaryThreshold !== '') return { error: '拥有指定勋章规则不需要次级阈值' }
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
+    const ownershipConfig = normalizeBadgeOwnershipRuleConfig(body.configJson)
+    if (ownershipConfig.error || !ownershipConfig.config) return { error: ownershipConfig.error || '拥有指定勋章规则配置无效' }
+    return {
+      rule: {
+        ruleType: ruleTypeValue as SupportedBadgeRuleType,
+        operator: 'GTE',
+        threshold: null,
+        secondaryThreshold: null,
+        configJson: ownershipConfig.config,
         isEnabled: body.isEnabled !== false,
       },
     }

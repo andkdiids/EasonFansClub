@@ -26,7 +26,7 @@ function source(rel: string) {
   return readFileSync(join(root, rel), 'utf8')
 }
 const routeSrc = source('app/api/users/me/route.ts')
-const friendRemarksSrc = source('lib/friend-remarks.ts')
+const friendRemarksSrc = source('lib/friend-display.ts')
 
 // 确定性 RNG（mulberry32），保证单测可复现。
 function mulberry32(seed: number) {

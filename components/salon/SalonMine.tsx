@@ -12,7 +12,7 @@ import {
   SALON_STATUS_LABELS,
   type SalonPostStatusValue,
   type SalonPostView,
-} from '@/lib/salon'
+} from '@/lib/salon-shared'
 
 export function SalonMine({ initialPosts }: Readonly<{ initialPosts: SalonPostView[] }>) {
   const [posts, setPosts] = useState(initialPosts)

@@ -46,7 +46,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
       },
     },
   })
-  const equippedBadgeMap = await getEquippedBadgesForUsers(likes.map((like) => like.userId))
+  const equippedBadges = await getEquippedBadgesForUsers(likes.map((like) => like.userId))
   return NextResponse.json({
     likers: likes.map((like) => ({
       id: like.userId,
@@ -55,7 +55,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
       friendRemark: null,
       displayName: getPublicUserDisplayName(like.User),
       avatarUrl: publicImageUrl(like.User.Profile?.avatarUrl || like.User.avatarUrl),
-      equippedBadge: equippedBadgeMap.get(like.userId) || null,
+      equippedBadges: equippedBadges.get(like.userId) || [],
+      equippedBadge: equippedBadges.get(like.userId)?.[0] || null,
     })),
   })
 }

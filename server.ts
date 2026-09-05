@@ -338,19 +338,22 @@ async function start() {
     if (activityAutoCheckInRunning) return
     activityAutoCheckInRunning = true
     try {
-      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }] = await Promise.all([
+      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }, { expireUserBadges }] = await Promise.all([
         import('./lib/activity-registration'),
         import('./lib/activity-lottery'),
         import('./lib/activity-badge-rewards'),
+        import('./lib/badge-expiration'),
       ])
-      const [result, lotteryResult, badgeRewardResult] = await Promise.all([
+      const [expirationResult, result, lotteryResult, badgeRewardResult] = await Promise.all([
+        expireUserBadges(),
         autoCheckInEndedActivityRegistrations({ batchSize: 100 }),
         drawDueActivityLotteries({ batchSize: 200 }),
         grantEligibleActivityBadges({ batchSize: 200 }),
       ])
-      if (result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed) {
+      if (expirationResult.expiredCount || expirationResult.clearedEquippedCount || result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed) {
         console.info('[activities.auto-check-in.completed]', {
           event: 'activities.auto_check_in.completed',
+          badgeExpiration: expirationResult,
           scanned: result.scanned,
           processed: result.processed,
           failed: result.failed,
