@@ -11,6 +11,7 @@ import { getEligibleMakeupDates } from '@/lib/checkin-makeup'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin, sanitizeText } from '@/lib/security'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 const MAKEUP_TRANSACTION_OPTIONS = {
   isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -179,6 +180,9 @@ export async function POST(request: Request) {
         longTermRewardAmount: madeUp.streak.rewardAmount,
       }
     }, MAKEUP_TRANSACTION_OPTIONS)
+    // 后台补签可能一次性补齐多天，逐条触发勋章事件评估（重新满足→自动重新
+    // 授予，持续资格复核随事件评估一并执行）。
+    for (const checkInId of result.checkInIds) triggerBadgeEvaluation(userId, 'CHECKIN_CREATED', `makeup:${checkInId}`)
     return NextResponse.json(result, { status: 201 })
   } catch (error) {
     if (error instanceof CheckInMakeupError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status })

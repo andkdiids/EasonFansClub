@@ -452,6 +452,7 @@ CREATE TABLE `BadgeRule` (
     `secondaryThreshold` INTEGER NULL,
     `configJson` JSON NULL,
     `isEnabled` BOOLEAN NOT NULL DEFAULT true,
+    `retentionPolicy` ENUM('PERMANENT_AFTER_GRANT', 'RETAIN_WHILE_ELIGIBLE') NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 

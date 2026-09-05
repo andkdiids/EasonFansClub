@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { ContentImageUploader } from '@/components/ContentImageUploader'
 import { RichTextEditor } from '@/components/posts/RichTextEditor'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
+import { FORUM_DISCOVERY_SESSION_PREFIX, notifyForumDiscoveryFeedChanged } from '@/lib/forum-discovery-session'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
 
@@ -16,7 +17,7 @@ function removePendingPostFromDiscoverySessions(postId: string) {
   try {
     for (let index = 0; index < window.sessionStorage.length; index += 1) {
       const key = window.sessionStorage.key(index)
-      if (!key?.startsWith('forum-discovery-session:')) continue
+      if (!key?.startsWith(FORUM_DISCOVERY_SESSION_PREFIX)) continue
       const raw = window.sessionStorage.getItem(key)
       if (!raw) continue
       const session = JSON.parse(raw) as { posts?: Array<{ id?: string }>; [key: string]: unknown }
@@ -88,6 +89,18 @@ export function PostEditForm({
         throw new Error(data?.message || '保存失败，请稍后重试')
       }
       if (data?.moderationStatus === 'PENDING') removePendingPostFromDiscoverySessions(postId)
+      // 帖子改分区后，旧分区/新分区/全部列表的 feed 快照必须立即失效：
+      // 服务端已把单一真实字段 boardId 更新为新分区（动态查询恒读库），真正残留
+      // 旧帖的是客户端 sessionStorage 会话快照；在此统一广播并清理，避免返回旧
+      // 分区列表时仍显示这篇帖子。
+      if (boardId !== initialBoardId) {
+        const slugOf = (id: string) => boards.find((board) => board.id === id)?.slug ?? null
+        notifyForumDiscoveryFeedChanged({
+          postId,
+          boardFrom: slugOf(initialBoardId),
+          boardTo: slugOf(boardId),
+        })
+      }
       router.push(`/posts/${postId}`)
       router.refresh()
     } catch (reason) {

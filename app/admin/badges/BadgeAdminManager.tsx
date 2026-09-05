@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { BadgeEffectType, BadgeGrantType, BadgeNicknameEffect, BadgeRarity, BadgeValidityType, BadgeVisibility } from '@/lib/badge-types'
 import { BADGE_EFFECT_TYPE_LABELS, BADGE_GRANT_TYPE_LABELS, BADGE_NICKNAME_SHINE_FALLBACK, BADGE_RARITY_LABELS, BADGE_VALIDITY_TYPE_LABELS, BADGE_VISIBILITY_LABELS, getBadgeNicknameShineColor, isBadgeNicknameShineEnabled } from '@/lib/badge-types'
-import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, generateBadgeAcquisitionDescription, getZodiacFromRuleConfig, parseBadgeRuleInput, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, BADGE_RETENTION_POLICY_LABELS, BADGE_RETENTION_POLICY_DESCRIPTIONS, generateBadgeAcquisitionDescription, getDefaultBadgeRetentionPolicy, getZodiacFromRuleConfig, parseBadgeRuleInput, resolveBadgeRetentionPolicy, supportsBadgeRetentionPolicy, type BadgeRetentionPolicyValue, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { getBadgeOwnershipRuleConfig, type BadgeOwnershipMatchMode } from '@/lib/badge-ownership-config'
 import { formatZodiacDateRange, formatZodiacLabel, ZODIAC_LABELS, ZODIAC_SIGNS, type ZodiacSign } from '@/lib/zodiac'
 import { BadgeImage, BadgeName, UserDisplayName } from '@/components/UserDisplayName'
@@ -17,7 +17,7 @@ export type AdminBadge = {
   acquisitionDescription: string | null
   resolvedAcquisitionDescription: string | null
   acquisitionDescriptionCustomized: boolean
-  rule: { id: string; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number | null; secondaryThreshold: number | null; configJson?: unknown; isEnabled: boolean } | null
+  rule: { id: string; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number | null; secondaryThreshold: number | null; configJson?: unknown; isEnabled: boolean; retentionPolicy: BadgeRetentionPolicyValue | null } | null
   iconUrl: string | null
   category: string
   visibility: BadgeVisibility
@@ -47,7 +47,7 @@ export type AdminBadge = {
   createdAt: string
 }
 
-type BadgeDraft = Omit<AdminBadge, 'id' | 'ownerCount' | 'createdAt' | 'isEnabled'> & { id?: string; isEnabled: boolean; imageUrl?: string | null; badgeType: 'STANDARD' | 'SERIES'; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number; zodiac: ZodiacSign; ruleEnabled: boolean; legacyAuto: boolean; legacyTier: boolean; seriesCompletionRule: boolean; tierEnabled: boolean; limitedEnabled: boolean; targetId: string; targetLabel: string; ownershipBadgeIds: string[]; ownershipBadgeNames: string[]; ownershipMatchMode: BadgeOwnershipMatchMode; ownershipMinimumCount: number }
+type BadgeDraft = Omit<AdminBadge, 'id' | 'ownerCount' | 'createdAt' | 'isEnabled'> & { id?: string; isEnabled: boolean; imageUrl?: string | null; badgeType: 'STANDARD' | 'SERIES'; ruleType: SupportedBadgeRuleType; operator: BadgeRuleOperatorValue; threshold: number; zodiac: ZodiacSign; ruleEnabled: boolean; legacyAuto: boolean; legacyTier: boolean; seriesCompletionRule: boolean; tierEnabled: boolean; limitedEnabled: boolean; targetId: string; targetLabel: string; ownershipBadgeIds: string[]; ownershipBadgeNames: string[]; ownershipMatchMode: BadgeOwnershipMatchMode; ownershipMinimumCount: number; retentionPolicy: BadgeRetentionPolicyValue | null }
 type AdminSeries = { id: string; code: string; name: string; description: string | null; sortOrder: number; isEnabled: boolean; completionRewardBadgeId: string | null; _count?: { Badges: number } }
 type SeriesDraft = { id?: string; name: string; description: string; sortOrder: number; isEnabled: boolean; completionRewardBadgeId: string | null }
 type ConcertOption = { id: string; title: string | null; concertDate: string; city: string; venue: string | null; MusicTour: { id: string; name: string } }
@@ -56,7 +56,7 @@ type ActivityOption = { id: string; title: string; status: 'DRAFT' | 'PUBLISHED'
 type OwnershipBadgeOption = Pick<AdminBadge, 'id' | 'name' | 'code' | 'iconUrl' | 'rarity'>
 
 const emptyDraft: BadgeDraft = {
-  name: '', code: '', slug: '', description: '', acquisitionDescription: '', resolvedAcquisitionDescription: null, acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', validityType: 'PERMANENT', validityDays: null, isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, badgeType: 'STANDARD', seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, announceOnGrant: false, countsTowardSeriesCompletion: true, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, zodiac: 'ARIES', ruleEnabled: true, legacyAuto: false, legacyTier: false, seriesCompletionRule: false, tierEnabled: false, limitedEnabled: false, targetId: '', targetLabel: '', ownershipBadgeIds: [], ownershipBadgeNames: [], ownershipMatchMode: 'ALL', ownershipMinimumCount: 1,
+  name: '', code: '', slug: '', description: '', acquisitionDescription: '', resolvedAcquisitionDescription: null, acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', validityType: 'PERMANENT', validityDays: null, isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, badgeType: 'STANDARD', seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, announceOnGrant: false, countsTowardSeriesCompletion: true, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, zodiac: 'ARIES', ruleEnabled: true, legacyAuto: false, legacyTier: false, seriesCompletionRule: false, tierEnabled: false, limitedEnabled: false, targetId: '', targetLabel: '', ownershipBadgeIds: [], ownershipBadgeNames: [], ownershipMatchMode: 'ALL', ownershipMinimumCount: 1, retentionPolicy: null,
 }
 
 function toDraft(badge: AdminBadge): BadgeDraft {
@@ -97,6 +97,7 @@ function toDraft(badge: AdminBadge): BadgeDraft {
     ownershipBadgeNames: ownershipConfig?.badgeNames || [],
     ownershipMatchMode: ownershipConfig?.matchMode || 'ALL',
     ownershipMinimumCount: ownershipConfig?.minimumCount || 1,
+    retentionPolicy: rule?.retentionPolicy ?? null,
   }
 }
 
@@ -142,7 +143,7 @@ function getBackfillUiState(badge: Pick<AdminBadge, 'rule' | 'availabilityStatus
   }
 }
 
-function getAutoRuleError(draft: Pick<BadgeDraft, 'grantType' | 'legacyAuto' | 'seriesCompletionRule' | 'ruleType' | 'operator' | 'threshold' | 'zodiac' | 'ruleEnabled' | 'targetId' | 'ownershipBadgeIds' | 'ownershipMatchMode' | 'ownershipMinimumCount'>) {
+function getAutoRuleError(draft: Pick<BadgeDraft, 'grantType' | 'legacyAuto' | 'seriesCompletionRule' | 'ruleType' | 'operator' | 'threshold' | 'zodiac' | 'ruleEnabled' | 'targetId' | 'ownershipBadgeIds' | 'ownershipMatchMode' | 'ownershipMinimumCount' | 'retentionPolicy'>) {
   if (draft.grantType !== 'AUTO' || draft.legacyAuto || draft.seriesCompletionRule) return null
   return parseBadgeRuleInput({
     ruleType: draft.ruleType,
@@ -150,6 +151,7 @@ function getAutoRuleError(draft: Pick<BadgeDraft, 'grantType' | 'legacyAuto' | '
     threshold: isTargetRule(draft.ruleType) || isBirthdayRule(draft.ruleType) || draft.ruleType === 'BADGE_OWNERSHIP' ? null : draft.threshold,
     configJson: draft.ruleType === 'BIRTHDAY_ZODIAC' ? { zodiac: draft.zodiac } : draft.ruleType === 'BIRTHDAY_TODAY' ? {} : draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : draft.ruleType === 'BADGE_OWNERSHIP' ? { badgeIds: draft.ownershipBadgeIds, matchMode: draft.ownershipMatchMode, ...(draft.ownershipMatchMode === 'AT_LEAST' ? { minimumCount: draft.ownershipMinimumCount } : {}) } : undefined,
     isEnabled: draft.ruleEnabled,
+    retentionPolicy: draft.retentionPolicy,
   }).error || null
 }
 
@@ -369,7 +371,8 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
         (isTargetRule(draft.ruleType) && (typeof (draft.rule.configJson as { concertId?: unknown; tourId?: unknown; activityId?: unknown } | null)?.concertId === 'string' ? String((draft.rule.configJson as { concertId: string }).concertId) : typeof (draft.rule.configJson as { tourId?: unknown } | null)?.tourId === 'string' ? String((draft.rule.configJson as { tourId: string }).tourId) : typeof (draft.rule.configJson as { activityId?: unknown } | null)?.activityId === 'string' ? String((draft.rule.configJson as { activityId: string }).activityId) : '') !== draft.targetId) ||
         (isZodiacRule(draft.ruleType) && getZodiacFromRuleConfig(draft.rule.configJson) !== draft.zodiac) ||
         (draft.ruleType === 'BADGE_OWNERSHIP' && (() => { const saved = getBadgeOwnershipRuleConfig(draft.rule.configJson); return !saved || saved.matchMode !== draft.ownershipMatchMode || saved.minimumCount !== (draft.ownershipMatchMode === 'AT_LEAST' ? draft.ownershipMinimumCount : undefined) || saved.badgeIds.length !== draft.ownershipBadgeIds.length || saved.badgeIds.some((badgeId, index) => badgeId !== draft.ownershipBadgeIds[index]) })()) ||
-        draft.rule.isEnabled !== draft.ruleEnabled
+        draft.rule.isEnabled !== draft.ruleEnabled ||
+        (draft.rule.retentionPolicy ?? null) !== draft.retentionPolicy
       ),
     )
     if (ruleChanged && !window.confirm('规则修改不会撤销已获得用户的历史勋章；保存后，新规则将用于后续自动授予。确定继续吗？')) return
@@ -388,8 +391,8 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           imageUrl: draft.imageUrl || draft.iconUrl || null,
           rule: draft.grantType === 'AUTO' && !draft.legacyAuto
             ? draft.seriesCompletionRule
-              ? { ruleType: 'BADGE_SERIES_COMPLETE', operator: 'GTE', threshold: null, configJson: draft.rule?.configJson, isEnabled: draft.ruleEnabled }
-              : { ruleType: draft.ruleType, operator: draft.operator, threshold: isTargetRule(draft.ruleType) || isBirthdayRule(draft.ruleType) || draft.ruleType === 'BADGE_OWNERSHIP' ? null : draft.threshold, configJson: draft.ruleType === 'BIRTHDAY_ZODIAC' ? { zodiac: draft.zodiac } : draft.ruleType === 'BIRTHDAY_TODAY' ? {} : draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : draft.ruleType === 'BADGE_OWNERSHIP' ? { badgeIds: draft.ownershipBadgeIds, matchMode: draft.ownershipMatchMode, ...(draft.ownershipMatchMode === 'AT_LEAST' ? { minimumCount: draft.ownershipMinimumCount } : {}) } : undefined, isEnabled: draft.ruleEnabled }
+              ? { ruleType: 'BADGE_SERIES_COMPLETE', operator: 'GTE', threshold: null, configJson: draft.rule?.configJson, isEnabled: draft.ruleEnabled, retentionPolicy: draft.rule?.retentionPolicy ?? null }
+              : { ruleType: draft.ruleType, operator: draft.operator, threshold: isTargetRule(draft.ruleType) || isBirthdayRule(draft.ruleType) || draft.ruleType === 'BADGE_OWNERSHIP' ? null : draft.threshold, configJson: draft.ruleType === 'BIRTHDAY_ZODIAC' ? { zodiac: draft.zodiac } : draft.ruleType === 'BIRTHDAY_TODAY' ? {} : draft.ruleType === 'CONCERT_SHOW_ATTENDED' ? { concertId: draft.targetId } : draft.ruleType === 'CONCERT_TOUR_ATTENDED' ? { tourId: draft.targetId } : draft.ruleType === 'ACTIVITY_PARTICIPATION' ? { activityId: draft.targetId } : draft.ruleType === 'BADGE_OWNERSHIP' ? { badgeIds: draft.ownershipBadgeIds, matchMode: draft.ownershipMatchMode, ...(draft.ownershipMatchMode === 'AT_LEAST' ? { minimumCount: draft.ownershipMinimumCount } : {}) } : undefined, isEnabled: draft.ruleEnabled, retentionPolicy: draft.retentionPolicy ?? null }
             : null,
         }),
       })
@@ -643,6 +646,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
                 {draft.ruleType === 'ACTIVITY_PARTICIPATION' ? <label className="text-xs font-black text-slate-500 sm:col-span-2">选择活动<select required value={draft.targetId} onChange={(event) => { const selected = activityOptions.find((activity) => activity.id === event.target.value); setDraft((current) => current ? { ...current, targetId: event.target.value, targetLabel: selected?.title || '', acquisitionDescription: current.acquisitionDescriptionCustomized ? current.acquisitionDescription : selected ? `参加「${selected.title}」后获得` : '' } : current) }} className="admin-badge-input"><option value="">请选择活动</option>{activityOptions.map((activity) => <option key={activity.id} value={activity.id}>{activity.title} · {activity.status === 'PUBLISHED' ? '已发布' : activity.status === 'DRAFT' ? '草稿' : '已取消'} · {activity.startsAt ? new Date(activity.startsAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未设置开始时间'}</option>)}</select>{draft.targetId ? <span className="mt-1 block text-[11px] font-black text-emerald-700">已选择：{draft.targetLabel || '当前已保存活动'}；只有有效人工 / 二维码现场核销才算参加，活动结束自动核销不计入。</span> : null}</label> : null}
               </div>
               <p className="mt-2 text-xs font-bold text-violet-700">数据口径：{BADGE_RULE_TYPE_DESCRIPTIONS[draft.ruleType]}</p>
+              <label className="sm:col-span-2"><span className="text-xs font-black text-slate-500">资格保持方式</span><select value={draft.retentionPolicy ?? ''} onChange={(event) => setDraft({ ...draft, retentionPolicy: (event.target.value || null) as BadgeRetentionPolicyValue | null })} className="admin-badge-input"><option value="">默认（{BADGE_RETENTION_POLICY_LABELS[getDefaultBadgeRetentionPolicy(draft.ruleType)]}）</option><option value="PERMANENT_AFTER_GRANT">达成后永久保留</option><option value="RETAIN_WHILE_ELIGIBLE" disabled={!supportsBadgeRetentionPolicy(draft.ruleType)}>持续满足条件才保留（条件失效自动回收，重新满足自动恢复）</option></select><span className="mt-1 block text-[10px] font-bold leading-4 text-slate-400">{supportsBadgeRetentionPolicy(draft.ruleType) ? BADGE_RETENTION_POLICY_DESCRIPTIONS.RETAIN_WHILE_ELIGIBLE + '回收只针对自动获取来源；管理员发放、活动奖励等其他来源仍保留勋章，不会全量删除。' : '该规则类型无法从现有业务数据重算资格，不能选择“持续满足条件才保留”；其余规则类型默认达成后永久保留，行为与旧版一致。'}</span></label>
             </div>
           ) : null}
           {draft.grantType === 'AUTO' && !draft.legacyAuto ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-100 bg-white p-3 md:col-span-2"><div><p className="text-xs font-black text-violet-800">规则操作</p><p className="mt-1 text-[11px] font-bold text-slate-500">预览只读；补发只处理符合条件且尚未拥有的用户，且需要先保存。限定勋章只按可证明的限定期数据扫描。</p>{getAutoRuleError(draft) ? <p className="mt-1 text-xs font-black text-red-600">{getAutoRuleError(draft)}</p> : null}{savedDraftBackfill ? <p className="mt-1 text-[11px] font-bold text-slate-500">{savedDraftBackfill.reason}</p> : null}</div><div className="flex flex-wrap gap-2"><button type="button" aria-label="预览已保存规则" title="预览已保存规则" disabled={busy || !draft.id || Boolean(getAutoRuleError(draft))} onClick={previewSavedDraft} className="admin-badge-list-button disabled:opacity-50">{draft.id ? '预览达标用户' : '保存后预览'}</button><button type="button" disabled={busy || !draft.id || !draft.ruleEnabled || Boolean(getAutoRuleError(draft)) || !savedDraftBackfill || savedDraftBackfill.disabled} onClick={backfillSavedDraft} className="admin-badge-list-button disabled:opacity-50">{draft.id ? savedDraftBackfill?.label || '暂不可扫描' : '保存后扫描'}</button></div></div> : null}

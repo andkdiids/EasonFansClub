@@ -359,7 +359,18 @@ export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEva
     return emptySummary(userId)
   }
   const eventKey = eventId?.trim() ? `event:${eventType}:${eventId.trim()}` : `event:${eventType}`
-  return evaluateUserAutoBadges(userId, ruleTypes, new Date(), eventKey)
+  const summary = await evaluateUserAutoBadges(userId, ruleTypes, new Date(), eventKey)
+  // Retention pass runs strictly after the grant pass so a badge that was just
+  // re-earned by this very event is counted as still eligible, never revoked.
+  // It only looks at RETAIN_WHILE_ELIGIBLE rules the user actually holds
+  // through an automatic source and recomputes the same bounded rule types.
+  try {
+    const { evaluateBadgeRetentionForUser } = await import('@/lib/badge-retention')
+    await evaluateBadgeRetentionForUser(userId, { ruleTypes, reason: '持续资格复核未通过' })
+  } catch (error) {
+    console.error('[badge-rule.event.retention]', { userId, eventType, error })
+  }
+  return summary
 }
 
 /** Event hooks deliberately do not await this function, so badge rules cannot slow or roll back the primary action. */

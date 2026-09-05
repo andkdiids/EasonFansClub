@@ -11,6 +11,7 @@ import {
   settleMakeupLongTermRewards,
 } from '@/lib/checkin-makeup'
 import { createUUID } from '@/lib/utils/uuid'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 const MAKEUP_TRANSACTION_OPTIONS = {
   isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -144,6 +145,10 @@ export async function POST(request: Request, { params }: Context) {
         })
       }
     }
+
+    // 免费答题补签把连续签到恢复到阈值后，重新评估自动勋章（重新满足即自动
+    // 重新授予，持续资格复核随事件评估一并执行）。以挑战记录作事件键保证幂等。
+    if (userId && result.madeUp) triggerBadgeEvaluation(userId, 'CHECKIN_CREATED', `makeup:${challengeId}`)
 
     log('success', {
       result: rewardSettlementPending ? 'success_reward_pending' : 'success',

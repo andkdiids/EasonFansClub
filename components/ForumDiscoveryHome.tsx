@@ -6,6 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ForumDiscoveryCard } from '@/components/ForumDiscoveryCard'
 import { ForumFishModePostRow, type FishModeOpenOptions } from '@/components/ForumFishModePostRow'
 import { ForumFishModePreview } from '@/components/ForumFishModePreview'
+import {
+  FORUM_DISCOVERY_FEED_CHANGED_EVENT,
+  forumFeedAffectedByChange,
+  type ForumDiscoveryFeedChangeDetail,
+} from '@/lib/forum-discovery-session'
 import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
 import {
   buildForumDiscoveryTabs,
@@ -592,6 +597,25 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
       setIsRefreshing(false)
     }
   }, [loadPage])
+
+  // 帖子改分区后：当前列表可能包含被移动的帖子时，先立即移除该行再整页刷新，
+  // 保证「旧分区列表移除、新分区列表出现」不依赖下一次挂载。快照清理在事件
+  // 分发端（PostEditForm → lib/forum-discovery-session）已完成，此处只管实时 UI。
+  useEffect(() => {
+    const onFeedChanged = (event: Event) => {
+      const detail = (event as CustomEvent<ForumDiscoveryFeedChangeDetail>).detail
+      if (!detail || typeof detail.postId !== 'string') return
+      if (!forumFeedAffectedByChange(boardValue, detail)) return
+      setPosts((current) => {
+        const next = current.filter((post) => post.id !== detail.postId)
+        if (next.length !== current.length) postsRef.current = next
+        return next
+      })
+      void refresh(false)
+    }
+    window.addEventListener(FORUM_DISCOVERY_FEED_CHANGED_EVENT, onFeedChanged)
+    return () => window.removeEventListener(FORUM_DISCOVERY_FEED_CHANGED_EVENT, onFeedChanged)
+  }, [boardValue, refresh])
 
   useEffect(() => {
     const onTouchStart = (event: TouchEvent) => {

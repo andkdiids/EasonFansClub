@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getBadgeAvailability } from '@/lib/badge-phase2'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { getBadgeOwnershipRuleConfig, matchBadgeOwnershipConfig, type BadgeOwnershipRuleConfig, withBadgeOwnershipNames } from '@/lib/badge-ownership-config'
+import { resolveBadgeRetentionPolicy, type BadgeRetentionPolicyValue } from '@/lib/badge-rules'
 
 export const BADGE_OWNERSHIP_RULE_TYPE = 'BADGE_OWNERSHIP' as const
 export const BADGE_OWNERSHIP_SOURCE_TYPE = 'AUTO_RULE'
@@ -153,6 +154,7 @@ export async function recheckBadgeOwnershipDependents(
       badgeId: true,
       configJson: true,
       isEnabled: true,
+      retentionPolicy: true,
       Badge: { select: { isEnabled: true, isActive: true, grantType: true, availableFrom: true, availableUntil: true, name: true } },
     },
   })
@@ -196,6 +198,13 @@ export async function recheckBadgeOwnershipDependents(
           }
         } else summary.alreadyOwned += 1
       } else {
+        // Only RETAIN_WHILE_ELIGIBLE rules recycle when the prerequisite set
+        // stops matching. A dependent whose administrator chose
+        // PERMANENT_AFTER_GRANT keeps its automatic source (default for every
+        // rule type except BADGE_OWNERSHIP itself, whose historical behaviour
+        // is exactly "revoke while no longer eligible").
+        const retentionPolicy = resolveBadgeRetentionPolicy({ ruleType: 'BADGE_OWNERSHIP', retentionPolicy: rule.retentionPolicy as BadgeRetentionPolicyValue | null })
+        if (retentionPolicy !== 'RETAIN_WHILE_ELIGIBLE') continue
         const { revokeBadgeAcquisitionSource } = await import('@/lib/badge-service')
         const result = await revokeBadgeAcquisitionSource({ userId, badgeId: rule.badgeId, sourceType: BADGE_OWNERSHIP_SOURCE_TYPE, sourceId: rule.id, reason: '前置勋章条件已失效', deferOwnershipRecheck: true, ownershipVisitedBadgeIds: visited })
         if (result.revoked) {

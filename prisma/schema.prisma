@@ -425,6 +425,18 @@ enum UserBadgeStatus {
   REVOKED
 }
 
+/**
+ * How an AUTO badge survives once its rule condition stops matching.
+ * PERMANENT_AFTER_GRANT keeps the historical "earned once, kept forever" behaviour and
+ * is the default for every existing rule. RETAIN_WHILE_ELIGIBLE lets the
+ * engine revoke the automatic source when the condition is recomputed as
+ * false, and re-grant it later without touching manual/event sources.
+ */
+enum BadgeRetentionPolicy {
+  PERMANENT_AFTER_GRANT
+  RETAIN_WHILE_ELIGIBLE
+}
+
 enum ActivityRegistrationStatus {
   ACTIVE
   CANCELLED
@@ -586,17 +598,23 @@ model Badge {
 }
 
 model BadgeRule {
-  id                 String            @id @default(cuid())
-  badgeId            String            @unique
+  id                 String                @id @default(cuid())
+  badgeId            String                @unique
   ruleType           BadgeRuleType
-  operator           BadgeRuleOperator @default(GTE)
+  operator           BadgeRuleOperator     @default(GTE)
   threshold          Int?
   secondaryThreshold Int?
   configJson         Json?
-  isEnabled          Boolean           @default(true)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  Badge              Badge             @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  isEnabled          Boolean               @default(true)
+  /**
+   * Nullable on purpose: NULL means "inherit the rule-type default", which
+   * keeps every existing row on its current behaviour without a data rewrite
+   * and lets the default evolve per rule type.
+   */
+  retentionPolicy    BadgeRetentionPolicy?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  Badge              Badge                 @relation(fields: [badgeId], references: [id], onDelete: Cascade)
 
   @@index([ruleType, isEnabled])
 }

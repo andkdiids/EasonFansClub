@@ -29,6 +29,7 @@ export default async function AdminBadgesPage() {
       secondaryThreshold: badge.BadgeRule.secondaryThreshold,
       configJson: badge.BadgeRule.configJson,
       isEnabled: badge.BadgeRule.isEnabled,
+      retentionPolicy: badge.BadgeRule.retentionPolicy,
     } : null,
     iconUrl: toPublicMediaUrl(badge.iconUrl),
     category: badge.category,

@@ -99,12 +99,13 @@ test('birthday rule configs are independent and never use a numeric threshold', 
     secondaryThreshold: null,
     configJson: { zodiac: 'ARIES' },
     isEnabled: true,
+    retentionPolicy: null,
   })
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', configJson: { zodiac: 'ARIES' }, threshold: 1 }).error || '', /不需要数值阈值/)
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', configJson: { zodiac: 'UNKNOWN' } }).error || '', /所属星座/)
   assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_ZODIAC', null, { zodiac: 'ARIES' }), '用户生日属于白羊座，并在白羊座星座周期内自动获得。')
   assert.deepEqual(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', operator: 'GTE' }).rule, {
-    ruleType: 'BIRTHDAY_TODAY', operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: {}, isEnabled: true,
+    ruleType: 'BIRTHDAY_TODAY', operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: {}, isEnabled: true, retentionPolicy: null,
   })
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', configJson: { zodiac: 'ARIES' } }).error || '', /不需要星座/)
   assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_TODAY', null, {}), '生日当天自动获得。')

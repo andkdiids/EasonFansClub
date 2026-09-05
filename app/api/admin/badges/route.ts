@@ -133,6 +133,7 @@ export async function POST(request: Request) {
             secondaryThreshold: parsed.rule.secondaryThreshold,
             configJson: parsed.rule.configJson ?? Prisma.JsonNull,
             isEnabled: parsed.rule.isEnabled,
+            retentionPolicy: parsed.rule.retentionPolicy ?? null,
           },
         })
       }

@@ -1466,6 +1466,7 @@ export const badgeAdminSelect = {
       secondaryThreshold: true,
       configJson: true,
       isEnabled: true,
+      retentionPolicy: true,
       createdAt: true,
       updatedAt: true,
     },

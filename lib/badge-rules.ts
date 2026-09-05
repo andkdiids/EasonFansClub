@@ -45,6 +45,12 @@ export type BadgeRuleRegistryEntry = {
   targetKind?: 'CONCERT' | 'TOUR' | 'ACTIVITY'
   /** Whether the rule can be recomputed against a bounded historical window. */
   supportsHistoricalBackfill: boolean
+  /**
+   * Whether an administrator may switch this rule to RETAIN_WHILE_ELIGIBLE.
+   * Only rule types whose current value can be re-derived from durable
+   * business data qualify; relationship counts and unprovable history do not.
+   */
+  supportsRetentionWhileEligible: boolean
   /** Human-readable evidence source shown to administrators. */
   historicalBasis: string
 }
@@ -70,6 +76,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['POST_CREATED', 'POST_APPROVED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按限定期内有效帖子的 createdAt 重算',
     defaultAcquisitionDescription: (threshold: number | null) => `累计发布 ${displayThreshold(threshold || 1)} 篇帖子后获得`,
   },
@@ -82,6 +89,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['POST_APPROVED', 'POST_FEATURED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: false,
     historicalBasis: '帖子没有可靠的历史精华时间，不能证明限定期内何时成为精华',
     defaultAcquisitionDescription: (threshold: number | null) => `累计获得 ${displayThreshold(threshold || 1)} 篇精华帖后获得`,
   },
@@ -94,6 +102,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['CHECKIN_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: false,
     historicalBasis: '按限定期内上海时区去重后的签到日期重算',
     defaultAcquisitionDescription: (threshold: number | null) => `累计挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
@@ -106,6 +115,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['CHECKIN_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按限定窗口内的签到日期重算最长连续天数',
     defaultAcquisitionDescription: (threshold: number | null) => `连续挂号 ${displayThreshold(threshold || 1)} 天后获得`,
   },
@@ -118,6 +128,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['USER_LOGIN'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: false,
     historicalBasis: '按用户注册时间与限定期结束日重算账号年龄',
     defaultAcquisitionDescription: (threshold: number | null) => `注册满 ${displayThreshold(threshold || 1)} 天后获得`,
   },
@@ -130,6 +141,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['FRIENDSHIP_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: false,
     historicalBasis: '关系删除后没有历史快照，无法可靠还原限定期结束时的好友数',
     defaultAcquisitionDescription: (threshold: number | null) => `好友达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
@@ -142,6 +154,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['FOLLOW_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: false,
     historicalBasis: '关系删除后没有历史快照，无法可靠还原限定期结束时的粉丝数',
     defaultAcquisitionDescription: (threshold: number | null) => `粉丝达到 ${displayThreshold(threshold || 1)} 位后获得`,
   },
@@ -154,6 +167,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['GUESS_SONG_SESSION_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按限定期内已完成且有效的听听对局重算最高连击',
     defaultAcquisitionDescription: (threshold: number | null) => `听听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
@@ -166,6 +180,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['DUEL_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: false,
     historicalBasis: '现有胜场统计没有逐场时间，无法可靠重建限定期胜场数',
     defaultAcquisitionDescription: (threshold: number | null) => `累计赢得 ${displayThreshold(threshold || 1)} 场听听 1v1 对决后获得`,
   },
@@ -178,6 +193,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['WANT_LISTEN_SESSION_FINISHED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: false,
     historicalBasis: '现有最高连击统计没有历史快照，无法可靠重建限定期最高连击',
     defaultAcquisitionDescription: (threshold: number | null) => `想听最高连击达到 ${displayThreshold(threshold || 1)} 题后获得`,
   },
@@ -190,6 +206,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['CONCERT_ATTENDANCE_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按限定期内 UserMusicConcert.createdAt 重算观演记录',
     defaultAcquisitionDescription: (threshold: number | null) => `累计观看 ${displayThreshold(threshold || 1)} 场演唱会后获得`,
   },
@@ -203,6 +220,7 @@ export const BADGE_RULE_REGISTRY = {
     threshold: null,
     targetKind: 'CONCERT',
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按限定期内添加的指定场次观演记录重算',
     defaultAcquisitionDescription: () => '观看指定演唱会后获得',
   },
@@ -216,6 +234,7 @@ export const BADGE_RULE_REGISTRY = {
     threshold: null,
     targetKind: 'TOUR',
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按限定期内添加的指定巡演观演记录重算',
     defaultAcquisitionDescription: () => '观看指定巡演任意一场后获得',
   },
@@ -228,6 +247,7 @@ export const BADGE_RULE_REGISTRY = {
     events: ['RATING_CREATED'],
     threshold: BADGE_RULE_THRESHOLD_LIMITS,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按限定期内 Rating.createdAt 重算评分次数',
     defaultAcquisitionDescription: (threshold: number | null) => `累计完成 ${displayThreshold(threshold || 1)} 次歌·颂评分后获得`,
   },
@@ -241,6 +261,7 @@ export const BADGE_RULE_REGISTRY = {
     threshold: null,
     targetKind: 'ACTIVITY',
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按指定活动中有效人工或二维码现场核销记录判断；活动结束自动核销不计入',
     defaultAcquisitionDescription: () => '参加指定活动后获得',
   },
@@ -254,6 +275,7 @@ export const BADGE_RULE_REGISTRY = {
     threshold: null,
     specialKind: 'BIRTHDAY_ZODIAC',
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '仅按上海时区当前星座周期与用户生日月日判断，不追溯已经结束的星座周期',
     defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => {
       const zodiac = getZodiacFromRuleConfig(configJson)
@@ -272,6 +294,7 @@ export const BADGE_RULE_REGISTRY = {
     threshold: null,
     specialKind: 'BIRTHDAY_TODAY',
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '仅按上海时区当前月日判断；2 月 29 日生日在非闰年不顺延',
     defaultAcquisitionDescription: () => '生日当天自动获得。',
   },
@@ -286,6 +309,7 @@ export const BADGE_RULE_REGISTRY = {
     adminSelectable: false,
     seriesCompletion: true,
     supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '没有可靠的系列首次完成时间，不能用当前完成状态倒推历史资格',
     defaultAcquisitionDescription: () => '集齐指定系列全部勋章后获得',
   },
@@ -298,6 +322,7 @@ export const BADGE_RULE_REGISTRY = {
     events: [],
     threshold: null,
     supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: true,
     historicalBasis: '按当前仍有效的 UserBadge 记录判断；已过期或已收回的勋章不计入',
     defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => describeBadgeOwnershipRule(configJson),
   },
@@ -325,6 +350,74 @@ export type ParsedBadgeRule = {
   secondaryThreshold: number | null
   configJson: Prisma.InputJsonValue | null
   isEnabled: boolean
+  /** Null keeps the rule-type default; see resolveBadgeRetentionPolicy. */
+  retentionPolicy: BadgeRetentionPolicyValue | null
+}
+
+export const BADGE_RETENTION_POLICIES = ['PERMANENT_AFTER_GRANT', 'RETAIN_WHILE_ELIGIBLE'] as const
+export type BadgeRetentionPolicyValue = typeof BADGE_RETENTION_POLICIES[number]
+
+/**
+ * Historical behaviour: earning a badge once keeps it forever. Every rule type
+ * inherits this unless it already behaves differently today.
+ */
+export const DEFAULT_BADGE_RETENTION_POLICY: BadgeRetentionPolicyValue = 'PERMANENT_AFTER_GRANT'
+
+/**
+ * BADGE_OWNERSHIP already revokes the automatic source when the prerequisite
+ * set stops matching, so its default must stay RETAIN_WHILE_ELIGIBLE to keep
+ * existing installations byte-for-byte compatible.
+ */
+const DEFAULT_RETENTION_POLICY_BY_RULE_TYPE: Partial<Record<SupportedBadgeRuleType, BadgeRetentionPolicyValue>> = {
+  BADGE_OWNERSHIP: 'RETAIN_WHILE_ELIGIBLE',
+}
+
+export const BADGE_RETENTION_POLICY_LABELS: Record<BadgeRetentionPolicyValue, string> = {
+  PERMANENT_AFTER_GRANT: '永久保留',
+  RETAIN_WHILE_ELIGIBLE: '持续满足条件才保留',
+}
+
+export const BADGE_RETENTION_POLICY_DESCRIPTIONS: Record<BadgeRetentionPolicyValue, string> = {
+  PERMANENT_AFTER_GRANT: '达成后即永久保留，不再重新判断。',
+  RETAIN_WHILE_ELIGIBLE: '持续满足条件才保留；不再满足时回收该自动来源，重新满足后重新授予。',
+}
+
+export function getDefaultBadgeRetentionPolicy(ruleType: SupportedBadgeRuleType): BadgeRetentionPolicyValue {
+  return DEFAULT_RETENTION_POLICY_BY_RULE_TYPE[ruleType] || DEFAULT_BADGE_RETENTION_POLICY
+}
+
+/**
+ * Effective policy for a stored rule. A NULL column inherits the rule-type
+ * default, which is how pre-existing rows keep their current behaviour.
+ */
+export function resolveBadgeRetentionPolicy(rule: {
+  ruleType: SupportedBadgeRuleType
+  retentionPolicy?: BadgeRetentionPolicyValue | null
+}): BadgeRetentionPolicyValue {
+  return rule.retentionPolicy || getDefaultBadgeRetentionPolicy(rule.ruleType)
+}
+
+/** Whether this rule type may be configured with RETAIN_WHILE_ELIGIBLE. */
+export function supportsBadgeRetentionPolicy(ruleType: SupportedBadgeRuleType) {
+  return BADGE_RULE_REGISTRY[ruleType]?.supportsRetentionWhileEligible === true
+}
+
+/** Validate the administrator-supplied retention policy against the rule type. */
+export function normalizeBadgeRetentionPolicy(
+  value: unknown,
+  ruleType: SupportedBadgeRuleType,
+): { policy?: BadgeRetentionPolicyValue | null; error?: string } {
+  if (value === undefined) return { policy: null }
+  if (value === null) return { policy: null }
+  if (typeof value !== 'string') return { error: '资格保持方式无效' }
+  const normalized = value.trim().toUpperCase()
+  if (!normalized) return { policy: null }
+  if (!(BADGE_RETENTION_POLICIES as readonly string[]).includes(normalized)) return { error: '资格保持方式无效' }
+  const policy = normalized as BadgeRetentionPolicyValue
+  if (policy === 'RETAIN_WHILE_ELIGIBLE' && !supportsBadgeRetentionPolicy(ruleType)) {
+    return { error: `${BADGE_RULE_REGISTRY[ruleType]?.label || '该规则'}不能按资格持续满足回收，请选择永久保留` }
+  }
+  return { policy }
 }
 
 export function getZodiacFromRuleConfig(value: unknown): ZodiacSign | null {
@@ -363,6 +456,11 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
   if (!(BADGE_RULE_OPERATORS as readonly string[]).includes(operator)) return { error: '自动获取规则操作符无效' }
   if (!definition.supportedOperators.includes(operator)) return { error: '当前版本后台仅支持达到（≥）操作符' }
 
+  // Validated once so every rule shape below inherits the same value.
+  const retention = normalizeBadgeRetentionPolicy(body.retentionPolicy, ruleTypeValue as SupportedBadgeRuleType)
+  if (retention.error) return { error: retention.error }
+  const retentionPolicy = retention.policy ?? null
+
   if (definition.specialKind === 'BIRTHDAY_ZODIAC' || definition.specialKind === 'BIRTHDAY_TODAY') {
     const ruleLabel = definition.specialKind === 'BIRTHDAY_ZODIAC' ? '星座' : '生日当天'
     if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: `${ruleLabel}规则不需要数值阈值` }
@@ -382,6 +480,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
           secondaryThreshold: null,
           configJson: { zodiac },
           isEnabled: body.isEnabled !== false,
+          retentionPolicy,
         },
       }
     }
@@ -399,6 +498,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         secondaryThreshold: null,
         configJson: {},
         isEnabled: body.isEnabled !== false,
+        retentionPolicy,
       },
     }
   }
@@ -419,6 +519,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         secondaryThreshold: null,
         configJson: { seriesId: seriesId.trim() },
         isEnabled: body.isEnabled !== false,
+        retentionPolicy,
       },
     }
   }
@@ -437,6 +538,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         secondaryThreshold: null,
         configJson: ownershipConfig.config,
         isEnabled: body.isEnabled !== false,
+        retentionPolicy,
       },
     }
   }
@@ -450,7 +552,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
     if (typeof targetId !== 'string' || !/^[A-Za-z0-9_-]{1,191}$/.test(targetId.trim())) return { error: `请选择有效的${targetLabel}` }
     if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: `指定${targetLabel}规则不需要填写数量` }
     if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
-    return { rule: { ruleType: ruleTypeValue as SupportedBadgeRuleType, operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: { [key]: targetId.trim() }, isEnabled: body.isEnabled !== false } }
+    return { rule: { ruleType: ruleTypeValue as SupportedBadgeRuleType, operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: { [key]: targetId.trim() }, isEnabled: body.isEnabled !== false, retentionPolicy } }
   }
 
   const thresholdResult = parsePositiveInteger(body.threshold, '规则阈值', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)
@@ -474,6 +576,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
       secondaryThreshold,
       configJson: null,
       isEnabled: body.isEnabled !== false,
+      retentionPolicy,
     },
   }
 }

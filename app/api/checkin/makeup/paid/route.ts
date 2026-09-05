@@ -12,6 +12,7 @@ import {
   settleMakeupLongTermRewards,
 } from '@/lib/checkin-makeup'
 import { createUUID } from '@/lib/utils/uuid'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 const MAKEUP_TRANSACTION_OPTIONS = {
   isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -143,6 +144,10 @@ export async function POST(request: Request) {
         })
       }
     }
+
+    // 补签把连续签到恢复到阈值后，重新评估自动勋章：重新满足即自动重新授予，
+    // 同时按持续资格策略复核是否需要回收。
+    if (userId) triggerBadgeEvaluation(userId, 'CHECKIN_CREATED', `makeup:${result.checkInId}`)
 
     log('success', {
       result: rewardSettlementPending ? 'success_reward_pending' : 'success',
