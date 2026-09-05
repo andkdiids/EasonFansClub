@@ -237,3 +237,31 @@ test('旧广场模式 URL 只被忽略，不会恢复旧布局或触发模式重
   assert.doesNotMatch(discovery, /view=square|mode=plaza|layout=grid/)
   assert.doesNotMatch(layout, /ecfc-forum-theme|forumTheme/)
 })
+
+test('移动端小臣书帖子详情底栏：DOM=最终顺序（说点什么→点赞→收藏→评论）且不再依赖失效的 CSS order', () => {
+  const bar = readFileSync('components/ForumDiscoveryActionBar.tsx', 'utf8')
+  const trigger = bar.indexOf('forum-discovery-comment-trigger')
+  const like = bar.indexOf('forum-discovery-action-like')
+  const favorite = bar.indexOf('forum-discovery-action-favorite')
+  const count = bar.indexOf('forum-discovery-action-count')
+  assert.ok(trigger >= 0 && like > trigger && favorite > like && count > favorite,
+    `expected DOM order 说点什么→点赞→收藏→评论, got trigger=${trigger} like=${like} favorite=${favorite} count=${count}`)
+  // comment composer trigger 必须是「说点什么」入口，且位于最左；评论数是右侧第 4 个
+  const triggerMarkup = bar.slice(trigger, like)
+  const countMarkup = bar.slice(count)
+  assert.match(triggerMarkup, /说点什么/)
+  assert.match(countMarkup, /评论 \{replyCount\}/)
+
+  const css = readFileSync('app/globals.css', 'utf8')
+  const mobileRegion = css.slice(css.indexOf('html[data-forum-detail-discover=\'true\']'))
+  // 列宽：说点什么 40%（2fr）＋ 点赞/收藏/评论各 20%（1fr）
+  assert.match(mobileRegion, /\.forum-discovery-action-bar \{[\s\S]*?grid-template-columns:minmax\(0,2fr\) repeat\(3,minmax\(0,1fr\)\)/)
+  // 点赞/收藏/评论右三列等宽等高（共用 min-height:44px / width:100%）
+  assert.match(mobileRegion, /\.forum-discovery-action-button \{ display:flex; width:100%; min-width:48px; min-height:44px/)
+  assert.match(mobileRegion, /\.forum-discovery-action-count \{ display:flex; width:100%; min-width:48px; min-height:44px/)
+  // 回归：like/favorite 的 className 打在内部 <button> 而非 grid 子项，禁止用 CSS order 重排（历史上因此错序）
+  assert.doesNotMatch(mobileRegion, /\.forum-discovery-comment-trigger\s*\{\s*order:/)
+  assert.doesNotMatch(mobileRegion, /\.forum-discovery-action-like\s*\{\s*order:/)
+  assert.doesNotMatch(mobileRegion, /\.forum-discovery-action-favorite\s*\{\s*order:/)
+  assert.doesNotMatch(mobileRegion, /\.forum-discovery-action-count\s*\{\s*order:/)
+})

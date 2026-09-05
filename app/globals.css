@@ -1000,12 +1000,9 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   .forum-discovery-action-bar > div > p { display:none; }
   .forum-discovery-action-count { display:flex; width:100%; min-width:48px; min-height:44px; align-items:center; justify-content:center; border:0; padding:0 2px; color:var(--foreground); background:transparent; font-size:11px; font-weight:850; white-space:nowrap; }
 
-  /* 移动端小臣书详情底栏：固定顺序为「说点什么 → 点赞 → 收藏 → 评论」。
-     仅通过 order 重排，不改 DOM，桌面端与摸鱼模式不受影响。 */
-  .forum-discovery-comment-trigger { order:1; }
-  .forum-discovery-action-like { order:2; }
-  .forum-discovery-action-favorite { order:3; }
-  .forum-discovery-action-count { order:4; }
+  /* 移动端小臣书详情底栏：最终视觉顺序 = DOM 顺序 = 说点什么(2fr/约40%) → 点赞(1fr) → 收藏(1fr) → 评论(1fr)。
+     不在此处用 order/nth-child 重排：点赞/收藏的 className 打在 LikeButton/FavoriteButton 的
+     内部 <button> 上、并非 grid 直接子项，order 会失效并造成错误顺序（历史问题）。 */
 
   .post-reply-bottom-sheet-backdrop { position:fixed; z-index:var(--layer-dialog); inset:0; display:block; width:100%; height:100%; border:0; padding:0; background:rgba(2,8,18,.42); touch-action:none; }
   .post-reply-bottom-sheet { position:fixed; z-index:calc(var(--layer-dialog) + 1); right:0; bottom:var(--post-reply-keyboard-offset,0px); left:0; display:flex; width:100%; max-width:100%; min-width:0; box-sizing:border-box; max-height:min(84dvh,calc(var(--post-reply-viewport-height,100dvh) - 8px)); flex-direction:column; overflow-x:clip; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; border-top:1px solid var(--border); border-radius:18px 18px 0 0; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 -16px 40px rgba(2,8,18,.24); }
@@ -6364,7 +6361,12 @@ body:has(.duel-page) .app-page-content {
 .rich-text-size-title { font-size: 22px; font-weight: 800; line-height: 1.5; }
 
 .rich-text-editor-shell { position: relative; min-width: 0; isolation: isolate; overflow: visible; border: 1px solid var(--border, #e5e9f0); background: var(--surface-elevated, #fff); }
-.rich-text-toolbar { position: sticky; top: 0; z-index: 30; display: flex; min-width: 0; flex-wrap: wrap; gap: 6px; overflow: visible; border-bottom: 1px solid var(--border, #e5e9f0); padding: 8px; background: var(--surface-subtle, #f8fafc); }
+/* 富文本工具栏冻结（仅编辑器区域内有效）：top 对齐站点 sticky 顶栏底部，避免被 .app-topbar 遮住；
+   桌面 .app-topbar 高度 58px，移动端 56px（见下方媒体覆盖）。shell 为定位/包含块，离开编辑器即停止 sticky。 */
+.rich-text-toolbar { position: sticky; top: 58px; z-index: 30; display: flex; min-width: 0; flex-wrap: wrap; gap: 6px; overflow: visible; border-bottom: 1px solid var(--border, #e5e9f0); padding: 8px; background: var(--surface-subtle, #f8fafc); box-shadow: 0 6px 14px -12px rgba(2, 8, 18, .3); }
+@media (max-width: 767px) {
+  .rich-text-toolbar { top: 56px; }
+}
 .rich-text-toolbar-row { display: contents; }
 .rich-text-toolbar-dropdown { position: relative; overflow: visible; }
 .rich-text-toolbar-button { display: inline-flex; box-sizing: border-box; min-height: 40px; min-width: 0; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--border, #e5e9f0); border-radius: 8px; padding: 0 11px; color: var(--foreground-muted, #667085); background: var(--surface-elevated, #fff); font-size: 12px; font-weight: 800; white-space: nowrap; transition: border-color .15s ease, background .15s ease, color .15s ease; }

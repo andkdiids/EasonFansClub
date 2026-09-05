@@ -48,9 +48,13 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, currentUserLike
     document.getElementById(`post-comments-${postId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  // Mobile post-detail bottom bar DOM order is the FINAL visual order:
+  // 1. comment composer trigger（说点什么，约 40%）
+  // 2. like（点赞）  3. favorite（收藏）  4. comment count（评论数）
+  // The 4 remaining grid columns are 2fr / 1fr / 1fr / 1fr in app/globals.css.
   return (
     <div className="forum-discovery-action-bar" data-forum-discovery-action-bar>
-      <button type="button" className="forum-discovery-action-count" onClick={focusComments} aria-label="查看评论">评论 {replyCount}</button>
+      <button type="button" className="forum-discovery-comment-trigger" onClick={() => void openComposer()}>说点什么</button>
       <LikeButton
         postId={postId}
         initialLiked={initialLiked}
@@ -66,7 +70,7 @@ export function ForumDiscoveryActionBar({ postId, currentUserId, currentUserLike
         refreshOnSuccess={false}
         className="forum-discovery-action-button forum-discovery-action-favorite"
       />
-      <button type="button" className="forum-discovery-comment-trigger" onClick={() => void openComposer()}>说点什么</button>
+      <button type="button" className="forum-discovery-action-count" onClick={focusComments} aria-label="查看评论">评论 {replyCount}</button>
     </div>
   )
 }
