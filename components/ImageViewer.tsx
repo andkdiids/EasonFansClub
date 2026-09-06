@@ -2,8 +2,9 @@
 
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type SyntheticEvent, type WheelEvent } from 'react'
-import { publicImageOriginalUrl, publicImageVariantUrl } from '@/lib/image-variants'
+import { publicImageVariantUrl } from '@/lib/image-variants'
 import { publicImageUrl } from '@/lib/images'
+import { resolveImageViewerFullUrl } from '@/lib/image-viewer-url'
 
 export const IMAGE_VIEWER_MIN_ZOOM = 0.5
 export const IMAGE_VIEWER_MAX_ZOOM = 4
@@ -150,9 +151,16 @@ export function ImageViewer({
   const requestedPreviewSrc = activeItem.previewSrc ? publicImageUrl(activeItem.previewSrc) || activeItem.previewSrc : null
   const renderPreviewSrc = requestedPreviewSrc || publicImageVariantUrl(publicSrc, 'card') || publicSrc
   const hasExplicitOriginal = Object.prototype.hasOwnProperty.call(activeItem, 'originalUrl')
-  const renderOriginalSrc = hasExplicitOriginal
-    ? publicImageUrl(activeItem.originalUrl) || activeItem.originalUrl || publicSrc
-    : publicImageOriginalUrl(publicSrc) || publicSrc
+  // The full-screen stage must reuse the exact effective public URL the inline
+  // image loads. It never guesses a `…/original` sibling: content images are
+  // uploaded without a preserved original, so that derived path would 404 even
+  // though the visible image is valid. A real original is only used when the
+  // caller explicitly provides one (see resolveImageViewerFullUrl).
+  const renderOriginalSrc = resolveImageViewerFullUrl({
+    src: activeItem.src,
+    originalUrl: activeItem.originalUrl,
+    hasExplicitOriginal,
+  })
   const isGallery = viewerItems.length > 1
 
   const clearAutoPlayTimeout = useCallback(() => {
@@ -528,7 +536,8 @@ export function ImageViewer({
         <div className="flex h-full w-full items-center justify-center" onClick={handleViewportClick}>
           {imageState === 'loading' ? <div className="pointer-events-none absolute inset-0 grid place-items-center" role="status"><span className="rounded-full bg-black/60 px-4 py-3 text-sm font-bold text-white/90">图片加载中…</span></div> : null}
           {imageState === 'error' ? <div className="pointer-events-none absolute inset-0 grid place-items-center" role="alert"><span className="rounded-full bg-black/70 px-4 py-3 text-sm font-bold text-white">图片加载失败</span></div> : null}
-          {/* The original URL is rendered directly so the viewer never downgrades image quality. */}
+          {/* The full-screen image renders the same effective public URL that
+              loads inline, unless the caller explicitly supplied an original. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             key={`${safeCurrentIndex}:${renderOriginalSrc}`}
