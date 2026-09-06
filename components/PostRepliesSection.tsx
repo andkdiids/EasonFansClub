@@ -431,8 +431,6 @@ export function PostRepliesSection({
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
               <Link href={`/user/${formatUid(reply.author.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /></Link>
-              <span className="font-bold text-slate-400">UID {formatUid(reply.author.uid)}</span>
-              <span className="font-bold text-slate-400">Lv.{reply.author.level}</span>
               <span className="font-bold text-slate-400">{formatDate(new Date(reply.createdAt))}</span>
               <IpRegionLabel ipRegion={reply.ipRegion} />
             </div>
@@ -501,7 +499,7 @@ export function PostRepliesSection({
               <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                 <SafeAvatar src={avatar} name={name} uid={reply.author.uid} />
               </span>
-              <span><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /> · UID {formatUid(reply.author.uid)} · Lv.{reply.author.level}</span>
+              <span><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /></span>
             </Link>
             {reply.isPinned ? <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
             <span>{reply.parentId === null && reply.floorNumber !== null ? `${reply.floorNumber}楼 · ` : ''}{formatDate(new Date(reply.createdAt))}</span>
