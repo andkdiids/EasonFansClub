@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 import { getMoodDisplay, NO_MOOD_LABEL } from '@/lib/checkin-mood'
+import { getCheckInTypeMeta } from '@/lib/checkin-type-meta'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { CheckInMakeupDialog } from '@/components/CheckInMakeupDialog'
 import {
@@ -302,8 +303,9 @@ export function CheckInHistoryDialog({ initialDate }: Readonly<{ initialDate: st
                     const hasMakeupDate = Boolean(makeupDate)
                     const visibleRecord = record && !isFuture ? record : undefined
                     const mood = visibleRecord ? getMoodDisplay(visibleRecord) : null
-                    const madeUp = Boolean(visibleRecord?.type && visibleRecord.type !== 'NORMAL')
-                    const moodLabel = madeUp ? '已补签' : mood?.label || (mood?.icon ? '' : '已挂号')
+                    const typeMeta = visibleRecord ? getCheckInTypeMeta(visibleRecord.type) : null
+                    const madeUp = Boolean(typeMeta?.isMakeup)
+                    const moodLabel = madeUp ? typeMeta!.frontLabel : mood?.label || (mood?.icon ? '' : '已挂号')
                     const content = (
                       <>
                         <span className="checkin-history-day-number">{cell.day}</span>
@@ -311,7 +313,7 @@ export function CheckInHistoryDialog({ initialDate }: Readonly<{ initialDate: st
                       </>
                     )
                     return visibleRecord ? (
-                      <button key={cell.key} type="button" className={cellClassName(cell, visibleRecord, currentMonth.dateKey)} onClick={() => void openDetail(visibleRecord)} aria-label={`${cell.key}，${madeUp ? '已补签' : mood?.label || '已挂号'}`}>
+                      <button key={cell.key} type="button" className={cellClassName(cell, visibleRecord, currentMonth.dateKey)} onClick={() => void openDetail(visibleRecord)} aria-label={`${cell.key}，${madeUp ? '补签' : mood?.label || '已挂号'}`}>
                         {content}
                       </button>
                     ) : hasMakeupDate ? (
@@ -346,7 +348,7 @@ export function CheckInHistoryDialog({ initialDate }: Readonly<{ initialDate: st
                         <dl className="checkin-history-detail-facts">
                           <div><dt>今日心情</dt><dd>{getMoodDisplay(detail).formatted || NO_MOOD_LABEL}</dd></div>
                           <div><dt>挂号时间</dt><dd>{formatBeijingDateTimeMinute(detail.createdAt)}</dd></div>
-                          <div><dt>挂号方式</dt><dd>{detail.type && detail.type !== 'NORMAL' ? '该日通过补签完成' : '正常挂号'}</dd></div>
+                          <div><dt>挂号方式</dt><dd>{getCheckInTypeMeta(detail.type).adminLabel}</dd></div>
                           {detail.streakDay > 0 ? <div><dt>连续挂号</dt><dd>{detail.streakDay} 天</dd></div> : null}
                         </dl>
                         <section className="checkin-history-message">

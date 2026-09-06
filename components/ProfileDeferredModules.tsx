@@ -5,9 +5,10 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ModuleFallback } from '@/components/ModuleFallback'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { getMoodDisplay } from '@/lib/checkin-mood'
+import { getCheckInTypeMeta } from '@/lib/checkin-type-meta'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
-type CheckIn = { id: string; checkDate: string; mood: string | null; moodType?: string | null; moodEmoji?: string | null; moodText?: string | null; streakDay: number }
+type CheckIn = { id: string; checkDate: string; mood: string | null; moodType?: string | null; moodEmoji?: string | null; moodText?: string | null; streakDay: number; type?: string | null; isMakeUp?: boolean | null }
 type ReplyItem = { id: string; content: string; createdAt: string; ipRegion?: string | null; authorName: string; authorAvatarUrl: string | null }
 type Message = {
   id: string
@@ -79,10 +80,13 @@ export function ProfileCheckInCalendar() {
               const day = index + 1
               const record = checkIns.data.find((item) => new Date(item.checkDate).getDate() === day)
               const mood = record ? getMoodDisplay(record) : null
+              const typeMeta = record ? getCheckInTypeMeta(record.type) : null
+              const isMakeupDay = Boolean(typeMeta?.isMakeup)
+              const dayLabel = isMakeupDay ? typeMeta!.frontLabel : mood?.formatted || ''
               return (
-                <div key={day} className={`flex h-12 flex-col items-center justify-center rounded-lg p-1 text-center text-xs font-black sm:h-[60px] ${record ? 'bg-brand-700 text-white' : 'bg-sky-50 text-slate-400'}`}>
+                <div key={day} title={isMakeupDay ? typeMeta!.adminLabel : mood?.formatted || ''} className={`flex h-12 flex-col items-center justify-center rounded-lg p-1 text-center text-xs font-black sm:h-[60px] ${record ? 'bg-brand-700 text-white' : 'bg-sky-50 text-slate-400'} ${isMakeupDay ? 'ring-2 ring-amber-300 ring-inset' : ''}`}>
                   <span>{day}</span>
-                  <span className="mt-0.5 block break-words text-[10px] leading-tight">{mood?.formatted || ''}</span>
+                  <span className="mt-0.5 block break-words text-[10px] leading-tight">{dayLabel}</span>
                 </div>
               )
             })}

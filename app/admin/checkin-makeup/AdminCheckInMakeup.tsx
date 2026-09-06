@@ -6,6 +6,7 @@ import {
   ADMIN_MAKEUP_RANGE_OPTIONS,
   type AdminMakeupRangeDays,
 } from '@/lib/admin-checkin-makeup'
+import { getCheckInTypeMeta } from '@/lib/checkin-type-meta'
 
 type UserResult = { id: string; uid: number; nickname: string; points: number }
 
@@ -29,9 +30,7 @@ function formatDateKey(dateKey: string) {
 }
 
 function typeLabel(type: string) {
-  if (type === 'MAKEUP_ADMIN') return '管理员补签'
-  if (type === 'MAKEUP_PAID' || type === 'MAKEUP_FREE_QUIZ') return '用户补签'
-  return '正常挂号'
+  return getCheckInTypeMeta(type).adminLabel
 }
 
 export function AdminCheckInMakeup() {

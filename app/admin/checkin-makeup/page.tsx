@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
 import { AdminCheckInMakeup } from './AdminCheckInMakeup'
+import { AdminCheckInMakeupRecords } from './AdminCheckInMakeupRecords'
 
 export default async function AdminCheckInMakeupPage() {
   await requireAdminPage('/admin/checkin-makeup', 'checkin_manage')
@@ -13,6 +14,7 @@ export default async function AdminCheckInMakeupPage() {
         <Link href="/admin" className="mt-5 inline-flex min-h-11 items-center bg-brand-950 px-5 text-sm font-black text-white">返回后台</Link>
       </section>
       <AdminCheckInMakeup />
+      <AdminCheckInMakeupRecords />
     </main>
   )
 }
