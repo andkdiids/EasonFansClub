@@ -25,9 +25,14 @@ test('并发审核基于锁定后的当前状态转换，通知使用本次审�
 })
 
 test('审核通过与拒绝的通知文案和链接正确', () => {
-  assert.match(reviewRoute, /title: input\.status === 'APPROVED' \? '帖子审核通过'/)
-  assert.match(reviewRoute, /E院广场查看/)
+  assert.match(reviewRoute, /title: input\.status === 'APPROVED' \? '你的帖子已通过审核'/)
   assert.match(reviewRoute, /帖子未通过审核/)
   assert.match(reviewRoute, /input\.rejectionReason/)
   assert.match(reviewRoute, /link: `\/posts\/\$\{input\.postId\}`/)
+  // 情况 A：未调整分区 → 通知说明发布至最终分区
+  assert.match(reviewRoute, /已通过审核，并发布至「/)
+  // 情况 B：管理员调整了分区 → 通知明确 A → B，并落在最终发布分区
+  assert.match(reviewRoute, /为了更符合内容分类，我们已将帖子从「/)
+  assert.match(reviewRoute, /调整至「/)
+  assert.match(reviewRoute, /帖子现已发布至「/)
 })
