@@ -23,7 +23,21 @@ import './globals.css'
 // Keep its metadata and authenticated shell out of build-time prerendering.
 export const dynamic = 'force-dynamic'
 
+// 移动端标准响应式 viewport（Next.js 官方 metadata 单一来源，勿再手动插入
+// 第二个 <meta name="viewport">）：
+// - width=device-width + initialScale=1：页面严格按设备宽度渲染（不出现桌面
+//   980px 布局），375/390/412px 各按其自身 viewport 布局；
+// - maximumScale=1 + userScalable=false：禁用双指把整页缩小成“桌面小页面”；
+// - interactiveWidget='resizes-content'：Android Chrome/微信 XWeb 等动态地址栏
+//   变化时布局视口跟随可视区重排，保证 fixed 底部导航首帧即在可视区底、
+//   不会被地址栏/工具栏推出屏幕（旧内核忽略该字段，无副作用）。
+// 桌面浏览器不执行 viewport 缩放指令，桌面端零影响。
 export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  interactiveWidget: 'resizes-content',
   themeColor: '#0f5f8f',
   colorScheme: 'light dark',
 }

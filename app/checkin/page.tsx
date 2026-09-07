@@ -238,7 +238,7 @@ export default async function CheckInPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <main className="site-page-main flat-page mx-auto max-w-[1500px] px-4 py-6 sm:px-5">
+      <main className="checkin-mobile-viewport-lock site-page-main flat-page mx-auto max-w-[1500px] px-4 py-6 sm:px-5">
         <CheckInPageSurface
           dailyQuote={getDailyQuote(today)}
           activeUsers={activeUsers}

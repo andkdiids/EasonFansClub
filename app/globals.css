@@ -1899,6 +1899,15 @@ flex-direction:column;
   .site-footer-info { padding-bottom: calc(var(--mobile-bottom-nav-total) + var(--mobile-page-bottom-gap)); }
 }
 
+/* 每日挂号页移动端兜底：禁止双指缩放整页（viewport 已设 maximum-scale=1 /
+   user-scalable=no；此处防 iOS Safari / 老 WebView 忽略 viewport 指令的兜底）。
+   touch-action: pan-y 仅解除浏览器对双指捏合的整页缩放处理，单指纵向滚动、
+   点击、输入、按钮触控全部不受影响；页面无横向滚动区域，不影响横向手势。
+   仅移动断点生效，桌面端零影响。 */
+@media (max-width: 767px) {
+  .checkin-mobile-viewport-lock { touch-action: pan-y; }
+}
+
 @media (max-width:767px) {
   .app-sidebar { display:none; }.app-main-area { width:100%; margin-left:0; }.app-page-content { padding-bottom:0; }.desktop-immersive-toggle { display:none; }
   .app-topbar { height:56px; padding:0 14px; }.app-topbar-brand { display:flex; min-width:0; margin-right:auto; }.app-topbar-search { display:none; }.app-topbar-actions { margin-left:auto; }.app-topbar-actions>a,
