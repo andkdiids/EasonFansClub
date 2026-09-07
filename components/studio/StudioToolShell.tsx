@@ -16,12 +16,13 @@ function saveStatusLabel(status: StudioSaveStatus) {
   return '未保存'
 }
 
-export function StudioToolShell({ tool, title, saveStatus, onSave, onShare, onExport, openExportOnMount = false, children }: Readonly<{
+export function StudioToolShell({ tool, title, saveStatus, onSave, onShare, shareDisabled, onExport, openExportOnMount = false, children }: Readonly<{
   tool: StudioToolDefinition
   title: string
   saveStatus: StudioSaveStatus
   onSave: () => void
   onShare: () => void
+  shareDisabled?: boolean
   onExport: (format: StudioExportFormat) => void
   openExportOnMount?: boolean
   children: ReactNode
@@ -50,14 +51,14 @@ export function StudioToolShell({ tool, title, saveStatus, onSave, onShare, onEx
           <span className={styles.saveStatus}><i className={styles.saveDot} />{status}</span>
           {tool.supportsSave ? <button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={onSave} disabled={saveStatus === 'saving'}><UiIcon name="check" />保存</button> : null}
           {tool.supportsExport ? <button type="button" className={styles.actionButton} onClick={openExport}>导出</button> : null}
-          {tool.supportsShare ? <button type="button" className={styles.actionButton} onClick={onShare}>分享</button> : null}
+          {tool.supportsShare ? <button type="button" className={styles.actionButton} onClick={onShare} disabled={shareDisabled}>分享</button> : null}
         </div>
       </header>
       <div className={styles.toolBody}>{children}</div>
       <div className={styles.mobileActionBar}>
         {tool.supportsSave ? <button type="button" className={styles.actionButton} onClick={onSave} disabled={saveStatus === 'saving'}>保存</button> : null}
         {tool.supportsExport ? <button type="button" className={styles.actionButton} onClick={openExport}>导出</button> : null}
-        {tool.supportsShare ? <button type="button" className={styles.actionButton} onClick={onShare}>分享</button> : null}
+        {tool.supportsShare ? <button type="button" className={styles.actionButton} onClick={onShare} disabled={shareDisabled}>分享</button> : null}
         {tool.supportsSave ? <button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={onSave} disabled={saveStatus === 'saving'}>完成</button> : null}
       </div>
       <StudioExportDialog open={exportOpen} formats={tool.supportedExportFormats} onClose={() => setExportOpen(false)} onExport={exportFile} />

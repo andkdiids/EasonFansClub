@@ -1044,9 +1044,18 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   if (!user) throw new BadgeServiceError('USER_NOT_FOUND', '目标用户不存在')
   if (!badge) throw new BadgeServiceError('BADGE_NOT_FOUND', '勋章不存在')
 
+  let regrantRecordId: string | null = null
   if (grantKey) {
     const sameGrant = await tx.userBadge.findUnique({ where: { grantKey }, select: { id: true } })
-    if (sameGrant) return operationResult(input, badge.name, sameGrant.id)
+    if (sameGrant) {
+      const sameSource = await tx.userBadgeSource.findUnique({ where: { sourceKey }, select: { isActive: true } })
+      // A retained automatic source may be revoked when eligibility is lost,
+      // then become eligible again within the same event/period key. Reuse the
+      // durable record and reactivate its source instead of being stopped by
+      // the idempotency key forever.
+      if (!sameSource || sameSource.isActive) return operationResult(input, badge.name, sameGrant.id)
+      regrantRecordId = sameGrant.id
+    }
   }
 
   await expireStaleUserBadgeRows(tx, input, now)
@@ -1106,6 +1115,50 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   }
   if (availabilityMode === 'ADMIN_MANUAL' && availability !== 'PERMANENT' && !grantReason) {
     throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '限定勋章手动补发必须填写补发原因')
+  }
+
+  if (regrantRecordId) {
+    const status = awardedIsActive ? 'ACTIVE' : 'EXPIRED'
+    const record = await tx.userBadge.update({
+      where: { id: regrantRecordId },
+      data: {
+        obtainedAt: awardedAt,
+        awardedAt,
+        grantedAt: awardedAt,
+        expiresAt,
+        expiredAt: status === 'EXPIRED' ? now : null,
+        revokedAt: null,
+        status,
+        activeKey: status === 'ACTIVE' ? activeBadgeKey(input.userId, input.badgeId) : null,
+        sourceType,
+        sourceId,
+        grantReason,
+        grantedBy: input.actorId || null,
+      },
+      select: { id: true },
+    })
+    await upsertBadgeAcquisitionSource(tx, {
+      userId: input.userId,
+      badgeId: input.badgeId,
+      userBadgeId: record.id,
+      sourceKey,
+      sourceType,
+      sourceId,
+      grantReason,
+      grantedBy: input.actorId || null,
+      grantedAt: awardedAt,
+      expiresAt,
+      active: status === 'ACTIVE',
+    })
+    await tx.userBadgeTracking.deleteMany({ where: { userId: input.userId, badgeId: input.badgeId } })
+    if (input.actorId) await writeBadgeAdminAction(tx, {
+      actorId: input.actorId,
+      action: 'BADGE_GRANT',
+      targetUserId: input.userId,
+      badgeId: input.badgeId,
+      detail: { badgeName: badge.name, awardedAt: awardedAt.toISOString(), expiresAt: expiresAt?.toISOString() || null, sourceType, sourceId, grantKey, grantReason, reactivated: true },
+    })
+    return { created: true, recordId: record.id, userId: input.userId, badgeId: input.badgeId, badgeName: badge.name }
   }
 
   const immediatelyExpired = Boolean(expiresAt && expiresAt <= now)

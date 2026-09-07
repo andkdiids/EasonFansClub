@@ -3863,6 +3863,7 @@ CREATE TABLE `User` (
     `birthMonth` INTEGER NULL,
     `birthDay` INTEGER NULL,
     `birthdaySetAt` DATETIME(3) NULL,
+    `birthdateSelfEditCount` INTEGER NOT NULL DEFAULT 0,
     `birthdayPublic` BOOLEAN NOT NULL DEFAULT true,
     `uid` INTEGER NOT NULL AUTO_INCREMENT,
     `experience` INTEGER NOT NULL DEFAULT 0,

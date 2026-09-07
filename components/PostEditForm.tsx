@@ -60,6 +60,7 @@ export function PostEditForm({
   const [addImageUrls, setAddImageUrls] = useState<string[]>([])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [richImagesUploading, setRichImagesUploading] = useState(false)
 
   const keptCount = media.filter((item) => !item.removed).length
   const totalImages = keptCount + addImageUrls.length
@@ -75,6 +76,10 @@ export function PostEditForm({
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (richImagesUploading) {
+      setError('图片仍在处理中，请等待上传完成后再保存。')
+      return
+    }
     setSubmitting(true)
     setError('')
     try {
@@ -142,6 +147,7 @@ export function PostEditForm({
               setRichContent(nextRichContent)
               setContent(plainText)
             }}
+            onBusyChange={setRichImagesUploading}
           />
         </div>
       </div>

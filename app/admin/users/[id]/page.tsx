@@ -3,9 +3,12 @@ import { notFound } from 'next/navigation'
 import { requireAdminPage } from '@/components/AdminAccess'
 
 import { SuperAdminUserActions } from '@/components/SuperAdminUserActions'
+import { AdminUserProfileEditor } from '@/components/AdminUserProfileEditor'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
+import { locationFromProfile } from '@/lib/user-location'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,13 +21,20 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
       id: true, uid: true, username: true, nickname: true, email: true, phone: true, role: true, status: true,
       emailVerifiedAt: true, phoneVerifiedAt: true, verificationStatus: true,
       level: true, exp: true, points: true, createdAt: true, lastLoginAt: true, mustSetupSecurity: true,
-      Profile: { select: { displayName: true, avatarUrl: true } },
+      avatarUrl: true, backgroundUrl: true, bio: true,
+      birthMonth: true, birthDay: true, birthdaySetAt: true, birthdateSelfEditCount: true, birthdayPublic: true,
+      showBadgeActivity: true, showBadgeProgressNotifications: true,
+      Profile: { select: {
+        displayName: true, avatarUrl: true, backgroundUrl: true, bio: true,
+        locationCountryCode: true, locationCountry: true, locationRegionCode: true, locationRegion: true,
+        wallVisibility: true,
+      } },
       _count: { select: { Post: true, Reply: true, CheckIn: true, UserAchievement: true, Notification_Notification_recipientIdToUser: true } },
     },
   })
   if (!user) notFound()
   const nickname = user.nickname?.trim() || 'E院用户'
-  if (user.Profile) user.Profile.avatarUrl = publicImageVariantUrl(user.Profile.avatarUrl, 'avatar-md')
+  const detailAvatarUrl = publicImageVariantUrl(user.Profile?.avatarUrl || user.avatarUrl, 'avatar-md')
   const details = [
     { field: 'nickname', label: '昵称', value: nickname },
     { field: 'uid', label: 'UID', value: formatUid(user.uid) },
@@ -43,11 +53,33 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
   return <><main className="mx-auto max-w-5xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
     <Link href="/admin/users" className="text-sm font-black text-brand-700">← 返回用户管理</Link>
     <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center"><div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">{user.Profile?.avatarUrl ? <img src={user.Profile.avatarUrl} alt="" className="size-full object-cover" /> : formatUid(user.uid).slice(0, 1)}</div><div><h1 className="text-3xl font-black text-brand-950 sm:text-4xl">{nickname}</h1><p className="mt-2 text-sm font-bold text-slate-500">UID {formatUid(user.uid)} · 注册于 {user.createdAt.toLocaleString('zh-CN', { hour12: false })}</p></div></div>
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center"><div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-2xl font-black text-white">{detailAvatarUrl ? <img src={detailAvatarUrl} alt="" className="size-full object-cover" /> : formatUid(user.uid).slice(0, 1)}</div><div><h1 className="text-3xl font-black text-brand-950 sm:text-4xl">{nickname}</h1><p className="mt-2 text-sm font-bold text-slate-500">UID {formatUid(user.uid)} · 注册于 {user.createdAt.toLocaleString('zh-CN', { hour12: false })}</p></div></div>
       <dl className="mt-7 grid gap-3 sm:grid-cols-2 md:grid-cols-4">{details.map(({ field, label, value }) => <div key={field} data-user-field={field} className="rounded-2xl bg-sky-50 p-4"><dt className="text-xs font-black text-brand-700">{label}</dt><dd className="mt-2 break-all font-black text-brand-950">{value}</dd></div>)}</dl>
       <div className="mt-5 grid gap-3 sm:grid-cols-5">{Object.entries(user._count).map(([label, value]) => <div key={label} className="rounded-2xl border border-sky-100 p-4 text-center"><p className="text-2xl font-black text-brand-950">{value}</p><p className="mt-1 text-xs font-bold text-slate-400">{label}</p></div>)}</div>
       {user.mustSetupSecurity ? <p className="mt-5 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-black text-amber-700">该用户需要重新确认密保设置。</p> : null}
     </section>
+    <AdminUserProfileEditor
+      targetUserId={user.id}
+      initialProfile={{
+        username: user.username,
+        nickname: user.nickname,
+        email: user.email || '',
+        phone: user.phone || '',
+        emailVerifiedAt: user.emailVerifiedAt?.toISOString() || null,
+        phoneVerifiedAt: user.phoneVerifiedAt?.toISOString() || null,
+        bio: user.Profile?.bio ?? user.bio ?? '',
+        avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl) || '',
+        backgroundUrl: publicImageUrl(user.Profile?.backgroundUrl || user.backgroundUrl) || '',
+        location: locationFromProfile(user.Profile),
+        wallVisibility: user.Profile?.wallVisibility || 'PUBLIC',
+        birthMonth: user.birthMonth,
+        birthDay: user.birthDay,
+        birthdateSelfEditCount: user.birthdateSelfEditCount,
+        birthdayPublic: user.birthdayPublic,
+        showBadgeActivity: user.showBadgeActivity,
+        showBadgeProgressNotifications: user.showBadgeProgressNotifications,
+      }}
+    />
     {currentUser.role === 'SUPER_ADMIN' ? <SuperAdminUserActions targetUserId={user.id} initialUid={user.uid} initialAccount={user.username} nickname={nickname} /> : null}
   </main></>
 }

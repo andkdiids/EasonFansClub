@@ -13,7 +13,7 @@ import { getDefaultPalette, getPalette, getPaletteCoverage, getPaletteModeDefini
 import { findNearestBeadColor } from '@/lib/studio/beads/color'
 import { calculateMaterialList, createDemoPattern, floodFill, replaceColor } from '@/lib/studio/beads/grid'
 import { generatePatternFromImageInWorker } from '@/lib/studio/beads/image'
-import { renderPatternToCanvas, renderPatternToDataUrl } from '@/lib/studio/beads/renderer'
+import { DEFAULT_BEAD_EXPORT_SCALE, renderPatternToCanvas, renderPatternToDataUrl } from '@/lib/studio/beads/renderer'
 import { createDefaultLayerStack, defaultBeadSettings, normalizeBeadProjectData, referenceLayerFromStack, beadsLayerFromStack } from '@/lib/studio/beads/compat'
 import { CURRENT_BEAD_PROJECT_VERSION, EMPTY_CELL, MAX_BEAD_DIMENSION, type BeadLayer, type BeadLayerStack, type BeadPatternGrid, type BeadProjectData, type BeadReferenceLayer, type BeadSettings } from '@/lib/studio/beads/types'
 import type { StudioExportFormat } from '@/lib/studio/tools'
@@ -151,6 +151,9 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const [layers, setLayers] = useState<BeadLayerStack>(() => createDefaultLayerStack())
   const [title, setTitle] = useState('我的第一张图纸')
   const [projectId, setProjectId] = useState<string | null>(null)
+  // projectId is also used as the local IndexedDB key. Keep the cloud
+  // persistence state explicit so a local draft can never unlock publishing.
+  const [cloudProjectId, setCloudProjectId] = useState<string | null>(null)
   const [createdAt, setCreatedAt] = useState<string | null>(null)
   const [visibility, setVisibility] = useState<StudioVisibility>('PRIVATE')
   const [reviewStatus, setReviewStatus] = useState<StudioReviewStatus>('NONE')
@@ -173,7 +176,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const [displayGrid, setDisplayGrid] = useState(true)
   const [displayCodes, setDisplayCodes] = useState(true)
   const [displayCoordinates, setDisplayCoordinates] = useState(false)
-  const [displayBoardLines, setDisplayBoardLines] = useState(true)
   const [transparentBackground, setTransparentBackground] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -381,7 +383,10 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     let cancelled = false
     async function loadProject() {
       let localProject = requestedProject ? await getLocalStudioProject(requestedProject) : null
-      if (!localProject && requestedProject && isAuthenticated) {
+      // A legacy cloud save could have reused a local-* id. Verify those ids
+      // against the cloud before treating the local IndexedDB copy as saved.
+      let loadedFromCloud = Boolean(localProject && !localProject.id.startsWith('local-'))
+      if ((!localProject || localProject.id.startsWith('local-')) && requestedProject && isAuthenticated) {
         try {
           const response = await fetch(`/api/studio/projects/${encodeURIComponent(requestedProject)}`, { cache: 'no-store' })
           if (response.ok) {
@@ -404,6 +409,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
                 metadata: remote.metadata,
                 supportedExportFormats: beadsTool.supportedExportFormats,
               }
+              loadedFromCloud = true
               await saveLocalStudioProject(localProject)
             }
           }
@@ -434,12 +440,13 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         setSelection(null)
         if (localProject) {
           setProjectId(localProject.id)
+          setCloudProjectId(loadedFromCloud ? localProject.id : null)
           setTitle(localProject.title)
           setCreatedAt(localProject.createdAt)
           setVisibility(localProject.visibility)
           setReviewStatus(localProject.reviewStatus)
           setSaveStatus('saved')
-        }
+        } else setCloudProjectId(null)
       } else if (requestedProject) {
         setError('这个创作项目不存在、已损坏，或你没有访问权限。')
       }
@@ -520,7 +527,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     setSaveStatus('unsaved')
   }
 
-  function finishGesture() {
+  const finishGesture = useCallback(() => {
     const gesture = pointerRef.current
     if (gesture.kind === 'draw' && gesture.changed && gesture.before) {
       const patches = diffCells(gesture.before, patternRef.current.cells)
@@ -532,7 +539,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     gestureCellsRef.current = null
     craftCompletedRef.current = null
     pointerRef.current = { kind: null, before: null, changed: false, lastCell: -1, lastX: 0, lastY: 0 }
-  }
+  }, [editorTool])
 
   function applyCraftCell(index: number, completedValue: boolean) {
     if (index < 0 || patternRef.current.cells[index] === EMPTY_CELL || (craftColor !== null && patternRef.current.cells[index] !== craftColor)) return
@@ -722,6 +729,29 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
   }
 
+  function onCanvasPointerLeave(event: ReactPointerEvent<HTMLDivElement>) {
+    // Pointer capture keeps an active drag alive outside the canvas. If capture
+    // is unavailable, commit the partial stroke before the browser drops it.
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) return
+    if (pointerRef.current.kind === 'select') selectionStartRef.current = null
+    pointersRef.current.delete(event.pointerId)
+    pinchRef.current = null
+    finishGesture()
+    if (!pointersRef.current.size) setIsPanning(false)
+  }
+
+  useEffect(() => {
+    const finishActivePointer = () => {
+      selectionStartRef.current = null
+      pointersRef.current.clear()
+      pinchRef.current = null
+      finishGesture()
+      setIsPanning(false)
+    }
+    window.addEventListener('blur', finishActivePointer)
+    return () => window.removeEventListener('blur', finishActivePointer)
+  }, [finishGesture])
+
   const undo = useCallback(() => {
     setHistory((items) => {
       const entry = items.at(-1)
@@ -797,13 +827,12 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       displayGrid,
       displayCodes,
       displayCoordinates,
-      displayBoardLines,
       transparentBackground: Boolean(referenceLayer.visible && referenceLayer.imageUrl),
       completed,
       activeColorIndex: craftMode ? craftColor : null,
       selection,
     })
-  }, [beadsLayer.opacity, beadsLayer.visible, completed, craftColor, craftMode, displayBoardLines, displayCodes, displayCoordinates, displayGrid, pattern, referenceLayer.imageUrl, referenceLayer.visible, selection, viewMode])
+  }, [beadsLayer.opacity, beadsLayer.visible, completed, craftColor, craftMode, displayCodes, displayCoordinates, displayGrid, pattern, referenceLayer.imageUrl, referenceLayer.visible, selection, viewMode])
 
   function updateSettings(patch: Partial<BeadSettings>) {
     setSettings((current) => ({ ...current, ...patch }))
@@ -968,6 +997,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     savingRef.current = true
     const now = new Date().toISOString()
     const localId = projectId || createStudioId()
+    const requestedCloudId = cloudProjectId || (projectId && !projectId.startsWith('local-') ? projectId : null)
     const data: BeadProjectData = { version: CURRENT_BEAD_PROJECT_VERSION, tool: 'beads', settings, pattern: patternRef.current, completed: [...completed], layers: layersForPersistence(layers) }
     const summary = calculateMaterialList(patternRef.current, packSize)
     const localProject: StudioLocalProject = {
@@ -977,7 +1007,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       description: '拼豆图纸作品',
       version: CURRENT_BEAD_PROJECT_VERSION,
       data,
-      thumbnailUrl: renderPatternToDataUrl(patternRef.current, { displayGrid: true, displayCodes: false, displayBoardLines: true }),
+      thumbnailUrl: renderPatternToDataUrl(patternRef.current, { displayGrid: true, displayCodes: false }),
       visibility,
       reviewStatus,
       createdAt: createdAt || now,
@@ -994,18 +1024,19 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       if (isAuthenticated) {
         let response: Response
         try {
+          const savePayload = {
+            ...(requestedCloudId ? { projectId: requestedCloudId } : {}),
+            toolSlug: 'beads',
+            title: localProject.title,
+            description: localProject.description,
+            version: CURRENT_BEAD_PROJECT_VERSION,
+            data,
+            thumbnailUrl: localProject.thumbnailUrl,
+          }
           response = await fetch('/api/studio/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              projectId: localId,
-              toolSlug: 'beads',
-              title: localProject.title,
-              description: localProject.description,
-              version: CURRENT_BEAD_PROJECT_VERSION,
-              data,
-              thumbnailUrl: localProject.thumbnailUrl,
-            }),
+            body: JSON.stringify(savePayload),
           })
         } catch {
           savingRef.current = false
@@ -1022,11 +1053,17 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         }
         const body = await response.json() as { project?: Partial<StudioLocalProject> }
         remoteProject = body.project || null
-        if (remoteProject?.id && remoteProject.id !== localId) {
+        const savedProject = remoteProject
+        const savedCloudId = typeof savedProject?.id === 'string' ? savedProject.id.trim() : ''
+        if (!savedProject || !savedCloudId) throw new Error('云端存档未返回项目 ID')
+        resolvedId = savedCloudId
+        if (savedCloudId !== localId) {
           await deleteLocalStudioProject(localId)
-          resolvedId = remoteProject.id
-          await saveLocalStudioProject({ ...localProject, ...remoteProject, id: resolvedId, thumbnailUrl: remoteProject.thumbnailUrl || localProject.thumbnailUrl })
+          await saveLocalStudioProject({ ...localProject, ...savedProject, id: resolvedId, thumbnailUrl: savedProject.thumbnailUrl || localProject.thumbnailUrl })
         }
+        setCloudProjectId(savedCloudId)
+      } else {
+        setCloudProjectId(null)
       }
       setProjectId(resolvedId)
       setCreatedAt(localProject.createdAt)
@@ -1040,7 +1077,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     } finally {
       savingRef.current = false
     }
-  }, [completed, createdAt, isAuthenticated, layers, packSize, projectId, reviewStatus, settings, showToast, title, visibility])
+  }, [cloudProjectId, completed, createdAt, isAuthenticated, layers, packSize, projectId, reviewStatus, settings, showToast, title, visibility])
 
   async function readStudioSaveErrorMessage(response: Response): Promise<string> {
     try {
@@ -1067,7 +1104,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     const name = (title.trim() || '拼豆图纸').replace(/[\\/:*?"<>|]/g, '_')
     try {
       if (format === 'PNG') {
-        downloadUrl(renderPatternToDataUrl(patternRef.current, { beadMode: viewMode === 'bead', displayGrid, displayCodes, displayCoordinates, displayBoardLines, transparentBackground }), `${name}.png`)
+        downloadUrl(renderPatternToDataUrl(patternRef.current, { beadMode: viewMode === 'bead', displayGrid, displayCodes, displayCoordinates, transparentBackground, renderScale: DEFAULT_BEAD_EXPORT_SCALE }), `${name}.png`)
       } else if (format === 'PDF') {
         downloadBlob(createBeadPatternPdf(patternRef.current, title), `${name}.pdf`)
       } else {
@@ -1081,9 +1118,8 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
   }
 
-  async function updateLocalPublicationStatus(nextVisibility: StudioVisibility, nextReviewStatus: StudioReviewStatus) {
-    if (!projectId) return
-    const localProject = await getLocalStudioProject(projectId)
+  async function updateLocalPublicationStatus(projectKey: string, nextVisibility: StudioVisibility, nextReviewStatus: StudioReviewStatus) {
+    const localProject = await getLocalStudioProject(projectKey)
     if (localProject) await saveLocalStudioProject({ ...localProject, visibility: nextVisibility, reviewStatus: nextReviewStatus, updatedAt: new Date().toISOString() })
   }
 
@@ -1092,13 +1128,22 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       showToast('登录后保存并发布作品，才能生成公开分享链接。')
       return
     }
-    if (!projectId || projectId.startsWith('local-')) {
+    if (saveStatus === 'saving') {
+      showToast('作品正在保存，请稍候再分享。')
+      return
+    }
+    if (!cloudProjectId) {
       showToast('请先保存作品，再申请发布。私密项目不会直接生成公开链接。')
       return
     }
+    if (saveStatus !== 'saved') {
+      showToast('请先保存最新修改，再申请发布。')
+      return
+    }
+    const shareProjectId = cloudProjectId
     if ((visibility === 'PUBLIC' && reviewStatus === 'APPROVED') || visibility === 'UNLISTED') {
       try {
-        const result = await shareContent({ title: title.trim() || '拼豆图纸', text: '来自贝多芬与我的拼豆图纸', url: `${window.location.origin}/studio/project/${encodeURIComponent(projectId)}` })
+        const result = await shareContent({ title: title.trim() || '拼豆图纸', text: '来自贝多芬与我的拼豆图纸', url: `${window.location.origin}/studio/project/${encodeURIComponent(shareProjectId)}` })
         showToast(result === 'shared' ? '已打开分享面板。' : '作品链接已复制。')
       } catch {
         showToast('分享已取消。')
@@ -1110,14 +1155,14 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       return
     }
     try {
-      const response = await fetch(`/api/studio/projects/${encodeURIComponent(projectId)}/publish`, { method: 'POST' })
+      const response = await fetch(`/api/studio/projects/${encodeURIComponent(shareProjectId)}/publish`, { method: 'POST' })
       const body = await response.json() as { message?: string; visibility?: StudioVisibility; reviewStatus?: StudioReviewStatus }
       if (!response.ok) throw new Error(body.message || 'publish failed')
       const nextVisibility = body.visibility || 'PUBLIC'
       const nextReviewStatus = body.reviewStatus || 'PENDING'
       setVisibility(nextVisibility)
       setReviewStatus(nextReviewStatus)
-      await updateLocalPublicationStatus(nextVisibility, nextReviewStatus)
+      await updateLocalPublicationStatus(shareProjectId, nextVisibility, nextReviewStatus)
       recordStudioEvent('beads', 'project_publish')
       showToast(body.message || '已提交公开审核。')
     } catch (publishError) {
@@ -1201,7 +1246,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const palette = pattern.palette
   const replacementAmount = pattern.cells.filter((cell) => cell === replaceFrom).length
   return <>
-  <StudioToolShell tool={beadsTool} title={title} saveStatus={saveStatus} onSave={() => void persistProject(false)} onShare={share} onExport={exportFile} openExportOnMount={requestedExport}>
+  <StudioToolShell tool={beadsTool} title={title} saveStatus={saveStatus} onSave={() => void persistProject(false)} onShare={share} shareDisabled={saveStatus === 'saving'} onExport={exportFile} openExportOnMount={requestedExport}>
     <div className={styles.beadsPage}>
       {onboardingOpen ? <BeadStudioOnboarding onDismiss={dismissOnboarding} /> : null}
       <div className={styles.mobilePanelTabs} role="tablist" aria-label="拼豆工具面板">
@@ -1245,7 +1290,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
 
           <section className={styles.beadsPreviewPanel}>
             <header className={styles.previewHeader}><div><strong className={styles.previewTitle}>图纸预览</strong><p className={styles.previewMeta}>{pattern.width} × {pattern.height} 颗 · {settings.brand} {settings.series}{craftMode && activeMaterial ? ` · 正在拼 ${activeMaterial.code}` : ''}</p></div><div className={styles.viewToggle}><button type="button" className={`${styles.viewToggleButton} ${viewMode === 'grid' ? styles.viewToggleActive : ''}`} onClick={() => setViewMode('grid')}>图纸</button><button type="button" className={`${styles.viewToggleButton} ${viewMode === 'bead' ? styles.viewToggleActive : ''}`} onClick={() => setViewMode('bead')}>圆豆</button></div></header>
-          <div ref={previewStageRef} className={`${styles.previewStage} ${isFullscreen ? styles.previewStageFullscreen : ''}`}><div ref={canvasViewportRef} className={canvasViewportClassName} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp}><div className={`${styles.canvasFrame} ${styles.canvasStage}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>{referenceLayer.imageUrl ? <img src={referenceLayer.imageUrl} alt="参考图层" className={styles.referenceImage} style={{ opacity: referenceLayer.visible ? referenceLayer.opacity / 100 : 0, transform: `translate(${referenceLayer.transform.x}%, ${referenceLayer.transform.y}%) scale(${referenceLayer.transform.scale}) rotate(${referenceLayer.transform.rotation}deg)` }} draggable={false} /> : null}<canvas ref={canvasRef} className={styles.previewCanvas} style={{ opacity: beadsLayer.visible ? beadsLayer.opacity / 100 : 0 }} aria-label="拼豆图纸编辑画布" /></div></div>{processing ? <div className={styles.processing}><i className={styles.processingMark} /><span>正在分析图片并匹配色板…</span></div> : null}</div>
+          <div ref={previewStageRef} className={`${styles.previewStage} ${isFullscreen ? styles.previewStageFullscreen : ''}`}><div ref={canvasViewportRef} className={canvasViewportClassName} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onPointerLeave={onCanvasPointerLeave}><div className={`${styles.canvasFrame} ${styles.canvasStage}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>{referenceLayer.imageUrl ? <img src={referenceLayer.imageUrl} alt="参考图层" className={styles.referenceImage} style={{ opacity: referenceLayer.visible ? referenceLayer.opacity / 100 : 0, transform: `translate(${referenceLayer.transform.x}%, ${referenceLayer.transform.y}%) scale(${referenceLayer.transform.scale}) rotate(${referenceLayer.transform.rotation}deg)` }} draggable={false} /> : null}<canvas ref={canvasRef} className={styles.previewCanvas} style={{ opacity: beadsLayer.visible ? beadsLayer.opacity / 100 : 0 }} aria-label="拼豆图纸编辑画布" /></div></div>{processing ? <div className={styles.processing}><i className={styles.processingMark} /><span>正在分析图片并匹配色板…</span></div> : null}</div>
           <div className={styles.previewFooter}><div className={styles.previewTools} aria-label="图纸工具"><button type="button" className={`${styles.iconButton} ${editorTool === 'brush' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('brush')} aria-label="画笔" title="画笔（B）"><UiIcon name="brush" /><span className={styles.toolButtonText}>画笔</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'eraser' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('eraser')} aria-label="橡皮擦" title="橡皮擦（E）"><UiIcon name="eraser" /><span className={styles.toolButtonText}>橡皮</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'eyedropper' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('eyedropper')} aria-label="吸管" title="吸管（I）"><UiIcon name="eyedropper" /><span className={styles.toolButtonText}>吸管</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'fill' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('fill')} aria-label="填充" title="填充（G）"><UiIcon name="fill" /><span className={styles.toolButtonText}>填充</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'select' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('select')} aria-label="选区" title="选区（S）"><UiIcon name="select" /><span className={styles.toolButtonText}>选区</span></button><button type="button" className={`${styles.iconButton} ${editorTool === 'pan' ? styles.iconButtonActive : ''}`} onClick={() => setEditorTool('pan')} aria-label="移动画布" title="移动画布（P）"><UiIcon name="move" /><span className={styles.toolButtonText}>移动</span></button><button type="button" className={styles.iconButton} onClick={() => openReplaceDialog()} aria-label="换色" title="换色（R）"><UiIcon name="replace" /><span className={styles.toolButtonText}>换色</span></button><button type="button" className={styles.iconButton} onClick={undo} disabled={!history.length} aria-label="撤回" title="撤回（Ctrl+Z）"><UiIcon name="undo" /><span className={styles.toolButtonText}>撤回</span></button><button type="button" className={styles.iconButton} onClick={redo} disabled={!redoStack.length} aria-label="重做" title="重做（Ctrl+Shift+Z）"><UiIcon name="redo" /><span className={styles.toolButtonText}>重做</span></button><button type="button" className={styles.iconButton} onClick={() => setZoomAroundPoint(zoomRef.current + .2)} aria-label="放大" title="放大"><UiIcon name="zoom-in" /><span className={styles.toolButtonText}>放大</span></button><button type="button" className={styles.iconButton} onClick={() => setZoomAroundPoint(zoomRef.current - .2)} aria-label="缩小" title="缩小"><UiIcon name="zoom-out" /><span className={styles.toolButtonText}>缩小</span></button><button type="button" className={styles.iconButton} onClick={resetView} aria-label="适应画布" title="适应画布"><UiIcon name="fit" /><span className={styles.toolButtonText}>适应</span></button><button type="button" className={styles.iconButton} onClick={() => void toggleFullscreen()} aria-label={isFullscreen ? '退出全屏' : '全屏预览'} title={isFullscreen ? '退出全屏' : '全屏预览'}><UiIcon name={isFullscreen ? 'fullscreen-exit' : 'fullscreen'} /><span className={styles.toolButtonText}>{isFullscreen ? '退出' : '全屏'}</span></button><button type="button" className={styles.iconButton} onClick={clearPattern} aria-label="清空图纸" title="清空图纸"><UiIcon name="trash" /><span className={styles.toolButtonText}>清空</span></button></div><div className={styles.previewLegend}><label className={styles.legendItem}><input className={styles.checkbox} type="checkbox" checked={displayGrid} onChange={(event) => setDisplayGrid(event.target.checked)} />网格</label><label className={styles.legendItem}><input className={styles.checkbox} type="checkbox" checked={displayCodes} onChange={(event) => setDisplayCodes(event.target.checked)} />色号</label><label className={styles.legendItem}><input className={styles.checkbox} type="checkbox" checked={displayCoordinates} onChange={(event) => setDisplayCoordinates(event.target.checked)} />坐标</label></div></div>
           {selection ? <div className={styles.selectionBar}><span>已选 {Math.abs(selection.xEnd - selection.xStart) + 1} × {Math.abs(selection.yEnd - selection.yStart) + 1} 格</span><button type="button" className={styles.selectionAction} onClick={() => updateSelection(currentColorIndex)}>填充选区</button><button type="button" className={styles.selectionAction} onClick={() => updateSelection(EMPTY_CELL)}>清除选区</button><button type="button" className={styles.selectionAction} onClick={() => setSelection(null)}>取消</button></div> : null}
         </section>
@@ -1275,7 +1320,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
           <div className={styles.materialsList}>{materials.materials.length ? materials.materials.map((material) => <div key={material.code} className={styles.materialRow}><button type="button" className={styles.materialMainButton} onClick={() => selectColor(material.index)}><i className={styles.materialSwatch} style={{ background: material.hex }} /><span className={styles.materialInfo}><b className={styles.materialCode}>{material.code} · {material.brand}</b><small className={styles.materialName}>{material.name}<span className={styles.materialBar}><i className={styles.materialBarFill} style={{ width: `${Math.max(4, material.percentage)}%` }} /></span></small></span><span className={styles.materialQuantity}>{material.quantity}<small className={styles.materialPercentage}>{material.percentage.toFixed(1)}%</small></span></button><button type="button" className={styles.materialReplaceButton} onClick={() => openReplaceDialog(material.index)} aria-label={`将${material.code}换成其他颜色`}>换色</button></div>) : <p className={styles.settingsSubtle}>生成图纸后会显示需要的颜色和数量。</p>}</div>
           <div className={styles.materialsTools}><label htmlFor="studio-pack-size">材料包计算</label><div className={styles.sizeRow}><select id="studio-pack-size" className={styles.miniSelect} value={packSize === 500 || packSize === 1000 || packSize === 2000 ? packSize : 'custom'} onChange={(event) => setPackSize(event.target.value === 'custom' ? (packSize === 500 || packSize === 1000 || packSize === 2000 ? 750 : packSize) : Number(event.target.value))}><option value="500">500 / 包</option><option value="1000">1000 / 包</option><option value="2000">2000 / 包</option><option value="custom">自定义</option></select><button type="button" className={styles.actionButton} onClick={() => openReplaceDialog()}><UiIcon name="replace" />换色</button></div>{packSize !== 500 && packSize !== 1000 && packSize !== 2000 ? <input className={styles.miniNumberInput} type="number" min="1" max="100000" value={packSize} onChange={(event) => setPackSize(Math.max(1, Math.min(100000, Number(event.target.value) || 1)))} aria-label="自定义每包拼豆数量" /> : null}</div>
            </section>
-           <section className={[styles.panelSection, styles.rightPanelPanel, styles.viewPanel, rightPanelClass('view'), mobilePanelClass('view')].join(' ')}><div className={styles.panelHeader}><div><span className={styles.panelStep}>VIEW / OPTIONS</span><h2 className={styles.panelTitle}>显示与导出</h2></div></div><label className={styles.checkboxRow}><input className={styles.checkbox} type="checkbox" checked={displayGrid} onChange={(event) => setDisplayGrid(event.target.checked)} />显示网格</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayCodes} onChange={(event) => setDisplayCodes(event.target.checked)} />显示色号</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayCoordinates} onChange={(event) => setDisplayCoordinates(event.target.checked)} />显示全局坐标</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayBoardLines} onChange={(event) => setDisplayBoardLines(event.target.checked)} />显示 29 × 29 底板边界</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={transparentBackground} onChange={(event) => setTransparentBackground(event.target.checked)} />PNG 导出透明空白格</label><p className={styles.notice}>透明像素会保留为空白格；暗色主题只改变界面，不会改变拼豆本身的颜色。</p></section>
+           <section className={[styles.panelSection, styles.rightPanelPanel, styles.viewPanel, rightPanelClass('view'), mobilePanelClass('view')].join(' ')}><div className={styles.panelHeader}><div><span className={styles.panelStep}>VIEW / OPTIONS</span><h2 className={styles.panelTitle}>显示与导出</h2></div></div><label className={styles.checkboxRow}><input className={styles.checkbox} type="checkbox" checked={displayGrid} onChange={(event) => setDisplayGrid(event.target.checked)} />显示网格</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayCodes} onChange={(event) => setDisplayCodes(event.target.checked)} />显示色号</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={displayCoordinates} onChange={(event) => setDisplayCoordinates(event.target.checked)} />显示全局坐标</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={transparentBackground} onChange={(event) => setTransparentBackground(event.target.checked)} />PNG 导出透明空白格</label><p className={styles.notice}>透明像素会保留为空白格；暗色主题只改变界面，不会改变拼豆本身的颜色。</p></section>
            <section className={[styles.panelSection, styles.rightPanelPanel, styles.morePanel, rightPanelClass('more'), mobilePanelClass('more')].join(' ')}><div className={styles.panelHeader}><div><span className={styles.panelStep}>MORE / 05</span><h2 className={styles.panelTitle}><UiIcon name="menu" className={styles.inlineIcon} /> 更多</h2></div><span className={styles.formHint}>低频设置</span></div><div className={styles.moreActions}><button type="button" className={styles.moreAction} onClick={clearPattern}><UiIcon name="trash" /><span><b>清理图纸</b><small>清除当前网格内容，可撤回</small></span></button><button type="button" className={styles.moreAction} onClick={clearSourceImage} disabled={!sourceImageUrl}><UiIcon name="trash" /><span><b>删除原图</b><small>{sourceImageUrl ? '移除当前上传图片' : '当前没有上传图片'}</small></span></button><button type="button" className={styles.moreAction} onClick={clearReferenceImage} disabled={!referenceLayer.imageUrl}><UiIcon name="trash" /><span><b>删除参考图</b><small>{referenceLayer.imageUrl ? '移除参考图层图片' : '当前没有参考图'}</small></span></button><button type="button" className={styles.moreAction} onClick={alignReferenceImage} disabled={!referenceLayer.imageUrl}><UiIcon name="align" /><span><b>对齐参考图</b><small>重置参考图位置、缩放和旋转</small></span></button></div>{renderAdvancedImageSettings()}</section>
         </aside>
       </div>

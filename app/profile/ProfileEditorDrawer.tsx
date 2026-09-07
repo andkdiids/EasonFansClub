@@ -23,6 +23,8 @@ type InitialProfile = {
   birthMonth: number | null
   birthDay: number | null
   birthdaySetAt: string | null
+  birthdateSelfEditCount: number
+  canEditBirthdate: boolean
   birthdayPublic: boolean
   showBadgeActivity: boolean
   showBadgeProgressNotifications: boolean

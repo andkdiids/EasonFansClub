@@ -334,6 +334,10 @@ function MusicReferenceInline({
 
 function renderInline(node: RichTextInlineNode, key: string, context: RichPostRenderContext) {
   if (node.type === 'hardBreak') return <br key={key} />
+  if (node.type === 'image') {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img key={key} src={node.attrs.src} alt={node.attrs.alt || '帖子图片'} className="rich-text-inline-image" loading="lazy" decoding="async" />
+  }
   if (node.type === 'musicReference') {
     return <MusicReferenceInline key={key} node={node} context={context} />
   }

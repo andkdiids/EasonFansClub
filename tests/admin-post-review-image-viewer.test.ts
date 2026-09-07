@@ -89,7 +89,8 @@ test('审核卡片内的详情内容和图片共用同一帖子媒体数据，�
 test('通过、拒绝、精选和置顶操作仍由原审核控制逻辑处理', () => {
   assert.match(reviewManager, /requestReview\(post, 'APPROVED'\)/)
   assert.match(reviewManager, /requestReview\(post, 'REJECTED'\)/)
-  assert.match(reviewManager, /toggleFlag\(post\.id, 'isFeatured'/)
+  assert.match(reviewManager, /setFeatureConfirm\(\{ postId: post\.id, title: post\.title, nextIsFeatured: true \}\)/)
+  assert.match(reviewManager, /toggleFlag\(featureConfirm\.postId, 'isFeatured', featureConfirm\.nextIsFeatured\)/)
   assert.match(reviewManager, /toggleFlag\(post\.id, 'isPinned'/)
 })
 

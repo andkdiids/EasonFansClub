@@ -76,6 +76,25 @@ test('活动公开详情保留已取消活动，草稿不会泄露', () => {
   assert.match(publicPage, /status: 'CANCELLED'/)
 })
 
+test('活动中心列表卡片只展示核心信息，完整说明仍保留在详情页且搜索不受影响', () => {
+  const card = read('components/activities/ActivityCard.tsx')
+  const list = read('components/activities/ActivitiesListClient.tsx')
+  const publicList = read('app/api/activities/route.ts')
+  const detail = read('components/activities/ActivityDetailView.tsx')
+
+  assert.match(card, /ActivityStatusBadge/)
+  assert.match(card, /activityTypeLabels\[activity\.type\]/)
+  assert.match(card, /activity\.isFeatured \? .*精选/)
+  assert.match(card, /activity\.title/)
+  assert.match(card, /activityDateLabel\(activity\.startsAt\)/)
+  assert.match(card, /activity\.locationName/)
+  assert.match(card, /activity\.signupCount/)
+  assert.doesNotMatch(card, /activity\.subtitle|activity\.description|richContent|summary|活动详情|活动流程|地铁指引|阵容|歌单/)
+  assert.match(list, /activity\.description/)
+  assert.match(publicList, /activity\.description/)
+  assert.match(detail, /activity\.description \|\| '暂无活动说明。'/)
+})
+
 test('活动迁移将旧状态归一化并保留报名/收藏关联保护所需字段', () => {
   const migration = read('prisma/migrations/20260825090000_add_activity_center/migration.sql')
   assert.match(migration, /CONCERT_SIGNUP.*CONCERT/)

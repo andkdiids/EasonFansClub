@@ -20,6 +20,7 @@ import {
   useRef,
   useSyncExternalStore,
   useState,
+  type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -29,6 +30,8 @@ import { PostReferencePicker, type PostReferencePost } from '@/components/posts/
 import { UserMentionPicker, type UserMentionUser } from '@/components/posts/UserMentionPicker'
 import { ActivityReferencePicker, type ActivityReferenceActivity } from '@/components/posts/ActivityReferencePicker'
 import { MaterialReferencePicker, type MaterialReferenceMaterial } from '@/components/posts/MaterialReferencePicker'
+import { ContentImageClientError, uploadContentImage, type ContentImageUploadPhase } from '@/lib/content-image-browser'
+import { CONTENT_IMAGE_ACCEPT, isContentImageMimeType } from '@/lib/content-image-upload'
 import {
   RICH_TEXT_COLOR_TOKENS,
   RICH_TEXT_FONT_SIZE_TOKENS,
@@ -58,6 +61,7 @@ type RichTextEditorProps = {
   /** Kept for old callers; rich content is now always enabled. */
   compatibilityMode?: boolean
   onChange: (content: RichTextContent, plainText: string) => void
+  onBusyChange?: (busy: boolean) => void
   placeholder?: string
 }
 
@@ -473,6 +477,39 @@ const richCodeBlock = TiptapNode.create({
   },
 })
 
+const richImage = TiptapNode.create({
+  name: 'image',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: true,
+  marks: '',
+  addAttributes() {
+    return {
+      src: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute('src'),
+      },
+      alt: {
+        default: '',
+        parseHTML: (element: HTMLElement) => element.getAttribute('alt') || '',
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'img[src]' }]
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    return ['img', mergeAttributes(HTMLAttributes, {
+      class: 'rich-text-inline-image',
+      alt: typeof node.attrs.alt === 'string' ? node.attrs.alt : '帖子图片',
+      loading: 'lazy',
+      decoding: 'async',
+    })]
+  },
+})
+
 const richMusicReference = TiptapNode.create({
   name: 'musicReference',
   group: 'inline',
@@ -824,6 +861,7 @@ const richTextExtensions = [
   richBlockquote,
   richHorizontalRule,
   richCodeBlock,
+  richImage,
   History.configure({ depth: 100 }),
   Placeholder.configure({ placeholder: '分享你的想法...' }),
   RichColorMark(),
@@ -837,6 +875,138 @@ const richTextExtensions = [
 
 type ProseMirrorDescendable = {
   descendants: (callback: (node: { type: { name: string } }) => boolean | void) => void
+}
+
+type SelectionBookmarkLike = {
+  map: (mapping: unknown) => SelectionBookmarkLike
+  resolve: (doc: unknown) => ClipboardSelectionLike
+}
+
+type ClipboardSelectionLike = {
+  from: number
+  to: number
+  getBookmark: () => unknown
+}
+
+type ClipboardTransactionLike = {
+  setSelection: (selection: ClipboardSelectionLike) => ClipboardTransactionLike
+  replaceSelectionWith: (node: unknown, inheritMarks?: boolean) => ClipboardTransactionLike
+  scrollIntoView: () => ClipboardTransactionLike
+}
+
+type ClipboardEditorViewLike = {
+  state: {
+    selection: ClipboardSelectionLike
+    doc: unknown
+    schema: {
+      nodes: Record<string, { create: (attrs?: Record<string, unknown>) => unknown } | undefined>
+    }
+    tr: ClipboardTransactionLike
+  }
+  dispatch: (transaction: ClipboardTransactionLike) => void
+  focus: () => void
+  isDestroyed?: boolean
+}
+
+type ClipboardImageUploadJob = {
+  view: ClipboardEditorViewLike
+  files: File[]
+  bookmark: SelectionBookmarkLike
+}
+
+type EnqueueImageUploads = (
+  view: ClipboardEditorViewLike,
+  files: File[],
+  bookmark?: SelectionBookmarkLike | null,
+) => void
+
+type ClipboardImageReadErrorCode = 'UNSUPPORTED' | 'PERMISSION'
+
+class ClipboardImageReadError extends Error {
+  constructor(public readonly code: ClipboardImageReadErrorCode) {
+    super(code)
+    this.name = 'ClipboardImageReadError'
+  }
+}
+
+function selectionBookmark(selection: ClipboardSelectionLike) {
+  return selection.getBookmark() as SelectionBookmarkLike
+}
+
+function clipboardImageExtension(type: string) {
+  const normalized = type.toLowerCase().split(';', 1)[0]
+  if (normalized === 'image/jpeg' || normalized === 'image/jpg' || normalized === 'image/pjpeg') return 'jpg'
+  if (normalized === 'image/webp') return 'webp'
+  if (normalized === 'image/gif') return 'gif'
+  if (normalized === 'image/avif') return 'avif'
+  if (normalized === 'image/heic') return 'heic'
+  if (normalized === 'image/heif') return 'heif'
+  return 'png'
+}
+
+function createClipboardImageFile(blob: Blob, type: string, index: number, timestamp = Date.now()) {
+  const normalizedType = type.trim().toLowerCase() || blob.type || 'image/png'
+  return new File(
+    [blob],
+    `clipboard-${timestamp}-${index + 1}.${clipboardImageExtension(normalizedType)}`,
+    { type: normalizedType, lastModified: timestamp },
+  )
+}
+
+function clipboardImageFilesFromPaste(event: ClipboardEvent) {
+  const items = event.clipboardData?.items
+  if (!items) return []
+
+  const timestamp = Date.now()
+  const files: File[] = []
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index]
+    const itemType = item.type.trim().toLowerCase()
+    if (item.kind !== 'file' || !itemType.startsWith('image/')) continue
+    const source = item.getAsFile()
+    if (!source) continue
+    files.push(createClipboardImageFile(source, itemType || source.type || 'image/png', files.length, timestamp))
+  }
+  return files
+}
+
+type ClipboardWithRead = Clipboard & {
+  read?: () => Promise<readonly ClipboardItem[]>
+}
+
+function isClipboardPermissionError(error: unknown) {
+  if (error instanceof Error && ['NotAllowedError', 'SecurityError'].includes(error.name)) return true
+  return typeof DOMException !== 'undefined'
+    && error instanceof DOMException
+    && ['NotAllowedError', 'SecurityError'].includes(error.name)
+}
+
+async function readClipboardImageFiles() {
+  const clipboard = typeof navigator !== 'undefined' && navigator.clipboard
+    ? navigator.clipboard as ClipboardWithRead
+    : null
+  if (!clipboard || typeof clipboard.read !== 'function') throw new ClipboardImageReadError('UNSUPPORTED')
+
+  try {
+    const items = await clipboard.read()
+    const timestamp = Date.now()
+    const files: File[] = []
+    for (const item of items) {
+      const type = item.types.find((candidate) => isContentImageMimeType(candidate))
+      if (!type) continue
+      try {
+        const blob = await item.getType(type)
+        if (blob.size <= 0) continue
+        files.push(createClipboardImageFile(blob, type, files.length, timestamp))
+      } catch (error) {
+        if (isClipboardPermissionError(error)) throw new ClipboardImageReadError('PERMISSION')
+      }
+    }
+    return files
+  } catch (error) {
+    if (error instanceof ClipboardImageReadError) throw error
+    throw new ClipboardImageReadError('PERMISSION')
+  }
 }
 
 function countMusicReferencesInProseMirrorDocument(document: ProseMirrorDescendable) {
@@ -976,12 +1146,20 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   initialContent = '',
   initialRichContent,
   onChange,
+  onBusyChange,
   placeholder = '分享你的想法...',
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const imageFileInputRef = useRef<HTMLInputElement>(null)
   const referenceTriggerRef = useRef<HTMLButtonElement>(null)
   const referenceMenuRef = useRef<HTMLDivElement>(null)
   const savedSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const imagePickerSelectionBookmarkRef = useRef<SelectionBookmarkLike | null>(null)
+  const clipboardImageJobsRef = useRef<ClipboardImageUploadJob[]>([])
+  const clipboardImageProcessingRef = useRef(false)
+  const enqueueImageUploadsRef = useRef<EnqueueImageUploads | null>(null)
+  const imageUploadBusyRef = useRef(false)
+  const onBusyChangeRef = useRef(onBusyChange)
   const headingMenuOpenRef = useRef(false)
   const musicReferenceLimitCallbackRef = useRef<() => void>(() => undefined)
   const [initialDocument] = useState(() => initialEditorContent(initialRichContent, initialContent))
@@ -990,16 +1168,19 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   // never open it as a side effect.
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false)
   const [activeHeadingLevel, setActiveHeadingLevel] = useState<HeadingLevel | undefined>(undefined)
-  const [openMenu, setOpenMenu] = useState<'list' | 'size' | 'color' | 'reference' | null>(null)
+  const [openMenu, setOpenMenu] = useState<'list' | 'size' | 'color' | 'reference' | 'image' | null>(null)
   const [musicPickerOpen, setMusicPickerOpen] = useState(false)
   const [postReferencePickerOpen, setPostReferencePickerOpen] = useState(false)
   const [activityReferencePickerOpen, setActivityReferencePickerOpen] = useState(false)
   const [materialReferencePickerOpen, setMaterialReferencePickerOpen] = useState(false)
   const [userMentionPickerOpen, setUserMentionPickerOpen] = useState(false)
   const [editorNotice, setEditorNotice] = useState('')
+  const [imageUploadNotice, setImageUploadNotice] = useState('')
+  const [imageUploadBusy, setImageUploadBusy] = useState(false)
   const [referenceMenuMobile, setReferenceMenuMobile] = useState(false)
   const [referenceMenuPosition, setReferenceMenuPosition] = useState<{ left: number; top: number } | null>(null)
 
+  onBusyChangeRef.current = onBusyChange
   musicReferenceLimitCallbackRef.current = () => setEditorNotice(`每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲`)
 
   function rememberSelection(currentEditor: Editor) {
@@ -1013,6 +1194,109 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     setActiveHeadingLevel((currentHeadingLevel) => currentHeadingLevel === nextHeadingLevel ? currentHeadingLevel : nextHeadingLevel)
   }
 
+  function updateImageUploadBusy(busy: boolean) {
+    if (imageUploadBusyRef.current === busy) return
+    imageUploadBusyRef.current = busy
+    setImageUploadBusy(busy)
+    onBusyChangeRef.current?.(busy)
+  }
+
+  function imageUploadFailureMessage(reason: unknown) {
+    if (reason instanceof ContentImageClientError) return reason.message
+    if (reason instanceof Error && reason.message.trim()) return reason.message
+    return '图片上传失败，请稍后重试'
+  }
+
+  function insertUploadedImage(view: ClipboardEditorViewLike, bookmark: SelectionBookmarkLike, src: string) {
+    if (view.isDestroyed) return null
+    const imageType = view.state.schema.nodes.image
+    if (!imageType) return null
+
+    try {
+      const selection = bookmark.resolve(view.state.doc)
+      const imageNode = imageType.create({ src, alt: '帖子图片' })
+      const transaction = view.state.tr
+        .setSelection(selection)
+        .replaceSelectionWith(imageNode, false)
+        .scrollIntoView()
+      view.dispatch(transaction)
+      view.focus()
+      savedSelectionRef.current = { from: view.state.selection.from, to: view.state.selection.to }
+      return selectionBookmark(view.state.selection)
+    } catch {
+      return null
+    }
+  }
+
+  async function processImageUploadQueue() {
+    if (clipboardImageProcessingRef.current) return
+    clipboardImageProcessingRef.current = true
+    try {
+      while (clipboardImageJobsRef.current.length) {
+        const job = clipboardImageJobsRef.current[0]
+        const failures: string[] = []
+        for (let index = 0; index < job.files.length; index += 1) {
+          if (clipboardImageJobsRef.current[0] !== job) return
+          const file = job.files[index]
+          const progress = `${index + 1}/${job.files.length}`
+          setImageUploadNotice(`正在处理图片 ${progress}…`)
+          try {
+            const result = await uploadContentImage(file, (phase: ContentImageUploadPhase) => {
+              const label = phase === 'compressing'
+                ? '正在压缩图片'
+                : phase === 'uploading'
+                  ? '正在上传图片'
+                  : '正在处理图片'
+              setImageUploadNotice(`${label} ${progress}…`)
+            })
+            if (clipboardImageJobsRef.current[0] !== job) return
+            const nextBookmark = insertUploadedImage(job.view, job.bookmark, result.url)
+            if (!nextBookmark) {
+              const message = '当前光标位置无法插入图片，请移到正文后重试'
+              failures.push(message)
+              setImageUploadNotice(`第 ${progress} 张图片：${message}`)
+              continue
+            }
+            job.bookmark = nextBookmark
+          } catch (reason) {
+            const message = imageUploadFailureMessage(reason)
+            failures.push(message)
+            setImageUploadNotice(`第 ${progress} 张图片：${message}`)
+          }
+        }
+        if (clipboardImageJobsRef.current[0] !== job) return
+        clipboardImageJobsRef.current.shift()
+        if (failures.length) setImageUploadNotice(failures[failures.length - 1])
+        else setImageUploadNotice('')
+      }
+    } catch (reason) {
+      clipboardImageJobsRef.current = []
+      setImageUploadNotice(imageUploadFailureMessage(reason))
+    } finally {
+      clipboardImageProcessingRef.current = false
+      if (!clipboardImageJobsRef.current.length) updateImageUploadBusy(false)
+    }
+  }
+
+  function enqueueImageUploads(
+    view: ClipboardEditorViewLike,
+    files: File[],
+    bookmark?: SelectionBookmarkLike | null,
+  ) {
+    if (!files.length || view.isDestroyed) return
+    const job: ClipboardImageUploadJob = {
+      view,
+      files,
+      bookmark: bookmark || selectionBookmark(view.state.selection),
+    }
+    clipboardImageJobsRef.current.push(job)
+    setImageUploadNotice('')
+    updateImageUploadBusy(true)
+    void processImageUploadQueue()
+  }
+
+  enqueueImageUploadsRef.current = enqueueImageUploads
+
   const editorProps = useMemo(() => ({
     attributes: {
       class: 'rich-text-editor-surface',
@@ -1020,10 +1304,17 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       spellcheck: 'true',
     },
     transformPastedHTML: sanitizePastedHtml,
-    handlePaste: (view: unknown, _event: ClipboardEvent, slice: unknown) => {
-      const editorView = view as { state: { doc: ProseMirrorDescendable } }
+    handlePaste: (view: unknown, event: ClipboardEvent, slice: unknown) => {
+      const editorView = view as ClipboardEditorViewLike
+      const imageFiles = clipboardImageFilesFromPaste(event)
+      if (imageFiles.length) {
+        event.preventDefault()
+        enqueueImageUploadsRef.current?.(editorView, imageFiles, selectionBookmark(editorView.state.selection))
+        return true
+      }
+      const musicEditorView = view as { state: { doc: ProseMirrorDescendable } }
       const pastedSlice = slice as { content: ProseMirrorDescendable }
-      const currentCount = countMusicReferencesInProseMirrorDocument(editorView.state.doc)
+      const currentCount = countMusicReferencesInProseMirrorDocument(musicEditorView.state.doc)
       const pastedCount = countMusicReferencesInProseMirrorDocument(pastedSlice.content)
       if (pastedCount > 0 && currentCount + pastedCount > MAX_RICH_TEXT_MUSIC_REFERENCES) {
         musicReferenceLimitCallbackRef.current()
@@ -1053,6 +1344,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       emitEditorChange(updatedEditor, onChange)
     },
     onSelectionUpdate: ({ editor: selectedEditor }) => syncEditorSelection(selectedEditor),
+    onTransaction: ({ transaction }) => {
+      for (const job of clipboardImageJobsRef.current) job.bookmark = job.bookmark.map(transaction.mapping)
+    },
   }, [])
   const inlineMarkState = useInlineMarkToolbarState(editor)
 
@@ -1214,6 +1508,60 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     rememberSelection(activeEditor)
     closeHeadingMenu()
     setOpenMenu((current) => current === menu ? null : menu)
+  }
+
+  function rememberImageInsertionSelection() {
+    const view = activeEditor.view as unknown as ClipboardEditorViewLike
+    imagePickerSelectionBookmarkRef.current = selectionBookmark(view.state.selection)
+    rememberSelection(activeEditor)
+  }
+
+  function toggleImageMenu() {
+    rememberImageInsertionSelection()
+    closeHeadingMenu()
+    closeReferenceMenuPosition()
+    setOpenMenu((current) => current === 'image' ? null : 'image')
+  }
+
+  function openImageFilePicker() {
+    closeHeadingMenu()
+    closeReferenceMenuPosition()
+    setOpenMenu(null)
+    imageFileInputRef.current?.click()
+  }
+
+  function handleImageFileSelection(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (!files.length) return
+    const view = activeEditor.view as unknown as ClipboardEditorViewLike
+    const bookmark = imagePickerSelectionBookmarkRef.current || selectionBookmark(view.state.selection)
+    imagePickerSelectionBookmarkRef.current = null
+    enqueueImageUploads(view, files, bookmark)
+  }
+
+  async function pasteImageFromClipboard() {
+    const view = activeEditor.view as unknown as ClipboardEditorViewLike
+    const bookmark = imagePickerSelectionBookmarkRef.current || selectionBookmark(view.state.selection)
+    imagePickerSelectionBookmarkRef.current = null
+    closeHeadingMenu()
+    closeReferenceMenuPosition()
+    setOpenMenu(null)
+    setImageUploadNotice('正在读取剪切板…')
+    try {
+      const files = await readClipboardImageFiles()
+      if (!files.length) {
+        setImageUploadNotice('剪切板中没有可用图片。')
+        return
+      }
+      enqueueImageUploads(view, files, bookmark)
+    } catch (reason) {
+      if (reason instanceof ClipboardImageReadError && reason.code === 'UNSUPPORTED') {
+        setImageUploadNotice('当前浏览器不支持读取剪切板，请直接按 Ctrl+V 粘贴图片。')
+        return
+      }
+      setImageUploadNotice('无法读取剪切板，请允许剪切板权限，或直接在编辑器中按 Ctrl+V。')
+    }
   }
 
   function toggleReferenceMenu() {
@@ -1413,7 +1761,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   )
 
   return (
-    <div className="rich-text-editor-shell">
+    <div className="rich-text-editor-shell" aria-busy={imageUploadBusy}>
       <div ref={toolbarRef} className="rich-text-toolbar" aria-label="正文排版工具栏">
         <div className="rich-text-toolbar-row rich-text-toolbar-row-primary">
         <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-heading">
@@ -1595,6 +1943,51 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         </div>
         </div>
         <div className="rich-text-toolbar-row rich-text-toolbar-row-secondary">
+        <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-image">
+          <button
+            type="button"
+            className={toolbarButtonClass()}
+            aria-label="插入图片"
+            aria-haspopup="menu"
+            aria-expanded={openMenu === 'image'}
+            onPointerDown={rememberToolbarPointerDown}
+            onMouseDown={closeHeadingOnToolbarMouseDown}
+            onClick={toggleImageMenu}
+          >
+            图片 <span aria-hidden="true">⌄</span>
+          </button>
+          {openMenu === 'image' ? (
+            <div className="rich-text-toolbar-menu" role="menu" aria-label="插入图片">
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass()}
+                onPointerDown={(event) => {
+                  rememberImageInsertionSelection()
+                  rememberToolbarPointerDown(event)
+                }}
+                onMouseDown={closeHeadingOnToolbarMouseDown}
+                onClick={openImageFilePicker}
+              >
+                上传图片
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass()}
+                onPointerDown={(event) => {
+                  rememberImageInsertionSelection()
+                  rememberToolbarPointerDown(event)
+                }}
+                onMouseDown={closeHeadingOnToolbarMouseDown}
+                onClick={() => void pasteImageFromClipboard()}
+              >
+                从剪切板粘贴
+              </button>
+              <span className="rich-text-toolbar-menu-hint">可直接粘贴剪切板图片</span>
+            </div>
+          ) : null}
+        </div>
         <div className="relative rich-text-toolbar-dropdown rich-text-toolbar-dropdown-reference">
           <button
             type="button"
@@ -1675,6 +2068,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         </div>
       </div>
       {editorNotice ? <p className="rich-text-toolbar-notice" role="status">{editorNotice}</p> : null}
+      {imageUploadNotice ? <p className="rich-text-toolbar-notice" role="status">{imageUploadNotice}</p> : null}
+      <input
+        ref={imageFileInputRef}
+        type="file"
+        accept={CONTENT_IMAGE_ACCEPT}
+        multiple
+        onChange={handleImageFileSelection}
+        className="sr-only"
+        aria-label="上传正文图片"
+      />
       <EditorContent
         editor={editor}
         className="rich-text-editor-content"

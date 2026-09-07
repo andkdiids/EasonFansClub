@@ -14,6 +14,7 @@ const MAX_COMPRESSION_DIMENSION = 4096
 const MAX_COMPRESSION_PASSES = 7
 
 export type ContentImageProcessingPhase = 'processing' | 'compressing'
+export type ContentImageUploadPhase = ContentImageProcessingPhase | 'uploading'
 
 export class ContentImageClientError extends Error {
   constructor(public readonly code: ContentImageUploadErrorCode, message: string) {
@@ -189,5 +190,77 @@ export async function prepareContentImageFile(
     return await compressImageFile(file)
   } catch {
     throw clientError(heic ? 'HEIC_CONVERSION_FAILED' : 'IMAGE_PROCESSING_FAILED')
+  }
+}
+
+const KNOWN_CONTENT_IMAGE_ERROR_CODES = new Set<ContentImageUploadErrorCode>([
+  'FILE_REQUIRED',
+  'EMPTY_FILE',
+  'FILE_TOO_LARGE',
+  'UNSUPPORTED_FORMAT',
+  'INVALID_FILE',
+  'HEIC_CONVERSION_FAILED',
+  'IMAGE_PROCESSING_FAILED',
+  'NETWORK_UPLOAD_FAILED',
+  'UPLOAD_FAILED',
+  'UPLOAD_RESPONSE_INVALID',
+])
+
+function isKnownContentImageErrorCode(value: unknown): value is ContentImageUploadErrorCode {
+  return typeof value === 'string' && KNOWN_CONTENT_IMAGE_ERROR_CODES.has(value as ContentImageUploadErrorCode)
+}
+
+function uploadErrorFromResponse(data: unknown, response: Response) {
+  const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const code = isKnownContentImageErrorCode(payload.code)
+    ? payload.code
+    : response.status === 413
+      ? 'FILE_TOO_LARGE'
+      : 'UPLOAD_FAILED'
+  const message = typeof payload.message === 'string' && payload.message.trim()
+    ? payload.message
+    : CONTENT_IMAGE_ERROR_MESSAGES[code]
+  return new ContentImageClientError(code, message)
+}
+
+/**
+ * The one browser-to-server content-image upload path. File selection,
+ * clipboard paste, and any future editor image entry point all use this
+ * helper so validation, compression, multipart fields, and diagnostics stay
+ * identical.
+ */
+export async function uploadContentImage(
+  file: File,
+  onPhase?: (phase: ContentImageUploadPhase) => void,
+) {
+  onPhase?.('processing')
+  const preparedFile = await prepareContentImageFile(file, (phase) => onPhase?.(phase))
+  onPhase?.('uploading')
+
+  const form = new FormData()
+  // Do not set Content-Type manually: the browser must add the multipart
+  // boundary, which is especially important in mobile WebViews.
+  form.set('file', preparedFile)
+
+  let response: Response
+  try {
+    response = await fetch('/api/uploads/content-image', {
+      method: 'POST',
+      body: form,
+      cache: 'no-store',
+    })
+  } catch {
+    throw new ContentImageClientError('NETWORK_UPLOAD_FAILED', CONTENT_IMAGE_ERROR_MESSAGES.NETWORK_UPLOAD_FAILED)
+  }
+
+  const data = await response.json().catch(() => null) as { url?: unknown; mimeType?: unknown; code?: unknown; message?: unknown } | null
+  if (!response.ok) throw uploadErrorFromResponse(data, response)
+  if (!data || typeof data.url !== 'string' || !data.url.trim()) {
+    throw new ContentImageClientError('UPLOAD_RESPONSE_INVALID', CONTENT_IMAGE_ERROR_MESSAGES.UPLOAD_RESPONSE_INVALID)
+  }
+
+  return {
+    url: data.url,
+    mimeType: typeof data.mimeType === 'string' ? data.mimeType : undefined,
   }
 }

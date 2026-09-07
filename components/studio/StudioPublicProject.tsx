@@ -48,7 +48,7 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
 
   useEffect(() => {
     if (!canvasRef.current) return
-    renderPatternToCanvas(canvasRef.current, pattern, { displayGrid: true, displayCodes: true, displayCoordinates: true, displayBoardLines: true })
+    renderPatternToCanvas(canvasRef.current, pattern, { displayGrid: true, displayCodes: true, displayCoordinates: true })
   }, [pattern])
 
   useEffect(() => {

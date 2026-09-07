@@ -5,6 +5,17 @@ import Link from 'next/link'
 import { createPortal } from 'react-dom'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { toPublicMediaUrl } from '@/lib/media-url'
+import {
+  addRecentExpression,
+  createRecentEmoji,
+  createRecentSticker,
+  hydrateRecentExpressions,
+  MAX_RECENT_EXPRESSIONS,
+  mergeRecentExpressions,
+  readRecentExpressions,
+  type RecentExpression,
+  writeRecentExpressions,
+} from '@/lib/recent-expressions'
 
 /**
  * 微信式表情面板（内联展开，非弹窗）：
@@ -50,6 +61,10 @@ export type PickerDataResponse = {
   systemEmojis: string[]
   searchIndex: PickerSticker[]
   fetchedAt?: string
+}
+
+type PickerData = Omit<PickerDataResponse, 'recent'> & {
+  recent: RecentExpression[]
 }
 
 function normalizePickerData(value: PickerDataResponse): PickerDataResponse {
@@ -98,7 +113,7 @@ export function getStickerPreviewPosition(
 export function StickerPicker({
   open,
   onClose,
-  onSelectSticker,
+  onSelectSticker: onSelectStickerProp,
   onSelectEmoji,
   composerRef,
   desktopColumns,
@@ -123,12 +138,13 @@ export function StickerPicker({
   // 'dm'（默认，私信全宽面板）或 'reply'（帖子回复小型浮层 420px / 8 列固定 / emoji 紧凑）。
   variant?: 'dm' | 'reply'
 }) {
-  const [data, setData] = useState<PickerDataResponse | null>(null)
+  const [data, setData] = useState<PickerData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<PickerView>('emojis')
   const [activePackId, setActivePackId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const recentExpressionsRef = useRef<RecentExpression[]>([])
   const rootRef = useRef<HTMLDivElement>(null)
 
   // 自定义表情长按预览（仅移动端 touch 触发；桌面尺寸足够大，无需预览）
@@ -225,28 +241,47 @@ export function StickerPicker({
     }
   }, [preview, closePreview])
 
+  const updateRecentExpressions = useCallback((expression: RecentExpression) => {
+    const next = addRecentExpression(recentExpressionsRef.current, expression, MAX_RECENT_EXPRESSIONS)
+    recentExpressionsRef.current = next
+    setData((current) => current ? { ...current, recent: next } : current)
+    writeRecentExpressions(next)
+  }, [])
+
+  const handleStickerClick = useCallback((sticker: PickerSticker) => {
+    // Preserve the caller's insertion/selection behavior before updating the
+    // local recent list. Consumers may close the panel in their callback.
+    onSelectStickerProp(sticker)
+    updateRecentExpressions(createRecentSticker(sticker))
+  }, [onSelectStickerProp, updateRecentExpressions])
+
   const handleEmojiClick = useCallback(
     (emoji: string) => {
       if (onSelectEmoji) {
         onSelectEmoji(emoji)
-        return
+      } else {
+        // fallback: insert directly into textarea if no callback provided
+        const textarea = composerRef?.current
+        if (textarea) {
+          const start = textarea.selectionStart ?? textarea.value.length
+          const end = textarea.selectionEnd ?? textarea.value.length
+          const before = textarea.value.slice(0, start)
+          const after = textarea.value.slice(end)
+          textarea.value = `${before}${emoji}${after}`
+          textarea.dispatchEvent(new Event('input', { bubbles: true }))
+          textarea.focus()
+          const caret = start + emoji.length
+          textarea.setSelectionRange(caret, caret)
+        }
       }
-      // fallback: insert directly into textarea if no callback provided
-      const textarea = composerRef?.current
-      if (textarea) {
-        const start = textarea.selectionStart ?? textarea.value.length
-        const end = textarea.selectionEnd ?? textarea.value.length
-        const before = textarea.value.slice(0, start)
-        const after = textarea.value.slice(end)
-        textarea.value = `${before}${emoji}${after}`
-        textarea.dispatchEvent(new Event('input', { bubbles: true }))
-        textarea.focus()
-        const caret = start + emoji.length
-        textarea.setSelectionRange(caret, caret)
-      }
+
+      updateRecentExpressions(createRecentEmoji(emoji))
     },
-    [composerRef, onSelectEmoji],
+    [composerRef, onSelectEmoji, updateRecentExpressions],
   )
+
+  // Keep one wrapped sticker entry point for pack, search, and recent views.
+  const onSelectSticker = handleStickerClick
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -258,7 +293,21 @@ export function StickerPicker({
         setError(json.error || '加载失败，请稍后重试')
         return
       }
-      setData(normalizePickerData(json))
+      const normalized = normalizePickerData(json)
+      const availableStickers = [
+        ...normalized.recent,
+        ...normalized.searchIndex,
+        ...Object.values(normalized.stickersByPack).flat(),
+      ]
+      const storedRecent = hydrateRecentExpressions(readRecentExpressions(), availableStickers)
+      const recent = mergeRecentExpressions(
+        storedRecent,
+        normalized.recent.map((sticker) => createRecentSticker(sticker)),
+        MAX_RECENT_EXPRESSIONS,
+      )
+      recentExpressionsRef.current = recent
+      writeRecentExpressions(recent)
+      setData({ ...normalized, recent })
       // 默认始终进入系统 Emoji 面板（微信式体验）。
       // 记录第一个表情包 id 供用户主动点击 pack icon 时使用，但不自动切换到 pack 视图。
       const firstPack = json.packs[0]
@@ -552,6 +601,18 @@ export function desktopImgClass(): string {
   return 'h-full w-full rounded-md object-contain p-1'
 }
 
+function recentStickerToPickerSticker(
+  expression: Extract<RecentExpression, { type: 'sticker' }>,
+): PickerSticker {
+  return {
+    id: expression.id,
+    name: expression.name ?? null,
+    url: toPublicMediaUrl(expression.url) || expression.url,
+    type: expression.stickerType || 'STATIC',
+    ...(expression.packId ? { packId: expression.packId } : {}),
+  }
+}
+
 function EmojiGrid({
   emojis,
   recent,
@@ -560,30 +621,52 @@ function EmojiGrid({
   compact,
 }: {
   emojis: string[]
-  recent: PickerSticker[]
+  recent: RecentExpression[]
   onSelectSticker: (sticker: PickerSticker) => void
   onSelectEmoji: (emoji: string) => void
   // 帖子回复场景：emoji 用 flex-wrap 紧凑排列（32px / text-[28px]）；私信场景用 10 列 grid。
   compact?: boolean
 }) {
+  const visibleRecent = recent
+    .filter((expression) => expression.type === 'emoji' || Boolean(expression.url))
+    .slice(0, 8)
+
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
-      {recent.length > 0 ? (
+      {visibleRecent.length > 0 ? (
         <section>
           <h3 className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">最近使用</h3>
           <div className="flex flex-wrap gap-1.5">
-            {recent.slice(0, 8).map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => onSelectSticker(s)}
-                className="grid h-10 w-10 place-items-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-12 md:w-12"
-                aria-label={s.name || '表情'}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={publicImageVariantUrl(s.url, 'thumb-sm') || s.url} alt={s.name || ''} className="h-full w-full object-contain p-0.5" loading="lazy" />
-              </button>
-            ))}
+            {visibleRecent.map((expression) => {
+              if (expression.type === 'emoji') {
+                return (
+                  <button
+                    key={`recent-emoji-${expression.value}`}
+                    type="button"
+                    onClick={() => onSelectEmoji(expression.value)}
+                    className={compact
+                      ? 'flex h-8 w-8 items-center justify-center rounded-md text-[28px] leading-none transition hover:bg-slate-100 active:scale-95'
+                      : 'flex h-10 w-10 items-center justify-center rounded-md text-[24px] leading-none transition hover:bg-slate-100 active:scale-95 md:h-12 md:w-12'}
+                    aria-label={`emoji ${expression.value}`}
+                  >
+                    {expression.value}
+                  </button>
+                )
+              }
+              const s = recentStickerToPickerSticker(expression)
+              return (
+                <button
+                  key={`recent-sticker-${s.id}`}
+                  type="button"
+                  onClick={() => onSelectSticker(s)}
+                  className="grid h-10 w-10 place-items-center rounded-md transition hover:bg-slate-100 active:scale-95 md:h-12 md:w-12"
+                  aria-label={s.name || '表情'}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={publicImageVariantUrl(s.url, 'thumb-sm') || s.url} alt={s.name || ''} className="h-full w-full object-contain p-0.5" loading="lazy" />
+                </button>
+              )
+            })}
           </div>
         </section>
       ) : null}

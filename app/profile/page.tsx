@@ -16,6 +16,7 @@ import { getBadgeProfileSummary, getEquippedBadgesForUser } from '@/lib/badge-se
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
+import { getBirthdayEditState } from '@/lib/birthday-immutability'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -56,6 +57,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       birthMonth: true,
       birthDay: true,
       birthdaySetAt: true,
+      birthdateSelfEditCount: true,
       birthdayPublic: true,
       showBadgeActivity: true,
       showBadgeProgressNotifications: true,
@@ -66,6 +68,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   })
 
   if (!profile || !profile.Profile) redirect('/login')
+  const birthdayState = getBirthdayEditState(profile)
 
   const visibility = await getProfileVisibility(profile.id, user.id)
 
@@ -103,6 +106,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     birthMonth: profile.birthMonth,
     birthDay: profile.birthDay,
     birthdaySetAt: profile.birthdaySetAt ? profile.birthdaySetAt.toISOString() : null,
+    birthdateSelfEditCount: profile.birthdateSelfEditCount,
+    canEditBirthdate: birthdayState.canEditBirthdate,
     birthdayPublic: profile.birthdayPublic,
     showBadgeActivity: profile.showBadgeActivity,
     showBadgeProgressNotifications: profile.showBadgeProgressNotifications,

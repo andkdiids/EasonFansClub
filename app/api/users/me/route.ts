@@ -14,7 +14,16 @@ import { updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { computeNicknameCooldownDays, generateUniqueViolationNickname } from '@/lib/nickname-violation'
 import { isValidBirthdayParts, type BirthdayParts } from '@/lib/zodiac'
-import { BIRTHDAY_ALREADY_SET, BIRTHDAY_ALREADY_SET_MESSAGE, BirthdayAlreadySetError, writeBirthdayOnce } from '@/lib/birthday-immutability'
+import {
+  BIRTHDAY_ALREADY_SET,
+  BIRTHDAY_ALREADY_SET_MESSAGE,
+  BIRTHDATE_SELF_EDIT_EXHAUSTED,
+  BIRTHDATE_SELF_EDIT_EXHAUSTED_MESSAGE,
+  BirthdayAlreadySetError,
+  BirthdaySelfEditExhaustedError,
+  getBirthdayEditState,
+  updateUserBirthdate,
+} from '@/lib/birthday-immutability'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
@@ -99,6 +108,18 @@ function birthdayAlreadySetResponse() {
     error: BIRTHDAY_ALREADY_SET,
     message: BIRTHDAY_ALREADY_SET_MESSAGE,
   }, { status: 409 })
+}
+
+function birthdayMutationErrorResponse(error: unknown) {
+  if (error instanceof BirthdaySelfEditExhaustedError) {
+    return NextResponse.json({
+      code: BIRTHDATE_SELF_EDIT_EXHAUSTED,
+      error: BIRTHDATE_SELF_EDIT_EXHAUSTED,
+      message: BIRTHDATE_SELF_EDIT_EXHAUSTED_MESSAGE,
+    }, { status: 409 })
+  }
+  if (error instanceof BirthdayAlreadySetError) return birthdayAlreadySetResponse()
+  return null
 }
 
 async function updateUsername(userId: string, rawUsername: unknown, request: Request) {
@@ -204,6 +225,7 @@ export async function GET(request: Request) {
       birthMonth: true,
       birthDay: true,
       birthdaySetAt: true,
+      birthdateSelfEditCount: true,
       birthdayPublic: true,
       showBadgeActivity: true,
       showBadgeProgressNotifications: true,
@@ -256,6 +278,7 @@ export async function GET(request: Request) {
 
   if (!profile) return NextResponse.json({ profile: null })
   const { Profile, UserBadge, _count, usernameChangedAt, nicknameChangedAt, nicknameViolationCount } = profile
+  const birthdayState = getBirthdayEditState(profile)
   return NextResponse.json({
     profile: {
       email: profile.email,
@@ -273,6 +296,12 @@ export async function GET(request: Request) {
       birthMonth: profile.birthMonth,
       birthDay: profile.birthDay,
       birthdaySetAt: profile.birthdaySetAt,
+      birthdateSelfEditCount: birthdayState.birthdateSelfEditCount,
+      hasBirthdate: birthdayState.hasBirthdate,
+      canEditBirthdate: birthdayState.canEditBirthdate,
+      birthdateCanEdit: birthdayState.canEditBirthdate,
+      birthdateEditUsed: birthdayState.birthdateEditUsed,
+      birthdayEditRemaining: birthdayState.birthdayEditRemaining,
       birthdayPublic: profile.birthdayPublic,
       showBadgeActivity: profile.showBadgeActivity,
       showBadgeProgressNotifications: profile.showBadgeProgressNotifications,
@@ -376,8 +405,8 @@ export async function PATCH(request: Request) {
 
     if (monthEmpty && dayEmpty) {
       // An unconfigured form submits two empty fields when saving other data.
-      // writeBirthdayOnce will turn this into a no-op, but will reject it if a
-      // birthday already exists.
+      // The shared birthday service treats that as a no-op, but rejects it if
+      // a birthday already exists.
       requestedBirthday = null
     } else {
       if (monthEmpty) return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
@@ -513,8 +542,13 @@ export async function PATCH(request: Request) {
   try {
     const profile = await prisma.$transaction(async (tx) => {
       if (birthdayFieldsProvided) {
-        const result = await writeBirthdayOnce(tx, guard.user.id, requestedBirthday || null, now)
-        birthdayChanged = result.status === 'set'
+        const result = await updateUserBirthdate(tx, {
+          targetUserId: guard.user.id,
+          birthdate: requestedBirthday || null,
+          actor: 'SELF',
+          now,
+        })
+        birthdayChanged = result.changed
       }
 
     // 昵称处理：违规 → 系统自动替换并生成唯一展示昵称；正常 / 修正 → 清除违规标记。
@@ -558,10 +592,11 @@ export async function PATCH(request: Request) {
         nicknameViolationCount: true,
         showBadgeActivity: true,
         showBadgeProgressNotifications: true,
-        birthMonth: true,
-        birthDay: true,
-        birthdaySetAt: true,
-        birthdayPublic: true,
+         birthMonth: true,
+         birthDay: true,
+         birthdaySetAt: true,
+         birthdateSelfEditCount: true,
+         birthdayPublic: true,
       },
     })
 
@@ -648,6 +683,7 @@ export async function PATCH(request: Request) {
       birthMonth: updated.birthMonth,
       birthDay: updated.birthDay,
       birthdaySetAt: updated.birthdaySetAt,
+      ...getBirthdayEditState(updated),
       birthdayPublic: updated.birthdayPublic,
       wallVisibility: profileRecord.wallVisibility,
       location: profileRecord.locationCountryCode ? {
@@ -685,7 +721,8 @@ export async function PATCH(request: Request) {
         : undefined,
     })
   } catch (error) {
-    if (error instanceof BirthdayAlreadySetError) return birthdayAlreadySetResponse()
+    const birthdayErrorResponse = birthdayMutationErrorResponse(error)
+    if (birthdayErrorResponse) return birthdayErrorResponse
     throw error
   }
 }

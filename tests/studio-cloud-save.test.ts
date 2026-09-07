@@ -307,3 +307,17 @@ test('保存按钮在 saving 期间禁用（桌面 + 移动端）', () => {
   const disabledCount = (shell.match(/disabled=\{saveStatus === 'saving'\}/g) || []).length
   assert.ok(disabledCount >= 2, `expected >=2 disabled save buttons, got ${disabledCount}`)
 })
+
+test('首次云端保存返回的 ID 会同步到分享状态，且本地 ID 不再冒充云端 ID', () => {
+  const editor = readFileSync('components/studio/StudioBeadsTool.tsx', 'utf8')
+  const shell = readFileSync('components/studio/StudioToolShell.tsx', 'utf8')
+  assert.match(editor, /const \[cloudProjectId, setCloudProjectId\]/)
+  assert.match(editor, /const requestedCloudId = cloudProjectId/)
+  assert.doesNotMatch(editor, /projectId: localId/)
+  assert.match(editor, /const savedProject = remoteProject[\s\S]*?const savedCloudId = typeof savedProject\?\.id === 'string'/)
+  assert.match(editor, /setCloudProjectId\(savedCloudId\)/)
+  assert.match(editor, /if \(!cloudProjectId\) \{[\s\S]*?请先保存作品/)
+  assert.match(editor, /if \(saveStatus !== 'saved'\) \{[\s\S]*?请先保存最新修改/)
+  assert.match(editor, /shareDisabled=\{saveStatus === 'saving'\}/)
+  assert.equal((shell.match(/disabled=\{shareDisabled\}/g) || []).length, 2)
+})

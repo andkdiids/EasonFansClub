@@ -20,26 +20,44 @@ const profileModules = read('components/PublicUserModules.tsx')
 const postActions = read('components/PostActions.tsx')
 const profileSurface = read('components/ProfilePageSurface.tsx')
 const profileUserPage = read('app/user/[uid]/page.tsx')
+const featureConfirmDialog = read('components/PostFeatureConfirmDialog.tsx')
+const detailMenu = postActions.slice(postActions.indexOf('export function PostManagementMenu'), postActions.indexOf('export function PersonalPostPinMenu'))
+const listActions = postActions.slice(postActions.indexOf('export function AdminPostActions'))
 
 // ---------------------------------------------------------------------------
-// FEATURE CONFIRM（管理员加精二次确认）
+// FEATURE CONFIRM（所有管理员加精入口统一二次确认）
 // ---------------------------------------------------------------------------
-test('点击加精先弹 ConfirmDialog（标题：确认加精帖子？），确认后才发起加精请求', () => {
-  assert.match(reviewManager, /title="确认加精帖子？"/)
-  // 未加精且可加精：点按钮只记录待确认目标，不直接 PATCH
-  assert.match(reviewManager, /setFeatureConfirm\(\{ postId: post\.id, title: post\.title \}\)/)
-  // 确认按钮才真正 toggleFlag(isFeatured: true)
-  assert.match(reviewManager, /void toggleFlag\(id, 'isFeatured', true\)/)
-  // 取消走 ConfirmDialog onCancel 分支
-  assert.match(reviewManager, /onCancel=\{\(\) => setFeatureConfirm\(null\)\}/)
+test('所有设为精华入口先弹统一确认框，确认后才发起请求', () => {
+  assert.match(featureConfirmDialog, /'设为精华？'/)
+  assert.match(featureConfirmDialog, /确认将这篇帖子设为精华吗？设为精华后将按照现有规则发放对应奖励。/)
+  assert.match(featureConfirmDialog, /'取消精华？'/)
+  assert.match(featureConfirmDialog, /确认取消这篇帖子的精华状态吗？/)
+  assert.match(featureConfirmDialog, /'确认设为精华'/)
+  assert.match(featureConfirmDialog, /'确认取消精华'/)
+
+  assert.match(detailMenu, /requestFeatureChange\(!isFeatured\)/)
+  assert.match(detailMenu, /<PostFeatureConfirmDialog/)
+  assert.match(listActions, /onClick=\{\(\) => setFeatureConfirm\(!isFeatured\)\}/)
+  assert.match(listActions, /<PostFeatureConfirmDialog/)
+  assert.match(reviewManager, /nextIsFeatured: true/)
+  assert.match(reviewManager, /toggleFlag\(featureConfirm\.postId, 'isFeatured', featureConfirm\.nextIsFeatured\)/)
+  assert.doesNotMatch(detailMenu, /onClick=\{\(\) => void updatePost\(\{ isFeatured: !isFeatured \}\)\}/)
+  assert.doesNotMatch(listActions, /onClick=\{\(\) => updatePost\(\{ isFeatured: !isFeatured \}\)\}/)
 })
 
-test('加精请求期间按钮 loading + disabled 且重复请求由服务端幂等保障', () => {
-  // 弹窗打开时 loading 跟随正在提交的请求
-  assert.match(reviewManager, /loading=\{Boolean\(reviewingId\) \|\| bulkDeleting\}/)
+test('加精与取消精华请求期间 loading + disabled，且服务端幂等逻辑保留', () => {
+  assert.match(detailMenu, /loading=\{isSubmitting\}/)
+  assert.match(listActions, /loading=\{isSubmitting\}/)
+  assert.match(reviewManager, /flaggingId/)
+  assert.match(reviewManager, /if \(flaggingId \|\| reviewingId\) return/)
+  assert.match(reviewManager, /loading=\{Boolean\(flaggingId\)\}/)
   // 已加精的帖子显示「取消精华」而不是重复加精
   assert.match(reviewManager, /post\.isFeatured \? \(/)
   assert.match(reviewManager, /取消精华/)
+  assert.match(reviewManager, /nextIsFeatured: false/)
+  assert.match(detailMenu, /onCancel=\{\(\) => setFeatureConfirm\(null\)\}/)
+  assert.match(listActions, /onCancel=\{\(\) => setFeatureConfirm\(null\)\}/)
+  assert.match(reviewManager, /onCancel=\{\(\) => setFeatureConfirm\(null\)\}/)
   // 奖励发放幂等（业务键去重）仍在既有加精语义中，不在本次删除改动中破坏
   assert.doesNotMatch(deletionService, /awardFeaturedPostRewards/)
   assert.doesNotMatch(deletionService, /reward/)
@@ -92,29 +110,29 @@ test('搜索结果分页且页码夹紧（删空页自动回退最后一个有�
   assert.match(reviewRoute, /keyword,/)
 })
 
-test('管理员列表保留 keyword/status/page 重新加载；删除后保留关键词', () => {
+test('管理员审核列表保留 keyword/status/page 重新加载与关键词清除', () => {
   assert.match(reviewManager, /params\.set\('keyword', keyword\.trim\(\)\)/)
-  assert.match(reviewManager, /await loadStatus\(queueStatus, page\)/)
+  assert.match(reviewManager, /void loadStatus\(queueStatus, 1\)/)
   assert.match(reviewManager, /清除/)
 })
 
 // ---------------------------------------------------------------------------
-// ADMIN MULTI-SELECT + BULK DELETE
+// REVIEW PAGE ACTIONS
 // ---------------------------------------------------------------------------
-test('每帖 checkbox + 本页全选/取消 + 计数 + 无选中禁用', () => {
-  assert.match(reviewManager, /本页全选/)
-  assert.match(reviewManager, /已选择 \{selectedCount\} 篇/)
-  assert.match(reviewManager, /disabled=\{selectedCount === 0 \|\| bulkDeleting \|\| loading\}/)
-  assert.match(reviewManager, /function toggleSelectAll\(\)/)
-  assert.match(reviewManager, /function toggleSelect\(postId: string\)/)
+test('审核页不暴露批量删除，也不保留仅服务于它的多选框和确认弹窗', () => {
+  assert.doesNotMatch(reviewManager, /批量删除/)
+  assert.doesNotMatch(reviewManager, /bulk-delete/)
+  assert.doesNotMatch(reviewManager, /bulkDeleting|bulkConfirmOpen|confirmBulkDelete/)
+  assert.doesNotMatch(reviewManager, /selectedIds|selectedCount|toggleSelect|本页全选|已选择/)
+  assert.doesNotMatch(reviewManager, /type="checkbox"/)
+  assert.doesNotMatch(reviewManager, /<ConfirmDialog/)
 })
 
-test('批量删除弹危险确认（取消不执行），成功后清空选择并按原状态刷新', () => {
-  assert.match(reviewManager, /title="批量删除帖子"/)
-  assert.match(reviewManager, /删除后无法恢复/)
-  assert.match(reviewManager, /setBulkConfirmOpen\(true\)/)
-  assert.match(reviewManager, /void confirmBulkDelete\(\)/)
-  assert.match(reviewManager, /setSelectedIds\(\[\]\)/)
+test('审核页的单条审核与其他合法管理操作仍保留', () => {
+  assert.match(reviewManager, /requestReview\(post, 'APPROVED'\)/)
+  assert.match(reviewManager, /requestReview\(post, 'REJECTED'\)/)
+  assert.match(reviewManager, /void toggleFlag\(post\.id, 'isPinned', !post\.isPinned\)/)
+  assert.match(reviewManager, /<PostFeatureConfirmDialog/)
 })
 
 // ---------------------------------------------------------------------------

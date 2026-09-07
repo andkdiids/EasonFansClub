@@ -58,6 +58,7 @@ export async function GET(request: Request) {
     select: {
       id: true,
       uid: true,
+      username: true,
       nickname: true,
       nicknameModerationStatus: true,
       nicknameViolationDisplay: true,
@@ -65,6 +66,9 @@ export async function GET(request: Request) {
       phone: true,
       emailVerifiedAt: true,
       phoneVerifiedAt: true,
+      birthMonth: true,
+      birthDay: true,
+      birthdateSelfEditCount: true,
       avatarUrl: true,
       Profile: {
         select: {

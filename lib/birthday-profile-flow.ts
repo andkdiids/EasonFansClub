@@ -1,4 +1,4 @@
-import { isBirthdayConfigured, type BirthdayState } from '@/lib/birthday-immutability'
+import { areBirthdayPartsEqual, getBirthdayEditState, isBirthdayConfigured, type BirthdayState } from '@/lib/birthday-immutability'
 import { isValidBirthdayParts, type BirthdayParts } from '@/lib/zodiac'
 
 export type BirthdayDraft = {
@@ -20,14 +20,14 @@ export function decideBirthdaySave(
   persistedBirthday: BirthdayState | null | undefined,
   draft: BirthdayDraft,
 ): BirthdaySaveDecision {
-  if (isBirthdayConfigured(persistedBirthday)) return { kind: 'locked' }
-
   const { month, day } = draft
   if (month == null && day == null) return { kind: 'none' }
   if (month == null || day == null) return { kind: 'incomplete', message: '请选择完整的生日日期' }
 
   const birthday = { month, day }
   if (!isValidBirthdayParts(birthday)) return { kind: 'incomplete', message: '该日期不存在，请重新选择' }
+  if (isBirthdayConfigured(persistedBirthday) && areBirthdayPartsEqual(persistedBirthday, birthday)) return { kind: 'none' }
+  if (!getBirthdayEditState(persistedBirthday).canEditBirthdate) return { kind: 'locked' }
   return { kind: 'confirm', birthday }
 }
 

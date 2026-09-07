@@ -35,7 +35,8 @@ test('CASES 4/5: complete drafts require the explicit confirm flow and cancel ke
   assert.doesNotMatch(form, /cancelBirthdayConfirmation[\s\S]*setForm\(/)
   assert.match(form, /aria-labelledby="birthday-confirm-title"/)
   assert.match(form, /请确认你的生日为：/)
-  assert.match(form, /生日仅可设置一次，确认保存后将无法修改。/)
+  assert.match(form, /生日设置后仅可再修改一次，请确认信息正确。/)
+  assert.match(form, /生日仅可修改一次。此次修改成功后，将无法再次自行修改生日。/)
   assert.match(form, /确认并保存/)
 })
 
@@ -48,8 +49,8 @@ test('CASES 6/7: only a successful response updates the persisted lock snapshot'
 
 test('CASE 8: saving other profile fields with an incomplete birthday omits birthday fields', () => {
   const form = read('app/profile/ProfileSettingsForm.tsx')
-  assert.match(form, /await saveProfile\(null, birthdayDecision\.kind === 'incomplete'\)/)
-  assert.match(form, /const birthdayPayload = !birthdayConfigured && birthdayToSave\n\s*\? \{ birthMonth: birthdayToSave\.month, birthDay: birthdayToSave\.day \}\n\s*:\s*\{\}/)
+  assert.match(form, /await saveProfile\(null, true\)/)
+  assert.match(form, /const birthdayPayload = birthdayToSave\n\s*\? \{ birthMonth: birthdayToSave\.month, birthDay: birthdayToSave\.day \}\n\s*:\s*\{\}/)
 })
 
 test('CASE 9: changing to a shorter month clears an invalid draft day', () => {
@@ -70,8 +71,12 @@ test('CASES 10/11: February 29 is allowed and February 30 is rejected', () => {
   })
 })
 
-test('CASE 12: historical birthdays remain locked from the persisted snapshot', () => {
-  assert.deepEqual(decideBirthdaySave({ birthMonth: 5, birthDay: 21, birthdaySetAt: null }, { month: 7, day: 15 }), {
+test('CASE 12: historical birthdays default to one editable opportunity and lock after it is used', () => {
+  assert.deepEqual(decideBirthdaySave({ birthMonth: 5, birthDay: 21, birthdaySetAt: null, birthdateSelfEditCount: 0 }, { month: 7, day: 15 }), {
+    kind: 'confirm',
+    birthday: { month: 7, day: 15 },
+  })
+  assert.deepEqual(decideBirthdaySave({ birthMonth: 5, birthDay: 21, birthdaySetAt: null, birthdateSelfEditCount: 1 }, { month: 7, day: 15 }), {
     kind: 'locked',
   })
 })
@@ -86,9 +91,9 @@ test('CASE 13: the API rejects partial birthday payloads before any birthday wri
 test('CASE 14: birthday first-set remains atomic and concurrent-safe', () => {
   const route = read('app/api/users/me/route.ts')
   const helper = read('lib/birthday-immutability.ts')
-  assert.match(route, /prisma\.\$transaction\(async \(tx\) => \{[\s\S]*writeBirthdayOnce\(tx, guard\.user\.id/)
+  assert.match(route, /prisma\.\$transaction\(async \(tx\) => \{[\s\S]*updateUserBirthdate\(tx, \{[\s\S]*actor: 'SELF'/)
   assert.match(helper, /updateMany\(/)
-  assert.match(helper, /birthMonth: null[\s\S]*birthDay: null[\s\S]*birthdaySetAt: null/)
+  assert.match(helper, /birthMonth: null[\s\S]*birthDay: null[\s\S]*birthdaySetAt: null[\s\S]*birthdateSelfEditCount: \{ lt: BIRTHDATE_SELF_EDIT_LIMIT \}/)
 })
 
 test('birthday draft selections are not persisted through browser storage or effects', () => {

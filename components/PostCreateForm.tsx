@@ -26,6 +26,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [imagesUploading, setImagesUploading] = useState(false)
+  const [richImagesUploading, setRichImagesUploading] = useState(false)
   const draftPublishedRef = useRef(false)
 
   useEffect(() => {
@@ -115,7 +116,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   async function submitPost(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (isSubmitting) return
-    if (imagesUploading) {
+    if (imagesUploading || richImagesUploading) {
       setErrors({ form: '图片仍在处理中，请等待上传完成后再发布。' })
       return
     }
@@ -194,6 +195,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
                 setRichContent(nextRichContent)
                 setContent(plainText)
               }}
+              onBusyChange={setRichImagesUploading}
             />
           ) : <div className="rich-text-editor-loading" aria-live="polite">正在恢复草稿…</div>}
         </div>
@@ -223,8 +225,8 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
             😊 表情
           </button>
         </div>
-        <button disabled={isSubmitting || imagesUploading} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
-          {isSubmitting ? '发布中...' : imagesUploading ? '图片处理中...' : '发布帖子'}
+        <button disabled={isSubmitting || imagesUploading || richImagesUploading} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
+          {isSubmitting ? '发布中...' : imagesUploading || richImagesUploading ? '图片处理中...' : '发布帖子'}
         </button>
         <StickerPicker
           open={pickerOpen}

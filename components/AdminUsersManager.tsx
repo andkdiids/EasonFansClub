@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -10,11 +11,15 @@ import { getPhoneInputParts, type PhoneCountryCode } from '@/lib/phone-number'
 type AdminUser = {
   id: string
   uid: number
+  username: string
   nickname: string
   email: string | null
   phone: string | null
   emailVerifiedAt: string | null
   phoneVerifiedAt: string | null
+  birthMonth: number | null
+  birthDay: number | null
+  birthdateSelfEditCount: number
   avatarUrl: string | null
   role: string
   status: string
@@ -86,6 +91,9 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
   const [contactPhoneCountry, setContactPhoneCountry] = useState<PhoneCountryCode>('CN')
   const [contactError, setContactError] = useState('')
   const [contactBusyUserId, setContactBusyUserId] = useState<string | null>(null)
+  const [contactConfirmationOpen, setContactConfirmationOpen] = useState(false)
+  const [securityConfirmation, setSecurityConfirmation] = useState<{ user: AdminUser; nextEnabled: boolean } | null>(null)
+  const [securityConfirmationError, setSecurityConfirmationError] = useState('')
 
   async function loadUsers(search = query) {
     setLoading(true)
@@ -156,6 +164,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
     setContactPhoneInput(phoneParts.value)
     setContactPhoneCountry(phoneParts.country)
     setContactError('')
+    setContactConfirmationOpen(false)
     setError('')
     setMessage('')
   }
@@ -182,6 +191,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
       const data = await response.json().catch(() => null)
       if (!response.ok) throw new Error(data?.message || '联系方式修改失败')
       setContactTarget(null)
+      setContactConfirmationOpen(false)
       await loadUsers(query)
       setMessage(data?.message || '联系方式已修改')
     } catch (updateError) {
@@ -192,14 +202,18 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
   async function updateSecurityRecovery(user: AdminUser) {
     if (!canManageAccountSecurity || securityBusyUserId) return
     const nextEnabled = !user.securityQuestionRecoveryEnabled
-    const confirmed = window.confirm(nextEnabled
-      ? '确认重新启用该用户的密保问题找回吗？'
-      : '确认停用该用户的密保问题找回吗？\n停用后，该用户将无法通过密保问题重置密码。')
-    if (!confirmed) return
+    setSecurityConfirmation({ user, nextEnabled })
+    setSecurityConfirmationError('')
+  }
+
+  async function confirmSecurityRecovery() {
+    if (!securityConfirmation || securityBusyUserId) return
+    const { user, nextEnabled } = securityConfirmation
 
     setSecurityBusyUserId(user.id)
     setError('')
     setMessage('')
+    setSecurityConfirmationError('')
     try {
       const response = await fetch(`/api/admin/users/${user.id}/security-recovery`, {
         method: 'PATCH',
@@ -212,9 +226,12 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
       setUsers((current) => current.map((item) => item.id === user.id
         ? { ...item, securityQuestionRecoveryEnabled: nextEnabled }
         : item))
+      setSecurityConfirmation(null)
       setMessage(data?.message || '密保找回状态已更新')
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : '密保找回状态更新失败')
+      const nextError = updateError instanceof Error ? updateError.message : '密保找回状态更新失败'
+      setSecurityConfirmationError(nextError)
+      setError(nextError)
     } finally {
       setSecurityBusyUserId(null)
     }
@@ -264,6 +281,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
           <thead className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
             <tr>
               <th className="px-3 py-2">用户</th>
+              <th className="px-3 py-2">生日</th>
               <th className="px-3 py-2">联系方式</th>
               <th className="px-3 py-2">角色</th>
               <th className="px-3 py-2">状态</th>
@@ -276,7 +294,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
+                <td colSpan={9} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
                   加载中...
                 </td>
               </tr>
@@ -290,9 +308,13 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
                       </div>
                       <div>
                         <p className="font-black text-brand-950">{user.nickname}</p>
-                        <p className="text-xs font-bold text-slate-500">UID {formatUid(user.uid)}</p>
+                        <p className="text-xs font-bold text-slate-500">@{user.username} · UID {formatUid(user.uid)}</p>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-3 py-3 font-bold text-slate-600">
+                    <p>{user.birthMonth != null && user.birthDay != null ? `${user.birthMonth}月${user.birthDay}日` : '未设置'}</p>
+                    {user.birthMonth != null && user.birthDay != null ? <p className="mt-1 text-xs text-slate-400">本人修改 {Math.min(1, Math.max(0, user.birthdateSelfEditCount))}/1</p> : null}
                   </td>
                   <td className="px-3 py-3 font-bold text-slate-600">
                     <p>{user.phone || '未绑定手机'}</p>
@@ -346,7 +368,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
+                <td colSpan={9} className="rounded-2xl bg-sky-50 px-4 py-8 text-center font-black text-slate-500">
                   暂无用户。
                 </td>
               </tr>
@@ -503,7 +525,7 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
               </button>
               <button
                 type="button"
-                onClick={updateContact}
+                onClick={() => setContactConfirmationOpen(true)}
                 disabled={contactBusyUserId === contactTarget.id}
                 className="min-h-11 rounded-full bg-brand-700 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300"
               >
@@ -513,6 +535,30 @@ export function AdminUsersManager({ canManageAccountSecurity, canManageUserEmail
           </div>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={contactConfirmationOpen && Boolean(contactTarget)}
+        title="确认修改联系方式？"
+        description={contactTarget ? `将修改 ${contactTarget.nickname}（UID ${formatUid(contactTarget.uid)}）的邮箱和手机号。修改后对应的验证状态会清零。` : ''}
+        confirmLabel="确认修改"
+        cancelLabel="取消"
+        loading={Boolean(contactTarget && contactBusyUserId === contactTarget.id)}
+        error={contactError}
+        onConfirm={() => { void updateContact() }}
+        onCancel={() => { if (!contactBusyUserId) { setContactConfirmationOpen(false); setContactError('') } }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(securityConfirmation)}
+        title={securityConfirmation?.nextEnabled ? '确认启用密保找回？' : '确认停用密保找回？'}
+        description={securityConfirmation?.nextEnabled ? '重新启用后，该用户可以使用已设置的密保问题找回密码。' : '停用后，该用户将无法通过密保问题重置密码。'}
+        confirmLabel="确认"
+        cancelLabel="取消"
+        loading={Boolean(securityConfirmation && securityBusyUserId === securityConfirmation.user.id)}
+        error={securityConfirmationError}
+        onConfirm={() => { void confirmSecurityRecovery() }}
+        onCancel={() => { if (!securityBusyUserId) { setSecurityConfirmation(null); setSecurityConfirmationError('') } }}
+      />
     </section>
   )
 }

@@ -3,7 +3,7 @@
 import { drawBrandedQrToCanvas } from '@/lib/branded-qr-client'
 import { shareCardQrPayload } from '@/lib/share-card'
 import { calculateMaterialList } from './grid'
-import { patternCellColor } from './renderer'
+import { BEAD_GRID_DIVIDER_COLOR, patternCellColor } from './renderer'
 import type { BeadPatternGrid } from './types'
 import { EMPTY_CELL } from './types'
 
@@ -108,16 +108,16 @@ function drawPatternGrid(context: CanvasRenderingContext2D, pattern: BeadPattern
   }
 
   for (let column = 0; column <= pattern.width; column += 1) {
-    context.strokeStyle = column % 29 === 0 ? 'rgba(16, 64, 99, .76)' : column % 5 === 0 ? 'rgba(31, 44, 58, .38)' : 'rgba(31, 44, 58, .18)'
-    context.lineWidth = column % 29 === 0 ? 2.2 : column % 5 === 0 ? 1.35 : 1
+    context.strokeStyle = column % 5 === 0 ? BEAD_GRID_DIVIDER_COLOR : 'rgba(31, 44, 58, .18)'
+    context.lineWidth = column % 5 === 0 ? 1.35 : 1
     context.beginPath()
     context.moveTo(x + column * cellSize + .5, y)
     context.lineTo(x + column * cellSize + .5, y + height)
     context.stroke()
   }
   for (let row = 0; row <= pattern.height; row += 1) {
-    context.strokeStyle = row % 29 === 0 ? 'rgba(16, 64, 99, .76)' : row % 5 === 0 ? 'rgba(31, 44, 58, .38)' : 'rgba(31, 44, 58, .18)'
-    context.lineWidth = row % 29 === 0 ? 2.2 : row % 5 === 0 ? 1.35 : 1
+    context.strokeStyle = row % 5 === 0 ? BEAD_GRID_DIVIDER_COLOR : 'rgba(31, 44, 58, .18)'
+    context.lineWidth = row % 5 === 0 ? 1.35 : 1
     context.beginPath()
     context.moveTo(x, y + row * cellSize + .5)
     context.lineTo(x + width, y + row * cellSize + .5)

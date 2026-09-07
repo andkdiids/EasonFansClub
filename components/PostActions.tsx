@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { PostFeatureConfirmDialog } from '@/components/PostFeatureConfirmDialog'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 
 export type PostInteractionLiker = {
@@ -209,6 +210,7 @@ export function PostManagementMenu({
   const [isPinned, setIsPinned] = useState(initialIsPinned)
   const [isFeatured, setIsFeatured] = useState(initialIsFeatured)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [featureConfirm, setFeatureConfirm] = useState<boolean | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -235,7 +237,6 @@ export function PostManagementMenu({
     const previousPinned = isPinned
     const previousFeatured = isFeatured
     if (typeof payload.isPinned === 'boolean') setIsPinned(payload.isPinned)
-    if (typeof payload.isFeatured === 'boolean') setIsFeatured(payload.isFeatured)
     setError('')
     setIsSubmitting(true)
     try {
@@ -255,6 +256,7 @@ export function PostManagementMenu({
         router.replace(redirectTo)
         return
       }
+      if (typeof payload.isFeatured === 'boolean') setFeatureConfirm(null)
       setMenuOpen(false)
       router.refresh()
     } catch (reason) {
@@ -264,6 +266,13 @@ export function PostManagementMenu({
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  function requestFeatureChange(nextIsFeatured: boolean) {
+    if (isSubmitting) return
+    setError('')
+    setMenuOpen(false)
+    setFeatureConfirm(nextIsFeatured)
   }
 
   return (
@@ -295,7 +304,7 @@ export function PostManagementMenu({
               <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => void updatePost({ isPinned: !isPinned })}>
                 {isPinned ? '\u53d6\u6d88\u7f6e\u9876' : '\u7f6e\u9876\u5e16\u5b50'}
               </button>
-              <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => void updatePost({ isFeatured: !isFeatured })}>
+              <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => requestFeatureChange(!isFeatured)}>
                 {isFeatured ? '\u53d6\u6d88\u7cbe\u534e' : '\u8bbe\u4e3a\u7cbe\u534e'}
               </button>
             </>
@@ -313,6 +322,16 @@ export function PostManagementMenu({
           ) : null}
           {error ? <p role="alert">{error}</p> : null}
         </div>
+      ) : null}
+      {featureConfirm !== null ? (
+        <PostFeatureConfirmDialog
+          open
+          nextIsFeatured={featureConfirm}
+          loading={isSubmitting}
+          error={error}
+          onConfirm={() => { if (featureConfirm !== null) void updatePost({ isFeatured: featureConfirm }) }}
+          onCancel={() => setFeatureConfirm(null)}
+        />
       ) : null}
       {confirmDelete ? (
         <div className="post-management-menu-confirm-backdrop" role="presentation">
@@ -470,6 +489,7 @@ export function AdminPostActions({
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [featureConfirm, setFeatureConfirm] = useState<boolean | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   async function updatePost(payload: { isPinned?: boolean; isFeatured?: boolean; isDeleted?: boolean }) {
@@ -500,6 +520,7 @@ export function AdminPostActions({
       return
     }
 
+    if (typeof payload.isFeatured === 'boolean') setFeatureConfirm(null)
     router.refresh()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '管理员操作失败，请稍后重试')
@@ -511,6 +532,7 @@ export function AdminPostActions({
   return (
     <div className="relative flex flex-wrap items-center gap-2">
       <button
+        type="button"
         onClick={() => updatePost({ isPinned: !isPinned })}
         disabled={isSubmitting}
         className="rounded-lg border border-sky-200 px-3 py-2 text-sm font-black disabled:opacity-60"
@@ -518,13 +540,25 @@ export function AdminPostActions({
         {isPinned ? '取消置顶' : '置顶'}
       </button>
       <button
-        onClick={() => updatePost({ isFeatured: !isFeatured })}
+        type="button"
+        onClick={() => setFeatureConfirm(!isFeatured)}
         disabled={isSubmitting}
         className="rounded-lg border border-sky-200 px-3 py-2 text-sm font-black disabled:opacity-60"
       >
         {isFeatured ? '取消精华' : '设为精华'}
       </button>
+      {featureConfirm !== null ? (
+        <PostFeatureConfirmDialog
+          open
+          nextIsFeatured={featureConfirm}
+          loading={isSubmitting}
+          error={error}
+          onConfirm={() => { if (featureConfirm !== null) void updatePost({ isFeatured: featureConfirm }) }}
+          onCancel={() => setFeatureConfirm(null)}
+        />
+      ) : null}
       <button
+        type="button"
         onClick={() => setConfirmDelete(true)}
         disabled={isSubmitting}
         className="rounded-lg border border-red-200 px-3 py-2 text-sm font-black text-red-600 disabled:opacity-60"

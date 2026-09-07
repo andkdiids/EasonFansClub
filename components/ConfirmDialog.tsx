@@ -17,6 +17,7 @@ export function ConfirmDialog({
   cancelLabel = '取消',
   loading = false,
   confirmDisabled = false,
+  error = '',
   onConfirm,
   onCancel,
 }: Readonly<{
@@ -27,6 +28,7 @@ export function ConfirmDialog({
   cancelLabel?: string
   loading?: boolean
   confirmDisabled?: boolean
+  error?: string
   onConfirm: () => void
   onCancel: () => void
 }>) {
@@ -75,6 +77,7 @@ export function ConfirmDialog({
       >
         <h2 className="text-lg font-black text-brand-950">{title}</h2>
         {description ? <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-500">{description}</p> : null}
+        {error ? <p role="alert" className="mt-3 text-sm font-bold leading-6 text-red-600">{error}</p> : null}
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <button
             ref={cancelRef}

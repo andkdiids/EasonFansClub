@@ -6390,6 +6390,7 @@ body:has(.duel-page) .app-page-content {
 .rich-text-toolbar-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; display: grid; box-sizing: border-box; min-width: 128px; overflow: hidden; border: 1px solid var(--border-strong, #cfd6df); border-radius: 9px; background: var(--surface-elevated, #fff); box-shadow: 0 10px 28px rgba(2, 8, 18, .16); }
 .rich-text-toolbar-menu-item { display: flex; min-height: 40px; width: 100%; align-items: center; gap: 8px; border: 0; padding: 0 12px; color: var(--foreground-muted, #667085); background: transparent; text-align: left; font-size: 12px; font-weight: 800; white-space: nowrap; }
 .rich-text-toolbar-menu-item:hover, .rich-text-toolbar-menu-item.is-active { color: var(--primary, #2f6fed); background: var(--surface-subtle, #f1f5f9); }
+.rich-text-toolbar-menu-hint { display: block; padding: 7px 12px 8px; color: var(--foreground-muted, #667085); font-size: 10px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
 .rich-text-color-menu { right: 0; left: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(240px, calc(100vw - 32px)); }
 .rich-text-color-trigger { color: var(--primary); font-size: 16px; font-weight: 900; line-height: 1; }
 .rich-text-color-dot { width: 12px; height: 12px; flex: none; border: 1px solid var(--border-strong, #cfd6df); border-radius: 50%; background: currentColor; }
@@ -6409,6 +6410,8 @@ body:has(.duel-page) .app-page-content {
 .rich-text-editor-surface li { display: list-item; margin: .2em 0; padding-left: .15em; }
 .rich-text-editor-surface blockquote { margin: .9em 0; border-left: 3px solid var(--primary, #2f6fed); padding: .35em 1em; color: var(--foreground-muted, #667085); background: var(--surface-subtle, #f8fafc); }
 .rich-text-editor-surface hr { margin: 1.1em 0; border: 0; border-top: 1px solid var(--border, #e5e9f0); }
+.rich-text-editor-surface .rich-text-inline-image, .rich-post-content .rich-text-inline-image { display: inline-block; max-width: 100%; height: auto; border-radius: 10px; vertical-align: middle; }
+.rich-text-editor-surface .rich-text-inline-image { cursor: default; user-select: none; }
 .rich-text-editor-surface a, .rich-post-content a { color: var(--primary, #2f6fed); text-decoration: underline; text-underline-offset: 2px; }
 .rich-text-editor-surface .rich-text-music-reference, .rich-post-content .rich-text-music-reference { display: inline-flex; max-width: min(100%, 420px); vertical-align: middle; align-items: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--primary, #2f6fed) 24%, var(--border, #e5e9f0)); border-radius: 8px; padding: 5px 6px 5px 7px; color: var(--foreground, #111827); background: color-mix(in srgb, var(--primary, #2f6fed) 7%, var(--surface-elevated, #fff)); text-decoration: none; line-height: 1.25; }
 .rich-text-editor-surface .rich-text-music-reference { cursor: default; }

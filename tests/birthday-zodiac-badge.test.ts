@@ -150,13 +150,20 @@ test('schema and migration add only the controlled birthday rule enums; seed doe
   assert.doesNotMatch(read('prisma/seed.ts'), /BIRTHDAY_ZODIAC|白羊座生日|金牛座生日/)
 })
 
-test('central grant contract is repeatable by period and no revoke path is attached to birthday updates', () => {
+test('central grant contract is repeatable by period and birthday updates use retention-aware reconciliation', () => {
   const schema = read('prisma/schema.prisma')
   const service = read('lib/badge-service.ts')
   const route = read('app/api/users/me/route.ts')
+  const engine = read('lib/badge-rule-engine.ts')
   const userBadge = schema.slice(schema.indexOf('model UserBadge'), schema.indexOf('model UserBadgeShowcase'))
   assert.match(userBadge, /activeKey\s+String\?\s+@unique/)
   assert.match(service, /activeUserBadgeWhere/)
   assert.match(service, /grantKey/)
+  assert.match(service, /sameSource\.isActive/)
+  assert.match(service, /regrantRecordId/)
   assert.doesNotMatch(route, /revokeBadge\(/)
+  assert.match(route, /triggerBadgeEvaluation\(guard\.user\.id, 'USER_BIRTHDAY_UPDATED'/)
+  assert.match(engine, /reconcileBirthdayAndZodiacBadges/)
+  assert.match(engine, /evaluateBadgeRetentionForUser/)
+  assert.match(engine, /'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY'/)
 })

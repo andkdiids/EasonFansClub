@@ -1,11 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { prepareContentImageFile, ContentImageClientError, type ContentImageProcessingPhase } from '@/lib/content-image-browser'
+import { ContentImageClientError, uploadContentImage, type ContentImageUploadPhase } from '@/lib/content-image-browser'
 import {
   CONTENT_IMAGE_ACCEPT,
   CONTENT_IMAGE_ERROR_MESSAGES,
-  type ContentImageUploadErrorCode,
 } from '@/lib/content-image-upload'
 import { MAX_CONTENT_IMAGES, reorderContentImageUrls } from '@/lib/content-images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -16,7 +15,7 @@ type PointerDragState = {
   currentIndex: number
 }
 
-type PendingUploadPhase = ContentImageProcessingPhase | 'uploading' | 'failed'
+type PendingUploadPhase = ContentImageUploadPhase | 'failed'
 
 type PendingUpload = {
   id: string
@@ -27,26 +26,9 @@ type PendingUpload = {
   previewFailed?: boolean
 }
 
-const KNOWN_ERROR_CODES = new Set<ContentImageUploadErrorCode>([
-  'FILE_REQUIRED',
-  'EMPTY_FILE',
-  'FILE_TOO_LARGE',
-  'UNSUPPORTED_FORMAT',
-  'INVALID_FILE',
-  'HEIC_CONVERSION_FAILED',
-  'IMAGE_PROCESSING_FAILED',
-  'NETWORK_UPLOAD_FAILED',
-  'UPLOAD_FAILED',
-  'UPLOAD_RESPONSE_INVALID',
-])
-
 function createUploadId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   return `content-image-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-function isKnownErrorCode(value: unknown): value is ContentImageUploadErrorCode {
-  return typeof value === 'string' && KNOWN_ERROR_CODES.has(value as ContentImageUploadErrorCode)
 }
 
 function isBusyPhase(phase: PendingUploadPhase) {
@@ -57,19 +39,6 @@ function busyLabel(items: readonly PendingUpload[]) {
   if (items.some((item) => item.phase === 'uploading')) return '上传中…'
   if (items.some((item) => item.phase === 'compressing')) return '正在压缩…'
   return '处理中…'
-}
-
-function errorFromResponse(data: unknown, response: Response) {
-  const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {}
-  const code = isKnownErrorCode(payload.code)
-    ? payload.code
-    : response.status === 413
-      ? 'FILE_TOO_LARGE'
-      : 'UPLOAD_FAILED'
-  const message = typeof payload.message === 'string' && payload.message.trim()
-    ? payload.message
-    : CONTENT_IMAGE_ERROR_MESSAGES[code]
-  return new ContentImageClientError(code, message)
 }
 
 function failureMessage(reason: unknown) {
@@ -149,36 +118,13 @@ export function ContentImageUploader({
   async function uploadItem(item: PendingUpload) {
     updatePendingUpload(item.id, { phase: 'processing', error: undefined })
     try {
-      const preparedFile = await prepareContentImageFile(item.file, (phase) => {
+      // uploadContentImage uses the existing form.set('file', file) contract.
+      const { url } = await uploadContentImage(item.file, (phase) => {
         updatePendingUpload(item.id, { phase })
       })
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
 
-      updatePendingUpload(item.id, { phase: 'uploading' })
-      const form = new FormData()
-      // The route reads formData.get('file'); keep this field contract exact.
-      const file = preparedFile
-      form.set('file', file)
-      let response: Response
-      try {
-        // Do not set Content-Type manually: the browser must add the multipart
-        // boundary, which is especially important in mobile WebViews.
-        response = await fetch('/api/uploads/content-image', {
-          method: 'POST',
-          body: form,
-          cache: 'no-store',
-        })
-      } catch {
-        throw new ContentImageClientError('NETWORK_UPLOAD_FAILED', CONTENT_IMAGE_ERROR_MESSAGES.NETWORK_UPLOAD_FAILED)
-      }
-      const data = await response.json().catch(() => null) as { url?: unknown; code?: unknown; message?: unknown } | null
-      if (!response.ok) throw errorFromResponse(data, response)
-      if (!data || typeof data.url !== 'string' || !data.url.trim()) {
-        throw new ContentImageClientError('UPLOAD_RESPONSE_INVALID', CONTENT_IMAGE_ERROR_MESSAGES.UPLOAD_RESPONSE_INVALID)
-      }
-      if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
-
-      appendUploadedUrl(data.url)
+      appendUploadedUrl(url)
       removePendingUpload(item.id)
     } catch (reason) {
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return

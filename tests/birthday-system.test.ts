@@ -39,33 +39,36 @@ test('homepage birthday count uses real user month/day, not TodayEvent', () => {
   assert.doesNotMatch(home, /type:\s*'BIRTHDAY', status:\s*'APPROVED'/)
 })
 
-test('profile API exposes birthday and enforces one-time immutable writes without revoking history', () => {
+test('profile API exposes birthday and enforces one self-edit with badge reconciliation', () => {
   const route = read('app/api/users/me/route.ts')
   assert.match(route, /birthMonth:\s*true/)
   assert.match(route, /birthDay:\s*true/)
   assert.match(route, /birthdaySetAt:\s*true/)
-  // 首次设置使用条件 updateMany；已经设置的生日只能同值 no-op，不能修改或清空。
-  assert.match(route, /writeBirthdayOnce\(tx, guard\.user\.id/)
+  assert.match(route, /birthdateSelfEditCount:\s*true/)
+  // 首次设置和唯一一次本人修改均通过共享服务；管理员流程使用同一服务但不改计数。
+  assert.match(route, /updateUserBirthdate\(tx, \{[\s\S]*actor: 'SELF'/)
   assert.match(read('lib/birthday-immutability.ts'), /birthMonth:\s*null/)
   assert.match(read('lib/birthday-immutability.ts'), /birthDay:\s*null/)
-  assert.match(read('lib/birthday-immutability.ts'), /BIRTHDAY_ALREADY_SET/)
+  assert.match(read('lib/birthday-immutability.ts'), /BIRTHDATE_SELF_EDIT_EXHAUSTED/)
+  assert.match(read('lib/birthday-immutability.ts'), /birthdateSelfEditCount:\s*\{ increment: 1 \}/)
   assert.match(route, /isValidBirthdayParts/)
   assert.doesNotMatch(route, /data\.birthMonth\s*=/)
   assert.doesNotMatch(route, /data\.birthDay\s*=/)
   assert.match(route, /USER_BIRTHDAY_UPDATED/)
+  assert.match(read('lib/badge-rule-engine.ts'), /reconcileBirthdayAndZodiacBadges/)
 })
 
-test('profile form shows one-time setup and read-only state after the initial set', () => {
+test('profile form shows one remaining edit and read-only state after it is used', () => {
   const form = read('app/profile/ProfileSettingsForm.tsx')
   assert.match(form, /当前生日/)
   assert.match(form, /请选择月份/)
   assert.match(form, /请选择日期/)
-  assert.match(form, /生日仅可设置一次，保存后不可修改，请确认日期无误。/)
-  assert.match(form, /<h2 id="birthday-confirm-title"[^>]*>确认生日<\/h2>/)
+  assert.match(form, /生日设置后仅可再修改一次，请确认信息正确。/)
+  assert.match(form, /生日已修改过一次，无法再次自行修改生日。/)
+  assert.match(form, /<h2 id="birthday-confirm-title"[^>]*>\{birthdayConfigured \? '确认修改生日？' : '确认生日？'\}<\/h2>/)
   assert.match(form, /确认并保存/)
-  assert.match(form, /isBirthdayConfigured\(persistedBirthday\)/)
-  assert.doesNotMatch(form, /可随时修正/)
-  assert.doesNotMatch(form, /修改生日后只会影响之后的生日判断/)
+  assert.match(form, /persistedBirthday\.canEditBirthdate/)
+  assert.match(form, /修改生日后只会影响之后的生日判断|生日或星座勋章会根据新的生日重新计算/)
 })
 
 test('birthday badge is auto-granted on login and on visiting own profile', () => {

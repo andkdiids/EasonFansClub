@@ -48,7 +48,6 @@ function PatternCanvas({ pattern, label, large = false }: Readonly<{ pattern: Be
       displayGrid: true,
       displayCodes: large,
       displayCoordinates: large,
-      displayBoardLines: true,
     })
   }, [large, pattern])
 

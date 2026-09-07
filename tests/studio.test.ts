@@ -9,7 +9,7 @@ import { generatePatternFromPixels } from '../lib/studio/beads/image'
 import { EMPTY_CELL } from '../lib/studio/beads/types'
 import { calculateMaterialList, createDemoPattern, floodFill, removeTinyColorRegions, replaceColor, splitIntoBoards } from '../lib/studio/beads/grid'
 import { createBeadPatternPdf } from '../lib/studio/beads/pdf'
-import { patternCellColor, renderPatternToDataUrl } from '../lib/studio/beads/renderer'
+import { BEAD_GRID_DIVIDER_COLOR, DEFAULT_BEAD_EXPORT_SCALE, patternCellColor, patternCellSize, renderPatternToCanvas, renderPatternToDataUrl, safeRenderScale } from '../lib/studio/beads/renderer'
 import { BEAD_STUDIO_ONBOARDING_STORAGE_KEY, hasSeenBeadStudioOnboarding, markBeadStudioOnboardingSeen } from '../lib/studio/beads/onboarding'
 import { isTrustedShareCardDataUrl, shareCardApiPath } from '../lib/share-card'
 
@@ -207,7 +207,7 @@ test('MARD 221 真实像素图生成后的 PNG / PDF 颜色一致', async () => 
     getContext: () => context,
     toDataURL: () => 'data:image/png;base64,MARD221-validation',
   } as unknown as HTMLCanvasElement
-  const renderOptions = { transparentBackground: true, displayGrid: false, displayBoardLines: false }
+  const renderOptions = { transparentBackground: true, displayGrid: false }
   const globalWithDocument = globalThis as typeof globalThis & { document?: unknown }
   const hadDocument = Object.prototype.hasOwnProperty.call(globalWithDocument, 'document')
   const previousDocument = globalWithDocument.document
@@ -223,6 +223,50 @@ test('MARD 221 真实像素图生成后的 PNG / PDF 颜色一致', async () => 
   const pdf = createBeadPatternPdf(pattern, 'MARD 221 validation')
   const pdfText = new TextDecoder().decode(new Uint8Array(await pdf.arrayBuffer()))
   for (const hex of new Set(expectedColors)) assert.ok(pdfText.includes(pdfRgbCommand(hex)), `PDF 未包含 ${hex} 的颜色命令`)
+})
+
+test('网格 5 格分界线复用蓝色且高清 PNG 单张重绘 29/58/102 尺寸', () => {
+  const palette = getDefaultPalette()
+  for (const size of [29, 58, 102]) {
+    const pattern = createDemoPattern(palette, size, size)
+    pattern.cells[0] = 0
+    const strokeStyles: string[] = []
+    const textFonts: string[] = []
+    const scaleCalls: number[] = []
+    const context = {
+      fillStyle: '',
+      globalAlpha: 1,
+      strokeStyle: '',
+      lineWidth: 0,
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+      clearRect() {},
+      fillRect() {},
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      stroke() { strokeStyles.push(context.strokeStyle) },
+      arc() {},
+      fill() {},
+      fillText() { textFonts.push(context.font) },
+      scale(value: number) { scaleCalls.push(value) },
+      setLineDash() {},
+      strokeRect() {},
+    }
+    const canvas = { width: 0, height: 0, getContext: () => context } as unknown as HTMLCanvasElement
+    const result = renderPatternToCanvas(canvas, pattern, { displayGrid: true, displayCodes: true, displayCoordinates: true, renderScale: DEFAULT_BEAD_EXPORT_SCALE })
+    const logicalSize = size * patternCellSize(size, size)
+    const dividerCount = (Math.floor(size / 5) + 1) * 2
+    assert.equal(result.scale, DEFAULT_BEAD_EXPORT_SCALE)
+    assert.equal(canvas.width, logicalSize * DEFAULT_BEAD_EXPORT_SCALE)
+    assert.equal(canvas.height, logicalSize * DEFAULT_BEAD_EXPORT_SCALE)
+    assert.deepEqual(scaleCalls, [DEFAULT_BEAD_EXPORT_SCALE])
+    assert.equal(strokeStyles.length, (size + 1) * 2)
+    assert.equal(strokeStyles.filter((color) => color === BEAD_GRID_DIVIDER_COLOR).length, dividerCount)
+    assert.equal(textFonts.length > 0, true)
+  }
+  assert.equal(safeRenderScale(714, 714, DEFAULT_BEAD_EXPORT_SCALE), DEFAULT_BEAD_EXPORT_SCALE)
 })
 
 test('量化和 Floyd–Steinberg 输出受当前色板约束', () => {

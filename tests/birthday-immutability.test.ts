@@ -1,140 +1,204 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import type { Prisma } from '@prisma/client'
 import {
   BIRTHDAY_ALREADY_SET,
+  BIRTHDATE_SELF_EDIT_EXHAUSTED,
   BirthdayAlreadySetError,
+  BirthdaySelfEditExhaustedError,
+  getBirthdayEditState,
   isBirthdayConfigured,
-  writeBirthdayOnce,
+  updateUserBirthdate,
   type BirthdayRecord,
 } from '@/lib/birthday-immutability'
 import { isBirthdayToday, isValidBirthdayParts, getZodiacSignFromBirthday } from '@/lib/zodiac'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-function createFakeBirthdayDb(initial: BirthdayRecord | null) {
-  let row = initial ? { ...initial } : null
+type FakeRow = Omit<Required<BirthdayRecord>, 'birthdateSelfEditCount'> & { birthdateSelfEditCount: number }
 
-  const db = {
-    user: {
-      async updateMany(args: {
-        where: { id: string; birthMonth: null; birthDay: null; birthdaySetAt: null }
-        data: { birthMonth: number; birthDay: number; birthdaySetAt: Date }
-      }) {
-        if (
-          row &&
-          args.where.id === 'user-1' &&
-          row.birthMonth === null &&
-          row.birthDay === null &&
-          row.birthdaySetAt === null
-        ) {
-          row = { ...row, ...args.data }
-          return { count: 1 }
-        }
-        return { count: 0 }
-      },
-      async findUnique() {
-        return row ? { ...row } : null
-      },
-    },
-    current() {
+function createFakeBirthdayDb(initial: FakeRow): Prisma.TransactionClient {
+  let row: FakeRow | null = { ...initial }
+
+  const user = {
+    async findUnique() {
       return row ? { ...row } : null
+    },
+    async updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }) {
+      if (!row || args.where.id !== 'user-1') return { count: 0 }
+
+      const countCondition = args.where.birthdateSelfEditCount as { lt?: number } | undefined
+      if (countCondition?.lt !== undefined && row.birthdateSelfEditCount >= countCondition.lt) return { count: 0 }
+      for (const key of ['birthMonth', 'birthDay', 'birthdaySetAt'] as const) {
+        if (!(key in args.where)) continue
+        const expected = args.where[key]
+        const actual = row[key]
+        if (expected instanceof Date && actual instanceof Date) {
+          if (expected.getTime() !== actual.getTime()) return { count: 0 }
+        } else if (actual !== expected) {
+          return { count: 0 }
+        }
+      }
+
+      const increment = args.data.birthdateSelfEditCount as { increment?: number } | undefined
+      row = {
+        ...row,
+        birthMonth: typeof args.data.birthMonth === 'number' ? args.data.birthMonth : row.birthMonth,
+        birthDay: typeof args.data.birthDay === 'number' ? args.data.birthDay : row.birthDay,
+        birthdaySetAt: args.data.birthdaySetAt instanceof Date ? args.data.birthdaySetAt : row.birthdaySetAt,
+        birthdateSelfEditCount: increment?.increment ? row.birthdateSelfEditCount + increment.increment : row.birthdateSelfEditCount,
+      }
+      return { count: 1 }
+    },
+    async update(args: { data: Record<string, unknown> }) {
+      if (!row) throw new Error('USER_NOT_FOUND')
+      row = {
+        ...row,
+        birthMonth: typeof args.data.birthMonth === 'number' ? args.data.birthMonth : row.birthMonth,
+        birthDay: typeof args.data.birthDay === 'number' ? args.data.birthDay : row.birthDay,
+        birthdaySetAt: args.data.birthdaySetAt instanceof Date ? args.data.birthdaySetAt : row.birthdaySetAt,
+      }
+      return { ...row }
     },
   }
 
-  return db
+  return { user } as unknown as Prisma.TransactionClient
 }
 
-function blankBirthday(): BirthdayRecord {
-  return { birthMonth: null, birthDay: null, birthdaySetAt: null }
+function blankBirthday(): FakeRow {
+  return { birthMonth: null, birthDay: null, birthdaySetAt: null, birthdateSelfEditCount: 0 }
 }
 
-function setBirthday(month: number, day: number): BirthdayRecord {
-  return { birthMonth: month, birthDay: day, birthdaySetAt: new Date('2026-09-03T00:00:00.000Z') }
+function setBirthday(month: number, day: number, count = 0): FakeRow {
+  return {
+    birthMonth: month,
+    birthDay: day,
+    birthdaySetAt: new Date('2026-09-03T00:00:00.000Z'),
+    birthdateSelfEditCount: count,
+  }
 }
 
-test('CASE 1: a new user can set a valid birthday exactly once', async () => {
+test('CASE 1: a new user can set a valid birthday and keeps one self-edit', async () => {
   const db = createFakeBirthdayDb(blankBirthday())
-  const result = await writeBirthdayOnce(db, 'user-1', { month: 5, day: 21 })
+  const result = await updateUserBirthdate(db, {
+    targetUserId: 'user-1',
+    birthdate: { month: 5, day: 21 },
+    actor: 'SELF',
+    now: new Date('2026-09-07T00:00:00.000Z'),
+  })
 
-  assert.deepEqual(result, { status: 'set', birthday: { month: 5, day: 21 } })
-  assert.deepEqual(db.current()?.birthMonth, 5)
-  assert.deepEqual(db.current()?.birthDay, 21)
-  assert.ok(db.current()?.birthdaySetAt instanceof Date)
+  assert.deepEqual(result, {
+    status: 'set',
+    changed: true,
+    previousBirthday: null,
+    birthday: { month: 5, day: 21 },
+    birthdaySetAt: new Date('2026-09-07T00:00:00.000Z'),
+    birthdateSelfEditCount: 0,
+  })
+  assert.equal(getBirthdayEditState(await db.user.findUnique({ where: { id: 'user-1' } })).canEditBirthdate, true)
 })
 
 test('CASE 2: submitting the same birthday is an allowed no-op', async () => {
   const existing = setBirthday(5, 21)
   const db = createFakeBirthdayDb(existing)
-  const result = await writeBirthdayOnce(db, 'user-1', { month: 5, day: 21 })
+  const result = await updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 5, day: 21 }, actor: 'SELF' })
 
-  assert.deepEqual(result, { status: 'noop', birthday: { month: 5, day: 21 } })
-  assert.deepEqual(db.current(), existing)
+  assert.equal(result.status, 'noop')
+  assert.equal(result.changed, false)
+  assert.equal(result.birthdateSelfEditCount, 0)
+  assert.deepEqual(await db.user.findUnique({ where: { id: 'user-1' } }), existing)
 })
 
-test('CASE 3/4: changing the day or month is rejected with BIRTHDAY_ALREADY_SET', async () => {
-  for (const requested of [{ month: 5, day: 22 }, { month: 6, day: 21 }] as const) {
-    const db = createFakeBirthdayDb(setBirthday(5, 21))
-    await assert.rejects(
-      writeBirthdayOnce(db, 'user-1', requested),
-      (error: unknown) => error instanceof BirthdayAlreadySetError && error.code === BIRTHDAY_ALREADY_SET,
-    )
-  }
+test('CASE 3/4: a configured user may change once, then receives the exhausted error', async () => {
+  const db = createFakeBirthdayDb(setBirthday(5, 21))
+  const result = await updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 5, day: 22 }, actor: 'SELF' })
+  assert.equal(result.status, 'updated')
+  assert.equal(result.birthdateSelfEditCount, 1)
+
+  await assert.rejects(
+    updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 6, day: 21 }, actor: 'SELF' }),
+    (error: unknown) => error instanceof BirthdaySelfEditExhaustedError && error.code === BIRTHDATE_SELF_EDIT_EXHAUSTED,
+  )
 })
 
 test('CASE 5: clearing an existing birthday is rejected', async () => {
   const db = createFakeBirthdayDb(setBirthday(5, 21))
   await assert.rejects(
-    writeBirthdayOnce(db, 'user-1', null),
+    updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: null, actor: 'SELF' }),
     (error: unknown) => error instanceof BirthdayAlreadySetError && error.code === BIRTHDAY_ALREADY_SET,
   )
-  assert.deepEqual(db.current(), setBirthday(5, 21))
+  assert.deepEqual(await db.user.findUnique({ where: { id: 'user-1' } }), setBirthday(5, 21))
 })
 
-test('CASE 7: concurrent first sets allow only one winner and one stored birthday', async () => {
-  const db = createFakeBirthdayDb(blankBirthday())
+test('CASE 6/7: concurrent self edits consume at most one edit slot', async () => {
+  const db = createFakeBirthdayDb(setBirthday(5, 21))
   const results = await Promise.allSettled([
-    writeBirthdayOnce(db, 'user-1', { month: 5, day: 21 }),
-    writeBirthdayOnce(db, 'user-1', { month: 7, day: 15 }),
+    updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 7, day: 15 }, actor: 'SELF' }),
+    updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 6, day: 21 }, actor: 'SELF' }),
   ])
 
-  const winners = results.filter((result) => result.status === 'fulfilled')
-  const failures = results.filter((result) => result.status === 'rejected')
-  assert.equal(winners.length, 1)
-  assert.equal(failures.length, 1)
-  assert.equal((failures[0] as PromiseRejectedResult).reason.code, BIRTHDAY_ALREADY_SET)
-  const stored = [db.current()?.birthMonth, db.current()?.birthDay]
-  assert.ok([[5, 21], [7, 15]].some(([month, day]) => stored[0] === month && stored[1] === day))
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1)
+  assert.equal(results.filter((result) => result.status === 'rejected').length, 1)
+  assert.equal((results.find((result) => result.status === 'rejected') as PromiseRejectedResult).reason.code, BIRTHDATE_SELF_EDIT_EXHAUSTED)
+  assert.equal((await db.user.findUnique({ where: { id: 'user-1' } }))?.birthdateSelfEditCount, 1)
 })
 
-test('CASES 6/8/9/10: the API and UI keep birthday writes separate from other profile settings', () => {
+test('CASE 8: historical birthday rows default to count zero and retain one edit', async () => {
+  assert.equal(isBirthdayConfigured({ birthMonth: 5, birthDay: 21, birthdaySetAt: null }), true)
+  const db = createFakeBirthdayDb(setBirthday(5, 21))
+  const result = await updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 7, day: 15 }, actor: 'SELF' })
+  assert.equal(result.status, 'updated')
+  assert.equal(result.birthdateSelfEditCount, 1)
+})
+
+test('CASE 9: admin changes do not consume or reset the self-edit count', async () => {
+  const db = createFakeBirthdayDb(setBirthday(7, 15, 1))
+  const result = await updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 8, day: 20 }, actor: 'ADMIN' })
+  assert.equal(result.changed, true)
+  assert.equal(result.birthdateSelfEditCount, 1)
+  await assert.rejects(
+    updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 9, day: 7 }, actor: 'SELF' }),
+    BirthdaySelfEditExhaustedError,
+  )
+})
+
+test('CASE 10: birthday validation accepts February 29 and rejects February 30', async () => {
+  assert.equal(isValidBirthdayParts({ month: 2, day: 29 }), true)
+  assert.equal(isValidBirthdayParts({ month: 2, day: 30 }), false)
+  const db = createFakeBirthdayDb(blankBirthday())
+  await assert.rejects(updateUserBirthdate(db, { targetUserId: 'user-1', birthdate: { month: 2, day: 30 }, actor: 'SELF' }), /INVALID_BIRTHDAY/)
+})
+
+test('CASE 11: the API and UI use the shared mutation service and keep birthday writes separate', () => {
   const route = read('app/api/users/me/route.ts')
   const helper = read('lib/birthday-immutability.ts')
   const form = read('app/profile/ProfileSettingsForm.tsx')
   const dataBlock = route.slice(route.indexOf('const data:'), route.indexOf('if (body?.bio !== undefined)'))
 
-  assert.match(route, /writeBirthdayOnce\(tx, guard\.user\.id, requestedBirthday \|\| null, now\)/)
+  assert.match(route, /updateUserBirthdate\(tx, \{[\s\S]*actor: 'SELF'/)
   assert.match(helper, /updateMany\(/)
+  assert.match(helper, /birthdateSelfEditCount:\s*\{ lt: BIRTHDATE_SELF_EDIT_LIMIT \}/)
   assert.match(helper, /birthMonth:\s*null/)
   assert.match(helper, /birthDay:\s*null/)
   assert.match(helper, /birthdaySetAt:\s*null/)
   assert.match(route, /birthdayPublic !== undefined\) data\.birthdayPublic = birthdayPublic/)
   assert.doesNotMatch(dataBlock, /birthMonth|birthDay|birthdaySetAt/)
-  assert.match(form, /isBirthdayConfigured\(persistedBirthday\)/)
-  assert.match(form, /const birthdayPayload = !birthdayConfigured && birthdayToSave/)
+  assert.match(form, /persistedBirthday\.canEditBirthdate/)
+  assert.match(form, /const birthdayPayload = birthdayToSave/)
   assert.match(form, /birthdayPublic: Boolean\(form\.birthdayPublic\)/)
 })
 
-test('CASE 10: any historical birthday value is read-only, even without birthdaySetAt', () => {
-  assert.equal(isBirthdayConfigured({ birthMonth: 5, birthDay: 21, birthdaySetAt: null }), true)
-  assert.equal(isBirthdayConfigured({ birthMonth: null, birthDay: null, birthdaySetAt: new Date() }), true)
-  assert.equal(isBirthdayConfigured(blankBirthday()), false)
-  assert.match(read('app/profile/ProfileSettingsForm.tsx'), /isBirthdayConfigured\(persistedBirthday\) \? \(/)
-})
-
-test('CASE 11/12: birthday validation accepts February 29 and rejects February 30', () => {
-  assert.equal(isValidBirthdayParts({ month: 2, day: 29 }), true)
-  assert.equal(isValidBirthdayParts({ month: 2, day: 30 }), false)
+test('CASE 12: profile state exposes one remaining edit and then a read-only state', () => {
+  assert.deepEqual(getBirthdayEditState(setBirthday(5, 21)), {
+    hasBirthdate: true,
+    birthdateSelfEditCount: 0,
+    birthdateEditUsed: false,
+    canEditBirthdate: true,
+    birthdayEditRemaining: 1,
+  })
+  assert.equal(getBirthdayEditState(setBirthday(5, 21, 1)).canEditBirthdate, false)
+  assert.match(read('app/profile/ProfileSettingsForm.tsx'), /生日已修改过一次，无法再次自行修改生日。/)
 })
 
 test('birthday zodiac and birthday-today rules remain unchanged', () => {

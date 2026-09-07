@@ -11,7 +11,9 @@ const growth = read('lib/growth.ts')
 const schema = read('prisma/schema.prisma')
 
 test('设为精华从详情菜单走 PATCH，并在成功后同步菜单和详情状态', () => {
-  assert.match(actions, /updatePost\(\{ isFeatured: !isFeatured \}\)/)
+  assert.match(actions, /requestFeatureChange\(!isFeatured\)/)
+  assert.match(actions, /<PostFeatureConfirmDialog/)
+  assert.match(actions, /updatePost\(\{ isFeatured: featureConfirm \}\)/)
   assert.match(actions, /method: 'PATCH'/)
   assert.match(actions, /`\/api\/posts\/\$\{postId\}`/)
   assert.match(actions, /isFeatured \? '取消精华' : '设为精华'/)

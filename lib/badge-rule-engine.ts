@@ -267,6 +267,28 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
   return summary
 }
 
+/**
+ * Reconcile the two birthday rule families after a real birthday mutation.
+ * Granting still uses the normal idempotent rule evaluator; the retention pass
+ * only revokes AUTO_RULE sources when the configured rule explicitly opts into
+ * RETAIN_WHILE_ELIGIBLE. Manual and permanent sources remain untouched.
+ */
+export async function reconcileBirthdayAndZodiacBadges(userId: string, now = new Date()) {
+  const ruleTypes: readonly SupportedBadgeRuleType[] = ['BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY']
+  const summary = await evaluateUserAutoBadges(userId, ruleTypes, now, `birthday-reconcile:${now.toISOString()}`)
+  try {
+    const { evaluateBadgeRetentionForUser } = await import('@/lib/badge-retention')
+    await evaluateBadgeRetentionForUser(userId, {
+      ruleTypes,
+      now,
+      reason: '生日变更后不再满足生日或星座规则',
+    })
+  } catch (error) {
+    console.error('[badge-rule.birthday.retention]', { userId, error })
+  }
+  return summary
+}
+
 export type ZodiacBadgeScanSummary = {
   zodiac: ZodiacSign | null
   scanned: number
@@ -359,6 +381,7 @@ export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEva
     return emptySummary(userId)
   }
   const eventKey = eventId?.trim() ? `event:${eventType}:${eventId.trim()}` : `event:${eventType}`
+  if (eventType === 'USER_BIRTHDAY_UPDATED') return reconcileBirthdayAndZodiacBadges(userId, new Date())
   const summary = await evaluateUserAutoBadges(userId, ruleTypes, new Date(), eventKey)
   // Retention pass runs strictly after the grant pass so a badge that was just
   // re-earned by this very event is counted as still eligible, never revoked.

@@ -40,11 +40,21 @@ export type RichTextMark =
 export type RichTextInlineNode =
   | { type: 'text'; text: string; marks?: RichTextMark[] }
   | { type: 'hardBreak' }
+  | RichTextImageNode
   | RichTextMusicReferenceNode
   | RichTextPostReferenceNode
   | RichTextUserMentionNode
   | RichTextActivityReferenceNode
   | RichTextMaterialReferenceNode
+
+/** An uploaded image embedded at a stable position in the rich-text document. */
+export type RichTextImageNode = {
+  type: 'image'
+  attrs: {
+    src: string
+    alt?: string
+  }
+}
 
 export type RichTextMusicReferenceNode = {
   type: 'musicReference'
@@ -206,6 +216,26 @@ export function normalizeRichTextHref(value: unknown): string | null {
   }
 }
 
+/**
+ * Normalize an image source without ever accepting data/blob URLs. Images in
+ * rich content are uploaded first and only their final HTTP(S)/site-relative
+ * URL is persisted.
+ */
+export function normalizeRichTextImageSrc(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const raw = value.trim().replace(/[\u0000-\u001f\u007f]/gu, '')
+  if (!raw || raw.length > 2_048 || /["'<>\s]/u.test(raw)) return null
+  if (raw.startsWith('/') && !raw.startsWith('//')) return raw
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (!url.hostname || url.username || url.password) return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
 type ValidationState = {
   errors: string[]
   nodeCount: number
@@ -316,6 +346,27 @@ function normalizeInlineNode(value: unknown, state: ValidationState, depth: numb
   if (value.type === 'hardBreak') {
     if (!hasOnlyKeys(value, ['type'])) fail(state, path + ' has unknown attributes')
     return { type: 'hardBreak' }
+  }
+  if (value.type === 'image') {
+    if (!hasOnlyKeys(value, ['type', 'attrs']) || !isRecord(value.attrs) || !hasOnlyKeys(value.attrs, ['src', 'alt'])) {
+      fail(state, path + ' has invalid image attributes')
+      return null
+    }
+    const src = normalizeRichTextImageSrc(value.attrs.src)
+    if (!src) {
+      fail(state, path + '.attrs.src is invalid')
+      return null
+    }
+    const metadata: RichTextImageNode['attrs'] = { src }
+    if (value.attrs.alt !== undefined && value.attrs.alt !== null && value.attrs.alt !== '') {
+      if (typeof value.attrs.alt !== 'string' || value.attrs.alt.length > 300) {
+        fail(state, path + '.attrs.alt is invalid')
+        return null
+      }
+      const alt = value.attrs.alt.trim()
+      if (alt) metadata.alt = alt
+    }
+    return { type: 'image', attrs: metadata }
   }
   if (value.type === 'musicReference') {
     if (!hasOnlyKeys(value, ['type', 'attrs']) || !isRecord(value.attrs) || !hasOnlyKeys(value.attrs, ['songId', 'title', 'artist', 'album'])) {
@@ -624,6 +675,7 @@ function normalizeBlockNode(value: unknown, state: ValidationState, depth: numbe
 function extractInlineText(content: RichTextInlineNode[] | undefined) {
   return (content || []).map((node) => {
     if (node.type === 'hardBreak') return '\n'
+    if (node.type === 'image') return ''
     if (node.type === 'musicReference') return node.attrs.title || ''
     if (node.type === 'postReference') return node.attrs.available === false ? '该引用帖子已不可用' : node.attrs.title || '引用帖子'
     if (node.type === 'userMention') return '@' + (node.attrs.available === false ? '用户已不可用' : node.attrs.displayName || '用户')

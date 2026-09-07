@@ -4151,6 +4151,9 @@ model User {
   birthMonth                                             Int?
   birthDay                                               Int?
   birthdaySetAt                                          DateTime?
+  /// Counts only successful self-service changes after the first birthday set.
+  /// Existing rows default to 0 so historical users retain one self-edit.
+  birthdateSelfEditCount                                 Int                            @default(0)
   birthdayPublic                                         Boolean                        @default(true)
   uid                                                    Int                            @unique @default(autoincrement())
   experience                                             Int                            @default(0)

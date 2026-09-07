@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { ImageViewer } from '@/components/ImageViewer'
-import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { PostFeatureConfirmDialog } from '@/components/PostFeatureConfirmDialog'
 import { notifyForumDiscoveryFeedChanged } from '@/lib/forum-discovery-session'
 import { postModerationStatuses, type PostModerationStatus } from '@/lib/post-moderation'
 
@@ -56,24 +56,16 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
   // 关键词搜索（标题 / 正文 / 作者昵称 / UID / 帖子 ID）
   const [keyword, setKeyword] = useState('')
   const [searchInput, setSearchInput] = useState('')
-  // 批量删除
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
-  const [bulkDeleting, setBulkDeleting] = useState(false)
-  const [bulkError, setBulkError] = useState('')
-  const [bulkNotice, setBulkNotice] = useState('')
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   // 加精二次确认
-  const [featureConfirm, setFeatureConfirm] = useState<{ postId: string; title: string } | null>(null)
+  const [featureConfirm, setFeatureConfirm] = useState<{ postId: string; title: string; nextIsFeatured: boolean } | null>(null)
+  const [flaggingId, setFlaggingId] = useState<string | null>(null)
   // 每张待审卡片的「发布分区」选择（未点通过前只存在于前端状态，绝不改动正式帖子）。
   const [publishBoardByPostId, setPublishBoardByPostId] = useState<Record<string, string>>({})
-
-  const allSelected = posts.length > 0 && posts.every((post) => selectedIds.includes(post.id))
-  const selectedCount = selectedIds.length
 
   // 进入页面或组件被 Next.js 客户端导航复用时，保证列表始终与当前选中 Tab 对齐：
   // 若服务端预取的初始列表与当前 queueStatus 不一致（例如复用上一轮 Tab 的列表数据），
@@ -201,12 +193,21 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
   }
 
   async function toggleFlag(postId: string, field: 'isPinned' | 'isFeatured', value: boolean) {
+    if (flaggingId || reviewingId) return
     setError('')
-    const response = await fetch(`/api/posts/${postId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [field]: value }) })
-    const data = await response.json().catch(() => null)
-    if (!response.ok) { setError(data?.message || '设置失败'); return }
-    setPosts((current) => current.map((post) => post.id === postId ? { ...post, [field]: value } : post))
-    setMessage(value ? '帖子标记已设置' : '帖子标记已取消')
+    setFlaggingId(postId)
+    try {
+      const response = await fetch(`/api/posts/${postId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [field]: value }) })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) { setError(data?.message || '设置失败'); return }
+      setPosts((current) => current.map((post) => post.id === postId ? { ...post, [field]: value } : post))
+      if (field === 'isFeatured') setFeatureConfirm(null)
+      setMessage(value ? '帖子标记已设置' : '帖子标记已取消')
+    } catch {
+      setError('设置失败，请稍后重试')
+    } finally {
+      setFlaggingId(null)
+    }
   }
 
   function canFeaturePost(post: ReviewPost) {
@@ -216,49 +217,14 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
     return true
   }
 
-  function toggleSelectAll() {
-    if (allSelected) setSelectedIds([])
-    else setSelectedIds(posts.map((post) => post.id))
-  }
-  function toggleSelect(postId: string) {
-    setSelectedIds((current) => (current.includes(postId) ? current.filter((id) => id !== postId) : [...current, postId]))
-  }
-
   function submitSearch() {
     setKeyword(searchInput.trim())
     void loadStatus(queueStatus, 1)
   }
 
-  async function confirmBulkDelete() {
-    if (!selectedCount || bulkDeleting) return
-    setBulkDeleting(true)
-    setBulkError('')
-    setBulkNotice('')
-    try {
-      const response = await fetch('/api/admin/posts/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postIds: selectedIds }),
-      })
-      const data = await response.json().catch(() => ({})) as { message?: string; deleted?: number; failed?: number; deletedIds?: string[] }
-      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '批量删除失败')
-      setBulkNotice(`已删除 ${data.deleted ?? selectedIds.length} 篇，失败 ${data.failed ?? 0} 篇`)
-      setSelectedIds([])
-      // 保持关键词 / 状态 / 页码；服务端会夹紧页码，空页自动回退到上一有效页。
-      await loadStatus(queueStatus, page)
-    } catch (reason) {
-      setBulkError(reason instanceof Error ? reason.message : '批量删除失败')
-    } finally {
-      setBulkDeleting(false)
-      setBulkConfirmOpen(false)
-    }
-  }
-
-  return <section className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7" aria-busy={loading || Boolean(reviewingId) || bulkDeleting}>
+  return <section className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7" aria-busy={loading || Boolean(reviewingId)}>
     {message ? <p className="mb-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
     {error ? <p className="mb-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">{error}</p> : null}
-    {bulkNotice ? <p className="mb-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{bulkNotice}</p> : null}
-    {bulkError ? <p className="mb-4 rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700">{bulkError}</p> : null}
 
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -284,31 +250,13 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
       ) : null}
     </div>
 
-    {/* 批量操作栏 */}
-    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3">
-      <label className="flex items-center gap-2 text-sm font-black text-brand-950">
-        <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} disabled={loading || posts.length === 0} />
-        本页全选
-      </label>
-      <span className="text-sm font-bold text-slate-600">已选择 {selectedCount} 篇</span>
-      <button
-        type="button"
-        onClick={() => setBulkConfirmOpen(true)}
-        disabled={selectedCount === 0 || bulkDeleting || loading}
-        className="rounded-full bg-red-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50"
-      >
-        {bulkDeleting ? '删除中…' : '批量删除'}
-      </button>
-    </div>
-
     <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="帖子审核状态">
-      {reviewFilters.map((status) => <button key={status} type="button" role="tab" aria-selected={status === queueStatus} disabled={loading || Boolean(reviewingId) || bulkDeleting || status === queueStatus} onClick={() => void loadStatus(status, 1)} className={`rounded-full px-4 py-2 text-sm font-black ${status === queueStatus ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'} disabled:opacity-60`}>{statusLabels[status]}</button>)}
+      {reviewFilters.map((status) => <button key={status} type="button" role="tab" aria-selected={status === queueStatus} disabled={loading || Boolean(reviewingId) || status === queueStatus} onClick={() => void loadStatus(status, 1)} className={`rounded-full px-4 py-2 text-sm font-black ${status === queueStatus ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'} disabled:opacity-60`}>{statusLabels[status]}</button>)}
     </div>
     <div className="mt-5 divide-y divide-sky-100">
       {posts.map((post) => {
         const isReviewing = reviewingId === post.id
         const imageItems = post.PostMedia.flatMap((media, index) => media.url ? [{ id: media.id, src: media.url, previewSrc: media.thumbnail || undefined, alt: `帖子图片 ${index + 1}` }] : [])
-        const selected = selectedIds.includes(post.id)
         return <article key={post.id} className="grid gap-5 py-6 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500">
@@ -359,21 +307,17 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
             {imageItems.length ? <div className="mt-4 flex flex-wrap gap-3" aria-label={`帖子图片，共 ${imageItems.length} 张`}>{imageItems.map((item, index) => <ImageViewer key={item.id} src={item.src} previewSrc={item.previewSrc} alt={item.alt} gallery={imageItems} initialIndex={index} imageClassName="h-28 w-40 rounded-xl object-cover" buttonClassName="block h-28 w-40 cursor-zoom-in overflow-hidden rounded-xl bg-slate-100 text-left" />)}</div> : null}
           </div>
           <div className="flex flex-wrap items-start gap-2 md:w-32 md:flex-col">
-            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
-              <input type="checkbox" checked={selected} onChange={() => toggleSelect(post.id)} disabled={bulkDeleting} />
-              选择
-            </label>
-            {post.moderationStatus === 'PENDING' ? <><button type="button" disabled={Boolean(reviewingId) || bulkDeleting} onClick={() => requestReview(post, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60">通过</button><button type="button" disabled={Boolean(reviewingId) || bulkDeleting} onClick={() => requestReview(post, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-60">拒绝</button></> : null}
-            {post.moderationStatus === 'APPROVED' ? <button type="button" disabled={Boolean(reviewingId) || bulkDeleting} onClick={() => requestReview(post, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-60">拒绝通过</button> : null}
-            {post.moderationStatus === 'REJECTED' ? <button type="button" disabled={Boolean(reviewingId) || bulkDeleting} onClick={() => requestReview(post, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60">重新通过</button> : null}
+            {post.moderationStatus === 'PENDING' ? <><button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60">通过</button><button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-60">拒绝</button></> : null}
+            {post.moderationStatus === 'APPROVED' ? <button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'REJECTED')} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-60">拒绝通过</button> : null}
+            {post.moderationStatus === 'REJECTED' ? <button type="button" disabled={Boolean(reviewingId)} onClick={() => requestReview(post, 'APPROVED')} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60">重新通过</button> : null}
             {post.isFeatured ? (
-              <button type="button" disabled={Boolean(reviewingId) || bulkDeleting} onClick={() => void toggleFlag(post.id, 'isFeatured', false)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">取消精华</button>
+              <button type="button" disabled={Boolean(reviewingId) || Boolean(flaggingId)} onClick={() => setFeatureConfirm({ postId: post.id, title: post.title, nextIsFeatured: false })} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">取消精华</button>
             ) : canFeaturePost(post) ? (
-              <button type="button" disabled={Boolean(reviewingId) || bulkDeleting} onClick={() => setFeatureConfirm({ postId: post.id, title: post.title })} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">设置精选</button>
+              <button type="button" disabled={Boolean(reviewingId) || Boolean(flaggingId)} onClick={() => setFeatureConfirm({ postId: post.id, title: post.title, nextIsFeatured: true })} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">设为精华</button>
             ) : (
               <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-400">仅超管可加精</span>
             )}
-            <button type="button" disabled={Boolean(reviewingId) || bulkDeleting} onClick={() => void toggleFlag(post.id, 'isPinned', !post.isPinned)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">{post.isPinned ? '取消置顶' : '置顶'}</button>
+            <button type="button" disabled={Boolean(reviewingId)} onClick={() => void toggleFlag(post.id, 'isPinned', !post.isPinned)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">{post.isPinned ? '取消置顶' : '置顶'}</button>
             {isReviewing ? <span className="text-xs font-black text-slate-500">提交中…</span> : null}
           </div>
         </article>
@@ -381,9 +325,9 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
       {!posts.length ? <p className="py-10 text-center text-sm font-bold text-slate-500">暂无{queueStatus === 'ALL' ? '帖子' : `${statusLabels[queueStatus]}帖子`}。</p> : null}
     </div>
     <div className="mt-5 flex items-center justify-center gap-3 border-t border-sky-100 pt-5">
-      <button type="button" disabled={loading || bulkDeleting || page <= 1} onClick={() => void loadStatus(queueStatus, page - 1)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">上一页</button>
+      <button type="button" disabled={loading || page <= 1} onClick={() => void loadStatus(queueStatus, page - 1)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">上一页</button>
       <span className="text-sm font-black text-slate-500">第 {page} 页</span>
-      <button type="button" disabled={loading || bulkDeleting || !hasMore} onClick={() => void loadStatus(queueStatus, page + 1)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">下一页</button>
+      <button type="button" disabled={loading || !hasMore} onClick={() => void loadStatus(queueStatus, page + 1)} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">下一页</button>
     </div>
     {reviewTarget ? <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewTarget(null) }}>
       <div className="w-full max-w-lg rounded-3xl border border-sky-100 bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="post-review-dialog-title">
@@ -393,25 +337,13 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
         <div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" onClick={() => setReviewTarget(null)} className="rounded-full bg-sky-50 px-5 py-2.5 text-sm font-black text-brand-700">取消</button><button type="button" onClick={() => void confirmReview()} className={`rounded-full px-5 py-2.5 text-sm font-black text-white ${reviewTarget.nextStatus === 'APPROVED' ? 'bg-emerald-600' : 'bg-red-600'}`}>确认{reviewTarget.nextStatus === 'APPROVED' ? '通过' : '拒绝'}</button></div>
       </div>
     </div> : null}
-    {featureConfirm ? <ConfirmDialog
+    {featureConfirm ? <PostFeatureConfirmDialog
       open
-      title="确认加精帖子？"
-      description={`确定要将《${featureConfirm.title}》设为精华吗？该操作会向作者发放加精奖励与通知。`}
-      confirmLabel="确认加精"
-      cancelLabel="取消"
-      loading={Boolean(reviewingId) || bulkDeleting}
-      onConfirm={() => { const id = featureConfirm.postId; setFeatureConfirm(null); void toggleFlag(id, 'isFeatured', true) }}
+      nextIsFeatured={featureConfirm.nextIsFeatured}
+      loading={Boolean(flaggingId)}
+      error={error}
+      onConfirm={() => { if (featureConfirm) void toggleFlag(featureConfirm.postId, 'isFeatured', featureConfirm.nextIsFeatured) }}
       onCancel={() => setFeatureConfirm(null)}
-    /> : null}
-    {bulkConfirmOpen ? <ConfirmDialog
-      open
-      title="批量删除帖子"
-      description={`确定要删除选中的 ${selectedCount} 篇帖子吗？删除后无法恢复，且会同步删除其下评论与互动。`}
-      confirmLabel="确认删除"
-      cancelLabel="取消"
-      loading={bulkDeleting}
-      onConfirm={() => void confirmBulkDelete()}
-      onCancel={() => { if (!bulkDeleting) setBulkConfirmOpen(false) }}
     /> : null}
   </section>
 }

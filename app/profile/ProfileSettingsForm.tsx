@@ -9,7 +9,7 @@ import { profileImageUrl } from '@/lib/images'
 import { validateNicknameValue } from '@/lib/login-account'
 import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import type { UserLocation } from '@/lib/user-location'
-import { BIRTHDAY_ALREADY_SET, isBirthdayConfigured } from '@/lib/birthday-immutability'
+import { BIRTHDAY_ALREADY_SET, BIRTHDATE_SELF_EDIT_EXHAUSTED, isBirthdayConfigured } from '@/lib/birthday-immutability'
 import { decideBirthdaySave, daysForBirthdayMonth, resetInvalidBirthdayDay, type BirthdayDraft } from '@/lib/birthday-profile-flow'
 
 type InitialProfile = {
@@ -29,6 +29,8 @@ type InitialProfile = {
   birthMonth: number | null
   birthDay: number | null
   birthdaySetAt: string | null
+  birthdateSelfEditCount: number
+  canEditBirthdate: boolean
   birthdayPublic: boolean
   showBadgeActivity: boolean
   showBadgeProgressNotifications: boolean
@@ -303,6 +305,8 @@ export function ProfileSettingsForm({
     birthMonth: initialProfile.birthMonth,
     birthDay: initialProfile.birthDay,
     birthdaySetAt: initialProfile.birthdaySetAt,
+    birthdateSelfEditCount: initialProfile.birthdateSelfEditCount,
+    canEditBirthdate: initialProfile.canEditBirthdate,
   }))
   const [birthdayConfirmation, setBirthdayConfirmation] = useState<BirthdayDraft | null>(null)
   const initialPhoneParts = getPhoneInputParts(initialProfile.phone)
@@ -614,6 +618,8 @@ export function ProfileSettingsForm({
         birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : null,
         birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : null,
         birthdaySetAt: typeof data.profile.birthdaySetAt === 'string' ? data.profile.birthdaySetAt : null,
+        birthdateSelfEditCount: typeof data.profile.birthdateSelfEditCount === 'number' ? data.profile.birthdateSelfEditCount : 0,
+        canEditBirthdate: typeof data.profile.canEditBirthdate === 'boolean' ? data.profile.canEditBirthdate : false,
       }
       setPersistedBirthday(nextBirthday)
       setForm((current) => ({ ...current, ...nextBirthday }))
@@ -627,8 +633,7 @@ export function ProfileSettingsForm({
     setMessage('')
     setError('')
 
-    const birthdayConfigured = isBirthdayConfigured(persistedBirthday)
-    const birthdayPayload = !birthdayConfigured && birthdayToSave
+    const birthdayPayload = birthdayToSave
       ? { birthMonth: birthdayToSave.month, birthDay: birthdayToSave.day }
       : {}
     const rawPhone = phoneValue.trim()
@@ -660,7 +665,7 @@ export function ProfileSettingsForm({
 
       if (!response.ok) {
         setBirthdayConfirmation(null)
-        if (data?.code === BIRTHDAY_ALREADY_SET) await refreshPersistedBirthday()
+        if (data?.code === BIRTHDAY_ALREADY_SET || data?.code === BIRTHDATE_SELF_EDIT_EXHAUSTED) await refreshPersistedBirthday()
         setError(data?.message || '保存失败，请稍后再试')
         return
       }
@@ -670,6 +675,8 @@ export function ProfileSettingsForm({
           birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : null,
           birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : null,
           birthdaySetAt: typeof data.profile.birthdaySetAt === 'string' ? data.profile.birthdaySetAt : null,
+          birthdateSelfEditCount: typeof data.profile.birthdateSelfEditCount === 'number' ? data.profile.birthdateSelfEditCount : persistedBirthday.birthdateSelfEditCount,
+          canEditBirthdate: typeof data.profile.canEditBirthdate === 'boolean' ? data.profile.canEditBirthdate : persistedBirthday.canEditBirthdate,
         }
         setPersistedBirthday(nextBirthday)
         setForm((current) => ({
@@ -739,12 +746,20 @@ export function ProfileSettingsForm({
       month: form.birthMonth,
       day: form.birthDay,
     })
+    if (birthdayDecision.kind === 'locked') {
+      setError('生日已修改过一次，无法再次自行修改生日。')
+      return
+    }
+    if (birthdayDecision.kind === 'incomplete') {
+      await saveProfile(null, true)
+      return
+    }
     if (birthdayDecision.kind === 'confirm') {
       setBirthdayConfirmation(birthdayDecision.birthday)
       return
     }
 
-    await saveProfile(null, birthdayDecision.kind === 'incomplete')
+    await saveProfile(null)
   }
 
   async function confirmBirthday() {
@@ -758,6 +773,39 @@ export function ProfileSettingsForm({
   }
 
   const avatarPreview = profileImageUrl(form.avatarUrl)
+  const birthdayConfigured = isBirthdayConfigured(persistedBirthday)
+  const birthdateSelfEditCount = persistedBirthday.birthdateSelfEditCount ?? 0
+  const canEditBirthday = persistedBirthday.canEditBirthdate
+  const birthdaySelectorFields = (
+    <div className="grid gap-4 md:grid-cols-2">
+      <label className="block rounded-2xl border border-white bg-white/78 p-4">
+        <span className="text-sm font-black text-slate-700">月份</span>
+        <select
+          value={form.birthMonth ?? ''}
+          onChange={(event) => updateBirthdayMonth(event.target.value ? Number(event.target.value) : null)}
+          className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+        >
+          <option value="">请选择月份</option>
+          {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
+            <option key={month} value={month}>{month}月</option>
+          ))}
+        </select>
+      </label>
+      <label className="block rounded-2xl border border-white bg-white/78 p-4">
+        <span className="text-sm font-black text-slate-700">日期</span>
+        <select
+          value={form.birthDay ?? ''}
+          onChange={(event) => update('birthDay', event.target.value ? Number(event.target.value) : null)}
+          className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+        >
+          <option value="">请选择日期</option>
+          {Array.from({ length: daysForBirthdayMonth(form.birthMonth) }, (_, index) => index + 1).map((day) => (
+            <option key={day} value={day}>{day}日</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
 
   // 预览裁剪框保持个人主页背景的 9:2 横向比例，使用实际显示尺寸计算背景位置。
   const backgroundLayout = backgroundCrop && backgroundFrameReady && backgroundCrop.naturalWidth
@@ -952,46 +1000,36 @@ export function ProfileSettingsForm({
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">生日纪念</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">我的生日</h3>
             <p className="mt-1 text-sm font-bold leading-6 text-slate-500">生日仅用于「生日纪念」徽章与今日生日统计。</p>
+            {birthdayConfigured ? <p className="mt-1 text-xs font-black text-slate-400">本人修改次数 {Math.min(1, Math.max(0, birthdateSelfEditCount))}/1</p> : null}
           </div>
 
-          {isBirthdayConfigured(persistedBirthday) ? (
+          {birthdayConfigured && !canEditBirthday ? (
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
               <p className="text-xs font-black tracking-[0.14em] text-emerald-700">当前生日</p>
               <p className="mt-1 text-lg font-black text-brand-950">
                 {persistedBirthday.birthMonth != null && persistedBirthday.birthDay != null ? `${persistedBirthday.birthMonth}月${persistedBirthday.birthDay}日` : '已设置'}
               </p>
-              <p className="mt-1">生日设置后不可修改。</p>
+              <p className="mt-1">生日已修改过一次，无法再次自行修改生日。</p>
+            </div>
+          ) : birthdayConfigured ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
+                <p className="text-xs font-black tracking-[0.14em] text-emerald-700">当前生日</p>
+                <p className="mt-1 text-lg font-black text-brand-950">
+                  {persistedBirthday.birthMonth != null && persistedBirthday.birthDay != null ? `${persistedBirthday.birthMonth}月${persistedBirthday.birthDay}日` : '已设置'}
+                </p>
+                <p className="mt-1">生日设置后仅可再修改一次，请确认信息正确。</p>
+              </div>
+              {birthdaySelectorFields}
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900">
+                生日仅可修改一次。此次修改成功后，将无法再次自行修改生日。
+              </div>
             </div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block rounded-2xl border border-white bg-white/78 p-4">
-                <span className="text-sm font-black text-slate-700">月份</span>
-                <select
-                  value={form.birthMonth ?? ''}
-                  onChange={(event) => updateBirthdayMonth(event.target.value ? Number(event.target.value) : null)}
-                  className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
-                >
-                  <option value="">请选择月份</option>
-                  {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
-                    <option key={month} value={month}>{month}月</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block rounded-2xl border border-white bg-white/78 p-4">
-                <span className="text-sm font-black text-slate-700">日期</span>
-                <select
-                  value={form.birthDay ?? ''}
-                  onChange={(event) => update('birthDay', event.target.value ? Number(event.target.value) : null)}
-                  className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
-                >
-                  <option value="">请选择日期</option>
-                  {Array.from({ length: daysForBirthdayMonth(form.birthMonth) }, (_, index) => index + 1).map((day) => (
-                    <option key={day} value={day}>{day}日</option>
-                  ))}
-                </select>
-              </label>
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900 md:col-span-2">
-                生日仅可设置一次，保存后不可修改，请确认日期无误。
+            <div className="space-y-4">
+              {birthdaySelectorFields}
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900">
+                设置生日后仍可自行修改一次，请确认日期完整且准确。
               </div>
             </div>
           )}
@@ -1084,16 +1122,17 @@ export function ProfileSettingsForm({
             aria-labelledby="birthday-confirm-title"
             className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl"
           >
-            <h2 id="birthday-confirm-title" className="text-xl font-black text-brand-950">确认生日</h2>
+            <h2 id="birthday-confirm-title" className="text-xl font-black text-brand-950">{birthdayConfigured ? '确认修改生日？' : '确认生日？'}</h2>
             <p className="mt-4 text-sm font-bold leading-6 text-slate-600">请确认你的生日为：</p>
             <p className="mt-1 text-2xl font-black text-brand-950">{birthdayConfirmation.month}月{birthdayConfirmation.day}日</p>
-            <p className="mt-3 text-sm font-bold leading-6 text-slate-500">生日仅可设置一次，确认保存后将无法修改。</p>
+            <p className="mt-3 text-sm font-bold leading-6 text-slate-500">{birthdayConfigured ? '生日仅可修改一次。此次修改成功后，将无法再次自行修改生日。' : '生日设置后仅可再修改一次，请确认信息正确。'}</p>
+            {birthdayConfigured ? <p className="mt-2 text-sm font-bold leading-6 text-slate-500">生日或星座勋章会根据新的生日重新计算。</p> : null}
             <div className="mt-6 flex gap-3">
               <button type="button" onClick={cancelBirthdayConfirmation} disabled={isSaving} className="flex-1 rounded-2xl bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-60">
                 取消
               </button>
               <button type="button" onClick={() => void confirmBirthday()} disabled={isSaving} className="flex-1 rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60">
-                {isSaving ? '保存中...' : '确认并保存'}
+                {isSaving ? '保存中...' : birthdayConfigured ? '确认修改' : '确认并保存'}
               </button>
             </div>
           </section>

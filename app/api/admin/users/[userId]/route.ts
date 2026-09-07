@@ -1,13 +1,23 @@
 import { NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
+import { Prisma, ProfileWallVisibility } from '@prisma/client'
 import type { UserRole, UserStatus } from '@prisma/client'
 import { deleteUserPermanently, getUserDeletionPreview } from '@/lib/admin-user-deletion'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { MySqlAdvisoryLockBusyError } from '@/lib/mysql-advisory-lock'
 import { updateAdminUserContact } from '@/lib/admin-user-contact'
+import { updateAdminUserProfile, type AdminUserProfilePatch } from '@/lib/admin-user-profile'
 import { prisma } from '@/lib/prisma'
 import { adjustRegistrationFeeBalance } from '@/lib/registration-fee'
+import { publicImageUrl } from '@/lib/images'
+import { validateLoginAccountValue, validateNicknameValue } from '@/lib/login-account'
+import { checkBannedWords, NICKNAME_BANNED_WORD_MESSAGE, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD } from '@/lib/content-moderation'
+import { normalizeUserLocationInput } from '@/lib/user-location'
+import { isValidBirthdayParts, type BirthdayParts } from '@/lib/zodiac'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { emitRealtime } from '@/lib/realtime'
+import { createNotification } from '@/lib/notification-write'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import {
   normalizeUserContactPatch,
@@ -65,6 +75,142 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { userId } = await context.params
   const body = await request.json().catch(() => null)
   const action = sanitizeText(body?.action, 40)
+
+  if (action === 'updateProfile') {
+    const hasOwn = (key: string) => Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, key))
+    const patch: AdminUserProfilePatch = {}
+
+    if (hasOwn('username')) {
+      const validation = validateLoginAccountValue(body.username)
+      if (validation.error) return NextResponse.json({ message: validation.error, code: 'USERNAME_INVALID' }, { status: 400 })
+      if ((await checkBannedWords(validation.account)).blocked) {
+        return NextResponse.json({ error: USERNAME_CONTAINS_BANNED_WORD, message: USERNAME_BANNED_WORD_MESSAGE }, { status: 400 })
+      }
+      patch.username = { account: validation.account, usernameNormalized: validation.usernameNormalized }
+    }
+
+    if (hasOwn('nickname')) {
+      const validation = validateNicknameValue(body.nickname)
+      if (validation.error) return NextResponse.json({ message: validation.error, code: 'NICKNAME_INVALID' }, { status: 400 })
+      if ((await checkBannedWords(validation.account)).blocked) {
+        return NextResponse.json({ message: NICKNAME_BANNED_WORD_MESSAGE, code: USERNAME_CONTAINS_BANNED_WORD }, { status: 400 })
+      }
+      patch.nickname = validation.account
+    }
+
+    if (hasOwn('email') || hasOwn('phone')) {
+      let contactPatch: ReturnType<typeof normalizeUserContactPatch>
+      try {
+        contactPatch = normalizeUserContactPatch({
+          ...(hasOwn('email') ? { email: body.email } : {}),
+          ...(hasOwn('phone') ? { phone: body.phone, phoneCountry: body.phoneCountry } : {}),
+        })
+      } catch (error) {
+        if (error instanceof UserContactValidationError) {
+          return NextResponse.json({ message: error.message, code: error.code }, { status: 400 })
+        }
+        throw error
+      }
+      if (hasOwn('email')) patch.email = contactPatch.email
+      if (hasOwn('phone')) patch.phone = contactPatch.phone
+      patch.phoneCountry = contactPatch.phoneCountry
+    }
+
+    if (hasOwn('bio')) patch.bio = sanitizeText(body.bio, 300)
+    if (hasOwn('avatarUrl')) patch.avatarUrl = publicImageUrl(sanitizeText(body.avatarUrl, 500))
+    if (hasOwn('backgroundUrl')) patch.backgroundUrl = publicImageUrl(sanitizeText(body.backgroundUrl, 500))
+    if (hasOwn('birthdayPublic')) {
+      if (typeof body.birthdayPublic !== 'boolean') return NextResponse.json({ message: '生日公开设置无效' }, { status: 400 })
+      patch.birthdayPublic = body.birthdayPublic
+    }
+    if (hasOwn('showBadgeActivity')) {
+      if (typeof body.showBadgeActivity !== 'boolean') return NextResponse.json({ message: '勋章动态设置无效' }, { status: 400 })
+      patch.showBadgeActivity = body.showBadgeActivity
+    }
+    if (hasOwn('showBadgeProgressNotifications')) {
+      if (typeof body.showBadgeProgressNotifications !== 'boolean') return NextResponse.json({ message: '勋章提醒设置无效' }, { status: 400 })
+      patch.showBadgeProgressNotifications = body.showBadgeProgressNotifications
+    }
+    if (hasOwn('location')) {
+      const location = normalizeUserLocationInput(body.location)
+      if (location === undefined) return NextResponse.json({ message: '地区选择无效，请重新选择' }, { status: 400 })
+      patch.location = location
+    }
+    if (hasOwn('wallVisibility')) {
+      const wallVisibility = sanitizeText(body.wallVisibility, 20)
+      if (!Object.values(ProfileWallVisibility).includes(wallVisibility as ProfileWallVisibility)) {
+        return NextResponse.json({ message: '留言墙隐私设置无效' }, { status: 400 })
+      }
+      patch.wallVisibility = wallVisibility as AdminUserProfilePatch['wallVisibility']
+    }
+
+    const hasBirthMonth = hasOwn('birthMonth')
+    const hasBirthDay = hasOwn('birthDay')
+    if (hasBirthMonth || hasBirthDay) {
+      const monthInput = hasBirthMonth ? body.birthMonth : null
+      const dayInput = hasBirthDay ? body.birthDay : null
+      const isEmpty = (value: unknown) => value == null || (typeof value === 'string' && value.trim() === '')
+      const monthEmpty = isEmpty(monthInput)
+      const dayEmpty = isEmpty(dayInput)
+      if (monthEmpty && dayEmpty) {
+        patch.birthday = null
+      } else {
+        if (monthEmpty) return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
+        if (dayEmpty) return NextResponse.json({ message: '请选择有效的出生日期' }, { status: 400 })
+        const month = Number(monthInput)
+        const day = Number(dayInput)
+        if (!Number.isInteger(month) || month < 1 || month > 12) return NextResponse.json({ message: '请选择有效的出生月份' }, { status: 400 })
+        if (!Number.isInteger(day) || day < 1 || day > 31) return NextResponse.json({ message: '请选择有效的出生日期' }, { status: 400 })
+        const birthday: BirthdayParts = { month, day }
+        if (!isValidBirthdayParts(birthday)) return NextResponse.json({ message: '该日期不存在，请重新选择' }, { status: 400 })
+        patch.birthday = birthday
+      }
+    }
+
+    try {
+      const result = await prisma.$transaction((tx) => updateAdminUserProfile(tx, {
+        userId,
+        adminId: guard.user.id,
+        patch,
+        reason: sanitizeText(body?.reason, 180) || '管理员编辑用户资料',
+      }))
+      invalidateCurrentUserCache(userId)
+      if (result.changedFields.includes('username')) {
+        await safeNotificationWrite(
+          () => createNotification({
+            data: {
+              recipientId: userId,
+              type: 'SYSTEM',
+              title: '登录账号已由管理员修改',
+              content: '您的登录账号已由管理员修改。下次登录时请使用新的登录账号。如非本人申请，请及时联系管理员。',
+              link: '/settings/security',
+            },
+          }),
+          { operation: 'admin-profile-login-account-changed', userId, notificationType: 'SYSTEM' },
+        )
+        emitRealtime(userId, 'notification')
+      }
+      if (result.birthdayChanged) {
+        void triggerBadgeEvaluation(userId, 'USER_BIRTHDAY_UPDATED', new Date().toISOString())
+      }
+      return NextResponse.json({ user: result.user, changedFields: result.changedFields, message: result.changed ? '用户资料已更新' : '用户资料未发生变化' })
+    } catch (error) {
+      const code = error instanceof Error ? error.message : ''
+      if (code === 'USER_NOT_FOUND') return NextResponse.json({ message: '用户不存在' }, { status: 404 })
+      if (code === 'USERNAME_ALREADY_EXISTS') return NextResponse.json({ message: '该用户名已被使用', code }, { status: 409 })
+      if (code === 'EMAIL_ALREADY_EXISTS') return NextResponse.json({ message: '该邮箱已绑定其他账号', code }, { status: 409 })
+      if (code === 'PHONE_ALREADY_EXISTS') return NextResponse.json({ message: '该手机号已绑定其他账号', code }, { status: 409 })
+      if (error instanceof MySqlAdvisoryLockBusyError) return NextResponse.json({ message: '资料修改正在处理中，请稍后重试', code: 'PROFILE_UPDATE_IN_PROGRESS' }, { status: 409 })
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = String(error.meta?.target || '')
+        if (target.includes('username')) return NextResponse.json({ message: '该用户名已被使用', code: 'USERNAME_ALREADY_EXISTS' }, { status: 409 })
+        if (target.includes('phone')) return NextResponse.json({ message: '该手机号已绑定其他账号', code: 'PHONE_ALREADY_EXISTS' }, { status: 409 })
+        if (target.includes('email')) return NextResponse.json({ message: '该邮箱已绑定其他账号', code: 'EMAIL_ALREADY_EXISTS' }, { status: 409 })
+        return NextResponse.json({ message: '资料中的唯一字段已被其他用户使用', code: 'PROFILE_UNIQUE_CONFLICT' }, { status: 409 })
+      }
+      throw error
+    }
+  }
 
   if (action === 'updateEmail' || action === 'updatePhone' || action === 'updateContact') {
     const contactInput = action === 'updateEmail'
