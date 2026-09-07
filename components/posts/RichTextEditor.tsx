@@ -30,8 +30,15 @@ import { PostReferencePicker, type PostReferencePost } from '@/components/posts/
 import { UserMentionPicker, type UserMentionUser } from '@/components/posts/UserMentionPicker'
 import { ActivityReferencePicker, type ActivityReferenceActivity } from '@/components/posts/ActivityReferencePicker'
 import { MaterialReferencePicker, type MaterialReferenceMaterial } from '@/components/posts/MaterialReferencePicker'
-import { ContentImageClientError, uploadContentImage, type ContentImageUploadPhase } from '@/lib/content-image-browser'
-import { CONTENT_IMAGE_ACCEPT, isContentImageMimeType } from '@/lib/content-image-upload'
+import {
+  ClipboardImageReadError,
+  clipboardImageFilesFromPaste,
+  ContentImageClientError,
+  readClipboardImageFiles,
+  uploadContentImage,
+  type ContentImageUploadPhase,
+} from '@/lib/content-image-browser'
+import { CONTENT_IMAGE_ACCEPT } from '@/lib/content-image-upload'
 import {
   RICH_TEXT_COLOR_TOKENS,
   RICH_TEXT_FONT_SIZE_TOKENS,
@@ -62,6 +69,9 @@ type RichTextEditorProps = {
   compatibilityMode?: boolean
   onChange: (content: RichTextContent, plainText: string) => void
   onBusyChange?: (busy: boolean) => void
+  /** Route real clipboard image files to an owning attachment uploader. */
+  pasteImagesToAttachments?: boolean
+  onPasteImagesToAttachments?: (files: File[]) => void
   placeholder?: string
 }
 
@@ -920,93 +930,8 @@ type EnqueueImageUploads = (
   bookmark?: SelectionBookmarkLike | null,
 ) => void
 
-type ClipboardImageReadErrorCode = 'UNSUPPORTED' | 'PERMISSION'
-
-class ClipboardImageReadError extends Error {
-  constructor(public readonly code: ClipboardImageReadErrorCode) {
-    super(code)
-    this.name = 'ClipboardImageReadError'
-  }
-}
-
 function selectionBookmark(selection: ClipboardSelectionLike) {
   return selection.getBookmark() as SelectionBookmarkLike
-}
-
-function clipboardImageExtension(type: string) {
-  const normalized = type.toLowerCase().split(';', 1)[0]
-  if (normalized === 'image/jpeg' || normalized === 'image/jpg' || normalized === 'image/pjpeg') return 'jpg'
-  if (normalized === 'image/webp') return 'webp'
-  if (normalized === 'image/gif') return 'gif'
-  if (normalized === 'image/avif') return 'avif'
-  if (normalized === 'image/heic') return 'heic'
-  if (normalized === 'image/heif') return 'heif'
-  return 'png'
-}
-
-function createClipboardImageFile(blob: Blob, type: string, index: number, timestamp = Date.now()) {
-  const normalizedType = type.trim().toLowerCase() || blob.type || 'image/png'
-  return new File(
-    [blob],
-    `clipboard-${timestamp}-${index + 1}.${clipboardImageExtension(normalizedType)}`,
-    { type: normalizedType, lastModified: timestamp },
-  )
-}
-
-function clipboardImageFilesFromPaste(event: ClipboardEvent) {
-  const items = event.clipboardData?.items
-  if (!items) return []
-
-  const timestamp = Date.now()
-  const files: File[] = []
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index]
-    const itemType = item.type.trim().toLowerCase()
-    if (item.kind !== 'file' || !itemType.startsWith('image/')) continue
-    const source = item.getAsFile()
-    if (!source) continue
-    files.push(createClipboardImageFile(source, itemType || source.type || 'image/png', files.length, timestamp))
-  }
-  return files
-}
-
-type ClipboardWithRead = Clipboard & {
-  read?: () => Promise<readonly ClipboardItem[]>
-}
-
-function isClipboardPermissionError(error: unknown) {
-  if (error instanceof Error && ['NotAllowedError', 'SecurityError'].includes(error.name)) return true
-  return typeof DOMException !== 'undefined'
-    && error instanceof DOMException
-    && ['NotAllowedError', 'SecurityError'].includes(error.name)
-}
-
-async function readClipboardImageFiles() {
-  const clipboard = typeof navigator !== 'undefined' && navigator.clipboard
-    ? navigator.clipboard as ClipboardWithRead
-    : null
-  if (!clipboard || typeof clipboard.read !== 'function') throw new ClipboardImageReadError('UNSUPPORTED')
-
-  try {
-    const items = await clipboard.read()
-    const timestamp = Date.now()
-    const files: File[] = []
-    for (const item of items) {
-      const type = item.types.find((candidate) => isContentImageMimeType(candidate))
-      if (!type) continue
-      try {
-        const blob = await item.getType(type)
-        if (blob.size <= 0) continue
-        files.push(createClipboardImageFile(blob, type, files.length, timestamp))
-      } catch (error) {
-        if (isClipboardPermissionError(error)) throw new ClipboardImageReadError('PERMISSION')
-      }
-    }
-    return files
-  } catch (error) {
-    if (error instanceof ClipboardImageReadError) throw error
-    throw new ClipboardImageReadError('PERMISSION')
-  }
 }
 
 function countMusicReferencesInProseMirrorDocument(document: ProseMirrorDescendable) {
@@ -1147,6 +1072,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   initialRichContent,
   onChange,
   onBusyChange,
+  pasteImagesToAttachments = false,
+  onPasteImagesToAttachments,
   placeholder = '分享你的想法...',
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -1160,6 +1087,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const enqueueImageUploadsRef = useRef<EnqueueImageUploads | null>(null)
   const imageUploadBusyRef = useRef(false)
   const onBusyChangeRef = useRef(onBusyChange)
+  const pasteImagesToAttachmentsRef = useRef(pasteImagesToAttachments)
+  const onPasteImagesToAttachmentsRef = useRef(onPasteImagesToAttachments)
   const headingMenuOpenRef = useRef(false)
   const musicReferenceLimitCallbackRef = useRef<() => void>(() => undefined)
   const [initialDocument] = useState(() => initialEditorContent(initialRichContent, initialContent))
@@ -1181,6 +1110,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const [referenceMenuPosition, setReferenceMenuPosition] = useState<{ left: number; top: number } | null>(null)
 
   onBusyChangeRef.current = onBusyChange
+  pasteImagesToAttachmentsRef.current = pasteImagesToAttachments
+  onPasteImagesToAttachmentsRef.current = onPasteImagesToAttachments
   musicReferenceLimitCallbackRef.current = () => setEditorNotice(`每篇帖子最多引用 ${MAX_RICH_TEXT_MUSIC_REFERENCES} 首歌曲`)
 
   function rememberSelection(currentEditor: Editor) {
@@ -1309,6 +1240,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       const imageFiles = clipboardImageFilesFromPaste(event)
       if (imageFiles.length) {
         event.preventDefault()
+        if (pasteImagesToAttachmentsRef.current && onPasteImagesToAttachmentsRef.current) {
+          onPasteImagesToAttachmentsRef.current(imageFiles)
+          return true
+        }
         enqueueImageUploadsRef.current?.(editorView, imageFiles, selectionBookmark(editorView.state.selection))
         return true
       }
@@ -1534,6 +1469,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     const files = Array.from(event.target.files || [])
     event.target.value = ''
     if (!files.length) return
+    if (pasteImagesToAttachmentsRef.current && onPasteImagesToAttachmentsRef.current) {
+      imagePickerSelectionBookmarkRef.current = null
+      onPasteImagesToAttachmentsRef.current(files)
+      return
+    }
     const view = activeEditor.view as unknown as ClipboardEditorViewLike
     const bookmark = imagePickerSelectionBookmarkRef.current || selectionBookmark(view.state.selection)
     imagePickerSelectionBookmarkRef.current = null
@@ -1552,6 +1492,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       const files = await readClipboardImageFiles()
       if (!files.length) {
         setImageUploadNotice('剪切板中没有可用图片。')
+        return
+      }
+      if (pasteImagesToAttachmentsRef.current && onPasteImagesToAttachmentsRef.current) {
+        onPasteImagesToAttachmentsRef.current(files)
+        setImageUploadNotice('')
         return
       }
       enqueueImageUploads(view, files, bookmark)

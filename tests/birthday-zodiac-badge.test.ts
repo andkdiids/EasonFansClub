@@ -167,3 +167,78 @@ test('central grant contract is repeatable by period and birthday updates use re
   assert.match(engine, /evaluateBadgeRetentionForUser/)
   assert.match(engine, /'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY'/)
 })
+
+test('birthday reconciliation covers legacy birthday source and waits for the current zodiac period', () => {
+  const engine = read('lib/badge-rule-engine.ts')
+  const retention = read('lib/badge-retention.ts')
+  const rules = read('lib/badge-rules.ts')
+  const profileRoute = read('app/api/users/me/route.ts')
+  const adminRoute = read('app/api/admin/users/[userId]/route.ts')
+  assert.match(engine, /export async function reconcileBirthdayRelatedBadges\(userId: string, now = new Date\(\)\)/)
+  assert.match(engine, /await ensureBirthdayBadge\(userId, getShanghaiDateKey\(now\)/)
+  assert.match(engine, /await evaluateBadgeRetentionForUser\(userId, \{[\s\S]*ruleTypes,[\s\S]*now,[\s\S]*reason:/)
+  assert.match(profileRoute, /if \(birthdayChanged\) await triggerBadgeEvaluation\(guard\.user\.id, 'USER_BIRTHDAY_UPDATED'/)
+  assert.match(adminRoute, /await triggerBadgeEvaluation\(userId, 'USER_BIRTHDAY_UPDATED'/)
+  assert.match(retention, /BIRTHDAY_BADGE_SLUG/)
+  assert.match(retention, /sourceType: 'AUTO', sourceId: BIRTHDAY_BADGE_SLUG/)
+  assert.match(retention, /sourceType: 'LEGACY', sourceId: null/)
+  assert.match(retention, /ruleType: 'BIRTHDAY_TODAY'/)
+  assert.match(rules, /BIRTHDAY_ZODIAC: 'RETAIN_WHILE_ELIGIBLE'/)
+  assert.match(rules, /BIRTHDAY_TODAY: 'RETAIN_WHILE_ELIGIBLE'/)
+})
+
+test('生日变更场景 A-E 使用最新生日判断旧资格、新资格与未来周期', () => {
+  const birthdayRule = { ruleType: 'BIRTHDAY_TODAY' as const, operator: 'GTE' as const, threshold: null, configJson: {} }
+  const evaluateChange = (
+    oldBirthday: { birthMonth: number; birthDay: number },
+    newBirthday: { birthMonth: number; birthDay: number },
+    now: Date,
+  ) => ({
+    oldZodiac: evaluateBadgeRule({ user: oldBirthday, rule: { ...zodiacRule, configJson: { zodiac: getZodiacSignFromBirthday({ month: oldBirthday.birthMonth, day: oldBirthday.birthDay }) } }, now }),
+    newZodiac: evaluateBadgeRule({ user: newBirthday, rule: { ...zodiacRule, configJson: { zodiac: getZodiacSignFromBirthday({ month: newBirthday.birthMonth, day: newBirthday.birthDay }) } }, now }),
+    oldToday: evaluateBadgeRule({ user: oldBirthday, rule: birthdayRule, now }),
+    newToday: evaluateBadgeRule({ user: newBirthday, rule: birthdayRule, now }),
+  })
+
+  // A: Cancer -> Virgo during the Virgo period.
+  const scenarioA = evaluateChange({ birthMonth: 7, birthDay: 15 }, { birthMonth: 9, birthDay: 5 }, new Date('2026-09-10T04:00:00.000Z'))
+  assert.equal(scenarioA.oldZodiac, false)
+  assert.equal(scenarioA.newZodiac, true)
+
+  // B: Virgo -> Capricorn during the Capricorn period.
+  const scenarioB = evaluateChange({ birthMonth: 9, birthDay: 5 }, { birthMonth: 12, birthDay: 25 }, new Date('2026-12-28T04:00:00.000Z'))
+  assert.equal(scenarioB.oldZodiac, false)
+  assert.equal(scenarioB.newZodiac, true)
+
+  // C: today's birthday becomes a non-today birthday.
+  const scenarioC = evaluateChange({ birthMonth: 9, birthDay: 7 }, { birthMonth: 9, birthDay: 8 }, new Date('2026-09-07T04:00:00.000Z'))
+  assert.equal(scenarioC.oldToday, true)
+  assert.equal(scenarioC.newToday, false)
+
+  // D: a changed birthday is today and must be eligible immediately.
+  const scenarioD = evaluateChange({ birthMonth: 9, birthDay: 8 }, { birthMonth: 9, birthDay: 7 }, new Date('2026-09-07T04:00:00.000Z'))
+  assert.equal(scenarioD.oldToday, false)
+  assert.equal(scenarioD.newToday, true)
+
+  // E: the new Aquarius badge waits until the Aquarius period, then qualifies.
+  const scenarioENow = evaluateChange({ birthMonth: 7, birthDay: 15 }, { birthMonth: 1, birthDay: 25 }, new Date('2026-09-10T04:00:00.000Z'))
+  assert.equal(scenarioENow.oldZodiac, false)
+  assert.equal(scenarioENow.newZodiac, false)
+  const scenarioELater = evaluateBadgeRule({
+    user: { birthMonth: 1, birthDay: 25 },
+    rule: { ...zodiacRule, configJson: { zodiac: 'AQUARIUS' } },
+    now: new Date('2027-01-30T04:00:00.000Z'),
+  })
+  assert.equal(scenarioELater, true)
+})
+
+test('场景 F：星座来源软回收后保留历史并允许按同一周期键重新激活', () => {
+  const service = read('lib/badge-service.ts')
+  const revokeStart = service.indexOf('export async function revokeBadgeAcquisitionSource')
+  const revoke = service.slice(revokeStart)
+  assert.match(service, /sameSource\.isActive/)
+  assert.match(service, /regrantRecordId = sameGrant\.id/)
+  assert.match(service, /reactivated: true/)
+  assert.match(revoke, /userBadgeSource\.update\(/)
+  assert.doesNotMatch(revoke, /userBadge\.deleteMany|userBadge\.delete\(/i)
+})

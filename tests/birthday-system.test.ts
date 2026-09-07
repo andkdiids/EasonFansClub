@@ -23,9 +23,11 @@ test('seed inserts the birthday-commemorative badge with auto-grant', () => {
 
 test('birthday service exports count + period-idempotent grant helpers', () => {
   const lib = read('lib/birthday.ts')
+  const constants = read('lib/birthday-constants.ts')
   assert.match(lib, /export async function countTodayBirthdays/)
   assert.match(lib, /export async function ensureBirthdayBadge/)
-  assert.match(lib, /BIRTHDAY_BADGE_SLUG = 'birthday-commemorative'/)
+  assert.match(lib, /export \{ BIRTHDAY_BADGE_SLUG \} from '@\/lib\/birthday-constants'/)
+  assert.match(constants, /BIRTHDAY_BADGE_SLUG = 'birthday-commemorative'/)
   // 授予使用生日日期作为周期键；过期历史不会阻止新年份再次获得。
   assert.match(lib, /grantKey:\s*`birthday:\$\{dateKey\}`/)
   assert.match(lib, /历史获得记录会保留|expired history/i)

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { getBadgeNicknameShineColor, isBadgeNicknameShineEnabled, normalizeBadgeColor } from '@/lib/badge-types'
@@ -128,9 +129,9 @@ export function BadgeImage({ badge, size = 'inline', className = '' }: { badge: 
 }
 
 function BadgeDetail({ badge, onClose }: { badge: UserDisplayNameBadge; onClose: () => void }) {
-  return (
-    <div className="badge-detail-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="badge-detail-dialog" role="dialog" aria-modal="true" aria-label={`${badge.name}勋章详情`} onMouseDown={(event) => event.stopPropagation()}>
+  const content = (
+    <div className="badge-detail-backdrop" role="presentation" onMouseDown={(event) => { event.stopPropagation(); onClose() }} onClick={(event) => event.stopPropagation()}>
+      <section className="badge-detail-dialog" role="dialog" aria-modal="true" aria-label={`${badge.name}勋章详情`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
         <button type="button" className="badge-detail-close" onClick={onClose} aria-label="关闭勋章详情">×</button>
         <BadgeImage badge={badge} size="detail" />
         <h3><BadgeName badge={badge} /></h3>
@@ -141,6 +142,8 @@ function BadgeDetail({ badge, onClose }: { badge: UserDisplayNameBadge; onClose:
       </section>
     </div>
   )
+
+  return typeof document === 'undefined' ? null : createPortal(content, document.body)
 }
 
 export function UserDisplayName({ name, uid, href, badge, badges, showBadge = true, showBadgeName = false, badgeInteraction = 'interactive', compact = false, showBadgeIcon = true, className = '', nameClassName = '' }: UserDisplayNameProps) {

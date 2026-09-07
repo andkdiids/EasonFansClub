@@ -5899,11 +5899,15 @@ body:has(.duel-page) .app-page-content {
 @keyframes eason-badge-name-glow { 0%,100% { text-shadow:0 0 3px rgba(255,219,127,.48),0 0 7px rgba(238,177,67,.25); } 50% { text-shadow:0 0 5px rgba(255,239,164,.9),0 0 12px rgba(238,177,67,.58); } }
 @keyframes eason-badge-name-sparkle { 0%,62%,100% { opacity:.35; transform:scale(.72) rotate(0deg); } 78% { opacity:1; transform:scale(1.18) rotate(14deg); } 90% { opacity:.35; transform:scale(.72) rotate(0deg); } }
 @keyframes eason-badge-nickname-shine { 0% { opacity:0; -webkit-mask-position:100% 0; mask-position:100% 0; } 12% { opacity:.96; } 88% { opacity:.96; } 100% { opacity:0; -webkit-mask-position:0 0; mask-position:0 0; } }
-.badge-detail-backdrop { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.48); }
+.badge-detail-backdrop { position:fixed; inset:0; z-index:var(--layer-dialog); display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.48); }
 .badge-detail-dialog { position:relative; display:flex; min-width:min(320px,100%); flex-direction:column; align-items:center; gap:10px; border:1px solid var(--border,#cbd5e1); border-radius:20px; padding:28px 32px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 18px 60px rgba(15,23,42,.2); text-align:center; }
 .badge-detail-dialog h3 { margin:3px 0 0; font-size:20px; font-weight:900; }
 .badge-detail-rarity,.badge-detail-obtained { margin:0; color:var(--foreground-muted,#64748b); font-size:12px; font-weight:800; }
 .badge-detail-close { position:absolute; top:8px; right:10px; border:0; color:var(--foreground-muted,#64748b); background:transparent; font-size:26px; line-height:1; cursor:pointer; }
+@media (max-width:767px) {
+  .badge-detail-backdrop { z-index:calc(var(--layer-mobile-nav) + 1); min-height:100dvh; max-height:100dvh; overflow-y:auto; padding:max(12px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px)); }
+  .badge-detail-dialog { max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 24px); overflow-x:hidden; overflow-y:auto; }
+}
 @media (prefers-reduced-motion: reduce) {
   .badge-effect-shine .user-badge-image { animation:none; filter:drop-shadow(0 0 3px rgba(255,221,126,.52)); }
   .badge-effect-glow .user-badge-image { animation:none; filter:drop-shadow(0 0 4px rgba(255,221,126,.75)) drop-shadow(0 0 9px rgba(242,175,56,.34)); }

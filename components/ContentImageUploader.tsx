@@ -1,7 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { ContentImageClientError, uploadContentImage, type ContentImageUploadPhase } from '@/lib/content-image-browser'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  ClipboardImageReadError,
+  ContentImageClientError,
+  readClipboardImageFiles,
+  uploadContentImage,
+  type ContentImageUploadPhase,
+} from '@/lib/content-image-browser'
 import {
   CONTENT_IMAGE_ACCEPT,
   CONTENT_IMAGE_ERROR_MESSAGES,
@@ -47,24 +53,32 @@ function failureMessage(reason: unknown) {
   return CONTENT_IMAGE_ERROR_MESSAGES.UPLOAD_FAILED
 }
 
-export function ContentImageUploader({
-  value,
-  onChange,
-  existingCount = 0,
-  onBusyChange,
-}: Readonly<{
+export type ContentImageUploaderHandle = {
+  addFiles: (files: File[]) => void
+}
+
+type ContentImageUploaderProps = Readonly<{
   value: string[]
   onChange: (urls: string[]) => void
   existingCount?: number
   onBusyChange?: (busy: boolean) => void
-}>) {
+}>
+
+export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, ContentImageUploaderProps>(function ContentImageUploader({
+  value,
+  onChange,
+  existingCount = 0,
+  onBusyChange,
+}, ref) {
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
   const [error, setError] = useState('')
   const [draggingUrl, setDraggingUrl] = useState<string | null>(null)
+  const [clipboardReading, setClipboardReading] = useState(false)
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
   const onBusyChangeRef = useRef(onBusyChange)
   const pendingUploadsRef = useRef(pendingUploads)
+  const clipboardReadingRef = useRef(false)
   const draggingUrlRef = useRef<string | null>(null)
   const pointerDragRef = useRef<PointerDragState | null>(null)
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
@@ -132,22 +146,20 @@ export function ContentImageUploader({
     }
   }
 
-  function selectFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files || [])
-    // Reset immediately so selecting the same photo again is still observable
-    // after a failed upload on iOS Safari/Android WebView.
-    event.target.value = ''
-    if (!files.length) return
+  function addFiles(files: readonly File[]) {
+    const nextFiles = Array.from(files)
+    if (!nextFiles.length) return
 
-    const currentCount = existingCount + valueRef.current.length + pendingUploadsRef.current.length
+    const pendingCount = pendingUploadsRef.current.filter((item) => isBusyPhase(item.phase)).length
+    const currentCount = existingCount + valueRef.current.length + pendingCount
     const remaining = MAX_CONTENT_IMAGES - currentCount
     if (remaining <= 0) {
-      setError(`最多上传 ${MAX_CONTENT_IMAGES} 张图片`)
+      setError(`最多只能添加 ${MAX_CONTENT_IMAGES} 张图片。`)
       return
     }
 
-    const acceptedFiles = files.slice(0, remaining)
-    const skippedCount = files.length - acceptedFiles.length
+    const acceptedFiles = nextFiles.slice(0, remaining)
+    const skippedCount = nextFiles.length - acceptedFiles.length
     const newItems = acceptedFiles.map((file): PendingUpload => ({
       id: createUploadId(),
       file,
@@ -159,7 +171,7 @@ export function ContentImageUploader({
     pendingUploadsRef.current = nextPending
     setPendingUploads(nextPending)
     setError(skippedCount > 0
-      ? `每篇帖子最多上传 ${MAX_CONTENT_IMAGES} 张图片，已忽略超出的 ${skippedCount} 张`
+      ? `最多只能添加 ${MAX_CONTENT_IMAGES} 张图片。`
       : '')
 
     // Each item owns its own status/error. A failed image never aborts the
@@ -167,6 +179,40 @@ export function ContentImageUploader({
     void (async () => {
       for (const item of newItems) await uploadItem(item)
     })()
+  }
+
+  useImperativeHandle(ref, () => ({ addFiles }))
+
+  function selectFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || [])
+    // Reset immediately so selecting the same photo again is still observable
+    // after a failed upload on iOS Safari/Android WebView.
+    event.target.value = ''
+    addFiles(files)
+  }
+
+  async function pasteFromClipboard() {
+    if (clipboardReadingRef.current) return
+    clipboardReadingRef.current = true
+    setClipboardReading(true)
+    setError('')
+    try {
+      const files = await readClipboardImageFiles()
+      if (!files.length) {
+        setError('剪贴板中没有可用图片。')
+        return
+      }
+      addFiles(files)
+    } catch (reason) {
+      if (reason instanceof ClipboardImageReadError && reason.code === 'UNSUPPORTED') {
+        setError('当前浏览器不支持直接读取剪贴板，请按 Ctrl+V 粘贴图片。')
+      } else {
+        setError('无法读取剪贴板，请允许剪贴板权限，或按 Ctrl+V 粘贴图片。')
+      }
+    } finally {
+      clipboardReadingRef.current = false
+      setClipboardReading(false)
+    }
   }
 
   function markPreviewFailed(id: string) {
@@ -254,20 +300,33 @@ export function ContentImageUploader({
   }
 
   const busy = pendingUploads.some((item) => isBusyPhase(item.phase))
+  const pendingCount = pendingUploads.filter((item) => isBusyPhase(item.phase)).length
+  const totalCount = existingCount + value.length + pendingCount
+  const canAddMore = totalCount < MAX_CONTENT_IMAGES
 
   return (
     <div className="post-content-image-uploader w-full min-w-0 max-w-full space-y-2">
-      <label className="post-content-image-uploader-trigger flex w-full min-w-0 max-w-full cursor-pointer box-border items-center rounded-lg border border-sky-100 bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
-        {busy ? busyLabel(pendingUploads) : `添加图片（${existingCount + value.length + pendingUploads.length}/${MAX_CONTENT_IMAGES}）`}
-        <input
-          type="file"
-          accept={CONTENT_IMAGE_ACCEPT}
-          multiple
-          disabled={busy}
-          onChange={selectFiles}
-          className="sr-only"
-        />
-      </label>
+      <div className="flex min-w-0 max-w-full flex-wrap gap-2">
+        <label className="post-content-image-uploader-trigger flex min-w-0 flex-1 basis-52 cursor-pointer box-border items-center rounded-lg border border-sky-100 bg-sky-50 px-4 py-2 text-sm font-black text-brand-700">
+          {busy ? `${busyLabel(pendingUploads)}（${totalCount}/${MAX_CONTENT_IMAGES}）` : `添加图片（${totalCount}/${MAX_CONTENT_IMAGES}）`}
+          <input
+            type="file"
+            accept={CONTENT_IMAGE_ACCEPT}
+            multiple
+            disabled={busy}
+            onChange={selectFiles}
+            className="sr-only"
+          />
+        </label>
+        <button
+          type="button"
+          disabled={!canAddMore || clipboardReading}
+          onClick={() => void pasteFromClipboard()}
+          className="min-w-0 max-w-full flex-1 basis-52 rounded-lg border border-sky-100 bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {clipboardReading ? '读取剪贴板…' : '从剪贴板添加'}
+        </button>
+      </div>
 
       {pendingUploads.length ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-live="polite">
@@ -349,4 +408,4 @@ export function ContentImageUploader({
       {busy ? <p className="text-xs font-bold text-slate-500" role="status">图片处理完成后才能发布帖子。</p> : null}
     </div>
   )
-}
+})

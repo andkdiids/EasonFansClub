@@ -364,11 +364,15 @@ export type BadgeRetentionPolicyValue = typeof BADGE_RETENTION_POLICIES[number]
 export const DEFAULT_BADGE_RETENTION_POLICY: BadgeRetentionPolicyValue = 'PERMANENT_AFTER_GRANT'
 
 /**
- * BADGE_OWNERSHIP already revokes the automatic source when the prerequisite
- * set stops matching, so its default must stay RETAIN_WHILE_ELIGIBLE to keep
- * existing installations byte-for-byte compatible.
+ * These rule families describe live eligibility rather than a one-time
+ * achievement. A NULL policy on them must therefore participate in the
+ * retention pass; otherwise a birthday change can never revoke the old
+ * automatic source. Explicit PERMANENT_AFTER_GRANT still wins through the
+ * resolver below.
  */
 const DEFAULT_RETENTION_POLICY_BY_RULE_TYPE: Partial<Record<SupportedBadgeRuleType, BadgeRetentionPolicyValue>> = {
+  BIRTHDAY_ZODIAC: 'RETAIN_WHILE_ELIGIBLE',
+  BIRTHDAY_TODAY: 'RETAIN_WHILE_ELIGIBLE',
   BADGE_OWNERSHIP: 'RETAIN_WHILE_ELIGIBLE',
 }
 

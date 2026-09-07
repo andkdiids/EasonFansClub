@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
-import { ContentImageUploader } from '@/components/ContentImageUploader'
+import { useRef, useState } from 'react'
+import { ContentImageUploader, type ContentImageUploaderHandle } from '@/components/ContentImageUploader'
 import { RichTextEditor } from '@/components/posts/RichTextEditor'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
 import { FORUM_DISCOVERY_SESSION_PREFIX, notifyForumDiscoveryFeedChanged } from '@/lib/forum-discovery-session'
@@ -49,6 +49,7 @@ export function PostEditForm({
   initialMedia: ExistingMedia[]
 }>) {
   const router = useRouter()
+  const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const [title, setTitle] = useState(initialTitle)
   const [content, setContent] = useState(initialContent)
   const [richContent, setRichContent] = useState<RichTextContent | null>(() => {
@@ -60,7 +61,7 @@ export function PostEditForm({
   const [addImageUrls, setAddImageUrls] = useState<string[]>([])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [richImagesUploading, setRichImagesUploading] = useState(false)
+  const [imagesUploading, setImagesUploading] = useState(false)
 
   const keptCount = media.filter((item) => !item.removed).length
   const totalImages = keptCount + addImageUrls.length
@@ -74,9 +75,17 @@ export function PostEditForm({
     setAddImageUrls((prev) => prev.filter((_, i) => i !== index))
   }
 
+  function addPastedImagesToAttachments(files: File[]) {
+    if (imagesUploaderRef.current) {
+      imagesUploaderRef.current.addFiles(files)
+      return
+    }
+    setError(`最多只能添加 ${MAX_CONTENT_IMAGES} 张图片。`)
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (richImagesUploading) {
+    if (imagesUploading) {
       setError('图片仍在处理中，请等待上传完成后再保存。')
       return
     }
@@ -147,7 +156,8 @@ export function PostEditForm({
               setRichContent(nextRichContent)
               setContent(plainText)
             }}
-            onBusyChange={setRichImagesUploading}
+            pasteImagesToAttachments
+            onPasteImagesToAttachments={addPastedImagesToAttachments}
           />
         </div>
       </div>
@@ -205,7 +215,13 @@ export function PostEditForm({
         ) : null}
 
         {canAddMore ? (
-          <ContentImageUploader value={addImageUrls} onChange={setAddImageUrls} existingCount={keptCount} />
+          <ContentImageUploader
+            ref={imagesUploaderRef}
+            value={addImageUrls}
+            onChange={setAddImageUrls}
+            existingCount={keptCount}
+            onBusyChange={setImagesUploading}
+          />
         ) : (
           <p className="text-sm font-bold text-slate-500">已达到图片数量上限，删除部分图片后可继续上传。</p>
         )}

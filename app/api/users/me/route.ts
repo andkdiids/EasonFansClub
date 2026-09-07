@@ -697,7 +697,7 @@ export async function PATCH(request: Request) {
 
   invalidateCurrentUserCache(guard.user.id)
   void updateUserIpRegion(guard.user.id, request)
-  if (birthdayChanged) triggerBadgeEvaluation(guard.user.id, 'USER_BIRTHDAY_UPDATED', profile.birthdaySetAt?.toISOString() || new Date().toISOString())
+  if (birthdayChanged) await triggerBadgeEvaluation(guard.user.id, 'USER_BIRTHDAY_UPDATED', profile.birthdaySetAt?.toISOString() || new Date().toISOString())
 
   profile.avatarUrl = publicImageUrl(profile.avatarUrl)
   profile.backgroundUrl = publicImageUrl(profile.backgroundUrl)

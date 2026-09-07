@@ -42,9 +42,11 @@ test('规则类型回收能力标记只对可重算的规则开放', () => {
   assert.equal(expectTrue.size + expectFalse.size, registryKeys.size)
 })
 
-test('默认策略保持现状：除 BADGE_OWNERSHIP 外全部永久保留', () => {
+test('默认策略仅对实时资格规则启用持续保持，其他规则仍永久保留', () => {
   for (const ruleType of Object.keys(BADGE_RULE_REGISTRY)) {
-    const expected = ruleType === 'BADGE_OWNERSHIP' ? 'RETAIN_WHILE_ELIGIBLE' : 'PERMANENT_AFTER_GRANT'
+    const expected = ['BADGE_OWNERSHIP', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY'].includes(ruleType)
+      ? 'RETAIN_WHILE_ELIGIBLE'
+      : 'PERMANENT_AFTER_GRANT'
     assert.equal(getDefaultBadgeRetentionPolicy(ruleType as Parameters<typeof getDefaultBadgeRetentionPolicy>[0]), expected, ruleType)
   }
 })
@@ -82,8 +84,11 @@ test('解析时保留策略会被携带到所有规则分支，包括生日/系�
 
 test('resolveBadgeRetentionPolicy：NULL 继承类型默认，显式值优先生效', () => {
   assert.equal(resolveBadgeRetentionPolicy({ ruleType: 'CHECKIN_STREAK', retentionPolicy: null }), 'PERMANENT_AFTER_GRANT')
+  assert.equal(resolveBadgeRetentionPolicy({ ruleType: 'BIRTHDAY_ZODIAC', retentionPolicy: null }), 'RETAIN_WHILE_ELIGIBLE')
+  assert.equal(resolveBadgeRetentionPolicy({ ruleType: 'BIRTHDAY_TODAY', retentionPolicy: null }), 'RETAIN_WHILE_ELIGIBLE')
   assert.equal(resolveBadgeRetentionPolicy({ ruleType: 'BADGE_OWNERSHIP', retentionPolicy: null }), 'RETAIN_WHILE_ELIGIBLE')
   assert.equal(resolveBadgeRetentionPolicy({ ruleType: 'BADGE_OWNERSHIP', retentionPolicy: 'PERMANENT_AFTER_GRANT' }), 'PERMANENT_AFTER_GRANT')
+  assert.equal(resolveBadgeRetentionPolicy({ ruleType: 'BIRTHDAY_TODAY', retentionPolicy: 'PERMANENT_AFTER_GRANT' }), 'PERMANENT_AFTER_GRANT')
   assert.equal(resolveBadgeRetentionPolicy({ ruleType: 'CHECKIN_STREAK', retentionPolicy: 'RETAIN_WHILE_ELIGIBLE' }), 'RETAIN_WHILE_ELIGIBLE')
   assert.ok(BADGE_RETENTION_POLICY_LABELS.PERMANENT_AFTER_GRANT)
   assert.ok(BADGE_RETENTION_POLICY_DESCRIPTIONS.RETAIN_WHILE_ELIGIBLE)

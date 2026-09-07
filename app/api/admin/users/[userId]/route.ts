@@ -191,7 +191,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         emitRealtime(userId, 'notification')
       }
       if (result.birthdayChanged) {
-        void triggerBadgeEvaluation(userId, 'USER_BIRTHDAY_UPDATED', new Date().toISOString())
+        await triggerBadgeEvaluation(userId, 'USER_BIRTHDAY_UPDATED', new Date().toISOString())
       }
       return NextResponse.json({ user: result.user, changedFields: result.changedFields, message: result.changed ? '用户资料已更新' : '用户资料未发生变化' })
     } catch (error) {

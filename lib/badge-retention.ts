@@ -14,6 +14,7 @@ import {
 } from '@/lib/badge-rules'
 import { revokeBadgeAcquisitionSource } from '@/lib/badge-service'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
+import { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday-constants'
 
 /**
  * Re-derivation of automatic badge conditions.
@@ -39,6 +40,8 @@ type StoredRetentionRule = {
   badgeName: string
   availableFrom: Date | null
   availableUntil: Date | null
+  /** The pre-rule birthday badge is a BIRTHDAY_TODAY compatibility source. */
+  legacyBirthdaySource?: boolean
 }
 
 function toRetentionPolicy(value: string | null): BadgeRetentionPolicyValue | null {
@@ -192,7 +195,7 @@ async function loadRecyclableRules(options: { ruleTypes?: readonly SupportedBadg
       Badge: { select: { id: true, name: true, availableFrom: true, availableUntil: true } },
     },
   })
-  return rows.map<StoredRetentionRule>((row) => ({
+  const rules = rows.map<StoredRetentionRule>((row) => ({
     id: row.id,
     badgeId: row.badgeId,
     ruleType: row.ruleType as SupportedBadgeRuleType,
@@ -204,6 +207,50 @@ async function loadRecyclableRules(options: { ruleTypes?: readonly SupportedBadg
     availableFrom: row.Badge.availableFrom,
     availableUntil: row.Badge.availableUntil,
   }))
+
+  // `birthday-commemorative` predates BadgeRule and is still granted by
+  // ensureBirthdayBadge. Treat that automatic source as the compatibility
+  // representation of BIRTHDAY_TODAY so existing users get the same
+  // retention/regrant semantics as rule-created birthday badges. A configured
+  // BIRTHDAY_TODAY rule on the same badge may explicitly opt into permanent
+  // retention; when absent, the rule-type default applies.
+  const wantsBirthdayToday = !options.ruleTypes?.length || options.ruleTypes.includes('BIRTHDAY_TODAY')
+  if (!wantsBirthdayToday) {
+    return rules
+  }
+  const legacyBadges = await prisma.badge.findMany({
+    where: {
+      slug: BIRTHDAY_BADGE_SLUG,
+      isEnabled: true,
+      isActive: true,
+      grantType: 'AUTO',
+      ...(options.badgeIds?.length ? { id: { in: [...new Set(options.badgeIds)] } } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      availableFrom: true,
+      availableUntil: true,
+      BadgeRule: { select: { ruleType: true, retentionPolicy: true } },
+    },
+  })
+  for (const badge of legacyBadges) {
+    const configuredRule = badge.BadgeRule?.ruleType === 'BIRTHDAY_TODAY' ? badge.BadgeRule : null
+    rules.push({
+      id: `legacy:${BIRTHDAY_BADGE_SLUG}`,
+      badgeId: badge.id,
+      ruleType: 'BIRTHDAY_TODAY',
+      operator: 'GTE',
+      threshold: null,
+      configJson: {},
+      retentionPolicy: toRetentionPolicy(configuredRule?.retentionPolicy || null),
+      badgeName: badge.name,
+      availableFrom: badge.availableFrom,
+      availableUntil: badge.availableUntil,
+      legacyBirthdaySource: true,
+    })
+  }
+  return rules
 }
 
 /**
@@ -232,9 +279,18 @@ export async function evaluateBadgeRetentionForUser(
     if (!supportsBadgeRetentionPolicy(rule.ruleType)) continue
     if (resolveBadgeRetentionPolicy(rule) !== 'RETAIN_WHILE_ELIGIBLE') continue
 
-    const sourceTypes = governedSourceTypes(rule.ruleType)
+    const sourceTypes = rule.legacyBirthdaySource ? ['AUTO', 'LEGACY'] : governedSourceTypes(rule.ruleType)
+    const legacySourceFilter = rule.legacyBirthdaySource ? {
+      OR: [
+        { sourceType: 'AUTO', sourceId: BIRTHDAY_BADGE_SLUG },
+        // Rows created before source identities were introduced were
+        // migrated as LEGACY with a NULL sourceId. The badge slug scopes
+        // this compatibility path to the old birthday badge only.
+        { sourceType: 'LEGACY', sourceId: null },
+      ],
+    } : {}
     const sources = await prisma.userBadgeSource.findMany({
-      where: { userId, badgeId: rule.badgeId, isActive: true, sourceType: { in: [...sourceTypes] } },
+      where: { userId, badgeId: rule.badgeId, isActive: true, sourceType: { in: [...sourceTypes] }, ...legacySourceFilter },
       select: { id: true, sourceType: true, sourceId: true },
     })
     if (!sources.length) {

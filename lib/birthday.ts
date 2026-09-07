@@ -10,14 +10,15 @@ import { getTodayMonthDay } from '@/lib/today'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { evaluateUserAutoBadges, grantCurrentZodiacBadgeRewards } from '@/lib/badge-rule-engine'
 import { expireUserBadges } from '@/lib/badge-expiration'
+import { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday-constants'
+
+export { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday-constants'
 
 /** 生日祝福通知标题与内容（不出现用户名、不写「祝 xxx 生日快乐」、不写生日日期）。 */
 export const BIRTHDAY_GREETING_TITLE = '🎂 生日纪念'
 export const BIRTHDAY_GREETING_CONTENT =
   '今天是你的生日，E院为你送上一份生日纪念。愿你继续听喜欢的歌，遇见喜欢的风景。'
 const BIRTHDAY_GREETING_KEY_PREFIX = 'birthday-greeting'
-
-export const BIRTHDAY_BADGE_SLUG = 'birthday-commemorative'
 
 /**
  * 从管理员维护的「启用」生日祝福文案池中随机选择一条。
