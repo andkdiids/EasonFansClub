@@ -105,12 +105,12 @@ export function ProfileEditorDrawer({
 
   const drawer = mounted && isOpen
     ? createPortal(
-      <div className="profile-editor-overlay fixed inset-0 z-[var(--layer-dialog)] overflow-hidden bg-slate-950/65 backdrop-blur-sm">
+      <div className="profile-editor-overlay fixed inset-0 z-[var(--layer-dialog)] overflow-hidden bg-slate-950/65">
         <aside
           role="dialog"
           aria-modal="true"
           aria-labelledby="profile-editor-title"
-          className="profile-editor-drawer ml-auto flex h-full min-h-0 w-full flex-col overflow-hidden shadow-2xl md:max-w-2xl"
+          className="profile-editor-drawer ml-auto flex h-full min-h-0 w-full flex-col overflow-hidden md:max-w-2xl"
         >
           <div className="profile-editor-header flex shrink-0 items-center justify-between border-b px-5 py-4">
             <div className="min-w-0">
@@ -121,7 +121,7 @@ export function ProfileEditorDrawer({
               ref={closeButtonRef}
               type="button"
               onClick={cancelEditor}
-              className="relative z-10 min-h-11 shrink-0 rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 hover:bg-sky-100"
+              className="relative z-10 min-h-11 shrink-0 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-black text-[var(--primary)] hover:bg-[var(--surface-subtle)]"
             >
               关闭
             </button>
@@ -138,7 +138,7 @@ export function ProfileEditorDrawer({
   return (
     <>
       {hideTrigger ? null : (
-        <button type="button" onClick={openEditor} className="h-11 rounded-xl border border-white/25 bg-slate-950/30 px-4 text-center text-sm font-black text-white shadow-lg shadow-slate-950/20 backdrop-blur-xl transition hover:bg-slate-950/42">
+        <button type="button" onClick={openEditor} className="h-11 rounded-sm border border-white/25 bg-slate-950/30 px-4 text-center text-sm font-black text-white transition hover:bg-slate-950/42">
           编辑资料
         </button>
       )}

@@ -10,7 +10,7 @@ import { formatUid } from '@/lib/uid'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
-const liveActionClass = 'inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-elevated)] px-4 py-2.5 text-sm font-black text-[var(--primary)] shadow-sm transition hover:bg-[var(--accent)]'
+const liveActionClass = 'inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-black text-[var(--primary)] transition hover:bg-[var(--surface-subtle)]'
 
 export function FriendProfileActions({
   targetUserId,
@@ -73,14 +73,14 @@ export function FriendProfileActions({
               setError('')
               setConfirmOpen(true)
             }}
-            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--danger)] bg-transparent px-4 py-2.5 text-sm font-black text-[var(--danger)] shadow-sm transition hover:bg-[var(--accent)]"
+            className="inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--danger)] bg-transparent px-4 py-2.5 text-sm font-black text-[var(--danger)] transition hover:bg-[var(--surface-subtle)]"
           >
             删除好友
           </button>
-          <FriendFollowButton userId={targetUserId} initialFollowed={isFollowed} onChanged={setIsFollowed} />
+          <FriendFollowButton userId={targetUserId} initialFollowed={isFollowed} onChanged={setIsFollowed} buttonClassName="inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-black text-[var(--primary)] transition hover:bg-[var(--surface-subtle)] disabled:cursor-wait disabled:opacity-60" />
         </>
       ) : null}
-      {hasViewer && !isFriend && !initialIsBlocked ? <AddFriendButton uid={targetUid} initialStatus={isFriend ? 'FRIEND' : friendStatus === 'FRIEND' ? 'NONE' : friendStatus} /> : null}
+      {hasViewer && !isFriend && !initialIsBlocked ? <AddFriendButton uid={targetUid} initialStatus={isFriend ? 'FRIEND' : friendStatus === 'FRIEND' ? 'NONE' : friendStatus} buttonClassName="inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-4 py-2.5 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70" /> : null}
       {!hasViewer ? <Link href="/login" className={liveActionClass}>登录后添加好友</Link> : null}
       {publicLiveCount > 0 ? <Link href={`/user/${formatUid(targetUid)}/live`} className={liveActionClass}>TA的现场</Link> : null}
       {error ? <p role="alert" className="w-full basis-full text-xs font-bold text-[var(--danger)]">{error}</p> : null}

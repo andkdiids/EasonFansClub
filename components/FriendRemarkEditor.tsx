@@ -45,26 +45,26 @@ export function FriendRemarkEditor({ targetUserId, initialRemark, baseDisplayNam
 
   return (
     <div className="inline-flex items-center">
-      <button type="button" onClick={openEditor} className="rounded-lg border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-brand-700 hover:bg-sky-50">
+      <button type="button" onClick={openEditor} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-black text-[var(--primary)] hover:bg-[var(--surface-subtle)]">
         修改备注
       </button>
       {open ? (
         <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-950/35 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false) }}>
-          <div className="w-full max-w-sm rounded-2xl border border-sky-100 bg-white p-5 text-left shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="friend-remark-title">
-            <h2 id="friend-remark-title" className="text-lg font-black text-brand-950">好友备注</h2>
+          <div className="w-full max-w-sm rounded-sm border border-[var(--border)] bg-[var(--surface-elevated)] p-5 text-left shadow-none" role="dialog" aria-modal="true" aria-labelledby="friend-remark-title">
+            <h2 id="friend-remark-title" className="text-lg font-black text-[var(--foreground)]">好友备注</h2>
             <input
               autoFocus
               value={draft}
               maxLength={20}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter') void save(); if (event.key === 'Escape' && !busy) setOpen(false) }}
-              className="mt-4 w-full rounded-xl border border-sky-100 px-3 py-2.5 text-sm font-bold text-brand-950 outline-none focus:border-brand-400"
+              className="mt-4 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-bold text-[var(--foreground)] outline-none focus:border-[var(--primary)]"
               placeholder="最多 20 个字符"
             />
             {error ? <p className="mt-2 text-xs font-bold text-red-600">{error}</p> : null}
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" disabled={busy} onClick={() => setOpen(false)} className="rounded-lg border border-sky-100 px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-50">取消</button>
-              <button type="button" disabled={busy} onClick={() => void save()} className="rounded-lg bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{busy ? '保存中…' : '保存'}</button>
+              <button type="button" disabled={busy} onClick={() => setOpen(false)} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-black text-[var(--foreground)] disabled:opacity-50">取消</button>
+              <button type="button" disabled={busy} onClick={() => void save()} className="rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-4 py-2 text-sm font-black text-[var(--primary-foreground)] disabled:opacity-50">{busy ? '保存中…' : '保存'}</button>
             </div>
           </div>
         </div>

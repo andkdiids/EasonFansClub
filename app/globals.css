@@ -2147,13 +2147,13 @@ padding-top:18vh; }.auth-brand-copy { display:none; }.auth-form-panel { padding:
 .profile-editor-drawer .profile-settings-actions { bottom:0; }
 .profile-settings-form { box-sizing:border-box; width:100%; max-width:100%; min-width:0; margin:0; border-color:var(--border); color:var(--foreground); background:var(--surface); }
 .profile-settings-form>section { border-color:var(--border); background:var(--surface-elevated); }
-.profile-settings-form>section :where(label.rounded-2xl,div.rounded-2xl) { border-color:var(--border); background:var(--surface-subtle); }
+.profile-settings-form>section :where(label.rounded-sm,div.rounded-sm) { border-color:var(--border); background:var(--surface-subtle); }
 .profile-settings-form :where(h2,h3,.text-brand-950,.text-slate-700) { color:var(--foreground)!important; }
 .profile-settings-form :where(.text-slate-500,.text-slate-400) { color:var(--foreground-muted)!important; }
 .profile-settings-form :where(input:not([type='file']):not([type='range']),textarea,select) { color:var(--foreground); border-color:var(--border); background:var(--surface); }
 .profile-settings-form :where(input,textarea)::placeholder { color:var(--foreground-muted); }
 .profile-settings-form .bg-gradient-to-r { background:linear-gradient(90deg,var(--surface-subtle),var(--surface),var(--surface-elevated))!important; }
-.profile-settings-form .profile-settings-actions { position:fixed; z-index:calc(var(--layer-dialog) + 1); right:0; bottom:0; display:grid; width:min(100%,42rem); min-height:var(--mobile-profile-action-bar-total); grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0; border-top:1px solid var(--border); padding:9px max(16px,env(safe-area-inset-right,0px)) max(9px,var(--mobile-safe-area-bottom)) max(16px,env(safe-area-inset-left,0px)); background:var(--surface-elevated); box-shadow:0 -8px 24px rgba(2,8,18,.12); }
+.profile-settings-form .profile-settings-actions { position:fixed; z-index:calc(var(--layer-dialog) + 1); right:0; bottom:0; display:grid; width:min(100%,42rem); min-height:var(--mobile-profile-action-bar-total); grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0; border-top:1px solid var(--border); padding:9px max(16px,env(safe-area-inset-right,0px)) max(9px,var(--mobile-safe-area-bottom)) max(16px,env(safe-area-inset-left,0px)); background:var(--surface-elevated); box-shadow:none; }
 .profile-settings-form .profile-settings-actions button { min-height:44px; border:1px solid var(--border); border-radius:2px; }
 .profile-settings-form .profile-settings-actions button:first-child { color:var(--foreground); background:var(--surface-subtle); }
 .profile-avatar-crop { color:var(--foreground); border:1px solid var(--border); background:var(--surface-elevated); }
@@ -2172,6 +2172,14 @@ padding-top:18vh; }.auth-brand-copy { display:none; }.auth-form-panel { padding:
 .profile-background-crop-cancel { flex:0 1 auto; }
 .profile-background-crop-confirm { flex:0 1 auto; }
 :root[data-theme='midnight'] .profile-settings-form :where(.bg-amber-50,.bg-emerald-50,.bg-red-50,.bg-slate-100) { background:var(--surface-subtle); }
+
+/* The profile badge collection is embedded in the flat profile surface. Keep
+ * its nested showcase/history blocks rectangular without changing the full
+ * badge-center page's separate layout language. */
+.profile-page-surface .badge-collection-section { border-radius:2px!important; box-shadow:none!important; }
+.profile-page-surface .badge-collection-section :where(section,article,div,a,button).rounded-full,
+.profile-page-surface .badge-collection-section :where(section,article,div,a,button).rounded-xl,
+.profile-page-surface .badge-collection-section :where(section,article,div,a,button).rounded-2xl { border-radius:2px!important; box-shadow:none!important; }
 
 @media (max-width:767px) {
   .profile-settings-form { padding-right:16px!important; padding-bottom:16px!important; padding-left:16px!important; }
@@ -5900,7 +5908,7 @@ body:has(.duel-page) .app-page-content {
 @keyframes eason-badge-name-sparkle { 0%,62%,100% { opacity:.35; transform:scale(.72) rotate(0deg); } 78% { opacity:1; transform:scale(1.18) rotate(14deg); } 90% { opacity:.35; transform:scale(.72) rotate(0deg); } }
 @keyframes eason-badge-nickname-shine { 0% { opacity:0; -webkit-mask-position:100% 0; mask-position:100% 0; } 12% { opacity:.96; } 88% { opacity:.96; } 100% { opacity:0; -webkit-mask-position:0 0; mask-position:0 0; } }
 .badge-detail-backdrop { position:fixed; inset:0; z-index:var(--layer-dialog); display:grid; place-items:center; padding:20px; background:rgba(15,23,42,.48); }
-.badge-detail-dialog { position:relative; display:flex; min-width:min(320px,100%); flex-direction:column; align-items:center; gap:10px; border:1px solid var(--border,#cbd5e1); border-radius:20px; padding:28px 32px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:0 18px 60px rgba(15,23,42,.2); text-align:center; }
+.badge-detail-dialog { position:relative; display:flex; min-width:min(320px,100%); flex-direction:column; align-items:center; gap:10px; border:1px solid var(--border,#cbd5e1); border-radius:2px; padding:28px 32px; color:var(--foreground,#0f172a); background:var(--surface,#fff); box-shadow:none; text-align:center; }
 .badge-detail-dialog h3 { margin:3px 0 0; font-size:20px; font-weight:900; }
 .badge-detail-rarity,.badge-detail-obtained { margin:0; color:var(--foreground-muted,#64748b); font-size:12px; font-weight:800; }
 .badge-detail-close { position:absolute; top:8px; right:10px; border:0; color:var(--foreground-muted,#64748b); background:transparent; font-size:26px; line-height:1; cursor:pointer; }
@@ -5923,12 +5931,12 @@ body:has(.duel-page) .app-page-content {
 @media (max-width: 767px) {
   .duel-room-player .user-display-name { max-width:100%; }
 }
-.badge-collection-card { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; border:1px solid var(--border,#cbd5e1); border-radius:14px; padding:10px; background:var(--surface-subtle,#f8fafc); }
+.badge-collection-card { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:8px; border:1px solid var(--border,#cbd5e1); border-radius:2px; padding:10px; color:var(--foreground); background:var(--surface-subtle,#f8fafc); }
 .badge-collection-card-hidden { opacity:.78; }
 .badge-collection-card-main { display:flex; min-width:0; flex:1; align-items:center; gap:10px; border:0; padding:0; background:transparent; cursor:pointer; }
-.badge-collection-card-main:focus-visible { outline:2px solid var(--primary,#0e7490); outline-offset:3px; border-radius:10px; }
-.badge-collection-action { flex:none; border:1px solid #bae6fd; border-radius:999px; padding:7px 10px; color:#075985; background:#f0f9ff; font-size:11px; font-weight:900; cursor:pointer; }
-.badge-collection-action.is-equipped { color:#475569; background:#f8fafc; }
+.badge-collection-card-main:focus-visible { outline:2px solid var(--primary,#0e7490); outline-offset:3px; border-radius:2px; }
+.badge-collection-action { flex:none; border:1px solid var(--border); border-radius:2px; padding:7px 10px; color:var(--primary); background:var(--surface); font-size:11px; font-weight:900; cursor:pointer; }
+.badge-collection-action.is-equipped { color:var(--foreground-muted); background:var(--surface-subtle); }
 .badge-collection-action:disabled { cursor:wait; opacity:.6; }
 .admin-badge-input { display:block; box-sizing:border-box; width:100%; margin-top:4px; min-height:40px; border:1px solid #bae6fd; border-radius:12px; padding:8px 11px; color:var(--foreground,#0f172a); background:var(--surface-subtle,#f8fafc); font:inherit; font-size:13px; font-weight:700; }
 .admin-badge-input:focus { border-color:#0e7490; outline:2px solid rgba(14,116,144,.16); outline-offset:1px; }
@@ -6011,19 +6019,19 @@ body:has(.duel-page) .app-page-content {
 .badge-museum-empty span:last-child { font-size:12px; font-weight:700; }
 .badge-museum-empty-mark { color:#c89b63; font-size:30px; }
 
-.badge-mini-showcase { min-width:0; border:1px solid color-mix(in srgb,#c89b63 28%,var(--border)); border-radius:20px; padding:16px; background:linear-gradient(180deg,color-mix(in srgb,#f2d39d 13%,var(--surface)),var(--surface)); box-shadow:0 10px 24px rgba(68,46,25,.06); }
+.badge-mini-showcase { min-width:0; border:1px solid var(--border); border-radius:2px; padding:16px; background:var(--surface); box-shadow:none; }
 .badge-mini-showcase-header { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:10px; }
 .badge-mini-showcase-header h2 { margin:3px 0 0; color:var(--foreground); font-size:18px; font-weight:950; }
 .badge-mini-showcase-actions { display:flex; align-items:center; gap:8px; }
 .badge-mini-showcase-edit,.badge-mini-showcase-all { color:var(--primary); font-size:11px; font-weight:900; text-decoration:none; }
-.badge-mini-showcase-cabinet { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:13px; border:1px solid color-mix(in srgb,#8b633d 30%,var(--border)); border-radius:12px; padding:10px 8px 8px; background:linear-gradient(180deg,color-mix(in srgb,#8f6848 10%,var(--surface)),color-mix(in srgb,#5b3d27 11%,var(--surface-subtle))); }
-.badge-mini-showcase-item { position:relative; display:grid; min-width:0; min-height:76px; place-items:center; align-content:end; gap:2px; border:0; border-bottom:5px solid color-mix(in srgb,#8a5d36 48%,var(--border)); border-radius:5px; padding:3px 2px 5px; color:var(--foreground); background:transparent; text-decoration:none; }
+.badge-mini-showcase-cabinet { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-top:13px; border:1px solid var(--border); border-radius:2px; padding:10px 8px 8px; background:var(--surface-subtle); }
+.badge-mini-showcase-item { position:relative; display:grid; min-width:0; min-height:76px; place-items:center; align-content:end; gap:2px; border:0; border-bottom:2px solid var(--border-strong); border-radius:2px; padding:3px 2px 5px; color:var(--foreground); background:transparent; text-decoration:none; }
 .badge-mini-showcase-item:hover .badge-mini-showcase-image { transform:translateY(-2px); }
 .badge-mini-showcase-image { display:block; transition:transform 170ms ease; }
 .badge-mini-showcase-image .user-badge-image,.badge-mini-showcase-image .user-badge-placeholder { width:46px; height:46px; filter:drop-shadow(0 4px 3px rgba(30,22,15,.18)); }
 .badge-mini-showcase-name { width:100%; overflow:hidden; color:var(--foreground); font-size:9px; font-weight:900; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
-.badge-mini-showcase-equipped { position:absolute; top:1px; right:0; border-radius:999px; padding:2px 4px; color:#94601f; background:color-mix(in srgb,#f6d99c 70%,var(--surface)); font-size:7px; font-weight:950; }
-.badge-mini-showcase-empty { display:flex; min-height:68px; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; border:1px dashed var(--border); border-radius:12px; padding:10px; color:var(--foreground-muted); font-size:11px; font-weight:800; }
+.badge-mini-showcase-equipped { position:absolute; top:1px; right:0; border:1px solid var(--border); border-radius:2px; padding:2px 4px; color:var(--primary); background:var(--surface-subtle); font-size:7px; font-weight:950; }
+.badge-mini-showcase-empty { display:flex; min-height:68px; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; border:1px dashed var(--border); border-radius:2px; padding:10px; color:var(--foreground-muted); font-size:11px; font-weight:800; }
 .badge-mini-showcase-empty a { color:var(--primary); font-weight:950; text-decoration:none; }
 .badge-mini-showcase-count { margin:10px 0 0; color:var(--foreground-muted); font-size:11px; font-weight:800; }
 

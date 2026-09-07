@@ -68,18 +68,18 @@ export function UserLocationPicker({ value, onChange }: { value: UserLocation | 
   const dialog = mounted && open
     ? createPortal(
       <div className="fixed inset-0 z-[var(--layer-dialog)] flex items-end justify-center bg-slate-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false) }}>
-        <section role="dialog" aria-modal="true" aria-labelledby="location-picker-title" className="flex max-h-[min(760px,92dvh)] w-full min-w-0 flex-col overflow-hidden rounded-t-[28px] border border-sky-100 bg-white shadow-2xl sm:max-w-2xl sm:rounded-[28px]">
+        <section role="dialog" aria-modal="true" aria-labelledby="location-picker-title" className="flex max-h-[min(760px,92dvh)] w-full min-w-0 flex-col overflow-hidden rounded-none border border-[var(--border)] bg-[var(--surface-elevated)] shadow-none sm:max-w-2xl">
           <header className="flex shrink-0 items-center justify-between gap-3 border-b border-sky-100 px-4 py-4 sm:px-6">
             <div className="min-w-0">
               <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料</p>
               <h2 id="location-picker-title" className="mt-1 text-lg font-black text-brand-950">选择地区</h2>
             </div>
-            <button type="button" onClick={() => setOpen(false)} className="min-h-10 shrink-0 rounded-full border border-sky-100 px-3 text-sm font-black text-brand-700">关闭</button>
+            <button type="button" onClick={() => setOpen(false)} className="min-h-10 shrink-0 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 text-sm font-black text-[var(--primary)]">关闭</button>
           </header>
           <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
             <div className="flex flex-wrap items-center gap-2">
               {selectedCountry ? (
-                <button type="button" onClick={() => { setSelectedCountryCode(''); setQuery('') }} className="rounded-full bg-sky-50 px-3 py-2 text-sm font-black text-brand-700">
+                <button type="button" onClick={() => { setSelectedCountryCode(''); setQuery('') }} className="rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2 text-sm font-black text-[var(--primary)]">
                   {selectedCountry.name} ×
                 </button>
               ) : null}
@@ -88,7 +88,7 @@ export function UserLocationPicker({ value, onChange }: { value: UserLocation | 
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="搜索国家、地区或城市，例如 东京 / California"
-                className="min-w-0 flex-1 rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm font-bold outline-none focus:border-brand-700"
+                className="min-w-0 flex-1 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-bold outline-none focus:border-[var(--primary)]"
                 aria-label="搜索地区"
               />
             </div>
@@ -102,13 +102,13 @@ export function UserLocationPicker({ value, onChange }: { value: UserLocation | 
                 {regionResults.length ? (
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {regionResults.map((item) => (
-                      <button key={item.code} type="button" onClick={() => chooseRegion(item.code, item.name)} className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 py-2 text-left text-sm font-bold text-slate-700 transition hover:border-brand-700 hover:bg-sky-50">
+                      <button key={item.code} type="button" onClick={() => chooseRegion(item.code, item.name)} className="min-h-11 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-sm font-bold text-[var(--foreground)] transition hover:border-[var(--primary)] hover:bg-[var(--surface-subtle)]">
                         {item.name}
                       </button>
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-4 rounded-2xl bg-sky-50/70 p-4 text-sm font-bold leading-6 text-slate-500">没有维护该国家/地区的一级行政区，可保存国家/地区本身。</p>
+                  <p className="mt-4 rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-sm font-bold leading-6 text-[var(--foreground-muted)]">没有维护该国家/地区的一级行政区，可保存国家/地区本身。</p>
                 )}
               </div>
             ) : (
@@ -118,7 +118,7 @@ export function UserLocationPicker({ value, onChange }: { value: UserLocation | 
                     <p className="text-sm font-black text-brand-950">地区匹配</p>
                     <div className="mt-2 space-y-2">
                       {globalRegionResults.map(({ country, region }) => (
-                        <button key={`${country.code}-${region.code}`} type="button" onClick={() => { onChange({ countryCode: country.code, countryName: country.name, regionCode: region.code, regionName: region.name }); setOpen(false) }} className="flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-sky-100 bg-white px-3 py-2 text-left text-sm font-bold text-slate-700 hover:bg-sky-50">
+                        <button key={`${country.code}-${region.code}`} type="button" onClick={() => { onChange({ countryCode: country.code, countryName: country.name, regionCode: region.code, regionName: region.name }); setOpen(false) }} className="flex min-h-11 w-full items-center justify-between gap-3 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-sm font-bold text-[var(--foreground)] hover:bg-[var(--surface-subtle)]">
                           <span>{country.name} · {region.name}</span>
                           <span className="text-xs text-slate-400">选择</span>
                         </button>
@@ -130,7 +130,7 @@ export function UserLocationPicker({ value, onChange }: { value: UserLocation | 
                   <p className="text-sm font-black text-brand-950">国家 / 地区</p>
                   <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {countryResults.map((country) => (
-                      <button key={country.code} type="button" onClick={() => chooseCountry(country)} className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 py-2 text-left text-sm font-bold text-slate-700 transition hover:border-brand-700 hover:bg-sky-50">
+                      <button key={country.code} type="button" onClick={() => chooseCountry(country)} className="min-h-11 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-sm font-bold text-[var(--foreground)] transition hover:border-[var(--primary)] hover:bg-[var(--surface-subtle)]">
                         {country.name}
                       </button>
                     ))}
@@ -153,9 +153,9 @@ export function UserLocationPicker({ value, onChange }: { value: UserLocation | 
 
   return (
     <>
-      <button type="button" onClick={openPicker} className="mt-2 flex min-h-12 w-full items-center justify-between gap-3 rounded-2xl border border-sky-100 bg-white px-4 py-2 text-left text-sm font-bold text-slate-700 outline-none transition hover:border-brand-700">
-        <span className={value ? 'text-brand-950' : 'text-slate-400'}>{formatUserLocation(value) || '选择地区'}</span>
-        <span aria-hidden="true" className="text-lg text-slate-400">›</span>
+      <button type="button" onClick={openPicker} className="mt-2 flex min-h-12 w-full items-center justify-between gap-3 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-left text-sm font-bold text-[var(--foreground)] outline-none transition hover:border-[var(--primary)]">
+        <span className={value ? 'text-[var(--foreground)]' : 'text-[var(--foreground-muted)]'}>{formatUserLocation(value) || '选择地区'}</span>
+        <span aria-hidden="true" className="text-lg text-[var(--foreground-muted)]">›</span>
       </button>
       {dialog}
     </>

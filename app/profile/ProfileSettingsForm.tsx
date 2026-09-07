@@ -800,12 +800,12 @@ export function ProfileSettingsForm({
   const canEditBirthday = persistedBirthday.canEditBirthdate
   const birthdaySelectorFields = (
     <div className="grid gap-4 md:grid-cols-2">
-      <label className="block rounded-2xl border border-white bg-white/78 p-4">
+      <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
         <span className="text-sm font-black text-slate-700">月份</span>
         <select
           value={form.birthMonth ?? ''}
           onChange={(event) => updateBirthdayMonth(event.target.value ? Number(event.target.value) : null)}
-          className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+          className="mt-3 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none"
         >
           <option value="">请选择月份</option>
           {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
@@ -813,12 +813,12 @@ export function ProfileSettingsForm({
           ))}
         </select>
       </label>
-      <label className="block rounded-2xl border border-white bg-white/78 p-4">
+      <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
         <span className="text-sm font-black text-slate-700">日期</span>
         <select
           value={form.birthDay ?? ''}
           onChange={(event) => update('birthDay', event.target.value ? Number(event.target.value) : null)}
-          className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+          className="mt-3 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none"
         >
           <option value="">请选择日期</option>
           {Array.from({ length: daysForBirthdayMonth(form.birthMonth) }, (_, index) => index + 1).map((day) => (
@@ -842,7 +842,7 @@ export function ProfileSettingsForm({
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="profile-settings-form space-y-5 rounded-[28px] border p-6 shadow-sm">
+      <form onSubmit={handleSubmit} className="profile-settings-form space-y-5 rounded-none border p-6 shadow-none">
         <div className="profile-settings-intro">
           <p className="profile-editor-eyebrow text-sm font-black tracking-[0.18em] text-sky-700">个人资料编辑器</p>
           <h2 className="mt-2 text-2xl font-black text-brand-950">编辑资料</h2>
@@ -850,19 +850,19 @@ export function ProfileSettingsForm({
         </div>
 
         {(initialProfile.nicknameViolation || initialProfile.bioViolation) ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black leading-6 text-rose-700">
+          <div className="rounded-sm border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black leading-6 text-rose-700">
             你的资料包含违规内容，请修改后保存。
           </div>
         ) : null}
 
-        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50/45 p-4">
+        <section className="space-y-4 rounded-none border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">个人资料</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">个人资料</h3>
           </div>
 
           <div className="grid items-start gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-white bg-white/78 p-4">
+            <div className="rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4">
               <p className="text-sm font-black text-slate-700">头像</p>
               <div className="mt-3 flex items-center gap-4">
                 <span className="block h-20 w-20 shrink-0 overflow-hidden rounded-full border-2 border-slate-200 shadow">
@@ -870,10 +870,10 @@ export function ProfileSettingsForm({
                 </span>
                 <div className="min-w-0">
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={uploading !== null} className="rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm disabled:cursor-not-allowed disabled:opacity-60">
+                    <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={uploading !== null} className="rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-2 text-sm font-black text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-60">
                       {uploading === 'avatar' ? '上传中...' : '上传头像'}
                     </button>
-                    <button type="button" onClick={openDefaultAvatarPicker} disabled={uploading !== null} className="rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-black text-brand-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60">
+                    <button type="button" onClick={openDefaultAvatarPicker} disabled={uploading !== null} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-black text-[var(--primary)] disabled:cursor-not-allowed disabled:opacity-60">
                       默认头像图库
                     </button>
                   </div>
@@ -882,13 +882,13 @@ export function ProfileSettingsForm({
                 </div>
               </div>
               {avatarPickerOpen ? (
-                <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/55 p-3" role="dialog" aria-label="默认头像图库">
+                <div className="mt-4 rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-3" role="dialog" aria-label="默认头像图库">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-black text-brand-950">默认头像图库</p>
                       <p className="mt-1 text-xs font-bold text-slate-500">头像来自网站当前启用的默认头像池。</p>
                     </div>
-                    <button type="button" onClick={() => setAvatarPickerOpen(false)} className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-slate-500">关闭</button>
+                    <button type="button" onClick={() => setAvatarPickerOpen(false)} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-black text-[var(--foreground-muted)]">关闭</button>
                   </div>
                   {initialProfile.defaultAvatarOptions.length ? (
                     <>
@@ -908,20 +908,20 @@ export function ProfileSettingsForm({
                           )
                         })}
                       </div>
-                      <button type="button" onClick={applyDefaultAvatar} disabled={!pendingDefaultAvatarUrl} className="mt-3 min-h-10 w-full rounded-xl bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
+                      <button type="button" onClick={applyDefaultAvatar} disabled={!pendingDefaultAvatarUrl} className="mt-3 min-h-10 w-full rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-4 py-2 text-sm font-black text-[var(--primary-foreground)] disabled:cursor-not-allowed disabled:opacity-50">
                         使用此头像
                       </button>
                     </>
                   ) : (
-                    <p className="mt-3 rounded-xl bg-white px-3 py-3 text-sm font-bold leading-6 text-slate-500">暂无可用默认头像，请联系管理员先补充头像图库。</p>
+                    <p className="mt-3 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-sm font-bold leading-6 text-[var(--foreground-muted)]">暂无可用默认头像，请联系管理员先补充头像图库。</p>
                   )}
                 </div>
               ) : null}
             </div>
 
-            <div className="rounded-2xl border border-white bg-white/78 p-4">
+            <div className="rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4">
               <p className="text-sm font-black text-slate-700">个人病历背景图</p>
-              <div className="mt-3 overflow-hidden rounded-2xl bg-slate-100">
+              <div className="mt-3 overflow-hidden rounded-none border border-[var(--border)] bg-[var(--surface-subtle)]">
                 {backgroundPreview ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -938,7 +938,7 @@ export function ProfileSettingsForm({
               <label
                 htmlFor="profile-background-upload"
                 aria-disabled={uploading !== null}
-                className={`mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-sky-50 px-4 py-2 text-sm font-black text-brand-950 shadow-sm ${uploading !== null ? 'pointer-events-none opacity-60' : ''}`}
+                className={`mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-2 text-sm font-black text-[var(--foreground)] ${uploading !== null ? 'pointer-events-none opacity-60' : ''}`}
               >
                 {uploading === 'background' ? '上传中…' : '上传背景图'}
               </label>
@@ -965,7 +965,7 @@ export function ProfileSettingsForm({
               }}
               minLength={2}
               maxLength={16}
-              className="mt-2 w-full rounded-2xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none transition focus:border-brand-700"
+              className="mt-2 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none transition focus:border-[var(--primary)]"
               placeholder="请输入昵称"
             />
             <span className="mt-2 block text-xs font-bold leading-5 text-slate-500">用于个人主页展示、帖子显示、好友搜索。每 30 天只能修改一次。</span>
@@ -977,12 +977,12 @@ export function ProfileSettingsForm({
               onChange={(event) => update('bio', event.target.value)}
               rows={5}
               maxLength={300}
-              className="mt-2 w-full resize-none rounded-2xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold leading-7 outline-none transition focus:border-brand-700"
+              className="mt-2 w-full resize-none rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold leading-7 outline-none transition focus:border-[var(--primary)]"
               placeholder="写一点关于你的 Eason 故事"
             />
           </label>
 
-          <fieldset className="rounded-2xl border border-sky-100 bg-white/78 p-4">
+          <fieldset className="rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4">
             <legend className="px-1 text-sm font-black text-slate-700">性别</legend>
             <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="性别">
               {([
@@ -990,7 +990,7 @@ export function ProfileSettingsForm({
                 ['FEMALE', '女'],
                 ['CUSTOM', '自定义'],
               ] as const satisfies ReadonlyArray<readonly [GenderValue, string]>).map(([value, label]) => (
-                <label key={value} className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-sky-100 bg-sky-50/55 px-3 py-2 text-sm font-black text-brand-800">
+                <label key={value} className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-sm border px-3 py-2 text-sm font-black transition ${form.gender === value ? 'border-[var(--primary)] bg-[var(--navigation-active)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-subtle)]'}`}>
                   <input
                     type="radio"
                     name="profile-gender"
@@ -1002,7 +1002,7 @@ export function ProfileSettingsForm({
                   {label}
                 </label>
               ))}
-              <button type="button" aria-pressed={form.gender === null} onClick={() => update('gender', null)} className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-600">
+              <button type="button" aria-pressed={form.gender === null} onClick={() => update('gender', null)} className={`inline-flex min-h-10 items-center rounded-sm border px-3 py-2 text-sm font-black transition ${form.gender === null ? 'border-[var(--primary)] bg-[var(--navigation-active)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-subtle)]'}`}>
                 不设置
               </button>
             </div>
@@ -1013,7 +1013,7 @@ export function ProfileSettingsForm({
                   value={form.customGender}
                   onChange={(event) => update('customGender', event.target.value.replace(/[\r\n]+/gu, ' '))}
                   maxLength={CUSTOM_GENDER_MAX_LENGTH}
-                  className="mt-2 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none transition focus:border-brand-700"
+                  className="mt-2 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none transition focus:border-[var(--primary)]"
                   placeholder="例如：非二元、流动、保密"
                 />
                 <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">限 20 个字符，不可换行或使用 HTML 标记。</span>
@@ -1026,28 +1026,28 @@ export function ProfileSettingsForm({
             <UserLocationPicker value={form.location} onChange={(value) => update('location', value)} />
             <span className="mt-2 block text-xs font-bold leading-5 text-slate-500">地区由你自行设置，与系统显示的 IP 属地无关。</span>
           </label>
-          <label className="flex items-center justify-between gap-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+          <label className="flex items-center justify-between gap-4 rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
             <span><span className="text-sm font-black text-slate-700">勋章获得动态</span><span className="mt-1 block text-xs font-bold leading-5 text-slate-500">开启后，明确设置为公开动态的稀有勋章才会出现在好友动态；个人勋章墙不受影响。</span></span>
             <input type="checkbox" checked={form.showBadgeActivity} onChange={(event) => update('showBadgeActivity', event.target.checked)} className="h-5 w-5 shrink-0 accent-sky-600" />
           </label>
-          <label className="flex items-center justify-between gap-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+          <label className="flex items-center justify-between gap-4 rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
             <span><span className="text-sm font-black text-slate-700">勋章进度提醒</span><span className="mt-1 block text-xs font-bold leading-5 text-slate-500">追踪中的勋章达到 25%、50%、75% 或 90% 时发送站内提醒；正式获得通知不受影响。</span></span>
             <input type="checkbox" checked={form.showBadgeProgressNotifications} onChange={(event) => update('showBadgeProgressNotifications', event.target.checked)} className="h-5 w-5 shrink-0 accent-sky-600" />
           </label>
         </section>
 
-        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">
+        <section className="space-y-4 rounded-none border border-[var(--border)] bg-[var(--surface)] p-4">
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">隐私设置</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">留言墙隐私</h3>
             <p className="mt-1 text-sm font-bold leading-6 text-slate-500">选择谁可以查看你的个人病历留言墙并发布留言。</p>
           </div>
-          <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+          <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
             <span className="text-sm font-black text-slate-700">留言墙可见范围</span>
             <select
               value={form.wallVisibility}
               onChange={(event) => update('wallVisibility', event.target.value as ProfileWallVisibility)}
-              className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+              className="mt-3 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none"
             >
               <option value="PUBLIC">公开</option>
               <option value="FRIENDS">仅好友</option>
@@ -1056,7 +1056,7 @@ export function ProfileSettingsForm({
           </label>
         </section>
 
-        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-sky-50/45 p-4">
+        <section className="space-y-4 rounded-none border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">生日纪念</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">我的生日</h3>
@@ -1065,7 +1065,7 @@ export function ProfileSettingsForm({
           </div>
 
           {birthdayConfigured && !canEditBirthday ? (
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
+            <div className="rounded-sm border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
               <p className="text-xs font-black tracking-[0.14em] text-emerald-700">当前生日</p>
               <p className="mt-1 text-lg font-black text-brand-950">
                 {persistedBirthday.birthMonth != null && persistedBirthday.birthDay != null ? `${persistedBirthday.birthMonth}月${persistedBirthday.birthDay}日` : '已设置'}
@@ -1074,7 +1074,7 @@ export function ProfileSettingsForm({
             </div>
           ) : birthdayConfigured ? (
             <div className="space-y-4">
-              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
+              <div className="rounded-sm border border-emerald-100 bg-emerald-50/70 p-4 text-sm font-bold leading-6 text-slate-600">
                 <p className="text-xs font-black tracking-[0.14em] text-emerald-700">当前生日</p>
                 <p className="mt-1 text-lg font-black text-brand-950">
                   {persistedBirthday.birthMonth != null && persistedBirthday.birthDay != null ? `${persistedBirthday.birthMonth}月${persistedBirthday.birthDay}日` : '已设置'}
@@ -1082,20 +1082,20 @@ export function ProfileSettingsForm({
                 <p className="mt-1">生日设置后仅可再修改一次，请确认信息正确。</p>
               </div>
               {birthdaySelectorFields}
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900">
+              <div className="rounded-sm border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900">
                 生日仅可修改一次。此次修改成功后，将无法再次自行修改生日。
               </div>
             </div>
           ) : (
             <div className="space-y-4">
               {birthdaySelectorFields}
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900">
+              <div className="rounded-sm border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900">
                 设置生日后仍可自行修改一次，请确认日期完整且准确。
               </div>
             </div>
           )}
 
-          <label className="flex items-center justify-between rounded-2xl border border-white bg-white/78 p-4">
+          <label className="flex items-center justify-between rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4">
             <span>
               <span className="text-sm font-black text-slate-700">生日公开</span>
               <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">关闭「生日公开」后，不向其他用户展示生日日期，不影响生日纪念通知及相关规则。</span>
@@ -1109,7 +1109,7 @@ export function ProfileSettingsForm({
           </label>
         </section>
 
-        <section className="space-y-4 rounded-[24px] border border-sky-100 bg-white p-4">
+        <section className="space-y-4 rounded-none border border-[var(--border)] bg-[var(--surface)] p-4">
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-sky-700">账户安全</p>
             <h3 className="mt-1 text-lg font-black text-brand-950">账户安全</h3>
@@ -1117,31 +1117,31 @@ export function ProfileSettingsForm({
           </div>
 
           {!form.emailVerifiedAt ? (
-            <p className="rounded-2xl bg-amber-50 px-4 py-2 text-sm font-black leading-6 text-amber-800">
+            <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-black leading-6 text-amber-800">
               建议绑定并验证邮箱，提高账户安全性。未验证手机号不能用于找回密码或高风险操作验证。
             </p>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+            <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
               <span className="text-sm font-black text-slate-700">邮箱</span>
               <span className="mt-2 block text-sm font-black text-brand-950">{maskEmail(form.email)}</span>
-              <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-black ${form.emailVerifiedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+              <span className={`mt-2 inline-flex rounded-sm border border-[var(--border)] px-3 py-1 text-xs font-black ${form.emailVerifiedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                 {form.email ? (form.emailVerifiedAt ? '已验证' : '未验证') : '未绑定'}
               </span>
               <input
                 value={form.email}
                 onChange={(event) => update('email', event.target.value)}
                 type="email"
-                className="mt-3 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none"
+                className="mt-3 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none"
                 placeholder={form.email ? '更换邮箱' : '绑定邮箱'}
               />
             </label>
 
-            <label className="block rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+            <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
               <span className="text-sm font-black text-slate-700">手机号</span>
               <span className="mt-2 block text-sm font-black text-brand-950">{maskPhone(form.phone)}</span>
-              <span className="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">
+              <span className="mt-2 inline-flex rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-1 text-xs font-black text-[var(--foreground-muted)]">
                 {form.phone ? (form.phoneVerifiedAt ? '已验证' : '未验证，仅作为已绑定登录标识') : '未绑定'}
               </span>
               <InternationalPhoneInput
@@ -1160,16 +1160,16 @@ export function ProfileSettingsForm({
           </div>
         </section>
 
-        {message ? <p className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
-        {error ? <p className="rounded-2xl bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
+        {message ? <p className="rounded-sm border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
+        {error ? <p className="rounded-sm border border-red-200 bg-red-50 px-4 py-2 text-sm font-black text-red-600">{error}</p> : null}
 
         <div className="profile-settings-actions">
           {onCancel ? (
-            <button type="button" onClick={onCancel} disabled={isSaving || uploading !== null} className="flex-1 rounded-2xl bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60">
+            <button type="button" onClick={onCancel} disabled={isSaving || uploading !== null} className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-5 py-3 text-sm font-black text-[var(--foreground)] transition hover:bg-[var(--surface-subtle)] disabled:cursor-not-allowed disabled:opacity-60">
               取消
             </button>
           ) : null}
-          <button disabled={isSaving || uploading !== null} className="flex-1 rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60">
+          <button disabled={isSaving || uploading !== null} className="flex-1 rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-5 py-3 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
             {isSaving ? '保存中...' : '保存资料'}
           </button>
         </div>
@@ -1181,7 +1181,7 @@ export function ProfileSettingsForm({
             role="dialog"
             aria-modal="true"
             aria-labelledby="birthday-confirm-title"
-            className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl"
+            className="w-full max-w-md rounded-sm border border-[var(--border)] bg-[var(--surface-elevated)] p-6 shadow-none"
           >
             <h2 id="birthday-confirm-title" className="text-xl font-black text-brand-950">{birthdayConfigured ? '确认修改生日？' : '确认生日？'}</h2>
             <p className="mt-4 text-sm font-bold leading-6 text-slate-600">请确认你的生日为：</p>
@@ -1189,10 +1189,10 @@ export function ProfileSettingsForm({
             <p className="mt-3 text-sm font-bold leading-6 text-slate-500">{birthdayConfigured ? '生日仅可修改一次。此次修改成功后，将无法再次自行修改生日。' : '生日设置后仅可再修改一次，请确认信息正确。'}</p>
             {birthdayConfigured ? <p className="mt-2 text-sm font-bold leading-6 text-slate-500">生日或星座勋章会根据新的生日重新计算。</p> : null}
             <div className="mt-6 flex gap-3">
-              <button type="button" onClick={cancelBirthdayConfirmation} disabled={isSaving} className="flex-1 rounded-2xl bg-sky-50 px-5 py-3 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-60">
+              <button type="button" onClick={cancelBirthdayConfirmation} disabled={isSaving} className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-5 py-3 text-sm font-black text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-60">
                 取消
               </button>
-              <button type="button" onClick={() => void confirmBirthday()} disabled={isSaving} className="flex-1 rounded-2xl bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60">
+              <button type="button" onClick={() => void confirmBirthday()} disabled={isSaving} className="flex-1 rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-5 py-3 text-sm font-black text-[var(--primary-foreground)] disabled:cursor-not-allowed disabled:opacity-60">
                 {isSaving ? '保存中...' : birthdayConfigured ? '确认修改' : '确认并保存'}
               </button>
             </div>
@@ -1202,7 +1202,7 @@ export function ProfileSettingsForm({
 
       {crop ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 px-4">
-          <section className="profile-avatar-crop w-full max-w-md rounded-[28px] p-5 shadow-2xl">
+          <section className="profile-avatar-crop w-full max-w-md rounded-sm p-5 shadow-none">
             <h3 className="text-xl font-black text-brand-950">调整头像</h3>
             <p className="mt-1 text-sm font-bold text-slate-500">拖动图片调整位置，使用滑块缩放。</p>
             <div
@@ -1236,8 +1236,8 @@ export function ProfileSettingsForm({
               />
             </label>
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={resetCrop} className="rounded-full bg-sky-50 px-5 py-2 text-sm font-black text-brand-700">取消</button>
-              <button type="button" onClick={confirmAvatarUpload} disabled={uploading === 'avatar'} className="rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">
+              <button type="button" onClick={resetCrop} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-5 py-2 text-sm font-black text-[var(--foreground)]">取消</button>
+              <button type="button" onClick={confirmAvatarUpload} disabled={uploading === 'avatar'} className="rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-5 py-2 text-sm font-black text-[var(--primary-foreground)] disabled:opacity-60">
                 {uploading === 'avatar' ? '上传中...' : '使用此头像'}
               </button>
             </div>
@@ -1247,13 +1247,13 @@ export function ProfileSettingsForm({
 
       {backgroundCrop ? (
         <div className="profile-background-crop-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55">
-          <section className="profile-background-crop flex max-h-[calc(100dvh-24px)] w-full max-w-lg min-w-0 flex-col rounded-[28px] p-5 shadow-2xl">
+          <section className="profile-background-crop flex max-h-[calc(100dvh-24px)] w-full max-w-lg min-w-0 flex-col rounded-sm p-5 shadow-none">
             <div className="profile-background-crop-content min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
               <h3 className="text-xl font-black text-brand-950">调整背景图</h3>
               <p className="profile-background-crop-description mt-1 text-sm font-bold text-slate-500">拖动图片调整显示区域，使用滑块缩放。建议把人物主体放在画面中央。</p>
               <div
                 ref={backgroundFrameRef}
-                className="profile-background-crop-frame relative mx-auto mt-5 aspect-[9/2] w-full max-w-[450px] min-w-0 touch-none overflow-hidden rounded-2xl bg-slate-900"
+                className="profile-background-crop-frame relative mx-auto mt-5 aspect-[9/2] w-full max-w-[450px] min-w-0 touch-none overflow-hidden rounded-none bg-slate-900"
                 onPointerDown={onBackgroundCropPointerDown}
                 onPointerMove={onBackgroundCropPointerMove}
                 onPointerUp={onBackgroundCropPointerUp}
@@ -1287,8 +1287,8 @@ export function ProfileSettingsForm({
               </label>
             </div>
             <div className="profile-background-crop-actions mt-5 flex shrink-0 min-w-0 justify-end gap-2">
-              <button type="button" onClick={resetBackgroundCrop} className="profile-background-crop-cancel min-w-0 rounded-full bg-sky-50 px-5 py-2 text-sm font-black text-brand-700">取消</button>
-              <button type="button" onClick={confirmBackgroundUpload} disabled={uploading === 'background'} className="profile-background-crop-confirm min-w-0 rounded-full bg-brand-950 px-5 py-2 text-sm font-black text-white disabled:opacity-60">
+              <button type="button" onClick={resetBackgroundCrop} className="profile-background-crop-cancel min-w-0 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-5 py-2 text-sm font-black text-[var(--foreground)]">取消</button>
+              <button type="button" onClick={confirmBackgroundUpload} disabled={uploading === 'background'} className="profile-background-crop-confirm min-w-0 rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-5 py-2 text-sm font-black text-[var(--primary-foreground)] disabled:opacity-60">
                 {uploading === 'background' ? '上传中...' : '使用此背景'}
               </button>
             </div>

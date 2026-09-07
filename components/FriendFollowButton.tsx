@@ -8,12 +8,14 @@ export function FriendFollowButton({
   compact = false,
   hideWhenFollowed = false,
   onChanged,
+  buttonClassName,
 }: Readonly<{
   userId: string
   initialFollowed: boolean
   compact?: boolean
   hideWhenFollowed?: boolean
   onChanged?: (followed: boolean) => void
+  buttonClassName?: string
 }>) {
   const [followed, setFollowed] = useState(initialFollowed)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -47,9 +49,9 @@ export function FriendFollowButton({
 
   if (hideWhenFollowed && followed) return null
 
-  const buttonClass = compact
+  const buttonClass = buttonClassName || (compact
     ? 'inline-flex h-6 shrink-0 items-center rounded-full border border-[var(--border)] bg-transparent px-1.5 text-[11px] font-black leading-none text-[var(--primary)] transition hover:bg-[var(--accent)] disabled:cursor-wait disabled:opacity-60'
-    : 'inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-elevated)] px-4 py-2.5 text-sm font-black text-[var(--primary)] shadow-sm transition hover:bg-[var(--accent)] disabled:cursor-wait disabled:opacity-60'
+    : 'inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-black text-[var(--primary)] transition hover:bg-[var(--surface-subtle)] disabled:cursor-wait disabled:opacity-60')
 
   return (
     <span className={`inline-flex min-w-0 items-center ${compact ? 'gap-1' : 'flex-wrap gap-1.5'}`}>

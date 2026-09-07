@@ -113,9 +113,9 @@ export function ProfileHeader({
         <div className="profile-hero-identity relative w-fit min-w-[190px] max-w-[min(320px,calc(100%_-_2rem))] p-0 text-left text-white sm:absolute sm:bottom-5 sm:left-5 sm:max-w-[380px]">
           <div className="flex min-w-0 flex-row items-center gap-2 sm:gap-3">
             {publicAvatarUrl ? (
-              <img src={publicAvatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover shadow-lg shadow-slate-950/25" />
+              <img src={publicAvatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover" />
             ) : (
-              <div className="grid h-[60px] w-[60px] shrink-0 place-items-center rounded-full border-2 border-white/85 bg-brand-950 text-xl font-black text-white shadow-lg shadow-slate-950/25">
+              <div className="grid h-[60px] w-[60px] shrink-0 place-items-center rounded-full border-2 border-white/85 bg-brand-950 text-xl font-black text-white">
                 {initial}
               </div>
             )}

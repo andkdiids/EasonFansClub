@@ -50,15 +50,15 @@ export type ProfilePageSurfaceRelationship = {
 
 function actionLinkClass(variant: 'primary' | 'secondary' = 'secondary') {
   return variant === 'primary'
-    ? 'inline-flex min-h-11 items-center justify-center rounded-xl border border-brand-900 bg-brand-950 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-brand-800'
-    : 'inline-flex min-h-11 items-center justify-center rounded-xl border border-sky-100 bg-white px-4 py-2.5 text-sm font-black text-brand-800 shadow-sm transition hover:bg-sky-50'
+    ? 'profile-action-link inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-4 py-2.5 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90'
+    : 'profile-action-link inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-black text-[var(--foreground)] transition hover:bg-[var(--surface-subtle)]'
 }
 
 function ClosedWall({ visibility }: { visibility: ProfileWallVisibility }) {
   const message = visibility === 'FRIENDS' ? '该成员的留言墙仅对好友展示。' : '该成员暂未开放留言墙展示。'
 
   return (
-    <section className="rounded-[24px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-5">
+    <section className="rounded-none border border-[var(--border)] bg-[var(--surface)] p-4 shadow-none sm:p-5">
       <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">留言墙</p>
       <h2 className="mt-1 text-xl font-black text-brand-950">留言墙暂不可见</h2>
       <p className="mt-3 break-words text-sm font-bold leading-6 text-slate-500">{message}</p>
@@ -94,7 +94,7 @@ export function ProfilePageSurface({
   const genderDisplay = getGenderDisplay(profile)
 
   return (
-    <main className="site-page-main flat-page mx-auto max-w-7xl space-y-4 px-4 py-5 sm:space-y-5 sm:px-5 sm:py-6">
+    <main className="profile-page-surface site-page-main flat-page mx-auto max-w-7xl space-y-4 px-4 py-5 sm:space-y-5 sm:px-5 sm:py-6">
       <ProfileHeader
         displayName={profile.displayName}
         uid={profile.uid}
@@ -112,7 +112,7 @@ export function ProfilePageSurface({
         showGrowth
       />
 
-      <section className="min-w-0 rounded-2xl border border-sky-100 bg-white/88 p-4 shadow-sm sm:p-5">
+      <section className="min-w-0 rounded-none border border-[var(--border)] bg-[var(--surface)] p-4 shadow-none sm:p-5">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <h2 className="profile-archive-title whitespace-nowrap text-base font-black text-brand-950 sm:text-lg md:text-xl">个人档案</h2>
           {!isSelf && hasViewer && isFriend && !isBlocked && remarkEditor ? <div className="shrink-0">{remarkEditor}</div> : null}

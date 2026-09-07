@@ -326,7 +326,7 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
   }
 
   return (
-    <section ref={wallRef} className="rounded-[24px] border border-sky-100 bg-white/85 p-4 shadow-sm sm:p-5">
+    <section ref={wallRef} className="rounded-none border border-[var(--border)] bg-[var(--surface)] p-4 shadow-none sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">留言墙</p>
@@ -335,25 +335,25 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
       </div>
 
       {canPost ? (
-        <div className="mt-4 rounded-2xl bg-sky-50/75 p-3">
+        <div className="mt-4 rounded-none border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
           <textarea
             value={content}
             onChange={(event) => setContent(event.target.value)}
-            className="min-h-20 w-full resize-none rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 outline-none"
+            className="min-h-20 w-full resize-none rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-bold leading-6 outline-none"
             placeholder="发表新的一级留言..."
           />
           <div className="mt-2 flex items-center justify-between gap-3">
             <ReplyLengthCounter value={content} />
-            <button onClick={submitRoot} disabled={submitting || contentLength.exceededBy > 0 || !content.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
+            <button onClick={submitRoot} disabled={submitting || contentLength.exceededBy > 0 || !content.trim()} className="rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-4 py-2 text-xs font-black text-[var(--primary-foreground)] disabled:opacity-50" type="button">
               {submitting ? '发布中...' : '发布'}
             </button>
           </div>
         </div>
       ) : null}
 
-      {error ? <p className="mt-3 rounded-2xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
-      {loading ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">留言墙加载中...</p> : null}
-      {!loading && !messages.length ? <p className="mt-4 rounded-2xl bg-sky-50 p-6 text-center text-sm font-black text-slate-500">暂无留言</p> : null}
+      {error ? <p className="mt-3 rounded-sm border border-[var(--danger)] bg-[var(--surface-subtle)] px-3 py-2 text-sm font-bold text-[var(--danger)]">{error}</p> : null}
+      {loading ? <p className="mt-4 rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-6 text-center text-sm font-black text-[var(--foreground-muted)]">留言墙加载中...</p> : null}
+      {!loading && !messages.length ? <p className="mt-4 rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-6 text-center text-sm font-black text-[var(--foreground-muted)]">暂无留言</p> : null}
 
       <div className="mt-4 space-y-3">
         {messages.map((message) => <WallMessageCard key={message.id} message={message} expanded={expanded} isOwner={isOwner} canReply={canPost} replyTarget={replyTarget} replyContent={replyContent} replySubmitting={replySubmitting} replyComposerRef={replyComposerRef} onToggleComments={(id) => setExpanded((value) => ({ ...value, [id]: !value[id] }))} onLike={toggleLike} onReply={handleReply} onReplyChange={setReplyContent} onReplySubmit={submitReply} onReplyCancel={cancelReply} onDelete={remove} />)}
@@ -375,21 +375,21 @@ export function ProfileWall({ receiverUid, focusId, isOwner = false }: { receive
 function WallInlineReplyComposer({ target, value, submitting, textareaRef, onChange, onSubmit, onCancel }: { target: WallReplyTarget; value: string; submitting: boolean; textareaRef: RefObject<HTMLTextAreaElement | null>; onChange: (value: string) => void; onSubmit: () => void; onCancel: () => void }) {
   const length = getReplyLengthMetrics(value)
   return (
-    <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/80 p-3">
+    <div className="mt-3 rounded-none border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
       <p className="text-xs font-black text-brand-700">回复 @{target.name}</p>
       <textarea
         ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 min-h-20 w-full resize-none rounded-2xl border border-sky-100 bg-white px-3 py-2 text-sm font-bold leading-6 outline-none placeholder:text-slate-400"
+        className="mt-2 min-h-20 w-full resize-none rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-bold leading-6 outline-none placeholder:text-slate-400"
         placeholder="请输入回复内容..."
         aria-label={`回复 @${target.name}`}
       />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <ReplyLengthCounter value={value} />
         <div className="flex items-center gap-2">
-          <button onClick={onCancel} className="rounded-full border border-sky-200 px-4 py-2 text-xs font-black text-brand-700" type="button">取消</button>
-          <button onClick={onSubmit} disabled={submitting || length.exceededBy > 0 || !value.trim()} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50" type="button">
+          <button onClick={onCancel} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs font-black text-[var(--foreground)]" type="button">取消</button>
+          <button onClick={onSubmit} disabled={submitting || length.exceededBy > 0 || !value.trim()} className="rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-4 py-2 text-xs font-black text-[var(--primary-foreground)] disabled:opacity-50" type="button">
             {submitting ? '发送中...' : '发送'}
           </button>
         </div>
@@ -405,9 +405,9 @@ function WallMessageCard({ message, expanded, isOwner = false, canReply, replyTa
   const replyCount = message.commentCount || children.length
 
   return (
-    <article id={`wall-message-${message.id}`} className="scroll-mt-20 rounded-2xl border border-sky-100 bg-white p-3 shadow-sm">
+    <article id={`wall-message-${message.id}`} className="scroll-mt-20 rounded-none border border-[var(--border)] bg-[var(--surface)] p-3 shadow-none">
       <div className="flex gap-3">
-        <a href={`/user/${formatUid(message.sender.uid)}`} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl bg-sky-50">
+        <a href={`/user/${formatUid(message.sender.uid)}`} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-sm bg-[var(--surface-subtle)]">
           <SafeAvatar src={avatar} name={name} uid={message.sender.uid} className="h-full w-full" />
         </a>
         <div className="min-w-0 flex-1">
@@ -431,7 +431,7 @@ function WallMessageHeader({ message, name }: { message: WallMessage; name: stri
   return (
     <div className="flex flex-wrap items-center gap-2">
       <a href={`/user/${formatUid(message.sender.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={message.sender.uid} badges={message.sender.equippedBadges} badge={message.sender.equippedBadge} compact /></a>
-      <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(message.sender.uid)}</span>
+      <span className="rounded-sm bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">UID {formatUid(message.sender.uid)}</span>
       <span className="text-xs font-bold text-slate-400">{new Date(message.createdAt).toLocaleString('zh-CN')}</span>
       <IpRegionLabel ipRegion={message.ipRegion} />
     </div>
@@ -454,9 +454,9 @@ function WallReplyCard({ message, replyToName, isOwner, canReply, replyTarget, r
   const name = message.sender.nickname || 'E院用户'
   const avatar = profileImageUrl(message.sender.profile?.avatarUrl || message.sender.avatarUrl)
   return (
-    <article id={`wall-message-${message.id}`} className="rounded-xl bg-sky-50/60 p-2.5">
+    <article id={`wall-message-${message.id}`} className="rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-2.5">
       <div className="flex gap-2.5">
-        <a href={`/user/${formatUid(message.sender.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-xl bg-white">
+        <a href={`/user/${formatUid(message.sender.uid)}`} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-sm bg-[var(--surface)]">
           <SafeAvatar src={avatar} name={name} uid={message.sender.uid} className="h-full w-full" />
         </a>
         <div className="min-w-0 flex-1">

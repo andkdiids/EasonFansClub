@@ -416,7 +416,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
               }
               setActive(tab.key)
             }}
-            className={`max-w-full rounded-xl px-3 py-2 text-xs font-black whitespace-nowrap sm:px-4 sm:text-sm ${active === tab.key ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}
+            className={`max-w-full rounded-none border px-3 py-2 text-xs font-black whitespace-nowrap transition sm:px-4 sm:text-sm ${active === tab.key ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-transparent bg-transparent text-[var(--primary)] hover:bg-[var(--surface-subtle)]'}`}
           >
             {isSelf ? tab.selfLabel : tab.otherLabel}
             {isSelf && recordLayout.find((preference) => preference.key === tab.key)?.visible === false ? '（已隐藏）' : null}
@@ -424,7 +424,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
         ))}
       </div>
 
-<div className="min-w-0 border-x border-b border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm sm:p-5">
+<div className="min-w-0 border-x border-b border-[var(--border)] bg-[var(--surface)] p-4 shadow-none sm:p-5">
       {!visibleTabs.length ? <ModuleFallback title="该用户暂未公开个人记录。" /> : null}
       {recentMessageNotice ? <p role="status" className="mb-3 border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700">{recentMessageNotice}</p> : null}
       {recentMessageError ? <p role="alert" className="mb-3 border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{recentMessageError}</p> : null}
@@ -433,15 +433,15 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
         {isSelf && active === 'posts' ? (
           <div className="mb-3 flex flex-wrap items-center gap-2">
             {!manageMode ? (
-              <button type="button" onClick={toggleManageMode} className="rounded-full border border-sky-200 bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">管理</button>
+              <button type="button" onClick={toggleManageMode} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-black text-[var(--primary)] disabled:opacity-60">管理</button>
             ) : (
               <>
                 <label className="inline-flex items-center gap-2 text-sm font-black text-brand-950">
                   <input type="checkbox" className="size-4" checked={allSelected} onChange={toggleSelectAllCurrent} /> 本页全选
                 </label>
                 <span className="text-sm font-bold text-slate-600">已选择 {selectedPostIds.size} 篇</span>
-                <button type="button" onClick={() => setBulkDeleteConfirm(true)} disabled={selectedPostIds.size === 0 || bulkDeleting} className="rounded-full bg-red-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">删除</button>
-                <button type="button" onClick={toggleManageMode} disabled={bulkDeleting} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-60">完成</button>
+                <button type="button" onClick={() => setBulkDeleteConfirm(true)} disabled={selectedPostIds.size === 0 || bulkDeleting} className="rounded-sm border border-[var(--danger)] bg-[var(--danger)] px-4 py-2 text-sm font-black text-white disabled:opacity-50">删除</button>
+                <button type="button" onClick={toggleManageMode} disabled={bulkDeleting} className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-black text-[var(--foreground)] disabled:opacity-60">完成</button>
               </>
             )}
             {bulkDeleteNotice ? <p role="status" className="w-full text-sm font-black text-emerald-700">{bulkDeleteNotice}</p> : null}
@@ -575,7 +575,7 @@ function ModuleContent({
                 <div className="min-w-0">
                   <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {post.isProfilePinned ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
+                    {post.isProfilePinned ? <span className="rounded-sm bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
                     <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
                   </div>
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
@@ -586,10 +586,10 @@ function ModuleContent({
                 <Link href={`/posts/${post.id}`} className="block min-w-0 p-3 pr-40" onClick={onPostNavigate}>
                   <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {post.isProfilePinned ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
+                    {post.isProfilePinned ? <span className="rounded-sm bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
                     <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
-                    {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
-                    {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
+                    {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-sm bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
+                    {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-sm bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
                   </div>
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
                   {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
@@ -648,7 +648,7 @@ function ModuleContent({
           return (
           <article key={message.id} className="min-w-0 border border-[var(--border)] bg-[var(--surface-subtle)] p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2 text-xs font-black text-brand-950">
-              {mood.formatted ? <span className="rounded-full bg-sky-50 px-2 py-1 text-brand-700">{mood.formatted}</span> : null}
+              {mood.formatted ? <span className="rounded-sm bg-sky-50 px-2 py-1 text-brand-700">{mood.formatted}</span> : null}
               <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString('zh-CN')}</time>
               <IpRegionLabel ipRegion={message.ipRegion} />
             </div>
@@ -710,7 +710,7 @@ function ModuleContent({
         {salonPosts.map((post) => {
           const media = post.media[0]
           const context = formatSalonPostContext(post.category, post.concert)
-          return <article key={post.id} className="min-w-0 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] sm:flex">
+          return <article key={post.id} className="min-w-0 overflow-hidden rounded-none border border-[var(--border)] bg-[var(--surface-subtle)] sm:flex">
             {media ? <Link href={`/salon/${post.id}`} className="block shrink-0 sm:w-40">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={media.thumbnailUrl} alt={post.title || context} className="h-40 w-full object-cover sm:h-full" loading="lazy" />
@@ -758,7 +758,7 @@ function ModuleContent({
     return (
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {albums.map((item) => (
-          <Link key={item.id} href={`/culture/${item.album.slug}`} className="rounded-2xl bg-sky-50/80 p-4">
+          <Link key={item.id} href={`/culture/${item.album.slug}`} className="rounded-none border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
             <p className="font-black text-brand-950">{item.album.title}</p>
             <p className="mt-2 text-xs font-bold text-slate-500">{item.note || '已加入收藏馆'}</p>
           </Link>

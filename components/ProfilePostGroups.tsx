@@ -103,12 +103,12 @@ export function ProfilePostGroupBar({ groups, activeGroupId, isSelf, onSelect, o
   return (
     <section className="mb-4 min-w-0 border-b border-[var(--border)] pb-3" aria-label="个人帖子分组">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <button type="button" aria-pressed={activeGroupId === ''} onClick={() => onSelect('')} className={`rounded-lg px-3 py-1.5 text-xs font-black ${activeGroupId === '' ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>全部</button>
-        <button type="button" aria-pressed={activeGroupId === PROFILE_POST_GROUP_UNGROUPED} onClick={() => onSelect(PROFILE_POST_GROUP_UNGROUPED)} className={`rounded-lg px-3 py-1.5 text-xs font-black ${activeGroupId === PROFILE_POST_GROUP_UNGROUPED ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>未分组</button>
+        <button type="button" aria-pressed={activeGroupId === ''} onClick={() => onSelect('')} className={`rounded-none border px-3 py-1.5 text-xs font-black ${activeGroupId === '' ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--surface-subtle)]'}`}>全部</button>
+        <button type="button" aria-pressed={activeGroupId === PROFILE_POST_GROUP_UNGROUPED} onClick={() => onSelect(PROFILE_POST_GROUP_UNGROUPED)} className={`rounded-none border px-3 py-1.5 text-xs font-black ${activeGroupId === PROFILE_POST_GROUP_UNGROUPED ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--surface-subtle)]'}`}>未分组</button>
         {groups.map((group) => (
-          <button key={group.id} type="button" aria-pressed={activeGroupId === group.id} onClick={() => onSelect(group.id)} className={`max-w-full truncate rounded-lg px-3 py-1.5 text-xs font-black ${activeGroupId === group.id ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>{group.name}</button>
+          <button key={group.id} type="button" aria-pressed={activeGroupId === group.id} onClick={() => onSelect(group.id)} className={`max-w-full truncate rounded-none border px-3 py-1.5 text-xs font-black ${activeGroupId === group.id ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--primary)] hover:bg-[var(--surface-subtle)]'}`}>{group.name}</button>
         ))}
-        {isSelf ? <button type="button" onClick={() => { setManageOpen((value) => !value); setError('') }} className="ml-auto rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-black text-brand-700">{manageOpen ? '收起管理' : '管理分组'}</button> : null}
+        {isSelf ? <button type="button" onClick={() => { setManageOpen((value) => !value); setError('') }} className="ml-auto rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-black text-[var(--primary)] hover:bg-[var(--surface-subtle)]">{manageOpen ? '收起管理' : '管理分组'}</button> : null}
       </div>
 
       {isSelf && manageOpen ? (
@@ -183,7 +183,7 @@ export function PersonalPostGroupMenu({
   return (
     <label className="inline-flex min-w-0 max-w-full items-center gap-1 text-[11px] font-black text-slate-500" title={error || '设置个人分组'}>
       <span className="sr-only">设置个人分组</span>
-      <select aria-label="设置个人分组" value={currentGroupId || PROFILE_POST_GROUP_UNGROUPED} disabled={isSubmitting} onChange={(event) => void assignGroup(event.target.value)} className="max-w-[140px] min-h-8 border border-[var(--border)] bg-[var(--surface)] px-1.5 text-[11px] font-black text-brand-700 outline-none">
+      <select aria-label="设置个人分组" value={currentGroupId || PROFILE_POST_GROUP_UNGROUPED} disabled={isSubmitting} onChange={(event) => void assignGroup(event.target.value)} className="max-w-[140px] min-h-8 rounded-none border border-[var(--border)] bg-[var(--surface)] px-1.5 text-[11px] font-black text-[var(--primary)] outline-none shadow-none">
         <option value={PROFILE_POST_GROUP_UNGROUPED}>未分组</option>
         {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
       </select>
