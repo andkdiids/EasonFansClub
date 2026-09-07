@@ -7,6 +7,7 @@ const schema = read('prisma/schema.prisma')
 const migration = read('prisma/migrations/20260816090000_add_post_profile_pin/migration.sql')
 const profilePinRoute = read('app/api/posts/[postId]/profile-pin/route.ts')
 const postDeleteRoute = read('app/api/posts/[postId]/route.ts')
+const deletionService = read('lib/post-deletion.ts')
 const publicModulesRoute = read('app/api/users/[userId]/public-modules/route.ts')
 const profileModules = read('components/PublicUserModules.tsx')
 const postActions = read('components/PostActions.tsx')
@@ -58,7 +59,9 @@ test('only the profile owner receives the personal pin menu and successful chang
 })
 
 test('personal pin is cleared with soft deletion and never participates in public forum ordering', () => {
-  assert.match(postDeleteRoute, /profilePinnedAt: null/)
+  // 软删除语义已统一收敛到 lib/post-deletion.ts，单帖/批量删除都经它清空 profilePinnedAt
+  assert.match(deletionService, /isDeleted: true, deletedAt: new Date\(\), profilePinnedAt: null/)
+  assert.match(postDeleteRoute, /deletePost\(\{ postId, actor: user, canManagePosts \}\)/)
   assert.doesNotMatch(forumFeed, /profilePinnedAt/)
   assert.doesNotMatch(forumDiscover, /profilePinnedAt/)
 })

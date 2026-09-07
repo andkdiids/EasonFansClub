@@ -19,10 +19,15 @@ import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preference
 
 export const dynamic = 'force-dynamic'
 
-type PageProps = { params: Promise<{ uid: string }> }
+type PageProps = { params: Promise<{ uid: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }
 
-export default async function PublicUserPage({ params }: PageProps) {
+export default async function PublicUserPage({ params, searchParams }: PageProps) {
   const { uid } = await params
+  const sp = await searchParams
+  const urlModule = typeof sp.module === 'string' ? sp.module : undefined
+  const urlPageRaw = typeof sp.page === 'string' ? Number(sp.page) : NaN
+  const urlPage = Number.isFinite(urlPageRaw) && urlPageRaw > 0 ? Math.trunc(urlPageRaw) : undefined
+  const urlGroupId = typeof sp.groupId === 'string' ? sp.groupId : undefined
   const numericUid = parseUidParam(uid)
   if (numericUid === null || numericUid <= 0) notFound()
 
@@ -179,6 +184,9 @@ export default async function PublicUserPage({ params }: PageProps) {
       }}
       recentMessages={recentMessagesPage.messages}
       recentMessagesPagination={recentMessagesPage.pagination}
+      initialModule={urlModule}
+      initialPage={urlPage}
+      initialGroupId={urlGroupId}
       remarkEditor={remarkEditor}
     />
   )

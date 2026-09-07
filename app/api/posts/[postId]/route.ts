@@ -6,7 +6,8 @@ import { adminAuditOperations, createAdminActionAudit, createPostModerationHisto
 import { awardFeaturedPostRewards } from '@/lib/community-rewards'
 import { getCurrentUser, type SessionUser } from '@/lib/auth'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { hasAdminPermission } from '@/lib/admin-permissions'
+import { hasAdminPermission, isSuperAdmin, isPrivilegedPostAuthor } from '@/lib/admin-permissions'
+import { deletePost } from '@/lib/post-deletion'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, publicContentImageMarkers } from '@/lib/content-images'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
@@ -233,68 +234,18 @@ function postEditErrorResponse(error: unknown, postId: string, userId: string, p
   return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_FAILED' : 'POST_EDIT_FAILED', message: isFeatureOperation ? '设置精华失败，请稍后重试' : '保存失败，请稍后重试' }, { status: 500 })
 }
 
-async function executePostDelete(postId: string, user: SessionUser, canManagePosts: boolean) {
-  const existing = await prisma.post.findUnique({
-    where: { id: postId },
-    select: { id: true, authorId: true, isDeleted: true },
-  })
-  if (!existing || existing.isDeleted) throw new Error(existing ? 'POST_ALREADY_DELETED' : 'POST_NOT_FOUND')
-  if (existing.authorId !== user.id && !canManagePosts) throw new Error('POST_DELETE_FORBIDDEN')
-
-  return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
-    const lockedExisting = await tx.post.findUnique({
-      where: { id: postId },
-      select: {
-        id: true,
-        authorId: true,
-        boardId: true,
-        isDeleted: true,
-        title: true,
-        User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
-      },
-    })
-    if (!lockedExisting) throw new Error('POST_NOT_FOUND')
-    if (lockedExisting.isDeleted) throw new Error('POST_ALREADY_DELETED')
-    if (lockedExisting.authorId !== user.id && !canManagePosts) throw new Error('POST_DELETE_FORBIDDEN')
-
-    const post = await tx.post.update({
-      where: { id: postId },
-      data: { isDeleted: true, deletedAt: new Date(), profilePinnedAt: null },
-      select: { id: true, isDeleted: true, deletedAt: true },
-    })
-    const postCount = await tx.post.count({
-      where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
-    })
-    await tx.board.update({ where: { id: lockedExisting.boardId }, data: { postCount } })
-
-    return {
-      post,
-      audit: {
-        operatorId: user.id,
-        action: 'DELETE_POST' as const,
-        operationType: adminAuditOperations.POST_DELETED,
-        targetType: 'POST',
-        targetId: postId,
-        targetTitle: lockedExisting.title,
-        targetUserId: lockedExisting.authorId,
-        targetUserName: lockedExisting.User.nickname || 'E院用户',
-        targetUserUid: lockedExisting.User.uid,
-        metadata: { isDeleted: true },
-      },
-    }
-  })
-}
+// 帖子删除核心语义已抽到 lib/post-deletion.ts 的 deletePost()，
+// 详情页单删 / 个人主页单删 / 用户批量删 / 管理员批量删 全部复用它。
 
 async function postDeleteResponse(postId: string, user: SessionUser, canManagePosts: boolean) {
   try {
-    const result = await executePostDelete(postId, user, canManagePosts)
+    const result = await deletePost({ postId, actor: user, canManagePosts })
 
     if (canManagePosts) {
       try {
         // Audit is valuable, but a drifted/partially migrated audit table must
         // not roll back the already committed content deletion.
-        await prisma.$transaction((tx) => createAdminActionAudit(tx, result.audit))
+        await prisma.$transaction((tx) => createAdminActionAudit(tx, { ...result.audit, reason: result.audit.reason ?? null }))
       } catch (error) {
         console.error('[posts.delete.audit]', { postId, userId: user.id, ...describePostDeleteError(error) })
       }
@@ -479,6 +430,7 @@ export async function PATCH(request: Request, { params }: Params) {
         richContent: true,
         stickerId: true,
         moderationStatus: true,
+        User: { select: { role: true } },
       },
     })
     if (!existing) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
@@ -516,6 +468,16 @@ export async function PATCH(request: Request, { params }: Params) {
     if (typeof body?.isDeleted === 'boolean') {
       data.isDeleted = body.isDeleted
       data.deletedAt = body.isDeleted ? new Date() : null
+    }
+
+    // #6 加精权限限制：管理员 / 版主（含超级管理员）发布的帖子，
+    // 仅超级管理员可以加精；普通管理员 / 版主尝试加精时返回 403。
+    // 取消精华不受影响。复用 isSuperAdmin / isPrivilegedPostAuthor，不写死 role === 'ADMIN'。
+    if (data.isFeatured === true && existing.isFeatured === false && isPrivilegedPostAuthor(existing.User?.role) && !isSuperAdmin(guard.user)) {
+      return NextResponse.json(
+        { message: '仅超级管理员可以对管理员或版主发布的帖子加精', code: 'POST_FEATURE_PRIVILEGED_FORBIDDEN' },
+        { status: 403 },
+      )
     }
 
     if (Object.keys(data).length === 0) {

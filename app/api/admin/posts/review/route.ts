@@ -1,7 +1,7 @@
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
-import { withForumBoardDisplayName } from '@/lib/boards'
+import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory, userSnapshotName } from '@/lib/admin-audit'
 import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { buildPostReviewUpdate, canTransitionPostModerationStatus, isPostModerationStatus, POST_REVIEW_PAGE_SIZE, type PostModerationStatus, type PostReviewableStatus } from '@/lib/post-moderation'
@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic'
 
 const reviewSelect = {
   id: true,
+  boardId: true,
   title: true,
   content: true,
   richContent: true,
@@ -28,7 +29,7 @@ const reviewSelect = {
   rejectionReason: true,
   isPinned: true,
   isFeatured: true,
-  User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
+  User: { select: { uid: true, nickname: true, role: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
   ReviewedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true } } } },
   Board: { select: { name: true, slug: true } },
   PostMedia: { where: { type: 'IMAGE' as const }, orderBy: { sortOrder: 'asc' as const }, select: { id: true, type: true, url: true, thumbnail: true } },
@@ -68,6 +69,33 @@ function logReviewError(scope: string, postId: string, action: ReviewAction, err
   })
 }
 
+/** 审核通过时的目标发布分区（复用广场/发帖真实分区源），仅 APPROVED 需要解析。 */
+type ReviewBoardTarget = { id: string; slug: string; name: string }
+
+async function resolveReviewBoardTarget(selectionId: string): Promise<ReviewBoardTarget | null> {
+  const configured = getConfiguredForumBoardBySelectionId(selectionId)
+  if (configured) {
+    const row = await prisma.board.upsert({
+      where: { slug: configured.slug },
+      update: {},
+      create: {
+        name: configured.name,
+        slug: configured.slug,
+        description: configured.description,
+        sortOrder: configured.sortOrder,
+      },
+      select: { id: true, slug: true, name: true, isActive: true },
+    })
+    if (!row.isActive) return null
+    return { id: row.id, slug: row.slug, name: row.name }
+  }
+  const row = await prisma.board.findFirst({
+    where: { id: selectionId, isActive: true },
+    select: { id: true, slug: true, name: true },
+  })
+  return row ? { id: row.id, slug: row.slug, name: row.name } : null
+}
+
 async function writeReviewAudit(input: {
   operatorId: string
   postId: string
@@ -79,6 +107,7 @@ async function writeReviewAudit(input: {
   authorUid: number
   previousStatus: PostReviewableStatus
   rejectionReason: string | null
+  category?: { originalBoardId: string; finalBoardId: string; changed: boolean }
 }) {
   const operationType = input.status === 'APPROVED'
     ? adminAuditOperations.POST_REVIEW_APPROVED
@@ -88,6 +117,11 @@ async function writeReviewAudit(input: {
     toStatus: input.status,
     moderationStatus: input.status,
     rejectionReason: input.rejectionReason,
+    ...(input.category ? {
+      originalCategoryId: input.category.originalBoardId,
+      finalCategoryId: input.category.finalBoardId,
+      categoryChanged: input.category.changed,
+    } : {}),
   }
 
   try {
@@ -153,6 +187,9 @@ async function writeReviewNotification(input: {
   rejectionReason: string | null
   reviewedAt: Date
   notificationKey?: string
+  boardChanged?: boolean
+  originalBoardName?: string | null
+  finalBoardName?: string | null
 }) {
   try {
     await prisma.notification.updateMany({
@@ -171,6 +208,14 @@ async function writeReviewNotification(input: {
     logReviewError('notification-read', input.postId, input.action, error)
   }
 
+  const approvedContent = input.status === 'APPROVED'
+    ? input.boardChanged && input.originalBoardName && input.finalBoardName
+      ? `你的帖子《${input.title}》已通过审核。\n为了更符合内容分类，我们已将帖子从「${input.originalBoardName}」调整至「${input.finalBoardName}」。\n帖子现已发布至「${input.finalBoardName}」。`
+      : `你的帖子《${input.title}》已通过审核，并发布至「${input.finalBoardName || 'E院广场'}」。`
+    : input.rejectionReason
+      ? `你发布的帖子《${input.title}》未通过审核。原因：${input.rejectionReason}`
+      : `你发布的帖子《${input.title}》未通过审核，请修改后重新提交。`
+
   try {
     await createNotification({
       data: {
@@ -178,12 +223,8 @@ async function writeReviewNotification(input: {
         actorId: input.operatorId,
         type: 'ADMIN',
         key: input.notificationKey || `post-review-result:${input.postId}:${input.status}:${input.reviewedAt.getTime()}`,
-        title: input.status === 'APPROVED' ? '帖子审核通过' : '帖子未通过审核',
-        content: input.status === 'APPROVED'
-          ? `你发布的帖子《${input.title}》已通过审核，现在可以在 E院广场查看。`
-          : input.rejectionReason
-            ? `你发布的帖子《${input.title}》未通过审核。原因：${input.rejectionReason}`
-            : `你发布的帖子《${input.title}》未通过审核，请修改后重新提交。`,
+        title: input.status === 'APPROVED' ? '你的帖子已通过审核' : '帖子未通过审核',
+        content: approvedContent,
         link: `/posts/${input.postId}`,
       },
     })
@@ -255,13 +296,35 @@ export async function GET(request: Request) {
     : isPostModerationStatus(rawStatus) ? rawStatus : 'PENDING'
   const rawPage = Number(new URL(request.url).searchParams.get('page') || '1')
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
+  // #2 关键词搜索：标题 / 正文 / 作者昵称 / UID / 帖子 ID。
+  // 统一 trim；空字符串视为「不过滤」（保持原有全部列表行为）。
+  // 注意：MySQL 不支持 mode: 'insensitive'，这里使用原生 contains（LIKE）即可满足中文搜索。
+  const keyword = (new URL(request.url).searchParams.get('keyword') || '').trim()
+  const keywordFilter = keyword
+    ? {
+        OR: [
+          { title: { contains: keyword } },
+          { content: { contains: keyword } },
+          { User: { nickname: { contains: keyword } } },
+          ...(/^\d+$/.test(keyword) ? [{ id: { equals: keyword } }, { User: { uid: Number(keyword) } }] : []),
+        ],
+      }
+    : {}
+  const where = status === 'ALL'
+    ? { isDeleted: false, ...keywordFilter }
+    : { moderationStatus: status, isDeleted: false, ...keywordFilter }
   try {
+    const total = await prisma.post.count({ where })
+    // 页码夹紧：超出范围的页码（如批量删除后当前页被清空）回退到最后一页，
+    // 客户端始终拿到有效内容，无需额外往返。
+    const totalPages = Math.max(1, Math.ceil(total / POST_REVIEW_PAGE_SIZE))
+    const safePage = Math.min(page, totalPages)
     const pageRows = await prisma.post.findMany({
-      where: status === 'ALL' ? { isDeleted: false } : { moderationStatus: status, isDeleted: false },
+      where,
       orderBy: status === 'PENDING' || status === 'ALL'
         ? [{ createdAt: 'desc' as const }]
         : [{ reviewedAt: 'desc' as const }, { createdAt: 'desc' as const }],
-      skip: (page - 1) * POST_REVIEW_PAGE_SIZE,
+      skip: (safePage - 1) * POST_REVIEW_PAGE_SIZE,
       take: POST_REVIEW_PAGE_SIZE + 1,
       select: reviewSelect,
     })
@@ -271,12 +334,15 @@ export async function GET(request: Request) {
     return NextResponse.json({
       posts: posts.map((post) => serializePost(post, historyByPostId.get(post.id) || [])),
       status,
-      page,
+      page: safePage,
       hasMore,
+      total,
+      totalPages,
+      keyword,
     }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
   } catch (error) {
-    console.error('[admin.posts.review.list]', { status, page, error: describePostModerationHistoryError(error) })
-    return NextResponse.json({ message: '审核列表暂时无法加载，请稍后重试', status, page }, { status: 503 })
+    console.error('[admin.posts.review.list]', { status, page, keyword, error: describePostModerationHistoryError(error) })
+    return NextResponse.json({ message: '审核列表暂时无法加载，请稍后重试', status, page, keyword }, { status: 503 })
   }
 }
 
@@ -299,6 +365,17 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ message: '拒绝帖子时必须填写拒绝理由' }, { status: 400 })
   }
 
+  // 「发布分区」只对通过审核有意义，且只有审核管理员能指定（requireAdmin 已拦截普通用户）。
+  // 分区必须是现有广场真实分区（含 configured: 快捷选择器，服务端会落库为真实 Board 行）；
+  // 不存在的、已停用的分区一律拒绝，绝不写死名称或凭空新建分区。
+  const boardSelectionId = status === 'APPROVED' && typeof body?.boardId === 'string'
+    ? sanitizeText(body.boardId, 80).trim()
+    : ''
+  const boardTarget = boardSelectionId ? await resolveReviewBoardTarget(boardSelectionId) : null
+  if (boardSelectionId && !boardTarget) {
+    return NextResponse.json({ message: '板块不存在或已停用，无法发布到该分区', errors: { boardId: '板块无效' } }, { status: 400 })
+  }
+
   try {
     const result = await prisma.$transaction(async (tx) => {
       const reviewedAt = new Date()
@@ -314,6 +391,7 @@ export async function PATCH(request: Request) {
           moderationStatus: true,
           reviewedAt: true,
           rejectionReason: true,
+          Board: { select: { id: true, name: true, slug: true } },
           User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
         },
       })
@@ -339,14 +417,23 @@ export async function PATCH(request: Request) {
         }
       }
 
+      // 通过审核时若管理员调整了发布分区，正式 Post.boardId 在同一个事务里更新：
+      // 分区变更只随「审核通过」落库，拒绝/退出/关闭页面都不会提前改动正式帖子。
+      const finalBoardId = boardTarget?.id || current.boardId
+      const boardChanged = status === 'APPROVED' && finalBoardId !== current.boardId
+      const finalBoardName = boardTarget?.name || current.Board?.name || null
+      const updateData: Prisma.PostUpdateManyMutationInput = {
+        ...buildPostReviewUpdate({ status, reviewedAt, reviewedById: guard.user.id, rejectionReason }),
+        ...(boardChanged ? { boardId: finalBoardId } : {}),
+      }
       const updateResult = await tx.post.updateMany({
         where: { id: postId, isDeleted: false, moderationStatus: current.moderationStatus },
-        data: buildPostReviewUpdate({ status, reviewedAt, reviewedById: guard.user.id, rejectionReason }),
+        data: updateData,
       })
       if (updateResult.count !== 1) throw new Error('POST_ALREADY_REVIEWED')
       const updated = await tx.post.findUniqueOrThrow({
         where: { id: postId },
-        select: { id: true, moderationStatus: true, reviewedAt: true, rejectionReason: true },
+        select: { id: true, moderationStatus: true, reviewedAt: true, rejectionReason: true, boardId: true },
       })
       return {
         changed: true,
@@ -354,6 +441,10 @@ export async function PATCH(request: Request) {
         previousStatus: current.moderationStatus,
         reviewedAt,
         current,
+        boardChanged,
+        finalBoardId,
+        finalBoardName,
+        originalBoardName: current.Board?.name || null,
       }
     })
     const current = result.current
@@ -369,6 +460,9 @@ export async function PATCH(request: Request) {
         rejectionReason: result.post.rejectionReason,
         reviewedAt: result.reviewedAt,
         notificationKey: result.notificationKey,
+        boardChanged: false,
+        originalBoardName: current.Board?.name,
+        finalBoardName: current.Board?.name,
       })
       return NextResponse.json({ post: result.post, previousStatus: result.previousStatus, changed: false })
     }
@@ -383,6 +477,11 @@ export async function PATCH(request: Request) {
       authorUid: current.User.uid,
       previousStatus: result.previousStatus,
       rejectionReason: result.post.rejectionReason,
+      category: {
+        originalBoardId: current.boardId,
+        finalBoardId: result.boardChanged ? result.finalBoardId : current.boardId,
+        changed: Boolean(result.boardChanged),
+      },
     })
     await writeReviewHistory({
       postId,
@@ -401,8 +500,14 @@ export async function PATCH(request: Request) {
       title: current.title,
       rejectionReason: result.post.rejectionReason,
       reviewedAt: result.reviewedAt,
+      boardChanged: Boolean(result.boardChanged),
+      originalBoardName: result.originalBoardName,
+      finalBoardName: result.finalBoardName,
     })
     await refreshReviewBoardCount(current.boardId, postId, action)
+    if (result.boardChanged) {
+      await refreshReviewBoardCount(result.finalBoardId, postId, action)
+    }
     if (reviewStatus === 'APPROVED') {
       await writeApprovalFriendActivity({ postId, authorId: current.authorId, title: current.title, action })
       // Re-approval must not re-run one-time approval side effects. The badge

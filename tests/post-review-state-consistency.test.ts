@@ -41,8 +41,10 @@ test('审核状态只写入 Post.moderationStatus，并清理互斥审核元数�
     reviewedById: 'admin-1',
     rejectionReason: '内容需要修改',
   })
-  assert.match(reviewRoute, /status === 'ALL' \? \{ isDeleted: false \} : \{ moderationStatus: status, isDeleted: false \}/)
-  assert.match(reviewRoute, /data: buildPostReviewUpdate\(\{ status, reviewedAt, reviewedById: guard\.user\.id, rejectionReason \}\)/)
+  assert.match(reviewRoute, /\? \{ isDeleted: false, \.\.\.keywordFilter \}/)
+  assert.match(reviewRoute, /\{ moderationStatus: status, isDeleted: false, \.\.\.keywordFilter \}/)
+  assert.match(reviewRoute, /buildPostReviewUpdate\(\{ status, reviewedAt, reviewedById: guard\.user\.id, rejectionReason \}\)/)
+  assert.match(reviewRoute, /data: updateData,/)
   assert.doesNotMatch(reviewRoute, /data:\s*\{\s*status:\s*status/)
 })
 

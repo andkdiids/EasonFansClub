@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ModuleFallback } from '@/components/ModuleFallback'
@@ -25,6 +26,7 @@ import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
 
 type ModuleKey = PublicProfileModuleKey
+const ALL_MODULE_KEYS: ModuleKey[] = PROFILE_RECORD_SECTIONS.map((section) => section.key) as ModuleKey[]
 type PostItem = {
   id: string
   title: string
@@ -73,7 +75,8 @@ function moduleLabel(moduleKey: ModuleKey, isSelf: boolean) {
   return getProfileRecordLabel(moduleKey, isSelf)
 }
 
-export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferences, recentMessages = [], recentMessagesPagination }: { uid: string; isSelf: boolean; visibleModules?: readonly ModuleKey[]; recordPreferences?: readonly ProfileRecordPreference[]; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination }) {
+export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferences, recentMessages = [], recentMessagesPagination, initialModule, initialPage, initialGroupId }: { uid: string; isSelf: boolean; visibleModules?: readonly ModuleKey[]; recordPreferences?: readonly ProfileRecordPreference[]; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination; initialModule?: string; initialPage?: number;     initialGroupId?: string }) {
+  const router = useRouter()
   const [recordLayout, setRecordLayout] = useState<ProfileRecordPreference[]>(() => recordPreferences?.length ? [...recordPreferences] : normalizeProfileRecordPreferences([]))
   const visibleModuleKeys = useMemo(() => {
     const allowed = new Set(visibleModules || PROFILE_RECORD_SECTIONS.map((section) => section.key))
@@ -82,15 +85,32 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
   }, [isSelf, recordLayout, visibleModules])
   const visibleTabs = useMemo(() => visibleModuleKeys.map((moduleKey) => PROFILE_RECORD_SECTIONS.find((tab) => tab.key === moduleKey)).filter((tab): tab is typeof PROFILE_RECORD_SECTIONS[number] => Boolean(tab)), [visibleModuleKeys])
   const firstVisibleModule = visibleModuleKeys[0] || 'posts'
-  const [active, setActive] = useState<ModuleKey>(firstVisibleModule)
-  const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({ posts: 1, 'recent-messages': recentMessagesPagination?.page || 1, salon: 1 })
-  const [postGroupFilter, setPostGroupFilter] = useState(ALL_POST_GROUPS)
+  // #5 分页返回状态：初始 active / 页码来自 URL searchParams（服务端透传），
+  // 这样从帖子详情页 browser back 回来时，服务端已按 URL 渲染出正确的 Tab / 页码。
+  const [active, setActive] = useState<ModuleKey>(
+    initialModule && ALL_MODULE_KEYS.includes(initialModule as ModuleKey) ? (initialModule as ModuleKey) : firstVisibleModule,
+  )
+  const [modulePages, setModulePages] = useState<Record<PaginatedModuleKey, number>>({
+    posts: initialModule === 'posts' ? Math.max(1, Math.trunc(initialPage || 1) || 1) : 1,
+    'recent-messages': recentMessagesPagination?.page || 1,
+    salon: 1,
+  })
+  const [postGroupFilter, setPostGroupFilter] = useState(initialGroupId || ALL_POST_GROUPS)
   const [postGroups, setPostGroups] = useState<ProfilePostGroupView[]>([])
   const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
   const [deleteTarget, setDeleteTarget] = useState<ProfileRecentMessage | null>(null)
   const [isDeletingRecentMessage, setIsDeletingRecentMessage] = useState(false)
   const [recentMessageNotice, setRecentMessageNotice] = useState('')
   const [recentMessageError, setRecentMessageError] = useState('')
+  // #3 个人主页「管理」模式：批量删除自己的帖子。
+  const [manageMode, setManageMode] = useState(false)
+  const [selectedPostIds, setSelectedPostIds] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+  const [bulkDeleteNotice, setBulkDeleteNotice] = useState('')
+  const [bulkDeleteError, setBulkDeleteError] = useState('')
+  // #5 返回时 best-effort 恢复滚动位置所用的 sessionStorage key。
+  const scrollRestoreKey = `profile-scroll:${uid}`
   const modulesSectionRef = useRef<HTMLElement>(null)
   const initialRecentPage = recentMessagesPagination?.page || 1
   const [cache, setCache] = useState<CacheState>(() => ({
@@ -99,15 +119,77 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
   const activePage = isPaginatedModule(active) ? modulePages[active] : 1
   const state = cache[moduleCacheKey(active, activePage, active === 'posts' ? postGroupFilter : ALL_POST_GROUPS)]
 
+  // #5 浏览器前进/后退时，以 URL 的 module/page/groupId 为准同步本地 state。
+  // 不依赖 useSearchParams（避免预渲染 Suspense 约束），改用 popstate 监听 + 挂载时同步。
+  const visibleModuleKeysRef = useRef(visibleModuleKeys)
+  visibleModuleKeysRef.current = visibleModuleKeys
+  const syncStateFromUrl = useCallback(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlModule = params.get('module')
+    const urlPageRaw = Number(params.get('page'))
+    const urlPage = Number.isFinite(urlPageRaw) && urlPageRaw > 0 ? Math.trunc(urlPageRaw) : 1
+    const urlGroupId = params.get('groupId') || ALL_POST_GROUPS
+    if (urlModule && ALL_MODULE_KEYS.includes(urlModule as ModuleKey) && visibleModuleKeysRef.current.includes(urlModule as ModuleKey)) {
+      setActive((current) => (current === urlModule ? current : (urlModule as ModuleKey)))
+      if (urlModule === 'posts') setPostGroupFilter((current) => (current === urlGroupId ? current : urlGroupId))
+    }
+    if (urlModule === 'posts' && urlPage > 1) {
+      setModulePages((current) => (current.posts === urlPage ? current : { ...current, posts: urlPage }))
+    }
+  }, [])
   useEffect(() => {
-    if (!isSelf) return
-    const requested = new URLSearchParams(window.location.search).get('module')
-    if (requested && visibleModuleKeys.includes(requested as ModuleKey)) setActive(requested as ModuleKey)
-  }, [isSelf, visibleModuleKeys])
+    syncStateFromUrl()
+    window.addEventListener('popstate', syncStateFromUrl)
+    return () => window.removeEventListener('popstate', syncStateFromUrl)
+  }, [syncStateFromUrl])
 
+  // 若当前 active 在可见模块之外（例如用户隐藏了某模块），回退到第一个可见模块。
   useEffect(() => {
     if (!visibleModuleKeys.includes(active)) setActive(firstVisibleModule)
   }, [active, firstVisibleModule, visibleModuleKeys])
+
+  // #5 用户切换标签/翻页/切换分组时，把状态写回 URL（不滚动，自行控制滚动恢复）。
+  const syncUrlFromState = useCallback(() => {
+    const params = new URLSearchParams()
+    if (active !== firstVisibleModule) params.set('module', active)
+    if (active === 'posts') {
+      if (modulePages.posts > 1) params.set('page', String(modulePages.posts))
+      if (postGroupFilter && postGroupFilter !== ALL_POST_GROUPS) params.set('groupId', postGroupFilter)
+    }
+    const query = params.toString()
+    const target = `/user/${uid}${query ? `?${query}` : ''}`
+    const current = `/user/${uid}${window.location.search}`
+    if (target !== current) router.replace(target, { scroll: false })
+  }, [active, modulePages, postGroupFilter, uid, router, firstVisibleModule])
+  useEffect(() => { syncUrlFromState() }, [syncUrlFromState])
+
+  // #5 返回个人主页时 best-effort 恢复滚动位置（仅当存在与当前 module/page/group 匹配的保存项）。
+  useEffect(() => {
+    if (!isSelf) return
+    try {
+      const raw = window.sessionStorage.getItem(scrollRestoreKey)
+      if (!raw) return
+      const saved = JSON.parse(raw) as { module?: string; page?: number; groupId?: string; y?: number }
+      const groupOk = active !== 'posts' || (saved.groupId || ALL_POST_GROUPS) === postGroupFilter
+      const pageOk = active !== 'posts' || saved.page === modulePages.posts
+      if (saved.module !== active || !pageOk || !groupOk) return
+      if (!state || state.loading) return
+      if (typeof saved.y === 'number') window.scrollTo({ top: saved.y, behavior: 'auto' })
+      window.sessionStorage.removeItem(scrollRestoreKey)
+    } catch { /* ignore */ }
+  }, [active, modulePages, postGroupFilter, state, isSelf, scrollRestoreKey])
+
+  const handlePostNavigate = useCallback(() => {
+    if (manageMode) return
+    try {
+      window.sessionStorage.setItem(scrollRestoreKey, JSON.stringify({
+        module: active,
+        page: active === 'posts' ? modulePages.posts : 1,
+        groupId: active === 'posts' ? postGroupFilter : ALL_POST_GROUPS,
+        y: window.scrollY,
+      }))
+    } catch { /* ignore */ }
+  }, [active, modulePages, postGroupFilter, manageMode, scrollRestoreKey])
 
   const loadModule = useCallback(async (moduleKey: ModuleKey, requestedPage = 1, scrollAfterLoad = false, requestedGroupId = postGroupFilter) => {
     if (!visibleModuleKeys.includes(moduleKey)) return
@@ -166,6 +248,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
   }
 
   const handlePostGroupChange = useCallback((nextGroupId: string) => {
+    setSelectedPostIds(new Set())
     setPostGroupFilter(nextGroupId)
     setModulePages((current) => ({ ...current, posts: 1 }))
     void loadModule('posts', 1, true, nextGroupId)
@@ -252,6 +335,71 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
     }
   }
 
+  // #3 个人主页批量删除自己的帖子（管理模式下）。
+  const currentPostItems = active === 'posts' && state ? (state.items as PostItem[]) : []
+  const allCurrentPostIds = currentPostItems.map((post) => post.id)
+  const allSelected = allCurrentPostIds.length > 0 && allCurrentPostIds.every((id) => selectedPostIds.has(id))
+
+  function toggleManageMode() {
+    setManageMode((current) => {
+      const next = !current
+      if (!next) setSelectedPostIds(new Set())
+      return next
+    })
+  }
+  function toggleSelectPost(postId: string) {
+    setSelectedPostIds((current) => {
+      const next = new Set(current)
+      if (next.has(postId)) next.delete(postId)
+      else next.add(postId)
+      return next
+    })
+  }
+  function toggleSelectAllCurrent() {
+    setSelectedPostIds((current) => {
+      if (allSelected) {
+        const next = new Set(current)
+        allCurrentPostIds.forEach((id) => next.delete(id))
+        return next
+      }
+      const next = new Set(current)
+      allCurrentPostIds.forEach((id) => next.add(id))
+      return next
+    })
+  }
+  function handleProfilePostDeleted() {
+    // #4 个人主页单帖删除：仅刷新发帖记录列表，绝不跳转。
+    setBulkDeleteNotice('帖子已删除')
+    void loadModule('posts', modulePages.posts, false, postGroupFilter)
+  }
+  async function confirmBulkDeleteUserPosts() {
+    if (bulkDeleting || selectedPostIds.size === 0) return
+    setBulkDeleting(true)
+    setBulkDeleteNotice('')
+    setBulkDeleteError('')
+    try {
+      const response = await fetch('/api/users/me/posts/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ postIds: Array.from(selectedPostIds) }),
+      })
+      const data = await response.json().catch(() => ({})) as { ok?: boolean; message?: string; deleted?: number }
+      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '批量删除失败，请稍后重试')
+      setBulkDeleteNotice(`已删除 ${data.deleted ?? selectedPostIds.size} 篇帖子`)
+      setManageMode(false)
+      setSelectedPostIds(new Set())
+      setBulkDeleteConfirm(false)
+      // 仅就地刷新当前发帖记录页，保持 Tab 与页码（服务端会夹紧到有效页）。
+      void loadModule('posts', modulePages.posts, false, postGroupFilter)
+    } catch (error) {
+      setBulkDeleteError(error instanceof Error ? error.message : '批量删除失败，请稍后重试')
+      setBulkDeleteConfirm(false)
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   return (
     <>
 <section ref={modulesSectionRef} id="profile-modules" className="h-full min-w-0 scroll-mt-24">
@@ -260,7 +408,14 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
           {visibleTabs.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActive(tab.key)}
+            onClick={() => {
+              // 离开发帖记录 Tab 时退出管理模式并清空选择，避免跨模块残留。
+              if (tab.key !== 'posts' && active === 'posts' && manageMode) {
+                setManageMode(false)
+                setSelectedPostIds(new Set())
+              }
+              setActive(tab.key)
+            }}
             className={`max-w-full rounded-xl px-3 py-2 text-xs font-black whitespace-nowrap sm:px-4 sm:text-sm ${active === tab.key ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}
           >
             {isSelf ? tab.selfLabel : tab.otherLabel}
@@ -275,6 +430,24 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
       {recentMessageError ? <p role="alert" className="mb-3 border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-600">{recentMessageError}</p> : null}
       {visibleTabs.length > 0 && state?.failed ? <ModuleFallback /> : null}
         {visibleTabs.length > 0 && (state?.loading || !state) ? <ModuleFallback title="正在加载..." /> : null}
+        {isSelf && active === 'posts' ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {!manageMode ? (
+              <button type="button" onClick={toggleManageMode} className="rounded-full border border-sky-200 bg-white px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-60">管理</button>
+            ) : (
+              <>
+                <label className="inline-flex items-center gap-2 text-sm font-black text-brand-950">
+                  <input type="checkbox" className="size-4" checked={allSelected} onChange={toggleSelectAllCurrent} /> 本页全选
+                </label>
+                <span className="text-sm font-bold text-slate-600">已选择 {selectedPostIds.size} 篇</span>
+                <button type="button" onClick={() => setBulkDeleteConfirm(true)} disabled={selectedPostIds.size === 0 || bulkDeleting} className="rounded-full bg-red-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">删除</button>
+                <button type="button" onClick={toggleManageMode} disabled={bulkDeleting} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-60">完成</button>
+              </>
+            )}
+            {bulkDeleteNotice ? <p role="status" className="w-full text-sm font-black text-emerald-700">{bulkDeleteNotice}</p> : null}
+            {bulkDeleteError ? <p role="alert" className="w-full text-sm font-black text-red-600">{bulkDeleteError}</p> : null}
+          </div>
+        ) : null}
         {visibleTabs.length > 0 && state && !state.loading && !state.failed ? (
           <ModuleContent
             moduleKey={active}
@@ -289,6 +462,11 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
             onPostGroupsChanged={handlePostGroupsChanged}
             onPageChange={handlePageChange}
             onProfilePinChanged={handleProfilePinChanged}
+            manageMode={manageMode}
+            selectedPostIds={selectedPostIds}
+            onToggleSelect={toggleSelectPost}
+            onPostNavigate={handlePostNavigate}
+            onProfilePostDeleted={handleProfilePostDeleted}
             expandedRecentMessages={expandedRecentMessages}
             onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
             onRequestDeleteRecentMessage={isSelf ? (message) => { setRecentMessageNotice(''); setRecentMessageError(''); setDeleteTarget(message) } : undefined}
@@ -307,6 +485,16 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
         onConfirm={() => void confirmDeleteRecentMessage()}
         onCancel={() => { if (!isDeletingRecentMessage) setDeleteTarget(null) }}
       />
+      <ConfirmDialog
+        open={bulkDeleteConfirm}
+        title="批量删除帖子"
+        description={`确定要删除选中的 ${selectedPostIds.size} 篇帖子吗？删除后无法恢复。`}
+        confirmLabel="确认删除"
+        cancelLabel="取消"
+        loading={bulkDeleting}
+        onConfirm={() => void confirmBulkDeleteUserPosts()}
+        onCancel={() => { if (!bulkDeleting) setBulkDeleteConfirm(false) }}
+      />
     </>
   )
 }
@@ -324,6 +512,11 @@ function ModuleContent({
   onPostGroupsChanged,
   onPageChange,
   onProfilePinChanged,
+  manageMode,
+  selectedPostIds,
+  onToggleSelect,
+  onPostNavigate,
+  onProfilePostDeleted,
   expandedRecentMessages,
   onToggleRecentMessage,
   onRequestDeleteRecentMessage,
@@ -341,6 +534,11 @@ function ModuleContent({
   onPostGroupsChanged: () => void
   onPageChange: (page: number) => void
   onProfilePinChanged: () => void
+  manageMode: boolean
+  selectedPostIds: Set<string>
+  onToggleSelect: (postId: string) => void
+  onPostNavigate: () => void
+  onProfilePostDeleted: () => void
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
   onRequestDeleteRecentMessage?: (message: ProfileRecentMessage) => void
@@ -371,35 +569,52 @@ function ModuleContent({
         {!posts.length ? <ModuleFallback title="该分组暂时没有帖子。" /> : null}
         {posts.map((post) => (
           <article key={post.id} className="relative min-w-0 border border-[var(--border)] bg-[var(--surface-subtle)]">
-            <Link href={`/posts/${post.id}`} className="block min-w-0 p-3 pr-40">
-              <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {post.isProfilePinned ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
-                <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
-                {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
-                {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
-              </div>
-              <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
-              {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
-              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
-                <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>
-              </p>
-            </Link>
-            {isSelf ? (
-              <div className="absolute right-2 top-2 flex max-w-[45%] flex-wrap items-start justify-end gap-1">
-                <PersonalPostGroupMenu
-                  postId={post.id}
-                  currentGroupId={post.userPostGroupId}
-                  groups={postGroups}
-                  onChanged={onPostGroupsChanged}
-                />
-                <PersonalPostPinMenu
-                  postId={post.id}
-                  initialIsPinned={post.isProfilePinned}
-                  onChanged={onProfilePinChanged}
-                />
-              </div>
-            ) : null}
+            {manageMode ? (
+              <label className="flex min-w-0 cursor-pointer gap-3 p-3">
+                <input type="checkbox" className="mt-1 size-4 shrink-0" checked={selectedPostIds.has(post.id)} onChange={() => onToggleSelect(post.id)} />
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {post.isProfilePinned ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
+                    <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
+                </div>
+              </label>
+            ) : (
+              <>
+                <Link href={`/posts/${post.id}`} className="block min-w-0 p-3 pr-40" onClick={onPostNavigate}>
+                  <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {post.isProfilePinned ? <span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
+                    <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
+                    {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
+                    {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
+                  {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
+                  <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
+                    <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>
+                  </p>
+                </Link>
+                {isSelf ? (
+                  <div className="absolute right-2 top-2 flex max-w-[45%] flex-wrap items-start justify-end gap-1">
+                    <PersonalPostGroupMenu
+                      postId={post.id}
+                      currentGroupId={post.userPostGroupId}
+                      groups={postGroups}
+                      onChanged={onPostGroupsChanged}
+                    />
+                    <PersonalPostPinMenu
+                      postId={post.id}
+                      initialIsPinned={post.isProfilePinned}
+                      onChanged={onProfilePinChanged}
+                      onDeleted={onProfilePostDeleted}
+                    />
+                  </div>
+                ) : null}
+              </>
+            )}
           </article>
         ))}
         {pageNavigation}

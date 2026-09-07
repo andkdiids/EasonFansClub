@@ -69,6 +69,9 @@ export function ProfilePageSurface({
   relationship,
   recentMessages,
   recentMessagesPagination,
+  initialModule,
+  initialPage,
+  initialGroupId,
   remarkEditor,
 }: {
   profile: ProfilePageSurfaceProfile
@@ -76,6 +79,9 @@ export function ProfilePageSurface({
   relationship: ProfilePageSurfaceRelationship
   recentMessages: ProfileRecentMessage[]
   recentMessagesPagination?: ProfileRecordPagination
+  initialModule?: string
+  initialPage?: number
+  initialGroupId?: string
   remarkEditor?: ReactNode
 }) {
   const { isSelf, isFriend, isBlocked, hasViewer, friendStatus } = relationship
@@ -151,7 +157,7 @@ export function ProfilePageSurface({
 
       <section className="min-w-0 space-y-4">
         <div className="min-w-0">
-          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} visibleModules={visibleModules} recordPreferences={profile.recordPreferences} recentMessages={recentMessages} recentMessagesPagination={recentMessagesPagination} />
+          <PublicUserModules uid={formatUid(profile.uid)} isSelf={isSelf} visibleModules={visibleModules} recordPreferences={profile.recordPreferences} recentMessages={recentMessages} recentMessagesPagination={recentMessagesPagination} initialModule={initialModule} initialPage={initialPage} initialGroupId={initialGroupId} />
         </div>
         <div id="profile-wall" className="min-w-0 scroll-mt-24">
           {canViewWall ? <ProfileWall receiverUid={profile.uid} isOwner={isSelf} /> : <ClosedWall visibility={profile.wallVisibility} />}

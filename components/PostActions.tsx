@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
 
 export type PostInteractionLiker = {
@@ -335,15 +336,22 @@ export function PersonalPostPinMenu({
   postId,
   initialIsPinned,
   onChanged,
+  canDelete = true,
+  onDeleted,
 }: Readonly<{
   postId: string
   initialIsPinned: boolean
   onChanged?: () => void
+  /** 是否允许删除（个人主页发帖记录默认开启）。 */
+  canDelete?: boolean
+  /** 删除成功后的回调：个人主页场景下仅刷新列表，绝不跳转。 */
+  onDeleted?: () => void
 }>) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [isPinned, setIsPinned] = useState(initialIsPinned)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -385,6 +393,25 @@ export function PersonalPostPinMenu({
     }
   }
 
+  async function deleteOwnPost() {
+    if (isSubmitting) return
+    setError('')
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`/api/posts/${postId}`, { method: 'DELETE', cache: 'no-store' })
+      const data = await response.json().catch(() => ({})) as { message?: unknown }
+      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '删除失败，请稍后重试')
+      setConfirmDelete(false)
+      setMenuOpen(false)
+      // #4 个人主页单帖删除：仅刷新列表，绝不使用路由跳转（不跳首页、不跳广场、不跳详情页）。
+      onDeleted?.()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '删除失败，请稍后重试')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <div ref={menuRef} className="post-management-menu">
       <button
@@ -402,8 +429,25 @@ export function PersonalPostPinMenu({
           <button type="button" role="menuitem" disabled={isSubmitting} onClick={() => void updateProfilePin(!isPinned)}>
             {isPinned ? '取消置顶' : '置顶'}
           </button>
+          {canDelete ? (
+            <button type="button" role="menuitem" className="is-danger" disabled={isSubmitting} onClick={() => setConfirmDelete(true)}>
+              删除帖子
+            </button>
+          ) : null}
           {error ? <p role="alert">{error}</p> : null}
         </div>
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          open
+          title="删除帖子"
+          description="确定要删除这篇帖子吗？删除后无法恢复，且会移除其在个人主页的展示。"
+          confirmLabel="确认删除"
+          cancelLabel="取消"
+          loading={isSubmitting}
+          onConfirm={() => void deleteOwnPost()}
+          onCancel={() => { if (!isSubmitting) setConfirmDelete(false) }}
+        />
       ) : null}
     </div>
   )

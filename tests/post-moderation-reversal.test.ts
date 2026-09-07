@@ -42,7 +42,8 @@ test('审核接口按锁定后的当前状态更新，不删除帖子且不修�
   assert.match(reviewRoute, /SELECT \\`id\\` FROM \\`Post\\` WHERE \\`id\\` = \$\{postId\} FOR UPDATE/)
   assert.match(reviewRoute, /canTransitionPostModerationStatus\(current\.moderationStatus, status\)/)
   assert.match(reviewRoute, /where: \{ id: postId, isDeleted: false, moderationStatus: current\.moderationStatus \}/)
-  assert.match(reviewRoute, /data: buildPostReviewUpdate\(\{ status, reviewedAt, reviewedById: guard\.user\.id, rejectionReason \}\)/)
+  assert.match(reviewRoute, /buildPostReviewUpdate\(\{ status, reviewedAt, reviewedById: guard\.user\.id, rejectionReason \}\)/)
+  assert.match(reviewRoute, /data: updateData,/)
   assert.match(patchRoute, /changed: true[\s\S]*previousStatus: current\.moderationStatus/)
   assert.doesNotMatch(reviewRoute, /tx\.post\.(delete|deleteMany)\(/)
   assert.doesNotMatch(patchRoute, /data:[\s\S]*createdAt\s*:/)
@@ -70,7 +71,8 @@ test('审核接口按锁定后的当前状态更新，不删除帖子且不修�
 
 test('审核中心展示全部/各状态列表，并为已通过和已拒绝帖子提供逆向操作', () => {
   assert.match(reviewRoute, /rawStatus === 'ALL'/)
-  assert.match(reviewRoute, /where: status === 'ALL' \? \{ isDeleted: false \} : \{ moderationStatus: status, isDeleted: false \}/)
+  assert.match(reviewRoute, /\? \{ isDeleted: false, \.\.\.keywordFilter \}/)
+  assert.match(reviewRoute, /\{ moderationStatus: status, isDeleted: false, \.\.\.keywordFilter \}/)
   assert.match(reviewManager, /const reviewFilters: ReviewFilter\[\] = \['ALL', \.\.\.postModerationStatuses\]/)
   assert.match(reviewManager, /post\.moderationStatus === 'APPROVED'[\s\S]*拒绝通过/)
   assert.match(reviewManager, /post\.moderationStatus === 'REJECTED'[\s\S]*重新通过/)

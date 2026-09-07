@@ -24,6 +24,15 @@ export function isAdminUser(user?: Pick<SessionUser, 'role'> | null) {
   return user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN'
 }
 
+/**
+ * 帖子作者是否为「拥有管理权限的角色」（ADMIN / MODERATOR / SUPER_ADMIN）。
+ * 用于「加精权限」限制：普通管理员/版主不能给这类作者发布的帖子加精，
+ * 仅 SUPER_ADMIN 可以。注意 MODERATOR 也属于受保护对象。
+ */
+export function isPrivilegedPostAuthor(role?: string | null) {
+  return role === 'ADMIN' || role === 'MODERATOR' || role === 'SUPER_ADMIN'
+}
+
 export async function getAdminPermissionSet(user: Pick<SessionUser, 'id' | 'role'>) {
   if (isSuperAdmin(user)) return new Set<AdminPermissionKey>(allAdminPermissionKeys)
 

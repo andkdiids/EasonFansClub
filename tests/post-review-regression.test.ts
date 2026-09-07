@@ -36,7 +36,8 @@ test('缺少审核历史表只降级附加历史，不会回滚发帖、编辑�
 
 test('审核 GET 不执行违禁词扫描或通知发送，状态仍只使用 moderationStatus', () => {
   assert.doesNotMatch(reviewList, /checkPostForbiddenWords|notification\.create|notification\.updateMany/)
-  assert.match(reviewList, /status === 'ALL' \? \{ isDeleted: false \} : \{ moderationStatus: status, isDeleted: false \}/)
+  assert.match(reviewList, /\? \{ isDeleted: false, \.\.\.keywordFilter \}/)
+  assert.match(reviewList, /\{ moderationStatus: status, isDeleted: false, \.\.\.keywordFilter \}/)
   assert.match(postModeration, /The moderation state is deliberately separate from Post\.status/)
 })
 
@@ -48,9 +49,9 @@ test('审核历史异常不会污染列表响应模型', () => {
 
 test('审核列表第一页、第二页和空状态使用同一分页契约', () => {
   assert.match(reviewRoute, /const page = Number\.isInteger\(rawPage\)/)
-  assert.match(reviewRoute, /skip: \(page - 1\) \* POST_REVIEW_PAGE_SIZE/)
+  assert.match(reviewRoute, /skip: \(safePage - 1\) \* POST_REVIEW_PAGE_SIZE/)
   assert.match(reviewRoute, /take: POST_REVIEW_PAGE_SIZE \+ 1/)
-  assert.match(reviewRoute, /page,\n\s+hasMore/)
+  assert.match(reviewRoute, /page: safePage,\n\s+hasMore/)
   assert.match(reviewManager, /page - 1/)
   assert.match(reviewManager, /page \+ 1/)
   assert.match(reviewManager, /!posts\.length/)
