@@ -114,6 +114,8 @@ export type BadgeRuleEvaluation = {
   configJson?: unknown
 }
 
+export type BadgeRuleEvaluationMode = 'AUTO' | 'ADMIN_BACKFILL'
+
 function isBirthdayRuleType(ruleType: SupportedBadgeRuleType) {
   return ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY'
 }
@@ -138,26 +140,30 @@ function grantKeyForRule(
  * Pure rule predicate shared by event evaluation, daily scans and admin
  * backfill/preview. Non-numeric rules must not be represented by a made-up
  * threshold; birthday rules are evaluated from their typed month/day facts.
+ *
+ * Automatic evaluation keeps the current zodiac-period requirement. Admin
+ * backfill evaluates the user's persistent birthday zodiac only, so a
+ * historical scan is not limited by today's zodiac period.
  */
 export function evaluateBadgeRule({
   user,
   rule,
   metric = 0,
   now = new Date(),
+  mode = 'AUTO',
 }: {
   user: BadgeRuleEvaluationUser
   rule: BadgeRuleEvaluation
   metric?: number
   now?: Date
+  mode?: BadgeRuleEvaluationMode
 }) {
   if (rule.ruleType === 'BIRTHDAY_ZODIAC') {
     if (user.birthMonth == null || user.birthDay == null) return false
     const zodiac = getZodiacSignFromBirthday({ month: user.birthMonth, day: user.birthDay })
     const configuredZodiac = getZodiacFromRuleConfig(rule.configJson)
-    const currentZodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
-    return zodiac !== null
-      && configuredZodiac === zodiac
-      && currentZodiac === configuredZodiac
+    if (zodiac === null || configuredZodiac !== zodiac) return false
+    return mode === 'ADMIN_BACKFILL' || getCurrentZodiacSign(now, 'Asia/Shanghai') === configuredZodiac
   }
 
   if (rule.ruleType === 'BIRTHDAY_TODAY') {
@@ -652,12 +658,11 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
   }
 
   if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY') {
-    const currentZodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
     const configuredZodiac = getZodiacFromRuleConfig(badge.BadgeRule.configJson)
-    // A zodiac backfill is only valid while the configured zodiac is the
-    // current Shanghai period. It never turns an ended period into a past
-    // eligibility window.
-    if (type === 'BIRTHDAY_ZODIAC' && (!configuredZodiac || configuredZodiac !== currentZodiac)) {
+    // An invalid zodiac rule must not fall through to the birthday-today
+    // query. A valid zodiac backfill is based on the user's birthday zodiac,
+    // not the zodiac period currently in progress.
+    if (type === 'BIRTHDAY_ZODIAC' && !configuredZodiac) {
       return {
         badgeId,
         ruleId: badge.BadgeRule.id,
@@ -714,7 +719,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
     }
     const newlyGranted: Array<{ userId: string; recordId: string }> = []
     for (const user of rows) {
-      if (!evaluateBadgeRule({ user, rule, now })) {
+      if (!evaluateBadgeRule({ user, rule, now, mode: type === 'BIRTHDAY_ZODIAC' ? 'ADMIN_BACKFILL' : 'AUTO' })) {
         if (type === 'BIRTHDAY_ZODIAC' && (user.birthMonth !== null || user.birthDay !== null) && !getZodiacSignFromBirthday({ month: user.birthMonth || 0, day: user.birthDay || 0 })) {
           console.warn('[badge-rule.birthday.invalid-birthday]', { userId: user.id })
         }
@@ -1001,9 +1006,8 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats, historical }
   }
   if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY') {
-    const currentZodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
     const configuredZodiac = getZodiacFromRuleConfig(badge.BadgeRule.configJson)
-    if (type === 'BIRTHDAY_ZODIAC' && (!configuredZodiac || configuredZodiac !== currentZodiac)) {
+    if (type === 'BIRTHDAY_ZODIAC' && !configuredZodiac) {
       return {
         badgeId,
         ruleId: badge.BadgeRule.id,
@@ -1043,7 +1047,7 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
         select: { id: true, birthMonth: true, birthDay: true },
       })
       if (!users.length) break
-      const eligibleIds = users.filter((user) => evaluateBadgeRule({ user, rule, now })).map((user) => user.id)
+      const eligibleIds = users.filter((user) => evaluateBadgeRule({ user, rule, now, mode: type === 'BIRTHDAY_ZODIAC' ? 'ADMIN_BACKFILL' : 'AUTO' })).map((user) => user.id)
       eligibleCount += eligibleIds.length
       if (eligibleIds.length) {
         const ownedEligibleCount = await prisma.userBadge.count({ where: { badgeId, userId: { in: eligibleIds }, ...activeUserBadgeWhere(now) } })

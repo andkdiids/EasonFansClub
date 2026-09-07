@@ -70,6 +70,38 @@ test('BIRTHDAY_ZODIAC requires user zodiac and current zodiac period, not birthd
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 2, birthDay: 30 }, rule: zodiacRule, now: new Date('2026-03-25T04:00:00.000Z') }), false)
 })
 
+test('ADMIN_BACKFILL accepts 08/10 Leo outside the current zodiac period while AUTO waits', () => {
+  const now = new Date('2026-09-07T04:00:00.000Z')
+  const user = { birthMonth: 8, birthDay: 10 }
+  const leoRule = { ...zodiacRule, configJson: { zodiac: 'LEO' } }
+
+  assert.equal(getZodiacSignFromBirthday({ month: user.birthMonth, day: user.birthDay }), 'LEO')
+  assert.equal(getCurrentZodiacSign(now), 'VIRGO')
+  assert.equal(evaluateBadgeRule({ user, rule: leoRule, now }), false)
+  assert.equal(evaluateBadgeRule({ user, rule: leoRule, now, mode: 'ADMIN_BACKFILL' }), true)
+  assert.equal(evaluateBadgeRule({ user, rule: { ...leoRule, configJson: { zodiac: 'VIRGO' } }, now, mode: 'ADMIN_BACKFILL' }), false)
+})
+
+test('ADMIN_BACKFILL uses the birthday zodiac at every boundary regardless of today', () => {
+  const now = new Date('2026-09-07T04:00:00.000Z')
+  const cases: Array<[number, number, string]> = [
+    [7, 22, 'CANCER'],
+    [7, 23, 'LEO'],
+    [8, 10, 'LEO'],
+    [8, 22, 'LEO'],
+    [8, 23, 'VIRGO'],
+    [9, 22, 'VIRGO'],
+    [9, 23, 'LIBRA'],
+  ]
+
+  for (const [month, day, zodiac] of cases) {
+    const user = { birthMonth: month, birthDay: day }
+    const rule = { ...zodiacRule, configJson: { zodiac } }
+    assert.equal(getZodiacSignFromBirthday({ month, day }), zodiac, `${month}/${day}`)
+    assert.equal(evaluateBadgeRule({ user, rule, now, mode: 'ADMIN_BACKFILL' }), true, `${month}/${day}`)
+  }
+})
+
 test('BIRTHDAY_ZODIAC handles Capricorn across the year boundary and Feb 29 without waiting for birthday', () => {
   const capricornRule = { ...zodiacRule, configJson: { zodiac: 'CAPRICORN' } }
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 12, birthDay: 25 }, rule: capricornRule, now: new Date('2026-12-25T04:00:00.000Z') }), true)
@@ -111,14 +143,19 @@ test('birthday rule configs are independent and never use a numeric threshold', 
   assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_TODAY', null, {}), '生日当天自动获得。')
 })
 
-test('daily scans select the current zodiac period while birthday scans stay on today', () => {
+test('daily scans keep current-period semantics while admin zodiac backfill does not', () => {
   const engine = read('lib/badge-rule-engine.ts')
-  const birthdayBranch = engine.slice(engine.indexOf("if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY')"), engine.indexOf("if (type === 'BADGE_SERIES_COMPLETE')"))
-  assert.match(birthdayBranch, /getCurrentZodiacSign/)
-  assert.match(birthdayBranch, /getBirthdayWhereForZodiac/)
-  assert.match(birthdayBranch, /BIRTHDAY_TODAY/)
-  assert.match(birthdayBranch, /evaluateBadgeRule\(/)
-  assert.doesNotMatch(birthdayBranch, /isBirthdayToday/)
+  const dailyScan = engine.slice(engine.indexOf('export async function grantCurrentZodiacBadgeRewards'))
+  const backfill = engine.slice(engine.indexOf('export async function backfillBadgeRule'), engine.indexOf('export type BadgeRulePreview'))
+  const preview = engine.slice(engine.indexOf('export async function previewBadgeRule'))
+  assert.match(dailyScan, /getCurrentZodiacSign/)
+  assert.match(dailyScan, /getBirthdayWhereForZodiac/)
+  assert.match(dailyScan, /evaluateBadgeRule\(/)
+  assert.match(backfill, /mode: type === 'BIRTHDAY_ZODIAC' \? 'ADMIN_BACKFILL' : 'AUTO'/)
+  assert.match(backfill, /getBirthdayWhereForZodiac/)
+  assert.doesNotMatch(backfill, /configuredZodiac !== currentZodiac/)
+  assert.match(preview, /mode: type === 'BIRTHDAY_ZODIAC' \? 'ADMIN_BACKFILL' : 'AUTO'/)
+  assert.doesNotMatch(preview, /configuredZodiac !== currentZodiac/)
   assert.match(read('lib/birthday.ts'), /grantCurrentZodiacBadgeRewards\(date\)/)
   assert.match(read('lib/birthday.ts'), /evaluateUserAutoBadges\(user\.id, \['BIRTHDAY_TODAY'\], date, `birthday:\$\{dateKey\}`\)/)
   assert.match(read('app/api/auth/login/route.ts'), /triggerBadgeEvaluation\(user\.id, 'USER_LOGIN', randomUUID\(\)\)/)
@@ -134,6 +171,8 @@ test('admin and public acquisition copy keep zodiac period and birthday-day rule
   assert.match(manager, /!isBirthdayRule\(draft\.ruleType\)/)
   assert.match(manager, /星座周期内自动获得/)
   assert.match(manager, /生日当天自动获得/)
+  assert.match(manager, /不受当前日期星座周期限制/)
+  assert.doesNotMatch(manager, /扫描当前星座周期/)
   assert.doesNotMatch(manager, /BIRTHDAY_ZODIAC[\s\S]{0,500}仅在生日当天自动发放/)
   assert.match(read('lib/badge-service.ts'), /configJson: true/)
   assert.match(read('lib/badge-service.ts'), /generateBadgeAcquisitionDescription/)
