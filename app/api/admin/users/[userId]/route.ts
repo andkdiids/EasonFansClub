@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { Prisma, ProfileWallVisibility } from '@prisma/client'
+import { Gender, Prisma, ProfileWallVisibility } from '@prisma/client'
 import type { UserRole, UserStatus } from '@prisma/client'
 import { deleteUserPermanently, getUserDeletionPreview } from '@/lib/admin-user-deletion'
 import { hasAdminPermission } from '@/lib/admin-permissions'
@@ -13,8 +13,10 @@ import { publicImageUrl } from '@/lib/images'
 import { validateLoginAccountValue, validateNicknameValue } from '@/lib/login-account'
 import { checkBannedWords, NICKNAME_BANNED_WORD_MESSAGE, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD } from '@/lib/content-moderation'
 import { normalizeUserLocationInput } from '@/lib/user-location'
+import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput } from '@/lib/gender'
 import { isValidBirthdayParts, type BirthdayParts } from '@/lib/zodiac'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { getEquippedBadgesForUser } from '@/lib/badge-service'
 import { emitRealtime } from '@/lib/realtime'
 import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
@@ -119,6 +121,21 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (hasOwn('bio')) patch.bio = sanitizeText(body.bio, 300)
     if (hasOwn('avatarUrl')) patch.avatarUrl = publicImageUrl(sanitizeText(body.avatarUrl, 500))
     if (hasOwn('backgroundUrl')) patch.backgroundUrl = publicImageUrl(sanitizeText(body.backgroundUrl, 500))
+    if (hasOwn('gender') || hasOwn('customGender')) {
+      const rawCustomGender = hasOwn('customGender') ? body.customGender : undefined
+      const customGenderInput = typeof rawCustomGender === 'string'
+        ? rawCustomGender.slice(0, Math.max(5000, CUSTOM_GENDER_MAX_LENGTH * 4))
+        : rawCustomGender
+      const genderValidation = validateGenderInput(body?.gender, customGenderInput)
+      if (genderValidation.error) {
+        return NextResponse.json({ message: genderValidation.error, code: 'INVALID_GENDER' }, { status: 400 })
+      }
+      if (genderValidation.customGender && (await checkBannedWords(genderValidation.customGender)).blocked) {
+        return NextResponse.json({ message: '自定义性别包含违禁词，请修改后再提交。', code: 'CONTENT_CONTAINS_BANNED_WORD' }, { status: 400 })
+      }
+      patch.gender = genderValidation.gender as Gender | null
+      patch.customGender = genderValidation.customGender
+    }
     if (hasOwn('birthdayPublic')) {
       if (typeof body.birthdayPublic !== 'boolean') return NextResponse.json({ message: '生日公开设置无效' }, { status: 400 })
       patch.birthdayPublic = body.birthdayPublic
@@ -193,7 +210,18 @@ export async function PATCH(request: Request, context: RouteContext) {
       if (result.birthdayChanged) {
         await triggerBadgeEvaluation(userId, 'USER_BIRTHDAY_UPDATED', new Date().toISOString())
       }
-      return NextResponse.json({ user: result.user, changedFields: result.changedFields, message: result.changed ? '用户资料已更新' : '用户资料未发生变化' })
+      const equippedBadges = result.birthdayChanged
+        ? await getEquippedBadgesForUser(userId).catch((error) => {
+          console.error('[admin.users.birthday.equipped-badges]', { userId, error })
+          return []
+        })
+        : undefined
+      return NextResponse.json({
+        user: result.user,
+        changedFields: result.changedFields,
+        message: result.changed ? '用户资料已更新' : '用户资料未发生变化',
+        ...(equippedBadges ? { equippedBadges, equippedBadge: equippedBadges[0] || null } : {}),
+      })
     } catch (error) {
       const code = error instanceof Error ? error.message : ''
       if (code === 'USER_NOT_FOUND') return NextResponse.json({ message: '用户不存在' }, { status: 404 })

@@ -55,6 +55,8 @@ export const friendUserSelect = {
   nickname: true,
   avatarUrl: true,
   bio: true,
+  gender: true,
+  customGender: true,
   status: true,
   isDeleted: true,
   Profile: {

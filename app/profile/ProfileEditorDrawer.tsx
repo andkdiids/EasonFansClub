@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
 import type { UserLocation } from '@/lib/user-location'
+import type { GenderValue } from '@/lib/gender'
 
 type InitialProfile = {
   nickname: string
@@ -13,6 +14,8 @@ type InitialProfile = {
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
+  gender: GenderValue | null
+  customGender: string
   bioViolation: boolean
   location: UserLocation | null
   email: string

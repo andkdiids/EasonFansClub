@@ -3831,6 +3831,8 @@ CREATE TABLE `User` (
     `phone` VARCHAR(191) NULL,
     `passwordHash` VARCHAR(191) NOT NULL,
     `nickname` VARCHAR(191) NOT NULL,
+    `gender` ENUM('MALE', 'FEMALE', 'CUSTOM') NULL,
+    `customGender` VARCHAR(20) NULL,
     `avatarUrl` VARCHAR(191) NULL,
     `bio` VARCHAR(191) NULL,
     `usernameModerationStatus` ENUM('NORMAL', 'VIOLATION') NOT NULL DEFAULT 'NORMAL',

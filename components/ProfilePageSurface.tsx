@@ -12,6 +12,7 @@ import type { BadgeCollectionView, EquippedBadgeView } from '@/lib/badge-types'
 import { BadgeMiniShowcase } from '@/components/BadgeMiniShowcase'
 import { getVisibleProfileModules, type UserPrivacySettings } from '@/lib/user-privacy'
 import type { ProfileRecordPreference } from '@/lib/profile-record-sections'
+import { getGenderDisplay } from '@/lib/gender'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -21,6 +22,8 @@ export type ProfilePageSurfaceProfile = {
   displayName: string
   baseDisplayName: string
   bio: string
+  gender?: string | null
+  customGender?: string | null
   location: UserLocation | null
   ipRegion: string | null
   avatarUrl: string | null
@@ -88,6 +91,7 @@ export function ProfilePageSurface({
   const wallHref = '#profile-wall'
   const canViewWall = isSelf || profile.wallVisibility === 'PUBLIC' || (profile.wallVisibility === 'FRIENDS' && isFriend && !isBlocked)
   const visibleModules = getVisibleProfileModules(profile.privacy, isSelf)
+  const genderDisplay = getGenderDisplay(profile)
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl space-y-4 px-4 py-5 sm:space-y-5 sm:px-5 sm:py-6">
@@ -122,6 +126,12 @@ export function ProfilePageSurface({
             <dt className="shrink-0 font-black text-slate-500">IP属地</dt>
             <dd className="min-w-0 truncate font-bold text-brand-950">{profile.ipRegion || '未有记录'}</dd>
           </div>
+          {genderDisplay ? (
+            <div className="flex min-w-0 items-baseline gap-3">
+              <dt className="shrink-0 font-black text-slate-500">性别</dt>
+              <dd className="min-w-0 truncate font-bold text-brand-950">{genderDisplay}</dd>
+            </div>
+          ) : null}
         </dl>
         <p className="mt-3 min-w-0 whitespace-pre-wrap break-words text-sm font-bold leading-7 text-slate-600 sm:text-base">
           {profile.bio || '这个成员还没有填写个人简介。'}

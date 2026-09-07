@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { Prisma, ProfileWallVisibility, type VerificationStatus } from '@prisma/client'
+import { Gender, Prisma, ProfileWallVisibility, type VerificationStatus } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { createVerificationForUser, isValidEmail, normalizeEmail, sendVerificationEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
@@ -25,6 +25,8 @@ import {
   updateUserBirthdate,
 } from '@/lib/birthday-immutability'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { getEquippedBadgesForUser } from '@/lib/badge-service'
+import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput } from '@/lib/gender'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -220,6 +222,8 @@ export async function GET(request: Request) {
       avatarUrl: true,
       backgroundUrl: true,
       bio: true,
+      gender: true,
+      customGender: true,
       emailVerifiedAt: true,
       phoneVerifiedAt: true,
       birthMonth: true,
@@ -293,6 +297,8 @@ export async function GET(request: Request) {
       avatarUrl: publicImageUrl(profile.avatarUrl),
       backgroundUrl: publicImageUrl(profile.backgroundUrl),
       bio: profile.bio,
+      gender: profile.gender,
+      customGender: profile.customGender,
       birthMonth: profile.birthMonth,
       birthDay: profile.birthDay,
       birthdaySetAt: profile.birthdaySetAt,
@@ -383,15 +389,35 @@ export async function PATCH(request: Request) {
   const birthdayPublic = typeof body?.birthdayPublic === 'boolean' ? body.birthdayPublic : undefined
   const showBadgeActivity = typeof body?.showBadgeActivity === 'boolean' ? body.showBadgeActivity : undefined
   const showBadgeProgressNotifications = typeof body?.showBadgeProgressNotifications === 'boolean' ? body.showBadgeProgressNotifications : undefined
+  const hasBodyField = (field: string) => Boolean(
+    body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, field),
+  )
+  const hasGenderFields = hasBodyField('gender') || hasBodyField('customGender')
+  let genderUpdate: { gender: Gender | null; customGender: string | null } | undefined
+  if (hasGenderFields) {
+    const rawCustomGender = hasBodyField('customGender') ? body.customGender : undefined
+    const customGenderInput = typeof rawCustomGender === 'string'
+      ? rawCustomGender.slice(0, Math.max(5000, CUSTOM_GENDER_MAX_LENGTH * 4))
+      : rawCustomGender
+    const genderValidation = validateGenderInput(body?.gender, customGenderInput)
+    if (genderValidation.error) {
+      return NextResponse.json({ message: genderValidation.error, code: 'INVALID_GENDER' }, { status: 400 })
+    }
+    if (genderValidation.customGender && (await checkBannedWords(genderValidation.customGender)).blocked) {
+      return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
+    }
+    genderUpdate = {
+      gender: genderValidation.gender as Gender | null,
+      customGender: genderValidation.customGender,
+    }
+  }
+
   const hasLocation = Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'location'))
   const location = hasLocation ? normalizeUserLocationInput(body.location) : undefined
   if (hasLocation && location === undefined) {
     return NextResponse.json({ message: '地区选择无效，请重新选择' }, { status: 400 })
   }
 
-  const hasBodyField = (field: string) => Boolean(
-    body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, field),
-  )
   const hasBirthMonth = hasBodyField('birthMonth')
   const hasBirthDay = hasBodyField('birthDay')
   const birthdayFieldsProvided = hasBirthMonth || hasBirthDay
@@ -442,6 +468,8 @@ export async function PATCH(request: Request) {
     birthdayPublic?: boolean
     showBadgeActivity?: boolean
     showBadgeProgressNotifications?: boolean
+    gender?: Gender | null
+    customGender?: string | null
   } = {}
 
   if (body?.bio !== undefined) {
@@ -466,6 +494,7 @@ export async function PATCH(request: Request) {
   if (requestedWallVisibility !== undefined && !profileWallVisibilities.has(requestedWallVisibility)) {
     return NextResponse.json({ message: '留言墙隐私设置无效' }, { status: 400 })
   }
+  if (genderUpdate) Object.assign(data, genderUpdate)
 
   const current = await prisma.user.findUnique({
     where: { id: guard.user.id },
@@ -587,6 +616,8 @@ export async function PATCH(request: Request) {
         avatarUrl: true,
         backgroundUrl: true,
         bio: true,
+        gender: true,
+        customGender: true,
         nicknameModerationStatus: true,
         nicknameViolationDisplay: true,
         nicknameViolationCount: true,
@@ -676,6 +707,8 @@ export async function PATCH(request: Request) {
       avatarUrl: updated.avatarUrl,
       backgroundUrl: updated.backgroundUrl,
       bio: updated.bio,
+      gender: updated.gender,
+      customGender: updated.customGender,
       nicknameModerationStatus: updated.nicknameModerationStatus,
       nicknameViolationDisplay: updated.nicknameViolationDisplay,
       showBadgeActivity: updated.showBadgeActivity,
@@ -697,7 +730,16 @@ export async function PATCH(request: Request) {
 
   invalidateCurrentUserCache(guard.user.id)
   void updateUserIpRegion(guard.user.id, request)
+  let equippedBadges: Awaited<ReturnType<typeof getEquippedBadgesForUser>> | undefined
+  // Wait for the unified birthday reconciliation before returning so the
+  // client can replace its equipped-badge state without a full reload.
   if (birthdayChanged) await triggerBadgeEvaluation(guard.user.id, 'USER_BIRTHDAY_UPDATED', profile.birthdaySetAt?.toISOString() || new Date().toISOString())
+  if (birthdayChanged) {
+    equippedBadges = await getEquippedBadgesForUser(guard.user.id).catch((error) => {
+      console.error('[users.me.birthday.equipped-badges]', { userId: guard.user.id, error })
+      return []
+    })
+  }
 
   profile.avatarUrl = publicImageUrl(profile.avatarUrl)
   profile.backgroundUrl = publicImageUrl(profile.backgroundUrl)
@@ -719,6 +761,7 @@ export async function PATCH(request: Request) {
       : nicknameViolation
         ? '昵称包含违禁词，已被系统替换为临时展示昵称，整改后可重新修改'
         : undefined,
+    ...(equippedBadges ? { equippedBadges, equippedBadge: equippedBadges[0] || null } : {}),
     })
   } catch (error) {
     const birthdayErrorResponse = birthdayMutationErrorResponse(error)

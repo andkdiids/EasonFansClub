@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { BadgeEffectType, BadgeGrantType, BadgeNicknameEffect, BadgeRarity, BadgeValidityType, BadgeVisibility } from '@/lib/badge-types'
 import { BADGE_EFFECT_TYPE_LABELS, BADGE_GRANT_TYPE_LABELS, BADGE_NICKNAME_SHINE_FALLBACK, BADGE_RARITY_LABELS, BADGE_VALIDITY_TYPE_LABELS, BADGE_VISIBILITY_LABELS, getBadgeNicknameShineColor, isBadgeNicknameShineEnabled } from '@/lib/badge-types'
-import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, BADGE_RETENTION_POLICY_LABELS, BADGE_RETENTION_POLICY_DESCRIPTIONS, generateBadgeAcquisitionDescription, getDefaultBadgeRetentionPolicy, getZodiacFromRuleConfig, parseBadgeRuleInput, resolveBadgeRetentionPolicy, supportsBadgeRetentionPolicy, type BadgeRetentionPolicyValue, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { BADGE_ADMIN_RULE_TYPES, BADGE_RULE_REGISTRY, BADGE_RULE_TYPE_DESCRIPTIONS, BADGE_RULE_TYPE_LABELS, BADGE_RETENTION_POLICY_LABELS, BADGE_RETENTION_POLICY_DESCRIPTIONS, generateBadgeAcquisitionDescription, getDefaultBadgeRetentionPolicy, getZodiacFromRuleConfig, parseBadgeRuleInput, supportsBadgeRetentionPolicy, type BadgeRetentionPolicyValue, type BadgeRuleOperatorValue, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { getBadgeOwnershipRuleConfig, type BadgeOwnershipMatchMode } from '@/lib/badge-ownership-config'
 import { formatZodiacDateRange, formatZodiacLabel, ZODIAC_LABELS, ZODIAC_SIGNS, type ZodiacSign } from '@/lib/zodiac'
 import { BadgeImage, BadgeName, UserDisplayName } from '@/components/UserDisplayName'
+import { SafeAvatar } from '@/components/SafeAvatar'
+import { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday-constants'
 
 export type AdminBadge = {
   id: string
@@ -54,6 +56,40 @@ type ConcertOption = { id: string; title: string | null; concertDate: string; ci
 type TourOption = { id: string; name: string }
 type ActivityOption = { id: string; title: string; status: 'DRAFT' | 'PUBLISHED' | 'CANCELLED'; startsAt: string | null; endsAt: string | null }
 type OwnershipBadgeOption = Pick<AdminBadge, 'id' | 'name' | 'code' | 'iconUrl' | 'rarity'>
+type BadgeRevokePreviewStatus = 'ALL' | 'PENDING_REVOKE' | 'STILL_ELIGIBLE' | 'RETAINED_INELIGIBLE'
+type BadgeRevokePreviewRow = {
+  recordId: string
+  user: { id: string; uid: number; username: string; displayName: string; avatarUrl: string | null }
+  currentBirthday: { month: number; day: number } | null
+  badge: { id: string; name: string; slug: string; iconUrl: string | null }
+  rule: { id: string; ruleType: SupportedBadgeRuleType; description: string }
+  obtainedAt: string
+  awardedAt: string
+  expiresAt: string | null
+  ruleMatches: boolean
+  status: Exclude<BadgeRevokePreviewStatus, 'ALL'>
+  reason: string
+  retentionPolicy: BadgeRetentionPolicyValue
+}
+type BadgeRevokePreviewData = {
+  generatedAt: string
+  badge: { id: string; name: string; slug: string; iconUrl: string | null }
+  rule: { id: string; ruleType: SupportedBadgeRuleType; description: string; retentionPolicy: BadgeRetentionPolicyValue }
+  currentOwnersCount: number
+  stillEligibleCount: number
+  pendingRevokeCount: number
+  retainedIneligibleCount: number
+  rows: BadgeRevokePreviewRow[]
+}
+type BadgeRevokeExecutionSummary = {
+  executedAt: string
+  previewCount: number
+  actualRevoked: number
+  skipped: number
+  failed: number
+  skippedReasons: Array<{ reason: string; count: number }>
+  failures: Array<{ userId: string; message: string }>
+}
 
 const emptyDraft: BadgeDraft = {
   name: '', code: '', slug: '', description: '', acquisitionDescription: '', resolvedAcquisitionDescription: null, acquisitionDescriptionCustomized: false, iconUrl: null, imageUrl: null, category: 'SYSTEM', visibility: 'PUBLIC', rarity: 'COMMON', grantType: 'MANUAL', validityType: 'PERMANENT', validityDays: null, isWearable: true, isEnabled: true, effectType: 'NONE', nicknameEffect: 'NONE', nicknameColor: '', nicknameGradientStart: '', nicknameGradientEnd: '', sortOrder: 0, rule: null, badgeType: 'STANDARD', seriesId: null, series: null, tierGroupCode: null, tierLevel: null, availableFrom: null, availableUntil: null, availabilityStatus: 'PERMANENT', ownershipStats: null, announceOnGrant: false, countsTowardSeriesCompletion: true, ruleType: 'POST_COUNT', operator: 'GTE', threshold: 1, zodiac: 'ARIES', ruleEnabled: true, legacyAuto: false, legacyTier: false, seriesCompletionRule: false, tierEnabled: false, limitedEnabled: false, targetId: '', targetLabel: '', ownershipBadgeIds: [], ownershipBadgeNames: [], ownershipMatchMode: 'ALL', ownershipMinimumCount: 1, retentionPolicy: null,
@@ -115,6 +151,11 @@ function isTargetRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'C
 function isBirthdayRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY' }
 function isZodiacRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'BIRTHDAY_ZODIAC' }
 function isBirthdayTodayRule(ruleType: SupportedBadgeRuleType) { return ruleType === 'BIRTHDAY_TODAY' }
+function isRevokePreviewBadge(badge: Pick<AdminBadge, 'grantType' | 'rule' | 'slug'>) { return badge.grantType === 'AUTO' && (Boolean(badge.rule) || badge.slug === BIRTHDAY_BADGE_SLUG) }
+function revokePreviewStatusLabel(status: BadgeRevokePreviewStatus) {
+  return status === 'PENDING_REVOKE' ? '待收回' : status === 'STILL_ELIGIBLE' ? '仍符合' : status === 'RETAINED_INELIGIBLE' ? '资格失效但保留' : '全部'
+}
+function retentionPolicyLabel(policy: BadgeRetentionPolicyValue) { return BADGE_RETENTION_POLICY_LABELS[policy] || policy }
 function getRuleUnit(ruleType: SupportedBadgeRuleType) {
   const definition = BADGE_RULE_REGISTRY[ruleType]
   return 'unit' in definition ? definition.unit : ''
@@ -207,6 +248,12 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
   const [seriesDraft, setSeriesDraft] = useState<SeriesDraft | null>(null)
   const [preview, setPreview] = useState<AdminBadge | null>(null)
   const [previewData, setPreviewData] = useState<{ eligibleCount: number; ownedCount: number; pendingCount: number; availability: string; historical?: { supported: boolean; mode: string; basis: string; from: string | null; until: string | null; message: string | null } } | null>(null)
+  const [revokePreview, setRevokePreview] = useState<AdminBadge | null>(null)
+  const [revokePreviewData, setRevokePreviewData] = useState<BadgeRevokePreviewData | null>(null)
+  const [revokePreviewQuery, setRevokePreviewQuery] = useState('')
+  const [revokePreviewFilter, setRevokePreviewFilter] = useState<BadgeRevokePreviewStatus>('PENDING_REVOKE')
+  const [revokePreviewLoading, setRevokePreviewLoading] = useState(false)
+  const [revokeExecution, setRevokeExecution] = useState<BadgeRevokeExecutionSummary | null>(null)
   const [formSections, setFormSections] = useState({ basic: true, rules: true, display: false })
   const [concertOptions, setConcertOptions] = useState<ConcertOption[]>([])
   const [tourOptions, setTourOptions] = useState<TourOption[]>([])
@@ -445,6 +492,72 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
     const data = await response.json().catch(() => null) as { preview?: { eligibleCount: number; ownedCount: number; pendingCount: number; availability: string; historical?: { supported: boolean; mode: string; basis: string; from: string | null; until: string | null; message: string | null } }; message?: string } | null
     if (!response.ok || !data?.preview) return fail(data?.message || '规则预览失败')
     setPreviewData(data.preview)
+  }
+
+  async function loadRevokePreview(badge: AdminBadge, nextQuery: string, nextStatus: BadgeRevokePreviewStatus) {
+    setRevokePreviewLoading(true)
+    try {
+      const params = new URLSearchParams({ status: nextStatus })
+      if (nextQuery.trim()) params.set('q', nextQuery.trim())
+      const response = await fetch(`/api/admin/badges/${badge.id}/revoke-preview?${params.toString()}`, { cache: 'no-store' })
+      const data = await response.json().catch(() => null) as { preview?: BadgeRevokePreviewData; message?: string } | null
+      if (!response.ok || !data?.preview) throw new Error(data?.message || '收回预览失败')
+      setRevokePreviewData(data.preview)
+    } catch (revokePreviewError) {
+      fail(revokePreviewError instanceof Error ? revokePreviewError.message : '收回预览失败')
+    } finally {
+      setRevokePreviewLoading(false)
+    }
+  }
+
+  function openRevokePreview(badge: AdminBadge) {
+    setRevokePreview(badge)
+    setRevokePreviewQuery('')
+    setRevokePreviewFilter('PENDING_REVOKE')
+    setRevokePreviewData(null)
+    setRevokeExecution(null)
+    void loadRevokePreview(badge, '', 'PENDING_REVOKE')
+  }
+
+  function refreshRevokePreview() {
+    if (!revokePreview) return
+    void loadRevokePreview(revokePreview, revokePreviewQuery, revokePreviewFilter)
+  }
+
+  function applyRevokePreviewFilter(nextStatus: BadgeRevokePreviewStatus) {
+    setRevokePreviewFilter(nextStatus)
+    if (revokePreview) void loadRevokePreview(revokePreview, revokePreviewQuery, nextStatus)
+  }
+
+  function searchRevokePreview() {
+    if (revokePreview) void loadRevokePreview(revokePreview, revokePreviewQuery, revokePreviewFilter)
+  }
+
+  async function executeRevokePreview() {
+    if (!revokePreview || !revokePreviewData) return
+    const pendingRows = revokePreviewData.rows.filter((row) => row.status === 'PENDING_REVOKE')
+    if (!pendingRows.length) return fail('当前筛选下没有待收回用户')
+    const scope = revokePreviewQuery.trim() ? `当前搜索结果中的 ${pendingRows.length} 名用户` : `${pendingRows.length} 名用户`
+    if (!window.confirm(`确认批量收回「${revokePreview.name}」吗？\n\n本次将处理${scope}。执行时会重新读取当前规则与保留策略，只有仍满足收回条件的来源才会被收回。不会发送通知，但会记录管理员操作日志。`)) return
+
+    setBusy(true)
+    try {
+      const response = await fetch(`/api/admin/badges/${revokePreview.id}/revoke-preview/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, query: revokePreviewQuery.trim() }),
+      })
+      const data = await response.json().catch(() => null) as { summary?: BadgeRevokeExecutionSummary; message?: string } | null
+      if (!response.ok || !data?.summary) throw new Error(data?.message || '批量收回失败')
+      setRevokeExecution(data.summary)
+      notify(`「${revokePreview.name}」收回完成：预览 ${data.summary.previewCount}，实际收回 ${data.summary.actualRevoked}，跳过 ${data.summary.skipped}，失败 ${data.summary.failed}`)
+      await reload()
+      await loadRevokePreview(revokePreview, revokePreviewQuery, revokePreviewFilter)
+    } catch (revokeExecutionError) {
+      fail(revokeExecutionError instanceof Error ? revokeExecutionError.message : '批量收回失败')
+    } finally {
+      setBusy(false)
+    }
   }
 
   function previewSavedDraft() {
@@ -687,6 +800,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
                 <button type="button" disabled={busy} onClick={() => void previewBadgeRule(badge)} className="admin-badge-list-button disabled:opacity-50">预览达标</button>
                 <button type="button" disabled={busy || !badge.rule.isEnabled || getBackfillUiState(badge).disabled} onClick={() => void backfillBadge(badge)} title={getBackfillUiState(badge).reason} className="admin-badge-list-button disabled:opacity-50">{getBackfillUiState(badge).label}</button>
               </> : null}
+              {isRevokePreviewBadge(badge) ? <button type="button" disabled={busy} onClick={() => openRevokePreview(badge)} className="admin-badge-list-button disabled:opacity-50">收回预览</button> : null}
               <button type="button" onClick={() => { setGrantBadgeTarget(badge); setGrantUsers([]); setGrantUserId(''); setGrantReason(''); setGrantConfirmed(false); setGrantUserStatus(null) }} className="admin-badge-list-button">{badge.availableFrom || badge.availableUntil ? '手动补发' : '发放'}</button>
               <button type="button" onClick={() => void loadOwners(badge)} className="admin-badge-list-button">获得用户</button>
               <button type="button" onClick={() => void deleteBadge(badge)} className="admin-badge-list-button danger">删除</button>
@@ -697,6 +811,39 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
       </section>
 
       {preview ? <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => setPreview(null)}><section className="badge-admin-dialog max-w-md" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => setPreview(null)} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button><h2 className="text-xl font-black text-brand-950">「{preview.name}」达标预览</h2><p className="mt-2 text-xs font-bold leading-5 text-slate-500">只读计算，不会授予勋章。规则修改也不会撤销已经获得的历史荣誉。</p>{preview.rule ? <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-black leading-5 text-amber-900">规则：{formatRuleSummary(preview.rule)}。</p> : null}{previewData ? <div className="mt-4 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-violet-50 p-3"><strong className="block text-xl font-black text-violet-800">{previewData.eligibleCount}</strong><span className="text-[11px] font-bold text-slate-500">符合条件</span></div><div className="rounded-xl bg-emerald-50 p-3"><strong className="block text-xl font-black text-emerald-800">{previewData.ownedCount}</strong><span className="text-[11px] font-bold text-slate-500">已获得</span></div><div className="rounded-xl bg-amber-50 p-3"><strong className="block text-xl font-black text-amber-800">{previewData.pendingCount}</strong><span className="text-[11px] font-bold text-slate-500">待补发</span></div></div> : <p className="mt-5 text-sm font-bold text-slate-500">正在聚合统计…</p>}{previewData ? <><p className="mt-3 text-center text-xs font-black text-slate-500">当前状态：{previewData.availability === 'PERMANENT' ? '永久可获得' : previewData.availability === 'AVAILABLE' ? '限定开放中' : previewData.availability === 'UPCOMING' ? '尚未开放' : '已绝版'}</p>{previewData.historical?.message ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">{previewData.historical.message}；如需补发，请使用“手动补发”并填写原因。</p> : previewData.historical?.mode === 'HISTORICAL_WINDOW' ? <p className="mt-2 rounded-xl bg-violet-50 p-3 text-xs font-bold leading-5 text-violet-800">本次预览按限定期历史数据计算：{previewData.historical.basis}。</p> : null}</> : null}</section></div> : null}
+      {revokePreview ? (
+        <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => { setRevokePreview(null); setRevokePreviewData(null); setRevokeExecution(null) }}>
+          <section className="badge-admin-dialog max-w-5xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => { setRevokePreview(null); setRevokePreviewData(null); setRevokeExecution(null) }} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button>
+            <div className="flex items-center gap-3">
+              {revokePreview.iconUrl ? <BadgeImage badge={{ name: revokePreview.name, imageUrl: revokePreview.iconUrl, effectType: revokePreview.effectType }} size="inline" /> : <span className="text-3xl">🏅</span>}
+              <div>
+                <h2 className="text-xl font-black text-brand-950">「{revokePreview.name}」收回预览</h2>
+                <p className="mt-1 text-xs font-bold text-slate-500">只读计算，不会收回勋章、发送通知或写入审计；确认执行后仍会按当前数据再次校验。</p>
+              </div>
+            </div>
+            {revokePreviewData ? <>
+              <p className="mt-3 rounded-xl bg-violet-50 p-3 text-xs font-black leading-5 text-violet-900">当前规则：{revokePreviewData.rule.description || formatRuleSummary(revokePreview.rule)} · 保留策略：{retentionPolicyLabel(revokePreviewData.rule.retentionPolicy)}</p>
+              <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                <div className="rounded-xl bg-sky-50 p-3"><strong className="block text-xl font-black text-sky-800">{revokePreviewData.currentOwnersCount}</strong><span className="text-[11px] font-bold text-slate-500">当前有效持有</span></div>
+                <div className="rounded-xl bg-emerald-50 p-3"><strong className="block text-xl font-black text-emerald-800">{revokePreviewData.stillEligibleCount}</strong><span className="text-[11px] font-bold text-slate-500">仍符合规则</span></div>
+                <div className="rounded-xl bg-rose-50 p-3"><strong className="block text-xl font-black text-rose-800">{revokePreviewData.pendingRevokeCount}</strong><span className="text-[11px] font-bold text-slate-500">待收回</span></div>
+                <div className="rounded-xl bg-amber-50 p-3"><strong className="block text-xl font-black text-amber-800">{revokePreviewData.retainedIneligibleCount}</strong><span className="text-[11px] font-bold text-slate-500">资格失效但保留</span></div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-end gap-2">
+                <label className="min-w-48 flex-1 text-xs font-black text-slate-500">搜索用户<input value={revokePreviewQuery} onChange={(event) => setRevokePreviewQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); searchRevokePreview() } }} placeholder="昵称 / UID / 用户 ID / 生日" className="mt-1 min-h-10 w-full rounded-xl border border-sky-200 px-3 text-sm font-bold text-brand-950" /></label>
+                <label className="text-xs font-black text-slate-500">筛选<select value={revokePreviewFilter} onChange={(event) => applyRevokePreviewFilter(event.target.value as BadgeRevokePreviewStatus)} className="mt-1 min-h-10 rounded-xl border border-sky-200 px-3 text-sm font-bold text-brand-950">{(['ALL', 'PENDING_REVOKE', 'STILL_ELIGIBLE', 'RETAINED_INELIGIBLE'] as BadgeRevokePreviewStatus[]).map((status) => <option key={status} value={status}>{revokePreviewStatusLabel(status)}</option>)}</select></label>
+                <button type="button" onClick={searchRevokePreview} disabled={revokePreviewLoading} className="admin-badge-list-button disabled:opacity-50">搜索</button>
+                <button type="button" onClick={refreshRevokePreview} disabled={revokePreviewLoading} className="admin-badge-list-button disabled:opacity-50">刷新</button>
+              </div>
+              <p className="mt-2 text-[11px] font-bold text-slate-400">当前显示：{revokePreviewStatusLabel(revokePreviewFilter)}；列表中的规则匹配、来源和保留策略均按预览生成时的实时数据计算。</p>
+              {revokePreviewLoading ? <p className="mt-5 text-center text-sm font-bold text-slate-500">正在重新计算…</p> : revokePreviewData.rows.length ? <div className="mt-4 max-h-[42vh] space-y-2 overflow-auto pr-1">{revokePreviewData.rows.map((row) => <div key={`${row.user.id}-${row.recordId}`} className="rounded-2xl border border-sky-100 bg-sky-50/60 p-3"><div className="flex items-start gap-3"><SafeAvatar src={row.user.avatarUrl} name={row.user.displayName} uid={row.user.uid} className="size-10 shrink-0 rounded-full" textClassName="text-xs" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><strong className="font-black text-brand-950">{row.user.displayName}</strong><span className="text-xs font-bold text-slate-500">@{row.user.username} · UID {row.user.uid}</span><span className={`rounded-full px-2 py-1 text-[10px] font-black ${row.status === 'PENDING_REVOKE' ? 'bg-rose-100 text-rose-700' : row.status === 'STILL_ELIGIBLE' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>{revokePreviewStatusLabel(row.status)}</span></div><p className="mt-1 text-xs font-bold text-slate-600">用户 ID：{row.user.id}{row.currentBirthday ? ` · 当前生日：${String(row.currentBirthday.month).padStart(2, '0')}-${String(row.currentBirthday.day).padStart(2, '0')}` : ' · 当前生日：未设置'}</p><p className="mt-1 text-xs font-black text-violet-800">持有勋章：{row.badge.name} · 规则：{BADGE_RULE_TYPE_LABELS[row.rule.ruleType] || row.rule.ruleType}{row.ruleMatches ? ' · 当前符合' : ' · 当前不符合'}</p><p className="mt-1 text-xs font-bold leading-5 text-slate-600">原因：{row.reason}</p><p className="mt-1 text-[11px] font-bold text-slate-500">获得时间：{formatDateTime(row.obtainedAt)}{row.awardedAt !== row.obtainedAt ? ` · 授予时间：${formatDateTime(row.awardedAt)}` : ''}{row.expiresAt ? ` · 有效至：${formatDateTime(row.expiresAt)}` : ''} · 保留策略：{retentionPolicyLabel(row.retentionPolicy)}</p></div></div></div>)}</div> : <p className="mt-5 rounded-xl bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">无符合当前筛选的记录</p>}
+              {revokeExecution ? <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-900"><p className="font-black">最近一次执行：预览 {revokeExecution.previewCount}，实际收回 {revokeExecution.actualRevoked}，跳过 {revokeExecution.skipped}，失败 {revokeExecution.failed}</p>{revokeExecution.skippedReasons.length ? <p className="mt-1">跳过原因：{revokeExecution.skippedReasons.map((item) => `${item.reason}（${item.count}）`).join('；')}</p> : null}{revokeExecution.failures.length ? <p className="mt-1 text-red-700">失败摘要：{revokeExecution.failures.map((item) => `${item.userId}：${item.message}`).join('；')}</p> : null}</div> : null}
+              <div className="mt-4 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setRevokePreview(null); setRevokePreviewData(null); setRevokeExecution(null) }} className="admin-badge-list-button">关闭</button><button type="button" onClick={() => void executeRevokePreview()} disabled={busy || revokePreviewLoading || !revokePreviewData.rows.some((row) => row.status === 'PENDING_REVOKE')} className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{busy ? '执行中…' : '确认执行收回'}</button></div>
+            </> : <p className="mt-5 text-center text-sm font-bold text-slate-500">正在计算当前持有与规则资格…</p>}
+          </section>
+        </div>
+      ) : null}
       {ownersBadge ? <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => setOwnersBadge(null)}><section className="badge-admin-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => setOwnersBadge(null)} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button><h2 className="text-xl font-black text-brand-950">{ownersBadge.name} · 获得记录</h2><p className="mt-1 text-xs font-bold text-slate-500">共 {owners.length} 条历史记录</p><div className="mt-4 max-h-80 space-y-2 overflow-auto">{owners.map((owner) => <div key={owner.id} className="flex items-center justify-between gap-3 rounded-xl bg-sky-50 px-3 py-2 text-sm"><span className="font-black text-brand-950">{owner.user.displayName} <small className="text-slate-500">UID {owner.user.uid}</small></span><span className="flex items-center gap-2 text-right text-[11px] font-bold text-slate-500"><span><strong className={owner.status === 'ACTIVE' ? 'text-emerald-700' : owner.status === 'EXPIRED' ? 'text-slate-600' : 'text-rose-700'}>{owner.status === 'ACTIVE' ? '有效' : owner.status === 'EXPIRED' ? '已过期' : '已收回'}</strong><br />获得：{formatDateTime(owner.awardedAt)}{owner.expiresAt ? <><br />有效至：{formatDateTime(owner.expiresAt)}</> : null}{owner.grantReason ? <><br />{owner.grantReason}</> : null}</span>{owner.status === 'ACTIVE' ? <button type="button" onClick={() => void revokeOwner(owner)} disabled={busy} className="admin-badge-list-button danger">收回</button> : null}</span></div>)}</div></section></div> : null}
       {grantBadgeTarget ? <div className="badge-detail-backdrop" role="presentation" onMouseDown={() => setGrantBadgeTarget(null)}><section className="badge-admin-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => setGrantBadgeTarget(null)} className="float-right text-2xl text-slate-500" aria-label="关闭">×</button><h2 className="text-xl font-black text-brand-950">{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '手动补发' : '发放'}「{grantBadgeTarget.name}」</h2><p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">有效期：{grantBadgeTarget.validityType === 'DAYS' && grantBadgeTarget.validityDays ? `获得后 ${grantBadgeTarget.validityDays} 天有效` : BADGE_VALIDITY_TYPE_LABELS.PERMANENT}</p>{grantBadgeTarget.availabilityStatus === 'UPCOMING' ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">该勋章限定期尚未开始；本次仅是管理员人工发放，不代表历史资格补发。</p> : null}<div className="mt-4 flex gap-2"><input value={grantQuery} onChange={(event) => setGrantQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void searchGrantUsers() } }} placeholder="昵称 / UID / 登录账号" className="admin-badge-input" /><button type="button" onClick={() => void searchGrantUsers()} className="admin-badge-list-button">搜索</button></div><div className="mt-2 space-y-1">{grantUsers.map((user) => <button type="button" key={user.id} onClick={() => void selectGrantUser(user)} className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-black ${grantUserId === user.id ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-950'}`}>{user.displayName} · UID {user.uid}</button>)}</div>{grantUserStatus ? <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 p-3 text-xs font-bold text-slate-600"><p className="font-black text-brand-950">{grantUserStatus.user.displayName} · E院ID {grantUserStatus.user.uid}</p><p className="mt-1">{grantUserStatus.ownership.owned ? '当前已拥有，可追加管理员授予来源' : '尚未获得'}</p>{grantUserStatus.badge ? <p className="mt-1 text-amber-800">{grantUserStatus.badge.validityLabel}{grantUserStatus.badge.previewExpiresAt ? `；预计失效：${formatDateTime(grantUserStatus.badge.previewExpiresAt)}` : ''}</p> : null}{grantUserStatus.rule && grantUserStatus.rule.threshold !== null && (grantUserStatus.historicalMetric !== null || grantUserStatus.currentMetric !== null) ? <p className="mt-1">{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '限定期历史进度' : '当前规则进度'}：{grantUserStatus.historicalMetric ?? grantUserStatus.currentMetric} / {grantUserStatus.rule.threshold}</p> : null}{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? <p className="mt-1 text-amber-800">{grantUserStatus.rule?.historicalSupported ? `历史依据：${grantUserStatus.rule.historicalBasis}` : '系统无法可靠证明限定期历史达标时间，请以人工核实为准。'}</p> : null}</div> : null}<textarea value={grantReason} onChange={(event) => setGrantReason(event.target.value)} placeholder={grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '限定勋章补发原因（必填）' : '发放原因（可选）'} className="admin-badge-input mt-3 min-h-20" />{grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? <label className="mt-3 flex items-start gap-2 text-xs font-bold text-slate-600"><input type="checkbox" checked={grantConfirmed} onChange={(event) => setGrantConfirmed(event.target.checked)} className="mt-0.5" />我已核实该用户在限定时间内符合条件</label> : null}<button type="button" onClick={() => void grantSelected()} disabled={busy || !grantUserId || !grantUserStatus || Boolean((grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil) && (!grantReason.trim() || !grantConfirmed))} className="mt-3 min-h-10 rounded-xl bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{busy ? '处理中…' : grantUserStatus?.ownership.owned ? '追加管理员来源' : grantBadgeTarget.availableFrom || grantBadgeTarget.availableUntil ? '确认手动补发' : '确认发放'}</button></section></div> : null}
     </div>

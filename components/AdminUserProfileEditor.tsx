@@ -10,6 +10,7 @@ import { validateLoginAccountValue, validateNicknameValue } from '@/lib/login-ac
 import type { UserLocation } from '@/lib/user-location'
 import { daysForBirthdayMonth, resetInvalidBirthdayDay } from '@/lib/birthday-profile-flow'
 import { isValidBirthdayParts } from '@/lib/zodiac'
+import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput, type GenderValue } from '@/lib/gender'
 
 export type AdminUserProfileInitial = {
   username: string
@@ -19,6 +20,8 @@ export type AdminUserProfileInitial = {
   emailVerifiedAt: string | null
   phoneVerifiedAt: string | null
   bio: string
+  gender: GenderValue | null
+  customGender: string
   avatarUrl: string
   backgroundUrl: string
   location: UserLocation | null
@@ -72,6 +75,8 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
     if (username.error) return username.error
     const nickname = validateNicknameValue(form.nickname)
     if (nickname.error) return nickname.error
+    const gender = validateGenderInput(form.gender, form.customGender)
+    if (gender.error) return gender.error
     const rawPhone = phoneValue.trim()
     if (rawPhone && !normalizePhoneNumber(rawPhone, phoneCountry)) return '手机号格式不正确'
     if ((form.birthMonth == null) !== (form.birthDay == null)) return '生日必须完整填写月份和日期'
@@ -92,6 +97,8 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
       phone: normalizedPhone?.e164 || '',
       phoneCountry: normalizedPhone?.country || phoneCountry,
       bio: form.bio,
+      gender: form.gender,
+      customGender: form.gender === 'CUSTOM' ? form.customGender : '',
       avatarUrl: form.avatarUrl,
       backgroundUrl: form.backgroundUrl,
       location: form.location,
@@ -138,6 +145,8 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
         emailVerifiedAt: typeof data?.user?.emailVerifiedAt === 'string' ? data.user.emailVerifiedAt : null,
         phoneVerifiedAt: typeof data?.user?.phoneVerifiedAt === 'string' ? data.user.phoneVerifiedAt : null,
         bio: typeof data?.user?.bio === 'string' ? data.user.bio : data?.user?.bio == null ? '' : form.bio,
+        gender: data?.user?.gender === 'MALE' || data?.user?.gender === 'FEMALE' || data?.user?.gender === 'CUSTOM' ? data.user.gender : null,
+        customGender: typeof data?.user?.customGender === 'string' ? data.user.customGender : '',
         avatarUrl: typeof data?.user?.avatarUrl === 'string' ? data.user.avatarUrl : data?.user?.avatarUrl == null ? '' : form.avatarUrl,
         backgroundUrl: typeof data?.user?.backgroundUrl === 'string' ? data.user.backgroundUrl : data?.user?.backgroundUrl == null ? '' : form.backgroundUrl,
         birthMonth: typeof data?.user?.birthMonth === 'number' ? data.user.birthMonth : null,
@@ -155,6 +164,13 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
       setPhoneValue(nextPhoneParts.value)
       setConfirmPayload(null)
       setMessage(data?.message || '用户资料已更新')
+      if (Array.isArray(data?.equippedBadges) && typeof CustomEvent === 'function' && typeof data?.user?.uid === 'number') {
+        const equippedBadges = data.equippedBadges
+        window.dispatchEvent(new CustomEvent('eason-badge-updated', {
+          detail: { uid: data.user.uid, equippedBadges, equippedBadge: equippedBadges[0] || null },
+        }))
+        window.dispatchEvent(new CustomEvent('eason-badge-collection-updated', { detail: { uid: data.user.uid } }))
+      }
       router.refresh()
     } catch (saveError) {
       const nextError = saveError instanceof Error ? saveError.message : '用户资料保存失败'
@@ -228,6 +244,45 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
               <span className="mt-1 block text-xs font-bold text-slate-400">号码发生变化后会清除原有验证状态。</span>
             </label>
           </div>
+
+          <fieldset className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+            <legend className="px-1 text-sm font-black text-slate-700">性别</legend>
+            <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="性别">
+              {([
+                ['MALE', '男'],
+                ['FEMALE', '女'],
+                ['CUSTOM', '自定义'],
+              ] as const satisfies ReadonlyArray<readonly [GenderValue, string]>).map(([value, label]) => (
+                <label key={value} className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-black text-brand-800">
+                  <input
+                    type="radio"
+                    name="admin-profile-gender"
+                    value={value}
+                    checked={form.gender === value}
+                    onChange={() => update('gender', value)}
+                    className="h-4 w-4 accent-sky-600"
+                  />
+                  {label}
+                </label>
+              ))}
+              <button type="button" aria-pressed={form.gender === null} onClick={() => update('gender', null)} className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-600">
+                不设置
+              </button>
+            </div>
+            {form.gender === 'CUSTOM' ? (
+              <label className="mt-3 block text-sm font-black text-slate-700">
+                自定义内容
+                <input
+                  value={form.customGender}
+                  onChange={(event) => update('customGender', event.target.value.replace(/[\r\n]+/gu, ' '))}
+                  maxLength={CUSTOM_GENDER_MAX_LENGTH}
+                  className="mt-2 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold outline-none focus:border-brand-400"
+                  placeholder="例如：非二元、流动、保密"
+                />
+                <span className="mt-1 block text-xs font-bold text-slate-400">限 20 个字符，不可换行或使用 HTML 标记。</span>
+              </label>
+            ) : null}
+          </fieldset>
 
           <label className="block text-sm font-black text-slate-700">
             个人简介

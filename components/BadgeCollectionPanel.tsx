@@ -292,6 +292,16 @@ export function BadgeCollectionPanel({ uid, isSelf, previewOnly = true }: Props)
   useEffect(() => { void load() }, [load])
 
   useEffect(() => {
+    const refreshCollection = (event: Event) => {
+      const detail = (event as CustomEvent<{ uid?: number }>).detail
+      if (detail?.uid !== undefined && String(detail.uid) !== String(uid)) return
+      void load()
+    }
+    window.addEventListener('eason-badge-collection-updated', refreshCollection)
+    return () => window.removeEventListener('eason-badge-collection-updated', refreshCollection)
+  }, [load, uid])
+
+  useEffect(() => {
     if (!collection) return
     const badgeId = new URLSearchParams(window.location.search).get('badge')
     if (!badgeId) return

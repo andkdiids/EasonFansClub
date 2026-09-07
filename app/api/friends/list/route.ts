@@ -345,6 +345,8 @@ const publicFriendSelect = {
   bioModerationStatus: true,
   avatarUrl: true,
   bio: true,
+  gender: true,
+  customGender: true,
   experience: true,
   isOnline: true,
   lastActiveAt: true,
@@ -362,6 +364,8 @@ function serializePublicUser(
     bioModerationStatus?: string | null
     avatarUrl: string | null
     bio: string | null
+    gender?: string | null
+    customGender?: string | null
     isOnline: boolean
     lastActiveAt: Date | null
     createdAt: Date
@@ -383,6 +387,8 @@ function serializePublicUser(
     displayName: getFriendDisplayName({ nickname, friendRemark: normalizedRemark, isFriendContext }),
     avatarUrl: publicImageUrl(friend.avatarUrl),
     bio: publicModerationText(friend.Profile?.bio || friend.bio, friend.Profile?.bioModerationStatus || friend.bioModerationStatus),
+    gender: friend.gender || null,
+    customGender: friend.customGender || null,
     isOnline: friend.isOnline,
     lastActiveAt: friend.lastActiveAt,
     createdAt: friend.createdAt,

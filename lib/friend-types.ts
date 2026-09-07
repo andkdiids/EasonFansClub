@@ -23,6 +23,8 @@ export type FriendDockUser = {
   friendRemark?: string | null
   avatarUrl: string | null
   bio: string | null
+  gender?: string | null
+  customGender?: string | null
   isOnline: boolean
   lastActiveAt: string | null
   createdAt: string

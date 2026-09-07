@@ -22,6 +22,7 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
       emailVerifiedAt: true, phoneVerifiedAt: true, verificationStatus: true,
       level: true, exp: true, points: true, createdAt: true, lastLoginAt: true, mustSetupSecurity: true,
       avatarUrl: true, backgroundUrl: true, bio: true,
+      gender: true, customGender: true,
       birthMonth: true, birthDay: true, birthdaySetAt: true, birthdateSelfEditCount: true, birthdayPublic: true,
       showBadgeActivity: true, showBadgeProgressNotifications: true,
       Profile: { select: {
@@ -68,6 +69,8 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
         emailVerifiedAt: user.emailVerifiedAt?.toISOString() || null,
         phoneVerifiedAt: user.phoneVerifiedAt?.toISOString() || null,
         bio: user.Profile?.bio ?? user.bio ?? '',
+        gender: user.gender,
+        customGender: user.customGender ?? '',
         avatarUrl: publicImageUrl(user.Profile?.avatarUrl || user.avatarUrl) || '',
         backgroundUrl: publicImageUrl(user.Profile?.backgroundUrl || user.backgroundUrl) || '',
         location: locationFromProfile(user.Profile),

@@ -11,6 +11,7 @@ import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from 
 import type { UserLocation } from '@/lib/user-location'
 import { BIRTHDAY_ALREADY_SET, BIRTHDATE_SELF_EDIT_EXHAUSTED, isBirthdayConfigured } from '@/lib/birthday-immutability'
 import { decideBirthdaySave, daysForBirthdayMonth, resetInvalidBirthdayDay, type BirthdayDraft } from '@/lib/birthday-profile-flow'
+import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput, type GenderValue } from '@/lib/gender'
 
 type InitialProfile = {
   nickname: string
@@ -19,6 +20,8 @@ type InitialProfile = {
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
   bio: string
+  gender: GenderValue | null
+  customGender: string
   bioViolation: boolean
   location: UserLocation | null
   email: string
@@ -653,6 +656,8 @@ export function ProfileSettingsForm({
           phone: normalizedPhone?.e164 || '',
           phoneCountry: normalizedPhone?.country || phoneCountry,
           wallVisibility: form.wallVisibility,
+          gender: form.gender,
+          customGender: form.gender === 'CUSTOM' ? form.customGender : '',
           // 生日公开开关：始终提交，服务端直接写回（不影响生日纪念通知与卡片本身）。
           birthdayPublic: Boolean(form.birthdayPublic),
           showBadgeActivity: Boolean(form.showBadgeActivity),
@@ -688,6 +693,8 @@ export function ProfileSettingsForm({
           wallVisibility: data.profile.wallVisibility || current.wallVisibility,
           showBadgeActivity: typeof data.profile.showBadgeActivity === 'boolean' ? data.profile.showBadgeActivity : current.showBadgeActivity,
           showBadgeProgressNotifications: typeof data.profile.showBadgeProgressNotifications === 'boolean' ? data.profile.showBadgeProgressNotifications : current.showBadgeProgressNotifications,
+          gender: data.profile.gender === 'MALE' || data.profile.gender === 'FEMALE' || data.profile.gender === 'CUSTOM' ? data.profile.gender : null,
+          customGender: typeof data.profile.customGender === 'string' ? data.profile.customGender : '',
           location: data.profile.location || null,
           // Keep an incomplete draft visible after saving other fields, but use
           // the server response as the persisted lock source.
@@ -703,6 +710,16 @@ export function ProfileSettingsForm({
       }
       setBirthdayConfirmation(null)
       if (typeof CustomEvent === 'function') {
+        if (Array.isArray(data?.equippedBadges)) {
+          const uid = typeof data?.profile?.uid === 'number' ? data.profile.uid : undefined
+          const badgeDetail = {
+            ...(uid === undefined ? {} : { uid }),
+            equippedBadges: data.equippedBadges,
+            equippedBadge: data.equippedBadges[0] || null,
+          }
+          window.dispatchEvent(new CustomEvent('eason-badge-updated', { detail: badgeDetail }))
+          if (uid !== undefined) window.dispatchEvent(new CustomEvent('eason-badge-collection-updated', { detail: { uid } }))
+        }
         window.dispatchEvent(new CustomEvent('profile-avatar-updated', {
           detail: { avatarUrl: data?.profile?.avatarUrl || form.avatarUrl },
         }))
@@ -728,6 +745,11 @@ export function ProfileSettingsForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const genderValidation = validateGenderInput(form.gender, form.customGender)
+    if (genderValidation.error) {
+      setError(genderValidation.error)
+      return
+    }
     const nicknameValidation = form.nickname !== initialProfile.nickname
       ? validateNicknameValue(form.nickname)
       : null
@@ -959,6 +981,45 @@ export function ProfileSettingsForm({
               placeholder="写一点关于你的 Eason 故事"
             />
           </label>
+
+          <fieldset className="rounded-2xl border border-sky-100 bg-white/78 p-4">
+            <legend className="px-1 text-sm font-black text-slate-700">性别</legend>
+            <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label="性别">
+              {([
+                ['MALE', '男'],
+                ['FEMALE', '女'],
+                ['CUSTOM', '自定义'],
+              ] as const satisfies ReadonlyArray<readonly [GenderValue, string]>).map(([value, label]) => (
+                <label key={value} className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-sky-100 bg-sky-50/55 px-3 py-2 text-sm font-black text-brand-800">
+                  <input
+                    type="radio"
+                    name="profile-gender"
+                    value={value}
+                    checked={form.gender === value}
+                    onChange={() => update('gender', value)}
+                    className="h-4 w-4 accent-sky-600"
+                  />
+                  {label}
+                </label>
+              ))}
+              <button type="button" aria-pressed={form.gender === null} onClick={() => update('gender', null)} className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-600">
+                不设置
+              </button>
+            </div>
+            {form.gender === 'CUSTOM' ? (
+              <label className="mt-3 block">
+                <span className="text-xs font-black text-slate-500">自定义内容</span>
+                <input
+                  value={form.customGender}
+                  onChange={(event) => update('customGender', event.target.value.replace(/[\r\n]+/gu, ' '))}
+                  maxLength={CUSTOM_GENDER_MAX_LENGTH}
+                  className="mt-2 w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-bold outline-none transition focus:border-brand-700"
+                  placeholder="例如：非二元、流动、保密"
+                />
+                <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">限 20 个字符，不可换行或使用 HTML 标记。</span>
+              </label>
+            ) : null}
+          </fieldset>
 
           <label className="block">
             <span className="text-sm font-black text-slate-700">地区</span>

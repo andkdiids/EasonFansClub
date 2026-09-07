@@ -276,22 +276,59 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
  */
 export async function reconcileBirthdayRelatedBadges(userId: string, now = new Date()) {
   const ruleTypes: readonly SupportedBadgeRuleType[] = ['BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY']
-  const summary = await evaluateUserAutoBadges(userId, ruleTypes, now, `birthday-reconcile:${now.toISOString()}`)
-  try {
-    const { ensureBirthdayBadge } = await import('@/lib/birthday')
-    await ensureBirthdayBadge(userId, getShanghaiDateKey(now))
-  } catch (error) {
-    console.error('[badge-rule.birthday.legacy]', { userId, error })
+  // The birthday mutation commits before this service is called. Read by id
+  // here (and again inside each evaluator) so an old profile snapshot can
+  // never drive the reconciliation.
+  const latestBirthday = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, birthMonth: true, birthDay: true },
+  })
+  const summary = emptySummary(userId)
+  if (!latestBirthday) {
+    summary.failed = 1
+    summary.failures.push('user:生日同步目标不存在')
+    return summary
   }
+
+  // Retention runs first so old ineligible sources are removed before the
+  // grant pass can re-activate a previously revoked record for the new
+  // birthday/zodiac period.
   try {
     const { evaluateBadgeRetentionForUser } = await import('@/lib/badge-retention')
-    await evaluateBadgeRetentionForUser(userId, {
+    const retention = await evaluateBadgeRetentionForUser(userId, {
       ruleTypes,
       now,
       reason: '生日变更后不再满足生日或星座规则',
     })
+    summary.failed += retention.failed
+    summary.failures.push(...retention.failures)
   } catch (error) {
+    summary.failed += 1
+    summary.failures.push(`retention:${error instanceof Error ? error.message : '生日勋章回收失败'}`)
     console.error('[badge-rule.birthday.retention]', { userId, error })
+  }
+
+  try {
+    const grantSummary = await evaluateUserAutoBadges(userId, ruleTypes, now, `birthday-reconcile:${now.toISOString()}`)
+    summary.evaluated += grantSummary.evaluated
+    summary.eligible += grantSummary.eligible
+    summary.granted += grantSummary.granted
+    summary.alreadyOwned += grantSummary.alreadyOwned
+    summary.failed += grantSummary.failed
+    summary.failures.push(...grantSummary.failures)
+  } catch (error) {
+    summary.failed += 1
+    summary.failures.push(`grant:${error instanceof Error ? error.message : '生日勋章发放失败'}`)
+    console.error('[badge-rule.birthday.grant]', { userId, error })
+  }
+
+  try {
+    const { ensureBirthdayBadge } = await import('@/lib/birthday')
+    await ensureBirthdayBadge(userId, getShanghaiDateKey(now))
+  } catch (error) {
+    summary.failed += 1
+    summary.failures.push(`legacy:${error instanceof Error ? error.message : '生日纪念勋章发放失败'}`)
+    console.error('[badge-rule.birthday.legacy]', { userId, error })
   }
   return summary
 }

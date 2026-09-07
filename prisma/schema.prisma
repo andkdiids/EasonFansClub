@@ -4119,6 +4119,8 @@ model User {
   phone                                                  String?
   passwordHash                                           String
   nickname                                               String
+  gender                                                 Gender?
+  customGender                                           String?                        @db.VarChar(20)
   avatarUrl                                              String?
   bio                                                    String?
   usernameModerationStatus                               ContentModerationStatus        @default(NORMAL)
@@ -5185,6 +5187,12 @@ enum ClinicContentStatus {
   HIDDEN
   DELETED
   REMOVED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  CUSTOM
 }
 
 enum ProfileWallVisibility {

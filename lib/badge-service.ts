@@ -1046,14 +1046,16 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
 
   let regrantRecordId: string | null = null
   if (grantKey) {
-    const sameGrant = await tx.userBadge.findUnique({ where: { grantKey }, select: { id: true } })
+    const sameGrant = await tx.userBadge.findUnique({ where: { grantKey }, select: { id: true, status: true, expiresAt: true } })
     if (sameGrant) {
       const sameSource = await tx.userBadgeSource.findUnique({ where: { sourceKey }, select: { isActive: true } })
       // A retained automatic source may be revoked when eligibility is lost,
       // then become eligible again within the same event/period key. Reuse the
       // durable record and reactivate its source instead of being stopped by
       // the idempotency key forever.
-      if (!sameSource || sameSource.isActive) return operationResult(input, badge.name, sameGrant.id)
+      const sameGrantIsActive = sameGrant.status === 'ACTIVE'
+        && (!sameGrant.expiresAt || sameGrant.expiresAt > now)
+      if (sameGrantIsActive && (!sameSource || sameSource.isActive)) return operationResult(input, badge.name, sameGrant.id)
       regrantRecordId = sameGrant.id
     }
   }

@@ -11,6 +11,7 @@ import { profileImageUrl } from '@/lib/images'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { getFriendDisplayName } from '@/lib/friend-display-name'
+import { getGenderDisplay } from '@/lib/gender'
 
 const FRIEND_PROFILE_HISTORY_KEY = '__easonFriendProfileCard'
 const FRIEND_REQUEST_REASON_OPEN_KEY = '__easonFriendRequestReasonDialogOpen'
@@ -108,6 +109,7 @@ export function FriendProfileCard({
   const name = getFriendDisplayName({ nickname: friend.nickname, friendRemark: friend.friendRemark, isFriendContext: status === 'FRIEND' })
   const avatar = profileImageUrl(friend.profile?.avatarUrl || friend.avatarUrl)
   const bio = friend.profile?.bio || friend.bio || '这个成员还没有填写个人简介。'
+  const genderDisplay = getGenderDisplay(friend)
   const statusLabel = status === 'SELF'
     ? '本人'
     : status === 'FRIEND'
@@ -148,6 +150,7 @@ export function FriendProfileCard({
           <span>UID {formatUid(friend.uid)}</span>
           <span>{friend.levelName || '初入E院'}</span>
         </p>
+        {genderDisplay ? <p className="friend-profile-card-meta"><span>性别：{genderDisplay}</span></p> : null}
         {loading ? <p className="friend-profile-card-state" role="status" aria-live="polite">加载用户资料…</p> : error ? <>
           <p className="friend-profile-card-state is-error" role="alert">{error}</p>
           {onRetry ? <button type="button" className="friend-profile-card-retry" onClick={onRetry}>重试</button> : null}

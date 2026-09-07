@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import { Gender, type Prisma } from '@prisma/client'
 import { createMySqlAdvisoryLockName, withMySqlAdvisoryLocks } from '@/lib/mysql-advisory-lock'
 import { buildAdminUserContactUpdate } from '@/lib/admin-user-contact'
 import {
@@ -25,6 +25,8 @@ export type AdminUserProfilePatch = {
   backgroundUrl?: string | null
   birthday?: BirthdayParts | null
   birthdayPublic?: boolean
+  gender?: Gender | null
+  customGender?: string | null
   showBadgeActivity?: boolean
   showBadgeProgressNotifications?: boolean
   location?: UserLocation | null
@@ -52,6 +54,8 @@ const adminUserProfileSelect = {
   birthdaySetAt: true,
   birthdateSelfEditCount: true,
   birthdayPublic: true,
+  gender: true,
+  customGender: true,
   showBadgeActivity: true,
   showBadgeProgressNotifications: true,
   Profile: {
@@ -229,6 +233,10 @@ export async function updateAdminUserProfile(
     if (hasOwn(options.patch, 'avatarUrl')) userData.avatarUrl = options.patch.avatarUrl
     if (hasOwn(options.patch, 'backgroundUrl')) userData.backgroundUrl = options.patch.backgroundUrl
     if (options.patch.birthdayPublic !== undefined) userData.birthdayPublic = options.patch.birthdayPublic
+    if (hasOwn(options.patch, 'gender')) {
+      userData.gender = options.patch.gender
+      userData.customGender = options.patch.gender === Gender.CUSTOM ? options.patch.customGender || null : null
+    }
     if (options.patch.showBadgeActivity !== undefined) userData.showBadgeActivity = options.patch.showBadgeActivity
     if (options.patch.showBadgeProgressNotifications !== undefined) userData.showBadgeProgressNotifications = options.patch.showBadgeProgressNotifications
 
@@ -307,6 +315,8 @@ export async function updateAdminUserProfile(
     recordChange('backgroundUrl', target.backgroundUrl, updated.backgroundUrl)
     recordChange('birthday', birthdayLabel(oldBirthday), birthdayLabel(birthdayFromRecord(updated)))
     recordChange('birthdayPublic', target.birthdayPublic, updated.birthdayPublic)
+    recordChange('gender', target.gender, updated.gender)
+    recordChange('customGender', target.customGender, updated.customGender)
     recordChange('showBadgeActivity', target.showBadgeActivity, updated.showBadgeActivity)
     recordChange('showBadgeProgressNotifications', target.showBadgeProgressNotifications, updated.showBadgeProgressNotifications)
     if (!sameLocation(target.Profile, options.patch.location)) {
