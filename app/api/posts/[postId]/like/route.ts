@@ -9,6 +9,7 @@ import { emitRealtime } from '@/lib/realtime'
 import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
+import { grantGrowthReward } from '@/lib/growth-tasks/service'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -104,6 +105,13 @@ export async function POST(request: Request, { params }: Params) {
     })
 
     if (post.authorId !== user.id) {
+      await grantGrowthReward(tx, {
+        userId: post.authorId,
+        taskCode: 'POST_LIKED',
+        sourceEventId: `post:${postId}:liker:${user.id}`,
+        reason: '帖子获得有效点赞',
+        postId,
+      })
       notificationInput = {
   recipientId: post.authorId,
   actorId: user.id,

@@ -7,6 +7,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 export const EMPTY_LYRIC_MESSAGE = '今日处方暂未开具，请等待管理员补充歌词库'
 export const PRESCRIPTION_HISTORY_PAGE_SIZE = 12
@@ -244,6 +245,13 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
         createdAt: now,
       },
       include: dailyDrawInclude,
+    })
+    await completeTask(tx, {
+      userId,
+      taskCode: 'DAILY_PRESCRIPTION',
+      periodKey: dateKey,
+      sourceEventId: createdDraw.id,
+      now,
     })
     const feeAward = await awardRegistrationFee(tx, {
       userId,

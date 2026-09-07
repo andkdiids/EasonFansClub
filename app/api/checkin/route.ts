@@ -20,6 +20,7 @@ import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } f
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { updateUserIpRegion } from '@/lib/ip-region'
 import { ensureRuntimeObservability } from '@/lib/runtime-observability'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 function getCheckInRequestId(request: Request) {
   const provided = request.headers.get('x-request-id')?.trim()
@@ -399,6 +400,13 @@ export async function POST(request: Request) {
         message: message || null,
       },
       select: { id: true, checkDate: true, points: true, exp: true, mood: true, moodType: true, moodEmoji: true, moodText: true, message: true, streakDay: true, createdAt: true, type: true, isMakeUp: true },
+    })
+    await completeTask(tx, {
+      userId: user.id,
+      taskCode: 'DAILY_CHECKIN',
+      periodKey: todayKey,
+      sourceEventId: createdCheckIn.id,
+      now: checkedAt,
     })
     const ordinaryFeeAward = await awardRegistrationFee(tx, {
       userId: user.id,

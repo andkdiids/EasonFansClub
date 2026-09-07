@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto'
 import { Prisma, type GuessSongMode } from '@prisma/client'
+import { getShanghaiDateKey } from '@/lib/checkin'
 import {
   GUESS_SONG_ANSWER_SECONDS,
   GUESS_SONG_INITIAL_LIVES,
@@ -33,6 +34,7 @@ import {
 } from '@/lib/guess-song-media-ticket'
 import { prisma } from '@/lib/prisma'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { completeTask } from '@/lib/growth-tasks/service'
 import { createUUID } from '@/lib/utils/uuid'
 
 type OptionSnapshot = { key: string; label: string }
@@ -1065,6 +1067,16 @@ export async function answerGuessSongQuestion(input: {
         ...(completed ? { status: 'COMPLETED', completedAt: now, activeKey: null } : {}),
       },
     })
+
+    if (completed) {
+      await completeTask(tx, {
+        userId: question.GuessSongSession.userId,
+        taskCode: 'DAILY_GAME',
+        periodKey: getShanghaiDateKey(now),
+        sourceEventId: input.sessionId,
+        now,
+      })
+    }
 
     if (!completed && infiniteSession) {
       const quizConfig = await tx.guessSongQuizConfig.findUnique({ where: { id: GUESS_SONG_QUIZ_CONFIG_ID } })

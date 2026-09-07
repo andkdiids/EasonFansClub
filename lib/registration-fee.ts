@@ -36,6 +36,8 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   PHARMACY_DRAW_COST: '天使的礼物·执药消耗',
   PHARMACY_PRIZE_REWARD: '天使的礼物·药房找零',
   PHARMACY_DUPLICATE_RECYCLE: '天使的礼物·余药回收',
+  GROWTH_REWARD: '成长奖励',
+  GROWTH_REWARD_REVERSAL: '成长奖励追回',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {
@@ -64,6 +66,9 @@ type RegistrationFeeAwardInput = {
   dailyDrawId?: string
   pharmacyDrawId?: string
   pharmacyRecycleLogId?: string
+  growthTaskCode?: string
+  sourceEventId?: string
+  reversalOfBusinessKey?: string
 }
 
 export async function awardRegistrationFee(
@@ -128,6 +133,9 @@ export async function awardRegistrationFee(
       dailyDrawId: input.dailyDrawId,
       pharmacyDrawId: input.pharmacyDrawId,
       pharmacyRecycleLogId: input.pharmacyRecycleLogId,
+      growthTaskCode: input.growthTaskCode,
+      sourceEventId: input.sourceEventId,
+      reversalOfBusinessKey: input.reversalOfBusinessKey,
       createdAt: now,
     },
   })
@@ -147,6 +155,10 @@ type RegistrationFeeReversalInput = {
   now?: Date
   postId?: string
   replyId?: string
+  action?: PointActionType
+  growthTaskCode?: string
+  sourceEventId?: string
+  reversalOfBusinessKey?: string
 }
 
 /** Write a negative ledger entry for a previously awarded reward. */
@@ -176,7 +188,7 @@ export async function reverseRegistrationFee(
   await tx.pointLog.create({
     data: {
       userId: input.userId,
-      action: 'COMMENT_REVOKE',
+      ...(input.action ? { action: input.action } : { action: 'COMMENT_REVOKE' }),
       points: -input.amount,
       before: user.points,
       after: updatedUser.points,
@@ -185,6 +197,9 @@ export async function reverseRegistrationFee(
       dateKey,
       postId: input.postId,
       replyId: input.replyId,
+      growthTaskCode: input.growthTaskCode,
+      sourceEventId: input.sourceEventId,
+      reversalOfBusinessKey: input.reversalOfBusinessKey,
       createdAt: now,
     },
   })

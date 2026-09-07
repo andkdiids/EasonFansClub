@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { ActivityRegistrationQr } from '@/components/activities/ActivityRegistrationQr'
+import { getOrCreateActivityDeviceId } from '@/lib/activity-device'
+import { createUUID } from '@/lib/utils/uuid'
 import { ACTIVITY_REGISTRATION_CANCEL_CLOSED, activityRegistrationCancelClosedMessage, getActivityRegistrationState, isActivityRegistrationCancellationOpen, type ActivityRegistrationQuestionView, type ActivityRegistrationState, type ActivityRegistrationView } from '@/lib/activity-registration-shared'
 import type { ActivityView } from '@/lib/activity'
 
@@ -125,10 +127,15 @@ export function ActivityRegistrationButton({ activity, isAuthenticated, initialR
     setSubmitting(true)
     setMessage('')
     try {
+      const deviceId = getOrCreateActivityDeviceId()
       const response = await fetch(`/api/activities/${encodeURIComponent(activity.id)}/register`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': createUUID(),
+          ...(deviceId ? { 'X-ECFC-Activity-Device-Id': deviceId } : {}),
+        },
         body: JSON.stringify({ confirm: true, answers }),
       })
       const data = await response.json().catch(() => null) as { message?: string; code?: string; registration?: ActivityRegistrationView; registrationCount?: number; registrationState?: ActivityRegistrationState; canRegister?: boolean } | null

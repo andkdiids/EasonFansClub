@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { PUBLIC_STUDIO_PROJECT_WHERE } from './public'
+import { grantGrowthReward } from '@/lib/growth-tasks/service'
 
 export type StudioProjectInteractionKind = 'like' | 'favorite'
 
@@ -44,7 +45,7 @@ export async function setStudioProjectInteraction(input: Readonly<{
     await tx.$queryRaw`SELECT \`id\` FROM \`StudioProject\` WHERE \`id\` = ${input.projectId} FOR UPDATE`
     const project = await tx.studioProject.findFirst({
       where: { ...PUBLIC_STUDIO_PROJECT_WHERE, id: input.projectId },
-      select: { id: true },
+      select: { id: true, userId: true, toolSlug: true },
     })
     if (!project) return null
 
@@ -54,6 +55,14 @@ export async function setStudioProjectInteraction(input: Readonly<{
         if (!existing) {
           await tx.studioProjectLike.create({ data: { projectId: input.projectId, userId: input.userId } })
           await tx.studioProject.update({ where: { id: input.projectId }, data: { likeCount: { increment: 1 } }, select: { id: true } })
+          if (project.toolSlug === 'beads' && project.userId !== input.userId) {
+            await grantGrowthReward(tx, {
+              userId: project.userId,
+              taskCode: 'BEAD_LIKED',
+              sourceEventId: `bead:${input.projectId}:like:${input.userId}`,
+              reason: '贝多芬与我作品获得有效喜欢',
+            })
+          }
         }
       } else {
         const deleted = await tx.studioProjectLike.deleteMany({ where: { projectId: input.projectId, userId: input.userId } })
@@ -66,6 +75,14 @@ export async function setStudioProjectInteraction(input: Readonly<{
       if (!existing) {
         await tx.studioProjectFavorite.create({ data: { projectId: input.projectId, userId: input.userId } })
         await tx.studioProject.update({ where: { id: input.projectId }, data: { favoriteCount: { increment: 1 } }, select: { id: true } })
+        if (project.toolSlug === 'beads' && project.userId !== input.userId) {
+          await grantGrowthReward(tx, {
+            userId: project.userId,
+            taskCode: 'BEAD_LIKED',
+            sourceEventId: `bead:${input.projectId}:favorite:${input.userId}`,
+            reason: '贝多芬与我作品获得有效收藏',
+          })
+        }
       }
     } else {
       const deleted = await tx.studioProjectFavorite.deleteMany({ where: { projectId: input.projectId, userId: input.userId } })

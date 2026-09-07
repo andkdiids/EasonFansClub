@@ -9,6 +9,7 @@ import { normalizeSalonConcertSelection, parseSalonCategory, SALON_CATEGORY_CONF
 import { prisma } from '@/lib/prisma'
 import { emitRealtime, emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
+import { completeTask, grantGrowthReward } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -203,7 +204,20 @@ export async function PATCH(request: Request) {
   }
   if (!Object.keys(data).length) return NextResponse.json({ ok: false, message: '没有需要更新的内容' }, { status: 400 })
 
-  const updated = await prisma.salonPost.update({ where: { id: postId }, data, select: { id: true, status: true } })
+  const updated = await prisma.$transaction(async (tx) => {
+    const changed = await tx.salonPost.updateMany({ where: { id: postId, ...(reviewStatus ? { status: 'PENDING' } : {}) }, data })
+    if (!changed.count) throw new Error('SALON_POST_ALREADY_REVIEWED')
+    if (reviewStatus === 'APPROVED') {
+      await grantGrowthReward(tx, {
+        userId: current.userId,
+        taskCode: 'SALON_APPROVED',
+        sourceEventId: current.id,
+        reason: '沙龙作品通过审核',
+      })
+      await completeTask(tx, { userId: current.userId, taskCode: 'FIRST_SALON', periodKey: 'ALL', sourceEventId: current.id })
+    }
+    return tx.salonPost.findUniqueOrThrow({ where: { id: postId }, select: { id: true, status: true } })
+  })
   if (reviewStatus && reviewedAt) {
     const adminRecipientIds = await safeNotificationWrite(
       () => completeSalonReviewNotifications({

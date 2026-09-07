@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ContentImageUploader, type ContentImageUploaderHandle } from '@/components/ContentImageUploader'
 import { RichTextEditor, type RichTextEditorHandle } from '@/components/posts/RichTextEditor'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
+import { getPostCreateInitialBoardId } from '@/lib/boards'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
 
@@ -15,7 +16,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const router = useRouter()
   const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const editorRef = useRef<RichTextEditorHandle>(null)
-  const [boardId, setBoardId] = useState(boards.find((board) => board.slug === initialBoardSlug)?.id || boards[0]?.id || '')
+  const [boardId, setBoardId] = useState(() => getPostCreateInitialBoardId(boards, initialBoardSlug))
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [richContent, setRichContent] = useState<RichTextContent | null>(null)

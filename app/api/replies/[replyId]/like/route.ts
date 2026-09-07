@@ -8,6 +8,7 @@ import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like
 import { logNotificationError } from '@/lib/notification-errors'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { publicPostWhere } from '@/lib/post-moderation'
+import { grantGrowthReward } from '@/lib/growth-tasks/service'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
 
@@ -89,6 +90,15 @@ export async function POST(request: Request, context: RouteContext) {
       await tx.replyLike.delete({ where: { id: existing.id } })
     } else {
       await tx.replyLike.create({ data: { replyId, userId: guard.user.id } })
+      if (reply.authorId !== guard.user.id) {
+        await grantGrowthReward(tx, {
+          userId: reply.authorId,
+          taskCode: 'COMMENT_LIKED',
+          sourceEventId: `reply:${replyId}:liker:${guard.user.id}`,
+          reason: '回复获得有效点赞',
+          replyId,
+        })
+      }
     }
 
     const likeCount = await tx.replyLike.count({ where: { replyId } })

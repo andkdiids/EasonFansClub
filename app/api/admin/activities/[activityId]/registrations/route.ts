@@ -72,6 +72,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
         checkedInAt: true,
         checkInSource: true,
         paidRegistrationFee: true,
+        registrationIpHash: true,
+        registrationUserAgent: true,
+        registrationDeviceId: true,
+        registrationRequestId: true,
         LinkedMaterialRedemption: {
           select: { id: true, status: true, redeemCode: true, redeemedAt: true, material: { select: { title: true } } },
         },
@@ -99,7 +103,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
       reward: activity.ActivityReward[0]?.Badge || null,
       activityCancelled: activity.status === 'CANCELLED',
     },
-    registrations: registrations.map((registration) => ({
+    registrations: registrations.map(({ registrationIpHash, registrationUserAgent, registrationDeviceId, registrationRequestId, ...registration }) => ({
       ...registration,
       displayStatus: registration.status === 'CANCELLED' ? 'CANCELLED' : registration.verifiedAt ? 'VERIFIED' : 'ACTIVE',
       registeredAt: registration.registeredAt.toISOString(),
@@ -108,6 +112,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
       checkedInAt: registration.checkedInAt?.toISOString() || null,
       paidRegistrationFee: registration.paidRegistrationFee,
       checkInSource: registration.checkInSource,
+      auditData: {
+        hasIpHash: Boolean(registrationIpHash),
+        hasDeviceId: Boolean(registrationDeviceId),
+        hasUserAgent: Boolean(registrationUserAgent),
+        hasRequestId: Boolean(registrationRequestId),
+        legacyWithoutAuditData: !registrationIpHash && !registrationUserAgent && !registrationDeviceId && !registrationRequestId,
+      },
       linkedMaterialRedemption: registration.LinkedMaterialRedemption ? {
         id: registration.LinkedMaterialRedemption.id,
         title: registration.LinkedMaterialRedemption.material.title,

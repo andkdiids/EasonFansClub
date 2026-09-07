@@ -2,6 +2,7 @@ import { PersonalRankingType, Prisma, RatingTargetType } from '@prisma/client'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { completeTask } from '@/lib/growth-tasks/service'
 import { ratingLanguageLabel, type RatingReviewSort, type RatingTarget } from '@/lib/rating-types'
 import { publicRatingReviewVisibilityWhere, ratingPublicUserSelect, resolveRatingCoverSources } from '@/lib/rating-service'
 
@@ -232,13 +233,22 @@ export async function addPersonalRankingItem(userId: string, type: PersonalRanki
           select: { id: true },
         })
         if (existing) throw new PersonalRankingError('DUPLICATE', type === 'SONG' ? '这首歌曲已经加入榜单' : '这张专辑已经加入榜单', 409)
-        await tx.personalRankingItem.create({
+        const createdItem = await tx.personalRankingItem.create({
           data: {
             rankingId: ranking.id,
             position: count + 1,
             ...(type === 'SONG' ? { songId: targetId, albumId: null } : { albumId: targetId, songId: null }),
           },
+          select: { id: true },
         })
+        if (count + 1 >= PERSONAL_RANKING_LIMITS[type]) {
+          await completeTask(tx, {
+            userId,
+            taskCode: type === 'SONG' ? 'COMPLETE_TOP27' : 'COMPLETE_TOP10_ALBUM',
+            periodKey: 'ALL',
+            sourceEventId: createdItem.id,
+          })
+        }
         await tx.personalRanking.update({ where: { id: ranking.id }, data: { revision: { increment: 1 } } })
       })
       break

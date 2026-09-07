@@ -9,6 +9,7 @@ import { parseStudioThumbnail } from '@/lib/studio/thumbnail'
 import { uploadSiteImage } from '@/lib/site-media-storage'
 import { normalizeBeadProjectData } from '@/lib/studio/beads/compat'
 import { CURRENT_BEAD_PROJECT_VERSION } from '@/lib/studio/beads/types'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,6 +79,8 @@ function projectMetadata(data: Prisma.InputJsonValue | Prisma.JsonValue | null) 
   return { width, height, totalBeads: cells.filter((cell) => typeof cell === 'number' && cell >= 0).length, colorCount: usedColors.size }
 }
 
+type StudioProjectWriter = Pick<typeof prisma, 'studioProject'>
+
 function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; likeCount: number; favoriteCount: number; viewCount: number; downloadCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }, includeData = false) {
   return {
     id: project.id,
@@ -141,20 +144,27 @@ export async function POST(request: Request) {
     // Core work data is persisted WITHOUT the preview image so a preview/upload
     // failure can never lose the saved work. The preview is attached only after
     // it is successfully generated and uploaded.
+    const createProject = (client: StudioProjectWriter) => client.studioProject.create({
+      data: {
+        ...(requestedId ? { id: requestedId } : {}),
+        userId: guard.user.id,
+        toolSlug,
+        title,
+        description,
+        version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1,
+        data,
+        lastOpenedAt: new Date(),
+      },
+    })
     const project = existing
       ? await prisma.studioProject.update({ where: { id: existing.id }, data: { toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, lastOpenedAt: new Date() } })
-      : await prisma.studioProject.create({
-          data: {
-            ...(requestedId ? { id: requestedId } : {}),
-            userId: guard.user.id,
-            toolSlug,
-            title,
-            description,
-            version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1,
-            data,
-            lastOpenedAt: new Date(),
-          },
-        })
+      : toolSlug !== 'beads' || typeof prisma.$transaction !== 'function'
+        ? await createProject(prisma)
+        : await prisma.$transaction(async (tx) => {
+            const created = await createProject(tx)
+            await completeTask(tx, { userId: guard.user.id, taskCode: 'FIRST_BEAD_PROJECT', periodKey: 'ALL', sourceEventId: created.id })
+            return created
+          })
     const uploadedThumbnail = await uploadStudioThumbnail(thumbnailUrl, guard.user.id, project.id, existing?.thumbnailUrl || null)
     const persistedProject = uploadedThumbnail ? await prisma.studioProject.update({ where: { id: project.id }, data: { thumbnailUrl: uploadedThumbnail } }) : project
     return NextResponse.json(

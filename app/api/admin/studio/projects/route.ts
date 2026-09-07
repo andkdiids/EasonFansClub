@@ -7,6 +7,7 @@ import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { buildStudioReviewNotification, STUDIO_REVIEW_NOTIFICATION_TYPE } from '@/lib/studio/review-notifications'
 import { extractStudioReviewPattern, getStudioReviewMetadata } from '@/lib/studio/review-data'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
+import { grantGrowthReward } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,6 +60,14 @@ export async function PATCH(request: Request) {
         : { visibility: 'PRIVATE', reviewStatus: reviewStatus as 'PENDING' | 'REJECTED' },
     })
     if (!changed.count) throw new Error('STUDIO_PROJECT_ALREADY_REVIEWED')
+    if (reviewStatus === 'APPROVED') {
+      await grantGrowthReward(tx, {
+        userId: project.userId,
+        taskCode: 'BEAD_PUBLISHED',
+        sourceEventId: project.id,
+        reason: '贝多芬与我作品通过审核',
+      })
+    }
     return tx.studioProject.findUnique({ where: { id: project.id }, select: { id: true, userId: true, title: true, visibility: true, reviewStatus: true } })
   }, { timeout: 15_000, maxWait: 5_000 })
   if (!updated) return NextResponse.json({ ok: false, message: '项目不存在' }, { status: 404 })

@@ -41,10 +41,16 @@ import {
 import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
+import { GrowthPanel } from '@/components/GrowthPanel'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
 type FriendListViewMode = 'alphabetical' | 'groups'
 type FriendDockTab = 'chat' | 'contacts'
+type GrowthDockView = 'today' | 'new-life'
+type GrowthOverviewSignal = {
+  today: { complete: boolean }
+  newLife: { completedCount: number; total: number; items: Array<{ completed?: boolean; claimed?: boolean }> }
+}
 type Message = {
   id: string
   content: string
@@ -152,6 +158,8 @@ export function FriendDock({
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set())
   const [friendListViewMode, setFriendListViewMode] = useState<FriendListViewMode>('alphabetical')
   const [activeTab, setActiveTab] = useState<FriendDockTab>('chat')
+  const [growthView, setGrowthView] = useState<GrowthDockView | null>(null)
+  const [growthSignals, setGrowthSignals] = useState<GrowthOverviewSignal | null>(null)
   const [activeAlphabetLetter, setActiveAlphabetLetter] = useState<FriendDirectoryLetter | null>(null)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -714,6 +722,7 @@ export function FriendDock({
   }, [])
 
   const changeFriendDockTab = useCallback((tab: FriendDockTab) => {
+    setGrowthView(null)
     setActiveTab(tab)
     setError('')
     if (tab === 'contacts') {
@@ -723,6 +732,14 @@ export function FriendDock({
       setChatListError('')
     }
   }, [])
+
+  const openGrowthView = useCallback((view: GrowthDockView) => {
+    resetChat()
+    setProfileFriend(null)
+    setError('')
+    setGrowthView(view)
+    setOpen(true)
+  }, [resetChat])
 
   useEffect(() => {
     friendsRef.current = friends
@@ -914,6 +931,7 @@ export function FriendDock({
   useEffect(() => {
     clearFriendListReturnState()
     setOpen(false)
+    setGrowthView(null)
     setProfileFriend(null)
     resetChat()
   }, [clearFriendListReturnState, pathname, currentUserId, resetChat])
@@ -1579,7 +1597,7 @@ export function FriendDock({
           '--friend-dock-viewport-height': `${viewport.height || window.innerHeight}px`,
           '--friend-dock-viewport-top': `${viewport.top}px`,
         } as React.CSSProperties}
-        aria-label="好友与私信"
+        aria-label={growthView ? (growthView === 'today' ? '今天只做一件事' : '新生活') : '好友与私信'}
       >
         <header className="friend-dock-header">
           {chatFriend ? (
@@ -1590,8 +1608,13 @@ export function FriendDock({
                 <span><strong><UserDisplayName name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} uid={chatFriend.uid} badges={chatFriend.equippedBadges} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
+          ) : growthView ? (
+            <>
+              <button type="button" onClick={() => setGrowthView(null)} aria-label="返回好友列表">←</button>
+              <strong className="friend-dock-title">{growthView === 'today' ? '今天只做一件事' : '新生活'}</strong>
+            </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
-          {!chatFriend ? <span className="friend-dock-count">{friendTotal}个病友</span> : null}
+          {!chatFriend && !growthView ? <span className="friend-dock-count">{friendTotal}个病友</span> : null}
           <div className="friend-dock-header-actions">
             {chatFriend ? (
               <div className="friend-dock-chat-actions">
@@ -1614,7 +1637,7 @@ export function FriendDock({
                 ) : null}
               </div>
             ) : null}
-            {!chatFriend ? (
+            {!chatFriend && !growthView ? (
               <Link
                 className="friend-dock-notifications-link"
                 href="/notifications"
@@ -1777,8 +1800,20 @@ export function FriendDock({
               />
             </div>
             </div>
+          ) : growthView ? (
+            <GrowthPanel view={growthView} onOverviewChange={setGrowthSignals} />
           ) : (
             <>
+              <div className="friend-dock-growth-links" aria-label="成长入口">
+                <button type="button" onClick={() => openGrowthView('today')}>
+                  <span>今天只做一件事</span>
+                  {growthSignals && !growthSignals.today.complete ? <i aria-label="还有内容未完成" /> : null}
+                </button>
+                <button type="button" onClick={() => openGrowthView('new-life')}>
+                  <span>新生活</span>
+                  {growthSignals && growthSignals.newLife.items.some((item) => item.completed && !item.claimed) ? <i aria-label="有奖励可领取" /> : null}
+                </button>
+              </div>
               <nav className="friend-dock-primary-tabs" role="tablist" aria-label="好友与私信栏目">
                 <button
                   type="button"

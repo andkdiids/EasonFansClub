@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { grantGrowthReward, reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
@@ -22,26 +23,62 @@ export async function POST(request: Request, context: RouteContext) {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
       where: { ...publicPostWhere, id: postId },
-      select: { id: true },
+      select: { id: true, authorId: true },
     })
     if (!post) return null
 
-    const existing = requestedState === null
-      ? await tx.postFavorite.findUnique({ where: { postId_userId: { postId, userId: guard.user.id } } })
-      : null
+    const existing = await tx.postFavorite.findUnique({ where: { postId_userId: { postId, userId: guard.user.id } }, select: { id: true, createdAt: true } })
 
     if (requestedState === true) {
-      await tx.postFavorite.upsert({
-        where: { postId_userId: { postId, userId: guard.user.id } },
-        update: {},
-        create: { postId, userId: guard.user.id },
-      })
+      if (!existing) {
+        await tx.postFavorite.upsert({
+          where: { postId_userId: { postId, userId: guard.user.id } },
+          update: {},
+          create: { postId, userId: guard.user.id },
+        })
+        if (post.authorId !== guard.user.id) {
+          await grantGrowthReward(tx, {
+            userId: post.authorId,
+            taskCode: 'POST_COLLECTED',
+            sourceEventId: `post:${postId}:collector:${guard.user.id}`,
+            reason: '帖子获得有效收藏',
+            postId,
+          })
+        }
+      }
     } else if (requestedState === false) {
       await tx.postFavorite.deleteMany({ where: { postId, userId: guard.user.id } })
+      if (existing && post.authorId !== guard.user.id) {
+        await reverseGrowthRewardForEvent(tx, {
+          userId: post.authorId,
+          taskCode: 'POST_COLLECTED',
+          sourceEventId: `post:${postId}:collector:${guard.user.id}`,
+          reason: '帖子收藏取消，追回对应成长奖励',
+          postId,
+        })
+      }
     } else if (existing) {
       await tx.postFavorite.delete({ where: { id: existing.id } })
+      if (post.authorId !== guard.user.id) {
+        await reverseGrowthRewardForEvent(tx, {
+          userId: post.authorId,
+          taskCode: 'POST_COLLECTED',
+          sourceEventId: `post:${postId}:collector:${guard.user.id}`,
+          reason: '帖子收藏取消，追回对应成长奖励',
+          postId,
+        })
+      }
     } else {
       await tx.postFavorite.create({ data: { postId, userId: guard.user.id } })
+      if (post.authorId !== guard.user.id) {
+        await grantGrowthReward(tx, {
+          userId: post.authorId,
+          taskCode: 'POST_COLLECTED',
+          sourceEventId: `post:${postId}:collector:${guard.user.id}`,
+          reason: '帖子获得有效收藏',
+          postId,
+        })
+      }
     }
 
     const favoriteCount = await tx.postFavorite.count({ where: { postId } })
@@ -68,11 +105,21 @@ export async function DELETE(request: Request, context: RouteContext) {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
       where: { ...publicPostWhere, id: postId },
-      select: { id: true },
+      select: { id: true, authorId: true },
     })
     if (!post) return null
 
+    const existing = await tx.postFavorite.findUnique({ where: { postId_userId: { postId, userId: guard.user.id } }, select: { id: true } })
     await tx.postFavorite.deleteMany({ where: { postId, userId: guard.user.id } })
+    if (existing && post.authorId !== guard.user.id) {
+      await reverseGrowthRewardForEvent(tx, {
+        userId: post.authorId,
+        taskCode: 'POST_COLLECTED',
+        sourceEventId: `post:${postId}:collector:${guard.user.id}`,
+        reason: '帖子收藏取消，追回对应成长奖励',
+        postId,
+      })
+    }
     const favoriteCount = await tx.postFavorite.count({ where: { postId } })
     await tx.post.update({ where: { id: postId }, data: { favoriteCount }, select: { id: true } })
     return { isFavorited: false, favoriteCount }

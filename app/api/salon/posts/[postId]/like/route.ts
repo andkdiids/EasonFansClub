@@ -5,6 +5,7 @@ import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { grantGrowthReward } from '@/lib/growth-tasks/service'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
@@ -29,7 +30,17 @@ export async function POST(request: Request, context: RouteContext) {
       if (!post) throw new Error('SALON_POST_NOT_FOUND')
       const existing = await tx.salonPostLike.findUnique({ where: { postId_userId: { postId, userId: guard.user.id } }, select: { id: true } })
       if (existing) await tx.salonPostLike.delete({ where: { id: existing.id } })
-      else await tx.salonPostLike.create({ data: { postId, userId: guard.user.id } })
+      else {
+        await tx.salonPostLike.create({ data: { postId, userId: guard.user.id } })
+        if (post.userId !== guard.user.id) {
+          await grantGrowthReward(tx, {
+            userId: post.userId,
+            taskCode: 'SALON_LIKED',
+            sourceEventId: `salon:${postId}:liker:${guard.user.id}`,
+            reason: '沙龙作品获得有效点赞',
+          })
+        }
+      }
       const likeCount = await tx.salonPostLike.count({ where: { postId } })
       await tx.salonPost.update({ where: { id: postId }, data: { likeCount }, select: { id: true } })
       return { liked: !existing, likeCount, recipientId: post.userId }

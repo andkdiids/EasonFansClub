@@ -5,6 +5,7 @@ import { parseBulkAttendanceRequest } from '@/lib/music-live-bulk'
 import { PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -164,6 +165,9 @@ export async function POST(request: Request) {
         skipDuplicates: true,
       })
       : { count: 0 }
+    if (created.count > 0) {
+      await completeTask(tx, { userId: guard.user.id, taskCode: 'FIRST_CONCERT_SEEN', periodKey: 'ALL', sourceEventId: addShowIds[0] })
+    }
     const recordedCount = scopeIds.size
       ? await tx.userMusicConcert.count({ where: { userId: guard.user.id, concertId: { in: [...scopeIds] } } })
       : 0

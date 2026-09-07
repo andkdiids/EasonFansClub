@@ -23,6 +23,8 @@ import {
   type ActivityRegistrationState,
 } from '@/lib/activity-registration'
 import { consumeRegistrationFee } from '@/lib/registration-fee'
+import { activityRegistrationAuditData } from '@/lib/activity-risk'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,6 +56,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   const { activityId } = await params
   if (!activityIdPattern.test(activityId)) return NextResponse.json({ ok: false, message: '活动不存在' }, { status: 404, headers: privateHeaders })
   const body = bodyRecord(await request.json().catch(() => null))
+  const auditData = activityRegistrationAuditData(request)
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -119,8 +122,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
       const token = generateActivityRegistrationToken()
       const lifecycleKey = generateActivityRegistrationLifecycleKey()
       const registration = await tx.activityRegistration.create({
-        data: { activityId, userId: guard.user.id, status: 'ACTIVE', paidRegistrationFee: activity.registrationFee, registeredAt: now, verificationToken: token },
+        data: {
+          activityId,
+          userId: guard.user.id,
+          status: 'ACTIVE',
+          paidRegistrationFee: activity.registrationFee,
+          registeredAt: now,
+          verificationToken: token,
+          ...auditData,
+        },
         select: { id: true },
+      })
+      await completeTask(tx, {
+        userId: guard.user.id,
+        taskCode: 'FIRST_ACTIVITY_REGISTRATION',
+        periodKey: 'ALL',
+        sourceEventId: registration.id,
+        now,
       })
 
       if (activity.registrationFee > 0) {

@@ -77,6 +77,18 @@ export function mergeForumBoardOptions(boards: readonly ForumBoardOption[]): For
   ]
 }
 
+/**
+ * Resolve the initial selection for a new post. An explicitly supplied board
+ * (for example, a compose link opened from a board) wins; otherwise ordinary
+ * posts start in daily-chat instead of depending on database sort order.
+ */
+export function getPostCreateInitialBoardId(boards: readonly ForumBoardOption[], initialBoardSlug?: string | null) {
+  return boards.find((board) => board.slug === initialBoardSlug)?.id
+    || boards.find((board) => board.slug === DAILY_CHAT_BOARD_SLUG)?.id
+    || boards[0]?.id
+    || ''
+}
+
 export function mergeForumBoardSummaries(boards: readonly ForumBoardSummary[]): ForumBoardSummary[] {
   const knownSlugs = new Set(boards.map((board) => board.slug))
   return [

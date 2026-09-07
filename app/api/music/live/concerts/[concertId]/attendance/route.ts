@@ -4,6 +4,7 @@ import { parseAttendanceInput, parseAttendanceVersion, PERSONAL_LIVE_NO_STORE_HE
 import { prisma } from '@/lib/prisma'
 import { evaluateConcertBadges } from '@/lib/concert-badge'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { completeTask } from '@/lib/growth-tasks/service'
 import { deleteFromCos, describeCosError } from '@/lib/tencent-cos'
 
 export const dynamic = 'force-dynamic'
@@ -40,9 +41,13 @@ export async function POST(request: Request, { params }: Context) {
   const parsed = parseAttendanceInput(await request.json().catch(() => null))
   if (!parsed.data) return NextResponse.json({ message: parsed.message }, { status: 400, headers: PERSONAL_LIVE_NO_STORE_HEADERS })
   try {
-    const attendance = await prisma.userMusicConcert.create({
-      data: { userId: guard.user.id, concertId, ...parsed.data },
-      select: { id: true, seatInfo: true, mood: true, note: true, isPublic: true, createdAt: true, updatedAt: true },
+    const attendance = await prisma.$transaction(async (tx) => {
+      const attendance = await tx.userMusicConcert.create({
+        data: { userId: guard.user.id, concertId, ...parsed.data },
+        select: { id: true, seatInfo: true, mood: true, note: true, isPublic: true, createdAt: true, updatedAt: true },
+      })
+      await completeTask(tx, { userId: guard.user.id, taskCode: 'FIRST_CONCERT_SEEN', periodKey: 'ALL', sourceEventId: attendance.id })
+      return attendance
     })
     // 按数据库当前事实统一补齐巡演纪念与累计场次勋章；失败不影响主流程。
     try {

@@ -12,6 +12,7 @@ import { sanitizeText } from '@/lib/security'
 import { hasValidActivityParticipation, type ActivityParticipationCheckInSnapshot } from '@/lib/activity-participation'
 import { fulfillActivityLotteryWinners, type ActivityLotteryFulfillmentSummary } from '@/lib/activity-lottery-fulfillment'
 import { ACTIVITY_LOTTERY_PRIZE_TYPES, ACTIVITY_LOTTERY_VIRTUAL_PRIZE_TYPES, MAX_ACTIVITY_LOTTERY_REGISTRATION_FEE, type ActivityLotteryPrizeType, type ActivityLotteryVirtualPrizeType } from '@/lib/activity-lottery-types'
+import { activityRiskAlertsByUserId, getActivityRiskReport, type ActivityRiskAlert } from '@/lib/activity-risk'
 
 export const ACTIVITY_LOTTERY_ALGORITHM_VERSION = 'SECURE_SHUFFLE_V1'
 export const MAX_ACTIVITY_LOTTERY_PRIZE_QUANTITY = 100_000
@@ -264,6 +265,7 @@ const adminLotterySelect = {
   algorithmVersion: true,
   createdAt: true,
   updatedAt: true,
+  _count: { select: { CandidateSnapshots: true } },
   Activity: { select: { status: true, endsAt: true } },
   LotteryPrize: {
     orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
@@ -299,7 +301,7 @@ const adminLotterySelect = {
       fulfillmentError: true,
       LotteryPrize: { select: { id: true, tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true } },
       Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
-      User: { select: { uid: true, nickname: true } },
+      User: { select: { uid: true, nickname: true, id: true } },
     },
   },
 } satisfies Prisma.LotterySelect
@@ -319,6 +321,7 @@ export type ActivityLotteryAdminView = {
   algorithmVersion: string | null
   createdAt: string
   updatedAt: string
+  candidateSnapshotCount: number
   prizes: Array<{
     id: string
     tierName: string | null
@@ -350,7 +353,8 @@ export type ActivityLotteryAdminView = {
      fulfilledAt: string | null
      fulfillmentError: string | null
      wonAt: string
-    redeemedAt: string | null
+     redeemedAt: string | null
+     risk: ActivityRiskAlert | null
   }>
 }
 
@@ -368,7 +372,7 @@ export type ActivityLotteryAdminListView = {
   lotteries: ActivityLotteryAdminView[]
 }
 
-function serializeAdminLottery(row: AdminLotteryRow, now = new Date()): ActivityLotteryAdminView {
+function serializeAdminLottery(row: AdminLotteryRow, now = new Date(), riskByUserId: ReadonlyMap<string, ActivityRiskAlert> = new Map()): ActivityLotteryAdminView {
   return {
     id: row.id,
     title: row.title,
@@ -382,6 +386,7 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date()): Activity
     algorithmVersion: row.algorithmVersion,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    candidateSnapshotCount: row._count.CandidateSnapshots,
     prizes: row.LotteryPrize.map((prize) => ({
       id: prize.id,
       tierName: prize.tierName,
@@ -414,6 +419,7 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date()): Activity
       fulfillmentError: entry.fulfillmentError,
       wonAt: entry.wonAt.toISOString(),
       redeemedAt: iso(entry.redeemedAt),
+      risk: riskByUserId.get(entry.userId) || null,
     })),
   }
 }
@@ -425,6 +431,15 @@ export async function getAdminActivityLotteries(activityId: string): Promise<Act
     prisma.activityRegistration.count({ where: { activityId, status: 'ACTIVE', User: { status: 'ACTIVE', isDeleted: false } } }),
   ])
   if (!activity) return null
+  let riskByUserId = new Map<string, ActivityRiskAlert>()
+  try {
+    const riskReport = await getActivityRiskReport(activityId)
+    if (riskReport) riskByUserId = activityRiskAlertsByUserId(riskReport)
+  } catch (error) {
+    // The audit panel is additive; a transient audit read must not hide the
+    // existing lottery management page or alter lottery behavior.
+    console.error('[activity-lottery.risk]', error instanceof Error ? error.message : error)
+  }
   return {
     activity: {
       id: activity.id,
@@ -436,7 +451,7 @@ export async function getAdminActivityLotteries(activityId: string): Promise<Act
       signupLimit: activity.signupLimit,
       activeParticipantCount,
     },
-    lotteries: lotteries.map((lottery) => serializeAdminLottery(lottery)),
+    lotteries: lotteries.map((lottery) => serializeAdminLottery(lottery, new Date(), riskByUserId)),
   }
 }
 
@@ -850,6 +865,19 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
     select: { id: true, userId: true },
   })
   if (!registrations.length) throw new ActivityLotteryError('LOTTERY_NO_ELIGIBLE_REGISTRATIONS', '当前没有有效报名用户，无法开奖。', 409)
+  // Keep the exact candidate set used by this draw for later audit review.
+  // This snapshot is informational only and does not alter eligibility or
+  // winner selection. The activity and lottery locks make it atomic with the draw.
+  await tx.activityLotteryCandidateSnapshot.createMany({
+    data: registrations.map((registration) => ({
+      lotteryId: lottery.id,
+      registrationId: registration.id,
+      userId: registration.userId,
+      eligibleAtDraw: true,
+      snapshotAt: now,
+    })),
+    skipDuplicates: true,
+  })
   const shuffled = secureShuffle(registrations)
   const winnerRows: Array<{ registration: { id: string; userId: string }; prize: { id: string; tierName: string | null; name: string; prizeType: ActivityLotteryPrizeType; virtualPrizeType: ActivityLotteryVirtualPrizeType | null; registrationFeeAmount: number | null } }> = []
   let cursor = 0

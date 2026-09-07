@@ -3,6 +3,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { isSupabaseStorageUrl, publicImageUrl } from '@/lib/images'
 import { publicImageVariantUrl, type ImageVariant } from '@/lib/image-variants'
 import { prisma } from '@/lib/prisma'
+import { completeTask, grantGrowthReward } from '@/lib/growth-tasks/service'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 import {
   formatAverageScore,
@@ -732,6 +733,15 @@ export async function createRatingWithOptionalReview({
           select: { id: true, content: true, createdAt: true },
         })
       }
+      await completeTask(tx, { userId, taskCode: 'FIRST_EASMUSIC_RATING', periodKey: 'ALL', sourceEventId: rating.id })
+      if (review && target === 'song') {
+        await grantGrowthReward(tx, {
+          userId,
+          taskCode: 'SONG_REVIEW_CREATED',
+          sourceEventId: review.id,
+          reason: '发表有效歌曲评价',
+        })
+      }
       const stats = await applyStatsDelta(tx, target, targetId, { ratingCount: 1, ratingScoreTotal: score, reviewCount: review ? 1 : 0 })
       return { rating, review, stats: statsView(stats) }
     })
@@ -769,6 +779,14 @@ export async function createRatingReview({ target, targetId, userId, content }: 
         data: { ratingId: rating.id, userId, content: value, activeKey: `rating:${target}:${targetId}:${userId}` },
         select: { id: true, content: true, createdAt: true },
       })
+      if (target === 'song') {
+        await grantGrowthReward(tx, {
+          userId,
+          taskCode: 'SONG_REVIEW_CREATED',
+          sourceEventId: review.id,
+          reason: '发表有效歌曲评价',
+        })
+      }
       const stats = await applyStatsDelta(tx, target, targetId, { reviewCount: 1 })
       return { review, stats: statsView(stats) }
     })
@@ -803,7 +821,7 @@ export async function deleteRatingReview({ reviewId, userId, canModerate }: { re
 export async function toggleRatingReviewLike({ reviewId, userId }: { reviewId: string; userId: string }) {
   try {
     return await prisma.$transaction(async (tx) => {
-      const review = await tx.ratingReview.findFirst({ where: { id: reviewId, deletedAt: null }, select: { id: true } })
+      const review = await tx.ratingReview.findFirst({ where: { id: reviewId, deletedAt: null }, select: { id: true, userId: true, Rating: { select: { targetType: true } } } })
       if (!review) throw new RatingServiceError('LIKE_TARGET_NOT_FOUND', '评价不存在或已经删除', 404)
       const existing = await tx.ratingReviewLike.findUnique({ where: { reviewId_userId: { reviewId, userId } }, select: { id: true } })
       let liked = false
@@ -811,6 +829,14 @@ export async function toggleRatingReviewLike({ reviewId, userId }: { reviewId: s
       else {
         await tx.ratingReviewLike.create({ data: { reviewId, userId } })
         liked = true
+        if (review.userId !== userId && review.Rating.targetType === RatingTargetType.SONG) {
+          await grantGrowthReward(tx, {
+            userId: review.userId,
+            taskCode: 'SONG_REVIEW_LIKED',
+            sourceEventId: `rating-review:${reviewId}:liker:${userId}`,
+            reason: '歌曲评价获得有效点赞',
+          })
+        }
       }
       const likeCount = await tx.ratingReviewLike.count({ where: { reviewId } })
       await tx.ratingReview.update({ where: { id: reviewId }, data: { likeCount } })

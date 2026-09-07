@@ -110,6 +110,10 @@ CREATE TABLE `ActivityRegistration` (
     `verificationToken` VARCHAR(128) NULL,
     `checkedInAt` DATETIME(3) NULL,
     `checkInSource` ENUM('MANUAL', 'QR', 'AUTO_AFTER_ACTIVITY_END') NULL,
+    `registrationIpHash` VARCHAR(128) NULL,
+    `registrationUserAgent` VARCHAR(500) NULL,
+    `registrationDeviceId` VARCHAR(128) NULL,
+    `registrationRequestId` VARCHAR(128) NULL,
     `linkedMaterialRedemptionId` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
@@ -122,6 +126,8 @@ CREATE TABLE `ActivityRegistration` (
     INDEX `ActivityRegistration_userId_registeredAt_idx`(`userId`, `registeredAt`),
     INDEX `ActivityRegistration_verifiedById_verifiedAt_idx`(`verifiedById`, `verifiedAt`),
     INDEX `ActivityRegistration_checkInSource_verifiedAt_idx`(`checkInSource`, `verifiedAt`),
+    INDEX `ActivityRegistration_activityDevice_idx`(`activityId`, `registrationDeviceId`),
+    INDEX `ActivityRegistration_activityIpHashRegisteredAt_idx`(`activityId`, `registrationIpHash`, `registeredAt`),
     UNIQUE INDEX `ActivityRegistration_activityId_userId_key`(`activityId`, `userId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -2131,6 +2137,21 @@ CREATE TABLE `LotteryEntry` (
     INDEX `LotteryEntry_redeemedByAdminId_redeemedAt_idx`(`redeemedByAdminId`, `redeemedAt`),
     INDEX `LotteryEntry_lotteryId_fulfillmentStatus_idx`(`lotteryId`, `fulfillmentStatus`),
     UNIQUE INDEX `LotteryEntry_lotteryId_userId_key`(`lotteryId`, `userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ActivityLotteryCandidateSnapshot` (
+    `id` VARCHAR(191) NOT NULL,
+    `lotteryId` VARCHAR(191) NOT NULL,
+    `registrationId` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `eligibleAtDraw` BOOLEAN NOT NULL DEFAULT true,
+    `snapshotAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `ActivityLotteryCandidateSnapshot_lotteryId_userId_idx`(`lotteryId`, `userId`),
+    INDEX `ActivityLotteryCandidateSnapshot_registrationId_idx`(`registrationId`),
+    UNIQUE INDEX `ActivityLotteryCandidateSnapshot_lotteryId_registrationId_key`(`lotteryId`, `registrationId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -4742,6 +4763,15 @@ ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_registrationId_fkey` FOR
 
 -- AddForeignKey
 ALTER TABLE `LotteryEntry` ADD CONSTRAINT `LotteryEntry_redeemedByAdminId_fkey` FOREIGN KEY (`redeemedByAdminId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityLotteryCandidateSnapshot` ADD CONSTRAINT `ActivityLotteryCandidateSnapshot_lotteryId_fkey` FOREIGN KEY (`lotteryId`) REFERENCES `Lottery`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityLotteryCandidateSnapshot` ADD CONSTRAINT `ActivityLotteryCandidateSnapshot_registrationId_fkey` FOREIGN KEY (`registrationId`) REFERENCES `ActivityRegistration`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityLotteryCandidateSnapshot` ADD CONSTRAINT `ActivityLotteryCandidateSnapshot_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `LotteryPrize` ADD CONSTRAINT `LotteryPrize_lotteryId_fkey` FOREIGN KEY (`lotteryId`) REFERENCES `Lottery`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

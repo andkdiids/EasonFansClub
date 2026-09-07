@@ -15,6 +15,8 @@ import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
 import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
+import { completeTask } from '@/lib/growth-tasks/service'
+import { getShanghaiDateKey } from '@/lib/checkin'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -254,6 +256,16 @@ export async function POST(request: Request, { params }: Params) {
       commenterId: user.id,
       postAuthorId: post.authorId,
     })
+    await completeTask(tx, {
+      userId: user.id,
+      taskCode: 'DAILY_COMMENT',
+      periodKey: getShanghaiDateKey(new Date()),
+      sourceEventId: createdReply.id,
+    })
+    if (user.id !== post.authorId) {
+      await completeTask(tx, { userId: user.id, taskCode: 'FIRST_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
+      await completeTask(tx, { userId: post.authorId, taskCode: 'FIRST_RECEIVED_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
+    }
 
     return {
       createdReply,

@@ -8,6 +8,7 @@ import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { resolveBadgeAcquisitionDescription } from '@/lib/badge-acquisition'
 import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { activeUserBadgeWhere, calculateBadgeExpiresAt, isUserBadgeActive, remainingBadgeDays } from '@/lib/badge-validity'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 const BADGE_SELECT = {
   id: true,
@@ -148,6 +149,23 @@ export type BadgeOperationResult = {
   userId: string
   badgeId: string
   badgeName: string
+}
+
+async function recordFirstNonInitialBadge(
+  tx: Prisma.TransactionClient,
+  input: GrantBadgeInput,
+  result: BadgeOperationResult,
+) {
+  const sourceType = input.sourceType?.trim().toUpperCase() || null
+  // Legacy/imported ownership has no new user action. Any explicit durable
+  // source produced by the existing badge system is a real non-initial grant.
+  if (!sourceType || sourceType === 'LEGACY' || (!result.created && !result.sourceAttached)) return
+  await completeTask(tx, {
+    userId: result.userId,
+    taskCode: 'FIRST_BADGE',
+    periodKey: 'ALL',
+    sourceEventId: result.recordId,
+  })
 }
 
 export class BadgeServiceError extends Error {
@@ -1213,7 +1231,11 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
 
 export async function grantBadge(input: GrantBadgeInput): Promise<BadgeOperationResult> {
   try {
-    const result = await prisma.$transaction((tx) => grantBadgeInTransaction(tx, input))
+    const result = await prisma.$transaction(async (tx) => {
+      const result = await grantBadgeInTransaction(tx, input)
+      await recordFirstNonInitialBadge(tx, input, result)
+      return result
+    })
     if (result.created && !input.deferPhase3Effects) {
       try {
         const { processBadgeGrantEffects } = await import('@/lib/badge-phase3')
@@ -1244,7 +1266,9 @@ export async function grantBadge(input: GrantBadgeInput): Promise<BadgeOperation
  * open.
  */
 export async function grantBadgeWithTransaction(tx: Prisma.TransactionClient, input: GrantBadgeInput): Promise<BadgeOperationResult> {
-  return grantBadgeInTransaction(tx, input)
+  const result = await grantBadgeInTransaction(tx, input)
+  await recordFirstNonInitialBadge(tx, input, result)
+  return result
 }
 
 export async function hasBadge(userId: string, badgeId: string) {
@@ -1380,6 +1404,7 @@ export async function equipBadge(userId: string, badgeId: string) {
         data: { userId, badgeId, position: (last?.position ?? -1) + 1 },
       })
     }
+    await completeTask(tx, { userId, taskCode: 'FIRST_BADGE_EQUIP', periodKey: 'ALL', sourceEventId: badgeId })
   })
 
   const equippedBadges = await getEquippedBadgesForUser(userId)

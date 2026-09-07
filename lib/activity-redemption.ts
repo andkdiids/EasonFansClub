@@ -4,6 +4,7 @@ import { activityRegistrationVerificationWhere, activityVerificationTokenFromInp
 import { getActivityLotteryWinnerRedemptionState, type ActivityLotteryCheckInSnapshot, type ActivityLotteryWinnerRedemptionState } from '@/lib/activity-lottery'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { getActivityRiskAlert, type ActivityRiskAlert } from '@/lib/activity-risk'
 
 export const activityRedemptionEntitlementTypes = ['ACTIVITY_REGISTRATION', 'MATERIAL', 'LOTTERY_PRIZE'] as const
 export type ActivityRedemptionEntitlementType = (typeof activityRedemptionEntitlementTypes)[number]
@@ -30,6 +31,7 @@ export type ActivityRedemptionLookupView = {
   activity: { id: string; title: string }
   user: { uid: number; nickname: string; avatarUrl: string | null }
   entitlements: ActivityRedemptionEntitlement[]
+  risk: ActivityRiskAlert | null
 }
 
 export class ActivityRedemptionError extends Error {
@@ -138,6 +140,7 @@ function lotteryWinnerSubtitle(state: ActivityLotteryWinnerRedemptionState) {
 export async function getActivityRedemptionLookup(activityId: string, rawToken: string): Promise<ActivityRedemptionLookupView> {
   const { registration, winners } = await loadLookupRows(activityId, rawToken)
   const now = new Date()
+  const risk = await getActivityRiskAlert(activityId, registration.userId)
   const registrationSelectable = !registration.verifiedAt
   const material = materialEntitlement(registration, now)
   const entitlements: ActivityRedemptionEntitlement[] = [
@@ -188,6 +191,7 @@ export async function getActivityRedemptionLookup(activityId: string, rawToken: 
     activity: { id: registration.Activity.id, title: registration.Activity.title },
     user: { uid: registration.User.uid, nickname: registration.User.nickname, avatarUrl: publicImageUrl(registration.User.Profile?.avatarUrl || registration.User.avatarUrl) },
     entitlements,
+    risk,
   }
 }
 

@@ -382,7 +382,7 @@ export function PostRepliesSection({
     const rootId = created.parentId ? findRootReplyId(created.parentId) : null
     if (rootId) setExpandedReplies((current) => ({ ...current, [rootId]: true }))
     window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: nextReplyCount } }))
-    if (document.documentElement.dataset.forumDetailDiscover !== 'true') router.refresh()
+    if (!window.matchMedia('(max-width: 767px)').matches) router.refresh()
   }
 
   function removeReply(replyId: string, result: DeleteCommentResult) {

@@ -122,6 +122,14 @@ model ActivityRegistration {
   verificationToken          String?                            @unique @db.VarChar(128)
   checkedInAt                DateTime?
   checkInSource              ActivityRegistrationCheckInSource?
+  /// HMAC of the trusted client address; raw IP is never stored here.
+  registrationIpHash         String?                            @db.VarChar(128)
+  /// Weak supporting signal retained for audit review, never used as a unique device key.
+  registrationUserAgent      String?                            @db.VarChar(500)
+  /// HMAC of the first-party random browser identifier; raw identifier is never stored here.
+  registrationDeviceId       String?                            @db.VarChar(128)
+  /// Opaque request correlation identifier for the successful registration request.
+  registrationRequestId      String?                            @db.VarChar(128)
   linkedMaterialRedemptionId String?                            @unique
   createdAt                  DateTime                           @default(now())
   updatedAt                  DateTime                           @updatedAt
@@ -134,12 +142,15 @@ model ActivityRegistration {
   Answers                    ActivityRegistrationAnswer[]
   PointLogs                  PointLog[]
   LotteryEntry               LotteryEntry[]
+  LotteryCandidateSnapshots  ActivityLotteryCandidateSnapshot[]
 
   @@unique([activityId, userId])
   @@index([activityId, status])
   @@index([userId, registeredAt])
   @@index([verifiedById, verifiedAt])
   @@index([checkInSource, verifiedAt])
+  @@index([activityId, registrationDeviceId], map: "ActivityRegistration_activityDevice_idx")
+  @@index([activityId, registrationIpHash, registeredAt], map: "ActivityRegistration_activityIpHashRegisteredAt_idx")
 }
 
 model ActivityRegistrationQuestion {
@@ -2243,27 +2254,28 @@ model LoginDevice {
 }
 
 model Lottery {
-  id               String                @id @default(cuid())
-  title            String
-  pointsCost       Int                   @default(0)
-  startsAt         DateTime?
-  endsAt           DateTime?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @default(now()) @updatedAt
-  activityId       String?
-  description      String?               @db.Text
-  drawAt           DateTime?
-  status           ActivityLotteryStatus @default(DRAFT)
-  eligibleCount    Int?
-  winnerCount      Int?
-  drawnAt          DateTime?
-  cancelledAt      DateTime?
-  algorithmVersion String?
-  createdById      String?
-  Activity         Activity?             @relation(fields: [activityId], references: [id])
-  CreatedBy        User?                 @relation("LotteryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  LotteryEntry     LotteryEntry[]
-  LotteryPrize     LotteryPrize[]
+  id                 String                             @id @default(cuid())
+  title              String
+  pointsCost         Int                                @default(0)
+  startsAt           DateTime?
+  endsAt             DateTime?
+  createdAt          DateTime                           @default(now())
+  updatedAt          DateTime                           @default(now()) @updatedAt
+  activityId         String?
+  description        String?                            @db.Text
+  drawAt             DateTime?
+  status             ActivityLotteryStatus              @default(DRAFT)
+  eligibleCount      Int?
+  winnerCount        Int?
+  drawnAt            DateTime?
+  cancelledAt        DateTime?
+  algorithmVersion   String?
+  createdById        String?
+  Activity           Activity?                          @relation(fields: [activityId], references: [id])
+  CreatedBy          User?                              @relation("LotteryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  LotteryEntry       LotteryEntry[]
+  LotteryPrize       LotteryPrize[]
+  CandidateSnapshots ActivityLotteryCandidateSnapshot[]
 
   @@index([activityId])
   @@index([activityId, status, drawAt])
@@ -2297,6 +2309,24 @@ model LotteryEntry {
   @@index([registrationId])
   @@index([redeemedByAdminId, redeemedAt])
   @@index([lotteryId, fulfillmentStatus])
+}
+
+/// Immutable candidate list captured atomically immediately before a draw.
+/// It is an audit trail only; it does not change lottery eligibility or winner selection.
+model ActivityLotteryCandidateSnapshot {
+  id             String               @id @default(cuid())
+  lotteryId      String
+  registrationId String
+  userId         String
+  eligibleAtDraw Boolean              @default(true)
+  snapshotAt     DateTime             @default(now())
+  Lottery        Lottery              @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
+  Registration   ActivityRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  User           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lotteryId, registrationId])
+  @@index([lotteryId, userId])
+  @@index([registrationId])
 }
 
 model LotteryPrize {
@@ -3087,6 +3117,9 @@ model PointLog {
   pharmacyRecycleLogId   String?
   dateKey                String?
   businessKey            String?                 @unique
+  growthTaskCode         String?                 @db.VarChar(64)
+  sourceEventId          String?                 @db.VarChar(191)
+  reversalOfBusinessKey  String?                 @db.VarChar(191)
   EntertainmentDailyDraw EntertainmentDailyDraw? @relation(fields: [dailyDrawId], references: [id])
   PharmacyDraw           PharmacyDraw?           @relation("PharmacyDrawPointLogs", fields: [pharmacyDrawId], references: [id], onDelete: SetNull)
   PharmacyRecycleLog     PharmacyRecycleLog?     @relation("PharmacyRecyclePointLogs", fields: [pharmacyRecycleLogId], references: [id], onDelete: SetNull)
@@ -3102,8 +3135,45 @@ model PointLog {
   @@index([replyId])
   @@index([userId, createdAt])
   @@index([userId, action, dateKey])
+  @@index([userId, growthTaskCode, createdAt])
+  @@index([growthTaskCode, sourceEventId])
+  @@index([reversalOfBusinessKey])
   @@index([pharmacyDrawId])
   @@index([pharmacyRecycleLogId])
+}
+
+model GrowthTaskCompletion {
+  id            String    @id @default(cuid())
+  userId        String
+  taskCode      String    @db.VarChar(64)
+  periodKey     String    @db.VarChar(32)
+  sourceEventId String    @db.VarChar(191)
+  oneTimeKey    String?   @unique @db.VarChar(191)
+  completedAt   DateTime  @default(now())
+  claimedAt     DateTime?
+  rewardAmount  Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  User          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, taskCode, periodKey, sourceEventId])
+  @@index([userId, taskCode, completedAt])
+  @@index([userId, periodKey, completedAt])
+}
+
+model GrowthWeeklyMilestoneClaim {
+  id           String    @id @default(cuid())
+  userId       String
+  weekKey      String    @db.VarChar(10)
+  milestone    Int
+  rewardAmount Int
+  claimedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  User         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, weekKey, milestone])
+  @@index([userId, weekKey])
 }
 
 model PharmacyCampaign {
@@ -4110,7 +4180,7 @@ model Task {
 }
 
 model User {
-  id                                                     String                         @id @default(cuid())
+  id                                                     String                             @id @default(cuid())
   /// 后台显示为“内部账号”；手机号、邮箱编辑不得写入此字段。
   username                                               String
   /// canonical 联系邮箱；后台编辑只更新此字段。
@@ -4120,64 +4190,64 @@ model User {
   passwordHash                                           String
   nickname                                               String
   gender                                                 Gender?
-  customGender                                           String?                        @db.VarChar(20)
+  customGender                                           String?                            @db.VarChar(20)
   avatarUrl                                              String?
   bio                                                    String?
-  usernameModerationStatus                               ContentModerationStatus        @default(NORMAL)
-  nicknameModerationStatus                               ContentModerationStatus        @default(NORMAL)
-  bioModerationStatus                                    ContentModerationStatus        @default(NORMAL)
+  usernameModerationStatus                               ContentModerationStatus            @default(NORMAL)
+  nicknameModerationStatus                               ContentModerationStatus            @default(NORMAL)
+  bioModerationStatus                                    ContentModerationStatus            @default(NORMAL)
   moderationReason                                       String?
-  matchedBannedWords                                     String?                        @db.Text
-  nicknameViolationDisplay                               String?                        @db.VarChar(32)
-  nicknameViolationCount                                 Int                            @default(0)
-  role                                                   UserRole                       @default(USER)
-  canPlayFullMusic                                       Boolean                        @default(false)
-  level                                                  Int                            @default(1)
-  points                                                 Int                            @default(0)
-  consecutiveDays                                        Int                            @default(0)
+  matchedBannedWords                                     String?                            @db.Text
+  nicknameViolationDisplay                               String?                            @db.VarChar(32)
+  nicknameViolationCount                                 Int                                @default(0)
+  role                                                   UserRole                           @default(USER)
+  canPlayFullMusic                                       Boolean                            @default(false)
+  level                                                  Int                                @default(1)
+  points                                                 Int                                @default(0)
+  consecutiveDays                                        Int                                @default(0)
   lastCheckInDate                                        DateTime?
-  isDeleted                                              Boolean                        @default(false)
+  isDeleted                                              Boolean                            @default(false)
   deletedAt                                              DateTime?
-  createdAt                                              DateTime                       @default(now())
-  updatedAt                                              DateTime                       @updatedAt
+  createdAt                                              DateTime                           @default(now())
+  updatedAt                                              DateTime                           @updatedAt
   backgroundUrl                                          String?
   emailVerifiedAt                                        DateTime?
-  exp                                                    Int                            @default(0)
-  isOnline                                               Boolean                        @default(false)
+  exp                                                    Int                                @default(0)
+  isOnline                                               Boolean                            @default(false)
   lastActiveAt                                           DateTime?
   lastLoginAt                                            DateTime?
   phoneVerifiedAt                                        DateTime?
-  status                                                 UserStatus                     @default(ACTIVE)
-  verificationStatus                                     VerificationStatus             @default(NONE)
+  status                                                 UserStatus                         @default(ACTIVE)
+  verificationStatus                                     VerificationStatus                 @default(NONE)
   nicknameChangedAt                                      DateTime?
   birthMonth                                             Int?
   birthDay                                               Int?
   birthdaySetAt                                          DateTime?
   /// Counts only successful self-service changes after the first birthday set.
   /// Existing rows default to 0 so historical users retain one self-edit.
-  birthdateSelfEditCount                                 Int                            @default(0)
-  birthdayPublic                                         Boolean                        @default(true)
-  uid                                                    Int                            @unique @default(autoincrement())
-  experience                                             Int                            @default(0)
-  securityQuestionRecoveryEnabled                        Boolean                        @default(false)
-  registrationIdempotencyKeyHash                         String?                        @unique
-  mustSetupSecurity                                      Boolean                        @default(false)
-  usernameNormalized                                     String                         @unique
+  birthdateSelfEditCount                                 Int                                @default(0)
+  birthdayPublic                                         Boolean                            @default(true)
+  uid                                                    Int                                @unique @default(autoincrement())
+  experience                                             Int                                @default(0)
+  securityQuestionRecoveryEnabled                        Boolean                            @default(false)
+  registrationIdempotencyKeyHash                         String?                            @unique
+  mustSetupSecurity                                      Boolean                            @default(false)
+  usernameNormalized                                     String                             @unique
   usernameChangedAt                                      DateTime?
   equippedBadgeId                                        String?
-  checkinMoodEnabled                                     Boolean                        @default(true)
-  showBadgeActivity                                      Boolean                        @default(true)
-  showBadgeProgressNotifications                         Boolean                        @default(true)
+  checkinMoodEnabled                                     Boolean                            @default(true)
+  showBadgeActivity                                      Boolean                            @default(true)
+  showBadgeProgressNotifications                         Boolean                            @default(true)
   ipRegion                                               String?
   ipRegionUpdatedAt                                      DateTime?
   AccountSecurityLog                                     AccountSecurityLog[]
   ActivityFavorite                                       ActivityFavorite[]
   ActivityRegistration                                   ActivityRegistration[]
-  ActivityRegistrationVerifiedBy                         ActivityRegistration[]         @relation("ActivityRegistrationVerifiedBy")
-  ActivityCreatedBy                                      Activity[]                     @relation("ActivityCreatedBy")
-  ActivityUpdatedBy                                      Activity[]                     @relation("ActivityUpdatedBy")
-  LotteryCreatedBy                                       Lottery[]                      @relation("LotteryCreatedBy")
-  LotteryEntryRedeemedByAdmin                            LotteryEntry[]                 @relation("LotteryEntryRedeemedByAdmin")
+  ActivityRegistrationVerifiedBy                         ActivityRegistration[]             @relation("ActivityRegistrationVerifiedBy")
+  ActivityCreatedBy                                      Activity[]                         @relation("ActivityCreatedBy")
+  ActivityUpdatedBy                                      Activity[]                         @relation("ActivityUpdatedBy")
+  LotteryCreatedBy                                       Lottery[]                          @relation("LotteryCreatedBy")
+  LotteryEntryRedeemedByAdmin                            LotteryEntry[]                     @relation("LotteryEntryRedeemedByAdmin")
   AlbumReview                                            AlbumReview[]
   AlbumReviewFavorite                                    AlbumReviewFavorite[]
   AlbumReviewLike                                        AlbumReviewLike[]
@@ -4187,25 +4257,25 @@ model User {
   RatingReviewLike                                       RatingReviewLike[]
   PersonalRanking                                        PersonalRanking[]
   UserCenterShortcutPreference                           UserCenterShortcutPreference[]
-  PharmacyCampaignsCreated                               PharmacyCampaign[]             @relation("PharmacyCampaignCreatedBy")
-  PharmacyCampaignsUpdated                               PharmacyCampaign[]             @relation("PharmacyCampaignUpdatedBy")
-  AdminAction_AdminAction_adminIdToUser                  AdminAction[]                  @relation("AdminAction_adminIdToUser")
-  AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                  @relation("AdminAction_targetUserIdToUser")
-  PostReviewedBy                                         Post[]                         @relation("PostReviewedBy")
-  PostModerationHistoryActor                             PostModerationHistory[]        @relation("PostModerationHistoryActor")
-  AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]               @relation("AdminActionLog_adminIdToUser")
-  AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]               @relation("AdminActionLog_targetUserIdToUser")
+  PharmacyCampaignsCreated                               PharmacyCampaign[]                 @relation("PharmacyCampaignCreatedBy")
+  PharmacyCampaignsUpdated                               PharmacyCampaign[]                 @relation("PharmacyCampaignUpdatedBy")
+  AdminAction_AdminAction_adminIdToUser                  AdminAction[]                      @relation("AdminAction_adminIdToUser")
+  AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                      @relation("AdminAction_targetUserIdToUser")
+  PostReviewedBy                                         Post[]                             @relation("PostReviewedBy")
+  PostModerationHistoryActor                             PostModerationHistory[]            @relation("PostModerationHistoryActor")
+  AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]                   @relation("AdminActionLog_adminIdToUser")
+  AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]                   @relation("AdminActionLog_targetUserIdToUser")
   AdminPermission                                        AdminPermission[]
-  MaterialRedemptionsCreated                             MaterialRedemption[]           @relation("MaterialRedemptionCreatedByAdmin")
-  MaterialRedemptionOrders                               MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderUser")
-  MaterialRedemptionOrdersRedeemedByAdmin                MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderRedeemedByAdmin")
-  MaterialRedemptionOrdersCancelledByAdmin               MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderCancelledByAdmin")
-  MaterialRedemptionOrdersRefundedByAdmin                MaterialRedemptionOrder[]      @relation("MaterialRedemptionOrderRefundedByAdmin")
-  UserReward_UserReward_operatorIdToUser                 UserReward[]                   @relation("UserRewardOperator")
-  UserReward_UserReward_userIdToUser                     UserReward[]                   @relation("UserRewardRecipient")
-  BannedWordCreated                                      BannedWord[]                   @relation("BannedWordCreatedBy")
-  Block_Block_blockedIdToUser                            Block[]                        @relation("Block_blockedIdToUser")
-  Block_Block_blockerIdToUser                            Block[]                        @relation("Block_blockerIdToUser")
+  MaterialRedemptionsCreated                             MaterialRedemption[]               @relation("MaterialRedemptionCreatedByAdmin")
+  MaterialRedemptionOrders                               MaterialRedemptionOrder[]          @relation("MaterialRedemptionOrderUser")
+  MaterialRedemptionOrdersRedeemedByAdmin                MaterialRedemptionOrder[]          @relation("MaterialRedemptionOrderRedeemedByAdmin")
+  MaterialRedemptionOrdersCancelledByAdmin               MaterialRedemptionOrder[]          @relation("MaterialRedemptionOrderCancelledByAdmin")
+  MaterialRedemptionOrdersRefundedByAdmin                MaterialRedemptionOrder[]          @relation("MaterialRedemptionOrderRefundedByAdmin")
+  UserReward_UserReward_operatorIdToUser                 UserReward[]                       @relation("UserRewardOperator")
+  UserReward_UserReward_userIdToUser                     UserReward[]                       @relation("UserRewardRecipient")
+  BannedWordCreated                                      BannedWord[]                       @relation("BannedWordCreatedBy")
+  Block_Block_blockedIdToUser                            Block[]                            @relation("Block_blockedIdToUser")
+  Block_Block_blockerIdToUser                            Block[]                            @relation("Block_blockerIdToUser")
   BoardFavorite                                          BoardFavorite[]
   Changelog                                              Changelog[]
   CheckIn                                                CheckIn[]
@@ -4225,20 +4295,20 @@ model User {
   ExperienceLog                                          ExperienceLog[]
   Feedback                                               Feedback[]
   FeedbackReply                                          FeedbackReply[]
-  Follow_Follow_followerIdToUser                         Follow[]                       @relation("Follow_followerIdToUser")
-  Follow_Follow_followingIdToUser                        Follow[]                       @relation("Follow_followingIdToUser")
-  FriendFollow_FriendFollow_followerIdToUser             FriendFollow[]                 @relation("FriendFollowFollower")
-  FriendFollow_FriendFollow_followedIdToUser             FriendFollow[]                 @relation("FriendFollowFollowed")
+  Follow_Follow_followerIdToUser                         Follow[]                           @relation("Follow_followerIdToUser")
+  Follow_Follow_followingIdToUser                        Follow[]                           @relation("Follow_followingIdToUser")
+  FriendFollow_FriendFollow_followerIdToUser             FriendFollow[]                     @relation("FriendFollowFollower")
+  FriendFollow_FriendFollow_followedIdToUser             FriendFollow[]                     @relation("FriendFollowFollowed")
   FriendActivity                                         FriendActivity[]
-  FriendGroup_FriendGroup_ownerIdToUser                  FriendGroup[]                  @relation("FriendGroupOwner")
-  FriendGroupMember_FriendGroupMember_ownerIdToUser      FriendGroupMember[]            @relation("FriendGroupMemberOwner")
-  FriendGroupMember_FriendGroupMember_friendIdToUser     FriendGroupMember[]            @relation("FriendGroupMemberFriend")
-  FriendRemark_FriendRemark_ownerIdToUser                FriendRemark[]                 @relation("FriendRemarkOwner")
-  FriendRemark_FriendRemark_friendIdToUser               FriendRemark[]                 @relation("FriendRemarkFriend")
-  FriendRequest_FriendRequest_receiverIdToUser           FriendRequest[]                @relation("FriendRequest_receiverIdToUser")
-  FriendRequest_FriendRequest_senderIdToUser             FriendRequest[]                @relation("FriendRequest_senderIdToUser")
-  Friendship_Friendship_userAIdToUser                    Friendship[]                   @relation("Friendship_userAIdToUser")
-  Friendship_Friendship_userBIdToUser                    Friendship[]                   @relation("Friendship_userBIdToUser")
+  FriendGroup_FriendGroup_ownerIdToUser                  FriendGroup[]                      @relation("FriendGroupOwner")
+  FriendGroupMember_FriendGroupMember_ownerIdToUser      FriendGroupMember[]                @relation("FriendGroupMemberOwner")
+  FriendGroupMember_FriendGroupMember_friendIdToUser     FriendGroupMember[]                @relation("FriendGroupMemberFriend")
+  FriendRemark_FriendRemark_ownerIdToUser                FriendRemark[]                     @relation("FriendRemarkOwner")
+  FriendRemark_FriendRemark_friendIdToUser               FriendRemark[]                     @relation("FriendRemarkFriend")
+  FriendRequest_FriendRequest_receiverIdToUser           FriendRequest[]                    @relation("FriendRequest_receiverIdToUser")
+  FriendRequest_FriendRequest_senderIdToUser             FriendRequest[]                    @relation("FriendRequest_senderIdToUser")
+  Friendship_Friendship_userAIdToUser                    Friendship[]                       @relation("Friendship_userAIdToUser")
+  Friendship_Friendship_userBIdToUser                    Friendship[]                       @relation("Friendship_userBIdToUser")
   GuessSongLeaderboardEntry                              GuessSongLeaderboardEntry[]
   GuessSongRiskLog                                       GuessSongRiskLog[]
   GuessSongSession                                       GuessSongSession[]
@@ -4246,45 +4316,48 @@ model User {
   WantListenStats                                        WantListenStats[]
   WantListenLeaderboardEntry                             WantListenLeaderboardEntry[]
   GameAntiCheatLog                                       GameAntiCheatLog[]
-  LeaderboardAdminLog_LeaderboardAdminLogAdminToUser     LeaderboardAdminLog[]          @relation("LeaderboardAdminLogAdmin")
-  LeaderboardAdminLog_LeaderboardAdminLogTargetToUser    LeaderboardAdminLog[]          @relation("LeaderboardAdminLogTarget")
-  UndercoverRoom_UndercoverRoomHost                      UndercoverRoom[]               @relation("UndercoverRoomHost")
+  LeaderboardAdminLog_LeaderboardAdminLogAdminToUser     LeaderboardAdminLog[]              @relation("LeaderboardAdminLogAdmin")
+  LeaderboardAdminLog_LeaderboardAdminLogTargetToUser    LeaderboardAdminLog[]              @relation("LeaderboardAdminLogTarget")
+  UndercoverRoom_UndercoverRoomHost                      UndercoverRoom[]                   @relation("UndercoverRoomHost")
   UndercoverRoomPlayer                                   UndercoverRoomPlayer[]
   UndercoverMatchPlayer                                  UndercoverMatchPlayer[]
   UndercoverRoomMessage                                  UndercoverRoomMessage[]
   UndercoverMatchResult                                  UndercoverMatchResult[]
   UndercoverStats                                        UndercoverStats?
-  ClinicRecordAuthor                                     ClinicRecord[]                 @relation("ClinicRecordAuthor")
-  ClinicConsultationAuthor                               ClinicConsultation[]           @relation("ClinicConsultationAuthor")
-  ClinicAspirinUser                                      ClinicAspirin[]                @relation("ClinicAspirinUser")
-  ClinicMouthpieceUser                                   ClinicMouthpiece[]             @relation("ClinicMouthpieceUser")
-  ClinicReportReporter                                   ClinicReport[]                 @relation("ClinicReportReporter")
-  ClinicReportHandler                                    ClinicReport[]                 @relation("ClinicReportHandler")
-  GuessSongDuelRoom_GuessSongDuelRoomHost                GuessSongDuelRoom[]            @relation("GuessSongDuelRoomHost")
-  GuessSongDuelRoom_GuessSongDuelRoomChallenger          GuessSongDuelRoom[]            @relation("GuessSongDuelRoomChallenger")
-  GuessSongDuelMatch_GuessSongDuelMatchWinner            GuessSongDuelMatch[]           @relation("GuessSongDuelMatchWinner")
-  GuessSongDuelPlayer                                    GuessSongDuelPlayer[]          @relation("GuessSongDuelPlayerUser")
-  GuessSongDuelAnswer                                    GuessSongDuelAnswer[]          @relation("GuessSongDuelAnswerUser")
-  GuessSongDuelStats                                     GuessSongDuelStats?            @relation("GuessSongDuelStatsUser")
-  GuessSongDuelInvite_GuessSongDuelInviteInviter         GuessSongDuelInvite[]          @relation("GuessSongDuelInviteInviter")
-  GuessSongDuelInvite_GuessSongDuelInviteInvitee         GuessSongDuelInvite[]          @relation("GuessSongDuelInviteInvitee")
+  ClinicRecordAuthor                                     ClinicRecord[]                     @relation("ClinicRecordAuthor")
+  ClinicConsultationAuthor                               ClinicConsultation[]               @relation("ClinicConsultationAuthor")
+  ClinicAspirinUser                                      ClinicAspirin[]                    @relation("ClinicAspirinUser")
+  ClinicMouthpieceUser                                   ClinicMouthpiece[]                 @relation("ClinicMouthpieceUser")
+  ClinicReportReporter                                   ClinicReport[]                     @relation("ClinicReportReporter")
+  ClinicReportHandler                                    ClinicReport[]                     @relation("ClinicReportHandler")
+  GuessSongDuelRoom_GuessSongDuelRoomHost                GuessSongDuelRoom[]                @relation("GuessSongDuelRoomHost")
+  GuessSongDuelRoom_GuessSongDuelRoomChallenger          GuessSongDuelRoom[]                @relation("GuessSongDuelRoomChallenger")
+  GuessSongDuelMatch_GuessSongDuelMatchWinner            GuessSongDuelMatch[]               @relation("GuessSongDuelMatchWinner")
+  GuessSongDuelPlayer                                    GuessSongDuelPlayer[]              @relation("GuessSongDuelPlayerUser")
+  GuessSongDuelAnswer                                    GuessSongDuelAnswer[]              @relation("GuessSongDuelAnswerUser")
+  GuessSongDuelStats                                     GuessSongDuelStats?                @relation("GuessSongDuelStatsUser")
+  GuessSongDuelInvite_GuessSongDuelInviteInviter         GuessSongDuelInvite[]              @relation("GuessSongDuelInviteInviter")
+  GuessSongDuelInvite_GuessSongDuelInviteInvitee         GuessSongDuelInvite[]              @relation("GuessSongDuelInviteInvitee")
   Like                                                   Like[]
   SocialPostLikes                                        SocialPostLike[]
-  SocialPostComments                                     SocialPostComment[]            @relation("SocialPostCommentAuthor")
+  SocialPostComments                                     SocialPostComment[]                @relation("SocialPostCommentAuthor")
   LoginDevice                                            LoginDevice[]
   LotteryEntry                                           LotteryEntry[]
+  LotteryCandidateSnapshots                              ActivityLotteryCandidateSnapshot[]
   LyricCard                                              LyricCard[]
   MusicFavorite                                          MusicFavorite[]
   MusicPlayRecord                                        MusicPlayRecord[]
   MusicSongLike                                          MusicSongLike[]
-  Notification_Notification_actorIdToUser                Notification[]                 @relation("Notification_actorIdToUser")
-  Notification_Notification_recipientIdToUser            Notification[]                 @relation("Notification_recipientIdToUser")
+  Notification_Notification_actorIdToUser                Notification[]                     @relation("Notification_actorIdToUser")
+  Notification_Notification_recipientIdToUser            Notification[]                     @relation("Notification_recipientIdToUser")
   OnlineSession                                          OnlineSession[]
-  PageLayout_PageLayout_publishedByIdToUser              PageLayout[]                   @relation("PageLayout_publishedByIdToUser")
-  PageLayout_PageLayout_updatedByIdToUser                PageLayout[]                   @relation("PageLayout_updatedByIdToUser")
+  PageLayout_PageLayout_publishedByIdToUser              PageLayout[]                       @relation("PageLayout_publishedByIdToUser")
+  PageLayout_PageLayout_updatedByIdToUser                PageLayout[]                       @relation("PageLayout_updatedByIdToUser")
   PageLayoutRevision                                     PageLayoutRevision[]
   PasswordResetToken                                     PasswordResetToken[]
   PointLog                                               PointLog[]
+  GrowthTaskCompletion                                   GrowthTaskCompletion[]
+  GrowthWeeklyMilestoneClaim                             GrowthWeeklyMilestoneClaim[]
   PharmacyDraws                                          PharmacyDraw[]
   PharmacyDuplicateInventories                           PharmacyDuplicateInventory[]
   PharmacyRecycleLogs                                    PharmacyRecycleLog[]
@@ -4295,19 +4368,19 @@ model User {
   ProfileRecordPreference                                ProfileRecordPreference[]
   UserPrivacySetting                                     UserPrivacySetting?
   ProfileWallLike                                        ProfileWallLike[]
-  ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]           @relation("ProfileWallMessage_receiverIdToUser")
-  ProfileWallMessage_ProfileWallMessage_senderIdToUser   ProfileWallMessage[]           @relation("ProfileWallMessage_senderIdToUser")
+  ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]               @relation("ProfileWallMessage_receiverIdToUser")
+  ProfileWallMessage_ProfileWallMessage_senderIdToUser   ProfileWallMessage[]               @relation("ProfileWallMessage_senderIdToUser")
   Reply                                                  Reply[]
   ReplyLike                                              ReplyLike[]
-  ReplyMention_ReplyMention_mentionerIdToUser            ReplyMention[]                 @relation("ReplyMentionMentioner")
-  ReplyMention_ReplyMention_mentionedUserIdToUser        ReplyMention[]                 @relation("ReplyMentionMentionedUser")
-  Report_Report_reporterIdToUser                         Report[]                       @relation("Report_reporterIdToUser")
-  Report_Report_targetUserIdToUser                       Report[]                       @relation("Report_targetUserIdToUser")
+  ReplyMention_ReplyMention_mentionerIdToUser            ReplyMention[]                     @relation("ReplyMentionMentioner")
+  ReplyMention_ReplyMention_mentionedUserIdToUser        ReplyMention[]                     @relation("ReplyMentionMentionedUser")
+  Report_Report_reporterIdToUser                         Report[]                           @relation("Report_reporterIdToUser")
+  Report_Report_targetUserIdToUser                       Report[]                           @relation("Report_targetUserIdToUser")
   SearchHistory                                          SearchHistory[]
   SystemNotification                                     SystemNotification[]
   SystemNotificationRead                                 SystemNotificationRead[]
-  TodayEventSubmitted                                    TodayEvent[]                   @relation("TodayEventSubmittedBy")
-  TodayEventReviewed                                     TodayEvent[]                   @relation("TodayEventReviewedBy")
+  TodayEventSubmitted                                    TodayEvent[]                       @relation("TodayEventSubmittedBy")
+  TodayEventReviewed                                     TodayEvent[]                       @relation("TodayEventReviewedBy")
   UserDailyMusicRecommendation                           UserDailyMusicRecommendation[]
   UserAchievement                                        UserAchievement[]
   UserAlbumCollection                                    UserAlbumCollection[]
@@ -4315,25 +4388,25 @@ model User {
   UserBadgeSource                                        UserBadgeSource[]
   UserBadgeShowcase                                      UserBadgeShowcase[]
   UserBadgeTracking                                      UserBadgeTracking[]
-  EquippedBadges                                         UserEquippedBadge[]            @relation("UserEquippedBadges")
-  EquippedBadge                                          Badge?                         @relation("UserEquippedBadge", fields: [equippedBadgeId], references: [id], onDelete: SetNull)
-  UserBadgeGrantedBy                                     UserBadge[]                    @relation("UserBadgeGrantedBy")
-  UserBadgeSourceGrantedBy                               UserBadgeSource[]              @relation("UserBadgeSourceGrantedBy")
+  EquippedBadges                                         UserEquippedBadge[]                @relation("UserEquippedBadges")
+  EquippedBadge                                          Badge?                             @relation("UserEquippedBadge", fields: [equippedBadgeId], references: [id], onDelete: SetNull)
+  UserBadgeGrantedBy                                     UserBadge[]                        @relation("UserBadgeGrantedBy")
+  UserBadgeSourceGrantedBy                               UserBadgeSource[]                  @relation("UserBadgeSourceGrantedBy")
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
   MyLivePhoto                                            MyLivePhoto[]
-  SalonPost                                              SalonPost[]                    @relation("SalonPostAuthor")
-  SalonPostApproved                                      SalonPost[]                    @relation("SalonPostApprovedBy")
-  SalonPostLike                                          SalonPostLike[]                @relation("SalonPostLikeUser")
-  SalonComment                                           SalonComment[]                 @relation("SalonCommentAuthor")
-  ConcertContributionSubmitter                           ConcertContribution[]          @relation("ConcertContributionSubmitter")
-  ConcertContributionReviewer                            ConcertContribution[]          @relation("ConcertContributionReviewer")
-  MusicConcertContributor                                MusicConcert[]                 @relation("MusicConcertContributor")
-  MusicConcertSetlistContributor                         MusicConcert[]                 @relation("MusicConcertSetlistContributor")
-  MusicConcertEncoreContributor                          MusicConcert[]                 @relation("MusicConcertEncoreContributor")
+  SalonPost                                              SalonPost[]                        @relation("SalonPostAuthor")
+  SalonPostApproved                                      SalonPost[]                        @relation("SalonPostApprovedBy")
+  SalonPostLike                                          SalonPostLike[]                    @relation("SalonPostLikeUser")
+  SalonComment                                           SalonComment[]                     @relation("SalonCommentAuthor")
+  ConcertContributionSubmitter                           ConcertContribution[]              @relation("ConcertContributionSubmitter")
+  ConcertContributionReviewer                            ConcertContribution[]              @relation("ConcertContributionReviewer")
+  MusicConcertContributor                                MusicConcert[]                     @relation("MusicConcertContributor")
+  MusicConcertSetlistContributor                         MusicConcert[]                     @relation("MusicConcertSetlistContributor")
+  MusicConcertEncoreContributor                          MusicConcert[]                     @relation("MusicConcertEncoreContributor")
   EHospitalCheckAttempt                                  EHospitalCheckAttempt[]
-  StickerPack_StickerPackCreator                         StickerPack[]                  @relation("StickerPackCreator")
-  UserStickerPack_UserStickerPackUser                    UserStickerPack[]              @relation("UserStickerPackUser")
+  StickerPack_StickerPackCreator                         StickerPack[]                      @relation("StickerPackCreator")
+  UserStickerPack_UserStickerPackUser                    UserStickerPack[]                  @relation("UserStickerPackUser")
   StudioProjectLike                                      StudioProjectLike[]
   StudioProjectFavorite                                  StudioProjectFavorite[]
   stickerReports                                         StickerReport[]
@@ -5035,6 +5108,8 @@ enum PointActionType {
   PHARMACY_DRAW_COST
   PHARMACY_PRIZE_REWARD
   PHARMACY_DUPLICATE_RECYCLE
+  GROWTH_REWARD
+  GROWTH_REWARD_REVERSAL
 }
 
 enum PharmacyCampaignStatus {

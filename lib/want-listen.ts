@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma, type WantListenFakeTitleDifficulty, type WantListenMode } from '@prisma/client'
+import { getShanghaiDateKey } from '@/lib/checkin'
 import {
   assessWantListenLatencies,
   averageAnswerTime,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/anti-cheat'
 import { syncUserAchievements } from '@/lib/achievements'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { completeTask } from '@/lib/growth-tasks/service'
 import { normalizeRatingLanguage } from '@/lib/rating-types'
 import { prisma } from '@/lib/prisma'
 import { cleanLyrics, selectLyricFragment, selectSafeLyricSnippet } from '@/lib/want-listen-lyrics'
@@ -983,6 +985,14 @@ export async function finishWantListenSession(userId: string, sessionId: string,
       include: { WantListenSessionQuestion: { orderBy: { position: 'asc' } } },
     })
     if (!updated) throw sessionNotFound()
+
+    await completeTask(database, {
+      userId: active.userId,
+      taskCode: 'DAILY_GAME',
+      periodKey: getShanghaiDateKey(finishedAt),
+      sourceEventId: active.id,
+      now: finishedAt,
+    })
 
     // 反作弊评估：基于服务端记录的全部已答耗时
     const answeredLatencies = updated.WantListenSessionQuestion

@@ -13,6 +13,7 @@ import { prisma } from '@/lib/prisma'
 import { generateMaterialRedeemCode } from '@/lib/material-redemption-code'
 import { parseMaterialRedeemCode } from '@/lib/material-redemption-domain'
 import type { ActivityRegistrationQuestionType, ActivityRegistrationQuestionView, ActivityRegistrationState, ActivityRegistrationView } from '@/lib/activity-registration-shared'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 export {
   activityRegistrationQuestionTypeValues,
@@ -907,6 +908,13 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
 
   const verifiedAt = now
   await tx.activityRegistration.update({ where: { id: current.id }, data: { verifiedAt, verifiedById: input.adminId, verificationMethod: input.method, checkedInAt: verifiedAt, checkInSource: input.method }, select: { id: true } })
+  await completeTask(tx, {
+    userId: current.userId,
+    taskCode: 'FIRST_ACTIVITY_ATTENDANCE',
+    periodKey: 'ALL',
+    sourceEventId: current.id,
+    now,
+  })
   const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
   let rewardGranted = false
   let rewardId: string | null = null

@@ -79,9 +79,10 @@ test('E院广场只挂载小臣书流，详情页仍按移动端边界启用发�
   assert.match(home, /<ForumDiscoveryHome showDesktopRefresh \/>/)
   assert.doesNotMatch(home, /ForumPlazaHome|ecfc-forum-theme|localStorage|showModeSwitch|onSwitchToPlaza/)
   assert.doesNotMatch(discovery, /forum-discovery-mode-button|onSwitchToPlaza|showModeSwitch/)
-  assert.match(detail, /max-width: 767px/)
+  assert.doesNotMatch(detail, /matchMedia|forumDetailDiscover|data-forum-detail-discover/)
   assert.match(css, /@media \(max-width:767px\)[\s\S]*forum-discovery-grid/)
-  assert.match(css, /data-forum-detail-discover='true'[\s\S]*app-mobile-nav/)
+  assert.match(css, /body:has\(\.forum-discovery-detail-shell\) \.app-topbar,[\s\S]*body:has\(\.forum-discovery-detail-shell\) \.app-mobile-nav,[\s\S]*body:has\(\.forum-discovery-detail-shell\) \.friend-dock \{ display:none !important; \}/)
+  assert.doesNotMatch(css, /data-forum-detail-discover/)
 })
 
 test('小臣书接口参数有明确边界，非法输入不会静默变成默认请求', () => {
@@ -218,10 +219,26 @@ test('E院广场桌面端和移动端都只保留小臣书，不依赖旧模式�
   assert.doesNotMatch(home, /plaza|localStorage|matchMedia|theme|\bviewMode\b|\blayoutMode\b/)
   assert.match(discovery, /<h1>小臣书<\/h1>/)
   assert.doesNotMatch(discovery, /showModeSwitch|onSwitchToPlaza|forum-discovery-mode-button|广场模式/)
-  assert.match(detailController, /if \(media\.matches\) root\.dataset\.forumDetailDiscover = 'true'/)
-  assert.match(layout, /dataset\.forumDetailDiscover='true'/)
+  assert.doesNotMatch(detailController, /matchMedia|forumDetailDiscover|data-forum-detail-discover/)
+  assert.doesNotMatch(layout, /forumDetailDiscover|data-forum-detail-discover/)
   assert.doesNotMatch(layout, /ecfc-forum-theme|forumTheme/)
   assert.doesNotMatch(css, /forum-discovery-mode-button|forum-plaza-mode-button/)
+})
+
+test('帖子详情首次渲染直接使用响应式布局，不依赖客户端 mounted 后切换', () => {
+  const detail = readFileSync('app/posts/[postId]/page.tsx', 'utf8')
+  const controller = readFileSync('components/ForumDiscoveryDetailController.tsx', 'utf8')
+  const layout = readFileSync('app/layout.tsx', 'utf8')
+  const css = readFileSync('app/globals.css', 'utf8')
+
+  assert.match(detail, /<ForumDiscoveryDetailTopbar/)
+  assert.match(detail, /<ForumDiscoveryActionBar/)
+  assert.doesNotMatch(detail, /LegacyPostDetail|OldPostDetail|isMobile/)
+  assert.doesNotMatch(controller, /useState|matchMedia|dataset|setTimeout|opacity/)
+  assert.doesNotMatch(layout, /forumDetailDiscover|data-forum-detail-discover/)
+  assert.doesNotMatch(css, /data-forum-detail-discover/)
+  assert.match(css, /@media \(max-width:767px\)[\s\S]*\.forum-discovery-detail-topbar \{ display:flex; \}/)
+  assert.match(css, /@media \(max-width:767px\)[\s\S]*\.forum-discovery-action-bar \{ display:grid;/)
 })
 
 test('旧广场模式 URL 只被忽略，不会恢复旧布局或触发模式重定向', () => {
@@ -253,7 +270,9 @@ test('移动端小臣书帖子详情底栏：DOM=最终顺序（说点什么→�
   assert.match(countMarkup, /评论 \{replyCount\}/)
 
   const css = readFileSync('app/globals.css', 'utf8')
-  const mobileRegion = css.slice(css.indexOf('html[data-forum-detail-discover=\'true\']'))
+  const mobileRegionStart = css.indexOf('  body:has(.forum-discovery-detail-shell) .app-topbar,\n  body:has(.forum-discovery-detail-shell) .app-mobile-nav')
+  assert.ok(mobileRegionStart >= 0)
+  const mobileRegion = css.slice(mobileRegionStart)
   // 列宽：说点什么 40%（2fr）＋ 点赞/收藏/评论各 20%（1fr）
   assert.match(mobileRegion, /\.forum-discovery-action-bar \{[\s\S]*?grid-template-columns:minmax\(0,2fr\) repeat\(3,minmax\(0,1fr\)\)/)
   // 点赞/收藏/评论右三列等宽等高（共用 min-height:44px / width:100%）

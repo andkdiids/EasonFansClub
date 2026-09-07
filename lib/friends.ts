@@ -8,6 +8,7 @@ import { emitRealtimeMany } from '@/lib/realtime'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
 import { validateFriendRequestReason } from '@/lib/friend-request-validation'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
@@ -202,11 +203,14 @@ export async function decideFriendRequest(userId: string, requestId: string, act
     })
     if (action === 'accept') {
       const [userAId, userBId] = normalizeFriendPair(friendRequest.senderId, friendRequest.receiverId)
-      await tx.friendship.upsert({
+      const friendship = await tx.friendship.upsert({
         where: { userAId_userBId: { userAId, userBId } },
         update: {},
         create: { userAId, userBId },
+        select: { id: true },
       })
+      await completeTask(tx, { userId: friendRequest.senderId, taskCode: 'FIRST_FRIEND', periodKey: 'ALL', sourceEventId: friendship.id })
+      await completeTask(tx, { userId: friendRequest.receiverId, taskCode: 'FIRST_FRIEND', periodKey: 'ALL', sourceEventId: friendship.id })
     }
 
     return {

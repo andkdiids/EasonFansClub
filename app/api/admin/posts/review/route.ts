@@ -13,6 +13,7 @@ import { requireAdmin, sanitizeText } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { createNotification } from '@/lib/notification-write'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -435,6 +436,9 @@ export async function PATCH(request: Request) {
         where: { id: postId },
         select: { id: true, moderationStatus: true, reviewedAt: true, rejectionReason: true, boardId: true },
       })
+      if (status === 'APPROVED') {
+        await completeTask(tx, { userId: current.authorId, taskCode: 'FIRST_POST', periodKey: 'ALL', sourceEventId: current.id, now: reviewedAt })
+      }
       return {
         changed: true,
         post: updated,

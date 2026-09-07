@@ -14,6 +14,7 @@ import type { EquippedBadgeView } from '@/lib/badge-types'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { upsertNotification } from '@/lib/notification-write'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
+import { completeTask } from '@/lib/growth-tasks/service'
 
 type WallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
@@ -341,6 +342,9 @@ export async function POST(request: Request) {
         targetUrl: `/user/${String(receiver.uid).padStart(5, '0')}/wall?focus=${created.id}`,
       },
     })
+    if (receiver.id !== viewer.id) {
+      await completeTask(tx, { userId: viewer.id, taskCode: 'FIRST_WALL_MESSAGE', periodKey: 'ALL', sourceEventId: created.id })
+    }
     const recipientId = parentMessage?.senderId || receiver.id
     if (recipientId !== viewer.id) {
       notifiedUserId = recipientId

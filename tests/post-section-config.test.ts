@@ -4,6 +4,8 @@ import test from 'node:test'
 import {
   BARD_BOARD_NAME,
   BARD_BOARD_SLUG,
+  DAILY_CHAT_BOARD_SLUG,
+  getPostCreateInitialBoardId,
   getForumBoardDisplayName,
   mergeForumBoardOptions,
 } from '../lib/boards'
@@ -33,6 +35,23 @@ test('发布、编辑和广场使用同一目录，并补齐缺失的吟游诗�
   assert.match(editPage, /mergeForumBoardOptions\(boardRows\)/)
   assert.match(createPage, /PostCreateForm boards=\{normalizeForumBoards\(boards\)\}/)
   assert.match(editPage, /boards=\{normalizeForumBoards\(boards\)\}/)
+})
+
+test('管理员新建帖子默认吹水，显式分区仍可预选且不依赖分区排序', () => {
+  const boards = [
+    { id: 'announcement', name: '公告区', slug: 'announcements' },
+    { id: 'chat', name: '吹水', slug: DAILY_CHAT_BOARD_SLUG },
+    { id: 'concert', name: '演唱会', slug: 'concerts' },
+  ]
+
+  assert.equal(getPostCreateInitialBoardId(boards), 'chat')
+  assert.equal(getPostCreateInitialBoardId(boards, 'announcements'), 'announcement')
+  assert.equal(getPostCreateInitialBoardId(boards.filter((board) => board.slug !== 'announcements')), 'chat')
+
+  const createForm = read('components/PostCreateForm.tsx')
+  assert.match(createForm, /getPostCreateInitialBoardId\(boards, initialBoardSlug\)/)
+  assert.doesNotMatch(createForm, /boards\[0\]/)
+  assert.doesNotMatch(createForm, /isAdmin|isAdministrator|canPostAnnouncement/)
 })
 
 test('发布 API 将配置选项解析成真实 Board，并保留公告区权限', () => {
