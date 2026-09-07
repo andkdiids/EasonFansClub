@@ -127,7 +127,25 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
         text: linkText ?? data.description,
         url: window.location.href,
       })
-      announce(result === 'shared' ? '已打开分享面板' : '标题和链接已复制')
+      let awardedAmount = 0
+      const contentId = data.contentId || data.url
+      try {
+        const rewardResponse = await fetch('/api/growth/actions/share', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contentId }),
+        })
+        const rewardData = await rewardResponse.json().catch(() => ({})) as { awardedAmount?: unknown }
+        if (rewardResponse.ok && Number.isSafeInteger(rewardData.awardedAmount) && Number(rewardData.awardedAmount) > 0) {
+          awardedAmount = Number(rewardData.awardedAmount)
+        }
+      } catch {
+        // A sharing success should not be turned into a failed share by a
+        // best-effort reward refresh; the server remains idempotent.
+      }
+      const suffix = awardedAmount > 0 ? `，+${awardedAmount}挂号费` : ''
+      announce(`${result === 'shared' ? '已打开分享面板' : '标题和链接已复制'}${suffix}`)
     } catch {
       announce('分享已取消')
     }

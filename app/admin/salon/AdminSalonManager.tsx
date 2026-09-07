@@ -93,10 +93,13 @@ export function AdminSalonManager({ initialPosts, initialHasMore, initialPostId,
     setLoading(true); setError('')
     try {
       const response = await fetch('/api/admin/salon', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: target.post.id, action: target.action, rejectReason: reason }) })
-      const data = await response.json().catch(() => null) as { message?: string } | null
-      if (!response.ok) throw new Error(data?.message || '审核失败')
+      const data = await response.json().catch(() => null) as { code?: string; message?: string } | null
+      if (!response.ok) {
+        const reason = data?.message?.trim() || (data?.code ? `错误码 ${data.code}` : '服务器未返回具体原因，请稍后重试')
+        throw new Error(`审核失败：${reason}`)
+      }
       setPosts((current) => current.filter((post) => post.id !== target.post.id)); setMessage(data?.message || '操作成功'); setReviewing(null)
-    } catch (caught) { setError(caught instanceof Error ? caught.message : '审核失败') } finally { setLoading(false) }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '审核失败：请求失败，请稍后重试') } finally { setLoading(false) }
   }
 
   async function saveEdit() {

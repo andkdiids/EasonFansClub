@@ -10,11 +10,15 @@ const messages = read('app/api/direct-conversations/[conversationId]/messages/ro
 const clear = read('app/api/direct-conversations/[conversationId]/clear/route.ts')
 const schema = read('prisma/schema.prisma')
 
-test('好友弹窗一级导航默认聊天，通讯录内保留 A-Z 与分组', () => {
+test('好友弹窗一级导航四项平级，通讯录内保留 A-Z 与分组', () => {
   assert.match(dock, /type FriendDockTab = 'chat' \| 'contacts'/)
   assert.match(dock, /useState<FriendDockTab>\('chat'\)/)
   assert.match(dock, /setActiveTab\('chat'\)/)
-  assert.match(dock, /<button[\s\S]*?role="tab"[\s\S]*?>聊天<\/button>[\s\S]*?<button[\s\S]*?role="tab"[\s\S]*?>通讯录<\/button>/)
+  assert.match(dock, /<button[\s\S]*?role="tab"[\s\S]*?>好友<\/button>[\s\S]*?<button[\s\S]*?role="tab"[\s\S]*?>通讯录<\/button>[\s\S]*?<button[\s\S]*?role="tab"[\s\S]*?>今天只做一件事<\/button>[\s\S]*?<button[\s\S]*?role="tab"[\s\S]*?>新生活<\/button>/)
+  assert.match(dock, /type FriendDockPrimaryTab = FriendDockTab \| GrowthDockView/)
+  assert.match(dock, /selectPrimaryTab\('today'\)/)
+  assert.match(dock, /selectPrimaryTab\('new-life'\)/)
+  assert.doesNotMatch(dock, /friend-dock-growth-links/)
   assert.match(dock, /activeTab === 'chat' \? \(/)
   assert.match(dock, /activeTab === 'contacts'/)
   assert.match(dock, /friendListViewMode === 'alphabetical'/)

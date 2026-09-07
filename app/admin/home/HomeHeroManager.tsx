@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, type ChangeEvent } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import { hasHeroMediaAsset } from '@/lib/hero-visuals'
+import { getNextHeroSortOrder, sortHeroSlides, type HeroMoveDirection } from '@/lib/hero-order'
 import type { HeroMediaAsset, HeroMediaType, SiteHeroSlide } from '@/lib/site-config'
 
 type HeroDevice = 'desktop' | 'mobile'
@@ -134,15 +135,17 @@ function DeviceMediaPanel({
 }
 
 export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlide[] }) {
-  const [slides, setSlides] = useState(initialSlides)
+  const [slides, setSlides] = useState(() => sortHeroSlides(initialSlides))
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState('')
   const [previewVersions, setPreviewVersions] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const [moving, setMoving] = useState('')
+  const movingRef = useRef(false)
 
   function update(index: number, patch: Partial<SiteHeroSlide>) {
-    setSlides((current) => current.map((slide, slideIndex) => slideIndex === index ? { ...slide, ...patch } : slide))
+    setSlides((current) => sortHeroSlides(current.map((slide, slideIndex) => slideIndex === index ? { ...slide, ...patch } : slide)))
   }
 
   function selectedMedia(slide: SiteHeroSlide, device: HeroDevice) {
@@ -240,6 +243,7 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
   }
 
   async function save() {
+    if (saving || moving) return
     setSaving(true)
     setMessage('')
     setError('')
@@ -263,6 +267,34 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
     }
   }
 
+  async function move(index: number, direction: HeroMoveDirection) {
+    if (saving || moving || uploading || movingRef.current) return
+    if ((direction === 'up' && index === 0) || (direction === 'down' && index === slides.length - 1)) return
+    movingRef.current = true
+    setMoving(`${index}:${direction}`)
+    setMessage('')
+    setError('')
+    try {
+      const response = await fetch('/api/admin/home/hero/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index, direction }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setError(data?.message || 'Hero 顺序调整失败')
+        return
+      }
+      setSlides(data.slides)
+      setMessage(data.message || 'Hero 顺序已更新')
+    } catch {
+      setError('Hero 顺序调整失败，请稍后重试')
+    } finally {
+      movingRef.current = false
+      setMoving('')
+    }
+  }
+
   return <div className="space-y-6">
     <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -273,8 +305,8 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
         </div>
         <div className="flex gap-2">
           <Link href="/admin/visuals/home" className="rounded-full border border-sky-200 bg-white px-4 py-3 text-sm font-black text-brand-700">页面视觉设置</Link>
-          <button type="button" onClick={() => setSlides((current) => [...current, emptySlide(current.length + 1)])} className="rounded-full bg-sky-50 px-4 py-3 text-sm font-black text-brand-700">新增 Hero</button>
-          <button type="button" disabled={saving} onClick={() => void save()} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:opacity-60">{saving ? '保存中…' : '保存全部'}</button>
+          <button type="button" disabled={saving || Boolean(moving) || Boolean(uploading)} onClick={() => setSlides((current) => [...current, emptySlide(getNextHeroSortOrder(current))])} className="rounded-full bg-sky-50 px-4 py-3 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-60">新增 Hero</button>
+          <button type="button" disabled={saving || Boolean(moving)} onClick={() => void save()} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60">{saving ? '保存中…' : '保存全部'}</button>
         </div>
       </div>
     </section>
@@ -325,7 +357,11 @@ export function HomeHeroManager({ initialSlides }: { initialSlides: SiteHeroSlid
             <input value={slide.subtitle} onChange={(event) => update(index, { subtitle: event.target.value })} placeholder="副标题" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
             <input value={slide.buttonText} onChange={(event) => update(index, { buttonText: event.target.value })} placeholder="按钮文字" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
             <input value={slide.href} onChange={(event) => update(index, { href: event.target.value })} placeholder="跳转链接" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
-            <input type="number" value={slide.sortOrder} onChange={(event) => update(index, { sortOrder: Number(event.target.value) })} placeholder="排序" className="rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="number" value={slide.sortOrder} onChange={(event) => update(index, { sortOrder: Number(event.target.value) })} placeholder="排序" className="min-w-0 flex-1 rounded-xl border border-sky-100 px-3 py-2 font-bold" />
+              <button type="button" disabled={Boolean(moving) || saving || Boolean(uploading) || index === 0} onClick={() => void move(index, 'up')} className="rounded-full border border-sky-200 bg-white px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">{moving === `${index}:up` ? '移动中…' : '上移'}</button>
+              <button type="button" disabled={Boolean(moving) || saving || Boolean(uploading) || index === slides.length - 1} onClick={() => void move(index, 'down')} className="rounded-full border border-sky-200 bg-white px-3 py-2 text-xs font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">{moving === `${index}:down` ? '移动中…' : '下移'}</button>
+            </div>
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-100 px-3 py-2 text-sm font-black text-slate-600">
               <span className="mr-1 text-slate-500">内容显示</span>
               <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={slide.showTitle !== false} onChange={(event) => update(index, { showTitle: event.target.checked })} />显示标题</label>

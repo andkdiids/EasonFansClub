@@ -47,6 +47,7 @@ type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
 type FriendListViewMode = 'alphabetical' | 'groups'
 type FriendDockTab = 'chat' | 'contacts'
 type GrowthDockView = 'today' | 'new-life'
+type FriendDockPrimaryTab = FriendDockTab | GrowthDockView
 type GrowthOverviewSignal = {
   today: { complete: boolean }
   newLife: { completedCount: number; total: number; items: Array<{ completed?: boolean; claimed?: boolean }> }
@@ -159,7 +160,7 @@ export function FriendDock({
   const [friendListViewMode, setFriendListViewMode] = useState<FriendListViewMode>('alphabetical')
   const [activeTab, setActiveTab] = useState<FriendDockTab>('chat')
   const [growthView, setGrowthView] = useState<GrowthDockView | null>(null)
-  const [growthSignals, setGrowthSignals] = useState<GrowthOverviewSignal | null>(null)
+  const [, setGrowthSignals] = useState<GrowthOverviewSignal | null>(null)
   const [activeAlphabetLetter, setActiveAlphabetLetter] = useState<FriendDirectoryLetter | null>(null)
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -303,6 +304,7 @@ export function FriendDock({
     conversationRequestRef.current += 1
     clearFriendListReturnState()
     setOpen(false)
+    setGrowthView(null)
     setProfileFriend(null)
     setFriendGroupDialog(null)
     setFriendGroupDialogName('')
@@ -329,6 +331,7 @@ export function FriendDock({
     setFriendGroupDialogError('')
     setDeleteFriendGroupTarget(null)
     setDeleteChatTarget(null)
+    setGrowthView(null)
     setActiveTab('chat')
     setConversations([])
     setConversationsLoaded(false)
@@ -740,6 +743,14 @@ export function FriendDock({
     setGrowthView(view)
     setOpen(true)
   }, [resetChat])
+
+  const selectPrimaryTab = useCallback((tab: FriendDockPrimaryTab) => {
+    if (tab === 'today' || tab === 'new-life') {
+      openGrowthView(tab)
+      return
+    }
+    changeFriendDockTab(tab)
+  }, [changeFriendDockTab, openGrowthView])
 
   useEffect(() => {
     friendsRef.current = friends
@@ -1608,11 +1619,6 @@ export function FriendDock({
                 <span><strong><UserDisplayName name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} uid={chatFriend.uid} badges={chatFriend.equippedBadges} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
-          ) : growthView ? (
-            <>
-              <button type="button" onClick={() => setGrowthView(null)} aria-label="返回好友列表">←</button>
-              <strong className="friend-dock-title">{growthView === 'today' ? '今天只做一件事' : '新生活'}</strong>
-            </>
           ) : <strong className="friend-dock-title">好友与私信</strong>}
           {!chatFriend && !growthView ? <span className="friend-dock-count">{friendTotal}个病友</span> : null}
           <div className="friend-dock-header-actions">
@@ -1800,37 +1806,39 @@ export function FriendDock({
               />
             </div>
             </div>
-          ) : growthView ? (
-            <GrowthPanel view={growthView} onOverviewChange={setGrowthSignals} />
           ) : (
             <>
-              <div className="friend-dock-growth-links" aria-label="成长入口">
-                <button type="button" onClick={() => openGrowthView('today')}>
-                  <span>今天只做一件事</span>
-                  {growthSignals && !growthSignals.today.complete ? <i aria-label="还有内容未完成" /> : null}
-                </button>
-                <button type="button" onClick={() => openGrowthView('new-life')}>
-                  <span>新生活</span>
-                  {growthSignals && growthSignals.newLife.items.some((item) => item.completed && !item.claimed) ? <i aria-label="有奖励可领取" /> : null}
-                </button>
-              </div>
               <nav className="friend-dock-primary-tabs" role="tablist" aria-label="好友与私信栏目">
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={activeTab === 'chat'}
-                  className={activeTab === 'chat' ? 'is-active' : undefined}
-                  onClick={() => changeFriendDockTab('chat')}
-                >聊天</button>
+                  aria-selected={!growthView && activeTab === 'chat'}
+                  className={!growthView && activeTab === 'chat' ? 'is-active' : undefined}
+                  onClick={() => selectPrimaryTab('chat')}
+                >好友</button>
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={activeTab === 'contacts'}
-                  className={activeTab === 'contacts' ? 'is-active' : undefined}
-                  onClick={() => changeFriendDockTab('contacts')}
+                  aria-selected={!growthView && activeTab === 'contacts'}
+                  className={!growthView && activeTab === 'contacts' ? 'is-active' : undefined}
+                  onClick={() => selectPrimaryTab('contacts')}
                 >通讯录</button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={growthView === 'today'}
+                  className={growthView === 'today' ? 'is-active' : undefined}
+                  onClick={() => selectPrimaryTab('today')}
+                >今天只做一件事</button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={growthView === 'new-life'}
+                  className={growthView === 'new-life' ? 'is-active' : undefined}
+                  onClick={() => selectPrimaryTab('new-life')}
+                >新生活</button>
               </nav>
-              {activeTab === 'chat' ? (
+              {growthView ? <GrowthPanel view={growthView} onOverviewChange={setGrowthSignals} /> : activeTab === 'chat' ? (
                 <div className="friend-list-layout friend-chat-list-layout">
                   <div
                     ref={chatListRef}

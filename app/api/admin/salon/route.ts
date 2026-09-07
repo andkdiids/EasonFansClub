@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime, emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { completeTask, grantGrowthReward } from '@/lib/growth-tasks/service'
+import { toSalonReviewError, type SalonReviewErrorCode, type SalonReviewFailureStage } from '@/lib/salon-review-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +18,10 @@ const PAGE_SIZE = 20
 
 function parseStatus(value: string | null) {
   return SALON_POST_STATUSES.includes(value as typeof SALON_POST_STATUSES[number]) ? value as typeof SALON_POST_STATUSES[number] : 'PENDING'
+}
+
+function reviewErrorResponse(code: SalonReviewErrorCode, message: string, status = 400) {
+  return NextResponse.json({ ok: false, code, message }, { status })
 }
 
 function serializeAdminPost(post: {
@@ -135,95 +140,121 @@ export async function PATCH(request: Request) {
   const guard = await requireAdmin('post_manage')
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
-  if (!body) return NextResponse.json({ ok: false, message: '请求内容无效' }, { status: 400 })
+  if (!body) return reviewErrorResponse('INVALID_REQUEST', '请求内容无效')
   const postId = sanitizeText(body.postId, 191)
   const action = body.action === 'approve' || body.action === 'reject' || body.action === 'update' ? body.action : ''
-  if (!postId || !action) return NextResponse.json({ ok: false, message: '审核操作无效' }, { status: 400 })
+  if (!postId || !action) return reviewErrorResponse('INVALID_REVIEW_ACTION', '审核操作无效')
 
-  const current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, category: true, status: true, userId: true, title: true, concertId: true } })
-  if (!current) return NextResponse.json({ ok: false, message: '作品不存在' }, { status: 404 })
-
+  type CurrentSalonPost = { id: string; category: string; status: string; userId: string; title: string | null; concertId: string | null }
+  let failureStage: SalonReviewFailureStage = 'LOAD'
+  let current: CurrentSalonPost | null = null
   const data: Prisma.SalonPostUpdateInput = {}
-  let requestedCategory: ReturnType<typeof parseSalonCategory>
-  if (Object.prototype.hasOwnProperty.call(body, 'category')) {
-    const category = parseSalonCategory(body.category)
-    if (!category) return NextResponse.json({ ok: false, message: '投稿分类无效' }, { status: 400 })
-    requestedCategory = category
-    data.category = category
-  }
-  const hasAssociationInput = ['tourId', 'sessionId', 'concertId'].some((key) => Object.prototype.hasOwnProperty.call(body, key))
-  const selection = normalizeSalonConcertSelection({
-    tourId: sanitizeText(body.tourId, 191),
-    sessionId: sanitizeText(body.sessionId, 191),
-    concertId: sanitizeText(body.concertId, 191),
-  })
-  if (selection.hasConflict) return NextResponse.json({ ok: false, message: '演唱会和场次选择不一致，请重新选择' }, { status: 400 })
-  const effectiveCategory = requestedCategory || parseSalonCategory(current.category)
-  const categoryConfig = effectiveCategory ? SALON_CATEGORY_CONFIG[effectiveCategory] : null
-  if (!categoryConfig) return NextResponse.json({ ok: false, message: '投稿分类无效' }, { status: 400 })
-  if (!categoryConfig.allowsConcert && (selection.tourId || selection.sessionId)) return NextResponse.json({ ok: false, message: '该投稿分类不支持关联演唱会' }, { status: 400 })
-  if (body.sessionId && !selection.tourId) return NextResponse.json({ ok: false, message: '请选择对应的演唱会' }, { status: 400 })
-
-  let selectedConcertId: string | null = selection.sessionId
-  if (selection.sessionId) {
-    const concert = await prisma.musicConcert.findFirst({
-      where: {
-        id: selection.sessionId,
-        ...(selection.tourId ? { tourId: selection.tourId } : {}),
-        status: 'PUBLISHED',
-        MusicTour: { status: 'PUBLISHED' },
-      },
-      select: { id: true },
-    })
-    if (!concert) return NextResponse.json({ ok: false, message: '演唱会场次不存在、未公开或不属于所选演唱会' }, { status: 400 })
-    selectedConcertId = concert.id
-  } else if (selection.tourId) {
-    const tour = await prisma.musicTour.findFirst({ where: { id: selection.tourId, status: 'PUBLISHED' }, select: { id: true } })
-    if (!tour) return NextResponse.json({ ok: false, message: '演唱会不存在或暂未公开' }, { status: 400 })
-  } else if (!hasAssociationInput) {
-    selectedConcertId = current.concertId
-  }
-  if (categoryConfig.requiresConcert && !selectedConcertId) return NextResponse.json({ ok: false, message: '演唱会记录必须关联演唱会场次' }, { status: 400 })
-  if (hasAssociationInput) data.concert = selectedConcertId ? { connect: { id: selectedConcertId } } : { disconnect: true }
-  if (requestedCategory && !categoryConfig.allowsConcert) data.concert = { disconnect: true }
-  if (Object.prototype.hasOwnProperty.call(body, 'title')) data.title = sanitizeText(body.title, 200) || null
-  if (Object.prototype.hasOwnProperty.call(body, 'content')) data.content = sanitizeText(body.content, 5000) || null
-
   let reviewStatus: 'APPROVED' | 'REJECTED' | null = null
   let reviewedAt: Date | null = null
-  if (action === 'approve' || action === 'reject') {
-    if (current.status !== 'PENDING') return NextResponse.json({ ok: false, message: '只有待审核作品可以执行审核操作' }, { status: 409 })
-    reviewStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
-    const rejectReason = sanitizeText(body.rejectReason, 2000)
-    if (reviewStatus === 'REJECTED' && !rejectReason) return NextResponse.json({ ok: false, message: '拒绝时必须填写原因' }, { status: 400 })
-    reviewedAt = new Date()
-    data.status = reviewStatus
-    data.approvedAt = reviewStatus === 'APPROVED' ? reviewedAt : null
-    data.approvedBy = reviewStatus === 'APPROVED' ? { connect: { id: guard.user.id } } : { disconnect: true }
-    data.rejectReason = reviewStatus === 'REJECTED' ? rejectReason : null
-  }
-  if (!Object.keys(data).length) return NextResponse.json({ ok: false, message: '没有需要更新的内容' }, { status: 400 })
+  let updated: { id: string; status: string } | null = null
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const changed = await tx.salonPost.updateMany({ where: { id: postId, ...(reviewStatus ? { status: 'PENDING' } : {}) }, data })
-    if (!changed.count) throw new Error('SALON_POST_ALREADY_REVIEWED')
-    if (reviewStatus === 'APPROVED') {
-      await grantGrowthReward(tx, {
-        userId: current.userId,
-        taskCode: 'SALON_APPROVED',
-        sourceEventId: current.id,
-        reason: '沙龙作品通过审核',
-      })
-      await completeTask(tx, { userId: current.userId, taskCode: 'FIRST_SALON', periodKey: 'ALL', sourceEventId: current.id })
+  try {
+    current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, category: true, status: true, userId: true, title: true, concertId: true } })
+    if (!current) return reviewErrorResponse('POST_NOT_FOUND', '作品不存在')
+
+    failureStage = 'VALIDATION'
+    let requestedCategory: ReturnType<typeof parseSalonCategory>
+    if (Object.prototype.hasOwnProperty.call(body, 'category')) {
+      const category = parseSalonCategory(body.category)
+      if (!category) return reviewErrorResponse('CATEGORY_INVALID', '投稿分类无效')
+      requestedCategory = category
+      data.category = category
     }
-    return tx.salonPost.findUniqueOrThrow({ where: { id: postId }, select: { id: true, status: true } })
-  })
+    const hasAssociationInput = ['tourId', 'sessionId', 'concertId'].some((key) => Object.prototype.hasOwnProperty.call(body, key))
+    const selection = normalizeSalonConcertSelection({
+      tourId: sanitizeText(body.tourId, 191),
+      sessionId: sanitizeText(body.sessionId, 191),
+      concertId: sanitizeText(body.concertId, 191),
+    })
+    if (selection.hasConflict) return reviewErrorResponse('CONCERT_SELECTION_INVALID', '演唱会和场次选择不一致，请重新选择')
+    const effectiveCategory = requestedCategory || parseSalonCategory(current.category)
+    const categoryConfig = effectiveCategory ? SALON_CATEGORY_CONFIG[effectiveCategory] : null
+    if (!categoryConfig) return reviewErrorResponse('CATEGORY_INVALID', '投稿分类无效')
+    if (!categoryConfig.allowsConcert && (selection.tourId || selection.sessionId)) return reviewErrorResponse('CONCERT_NOT_ALLOWED', '该投稿分类不支持关联演唱会')
+    if (body.sessionId && !selection.tourId) return reviewErrorResponse('SESSION_REQUIRED', '请选择对应的演唱会')
+
+    let selectedConcertId: string | null = selection.sessionId
+    if (selection.sessionId) {
+      const concert = await prisma.musicConcert.findFirst({
+        where: {
+          id: selection.sessionId,
+          ...(selection.tourId ? { tourId: selection.tourId } : {}),
+          status: 'PUBLISHED',
+          MusicTour: { status: 'PUBLISHED' },
+        },
+        select: { id: true },
+      })
+      if (!concert) return reviewErrorResponse('SESSION_NOT_FOUND', '演唱会场次不存在、未公开或不属于所选演唱会')
+      selectedConcertId = concert.id
+    } else if (selection.tourId) {
+      const tour = await prisma.musicTour.findFirst({ where: { id: selection.tourId, status: 'PUBLISHED' }, select: { id: true } })
+      if (!tour) return reviewErrorResponse('CONCERT_NOT_FOUND', '演唱会不存在或暂未公开')
+    } else if (!hasAssociationInput) {
+      selectedConcertId = current.concertId
+    }
+    if (categoryConfig.requiresConcert && !selectedConcertId) return reviewErrorResponse('SESSION_REQUIRED', '演唱会记录必须关联演唱会场次')
+    if (hasAssociationInput) data.concert = selectedConcertId ? { connect: { id: selectedConcertId } } : { disconnect: true }
+    if (requestedCategory && !categoryConfig.allowsConcert) data.concert = { disconnect: true }
+    if (Object.prototype.hasOwnProperty.call(body, 'title')) data.title = sanitizeText(body.title, 200) || null
+    if (Object.prototype.hasOwnProperty.call(body, 'content')) data.content = sanitizeText(body.content, 5000) || null
+
+    if (action === 'approve' || action === 'reject') {
+      if (current.status !== 'PENDING') return reviewErrorResponse('REVIEW_NOT_ALLOWED', '只有待审核作品可以执行审核操作', 409)
+      reviewStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
+      const rejectReason = sanitizeText(body.rejectReason, 2000)
+      if (reviewStatus === 'REJECTED' && !rejectReason) return reviewErrorResponse('REJECTION_REASON_REQUIRED', '拒绝时必须填写原因')
+      reviewedAt = new Date()
+      data.status = reviewStatus
+      data.approvedAt = reviewStatus === 'APPROVED' ? reviewedAt : null
+      data.approvedBy = reviewStatus === 'APPROVED' ? { connect: { id: guard.user.id } } : { disconnect: true }
+      data.rejectReason = reviewStatus === 'REJECTED' ? rejectReason : null
+    }
+    if (!Object.keys(data).length) return reviewErrorResponse('NO_CHANGES', '没有需要更新的内容')
+
+    failureStage = 'DATABASE_UPDATE'
+    updated = await prisma.$transaction(async (tx) => {
+      const changed = await tx.salonPost.updateMany({ where: { id: postId, ...(reviewStatus ? { status: 'PENDING' } : {}) }, data })
+      if (!changed.count) throw new Error('SALON_POST_ALREADY_REVIEWED')
+      if (reviewStatus === 'APPROVED') {
+        failureStage = 'REWARD'
+        await grantGrowthReward(tx, {
+          userId: current!.userId,
+          taskCode: 'SALON_APPROVED',
+          sourceEventId: current!.id,
+          reason: '沙龙作品通过审核',
+        })
+        await completeTask(tx, { userId: current!.userId, taskCode: 'FIRST_SALON', periodKey: 'ALL', sourceEventId: current!.id })
+      }
+      failureStage = 'DATABASE_UPDATE'
+      return tx.salonPost.findUniqueOrThrow({ where: { id: postId }, select: { id: true, status: true } })
+    })
+  } catch (error) {
+    const mapped = toSalonReviewError(error, failureStage)
+    console.error('[admin.salon.review.failed]', {
+      postId,
+      action,
+      stage: failureStage,
+      code: mapped.code,
+      errorName: error instanceof Error ? error.name : 'unknown',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+    })
+    return reviewErrorResponse(mapped.code, mapped.message, mapped.status)
+  }
+
+  const reviewedCurrent = current
+  if (!reviewedCurrent || !updated) return reviewErrorResponse('DATABASE_ERROR', '数据库操作未完成，请稍后重试', 500)
   if (reviewStatus && reviewedAt) {
     const adminRecipientIds = await safeNotificationWrite(
       () => completeSalonReviewNotifications({
         postId,
         status: reviewStatus!,
-        title: current.title,
+        title: reviewedCurrent.title,
         completedAt: reviewedAt!,
       }),
       {
@@ -245,11 +276,11 @@ export async function PATCH(request: Request) {
       )
     }
     const content = reviewStatus === 'APPROVED'
-      ? `你提交的沙龙作品《${current.title || '无标题作品'}》已通过审核。`
-      : `你提交的沙龙作品《${current.title || '无标题作品'}》未通过审核。原因：${String(data.rejectReason || '')}`
+      ? `你提交的沙龙作品《${reviewedCurrent.title || '无标题作品'}》已通过审核。`
+      : `你提交的沙龙作品《${reviewedCurrent.title || '无标题作品'}》未通过审核。原因：${String(data.rejectReason || '')}`
     await safeNotificationWrite(() => createNotification({
       data: {
-        recipientId: current.userId,
+        recipientId: reviewedCurrent.userId,
         actorId: guard.user.id,
         // REVIEW is reserved for moderation queue entries. Personal review
         // results use the existing ADMIN notification semantics so ordinary
@@ -261,7 +292,10 @@ export async function PATCH(request: Request) {
         link: '/salon/mine',
       },
     }), { operation: 'salon.review.notification', userId: guard.user.id, notificationType: 'ADMIN' })
-    emitRealtime(current.userId, 'notification')
+    await safeNotificationWrite(
+      async () => { emitRealtime(reviewedCurrent.userId, 'notification') },
+      { operation: 'salon.review.notification-realtime', userId: guard.user.id, targetId: postId, notificationType: 'ADMIN' },
+    )
   }
   revalidatePath('/salon')
   revalidatePath('/salon/mine')

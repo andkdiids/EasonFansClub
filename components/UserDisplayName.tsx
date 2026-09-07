@@ -19,6 +19,8 @@ type UserDisplayNameProps = {
   badgeInteraction?: 'interactive' | 'static'
   compact?: boolean
   showBadgeIcon?: boolean
+  /** Optional per-context display cap; omitted means show every equipped badge. */
+  maxDisplay?: number
   className?: string
   nameClassName?: string
 }
@@ -146,7 +148,7 @@ function BadgeDetail({ badge, onClose }: { badge: UserDisplayNameBadge; onClose:
   return typeof document === 'undefined' ? null : createPortal(content, document.body)
 }
 
-export function UserDisplayName({ name, uid, href, badge, badges, showBadge = true, showBadgeName = false, badgeInteraction = 'interactive', compact = false, showBadgeIcon = true, className = '', nameClassName = '' }: UserDisplayNameProps) {
+export function UserDisplayName({ name, uid, href, badge, badges, showBadge = true, showBadgeName = false, badgeInteraction = 'interactive', compact = false, showBadgeIcon = true, maxDisplay, className = '', nameClassName = '' }: UserDisplayNameProps) {
   const [detailBadge, setDetailBadge] = useState<UserDisplayNameBadge | null>(null)
   const initialBadges = Array.isArray(badges) ? badges : badge ? [badge] : []
   const [liveBadges, setLiveBadges] = useState<UserDisplayNameBadge[]>(initialBadges)
@@ -162,11 +164,14 @@ export function UserDisplayName({ name, uid, href, badge, badges, showBadge = tr
     window.addEventListener('eason-badge-updated', updateBadge)
     return () => window.removeEventListener('eason-badge-updated', updateBadge)
   }, [uid])
+  const orderedBadges = liveBadges
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => (left.item.position ?? left.index) - (right.item.position ?? right.index) || left.index - right.index)
+    .map(({ item }) => item)
   const displayBadges = showBadge
-    ? liveBadges
-      .map((item, index) => ({ item, index }))
-      .sort((left, right) => (left.item.position ?? left.index) - (right.item.position ?? right.index) || left.index - right.index)
-      .map(({ item }) => item)
+    ? Number.isFinite(maxDisplay)
+      ? orderedBadges.slice(0, Math.max(0, Math.floor(maxDisplay as number)))
+      : orderedBadges
     : []
   const nicknameBadge = displayBadges.find((item) => isBadgeNicknameShineEnabled(item) || Boolean(normalizeBadgeColor(item.nicknameColor))) || displayBadges[0]
   const isStaticBadge = badgeInteraction === 'static'

@@ -430,7 +430,7 @@ export function PostRepliesSection({
           </Link>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-              <Link href={`/user/${formatUid(reply.author.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /></Link>
+              <Link href={`/user/${formatUid(reply.author.uid)}`} className="font-black text-brand-950"><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact maxDisplay={1} /></Link>
               <span className="font-bold text-slate-400">{formatDate(new Date(reply.createdAt))}</span>
               <IpRegionLabel ipRegion={reply.ipRegion} />
             </div>
@@ -499,7 +499,7 @@ export function PostRepliesSection({
               <span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-brand-950 text-white">
                 <SafeAvatar src={avatar} name={name} uid={reply.author.uid} />
               </span>
-              <span><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /></span>
+              <span><UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact maxDisplay={1} /></span>
             </Link>
             {reply.isPinned ? <span className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
             <span>{reply.parentId === null && reply.floorNumber !== null ? `${reply.floorNumber}楼 · ` : ''}{formatDate(new Date(reply.createdAt))}</span>
@@ -664,7 +664,7 @@ export function PostRepliesSection({
               const reply = replyMap.get(id)
               if (!reply) return null
               const name = reply.author.nickname || 'E院用户'
-              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · <UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact /> · {reply.likeCount} 赞</a>
+              return <a key={id} href={`#reply-${id}`} className="post-replies-hot-link px-3 py-2 text-xs font-black text-brand-700">热门 #{index + 1} · <UserDisplayName name={name} uid={reply.author.uid} badges={reply.author.equippedBadges} badge={reply.author.equippedBadge} compact maxDisplay={1} /> · {reply.likeCount} 赞</a>
             })}
           </div>
         </div>

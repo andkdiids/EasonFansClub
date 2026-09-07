@@ -6,11 +6,14 @@ import { awardRegistrationFee, reverseRegistrationFee } from '@/lib/registration
 import {
   TASK_SYSTEM_LAUNCH_AT,
   WEEKLY_MILESTONES,
+  getActiveActionTasks,
+  getCoreActiveTasks,
   getEconomyReport,
   getGrowthTask,
   getTasksByKind,
   type GrowthTaskCode,
 } from './registry'
+import { getCompletedCoreDayKeys } from './progress'
 
 type GrowthTransaction = Prisma.TransactionClient
 
@@ -136,7 +139,8 @@ export async function grantGrowthReward(
   },
 ) {
   const task = getGrowthTask(input.taskCode)
-  if (!task || task.kind !== 'passive') throw new Error('GROWTH_REWARD_TASK_NOT_PASSIVE')
+  const isActiveAction = task?.kind === 'active' && task.surface === 'action'
+  if (!task || (task.kind !== 'passive' && !isActiveAction)) throw new Error('GROWTH_REWARD_TASK_NOT_REWARDABLE')
   const now = input.now || new Date()
   const sourceEventId = normalizeSource(input.sourceEventId)
   const periodKey = task.frequency === 'daily' ? getShanghaiDateKey(now) : getShanghaiWeekKey(now)
@@ -281,12 +285,10 @@ export async function claimGrowthTask(userId: string, taskCode: GrowthTaskCode, 
   })
 }
 
-async function completedActiveDays(tx: GrowthTransaction, userId: string, weekKey: string) {
-  const activeCodes = getTasksByKind('active').map((task) => task.code)
-  const rows = await tx.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: activeCodes }, periodKey: { in: dayKeysForWeek(weekKey) } }, select: { taskCode: true, periodKey: true } })
-  const byDay = new Map<string, Set<string>>()
-  for (const row of rows) byDay.set(row.periodKey, (byDay.get(row.periodKey) || new Set()).add(row.taskCode))
-  return dayKeysForWeek(weekKey).filter((day) => activeCodes.every((code) => byDay.get(day)?.has(code))).length
+async function completedActiveDays(tx: GrowthTransaction, userId: string, weekKey: string, now = new Date()) {
+  const coreCodes = getCoreActiveTasks().map((task) => task.code)
+  const rows = await tx.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: coreCodes }, periodKey: { in: dayKeysForWeek(weekKey) } }, select: { taskCode: true, periodKey: true } })
+  return getCompletedCoreDayKeys(weekKey, rows, now).size
 }
 
 export async function claimWeeklyMilestone(userId: string, milestone: number, now = new Date()) {
@@ -294,7 +296,7 @@ export async function claimWeeklyMilestone(userId: string, milestone: number, no
   if (!definition) throw new Error('INVALID_WEEKLY_MILESTONE')
   const weekKey = getShanghaiWeekKey(now)
   return prismaTransaction(async (tx) => {
-    const days = await completedActiveDays(tx, userId, weekKey)
+    const days = await completedActiveDays(tx, userId, weekKey, now)
     if (days < definition.days) throw new Error('WEEKLY_MILESTONE_NOT_REACHED')
     const claim = await tx.growthWeeklyMilestoneClaim.upsert({
       where: { userId_weekKey_milestone: { userId, weekKey, milestone } },
@@ -346,7 +348,8 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     DAILY_GAME: 0,
     DAILY_COMMENT: dailyRewardTotal(['COMMENT_POST']),
   }
-  const active = getTasksByKind('active')
+  const active = getCoreActiveTasks()
+  const activeActions = getActiveActionTasks()
   const passive = getTasksByKind('passive')
   const completionRows = completions.filter((row) => row.periodKey === dateKey)
   const activeItems = active.map((task) => ({
@@ -355,13 +358,20 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     completed: completionRows.some((row) => row.taskCode === task.code),
     todayReward: activeRewardByCode[task.code] || 0,
   }))
-  const activeCodes = new Set<string>(active.map((task) => task.code))
-  const activeByDay = new Map<string, Set<string>>()
-  completions.forEach((row) => {
-    if (!activeCodes.has(row.taskCode) || !dayKeysForWeek(weekKey).includes(row.periodKey)) return
-    activeByDay.set(row.periodKey, (activeByDay.get(row.periodKey) || new Set()).add(row.taskCode))
+  const activeActionItems = activeActions.map((task) => {
+    const positiveRows = pointLogs.filter((row) => row.growthTaskCode === task.code && row.points > 0 && row.createdAt >= todayRange.start && row.createdAt < todayRange.end)
+    const earned = positiveRows.reduce((sum, row) => sum + row.points, 0)
+    const cap = task.dailyCap || 0
+    return {
+      ...task,
+      progress: positiveRows.length,
+      earned,
+      cap,
+      completed: cap > 0 && positiveRows.length >= cap,
+      todayReward: earned,
+    }
   })
-  const activeDays = dayKeysForWeek(weekKey).filter((day) => activeCodes.size > 0 && activeCodes.size === activeByDay.get(day)?.size).length
+  const activeDays = getCompletedCoreDayKeys(weekKey, completions, now).size
   const passiveItems = passive.map((task) => {
     const start = task.frequency === 'daily' ? getShanghaiDayRange(now).start : weekRange(weekKey).start
     const end = task.frequency === 'daily' ? getShanghaiDayRange(now).end : weekRange(weekKey).end
@@ -382,7 +392,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
   return {
     timezone: 'Asia/Shanghai',
     taskSystemLaunchAt: TASK_SYSTEM_LAUNCH_AT.toISOString(),
-    today: { dateKey, items: activeItems, complete: activeItems.every((item) => item.completed) },
+    today: { dateKey, items: activeItems, activeActions: activeActionItems, complete: activeItems.every((item) => item.completed) },
     passive: { dateKey, weekKey, items: passiveItems },
     week: {
       weekKey,

@@ -17,7 +17,7 @@ const duplicateBranch = postLikeRoute.slice(
 
 const forbiddenRewardEffects = /awardRegistrationFee|awardExperience|POST_LIKE_RECEIVED|postLikeReceived|tx\.pointLog\.(?:create|update)|tx\.user\.update/
 
-test('A liking B post only creates Like, updates count, and upserts its aggregate notification', () => {
+test('A liking B post creates Like, updates count, notifies, and grants the bounded actor reward', () => {
   assert.match(postLikePost, /await tx\.like\.create\(/)
   assert.match(postLikePost, /await tx\.like\.count\(/)
   assert.match(postLikePost, /await tx\.post\.update\(/)
@@ -26,6 +26,10 @@ test('A liking B post only creates Like, updates count, and upserts its aggregat
   assert.match(likeNotifications, /upsertNotificationWithDb\(/)
   assert.match(read('lib/notification-write.ts'), /db\.notification\.upsert\(/)
   assert.match(likeNotifications, /type: 'LIKE'/)
+  assert.match(postLikePost, /taskCode: 'POST_LIKED'/)
+  assert.match(postLikePost, /taskCode: 'POST_LIKE_ACTIVE'/)
+  assert.match(postLikePost, /sourceEventId: `post:\$\{postId\}:date:\$\{dateKey\}`/)
+  assert.match(postLikePost, /if \(post\.authorId !== user\.id\)/)
   assert.doesNotMatch(postLikePost, forbiddenRewardEffects)
 })
 
@@ -45,9 +49,9 @@ test('重复点赞保持幂等，不进入创建或任何奖励副作用', () =>
   assert.doesNotMatch(duplicateBranch, forbiddenRewardEffects)
 })
 
-test('所有当前点赞/互动接口都不写入挂号费或经验奖励', () => {
+test('其他点赞互动继续只保留既有被动奖励，帖子点赞新增行为奖励走统一成长服务', () => {
+  assert.match(read('app/api/posts/[postId]/like/route.ts'), /grantGrowthReward/)
   for (const path of [
-    'app/api/posts/[postId]/like/route.ts',
     'app/api/replies/[replyId]/like/route.ts',
     'app/api/daily-messages/[messageId]/like/route.ts',
     'app/api/profile-wall/[messageId]/like/route.ts',

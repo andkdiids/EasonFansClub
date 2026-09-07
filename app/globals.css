@@ -8475,3 +8475,183 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
     grid-template-columns: 52px minmax(0, 1fr);
   }
 }
+
+/* Final cascade for the four peer FriendDock tabs and compact growth rows. */
+.friend-dock-primary-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+}
+.friend-dock-primary-tabs button {
+  min-width: 0;
+  overflow: hidden;
+  padding-inline: 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.growth-today-panel {
+  padding: 8px 12px 14px;
+  background: var(--surface-elevated);
+}
+.growth-today-summary {
+  border-bottom: 1px solid var(--border);
+  padding: 2px 0 8px;
+}
+.growth-summary-line {
+  display: flex;
+  min-height: 24px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--foreground-muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+.growth-summary-line strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+.growth-week-track {
+  height: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  background: var(--border);
+}
+.growth-week-track span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+.growth-panel-section {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+}
+.growth-panel-section > h3 {
+  margin: 0 0 3px;
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 950;
+}
+.growth-panel-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 950;
+  list-style: none;
+}
+.growth-panel-section > summary::-webkit-details-marker {
+  display: none;
+}
+.growth-panel-section > summary span {
+  color: var(--foreground-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+.growth-reward-rules[open] > summary span,
+.growth-passive-section[open] > summary span {
+  transform: rotate(90deg);
+}
+.growth-rule-list {
+  display: grid;
+  margin-top: 4px;
+}
+.growth-rule-row {
+  display: flex;
+  width: 100%;
+  min-height: 29px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+  color: var(--foreground-muted);
+  background: transparent;
+  font-size: 10px;
+  text-align: left;
+}
+.growth-rule-row:last-child {
+  border-bottom: 0;
+}
+.growth-rule-row strong {
+  color: var(--foreground);
+  font-size: 10px;
+}
+.growth-rule-row:disabled {
+  opacity: .6;
+}
+.growth-today-panel .growth-item-list {
+  gap: 0;
+  margin-top: 0;
+}
+.growth-today-panel .growth-item {
+  min-height: 40px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--foreground);
+  text-decoration: none;
+}
+.growth-today-panel .growth-item:last-child {
+  border-bottom: 0;
+}
+.growth-today-panel .growth-item:hover {
+  background: var(--surface-subtle);
+}
+.growth-today-panel .growth-item-mark {
+  font-size: 14px;
+}
+.growth-today-panel .growth-item-copy {
+  gap: 0;
+}
+.growth-today-panel .growth-item-copy strong {
+  font-size: 11px;
+  font-weight: 850;
+}
+.growth-today-panel .growth-item-copy small {
+  margin-top: 2px;
+  font-size: 9px;
+}
+.growth-today-panel .growth-item.is-done .growth-item-copy strong {
+  color: var(--foreground-muted);
+  font-weight: 750;
+}
+.growth-today-panel .growth-item-reward {
+  max-width: none;
+  color: var(--foreground-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.growth-new-life-head {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground-muted);
+  font-size: 11px;
+}
+.growth-new-life-head strong {
+  margin-right: auto;
+  color: var(--foreground);
+  font-size: 12px;
+}
+@media (max-width:767px) {
+  .friend-dock-primary-tabs button {
+    min-height: 39px;
+    padding-inline: 2px;
+    font-size: 10px;
+  }
+  .growth-today-panel {
+    padding-inline: 10px;
+  }
+  .growth-today-panel .growth-item {
+    min-height: 38px;
+  }
+}

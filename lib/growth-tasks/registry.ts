@@ -4,13 +4,20 @@
  * tests all consume the same source of truth.
  */
 
-export const TASK_SYSTEM_LAUNCH_AT = new Date('2026-09-07T00:00:00+08:00')
+export const TASK_SYSTEM_LAUNCH_DATE_KEY = '2026-09-08'
+export const TASK_SYSTEM_GRACE_DATE_KEY = '2026-09-07'
+// The grace date is the Monday key of its one affected Shanghai week. Keeping
+// it explicit makes the exception impossible to repeat on a future Monday.
+export const TASK_SYSTEM_GRACE_WEEK_KEY = TASK_SYSTEM_GRACE_DATE_KEY
+export const TASK_SYSTEM_LAUNCH_AT = new Date(`${TASK_SYSTEM_LAUNCH_DATE_KEY}T00:00:00+08:00`)
 
 export type GrowthTaskCode =
   | 'DAILY_CHECKIN'
   | 'DAILY_PRESCRIPTION'
   | 'DAILY_GAME'
   | 'DAILY_COMMENT'
+  | 'POST_LIKE_ACTIVE'
+  | 'CONTENT_SHARE_ACTIVE'
   | 'POST_LIKED'
   | 'POST_COLLECTED'
   | 'COMMENT_LIKED'
@@ -38,6 +45,7 @@ export type GrowthTaskCode =
   | 'FIRST_CONCERT_SEEN'
 
 export type GrowthTaskKind = 'active' | 'passive' | 'newLife'
+export type GrowthTaskSurface = 'core' | 'action'
 export type GrowthFrequency = 'daily' | 'weekly' | 'once'
 export type GrowthClaimMode = 'none' | 'manual'
 
@@ -46,6 +54,7 @@ export type GrowthTaskDefinition = {
   title: string
   description: string
   kind: GrowthTaskKind
+  surface?: GrowthTaskSurface
   frequency: GrowthFrequency
   reward: number
   dailyCap?: number
@@ -55,16 +64,21 @@ export type GrowthTaskDefinition = {
   completionMode: 'event' | 'currentState'
   claimMode: GrowthClaimMode
   existingReward?: string
+  displayReward?: string
+  actionHref?: string
 }
 
 const launch = TASK_SYSTEM_LAUNCH_AT
 const historical = new Date('1970-01-01T00:00:00.000Z')
 
 export const GROWTH_TASKS: readonly GrowthTaskDefinition[] = [
-  { code: 'DAILY_CHECKIN', title: '每日挂号', description: '完成今天的挂号', kind: 'active', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用每日挂号现有奖励' },
-  { code: 'DAILY_PRESCRIPTION', title: '每日处方', description: '领取今天的娱乐处方', kind: 'active', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用每日处方现有奖励' },
-  { code: 'DAILY_GAME', title: '完成一局游戏', description: '完成今天的一局娱乐游戏', kind: 'active', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用游戏现有奖励' },
-  { code: 'DAILY_COMMENT', title: '回复一条帖子', description: '在今天参与一次有效讨论', kind: 'active', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用回复现有奖励' },
+  { code: 'DAILY_CHECKIN', title: '每日挂号', description: '完成今天的挂号', kind: 'active', surface: 'core', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用每日挂号现有奖励', displayReward: '+14', actionHref: '/checkin' },
+  { code: 'DAILY_PRESCRIPTION', title: '每日处方', description: '领取今天的娱乐处方', kind: 'active', surface: 'core', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用每日处方现有奖励', displayReward: '+7～+27', actionHref: '/games/daily-prescription' },
+  { code: 'DAILY_GAME', title: '完成一局游戏', description: '完成今天的一局娱乐游戏', kind: 'active', surface: 'core', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用游戏现有奖励', actionHref: '/games' },
+  { code: 'DAILY_COMMENT', title: '回复一条帖子', description: '在今天参与一次有效讨论', kind: 'active', surface: 'core', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用回复现有奖励', actionHref: '/forum' },
+
+  { code: 'POST_LIKE_ACTIVE', title: '帖子点赞', description: '给其他用户的帖子点赞', kind: 'active', surface: 'action', frequency: 'daily', reward: 1, dailyCap: 5, capUnit: 'events', eligibleFrom: launch, completionMode: 'event', claimMode: 'none', actionHref: '/forum' },
+  { code: 'CONTENT_SHARE_ACTIVE', title: '分享内容', description: '完成一次站内分享', kind: 'active', surface: 'action', frequency: 'daily', reward: 2, dailyCap: 1, capUnit: 'events', eligibleFrom: launch, completionMode: 'event', claimMode: 'none', actionHref: '/forum' },
 
   { code: 'POST_LIKED', title: '帖子被点赞', description: '帖子每获得一位有效用户点赞 +1', kind: 'passive', frequency: 'daily', reward: 1, dailyCap: 5, capUnit: 'points', eligibleFrom: launch, completionMode: 'event', claimMode: 'none' },
   { code: 'POST_COLLECTED', title: '帖子被收藏', description: '帖子每被收藏一次 +2，本周最多 10', kind: 'passive', frequency: 'weekly', reward: 2, weeklyCap: 10, capUnit: 'points', eligibleFrom: launch, completionMode: 'event', claimMode: 'none' },
@@ -108,6 +122,18 @@ export function getGrowthTask(code: GrowthTaskCode) {
 
 export function getTasksByKind(kind: GrowthTaskKind) {
   return GROWTH_TASKS.filter((task) => task.kind === kind)
+}
+
+export function getTasksBySurface(surface: GrowthTaskSurface) {
+  return GROWTH_TASKS.filter((task) => task.surface === surface)
+}
+
+export function getCoreActiveTasks() {
+  return GROWTH_TASKS.filter((task) => task.kind === 'active' && task.surface === 'core')
+}
+
+export function getActiveActionTasks() {
+  return GROWTH_TASKS.filter((task) => task.kind === 'active' && task.surface === 'action')
 }
 
 export function getEconomyReport() {

@@ -35,7 +35,7 @@ test('回复作者仍可点击跳转个人主页并保留头像', () => {
 })
 
 test('昵称与已佩戴勋章展示保留（两级评论共用 UserDisplayName）', () => {
-  const displayNames = (replySection.match(/<UserDisplayName name=\{name\} uid=\{reply\.author\.uid\} badges=\{reply\.author\.equippedBadges\} badge=\{reply\.author\.equippedBadge\} compact \/>/g) || []).length
+  const displayNames = (replySection.match(/<UserDisplayName name=\{name\} uid=\{reply\.author\.uid\} badges=\{reply\.author\.equippedBadges\} badge=\{reply\.author\.equippedBadge\} compact maxDisplay=\{1\} \/>/g) || []).length
   assert.ok(displayNames >= 2)
 })
 

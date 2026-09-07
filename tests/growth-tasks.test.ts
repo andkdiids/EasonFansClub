@@ -3,17 +3,25 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   GROWTH_TASKS,
+  TASK_SYSTEM_GRACE_DATE_KEY,
+  TASK_SYSTEM_GRACE_WEEK_KEY,
   TASK_SYSTEM_LAUNCH_AT,
+  TASK_SYSTEM_LAUNCH_DATE_KEY,
   WEEKLY_MILESTONES,
   getEconomyReport,
+  getActiveActionTasks,
+  getCoreActiveTasks,
   getTasksByKind,
 } from '@/lib/growth-tasks/registry'
+import { getCompletedCoreDayKeys, getLaunchGraceDayForWeek } from '@/lib/growth-tasks/progress'
 
-test('统一成长注册表包含四项主动、九项被动和十六项新生活', () => {
-  assert.equal(getTasksByKind('active').length, 4)
+test('统一成长注册表包含四项核心、两项主动行为、九项被动和十六项新生活', () => {
+  assert.equal(getCoreActiveTasks().length, 4)
+  assert.equal(getActiveActionTasks().length, 2)
+  assert.equal(getTasksByKind('active').length, 6)
   assert.equal(getTasksByKind('passive').length, 9)
   assert.equal(getTasksByKind('newLife').length, 16)
-  assert.equal(GROWTH_TASKS.length, 29)
+  assert.equal(GROWTH_TASKS.length, 31)
 })
 
 test('经济报告从注册表计算出产品约束中的总额', () => {
@@ -28,7 +36,10 @@ test('经济报告从注册表计算出产品约束中的总额', () => {
 })
 
 test('非资料类新生活项目从统一上线时间开始，资料完善允许历史刷新', () => {
-  assert.equal(TASK_SYSTEM_LAUNCH_AT.toISOString(), '2026-09-06T16:00:00.000Z')
+  assert.equal(TASK_SYSTEM_LAUNCH_DATE_KEY, '2026-09-08')
+  assert.equal(TASK_SYSTEM_GRACE_DATE_KEY, '2026-09-07')
+  assert.equal(TASK_SYSTEM_GRACE_WEEK_KEY, '2026-09-07')
+  assert.equal(TASK_SYSTEM_LAUNCH_AT.toISOString(), '2026-09-07T16:00:00.000Z')
   const profile = GROWTH_TASKS.find((task) => task.code === 'PROFILE_COMPLETE')
   const firstPost = GROWTH_TASKS.find((task) => task.code === 'FIRST_POST')
   assert.ok(profile && firstPost)
@@ -36,13 +47,38 @@ test('非资料类新生活项目从统一上线时间开始，资料完善允�
   assert.equal(firstPost?.eligibleFrom.toISOString(), TASK_SYSTEM_LAUNCH_AT.toISOString())
 })
 
+test('上线补偿只在 2026-09-07 这一周生效，且不伪造核心任务完成记录', () => {
+  const coreCodes = getCoreActiveTasks().map((task) => task.code)
+  const tuesday = new Date('2026-09-08T04:00:00.000Z')
+  assert.equal(getLaunchGraceDayForWeek('2026-09-07', tuesday), '2026-09-07')
+  assert.equal(getLaunchGraceDayForWeek('2026-09-14', tuesday), null)
+
+  const mondayOnly = getCompletedCoreDayKeys('2026-09-07', [], tuesday)
+  assert.deepEqual([...mondayOnly], ['2026-09-07'])
+
+  const threeOfFour = coreCodes.slice(0, 3).map((taskCode) => ({ taskCode, periodKey: '2026-09-08' }))
+  assert.equal(getCompletedCoreDayKeys('2026-09-07', threeOfFour, tuesday).size, 1)
+
+  const fourOfFour = coreCodes.map((taskCode) => ({ taskCode, periodKey: '2026-09-08' }))
+  assert.deepEqual([...getCompletedCoreDayKeys('2026-09-07', fourOfFour, tuesday)].sort(), ['2026-09-07', '2026-09-08'])
+  assert.equal(getCompletedCoreDayKeys('2026-09-14', [], new Date('2026-09-14T04:00:00.000Z')).size, 0)
+})
+
 test('新成长入口不把“任务”作为前台产品文案', () => {
   const friendDock = readFileSync('components/FriendDock.tsx', 'utf8')
   const growthPanel = readFileSync('components/GrowthPanel.tsx', 'utf8')
+  const css = readFileSync('app/globals.css', 'utf8')
   assert.match(friendDock, /今天只做一件事/)
   assert.match(friendDock, /新生活/)
+  assert.match(friendDock, /<\/button>[\s\S]*?>通讯录<\/button>[\s\S]*?>今天只做一件事<\/button>[\s\S]*?>新生活<\/button>/)
+  assert.doesNotMatch(friendDock, /friend-dock-growth-links/)
   assert.doesNotMatch(friendDock, /任务中心|每日任务|一次性任务|任务列表/)
   assert.doesNotMatch(growthPanel, /任务中心|每日任务|一次性任务|任务列表|任务奖励|任务完成/)
+  assert.doesNotMatch(growthPanel, /今天的四个动作|本周连续感|本周连续数|进行中|完整的脚印/)
+  assert.match(growthPanel, /本周进度/)
+  assert.match(growthPanel, /主动任务/)
+  assert.match(growthPanel, /被动奖励/)
+  assert.match(css, /\.friend-dock-primary-tabs[\s\S]*grid-template-columns: repeat\(4/)
 })
 
 test('周奖励采用三档累计，而不是只领取最高一档', () => {

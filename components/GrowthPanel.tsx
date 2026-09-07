@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 
 type GrowthView = 'today' | 'new-life'
@@ -9,6 +10,8 @@ type GrowthItem = {
   title: string
   description: string
   reward: number
+  displayReward?: string
+  actionHref?: string
   frequency?: 'daily' | 'weekly' | 'once'
   existingReward?: string
   todayReward?: number
@@ -22,7 +25,7 @@ type GrowthItem = {
 }
 
 type GrowthOverview = {
-  today: { dateKey: string; complete: boolean; items: GrowthItem[] }
+  today: { dateKey: string; complete: boolean; items: GrowthItem[]; activeActions?: GrowthItem[] }
   passive: { items: GrowthItem[] }
   week: {
     completedDays: number
@@ -32,16 +35,48 @@ type GrowthOverview = {
   newLife: { total: number; completedCount: number; items: GrowthItem[] }
 }
 
-function formatActiveReward(item: GrowthItem) {
-  if ((item.todayReward || 0) > 0) return `今日 +${item.todayReward}`
-  return item.existingReward || '今日未产生积分'
+function formatCoreReward(item: GrowthItem) {
+  if (item.code === 'DAILY_GAME' || item.code === 'DAILY_COMMENT') return '›'
+  if (item.completed && (item.todayReward || 0) > 0) return `已完成 · +${item.todayReward}`
+  if (item.completed) return `已完成 · ${item.displayReward || ''}`.trim()
+  if ((item.todayReward || 0) > 0) return `+${item.todayReward}`
+  return item.displayReward || ''
+}
+
+function formatActiveAction(item: GrowthItem) {
+  const progress = `${item.progress || 0}/${item.cap || 0}`
+  if (item.code === 'POST_LIKE_ACTIVE') return item.completed
+    ? `${progress}  +${item.earned || item.progress || 0}`
+    : `${progress}  +1/次  ›`
+  if (item.code === 'CONTENT_SHARE_ACTIVE') return item.completed
+    ? `${progress}  +${item.earned || 2}`
+    : `${progress}  +2  ›`
+  return `${progress}  ›`
 }
 
 function formatPassiveProgress(item: GrowthItem) {
   const period = item.frequency === 'weekly' ? '本周' : '今日'
-  const current = item.progress || 0
-  if (item.capUnit === 'events') return `${period} ${current}/${item.cap || 0}`
-  return `${period} +${item.earned || 0} · ${current}/${item.cap || 0}`
+  return `${period} ${Math.max(0, item.progress || 0)}/${item.cap || 0}`
+}
+
+function GrowthActionRow({
+  item,
+  right,
+  completed = false,
+}: {
+  item: GrowthItem
+  right: string
+  completed?: boolean
+}) {
+  const content = (
+    <>
+      <span className={`growth-item-mark ${completed ? '' : 'growth-item-mark-muted'}`} aria-hidden="true">{completed ? '✓' : '○'}</span>
+      <span className="growth-item-copy"><strong>{item.title}</strong></span>
+      <span className="growth-item-reward">{right}</span>
+    </>
+  )
+  const className = `growth-item ${completed ? 'is-done' : ''}`
+  return item.actionHref ? <Link href={item.actionHref} className={className}>{content}</Link> : <div className={className}>{content}</div>
 }
 
 export function GrowthPanel({
@@ -115,106 +150,58 @@ export function GrowthPanel({
     )
   }
 
+  const activeActions = overview.today.activeActions || []
+  const completedToday = overview.today.items.filter((item) => item.completed).length
+  const weekPercent = Math.min(100, overview.week.completedDays / Math.max(1, overview.week.totalDays) * 100)
+
   return (
-    <div className="growth-panel">
+    <div className={`growth-panel ${view === 'today' ? 'growth-today-panel' : 'growth-new-life-panel'}`}>
       {view === 'today' ? (
         <>
-          <div className="growth-panel-intro">
-            <div>
-              <h2>今天只做一件事</h2>
-              <p>把今天的四个小动作做完，本周就会留下一个完整的脚印。</p>
+          <section className="growth-today-summary" aria-label="今日与本周进度">
+            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {overview.today.items.length}</strong></div>
+            <div className="growth-summary-line"><span>本周进度</span><strong>{overview.week.completedDays} / {overview.week.totalDays} 天</strong></div>
+            <div className="growth-week-track" role="progressbar" aria-valuemin={0} aria-valuemax={overview.week.totalDays} aria-valuenow={overview.week.completedDays} aria-label={`本周进度 ${overview.week.completedDays} / ${overview.week.totalDays} 天`}>
+              <span style={{ width: `${weekPercent}%` }} />
             </div>
-            <span className={overview.today.complete ? 'growth-status is-done' : 'growth-status'}>
-              {overview.today.complete ? '今日完成' : '进行中'}
-            </span>
-          </div>
+          </section>
 
-          <section className="growth-panel-section" aria-labelledby="growth-week-title">
-            <div className="growth-section-heading">
-              <div>
-                <h3 id="growth-week-title">本周连续感</h3>
-                <p>完成当天四项后，才算留下这一天。</p>
-              </div>
-              <strong>{overview.week.completedDays}/{overview.week.totalDays} 天</strong>
+          <details className="growth-panel-section growth-reward-rules">
+            <summary>奖励规则 <span aria-hidden="true">›</span></summary>
+            <div className="growth-rule-list">
+              {overview.week.milestones.map((milestone) => {
+                const content = (
+                  <><span>完成 {milestone.days} 天</span><strong>{milestone.claimable ? '✓ ' : ''}+{milestone.reward}{milestone.claimed ? ' · 已领取' : ''}</strong></>
+                )
+                return milestone.claimable && !milestone.claimed ? (
+                  <button type="button" className="growth-rule-row" key={milestone.days} onClick={() => void claim({ milestone: milestone.days }, `milestone-${milestone.days}`)} disabled={busyKey === `milestone-${milestone.days}`}>
+                    {content}
+                  </button>
+                ) : <div className="growth-rule-row" key={milestone.days}>{content}</div>
+              })}
             </div>
-            <div className="growth-week-progress-wrap">
-              <div className="growth-week-track" tabIndex={0} role="img" aria-label={`本周完成 ${overview.week.completedDays} 天，共 ${overview.week.totalDays} 天`}>
-              <span style={{ width: `${Math.min(100, overview.week.completedDays / overview.week.totalDays * 100)}%` }} />
-                <div className="growth-week-reward-tooltip" role="tooltip">
-                  <strong>本周奖励</strong>
-                  <span>完成 3 天 +27</span>
-                  <span>完成 5 天 +50</span>
-                  <span>完成 7 天 +74</span>
-                </div>
-              </div>
-              <details className="growth-week-reward-details">
-                <summary>奖励说明</summary>
-                <div><span>完成 3 天</span><strong>+27</strong></div>
-                <div><span>完成 5 天</span><strong>+50</strong></div>
-                <div><span>完成 7 天</span><strong>+74</strong></div>
-              </details>
-            </div>
-            <div className="growth-milestones">
-              {overview.week.milestones.map((milestone) => (
-                <div className="growth-milestone" key={milestone.days}>
-                  <span>{milestone.days} 天 · +{milestone.reward}</span>
-                  {milestone.claimed ? (
-                    <em>已领取</em>
-                  ) : milestone.claimable ? (
-                    <button
-                      type="button"
-                      onClick={() => void claim({ milestone: milestone.days }, `milestone-${milestone.days}`)}
-                      disabled={busyKey === `milestone-${milestone.days}`}
-                    >
-                      {busyKey === `milestone-${milestone.days}` ? '领取中…' : '领取'}
-                    </button>
-                  ) : <em>未达成</em>}
-                </div>
-              ))}
+          </details>
+
+          <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
+            <h3 id="growth-core-title" className="sr-only">今日</h3>
+            <div className="growth-item-list">
+              {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatCoreReward(item)} completed={Boolean(item.completed)} />)}
             </div>
           </section>
 
           <section className="growth-panel-section" aria-labelledby="growth-active-title">
-            <div className="growth-section-heading">
-              <div>
-                <h3 id="growth-active-title">今天的四个动作</h3>
-                <p>奖励沿用现有系统，完成状态在这里统一记录。</p>
-              </div>
-            </div>
+            <h3 id="growth-active-title">主动任务</h3>
             <div className="growth-item-list">
-              {overview.today.items.map((item) => (
-                <div className={`growth-item ${item.completed ? 'is-done' : ''}`} key={item.code}>
-                  <span className="growth-item-mark" aria-hidden="true">{item.completed ? '✓' : '○'}</span>
-                  <div className="growth-item-copy">
-                    <strong>{item.title}</strong>
-                    <small>{item.description}</small>
-                  </div>
-                  <span className="growth-item-reward">{formatActiveReward(item)}</span>
-                </div>
-              ))}
+              {activeActions.map((item) => <GrowthActionRow key={item.code} item={item} right={formatActiveAction(item)} completed={Boolean(item.completed)} />)}
             </div>
           </section>
 
-          <section className="growth-panel-section" aria-labelledby="growth-passive-title">
-            <div className="growth-section-heading">
-              <div>
-                <h3 id="growth-passive-title">被喜欢的回声</h3>
-                <p>按日或按周封顶，撤销时只回收对应那一笔。</p>
-              </div>
-            </div>
+          <details className="growth-panel-section growth-passive-section">
+            <summary>被动奖励 <span aria-hidden="true">›</span></summary>
             <div className="growth-item-list">
-              {overview.passive.items.map((item) => (
-                <div className="growth-item" key={item.code}>
-                  <span className="growth-item-mark growth-item-mark-muted" aria-hidden="true">·</span>
-                  <div className="growth-item-copy">
-                    <strong>{item.title}</strong>
-                    <small>{item.description}</small>
-                  </div>
-                  <span className="growth-item-reward">{formatPassiveProgress(item)}</span>
-                </div>
-              ))}
+              {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} />)}
             </div>
-          </section>
+          </details>
         </>
       ) : (
         <>

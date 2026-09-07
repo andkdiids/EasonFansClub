@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
+import { getShanghaiDateKey } from '@/lib/checkin'
 import { publicImageUrl } from '@/lib/images'
 import { publicPostWhere } from '@/lib/post-moderation'
 import { decodePostLikeCursor, encodePostLikeCursor, POST_LIKE_PAGE_SIZE } from '@/lib/post-like-pagination'
@@ -80,6 +81,8 @@ export async function POST(request: Request, { params }: Params) {
   if (limited) return limited
 
   const { postId } = await params
+  const now = new Date()
+  const dateKey = getShanghaiDateKey(now)
   let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
@@ -111,6 +114,14 @@ export async function POST(request: Request, { params }: Params) {
         sourceEventId: `post:${postId}:liker:${user.id}`,
         reason: '帖子获得有效点赞',
         postId,
+      })
+      await grantGrowthReward(tx, {
+        userId: user.id,
+        taskCode: 'POST_LIKE_ACTIVE',
+        sourceEventId: `post:${postId}:date:${dateKey}`,
+        reason: '给其他用户帖子点赞',
+        postId,
+        now,
       })
       notificationInput = {
   recipientId: post.authorId,

@@ -157,10 +157,10 @@ test('管理员审核后所有该投稿审核通知变为已处理，且更新�
 })
 
 test('作者审核结果继续进入普通通知中心，且不会伪装成管理员待审核通知', () => {
-  assert.match(adminRoute, /recipientId: current\.userId/)
+  assert.match(adminRoute, /recipientId: reviewedCurrent\.userId/)
   assert.match(adminRoute, /type: 'ADMIN'/)
   assert.match(adminRoute, /link: '\/salon\/mine'/)
-  assert.match(adminRoute, /emitRealtime\(current\.userId, 'notification'\)/)
+  assert.match(adminRoute, /emitRealtime\(reviewedCurrent\.userId, 'notification'\)/)
   assert.match(read('lib/notifications.ts'), /审核结果通知仍用 `type: 'ADMIN'` 存储/)
 })
 

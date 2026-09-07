@@ -1,5 +1,6 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
+import { sortHeroSlides } from '@/lib/hero-order'
 import { clearSiteAppearanceCache, getSiteAppearance, mergeSiteAppearanceConfig, normalizeHeroMediaAsset, heroFitModes, type HeroFitMode, type HeroMediaAsset, type SiteHeroSlide } from '@/lib/site-config'
 import { normalizeHeroMediaType, normalizeHeroScale } from '@/lib/hero-visuals'
 import { toPublicMediaUrl } from '@/lib/media-url'
@@ -120,7 +121,7 @@ export async function PATCH(request: Request) {
   const guard = await requireAdmin('home_manage')
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
-  const slides = normalizeSlides(body?.slides)
+  const slides = sortHeroSlides(normalizeSlides(body?.slides))
   if (!slides.length) return NextResponse.json({ message: '至少保留一张 Hero 配置' }, { status: 400 })
   const current = await getSiteAppearance({ cache: 'no-store' })
   const config = mergeSiteAppearanceConfig({ ...current, heroSlides: slides })
@@ -134,6 +135,6 @@ export async function PATCH(request: Request) {
   revalidatePath('/welcome')
   revalidatePath('/admin/home')
   revalidatePath('/admin/visuals/home')
-  config.heroSlides = config.heroSlides.map(publicHeroSlide)
+  config.heroSlides = sortHeroSlides(config.heroSlides).map(publicHeroSlide)
   return NextResponse.json({ slides: config.heroSlides, message: '首页 Hero 已保存' })
 }

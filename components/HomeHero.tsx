@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { HeroBackground } from '@/components/HeroBackground'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
+import { sortHeroSlides } from '@/lib/hero-order'
 import { hasHeroMediaAsset } from '@/lib/hero-visuals'
 import { resolveHeroSlideVisual, type SiteHeroSlide, type SiteHeroStyle } from '@/lib/site-config'
 import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
@@ -60,7 +61,7 @@ export function HomeHero({
   defaultSubtitle?: string
 }) {
   const visibleSlides = useMemo(
-    () => slides.filter((item) => item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder),
+    () => sortHeroSlides(slides.filter((item) => item.isVisible)),
     [slides],
   )
   const isPageVisible = usePageVisibility()
