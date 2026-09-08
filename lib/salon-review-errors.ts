@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 export type SalonReviewFailureStage = 'LOAD' | 'VALIDATION' | 'DATABASE_UPDATE' | 'REWARD'
 
 export type SalonReviewErrorCode =
+  | 'INVALID_INPUT'
   | 'INVALID_REQUEST'
   | 'INVALID_REVIEW_ACTION'
   | 'POST_NOT_FOUND'
@@ -33,6 +34,10 @@ export class SalonReviewError extends Error {
 
 export function toSalonReviewError(error: unknown, stage: SalonReviewFailureStage) {
   if (error instanceof SalonReviewError) return error
+
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    return new SalonReviewError('INVALID_INPUT', '审核请求数据无效，请刷新后重试', 400)
+  }
 
   if (error instanceof Error && error.message === 'SALON_POST_ALREADY_REVIEWED') {
     return new SalonReviewError('ALREADY_REVIEWED', '这篇作品已经被其他管理员处理，请刷新后重试', 409)

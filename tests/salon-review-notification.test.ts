@@ -152,8 +152,9 @@ test('管理员审核后所有该投稿审核通知变为已处理，且更新�
   const rejected = await completeSalonReviewNotifications({ postId: 'salon-post-3', status: 'REJECTED', title: '作品', completedAt }, db)
   assert.deepEqual(rejected, ['admin-a', 'admin-b'])
   assert.equal(updateArgs?.data.title, '沙龙投稿已拒绝')
-  assert.match(adminRoute, /current\.status !== 'PENDING'/)
-  assert.match(adminManager, /post\.status === 'PENDING'/)
+  assert.match(adminRoute, /canTransitionSalonReviewStatus\(current\.status, reviewStatus\)/)
+  assert.match(adminRoute, /status: \{ in: \['PENDING', 'APPROVED'\] \}/)
+  assert.match(adminManager, /post\.status === 'PENDING' \|\| post\.status === 'APPROVED'/)
 })
 
 test('作者审核结果继续进入普通通知中心，且不会伪装成管理员待审核通知', () => {

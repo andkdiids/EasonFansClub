@@ -25,7 +25,7 @@ type GrowthItem = {
 }
 
 type GrowthOverview = {
-  today: { dateKey: string; complete: boolean; items: GrowthItem[]; activeActions?: GrowthItem[] }
+  today: { dateKey: string; total: number; completed: number; complete: boolean; items: GrowthItem[] }
   passive: { items: GrowthItem[] }
   week: {
     completedDays: number
@@ -54,6 +54,12 @@ function formatActiveAction(item: GrowthItem) {
   return `${progress}  ›`
 }
 
+function formatTodayReward(item: GrowthItem) {
+  return item.code === 'POST_LIKE_ACTIVE' || item.code === 'CONTENT_SHARE_ACTIVE'
+    ? formatActiveAction(item)
+    : formatCoreReward(item)
+}
+
 function formatPassiveProgress(item: GrowthItem) {
   const period = item.frequency === 'weekly' ? '本周' : '今日'
   return `${period} ${Math.max(0, item.progress || 0)}/${item.cap || 0}`
@@ -77,6 +83,59 @@ function GrowthActionRow({
   )
   const className = `growth-item ${completed ? 'is-done' : ''}`
   return item.actionHref ? <Link href={item.actionHref} className={className}>{content}</Link> : <div className={className}>{content}</div>
+}
+
+function GrowthNewLifeRow({
+  item,
+  busy,
+  onClaim,
+}: {
+  item: GrowthItem
+  busy: boolean
+  onClaim: () => void
+}) {
+  const completed = Boolean(item.completed)
+  const claimed = Boolean(item.claimed)
+  const className = `growth-item ${claimed ? 'is-done' : ''}`
+  const mark = <span className="growth-item-mark" aria-hidden="true">{claimed ? '✓' : completed ? '●' : '○'}</span>
+  const copy = <div className="growth-item-copy"><strong>{item.title}</strong><small>{item.description}</small></div>
+  const destination = <span className="growth-new-life-destination" aria-hidden="true">›</span>
+  const status = claimed
+    ? <span className="growth-claimed">已领取</span>
+    : completed
+      ? <button type="button" onClick={(event) => { event.stopPropagation(); onClaim() }} disabled={busy}>{busy ? '领取中…' : `领取 +${item.reward}`}</button>
+      : <span className="growth-pending">未完成</span>
+
+  if (item.actionHref && completed && !claimed) {
+    return (
+      <div className={`${className} growth-new-life-row-shell`}>
+        <Link href={item.actionHref} className="growth-new-life-row-link">
+          {mark}
+          {copy}
+          <span className="growth-item-reward">+{item.reward} {destination}</span>
+        </Link>
+        <span className="growth-item-action">{status}</span>
+      </div>
+    )
+  }
+
+  if (item.actionHref) {
+    return (
+      <Link href={item.actionHref} className={`${className} growth-new-life-row-link`}>
+        {mark}
+        {copy}
+        <span className="growth-item-action">{claimed ? <>{status} {destination}</> : <>{`+${item.reward}`} {destination}</>}</span>
+      </Link>
+    )
+  }
+
+  return (
+    <div className={className}>
+      {mark}
+      {copy}
+      <span className="growth-item-action">{status}</span>
+    </div>
+  )
 }
 
 export function GrowthPanel({
@@ -150,8 +209,7 @@ export function GrowthPanel({
     )
   }
 
-  const activeActions = overview.today.activeActions || []
-  const completedToday = overview.today.items.filter((item) => item.completed).length
+  const completedToday = overview.today.completed
   const weekPercent = Math.min(100, overview.week.completedDays / Math.max(1, overview.week.totalDays) * 100)
 
   return (
@@ -159,7 +217,7 @@ export function GrowthPanel({
       {view === 'today' ? (
         <>
           <section className="growth-today-summary" aria-label="今日与本周进度">
-            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {overview.today.items.length}</strong></div>
+            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {overview.today.total}</strong></div>
             <div className="growth-summary-line"><span>本周进度</span><strong>{overview.week.completedDays} / {overview.week.totalDays} 天</strong></div>
             <div className="growth-week-track" role="progressbar" aria-valuemin={0} aria-valuemax={overview.week.totalDays} aria-valuenow={overview.week.completedDays} aria-label={`本周进度 ${overview.week.completedDays} / ${overview.week.totalDays} 天`}>
               <span style={{ width: `${weekPercent}%` }} />
@@ -185,14 +243,7 @@ export function GrowthPanel({
           <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
             <h3 id="growth-core-title" className="sr-only">今日</h3>
             <div className="growth-item-list">
-              {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatCoreReward(item)} completed={Boolean(item.completed)} />)}
-            </div>
-          </section>
-
-          <section className="growth-panel-section" aria-labelledby="growth-active-title">
-            <h3 id="growth-active-title">主动任务</h3>
-            <div className="growth-item-list">
-              {activeActions.map((item) => <GrowthActionRow key={item.code} item={item} right={formatActiveAction(item)} completed={Boolean(item.completed)} />)}
+              {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayReward(item)} completed={Boolean(item.completed)} />)}
             </div>
           </section>
 
@@ -218,26 +269,7 @@ export function GrowthPanel({
             </div>
           </div>
           <div className="growth-item-list growth-new-life-list">
-            {overview.newLife.items.map((item) => (
-              <div className={`growth-item ${item.claimed ? 'is-done' : ''}`} key={item.code}>
-                <span className="growth-item-mark" aria-hidden="true">{item.claimed ? '✓' : item.completed ? '●' : '○'}</span>
-                <div className="growth-item-copy">
-                  <strong>{item.title}</strong>
-                  <small>{item.description}</small>
-                </div>
-                <div className="growth-item-action">
-                  {item.claimed ? <span className="growth-claimed">已领取</span> : item.completed ? (
-                    <button
-                      type="button"
-                      onClick={() => void claim({ taskCode: item.code }, item.code)}
-                      disabled={busyKey === item.code}
-                    >
-                      {busyKey === item.code ? '领取中…' : `领取 +${item.reward}`}
-                    </button>
-                  ) : <span className="growth-pending">未完成</span>}
-                </div>
-              </div>
-            ))}
+            {overview.newLife.items.map((item) => <GrowthNewLifeRow key={item.code} item={item} busy={busyKey === item.code} onClaim={() => void claim({ taskCode: item.code }, item.code)} />)}
           </div>
         </>
       )}

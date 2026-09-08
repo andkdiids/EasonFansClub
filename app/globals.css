@@ -8642,6 +8642,33 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
   color: var(--foreground);
   font-size: 12px;
 }
+.growth-new-life-row-link {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  text-decoration: none;
+}
+.growth-new-life-row-link:hover {
+  background: var(--surface-subtle);
+}
+.growth-new-life-row-shell {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.growth-new-life-row-shell > .growth-new-life-row-link {
+  border-bottom: 0;
+}
+.growth-new-life-row-shell > .growth-item-action {
+  min-width: 76px;
+}
+.growth-new-life-destination {
+  color: var(--foreground-muted);
+  font-size: 16px;
+  line-height: 1;
+}
 @media (max-width:767px) {
   .friend-dock-primary-tabs button {
     min-height: 39px;

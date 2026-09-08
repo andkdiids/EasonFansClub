@@ -1,6 +1,6 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { completeSalonReviewNotifications } from '@/lib/salon-review-notifications'
@@ -11,6 +11,7 @@ import { emitRealtime, emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { completeTask, grantGrowthReward } from '@/lib/growth-tasks/service'
 import { toSalonReviewError, type SalonReviewErrorCode, type SalonReviewFailureStage } from '@/lib/salon-review-errors'
+import { canTransitionSalonReviewStatus } from '@/lib/salon-review-transitions'
 
 export const dynamic = 'force-dynamic'
 
@@ -148,7 +149,11 @@ export async function PATCH(request: Request) {
   type CurrentSalonPost = { id: string; category: string; status: string; userId: string; title: string | null; concertId: string | null }
   let failureStage: SalonReviewFailureStage = 'LOAD'
   let current: CurrentSalonPost | null = null
-  const data: Prisma.SalonPostUpdateInput = {}
+  // This mutation uses updateMany for the review-state compare-and-set.
+  // updateMany only accepts scalar update inputs; relation envelopes such as
+  // `approvedBy` and `concert` are valid for update(), but fail validation
+  // here before MySQL receives the transaction.
+  const data: Prisma.SalonPostUncheckedUpdateManyInput = {}
   let reviewStatus: 'APPROVED' | 'REJECTED' | null = null
   let reviewedAt: Date | null = null
   let updated: { id: string; status: string } | null = null
@@ -198,27 +203,32 @@ export async function PATCH(request: Request) {
       selectedConcertId = current.concertId
     }
     if (categoryConfig.requiresConcert && !selectedConcertId) return reviewErrorResponse('SESSION_REQUIRED', '演唱会记录必须关联演唱会场次')
-    if (hasAssociationInput) data.concert = selectedConcertId ? { connect: { id: selectedConcertId } } : { disconnect: true }
-    if (requestedCategory && !categoryConfig.allowsConcert) data.concert = { disconnect: true }
+    if (hasAssociationInput) data.concertId = selectedConcertId
+    if (requestedCategory && !categoryConfig.allowsConcert) data.concertId = null
     if (Object.prototype.hasOwnProperty.call(body, 'title')) data.title = sanitizeText(body.title, 200) || null
     if (Object.prototype.hasOwnProperty.call(body, 'content')) data.content = sanitizeText(body.content, 5000) || null
 
     if (action === 'approve' || action === 'reject') {
-      if (current.status !== 'PENDING') return reviewErrorResponse('REVIEW_NOT_ALLOWED', '只有待审核作品可以执行审核操作', 409)
       reviewStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
+      if (!canTransitionSalonReviewStatus(current.status, reviewStatus)) return reviewErrorResponse('REVIEW_NOT_ALLOWED', '当前作品状态不允许执行该审核操作', 409)
       const rejectReason = sanitizeText(body.rejectReason, 2000)
       if (reviewStatus === 'REJECTED' && !rejectReason) return reviewErrorResponse('REJECTION_REASON_REQUIRED', '拒绝时必须填写原因')
       reviewedAt = new Date()
       data.status = reviewStatus
       data.approvedAt = reviewStatus === 'APPROVED' ? reviewedAt : null
-      data.approvedBy = reviewStatus === 'APPROVED' ? { connect: { id: guard.user.id } } : { disconnect: true }
+      data.approvedById = reviewStatus === 'APPROVED' ? guard.user.id : null
       data.rejectReason = reviewStatus === 'REJECTED' ? rejectReason : null
     }
     if (!Object.keys(data).length) return reviewErrorResponse('NO_CHANGES', '没有需要更新的内容')
 
     failureStage = 'DATABASE_UPDATE'
     updated = await prisma.$transaction(async (tx) => {
-      const changed = await tx.salonPost.updateMany({ where: { id: postId, ...(reviewStatus ? { status: 'PENDING' } : {}) }, data })
+      const allowedReviewStates: Prisma.SalonPostWhereInput = reviewStatus === 'APPROVED'
+        ? { status: 'PENDING' as const }
+        : reviewStatus === 'REJECTED'
+          ? { status: { in: ['PENDING', 'APPROVED'] } }
+          : {}
+      const changed = await tx.salonPost.updateMany({ where: { id: postId, ...allowedReviewStates }, data })
       if (!changed.count) throw new Error('SALON_POST_ALREADY_REVIEWED')
       if (reviewStatus === 'APPROVED') {
         failureStage = 'REWARD'
@@ -240,6 +250,7 @@ export async function PATCH(request: Request) {
       action,
       stage: failureStage,
       code: mapped.code,
+      prismaCode: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined,
       errorName: error instanceof Error ? error.name : 'unknown',
       errorMessage: error instanceof Error ? error.message : String(error),
       errorStack: error instanceof Error ? error.stack : undefined,
