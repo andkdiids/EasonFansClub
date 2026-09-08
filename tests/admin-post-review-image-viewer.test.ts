@@ -4,21 +4,22 @@ import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const viewer = read('components/ImageViewer.tsx')
-const reviewManager = read('app/admin/posts/review/PostReviewManager.tsx')
-const reviewPage = read('app/admin/posts/review/page.tsx')
-const reviewRoute = read('app/api/admin/posts/review/route.ts')
+const reviewCenter = read('app/admin/review/ReviewCenter.tsx')
+const reviewCenterRoute = read('app/api/admin/review/route.ts')
+const reviewSource = read('lib/review-center.ts')
+const legacyReviewPage = read('app/admin/posts/review/page.tsx')
 const globals = read('app/globals.css')
 
 test('审核中心单图缩略图使用站内 ImageViewer 打开大图', () => {
-  assert.match(reviewManager, /<ImageViewer/)
-  assert.match(reviewManager, /aria-label=\{`帖子图片，共 \$\{imageItems\.length\} 张`\}/)
+  assert.match(reviewCenter, /<ImageViewer/)
+  assert.match(reviewCenter, /aria-label=\{`帖子图片，共 \$\{mediaItems\.length\} 张`\}/)
   assert.match(viewer, /aria-haspopup="dialog"/)
-  assert.doesNotMatch(reviewManager, /window\.open\(/)
+  assert.doesNotMatch(reviewCenter, /window\.open\(/)
 })
 
 test('多图从被点击图片的 initialIndex 开始预览', () => {
-  assert.match(reviewManager, /gallery=\{imageItems\}/)
-  assert.match(reviewManager, /initialIndex=\{index\}/)
+  assert.match(reviewCenter, /gallery=\{mediaItems\}/)
+  assert.match(reviewCenter, /initialIndex=\{index\}/)
   assert.match(viewer, /const nextIndex = clampIndex\(initialIndex, viewerItems\.length\)/)
   assert.match(viewer, /setCurrentIndex\(nextIndex\)/)
 })
@@ -74,30 +75,33 @@ test('原图加载期间有状态提示，失败后可继续使用 viewer', () =
 })
 
 test('审核列表仍保持缩略图网格布局并使用 zoom-in 光标', () => {
-  assert.match(reviewManager, /h-28 w-40 rounded-xl object-cover/)
-  assert.match(reviewManager, /h-28 w-40 cursor-zoom-in/)
-  assert.match(reviewManager, /imageClassName="h-28 w-40 rounded-xl object-cover"/)
+  assert.match(reviewCenter, /h-28 w-40 rounded-xl object-cover/)
+  assert.match(reviewCenter, /h-28 w-40 cursor-zoom-in/)
+  assert.match(reviewCenter, /imageClassName="h-28 w-40 rounded-xl object-cover"/)
 })
 
 test('审核卡片内的详情内容和图片共用同一帖子媒体数据，详情区域同样可预览', () => {
-  assert.match(reviewManager, /<article key=\{post\.id\}/)
-  assert.match(reviewManager, /post\.content/)
-  assert.match(reviewManager, /post\.PostMedia\.flatMap/)
-  assert.match(reviewManager, /gallery=\{imageItems\}/)
+  assert.match(reviewCenter, /function ReviewCard/)
+  assert.match(reviewCenter, /item\.summary/)
+  assert.match(reviewCenter, /const mediaItems = item\.media \|\| \[\]/)
+  assert.match(reviewCenter, /gallery=\{mediaItems\}/)
 })
 
-test('通过、拒绝、精选和置顶操作仍由原审核控制逻辑处理', () => {
-  assert.match(reviewManager, /requestReview\(post, 'APPROVED'\)/)
-  assert.match(reviewManager, /requestReview\(post, 'REJECTED'\)/)
-  assert.match(reviewManager, /setFeatureConfirm\(\{ postId: post\.id, title: post\.title, nextIsFeatured: true \}\)/)
-  assert.match(reviewManager, /toggleFlag\(featureConfirm\.postId, 'isFeatured', featureConfirm\.nextIsFeatured\)/)
-  assert.match(reviewManager, /toggleFlag\(post\.id, 'isPinned'/)
+test('统一审核中心仍提供通过与拒绝操作，帖子标记不在旧审核入口重复挂载', () => {
+  assert.match(reviewCenter, /decide\(item, 'APPROVE'\)/)
+  assert.match(reviewCenter, /decide\((?:item|target), 'REJECT'/)
+  assert.doesNotMatch(legacyReviewPage, /通过|拒绝|ImageViewer/)
 })
 
 test('只读取图片媒体并复用统一公开 URL 与管理员权限校验', () => {
-  assert.match(reviewPage, /PostMedia: \{ where: \{ type: 'IMAGE' \}/)
-  assert.match(reviewRoute, /PostMedia: \{ where: \{ type: 'IMAGE'/)
-  assert.match(reviewPage, /publicImageUrl\(media\.url\)/)
-  assert.match(reviewRoute, /publicImageUrl\(media\.url\)/)
-  assert.match(reviewRoute, /const guard = await requireAdmin\('post_manage'\)/)
+  assert.match(reviewCenterRoute, /PostMedia: \{ where: \{ type: 'IMAGE'/)
+  assert.match(reviewCenterRoute, /publicImageUrl\(media\.url\)/)
+  assert.match(reviewCenterRoute, /hasAdminPermission/)
+  assert.match(reviewSource, /type: 'POST',[\s\S]*permission: 'post_manage'/)
+})
+
+test('旧帖子审核入口只跳转统一审核中心', () => {
+  assert.match(legacyReviewPage, /redirect\('\/admin\/review\?type=post'\)/)
+  assert.doesNotMatch(legacyReviewPage, /PostReviewManager|PostMedia|通过|拒绝/)
+  assert.match(reviewCenter, /<h1[^>]*>审核中心<\/h1>/)
 })

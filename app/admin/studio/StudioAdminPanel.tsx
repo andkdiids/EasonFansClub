@@ -70,10 +70,8 @@ function DetailField({ label, value }: Readonly<{ label: string; value: string }
 }
 
 export function StudioAdminPanel({ initialProjects, initialProjectId }: Readonly<{ initialProjects: ProjectRow[]; initialProjectId?: string | null }>) {
-  const [projects, setProjects] = useState(initialProjects)
+  const [projects] = useState(initialProjects)
   const [selectedProject, setSelectedProject] = useState<ProjectRow | null>(null)
-  const [message, setMessage] = useState('')
-  const [busyId, setBusyId] = useState('')
 
   useEffect(() => {
     if (!initialProjectId) return
@@ -95,27 +93,9 @@ export function StudioAdminPanel({ initialProjects, initialProjectId }: Readonly
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [selectedProject])
 
-  async function review(projectId: string, reviewStatus: 'APPROVED' | 'REJECTED') {
-    setBusyId(projectId)
-    setMessage('')
-    try {
-      const response = await fetch('/api/admin/studio/projects', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, reviewStatus }) })
-      const body = await response.json().catch(() => null) as { message?: string } | null
-      if (!response.ok) throw new Error(body?.message || '审核失败')
-      setProjects((current) => current.filter((project) => project.id !== projectId))
-      setSelectedProject((current) => current?.id === projectId ? null : current)
-      setMessage(reviewStatus === 'APPROVED' ? '作品已通过公开审核，作者将收到通知。' : '作品已拒绝并恢复为私密，作者将收到通知。')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '审核失败，请稍后重试。')
-    } finally {
-      setBusyId('')
-    }
-  }
-
   return <section className="space-y-4">
-    {message ? <p className="border border-emerald-200 bg-emerald-50 p-3 text-sm font-black text-emerald-800" role="status">{message}</p> : null}
     <div className="overflow-hidden border border-sky-100 bg-white/90">
-      <div className="border-b border-sky-100 px-4 py-3"><h2 className="text-lg font-black text-brand-950">待审核公开作品</h2><p className="mt-1 text-xs font-bold text-slate-500">只有通过审核的作品才会进入公开访问流程；点击缩略图或详情可查看完整图纸。</p></div>
+      <div className="border-b border-sky-100 px-4 py-3"><h2 className="text-lg font-black text-brand-950">待审核公开作品预览</h2><p className="mt-1 text-xs font-bold text-slate-500">只有通过审核的作品才会进入公开访问流程；审核动作已统一到审核中心，点击缩略图或详情可查看完整图纸。</p></div>
       <div className="divide-y divide-sky-100">
         {projects.map((project) => <article key={project.id} id={`studio-review-project-${project.id}`} className={`grid gap-4 p-4 sm:p-5 lg:grid-cols-[220px_minmax(0,1fr)_auto] lg:items-center ${project.id === initialProjectId ? 'bg-amber-50/45' : ''}`}>
           <button type="button" onClick={() => setSelectedProject(project)} className="group min-w-0 border border-sky-100 bg-sky-50/35 p-2 text-left hover:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-300" aria-label={`查看${project.title}的审核详情`}>
@@ -134,11 +114,7 @@ export function StudioAdminPanel({ initialProjects, initialProjectId }: Readonly
             <p className="mt-3 text-xs font-bold text-slate-400">创建时间：{formatDateTime(project.createdAt)} · 更新于：{formatDateTime(project.updatedAt)}</p>
             <p className="mt-2 break-words text-xs font-bold text-slate-500">{project.description || '无描述'}</p>
           </div>
-          <div className="flex shrink-0 gap-2 lg:flex-col">
-            <button type="button" onClick={() => setSelectedProject(project)} className="min-h-9 border border-sky-200 px-3 text-xs font-black text-sky-700 hover:border-sky-400 hover:bg-sky-50">查看详情</button>
-            <button type="button" onClick={() => void review(project.id, 'REJECTED')} disabled={busyId === project.id} className="min-h-9 border border-red-200 px-3 text-xs font-black text-red-700 disabled:opacity-50">拒绝</button>
-            <button type="button" onClick={() => void review(project.id, 'APPROVED')} disabled={busyId === project.id} className="min-h-9 bg-emerald-700 px-3 text-xs font-black text-white disabled:opacity-50">通过</button>
-          </div>
+          <div className="flex shrink-0 gap-2 lg:flex-col"><button type="button" onClick={() => setSelectedProject(project)} className="min-h-9 border border-sky-200 px-3 text-xs font-black text-sky-700 hover:border-sky-400 hover:bg-sky-50">查看详情</button><span className="text-[10px] font-black text-slate-400">审核请前往审核中心</span></div>
         </article>)}
         {!projects.length ? <p className="p-6 text-sm font-bold text-slate-500">暂无待审核作品。</p> : null}
       </div>

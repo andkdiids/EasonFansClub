@@ -13,7 +13,7 @@ import { requireAdmin, sanitizeText } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { createNotification } from '@/lib/notification-write'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
-import { completeTask } from '@/lib/growth-tasks/service'
+import { recordQualifiedPublishedPostGrowth, reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -389,6 +389,8 @@ export async function PATCH(request: Request) {
           authorId: true,
           boardId: true,
           title: true,
+          status: true,
+          isDeleted: true,
           moderationStatus: true,
           reviewedAt: true,
           rejectionReason: true,
@@ -397,26 +399,13 @@ export async function PATCH(request: Request) {
         },
       })
       if (!current) throw new Error('POST_NOT_FOUND')
-      if (!canTransitionPostModerationStatus(current.moderationStatus, status)) throw new Error('POST_REVIEW_STATUS_UNSUPPORTED')
-
-      // Retrying the same request after the first commit is a safe no-op. The
-      // existing review timestamp keeps the author notification key stable,
-      // so a notification retry cannot create a duplicate row.
       if (current.moderationStatus === status) {
-        return {
-          changed: false,
-          post: {
-            id: current.id,
-            moderationStatus: current.moderationStatus,
-            reviewedAt: current.reviewedAt,
-            rejectionReason: current.rejectionReason,
-          },
-          previousStatus: current.moderationStatus,
-          reviewedAt: current.reviewedAt || reviewedAt,
-          notificationKey: current.reviewedAt ? undefined : `post-review-result:${postId}:${current.moderationStatus}:legacy`,
-          current,
-        }
+        throw new Error('POST_REVIEW_ALREADY_REVIEWED')
       }
+      if (current.moderationStatus === 'REJECTED' && status === 'APPROVED') {
+        throw new Error('REVIEW_CONFLICT_REJECT_WINS')
+      }
+      if (!canTransitionPostModerationStatus(current.moderationStatus, status)) throw new Error('POST_REVIEW_STATUS_UNSUPPORTED')
 
       // 通过审核时若管理员调整了发布分区，正式 Post.boardId 在同一个事务里更新：
       // 分区变更只随「审核通过」落库，拒绝/退出/关闭页面都不会提前改动正式帖子。
@@ -434,10 +423,27 @@ export async function PATCH(request: Request) {
       if (updateResult.count !== 1) throw new Error('POST_ALREADY_REVIEWED')
       const updated = await tx.post.findUniqueOrThrow({
         where: { id: postId },
-        select: { id: true, moderationStatus: true, reviewedAt: true, rejectionReason: true, boardId: true },
+        select: { id: true, status: true, isDeleted: true, moderationStatus: true, reviewedAt: true, rejectionReason: true, boardId: true },
       })
       if (status === 'APPROVED') {
-        await completeTask(tx, { userId: current.authorId, taskCode: 'FIRST_POST', periodKey: 'ALL', sourceEventId: current.id, now: reviewedAt })
+        await recordQualifiedPublishedPostGrowth(tx, {
+          userId: current.authorId,
+          postId: current.id,
+          post: updated,
+          now: reviewedAt,
+        })
+      } else if (current.moderationStatus === 'APPROVED') {
+        // The passive publish reward belongs to the currently public state;
+        // reverse only that existing ledger entry when a later rejection wins.
+        // One-time FIRST_POST completion remains a separate manual claim.
+        await reverseGrowthRewardForEvent(tx, {
+          userId: current.authorId,
+          taskCode: 'PUBLISH_POST_ACTIVE',
+          sourceEventId: `post:${current.id}`,
+          postId: current.id,
+          reason: '帖子审核拒绝，撤销发布奖励',
+          now: reviewedAt,
+        })
       }
       return {
         changed: true,
@@ -453,23 +459,6 @@ export async function PATCH(request: Request) {
     })
     const current = result.current
     const reviewStatus = result.post.moderationStatus as ReviewStatus
-    if (!result.changed) {
-      await writeReviewNotification({
-        postId,
-        action,
-        status: reviewStatus,
-        authorId: current.authorId,
-        operatorId: guard.user.id,
-        title: current.title,
-        rejectionReason: result.post.rejectionReason,
-        reviewedAt: result.reviewedAt,
-        notificationKey: result.notificationKey,
-        boardChanged: false,
-        originalBoardName: current.Board?.name,
-        finalBoardName: current.Board?.name,
-      })
-      return NextResponse.json({ post: result.post, previousStatus: result.previousStatus, changed: false })
-    }
     await writeReviewAudit({
       operatorId: guard.user.id,
       postId,
@@ -545,11 +534,17 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ post: result.post, previousStatus: result.previousStatus })
   } catch (error) {
     logReviewError('core', postId, action, error)
+    if (error instanceof Error && error.message === 'REVIEW_CONFLICT_REJECT_WINS') {
+      return NextResponse.json({ code: 'REVIEW_CONFLICT_REJECT_WINS', message: '该内容已被拒绝，无法再次通过' }, { status: 409 })
+    }
+    if (error instanceof Error && error.message === 'POST_REVIEW_ALREADY_REVIEWED') {
+      return NextResponse.json({ code: 'ALREADY_REVIEWED', message: '该内容已被其他管理员处理，请刷新后查看最新状态' }, { status: 409 })
+    }
     if (error instanceof Error && error.message === 'POST_ALREADY_REVIEWED') {
-      return NextResponse.json({ message: '该帖子已被其他管理员审核，请刷新后查看最新状态' }, { status: 409 })
+      return NextResponse.json({ code: 'REVIEW_CONFLICT', message: '该内容已被其他管理员处理，请刷新后查看最新状态' }, { status: 409 })
     }
     if (error instanceof Error && error.message === 'POST_REVIEW_STATUS_UNSUPPORTED') {
-      return NextResponse.json({ message: '该帖子当前状态不支持普通审核操作，请刷新后重试' }, { status: 409 })
+      return NextResponse.json({ code: 'REVIEW_NOT_ALLOWED', message: '该帖子当前状态不支持普通审核操作，请刷新后重试' }, { status: 409 })
     }
     if (error instanceof Error && error.message === 'POST_NOT_FOUND') {
       return NextResponse.json({ message: '帖子不存在或已删除' }, { status: 404 })

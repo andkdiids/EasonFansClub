@@ -24,8 +24,36 @@ type GrowthItem = {
   capUnit?: 'points' | 'events'
 }
 
+type GrowthRewardRule = {
+  code: string
+  title: string
+  amount: number | null
+  amountLabel: string
+  dailyCap?: number
+  weeklyCap?: number
+  maxDailyAmount?: number
+  maxWeeklyAmount?: number
+  unit?: '次' | '篇' | '天'
+  detail?: string
+  milestoneDays?: number
+  claimable?: boolean
+  claimed?: boolean
+}
+
 type GrowthOverview = {
-  today: { dateKey: string; total: number; completed: number; complete: boolean; items: GrowthItem[] }
+  today: {
+    dateKey: string
+    total: number
+    completed: number
+    coreTotal: number
+    coreCompleted: number
+    bonusTotal: number
+    bonusCompleted: number
+    listTotal: number
+    listCompleted: number
+    complete: boolean
+    items: GrowthItem[]
+  }
   passive: { items: GrowthItem[] }
   week: {
     completedDays: number
@@ -33,36 +61,30 @@ type GrowthOverview = {
     milestones: Array<{ days: number; reward: number; claimable: boolean; claimed: boolean }>
   }
   newLife: { total: number; completedCount: number; items: GrowthItem[] }
+  rewardRules: Array<{ key: string; title: string; items: GrowthRewardRule[] }>
 }
 
-function formatCoreReward(item: GrowthItem) {
-  if (item.code === 'DAILY_GAME' || item.code === 'DAILY_COMMENT') return '›'
-  if (item.completed && (item.todayReward || 0) > 0) return `已完成 · +${item.todayReward}`
-  if (item.completed) return `已完成 · ${item.displayReward || ''}`.trim()
-  if ((item.todayReward || 0) > 0) return `+${item.todayReward}`
-  return item.displayReward || ''
-}
-
-function formatActiveAction(item: GrowthItem) {
-  const progress = `${item.progress || 0}/${item.cap || 0}`
-  if (item.code === 'POST_LIKE_ACTIVE') return item.completed
-    ? `${progress}  +${item.earned || item.progress || 0}`
-    : `${progress}  +1/次  ›`
-  if (item.code === 'CONTENT_SHARE_ACTIVE') return item.completed
-    ? `${progress}  +${item.earned || 2}`
-    : `${progress}  +2  ›`
-  return `${progress}  ›`
-}
-
-function formatTodayReward(item: GrowthItem) {
-  return item.code === 'POST_LIKE_ACTIVE' || item.code === 'CONTENT_SHARE_ACTIVE'
-    ? formatActiveAction(item)
-    : formatCoreReward(item)
+function formatTodayProgress(item: GrowthItem) {
+  if (item.cap && item.cap > 0) {
+    const progress = `${Math.max(0, item.progress || 0)}/${item.cap}`
+    return item.completed ? progress : `${progress}  ›`
+  }
+  if (item.completed) return '已完成'
+  return item.actionHref ? '›' : ''
 }
 
 function formatPassiveProgress(item: GrowthItem) {
+  if (item.code === 'LISTEN_DUEL_BRANCH') return `本周 ${Math.max(0, item.progress || 0)} 局  ›`
   const period = item.frequency === 'weekly' ? '本周' : '今日'
   return `${period} ${Math.max(0, item.progress || 0)}/${item.cap || 0}`
+}
+
+function formatRuleCaps(rule: GrowthRewardRule) {
+  const unit = rule.unit || '次'
+  return [
+    rule.dailyCap !== undefined ? `每日最多 ${rule.dailyCap}${unit}${rule.maxDailyAmount !== undefined ? `（最多 +${rule.maxDailyAmount}）` : ''}` : '',
+    rule.weeklyCap !== undefined ? `每周最多 ${rule.weeklyCap}${unit}${rule.maxWeeklyAmount !== undefined ? `（最多 +${rule.maxWeeklyAmount}）` : ''}` : '',
+  ].filter(Boolean).join(' · ')
 }
 
 function GrowthActionRow({
@@ -178,6 +200,14 @@ export function GrowthPanel({
     void requestOverview(view === 'new-life')
   }, [requestOverview, view])
 
+  useEffect(() => {
+    const refreshAfterProfileUpdate = () => {
+      void requestOverview(true)
+    }
+    window.addEventListener('profile-updated', refreshAfterProfileUpdate)
+    return () => window.removeEventListener('profile-updated', refreshAfterProfileUpdate)
+  }, [requestOverview])
+
   const claim = useCallback(async (payload: { taskCode?: string; milestone?: number }, key: string) => {
     setBusyKey(key)
     setError('')
@@ -209,7 +239,8 @@ export function GrowthPanel({
     )
   }
 
-  const completedToday = overview.today.completed
+  const completedToday = overview.today.coreCompleted
+  const totalCoreTasks = overview.today.coreTotal
   const weekPercent = Math.min(100, overview.week.completedDays / Math.max(1, overview.week.totalDays) * 100)
 
   return (
@@ -217,7 +248,7 @@ export function GrowthPanel({
       {view === 'today' ? (
         <>
           <section className="growth-today-summary" aria-label="今日与本周进度">
-            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {overview.today.total}</strong></div>
+            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {totalCoreTasks}</strong></div>
             <div className="growth-summary-line"><span>本周进度</span><strong>{overview.week.completedDays} / {overview.week.totalDays} 天</strong></div>
             <div className="growth-week-track" role="progressbar" aria-valuemin={0} aria-valuemax={overview.week.totalDays} aria-valuenow={overview.week.completedDays} aria-label={`本周进度 ${overview.week.completedDays} / ${overview.week.totalDays} 天`}>
               <span style={{ width: `${weekPercent}%` }} />
@@ -226,31 +257,49 @@ export function GrowthPanel({
 
           <details className="growth-panel-section growth-reward-rules">
             <summary>奖励规则 <span aria-hidden="true">›</span></summary>
-            <div className="growth-rule-list">
-              {overview.week.milestones.map((milestone) => {
-                const content = (
-                  <><span>完成 {milestone.days} 天</span><strong>{milestone.claimable ? '✓ ' : ''}+{milestone.reward}{milestone.claimed ? ' · 已领取' : ''}</strong></>
-                )
-                return milestone.claimable && !milestone.claimed ? (
-                  <button type="button" className="growth-rule-row" key={milestone.days} onClick={() => void claim({ milestone: milestone.days }, `milestone-${milestone.days}`)} disabled={busyKey === `milestone-${milestone.days}`}>
-                    {content}
-                  </button>
-                ) : <div className="growth-rule-row" key={milestone.days}>{content}</div>
-              })}
+            <div className="growth-reward-rule-groups">
+              {overview.rewardRules.map((group) => (
+                <section className="growth-reward-rule-group" key={group.key}>
+                  <h3>{group.title}</h3>
+                  <div className="growth-rule-list">
+                    {group.items.map((rule) => {
+                      const caps = formatRuleCaps(rule)
+                      const details = [caps, rule.detail].filter(Boolean).join(' · ')
+                      const amount = rule.claimed
+                        ? `✓ ${rule.amountLabel} · 已领取`
+                        : rule.claimable
+                          ? `✓ ${rule.amountLabel}`
+                          : rule.amountLabel
+                      const content = (
+                        <>
+                          <span className="growth-rule-main"><span>{rule.title}</span><strong>{amount}</strong></span>
+                          {details ? <small>{details}</small> : null}
+                        </>
+                      )
+                      const key = rule.milestoneDays === undefined ? rule.code : `milestone-${rule.milestoneDays}`
+                      return rule.milestoneDays !== undefined && rule.claimable && !rule.claimed ? (
+                        <button type="button" className="growth-rule-row" key={key} onClick={() => void claim({ milestone: rule.milestoneDays }, `milestone-${rule.milestoneDays}`)} disabled={busyKey === `milestone-${rule.milestoneDays}`}>
+                          {content}
+                        </button>
+                      ) : <div className="growth-rule-row" key={key}>{content}</div>
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           </details>
 
           <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
             <h3 id="growth-core-title" className="sr-only">今日</h3>
             <div className="growth-item-list">
-              {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayReward(item)} completed={Boolean(item.completed)} />)}
+              {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayProgress(item)} completed={Boolean(item.completed)} />)}
             </div>
           </section>
 
           <details className="growth-panel-section growth-passive-section">
-            <summary>被动奖励 <span aria-hidden="true">›</span></summary>
+            <summary>支线 <span aria-hidden="true">›</span></summary>
             <div className="growth-item-list">
-              {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} />)}
+              {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} completed={Boolean(item.completed)} />)}
             </div>
           </details>
         </>

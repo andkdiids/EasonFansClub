@@ -4,8 +4,9 @@ import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const reviewRoute = read('app/api/admin/posts/review/route.ts')
-const reviewManager = read('app/admin/posts/review/PostReviewManager.tsx')
-const reviewPage = read('app/admin/posts/review/page.tsx')
+const reviewCenterRoute = read('app/api/admin/review/route.ts')
+const reviewCenter = read('app/admin/review/ReviewCenter.tsx')
+const legacyReviewPage = read('app/admin/posts/review/page.tsx')
 const patch = reviewRoute.slice(reviewRoute.indexOf('export async function PATCH'))
 const transaction = reviewRoute.slice(reviewRoute.indexOf('prisma.$transaction'), reviewRoute.indexOf('const current = result.current'))
 
@@ -20,8 +21,8 @@ test('CASE 7 发布分区只从真实分区数据源解析，配置分区落库�
   assert.match(reviewRoute, /prisma\.board\.upsert/)
   assert.match(reviewRoute, /prisma\.board\.findFirst\(\{\s*where: \{ id: selectionId, isActive: true \}/)
   assert.doesNotMatch(reviewRoute, /boardSelectionId === '小臣书'|name: '小臣书'|slug: 'xiaochenshu'/)
-  assert.match(reviewPage, /mergeForumBoardOptions\(boardRows\)/)
-  assert.match(reviewPage, /where: \{ isActive: true \}/)
+  assert.match(reviewCenterRoute, /mergeForumBoardOptions\(boardRows\)/)
+  assert.match(reviewCenterRoute, /where: \{ isActive: true \}/)
 })
 
 test('CASE 7 不存在的或已停用分区 → 服务端 400 拒绝', () => {
@@ -48,18 +49,18 @@ test('CASE 5 拒绝不修改分区（boardChanged 要求 status==APPROVED；拒�
 })
 
 test('CASE 6 未通过审核直接退出不落库：分区选择仅存前端 state，无任何提前写入请求', () => {
-  assert.match(reviewManager, /publishBoardByPostId/)
-  assert.match(reviewManager, /setPublishBoardByPostId\(\{\}\)/)
+  assert.match(reviewCenter, /postBoardById/)
+  assert.match(reviewCenter, /setPostBoardById/)
   // select 变更只更新本地 state，不触发网络请求
-  const onChangeBlock = reviewManager.slice(reviewManager.indexOf('onChange={(event) => {'), reviewManager.indexOf('className="max-w-56'))
+  const onChangeBlock = reviewCenter.slice(reviewCenter.indexOf('onChange={(event) => onBoardChange'), reviewCenter.indexOf('className="max-w-56'))
   assert.doesNotMatch(onChangeBlock, /fetch\(|method:\s*'PATCH'/)
 })
 
 test('CASE 1/3/4 审核通过时仅当分区变化才提交 boardId，最终分区与提交一致', () => {
-  assert.match(reviewManager, /const boardChanged = status === 'APPROVED' && Boolean\(publishBoardId\) && currentPost && publishBoardId !== currentPost\.boardId/)
-  assert.match(reviewManager, /\.\.\.\(boardChanged \? \{ boardId: publishBoardId \} : \{\}\)/)
-  assert.match(reviewManager, /publishBoardByPostId\[target\.postId\]/)
-  assert.match(reviewManager, /target\.nextStatus === 'APPROVED' \? chosenBoardId : undefined/)
+  assert.match(reviewCenter, /const boardChanged = decision === 'APPROVE' && item\.postDetails && selectedPostBoardId !== item\.postDetails\.boardId/)
+  assert.match(reviewCenter, /\.\.\.\(boardChanged && selectedPostBoardId \? \{ boardId: selectedPostBoardId \} : \{\}\)/)
+  assert.match(reviewCenter, /postBoardById\[item\.sourceId\]/)
+  assert.match(reviewCenterRoute, /boardId: postBoardId/)
   // 服务端用提交的最终分区回写
   assert.match(transaction, /finalBoardName = boardTarget\?\.name \|\| current\.Board\?\.name/)
 })
@@ -83,20 +84,20 @@ test('CASE 9 分区变动后旧/新两分区都刷新 postCount', () => {
 })
 
 test('CASE 2/13 管理员界面显示原分区且「发布分区」默认等于当前真实分区，选项来自真实数据源', () => {
-  assert.match(reviewManager, /投稿分区：/)
-  assert.match(reviewManager, /发布分区：/)
-  assert.match(reviewManager, /const selectedBoardId = publishBoardByPostId\[post\.id\] \|\| post\.boardId/)
-  assert.match(reviewManager, /已调整分区：/)
-  assert.match(reviewManager, /boardOptions\.map\(\(board\) => <option/)
-  assert.match(reviewManager, /boards: ReviewBoardOption\[\]/)
+  assert.match(reviewCenter, /投稿分区：/)
+  assert.match(reviewCenter, /发布分区：/)
+  assert.match(reviewCenter, /const boardSelection = selectedBoardId \|\| item\.postDetails\?\.boardId \|\| ''/)
+  assert.match(reviewCenter, /已调整分区：/)
+  assert.match(reviewCenter, /item\.postDetails\.boards\.map\(\(board\) => <option/)
+  assert.match(reviewCenterRoute, /postDetails: \{/)
   // 卡片标题/正文/历史等其它内容仍来自帖子本身，不因分区选择改动
-  assert.match(reviewManager, /\{post\.title\}/)
+  assert.match(reviewCenter, /\{item\.title\}/)
 })
 
 test('CASE 5/8 服务端列表与详情始终以 Post.boardId（当前真实分区）为准', () => {
   // 审核列表显式返回 boardId，卡片默认值读取该真实字段，而非 URL/缓存
-  assert.match(reviewRoute, /boardId: true,/)
-  assert.match(reviewManager, /boardId: string/)
-  assert.match(reviewPage, /boardId: true,/)
-  assert.match(reviewPage, /getForumBoardDisplayName\(post\.Board\)/)
+  assert.match(reviewCenterRoute, /id: true, boardId: true,/)
+  assert.match(reviewCenter, /boardId: string/)
+  assert.match(reviewCenterRoute, /getForumBoardDisplayName\(row\.Board\)/)
+  assert.match(legacyReviewPage, /redirect\('\/admin\/review\?type=post'\)/)
 })

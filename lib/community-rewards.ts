@@ -4,14 +4,14 @@ import { awardExperience, EXPERIENCE_REWARD_SOURCES } from '@/lib/growth'
 import { awardRegistrationFee, reverseRegistrationFee } from '@/lib/registration-fee'
 
 export const COMMUNITY_REWARD_POINTS = {
-  postCommentReceived: 1,
-  commentPost: 2,
+  postCommentReceived: 2,
+  commentPost: 1,
   featuredPost: 27,
   featuredPostExperience: 27,
 } as const
 
 export const COMMUNITY_REWARD_LIMITS = {
-  postCommentReceivedDaily: 10,
+  postCommentReceivedDaily: 5,
   commentPostDaily: 10,
   featuredPostDaily: 1,
 } as const
@@ -50,20 +50,18 @@ async function lockUsers(tx: CommunityRewardTransaction, userIds: string[]) {
   }
 }
 
-async function getPositiveRewardTotal(
+async function getPositiveRewardEventCount(
   tx: CommunityRewardTransaction,
   input: { userId: string; action: 'POST_COMMENT_RECEIVED' | 'COMMENT_POST' | 'FEATURED_POST'; dateKey?: string },
 ) {
-  const result = await tx.pointLog.aggregate({
+  return tx.pointLog.count({
     where: {
       userId: input.userId,
       action: input.action,
       points: { gt: 0 },
       ...(input.dateKey ? { dateKey: input.dateKey } : {}),
     },
-    _sum: { points: true },
   })
-  return result._sum.points || 0
 }
 
 type CommentRewardInput = {
@@ -90,12 +88,12 @@ export async function awardCommunityCommentRewards(
     return { commenterRewardPoints: 0, postAuthorRewardPoints: 0, weekKey, dateKey }
   }
 
-  const authorRewardTotal = await getPositiveRewardTotal(tx, {
+  const authorRewardEvents = await getPositiveRewardEventCount(tx, {
     userId: input.postAuthorId,
     action: 'POST_COMMENT_RECEIVED',
     dateKey,
   })
-  const authorReward = authorRewardTotal < COMMUNITY_REWARD_LIMITS.postCommentReceivedDaily
+  const authorReward = authorRewardEvents < COMMUNITY_REWARD_LIMITS.postCommentReceivedDaily
     ? await awardRegistrationFee(tx, {
       userId: input.postAuthorId,
       requestedAmount: COMMUNITY_REWARD_POINTS.postCommentReceived,
@@ -108,12 +106,12 @@ export async function awardCommunityCommentRewards(
     })
     : null
 
-  const commenterRewardTotal = await getPositiveRewardTotal(tx, {
+  const commenterRewardEvents = await getPositiveRewardEventCount(tx, {
     userId: input.commenterId,
     action: 'COMMENT_POST',
     dateKey,
   })
-  const commenterReward = commenterRewardTotal < COMMUNITY_REWARD_LIMITS.commentPostDaily
+  const commenterReward = commenterRewardEvents < COMMUNITY_REWARD_LIMITS.commentPostDaily
     ? await awardRegistrationFee(tx, {
       userId: input.commenterId,
       requestedAmount: COMMUNITY_REWARD_POINTS.commentPost,

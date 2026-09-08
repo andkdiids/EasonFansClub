@@ -12,22 +12,23 @@ import {
   getActiveActionTasks,
   getCoreActiveTasks,
   getTasksByKind,
+  getRewardRuleGroups,
 } from '@/lib/growth-tasks/registry'
 import { getCompletedCoreDayKeys, getLaunchGraceDayForWeek } from '@/lib/growth-tasks/progress'
 
-test('统一成长注册表包含四项核心、两项主动行为、九项被动和十六项新生活', () => {
+test('统一成长注册表包含四项核心、三项主动行为、十一项支线和十六项新生活', () => {
   assert.equal(getCoreActiveTasks().length, 4)
-  assert.equal(getActiveActionTasks().length, 2)
-  assert.equal(getTasksByKind('active').length, 6)
-  assert.equal(getTasksByKind('passive').length, 9)
+  assert.equal(getActiveActionTasks().length, 3)
+  assert.equal(getTasksByKind('active').length, 7)
+  assert.equal(getTasksByKind('passive').length, 11)
   assert.equal(getTasksByKind('newLife').length, 16)
-  assert.equal(GROWTH_TASKS.length, 31)
+  assert.equal(GROWTH_TASKS.length, 34)
 })
 
 test('经济报告从注册表计算出产品约束中的总额', () => {
   const report = getEconomyReport()
-  assert.equal(report.maxPassiveDaily, 25)
-  assert.equal(report.maxPassiveWeekly, 238)
+  assert.equal(report.maxPassiveDaily, 35)
+  assert.equal(report.maxPassiveWeekly, 308)
   assert.equal(report.weeklyMilestoneTotal, 151)
   // The sixteen line-item amounts in the product brief add up to 208;
   // keep the registry-derived report faithful to those amounts.
@@ -76,12 +77,31 @@ test('新成长入口不把“任务”作为前台产品文案', () => {
   assert.doesNotMatch(growthPanel, /任务中心|每日任务|一次性任务|任务列表|任务奖励|任务完成/)
   assert.doesNotMatch(growthPanel, /今天的四个动作|本周连续感|本周连续数|进行中|完整的脚印/)
   assert.match(growthPanel, /本周进度/)
-  assert.doesNotMatch(growthPanel, /主动任务/)
-  assert.match(growthPanel, /formatTodayReward/)
+  assert.doesNotMatch(growthPanel, />主动任务</)
+  assert.match(growthPanel, /formatTodayProgress/)
   assert.match(growthPanel, /overview\.today\.items\.map/)
   assert.doesNotMatch(growthPanel, /activeActions/)
-  assert.match(growthPanel, /被动奖励/)
+  assert.match(growthPanel, /支线/)
   assert.match(css, /\.friend-dock-primary-tabs[\s\S]*grid-template-columns: repeat\(4/)
+})
+
+test('奖励规则由统一注册表完整生成，覆盖每日、主动、支线和周奖励', () => {
+  const groups = getRewardRuleGroups()
+  assert.deepEqual(groups.map((group) => group.key), ['daily', 'active', 'passive', 'weekly'])
+  assert.deepEqual(groups.map((group) => group.items.length), [4, 3, 11, 3])
+  const active = groups.find((group) => group.key === 'active')?.items.find((item) => item.code === 'PUBLISH_POST_ACTIVE')
+  assert.equal(active?.amount, 2)
+  assert.equal(active?.dailyCap, 1)
+  assert.equal(active?.weeklyCap, 7)
+  assert.equal(active?.maxWeeklyAmount, 14)
+  const reply = groups.find((group) => group.key === 'daily')?.items.find((item) => item.code === 'DAILY_COMMENT')
+  assert.equal(reply?.amount, 1)
+  assert.equal(reply?.dailyCap, 10)
+  const received = groups.find((group) => group.key === 'passive')?.items.find((item) => item.code === 'POST_COMMENT_RECEIVED')
+  assert.equal(received?.amount, 2)
+  assert.equal(received?.dailyCap, 5)
+  assert.equal(received?.maxDailyAmount, 10)
+  assert.equal(groups.find((group) => group.key === 'passive')?.title, '支线')
 })
 
 test('周奖励采用三档累计，而不是只领取最高一档', () => {

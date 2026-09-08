@@ -1,4 +1,4 @@
-export const GENDER_VALUES = ['MALE', 'FEMALE', 'CUSTOM'] as const
+export const GENDER_VALUES = ['MALE', 'FEMALE', 'CUSTOM', 'PRIVATE'] as const
 export type GenderValue = typeof GENDER_VALUES[number]
 
 export const CUSTOM_GENDER_MAX_LENGTH = 20
@@ -44,6 +44,12 @@ export function validateGenderInput(genderInput: unknown, customGenderInput: unk
   }
 
   return { gender: 'CUSTOM', customGender, error: null }
+}
+
+export function isProfileGenderComplete(user: { gender?: unknown; customGender?: unknown } | null | undefined) {
+  if (!user) return false
+  if (user.gender === 'MALE' || user.gender === 'FEMALE' || user.gender === 'PRIVATE') return true
+  return user.gender === 'CUSTOM' && validateGenderInput(user.gender, user.customGender).error === null
 }
 
 export function getGenderDisplay(user: { gender?: string | null; customGender?: string | null } | null | undefined) {

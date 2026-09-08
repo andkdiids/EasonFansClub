@@ -78,7 +78,7 @@ test('板块名称在广场、详情、后台和分享卡中都走统一显示�
   assert.match(read('app/api/forum/discover/route.ts'), /mergeForumBoardSummaries\(boardRows\)/)
   assert.match(read('app/api/boards/route.ts'), /mergeForumBoardSummaries\(boardRows\)/)
   assert.match(read('app/posts/[postId]/page.tsx'), /getForumBoardDisplayName\(post\.Board\)/)
-  assert.match(read('app/admin/posts/review/page.tsx'), /getForumBoardDisplayName\(post\.Board\)/)
+  assert.match(read('app/api/admin/review/route.ts'), /getForumBoardDisplayName\(row\.Board\)/)
   assert.match(read('lib/share-card-service.ts'), /getForumBoardDisplayName\(post\.Board\)/)
   assert.match(read('lib/share-card-layout.ts'), /getForumBoardDisplayName\(\{ slug: normalizedValue, name: normalizedValue \}\)/)
 })

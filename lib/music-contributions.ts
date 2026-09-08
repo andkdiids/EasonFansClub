@@ -222,7 +222,7 @@ export async function validateContributionSongs(tx: Prisma.TransactionClient, pa
 }
 
 export class ContributionAlreadyProcessedError extends Error {
-  constructor() {
+  constructor(public readonly currentStatus?: string) {
     super('该投稿已经处理')
     this.name = 'ContributionAlreadyProcessedError'
   }
@@ -279,7 +279,7 @@ export async function approveConcertContribution({ contributionId, reviewerId, a
       where: { id: contributionId },
       include: { submitter: { select: { id: true, uid: true, nickname: true } } },
     })
-    if (!current || current.status !== 'PENDING') throw new ContributionAlreadyProcessedError()
+    if (!current || current.status !== 'PENDING') throw new ContributionAlreadyProcessedError(current?.status)
 
     const type = current.type as ConcertContributionTypeValue
     const parsed = parseContributionPayload(type, payloadOverride ?? current.payload, { requireSongId: false })
@@ -412,13 +412,32 @@ async function prismaTransaction<T>(callback: TransactionCallback<T>) {
 export async function rejectConcertContribution(contributionId: string, reviewerId: string, reviewNote: string) {
   const resultWithNotification = await prismaTransaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`ConcertContribution\` WHERE \`id\` = ${contributionId} FOR UPDATE`
-    const current = await tx.concertContribution.findUnique({ where: { id: contributionId }, select: { id: true, type: true, submitterId: true, status: true } })
-    if (!current || current.status !== 'PENDING') throw new ContributionAlreadyProcessedError()
+    const current = await tx.concertContribution.findUnique({ where: { id: contributionId }, select: { id: true, type: true, submitterId: true, status: true, targetShowId: true } })
+    if (!current || (current.status !== 'PENDING' && current.status !== 'APPROVED')) throw new ContributionAlreadyProcessedError(current?.status)
     const rejected = await tx.concertContribution.updateMany({
-      where: { id: contributionId, status: 'PENDING' },
+      // REJECT is allowed to close an already-approved row as well. This is
+      // what makes a PENDING APPROVE/REJECT race deterministic: whichever
+      // request acquires the row lock first, the later REJECT still wins.
+      where: { id: contributionId, status: { in: ['PENDING', 'APPROVED'] } },
       data: { status: 'REJECTED', reviewerId, reviewedAt: new Date(), reviewNote: sanitizeText(reviewNote, 2000) || null },
     })
     if (rejected.count !== 1) throw new ContributionAlreadyProcessedError()
+    if (current.status === 'APPROVED') {
+      // A SHOW contribution creates a directly attributable formal concert.
+      // Hide that publication when the approval is superseded by a rejection;
+      // setlist/Encore approvals can replace pre-existing rows without a
+      // persisted snapshot, so their formal data is deliberately left intact
+      // rather than performing an unsafe broad rollback.
+      if (current.type === 'SHOW') {
+        await tx.musicConcert.updateMany({ where: { contributionId, status: 'PUBLISHED' }, data: { status: 'DRAFT' } })
+      }
+      if (current.type === 'SETLIST' && current.targetShowId) {
+        await tx.musicConcert.updateMany({ where: { id: current.targetShowId, setlistContributionId: contributionId }, data: { setlistContributionId: null, setlistContributorUserId: null } })
+      }
+      if (current.type === 'ENCORE' && current.targetShowId) {
+        await tx.musicConcert.updateMany({ where: { id: current.targetShowId, encoreContributionId: contributionId }, data: { encoreContributionId: null, encoreContributorUserId: null } })
+      }
+    }
     const content = sanitizeText(reviewNote, 2000)
     return {
       id: contributionId,

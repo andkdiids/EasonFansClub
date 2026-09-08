@@ -1,4 +1,5 @@
 import { requireAdminPage } from '@/components/AdminAccess'
+import Link from 'next/link'
 
 import { getTodayEventDateKey } from '@/lib/today'
 import { prisma } from '@/lib/prisma'
@@ -41,7 +42,8 @@ export default async function AdminTodayPage() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-7 sm:px-5 sm:py-9">
         <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 shadow-sm sm:p-8">
           <h1 className="text-3xl font-black text-brand-950 sm:text-4xl">今日内容管理</h1>
-          <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600">维护历史上的今天，并审核用户提交的生日、出道、比赛、专辑、演唱会和获奖记录。</p>
+          <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600">维护历史上的今天；统一审核入口处理用户提交的生日、出道、比赛、专辑、演唱会和获奖记录。</p>
+          <Link href="/admin/review?type=today" className="mt-4 inline-flex bg-brand-950 px-4 py-2 text-sm font-black text-white">进入今日内容审核</Link>
         </section>
         <TodayAdminManager initialEvents={initial} />
       </main>

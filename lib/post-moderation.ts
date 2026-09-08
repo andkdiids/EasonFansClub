@@ -25,10 +25,15 @@ export function isPublicPostModerationStatus(value: unknown): value is PostModer
   return publicPostModerationStatuses.includes(value as PostModerationStatus)
 }
 
-/** The normal admin review endpoint may target either final state from any
- * persisted review state, while VIOLATION remains a separate moderation path. */
+/**
+ * The normal admin review state machine is intentionally one-way at the
+ * decision boundary: a pending post may be approved or rejected, and an
+ * approved post may be revoked. Rejected is absorbing so a stale approve
+ * request can never reopen it.
+ */
 export function canTransitionPostModerationStatus(from: unknown, to: unknown): from is PostReviewableStatus {
-  return isPostReviewableStatus(from) && (to === 'APPROVED' || to === 'REJECTED')
+  return (from === 'PENDING' && (to === 'APPROVED' || to === 'REJECTED'))
+    || (from === 'APPROVED' && to === 'REJECTED')
 }
 
 export function buildPostReviewUpdate({
@@ -65,6 +70,21 @@ export const publicPostWhere = {
   isDeleted: false,
   status: 'PUBLISHED' as const,
   moderationStatus: { in: publicPostModerationStatuses },
+}
+
+/**
+ * The canonical fact used by growth actions that require a valid published
+ * post. A pending, rejected, deleted, draft, or moderation-violation post is
+ * not an effective publication for reward purposes. This deliberately reads
+ * the persisted public state, so review-bypass authors follow the same path
+ * as ordinary authors once their post is public.
+ */
+export function isQualifiedPublishedPost(post: {
+  status: unknown
+  moderationStatus: unknown
+  isDeleted: unknown
+}) {
+  return post.isDeleted === false && post.status === 'PUBLISHED' && post.moderationStatus === 'APPROVED'
 }
 
 /**

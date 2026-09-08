@@ -1,11 +1,11 @@
+import Link from 'next/link'
 import { requireAdminPage } from '@/components/AdminAccess'
-
-import { prisma } from '@/lib/prisma'
 import { AdminStickersTabs } from '@/components/AdminStickersTabs'
-import { toPublicMediaUrl } from '@/lib/media-url'
 
 export const dynamic = 'force-dynamic'
 
+// Kept for the legacy component's type imports; the legacy review UI is no
+// longer mounted here and the unified center owns its list model.
 export type StickerRow = {
   id: string
   name: string | null
@@ -31,56 +31,15 @@ export type StickerPackRow = {
 export default async function AdminStickersPage() {
   await requireAdminPage('/admin/stickers', 'sticker_manage')
 
-  const rawPacks = await prisma.stickerPack.findMany({
-    orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
-    select: {
-      id: true,
-      name: true,
-      description: true,
-      coverUrl: true,
-      type: true,
-      status: true,
-      rejectionReason: true,
-      reviewedAt: true,
-      createdAt: true,
-      creator: { select: { id: true, nickname: true, uid: true } },
-      stickers: {
-        orderBy: { sort: 'asc' },
-        select: { id: true, name: true, url: true, type: true, sort: true },
-      },
-    },
-  })
-
-  const initialPacks: StickerPackRow[] = rawPacks.map((p) => ({
-    id: p.id,
-    name: p.name,
-    description: p.description,
-    coverUrl: toPublicMediaUrl(p.coverUrl),
-    type: p.type,
-    status: p.status,
-    rejectionReason: p.rejectionReason,
-    reviewedAt: p.reviewedAt ? p.reviewedAt.toISOString() : null,
-    createdAt: p.createdAt.toISOString(),
-    creator: p.creator,
-    stickers: p.stickers.map((sticker) => ({
-      ...sticker,
-      url: toPublicMediaUrl(sticker.url) || sticker.url,
-    })),
-  }))
-
   return (
-    <>
-      
-      <main className="admin-mobile-page mx-auto max-w-6xl space-y-7 px-4 py-7 sm:px-5 sm:py-9">
-        <section className="rounded-[32px] border border-sky-100 bg-white/90 p-7 shadow-sm sm:p-9">
-          <p className="text-sm font-black tracking-[0.2em] text-brand-700">表情包 · 审核中心</p>
-          <h1 className="mt-2 text-4xl font-black text-brand-950">表情包审核</h1>
-          <p className="mt-4 max-w-3xl text-sm font-bold leading-7 text-slate-600">
-            审核用户提交的表情包合集。预览表情后通过或拒绝；静态合集仅含静态图，动态合集仅含 GIF 动图。
-          </p>
-        </section>
-        <AdminStickersTabs initialPacks={initialPacks} />
-      </main>
-    </>
+    <main className="admin-mobile-page mx-auto max-w-6xl space-y-7 px-4 py-7 sm:px-5 sm:py-9">
+      <section className="rounded-[32px] border border-sky-100 bg-white/90 p-7 shadow-sm sm:p-9">
+        <p className="text-sm font-black tracking-[0.2em] text-brand-700">表情包管理</p>
+        <h1 className="mt-2 text-4xl font-black text-brand-950">表情包资料管理</h1>
+        <p className="mt-4 max-w-3xl text-sm font-bold leading-7 text-slate-600">审核入口已统一到审核中心；本页保留官方表情、排序和排行等非审核管理能力。</p>
+        <Link href="/admin/review?type=sticker" className="mt-4 inline-flex bg-brand-950 px-4 py-2 text-sm font-black text-white">进入表情包审核</Link>
+      </section>
+      <AdminStickersTabs />
+    </main>
   )
 }

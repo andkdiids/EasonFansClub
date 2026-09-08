@@ -17,6 +17,8 @@ export type SalonReviewErrorCode =
   | 'REJECTION_REASON_REQUIRED'
   | 'NO_CHANGES'
   | 'ALREADY_REVIEWED'
+  | 'ALREADY_REJECTED'
+  | 'REVIEW_CONFLICT_REJECT_WINS'
   | 'REWARD_PROCESSING_ERROR'
   | 'DATABASE_ERROR'
 
@@ -41,6 +43,22 @@ export function toSalonReviewError(error: unknown, stage: SalonReviewFailureStag
 
   if (error instanceof Error && error.message === 'SALON_POST_ALREADY_REVIEWED') {
     return new SalonReviewError('ALREADY_REVIEWED', '这篇作品已经被其他管理员处理，请刷新后重试', 409)
+  }
+
+  if (error instanceof Error && error.message === 'SALON_REVIEW_ALREADY_REVIEWED') {
+    return new SalonReviewError('ALREADY_REVIEWED', '这篇作品已经被处理，不能重复审核', 409)
+  }
+
+  if (error instanceof Error && error.message === 'SALON_REVIEW_CONFLICT_REJECT_WINS') {
+    return new SalonReviewError('REVIEW_CONFLICT_REJECT_WINS', '该内容已被拒绝，无法再次通过', 409)
+  }
+
+  if (error instanceof Error && error.message === 'SALON_REVIEW_NOT_ALLOWED') {
+    return new SalonReviewError('REVIEW_NOT_ALLOWED', '当前作品状态不允许执行该审核操作', 409)
+  }
+
+  if (error instanceof Error && error.message === 'SALON_POST_NOT_FOUND') {
+    return new SalonReviewError('POST_NOT_FOUND', '作品不存在或已被删除', 404)
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025' && stage !== 'REWARD') {

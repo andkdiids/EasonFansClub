@@ -693,7 +693,7 @@ export function ProfileSettingsForm({
           wallVisibility: data.profile.wallVisibility || current.wallVisibility,
           showBadgeActivity: typeof data.profile.showBadgeActivity === 'boolean' ? data.profile.showBadgeActivity : current.showBadgeActivity,
           showBadgeProgressNotifications: typeof data.profile.showBadgeProgressNotifications === 'boolean' ? data.profile.showBadgeProgressNotifications : current.showBadgeProgressNotifications,
-          gender: data.profile.gender === 'MALE' || data.profile.gender === 'FEMALE' || data.profile.gender === 'CUSTOM' ? data.profile.gender : null,
+          gender: data.profile.gender === 'MALE' || data.profile.gender === 'FEMALE' || data.profile.gender === 'CUSTOM' || data.profile.gender === 'PRIVATE' ? data.profile.gender : null,
           customGender: typeof data.profile.customGender === 'string' ? data.profile.customGender : '',
           location: data.profile.location || null,
           // Keep an incomplete draft visible after saving other fields, but use
@@ -989,6 +989,7 @@ export function ProfileSettingsForm({
                 ['MALE', '男'],
                 ['FEMALE', '女'],
                 ['CUSTOM', '自定义'],
+                ['PRIVATE', '保密'],
               ] as const satisfies ReadonlyArray<readonly [GenderValue, string]>).map(([value, label]) => (
                 <label key={value} className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-sm border px-3 py-2 text-sm font-black transition ${form.gender === value ? 'border-[var(--primary)] bg-[var(--navigation-active)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-subtle)]'}`}>
                   <input
@@ -1002,9 +1003,6 @@ export function ProfileSettingsForm({
                   {label}
                 </label>
               ))}
-              <button type="button" aria-pressed={form.gender === null} onClick={() => update('gender', null)} className={`inline-flex min-h-10 items-center rounded-sm border px-3 py-2 text-sm font-black transition ${form.gender === null ? 'border-[var(--primary)] bg-[var(--navigation-active)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-subtle)]'}`}>
-                不设置
-              </button>
             </div>
             {form.gender === 'CUSTOM' ? (
               <label className="mt-3 block">
@@ -1014,7 +1012,7 @@ export function ProfileSettingsForm({
                   onChange={(event) => update('customGender', event.target.value.replace(/[\r\n]+/gu, ' '))}
                   maxLength={CUSTOM_GENDER_MAX_LENGTH}
                   className="mt-2 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none transition focus:border-[var(--primary)]"
-                  placeholder="例如：非二元、流动、保密"
+                  placeholder="例如：非二元、流动"
                 />
                 <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">限 20 个字符，不可换行或使用 HTML 标记。</span>
               </label>

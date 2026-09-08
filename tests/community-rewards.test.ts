@@ -18,13 +18,13 @@ test('社区互动奖励按上海时间的自然周周一归档', () => {
 
 test('社区奖励额度与奖励来源保持独立', () => {
   assert.deepEqual(COMMUNITY_REWARD_POINTS, {
-    postCommentReceived: 1,
-    commentPost: 2,
+    postCommentReceived: 2,
+    commentPost: 1,
     featuredPost: 27,
     featuredPostExperience: 27,
   })
   assert.deepEqual(COMMUNITY_REWARD_LIMITS, {
-    postCommentReceivedDaily: 10,
+    postCommentReceivedDaily: 5,
     commentPostDaily: 10,
     featuredPostDaily: 1,
   })

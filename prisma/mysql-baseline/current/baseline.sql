@@ -2872,7 +2872,7 @@ CREATE TABLE `PasswordResetToken` (
 -- CreateTable
 CREATE TABLE `PointLog` (
     `id` VARCHAR(191) NOT NULL,
-    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD', 'CHECK_IN_MAKEUP', 'MATERIAL_REDEMPTION', 'MATERIAL_REDEMPTION_REFUND', 'ACTIVITY_REGISTRATION_FEE', 'ACTIVITY_REGISTRATION_REFUND', 'ACTIVITY_LOTTERY_PRIZE', 'PHARMACY_DRAW_COST', 'PHARMACY_PRIZE_REWARD', 'PHARMACY_DUPLICATE_RECYCLE') NOT NULL,
+    `action` ENUM('POST_CREATE', 'REPLY_CREATE', 'DAILY_CHECK_IN', 'POST_LIKE_RECEIVED', 'ADMIN_ADJUST', 'REGISTER', 'LOGIN', 'CONTINUOUS_CHECK_IN_BONUS', 'FEATURED_POST', 'ACTIVITY_REWARD', 'BADGE_EXCHANGE', 'ENTERTAINMENT_DAILY_DRAW', 'POST_DAILY_FIRST', 'POST_COMMENT_DAILY', 'POST_COMMENT_RECEIVED', 'COMMENT_POST', 'COMMENT_REVOKE', 'GUESS_SONG_DUEL_WIN', 'USER_REWARD', 'CHECK_IN_MAKEUP', 'MATERIAL_REDEMPTION', 'MATERIAL_REDEMPTION_REFUND', 'ACTIVITY_REGISTRATION_FEE', 'ACTIVITY_REGISTRATION_REFUND', 'ACTIVITY_LOTTERY_PRIZE', 'PHARMACY_DRAW_COST', 'PHARMACY_PRIZE_REWARD', 'PHARMACY_DUPLICATE_RECYCLE', 'GROWTH_REWARD', 'GROWTH_REWARD_REVERSAL') NOT NULL,
     `points` INTEGER NOT NULL,
     `before` INTEGER NOT NULL,
     `after` INTEGER NOT NULL,
@@ -2890,6 +2890,9 @@ CREATE TABLE `PointLog` (
     `pharmacyRecycleLogId` VARCHAR(191) NULL,
     `dateKey` VARCHAR(191) NULL,
     `businessKey` VARCHAR(191) NULL,
+    `growthTaskCode` VARCHAR(64) NULL,
+    `sourceEventId` VARCHAR(191) NULL,
+    `reversalOfBusinessKey` VARCHAR(191) NULL,
 
     UNIQUE INDEX `PointLog_dailyDrawId_key`(`dailyDrawId`),
     UNIQUE INDEX `PointLog_businessKey_key`(`businessKey`),
@@ -2901,9 +2904,49 @@ CREATE TABLE `PointLog` (
     INDEX `PointLog_replyId_idx`(`replyId`),
     INDEX `PointLog_userId_createdAt_idx`(`userId`, `createdAt`),
     INDEX `PointLog_userId_action_dateKey_idx`(`userId`, `action`, `dateKey`),
+    INDEX `PointLog_userId_growthTaskCode_createdAt_idx`(`userId`, `growthTaskCode`, `createdAt`),
+    INDEX `PointLog_growthTaskCode_sourceEventId_idx`(`growthTaskCode`, `sourceEventId`),
+    INDEX `PointLog_reversalOfBusinessKey_idx`(`reversalOfBusinessKey`),
     INDEX `PointLog_pharmacyDrawId_idx`(`pharmacyDrawId`),
     INDEX `PointLog_pharmacyRecycleLogId_idx`(`pharmacyRecycleLogId`),
     UNIQUE INDEX `PointLog_action_checkInId_key`(`action`, `checkInId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `GrowthTaskCompletion` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `taskCode` VARCHAR(64) NOT NULL,
+    `periodKey` VARCHAR(32) NOT NULL,
+    `sourceEventId` VARCHAR(191) NOT NULL,
+    `oneTimeKey` VARCHAR(191) NULL,
+    `completedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `claimedAt` DATETIME(3) NULL,
+    `rewardAmount` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `GrowthTaskCompletion_oneTimeKey_key`(`oneTimeKey`),
+    INDEX `GrowthTaskCompletion_userId_taskCode_completedAt_idx`(`userId`, `taskCode`, `completedAt`),
+    INDEX `GrowthTaskCompletion_userId_periodKey_completedAt_idx`(`userId`, `periodKey`, `completedAt`),
+    UNIQUE INDEX `GrowthTaskCompletion_userId_taskCode_periodKey_sourceEventId_key`(`userId`, `taskCode`, `periodKey`, `sourceEventId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `GrowthWeeklyMilestoneClaim` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `weekKey` VARCHAR(10) NOT NULL,
+    `milestone` INTEGER NOT NULL,
+    `rewardAmount` INTEGER NOT NULL,
+    `claimedAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `GrowthWeeklyMilestoneClaim_userId_weekKey_idx`(`userId`, `weekKey`),
+    UNIQUE INDEX `GrowthWeeklyMilestoneClaim_userId_weekKey_milestone_key`(`userId`, `weekKey`, `milestone`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3852,7 +3895,7 @@ CREATE TABLE `User` (
     `phone` VARCHAR(191) NULL,
     `passwordHash` VARCHAR(191) NOT NULL,
     `nickname` VARCHAR(191) NOT NULL,
-    `gender` ENUM('MALE', 'FEMALE', 'CUSTOM') NULL,
+    `gender` ENUM('MALE', 'FEMALE', 'CUSTOM', 'PRIVATE') NULL,
     `customGender` VARCHAR(20) NULL,
     `avatarUrl` VARCHAR(191) NULL,
     `bio` VARCHAR(191) NULL,
@@ -4982,6 +5025,12 @@ ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_activityRegistrationId_fkey` FOR
 
 -- AddForeignKey
 ALTER TABLE `PointLog` ADD CONSTRAINT `PointLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `GrowthTaskCompletion` ADD CONSTRAINT `GrowthTaskCompletion_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `GrowthWeeklyMilestoneClaim` ADD CONSTRAINT `GrowthWeeklyMilestoneClaim_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `PharmacyCampaign` ADD CONSTRAINT `PharmacyCampaign_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;

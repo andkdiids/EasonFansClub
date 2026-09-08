@@ -145,7 +145,7 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
         emailVerifiedAt: typeof data?.user?.emailVerifiedAt === 'string' ? data.user.emailVerifiedAt : null,
         phoneVerifiedAt: typeof data?.user?.phoneVerifiedAt === 'string' ? data.user.phoneVerifiedAt : null,
         bio: typeof data?.user?.bio === 'string' ? data.user.bio : data?.user?.bio == null ? '' : form.bio,
-        gender: data?.user?.gender === 'MALE' || data?.user?.gender === 'FEMALE' || data?.user?.gender === 'CUSTOM' ? data.user.gender : null,
+        gender: data?.user?.gender === 'MALE' || data?.user?.gender === 'FEMALE' || data?.user?.gender === 'CUSTOM' || data?.user?.gender === 'PRIVATE' ? data.user.gender : null,
         customGender: typeof data?.user?.customGender === 'string' ? data.user.customGender : '',
         avatarUrl: typeof data?.user?.avatarUrl === 'string' ? data.user.avatarUrl : data?.user?.avatarUrl == null ? '' : form.avatarUrl,
         backgroundUrl: typeof data?.user?.backgroundUrl === 'string' ? data.user.backgroundUrl : data?.user?.backgroundUrl == null ? '' : form.backgroundUrl,
@@ -252,6 +252,7 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
                 ['MALE', '男'],
                 ['FEMALE', '女'],
                 ['CUSTOM', '自定义'],
+                ['PRIVATE', '保密'],
               ] as const satisfies ReadonlyArray<readonly [GenderValue, string]>).map(([value, label]) => (
                 <label key={value} className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-black text-brand-800">
                   <input
@@ -265,9 +266,6 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
                   {label}
                 </label>
               ))}
-              <button type="button" aria-pressed={form.gender === null} onClick={() => update('gender', null)} className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-600">
-                不设置
-              </button>
             </div>
             {form.gender === 'CUSTOM' ? (
               <label className="mt-3 block text-sm font-black text-slate-700">
@@ -277,7 +275,7 @@ export function AdminUserProfileEditor({ targetUserId, initialProfile }: { targe
                   onChange={(event) => update('customGender', event.target.value.replace(/[\r\n]+/gu, ' '))}
                   maxLength={CUSTOM_GENDER_MAX_LENGTH}
                   className="mt-2 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold outline-none focus:border-brand-400"
-                  placeholder="例如：非二元、流动、保密"
+                  placeholder="例如：非二元、流动"
                 />
                 <span className="mt-1 block text-xs font-bold text-slate-400">限 20 个字符，不可换行或使用 HTML 标记。</span>
               </label>

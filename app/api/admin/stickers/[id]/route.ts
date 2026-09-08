@@ -38,9 +38,9 @@ export async function PATCH(
     select: { id: true, status: true, name: true, creatorId: true },
   })
   if (!existing) return NextResponse.json({ message: '表情包不存在' }, { status: 404 })
-  if (existing.status !== 'PENDING') {
-    return NextResponse.json({ message: '该表情包当前不在待审核状态' }, { status: 409 })
-  }
+  if (existing.status === 'REJECTED' && action === 'approve') return NextResponse.json({ code: 'REVIEW_CONFLICT_REJECT_WINS', message: '该内容已被拒绝，无法再次通过' }, { status: 409 })
+  if (existing.status === (action === 'approve' ? 'APPROVED' : 'REJECTED')) return NextResponse.json({ code: 'ALREADY_REVIEWED', message: '该表情包已经处理，不能重复审核' }, { status: 409 })
+  if (existing.status !== 'PENDING' && !(existing.status === 'APPROVED' && action === 'reject')) return NextResponse.json({ code: 'REVIEW_NOT_ALLOWED', message: '该表情包当前状态不允许执行该审核操作' }, { status: 409 })
 
   const reviewedAt = new Date()
   const rejectionReason = action === 'reject'
@@ -55,8 +55,14 @@ export async function PATCH(
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT \`id\` FROM \`StickerPack\` WHERE \`id\` = ${id} FOR UPDATE`
+      const current = await tx.stickerPack.findUnique({ where: { id }, select: { id: true, name: true, status: true, rejectionReason: true, reviewedAt: true, creatorId: true } })
+      if (!current) throw new Error('STICKER_PACK_NOT_FOUND')
+      if (current.status === 'REJECTED' && action === 'approve') throw new Error('STICKER_REVIEW_CONFLICT_REJECT_WINS')
+      if (current.status === (action === 'approve' ? 'APPROVED' : 'REJECTED')) throw new Error('STICKER_REVIEW_ALREADY_REVIEWED')
+      if (current.status !== 'PENDING' && !(current.status === 'APPROVED' && action === 'reject')) throw new Error('STICKER_REVIEW_NOT_ALLOWED')
       const changed = await tx.stickerPack.updateMany({
-        where: { id, status: 'PENDING' },
+        where: { id, status: current.status },
         data,
       })
       if (changed.count === 0) throw new Error('STICKER_PACK_NOT_PENDING')
@@ -122,8 +128,17 @@ export async function PATCH(
     revalidatePath(`/profile/stickers/${updated.id}/edit`)
     return NextResponse.json({ pack: pack ? serializePack(pack) : null })
   } catch (error) {
+    if (error instanceof Error && error.message === 'STICKER_REVIEW_CONFLICT_REJECT_WINS') {
+      return NextResponse.json({ code: 'REVIEW_CONFLICT_REJECT_WINS', message: '该内容已被拒绝，无法再次通过' }, { status: 409 })
+    }
+    if (error instanceof Error && error.message === 'STICKER_REVIEW_ALREADY_REVIEWED') {
+      return NextResponse.json({ code: 'ALREADY_REVIEWED', message: '该表情包已经处理，不能重复审核' }, { status: 409 })
+    }
+    if (error instanceof Error && error.message === 'STICKER_REVIEW_NOT_ALLOWED') {
+      return NextResponse.json({ code: 'REVIEW_NOT_ALLOWED', message: '该表情包当前状态不允许执行该审核操作' }, { status: 409 })
+    }
     if (error instanceof Error && error.message === 'STICKER_PACK_NOT_PENDING') {
-      return NextResponse.json({ message: '该表情包已被其他管理员处理，请刷新列表' }, { status: 409 })
+      return NextResponse.json({ code: 'REVIEW_CONFLICT', message: '该表情包已被其他管理员处理，请刷新列表' }, { status: 409 })
     }
     if (error instanceof Error && error.message === 'STICKER_PACK_NOT_FOUND') {
       return NextResponse.json({ message: '表情包不存在' }, { status: 404 })

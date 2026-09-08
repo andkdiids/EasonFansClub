@@ -15,6 +15,7 @@ import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } fr
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicPostWhere } from '@/lib/post-moderation'
+import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
@@ -412,7 +413,7 @@ export async function POST(request: Request) {
           moderationStatus,
           stickerId: rawStickerId || undefined,
         },
-        select: { id: true, moderationStatus: true },
+        select: { id: true, status: true, moderationStatus: true, isDeleted: true },
       })
       if (imageUrls.length) {
         phase = 'post-transaction.media-create'
@@ -463,6 +464,13 @@ export async function POST(request: Request) {
             skipDuplicates: true,
           })
         }, user.id, board.id),
+      moderationStatus === 'APPROVED'
+        ? runPostCreateSideEffect('growth-published-post', () => prisma.$transaction((tx) => recordQualifiedPublishedPostGrowth(tx, {
+          userId: user.id,
+          postId: result.post.id,
+          post: result.post,
+        })), user.id, board.id)
+        : Promise.resolve(),
       moderationStatus === 'APPROVED'
         ? runPostCreateSideEffect('board-counter', () => prisma.board.update({ where: { id: board.id }, data: { postCount: { increment: 1 } } }), user.id, board.id)
         : Promise.resolve(),

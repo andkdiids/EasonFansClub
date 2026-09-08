@@ -2,7 +2,6 @@
 
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
 import type { UserLocation } from '@/lib/user-location'
 import type { GenderValue } from '@/lib/gender'
@@ -42,16 +41,23 @@ export function ProfileEditorDrawer({
   initialProfile: InitialProfile
   hideTrigger?: boolean
 }) {
-  const router = useRouter()
-  const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(initialOpen)
   const [mounted, setMounted] = useState(false)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const editQueryConsumedRef = useRef(false)
+
+  const replaceEditQuery = useCallback((open: boolean) => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (open) url.searchParams.set('edit', '1')
+    else url.searchParams.delete('edit')
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [])
 
   const closeEditor = useCallback(() => {
     setIsOpen(false)
-    router.replace(pathname, { scroll: false })
-  }, [pathname, router])
+    replaceEditQuery(false)
+  }, [replaceEditQuery])
 
   const cancelEditor = useCallback(() => {
     if (window.confirm('放弃未保存的资料修改吗？')) closeEditor()
@@ -60,8 +66,19 @@ export function ProfileEditorDrawer({
   useEffect(() => setMounted(true), [])
 
   useEffect(() => {
-    setIsOpen(initialOpen)
-  }, [initialOpen])
+    if (!initialOpen) {
+      editQueryConsumedRef.current = false
+      return
+    }
+    if (editQueryConsumedRef.current) return
+
+    // `?edit=1` is an entry command, not the source of truth for the drawer.
+    // Consume it once so a route refresh/query cleanup cannot reset an already
+    // open editor back to false.
+    editQueryConsumedRef.current = true
+    setIsOpen(true)
+    replaceEditQuery(false)
+  }, [initialOpen, replaceEditQuery])
 
   useEffect(() => {
     if (!isOpen) return
@@ -100,7 +117,7 @@ export function ProfileEditorDrawer({
 
   function openEditor() {
     setIsOpen(true)
-    router.replace(`${pathname}?edit=1`, { scroll: false })
+    replaceEditQuery(true)
   }
 
   const drawer = mounted && isOpen

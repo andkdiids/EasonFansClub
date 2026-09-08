@@ -38,7 +38,8 @@ test('管理记录改为分割线区域，性别选择使用矩形选中态', ()
   assert.match(recordSettings, /mb-3 min-w-0 border-b border-\[var\(--border\)\] pb-3/)
   assert.doesNotMatch(recordSettings, /mb-3 rounded-xl|rounded-full px-2\.5/)
   assert.match(form, /form\.gender === value \? 'border-\[var\(--primary\)\]/)
-  assert.match(form, /form\.gender === null \? 'border-\[var\(--primary\)\]/)
+  assert.match(form, /\['PRIVATE', '保密'\]/)
+  assert.doesNotMatch(form, /不设置/)
 })
 
 test('编辑资料容器、控件、地区弹层和底部操作栏使用轻量圆角', () => {

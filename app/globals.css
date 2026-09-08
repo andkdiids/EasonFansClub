@@ -8585,6 +8585,48 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
 .growth-rule-row:disabled {
   opacity: .6;
 }
+.growth-reward-rule-groups {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.growth-reward-rule-group {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.growth-reward-rule-group h3 {
+  margin: 0 0 2px;
+  color: var(--foreground);
+  font-size: 10px;
+  font-weight: 900;
+}
+.growth-reward-rule-group .growth-rule-list {
+  margin-top: 0;
+}
+.growth-reward-rule-group .growth-rule-row {
+  display: grid;
+  min-height: 32px;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 0;
+}
+.growth-rule-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.growth-rule-main > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.growth-reward-rule-group .growth-rule-row small {
+  color: var(--foreground-muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
 .growth-today-panel .growth-item-list {
   gap: 0;
   margin-top: 0;

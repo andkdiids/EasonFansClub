@@ -39,6 +39,7 @@ import {
   normalizeUndercoverWord,
 } from '@/lib/undercover-star-title'
 import { resolveVoteResult } from '@/lib/undercover-star-vote'
+import { recordEntertainmentGameCompletion } from '@/lib/growth-tasks/service'
 import type {
   UndercoverActiveState,
   UndercoverDescriptionByRound,
@@ -1203,6 +1204,16 @@ async function finishMatchTx(
     undercoverWord: match.undercoverWord,
     undercoverPlayerId: undercover?.id || '',
     players: finalPlayers,
+  }
+  if (reason !== 'UNDERCOVER_EXIT') {
+    for (const player of players) {
+      await recordEntertainmentGameCompletion(tx, {
+        userId: player.User.id,
+        gameCode: 'UNDERCOVER_STAR',
+        gameId: match.id,
+        now,
+      })
+    }
   }
   await tx.undercoverMatch.update({
     where: { id: match.id },

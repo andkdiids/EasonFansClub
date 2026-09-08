@@ -15,7 +15,9 @@ export async function POST(request: Request, { params }: Context) {
     const result = await approveConcertContribution({ contributionId: id, reviewerId: guard.user.id, allowDuplicate: body?.allowDuplicate === true, payloadOverride: body?.payload })
     return NextResponse.json({ ok: true, result, message: '投稿已审核通过并进入正式资料' })
   } catch (error) {
-    if (error instanceof ContributionAlreadyProcessedError) return NextResponse.json({ message: '该投稿已经处理' }, { status: 409 })
+    if (error instanceof ContributionAlreadyProcessedError) {
+      return NextResponse.json({ code: error.currentStatus === 'REJECTED' ? 'REVIEW_CONFLICT_REJECT_WINS' : 'ALREADY_REVIEWED', message: error.currentStatus === 'REJECTED' ? '该内容已被拒绝，无法再次通过' : '该投稿已经处理，请刷新后查看最新状态' }, { status: 409 })
+    }
     if (error instanceof ContributionDuplicateError) return NextResponse.json({ code: 'POSSIBLE_DUPLICATE', message: error.message, duplicates: error.duplicates }, { status: 409 })
     if (error instanceof ContributionValidationError) return NextResponse.json({ message: error.message }, { status: 400 })
     throw error

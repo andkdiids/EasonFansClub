@@ -49,6 +49,7 @@ import { isUserBadgeActive } from '@/lib/badge-validity'
 import { normalizeGuessSongAnswer } from '@/lib/guess-song-config'
 import { getGuessSongQuizConfigOrDefault, GUESS_SONG_QUESTION_TYPE_AUTO, GUESS_SONG_QUESTION_TYPE_MANUAL } from '@/lib/guess-song-quiz-config'
 import { createUUID } from '@/lib/utils/uuid'
+import { recordEntertainmentGameCompletion } from '@/lib/growth-tasks/service'
 
 // Declared separately as a mutable array: Prisma's generated `orderBy` types
 // reject the readonly tuples that `as const` produces on the select below.
@@ -1844,6 +1845,14 @@ async function settleMatchTx(
       })
     }
     rewardReason = input.winnerId && !input.isDraw && !winnerSuspicious ? 'PENDING' : 'NOT_ELIGIBLE'
+    for (const player of players) {
+      await recordEntertainmentGameCompletion(tx, {
+        userId: player.userId,
+        gameCode: 'LISTEN_DUEL',
+        gameId: match.id,
+        now: input.now,
+      })
+    }
   }
   const updated = await tx.guessSongDuelMatch.update({
     where: { id: matchId },

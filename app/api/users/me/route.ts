@@ -27,6 +27,7 @@ import {
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getEquippedBadgesForUser } from '@/lib/badge-service'
 import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput } from '@/lib/gender'
+import { refreshProfileCompletion } from '@/lib/growth-tasks/service'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -730,6 +731,11 @@ export async function PATCH(request: Request) {
 
   invalidateCurrentUserCache(guard.user.id)
   void updateUserIpRegion(guard.user.id, request)
+  if (genderUpdate) {
+    await refreshProfileCompletion(guard.user.id, now).catch((error) => {
+      console.error('[users.me.profile-completion]', { userId: guard.user.id, error })
+    })
+  }
   let equippedBadges: Awaited<ReturnType<typeof getEquippedBadgesForUser>> | undefined
   // Wait for the unified birthday reconciliation before returning so the
   // client can replace its equipped-badge state without a full reload.

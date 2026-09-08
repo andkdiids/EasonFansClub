@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Prisma } from '@prisma/client'
 import { getShanghaiDateKey, getShanghaiDayRange, parseBeijingDate, shiftShanghaiDateKey } from '@/lib/checkin'
-import { getShanghaiWeekKey } from '@/lib/community-rewards'
+import { COMMUNITY_REWARD_LIMITS, COMMUNITY_REWARD_POINTS, getShanghaiWeekKey } from '@/lib/community-rewards'
 import { awardRegistrationFee, reverseRegistrationFee } from '@/lib/registration-fee'
 import {
   TASK_SYSTEM_LAUNCH_AT,
@@ -10,11 +10,14 @@ import {
   getCoreActiveTasks,
   getEconomyReport,
   getGrowthTask,
+  getRewardRuleGroups,
   getTasksByKind,
   resolveGrowthTaskDestination,
   type GrowthTaskCode,
 } from './registry'
 import { getCompletedCoreDayKeys, resolveTodayTaskProgress } from './progress'
+import { isQualifiedPublishedPost } from '@/lib/post-moderation'
+import { isProfileGenderComplete } from '@/lib/gender'
 
 type GrowthTransaction = Prisma.TransactionClient
 
@@ -115,13 +118,60 @@ export async function completeTask(
   }
 }
 
-function capWindow(task: NonNullable<ReturnType<typeof getGrowthTask>>, now: Date) {
+/**
+ * Every formally settled entertainment mode records the same daily fact.
+ * This is a completion marker only; it never grants a registration-fee
+ * reward. The completion table's event key makes repeated settlement calls
+ * idempotent across HTTP retries and websocket fallbacks.
+ */
+export async function recordEntertainmentGameCompletion(
+  tx: GrowthTransaction,
+  input: { userId: string; gameCode: string; gameId: string; now?: Date },
+) {
+  const now = input.now || new Date()
+  return completeTask(tx, {
+    userId: input.userId,
+    taskCode: 'DAILY_GAME',
+    periodKey: getShanghaiDateKey(now),
+    sourceEventId: `${input.gameCode}:${input.gameId}`,
+    now,
+  })
+}
+
+type GrowthRewardWindow = { start: Date; end: Date; limit: number }
+
+function capWindows(task: NonNullable<ReturnType<typeof getGrowthTask>>, now: Date): GrowthRewardWindow[] {
+  const windows: GrowthRewardWindow[] = []
+  if (task.dailyCap !== undefined) {
+    const range = getShanghaiDayRange(now)
+    windows.push({ start: range.start, end: range.end, limit: task.dailyCap })
+  }
+  if (task.weeklyCap !== undefined) {
+    const range = weekRange(getShanghaiWeekKey(now))
+    windows.push({ ...range, limit: task.weeklyCap })
+  }
+  if (windows.length > 0) return windows
+
   if (task.frequency === 'daily') {
     const range = getShanghaiDayRange(now)
-    return { start: range.start, end: range.end, limit: task.dailyCap || Number.MAX_SAFE_INTEGER }
+    return [{ start: range.start, end: range.end, limit: Number.MAX_SAFE_INTEGER }]
   }
   const range = weekRange(getShanghaiWeekKey(now))
-  return { ...range, limit: task.weeklyCap || Number.MAX_SAFE_INTEGER }
+  return [{ ...range, limit: Number.MAX_SAFE_INTEGER }]
+}
+
+/** Pure cap calculation shared by reward tests and the transactional grant. */
+export function calculateGrowthRewardAmount(
+  task: NonNullable<ReturnType<typeof getGrowthTask>>,
+  input: { dailyUsed?: number; weeklyUsed?: number } = {},
+) {
+  const remainingCaps = [
+    task.dailyCap === undefined ? Number.MAX_SAFE_INTEGER : task.dailyCap - (input.dailyUsed || 0),
+    task.weeklyCap === undefined ? Number.MAX_SAFE_INTEGER : task.weeklyCap - (input.weeklyUsed || 0),
+  ]
+  const remaining = Math.max(0, Math.min(...remainingCaps))
+  if (remaining <= 0) return 0
+  return task.capUnit === 'events' ? task.reward : Math.min(task.reward, remaining)
 }
 
 export async function grantGrowthReward(
@@ -137,6 +187,7 @@ export async function grantGrowthReward(
     activityId?: string
     activityRegistrationId?: string
     badgeId?: string
+    businessKey?: string
   },
 ) {
   const task = getGrowthTask(input.taskCode)
@@ -149,28 +200,37 @@ export async function grantGrowthReward(
   if (!completion.eligible || !completion.completion) return { awardedAmount: 0, capped: true, duplicate: false }
 
   await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${input.userId} FOR UPDATE`
-  const businessKey = stableBusinessKey([input.taskCode, input.userId, periodKey, sourceEventId])
+  const businessKey = input.businessKey || stableBusinessKey([input.taskCode, input.userId, periodKey, sourceEventId])
   const original = await tx.pointLog.findUnique({ where: { businessKey }, select: { id: true } })
   if (original) return { awardedAmount: 0, capped: false, duplicate: true }
 
-  const window = capWindow(task, now)
-  const where = {
-    userId: input.userId,
-    growthTaskCode: input.taskCode,
-    points: { gt: 0 },
-    createdAt: { gte: window.start, lt: window.end },
-  } as const
-  const [sum, count] = await Promise.all([
-    tx.pointLog.aggregate({ where, _sum: { points: true } }),
-    tx.pointLog.count({ where }),
-  ])
-  const used = task.capUnit === 'events' ? count : (sum._sum.points || 0)
+  const [window, ...additionalWindows] = capWindows(task, now)
+  const getUsed = async (scopedWindow: GrowthRewardWindow) => {
+    const where = {
+      userId: input.userId,
+      growthTaskCode: input.taskCode,
+      points: { gt: 0 },
+      createdAt: { gte: scopedWindow.start, lt: scopedWindow.end },
+    } as const
+    const [sum, count] = await Promise.all([
+      tx.pointLog.aggregate({ where, _sum: { points: true } }),
+      tx.pointLog.count({ where }),
+    ])
+    return task.capUnit === 'events' ? count : (sum._sum.points || 0)
+  }
+  if (!window) throw new Error('GROWTH_REWARD_WINDOW_MISSING')
+  const used = await getUsed(window)
   const remaining = Math.max(0, window.limit - used)
-  if (remaining <= 0) {
+  const additionalRemaining = await Promise.all(additionalWindows.map(async (scopedWindow) => {
+    const scopedUsed = await getUsed(scopedWindow)
+    return Math.max(0, scopedWindow.limit - scopedUsed)
+  }))
+  const effectiveRemaining = Math.max(0, Math.min(remaining, ...additionalRemaining))
+  if (effectiveRemaining <= 0) {
     await tx.growthTaskCompletion.update({ where: { id: completion.completion.id }, data: { rewardAmount: 0 } })
     return { awardedAmount: 0, capped: true, duplicate: false }
   }
-  const amount = task.capUnit === 'events' ? task.reward : Math.min(task.reward, remaining)
+  const amount = task.capUnit === 'events' ? task.reward : Math.min(task.reward, effectiveRemaining)
   const award = await awardRegistrationFee(tx, {
     userId: input.userId,
     requestedAmount: amount,
@@ -188,6 +248,42 @@ export async function grantGrowthReward(
   })
   await tx.growthTaskCompletion.update({ where: { id: completion.completion.id }, data: { rewardAmount: award.awardedAmount } })
   return { awardedAmount: award.awardedAmount, capped: false, duplicate: award.duplicate }
+}
+
+/**
+ * A public, approved post is one shared business fact for both post-growth
+ * surfaces. The two tasks still keep separate completion and reward ledgers.
+ */
+export async function recordQualifiedPublishedPostGrowth(
+  tx: GrowthTransaction,
+  input: {
+    userId: string
+    postId: string
+    post: { status: unknown; moderationStatus: unknown; isDeleted: unknown }
+    now?: Date
+  },
+) {
+  if (!isQualifiedPublishedPost(input.post)) {
+    return { qualified: false, newLife: null, publishReward: null }
+  }
+  const now = input.now || new Date()
+  const newLife = await completeTask(tx, {
+    userId: input.userId,
+    taskCode: 'FIRST_POST',
+    periodKey: 'ALL',
+    sourceEventId: input.postId,
+    now,
+  })
+  const publishReward = await grantGrowthReward(tx, {
+    userId: input.userId,
+    taskCode: 'PUBLISH_POST_ACTIVE',
+    sourceEventId: `post:${input.postId}`,
+    businessKey: stableBusinessKey(['published-post', input.userId, input.postId]),
+    reason: '发布帖子',
+    postId: input.postId,
+    now,
+  })
+  return { qualified: true, newLife, publishReward }
 }
 
 export async function reverseGrowthRewardForEvent(
@@ -233,6 +329,7 @@ export async function refreshProfileCompletion(userId: string, now = new Date())
       select: {
         nickname: true,
         gender: true,
+        customGender: true,
         avatarUrl: true,
         bio: true,
         birthMonth: true,
@@ -245,7 +342,7 @@ export async function refreshProfileCompletion(userId: string, now = new Date())
       user.nickname.trim() &&
       (user.avatarUrl || user.Profile?.avatarUrl) &&
       (user.bio?.trim() || user.Profile?.bio?.trim()) &&
-      user.gender &&
+      isProfileGenderComplete(user) &&
       (user.Profile?.locationCountry || user.Profile?.locationRegion) &&
       user.birthMonth &&
       user.birthDay,
@@ -289,14 +386,21 @@ export async function claimGrowthTask(userId: string, taskCode: GrowthTaskCode, 
 async function completedActiveDays(tx: GrowthTransaction, userId: string, weekKey: string, now = new Date()) {
   const coreCodes = getCoreActiveTasks().map((task) => task.code)
   const weekDateKeys = dayKeysForWeek(weekKey)
-  const [rows, checkIns, prescriptions] = await Promise.all([
+  const [rows, checkIns, prescriptions, commentRewards] = await Promise.all([
     tx.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: coreCodes }, periodKey: { in: weekDateKeys } }, select: { taskCode: true, periodKey: true } }),
     tx.checkIn.findMany({ where: { userId, checkinDateKey: { in: weekDateKeys } }, select: { checkinDateKey: true } }),
     tx.entertainmentDailyDraw.findMany({ where: { userId, dateKey: { in: weekDateKeys } }, select: { dateKey: true } }),
+    tx.pointLog.findMany({ where: { userId, action: 'COMMENT_POST', points: { gt: 0 }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { dateKey: true, createdAt: true } }),
   ])
+  const commentRewardCountsByDate = new Map<string, number>(weekDateKeys.map((dateKey) => [dateKey, 0]))
+  for (const row of commentRewards) {
+    const rewardDateKey = row.dateKey || getShanghaiDateKey(row.createdAt)
+    commentRewardCountsByDate.set(rewardDateKey, (commentRewardCountsByDate.get(rewardDateKey) || 0) + 1)
+  }
   return getCompletedCoreDayKeys(weekKey, rows, now, {
     checkinDateKeys: checkIns.map((row) => row.checkinDateKey),
     prescriptionDateKeys: prescriptions.map((row) => row.dateKey),
+    commentRewardCountsByDate,
   }).size
 }
 
@@ -336,13 +440,28 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
   const weekKey = getShanghaiWeekKey(now)
   const todayRange = getShanghaiDayRange(now)
   const weekDateKeys = dayKeysForWeek(weekKey)
-  const [completions, newLifeCompletions, pointLogs, checkIns, prescriptions] = await Promise.all([
+  const [completions, newLifeCompletions, pointLogs, checkIns, prescriptions, communityRewardLogs, duelCount] = await Promise.all([
     prisma.growthTaskCompletion.findMany({ where: { userId, periodKey: { in: [dateKey, weekKey, ...weekDateKeys] } }, orderBy: { completedAt: 'asc' } }),
     prisma.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: getTasksByKind('newLife').map((task) => task.code) }, oneTimeKey: { not: null } }, orderBy: { completedAt: 'asc' } }),
     prisma.pointLog.findMany({ where: { userId, growthTaskCode: { not: null }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { growthTaskCode: true, points: true, createdAt: true } }),
     prisma.checkIn.findMany({ where: { userId, checkinDateKey: { in: weekDateKeys } }, select: { checkinDateKey: true } }),
     prisma.entertainmentDailyDraw.findMany({ where: { userId, dateKey: { in: weekDateKeys } }, select: { dateKey: true } }),
+    prisma.pointLog.findMany({ where: { userId, action: { in: ['COMMENT_POST', 'POST_COMMENT_RECEIVED'] }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { action: true, points: true, dateKey: true, createdAt: true } }),
+    prisma.guessSongDuelMatch.count({ where: { status: 'FINISHED', finishedAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end }, GuessSongDuelPlayer: { some: { userId } } } }),
   ])
+  const commentRewardCountsByDate = new Map<string, number>(weekDateKeys.map((dateKey) => [dateKey, 0]))
+  const receivedCommentCountsByDate = new Map<string, number>()
+  for (const row of communityRewardLogs) {
+    if (row.points <= 0) continue
+    const rewardDateKey = row.dateKey || getShanghaiDateKey(row.createdAt)
+    const target = row.action === 'COMMENT_POST' ? commentRewardCountsByDate : receivedCommentCountsByDate
+    target.set(rewardDateKey, (target.get(rewardDateKey) || 0) + 1)
+  }
+  const gameCompletionCountsByDate = new Map<string, number>()
+  for (const row of completions) {
+    if (row.taskCode !== 'DAILY_GAME' || !weekDateKeys.includes(row.periodKey)) continue
+    gameCompletionCountsByDate.set(row.periodKey, (gameCompletionCountsByDate.get(row.periodKey) || 0) + 1)
+  }
   const existingDailyRewards = await prisma.pointLog.findMany({
     where: {
       userId,
@@ -358,27 +477,39 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     DAILY_CHECKIN: dailyRewardTotal(['DAILY_CHECK_IN', 'CONTINUOUS_CHECK_IN_BONUS']),
     DAILY_PRESCRIPTION: dailyRewardTotal(['ENTERTAINMENT_DAILY_DRAW']),
     DAILY_GAME: 0,
-    DAILY_COMMENT: dailyRewardTotal(['COMMENT_POST']),
+    DAILY_COMMENT: communityRewardLogs
+      .filter((row) => row.action === 'COMMENT_POST' && row.points > 0 && (row.dateKey || getShanghaiDateKey(row.createdAt)) === dateKey)
+      .reduce((sum, row) => sum + row.points, 0),
   }
   const active = getCoreActiveTasks()
   const activeActions = getActiveActionTasks()
   const passive = getTasksByKind('passive')
   const activeActionItems = activeActions.map((task) => {
     const positiveRows = pointLogs.filter((row) => row.growthTaskCode === task.code && row.points > 0 && row.createdAt >= todayRange.start && row.createdAt < todayRange.end)
+    const completionRows = completions.filter((row) => row.taskCode === task.code && row.periodKey === dateKey)
     const earned = positiveRows.reduce((sum, row) => sum + row.points, 0)
     const cap = task.dailyCap || 0
+    // Publish completions are recorded for every valid public post, including
+    // posts that arrive after today's reward cap is exhausted. The daily row
+    // is still a 0/1 task, while the ledger independently decides whether the
+    // event earned money.
+    const progress = task.code === 'PUBLISH_POST_ACTIVE'
+      ? Math.min(cap, completionRows.length)
+      : Math.min(cap, positiveRows.length)
     return {
       ...task,
-      progress: positiveRows.length,
+      progress,
       earned,
       cap,
-      completed: cap > 0 && positiveRows.length >= cap,
+      completed: cap > 0 && progress >= cap,
       todayReward: earned,
     }
   })
   const businessFacts = {
     checkinDateKeys: checkIns.map((row) => row.checkinDateKey),
     prescriptionDateKeys: prescriptions.map((row) => row.dateKey),
+    commentRewardCountsByDate,
+    gameCompletionCountsByDate,
   }
   const todayProgress = resolveTodayTaskProgress({
     dateKey,
@@ -395,16 +526,42 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
       actionHref: resolveGrowthTaskDestination(task.code) || undefined,
       reward: task.reward,
       completed: Boolean(status?.completed),
-      ...(isAction ? {
+      ...(status?.cap !== undefined ? {
         progress: status?.progress || 0,
         earned: status?.earned || 0,
-        cap: status?.cap || task.dailyCap || 0,
+        cap: status.cap,
       } : {}),
       todayReward: isAction ? status?.earned || 0 : activeRewardByCode[task.code] || 0,
     }
   })
   const activeDays = getCompletedCoreDayKeys(weekKey, completions, now, businessFacts).size
   const passiveItems = passive.map((task) => {
+    if (task.code === 'POST_COMMENT_RECEIVED') {
+      const progress = Math.min(COMMUNITY_REWARD_LIMITS.postCommentReceivedDaily, task.dailyCap || 0, receivedCommentCountsByDate.get(dateKey) || 0)
+      const earned = progress * COMMUNITY_REWARD_POINTS.postCommentReceived
+      return {
+        ...task,
+        actionHref: resolveGrowthTaskDestination(task.code) || undefined,
+        earned,
+        progress,
+        positiveEvents: progress,
+        reversals: 0,
+        cap: task.dailyCap,
+        completed: progress >= (task.completionThreshold || task.dailyCap || 1),
+      }
+    }
+    if (task.code === 'LISTEN_DUEL_BRANCH') {
+      return {
+        ...task,
+        actionHref: resolveGrowthTaskDestination(task.code) || undefined,
+        earned: 0,
+        progress: duelCount,
+        positiveEvents: duelCount,
+        reversals: 0,
+        cap: undefined,
+        completed: duelCount >= (task.completionThreshold || 1),
+      }
+    }
     const start = task.frequency === 'daily' ? getShanghaiDayRange(now).start : weekRange(weekKey).start
     const end = task.frequency === 'daily' ? getShanghaiDayRange(now).end : weekRange(weekKey).end
     const scoped = pointLogs.filter((row) => row.growthTaskCode === task.code && row.createdAt >= start && row.createdAt < end)
@@ -413,7 +570,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     const earned = scoped.reduce((sum, row) => sum + row.points, 0)
     const cap = task.frequency === 'daily' ? task.dailyCap : task.weeklyCap
     const progress = task.capUnit === 'events' ? positiveRows.length : earned
-    return { ...task, actionHref: resolveGrowthTaskDestination(task.code) || undefined, earned, progress, positiveEvents: positiveRows.length, reversals: negativeRows.length, cap }
+    return { ...task, actionHref: resolveGrowthTaskDestination(task.code) || undefined, earned, progress, positiveEvents: positiveRows.length, reversals: negativeRows.length, cap, completed: cap !== undefined && progress >= cap }
   })
   const newLifeItems = getTasksByKind('newLife').map((task) => {
     const completion = newLifeCompletions.find((row) => row.taskCode === task.code)
@@ -421,10 +578,37 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
   })
   const milestones = await prisma.growthWeeklyMilestoneClaim.findMany({ where: { userId, weekKey }, select: { milestone: true, claimedAt: true } })
   const milestoneDays = activeDays
+  const rewardRules = getRewardRuleGroups().map((group) => group.key === 'weekly'
+    ? {
+        ...group,
+        items: group.items.map((rule) => {
+          const milestone = rule.milestoneDays === undefined
+            ? null
+            : milestones.find((claim) => claim.milestone === rule.milestoneDays)
+          return milestone
+            ? { ...rule, claimable: milestoneDays >= (rule.milestoneDays || 0), claimed: Boolean(milestone.claimedAt) }
+            : rule
+        }),
+      }
+    : group)
   return {
     timezone: 'Asia/Shanghai',
     taskSystemLaunchAt: TASK_SYSTEM_LAUNCH_AT.toISOString(),
-    today: { dateKey, total: todayProgress.total, completed: todayProgress.completed, items: todayItems, complete: todayProgress.completed === todayProgress.total },
+    today: {
+      dateKey,
+      // Bonus actions remain visible in the same list but never change the
+      // core daily-completion denominator used by the weekly milestones.
+      total: todayProgress.coreTotal,
+      completed: todayProgress.coreCompleted,
+      coreTotal: todayProgress.coreTotal,
+      coreCompleted: todayProgress.coreCompleted,
+      bonusTotal: todayProgress.bonusTotal,
+      bonusCompleted: todayProgress.bonusCompleted,
+      listTotal: todayProgress.total,
+      listCompleted: todayProgress.completed,
+      items: todayItems,
+      complete: todayProgress.coreCompleted === todayProgress.coreTotal,
+    },
     passive: { dateKey, weekKey, items: passiveItems },
     week: {
       weekKey,
@@ -437,6 +621,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
       completedCount: newLifeItems.filter((item) => item.completed).length,
       items: newLifeItems,
     },
+    rewardRules,
     economy: getEconomyReport(),
   }
 }

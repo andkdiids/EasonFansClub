@@ -1,6 +1,5 @@
 import { randomInt } from 'node:crypto'
 import { Prisma, type GuessSongMode } from '@prisma/client'
-import { getShanghaiDateKey } from '@/lib/checkin'
 import {
   GUESS_SONG_ANSWER_SECONDS,
   GUESS_SONG_INITIAL_LIVES,
@@ -34,7 +33,7 @@ import {
 } from '@/lib/guess-song-media-ticket'
 import { prisma } from '@/lib/prisma'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { completeTask } from '@/lib/growth-tasks/service'
+import { recordEntertainmentGameCompletion } from '@/lib/growth-tasks/service'
 import { createUUID } from '@/lib/utils/uuid'
 
 type OptionSnapshot = { key: string; label: string }
@@ -1068,16 +1067,6 @@ export async function answerGuessSongQuestion(input: {
       },
     })
 
-    if (completed) {
-      await completeTask(tx, {
-        userId: question.GuessSongSession.userId,
-        taskCode: 'DAILY_GAME',
-        periodKey: getShanghaiDateKey(now),
-        sourceEventId: input.sessionId,
-        now,
-      })
-    }
-
     if (!completed && infiniteSession) {
       const quizConfig = await tx.guessSongQuizConfig.findUnique({ where: { id: GUESS_SONG_QUIZ_CONFIG_ID } })
       await createNextInfiniteQuestion(
@@ -1152,6 +1141,14 @@ export async function answerGuessSongQuestion(input: {
       cheatDetected: true,
       exitAfterSeconds: risk.exitAfterSeconds,
     }
+  }
+  if (!outcome.duplicate && session.status === 'COMPLETED' && session.isValid) {
+    await prisma.$transaction((tx) => recordEntertainmentGameCompletion(tx, {
+      userId: input.userId,
+      gameCode: 'GUESS_SONG',
+      gameId: input.sessionId,
+      now,
+    }))
   }
   let ranks: { weekRank: number | null; monthRank: number | null } | null = null
   if (!outcome.duplicate && session.status === 'COMPLETED') {

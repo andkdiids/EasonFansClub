@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma, type WantListenFakeTitleDifficulty, type WantListenMode } from '@prisma/client'
-import { getShanghaiDateKey } from '@/lib/checkin'
 import {
   assessWantListenLatencies,
   averageAnswerTime,
@@ -11,7 +10,7 @@ import {
 } from '@/lib/anti-cheat'
 import { syncUserAchievements } from '@/lib/achievements'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { completeTask } from '@/lib/growth-tasks/service'
+import { recordEntertainmentGameCompletion } from '@/lib/growth-tasks/service'
 import { normalizeRatingLanguage } from '@/lib/rating-types'
 import { prisma } from '@/lib/prisma'
 import { cleanLyrics, selectLyricFragment, selectSafeLyricSnippet } from '@/lib/want-listen-lyrics'
@@ -872,9 +871,15 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
       })
     }
 
-    if (isFinal && !assessment.suspicious) {
+    if (isFinal && !assessment.suspicious && session.antiCheatStatus !== 'SUSPICIOUS') {
       await updateWantListenStats(database, updated, '', false, 1, finalScore, finalCorrectCount)
       await recordWantListenLeaderboard(session.id, database)
+      await recordEntertainmentGameCompletion(database, {
+        userId: session.userId,
+        gameCode: `WANT_LISTEN_${session.mode}`,
+        gameId: session.id,
+        now: completedAt || new Date(),
+      })
     }
     return { duplicate: false, sessionId: updated.id, questionId: current.id, finalized: isFinal }
   })
@@ -986,14 +991,6 @@ export async function finishWantListenSession(userId: string, sessionId: string,
     })
     if (!updated) throw sessionNotFound()
 
-    await completeTask(database, {
-      userId: active.userId,
-      taskCode: 'DAILY_GAME',
-      periodKey: getShanghaiDateKey(finishedAt),
-      sourceEventId: active.id,
-      now: finishedAt,
-    })
-
     // 反作弊评估：基于服务端记录的全部已答耗时
     const answeredLatencies = updated.WantListenSessionQuestion
       .filter((question) => question.answeredAt && question.answerLatencyMs !== null && question.answerLatencyMs !== undefined)
@@ -1018,9 +1015,15 @@ export async function finishWantListenSession(userId: string, sessionId: string,
       })
     }
 
-    if (!assessment.suspicious) {
+    if (!assessment.suspicious && active.antiCheatStatus !== 'SUSPICIOUS' && updated.totalQuestions > 0) {
       await updateWantListenStats(database, updated, '', false, 1, updated.score, updated.correctCount)
       await recordWantListenLeaderboard(active.id, database)
+      await recordEntertainmentGameCompletion(database, {
+        userId: active.userId,
+        gameCode: `WANT_LISTEN_${active.mode}`,
+        gameId: active.id,
+        now: finishedAt,
+      })
     }
     return { duplicate: false, finalized: true }
   })

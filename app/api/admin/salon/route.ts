@@ -9,7 +9,7 @@ import { normalizeSalonConcertSelection, parseSalonCategory, SALON_CATEGORY_CONF
 import { prisma } from '@/lib/prisma'
 import { emitRealtime, emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, sanitizeText } from '@/lib/security'
-import { completeTask, grantGrowthReward } from '@/lib/growth-tasks/service'
+import { completeTask, grantGrowthReward, reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
 import { toSalonReviewError, type SalonReviewErrorCode, type SalonReviewFailureStage } from '@/lib/salon-review-errors'
 import { canTransitionSalonReviewStatus } from '@/lib/salon-review-transitions'
 
@@ -210,6 +210,8 @@ export async function PATCH(request: Request) {
 
     if (action === 'approve' || action === 'reject') {
       reviewStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
+      if (current.status === reviewStatus) return reviewErrorResponse('ALREADY_REVIEWED', '这篇作品已经被处理，不能重复审核', 409)
+      if (current.status === 'REJECTED' && reviewStatus === 'APPROVED') return reviewErrorResponse('REVIEW_CONFLICT_REJECT_WINS', '该内容已被拒绝，无法再次通过', 409)
       if (!canTransitionSalonReviewStatus(current.status, reviewStatus)) return reviewErrorResponse('REVIEW_NOT_ALLOWED', '当前作品状态不允许执行该审核操作', 409)
       const rejectReason = sanitizeText(body.rejectReason, 2000)
       if (reviewStatus === 'REJECTED' && !rejectReason) return reviewErrorResponse('REJECTION_REASON_REQUIRED', '拒绝时必须填写原因')
@@ -223,6 +225,21 @@ export async function PATCH(request: Request) {
 
     failureStage = 'DATABASE_UPDATE'
     updated = await prisma.$transaction(async (tx) => {
+      // A conditional update alone is not enough for the reject-wins rule:
+      // serialize every decision on the same SalonPost row and re-evaluate
+      // the transition after the lock is acquired.
+      await tx.$queryRaw`SELECT \`id\` FROM \`SalonPost\` WHERE \`id\` = ${postId} FOR UPDATE`
+      const lockedCurrent = await tx.salonPost.findUnique({
+        where: { id: postId },
+        select: { id: true, category: true, status: true, userId: true, title: true, concertId: true },
+      })
+      if (!lockedCurrent) throw new Error('SALON_POST_NOT_FOUND')
+      current = lockedCurrent
+      if (reviewStatus) {
+        if (lockedCurrent.status === reviewStatus) throw new Error('SALON_REVIEW_ALREADY_REVIEWED')
+        if (lockedCurrent.status === 'REJECTED' && reviewStatus === 'APPROVED') throw new Error('SALON_REVIEW_CONFLICT_REJECT_WINS')
+        if (!canTransitionSalonReviewStatus(lockedCurrent.status, reviewStatus)) throw new Error('SALON_REVIEW_NOT_ALLOWED')
+      }
       const allowedReviewStates: Prisma.SalonPostWhereInput = reviewStatus === 'APPROVED'
         ? { status: 'PENDING' as const }
         : reviewStatus === 'REJECTED'
@@ -239,6 +256,14 @@ export async function PATCH(request: Request) {
           reason: '沙龙作品通过审核',
         })
         await completeTask(tx, { userId: current!.userId, taskCode: 'FIRST_SALON', periodKey: 'ALL', sourceEventId: current!.id })
+      } else if (lockedCurrent.status === 'APPROVED') {
+        failureStage = 'REWARD'
+        await reverseGrowthRewardForEvent(tx, {
+          userId: lockedCurrent.userId,
+          taskCode: 'SALON_APPROVED',
+          sourceEventId: lockedCurrent.id,
+          reason: '沙龙审核拒绝，撤销通过奖励',
+        })
       }
       failureStage = 'DATABASE_UPDATE'
       return tx.salonPost.findUniqueOrThrow({ where: { id: postId }, select: { id: true, status: true } })

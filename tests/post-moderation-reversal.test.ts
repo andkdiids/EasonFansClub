@@ -24,15 +24,17 @@ const replyLikeRoute = read('app/api/replies/[replyId]/like/route.ts')
 const replyPinRoute = read('app/api/replies/[replyId]/pin/route.ts')
 const viewRoute = read('app/api/posts/[postId]/view/route.ts')
 
-test('帖子审核允许 PENDING/APPROVED/REJECTED 之间的双向最终状态调整', () => {
+test('帖子审核遵循 REJECTED 优先的单向状态机', () => {
   for (const [from, to] of [
     ['PENDING', 'APPROVED'],
     ['PENDING', 'REJECTED'],
     ['APPROVED', 'REJECTED'],
-    ['REJECTED', 'APPROVED'],
   ] as const) {
     assert.equal(canTransitionPostModerationStatus(from, to), true, `${from} -> ${to}`)
   }
+  assert.equal(canTransitionPostModerationStatus('REJECTED', 'APPROVED'), false, 'REJECTED -> APPROVED')
+  assert.equal(canTransitionPostModerationStatus('REJECTED', 'REJECTED'), false, 'duplicate REJECTED')
+  assert.equal(canTransitionPostModerationStatus('APPROVED', 'APPROVED'), false, 'duplicate APPROVED')
   assert.equal(canTransitionPostModerationStatus('VIOLATION', 'APPROVED'), false)
   assert.equal(canTransitionPostModerationStatus('APPROVED', 'PENDING'), false)
 })

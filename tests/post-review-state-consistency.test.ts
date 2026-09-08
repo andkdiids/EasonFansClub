@@ -9,7 +9,8 @@ import {
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const reviewRoute = read('app/api/admin/posts/review/route.ts')
-const reviewManager = read('app/admin/posts/review/PostReviewManager.tsx')
+const reviewCenterRoute = read('app/api/admin/review/route.ts')
+const reviewCenter = read('app/admin/review/ReviewCenter.tsx')
 const postDetail = read('app/posts/[postId]/page.tsx')
 const postEditRoute = read('app/api/posts/[postId]/route.ts')
 const postActions = read('components/PostActions.tsx')
@@ -56,16 +57,19 @@ test('审核 API 具备四种状态迁移、幂等守卫和并发锁', () => {
   assert.match(reviewRoute, /writeApprovalFriendActivity/)
   assert.doesNotMatch(reviewRoute, /tx\.notification\.create/)
   assert.match(reviewRoute, /previousStatus: result\.previousStatus/)
-  assert.match(reviewRoute, /changed: false/)
+  assert.match(reviewRoute, /POST_REVIEW_ALREADY_REVIEWED/)
+  assert.match(reviewRoute, /REVIEW_CONFLICT_REJECT_WINS/)
+  assert.match(reviewCenterRoute, /decision === 'APPROVE' \? 'APPROVED' : 'REJECTED'/)
 })
 
-test('后台三个列表和重新审核按钮都直接对应 PENDING / APPROVED / REJECTED', () => {
-  assert.match(reviewManager, /reviewFilters\.map/)
-  assert.match(reviewManager, /拒绝通过/)
-  assert.match(reviewManager, /重新通过/)
-  assert.match(reviewManager, /拒绝原因（必填）/)
-  assert.match(reviewManager, /rejectionReason: reason/)
-  assert.match(reviewManager, /setPosts\(\(current\) => current\.filter\(\(post\) => post\.id !== postId\)\)/)
+test('统一审核中心的状态按钮与服务端状态迁移保持一致', () => {
+  assert.match(reviewCenter, /\['ALL', 'PENDING', 'APPROVED', 'REJECTED'\]/)
+  assert.match(reviewCenter, /item\.actions\.reject/)
+  assert.match(reviewCenter, /item\.actions\.approve/)
+  assert.match(reviewCenter, /setRejectReason\(item\.rejectReason \|\| ''\)/)
+  assert.match(reviewCenter, /body: JSON\.stringify\(/)
+  assert.match(reviewCenterRoute, /rejectReason: reason/)
+  assert.match(reviewCenterRoute, /REVIEW_CONFLICT_REJECT_WINS/)
 })
 
 test('帖子详情和公开查询使用同一审核访问规则', () => {
