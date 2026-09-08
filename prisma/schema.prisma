@@ -3414,6 +3414,28 @@ model Post {
   @@index([moderationStatus, createdAt])
 }
 
+/**
+ * The single active new-post draft for a user. Drafts are private and are
+ * intentionally separate from Post so autosave never enters moderation,
+ * growth, notification, or published-post counters.
+ */
+model PostDraft {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  boardId        String?
+  title          String   @db.VarChar(120)
+  content        String   @db.Text
+  richContent    Json?
+  imageUrls      Json
+  pendingSticker Json?
+  version        Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  User           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt])
+}
+
 model UserPostGroup {
   id        String   @id @default(cuid())
   userId    String
@@ -4362,6 +4384,7 @@ model User {
   PharmacyDuplicateInventories                           PharmacyDuplicateInventory[]
   PharmacyRecycleLogs                                    PharmacyRecycleLog[]
   Post                                                   Post[]
+  PostDraft                                              PostDraft?
   UserPostGroup                                          UserPostGroup[]
   PostFavorite                                           PostFavorite[]
   Profile                                                Profile?

@@ -24,6 +24,14 @@ test('closed FriendDock restores both expanded and collapsed triggers', () => {
   assert.match(friendDock, /ref=\{toggleRef\}/)
 })
 
+test('post detail keeps the stable FriendDock trigger while route changes auto-close the panel', () => {
+  assert.match(appShell, /<FriendDock currentUserId=\{user\.id\}/)
+  assert.match(friendDock, /clearFriendListReturnState\(\)[\s\S]*setOpen\(false\)[\s\S]*setGrowthView\(null\)[\s\S]*\[clearFriendListReturnState, pathname, currentUserId, resetChat\]/)
+  assert.doesNotMatch(css, /body:has\(\.forum-discovery-detail-shell\) \.friend-dock \{ display:none !important; \}/)
+  assert.match(css, /body:has\(\.forum-discovery-detail-shell\) \.friend-dock \{[\s\S]*bottom:calc\(var\(--mobile-post-action-bar-total\) \+ var\(--mobile-floating-action-gap\)\)/)
+  assert.match(css, /--mobile-post-action-bar-total: calc\(var\(--mobile-post-action-bar-height\) \+ var\(--mobile-safe-area-bottom\)\)/)
+})
+
 test('closing FriendDock invalidates pending chat work and clears all chat-only state', () => {
   assert.match(friendDock, /const chatSessionRef = useRef\(0\)/)
   assert.match(friendDock, /const resetChat = useCallback\(\(\) => \{[\s\S]*chatSessionRef\.current \+= 1[\s\S]*setChatFriend\(null\)[\s\S]*setConversationId\(''\)[\s\S]*setMessages\(\[\]\)[\s\S]*setContent\(''\)[\s\S]*setSending\(false\)[\s\S]*setLoadingOlder\(false\)/)

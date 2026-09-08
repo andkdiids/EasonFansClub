@@ -61,26 +61,47 @@ function addBusinessFact(completedCodesByDay: Map<string, Set<string>>, dayKey: 
   completedCodesByDay.set(dayKey, codes)
 }
 
+/**
+ * A capped event task exposes its daily cap as the progress target. The
+ * completionThreshold field is retained for uncapped event tasks and must not
+ * turn the first rewardable event of a multi-event task into a completed task.
+ */
+function getTaskProgressTarget(taskCode: GrowthTaskCode) {
+  const task = getGrowthTask(taskCode)
+  return task?.dailyCap ?? task?.completionThreshold ?? 1
+}
+
 function completedCoreCodesForDate(
   dateKey: string,
   rows: Iterable<GrowthCompletionDayRow>,
   businessFacts: GrowthBusinessCompletionFacts = {},
 ) {
-  const coreCodeSet = new Set<string>(getCoreActiveTasks().map((task) => task.code))
+  const coreTasks = getCoreActiveTasks()
+  const coreCodeSet = new Set<string>(coreTasks.map((task) => task.code))
+  const progressCoreCodeSet = new Set<string>(coreTasks.filter((task) => task.dailyCap !== undefined).map((task) => task.code))
   const completedCodes = new Set<string>()
+  const progressCounts = new Map<string, number>()
   for (const row of rows) {
-    if (row.periodKey === dateKey && coreCodeSet.has(row.taskCode)) completedCodes.add(row.taskCode)
+    if (row.periodKey !== dateKey || !coreCodeSet.has(row.taskCode)) continue
+    if (progressCoreCodeSet.has(row.taskCode)) {
+      progressCounts.set(row.taskCode, (progressCounts.get(row.taskCode) || 0) + 1)
+    } else {
+      completedCodes.add(row.taskCode)
+    }
+  }
+  for (const [taskCode, count] of progressCounts) {
+    if (count >= getTaskProgressTarget(taskCode as GrowthTaskCode)) completedCodes.add(taskCode)
   }
   if (Array.from(businessFacts.checkinDateKeys || []).includes(dateKey)) completedCodes.add('DAILY_CHECKIN')
   if (Array.from(businessFacts.prescriptionDateKeys || []).includes(dateKey)) completedCodes.add('DAILY_PRESCRIPTION')
   const commentCount = businessFacts.commentRewardCountsByDate?.get(dateKey)
   if (commentCount !== undefined) {
-    if (commentCount >= (getGrowthTask('DAILY_COMMENT')?.completionThreshold || 1)) completedCodes.add('DAILY_COMMENT')
+    if (commentCount >= getTaskProgressTarget('DAILY_COMMENT')) completedCodes.add('DAILY_COMMENT')
     else completedCodes.delete('DAILY_COMMENT')
   }
   const gameCount = businessFacts.gameCompletionCountsByDate?.get(dateKey)
   if (gameCount !== undefined) {
-    if (gameCount >= (getGrowthTask('DAILY_GAME')?.completionThreshold || 1)) completedCodes.add('DAILY_GAME')
+    if (gameCount >= getTaskProgressTarget('DAILY_GAME')) completedCodes.add('DAILY_GAME')
     else completedCodes.delete('DAILY_GAME')
   }
   return completedCodes
@@ -113,13 +134,13 @@ export function resolveTodayTaskProgress(input: {
         ? input.businessFacts?.gameCompletionCountsByDate?.get(input.dateKey)
         : undefined
     const fallbackCount = completionRows.filter((row) => row.taskCode === task.code && row.periodKey === input.dateKey).length
-    const rawProgress = businessCount ?? fallbackCount
+    const rawProgress = Math.max(0, businessCount ?? fallbackCount)
     const cap = task.dailyCap
     const progress = cap === undefined ? undefined : Math.min(cap, Math.max(0, rawProgress))
-    const threshold = task.completionThreshold || (cap === undefined ? 1 : cap)
+    const target = getTaskProgressTarget(task.code)
     return {
       code: task.code,
-      completed: isComment || isGame ? rawProgress >= threshold : completedCoreCodes.has(task.code),
+      completed: cap === undefined ? completedCoreCodes.has(task.code) : rawProgress >= target,
       ...(cap === undefined ? {} : { progress: progress || 0, cap }),
     }
   })
@@ -161,10 +182,25 @@ export function getCompletedCoreDayKeys(
   const weekDayKeys = dayKeysForGrowthWeek(weekKey)
   const weekDayKeySet = new Set(weekDayKeys)
   const completedCodesByDay = new Map<string, Set<string>>()
+  const progressCoreCodeSet = new Set<string>(getCoreActiveTasks().filter((task) => task.dailyCap !== undefined).map((task) => task.code))
+  const progressCountsByDay = new Map<string, Map<string, number>>()
   for (const row of rows) {
     if (!coreCodeSet.has(row.taskCode)) continue
     if (!weekDayKeySet.has(row.periodKey)) continue
-    completedCodesByDay.set(row.periodKey, (completedCodesByDay.get(row.periodKey) || new Set()).add(row.taskCode))
+    if (progressCoreCodeSet.has(row.taskCode)) {
+      const counts = progressCountsByDay.get(row.periodKey) || new Map<string, number>()
+      counts.set(row.taskCode, (counts.get(row.taskCode) || 0) + 1)
+      progressCountsByDay.set(row.periodKey, counts)
+    } else {
+      completedCodesByDay.set(row.periodKey, (completedCodesByDay.get(row.periodKey) || new Set()).add(row.taskCode))
+    }
+  }
+  for (const [dateKey, counts] of progressCountsByDay) {
+    const codes = completedCodesByDay.get(dateKey) || new Set<string>()
+    for (const [taskCode, count] of counts) {
+      if (count >= getTaskProgressTarget(taskCode as GrowthTaskCode)) codes.add(taskCode)
+    }
+    if (codes.size > 0) completedCodesByDay.set(dateKey, codes)
   }
 
   for (const dateKey of businessFacts.checkinDateKeys || []) addBusinessFact(completedCodesByDay, dateKey, 'DAILY_CHECKIN', weekDayKeySet)
@@ -172,12 +208,11 @@ export function getCompletedCoreDayKeys(
 
   const applyCountFact = (counts: ReadonlyMap<string, number> | undefined, taskCode: GrowthTaskCode) => {
     if (!counts) return
-    const task = getGrowthTask(taskCode)
-    const threshold = task?.completionThreshold || 1
+    const target = getTaskProgressTarget(taskCode)
     for (const [dateKey, count] of counts) {
       if (!weekDayKeySet.has(dateKey)) continue
       const codes = completedCodesByDay.get(dateKey) || new Set<string>()
-      if (count >= threshold) codes.add(taskCode)
+      if (count >= target) codes.add(taskCode)
       else codes.delete(taskCode)
       if (codes.size > 0) completedCodesByDay.set(dateKey, codes)
       else completedCodesByDay.delete(dateKey)

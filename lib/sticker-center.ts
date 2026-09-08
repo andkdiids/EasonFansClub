@@ -6,6 +6,7 @@ import { getStickerPackReviewNotificationLink } from '@/lib/sticker-pack-editing
 import type { Prisma, StickerReportReason } from '@prisma/client'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications, createNotification } from '@/lib/notification-write'
+import { buildReviewCenterUrl } from '@/lib/review-center'
 
 /** 选择器可见表情：未隐藏、未下架、所属合集已通过审核。 */
 const VISIBLE_STICKER_WHERE = {
@@ -913,7 +914,7 @@ export async function submitStickerPack(input: SubmitStickerPackInput): Promise<
           type: 'REVIEW' as const,
           title: '新的表情包审核申请',
           content: `用户 ${creator.nickname} 提交了表情包《${result.name}》，请前往审核中心处理。`,
-          link: '/admin/stickers',
+          link: buildReviewCenterUrl('STICKER', result.id),
           key: `sticker-pack-review:${result.id}`,
         })),
         skipDuplicates: true,

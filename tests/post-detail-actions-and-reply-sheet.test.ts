@@ -55,6 +55,6 @@ test('回复 Bottom Sheet、文本框和图片上传器限制在父容器内并�
   assert.match(css, /post-reply-bottom-sheet[\s\S]*post-reply-form textarea:focus[\s\S]*box-shadow:inset 0 0 0 2px var\(--primary\)/)
   assert.match(css, /post-content-image-uploader-trigger \{ width:100%; max-width:100%; min-width:0; box-sizing:border-box; \}/)
   assert.match(css, /padding-bottom:max\(16px,env\(safe-area-inset-bottom,0px\)\)/)
-  assert.match(uploader, /post-content-image-uploader-trigger flex w-full min-w-0 max-w-full/)
+  assert.match(uploader, /post-content-image-uploader-trigger flex[^\"]*min-w-0[^\"]*flex-1/)
   assert.doesNotMatch(css, /\.post-reply-bottom-sheet[^}]*?(?<!max-)width:100vw;/)
 })

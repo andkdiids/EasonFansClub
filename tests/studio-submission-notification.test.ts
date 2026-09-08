@@ -72,13 +72,13 @@ test('投稿进入 PENDING 后向所有有创作平台权限的管理员写 REVI
   assert.ok(write.data.every((item) => item.actorId === 'user-1'))
   assert.ok(write.data.every((item) => item.title === '创作平台有新的待审核投稿'))
   assert.ok(write.data.every((item) => item.content === '贝多芬迷 提交了「我的第一张图纸」，等待审核。'))
-  assert.ok(write.data.every((item) => item.link === '/admin/studio?projectId=project-1'))
+  assert.ok(write.data.every((item) => item.link === '/admin/review?type=creation&targetId=project-1'))
 })
 
 test('管理员审核通知进入现有 review 分类和未读统计，普通账号不能查询该分类', () => {
   const link = creatorReviewNotificationLink('project-1')
   assert.equal(buildCreatorReviewNotificationContent({ nickname: '贝多芬迷', title: '我的第一张图纸' }), '贝多芬迷 提交了「我的第一张图纸」，等待审核。')
-  assert.equal(creatorReviewNotificationLink('project/with space'), '/admin/studio?projectId=project%2Fwith%20space')
+  assert.equal(creatorReviewNotificationLink('project/with space'), '/admin/review?type=creation&targetId=project%2Fwith%20space')
   assert.equal(getNotificationCategory('REVIEW', link, creatorReviewNotificationKey('project-1', submissionInput.reviewVersion)), 'review')
   assert.deepEqual(getNotificationCategoryFilter('review', false), { id: { in: [] } })
   assert.match(JSON.stringify(getNotificationCategoryFilter('review', true)), /"type":"REVIEW"/)

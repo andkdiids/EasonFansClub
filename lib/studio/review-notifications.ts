@@ -1,6 +1,7 @@
 import type { NotificationType, Prisma, PrismaClient } from '@prisma/client'
 import { createManyNotificationsWithDb } from '@/lib/notification-write'
 import { prisma } from '@/lib/prisma'
+import { buildReviewCenterUrl } from '@/lib/review-center'
 
 type NotificationDb = PrismaClient | Prisma.TransactionClient
 
@@ -19,7 +20,7 @@ export function creatorReviewNotificationKey(projectId: string, reviewVersion: s
 }
 
 export function creatorReviewNotificationLink(projectId: string) {
-  return `/admin/studio?projectId=${encodeURIComponent(projectId)}`
+  return buildReviewCenterUrl('CREATION', projectId)
 }
 
 export function buildCreatorReviewNotificationContent(input: {

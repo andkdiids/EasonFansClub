@@ -21,6 +21,23 @@ export const reviewSourceDefinitions: readonly ReviewSourceDefinition[] = [
   { type: 'TODAY', queryValues: ['today'], label: '今日内容', permission: 'today_manage' },
 ] as const
 
+/**
+ * Build the one canonical destination for an administrator review notice.
+ *
+ * The target id is optional because some historical notices only retained the
+ * queue URL. New notices should always provide it when the source has one so
+ * the review center can open the exact row instead of making an administrator
+ * search for it again.
+ */
+export function buildReviewCenterUrl(type: ReviewSourceType, targetId?: string | null) {
+  const definition = reviewSourceDefinitions.find((item) => item.type === type)
+  const queryType = definition?.queryValues[0] || type.toLowerCase()
+  const query = [`type=${encodeURIComponent(queryType)}`]
+  const normalizedTargetId = targetId?.trim()
+  if (normalizedTargetId) query.push(`targetId=${encodeURIComponent(normalizedTargetId)}`)
+  return `/admin/review?${query.join('&')}`
+}
+
 export function parseReviewSourceType(value: unknown): ReviewSourceType | 'ALL' {
   if (typeof value !== 'string' || !value.trim()) return 'ALL'
   const normalized = value.trim().toLowerCase()

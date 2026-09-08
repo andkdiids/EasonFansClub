@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 import { createManyNotificationsWithDb } from '@/lib/notification-write'
 import { prisma } from '@/lib/prisma'
 import { salonCategoryLabel } from '@/lib/salon'
+import { buildReviewCenterUrl } from '@/lib/review-center'
 
 type NotificationDb = PrismaClient | Prisma.TransactionClient
 
@@ -16,7 +17,7 @@ export function salonReviewNotificationKey(postId: string) {
 }
 
 export function salonReviewNotificationLink(postId: string) {
-  return `/admin/salon?postId=${encodeURIComponent(postId)}`
+  return buildReviewCenterUrl('SALON', postId)
 }
 
 function safeSalonCategoryLabel(category: string) {
@@ -47,9 +48,11 @@ export function buildSalonReviewNotificationContent(input: {
 
 export function salonReviewNotificationWhere(postId: string): Prisma.NotificationWhereInput {
   return {
-    type: 'REVIEW',
     key: salonReviewNotificationKey(postId),
-    link: salonReviewNotificationLink(postId),
+    // The unique business key is stable across the old /admin/salon target
+    // and the canonical review-center target. Keep both stored notification
+    // types compatible so completing a historical notice also closes it.
+    OR: [{ type: 'REVIEW' }, { type: 'ADMIN' }],
   }
 }
 

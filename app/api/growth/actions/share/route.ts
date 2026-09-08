@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { grantGrowthReward } from '@/lib/growth-tasks/service'
@@ -7,9 +6,11 @@ import { enforceApiRateLimit, requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
-function shareSourceKey(contentId: string, dateKey: string) {
-  const digest = createHash('sha256').update(contentId).digest('hex')
-  return `content:${digest}:${dateKey}`
+function shareSourceKey(dateKey: string) {
+  // Link shares and share-card saves are two successful entry points for the
+  // same once-per-day task. The date-scoped key keeps every content type and
+  // every piece of content idempotent within that task window.
+  return `content:${dateKey}`
 }
 
 export async function POST(request: Request) {
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
     const result = await prisma.$transaction(async (tx) => grantGrowthReward(tx, {
       userId: guard.user.id,
       taskCode: 'CONTENT_SHARE_ACTIVE',
-      sourceEventId: shareSourceKey(contentId, dateKey),
+      sourceEventId: shareSourceKey(dateKey),
       reason: '分享内容',
       now,
     }))

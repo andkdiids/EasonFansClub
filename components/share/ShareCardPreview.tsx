@@ -7,7 +7,7 @@ import type { ShareCardData } from '@/lib/share-card'
 import { useIsDesktopMediaQuery } from '@/lib/use-desktop-media-query'
 
 async function downloadShareCard(event: MouseEvent<HTMLAnchorElement>, image: GeneratedShareCardImage) {
-  if (image.source !== 'remote' || !image.previewSrc.startsWith('https://')) return
+  if (image.source !== 'remote' || !image.previewSrc.startsWith('https://')) return true
   event.preventDefault()
   try {
     const response = await fetch(image.previewSrc, { mode: 'cors', credentials: 'omit', cache: 'force-cache' })
@@ -19,20 +19,22 @@ async function downloadShareCard(event: MouseEvent<HTMLAnchorElement>, image: Ge
     anchor.download = image.fileName
     anchor.click()
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+    return true
   } catch {
     // A CDN without CORS can still be opened from the user's explicit click;
     // the preview itself remains the original HTTPS image throughout.
-    window.open(image.previewSrc, '_blank', 'noopener,noreferrer')
+    return Boolean(window.open(image.previewSrc, '_blank', 'noopener,noreferrer'))
   }
 }
 
-export function ShareCardPreview({ data, status, image, error, onClose, onRetry }: Readonly<{
+export function ShareCardPreview({ data, status, image, error, onClose, onRetry, onShareSuccess }: Readonly<{
   data: ShareCardData
   status: 'generating' | 'ready' | 'error'
   image: GeneratedShareCardImage | null
   error: string
   onClose: () => void
   onRetry: () => void
+  onShareSuccess?: () => void | Promise<void>
 }>) {
   const isDesktop = useIsDesktopMediaQuery()
 
@@ -83,7 +85,7 @@ export function ShareCardPreview({ data, status, image, error, onClose, onRetry 
             </div>
             {isDesktop ? (
               <div className="share-card-preview-actions">
-                <a href={image.previewSrc} download={image.fileName} onClick={(event) => { void downloadShareCard(event, image) }} className="share-card-preview-primary" data-share-card-save>保存图片</a>
+                <a href={image.previewSrc} download={image.fileName} onClick={(event) => { void downloadShareCard(event, image).then(async (saved) => { if (saved) await onShareSuccess?.() }) }} className="share-card-preview-primary" data-share-card-save>保存图片</a>
               </div>
             ) : null}
           </>

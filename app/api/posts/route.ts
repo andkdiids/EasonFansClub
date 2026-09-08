@@ -19,6 +19,7 @@ import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
+import { buildReviewCenterUrl } from '@/lib/review-center'
 import {
   logPostRichContentCompatibilityMode,
   resolvePostContentInput,
@@ -458,7 +459,7 @@ export async function POST(request: Request) {
               type: 'REVIEW' as const,
               title: '新帖子待审核',
               content: input.title,
-              link: '/admin/posts/review',
+              link: buildReviewCenterUrl('POST', result.post.id),
               key: `post-review:${result.post.id}`,
             })),
             skipDuplicates: true,

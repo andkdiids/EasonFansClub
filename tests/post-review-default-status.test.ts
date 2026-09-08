@@ -8,7 +8,7 @@ const centerPage = read('app/admin/review/page.tsx')
 const route = read('app/api/admin/review/route.ts')
 
 test('统一审核中心默认选中并请求待审核（PENDING）', () => {
-  assert.match(center, /useState<Filter>\('PENDING'\)/)
+  assert.match(center, /useState<Filter>\(initialTargetId \? 'ALL' : 'PENDING'\)/)
   assert.match(center, /status: nextStatus/)
   assert.match(route, /: 'PENDING'/)
   assert.match(centerPage, /ReviewCenter initialType=/)

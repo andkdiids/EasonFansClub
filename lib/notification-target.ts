@@ -1,4 +1,5 @@
 import { legacyLocalhostUrlToInternalPath, safeInternalPathOrNull } from '@/lib/url-safety'
+import { buildReviewCenterUrl, parseReviewSourceType, type ReviewSourceType } from '@/lib/review-center'
 
 export type NotificationTargetInput = {
   id: string
@@ -6,6 +7,7 @@ export type NotificationTargetInput = {
   type: string
   link: string | null
   targetUrl: string | null
+  key?: string | null
 }
 
 export type NotificationReplyTarget =
@@ -16,6 +18,92 @@ export type NotificationReplyTarget =
 
 function normalizeNotificationTarget(value: unknown) {
   return safeInternalPathOrNull(value) || legacyLocalhostUrlToInternalPath(value)
+}
+
+type ReviewNotificationRoute = {
+  sourceType: ReviewSourceType
+  targetId: string | null
+}
+
+const reviewNotificationKeyPrefixes: Array<{ prefix: string; sourceType: ReviewSourceType }> = [
+  { prefix: 'post-review:', sourceType: 'POST' },
+  { prefix: 'salon-review:', sourceType: 'SALON' },
+  { prefix: 'creator-review:', sourceType: 'CREATION' },
+  { prefix: 'sticker-pack-review:', sourceType: 'STICKER' },
+  { prefix: 'sticker-pack-resubmit:', sourceType: 'STICKER' },
+  { prefix: 'today-review:', sourceType: 'TODAY' },
+  { prefix: 'concert-review:', sourceType: 'CONCERT' },
+]
+
+function targetIdFromReviewKey(key: string | null | undefined): ReviewNotificationRoute | null {
+  if (!key) return null
+  for (const { prefix, sourceType } of reviewNotificationKeyPrefixes) {
+    if (!key.startsWith(prefix)) continue
+    const remainder = key.slice(prefix.length)
+    const separator = remainder.indexOf(':')
+    const targetId = (separator >= 0 ? remainder.slice(0, separator) : remainder).trim()
+    return { sourceType, targetId: targetId || null }
+  }
+  return null
+}
+
+function reviewNotificationRouteFromLink(link: string | null, key: string | null | undefined): ReviewNotificationRoute | null {
+  const normalizedLink = normalizeNotificationTarget(link)
+  if (!normalizedLink) return null
+  const url = new URL(normalizedLink, 'https://local.invalid')
+  const keyRoute = targetIdFromReviewKey(key)
+  const queryTargetId = (...names: string[]) => {
+    for (const name of names) {
+      const value = url.searchParams.get(name)?.trim()
+      if (value) return value
+    }
+    return null
+  }
+  const legacyRoute = (sourceType: ReviewSourceType, targetId: string | null, allowQueueOnly = false) => {
+    if (keyRoute?.sourceType === sourceType) return keyRoute
+    if (targetId) return { sourceType, targetId }
+    return allowQueueOnly ? { sourceType, targetId: null } : null
+  }
+
+  if (url.pathname === '/admin/review') {
+    const sourceType = parseReviewSourceType(url.searchParams.get('type'))
+    return sourceType === 'ALL'
+      ? null
+      : { sourceType, targetId: queryTargetId('targetId', 'sourceId', 'reviewId') }
+  }
+  if (url.pathname === '/admin/posts/review') return legacyRoute('POST', queryTargetId('postId', 'targetId'), true)
+  if (url.pathname === '/admin/salon') return legacyRoute('SALON', queryTargetId('postId', 'targetId'))
+  if (url.pathname === '/admin/studio') return legacyRoute('CREATION', queryTargetId('projectId', 'targetId'))
+  if (url.pathname === '/admin/stickers') return legacyRoute('STICKER', queryTargetId('packId', 'targetId'))
+  if (url.pathname === '/admin/today') return legacyRoute('TODAY', queryTargetId('eventId', 'targetId'))
+  if (url.pathname === '/admin/music/concerts/contributions') {
+    return legacyRoute('CONCERT', queryTargetId('submission', 'targetId'))
+  }
+  return null
+}
+
+/**
+ * Resolve both current and historical administrator review notices to the
+ * unified review center. This is intentionally limited to REVIEW notices and
+ * recognizable legacy administrator review targets; ordinary ADMIN notices
+ * keep their original destination.
+ */
+export function getReviewNotificationTarget(notification: NotificationTargetInput) {
+  const normalizedLink = normalizeNotificationTarget(notification.targetUrl || notification.link)
+  const keyRoute = targetIdFromReviewKey(notification.key)
+  const routeFromLink = reviewNotificationRouteFromLink(normalizedLink, notification.key)
+  // Key-only recovery is safe for the dedicated REVIEW type. ADMIN keys are
+  // also used by user-facing moderation-result notices, so an ADMIN row must
+  // still carry a recognizable administrator review target before it can be
+  // redirected to the review center.
+  const route = routeFromLink || (notification.type === 'REVIEW' ? keyRoute : null)
+  const isReviewNotification = notification.type === 'REVIEW'
+  const isLegacyAdminRoute = notification.type === 'ADMIN' && Boolean(route)
+  if (!isReviewNotification && !isLegacyAdminRoute) return null
+  if (route) return buildReviewCenterUrl(route.sourceType, route.targetId)
+  // REVIEW is reserved for the administrator queue. If an old row lost its
+  // link/key, still take the administrator to the safe queue entry point.
+  return isReviewNotification ? '/admin/review' : null
 }
 
 export function parseNotificationReplyTarget(input: NotificationTargetInput): NotificationReplyTarget | null {
@@ -51,6 +139,8 @@ export function parseNotificationReplyTarget(input: NotificationTargetInput): No
 
 export function getNotificationTarget(notification: NotificationTargetInput) {
   const explicit = notification.targetUrl || notification.link
+  const reviewTarget = getReviewNotificationTarget(notification)
+  if (reviewTarget) return reviewTarget
   const normalizedExplicit = normalizeNotificationTarget(explicit)
   if (normalizedExplicit) return normalizedExplicit
   if (notification.type === 'FRIEND_REQUEST' || notification.type === 'FOLLOW') return '/friends#received-requests'

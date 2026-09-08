@@ -290,14 +290,14 @@ export function GrowthPanel({
           </details>
 
           <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
-            <h3 id="growth-core-title" className="sr-only">今日</h3>
+            <h3 id="growth-core-title">今日任务</h3>
             <div className="growth-item-list">
               {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayProgress(item)} completed={Boolean(item.completed)} />)}
             </div>
           </section>
 
           <details className="growth-panel-section growth-passive-section">
-            <summary>支线 <span aria-hidden="true">›</span></summary>
+            <summary>之外 <span aria-hidden="true">›</span></summary>
             <div className="growth-item-list">
               {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} completed={Boolean(item.completed)} />)}
             </div>

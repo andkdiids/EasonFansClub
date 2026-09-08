@@ -10,6 +10,7 @@ import { getTodayEventRecords } from '@/lib/today-events'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
+import { buildReviewCenterUrl } from '@/lib/review-center'
 
 export const dynamic = 'force-dynamic'
 
@@ -93,7 +94,7 @@ export async function POST(request: Request) {
             type: 'REVIEW' as const,
             title: '有新的今日内容等待审核',
             content: event.title,
-            link: '/admin/today',
+            link: buildReviewCenterUrl('TODAY', event.id),
             key: `today-review:${event.id}`,
           })),
           skipDuplicates: true,

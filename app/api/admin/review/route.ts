@@ -22,6 +22,7 @@ import {
   reviewSourceDefinitions,
   type ReviewDecision,
   type ReviewItem,
+  type ReviewMedia,
   type ReviewSourceDefinition,
   type ReviewSourceType,
   type ReviewStatus,
@@ -75,6 +76,11 @@ function itemActions(type: ReviewSourceType, status: ReviewStatus, id: string): 
 
 function buildItem(input: Omit<ReviewItem, 'actions'>): ReviewItem {
   return { ...input, actions: itemActions(input.sourceType, input.status, input.sourceId) }
+}
+
+function reviewMedia(id: string, value: string | null | undefined, alt: string): ReviewMedia[] {
+  const src = publicImageUrl(value)
+  return src ? [{ id, src, alt }] : []
 }
 
 function numericKeyword(keyword: string) {
@@ -176,11 +182,15 @@ function todayWhere(status: ReviewStatus | 'ALL', keyword: string): Prisma.Today
   }
 }
 
-async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, take: number): Promise<ReviewItem[]> {
+function withTargetId<T>(where: T, targetId: string | null): T {
+  return targetId ? ({ AND: [where, { id: targetId }] } as T) : where
+}
+
+async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL', keyword: string, take: number, targetId: string | null = null): Promise<ReviewItem[]> {
   if (type === 'POST') {
     const [rows, boardRows] = await Promise.all([
       prisma.post.findMany({
-        where: postWhere(status, keyword),
+        where: withTargetId(postWhere(status, targetId ? '' : keyword), targetId),
         orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }],
         take,
         select: {
@@ -227,13 +237,13 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
 
   if (type === 'SALON') {
     const rows = await prisma.salonPost.findMany({
-      where: salonWhere(status, keyword), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }], take,
+      where: withTargetId(salonWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }], take,
       select: {
         id: true, title: true, content: true, category: true, status: true, rejectReason: true, createdAt: true, approvedAt: true,
         author: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
         approvedBy: { select: { id: true, uid: true, nickname: true } },
         concert: { select: { title: true, city: true, MusicTour: { select: { name: true } } } },
-        media: { orderBy: { sortOrder: 'asc' }, take: 1, select: { previewUrl: true, thumbnailUrl: true } },
+        media: { orderBy: { sortOrder: 'asc' }, select: { id: true, previewUrl: true, thumbnailUrl: true } },
       },
     })
     return rows.map((row) => buildItem({
@@ -241,39 +251,44 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
       author: author({ id: row.author.id, uid: row.author.uid, nickname: row.author.nickname, displayName: row.author.Profile?.displayName }), authorId: row.author.id,
       createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus,
       cover: publicImageUrl(row.media[0]?.thumbnailUrl || row.media[0]?.previewUrl), summary: summary(row.content), category: row.category, relatedEntity: row.concert ? `${row.concert.MusicTour.name} · ${row.concert.city}${row.concert.title ? ` · ${row.concert.title}` : ''}` : null,
+      media: row.media.flatMap((media, index) => {
+        const src = publicImageUrl(media.previewUrl || media.thumbnailUrl)
+        if (!src) return []
+        return [{ id: `${row.id}:${index}`, src, previewSrc: publicImageUrl(media.thumbnailUrl) || undefined, alt: `沙龙图片 ${index + 1}` }]
+      }),
       reviewer: row.approvedBy ? author({ id: row.approvedBy.id, uid: row.approvedBy.uid, nickname: row.approvedBy.nickname }) : null, reviewedAt: asIso(row.approvedAt), rejectReason: row.rejectReason,
     }))
   }
 
   if (type === 'CREATION') {
     const rows = await prisma.studioProject.findMany({
-      where: studioWhere(status, keyword), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }], take,
+      where: withTargetId(studioWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }], take,
       select: { id: true, toolSlug: true, title: true, description: true, thumbnailUrl: true, reviewStatus: true, createdAt: true, updatedAt: true, User: { select: { id: true, uid: true, nickname: true } } },
     })
     return rows.map((row) => buildItem({
       id: row.id, sourceType: 'CREATION', sourceId: row.id, title: row.title || '未命名作品',
       author: author({ id: row.User.id, uid: row.User.uid, nickname: row.User.nickname }), authorId: row.User.id,
-      createdAt: row.createdAt.toISOString(), status: row.reviewStatus as ReviewStatus, cover: publicImageUrl(row.thumbnailUrl), summary: summary(row.description), category: getStudioTool(row.toolSlug)?.name || '创作项目', relatedEntity: row.toolSlug,
+      createdAt: row.createdAt.toISOString(), status: row.reviewStatus as ReviewStatus, cover: publicImageUrl(row.thumbnailUrl), media: reviewMedia(`${row.id}:thumbnail`, row.thumbnailUrl, `${row.title || '创作作品'}缩略图`), summary: summary(row.description), category: getStudioTool(row.toolSlug)?.name || '创作项目', relatedEntity: row.toolSlug,
       reviewer: null, reviewedAt: row.reviewStatus === 'PENDING' ? null : row.updatedAt.toISOString(), rejectReason: null,
     }))
   }
 
   if (type === 'STICKER') {
     const rows = await prisma.stickerPack.findMany({
-      where: stickerWhere(status, keyword), orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }], take,
+      where: withTargetId(stickerWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }], take,
       select: { id: true, name: true, description: true, coverUrl: true, status: true, rejectionReason: true, reviewedAt: true, createdAt: true, creator: { select: { id: true, uid: true, nickname: true } } },
     })
     return rows.map((row) => buildItem({
       id: row.id, sourceType: 'STICKER', sourceId: row.id, title: row.name,
       author: author({ id: row.creator.id, uid: row.creator.uid, nickname: row.creator.nickname }), authorId: row.creator.id,
-      createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus, cover: publicImageUrl(row.coverUrl), summary: summary(row.description), category: '表情包合集', relatedEntity: null,
+      createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus, cover: publicImageUrl(row.coverUrl), media: reviewMedia(`${row.id}:cover`, row.coverUrl, `${row.name}封面`), summary: summary(row.description), category: '表情包合集', relatedEntity: null,
       reviewer: null, reviewedAt: asIso(row.reviewedAt), rejectReason: row.rejectionReason,
     }))
   }
 
   if (type === 'CONCERT') {
     const rows = await prisma.concertContribution.findMany({
-      where: contributionWhere(status, keyword), orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }], take,
+      where: withTargetId(contributionWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }], take,
       select: { id: true, type: true, status: true, reviewNote: true, createdAt: true, reviewedAt: true, submitter: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } }, reviewer: { select: { id: true, uid: true, nickname: true } }, targetShow: { select: { city: true, title: true, MusicTour: { select: { name: true } } } } },
     })
     return rows.map((row) => buildItem({
@@ -285,13 +300,13 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
   }
 
   const rows = await prisma.todayEvent.findMany({
-    where: todayWhere(status, keyword), orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }], take,
+    where: withTargetId(todayWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }], take,
     select: { id: true, title: true, content: true, imageUrl: true, type: true, status: true, rejectionReason: true, reviewedAt: true, createdAt: true, date: true, month: true, day: true, SubmittedBy: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } }, ReviewedBy: { select: { id: true, uid: true, nickname: true } } },
   })
   return rows.map((row) => buildItem({
     id: row.id, sourceType: 'TODAY', sourceId: row.id, title: row.title,
     author: row.SubmittedBy ? author({ id: row.SubmittedBy.id, uid: row.SubmittedBy.uid, nickname: row.SubmittedBy.nickname, displayName: row.SubmittedBy.Profile?.displayName }) : author({}), authorId: row.SubmittedBy?.id || null,
-    createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus, cover: publicImageUrl(row.imageUrl), summary: summary(row.content), category: row.type, relatedEntity: getTodayEventDateKey(row.date, row.month, row.day),
+    createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus, cover: publicImageUrl(row.imageUrl), media: reviewMedia(`${row.id}:image`, row.imageUrl, `${row.title}图片`), summary: summary(row.content), category: row.type, relatedEntity: getTodayEventDateKey(row.date, row.month, row.day),
     reviewer: row.ReviewedBy ? author({ id: row.ReviewedBy.id, uid: row.ReviewedBy.uid, nickname: row.ReviewedBy.nickname }) : null, reviewedAt: asIso(row.reviewedAt), rejectReason: row.rejectionReason,
   }))
 }
@@ -318,6 +333,7 @@ export async function GET(request: Request) {
   const statusParam = params.get('status')
   const status: ReviewStatus | 'ALL' = statusParam === 'ALL' || reviewStatuses.includes(statusParam as ReviewStatus) ? statusParam as ReviewStatus | 'ALL' : 'PENDING'
   const keyword = sanitizeText(params.get('keyword'), 80).trim()
+  const targetId = sanitizeText(params.get('targetId') || params.get('sourceId') || params.get('reviewId'), 200).trim() || null
   const rawPage = Number(params.get('page') || '1')
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
   const definitions = await accessibleDefinitions(guard.user)
@@ -325,7 +341,7 @@ export async function GET(request: Request) {
 
   const prefetchSize = Math.max(PAGE_SIZE * 3, PAGE_SIZE * page)
   const [batches, countRows] = await Promise.all([
-    Promise.all(selected.map((definition) => loadTypeItems(definition.type, status, keyword, prefetchSize))),
+    Promise.all(selected.map((definition) => loadTypeItems(definition.type, status, keyword, targetId ? 1 : prefetchSize, targetId))),
     Promise.all(definitions.map(async (definition) => {
       const [total, pending, approved, rejected] = await Promise.all([
         countType(definition.type, 'ALL', keyword), countType(definition.type, 'PENDING', keyword), countType(definition.type, 'APPROVED', keyword), countType(definition.type, 'REJECTED', keyword),
@@ -338,7 +354,9 @@ export async function GET(request: Request) {
   // status totals and pagination truthful even when a queue exceeds the
   // adapter's bounded prefetch window.
   const scopedCounts = countRows.filter((row) => selected.some((definition) => definition.type === row.type))
-  const total = scopedCounts.reduce((sum, row) => sum + (status === 'ALL' ? row.total : row[status.toLowerCase() as 'pending' | 'approved' | 'rejected']), 0)
+  const total = targetId
+    ? allItems.length
+    : scopedCounts.reduce((sum, row) => sum + (status === 'ALL' ? row.total : row[status.toLowerCase() as 'pending' | 'approved' | 'rejected']), 0)
   const start = (page - 1) * PAGE_SIZE
   const items = allItems.slice(start, start + PAGE_SIZE)
   return NextResponse.json({
@@ -347,6 +365,8 @@ export async function GET(request: Request) {
     pageSize: PAGE_SIZE,
     total,
     hasMore: start + PAGE_SIZE < total,
+    targetId,
+    targetFound: targetId ? allItems.some((item) => item.sourceId === targetId) : undefined,
     type: sourceType,
     status,
     keyword,

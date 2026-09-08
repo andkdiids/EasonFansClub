@@ -97,7 +97,7 @@ test('审核列表 GET 支持 keyword（trim / 空恢复 / 中文可用 / 组合
 
 test('搜索结果分页且页码夹紧（删空页自动回退最后一个有效页）', () => {
   assert.match(reviewRoute, /const prefetchSize = Math\.max\(PAGE_SIZE \* 3, PAGE_SIZE \* page\)/)
-  assert.match(reviewRoute, /const total = scopedCounts\.reduce/)
+  assert.match(reviewRoute, /const total = targetId[\s\S]*scopedCounts\.reduce/)
   assert.match(reviewRoute, /const items = allItems\.slice\(start, start \+ PAGE_SIZE\)/)
   assert.match(reviewRoute, /hasMore: start \+ PAGE_SIZE < total/)
   assert.match(reviewRoute, /keyword,/)

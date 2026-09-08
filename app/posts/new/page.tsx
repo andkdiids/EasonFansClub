@@ -30,7 +30,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
         <div className="mb-6">
           <h1 className="mt-2 text-4xl font-black text-brand-950">发布帖子</h1>
         </div>
-        <PostCreateForm boards={normalizeForumBoards(boards)} initialBoardSlug={query.board} />
+        <PostCreateForm boards={normalizeForumBoards(boards)} userId={user.id} initialBoardSlug={query.board} />
       </main>
     </>
   )

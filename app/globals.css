@@ -918,8 +918,10 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   .forum-discovery-back-top { position:fixed; z-index:24; right:12px; bottom:calc(var(--mobile-bottom-nav-total) + 16px); display:grid; width:36px; height:36px; place-items:center; border:1px solid var(--border); border-radius:50%; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 5px 16px rgba(0,0,0,.14); font-size:18px; }
 
   body:has(.forum-discovery-detail-shell) .app-topbar,
-  body:has(.forum-discovery-detail-shell) .app-mobile-nav,
-  body:has(.forum-discovery-detail-shell) .friend-dock { display:none !important; }
+  body:has(.forum-discovery-detail-shell) .app-mobile-nav { display:none !important; }
+  body:has(.forum-discovery-detail-shell) .friend-dock {
+    bottom:calc(var(--mobile-post-action-bar-total) + var(--mobile-floating-action-gap));
+  }
   body:has(.forum-discovery-detail-shell) .app-page-content { padding-bottom:0 !important; }
   body:has(.forum-discovery-detail-shell) .forum-discovery-detail-topbar { display:flex; }
   body:has(.forum-discovery-detail-shell) .forum-discovery-action-bar { display:grid; }
@@ -982,10 +984,10 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
     left:0;
     display:grid;
     grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr));
-    min-height:58px;
+    min-height:var(--mobile-post-action-bar-height);
     align-items:center;
     gap:4px;
-    padding:7px max(12px,env(safe-area-inset-right,0px)) calc(7px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));
+    padding:7px max(12px,env(safe-area-inset-right,0px)) calc(7px + var(--mobile-safe-area-bottom)) max(12px,env(safe-area-inset-left,0px));
     border-top:1px solid var(--border);
     color:var(--foreground);
     background:color-mix(in srgb,var(--surface-elevated),transparent 2%);
@@ -1054,6 +1056,8 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   --mobile-safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --mobile-bottom-nav-height: 70px;
   --mobile-bottom-nav-total: calc(var(--mobile-bottom-nav-height) + var(--mobile-safe-area-bottom));
+  --mobile-post-action-bar-height: 58px;
+  --mobile-post-action-bar-total: calc(var(--mobile-post-action-bar-height) + var(--mobile-safe-area-bottom));
   --mobile-profile-action-bar-height: 70px;
   --mobile-profile-action-bar-total: calc(var(--mobile-profile-action-bar-height) + var(--mobile-safe-area-bottom));
   --mobile-center-action-overhang: 28px;

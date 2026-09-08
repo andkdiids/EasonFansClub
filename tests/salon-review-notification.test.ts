@@ -82,7 +82,7 @@ test('通知 writer 只解析有 post_manage 权限的活跃管理员，并为�
   assert.deepEqual(createArgs?.data.map((item) => item.recipientId), ['admin-a', 'admin-b'])
   assert.ok(createArgs?.data.every((item) => item.type === 'REVIEW'))
   assert.equal(createArgs?.data[0]?.key, 'salon-review:salon-post-1')
-  assert.equal(createArgs?.data[0]?.link, '/admin/salon?postId=salon-post-1')
+  assert.equal(createArgs?.data[0]?.link, '/admin/review?type=salon&targetId=salon-post-1')
   assert.equal(createArgs?.skipDuplicates, true)
 })
 
@@ -97,8 +97,8 @@ test('通知保留具体投稿 target，并能通过现有通知跳转解析器�
   const postId = 'salon/post with spaces'
   const link = salonReviewNotificationLink(postId)
   assert.equal(salonReviewNotificationKey(postId), 'salon-review:salon/post with spaces')
-  assert.equal(link, '/admin/salon?postId=salon%2Fpost%20with%20spaces')
-  assert.equal(getNotificationTarget({ id: 'notification-1', source: 'personal', type: 'REVIEW', link, targetUrl: null }), link)
+  assert.equal(link, '/admin/review?type=salon&targetId=salon%2Fpost%20with%20spaces')
+  assert.equal(getNotificationTarget({ id: 'notification-1', source: 'personal', type: 'REVIEW', link, targetUrl: null, key: salonReviewNotificationKey(postId) }), link)
   assert.match(adminPage, /searchParams/)
   assert.match(adminManager, /\/api\/admin\/salon\?postId=/)
   assert.match(adminManager, /salon-post-\$\{post\.id\}/)

@@ -16,7 +16,7 @@ import {
 } from '@/lib/growth-tasks/registry'
 import { getCompletedCoreDayKeys, getLaunchGraceDayForWeek } from '@/lib/growth-tasks/progress'
 
-test('统一成长注册表包含四项核心、三项主动行为、十一项支线和十六项新生活', () => {
+test('统一成长注册表包含四项核心、三项主动行为、十一项之外和十六项新生活', () => {
   assert.equal(getCoreActiveTasks().length, 4)
   assert.equal(getActiveActionTasks().length, 3)
   assert.equal(getTasksByKind('active').length, 7)
@@ -60,7 +60,9 @@ test('上线补偿只在 2026-09-07 这一周生效，且不伪造核心任务�
   const threeOfFour = coreCodes.slice(0, 3).map((taskCode) => ({ taskCode, periodKey: '2026-09-08' }))
   assert.equal(getCompletedCoreDayKeys('2026-09-07', threeOfFour, tuesday).size, 1)
 
-  const fourOfFour = coreCodes.map((taskCode) => ({ taskCode, periodKey: '2026-09-08' }))
+  const fourOfFour = coreCodes.flatMap((taskCode): Array<{ taskCode: string; periodKey: string }> => taskCode === 'DAILY_COMMENT'
+    ? Array.from({ length: 10 }, () => ({ taskCode, periodKey: '2026-09-08' }))
+    : [{ taskCode, periodKey: '2026-09-08' }])
   assert.deepEqual([...getCompletedCoreDayKeys('2026-09-07', fourOfFour, tuesday)].sort(), ['2026-09-07', '2026-09-08'])
   assert.equal(getCompletedCoreDayKeys('2026-09-14', [], new Date('2026-09-14T04:00:00.000Z')).size, 0)
 })
@@ -81,11 +83,13 @@ test('新成长入口不把“任务”作为前台产品文案', () => {
   assert.match(growthPanel, /formatTodayProgress/)
   assert.match(growthPanel, /overview\.today\.items\.map/)
   assert.doesNotMatch(growthPanel, /activeActions/)
-  assert.match(growthPanel, /支线/)
+  assert.match(growthPanel, /<h3 id="growth-core-title">今日任务<\/h3>/)
+  assert.match(growthPanel, /<summary>之外/)
+  assert.doesNotMatch(growthPanel, /<summary>支线/)
   assert.match(css, /\.friend-dock-primary-tabs[\s\S]*grid-template-columns: repeat\(4/)
 })
 
-test('奖励规则由统一注册表完整生成，覆盖每日、主动、支线和周奖励', () => {
+test('奖励规则由统一注册表完整生成，覆盖每日、主动、之外和周奖励', () => {
   const groups = getRewardRuleGroups()
   assert.deepEqual(groups.map((group) => group.key), ['daily', 'active', 'passive', 'weekly'])
   assert.deepEqual(groups.map((group) => group.items.length), [4, 3, 11, 3])
@@ -101,7 +105,7 @@ test('奖励规则由统一注册表完整生成，覆盖每日、主动、支�
   assert.equal(received?.amount, 2)
   assert.equal(received?.dailyCap, 5)
   assert.equal(received?.maxDailyAmount, 10)
-  assert.equal(groups.find((group) => group.key === 'passive')?.title, '支线')
+  assert.equal(groups.find((group) => group.key === 'passive')?.title, '之外')
 })
 
 test('周奖励采用三档累计，而不是只领取最高一档', () => {

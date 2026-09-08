@@ -51,7 +51,7 @@ test('post review creates an admin notification and public home query only accep
   const home = read('lib/home-data.ts')
   assert.match(create, /moderationStatus/)
   assert.match(create, /type: 'REVIEW'/)
-  assert.match(create, /link: '\/admin\/posts\/review'/)
+  assert.match(create, /link: buildReviewCenterUrl\('POST', result\.post\.id\)/)
   assert.match(review, /status === 'APPROVED' \? 'APPROVE_POST' : 'REJECT_POST'/)
   assert.match(home, /moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\] \}/)
   assert.match(home, /OR: \[\{ isFeatured: true \}, \{ isPinned: true \}\]/)

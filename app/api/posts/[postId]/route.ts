@@ -17,6 +17,7 @@ import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from 
 import { requireUser, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
+import { buildReviewCenterUrl } from '@/lib/review-center'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 import {
   logPostRichContentCompatibilityMode,
@@ -985,7 +986,7 @@ async function handleEditPost(
             type: 'REVIEW' as const,
             title: '帖子编辑后待审核',
             content: rawTitle,
-            link: '/admin/posts/review',
+            link: buildReviewCenterUrl('POST', postId),
             key: reviewNotificationKey,
           })),
           skipDuplicates: true,

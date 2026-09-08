@@ -81,7 +81,9 @@ test('E院广场只挂载小臣书流，详情页仍按移动端边界启用发�
   assert.doesNotMatch(discovery, /forum-discovery-mode-button|onSwitchToPlaza|showModeSwitch/)
   assert.doesNotMatch(detail, /matchMedia|forumDetailDiscover|data-forum-detail-discover/)
   assert.match(css, /@media \(max-width:767px\)[\s\S]*forum-discovery-grid/)
-  assert.match(css, /body:has\(\.forum-discovery-detail-shell\) \.app-topbar,[\s\S]*body:has\(\.forum-discovery-detail-shell\) \.app-mobile-nav,[\s\S]*body:has\(\.forum-discovery-detail-shell\) \.friend-dock \{ display:none !important; \}/)
+  assert.match(css, /body:has\(\.forum-discovery-detail-shell\) \.app-topbar,[\s\S]*body:has\(\.forum-discovery-detail-shell\) \.app-mobile-nav \{ display:none !important; \}/)
+  assert.doesNotMatch(css, /body:has\(\.forum-discovery-detail-shell\) \.friend-dock \{ display:none !important; \}/)
+  assert.match(css, /body:has\(\.forum-discovery-detail-shell\) \.friend-dock \{[\s\S]*bottom:calc\(var\(--mobile-post-action-bar-total\) \+ var\(--mobile-floating-action-gap\)\)/)
   assert.doesNotMatch(css, /data-forum-detail-discover/)
 })
 

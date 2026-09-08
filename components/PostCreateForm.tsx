@@ -1,22 +1,45 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ContentImageUploader, type ContentImageUploaderHandle } from '@/components/ContentImageUploader'
 import { RichTextEditor, type RichTextEditorHandle } from '@/components/posts/RichTextEditor'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { getPostCreateInitialBoardId } from '@/lib/boards'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
+import {
+  createStoredPostDraft,
+  hasMeaningfulPostDraftContent,
+  normalizeServerPostDraft,
+  parseStoredPostDraft,
+  postDraftConflictStorageKey,
+  postDraftPayloadKey,
+  postDraftStorageKey,
+  POST_DRAFT_AUTOSAVE_DEBOUNCE_MS,
+  POST_DRAFT_LOCAL_CACHE_DEBOUNCE_MS,
+  POST_DRAFT_STORAGE_KEY,
+  type PostDraftPayload,
+  type ServerPostDraft,
+} from '@/lib/post-draft'
+import { type RichTextContent } from '@/lib/rich-text'
 
 type Board = { id: string; name: string; slug: string }
-const POST_DRAFT_STORAGE_KEY = 'eason-forum-post-draft:v2'
 
-export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: Board[]; initialBoardSlug?: string }>) {
+type DraftConflict = {
+  latest: ServerPostDraft
+  local: PostDraftPayload
+}
+
+export function PostCreateForm({
+  userId,
+  boards,
+  initialBoardSlug,
+}: Readonly<{ userId: string; boards: Board[]; initialBoardSlug?: string }>) {
   const router = useRouter()
   const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const editorRef = useRef<RichTextEditorHandle>(null)
-  const [boardId, setBoardId] = useState(() => getPostCreateInitialBoardId(boards, initialBoardSlug))
+  const initialBoardIdRef = useRef(getPostCreateInitialBoardId(boards, initialBoardSlug))
+  const [boardId, setBoardId] = useState(initialBoardIdRef.current)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [richContent, setRichContent] = useState<RichTextContent | null>(null)
@@ -25,93 +48,326 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [draftReady, setDraftReady] = useState(false)
   const [draftStatus, setDraftStatus] = useState('')
+  const [draftConflict, setDraftConflict] = useState<DraftConflict | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [imagesUploading, setImagesUploading] = useState(false)
   const draftPublishedRef = useRef(false)
+  const draftVersionRef = useRef<number | null>(null)
+  const lastServerUpdatedAtRef = useRef<string | null>(null)
+  const lastSyncedPayloadKeyRef = useRef<string | null>(null)
+  const currentPayloadRef = useRef<PostDraftPayload>({
+    boardId: initialBoardIdRef.current,
+    title: '',
+    content: '',
+    richContent: null,
+    imageUrls: [],
+    pendingSticker: null,
+  })
+  const queuedSaveRef = useRef<PostDraftPayload | null>(null)
+  const saveInFlightRef = useRef<Promise<void> | null>(null)
+  const draftConflictRef = useRef<DraftConflict | null>(null)
+  const saveServerDraftRef = useRef<(payload: PostDraftPayload) => Promise<void>>(async () => undefined)
 
-  useEffect(() => {
+  const localStorageKey = postDraftStorageKey(userId)
+  const legacyLocalStorageKey = POST_DRAFT_STORAGE_KEY
+  const conflictStorageKey = postDraftConflictStorageKey(userId)
+  const validBoardIds = useMemo(() => boards.map((board) => board.id), [boards])
+  const validBoardIdsKey = validBoardIds.join('|')
+
+  const currentPayload = useCallback((): PostDraftPayload => {
+    return {
+      boardId,
+      title,
+      content,
+      richContent,
+      imageUrls: [...imageUrls],
+      pendingSticker: pendingSticker
+        ? { id: pendingSticker.id, name: pendingSticker.name, url: pendingSticker.url, type: pendingSticker.type }
+        : null,
+    }
+  }, [boardId, title, content, richContent, imageUrls, pendingSticker])
+
+  const persistLocal = useCallback((payload: PostDraftPayload, serverVersion = draftVersionRef.current, key = localStorageKey) => {
     try {
-      const raw = window.localStorage.getItem(POST_DRAFT_STORAGE_KEY)
-      if (!raw) {
-        setDraftReady(true)
-        return
-      }
-      const saved = JSON.parse(raw) as {
-        boardId?: unknown
-        title?: unknown
-        content?: unknown
-        richContent?: unknown
-        imageUrls?: unknown
-        pendingSticker?: unknown
-      }
-      const savedBoardId = typeof saved.boardId === 'string' && boards.some((board) => board.id === saved.boardId)
-        ? saved.boardId
-        : null
-      const richResult = validateRichPostContent(saved.richContent)
-      if (savedBoardId) setBoardId(savedBoardId)
-      if (typeof saved.title === 'string') setTitle(saved.title.slice(0, 120))
-      if (richResult.valid) {
-        setRichContent(richResult.value)
-        setContent(richResult.plainText)
-      } else if (typeof saved.content === 'string') {
-        setContent(saved.content.slice(0, 20_000))
-      }
-      if (Array.isArray(saved.imageUrls)) {
-        setImageUrls(saved.imageUrls.filter((url): url is string => typeof url === 'string' && /^https?:\/\//iu.test(url)).slice(0, 9))
-      }
-      if (saved.pendingSticker && typeof saved.pendingSticker === 'object') {
-        const sticker = saved.pendingSticker as Record<string, unknown>
-        if (
-          typeof sticker.id === 'string'
-          && typeof sticker.url === 'string'
-          && (sticker.type === 'STATIC' || sticker.type === 'GIF')
-          && (typeof sticker.name === 'string' || sticker.name === null)
-        ) {
-          setPendingSticker({ id: sticker.id, name: sticker.name, url: sticker.url, type: sticker.type })
+      window.localStorage.setItem(key, JSON.stringify(createStoredPostDraft(payload, serverVersion)))
+    } catch {
+      // Quota/private-mode failures do not block server sync or publishing.
+    }
+  }, [localStorageKey])
+
+  function removeLocalDrafts() {
+    try {
+      window.localStorage.removeItem(localStorageKey)
+      window.localStorage.removeItem(legacyLocalStorageKey)
+      window.localStorage.removeItem(conflictStorageKey)
+    } catch {
+      // Storage failures do not change the successful publish result.
+    }
+  }
+
+  const applyDraftPayload = useCallback((payload: PostDraftPayload) => {
+    setBoardId(payload.boardId && validBoardIds.includes(payload.boardId) ? payload.boardId : initialBoardIdRef.current)
+    setTitle(payload.title)
+    setRichContent(payload.richContent)
+    setContent(payload.content)
+    setImageUrls(payload.imageUrls)
+    setPendingSticker(payload.pendingSticker)
+  }, [validBoardIds])
+
+  function setConflict(value: DraftConflict | null) {
+    draftConflictRef.current = value
+    setDraftConflict(value)
+  }
+
+  async function saveServerDraft(payload: PostDraftPayload) {
+    if (draftPublishedRef.current) return
+    queuedSaveRef.current = payload
+    if (saveInFlightRef.current) return saveInFlightRef.current
+
+    const run = (async () => {
+      while (queuedSaveRef.current && !draftPublishedRef.current) {
+        const nextPayload = queuedSaveRef.current
+        queuedSaveRef.current = null
+        if (draftConflictRef.current) break
+        if (!hasMeaningfulPostDraftContent(nextPayload)) {
+          persistLocal(nextPayload)
+          continue
+        }
+        if (lastSyncedPayloadKeyRef.current === postDraftPayloadKey(nextPayload) && draftVersionRef.current !== null) {
+          persistLocal(nextPayload)
+          continue
+        }
+
+        setDraftStatus('正在同步草稿…')
+        let response: Response
+        try {
+          response = await fetch('/api/posts/draft', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...nextPayload,
+              expectedVersion: draftVersionRef.current,
+            }),
+          })
+        } catch {
+          persistLocal(nextPayload)
+          setDraftStatus('本地已保存，云端未同步；网络恢复后会自动重试')
+          break
+        }
+
+        const data = await response.json().catch(() => ({})) as { draft?: unknown; message?: unknown; code?: unknown }
+        if (response.status === 409 && data.code === 'DRAFT_CONFLICT') {
+          const latest = normalizeServerPostDraft(data.draft, validBoardIds)
+          if (latest) {
+            persistLocal(nextPayload, draftVersionRef.current, conflictStorageKey)
+            setConflict({ latest, local: nextPayload })
+            setDraftStatus('这份草稿已在另一台设备更新；当前内容已保留在本机备份')
+          } else {
+            persistLocal(nextPayload)
+            setDraftStatus('草稿版本发生冲突，本地内容已保留')
+          }
+          break
+        }
+        if (!response.ok) {
+          persistLocal(nextPayload)
+          setDraftStatus(typeof data.message === 'string' ? `${data.message}（本地已保存）` : '本地已保存，云端未同步')
+          break
+        }
+
+        const saved = normalizeServerPostDraft(data.draft, validBoardIds)
+        if (!saved) {
+          persistLocal(nextPayload)
+          setDraftStatus('本地已保存，云端返回格式异常')
+          break
+        }
+        draftVersionRef.current = saved.version
+        lastServerUpdatedAtRef.current = saved.updatedAt
+        lastSyncedPayloadKeyRef.current = postDraftPayloadKey(saved)
+        persistLocal(saved, saved.version)
+        setConflict(null)
+        setDraftStatus('已保存')
+        try {
+          // The legacy key has no account identity. It is removed only after
+          // the account-scoped server save succeeds.
+          window.localStorage.removeItem(legacyLocalStorageKey)
+          window.localStorage.removeItem(conflictStorageKey)
+        } catch {
+          // The server is already authoritative; retaining a cache is safe.
         }
       }
-      setDraftStatus('已恢复上次未发布的草稿')
-    } catch {
-      // A malformed local draft must never prevent the compose screen from opening.
+    })()
+
+    saveInFlightRef.current = run
+    try {
+      await run
     } finally {
-      setDraftReady(true)
+      if (saveInFlightRef.current === run) saveInFlightRef.current = null
     }
-  }, [boards])
+  }
+
+  saveServerDraftRef.current = saveServerDraft
 
   useEffect(() => {
-    if (!draftReady || isSubmitting || draftPublishedRef.current) return
-    const timer = window.setTimeout(() => {
+    let cancelled = false
+    async function restoreDraft() {
+      setDraftReady(false)
+      setConflict(null)
+      let scopedLocal: ReturnType<typeof parseStoredPostDraft> = null
+      let legacyLocal: ReturnType<typeof parseStoredPostDraft> = null
       try {
-        window.localStorage.setItem(POST_DRAFT_STORAGE_KEY, JSON.stringify({
-          boardId,
-          title,
-          content,
-          richContent,
-          imageUrls,
-          pendingSticker,
-        }))
+        scopedLocal = parseStoredPostDraft(window.localStorage.getItem(localStorageKey), validBoardIds)
+        legacyLocal = parseStoredPostDraft(window.localStorage.getItem(legacyLocalStorageKey), validBoardIds)
       } catch {
-        // Quota/private-mode failures do not block publishing.
+        // Local storage can be unavailable in private browsing contexts.
       }
-    }, 600)
-    return () => window.clearTimeout(timer)
-  }, [boardId, title, content, richContent, imageUrls, pendingSticker, draftReady, isSubmitting])
+      const local = scopedLocal || legacyLocal
 
-  function saveDraftNow() {
-    try {
-      window.localStorage.setItem(POST_DRAFT_STORAGE_KEY, JSON.stringify({
-        boardId,
-        title,
-        content,
-        richContent,
-        imageUrls,
-        pendingSticker,
-      }))
-      setDraftStatus('草稿已保存')
-    } catch {
-      setDraftStatus('当前浏览器无法保存草稿')
+      try {
+        const response = await fetch('/api/posts/draft', { cache: 'no-store' })
+        if (!response.ok) throw new Error(`draft GET ${response.status}`)
+        const data = await response.json() as { draft?: unknown }
+        const server = normalizeServerPostDraft(data.draft, validBoardIds)
+        if (cancelled) return
+
+        if (server) {
+          const serverPayload = server as PostDraftPayload
+          const localDiffers = Boolean(local && postDraftPayloadKey(local) !== postDraftPayloadKey(serverPayload))
+          if (localDiffers && local) {
+            persistLocal(local, local.serverVersion, conflictStorageKey)
+            setConflict({ latest: server, local })
+          }
+          applyDraftPayload(serverPayload)
+          draftVersionRef.current = server.version
+          lastServerUpdatedAtRef.current = server.updatedAt
+          lastSyncedPayloadKeyRef.current = postDraftPayloadKey(serverPayload)
+          persistLocal(serverPayload, server.version)
+          try {
+            // A server record is already authoritative, so an unscoped legacy
+            // cache no longer needs to participate in future restores. A
+            // differing copy was preserved above under the conflict key.
+            window.localStorage.removeItem(legacyLocalStorageKey)
+          } catch {
+            // Cache cleanup is best effort.
+          }
+          setDraftStatus(localDiffers ? '已恢复云端草稿；本机未同步内容已保留备份' : '已恢复云端草稿')
+        } else if (local) {
+          applyDraftPayload(local)
+          draftVersionRef.current = local.serverVersion
+          lastServerUpdatedAtRef.current = null
+          lastSyncedPayloadKeyRef.current = null
+          setDraftStatus('已恢复本地草稿，正在同步云端…')
+        }
+      } catch {
+        if (cancelled) return
+        // The legacy key has no account identity. Only an account-scoped
+        // cache is safe to restore while the authenticated server lookup is
+        // unavailable; the legacy record remains for a successful migration
+        // after the server confirms that this account has no draft.
+        if (scopedLocal) {
+          applyDraftPayload(scopedLocal)
+          draftVersionRef.current = scopedLocal.serverVersion
+          setDraftStatus('本地已保存，云端暂时无法读取')
+        } else {
+          setDraftStatus('云端草稿暂时无法读取，当前内容仍可本地保存')
+        }
+      } finally {
+        if (!cancelled) setDraftReady(true)
+      }
     }
+    void restoreDraft()
+    return () => {
+      cancelled = true
+    }
+  }, [applyDraftPayload, conflictStorageKey, legacyLocalStorageKey, localStorageKey, persistLocal, validBoardIds, validBoardIdsKey])
+
+  useEffect(() => {
+    const payload = currentPayload()
+    currentPayloadRef.current = payload
+    if (!draftReady || draftPublishedRef.current) return
+
+    const localTimer = window.setTimeout(() => persistLocal(payload), POST_DRAFT_LOCAL_CACHE_DEBOUNCE_MS)
+    const serverTimer = window.setTimeout(() => {
+      persistLocal(payload)
+      if (draftConflictRef.current) return
+      if (!hasMeaningfulPostDraftContent(payload) && draftVersionRef.current === null) return
+      void saveServerDraftRef.current(payload)
+    }, POST_DRAFT_AUTOSAVE_DEBOUNCE_MS)
+    return () => {
+      window.clearTimeout(localTimer)
+      window.clearTimeout(serverTimer)
+    }
+  }, [currentPayload, draftReady, persistLocal])
+
+  useEffect(() => {
+    function flushDraft() {
+      if (!draftReady || draftPublishedRef.current) return
+      const payload = currentPayloadRef.current
+      persistLocal(payload)
+      if (draftConflictRef.current) return
+      if (hasMeaningfulPostDraftContent(payload)) void saveServerDraftRef.current(payload)
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') flushDraft()
+    }
+    function handleOnline() {
+      const payload = currentPayloadRef.current
+      if (!draftPublishedRef.current && !draftConflictRef.current && hasMeaningfulPostDraftContent(payload)) {
+        void saveServerDraftRef.current(payload)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('online', handleOnline)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('online', handleOnline)
+      flushDraft()
+    }
+  }, [draftReady, persistLocal])
+
+  function useLatestServerDraft() {
+    const conflict = draftConflictRef.current
+    if (!conflict) return
+    applyDraftPayload(conflict.latest)
+    draftVersionRef.current = conflict.latest.version
+    lastServerUpdatedAtRef.current = conflict.latest.updatedAt
+    lastSyncedPayloadKeyRef.current = postDraftPayloadKey(conflict.latest)
+    setConflict(null)
+    persistLocal(conflict.latest, conflict.latest.version)
+    setDraftStatus('已使用云端最新草稿')
+    try {
+      window.localStorage.removeItem(conflictStorageKey)
+    } catch {
+      // Backup cleanup is best effort.
+    }
+  }
+
+  function keepLocalDraft() {
+    const conflict = draftConflictRef.current
+    if (!conflict) return
+    applyDraftPayload(conflict.local)
+    draftVersionRef.current = conflict.latest.version
+    lastServerUpdatedAtRef.current = conflict.latest.updatedAt
+    lastSyncedPayloadKeyRef.current = postDraftPayloadKey(conflict.latest)
+    setConflict(null)
+    persistLocal(conflict.local, conflict.latest.version)
+    setDraftStatus('正在保存本机版本…')
+    void saveServerDraftRef.current(conflict.local)
+  }
+
+  async function saveDraftNow() {
+    if (draftConflictRef.current) {
+      setDraftStatus('请先处理另一台设备产生的草稿冲突')
+      return
+    }
+    const payload = currentPayloadRef.current
+    persistLocal(payload)
+    if (!hasMeaningfulPostDraftContent(payload)) {
+      setDraftStatus('本地草稿已保存')
+      return
+    }
+    setDraftStatus('正在保存…')
+    await saveServerDraftRef.current(payload)
   }
 
   function addPastedImagesToAttachments(files: File[]) {
@@ -145,17 +401,25 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
         setErrors({ form: '帖子已提交，但跳转地址异常，请刷新帖子列表查看。' })
         return
       }
+
+      // A successful Post create comes first. Only then clear the private
+      // draft; a failed create therefore leaves both server and local copies.
+      let draftCleared = false
+      try {
+        const clearResponse = await fetch('/api/posts/draft', { method: 'DELETE' })
+        draftCleared = clearResponse.ok
+        if (!draftCleared) console.error('[post:draft:clear-after-publish]', { status: clearResponse.status })
+      } catch (error) {
+        console.error('[post:draft:clear-after-publish]', { name: error instanceof Error ? error.name : 'unknown' })
+      }
+      draftPublishedRef.current = true
+      if (draftCleared) removeLocalDrafts()
+
       if (isPending) {
         router.push(`/post/submitted?postId=${postId}&status=${data.moderationStatus}`)
       } else {
         const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : `/posts/${postId}`
         router.push(detailUrl)
-      }
-      draftPublishedRef.current = true
-      try {
-        window.localStorage.removeItem(POST_DRAFT_STORAGE_KEY)
-      } catch {
-        // Storage failures do not change the successful publish result.
       }
       router.refresh()
     } catch (error) {
@@ -173,6 +437,16 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
     <form onSubmit={submitPost} className="space-y-5 rounded-xl border border-sky-100 bg-white/82 p-6 shadow-sm">
       {errors.form ? <p className="text-sm font-bold text-red-600">{errors.form}</p> : null}
       {draftStatus ? <p className="rounded-lg bg-sky-50 px-4 py-2 text-sm font-bold text-brand-700" role="status">{draftStatus}</p> : null}
+      {draftConflict ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950" role="alert">
+          <p className="font-black">这份草稿已在另一台设备更新。</p>
+          <p className="mt-1">当前内容已保留在本机备份，请选择使用哪个版本。</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={useLatestServerDraft} className="rounded-lg bg-brand-700 px-3 py-2 font-black text-white">使用云端最新</button>
+            <button type="button" onClick={keepLocalDraft} className="rounded-lg border border-amber-300 px-3 py-2 font-black text-amber-900">保留当前内容并覆盖云端</button>
+          </div>
+        </div>
+      ) : null}
       <label className="block">
         <span className="text-sm font-black text-slate-700">选择板块</span>
         <select value={boardId} onChange={(event) => setBoardId(event.target.value)} className="mt-2 w-full rounded-lg border border-sky-100 px-4 py-2">
@@ -217,7 +491,7 @@ export function PostCreateForm({ boards, initialBoardSlug }: Readonly<{ boards: 
       ) : null}
       <div className="relative flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <button type="button" onClick={saveDraftNow} className="inline-flex h-10 items-center rounded-lg border border-sky-200 px-3 text-sm font-black text-brand-700 transition hover:bg-sky-50">
+          <button type="button" onClick={() => void saveDraftNow()} className="inline-flex h-10 items-center rounded-lg border border-sky-200 px-3 text-sm font-black text-brand-700 transition hover:bg-sky-50">
             保存草稿
           </button>
           <button

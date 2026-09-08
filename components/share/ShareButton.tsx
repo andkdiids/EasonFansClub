@@ -36,6 +36,25 @@ async function requestServerShareCard(data: ShareCardData): Promise<GeneratedSha
   }
 }
 
+async function recordContentShare(contentId: string) {
+  try {
+    const rewardResponse = await fetch('/api/growth/actions/share', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentId }),
+    })
+    const rewardData = await rewardResponse.json().catch(() => ({})) as { awardedAmount?: unknown }
+    return rewardResponse.ok && Number.isSafeInteger(rewardData.awardedAmount) && Number(rewardData.awardedAmount) > 0
+      ? Number(rewardData.awardedAmount)
+      : 0
+  } catch {
+    // A successful share should not be turned into a failed share by a
+    // best-effort reward refresh; the server remains idempotent.
+    return 0
+  }
+}
+
 export function ShareButton({ data, linkTitle, linkText, label = '分享', triggerClassName = '', messageClassName = '', ariaLabel, canSaveCard = data.canGenerateCard !== false }: Readonly<{
   data: ShareCardData
   linkTitle?: string
@@ -127,28 +146,18 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
         text: linkText ?? data.description,
         url: window.location.href,
       })
-      let awardedAmount = 0
-      const contentId = data.contentId || data.url
-      try {
-        const rewardResponse = await fetch('/api/growth/actions/share', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contentId }),
-        })
-        const rewardData = await rewardResponse.json().catch(() => ({})) as { awardedAmount?: unknown }
-        if (rewardResponse.ok && Number.isSafeInteger(rewardData.awardedAmount) && Number(rewardData.awardedAmount) > 0) {
-          awardedAmount = Number(rewardData.awardedAmount)
-        }
-      } catch {
-        // A sharing success should not be turned into a failed share by a
-        // best-effort reward refresh; the server remains idempotent.
-      }
+      const awardedAmount = await recordContentShare(data.contentId || data.url)
       const suffix = awardedAmount > 0 ? `，+${awardedAmount}挂号费` : ''
       announce(`${result === 'shared' ? '已打开分享面板' : '标题和链接已复制'}${suffix}`)
     } catch {
       announce('分享已取消')
     }
+  }
+
+  async function recordCardShare() {
+    const awardedAmount = await recordContentShare(data.contentId || data.url)
+    const suffix = awardedAmount > 0 ? `，+${awardedAmount}挂号费` : ''
+    announce(`分享卡片已保存${suffix}`)
   }
 
   return (
@@ -165,7 +174,7 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
       </button>
       {message ? <span className={messageClassName || 'share-button-message'} role="status">{message}</span> : null}
       <ShareMethodDialog open={methodOpen} canSaveCard={canSaveCard} onClose={() => setMethodOpen(false)} onSaveCard={() => { void generateCard() }} onShareLink={() => { void shareLink() }} />
-      {previewOpen ? <ShareCardPreview data={data} status={cardStatus} image={cardImage} error={cardError} onClose={closePreview} onRetry={() => { void generateCard() }} /> : null}
+      {previewOpen ? <ShareCardPreview data={data} status={cardStatus} image={cardImage} error={cardError} onClose={closePreview} onRetry={() => { void generateCard() }} onShareSuccess={() => { void recordCardShare() }} /> : null}
     </span>
   )
 }

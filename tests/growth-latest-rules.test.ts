@@ -30,12 +30,29 @@ test('任务列表只输出状态和进度，奖励金额集中在展开的规�
   const branchStart = panel.indexOf('growth-passive-section')
   const taskListSource = panel.slice(listStart, branchStart)
   assert.ok(listStart >= 0 && branchStart > listStart)
+  assert.match(taskListSource, /<h3 id="growth-core-title">今日任务<\/h3>/)
   assert.match(taskListSource, /formatTodayProgress/)
   assert.doesNotMatch(taskListSource, /formatTodayReward|\+\$\{|\+1\/次|\+2\/次|\+14|\+27|\+50|\+74/)
   assert.match(panel, /overview\.rewardRules\.map/)
   assert.match(panel, /<details className="growth-panel-section growth-reward-rules">/)
-  assert.match(panel, /<summary>支线/)
+  assert.match(panel, /<summary>之外/)
+  assert.doesNotMatch(panel, /<summary>支线/)
   assert.doesNotMatch(panel, />被动奖励</)
+})
+
+test('今日游戏任务只更新用户可见标题，保留原任务标识和规则', () => {
+  const game = getGrowthTask('DAILY_GAME')
+  const registry = read('lib/growth-tasks/registry.ts')
+  const gameRule = getRewardRuleGroups().flatMap((group) => group.items).find((item) => item.code === 'DAILY_GAME')
+  assert.equal(game?.title, '在娱乐天空完成任意一局游戏')
+  assert.equal(gameRule?.title, '在娱乐天空完成任意一局游戏')
+  assert.equal(game?.dailyCap, 1)
+  assert.equal(game?.completionThreshold, 1)
+  assert.equal(game?.reward, 0)
+  assert.equal(game?.actionHref, '/games')
+  assert.match(registry, /code: 'DAILY_GAME', title: '在娱乐天空完成任意一局游戏'/)
+  assert.doesNotMatch(registry, /title: '完成一局游戏'/)
+  assert.doesNotMatch(registry, /支线|伴游/)
 })
 
 test('奖励规则覆盖回复、点赞、分享、发帖、收到回复和周奖励', () => {
@@ -61,7 +78,7 @@ test('奖励规则覆盖回复、点赞、分享、发帖、收到回复和周�
   )
 })
 
-test('任意娱乐模式只有正式结算才写入 DAILY_GAME，1v1 进入支线', () => {
+test('任意娱乐模式只有正式结算才写入 DAILY_GAME，1v1 进入之外进度', () => {
   const game = getGrowthTask('DAILY_GAME')
   const duel = getGrowthTask('LISTEN_DUEL_BRANCH')
   assert.equal(game?.dailyCap, 1)

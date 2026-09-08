@@ -12,14 +12,22 @@ const globals = read('app/globals.css')
 
 test('审核中心单图缩略图使用站内 ImageViewer 打开大图', () => {
   assert.match(reviewCenter, /<ImageViewer/)
-  assert.match(reviewCenter, /aria-label=\{`帖子图片，共 \$\{mediaItems\.length\} 张`\}/)
+  assert.match(reviewCenter, /aria-label=\{`\$\{reviewSourceLabel\(item\.sourceType\)\}图片，共 \$\{mediaItems\.length\} 张`\}/)
   assert.match(viewer, /aria-haspopup="dialog"/)
   assert.doesNotMatch(reviewCenter, /window\.open\(/)
 })
 
-test('多图从被点击图片的 initialIndex 开始预览', () => {
+test('帖子审核只保留顶部正方形缩略图，正文摘要下不再重复渲染媒体', () => {
+  assert.equal((reviewCenter.match(/<ImageViewer/g) || []).length, 1)
+  assert.match(reviewCenter, /const primaryMedia = mediaItems\[0\]/)
   assert.match(reviewCenter, /gallery=\{mediaItems\}/)
-  assert.match(reviewCenter, /initialIndex=\{index\}/)
+  assert.doesNotMatch(reviewCenter, /mediaItems\.map\(/)
+  assert.doesNotMatch(reviewCenter, /h-28 w-40 rounded-xl object-cover/)
+})
+
+test('帖子顶部缩略图打开多图画廊并从第一张开始预览', () => {
+  assert.match(reviewCenter, /gallery=\{mediaItems\}/)
+  assert.doesNotMatch(reviewCenter, /initialIndex=\{index\}/)
   assert.match(viewer, /const nextIndex = clampIndex\(initialIndex, viewerItems\.length\)/)
   assert.match(viewer, /setCurrentIndex\(nextIndex\)/)
 })
@@ -74,17 +82,26 @@ test('原图加载期间有状态提示，失败后可继续使用 viewer', () =
   assert.match(viewer, /imageState === 'error'/)
 })
 
-test('审核列表仍保持缩略图网格布局并使用 zoom-in 光标', () => {
-  assert.match(reviewCenter, /h-28 w-40 rounded-xl object-cover/)
-  assert.match(reviewCenter, /h-28 w-40 cursor-zoom-in/)
-  assert.match(reviewCenter, /imageClassName="h-28 w-40 rounded-xl object-cover"/)
+test('审核列表保留顶部正方形缩略图并使用 zoom-in 光标', () => {
+  assert.match(reviewCenter, /h-24 w-24/)
+  assert.match(reviewCenter, /imageClassName="h-full w-full object-cover"/)
+  assert.match(reviewCenter, /buttonClassName="block h-full w-full cursor-zoom-in/)
+  assert.doesNotMatch(reviewCenter, /h-28 w-40 rounded-xl object-cover/)
 })
 
-test('审核卡片内的详情内容和图片共用同一帖子媒体数据，详情区域同样可预览', () => {
+test('审核卡片顶部缩略图和预览画廊共用审核对象媒体数据', () => {
   assert.match(reviewCenter, /function ReviewCard/)
   assert.match(reviewCenter, /item\.summary/)
-  assert.match(reviewCenter, /const mediaItems = item\.media \|\| \[\]/)
+  assert.match(reviewCenter, /const mediaItems = item\.media\?\.length/)
   assert.match(reviewCenter, /gallery=\{mediaItems\}/)
+})
+
+test('所有当前审核类型的内容封面都接入统一审核图片媒体数据', () => {
+  assert.match(reviewCenterRoute, /media: row\.media\.flatMap\(/)
+  assert.match(reviewCenterRoute, /sourceType: 'CREATION'[\s\S]*media: reviewMedia\(/)
+  assert.match(reviewCenterRoute, /sourceType: 'STICKER'[\s\S]*media: reviewMedia\(/)
+  assert.match(reviewCenterRoute, /sourceType: 'TODAY'[\s\S]*media: reviewMedia\(/)
+  assert.match(reviewCenterRoute, /media: \{ orderBy: \{ sortOrder: 'asc' \}, select: \{ id: true, previewUrl: true, thumbnailUrl: true \} \}/)
 })
 
 test('统一审核中心仍提供通过与拒绝操作，帖子标记不在旧审核入口重复挂载', () => {

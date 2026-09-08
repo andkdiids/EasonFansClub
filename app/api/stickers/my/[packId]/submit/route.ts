@@ -7,6 +7,7 @@ import { emitRealtimeMany } from '@/lib/realtime'
 import { requireUser } from '@/lib/security'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
+import { buildReviewCenterUrl } from '@/lib/review-center'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,7 +76,7 @@ export async function POST(
             type: 'REVIEW' as const,
             title: '表情包重新提交审核',
             content: `用户重新提交了表情包《${pack.name}》，请前往审核中心处理。`,
-            link: '/admin/stickers',
+            link: buildReviewCenterUrl('STICKER', packId),
             key: `sticker-pack-resubmit:${packId}:${randomUUID()}`,
           })),
           skipDuplicates: true,

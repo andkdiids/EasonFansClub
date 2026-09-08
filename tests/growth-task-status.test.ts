@@ -39,10 +39,12 @@ test('签到和处方事实在任务实例缺失时仍恢复今天状态，核�
   assert.equal(status(result, 'DAILY_COMMENT')?.completed, false)
 })
 
-test('已有任务完成记录与任务实例生成后的真实事件仍按原规则完成', () => {
+test('已有任务完成记录按进度目标完成，不能把一次回复当成 10/10', () => {
   const coreCodes = getCoreActiveTasks().map((task) => task.code)
   const result = resolveToday({
-    completionRows: coreCodes.map((taskCode) => ({ taskCode, periodKey: TODAY })),
+    completionRows: coreCodes.flatMap((taskCode): Array<{ taskCode: string; periodKey: string }> => taskCode === 'DAILY_COMMENT'
+      ? Array.from({ length: 10 }, () => ({ taskCode, periodKey: TODAY }))
+      : [{ taskCode, periodKey: TODAY }]),
   })
   assert.equal(result.total, 7)
   assert.equal(result.completed, 4)
@@ -92,7 +94,9 @@ test('点赞和分享以整项达标计数，不把每次事件拆成多个今�
 
 test('核心和三项主动奖励任务全部完成时返回 7/7 列表进度，核心仍为 4/4', () => {
   const result = resolveToday({
-    completionRows: getCoreActiveTasks().map((task) => ({ taskCode: task.code, periodKey: TODAY })),
+    completionRows: getCoreActiveTasks().flatMap((task): Array<{ taskCode: string; periodKey: string }> => task.code === 'DAILY_COMMENT'
+      ? Array.from({ length: 10 }, () => ({ taskCode: task.code, periodKey: TODAY }))
+      : [{ taskCode: task.code, periodKey: TODAY }]),
     actionProgress: [
       { taskCode: 'POST_LIKE_ACTIVE', progress: 5, earned: 5, cap: 5 },
       { taskCode: 'CONTENT_SHARE_ACTIVE', progress: 1, earned: 2, cap: 1 },
@@ -105,17 +109,26 @@ test('核心和三项主动奖励任务全部完成时返回 7/7 列表进度，
   assert.equal(result.coreCompleted, 4)
 })
 
-test('回复进度按有效奖励账本计数，首次有效回复完成核心但仍可累计到 10/10', () => {
-  const oneReply = resolveToday({
-    businessFacts: {
-      checkinDateKeys: [],
-      prescriptionDateKeys: [],
-      commentRewardCountsByDate: new Map([[TODAY, 1]]),
-    },
+test('进度型任务统一以 current >= target 决定完成状态', () => {
+  const oneCompletionRow = resolveToday({
+    completionRows: [{ taskCode: 'DAILY_COMMENT', periodKey: TODAY }],
   })
-  assert.equal(status(oneReply, 'DAILY_COMMENT')?.progress, 1)
-  assert.equal(status(oneReply, 'DAILY_COMMENT')?.cap, 10)
-  assert.equal(status(oneReply, 'DAILY_COMMENT')?.completed, true)
+  assert.equal(status(oneCompletionRow, 'DAILY_COMMENT')?.progress, 1)
+  assert.equal(status(oneCompletionRow, 'DAILY_COMMENT')?.completed, false)
+
+  for (const current of [0, 1, 5, 9]) {
+    const result = resolveToday({
+      businessFacts: {
+        checkinDateKeys: [],
+        prescriptionDateKeys: [],
+        commentRewardCountsByDate: new Map([[TODAY, current]]),
+      },
+    })
+    assert.equal(status(result, 'DAILY_COMMENT')?.progress, current)
+    assert.equal(status(result, 'DAILY_COMMENT')?.cap, 10)
+    assert.equal(status(result, 'DAILY_COMMENT')?.completed, false)
+    assert.equal(result.coreCompleted, 0)
+  }
 
   const tenReplies = resolveToday({
     businessFacts: {
@@ -126,6 +139,17 @@ test('回复进度按有效奖励账本计数，首次有效回复完成核心�
   })
   assert.equal(status(tenReplies, 'DAILY_COMMENT')?.progress, 10)
   assert.equal(status(tenReplies, 'DAILY_COMMENT')?.completed, true)
+
+  const partialActions = resolveToday({
+    actionProgress: [
+      { taskCode: 'POST_LIKE_ACTIVE', progress: 1, earned: 1, cap: 5 },
+      { taskCode: 'CONTENT_SHARE_ACTIVE', progress: 0, earned: 0, cap: 1 },
+      { taskCode: 'PUBLISH_POST_ACTIVE', progress: 0, earned: 0, cap: 1 },
+    ],
+  })
+  assert.equal(status(partialActions, 'POST_LIKE_ACTIVE')?.completed, false)
+  assert.equal(status(partialActions, 'CONTENT_SHARE_ACTIVE')?.completed, false)
+  assert.equal(status(partialActions, 'PUBLISH_POST_ACTIVE')?.completed, false)
 })
 
 test('周进度用真实签到和处方日期补齐同一天，而不写入任务完成记录', () => {
@@ -136,9 +160,16 @@ test('周进度用真实签到和处方日期补齐同一天，而不写入任�
   const completedDays = getCompletedCoreDayKeys('2026-09-07', rows, new Date('2026-09-08T04:00:00.000Z'), {
     checkinDateKeys: [TODAY],
     prescriptionDateKeys: [TODAY],
-    commentRewardCountsByDate: new Map([[TODAY, 1]]),
+    commentRewardCountsByDate: new Map([[TODAY, 10]]),
   })
   assert.equal(completedDays.has(TODAY), true)
+
+  const partialDay = getCompletedCoreDayKeys('2026-09-07', rows, new Date('2026-09-08T04:00:00.000Z'), {
+    checkinDateKeys: [TODAY],
+    prescriptionDateKeys: [TODAY],
+    commentRewardCountsByDate: new Map([[TODAY, 5]]),
+  })
+  assert.equal(partialDay.has(TODAY), false)
 })
 
 test('overview 读取业务事实但不在读取时补任务、派奖或通知', () => {
