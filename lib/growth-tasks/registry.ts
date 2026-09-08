@@ -96,7 +96,7 @@ export type GrowthRewardRule = {
 }
 
 export type GrowthRewardRuleGroup = {
-  key: 'daily' | 'active' | 'passive' | 'weekly'
+  key: 'daily' | 'passive' | 'weekly'
   title: string
   items: GrowthRewardRule[]
 }
@@ -107,7 +107,7 @@ const historical = new Date('1970-01-01T00:00:00.000Z')
 export const GROWTH_TASKS: readonly GrowthTaskDefinition[] = [
   { code: 'DAILY_CHECKIN', title: '每日挂号', description: '完成今天的挂号', kind: 'active', surface: 'core', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用每日挂号现有奖励', displayReward: '+14', actionHref: '/checkin' },
   { code: 'DAILY_PRESCRIPTION', title: '每日处方', description: '领取今天的娱乐处方', kind: 'active', surface: 'core', frequency: 'daily', reward: 0, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用每日处方现有奖励', displayReward: '+7～+27', actionHref: '/games/daily-prescription' },
-  { code: 'DAILY_GAME', title: '在娱乐天空完成任意一局游戏', description: '完成今天的一局娱乐游戏', kind: 'active', surface: 'core', frequency: 'daily', reward: 0, dailyCap: 1, capUnit: 'events', completionThreshold: 1, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用游戏现有奖励', actionHref: '/games' },
+  { code: 'DAILY_GAME', title: '在娱乐天空完成任意一局游戏', description: '完成今天的一局娱乐游戏', kind: 'active', surface: 'core', frequency: 'daily', reward: 7, dailyCap: 1, capUnit: 'events', completionThreshold: 1, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', displayReward: '+7', actionHref: '/games' },
   { code: 'DAILY_COMMENT', title: '回复帖子', description: '在今天参与一次有效讨论', kind: 'active', surface: 'core', frequency: 'daily', reward: COMMUNITY_REWARD_POINTS.commentPost, dailyCap: COMMUNITY_REWARD_LIMITS.commentPostDaily, capUnit: 'events', completionThreshold: 1, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', existingReward: '沿用回复现有奖励', actionHref: '/forum' },
 
   { code: 'POST_LIKE_ACTIVE', title: '帖子点赞', description: '给其他用户的帖子点赞', kind: 'active', surface: 'action', frequency: 'daily', reward: 1, dailyCap: 5, capUnit: 'events', eligibleFrom: launch, completionMode: 'event', claimMode: 'none', actionHref: '/forum' },
@@ -231,8 +231,10 @@ function getDailyRewardRules() {
     }
     if (task.code === 'DAILY_GAME') {
       return makeRewardRule(task, {
-        amount: null,
-        amountLabel: '沿用对应游戏现有奖励',
+        amount: task.reward,
+        amountLabel: task.displayReward || `+${task.reward}`,
+        capUnit: 'events',
+        detail: '每天首次完成符合条件的娱乐游戏，同一天只奖励一次',
       })
     }
     return makeRewardRule(task, {
@@ -310,8 +312,7 @@ function getPassiveRewardRules() {
  */
 export function getRewardRuleGroups(): GrowthRewardRuleGroup[] {
   return [
-    { key: 'daily', title: '每日任务', items: getDailyRewardRules() },
-    { key: 'active', title: '主动任务', items: getActiveRewardRules() },
+    { key: 'daily', title: '今天只做一件事', items: [...getDailyRewardRules(), ...getActiveRewardRules()] },
     { key: 'passive', title: '之外', items: getPassiveRewardRules() },
     {
       key: 'weekly',

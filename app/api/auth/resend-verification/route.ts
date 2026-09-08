@@ -39,14 +39,24 @@ export async function POST(request: Request) {
   }
 
   const verification = await createVerificationForUser(user.id, email)
-  const emailResult = await sendVerificationEmail(email, verification.verificationUrl, 'resend')
+  try {
+    const emailResult = await sendVerificationEmail(email, verification.verificationUrl, 'resend')
+    if (!emailResult.sent) {
+      await prisma.emailVerification.updateMany({ where: { userId: user.id, email, usedAt: null }, data: { usedAt: new Date() } })
+      return NextResponse.json({ message: '验证邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503, headers: noStoreHeaders })
+    }
 
-  return NextResponse.json(
-    {
-      message: genericMessage,
-      emailSent: emailResult.sent,
-      devVerificationUrl: process.env.NODE_ENV === 'production' ? undefined : verification.verificationUrl,
-    },
-    { headers: noStoreHeaders },
-  )
+    return NextResponse.json(
+      {
+        message: genericMessage,
+        emailSent: emailResult.sent,
+        devVerificationUrl: process.env.NODE_ENV === 'production' ? undefined : verification.verificationUrl,
+      },
+      { headers: noStoreHeaders },
+    )
+  } catch (error) {
+    await prisma.emailVerification.updateMany({ where: { userId: user.id, email, usedAt: null }, data: { usedAt: new Date() } }).catch(() => undefined)
+    console.error('[auth.resend-verification]', error instanceof Error ? error.message : 'unknown_error')
+    return NextResponse.json({ message: '验证邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503, headers: noStoreHeaders })
+  }
 }

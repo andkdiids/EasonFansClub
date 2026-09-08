@@ -28,18 +28,25 @@ const headerFrame = read('components/SiteHeaderFrame.tsx')
 const css = read('app/globals.css')
 const nginxWorkflow = read('.github/workflows/configure-production-entry.yml')
 
-test('FriendDock 打开时锁定根节点和 body 并保存滚动位置', () => {
+test('FriendDock 打开时锁定根节点和 body 并保存双轴滚动位置', () => {
+  assert.match(friendDock, /const scrollX = window\.scrollX/)
   assert.match(friendDock, /const scrollY = window\.scrollY/)
   assert.match(friendDock, /root\.style\.overflow = 'hidden'/)
+  assert.match(friendDock, /body\.style\.overflow = 'hidden'/)
   assert.match(friendDock, /body\.style\.position = 'fixed'/)
   assert.match(friendDock, /body\.style\.top = `-\$\{scrollY\}px`/)
+  assert.match(friendDock, /body\.style\.width = '100%'/)
 })
 
-test('FriendDock 关闭时恢复原样式和滚动位置', () => {
+test('FriendDock 关闭时恢复原样式和双轴滚动位置', () => {
   assert.match(friendDock, /root\.style\.overflow = rootOverflow/)
   assert.match(friendDock, /body\.style\.position = bodyPosition/)
-  assert.match(friendDock, /window\.scrollTo\(\{ top: scrollY, left: 0, behavior: 'auto' \}\)/)
+  assert.match(friendDock, /body\.style\.overflow = bodyOverflow/)
+  assert.match(friendDock, /body\.style\.width = bodyWidth/)
+  assert.match(friendDock, /window\.scrollTo\(\{ top: scrollY, left: scrollX, behavior: 'auto' \}\)/)
   assert.match(css, /\.friend-dock-backdrop \{[^}]*height:100dvh;[^}]*min-height:100svh/)
+  assert.match(css, /\.friend-dock-list \{[^}]*overflow-x:hidden;[^}]*overflow-y:auto/)
+  assert.match(css, /\.friend-chat-messages \{[^}]*overflow-y:auto/)
 })
 
 test('音乐封面限制10MB并在服务器转为 WebP 后上传 COS', () => {

@@ -1,5 +1,8 @@
 import { createHash, createHmac } from 'node:crypto'
 import {
+  EMAIL_VERIFICATION_CODE_EXPIRY_MINUTES,
+  renderEmailVerificationCode,
+  renderEmailVerificationLink,
   PASSWORD_RESET_CODE_EXPIRY_MINUTES,
   renderPasswordResetEmail,
 } from '@/lib/password-reset-email'
@@ -237,17 +240,57 @@ async function sendTencentSimpleMail({
   })
 }
 
-function getCompatibilityTemplateId() {
-  return Number.parseInt(
-    process.env.TENCENT_EMAIL_VERIFICATION_TEMPLATE_ID ||
-    process.env.TENCENT_EMAIL_RESET_TEMPLATE_ID ||
-    '',
-    10,
-  )
+function isSimpleEmailUnsupported(error: unknown) {
+  if (!(error instanceof Error)) return false
+  return /TENCENT_EMAIL_SEND_FAILED:(?:MissingParameter\.SendParamNecessary|OperationDenied\.[^:]*Simple|InvalidParameterValue\.EmailContentIsWrong)/i.test(error.message)
+}
+
+function getTemplateId(name: 'verification' | 'register' | 'reset') {
+  const key = name === 'verification'
+    ? 'TENCENT_EMAIL_VERIFICATION_TEMPLATE_ID'
+    : name === 'register'
+      ? 'TENCENT_EMAIL_REGISTER_TEMPLATE_ID'
+      : 'TENCENT_EMAIL_RESET_TEMPLATE_ID'
+  return Number.parseInt(process.env[key] || '', 10)
+}
+
+async function sendRenderedEmail({
+  to,
+  subject,
+  text,
+  html,
+  fallback,
+}: {
+  to: string
+  subject: string
+  text: string
+  html: string
+  fallback?: {
+    templateId: number
+    templateData: Record<string, string>
+  }
+}): Promise<SendMailResult> {
+  try {
+    return await sendTencentSimpleMail({ to, subject, text, html })
+  } catch (error) {
+    if (isSimpleEmailUnsupported(error) && fallback) {
+      return sendTencentTemplateMail({
+        to,
+        subject,
+        templateId: fallback.templateId,
+        templateData: fallback.templateData,
+      })
+    }
+    if (error instanceof Error && error.message === 'TENCENT_EMAIL_NOT_CONFIGURED') {
+      throw new Error('EMAIL_SEND_NOT_CONFIGURED')
+    }
+    throw error
+  }
 }
 
 /**
- * 兼容旧的通用邮件调用方，实际仍通过腾讯云 SES 模板发送。
+ * 统一验证链接邮件入口。模板在应用内完成渲染，再通过腾讯云 SES
+ * Simple 发送，避免远程模板变量或图片地址漂移。
  */
 export async function sendMail({
   to,
@@ -258,11 +301,14 @@ export async function sendMail({
   subject: string
   template: MailTemplateInput
 }): Promise<SendMailResult> {
-  try {
-    return await sendTencentTemplateMail({
-      to,
-      subject,
-      templateId: getCompatibilityTemplateId(),
+  const rendered = renderEmailVerificationLink({ subject, ...template })
+  return sendRenderedEmail({
+    to,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    fallback: {
+      templateId: getTemplateId('verification'),
       templateData: {
         title: template.title,
         intro: template.intro,
@@ -270,13 +316,8 @@ export async function sendMail({
         actionUrl: template.actionUrl,
         note: template.note || '',
       },
-    })
-  } catch (error) {
-    if (error instanceof Error && error.message === 'TENCENT_EMAIL_NOT_CONFIGURED') {
-      throw new Error('EMAIL_SEND_NOT_CONFIGURED')
-    }
-    throw error
-  }
+    },
+  })
 }
 
 export function verificationMailTemplate(
@@ -304,55 +345,51 @@ export function verificationMailTemplate(
  * 忘记密码验证码：使用应用内完整 HTML，避免依赖云端模板中的未替换变量或相对图片地址。
  */
 export async function sendPasswordResetCode(email: string, code: string): Promise<SendMailResult> {
-  try {
-    const rendered = renderPasswordResetEmail({
-      kind: 'code',
-      code,
-      expiresInMinutes: PASSWORD_RESET_CODE_EXPIRY_MINUTES,
-    })
-    return await sendTencentSimpleMail({
-      to: email,
-      subject: rendered.subject,
-      text: rendered.text,
-      html: rendered.html,
-    })
-  } catch (error) {
-    if (error instanceof Error && error.message === 'TENCENT_EMAIL_NOT_CONFIGURED') {
-      throw new Error('EMAIL_SEND_NOT_CONFIGURED')
-    }
-    throw error
-  }
+  const rendered = renderPasswordResetEmail({
+    kind: 'code',
+    code,
+    expiresInMinutes: PASSWORD_RESET_CODE_EXPIRY_MINUTES,
+  })
+  return sendRenderedEmail({
+    to: email,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    fallback: {
+      templateId: getTemplateId('reset'),
+      templateData: { code },
+    },
+  })
 }
 
+/** 所有邮箱验证码都使用同一个应用内渲染与腾讯云 SES Simple 发送入口。 */
+export async function sendEmailVerificationCode(
+  email: string,
+  code: string,
+  reason: 'register' | 'change-email' | 'resend' = 'change-email',
+): Promise<SendMailResult> {
+  const rendered = renderEmailVerificationCode({
+    code,
+    reason,
+    expiresInMinutes: EMAIL_VERIFICATION_CODE_EXPIRY_MINUTES,
+  })
+  return sendRenderedEmail({
+    to: email,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    fallback: {
+      templateId: getTemplateId('register'),
+      templateData: { code },
+    },
+  })
+}
 
-/** 注册邮箱验证码仍使用现有腾讯云 SES 注册模板。 */
 export async function sendRegistrationVerificationCode(
   email: string,
   code: string,
 ): Promise<SendMailResult> {
-
-
-  const templateId =
-    Number.parseInt(
-      process.env.TENCENT_EMAIL_REGISTER_TEMPLATE_ID || '',
-      10,
-    )
-
-
-  return sendTencentTemplateMail({
-
-    to:
-      email,
-
-    subject:
-      'EasonFansClub 注册验证码',
-
-    templateId,
-
-    templateData: {
-      code,
-    },
-  })
+  return sendEmailVerificationCode(email, code, 'register')
 }
 
 
@@ -363,10 +400,14 @@ export async function sendPasswordResetLinkEmail(
   resetUrl: string,
 ): Promise<SendMailResult> {
   const rendered = renderPasswordResetEmail({ kind: 'link', resetUrl, expiresInMinutes: 30 })
-  return sendTencentSimpleMail({
+  return sendRenderedEmail({
     to: email,
     subject: rendered.subject,
     text: rendered.text,
     html: rendered.html,
+    fallback: {
+      templateId: getTemplateId('reset'),
+      templateData: { reset_url: resetUrl },
+    },
   })
 }

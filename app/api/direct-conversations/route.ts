@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
-import { activeUserWhere, normalizeFriendPair } from '@/lib/friends'
+import { activeUserWhere, ensureFriendConversation, normalizeFriendPair } from '@/lib/friends'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { publicImageUrl } from '@/lib/images'
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     prisma.conversation.findMany({
       where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
       include: {
-        ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true, isDeleted: true, User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, bio: true, bioModerationStatus: true, experience: true, isOnline: true, lastActiveAt: true, createdAt: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } } } } } },
+        ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true, pinnedAt: true, isDeleted: true, User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, bio: true, bioModerationStatus: true, experience: true, isOnline: true, lastActiveAt: true, createdAt: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } } } } } },
         DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, moderationStatus: true, createdAt: true, senderId: true, type: true, imageUrl: true, stickerId: true } },
       },
     }),
@@ -59,11 +59,13 @@ export async function GET(request: Request) {
         latestMessageAt: left.DirectMessage[0]?.createdAt || null,
         fallbackAt: left.createdAt,
         stableId: left.id,
+        isPinned: Boolean(left.ConversationParticipant.find((participant) => participant.userId === user.id)?.pinnedAt),
       },
       {
         latestMessageAt: right.DirectMessage[0]?.createdAt || null,
         fallbackAt: right.createdAt,
         stableId: right.id,
+        isPinned: Boolean(right.ConversationParticipant.find((participant) => participant.userId === user.id)?.pinnedAt),
       },
     ))
     .slice(0, 30)
@@ -154,6 +156,7 @@ export async function GET(request: Request) {
     return {
       id: row.id,
       lastMessageAt: latestMessage?.createdAt || null,
+      pinnedAt: row.ConversationParticipant.find((participant) => participant.userId === user.id)?.pinnedAt || null,
       otherUser,
       latestMessage,
       unreadCount: unreadByConversation.get(row.id) || 0,
@@ -190,12 +193,6 @@ export async function POST(request: Request) {
   const [userAId, userBId] = normalizeFriendPair(user.id, target.id)
   const friendship = await prisma.friendship.findUnique({ where: { userAId_userBId: { userAId, userBId } }, select: { id: true } })
   if (!friendship) return NextResponse.json({ message: '只能给好友发送私信' }, { status: 403, headers: privateHeaders })
-  const pairKey = `${userAId}:${userBId}`
-  const conversation = await prisma.conversation.upsert({
-    where: { pairKey },
-    update: {},
-    create: { pairKey, ConversationParticipant: { create: [{ userId: userAId }, { userId: userBId }] } },
-    select: { id: true },
-  })
+  const conversation = await prisma.$transaction((tx) => ensureFriendConversation(tx, user.id, target.id), { timeout: 15_000, maxWait: 5_000 })
   return NextResponse.json({ conversation }, { headers: privateHeaders })
 }

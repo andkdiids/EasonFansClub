@@ -83,17 +83,18 @@ test('新成长入口不把“任务”作为前台产品文案', () => {
   assert.match(growthPanel, /formatTodayProgress/)
   assert.match(growthPanel, /overview\.today\.items\.map/)
   assert.doesNotMatch(growthPanel, /activeActions/)
-  assert.match(growthPanel, /<h3 id="growth-core-title">今日任务<\/h3>/)
+  assert.match(growthPanel, /<h3 id="growth-core-title">今天只做一件事<\/h3>/)
   assert.match(growthPanel, /<summary>之外/)
   assert.doesNotMatch(growthPanel, /<summary>支线/)
   assert.match(css, /\.friend-dock-primary-tabs[\s\S]*grid-template-columns: repeat\(4/)
 })
 
-test('奖励规则由统一注册表完整生成，覆盖每日、主动、之外和周奖励', () => {
+test('奖励规则由统一注册表完整生成，覆盖今天只做一件事、之外和周奖励', () => {
   const groups = getRewardRuleGroups()
-  assert.deepEqual(groups.map((group) => group.key), ['daily', 'active', 'passive', 'weekly'])
-  assert.deepEqual(groups.map((group) => group.items.length), [4, 3, 11, 3])
-  const active = groups.find((group) => group.key === 'active')?.items.find((item) => item.code === 'PUBLISH_POST_ACTIVE')
+  assert.deepEqual(groups.map((group) => group.key), ['daily', 'passive', 'weekly'])
+  assert.deepEqual(groups.map((group) => group.items.length), [7, 11, 3])
+  assert.equal(groups.find((group) => group.key === 'daily')?.title, '今天只做一件事')
+  const active = groups.find((group) => group.key === 'daily')?.items.find((item) => item.code === 'PUBLISH_POST_ACTIVE')
   assert.equal(active?.amount, 2)
   assert.equal(active?.dailyCap, 1)
   assert.equal(active?.weeklyCap, 7)

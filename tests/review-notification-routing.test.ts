@@ -67,7 +67,7 @@ test('普通通知不进入审核中心，审核中心支持一次性 targetId �
   const center = read('app/admin/review/ReviewCenter.tsx')
   const route = read('app/api/admin/review/route.ts')
   assert.match(page, /initialTargetId/)
-  assert.match(center, /initialTargetId \? 'ALL' : 'PENDING'/)
+  assert.match(center, /useState<ReviewStatus>\(initialStatus\)/)
   assert.match(center, /data-review-target/)
   assert.match(center, /scrollIntoView/)
   assert.match(route, /targetId = sanitizeText/)

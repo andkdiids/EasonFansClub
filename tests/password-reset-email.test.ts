@@ -6,9 +6,10 @@ import {
   PASSWORD_RESET_EMAIL_LOGO_URL,
   PASSWORD_RESET_CODE_SUBJECT,
   PASSWORD_RESET_LINK_SUBJECT,
+  renderEmailVerificationCode,
   renderPasswordResetEmail,
 } from '../lib/password-reset-email'
-import { sendPasswordResetCode, sendPasswordResetLinkEmail } from '../lib/mail'
+import { sendEmailVerificationCode, sendPasswordResetCode, sendPasswordResetLinkEmail } from '../lib/mail'
 
 function source(relativePath: string) {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8')
@@ -99,13 +100,59 @@ test('密码重置链路传递生成的同一个 code，并保持原有 10 分�
   assert.match(mail, /Simple:/)
 })
 
-test('注册验证码仍使用原有 Tencent 模板 code 参数，未改动注册业务', () => {
+test('注册与资料邮箱验证码使用应用内渲染的同一套 Simple 邮件入口', () => {
   const mail = source('lib/mail.ts')
   const registerRoute = source('app/api/auth/register/send-email-code/route.ts')
 
   assert.match(mail, /export async function sendRegistrationVerificationCode/)
-  assert.match(mail, /templateData:\s*\{\s*code,\s*\}/)
+  assert.match(mail, /return sendEmailVerificationCode\(email, code, 'register'\)/)
+  assert.match(mail, /renderEmailVerificationCode\(/)
+  assert.match(mail, /sendTencentTemplateMail/)
+  assert.match(mail, /templateData: \{ code \}/)
   assert.match(registerRoute, /sendRegistrationVerificationCode\(email, code\)/)
+})
+
+test('邮箱验证码模板插入真实 code、使用绝对 Logo 且不残留占位符', () => {
+  const rendered = renderEmailVerificationCode({ code: '654321', reason: 'change-email', expiresInMinutes: 10 })
+  assert.match(rendered.html, />654321<\/p>/)
+  assert.doesNotMatch(rendered.html, /\{\{|\$\{/)
+  assert.doesNotMatch(rendered.html, /undefined|null/)
+  assert.match(rendered.html, /src="https:\/\/ecfc\.fans\/icon\.png"/)
+  assert.match(rendered.text, /654321/)
+})
+
+test('腾讯云拒绝 Simple 时，邮箱验证码回退到已审核模板并传入 code', async () => {
+  const originalFetch = globalThis.fetch
+  const originalSecretId = process.env.TENCENT_EMAIL_SECRET_ID
+  const originalSecretKey = process.env.TENCENT_EMAIL_SECRET_KEY
+  const originalTemplateId = process.env.TENCENT_EMAIL_REGISTER_TEMPLATE_ID
+  const requests: Array<Record<string, unknown>> = []
+
+  process.env.TENCENT_EMAIL_SECRET_ID = 'test-secret-id'
+  process.env.TENCENT_EMAIL_SECRET_KEY = 'test-secret-key'
+  process.env.TENCENT_EMAIL_REGISTER_TEMPLATE_ID = '123'
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    requests.push(body)
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ Response: { Error: { Code: 'MissingParameter.SendParamNecessary', Message: 'template required' } } }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ Response: { RequestId: 'fallback-request' } }), { status: 200 })
+  }) as typeof fetch
+
+  try {
+    assert.deepEqual(await sendEmailVerificationCode('test@example.com', '246810', 'change-email'), { sent: true })
+    assert.ok(requests[0]?.Simple)
+    assert.deepEqual(requests[1]?.Template, { TemplateID: 123, TemplateData: JSON.stringify({ code: '246810' }) })
+  } finally {
+    globalThis.fetch = originalFetch
+    if (originalSecretId === undefined) delete process.env.TENCENT_EMAIL_SECRET_ID
+    else process.env.TENCENT_EMAIL_SECRET_ID = originalSecretId
+    if (originalSecretKey === undefined) delete process.env.TENCENT_EMAIL_SECRET_KEY
+    else process.env.TENCENT_EMAIL_SECRET_KEY = originalSecretKey
+    if (originalTemplateId === undefined) delete process.env.TENCENT_EMAIL_REGISTER_TEMPLATE_ID
+    else process.env.TENCENT_EMAIL_REGISTER_TEMPLATE_ID = originalTemplateId
+  }
 })
 
 test('密码重置模板 Logo 使用正式公网 HTTPS PNG 资源', () => {

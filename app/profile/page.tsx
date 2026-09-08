@@ -17,6 +17,8 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
 import { getBirthdayEditState } from '@/lib/birthday-immutability'
+import { serializeNicknameChange } from '@/lib/nickname-change'
+import { computeNicknameCooldownDays } from '@/lib/nickname-violation'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -42,6 +44,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       id: true,
       uid: true,
       nickname: true,
+      nicknameChangedAt: true,
+      nicknameFreeChangeUsedAt: true,
+      nicknameViolationCount: true,
       usernameModerationStatus: true,
       nicknameModerationStatus: true,
       nicknameViolationDisplay: true,
@@ -94,6 +99,11 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
 
   const profileEditorInitialProfile = {
     nickname: profile.nickname,
+    nicknameChange: serializeNicknameChange(
+      profile.nicknameChangedAt,
+      profile.nicknameFreeChangeUsedAt,
+      computeNicknameCooldownDays(profile.nicknameViolationCount ?? 0),
+    ),
     nicknameViolation: profile.nicknameModerationStatus === 'VIOLATION' || profile.Profile.displayNameModerationStatus === 'VIOLATION',
     avatarUrl: avatar || '',
     defaultAvatarOptions,

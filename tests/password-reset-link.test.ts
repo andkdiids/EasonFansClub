@@ -61,3 +61,12 @@ test('邮箱链接流程不替换密保问题找回入口', () => {
   assert.match(securityRoute, /type: 'SECURITY_QUESTION'/)
   assert.match(legacyResetRoute, /type: \{ not: 'EMAIL_LINK' \}/)
 })
+
+test('腾讯云不支持 Simple 时，重置链接回退到已审核模板的 reset_url 变量', () => {
+  const mail = source('lib/mail.ts')
+  const requestRoute = source('app/api/auth/password/request/route.ts')
+  assert.match(mail, /templateData: \{ reset_url: resetUrl \}/)
+  assert.match(mail, /getTemplateId\('reset'\)/)
+  assert.match(requestRoute, /buildPasswordResetUrl\(generated\.token\)/)
+  assert.match(requestRoute, /EMAIL_SEND_FAILED/)
+})

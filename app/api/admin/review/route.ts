@@ -18,7 +18,9 @@ import { publicImageUrl } from '@/lib/images'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import {
   canApplyReviewDecision,
+  parseReviewStatus,
   parseReviewSourceType,
+  reviewSalonCategoryLabel,
   reviewSourceDefinitions,
   type ReviewDecision,
   type ReviewItem,
@@ -60,17 +62,13 @@ function itemActions(type: ReviewSourceType, status: ReviewStatus, id: string): 
     reject: canApplyReviewDecision(status, 'REJECT'),
     edit: type === 'SALON' || type === 'TODAY' || (type === 'CONCERT' && status === 'PENDING'),
     delete: type === 'SALON' || type === 'TODAY',
-    detailUrl: type === 'POST'
-      ? `/posts/${encodeURIComponent(id)}`
-      : type === 'SALON'
-        ? `/admin/salon?postId=${encodeURIComponent(id)}`
-        : type === 'CREATION'
-          ? `/admin/studio?projectId=${encodeURIComponent(id)}`
-          : type === 'STICKER'
-            ? '/admin/stickers'
-            : type === 'CONCERT'
-              ? `/admin/music/concerts/contributions?submission=${encodeURIComponent(id)}`
-              : '/admin/today',
+    editUrl: type === 'SALON'
+      ? `/admin/salon?postId=${encodeURIComponent(id)}`
+      : type === 'TODAY'
+        ? '/admin/today'
+        : type === 'CONCERT' && status === 'PENDING'
+          ? `/admin/music/concerts/contributions?submission=${encodeURIComponent(id)}`
+          : null,
   }
 }
 
@@ -250,7 +248,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
       id: row.id, sourceType: 'SALON', sourceId: row.id, title: row.title || '无标题作品',
       author: author({ id: row.author.id, uid: row.author.uid, nickname: row.author.nickname, displayName: row.author.Profile?.displayName }), authorId: row.author.id,
       createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus,
-      cover: publicImageUrl(row.media[0]?.thumbnailUrl || row.media[0]?.previewUrl), summary: summary(row.content), category: row.category, relatedEntity: row.concert ? `${row.concert.MusicTour.name} · ${row.concert.city}${row.concert.title ? ` · ${row.concert.title}` : ''}` : null,
+      cover: publicImageUrl(row.media[0]?.thumbnailUrl || row.media[0]?.previewUrl), summary: summary(row.content), category: reviewSalonCategoryLabel(row.category), relatedEntity: row.concert ? `${row.concert.MusicTour.name} · ${row.concert.city}${row.concert.title ? ` · ${row.concert.title}` : ''}` : null,
       media: row.media.flatMap((media, index) => {
         const src = publicImageUrl(media.previewUrl || media.thumbnailUrl)
         if (!src) return []
@@ -331,17 +329,20 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
   const sourceType = parseReviewSourceType(params.get('type'))
   const statusParam = params.get('status')
-  const status: ReviewStatus | 'ALL' = statusParam === 'ALL' || reviewStatuses.includes(statusParam as ReviewStatus) ? statusParam as ReviewStatus | 'ALL' : 'PENDING'
+  const status = parseReviewStatus(statusParam)
   const keyword = sanitizeText(params.get('keyword'), 80).trim()
   const targetId = sanitizeText(params.get('targetId') || params.get('sourceId') || params.get('reviewId'), 200).trim() || null
   const rawPage = Number(params.get('page') || '1')
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
   const definitions = await accessibleDefinitions(guard.user)
   const selected = sourceType === 'ALL' ? definitions : definitions.filter((item) => item.type === sourceType)
+  // A notification may point at an already processed item. Resolve that item
+  // across all review states, then let the client switch to its real tab.
+  const queryStatus: ReviewStatus | 'ALL' = targetId ? 'ALL' : status
 
   const prefetchSize = Math.max(PAGE_SIZE * 3, PAGE_SIZE * page)
   const [batches, countRows] = await Promise.all([
-    Promise.all(selected.map((definition) => loadTypeItems(definition.type, status, keyword, targetId ? 1 : prefetchSize, targetId))),
+    Promise.all(selected.map((definition) => loadTypeItems(definition.type, queryStatus, keyword, targetId ? 1 : prefetchSize, targetId))),
     Promise.all(definitions.map(async (definition) => {
       const [total, pending, approved, rejected] = await Promise.all([
         countType(definition.type, 'ALL', keyword), countType(definition.type, 'PENDING', keyword), countType(definition.type, 'APPROVED', keyword), countType(definition.type, 'REJECTED', keyword),
@@ -356,7 +357,7 @@ export async function GET(request: Request) {
   const scopedCounts = countRows.filter((row) => selected.some((definition) => definition.type === row.type))
   const total = targetId
     ? allItems.length
-    : scopedCounts.reduce((sum, row) => sum + (status === 'ALL' ? row.total : row[status.toLowerCase() as 'pending' | 'approved' | 'rejected']), 0)
+    : scopedCounts.reduce((sum, row) => sum + row[status.toLowerCase() as 'pending' | 'approved' | 'rejected'], 0)
   const start = (page - 1) * PAGE_SIZE
   const items = allItems.slice(start, start + PAGE_SIZE)
   return NextResponse.json({
@@ -367,6 +368,7 @@ export async function GET(request: Request) {
     hasMore: start + PAGE_SIZE < total,
     targetId,
     targetFound: targetId ? allItems.some((item) => item.sourceId === targetId) : undefined,
+    targetStatus: targetId ? allItems.find((item) => item.sourceId === targetId)?.status : undefined,
     type: sourceType,
     status,
     keyword,

@@ -120,20 +120,21 @@ export async function completeTask(
 
 /**
  * Every formally settled entertainment mode records the same daily fact.
- * This is a completion marker only; it never grants a registration-fee
- * reward. The completion table's event key makes repeated settlement calls
- * idempotent across HTTP retries and websocket fallbacks.
+ * The daily task owns a separate fixed registration-fee reward; the game
+ * settlement code keeps its own score/reward rules. The completion table and
+ * PointLog business key make repeated settlement calls idempotent across HTTP
+ * retries and websocket fallbacks.
  */
 export async function recordEntertainmentGameCompletion(
   tx: GrowthTransaction,
   input: { userId: string; gameCode: string; gameId: string; now?: Date },
 ) {
   const now = input.now || new Date()
-  return completeTask(tx, {
+  return grantGrowthReward(tx, {
     userId: input.userId,
     taskCode: 'DAILY_GAME',
-    periodKey: getShanghaiDateKey(now),
     sourceEventId: `${input.gameCode}:${input.gameId}`,
+    reason: '在娱乐天空完成任意一局游戏',
     now,
   })
 }
@@ -192,7 +193,8 @@ export async function grantGrowthReward(
 ) {
   const task = getGrowthTask(input.taskCode)
   const isActiveAction = task?.kind === 'active' && task.surface === 'action'
-  if (!task || (task.kind !== 'passive' && !isActiveAction)) throw new Error('GROWTH_REWARD_TASK_NOT_REWARDABLE')
+  const isDailyGame = task?.code === 'DAILY_GAME'
+  if (!task || (task.kind !== 'passive' && !isActiveAction && !isDailyGame)) throw new Error('GROWTH_REWARD_TASK_NOT_REWARDABLE')
   const now = input.now || new Date()
   const sourceEventId = normalizeSource(input.sourceEventId)
   const periodKey = task.frequency === 'daily' ? getShanghaiDateKey(now) : getShanghaiWeekKey(now)
@@ -476,7 +478,9 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
   const activeRewardByCode: Record<string, number> = {
     DAILY_CHECKIN: dailyRewardTotal(['DAILY_CHECK_IN', 'CONTINUOUS_CHECK_IN_BONUS']),
     DAILY_PRESCRIPTION: dailyRewardTotal(['ENTERTAINMENT_DAILY_DRAW']),
-    DAILY_GAME: 0,
+    DAILY_GAME: pointLogs
+      .filter((row) => row.growthTaskCode === 'DAILY_GAME' && row.points > 0 && row.createdAt >= todayRange.start && row.createdAt < todayRange.end)
+      .reduce((sum, row) => sum + row.points, 0),
     DAILY_COMMENT: communityRewardLogs
       .filter((row) => row.action === 'COMMENT_POST' && row.points > 0 && (row.dateKey || getShanghaiDateKey(row.createdAt)) === dateKey)
       .reduce((sum, row) => sum + row.points, 0),

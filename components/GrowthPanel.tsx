@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
+import { formatListenDuelProgress, isListenDuelProgressComplete } from '@/lib/growth-tasks/presentation'
 
 type GrowthView = 'today' | 'new-life'
 
@@ -74,9 +75,14 @@ function formatTodayProgress(item: GrowthItem) {
 }
 
 function formatPassiveProgress(item: GrowthItem) {
-  if (item.code === 'LISTEN_DUEL_BRANCH') return `本周 ${Math.max(0, item.progress || 0)} 局  ›`
+  if (item.code === 'LISTEN_DUEL_BRANCH') return formatListenDuelProgress(item.progress || 0)
   const period = item.frequency === 'weekly' ? '本周' : '今日'
   return `${period} ${Math.max(0, item.progress || 0)}/${item.cap || 0}`
+}
+
+function isPassiveItemComplete(item: GrowthItem) {
+  if (item.code === 'LISTEN_DUEL_BRANCH') return isListenDuelProgressComplete(item.progress || 0)
+  return Boolean(item.completed)
 }
 
 function formatRuleCaps(rule: GrowthRewardRule) {
@@ -290,7 +296,7 @@ export function GrowthPanel({
           </details>
 
           <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
-            <h3 id="growth-core-title">今日任务</h3>
+            <h3 id="growth-core-title">今天只做一件事</h3>
             <div className="growth-item-list">
               {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayProgress(item)} completed={Boolean(item.completed)} />)}
             </div>
@@ -299,7 +305,7 @@ export function GrowthPanel({
           <details className="growth-panel-section growth-passive-section">
             <summary>之外 <span aria-hidden="true">›</span></summary>
             <div className="growth-item-list">
-              {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} completed={Boolean(item.completed)} />)}
+              {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} completed={isPassiveItemComplete(item)} />)}
             </div>
           </details>
         </>

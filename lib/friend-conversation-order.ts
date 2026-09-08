@@ -2,6 +2,7 @@ export type FriendConversationOrderInput = {
   latestMessageAt: Date | null
   fallbackAt: Date
   stableId: string
+  isPinned?: boolean
 }
 
 /**
@@ -17,6 +18,8 @@ export function compareFriendConversationOrder(
   left: FriendConversationOrderInput,
   right: FriendConversationOrderInput,
 ) {
+  if (Boolean(left.isPinned) !== Boolean(right.isPinned)) return left.isPinned ? -1 : 1
+
   const leftMessageTime = left.latestMessageAt?.getTime() || 0
   const rightMessageTime = right.latestMessageAt?.getTime() || 0
   if (leftMessageTime !== rightMessageTime) return rightMessageTime - leftMessageTime

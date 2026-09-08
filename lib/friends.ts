@@ -20,6 +20,111 @@ export function normalizeFriendPair(userId: string, otherUserId: string) {
   return [userId, otherUserId].sort() as [string, string]
 }
 
+const FRIEND_REQUEST_GREETING_PREFIX = 'friend-request:'
+
+function friendRequestGreetingClientMessageId(requestId: string) {
+  return `${FRIEND_REQUEST_GREETING_PREFIX}${requestId}`
+}
+
+/**
+ * Resolve one direct conversation even for rows created before pairKey was
+ * introduced. The participant shape is the legacy fallback; requiring both
+ * members and no third member keeps group conversations out of this path.
+ */
+export async function ensureFriendConversation(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  otherUserId: string,
+) {
+  const [userAId, userBId] = normalizeFriendPair(userId, otherUserId)
+  const pairKey = `${userAId}:${userBId}`
+  let conversation = await tx.conversation.findUnique({
+    where: { pairKey },
+    select: { id: true, pairKey: true },
+  })
+  if (!conversation) {
+    conversation = await tx.conversation.findFirst({
+      where: {
+        AND: [
+          { ConversationParticipant: { some: { userId: userAId } } },
+          { ConversationParticipant: { some: { userId: userBId } } },
+          { ConversationParticipant: { every: { userId: { in: [userAId, userBId] } } } },
+        ],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, pairKey: true },
+    })
+  }
+  if (!conversation) {
+    conversation = await tx.conversation.upsert({
+      where: { pairKey },
+      update: {},
+      create: { pairKey },
+      select: { id: true, pairKey: true },
+    })
+  } else if (!conversation.pairKey) {
+    conversation = await tx.conversation.update({
+      where: { id: conversation.id },
+      data: { pairKey },
+      select: { id: true, pairKey: true },
+    })
+  }
+
+  for (const participantUserId of [userAId, userBId]) {
+    await tx.conversationParticipant.upsert({
+      where: { conversationId_userId: { conversationId: conversation.id, userId: participantUserId } },
+      update: { isDeleted: false },
+      create: { conversationId: conversation.id, userId: participantUserId },
+    })
+  }
+  return conversation
+}
+
+async function ensureFriendRequestConversation(
+  tx: Prisma.TransactionClient,
+  input: { requestId: string; senderId: string; receiverId: string; reason: string | null },
+) {
+  const conversation = await ensureFriendConversation(tx, input.senderId, input.receiverId)
+
+  const content = typeof input.reason === 'string' ? input.reason.trim() : ''
+  if (!content) return { conversationId: conversation.id, greetingMessageId: null as string | null }
+
+  const clientMessageId = friendRequestGreetingClientMessageId(input.requestId)
+  // The composite unique key makes retries and concurrent accept handlers
+  // converge on one normal message instead of racing a find-then-create.
+  const greeting = await tx.directMessage.upsert({
+    where: { senderId_clientMessageId: { senderId: input.senderId, clientMessageId } },
+    update: {},
+    create: {
+      conversationId: conversation.id,
+      senderId: input.senderId,
+      type: 'TEXT',
+      content,
+      clientMessageId,
+    },
+    select: { id: true, createdAt: true },
+  })
+  await tx.conversation.updateMany({
+    where: {
+      id: conversation.id,
+      OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: greeting.createdAt } }],
+    },
+    data: { lastMessageAt: greeting.createdAt },
+  })
+  // The applicant is the real sender. Mark only that participant as having
+  // read their own greeting so the receiver gets the normal incoming-message
+  // unread state without showing a self-sent red dot to the applicant.
+  await tx.conversationParticipant.updateMany({
+    where: {
+      conversationId: conversation.id,
+      userId: input.senderId,
+      OR: [{ lastReadAt: null }, { lastReadAt: { lt: greeting.createdAt } }],
+    },
+    data: { lastReadAt: greeting.createdAt, isDeleted: false },
+  })
+  return { conversationId: conversation.id, greetingMessageId: greeting.id }
+}
+
 export async function getFriendIds(userId: string) {
   const friendships = await prisma.friendship.findMany({
     where: {
@@ -208,6 +313,12 @@ export async function decideFriendRequest(userId: string, requestId: string, act
         update: {},
         create: { userAId, userBId },
         select: { id: true },
+      })
+      await ensureFriendRequestConversation(tx, {
+        requestId,
+        senderId: friendRequest.senderId,
+        receiverId: friendRequest.receiverId,
+        reason: friendRequest.message,
       })
       await completeTask(tx, { userId: friendRequest.senderId, taskCode: 'FIRST_FRIEND', periodKey: 'ALL', sourceEventId: friendship.id })
       await completeTask(tx, { userId: friendRequest.receiverId, taskCode: 'FIRST_FRIEND', periodKey: 'ALL', sourceEventId: friendship.id })

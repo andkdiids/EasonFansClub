@@ -66,8 +66,8 @@ export async function POST(request: Request) {
     if (!sent.sent) throw new Error('TENCENT_EMAIL_NOT_CONFIGURED')
   } catch (error) {
     if (recordId) await prisma.passwordResetToken.deleteMany({ where: { id: recordId } }).catch(() => undefined)
-    console.error('[auth.password.request]', error)
-    return NextResponse.json({ message: '邮件服务暂时不可用，请稍后再试' }, { status: 503, headers: noStoreHeaders })
+    console.error('[auth.password.request]', error instanceof Error ? error.message : 'unknown_error')
+    return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503, headers: noStoreHeaders })
   }
 
   return genericResponse()

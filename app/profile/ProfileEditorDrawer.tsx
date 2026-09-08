@@ -5,9 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ProfileSettingsForm } from './ProfileSettingsForm'
 import type { UserLocation } from '@/lib/user-location'
 import type { GenderValue } from '@/lib/gender'
+import type { NicknameChangeView } from '@/lib/nickname-change'
 
 type InitialProfile = {
   nickname: string
+  nicknameChange: NicknameChangeView
   nicknameViolation: boolean
   avatarUrl: string
   defaultAvatarOptions: Array<{ id: string; url: string }>

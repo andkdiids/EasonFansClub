@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { COMMUNITY_REWARD_LIMITS, COMMUNITY_REWARD_POINTS } from '@/lib/community-rewards'
 import { getGrowthTask, getRewardRuleGroups } from '@/lib/growth-tasks/registry'
+import { formatListenDuelProgress, isListenDuelProgressComplete } from '@/lib/growth-tasks/presentation'
 import { isQualifiedPublishedPost } from '@/lib/post-moderation'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -30,7 +31,7 @@ test('任务列表只输出状态和进度，奖励金额集中在展开的规�
   const branchStart = panel.indexOf('growth-passive-section')
   const taskListSource = panel.slice(listStart, branchStart)
   assert.ok(listStart >= 0 && branchStart > listStart)
-  assert.match(taskListSource, /<h3 id="growth-core-title">今日任务<\/h3>/)
+  assert.match(taskListSource, /<h3 id="growth-core-title">今天只做一件事<\/h3>/)
   assert.match(taskListSource, /formatTodayProgress/)
   assert.doesNotMatch(taskListSource, /formatTodayReward|\+\$\{|\+1\/次|\+2\/次|\+14|\+27|\+50|\+74/)
   assert.match(panel, /overview\.rewardRules\.map/)
@@ -40,19 +41,31 @@ test('任务列表只输出状态和进度，奖励金额集中在展开的规�
   assert.doesNotMatch(panel, />被动奖励</)
 })
 
-test('今日游戏任务只更新用户可见标题，保留原任务标识和规则', () => {
+test('娱乐天空每日任务固定奖励 7，保留原任务标识并统一用户可见文案', () => {
   const game = getGrowthTask('DAILY_GAME')
   const registry = read('lib/growth-tasks/registry.ts')
   const gameRule = getRewardRuleGroups().flatMap((group) => group.items).find((item) => item.code === 'DAILY_GAME')
+  const service = read('lib/growth-tasks/service.ts')
   assert.equal(game?.title, '在娱乐天空完成任意一局游戏')
   assert.equal(gameRule?.title, '在娱乐天空完成任意一局游戏')
   assert.equal(game?.dailyCap, 1)
   assert.equal(game?.completionThreshold, 1)
-  assert.equal(game?.reward, 0)
+  assert.equal(game?.reward, 7)
+  assert.equal(game?.displayReward, '+7')
+  assert.equal(gameRule?.amount, 7)
+  assert.equal(gameRule?.amountLabel, '+7')
+  assert.equal(gameRule?.dailyCap, 1)
+  assert.equal(gameRule?.capUnit, 'events')
+  assert.equal(gameRule?.maxDailyAmount, 7)
   assert.equal(game?.actionHref, '/games')
+  assert.equal(getRewardRuleGroups().find((group) => group.key === 'daily')?.title, '今天只做一件事')
   assert.match(registry, /code: 'DAILY_GAME', title: '在娱乐天空完成任意一局游戏'/)
   assert.doesNotMatch(registry, /title: '完成一局游戏'/)
+  assert.doesNotMatch(registry, /沿用(?:对应)?游戏现有奖励/)
   assert.doesNotMatch(registry, /支线|伴游/)
+  const completionSource = service.slice(service.indexOf('export async function recordEntertainmentGameCompletion'), service.indexOf('type GrowthRewardWindow'))
+  assert.match(completionSource, /return grantGrowthReward\(tx, \{[\s\S]*taskCode: 'DAILY_GAME'/)
+  assert.match(completionSource, /reason: '在娱乐天空完成任意一局游戏'/)
 })
 
 test('奖励规则覆盖回复、点赞、分享、发帖、收到回复和周奖励', () => {
@@ -76,6 +89,25 @@ test('奖励规则覆盖回复、点赞、分享、发帖、收到回复和周�
     groups.find((group) => group.key === 'weekly')?.items.map((item) => [item.amount, item.milestoneDays]),
     [[27, 3], [50, 5], [74, 7]],
   )
+})
+
+test('听听 1v1 对决只在展示层使用 current/7 并封顶完成状态', () => {
+  const cases = [
+    [0, '0/7', false],
+    [1, '1/7', false],
+    [6, '6/7', false],
+    [7, '7/7', true],
+    [8, '7/7', true],
+    [12, '7/7', true],
+  ] as const
+  for (const [current, expectedDisplay, expectedComplete] of cases) {
+    assert.equal(formatListenDuelProgress(current), expectedDisplay)
+    assert.equal(isListenDuelProgressComplete(current), expectedComplete)
+  }
+  const panel = read('components/GrowthPanel.tsx')
+  assert.match(panel, /formatListenDuelProgress/)
+  assert.match(panel, /isListenDuelProgressComplete/)
+  assert.doesNotMatch(panel, /LISTEN_DUEL_BRANCH.*本周.*局/)
 })
 
 test('任意娱乐模式只有正式结算才写入 DAILY_GAME，1v1 进入之外进度', () => {

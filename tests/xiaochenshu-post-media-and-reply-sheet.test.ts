@@ -12,12 +12,12 @@ test('小臣书分类固定为全部、公告区、推荐、最新、热门，�
     { slug: 'daily-chat', name: '吹水' },
     { slug: 'announcements', name: '旧公告名', isAnnouncement: true },
     { slug: 'concert', name: '演唱会' },
-    { slug: 'material-trade', name: '物料交换' },
+    { slug: 'material-trade', name: '物料' },
     { slug: 'bard', name: '吟游诗人' },
   ])
 
   assert.deepEqual(tabs.map((tab) => tab.value), ['all', 'announcements', 'recommend', 'latest', 'hot', 'daily-chat', 'concert', 'material-trade', 'bard'])
-  assert.deepEqual(tabs.map((tab) => tab.label), ['全部', '公告区', '推荐', '最新', '热门', '吹水', '演唱会', '物料交换', '吟游诗人'])
+  assert.deepEqual(tabs.map((tab) => tab.label), ['全部', '公告区', '推荐', '最新', '热门', '吹水', '演唱会', '物料', '吟游诗人'])
 })
 
 test('论坛分区改名保留 daily-chat slug，并新增吟游诗人默认分区', () => {
@@ -31,7 +31,7 @@ test('论坛分区改名保留 daily-chat slug，并新增吟游诗人默认分�
       { name: '公告区', slug: 'announcements' },
       { name: DAILY_CHAT_DISPLAY_NAME, slug: DAILY_CHAT_BOARD_SLUG },
       { name: '演唱会', slug: 'concerts' },
-      { name: '物料交换', slug: 'merch-exchange' },
+      { name: '物料', slug: 'merch-exchange' },
       { name: BARD_BOARD_NAME, slug: BARD_BOARD_SLUG },
     ],
   )

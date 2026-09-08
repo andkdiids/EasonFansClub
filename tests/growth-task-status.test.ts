@@ -52,6 +52,30 @@ test('已有任务完成记录按进度目标完成，不能把一次回复当�
   assert.equal(status(result, 'DAILY_COMMENT')?.completed, true)
 })
 
+test('娱乐天空任务按当天首次游戏完成封顶为 1/1', () => {
+  const oneGame = resolveToday({
+    businessFacts: {
+      checkinDateKeys: [],
+      prescriptionDateKeys: [],
+      gameCompletionCountsByDate: new Map([[TODAY, 1]]),
+    },
+  })
+  assert.equal(status(oneGame, 'DAILY_GAME')?.progress, 1)
+  assert.equal(status(oneGame, 'DAILY_GAME')?.cap, 1)
+  assert.equal(status(oneGame, 'DAILY_GAME')?.completed, true)
+
+  const multipleGames = resolveToday({
+    businessFacts: {
+      checkinDateKeys: [],
+      prescriptionDateKeys: [],
+      gameCompletionCountsByDate: new Map([[TODAY, 2]]),
+    },
+  })
+  assert.equal(status(multipleGames, 'DAILY_GAME')?.progress, 1)
+  assert.equal(status(multipleGames, 'DAILY_GAME')?.cap, 1)
+  assert.equal(status(multipleGames, 'DAILY_GAME')?.completed, true)
+})
+
 test('补签历史日期不误判今天，正常当天挂号才算今天完成', () => {
   const makeup = resolveToday({ businessFacts: { checkinDateKeys: ['2026-09-05'] } })
   assert.equal(status(makeup, 'DAILY_CHECKIN')?.completed, false)

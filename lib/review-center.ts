@@ -1,9 +1,17 @@
 import type { AdminPermissionKey } from '@/lib/admin-permission-config'
+import { salonCategoryLabel } from '@/lib/salon-shared'
 
 export const reviewSourceTypes = ['POST', 'SALON', 'CREATION', 'STICKER', 'CONCERT', 'TODAY'] as const
 export type ReviewSourceType = typeof reviewSourceTypes[number]
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
 export type ReviewDecision = 'APPROVE' | 'REJECT'
+export const reviewStatuses = ['PENDING', 'APPROVED', 'REJECTED'] as const
+
+/** Normalize review-center URL input; legacy `status=all` means the default queue. */
+export function parseReviewStatus(value: unknown): ReviewStatus {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  return reviewStatuses.includes(normalized as ReviewStatus) ? normalized as ReviewStatus : 'PENDING'
+}
 
 export type ReviewSourceDefinition = {
   type: ReviewSourceType
@@ -49,6 +57,26 @@ export function reviewSourceLabel(type: ReviewSourceType | 'ALL') {
   return reviewSourceDefinitions.find((item) => item.type === type)?.label || type
 }
 
+const legacySalonCategoryLabels: Record<string, string> = {
+  CONCERT: '演唱会记录',
+  MOBILE_WALLPAPER: '手机壁纸',
+  DESKTOP_WALLPAPER: '电脑壁纸',
+  TIME_TRAVEL: '时光倒流二十年',
+  '演唱会记录': '演唱会记录',
+  '手机壁纸': '手机壁纸',
+  '电脑壁纸': '电脑壁纸',
+  '时光倒流二十年': '时光倒流二十年',
+}
+
+/** Resolve Salon's persisted category without exposing enum/code values. */
+export function reviewSalonCategoryLabel(value: unknown) {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return '未分类'
+  const configuredLabel = salonCategoryLabel(raw)
+  if (configuredLabel !== raw) return configuredLabel
+  return legacySalonCategoryLabels[raw] || '未分类'
+}
+
 /** Shared decision availability for the unified queue and server adapters. */
 export function canApplyReviewDecision(status: unknown, decision: ReviewDecision) {
   if (status === 'PENDING') return decision === 'APPROVE' || decision === 'REJECT'
@@ -60,7 +88,7 @@ export type ReviewItemActions = {
   reject: boolean
   edit: boolean
   delete: boolean
-  detailUrl: string | null
+  editUrl: string | null
 }
 
 export type ReviewMedia = {

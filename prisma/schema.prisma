@@ -271,6 +271,34 @@ model AdminActionLog {
   @@index([targetUserId, createdAt])
 }
 
+/// Durable audit events for important user-owned changes that cannot be
+/// reconstructed from the current User row (for example nickname/birthday
+/// old -> new transitions). Existing business records remain the source of
+/// truth for posts, check-ins, rewards, badges, and risk events.
+model UserOperationLog {
+  id             String   @id @default(cuid())
+  userId         String
+  category       String   @db.VarChar(32)
+  action         String   @db.VarChar(64)
+  summary        String   @db.VarChar(500)
+  metadata       Json?
+  source         String   @db.VarChar(32)
+  operatorType   String   @db.VarChar(16)
+  operatorUserId String?
+  targetType     String?  @db.VarChar(64)
+  targetId       String?  @db.VarChar(191)
+  riskLevel      String?  @db.VarChar(16)
+  occurredAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  user           User     @relation("UserOperationLogUser", fields: [userId], references: [id], onDelete: Cascade)
+  operator       User?    @relation("UserOperationLogOperator", fields: [operatorUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, occurredAt, id])
+  @@index([category, occurredAt, id])
+  @@index([riskLevel, occurredAt, id])
+  @@index([operatorUserId, occurredAt])
+}
+
 model AdminPermission {
   id            String   @id @default(cuid())
   permissionKey String
@@ -932,6 +960,7 @@ model ConversationParticipant {
   id             String       @id @default(cuid())
   lastReadAt     DateTime?
   clearedAt      DateTime?
+  pinnedAt       DateTime?
   isDeleted      Boolean      @default(false)
   isMuted        Boolean      @default(false)
   joinedAt       DateTime     @default(now())
@@ -4242,6 +4271,9 @@ model User {
   status                                                 UserStatus                         @default(ACTIVE)
   verificationStatus                                     VerificationStatus                 @default(NONE)
   nicknameChangedAt                                      DateTime?
+  /// Null means the one-time long-lived nickname opportunity is still available.
+  /// It is consumed only by a successful self-service nickname change.
+  nicknameFreeChangeUsedAt                               DateTime?
   birthMonth                                             Int?
   birthDay                                               Int?
   birthdaySetAt                                          DateTime?
@@ -4287,6 +4319,8 @@ model User {
   PostModerationHistoryActor                             PostModerationHistory[]            @relation("PostModerationHistoryActor")
   AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]                   @relation("AdminActionLog_adminIdToUser")
   AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]                   @relation("AdminActionLog_targetUserIdToUser")
+  UserOperationLog_UserOperationLog_userIdToUser         UserOperationLog[]                 @relation("UserOperationLogUser")
+  UserOperationLog_UserOperationLog_operatorUserIdToUser UserOperationLog[]                 @relation("UserOperationLogOperator")
   AdminPermission                                        AdminPermission[]
   MaterialRedemptionsCreated                             MaterialRedemption[]               @relation("MaterialRedemptionCreatedByAdmin")
   MaterialRedemptionOrders                               MaterialRedemptionOrder[]          @relation("MaterialRedemptionOrderUser")

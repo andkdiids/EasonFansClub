@@ -38,6 +38,7 @@ import {
   parseFriendListReturnState,
   type FriendListReturnState,
 } from '@/lib/friend-list-return-state'
+import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
@@ -81,6 +82,7 @@ type FriendGroupPagination = {
 type ConversationSummary = {
   id: string
   lastMessageAt: string | null
+  pinnedAt: string | null
   otherUser: FriendDockUser
   latestMessage: {
     id: string
@@ -91,6 +93,23 @@ type ConversationSummary = {
     preview?: string
   } | null
   unreadCount: number
+}
+
+function compareConversationSummaries(left: ConversationSummary, right: ConversationSummary) {
+  return compareFriendConversationOrder(
+    {
+      latestMessageAt: left.lastMessageAt ? new Date(left.lastMessageAt) : null,
+      fallbackAt: left.lastMessageAt ? new Date(left.lastMessageAt) : new Date(0),
+      stableId: left.id,
+      isPinned: Boolean(left.pinnedAt),
+    },
+    {
+      latestMessageAt: right.lastMessageAt ? new Date(right.lastMessageAt) : null,
+      fallbackAt: right.lastMessageAt ? new Date(right.lastMessageAt) : new Date(0),
+      stableId: right.id,
+      isPinned: Boolean(right.pinnedAt),
+    },
+  )
 }
 
 const emptySummary: UnreadSummary = {
@@ -177,6 +196,7 @@ export function FriendDock({
       ? conversationUnreadCount
       : null
   const [loadingConversations, setLoadingConversations] = useState(false)
+  const [pinningConversationId, setPinningConversationId] = useState<string | null>(null)
   const [chatListError, setChatListError] = useState('')
   const [loadingList, setLoadingList] = useState(false)
   const [refreshingFriendList, setRefreshingFriendList] = useState(false)
@@ -289,6 +309,7 @@ export function FriendDock({
     setPendingSticker(null)
     setPickerOpen(false)
     setSending(false)
+    setPinningConversationId(null)
     setClearingChat(false)
     setError('')
     cursorRef.current = ''
@@ -516,6 +537,37 @@ export function FriendDock({
       if (requestId === conversationRequestRef.current) setLoadingConversations(false)
     }
   }, [])
+
+  async function toggleConversationPin(conversation: ConversationSummary) {
+    if (pinningConversationId) return
+    const nextPinned = !conversation.pinnedAt
+    setPinningConversationId(conversation.id)
+    setError('')
+    try {
+      const response = await fetch(`/api/direct-conversations/${conversation.id}/pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({ pinned: nextPinned }),
+      })
+      const data = await response.json().catch(() => ({})) as { message?: string; pinned?: boolean; pinnedAt?: string | null }
+      if (!response.ok) {
+        setError(data.message || (nextPinned ? '置顶聊天失败' : '取消置顶失败'))
+        return
+      }
+      setConversations((current) => current
+        .map((item) => item.id === conversation.id
+          ? { ...item, pinnedAt: data.pinned ? (data.pinnedAt || new Date().toISOString()) : null }
+          : item)
+        .sort(compareConversationSummaries))
+      notifyClients('messages')
+    } catch (pinError) {
+      setError(pinError instanceof TypeError ? '网络连接中断，请重试' : (nextPinned ? '置顶聊天失败' : '取消置顶失败'))
+    } finally {
+      setPinningConversationId(null)
+    }
+  }
 
   function openFriendGroupDialog(mode: FriendGroupDialogMode, group: FriendGroup | null = null) {
     setError('')
@@ -1066,9 +1118,12 @@ export function FriendDock({
   }, [open, isMobileDrawer])
 
   useEffect(() => {
-    if (!open || !isMobileDrawer) return
+    // FriendDock is a modal overlay on every viewport. Lock the page while it
+    // is open, but leave the panel's own scroll containers available.
+    if (!open) return
     const root = document.documentElement
     const body = document.body
+    const scrollX = window.scrollX
     const scrollY = window.scrollY
     const rootOverflow = root.style.overflow
     const bodyOverflow = body.style.overflow
@@ -1088,9 +1143,9 @@ export function FriendDock({
       body.style.position = bodyPosition
       body.style.top = bodyTop
       body.style.width = bodyWidth
-      window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' })
+      window.scrollTo({ top: scrollY, left: scrollX, behavior: 'auto' })
     }
-  }, [open, isMobileDrawer])
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -1235,6 +1290,7 @@ export function FriendDock({
     setDeleteChatTarget(existing || {
       id: conversationId,
       lastMessageAt: null,
+      pinnedAt: null,
       otherUser: chatFriend,
       latestMessage: null,
       unreadCount: 0,
@@ -1864,6 +1920,8 @@ export function FriendDock({
                         conversation={conversation}
                         onOpen={() => void openChat(conversation.otherUser, conversation.id)}
                         onDelete={() => setDeleteChatTarget(conversation)}
+                        onTogglePin={() => void toggleConversationPin(conversation)}
+                        pinning={pinningConversationId === conversation.id}
                       />
                     )) : null}
                     <div className="friend-dock-list-end" aria-hidden="true" />
@@ -2071,11 +2129,16 @@ function ConversationRow({
   conversation,
   onOpen,
   onDelete,
+  onTogglePin,
+  pinning,
 }: {
   conversation: ConversationSummary
   onOpen: () => void
   onDelete: () => void
+  onTogglePin: () => void
+  pinning: boolean
 }) {
+  const [actionsOpen, setActionsOpen] = useState(false)
   const longPressTimerRef = useRef<number | null>(null)
   const longPressTriggeredRef = useRef(false)
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -2125,7 +2188,7 @@ function ConversationRow({
   }
 
   return (
-    <article data-conversation-id={conversation.id} className={`friend-chat-row ${conversation.unreadCount ? 'has-unread' : ''}`}>
+    <article data-conversation-id={conversation.id} data-pinned={conversation.pinnedAt ? 'true' : 'false'} className={`friend-chat-row ${conversation.unreadCount ? 'has-unread' : ''}`}>
       <button
         type="button"
         className="friend-chat-row-main"
@@ -2144,7 +2207,7 @@ function ConversationRow({
         <SafeAvatar src={profileImageUrl(peer.profile?.avatarUrl || peer.avatarUrl)} name={name} uid={peer.uid} className="friend-chat-row-avatar" />
         <span className="friend-chat-row-copy">
           <span className="friend-chat-row-heading">
-            <strong><UserDisplayName name={name} uid={peer.uid} badges={peer.equippedBadges} badge={peer.equippedBadge} compact /></strong>
+            <strong><UserDisplayName name={name} uid={peer.uid} badges={peer.equippedBadges} badge={peer.equippedBadge} compact maxDisplay={1} /></strong>
             {conversation.lastMessageAt ? <time>{formatConversationTime(conversation.lastMessageAt)}</time> : null}
           </span>
           <span className="friend-chat-row-preview">
@@ -2153,7 +2216,40 @@ function ConversationRow({
           </span>
         </span>
       </button>
-      <button type="button" className="friend-chat-row-actions" onClick={onDelete} aria-label={`删除与${name}的聊天`} title="删除聊天">⋯</button>
+      <div className="friend-chat-row-actions">
+        <button
+          type="button"
+          onClick={() => setActionsOpen((value) => !value)}
+          aria-label={`更多${name}的聊天操作`}
+          aria-haspopup="menu"
+          aria-expanded={actionsOpen}
+          title="更多操作"
+        >⋯</button>
+        {actionsOpen ? (
+          <div className="friend-chat-row-menu" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActionsOpen(false)
+                onTogglePin()
+              }}
+              disabled={pinning}
+            >
+              {pinning ? '处理中…' : conversation.pinnedAt ? '取消置顶' : '置顶聊天'}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActionsOpen(false)
+                onDelete()
+              }}
+              title="删除聊天"
+            >删除聊天</button>
+          </div>
+        ) : null}
+      </div>
     </article>
   )
 }
@@ -2191,7 +2287,7 @@ function FriendRow({
       </button>
       <div className="friend-dock-row-main">
         <button type="button" className="friend-dock-row-name" onClick={status === 'FRIEND' ? onChat : onProfile}>
-          <strong><UserDisplayName name={name} uid={friend.uid} badges={friend.equippedBadges} badge={friend.equippedBadge} compact /></strong>
+          <strong><UserDisplayName name={name} uid={friend.uid} badges={friend.equippedBadges} badge={friend.equippedBadge} compact maxDisplay={1} /></strong>
           <small>UID {formatUid(friend.uid)} · {friend.levelName || '初入E院'}</small>
         </button>
         {!searching ? (

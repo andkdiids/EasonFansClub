@@ -35,12 +35,12 @@ export async function POST(request: Request) {
     const sent = await sendPasswordResetCode(user.email, code)
     if (!sent.sent) {
       await prisma.passwordResetToken.delete({ where: { id: record.id } })
-      return NextResponse.json({ message: '邮件服务未配置' }, { status: 503 })
+      return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503 })
     }
   } catch (error) {
     await prisma.passwordResetToken.deleteMany({ where: { id: record.id } })
-    if (error instanceof Error && error.message === 'EMAIL_SEND_NOT_CONFIGURED') return NextResponse.json({ message: '邮件服务未配置' }, { status: 503 })
-    return NextResponse.json({ message: '邮件发送失败，请稍后再试' }, { status: 502 })
+    if (error instanceof Error && error.message === 'EMAIL_SEND_NOT_CONFIGURED') return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503 })
+    return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 502 })
   }
   return NextResponse.json({ message: genericMessage })
 }

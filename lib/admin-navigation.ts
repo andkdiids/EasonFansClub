@@ -20,6 +20,7 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     desc: '维护用户账号与默认资料资源。',
     items: [
       { href: '/admin/users', title: '用户管理', desc: '管理用户状态、权限、昵称冷却和重复账号。' },
+      { href: '/admin/user-operations', title: '用户操作记录', desc: '查看今日重要操作、高风险用户，以及单个用户的统一审计时间线。' },
       { href: '/admin/checkin-makeup', title: '手动补签', desc: '免费为用户补历史挂号，并记录管理员审计原因。' },
       { href: '/admin/default-avatars', title: '默认头像管理', desc: '维护系统默认头像池。' },
       { href: '/admin/user-rewards', title: '用户奖励', desc: '用户投稿、建议或内容被采纳后，记录并发放贡献奖励。' },

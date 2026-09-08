@@ -2,6 +2,8 @@ export const PASSWORD_RESET_EMAIL_LOGO_URL = 'https://ecfc.fans/icon.png'
 export const PASSWORD_RESET_CODE_SUBJECT = '私家E院｜重置密码验证码'
 export const PASSWORD_RESET_LINK_SUBJECT = '私家E院｜密码重置链接'
 export const PASSWORD_RESET_CODE_EXPIRY_MINUTES = 10
+export const EMAIL_VERIFICATION_CODE_EXPIRY_MINUTES = 10
+export const EMAIL_VERIFICATION_CODE_SUBJECT = '私家E院｜邮箱验证码'
 
 type PasswordResetEmailInput =
   | { kind: 'code'; code: string; expiresInMinutes: number }
@@ -12,6 +14,14 @@ export type RenderedPasswordResetEmail = {
   text: string
   html: string
 }
+
+export type RenderedEmail = {
+  subject: string
+  text: string
+  html: string
+}
+
+export type EmailVerificationReason = 'register' | 'change-email' | 'resend'
 
 function escapeHtml(value: string) {
   return value
@@ -74,6 +84,7 @@ export function renderPasswordResetEmail(input: PasswordResetEmailInput): Render
 </html>`
 
     assertNoUnresolvedVariables(html)
+    assertNoUnresolvedVariables(text)
     return { subject: PASSWORD_RESET_CODE_SUBJECT, text, html }
   }
 
@@ -118,9 +129,126 @@ export function renderPasswordResetEmail(input: PasswordResetEmailInput): Render
 </html>`
 
   assertNoUnresolvedVariables(html)
+  assertNoUnresolvedVariables(text)
   return { subject: PASSWORD_RESET_LINK_SUBJECT, text, html }
 }
 
-function assertNoUnresolvedVariables(html: string) {
-  if (html.includes('{{')) throw new Error('PASSWORD_RESET_EMAIL_TEMPLATE_UNRESOLVED_VARIABLE')
+export function renderEmailVerificationCode(input: {
+  code: string
+  reason?: EmailVerificationReason
+  expiresInMinutes: number
+}): RenderedEmail {
+  if (!/^\d{6}$/.test(input.code)) throw new Error('EMAIL_VERIFICATION_CODE_INVALID')
+
+  const expiresInMinutes = Math.max(1, Math.floor(input.expiresInMinutes))
+  const reason = input.reason || 'change-email'
+  const title = reason === 'register' ? '注册邮箱验证码' : '验证你的新邮箱'
+  const intro = reason === 'register'
+    ? '欢迎加入私家E院，请使用下面的 6 位验证码完成邮箱验证。'
+    : '你正在为私家E院账号验证邮箱，请使用下面的 6 位验证码完成验证。'
+  const code = escapeHtml(input.code)
+  const logoUrl = escapeHtml(PASSWORD_RESET_EMAIL_LOGO_URL)
+  const fontFamily = emailFontFamily()
+  const text = [
+    '私家E院 · Eason Fans Club',
+    '',
+    intro,
+    `邮箱验证码：${input.code}`,
+    `验证码 ${expiresInMinutes} 分钟内有效，且只能使用一次。`,
+    '',
+    '如果不是你本人操作，请忽略这封邮件。',
+  ].join('\n')
+  const html = `<!doctype html>
+<html lang="zh-CN">
+  <body style="margin:0;padding:0;background:#eef8ff;color:#102033;font-family:${fontFamily};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0;padding:0;background:#eef8ff;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;background:#ffffff;border:1px solid #dbeafe;">
+            <tr>
+              <td align="center" style="padding:28px 28px 12px;">
+                <img src="${logoUrl}" width="56" height="56" alt="私家E院" style="display:block;width:56px;height:56px;border:0;outline:none;text-decoration:none;object-fit:contain;" />
+                <p style="margin:14px 0 0;font-size:12px;line-height:1.5;font-weight:700;letter-spacing:.08em;color:#0f5f8f;">私家E院 · Eason Fans Club</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 28px 32px;">
+                <h1 style="margin:0;font-size:26px;line-height:1.3;font-weight:700;color:#102033;">${escapeHtml(title)}</h1>
+                <p style="margin:18px 0 0;font-size:15px;line-height:1.8;color:#475569;">${escapeHtml(intro)}</p>
+                <p style="margin:24px 0;text-align:center;font-size:32px;line-height:1.2;font-weight:700;letter-spacing:6px;color:#0f5f8f;">${code}</p>
+                <p style="margin:0;font-size:13px;line-height:1.8;color:#64748b;">验证码 ${expiresInMinutes} 分钟内有效，且只能使用一次。</p>
+                <p style="margin:22px 0 0;font-size:12px;line-height:1.8;color:#94a3b8;">如果不是你本人操作，请忽略这封邮件。</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`
+
+  assertNoUnresolvedVariables(html)
+  assertNoUnresolvedVariables(text)
+  return { subject: EMAIL_VERIFICATION_CODE_SUBJECT, text, html }
+}
+
+export function renderEmailVerificationLink(input: {
+  subject: string
+  title: string
+  intro: string
+  actionText: string
+  actionUrl: string
+  note?: string
+}): RenderedEmail {
+  const logoUrl = escapeHtml(PASSWORD_RESET_EMAIL_LOGO_URL)
+  const actionUrl = escapeHtml(input.actionUrl)
+  const fontFamily = emailFontFamily()
+  const note = input.note || '如果不是你本人操作，请忽略这封邮件。'
+  const text = [
+    '私家E院 · Eason Fans Club',
+    '',
+    input.title,
+    input.intro,
+    `${input.actionText}：${input.actionUrl}`,
+    '',
+    note,
+  ].join('\n')
+  const html = `<!doctype html>
+<html lang="zh-CN">
+  <body style="margin:0;padding:0;background:#eef8ff;color:#102033;font-family:${fontFamily};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0;padding:0;background:#eef8ff;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;background:#ffffff;border:1px solid #dbeafe;">
+            <tr>
+              <td align="center" style="padding:28px 28px 12px;">
+                <img src="${logoUrl}" width="56" height="56" alt="私家E院" style="display:block;width:56px;height:56px;border:0;outline:none;text-decoration:none;object-fit:contain;" />
+                <p style="margin:14px 0 0;font-size:12px;line-height:1.5;font-weight:700;letter-spacing:.08em;color:#0f5f8f;">私家E院 · Eason Fans Club</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 28px 32px;">
+                <h1 style="margin:0;font-size:26px;line-height:1.3;font-weight:700;color:#102033;">${escapeHtml(input.title)}</h1>
+                <p style="margin:18px 0 0;font-size:15px;line-height:1.8;color:#475569;">${escapeHtml(input.intro)}</p>
+                <p style="margin:24px 0;text-align:center;"><a href="${actionUrl}" style="display:inline-block;padding:12px 22px;background:#0f5f8f;color:#ffffff;text-decoration:none;font-size:14px;line-height:1.4;font-weight:700;">${escapeHtml(input.actionText)}</a></p>
+                <p style="margin:0;word-break:break-all;font-size:12px;line-height:1.8;color:#0f5f8f;">${actionUrl}</p>
+                <p style="margin:22px 0 0;font-size:12px;line-height:1.8;color:#94a3b8;">${escapeHtml(note)}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`
+
+  assertNoUnresolvedVariables(html)
+  assertNoUnresolvedVariables(text)
+  return { subject: input.subject, text, html }
+}
+
+export function assertNoUnresolvedVariables(html: string) {
+  if (/\{\{[^}]+\}\}|\$\{[^}]+\}/.test(html)) {
+    throw new Error('EMAIL_TEMPLATE_UNRESOLVED_VARIABLE')
+  }
 }

@@ -41,7 +41,7 @@ export default async function SecurityPage() {
 
   const questionsSet = Boolean(user.UserSecurityQuestion)
   const securityResetAvailable = settings.enableSecurityQuestionRecovery && questionsSet && user.securityQuestionRecoveryEnabled && !user.mustSetupSecurity
-  const emailResetConfigured = Boolean(settings.enableEmailPasswordReset && process.env.RESEND_API_KEY && user.email && user.emailVerifiedAt)
+  const emailResetConfigured = Boolean(settings.enableEmailPasswordReset && user.email && user.emailVerifiedAt)
   const recoveryReason = !settings.enableSecurityQuestionRecovery
     ? '系统功能已关闭'
     : !questionsSet

@@ -12,9 +12,11 @@ import type { UserLocation } from '@/lib/user-location'
 import { BIRTHDAY_ALREADY_SET, BIRTHDATE_SELF_EDIT_EXHAUSTED, isBirthdayConfigured } from '@/lib/birthday-immutability'
 import { decideBirthdaySave, daysForBirthdayMonth, resetInvalidBirthdayDay, type BirthdayDraft } from '@/lib/birthday-profile-flow'
 import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput, type GenderValue } from '@/lib/gender'
+import type { NicknameChangeView } from '@/lib/nickname-change'
 
 type InitialProfile = {
   nickname: string
+  nicknameChange: NicknameChangeView
   nicknameViolation: boolean
   avatarUrl: string
   defaultAvatarOptions: Array<{ id: string; url: string }>
@@ -41,6 +43,44 @@ type InitialProfile = {
 
 type UploadKind = 'avatar' | 'background'
 type ProfileWallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
+
+type ProfileFieldErrors = Record<string, string>
+
+function extractProfileFieldErrors(data: unknown): ProfileFieldErrors {
+  if (!data || typeof data !== 'object') return {}
+  const value = data as { errors?: unknown; field?: unknown; message?: unknown; code?: unknown }
+  const errors: ProfileFieldErrors = {}
+  if (value.errors && typeof value.errors === 'object' && !Array.isArray(value.errors)) {
+    for (const [field, message] of Object.entries(value.errors)) {
+      if (typeof message === 'string' && message) errors[field] = message
+    }
+  }
+  if (Object.keys(errors).length === 0 && typeof value.field === 'string' && typeof value.message === 'string') {
+    errors[value.field] = value.message
+  }
+  if (Object.keys(errors).length === 0 && typeof value.message === 'string' && typeof value.code === 'string') {
+    const fieldByCode: Record<string, string> = {
+      INVALID_NICKNAME: 'nickname',
+      NICKNAME_REQUIRED: 'nickname',
+      INVALID_EMAIL: 'email',
+      EMAIL_TAKEN: 'email',
+      EMAIL_VERIFICATION_REQUIRED: 'email',
+      EMAIL_CODE_INVALID: 'code',
+      EMAIL_CODE_EXPIRED: 'code',
+      INVALID_EMAIL_CODE: 'code',
+      INVALID_PHONE: 'phone',
+      PHONE_TAKEN: 'phone',
+      INVALID_GENDER: 'gender',
+      INVALID_LOCATION: 'location',
+      INVALID_BIRTHDAY: 'birthday',
+      BIRTHDAY_ALREADY_SET: 'birthday',
+      BIRTHDATE_SELF_EDIT_EXHAUSTED: 'birthday',
+    }
+    const field = fieldByCode[value.code]
+    if (field) errors[field] = value.message
+  }
+  return errors
+}
 
 type CropState = {
   file: File
@@ -194,6 +234,10 @@ function maskEmail(email: string) {
   return email
 }
 
+function sameProfileValue(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 async function cropAvatarToWebp(crop: CropState) {
   const image = await loadImage(crop.url)
   const canvas = document.createElement('canvas')
@@ -315,10 +359,17 @@ export function ProfileSettingsForm({
   const initialPhoneParts = getPhoneInputParts(initialProfile.phone)
   const [phoneCountry, setPhoneCountry] = useState<PhoneCountryCode>(initialPhoneParts.country)
   const [phoneValue, setPhoneValue] = useState(initialPhoneParts.value)
+  const [nicknameChange, setNicknameChange] = useState(initialProfile.nicknameChange)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>({})
   const [uploading, setUploading] = useState<UploadKind | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [emailCode, setEmailCode] = useState('')
+  const [emailCodeSent, setEmailCodeSent] = useState(false)
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailVerifying, setEmailVerifying] = useState(false)
+  const [emailCooldown, setEmailCooldown] = useState(0)
   const [crop, setCrop] = useState<CropState | null>(null)
   const [backgroundCrop, setBackgroundCrop] = useState<CropState | null>(null)
   const dragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
@@ -372,6 +423,14 @@ export function ProfileSettingsForm({
   }, [])
 
   useEffect(() => {
+    if (emailCooldown <= 0) return
+    const timer = window.setInterval(() => {
+      setEmailCooldown((current) => Math.max(0, current - 1))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [emailCooldown])
+
+  useEffect(() => {
     return () => {
       if (crop?.url) URL.revokeObjectURL(crop.url)
     }
@@ -385,6 +444,31 @@ export function ProfileSettingsForm({
 
   function update<K extends keyof InitialProfile>(key: K, value: InitialProfile[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+    setFieldErrors((current) => {
+      if (!current[key as string]) return current
+      const next = { ...current }
+      delete next[key as string]
+      return next
+    })
+  }
+
+  function updateEmailDraft(value: string) {
+    const normalized = value.trim().toLowerCase()
+    const initialEmail = initialProfile.email.trim().toLowerCase()
+    setForm((current) => ({
+      ...current,
+      email: value,
+      emailVerifiedAt: normalized && normalized === initialEmail ? initialProfile.emailVerifiedAt : null,
+    }))
+    setEmailCode('')
+    setEmailCodeSent(false)
+    setEmailCooldown(0)
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next.email
+      delete next.code
+      return next
+    })
   }
 
   function updateBirthdayMonth(month: number | null) {
@@ -393,6 +477,13 @@ export function ProfileSettingsForm({
       birthMonth: month,
       birthDay: resetInvalidBirthdayDay(month, current.birthDay),
     }))
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next.birthMonth
+      delete next.birthDay
+      delete next.birthday
+      return next
+    })
   }
 
   function openDefaultAvatarPicker() {
@@ -631,50 +722,151 @@ export function ProfileSettingsForm({
     }
   }
 
-  async function saveProfile(birthdayToSave: BirthdayDraft | null, partialBirthdayDraft = false) {
-    setIsSaving(true)
+  async function sendEmailVerificationCode() {
+    if (emailSending || emailVerifying || emailCooldown > 0) return
+    const email = form.email.trim()
     setMessage('')
     setError('')
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next.email
+      delete next.code
+      return next
+    })
+    setEmailSending(true)
+    try {
+      const response = await fetch('/api/users/me/email-verification/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setFieldErrors(extractProfileFieldErrors(data))
+        setError(data?.message || '验证码邮件发送失败，请稍后重试')
+        return
+      }
+      setEmailCodeSent(true)
+      setEmailCooldown(60)
+      setMessage('验证码已发送，请查收邮件。')
+    } catch (sendError) {
+      setError(sendError instanceof TypeError ? '网络连接中断，请稍后重试' : '验证码邮件发送失败，请稍后重试')
+    } finally {
+      if (mountedRef.current) setEmailSending(false)
+    }
+  }
 
+  async function verifyEmailCode() {
+    if (emailVerifying || emailSending) return
+    const email = form.email.trim()
+    setMessage('')
+    setError('')
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next.email
+      delete next.code
+      return next
+    })
+    setEmailVerifying(true)
+    try {
+      const response = await fetch('/api/users/me/email-verification/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: emailCode }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setFieldErrors(extractProfileFieldErrors(data))
+        setError(data?.message || '邮箱验证失败，请稍后重试')
+        return
+      }
+      const verifiedEmail = typeof data?.profile?.email === 'string' ? data.profile.email : email
+      setForm((current) => ({
+        ...current,
+        email: verifiedEmail,
+        emailVerifiedAt: typeof data?.profile?.emailVerifiedAt === 'string' ? data.profile.emailVerifiedAt : new Date().toISOString(),
+      }))
+      setEmailCode('')
+      setEmailCodeSent(false)
+      setEmailCooldown(0)
+      setMessage('邮箱绑定成功。')
+      router.refresh()
+    } catch (verifyError) {
+      setError(verifyError instanceof TypeError ? '网络连接中断，请稍后重试' : '邮箱验证失败，请稍后重试')
+    } finally {
+      if (mountedRef.current) setEmailVerifying(false)
+    }
+  }
+
+  async function saveProfile(birthdayToSave: BirthdayDraft | null, partialBirthdayDraft = false) {
+    setMessage('')
+    setError('')
+    setFieldErrors({})
+
+    const payload: Record<string, unknown> = {}
+    const nicknamePayload = form.nickname !== initialProfile.nickname
+      ? { nickname: form.nickname }
+      : {}
+    Object.assign(payload, nicknamePayload)
+    if (form.bio !== initialProfile.bio) payload.bio = form.bio
+    const locationPayload = !sameProfileValue(form.location, initialProfile.location)
+      ? { location: form.location }
+      : {}
+    Object.assign(payload, locationPayload)
+    if (form.avatarUrl !== initialProfile.avatarUrl) payload.avatarUrl = form.avatarUrl
+    if (form.backgroundUrl !== initialProfile.backgroundUrl) payload.backgroundUrl = form.backgroundUrl
+
+    const rawPhone = phoneValue.trim()
+    const normalizedPhone = rawPhone ? normalizePhoneNumber(rawPhone, phoneCountry) : null
+    const nextPhone = normalizedPhone?.e164 || ''
+    if (nextPhone !== initialProfile.phone) {
+      payload.phone = nextPhone
+      payload.phoneCountry = normalizedPhone?.country || phoneCountry
+    }
+    if (form.wallVisibility !== initialProfile.wallVisibility) payload.wallVisibility = form.wallVisibility
+    if (form.gender !== initialProfile.gender || form.customGender !== initialProfile.customGender) {
+      payload.gender = form.gender
+      payload.customGender = form.gender === 'CUSTOM' ? form.customGender : ''
+    }
+    if (form.birthdayPublic !== initialProfile.birthdayPublic) {
+      Object.assign(payload, { birthdayPublic: Boolean(form.birthdayPublic) })
+    }
+    if (form.showBadgeActivity !== initialProfile.showBadgeActivity) {
+      Object.assign(payload, { showBadgeActivity: Boolean(form.showBadgeActivity) })
+    }
+    if (form.showBadgeProgressNotifications !== initialProfile.showBadgeProgressNotifications) {
+      payload.showBadgeProgressNotifications = Boolean(form.showBadgeProgressNotifications)
+    }
+    // 只有确认弹窗后才添加生日；未完成的 draft 永远不会进入请求。
     const birthdayPayload = birthdayToSave
       ? { birthMonth: birthdayToSave.month, birthDay: birthdayToSave.day }
       : {}
-    const rawPhone = phoneValue.trim()
-    const normalizedPhone = rawPhone ? normalizePhoneNumber(rawPhone, phoneCountry) : null
+    Object.assign(payload, birthdayPayload)
 
+    if (Object.keys(payload).length === 0) {
+      setMessage(partialBirthdayDraft ? '资料已保存。生日尚未完整设置，本次不会保存生日。' : '没有需要保存的修改。')
+      setBirthdayConfirmation(null)
+      return
+    }
+
+    setIsSaving(true)
     try {
       const response = await fetch('/api/users/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nickname: form.nickname,
-          bio: form.bio,
-          location: form.location,
-          avatarUrl: form.avatarUrl,
-          backgroundUrl: form.backgroundUrl,
-          email: form.email,
-          phone: normalizedPhone?.e164 || '',
-          phoneCountry: normalizedPhone?.country || phoneCountry,
-          wallVisibility: form.wallVisibility,
-          gender: form.gender,
-          customGender: form.gender === 'CUSTOM' ? form.customGender : '',
-          // 生日公开开关：始终提交，服务端直接写回（不影响生日纪念通知与卡片本身）。
-          birthdayPublic: Boolean(form.birthdayPublic),
-          showBadgeActivity: Boolean(form.showBadgeActivity),
-          showBadgeProgressNotifications: Boolean(form.showBadgeProgressNotifications),
-          // 只有确认弹窗后才添加首次生日；未完成的 draft 永远不进入请求。
-          ...birthdayPayload,
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await response.json().catch(() => null)
 
       if (!response.ok) {
         setBirthdayConfirmation(null)
         if (data?.code === BIRTHDAY_ALREADY_SET || data?.code === BIRTHDATE_SELF_EDIT_EXHAUSTED) await refreshPersistedBirthday()
+        setFieldErrors(extractProfileFieldErrors(data))
         setError(data?.message || '保存失败，请稍后再试')
         return
       }
 
+      if (data?.nicknameChange) setNicknameChange(data.nicknameChange)
       if (data?.profile) {
         const nextBirthday = {
           birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : null,
@@ -686,9 +878,8 @@ export function ProfileSettingsForm({
         setPersistedBirthday(nextBirthday)
         setForm((current) => ({
           ...current,
-          email: data.profile.email || '',
+          nickname: typeof data.profile.nickname === 'string' ? data.profile.nickname : current.nickname,
           phone: data.profile.phone || '',
-          emailVerifiedAt: data.profile.emailVerifiedAt || null,
           phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
           wallVisibility: data.profile.wallVisibility || current.wallVisibility,
           showBadgeActivity: typeof data.profile.showBadgeActivity === 'boolean' ? data.profile.showBadgeActivity : current.showBadgeActivity,
@@ -696,8 +887,6 @@ export function ProfileSettingsForm({
           gender: data.profile.gender === 'MALE' || data.profile.gender === 'FEMALE' || data.profile.gender === 'CUSTOM' || data.profile.gender === 'PRIVATE' ? data.profile.gender : null,
           customGender: typeof data.profile.customGender === 'string' ? data.profile.customGender : '',
           location: data.profile.location || null,
-          // Keep an incomplete draft visible after saving other fields, but use
-          // the server response as the persisted lock source.
           birthMonth: typeof data.profile.birthMonth === 'number' ? data.profile.birthMonth : current.birthMonth,
           birthDay: typeof data.profile.birthDay === 'number' ? data.profile.birthDay : current.birthDay,
           birthdaySetAt: nextBirthday.birthdaySetAt || current.birthdaySetAt,
@@ -732,12 +921,12 @@ export function ProfileSettingsForm({
       }
       setMessage(partialBirthdayDraft
         ? '资料已保存。生日尚未完整设置，本次不会保存生日。'
-        : data?.emailVerificationSent ? '资料已保存，新邮箱需要查收邮件完成验证。' : data?.nicknameMessage || '资料已保存。')
+        : data?.nicknameMessage || '资料已保存。')
       router.refresh()
       onSaved?.()
     } catch (saveError) {
       setBirthdayConfirmation(null)
-      setError(saveError instanceof Error ? saveError.message : '保存失败，请稍后再试')
+      setError(saveError instanceof TypeError ? '网络连接中断，请检查网络后重试' : saveError instanceof Error ? saveError.message : '保存失败，请稍后再试')
     } finally {
       if (mountedRef.current) setIsSaving(false)
     }
@@ -745,21 +934,28 @@ export function ProfileSettingsForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const genderValidation = validateGenderInput(form.gender, form.customGender)
-    if (genderValidation.error) {
-      setError(genderValidation.error)
-      return
+    setFieldErrors({})
+    const genderChanged = form.gender !== initialProfile.gender || form.customGender !== initialProfile.customGender
+    if (genderChanged) {
+      const genderValidation = validateGenderInput(form.gender, form.customGender)
+      if (genderValidation.error) {
+        setFieldErrors({ [genderValidation.gender === 'CUSTOM' ? 'customGender' : 'gender']: genderValidation.error })
+        setError(genderValidation.error)
+        return
+      }
     }
     const nicknameValidation = form.nickname !== initialProfile.nickname
       ? validateNicknameValue(form.nickname)
       : null
     if (nicknameValidation?.error) {
+      setFieldErrors({ nickname: nicknameValidation.error })
       setError(nicknameValidation.error)
       return
     }
     const rawPhone = phoneValue.trim()
     const normalizedPhone = rawPhone ? normalizePhoneNumber(rawPhone, phoneCountry) : null
     if (rawPhone && !normalizedPhone) {
+      setFieldErrors({ phone: '手机号格式不正确' })
       setError('手机号格式不正确')
       return
     }
@@ -769,6 +965,7 @@ export function ProfileSettingsForm({
       day: form.birthDay,
     })
     if (birthdayDecision.kind === 'locked') {
+      setFieldErrors({ birthday: '生日已修改过一次，无法再次自行修改生日。' })
       setError('生日已修改过一次，无法再次自行修改生日。')
       return
     }
@@ -812,6 +1009,7 @@ export function ProfileSettingsForm({
             <option key={month} value={month}>{month}月</option>
           ))}
         </select>
+        {fieldErrors.birthMonth ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.birthMonth}</span> : null}
       </label>
       <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
         <span className="text-sm font-black text-slate-700">日期</span>
@@ -825,7 +1023,9 @@ export function ProfileSettingsForm({
             <option key={day} value={day}>{day}日</option>
           ))}
         </select>
+        {fieldErrors.birthDay ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.birthDay}</span> : null}
       </label>
+      {fieldErrors.birthday ? <p className="md:col-span-2 text-xs font-black leading-5 text-rose-600">{fieldErrors.birthday}</p> : null}
     </div>
   )
 
@@ -961,14 +1161,25 @@ export function ProfileSettingsForm({
               value={form.nickname}
               onChange={(event) => {
                 update('nickname', event.target.value)
-                setError(event.target.value === initialProfile.nickname ? '' : validateNicknameValue(event.target.value).error || '')
+                const nicknameError = event.target.value === initialProfile.nickname ? '' : validateNicknameValue(event.target.value).error || ''
+                setFieldErrors((current) => ({ ...current, ...(nicknameError ? { nickname: nicknameError } : {}) }))
+                setError(nicknameError)
               }}
               minLength={2}
               maxLength={16}
               className="mt-2 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none transition focus:border-[var(--primary)]"
               placeholder="请输入昵称"
             />
-            <span className="mt-2 block text-xs font-bold leading-5 text-slate-500">用于个人主页展示、帖子显示、好友搜索。每 30 天只能修改一次。</span>
+            {fieldErrors.nickname ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.nickname}</span> : null}
+            <span className="mt-2 block text-xs font-bold leading-5 text-slate-500">
+              用于个人主页展示、帖子显示、好友搜索。{nicknameChange.opportunityAvailable
+                ? '本次修改成功后，30 天内无法再次修改。'
+                : nicknameChange.canChange
+                  ? '当前可以修改昵称。'
+                  : nicknameChange.nextAllowedAt
+                    ? `下次可修改：${new Date(nicknameChange.nextAllowedAt).toLocaleString('zh-CN')}`
+                    : '当前暂时无法修改。'}
+            </span>
           </label>
           <label className="block">
             <span className="text-sm font-black text-slate-700">个人简介</span>
@@ -980,6 +1191,7 @@ export function ProfileSettingsForm({
               className="mt-2 w-full resize-none rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold leading-7 outline-none transition focus:border-[var(--primary)]"
               placeholder="写一点关于你的 Eason 故事"
             />
+            {fieldErrors.bio ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.bio}</span> : null}
           </label>
 
           <fieldset className="rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -1004,6 +1216,7 @@ export function ProfileSettingsForm({
                 </label>
               ))}
             </div>
+            {fieldErrors.gender ? <p className="mt-2 text-xs font-black leading-5 text-rose-600">{fieldErrors.gender}</p> : null}
             {form.gender === 'CUSTOM' ? (
               <label className="mt-3 block">
                 <span className="text-xs font-black text-slate-500">自定义内容</span>
@@ -1014,6 +1227,7 @@ export function ProfileSettingsForm({
                   className="mt-2 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none transition focus:border-[var(--primary)]"
                   placeholder="例如：非二元、流动"
                 />
+                {fieldErrors.customGender ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.customGender}</span> : null}
                 <span className="mt-1 block text-xs font-bold leading-5 text-slate-500">限 20 个字符，不可换行或使用 HTML 标记。</span>
               </label>
             ) : null}
@@ -1022,6 +1236,7 @@ export function ProfileSettingsForm({
           <label className="block">
             <span className="text-sm font-black text-slate-700">地区</span>
             <UserLocationPicker value={form.location} onChange={(value) => update('location', value)} />
+            {fieldErrors.location ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.location}</span> : null}
             <span className="mt-2 block text-xs font-bold leading-5 text-slate-500">地区由你自行设置，与系统显示的 IP 属地无关。</span>
           </label>
           <label className="flex items-center justify-between gap-4 rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
@@ -1051,6 +1266,7 @@ export function ProfileSettingsForm({
               <option value="FRIENDS">仅好友</option>
               <option value="CLOSED">关闭</option>
             </select>
+            {fieldErrors.wallVisibility ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.wallVisibility}</span> : null}
           </label>
         </section>
 
@@ -1121,7 +1337,7 @@ export function ProfileSettingsForm({
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
+            <div className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
               <span className="text-sm font-black text-slate-700">邮箱</span>
               <span className="mt-2 block text-sm font-black text-brand-950">{maskEmail(form.email)}</span>
               <span className={`mt-2 inline-flex rounded-sm border border-[var(--border)] px-3 py-1 text-xs font-black ${form.emailVerifiedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
@@ -1129,12 +1345,46 @@ export function ProfileSettingsForm({
               </span>
               <input
                 value={form.email}
-                onChange={(event) => update('email', event.target.value)}
+                onChange={(event) => updateEmailDraft(event.target.value)}
                 type="email"
                 className="mt-3 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none"
                 placeholder={form.email ? '更换邮箱' : '绑定邮箱'}
               />
-            </label>
+              {form.email.trim() && !form.emailVerifiedAt ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={sendEmailVerificationCode}
+                    disabled={isSaving || emailSending || emailVerifying || emailCooldown > 0}
+                    className="mt-3 w-full rounded-sm border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-black text-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {emailSending ? '发送中…' : emailCooldown > 0 ? `重新发送（${emailCooldown}s）` : emailCodeSent ? '重新发送验证码' : '发送验证码'}
+                  </button>
+                  {emailCodeSent ? (
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        value={emailCode}
+                        onChange={(event) => setEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        className="min-w-0 flex-1 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-bold outline-none"
+                        placeholder="6 位验证码"
+                      />
+                      <button
+                        type="button"
+                        onClick={verifyEmailCode}
+                        disabled={isSaving || emailSending || emailVerifying || emailCode.length !== 6}
+                        className="shrink-0 rounded-sm bg-brand-950 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {emailVerifying ? '验证中…' : '验证并绑定'}
+                      </button>
+                    </div>
+                  ) : null}
+                  {fieldErrors.code ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.code}</span> : null}
+                </>
+              ) : null}
+              {fieldErrors.email ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.email}</span> : null}
+            </div>
 
             <label className="block rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
               <span className="text-sm font-black text-slate-700">手机号</span>
@@ -1145,8 +1395,24 @@ export function ProfileSettingsForm({
               <InternationalPhoneInput
                 value={phoneValue}
                 country={phoneCountry}
-                onChange={setPhoneValue}
-                onCountryChange={setPhoneCountry}
+                onChange={(value) => {
+                  setPhoneValue(value)
+                  setFieldErrors((current) => {
+                    if (!current.phone) return current
+                    const next = { ...current }
+                    delete next.phone
+                    return next
+                  })
+                }}
+                onCountryChange={(country) => {
+                  setPhoneCountry(country)
+                  setFieldErrors((current) => {
+                    if (!current.phone) return current
+                    const next = { ...current }
+                    delete next.phone
+                    return next
+                  })
+                }}
                 disabled={isSaving || uploading !== null}
                 placeholder={form.phone ? '更换手机号' : '绑定手机号'}
                 containerClassName="profile-phone-input mt-3"
@@ -1154,6 +1420,7 @@ export function ProfileSettingsForm({
                 dropdownPlacement="top"
                 inputClassName="text-sm"
               />
+              {fieldErrors.phone ? <span className="mt-2 block text-xs font-black leading-5 text-rose-600">{fieldErrors.phone}</span> : null}
             </label>
           </div>
         </section>

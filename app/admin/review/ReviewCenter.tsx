@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ImageViewer } from '@/components/ImageViewer'
 import {
   parseReviewSourceType,
@@ -13,7 +14,6 @@ import {
   type ReviewStatus,
 } from '@/lib/review-center'
 
-type Filter = ReviewStatus | 'ALL'
 const REVIEW_PAGE_SIZE = 40
 type ReviewResponse = {
   items?: ReviewItem[]
@@ -21,13 +21,17 @@ type ReviewResponse = {
   pageSize?: number
   total?: number
   hasMore?: boolean
-  types?: Array<{ type: ReviewSourceType; label: string; total: number; pending: number; approved: number; rejected: number }>
-  counts?: { total: number; pending: number; approved: number; rejected: number }
+  types?: ReviewTypeCount[]
+  counts?: ReviewCount
   targetFound?: boolean
+  targetStatus?: ReviewStatus
   message?: string
 }
 
-const statusLabels: Record<Filter, string> = { ALL: '全部状态', PENDING: '待审核', APPROVED: '已通过', REJECTED: '未通过' }
+type ReviewCount = { total: number; pending: number; approved: number; rejected: number }
+type ReviewTypeCount = ReviewCount & { type: ReviewSourceType; label: string }
+
+const statusLabels: Record<ReviewStatus, string> = { PENDING: '待审核', APPROVED: '已通过', REJECTED: '未通过' }
 
 function queryType(type: ReviewSourceType | 'ALL') {
   if (type === 'ALL') return 'ALL'
@@ -45,10 +49,28 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
-export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ initialType: string; initialTargetId?: string }>) {
+function reviewCountAfterDecision<T extends ReviewCount>(count: T, item: ReviewItem, decision: ReviewDecision): T {
+  const from = item.status.toLowerCase() as 'pending' | 'approved' | 'rejected'
+  const to = decision === 'APPROVE' ? 'approved' : 'rejected'
+  if (from === to || (item.status !== 'PENDING' && item.status !== 'APPROVED')) return count
+  return {
+    ...count,
+    [from]: Math.max(0, count[from] - 1),
+    [to]: count[to] + 1,
+  } as T
+}
+
+function reviewCountAfterDelete<T extends ReviewCount>(count: T, item: ReviewItem): T {
+  const statusKey = item.status.toLowerCase() as 'pending' | 'approved' | 'rejected'
+  return { ...count, total: Math.max(0, count.total - 1), [statusKey]: Math.max(0, count[statusKey] - 1) } as T
+}
+
+export function ReviewCenter({ initialType, initialStatus = 'PENDING', initialTargetId = '' }: Readonly<{ initialType: string; initialStatus?: ReviewStatus; initialTargetId?: string }>) {
+  const router = useRouter()
+  const pathname = usePathname()
   const parsedInitialType = parseReviewSourceType(initialType)
   const [type, setType] = useState<ReviewSourceType | 'ALL'>(parsedInitialType)
-  const [status, setStatus] = useState<Filter>(initialTargetId ? 'ALL' : 'PENDING')
+  const [status, setStatus] = useState<ReviewStatus>(initialStatus)
   const [keyword, setKeyword] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [focusTargetId, setFocusTargetId] = useState(initialTargetId.trim())
@@ -64,8 +86,19 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
   const [error, setError] = useState('')
   const [targetMessage, setTargetMessage] = useState('')
   const [postBoardById, setPostBoardById] = useState<Record<string, string>>({})
+  const focusTargetIdRef = useRef(initialTargetId.trim())
+  const loadRequestRef = useRef(0)
+  const replaceStatusInUrl = useCallback((nextStatus: ReviewStatus) => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (nextStatus === 'PENDING') params.delete('status')
+    else params.set('status', nextStatus.toLowerCase())
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }, [pathname, router])
 
-  const load = useCallback(async (nextType = type, nextStatus = status, nextKeyword = keyword, nextTargetId = focusTargetId) => {
+  const load = useCallback(async (nextType = type, nextStatus = status, nextKeyword = keyword, nextTargetId = focusTargetIdRef.current) => {
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     setError('')
     try {
@@ -75,19 +108,34 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
       const response = await fetch(`/api/admin/review?${params.toString()}`, { cache: 'no-store' })
       const data = await response.json().catch(() => null) as ReviewResponse | null
       if (!response.ok) throw new Error(data?.message || '审核列表加载失败')
+      if (requestId !== loadRequestRef.current) return
       setItems(Array.isArray(data?.items) ? data.items : [])
       setHasMore(Boolean(data?.hasMore))
       setTypes(Array.isArray(data?.types) ? data.types : [])
       setCounts(data?.counts || { total: 0, pending: 0, approved: 0, rejected: 0 })
       setTargetMessage(nextTargetId.trim() ? (data?.targetFound ? '已定位通知对应的审核内容。' : '通知对应的审核内容已不存在或暂时无法定位。') : '')
+      if (nextTargetId.trim() && data?.targetStatus && data.targetStatus !== nextStatus) {
+        setStatus(data.targetStatus)
+        replaceStatusInUrl(data.targetStatus)
+      }
     } catch (caught) {
+      if (requestId !== loadRequestRef.current) return
       setError(caught instanceof Error ? caught.message : '审核列表加载失败，请稍后重试')
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
-  }, [focusTargetId, keyword, status, type])
+  }, [keyword, replaceStatusInUrl, status, type])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('status')?.trim().toLowerCase() !== 'all') return
+    params.delete('status')
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }, [pathname, router])
 
   useEffect(() => {
     if (!focusTargetId || loading) return
@@ -98,8 +146,57 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
   }, [focusTargetId, items, loading])
 
   function clearTargetFocus() {
+    focusTargetIdRef.current = ''
     setFocusTargetId('')
     setTargetMessage('')
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      let changed = false
+      for (const key of ['targetId', 'sourceId', 'reviewId', 'focus']) {
+        if (!params.has(key)) continue
+        params.delete(key)
+        changed = true
+      }
+      if (changed) {
+        const query = params.toString()
+        router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+      }
+    }
+  }
+
+  function changeStatus(nextStatus: ReviewStatus) {
+    focusTargetIdRef.current = ''
+    setFocusTargetId('')
+    setTargetMessage('')
+    setStatus(nextStatus)
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      for (const key of ['targetId', 'sourceId', 'reviewId', 'focus']) params.delete(key)
+      if (nextStatus === 'PENDING') params.delete('status')
+      else params.set('status', nextStatus.toLowerCase())
+      const query = params.toString()
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    }
+  }
+
+  function resolveSuccessfulReview(item: ReviewItem, decision: ReviewDecision) {
+    loadRequestRef.current += 1
+    setLoading(false)
+    const key = `${item.sourceType}:${item.sourceId}`
+    setItems((current) => current.filter((entry) => `${entry.sourceType}:${entry.sourceId}` !== key))
+    setCounts((current) => current ? reviewCountAfterDecision(current, item, decision) : current)
+    setTypes((current) => current?.map((entry) => entry.type === item.sourceType ? reviewCountAfterDecision(entry, item, decision) : entry) || current)
+    if (focusTargetIdRef.current === item.sourceId) clearTargetFocus()
+  }
+
+  function resolveSuccessfulDelete(item: ReviewItem) {
+    loadRequestRef.current += 1
+    setLoading(false)
+    const key = `${item.sourceType}:${item.sourceId}`
+    setItems((current) => current.filter((entry) => `${entry.sourceType}:${entry.sourceId}` !== key))
+    setCounts((current) => current ? reviewCountAfterDelete(current, item) : current)
+    setTypes((current) => current?.map((entry) => entry.type === item.sourceType ? reviewCountAfterDelete(entry, item) : entry) || current)
+    if (focusTargetIdRef.current === item.sourceId) clearTargetFocus()
   }
 
   async function decide(item: ReviewItem, decision: ReviewDecision, reason = '') {
@@ -134,8 +231,8 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
         }
         return
       }
-      setMessage(decision === 'APPROVE' ? '已通过，列表已按服务端最终状态刷新。' : '已拒绝，列表已按服务端最终状态刷新。')
-      await load()
+      resolveSuccessfulReview(item, decision)
+      setMessage(decision === 'APPROVE' ? '已通过，已从当前审核列表移除。' : '已拒绝，已从当前审核列表移除。')
     } catch {
       setError('网络错误，请刷新后重试')
     } finally {
@@ -145,6 +242,7 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
 
   async function loadMore() {
     if (loading || !hasMore) return
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     setError('')
     try {
@@ -154,12 +252,14 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
       const response = await fetch(`/api/admin/review?${params.toString()}`, { cache: 'no-store' })
       const data = await response.json().catch(() => null) as ReviewResponse | null
       if (!response.ok) throw new Error(data?.message || '更多审核列表加载失败')
+      if (requestId !== loadRequestRef.current) return
       setItems((current) => [...current, ...(Array.isArray(data?.items) ? data.items : [])])
       setHasMore(Boolean(data?.hasMore))
     } catch (caught) {
+      if (requestId !== loadRequestRef.current) return
       setError(caught instanceof Error ? caught.message : '更多审核列表加载失败，请稍后重试')
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
   }
 
@@ -173,8 +273,8 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
       const response = await fetch(`/api/admin/review?${params.toString()}`, { method: 'DELETE' })
       const data = await response.json().catch(() => null) as { message?: string } | null
       if (!response.ok) throw new Error(data?.message || '删除失败，请刷新后重试')
-      setMessage('已删除，列表已按服务端最终状态刷新。')
-      await load()
+      resolveSuccessfulDelete(item)
+      setMessage('已删除，已从当前审核列表移除。')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '删除失败，请刷新后重试')
     } finally {
@@ -211,7 +311,7 @@ export function ReviewCenter({ initialType, initialTargetId = '' }: Readonly<{ i
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label="审核状态">
-        {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as Filter[]).map((value) => <button type="button" role="tab" key={value} aria-selected={status === value} onClick={() => { clearTargetFocus(); setStatus(value) }} className={`rounded-full px-3 py-1.5 text-xs font-black ${status === value ? 'bg-sky-200 text-brand-950' : 'bg-slate-50 text-slate-600'}`}>{statusLabels[value]}{value === 'PENDING' ? ` ${counts?.pending || 0}` : ''}</button>)}
+        {(['PENDING', 'APPROVED', 'REJECTED'] as ReviewStatus[]).map((value) => <button type="button" role="tab" key={value} aria-selected={status === value} onClick={() => changeStatus(value)} className={`rounded-full px-3 py-1.5 text-xs font-black ${status === value ? 'bg-sky-200 text-brand-950' : 'bg-slate-50 text-slate-600'}`}>{statusLabels[value]}{value === 'PENDING' ? ` ${counts?.pending || 0}` : ''}</button>)}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -256,17 +356,17 @@ function ReviewCard({ item, busy, focused, selectedBoardId, onBoardChange, onApp
   onReject: () => void
   onDelete: () => void
 }>) {
-  const mediaItems = item.media?.length
-    ? item.media
-    : item.cover
-      ? [{ id: `${item.sourceType}:${item.sourceId}:cover`, src: item.cover, alt: `${item.title}图片` }]
-      : []
+  const mediaItems = (item.media || []).filter((media) => Boolean(media.src.trim()))
+  if (!mediaItems.length && item.cover?.trim()) {
+    mediaItems.push({ id: `${item.sourceType}:${item.sourceId}:cover`, src: item.cover.trim(), alt: `${item.title}图片` })
+  }
   const primaryMedia = mediaItems[0]
+  const showMediaColumn = Boolean(primaryMedia) || item.sourceType !== 'POST'
   const boardSelection = selectedBoardId || item.postDetails?.boardId || ''
   const boardChanged = Boolean(item.postDetails && boardSelection !== item.postDetails.boardId)
-  return <article data-review-source={item.sourceType} data-review-target={item.sourceId} className={`grid gap-4 border border-sky-100 bg-white/95 p-4 shadow-sm sm:p-5 lg:grid-cols-[96px_minmax(0,1fr)_auto] lg:items-start ${focused ? 'ring-2 ring-amber-300 ring-offset-2' : ''}`}>
-    <div className="flex h-24 w-24 items-center justify-center overflow-hidden border border-sky-100 bg-sky-50/50">
-      {primaryMedia ? <div className="h-full w-full" aria-label={`${reviewSourceLabel(item.sourceType)}图片，共 ${mediaItems.length} 张`}>
+  return <article data-review-source={item.sourceType} data-review-target={item.sourceId} className={`grid gap-4 border border-sky-100 bg-white/95 p-4 shadow-sm sm:p-5 ${showMediaColumn ? 'lg:grid-cols-[96px_minmax(0,1fr)_auto]' : 'lg:grid-cols-[minmax(0,1fr)_auto]'} lg:items-start ${focused ? 'ring-2 ring-amber-300 ring-offset-2' : ''}`}>
+    {primaryMedia ? <div className="flex h-24 w-24 items-center justify-center overflow-hidden border border-sky-100 bg-sky-50/50">
+      <div className="h-full w-full" aria-label={`${reviewSourceLabel(item.sourceType)}图片，共 ${mediaItems.length} 张`}>
         <ImageViewer
           src={primaryMedia.src}
           previewSrc={primaryMedia.previewSrc}
@@ -275,8 +375,10 @@ function ReviewCard({ item, busy, focused, selectedBoardId, onBoardChange, onApp
           imageClassName="h-full w-full object-cover"
           buttonClassName="block h-full w-full cursor-zoom-in overflow-hidden text-left"
         />
-      </div> : <span className="px-2 text-center text-xs font-black text-sky-700">{item.sourceType === 'POST' ? '帖子' : item.sourceType === 'SALON' ? '沙龙' : '审核项'}</span>}
-    </div>
+      </div>
+    </div> : item.sourceType === 'POST' ? null : <div className="flex h-24 w-24 items-center justify-center overflow-hidden border border-sky-100 bg-sky-50/50">
+      <span className="px-2 text-center text-xs font-black text-sky-700">{item.sourceType === 'SALON' ? '沙龙' : '审核项'}</span>
+    </div>}
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2"><span className="bg-sky-50 px-2 py-1 text-[10px] font-black text-brand-700">{reviewSourceLabel(item.sourceType)}</span><span className={`px-2 py-1 text-[10px] font-black ${item.status === 'PENDING' ? 'bg-amber-50 text-amber-800' : item.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>{statusLabel(item.status)}</span><h3 className="min-w-0 break-words text-lg font-black text-brand-950">{item.title}</h3></div>
       <p className="mt-2 text-xs font-bold text-slate-500">作者：{item.author.name}{item.author.uid !== null ? `（UID ${item.author.uid}）` : ''} · 提交于 {formatDate(item.createdAt)}</p>
@@ -290,15 +392,19 @@ function ReviewCard({ item, busy, focused, selectedBoardId, onBoardChange, onApp
         {boardChanged ? <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">已调整分区：{item.postDetails.boardName} → {item.postDetails.boards.find((board) => board.id === boardSelection)?.name || boardSelection}</span> : null}
       </div> : null}
       <p className="mt-2 break-words text-sm leading-6 text-slate-600">{item.summary || '暂无摘要'}</p>
-      <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-bold text-slate-400">{item.category ? <span>{item.category}</span> : null}{item.relatedEntity ? <span>{item.relatedEntity}</span> : null}<span>最终审核：{formatDate(item.reviewedAt)}</span>{item.reviewer ? <span>审核人：{item.reviewer.name}</span> : null}</p>
+      <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-bold text-slate-400">{item.category ? <span>{item.sourceType === 'SALON' ? '分区：' : ''}{item.category}</span> : null}{item.relatedEntity ? <span>{item.sourceType === 'SALON' ? '关联演唱会：' : ''}{item.relatedEntity}</span> : null}<span>最终审核：{formatDate(item.reviewedAt)}</span>{item.reviewer ? <span>审核人：{item.reviewer.name}</span> : null}</p>
       {item.rejectReason ? <p className="mt-2 break-words border-l-2 border-red-300 pl-2 text-xs font-bold text-red-700">拒绝原因：{item.rejectReason}</p> : null}
     </div>
-    <div className="flex flex-wrap gap-2 lg:w-28 lg:flex-col">
-      {item.actions.detailUrl ? <Link href={item.actions.detailUrl} className="min-h-9 border border-sky-200 px-3 py-2 text-center text-xs font-black text-brand-700 hover:bg-sky-50">查看详情</Link> : null}
-      {item.actions.edit && item.actions.detailUrl ? <Link href={item.actions.detailUrl} className="min-h-9 border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-600">修改资料</Link> : null}
-      {item.actions.reject ? <button type="button" onClick={onReject} disabled={busy} className="min-h-9 border border-red-200 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-50">拒绝</button> : null}
-      {item.actions.approve ? <button type="button" onClick={onApprove} disabled={busy} className="min-h-9 bg-emerald-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50">通过</button> : null}
-      {item.actions.delete ? <button type="button" onClick={onDelete} disabled={busy} className="min-h-9 border border-red-300 px-3 py-2 text-xs font-black text-red-800 disabled:opacity-50">删除</button> : null}
+    <div className="w-fit min-w-0 max-w-full lg:w-48">
+      {item.status === 'PENDING' ? <div className="flex w-full min-w-0 flex-nowrap gap-2">
+        {item.actions.approve ? <button type="button" onClick={onApprove} disabled={busy} className="min-h-10 min-w-0 flex-1 bg-emerald-700 px-3 py-2 text-center text-xs font-black text-white disabled:opacity-50">通过</button> : null}
+        {item.actions.reject ? <button type="button" onClick={onReject} disabled={busy} className="min-h-10 min-w-0 flex-1 border border-red-200 px-3 py-2 text-center text-xs font-black text-red-700 disabled:opacity-50">拒绝</button> : null}
+      </div> : <div className="flex w-full flex-wrap gap-2">
+        {item.actions.edit && item.actions.editUrl ? <Link href={item.actions.editUrl} className="min-h-9 border border-slate-200 px-3 py-2 text-center text-xs font-black text-slate-600">修改资料</Link> : null}
+        {item.actions.reject ? <button type="button" onClick={onReject} disabled={busy} className="min-h-9 border border-red-200 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-50">拒绝</button> : null}
+        {item.actions.approve ? <button type="button" onClick={onApprove} disabled={busy} className="min-h-9 bg-emerald-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50">通过</button> : null}
+        {item.actions.delete ? <button type="button" onClick={onDelete} disabled={busy} className="min-h-9 border border-red-300 px-3 py-2 text-xs font-black text-red-800 disabled:opacity-50">删除</button> : null}
+      </div>}
     </div>
   </article>
 }

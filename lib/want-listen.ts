@@ -91,6 +91,8 @@ type SongRow = {
 
 type PreparedQuestion = WantListenBuiltQuestion & { fakeTitleId?: string }
 
+type WantListenDatabase = Prisma.TransactionClient | typeof prisma
+
 function boolSetting(value: string | undefined, fallback: boolean) {
   if (value === undefined) return fallback
   return value === 'true' || value === '1' || value === 'yes'
@@ -125,9 +127,20 @@ export function isRetryableWantListenTransactionError(error: unknown) {
   if (!error || typeof error !== 'object') return false
   const code = prismaErrorCode(error)
   const message = error instanceof Error ? error.message.toLowerCase() : ''
-  // P2028 means Prisma lost/closed the interactive transaction. The callback is
-  // rolled back in that case, so retrying the whole idempotent operation is safe.
-  return code === 'P2028' || code === 'P2034' || message.includes('deadlock') || message.includes('serialization')
+  // These errors mean the transaction never reached a reliable commit. Prisma
+  // rolls the interactive transaction back, so retrying the whole operation is
+  // safe. Keep this list limited to connection/pool/serialization failures;
+  // validation and data errors must still surface immediately.
+  return code === 'P2028' || [
+    'P1001', // cannot reach database server
+    'P1002', // database server timed out
+    'P1008', // operation timed out
+    'P1017', // server closed connection
+    'P2024', // connection pool timeout
+    'P2034', // transaction conflict/deadlock
+    'ECONNRESET',
+    'ETIMEDOUT',
+  ].includes(code) || message.includes('deadlock') || message.includes('serialization') || /connection (?:was )?(?:closed|reset|timed out)|server has closed the connection|can't reach the database server|timed out fetching a new connection/i.test(message)
 }
 
 async function transactionWithRetry<T>(callback: (database: Prisma.TransactionClient) => Promise<T>) {
@@ -164,8 +177,8 @@ function mapSong(row: SongRow): WantListenSongCandidate {
   }
 }
 
-async function loadSongRows() {
-  return prisma.musicSong.findMany({
+async function loadSongRows(database: WantListenDatabase = prisma) {
+  return database.musicSong.findMany({
     where: { title: { not: '' }, MusicAlbum: { status: 'PUBLISHED' } },
     select: {
       id: true,
@@ -185,8 +198,8 @@ async function loadSongRows() {
   })
 }
 
-async function loadSongPool(mode: WantListenMode) {
-  const songs = (await loadSongRows()).map(mapSong)
+async function loadSongPool(mode: WantListenMode, database: WantListenDatabase = prisma) {
+  const songs = (await loadSongRows(database)).map(mapSong)
   if (mode === 'WANT_LISTEN') return songs.filter(isValidWantListenSong)
   return songs.filter((song) => {
     const lines = cleanLyrics(song.lyrics)
@@ -195,8 +208,8 @@ async function loadSongPool(mode: WantListenMode) {
   })
 }
 
-async function loadRealTitles() {
-  const songs = (await loadSongRows()).map(mapSong)
+async function loadRealTitles(database: WantListenDatabase = prisma) {
+  const songs = (await loadSongRows(database)).map(mapSong)
   const seen = new Set<string>()
   return songs
     .map((song) => song.title.trim())
@@ -208,9 +221,9 @@ async function loadRealTitles() {
     })
 }
 
-async function loadActiveFakeTitles(realTitles: readonly string[]) {
+async function loadActiveFakeTitles(realTitles: readonly string[], database: WantListenDatabase = prisma) {
   const realKeys = new Set(realTitles.map(normalizeWantListenTitle).filter(Boolean))
-  const rows = await prisma.wantListenFakeTitle.findMany({
+  const rows = await database.wantListenFakeTitle.findMany({
     where: { enabled: true },
     orderBy: [{ difficulty: 'asc' }, { usageCount: 'asc' }, { createdAt: 'asc' }],
     select: { id: true, title: true, normalizedTitle: true, difficulty: true },
@@ -271,11 +284,11 @@ function selectFakeTitle(
  * 无尽模式：按需生成单道题目（无限挑战，不预生成 20 题）。
  * 排除上一题来源歌曲 / 假歌名，池耗尽时按现有回退逻辑复用（可无限循环）。
  */
-async function buildQuestionAtPosition(mode: WantListenMode, position: number, excludedSongIds: ReadonlySet<string>, excludedFakeIds: ReadonlySet<string>): Promise<PreparedQuestion> {
+async function buildQuestionAtPosition(mode: WantListenMode, position: number, excludedSongIds: ReadonlySet<string>, excludedFakeIds: ReadonlySet<string>, database: WantListenDatabase = prisma): Promise<PreparedQuestion> {
   if (mode === 'FALSE_TITLE') {
-    const realTitles = await loadRealTitles()
+    const realTitles = await loadRealTitles(database)
     if (realTitles.length < 5) throw new WantListenServiceError('当前真实曲库不足，暂时无法开始「防不胜防」。', 409, 'QUESTION_BANK_INSUFFICIENT')
-    const fakes = await loadActiveFakeTitles(realTitles)
+    const fakes = await loadActiveFakeTitles(realTitles, database)
     const fake = selectFakeTitle(fakes, position, excludedFakeIds)
     if (!fake) throw new WantListenServiceError('当前假歌名库暂时不足，请管理员补充后再试。', 409, 'FAKE_TITLE_BANK_INSUFFICIENT')
     const question = buildFalseTitleQuestion(realTitles, fake.title, fake.difficulty)
@@ -284,7 +297,7 @@ async function buildQuestionAtPosition(mode: WantListenMode, position: number, e
     return { ...question, fakeTitleId: fake.id }
   }
 
-  const pool = await loadSongPool(mode)
+  const pool = await loadSongPool(mode, database)
   if (pool.length < 4) throw new WantListenServiceError(mode === 'WANT_LISTEN' ? '当前曲库可用歌曲不足，暂时无法开始「想听」。' : '当前粤语歌词题库不足，暂时无法开始「粤语残片」。', 409, 'QUESTION_BANK_INSUFFICIENT')
   return mode === 'WANT_LISTEN'
     ? buildQuestionForSongMode(pool, position, new Set(excludedSongIds))
@@ -304,6 +317,7 @@ async function generateNextQuestion(database: Prisma.TransactionClient | typeof 
     position,
     prevData?.songId ? new Set([prevData.songId]) : new Set(),
     prevData?.fakeTitleId ? new Set([prevData.fakeTitleId]) : new Set(),
+    database,
   )
   await database.wantListenSessionQuestion.create({
     data: {

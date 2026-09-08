@@ -7,11 +7,16 @@
 ```env
 APP_URL=https://ecfc.fans
 NEXT_PUBLIC_APP_URL=https://ecfc.fans
-RESEND_API_KEY=
-EMAIL_FROM="EasonFansClub <noreply@ecfc.fans>"
+TENCENT_EMAIL_REGION=ap-hongkong
+TENCENT_EMAIL_FROM=0727@ecfc.fans
+TENCENT_EMAIL_SECRET_ID=
+TENCENT_EMAIL_SECRET_KEY=
+TENCENT_EMAIL_VERIFICATION_TEMPLATE_ID=
+TENCENT_EMAIL_REGISTER_TEMPLATE_ID=
+TENCENT_EMAIL_RESET_TEMPLATE_ID=
 ```
 
-不要把真实 `RESEND_API_KEY`、JWT Secret、数据库密码提交到仓库。
+不要把真实腾讯云密钥、JWT Secret、数据库密码提交到仓库。
 
 ## 邮箱登录规则
 

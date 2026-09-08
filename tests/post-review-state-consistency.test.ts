@@ -63,7 +63,7 @@ test('审核 API 具备四种状态迁移、幂等守卫和并发锁', () => {
 })
 
 test('统一审核中心的状态按钮与服务端状态迁移保持一致', () => {
-  assert.match(reviewCenter, /\['ALL', 'PENDING', 'APPROVED', 'REJECTED'\]/)
+  assert.match(reviewCenter, /\['PENDING', 'APPROVED', 'REJECTED'\]/)
   assert.match(reviewCenter, /item\.actions\.reject/)
   assert.match(reviewCenter, /item\.actions\.approve/)
   assert.match(reviewCenter, /setRejectReason\(item\.rejectReason \|\| ''\)/)

@@ -135,9 +135,9 @@ export const defaultBoards = [
     sortOrder: 3,
   },
   {
-    name: '物料交换',
+    name: '物料',
     slug: 'merch-exchange',
-    description: '周边、应援物料交换',
+    description: '周边、应援物料',
     sortOrder: 4,
   },
   {

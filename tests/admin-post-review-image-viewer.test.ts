@@ -92,7 +92,7 @@ test('审核列表保留顶部正方形缩略图并使用 zoom-in 光标', () =>
 test('审核卡片顶部缩略图和预览画廊共用审核对象媒体数据', () => {
   assert.match(reviewCenter, /function ReviewCard/)
   assert.match(reviewCenter, /item\.summary/)
-  assert.match(reviewCenter, /const mediaItems = item\.media\?\.length/)
+  assert.match(reviewCenter, /const mediaItems = \(item\.media \|\| \[\]\)\.filter/)
   assert.match(reviewCenter, /gallery=\{mediaItems\}/)
 })
 

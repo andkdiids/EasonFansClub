@@ -17,14 +17,14 @@ test('发布、编辑和广场使用同一目录，并补齐缺失的吟游诗�
     { id: 'announcements', name: '公告区', slug: 'announcements' },
     { id: 'chat', name: '吹水', slug: 'daily-chat' },
     { id: 'concerts', name: '演唱会', slug: 'concerts' },
-    { id: 'merch', name: '物料交换', slug: 'merch-exchange' },
+    { id: 'merch', name: '物料', slug: 'merch-exchange' },
   ])
 
   assert.deepEqual(options.map((board) => ({ id: board.id, name: board.name, slug: board.slug })), [
     { id: 'announcements', name: '公告区', slug: 'announcements' },
     { id: 'chat', name: '吹水', slug: 'daily-chat' },
     { id: 'concerts', name: '演唱会', slug: 'concerts' },
-    { id: 'merch', name: '物料交换', slug: 'merch-exchange' },
+    { id: 'merch', name: '物料', slug: 'merch-exchange' },
     { id: `configured:${BARD_BOARD_SLUG}`, name: BARD_BOARD_NAME, slug: BARD_BOARD_SLUG },
   ])
   assert.equal(getForumBoardDisplayName({ name: BARD_BOARD_SLUG, slug: BARD_BOARD_SLUG }), BARD_BOARD_NAME)

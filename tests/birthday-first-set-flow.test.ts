@@ -83,8 +83,8 @@ test('CASE 12: historical birthdays default to one editable opportunity and lock
 
 test('CASE 13: the API rejects partial birthday payloads before any birthday write', () => {
   const route = read('app/api/users/me/route.ts')
-  assert.match(route, /if \(monthEmpty\) return NextResponse\.json\(\{ message: '请选择有效的出生月份' \}/)
-  assert.match(route, /if \(dayEmpty\) return NextResponse\.json\(\{ message: '请选择有效的出生日期' \}/)
+  assert.match(route, /if \(monthEmpty\) return profileFieldError\('birthMonth', 'INVALID_BIRTHDAY'/)
+  assert.match(route, /if \(dayEmpty\) return profileFieldError\('birthDay', 'INVALID_BIRTHDAY'/)
   assert.match(route, /if \(!isValidBirthdayParts\(\{ month: birthMonthRaw, day: birthDayRaw \}\)\)/)
 })
 
