@@ -97,14 +97,16 @@ test('审核列表 GET 支持 keyword（trim / 空恢复 / 中文可用 / 组合
 
 test('搜索结果分页且页码夹紧（删空页自动回退最后一个有效页）', () => {
   assert.match(reviewRoute, /const prefetchSize = Math\.max\(PAGE_SIZE \* 3, PAGE_SIZE \* page\)/)
-  assert.match(reviewRoute, /const total = targetId[\s\S]*scopedCounts\.reduce/)
+  assert.match(reviewRoute, /const total = scopedCounts\.reduce/)
+  assert.doesNotMatch(reviewRoute, /const total = targetId/)
   assert.match(reviewRoute, /const items = allItems\.slice\(start, start \+ PAGE_SIZE\)/)
   assert.match(reviewRoute, /hasMore: start \+ PAGE_SIZE < total/)
   assert.match(reviewRoute, /keyword,/)
 })
 
 test('管理员审核列表保留 keyword/status/page 重新加载与关键词清除', () => {
-  assert.match(reviewCenter, /params\.set\('keyword', nextKeyword\.trim\(\)\)/)
+  assert.match(reviewCenter, /params\.set\('keyword', keyword\.trim\(\)\)/)
+  assert.match(reviewCenter, /fetchReviewPage\(nextType, nextStatus, nextKeyword, 1, nextTargetId\)/)
   assert.match(reviewCenter, /setKeyword\(searchInput\.trim\(\)\)/)
   assert.match(reviewCenter, /清除/)
 })

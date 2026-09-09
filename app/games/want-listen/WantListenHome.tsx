@@ -49,12 +49,17 @@ export function WantListenHome() {
   const [starting, setStarting] = useState<WantListenMode | null>(null)
   const [error, setError] = useState('')
   const [summaryUnavailable, setSummaryUnavailable] = useState(false)
+  const [summaryRetryKey, setSummaryRetryKey] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
+    setLoading(true)
+    setError('')
+    setSummaryUnavailable(false)
     request<Summary>('/api/entertainment/want-listen/summary', { cache: 'no-store', signal: controller.signal })
       .then((value) => {
         setSummary(value)
+        setError('')
         setSummaryUnavailable(false)
       })
       .catch((reason: unknown) => {
@@ -64,7 +69,7 @@ export function WantListenHome() {
       })
       .finally(() => setLoading(false))
     return () => controller.abort()
-  }, [])
+  }, [summaryRetryKey])
 
   async function start(mode: WantListenMode) {
     const active = summary?.activeSessions.find((session) => session.mode === mode)
@@ -98,7 +103,7 @@ export function WantListenHome() {
 
       {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
       {!summary && loading ? <p className="want-listen-loading">正在读取想听状态…</p> : null}
-      {summaryUnavailable ? <p className="want-listen-degraded" role="status">状态摘要暂时无法加载，但仍可尝试开始游戏，服务端会再次校验模式状态。</p> : null}
+      {summaryUnavailable ? <div className="want-listen-degraded" role="status"><span>状态摘要暂时无法加载，但仍可尝试开始游戏，服务端会再次校验模式状态。</span><button type="button" className="want-listen-primary-link" onClick={() => setSummaryRetryKey((value) => value + 1)} disabled={loading}>{loading ? '重试中…' : '重试'}</button></div> : null}
       {summary && !summary.config.enabled ? <p className="want-listen-disabled" role="status">想听板块目前暂停开放，请稍后再来。</p> : null}
       {summary && (summary.statsUnavailable || summary.activeSessionsUnavailable) ? <p className="want-listen-degraded" role="status">个人数据暂时无法完整加载，但游戏仍可开始。</p> : null}
 

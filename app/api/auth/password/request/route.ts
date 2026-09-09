@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { sendPasswordResetLinkEmail } from '@/lib/mail'
+import { isMailFailure, logMailFailure, sendPasswordResetLinkEmail } from '@/lib/mail'
 import {
   buildPasswordResetUrl,
   createPasswordResetLinkToken,
@@ -66,7 +66,11 @@ export async function POST(request: Request) {
     if (!sent.sent) throw new Error('TENCENT_EMAIL_NOT_CONFIGURED')
   } catch (error) {
     if (recordId) await prisma.passwordResetToken.deleteMany({ where: { id: recordId } }).catch(() => undefined)
-    console.error('[auth.password.request]', error instanceof Error ? error.message : 'unknown_error')
+    if (isMailFailure(error)) {
+      logMailFailure(error, { route: '/api/auth/password/request', mailType: 'password_reset_link' })
+    } else {
+      console.error('[auth.password.request]', error instanceof Error ? error.message : 'unknown_error')
+    }
     return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503, headers: noStoreHeaders })
   }
 

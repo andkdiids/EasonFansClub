@@ -11,6 +11,7 @@ import {
   getEconomyReport,
   getActiveActionTasks,
   getCoreActiveTasks,
+  getPassiveTasks,
   getTasksByKind,
   getRewardRuleGroups,
 } from '@/lib/growth-tasks/registry'
@@ -107,6 +108,28 @@ test('奖励规则由统一注册表完整生成，覆盖今天只做一件事�
   assert.equal(received?.dailyCap, 5)
   assert.equal(received?.maxDailyAmount, 10)
   assert.equal(groups.find((group) => group.key === 'passive')?.title, '之外')
+})
+
+test('之外按真实 frequency 将每日任务排在每周任务前，并保留同周期相对顺序', () => {
+  const passive = getPassiveTasks()
+  const frequencies = passive.map((task) => task.frequency)
+  assert.deepEqual(frequencies, [
+    'daily', 'daily', 'daily', 'daily', 'daily', 'daily', 'daily',
+    'weekly', 'weekly', 'weekly', 'weekly',
+  ])
+  assert.deepEqual(passive.map((task) => task.code), [
+    'POST_LIKED',
+    'POST_COMMENT_RECEIVED',
+    'COMMENT_LIKED',
+    'SALON_LIKED',
+    'SONG_REVIEW_LIKED',
+    'BEAD_LIKED',
+    'LISTEN_DUEL_BRANCH',
+    'POST_COLLECTED',
+    'SALON_APPROVED',
+    'SONG_REVIEW_CREATED',
+    'BEAD_PUBLISHED',
+  ])
 })
 
 test('周奖励采用三档累计，而不是只领取最高一档', () => {

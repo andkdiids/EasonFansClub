@@ -17,7 +17,9 @@ test('审核首屏不依赖通知读写，也不把可选审核历史关系绑�
   assert.match(legacyReviewPage, /redirect\('\/admin\/review\?type=post'\)/)
   assert.doesNotMatch(legacyReviewPage, /markModerationNotificationsRead|emitRealtime|loadPostModerationHistoryByPostIds/)
   assert.doesNotMatch(reviewCenterRoute, /markModerationNotificationsRead|emitRealtime|PostModerationHistory:\s*\{\s*orderBy/)
-  assert.match(reviewCenterRoute, /loadTypeItems\(definition\.type, queryStatus, keyword, targetId \? 1 : prefetchSize, targetId\)/)
+  assert.match(reviewCenterRoute, /loadTypeItems\(definition\.type, status, keyword, prefetchSize\)/)
+  assert.match(reviewCenterRoute, /loadTypeItems\(definition\.type, 'ALL', keyword, 1, targetId\)/)
+  assert.doesNotMatch(reviewCenterRoute, /queryStatus|targetId \? 1 : prefetchSize/)
 })
 
 test('审核列表 GET 对历史表缺失和普通 Prisma 异常都有服务端日志与明确错误响应', () => {

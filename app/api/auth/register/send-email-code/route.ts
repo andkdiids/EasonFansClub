@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { sendRegistrationVerificationCode } from '@/lib/mail'
+import { isMailFailure, logMailFailure, sendRegistrationVerificationCode } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 import { getRegistrationIdentityHash, createRegistrationCode, hashRegistrationCode, isHospitalOnlyDraft, REGISTRATION_CODE_TTL_MS } from '@/lib/registration-draft'
 import { getEHospitalCheckConfig } from '@/lib/ehospital-check'
@@ -117,7 +117,11 @@ export async function POST(request: Request) {
       message: `验证码已发送至：${email}`,
     }, { headers: noStoreHeaders })
   } catch (error) {
-    console.error('[send-email-code]', error instanceof Error ? error.message : 'unknown_error')
+    if (isMailFailure(error)) {
+      logMailFailure(error, { route: '/api/auth/register/send-email-code', mailType: 'registration_code' })
+    } else {
+      console.error('[send-email-code]', error instanceof Error ? error.message : 'unknown_error')
+    }
     if (error instanceof Error && (error.message === 'TENCENT_EMAIL_NOT_CONFIGURED' || error.message === 'EMAIL_SEND_NOT_CONFIGURED')) {
       return errorResponse('邮件服务尚未配置，暂时无法发送验证码', 503, 'EMAIL_SERVICE_NOT_CONFIGURED')
     }

@@ -10,6 +10,7 @@ import {
   getCoreActiveTasks,
   getEconomyReport,
   getGrowthTask,
+  getPassiveTasks,
   getRewardRuleGroups,
   getTasksByKind,
   resolveGrowthTaskDestination,
@@ -449,7 +450,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     prisma.checkIn.findMany({ where: { userId, checkinDateKey: { in: weekDateKeys } }, select: { checkinDateKey: true } }),
     prisma.entertainmentDailyDraw.findMany({ where: { userId, dateKey: { in: weekDateKeys } }, select: { dateKey: true } }),
     prisma.pointLog.findMany({ where: { userId, action: { in: ['COMMENT_POST', 'POST_COMMENT_RECEIVED'] }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { action: true, points: true, dateKey: true, createdAt: true } }),
-    prisma.guessSongDuelMatch.count({ where: { status: 'FINISHED', finishedAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end }, GuessSongDuelPlayer: { some: { userId } } } }),
+    prisma.guessSongDuelMatch.count({ where: { status: 'FINISHED', finishedAt: { gte: todayRange.start, lt: todayRange.end }, GuessSongDuelPlayer: { some: { userId } } } }),
   ])
   const commentRewardCountsByDate = new Map<string, number>(weekDateKeys.map((dateKey) => [dateKey, 0]))
   const receivedCommentCountsByDate = new Map<string, number>()
@@ -487,7 +488,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
   }
   const active = getCoreActiveTasks()
   const activeActions = getActiveActionTasks()
-  const passive = getTasksByKind('passive')
+  const passive = getPassiveTasks()
   const activeActionItems = activeActions.map((task) => {
     const positiveRows = pointLogs.filter((row) => row.growthTaskCode === task.code && row.points > 0 && row.createdAt >= todayRange.start && row.createdAt < todayRange.end)
     const completionRows = completions.filter((row) => row.taskCode === task.code && row.periodKey === dateKey)
@@ -555,15 +556,17 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
       }
     }
     if (task.code === 'LISTEN_DUEL_BRANCH') {
+      const cap = task.dailyCap ?? task.completionThreshold ?? 1
+      const progress = Math.min(cap, duelCount)
       return {
         ...task,
         actionHref: resolveGrowthTaskDestination(task.code) || undefined,
         earned: 0,
-        progress: duelCount,
+        progress,
         positiveEvents: duelCount,
         reversals: 0,
-        cap: undefined,
-        completed: duelCount >= (task.completionThreshold || 1),
+        cap,
+        completed: progress >= cap,
       }
     }
     const start = task.frequency === 'daily' ? getShanghaiDayRange(now).start : weekRange(weekKey).start

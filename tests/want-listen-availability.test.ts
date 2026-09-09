@@ -152,6 +152,23 @@ test('想听首页将配置作为核心依赖，统计与进行中会话失败�
   assert.doesNotMatch(service, /getWantListenLeaderboard\(/)
 })
 
+test('summary 成功会清除旧的错误状态，并允许用户重试恢复首页', () => {
+  const home = source('app/games/want-listen/WantListenHome.tsx')
+  assert.match(home, /const \[summaryRetryKey, setSummaryRetryKey\] = useState\(0\)/)
+  assert.match(home, /request<Summary>\('\/api\/entertainment\/want-listen\/summary'[\s\S]*?\.then\(\(value\) => \{\s+setSummary\(value\)\s+setError\(''\)\s+setSummaryUnavailable\(false\)/)
+  assert.match(home, /\}, \[summaryRetryKey\]\)/)
+  assert.match(home, /setSummaryRetryKey\(\(value\) => value \+ 1\)/)
+  assert.match(home, /重试中…/)
+})
+
+test('三个模式分别读取独立配置，不会因单个 mode 配置影响另外两个模式', () => {
+  const enabled = { enabled: true, wantListenEnabled: true, cantoneseFragmentEnabled: true, falseTitleEnabled: true }
+  const cantoneseOnlyOff = { ...enabled, cantoneseFragmentEnabled: false }
+  assert.equal(isWantListenModeEnabled(cantoneseOnlyOff, 'WANT_LISTEN'), true)
+  assert.equal(isWantListenModeEnabled(cantoneseOnlyOff, 'CANTONESE_FRAGMENT'), false)
+  assert.equal(isWantListenModeEnabled(cantoneseOnlyOff, 'FALSE_TITLE'), true)
+})
+
 test('三种模式使用同一核心 session API 与正式 mode 值', () => {
   const config = source('lib/want-listen-config.ts')
   const home = source('app/games/want-listen/WantListenHome.tsx')

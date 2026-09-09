@@ -6,6 +6,7 @@ import {
   normalizeEmail,
   sendVerificationEmail,
 } from '@/lib/email-verification'
+import { isMailFailure, logMailFailure } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 import { getClientIp, rateLimit } from '@/lib/security'
 
@@ -56,7 +57,11 @@ export async function POST(request: Request) {
     )
   } catch (error) {
     await prisma.emailVerification.updateMany({ where: { userId: user.id, email, usedAt: null }, data: { usedAt: new Date() } }).catch(() => undefined)
-    console.error('[auth.resend-verification]', error instanceof Error ? error.message : 'unknown_error')
+    if (isMailFailure(error)) {
+      logMailFailure(error, { route: '/api/auth/resend-verification', mailType: 'verification_link' })
+    } else {
+      console.error('[auth.resend-verification]', error instanceof Error ? error.message : 'unknown_error')
+    }
     return NextResponse.json({ message: '验证邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503, headers: noStoreHeaders })
   }
 }

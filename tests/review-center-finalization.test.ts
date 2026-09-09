@@ -84,12 +84,21 @@ test('审核中心状态筛选只保留三态，旧 status=all 回退待审核',
   assert.equal(parseReviewStatus('rejected'), 'REJECTED')
 })
 
-test('通知 deep-link 会跨状态解析目标并切换到真实历史 Tab', () => {
+test('通知 deep-link 只解析目标状态，主列表仍按正常状态查询并保留完整队列', () => {
   const center = read('app/admin/review/ReviewCenter.tsx')
   const api = read('app/api/admin/review/route.ts')
 
-  assert.match(api, /const queryStatus: ReviewStatus \| 'ALL' = targetId \? 'ALL' : status/u)
-  assert.match(api, /targetStatus: targetId \? allItems\.find\(\(item\) => item\.sourceId === targetId\)\?\.status/u)
+  assert.match(api, /const \[batches, targetBatches, countRows\]/u)
+  assert.match(api, /loadTypeItems\(definition\.type, status, keyword, prefetchSize\)/u)
+  assert.match(api, /loadTypeItems\(definition\.type, 'ALL', keyword, 1, targetId\)/u)
+  assert.match(api, /const targetItem = targetBatches\.flat\(\)\.find\(\(item\) => item\.sourceId === targetId\)/u)
+  assert.match(api, /targetStatus: targetItem\?\.status/u)
+  assert.doesNotMatch(api, /const queryStatus: ReviewStatus \| 'ALL'/u)
+  assert.doesNotMatch(api, /targetId \? 1 : prefetchSize/u)
+  assert.match(center, /fetchReviewPage\(nextType, nextStatus, nextKeyword, 1, nextTargetId\)/u)
+  assert.match(center, /fetchReviewPage\(nextType, nextStatus, nextKeyword, nextPage\)/u)
+  assert.match(center, /setItems\(loadedItems\)/u)
+  assert.doesNotMatch(center, /setItems\(Array\.isArray\(data\?\.items\) \? data\.items : \[\]\)/u)
   assert.match(center, /data\?\.targetStatus && data\.targetStatus !== nextStatus/u)
   assert.match(center, /replaceStatusInUrl\(data\.targetStatus\)/u)
 })

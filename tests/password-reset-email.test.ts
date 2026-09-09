@@ -135,7 +135,7 @@ test('腾讯云拒绝 Simple 时，邮箱验证码回退到已审核模板并传
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>
     requests.push(body)
     if (requests.length === 1) {
-      return new Response(JSON.stringify({ Response: { Error: { Code: 'MissingParameter.SendParamNecessary', Message: 'template required' } } }), { status: 200 })
+      return new Response(JSON.stringify({ Response: { RequestId: 'simple-request', Error: { Code: 'FailedOperation.WithOutPermission', Message: '仅支持使用模板发送邮件' } } }), { status: 200 })
     }
     return new Response(JSON.stringify({ Response: { RequestId: 'fallback-request' } }), { status: 200 })
   }) as typeof fetch
@@ -152,6 +152,75 @@ test('腾讯云拒绝 Simple 时，邮箱验证码回退到已审核模板并传
     else process.env.TENCENT_EMAIL_SECRET_KEY = originalSecretKey
     if (originalTemplateId === undefined) delete process.env.TENCENT_EMAIL_REGISTER_TEMPLATE_ID
     else process.env.TENCENT_EMAIL_REGISTER_TEMPLATE_ID = originalTemplateId
+  }
+})
+
+test('腾讯云拒绝 Simple 时，密码重置链接使用独立的 reset_url 模板配置', async () => {
+  const originalFetch = globalThis.fetch
+  const originalSecretId = process.env.TENCENT_EMAIL_SECRET_ID
+  const originalSecretKey = process.env.TENCENT_EMAIL_SECRET_KEY
+  const originalTemplateId = process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID
+  const requests: Array<Record<string, unknown>> = []
+
+  process.env.TENCENT_EMAIL_SECRET_ID = 'test-secret-id'
+  process.env.TENCENT_EMAIL_SECRET_KEY = 'test-secret-key'
+  process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID = '456'
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    requests.push(body)
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ Response: { Error: { Code: 'FailedOperation.WithOutPermission', Message: '仅支持使用模板发送邮件' } } }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ Response: { RequestId: 'reset-link-fallback-request' } }), { status: 200 })
+  }) as typeof fetch
+
+  try {
+    assert.deepEqual(await sendPasswordResetLinkEmail('test@example.com', 'https://ecfc.fans/reset-password?token=abc'), { sent: true })
+    assert.ok(requests[0]?.Simple)
+    assert.deepEqual(requests[1]?.Template, { TemplateID: 456, TemplateData: JSON.stringify({ reset_url: 'https://ecfc.fans/reset-password?token=abc' }) })
+  } finally {
+    globalThis.fetch = originalFetch
+    if (originalSecretId === undefined) delete process.env.TENCENT_EMAIL_SECRET_ID
+    else process.env.TENCENT_EMAIL_SECRET_ID = originalSecretId
+    if (originalSecretKey === undefined) delete process.env.TENCENT_EMAIL_SECRET_KEY
+    else process.env.TENCENT_EMAIL_SECRET_KEY = originalSecretKey
+    if (originalTemplateId === undefined) delete process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID
+    else process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID = originalTemplateId
+  }
+})
+
+test('Tencent provider error 保留真实错误码、RequestId 和发送阶段但不携带邮件正文', async () => {
+  const originalFetch = globalThis.fetch
+  const originalSecretId = process.env.TENCENT_EMAIL_SECRET_ID
+  const originalSecretKey = process.env.TENCENT_EMAIL_SECRET_KEY
+
+  process.env.TENCENT_EMAIL_SECRET_ID = 'test-secret-id'
+  process.env.TENCENT_EMAIL_SECRET_KEY = 'test-secret-key'
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    Response: {
+      RequestId: 'provider-error-request',
+      Error: { Code: 'FailedOperation.NotAuthenticatedSender', Message: 'sender is not authenticated' },
+    },
+  }), { status: 200 })) as typeof fetch
+
+  try {
+    await assert.rejects(
+      () => sendPasswordResetCode('test@example.com', '123456'),
+      (error: unknown) => {
+        assert.equal(error instanceof Error ? error.name : '', 'TencentMailProviderError')
+        assert.equal((error as { providerCode?: string }).providerCode, 'FailedOperation.NotAuthenticatedSender')
+        assert.equal((error as { providerRequestId?: string }).providerRequestId, 'provider-error-request')
+        assert.equal((error as { attempt?: string }).attempt, 'simple')
+        assert.doesNotMatch(error instanceof Error ? error.message : '', /123456|test@example\.com/i)
+        return true
+      },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+    if (originalSecretId === undefined) delete process.env.TENCENT_EMAIL_SECRET_ID
+    else process.env.TENCENT_EMAIL_SECRET_ID = originalSecretId
+    if (originalSecretKey === undefined) delete process.env.TENCENT_EMAIL_SECRET_KEY
+    else process.env.TENCENT_EMAIL_SECRET_KEY = originalSecretKey
   }
 })
 

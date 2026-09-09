@@ -38,6 +38,16 @@ function queryType(type: ReviewSourceType | 'ALL') {
   return reviewSourceDefinitions.find((item) => item.type === type)?.queryValues[0] || type.toLowerCase()
 }
 
+async function fetchReviewPage(type: ReviewSourceType | 'ALL', status: ReviewStatus, keyword: string, page: number, targetId = '') {
+  const params = new URLSearchParams({ type: queryType(type), status, page: String(page) })
+  if (keyword.trim()) params.set('keyword', keyword.trim())
+  if (targetId.trim()) params.set('targetId', targetId.trim())
+  const response = await fetch(`/api/admin/review?${params.toString()}`, { cache: 'no-store' })
+  const data = await response.json().catch(() => null) as ReviewResponse | null
+  if (!response.ok) throw new Error(data?.message || '审核列表加载失败')
+  return data || {}
+}
+
 function statusLabel(status: ReviewItem['status']) {
   return statusLabels[status]
 }
@@ -102,15 +112,28 @@ export function ReviewCenter({ initialType, initialStatus = 'PENDING', initialTa
     setLoading(true)
     setError('')
     try {
-      const params = new URLSearchParams({ type: queryType(nextType), status: nextStatus, page: '1' })
-      if (nextKeyword.trim()) params.set('keyword', nextKeyword.trim())
-      if (nextTargetId.trim()) params.set('targetId', nextTargetId.trim())
-      const response = await fetch(`/api/admin/review?${params.toString()}`, { cache: 'no-store' })
-      const data = await response.json().catch(() => null) as ReviewResponse | null
-      if (!response.ok) throw new Error(data?.message || '审核列表加载失败')
+      const data = await fetchReviewPage(nextType, nextStatus, nextKeyword, 1, nextTargetId)
       if (requestId !== loadRequestRef.current) return
-      setItems(Array.isArray(data?.items) ? data.items : [])
-      setHasMore(Boolean(data?.hasMore))
+      let loadedItems = Array.isArray(data.items) ? data.items : []
+      let loadedHasMore = Boolean(data.hasMore)
+
+      // A target is a navigation hint, not a filter. If it is outside the
+      // first page, keep requesting normal pages until the target is present;
+      // every fetched page remains in the queue so the target never becomes a
+      // one-card view.
+      if (nextTargetId.trim() && data.targetFound && data.targetStatus === nextStatus && !loadedItems.some((item) => item.sourceId === nextTargetId.trim())) {
+        let nextPage = 2
+        while (loadedHasMore && !loadedItems.some((item) => item.sourceId === nextTargetId.trim())) {
+          const pageData = await fetchReviewPage(nextType, nextStatus, nextKeyword, nextPage)
+          if (requestId !== loadRequestRef.current) return
+          loadedItems = [...loadedItems, ...(Array.isArray(pageData.items) ? pageData.items : [])]
+          loadedHasMore = Boolean(pageData.hasMore)
+          nextPage += 1
+        }
+      }
+
+      setItems(loadedItems)
+      setHasMore(loadedHasMore)
       setTypes(Array.isArray(data?.types) ? data.types : [])
       setCounts(data?.counts || { total: 0, pending: 0, approved: 0, rejected: 0 })
       setTargetMessage(nextTargetId.trim() ? (data?.targetFound ? '已定位通知对应的审核内容。' : '通知对应的审核内容已不存在或暂时无法定位。') : '')
@@ -247,11 +270,7 @@ export function ReviewCenter({ initialType, initialStatus = 'PENDING', initialTa
     setError('')
     try {
       const nextPage = Math.floor(items.length / REVIEW_PAGE_SIZE) + 1
-      const params = new URLSearchParams({ type: queryType(type), status, page: String(nextPage) })
-      if (keyword.trim()) params.set('keyword', keyword.trim())
-      const response = await fetch(`/api/admin/review?${params.toString()}`, { cache: 'no-store' })
-      const data = await response.json().catch(() => null) as ReviewResponse | null
-      if (!response.ok) throw new Error(data?.message || '更多审核列表加载失败')
+      const data = await fetchReviewPage(type, status, keyword, nextPage)
       if (requestId !== loadRequestRef.current) return
       setItems((current) => [...current, ...(Array.isArray(data?.items) ? data.items : [])])
       setHasMore(Boolean(data?.hasMore))

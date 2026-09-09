@@ -124,7 +124,7 @@ export const GROWTH_TASKS: readonly GrowthTaskDefinition[] = [
   { code: 'SONG_REVIEW_LIKED', title: '歌曲评价被点赞', description: '评价每获得一位有效用户点赞 +1', kind: 'passive', frequency: 'daily', reward: 1, dailyCap: 5, capUnit: 'points', eligibleFrom: launch, completionMode: 'event', claimMode: 'none' },
   { code: 'BEAD_PUBLISHED', title: '贝多芬与我作品通过审核', description: '每篇公开作品通过审核 +7，本周最多 2 篇', kind: 'passive', frequency: 'weekly', reward: 7, weeklyCap: 2, capUnit: 'events', eligibleFrom: launch, completionMode: 'event', claimMode: 'none' },
   { code: 'BEAD_LIKED', title: '贝多芬与我作品被喜欢', description: '作品每获得一位有效用户喜欢或收藏 +1', kind: 'passive', frequency: 'daily', reward: 1, dailyCap: 5, capUnit: 'points', eligibleFrom: launch, completionMode: 'event', claimMode: 'none' },
-  { code: 'LISTEN_DUEL_BRANCH', title: '听听 1v1 对决', description: '完成一场有效的听听 1v1 对决', kind: 'passive', frequency: 'weekly', reward: 0, capUnit: 'events', completionThreshold: 1, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', actionHref: '/games/guess-song/duel' },
+  { code: 'LISTEN_DUEL_BRANCH', title: '听听 1v1 对决', description: '完成一场有效的听听 1v1 对决', kind: 'passive', frequency: 'daily', reward: 0, dailyCap: 1, capUnit: 'events', completionThreshold: 1, eligibleFrom: launch, completionMode: 'event', claimMode: 'none', actionHref: '/games/guess-song/duel' },
 
   { code: 'PROFILE_COMPLETE', title: '完善个人资料', description: '补齐头像、昵称、简介、性别、地区和生日', kind: 'newLife', frequency: 'once', reward: 27, eligibleFrom: historical, completionMode: 'currentState', claimMode: 'manual', actionHref: '/profile?edit=1' },
   { code: 'FIRST_POST', title: '发表第一篇帖子', description: '第一篇新发布且审核通过的帖子', kind: 'newLife', frequency: 'once', reward: 10, eligibleFrom: launch, completionMode: 'event', claimMode: 'manual', actionHref: '/posts/new' },
@@ -167,6 +167,20 @@ export function resolveGrowthTaskDestination(code: GrowthTaskCode) {
 
 export function getTasksByKind(kind: GrowthTaskKind) {
   return GROWTH_TASKS.filter((task) => task.kind === kind)
+}
+
+const frequencyOrder: Record<GrowthFrequency, number> = { daily: 0, weekly: 1, once: 2 }
+
+/** Keep a task kind's configured relative order while grouping its cadence. */
+export function sortGrowthTasksByFrequency<T extends Pick<GrowthTaskDefinition, 'frequency'>>(tasks: readonly T[]) {
+  return tasks
+    .map((task, index) => ({ task, index }))
+    .sort((left, right) => frequencyOrder[left.task.frequency] - frequencyOrder[right.task.frequency] || left.index - right.index)
+    .map(({ task }) => task)
+}
+
+export function getPassiveTasks() {
+  return sortGrowthTasksByFrequency(getTasksByKind('passive'))
 }
 
 export function getTasksBySurface(surface: GrowthTaskSurface) {
@@ -276,7 +290,7 @@ function getActiveRewardRules() {
 }
 
 function getPassiveRewardRules() {
-  return getTasksByKind('passive').map((task) => {
+  return getPassiveTasks().map((task) => {
     if (task.code === 'POST_COMMENT_RECEIVED') {
       return makeRewardRule(task, {
         amount: COMMUNITY_REWARD_POINTS.postCommentReceived,
@@ -292,7 +306,7 @@ function getPassiveRewardRules() {
       return makeRewardRule(task, {
         amount: DUEL_WIN_REWARD,
         amountLabel: `+${DUEL_WIN_REWARD} / 胜`,
-        detail: '完成记录仅用于之外进度，不新增另一份奖励',
+        detail: '每日完成 1 局；完成记录仅用于之外进度，不新增另一份奖励',
       })
     }
     const unit = task.code === 'SALON_APPROVED' || task.code === 'BEAD_PUBLISHED' ? '篇' : '次'
@@ -330,7 +344,7 @@ export function getRewardRuleGroups(): GrowthRewardRuleGroup[] {
 }
 
 export function getEconomyReport() {
-  const passive = getTasksByKind('passive')
+  const passive = getPassiveTasks()
   const maxPassiveDaily = passive
     .filter((task) => task.dailyCap)
     .reduce((total, task) => total + task.reward * (task.dailyCap || 0), 0)

@@ -19,6 +19,90 @@ export type SendMailResult =
   | { sent: true }
   | { sent: false; reason: 'missing_tencent_email_config' }
 
+export type MailType =
+  | 'registration_code'
+  | 'profile_email_code'
+  | 'verification_link'
+  | 'password_reset_code'
+  | 'password_reset_link'
+
+type MailAttempt = 'simple' | 'template'
+
+export class TencentMailProviderError extends Error {
+  readonly provider = 'tencent-ses'
+  readonly providerCode: string
+  readonly providerMessage: string
+  readonly providerRequestId: string | null
+  readonly httpStatus: number | null
+  readonly attempt: MailAttempt
+
+  constructor({
+    code,
+    message,
+    requestId,
+    httpStatus,
+    attempt,
+  }: {
+    code: string
+    message: string
+    requestId?: string | null
+    httpStatus?: number | null
+    attempt: MailAttempt
+  }) {
+    super(`TENCENT_EMAIL_SEND_FAILED:${code}:${message}`.slice(0, 320))
+    this.name = 'TencentMailProviderError'
+    this.providerCode = code
+    this.providerMessage = message
+    this.providerRequestId = requestId || null
+    this.httpStatus = httpStatus ?? null
+    this.attempt = attempt
+  }
+}
+
+function safeProviderMessage(value: string) {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted-token]')
+    .slice(0, 240)
+}
+
+function providerFailureDetails(error: unknown) {
+  if (error instanceof TencentMailProviderError) {
+    return {
+      errorType: error.name,
+      providerCode: error.providerCode,
+      providerMessage: safeProviderMessage(error.providerMessage),
+      providerRequestId: error.providerRequestId,
+      httpStatus: error.httpStatus,
+      attempt: error.attempt,
+    }
+  }
+
+  return {
+    errorType: error instanceof Error ? error.name : 'UNKNOWN',
+    providerCode: error instanceof Error && error.message.includes('NOT_CONFIGURED') ? 'CONFIGURATION' : 'UNKNOWN',
+    providerMessage: error instanceof Error ? safeProviderMessage(error.message) : 'unknown_error',
+    providerRequestId: null,
+    httpStatus: null,
+    attempt: null,
+  }
+}
+
+export function isMailFailure(error: unknown) {
+  return error instanceof TencentMailProviderError || (error instanceof Error && /(?:TENCENT_EMAIL|EMAIL_SEND)/.test(error.message))
+}
+
+export function logMailFailure(error: unknown, context: { route: string; mailType: MailType }) {
+  console.error('[mail.send.failed]', {
+    event: 'mail.send.failed',
+    provider: 'tencent-ses',
+    route: context.route,
+    mailType: context.mailType,
+    timestamp: new Date().toISOString(),
+    ...providerFailureDetails(error),
+  })
+}
+
 const tencentEmailHost = 'ses.tencentcloudapi.com'
 const tencentEmailService = 'ses'
 const tencentEmailVersion = '2020-10-02'
@@ -139,11 +223,13 @@ async function sendTencentMail({
   subject,
   content,
   templateId,
+  attempt,
 }: {
   to: string
   subject: string
   content: TencentMailContent
   templateId?: number
+  attempt: MailAttempt
 }): Promise<SendMailResult> {
   const config = getTencentEmailConfig()
   const templateInvalid = templateId !== undefined && (!Number.isInteger(templateId) || templateId <= 0)
@@ -166,29 +252,68 @@ async function sendTencentMail({
     payload,
     timestamp,
   })
-  const response = await fetch(`https://${tencentEmailHost}`, {
-    method: 'POST',
-    headers: {
-      Authorization: authorization,
-      'Content-Type': 'application/json; charset=utf-8',
-      Host: tencentEmailHost,
-      'X-TC-Action': 'SendEmail',
-      'X-TC-Region': config.region,
-      'X-TC-Timestamp': String(timestamp),
-      'X-TC-Version': tencentEmailVersion,
-    },
-    body: payload,
-    cache: 'no-store',
-  })
-  const result = await response.json().catch(() => null) as {
-    Response?: { Error?: { Code?: string; Message?: string } }
+  let response: Response
+  let result: {
+    Response?: {
+      RequestId?: string
+      Error?: { Code?: string; Message?: string }
+    }
   } | null
+  try {
+    response = await fetch(`https://${tencentEmailHost}`, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json; charset=utf-8',
+        Host: tencentEmailHost,
+        'X-TC-Action': 'SendEmail',
+        'X-TC-Region': config.region,
+        'X-TC-Timestamp': String(timestamp),
+        'X-TC-Version': tencentEmailVersion,
+      },
+      body: payload,
+      cache: 'no-store',
+    })
+    try {
+      result = await response.json() as {
+        Response?: {
+          RequestId?: string
+          Error?: { Code?: string; Message?: string }
+        }
+      } | null
+    } catch {
+      throw new TencentMailProviderError({
+        code: 'INVALID_RESPONSE',
+        message: 'Tencent SES returned a non-JSON response',
+        httpStatus: response.status,
+        attempt,
+      })
+    }
+  } catch (error) {
+    if (error instanceof TencentMailProviderError) throw error
+    throw new TencentMailProviderError({
+      code: 'TRANSPORT_ERROR',
+      message: error instanceof Error ? error.message : 'fetch_failed',
+      attempt,
+    })
+  }
+  if (!result?.Response) {
+    throw new TencentMailProviderError({
+      code: 'INVALID_RESPONSE',
+      message: 'Tencent SES response is missing Response',
+      httpStatus: response.status,
+      attempt,
+    })
+  }
   const apiError = result?.Response?.Error
   if (!response.ok || apiError) {
-    const detail = apiError
-      ? `${apiError.Code || 'UNKNOWN'}:${apiError.Message || ''}`
-      : `HTTP_${response.status}`
-    throw new Error(`TENCENT_EMAIL_SEND_FAILED:${detail.slice(0, 180)}`)
+    throw new TencentMailProviderError({
+      code: apiError?.Code || `HTTP_${response.status}`,
+      message: apiError?.Message || `HTTP_${response.status}`,
+      requestId: result?.Response?.RequestId,
+      httpStatus: response.status,
+      attempt,
+    })
   }
   return { sent: true }
 }
@@ -214,6 +339,7 @@ async function sendTencentTemplateMail({
         TemplateData: JSON.stringify(templateData),
       },
     },
+    attempt: 'template',
   })
 }
 
@@ -237,21 +363,36 @@ async function sendTencentSimpleMail({
         Text: Buffer.from(text, 'utf8').toString('base64'),
       },
     },
+    attempt: 'simple',
   })
 }
 
 function isSimpleEmailUnsupported(error: unknown) {
+  if (error instanceof TencentMailProviderError) {
+    return new Set([
+      'FailedOperation.WithOutPermission',
+      'FailedOperation.UnsupportMailType',
+      'MissingParameter.SendParamNecessary',
+      'InvalidParameterValue.EmailContentIsWrong',
+    ]).has(error.providerCode) || /^OperationDenied\..*Simple$/i.test(error.providerCode)
+  }
   if (!(error instanceof Error)) return false
-  return /TENCENT_EMAIL_SEND_FAILED:(?:MissingParameter\.SendParamNecessary|OperationDenied\.[^:]*Simple|InvalidParameterValue\.EmailContentIsWrong)/i.test(error.message)
+  return /TENCENT_EMAIL_SEND_FAILED:(?:FailedOperation\.WithOutPermission|FailedOperation\.UnsupportMailType|MissingParameter\.SendParamNecessary|OperationDenied\.[^:]*Simple|InvalidParameterValue\.EmailContentIsWrong)/i.test(error.message)
 }
 
-function getTemplateId(name: 'verification' | 'register' | 'reset') {
-  const key = name === 'verification'
-    ? 'TENCENT_EMAIL_VERIFICATION_TEMPLATE_ID'
+function getTemplateId(name: 'verification-link' | 'register' | 'profile' | 'reset' | 'reset-link') {
+  const key = name === 'verification-link'
+    ? 'TENCENT_EMAIL_VERIFICATION_LINK_TEMPLATE_ID'
     : name === 'register'
       ? 'TENCENT_EMAIL_REGISTER_TEMPLATE_ID'
-      : 'TENCENT_EMAIL_RESET_TEMPLATE_ID'
-  return Number.parseInt(process.env[key] || '', 10)
+      : name === 'profile'
+        ? 'TENCENT_EMAIL_PROFILE_TEMPLATE_ID'
+        : name === 'reset-link'
+          ? 'TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID'
+          : 'TENCENT_EMAIL_RESET_TEMPLATE_ID'
+  const fallbackKey = name === 'profile' ? 'TENCENT_EMAIL_REGISTER_TEMPLATE_ID' : undefined
+  const raw = process.env[key] || (fallbackKey ? process.env[fallbackKey] : '') || ''
+  return Number.parseInt(raw, 10)
 }
 
 async function sendRenderedEmail({
@@ -260,6 +401,7 @@ async function sendRenderedEmail({
   text,
   html,
   fallback,
+  mailType,
 }: {
   to: string
   subject: string
@@ -269,17 +411,41 @@ async function sendRenderedEmail({
     templateId: number
     templateData: Record<string, string>
   }
+  mailType: MailType
 }): Promise<SendMailResult> {
   try {
     return await sendTencentSimpleMail({ to, subject, text, html })
   } catch (error) {
+    console.warn('[mail.provider.failure]', {
+      event: 'mail.provider.failure',
+      provider: 'tencent-ses',
+      mailType,
+      ...providerFailureDetails(error),
+    })
     if (isSimpleEmailUnsupported(error) && fallback) {
-      return sendTencentTemplateMail({
-        to,
-        subject,
-        templateId: fallback.templateId,
-        templateData: fallback.templateData,
-      })
+      try {
+        const result = await sendTencentTemplateMail({
+          to,
+          subject,
+          templateId: fallback.templateId,
+          templateData: fallback.templateData,
+        })
+        console.info('[mail.provider.fallback.success]', {
+          event: 'mail.provider.fallback.success',
+          provider: 'tencent-ses',
+          mailType,
+          attempt: 'template',
+        })
+        return result
+      } catch (fallbackError) {
+        console.error('[mail.provider.fallback.failure]', {
+          event: 'mail.provider.fallback.failure',
+          provider: 'tencent-ses',
+          mailType,
+          ...providerFailureDetails(fallbackError),
+        })
+        throw fallbackError
+      }
     }
     if (error instanceof Error && error.message === 'TENCENT_EMAIL_NOT_CONFIGURED') {
       throw new Error('EMAIL_SEND_NOT_CONFIGURED')
@@ -307,8 +473,9 @@ export async function sendMail({
     subject: rendered.subject,
     text: rendered.text,
     html: rendered.html,
+    mailType: 'verification_link',
     fallback: {
-      templateId: getTemplateId('verification'),
+      templateId: getTemplateId('verification-link'),
       templateData: {
         title: template.title,
         intro: template.intro,
@@ -355,6 +522,7 @@ export async function sendPasswordResetCode(email: string, code: string): Promis
     subject: rendered.subject,
     text: rendered.text,
     html: rendered.html,
+    mailType: 'password_reset_code',
     fallback: {
       templateId: getTemplateId('reset'),
       templateData: { code },
@@ -378,8 +546,9 @@ export async function sendEmailVerificationCode(
     subject: rendered.subject,
     text: rendered.text,
     html: rendered.html,
+    mailType: reason === 'register' ? 'registration_code' : 'profile_email_code',
     fallback: {
-      templateId: getTemplateId('register'),
+      templateId: getTemplateId(reason === 'register' ? 'register' : 'profile'),
       templateData: { code },
     },
   })
@@ -405,8 +574,9 @@ export async function sendPasswordResetLinkEmail(
     subject: rendered.subject,
     text: rendered.text,
     html: rendered.html,
+    mailType: 'password_reset_link',
     fallback: {
-      templateId: getTemplateId('reset'),
+      templateId: getTemplateId('reset-link'),
       templateData: { reset_url: resetUrl },
     },
   })

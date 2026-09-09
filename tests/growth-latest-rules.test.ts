@@ -91,23 +91,30 @@ test('奖励规则覆盖回复、点赞、分享、发帖、收到回复和周�
   )
 })
 
-test('听听 1v1 对决只在展示层使用 current/7 并封顶完成状态', () => {
+test('听听 1v1 对决按每日 1 局统计、展示并封顶完成状态', () => {
   const cases = [
-    [0, '0/7', false],
-    [1, '1/7', false],
-    [6, '6/7', false],
-    [7, '7/7', true],
-    [8, '7/7', true],
-    [12, '7/7', true],
+    [0, '0/1', false],
+    [1, '1/1', true],
+    [2, '1/1', true],
   ] as const
   for (const [current, expectedDisplay, expectedComplete] of cases) {
     assert.equal(formatListenDuelProgress(current), expectedDisplay)
     assert.equal(isListenDuelProgressComplete(current), expectedComplete)
   }
+  const duel = getGrowthTask('LISTEN_DUEL_BRANCH')
+  const duelRule = getRewardRuleGroups().flatMap((group) => group.items).find((item) => item.code === 'LISTEN_DUEL_BRANCH')
+  assert.equal(duel?.frequency, 'daily')
+  assert.equal(duel?.dailyCap, 1)
+  assert.equal(duel?.completionThreshold, 1)
+  assert.equal(duelRule?.dailyCap, 1)
+  assert.match(duelRule?.detail || '', /每日完成 1 局/)
   const panel = read('components/GrowthPanel.tsx')
   assert.match(panel, /formatListenDuelProgress/)
-  assert.match(panel, /isListenDuelProgressComplete/)
+  assert.match(panel, /item\.frequency === 'weekly' \? '本周' : '今日'/)
   assert.doesNotMatch(panel, /LISTEN_DUEL_BRANCH.*本周.*局/)
+  const service = read('lib/growth-tasks/service.ts')
+  assert.match(service, /guessSongDuelMatch\.count\(\{ where: \{ status: 'FINISHED', finishedAt: \{ gte: todayRange\.start, lt: todayRange\.end \}/)
+  assert.match(service, /const cap = task\.dailyCap \?\? task\.completionThreshold \?\? 1/)
 })
 
 test('任意娱乐模式只有正式结算才写入 DAILY_GAME，1v1 进入之外进度', () => {

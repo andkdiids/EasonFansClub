@@ -9,14 +9,15 @@ const route = read('app/api/admin/review/route.ts')
 
 test('统一审核中心默认选中并请求待审核（PENDING）', () => {
   assert.match(center, /useState<ReviewStatus>\(initialStatus\)/)
-  assert.match(center, /status: nextStatus/)
+  assert.match(center, /fetchReviewPage\(nextType, nextStatus, nextKeyword, 1, nextTargetId\)/)
+  assert.match(center, /new URLSearchParams\(\{ type: queryType\(type\), status, page: String\(page\) \}\)/)
   assert.match(route, /const status = parseReviewStatus\(statusParam\)/)
   assert.match(centerPage, /initialStatus=\{parseReviewStatus\(rawStatus\)\}/)
 })
 
 test('切换任一状态 Tab 均按该状态重新拉取列表', () => {
   assert.match(center, /changeStatus\(value\)/)
-  assert.match(center, /status: nextStatus/)
+  assert.match(center, /fetchReviewPage\(nextType, nextStatus, nextKeyword, 1, nextTargetId\)/)
   assert.match(route, /parseReviewStatus\(statusParam\)/)
   assert.match(center, /cache: 'no-store'/)
   assert.match(route, /Cache-Control': 'private, no-store, max-age=0'/)
@@ -24,7 +25,8 @@ test('切换任一状态 Tab 均按该状态重新拉取列表', () => {
 
 test('挂载时若初始列表与当前 Tab 不一致会按当前状态重拉，避免复用上一轮 Tab 数据', () => {
   assert.match(center, /useEffect\(\(\) => \{ void load\(\) \}, \[load\]\)/)
-  assert.match(center, /const params = new URLSearchParams\(\{ type: queryType\(nextType\), status: nextStatus, page: '1' \}\)/)
+  assert.match(center, /fetchReviewPage\(nextType, nextStatus, nextKeyword, 1, nextTargetId\)/)
+  assert.match(center, /new URLSearchParams\(\{ type: queryType\(type\), status, page: String\(page\) \}\)/)
 })
 
 test('统一审核中心的三种审核状态均可作为 Tab 切换目标', () => {

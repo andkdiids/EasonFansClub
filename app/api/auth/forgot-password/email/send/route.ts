@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { getAccountSecuritySettings } from '@/lib/account-security'
-import { sendPasswordResetCode } from '@/lib/mail'
+import { isMailFailure, logMailFailure, sendPasswordResetCode } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { createPlainToken, hashToken } from '@/lib/tokens'
@@ -39,8 +39,11 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     await prisma.passwordResetToken.deleteMany({ where: { id: record.id } })
-    if (error instanceof Error && error.message === 'EMAIL_SEND_NOT_CONFIGURED') return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503 })
-    return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 502 })
+    if (isMailFailure(error)) {
+      logMailFailure(error, { route: '/api/auth/forgot-password/email/send', mailType: 'password_reset_code' })
+    }
+    const status = error instanceof Error && error.message === 'EMAIL_SEND_NOT_CONFIGURED' ? 503 : 502
+    return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status })
   }
   return NextResponse.json({ message: genericMessage })
 }

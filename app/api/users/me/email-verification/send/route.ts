@@ -6,6 +6,7 @@ import {
   normalizeEmail,
   sendProfileEmailVerificationCode,
 } from '@/lib/email-verification'
+import { isMailFailure, logMailFailure } from '@/lib/mail'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 
@@ -76,7 +77,11 @@ export async function POST(request: Request) {
       where: { userId: guard.user.id, email, usedAt: null },
       data: { usedAt: new Date() },
     }).catch(() => undefined)
-    console.error('[users.me.email-verification.send]', error instanceof Error ? error.message : 'unknown_error')
+    if (isMailFailure(error)) {
+      logMailFailure(error, { route: '/api/users/me/email-verification/send', mailType: 'profile_email_code' })
+    } else {
+      console.error('[users.me.email-verification.send]', error instanceof Error ? error.message : 'unknown_error')
+    }
     return errorResponse('验证码邮件发送失败，请稍后重试', 'EMAIL_SEND_FAILED', 503)
   }
 

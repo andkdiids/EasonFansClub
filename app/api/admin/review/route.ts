@@ -336,13 +336,16 @@ export async function GET(request: Request) {
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
   const definitions = await accessibleDefinitions(guard.user)
   const selected = sourceType === 'ALL' ? definitions : definitions.filter((item) => item.type === sourceType)
-  // A notification may point at an already processed item. Resolve that item
-  // across all review states, then let the client switch to its real tab.
-  const queryStatus: ReviewStatus | 'ALL' = targetId ? 'ALL' : status
-
   const prefetchSize = Math.max(PAGE_SIZE * 3, PAGE_SIZE * page)
-  const [batches, countRows] = await Promise.all([
-    Promise.all(selected.map((definition) => loadTypeItems(definition.type, queryStatus, keyword, targetId ? 1 : prefetchSize, targetId))),
+  // The normal queue is always loaded from the requested type/status/page.
+  // A notification target is supplemental metadata only: it can tell the
+  // client which status tab to use, but it must never replace the queue with
+  // a target-only query.
+  const [batches, targetBatches, countRows] = await Promise.all([
+    Promise.all(selected.map((definition) => loadTypeItems(definition.type, status, keyword, prefetchSize))),
+    targetId
+      ? Promise.all(selected.map((definition) => loadTypeItems(definition.type, 'ALL', keyword, 1, targetId)))
+      : Promise.resolve([] as ReviewItem[][]),
     Promise.all(definitions.map(async (definition) => {
       const [total, pending, approved, rejected] = await Promise.all([
         countType(definition.type, 'ALL', keyword), countType(definition.type, 'PENDING', keyword), countType(definition.type, 'APPROVED', keyword), countType(definition.type, 'REJECTED', keyword),
@@ -355,9 +358,8 @@ export async function GET(request: Request) {
   // status totals and pagination truthful even when a queue exceeds the
   // adapter's bounded prefetch window.
   const scopedCounts = countRows.filter((row) => selected.some((definition) => definition.type === row.type))
-  const total = targetId
-    ? allItems.length
-    : scopedCounts.reduce((sum, row) => sum + row[status.toLowerCase() as 'pending' | 'approved' | 'rejected'], 0)
+  const targetItem = targetBatches.flat().find((item) => item.sourceId === targetId) || null
+  const total = scopedCounts.reduce((sum, row) => sum + row[status.toLowerCase() as 'pending' | 'approved' | 'rejected'], 0)
   const start = (page - 1) * PAGE_SIZE
   const items = allItems.slice(start, start + PAGE_SIZE)
   return NextResponse.json({
@@ -367,8 +369,8 @@ export async function GET(request: Request) {
     total,
     hasMore: start + PAGE_SIZE < total,
     targetId,
-    targetFound: targetId ? allItems.some((item) => item.sourceId === targetId) : undefined,
-    targetStatus: targetId ? allItems.find((item) => item.sourceId === targetId)?.status : undefined,
+    targetFound: targetId ? Boolean(targetItem) : undefined,
+    targetStatus: targetItem?.status,
     type: sourceType,
     status,
     keyword,

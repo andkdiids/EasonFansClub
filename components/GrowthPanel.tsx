@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
-import { formatListenDuelProgress, isListenDuelProgressComplete } from '@/lib/growth-tasks/presentation'
+import { formatListenDuelProgress } from '@/lib/growth-tasks/presentation'
 
 type GrowthView = 'today' | 'new-life'
 
@@ -75,13 +75,14 @@ function formatTodayProgress(item: GrowthItem) {
 }
 
 function formatPassiveProgress(item: GrowthItem) {
-  if (item.code === 'LISTEN_DUEL_BRANCH') return formatListenDuelProgress(item.progress || 0)
   const period = item.frequency === 'weekly' ? '本周' : '今日'
-  return `${period} ${Math.max(0, item.progress || 0)}/${item.cap || 0}`
+  const progress = item.code === 'LISTEN_DUEL_BRANCH'
+    ? formatListenDuelProgress(item.progress || 0)
+    : `${Math.min(item.cap || 0, Math.max(0, item.progress || 0))}/${item.cap || 0}`
+  return `${period} ${progress}`
 }
 
 function isPassiveItemComplete(item: GrowthItem) {
-  if (item.code === 'LISTEN_DUEL_BRANCH') return isListenDuelProgressComplete(item.progress || 0)
   return Boolean(item.completed)
 }
 
