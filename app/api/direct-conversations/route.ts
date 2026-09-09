@@ -9,6 +9,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
+import { parsePostShareSnapshot, postSharePreview } from '@/lib/post-share-types'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
       where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
       include: {
         ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true, pinnedAt: true, isDeleted: true, User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, bio: true, bioModerationStatus: true, experience: true, isOnline: true, lastActiveAt: true, createdAt: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } } } } } },
-        DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, moderationStatus: true, createdAt: true, senderId: true, type: true, imageUrl: true, stickerId: true } },
+        DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, moderationStatus: true, createdAt: true, senderId: true, type: true, imageUrl: true, stickerId: true, metadata: true } },
       },
     }),
     prisma.friendship.count({ where: friendshipWhere }),
@@ -170,9 +171,14 @@ function getConversationMessagePreview(message: {
   type: string
   imageUrl: string | null
   stickerId: string | null
+  metadata?: unknown
 }) {
   if (message.type === 'IMAGE' || message.imageUrl) return '[图片]'
   if (message.type === 'STICKER' || message.stickerId) return '[表情]'
+  if (message.type === 'POST_SHARE') {
+    const snapshot = parsePostShareSnapshot(message.metadata)
+    return snapshot ? postSharePreview(snapshot) : '[帖子] 分享了一个帖子'
+  }
   const text = publicModerationText(message.content, message.moderationStatus).replace(/\s+/g, ' ').trim()
   return text || '[消息]'
 }

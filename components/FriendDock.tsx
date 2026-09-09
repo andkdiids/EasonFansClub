@@ -43,6 +43,7 @@ import type { UnreadSummary } from '@/lib/notifications'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { GrowthPanel } from '@/components/GrowthPanel'
+import type { PostShareMessageView } from '@/lib/post-share-types'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
 type FriendListViewMode = 'alphabetical' | 'groups'
@@ -64,6 +65,7 @@ type Message = {
   status?: MessageStatus
   stickerId?: string | null
   stickerUrl?: string | null
+  postShare?: PostShareMessageView | null
 }
 
 type FriendGroup = {
@@ -1735,6 +1737,7 @@ export function FriendDock({
                   <div className="friend-chat-date">{group.label}</div>
                   {group.messages.map((message) => {
                     const mine = message.senderId === currentUserId
+                    const postShareCard = message.type === 'POST_SHARE' ? message.postShare : null
                     // 表情包消息：直接展示图片，不套用文字气泡（无 border/background/白框/padding）。
                     const stickerImg = message.stickerUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1746,7 +1749,31 @@ export function FriendDock({
                     ) : null
                     return (
                       <div key={message.id} className={`friend-chat-message ${mine ? 'is-mine' : 'is-peer'}`}>
-                        {message.stickerUrl ? (
+                        {postShareCard ? (
+                          postShareCard.available ? (
+                            <Link href={postShareCard.url} className="friend-chat-post-share-card" aria-label={`查看帖子：${postShareCard.title}`}>
+                              {postShareCard.imageUrl ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img
+                                  src={postShareCard.imageUrl}
+                                  alt=""
+                                  className="friend-chat-post-share-image"
+                                  onError={(event) => { event.currentTarget.remove() }}
+                                />
+                              ) : null}
+                              <span className="friend-chat-post-share-label">帖子</span>
+                              <strong>{postShareCard.title}</strong>
+                              {postShareCard.authorName ? <span>{postShareCard.authorName}{postShareCard.boardName ? ` · ${postShareCard.boardName}` : ''}</span> : null}
+                              {postShareCard.summary ? <small>{postShareCard.summary}</small> : null}
+                              <em>查看帖子 →</em>
+                            </Link>
+                          ) : (
+                            <div className="friend-chat-post-share-card is-unavailable" role="status">
+                              <span className="friend-chat-post-share-label">帖子</span>
+                              <strong>{postShareCard.title}</strong>
+                            </div>
+                          )
+                        ) : message.stickerUrl ? (
                           // 仅发送失败（FAILED）时才用无样式按钮包裹，点击重试；成功消息直接展示图片。
                           message.status === 'FAILED' ? (
                             <button

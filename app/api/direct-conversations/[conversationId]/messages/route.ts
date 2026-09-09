@@ -9,15 +9,19 @@ import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/li
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicModerationText } from '@/lib/content-moderation'
+import { resolvePostShareViews } from '@/lib/post-share-service'
+import { parsePostShareSnapshot, type PostShareMessageView } from '@/lib/post-share-types'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const messageSelect = {
   id: true,
+  type: true,
   content: true,
   moderationStatus: true,
   senderId: true,
   createdAt: true,
   clientMessageId: true,
+  metadata: true,
   stickerId: true,
   sticker: { select: { url: true } },
 } as const
@@ -78,8 +82,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
   const ordered = cursor ? limitedRows : limitedRows.reverse()
   const peer = conversation.ConversationParticipant.find((participant) => participant.userId !== user.id)
 
+  const postShareViews = await resolvePostShareViews(ordered, user.id)
   return NextResponse.json({
-    messages: ordered.map((message) => serializeMessage(message, user.id, peer?.lastReadAt || null)),
+    messages: ordered.map((message) => {
+      const snapshot = parsePostShareSnapshot(message.metadata)
+      return serializeMessage(message, user.id, peer?.lastReadAt || null, snapshot ? postShareViews.get(snapshot.postId) : undefined)
+    }),
     cursor: ordered.length ? formatCursor(ordered[ordered.length - 1]) : url.searchParams.get('after'),
     beforeCursor: ordered.length ? formatCursor(ordered[0]) : url.searchParams.get('before'),
     hasMore: cursor ? hasMore : false,
@@ -287,6 +295,7 @@ function formatCursor(message: { createdAt: Date; id: string }) {
 function serializeMessage(
   message: {
     id: string
+    type: string
     content: string
     moderationStatus: string
     senderId: string
@@ -294,17 +303,21 @@ function serializeMessage(
     clientMessageId: string | null
     stickerId: string | null
     sticker: { url: string } | null
+    metadata: unknown
   },
   currentUserId: string,
   peerLastReadAt: Date | null,
+  postShare?: PostShareMessageView,
 ) {
   return {
     id: message.id,
+    type: message.type,
     content: publicModerationText(message.content, message.moderationStatus),
     senderId: message.senderId,
     clientMessageId: message.clientMessageId,
     stickerId: message.stickerId,
     stickerUrl: toPublicMediaUrl(message.sticker?.url),
+    postShare: message.type === 'POST_SHARE' ? postShare || null : null,
     createdAt: message.createdAt.toISOString(),
     readAt: message.senderId === currentUserId && peerLastReadAt && message.createdAt <= peerLastReadAt
       ? peerLastReadAt.toISOString()

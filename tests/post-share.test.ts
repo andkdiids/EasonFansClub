@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+import { parsePostShareSnapshot, postSharePreview, postShareUrl, POST_SHARE_MESSAGE_TYPE } from '@/lib/post-share-types'
+
+const read = (file: string) => readFileSync(file, 'utf8')
+
+test('帖子分享入口使用三层站内 Share Sheet，不把原生分享作为帖子第一入口', () => {
+  const button = read('components/share/ShareButton.tsx')
+  const sheet = read('components/share/PostShareSheet.tsx')
+  assert.match(button, /data\.type === 'post' \? \(/)
+  assert.match(button, /<PostShareSheet/)
+  assert.match(sheet, /最近聊天好友/)
+  assert.match(sheet, /私信好友/)
+  assert.match(sheet, /生成分享卡片/)
+  assert.match(sheet, /复制链接/)
+  assert.ok(sheet.includes('/api/posts/${encodeURIComponent(postId)}/share'))
+  assert.ok(sheet.includes('/api/friends/list?${params.toString()}'))
+  assert.doesNotMatch(sheet, /navigator\.share/)
+})
+
+test('站内帖子分享保存结构化 POST_SHARE 消息，并通过服务器记录分享任务', () => {
+  const schema = read('prisma/schema.prisma')
+  const migration = read('prisma/migrations/20260909120000_add_post_share_message/migration.sql')
+  const route = read('app/api/posts/[postId]/share/route.ts')
+  const task = read('lib/share-task.ts')
+  assert.equal(POST_SHARE_MESSAGE_TYPE, 'POST_SHARE')
+  assert.match(schema, /model DirectMessage[\s\S]*metadata\s+Json\?[\s\S]*enum MessageType[\s\S]*POST_SHARE/)
+  assert.match(migration, /ADD COLUMN `metadata` JSON NULL/)
+  assert.match(migration, /'POST_SHARE'/)
+  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /assertFriendShareTarget\(guard\.user\.id, recipientId\)/)
+  assert.match(route, /ensureFriendConversation\(tx, guard\.user\.id, recipientId\)/)
+  assert.match(route, /type: POST_SHARE_MESSAGE_TYPE/)
+  assert.match(route, /metadata: snapshot/)
+  assert.match(route, /recordContentShareTask\(tx, guard\.user\.id, now\)/)
+  assert.match(task, /sourceEventId: contentShareSourceEventId\(now\)/)
+  assert.match(task, /taskCode: 'CONTENT_SHARE_ACTIVE'/)
+})
+
+test('好友最近聊天按最后消息倒序，并过滤好友关系、封禁和不可用账号', () => {
+  const service = read('lib/post-share-service.ts')
+  assert.match(service, /DirectMessage: \{ some: \{ isDeleted: false \} \}/)
+  assert.match(service, /\.sort\(\(left, right\) => \{[\s\S]*DirectMessage\[0\]\?\.createdAt[\s\S]*rightAt[\s\S]*leftAt/)
+  assert.match(service, /friendIds\.has\(item\.friendId\)/)
+  assert.match(service, /blockedIds\.has\(item\.friendId\)/)
+  assert.match(service, /activeUserWhere/)
+  assert.match(service, /result\.length >= limit/)
+})
+
+test('帖子分享消息读取时重新按帖子权限解析，并且无图卡片不渲染媒体区域', () => {
+  const messages = read('app/api/direct-conversations/[conversationId]/messages/route.ts')
+  const service = read('lib/post-share-service.ts')
+  const dock = read('components/FriendDock.tsx')
+  assert.match(messages, /resolvePostShareViews\(ordered, user\.id\)/)
+  assert.match(messages, /postShare: message\.type === 'POST_SHARE' \? postShare \|\| null : null/)
+  assert.match(service, /status: 'PUBLISHED'/)
+  assert.match(service, /isDeleted: false/)
+  assert.match(service, /OR: \[[\s\S]*moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\]/)
+  assert.match(dock, /postShareCard\.imageUrl \? \(/)
+  assert.match(dock, /className="friend-chat-post-share-image"/)
+  assert.doesNotMatch(dock, /postShareCard\.available[\s\S]*postShareCard\.imageUrl \? \([\s\S]*fallback/) 
+})
+
+test('结构化帖子分享的预览、URL 和异常 JSON 都有安全边界', () => {
+  assert.equal(postSharePreview({ title: '今天的帖子' }), '[帖子] 今天的帖子')
+  assert.equal(postShareUrl('post/1'), '/posts/post%2F1')
+  assert.equal(parsePostShareSnapshot({ postId: 'p1', title: '帖子', imageUrl: '' })?.imageUrl, null)
+  assert.equal(parsePostShareSnapshot({ postId: 'p1' }), null)
+  assert.equal(parsePostShareSnapshot({ postId: 'p1', title: '帖子', summary: 'x'.repeat(300) })?.summary.length, 180)
+})

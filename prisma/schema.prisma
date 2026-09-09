@@ -1198,6 +1198,7 @@ model DirectMessage {
   id                 String                  @id @default(cuid())
   type               MessageType             @default(TEXT)
   content            String
+  metadata           Json?
   imageUrl           String?
   stickerId          String?
   sticker            Sticker?                @relation("DirectMessageSticker", fields: [stickerId], references: [id], onDelete: SetNull)
@@ -5004,6 +5005,7 @@ enum MessageType {
   EMOJI
   SYSTEM
   STICKER
+  POST_SHARE
 }
 
 enum MusicPublicationStatus {

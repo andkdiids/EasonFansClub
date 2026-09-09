@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { shareContent } from '@/lib/share'
-import { createShareCardFilename, isTrustedShareCardHttpsUrl, shareCardApiPath, shareCardQrPayload, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
+import { canonicalShareUrl, createShareCardFilename, isTrustedShareCardHttpsUrl, shareCardApiPath, shareCardQrPayload, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { generateShareCardImage, type GeneratedShareCardImage } from '@/lib/share-card-image'
 import { ShareCardPreview } from './ShareCardPreview'
+import { PostShareSheet } from './PostShareSheet'
 import { ShareMethodDialog } from './ShareMethodDialog'
 
 type ShareCardApiResponse = Readonly<{
@@ -53,6 +54,23 @@ async function recordContentShare(contentId: string) {
     // best-effort reward refresh; the server remains idempotent.
     return 0
   }
+}
+
+async function copyText(value: string) {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  if (!copied) throw new Error('COPY_FAILED')
 }
 
 export function ShareButton({ data, linkTitle, linkText, label = '分享', triggerClassName = '', messageClassName = '', ariaLabel, canSaveCard = data.canGenerateCard !== false }: Readonly<{
@@ -154,6 +172,24 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
     }
   }
 
+  async function copyPostLink() {
+    if (data.type !== 'post') return
+    try {
+      await copyText(canonicalShareUrl(data.url))
+      setMethodOpen(false)
+      const awardedAmount = await recordContentShare(data.contentId || data.url)
+      const suffix = awardedAmount > 0 ? `，+${awardedAmount}挂号费` : ''
+      announce(`链接已复制${suffix}`)
+    } catch {
+      announce('链接复制失败，请稍后重试')
+    }
+  }
+
+  function onPostShareSuccess(displayName: string) {
+    setMethodOpen(false)
+    announce(`已分享给 ${displayName}`)
+  }
+
   async function recordCardShare() {
     const awardedAmount = await recordContentShare(data.contentId || data.url)
     const suffix = awardedAmount > 0 ? `，+${awardedAmount}挂号费` : ''
@@ -173,7 +209,19 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
         {label}
       </button>
       {message ? <span className={messageClassName || 'share-button-message'} role="status">{message}</span> : null}
-      <ShareMethodDialog open={methodOpen} canSaveCard={canSaveCard} onClose={() => setMethodOpen(false)} onSaveCard={() => { void generateCard() }} onShareLink={() => { void shareLink() }} />
+      {data.type === 'post' ? (
+        <PostShareSheet
+          open={methodOpen}
+          data={data}
+          canSaveCard={canSaveCard}
+          onClose={() => setMethodOpen(false)}
+          onCreateCard={() => { void generateCard() }}
+          onCopyLink={() => { void copyPostLink() }}
+          onShareSuccess={onPostShareSuccess}
+        />
+      ) : (
+        <ShareMethodDialog open={methodOpen} canSaveCard={canSaveCard} onClose={() => setMethodOpen(false)} onSaveCard={() => { void generateCard() }} onShareLink={() => { void shareLink() }} />
+      )}
       {previewOpen ? <ShareCardPreview data={data} status={cardStatus} image={cardImage} error={cardError} onClose={closePreview} onRetry={() => { void generateCard() }} onShareSuccess={() => { void recordCardShare() }} /> : null}
     </span>
   )
