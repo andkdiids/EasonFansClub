@@ -1,3 +1,5 @@
+import * as React from 'react'
+
 export type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker' | 'stethoscope' | 'pill' | 'gift' | 'camera' | 'eye' | 'palette' | 'brush' | 'eraser' | 'eyedropper' | 'fill' | 'select' | 'move' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'fit' | 'fullscreen' | 'fullscreen-exit' | 'replace' | 'layers' | 'download' | 'trash' | 'eye-off' | 'align' | 'upload'
 
 const paths: Record<IconName, React.ReactNode> = {

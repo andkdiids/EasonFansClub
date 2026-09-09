@@ -13,6 +13,7 @@ import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { recordEntertainmentGameCompletion } from '@/lib/growth-tasks/service'
 import { normalizeRatingLanguage } from '@/lib/rating-types'
 import { prisma } from '@/lib/prisma'
+import { normalizeStoredUserAgent } from '@/lib/request-metadata'
 import { cleanLyrics, selectLyricFragment, selectSafeLyricSnippet } from '@/lib/want-listen-lyrics'
 import {
   DEFAULT_WANT_LISTEN_CONFIG,
@@ -600,7 +601,7 @@ async function persistWantListenSession(
         livesRemaining: WANT_LISTEN_MAX_WRONG_COUNT,
         expiresAt: new Date(now.getTime() + WANT_LISTEN_SESSION_TTL_MS),
         ipAddress: meta.ip?.slice(0, 64) || null,
-        userAgent: meta.userAgent?.slice(0, 500) || null,
+        userAgent: normalizeStoredUserAgent(meta.userAgent),
         WantListenSessionQuestion: {
           create: {
             publicId: randomUUID(),

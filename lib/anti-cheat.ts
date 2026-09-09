@@ -1,4 +1,5 @@
 import { Prisma, type GameAntiCheatSuspiciousType } from '@prisma/client'
+import { normalizeStoredUserAgent } from './request-metadata'
 
 /** 单题答题时间低于该值（毫秒）即记录异常 */
 export const ANTI_CHEAT_FAST_ANSWER_THRESHOLD_MS = 1000
@@ -104,7 +105,7 @@ export async function recordAntiCheatLog(
       fastestAnswerTime: input.fastestAnswerTime ?? null,
       averageAnswerTime: input.averageAnswerTime ?? null,
       ip: input.ip ?? null,
-      userAgent: input.userAgent ?? null,
+      userAgent: normalizeStoredUserAgent(input.userAgent),
       suspiciousType: input.suspiciousType,
       details: input.details ?? undefined,
     },

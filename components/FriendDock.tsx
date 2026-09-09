@@ -206,6 +206,7 @@ export function FriendDock({
   const [conversationId, setConversationId] = useState('')
   const [chatFriend, setChatFriend] = useState<FriendDockUser | null>(null)
   const [chatActionsOpen, setChatActionsOpen] = useState(false)
+  const [activeConversationMenuId, setActiveConversationMenuId] = useState<string | null>(null)
   const [clearingChat, setClearingChat] = useState(false)
   const [deleteChatTarget, setDeleteChatTarget] = useState<ConversationSummary | null>(null)
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null)
@@ -305,6 +306,7 @@ export function FriendDock({
     sendingMessageIdsRef.current.clear()
     setChatFriend(null)
     setChatActionsOpen(false)
+    setActiveConversationMenuId(null)
     setConversationId('')
     setMessages([])
     setContent('')
@@ -779,6 +781,7 @@ export function FriendDock({
   }, [])
 
   const changeFriendDockTab = useCallback((tab: FriendDockTab) => {
+    setActiveConversationMenuId(null)
     setGrowthView(null)
     setActiveTab(tab)
     setError('')
@@ -805,6 +808,25 @@ export function FriendDock({
     }
     changeFriendDockTab(tab)
   }, [changeFriendDockTab, openGrowthView])
+
+  useEffect(() => {
+    if (!open || !activeConversationMenuId || chatFriend || growthView) return undefined
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest('[data-conversation-menu]')) return
+      setActiveConversationMenuId(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActiveConversationMenuId(null)
+    }
+    document.addEventListener('pointerdown', closeOnPointerDown)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerDown)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [activeConversationMenuId, chatFriend, growthView, open])
 
   useEffect(() => {
     friendsRef.current = friends
@@ -1926,7 +1948,10 @@ export function FriendDock({
                   <div
                     ref={chatListRef}
                     className="friend-dock-list friend-chat-list"
-                    onScroll={(event) => { chatListScrollTopRef.current = event.currentTarget.scrollTop }}
+                    onScroll={(event) => {
+                      chatListScrollTopRef.current = event.currentTarget.scrollTop
+                      if (activeConversationMenuId) setActiveConversationMenuId(null)
+                    }}
                   >
                     {loadingConversations ? <p className="friend-dock-empty">加载中…</p> : null}
                     {!loadingConversations && chatListError ? (
@@ -1946,9 +1971,18 @@ export function FriendDock({
                         key={conversation.id}
                         conversation={conversation}
                         onOpen={() => void openChat(conversation.otherUser, conversation.id)}
-                        onDelete={() => setDeleteChatTarget(conversation)}
-                        onTogglePin={() => void toggleConversationPin(conversation)}
+                        onDelete={() => {
+                          setActiveConversationMenuId(null)
+                          setDeleteChatTarget(conversation)
+                        }}
+                        onTogglePin={() => {
+                          setActiveConversationMenuId(null)
+                          void toggleConversationPin(conversation)
+                        }}
                         pinning={pinningConversationId === conversation.id}
+                        actionsOpen={activeConversationMenuId === conversation.id}
+                        onToggleActions={() => setActiveConversationMenuId((current) => current === conversation.id ? null : conversation.id)}
+                        onCloseActions={() => setActiveConversationMenuId(null)}
                       />
                     )) : null}
                     <div className="friend-dock-list-end" aria-hidden="true" />
@@ -2158,14 +2192,19 @@ function ConversationRow({
   onDelete,
   onTogglePin,
   pinning,
+  actionsOpen,
+  onToggleActions,
+  onCloseActions,
 }: {
   conversation: ConversationSummary
   onOpen: () => void
   onDelete: () => void
   onTogglePin: () => void
   pinning: boolean
+  actionsOpen: boolean
+  onToggleActions: () => void
+  onCloseActions: () => void
 }) {
-  const [actionsOpen, setActionsOpen] = useState(false)
   const longPressTimerRef = useRef<number | null>(null)
   const longPressTriggeredRef = useRef(false)
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -2235,7 +2274,6 @@ function ConversationRow({
         <span className="friend-chat-row-copy">
           <span className="friend-chat-row-heading">
             <strong><UserDisplayName name={name} uid={peer.uid} badges={peer.equippedBadges} badge={peer.equippedBadge} compact maxDisplay={1} /></strong>
-            {conversation.lastMessageAt ? <time>{formatConversationTime(conversation.lastMessageAt)}</time> : null}
           </span>
           <span className="friend-chat-row-preview">
             <span>{preview}</span>
@@ -2243,10 +2281,12 @@ function ConversationRow({
           </span>
         </span>
       </button>
-      <div className="friend-chat-row-actions">
+      <div className="friend-chat-row-meta">
+        {conversation.lastMessageAt ? <time>{formatConversationTime(conversation.lastMessageAt)}</time> : null}
+        <div className="friend-chat-row-actions" data-conversation-menu>
         <button
           type="button"
-          onClick={() => setActionsOpen((value) => !value)}
+          onClick={onToggleActions}
           aria-label={`更多${name}的聊天操作`}
           aria-haspopup="menu"
           aria-expanded={actionsOpen}
@@ -2258,7 +2298,7 @@ function ConversationRow({
               type="button"
               role="menuitem"
               onClick={() => {
-                setActionsOpen(false)
+                onCloseActions()
                 onTogglePin()
               }}
               disabled={pinning}
@@ -2269,13 +2309,14 @@ function ConversationRow({
               type="button"
               role="menuitem"
               onClick={() => {
-                setActionsOpen(false)
+                onCloseActions()
                 onDelete()
               }}
               title="删除聊天"
             >删除聊天</button>
           </div>
         ) : null}
+        </div>
       </div>
     </article>
   )

@@ -19,6 +19,32 @@ test('帖子分享入口使用三层站内 Share Sheet，不把原生分享作�
   assert.doesNotMatch(sheet, /navigator\.share/)
 })
 
+test('站内分享好友需要二次确认，选择和发送分为两个动作', () => {
+  const sheet = read('components/share/PostShareSheet.tsx')
+  const css = read('app/globals.css')
+  assert.match(sheet, /const \[selectedFriend, setSelectedFriend\] = useState<ShareRecipient \| null>\(null\)/)
+  assert.match(sheet, /onClick=\{\(\) => selectFriend\(friend\)\}/)
+  assert.match(sheet, /onClick=\{\(\) => selectFriend\(\{ id: friend\.id, uid: friend\.uid, displayName, avatarUrl: friend\.avatarUrl \}\)\}/)
+  assert.match(sheet, /className="post-share-confirm"/)
+  assert.match(sheet, /确认分享/)
+  assert.match(sheet, /onClick=\{\(\) => \{ void shareWithFriend\(selectedFriend\) \}\}/)
+  assert.match(sheet, /clientMessageId: createClientMessageId\(\)/)
+  assert.match(sheet, /const sendingIdRef = useRef<string \| null>\(null\)/)
+  assert.match(sheet, /setSelectedFriend\(null\)/)
+  assert.match(sheet, /post-share-confirm-error/)
+  assert.match(sheet, /发送中…/)
+  assert.match(css, /\.post-share-confirm-backdrop \{ position:fixed;/)
+})
+
+test('通讯录入口使用项目图标，不使用信封字符占位', () => {
+  const sheet = read('components/share/PostShareSheet.tsx')
+  const css = read('app/globals.css')
+  assert.match(sheet, /import \{ UiIcon \} from '@\/components\/UiIcon'/)
+  assert.match(sheet, /<UiIcon name="friends" \/>/)
+  assert.doesNotMatch(sheet, /✉/)
+  assert.match(css, /\.post-share-contact-icon svg \{ width:18px; height:18px; \}/)
+})
+
 test('站内帖子分享保存结构化 POST_SHARE 消息，并通过服务器记录分享任务', () => {
   const schema = read('prisma/schema.prisma')
   const migration = read('prisma/migrations/20260909120000_add_post_share_message/migration.sql')

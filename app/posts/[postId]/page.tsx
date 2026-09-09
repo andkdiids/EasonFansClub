@@ -1111,11 +1111,6 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           </div>
         ) : null}
         <ForumDiscoveryDetailTopbar
-          authorName={authorName}
-          authorAvatar={authorAvatar}
-          authorUid={post.User.uid}
-          authorBadges={equippedBadgeMap.get(post.User.id) || []}
-          authorBadge={equippedBadgeMap.get(post.User.id)?.[0] || null}
           shareTitle={shareTitle}
           shareText={shareText}
           shareCardData={shareCardData}

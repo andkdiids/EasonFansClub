@@ -24,6 +24,17 @@ test('帖子详情把管理员和作者操作接入移动端菜单，并保留�
   assert.match(actions, /router\.replace\(redirectTo\)/)
 })
 
+test('帖子详情移动顶栏只保留导航和操作，正文作者区没有额外占位间距', () => {
+  const topbarUsageStart = detail.indexOf('<ForumDiscoveryDetailTopbar')
+  const topbarUsageEnd = detail.indexOf('<div className="forum-discovery-detail-legacy-back">', topbarUsageStart)
+  const topbarUsage = detail.slice(topbarUsageStart, topbarUsageEnd)
+  assert.doesNotMatch(topbarUsage, /author(Name|Avatar|Uid|Badges|Badge)=/)
+  assert.match(topbar, /forum-discovery-detail-actions/)
+  assert.doesNotMatch(topbar, /UserDisplayName|forum-discovery-detail-author|forum-discovery-detail-avatar/)
+  assert.match(detail, /<UserDisplayName name=\{authorName\} uid=\{post\.User\.uid\} badges=\{equippedBadgeMap\.get\(post\.User\.id\) \|\| \[\]\}/)
+  assert.match(css, /body:has\(\.forum-discovery-detail-shell\) \.forum-discovery-detail-shell\.site-page-main > \.post-detail-article \{ margin-top:0; \}/)
+})
+
 test('帖子管理 API 只允许 post_manage 置顶和精华，作者只能删除自己的帖子', () => {
   assert.match(route, /const canManagePosts = await hasAdminPermission\(guard\.user, 'post_manage'\)/)
   assert.match(route, /if \(changesModeration && !canManagePosts\)/)

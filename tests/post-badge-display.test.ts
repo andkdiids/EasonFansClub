@@ -23,10 +23,10 @@ test('帖子详情的所有评论变体只显示第一枚已佩戴勋章', () =>
   assert.match(replies, /post-replies-hot-list[\s\S]*?maxDisplay=\{1\}/)
 })
 
-test('帖子顶部作者区不受评论区上限影响，资料卡和其他页面不改默认行为', () => {
-  assert.match(detail, /<ForumDiscoveryDetailTopbar[\s\S]*?authorBadges=\{equippedBadgeMap\.get\(post\.User\.id\) \|\| \[\]\}/)
+test('帖子详情移动顶栏不重复作者信息，正文作者区仍保留全部已佩戴勋章', () => {
   assert.match(detail, /<UserDisplayName name=\{authorName\}[\s\S]*?badges=\{equippedBadgeMap\.get\(post\.User\.id\) \|\| \[\]\} badge=\{equippedBadgeMap\.get\(post\.User\.id\)\?\.\[0\] \|\| null\} compact \/>/)
-  assert.match(topbar, /<UserDisplayName name=\{authorName\}[\s\S]*?badges=\{authorBadges\} badge=\{authorBadge\} compact \/>/)
+  assert.match(topbar, /forum-discovery-detail-actions/)
+  assert.doesNotMatch(topbar, /UserDisplayName|author(Name|Avatar|Uid|Badges|Badge)|forum-discovery-detail-author|forum-discovery-detail-avatar/)
   assert.doesNotMatch(detail, /authorBadges=.*maxDisplay=\{1\}/)
   assert.doesNotMatch(topbar, /maxDisplay=\{1\}/)
 })
