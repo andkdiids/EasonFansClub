@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { getCoreActiveTasks } from '@/lib/growth-tasks/registry'
-import { getCompletedCoreDayKeys, resolveTodayTaskProgress } from '@/lib/growth-tasks/progress'
+import { getCoreActiveTasks, getGrowthTask, getTodayTasks, type GrowthTaskDefinition } from '@/lib/growth-tasks/registry'
+import { getCompletedDailyTaskDayKeys, resolveTodayTaskProgress } from '@/lib/growth-tasks/progress'
 
 const TODAY = '2026-09-08'
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -25,12 +25,13 @@ function status(result: ReturnType<typeof resolveTodayTaskProgress>, code: strin
   return result.tasks.find((task) => task.code === code)
 }
 
-test('签到和处方事实在任务实例缺失时仍恢复今天状态，核心进度为 2/4', () => {
+test('签到和处方事实在任务实例缺失时仍恢复今天状态，今日进度为 2/7', () => {
   const result = resolveToday({
     businessFacts: { checkinDateKeys: [TODAY], prescriptionDateKeys: [TODAY] },
   })
   assert.equal(result.total, 7)
   assert.equal(result.completed, 2)
+  assert.equal(result.complete, false)
   assert.equal(result.coreTotal, 4)
   assert.equal(result.coreCompleted, 2)
   assert.equal(status(result, 'DAILY_CHECKIN')?.completed, true)
@@ -129,6 +130,7 @@ test('核心和三项主动奖励任务全部完成时返回 7/7 列表进度，
   })
   assert.equal(result.total, 7)
   assert.equal(result.completed, 7)
+  assert.equal(result.complete, true)
   assert.equal(result.coreTotal, 4)
   assert.equal(result.coreCompleted, 4)
 })
@@ -176,24 +178,127 @@ test('进度型任务统一以 current >= target 决定完成状态', () => {
   assert.equal(status(partialActions, 'PUBLISH_POST_ACTIVE')?.completed, false)
 })
 
+test('顶部今日统计按七项每日任务动态计算，部分完成不计为整日完成', () => {
+  const empty = resolveToday()
+  assert.deepEqual([empty.completed, empty.total, empty.complete], [0, 7, false])
+
+  const one = resolveToday({ businessFacts: { checkinDateKeys: [TODAY], prescriptionDateKeys: [] } })
+  assert.deepEqual([one.completed, one.total, one.complete], [1, 7, false])
+
+  const six = resolveToday({
+    businessFacts: {
+      checkinDateKeys: [TODAY],
+      prescriptionDateKeys: [TODAY],
+      commentRewardCountsByDate: new Map([[TODAY, 10]]),
+      gameCompletionCountsByDate: new Map([[TODAY, 1]]),
+    },
+    actionProgress: [
+      { taskCode: 'POST_LIKE_ACTIVE', progress: 5, earned: 5, cap: 5 },
+      { taskCode: 'CONTENT_SHARE_ACTIVE', progress: 1, earned: 2, cap: 1 },
+      { taskCode: 'PUBLISH_POST_ACTIVE', progress: 0, earned: 0, cap: 1 },
+    ],
+  })
+  assert.deepEqual([six.completed, six.total, six.complete], [6, 7, false])
+
+  const seven = resolveToday({
+    businessFacts: {
+      checkinDateKeys: [TODAY],
+      prescriptionDateKeys: [TODAY],
+      commentRewardCountsByDate: new Map([[TODAY, 10]]),
+      gameCompletionCountsByDate: new Map([[TODAY, 1]]),
+    },
+    actionProgress: [
+      { taskCode: 'POST_LIKE_ACTIVE', progress: 5, earned: 5, cap: 5 },
+      { taskCode: 'CONTENT_SHARE_ACTIVE', progress: 1, earned: 2, cap: 1 },
+      { taskCode: 'PUBLISH_POST_ACTIVE', progress: 1, earned: 2, cap: 1 },
+    ],
+  })
+  assert.deepEqual([seven.completed, seven.total, seven.complete], [7, 7, true])
+})
+
+test('停用今日任务会从同一任务解析器的分母和完成条件中移除', () => {
+  const definitions = getTodayTasks().map((task) => task.code === 'CONTENT_SHARE_ACTIVE' ? { ...task, enabled: false } : task)
+  const result = resolveTodayTaskProgress({
+    dateKey: TODAY,
+    completionRows: [],
+    taskDefinitions: definitions,
+    businessFacts: { checkinDateKeys: [], prescriptionDateKeys: [] },
+    actionProgress: [],
+  })
+  assert.equal(result.total, 6)
+  assert.equal(result.tasks.some((task) => task.code === 'CONTENT_SHARE_ACTIVE'), false)
+})
+
+test('新增第八项每日任务时今日分母自动变为八项', () => {
+  const extraTask = {
+    ...getGrowthTask('LISTEN_DUEL_BRANCH')!,
+    kind: 'active' as const,
+    surface: 'action' as const,
+  } satisfies GrowthTaskDefinition
+  const definitions = [...getTodayTasks(), extraTask]
+  const result = resolveTodayTaskProgress({
+    dateKey: TODAY,
+    completionRows: [],
+    taskDefinitions: definitions,
+    businessFacts: { checkinDateKeys: [], prescriptionDateKeys: [] },
+    actionProgress: [],
+  })
+  assert.equal(result.total, 8)
+  assert.equal(result.completed, 0)
+  assert.equal(result.complete, false)
+})
+
 test('周进度用真实签到和处方日期补齐同一天，而不写入任务完成记录', () => {
   const rows = [
     { taskCode: 'DAILY_GAME', periodKey: TODAY },
     { taskCode: 'DAILY_COMMENT', periodKey: TODAY },
   ]
-  const completedDays = getCompletedCoreDayKeys('2026-09-07', rows, new Date('2026-09-08T04:00:00.000Z'), {
+  const completedDays = getCompletedDailyTaskDayKeys('2026-09-07', rows, new Date('2026-09-08T04:00:00.000Z'), {
     checkinDateKeys: [TODAY],
     prescriptionDateKeys: [TODAY],
     commentRewardCountsByDate: new Map([[TODAY, 10]]),
+    actionProgressCountsByDate: new Map([[TODAY, new Map([
+      ['POST_LIKE_ACTIVE', 5],
+      ['CONTENT_SHARE_ACTIVE', 1],
+      ['PUBLISH_POST_ACTIVE', 1],
+    ])]]),
   })
   assert.equal(completedDays.has(TODAY), true)
 
-  const partialDay = getCompletedCoreDayKeys('2026-09-07', rows, new Date('2026-09-08T04:00:00.000Z'), {
+  const partialDay = getCompletedDailyTaskDayKeys('2026-09-07', rows, new Date('2026-09-08T04:00:00.000Z'), {
     checkinDateKeys: [TODAY],
     prescriptionDateKeys: [TODAY],
     commentRewardCountsByDate: new Map([[TODAY, 5]]),
+    actionProgressCountsByDate: new Map([[TODAY, new Map([
+      ['POST_LIKE_ACTIVE', 5],
+      ['CONTENT_SHARE_ACTIVE', 1],
+      ['PUBLISH_POST_ACTIVE', 1],
+    ])]]),
   })
   assert.equal(partialDay.has(TODAY), false)
+})
+
+test('同一天重复解析周进度只返回一个完成日期', () => {
+  const dayKey = '2026-09-15'
+  const rows = getTodayTasks().flatMap((task): Array<{ taskCode: string; periodKey: string }> => task.dailyCap
+    ? Array.from({ length: task.dailyCap }, () => ({ taskCode: task.code, periodKey: dayKey }))
+    : [{ taskCode: task.code, periodKey: dayKey }])
+  const facts = {
+    checkinDateKeys: [dayKey],
+    prescriptionDateKeys: [dayKey],
+    commentRewardCountsByDate: new Map([[dayKey, 10]]),
+    gameCompletionCountsByDate: new Map([[dayKey, 1]]),
+    actionProgressCountsByDate: new Map([[dayKey, new Map([
+      ['POST_LIKE_ACTIVE', 5],
+      ['CONTENT_SHARE_ACTIVE', 1],
+      ['PUBLISH_POST_ACTIVE', 1],
+    ])]]),
+  }
+  const first = getCompletedDailyTaskDayKeys('2026-09-14', rows, new Date('2026-09-15T04:00:00.000Z'), facts)
+  const second = getCompletedDailyTaskDayKeys('2026-09-14', rows, new Date('2026-09-15T04:00:00.000Z'), facts)
+  assert.deepEqual([...first], [dayKey])
+  assert.deepEqual([...second], [dayKey])
+  assert.equal(second.size, 1)
 })
 
 test('overview 读取业务事实但不在读取时补任务、派奖或通知', () => {
@@ -211,11 +316,11 @@ test('overview 读取业务事实但不在读取时补任务、派奖或通知',
   assert.doesNotMatch(overview, /notification/i)
 })
 
-test('前端只消费服务端的核心今日进度，并将全部今日任务渲染为一个列表', () => {
+test('前端只消费服务端的完整今日进度，并将全部今日任务渲染为一个列表', () => {
   const panel = read('components/GrowthPanel.tsx')
   assert.match(panel, /today: \{\s+dateKey: string\s+total: number\s+completed: number/)
-  assert.match(panel, /overview\.today\.coreCompleted/)
-  assert.match(panel, /overview\.today\.coreTotal/)
+  assert.match(panel, /overview\.today\.completed/)
+  assert.match(panel, /overview\.today\.total/)
   assert.match(panel, /overview\.today\.items\.map/)
   assert.doesNotMatch(panel, /today\.activeActions/)
   assert.doesNotMatch(panel, />主动任务</)

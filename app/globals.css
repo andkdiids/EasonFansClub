@@ -8690,6 +8690,12 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
   font-size: 10px;
   font-weight: 900;
 }
+.growth-reward-rule-group-description {
+  margin: 0 0 5px;
+  color: var(--foreground-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
 .growth-reward-rule-group .growth-rule-list {
   margin-top: 0;
 }

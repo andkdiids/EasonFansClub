@@ -64,6 +64,8 @@ export type GrowthTaskDefinition = {
   description: string
   kind: GrowthTaskKind
   surface?: GrowthTaskSurface
+  /** Disabled tasks stay in the registry but do not participate in today's panel or denominator. */
+  enabled?: boolean
   frequency: GrowthFrequency
   reward: number
   dailyCap?: number
@@ -98,6 +100,7 @@ export type GrowthRewardRule = {
 export type GrowthRewardRuleGroup = {
   key: 'daily' | 'passive' | 'weekly'
   title: string
+  description?: string
   items: GrowthRewardRule[]
 }
 
@@ -169,6 +172,15 @@ export function getTasksByKind(kind: GrowthTaskKind) {
   return GROWTH_TASKS.filter((task) => task.kind === kind)
 }
 
+/**
+ * The single registry-owned definition of the tasks shown under today's
+ * progress. Keeping this separate from the core/action presentation split
+ * prevents the four core tasks from becoming an accidental denominator.
+ */
+export function getTodayTasks(tasks: readonly GrowthTaskDefinition[] = GROWTH_TASKS) {
+  return tasks.filter((task) => task.enabled !== false && task.kind === 'active' && task.frequency === 'daily')
+}
+
 const frequencyOrder: Record<GrowthFrequency, number> = { daily: 0, weekly: 1, once: 2 }
 
 /** Keep a task kind's configured relative order while grouping its cadence. */
@@ -187,12 +199,12 @@ export function getTasksBySurface(surface: GrowthTaskSurface) {
   return GROWTH_TASKS.filter((task) => task.surface === surface)
 }
 
-export function getCoreActiveTasks() {
-  return GROWTH_TASKS.filter((task) => task.kind === 'active' && task.surface === 'core')
+export function getCoreActiveTasks(tasks: readonly GrowthTaskDefinition[] = GROWTH_TASKS) {
+  return getTodayTasks(tasks).filter((task) => task.surface === 'core')
 }
 
-export function getActiveActionTasks() {
-  return GROWTH_TASKS.filter((task) => task.kind === 'active' && task.surface === 'action')
+export function getActiveActionTasks(tasks: readonly GrowthTaskDefinition[] = GROWTH_TASKS) {
+  return getTodayTasks(tasks).filter((task) => task.surface === 'action')
 }
 
 type RewardRuleOverrides = {
@@ -326,11 +338,10 @@ function getPassiveRewardRules() {
  */
 export function getRewardRuleGroups(): GrowthRewardRuleGroup[] {
   return [
-    { key: 'daily', title: '今天只做一件事', items: [...getDailyRewardRules(), ...getActiveRewardRules()] },
-    { key: 'passive', title: '之外', items: getPassiveRewardRules() },
     {
       key: 'weekly',
       title: '本周奖励',
+      description: '每天完成「今天只做一件事」中的全部任务，即计入本周完成 1 天；当天缺少任意一项未完成，则不增加本周进度。',
       items: WEEKLY_MILESTONES.map((milestone) => ({
         code: `WEEKLY_MILESTONE_${milestone.days}`,
         title: `完成 ${milestone.days} 天`,
@@ -340,6 +351,8 @@ export function getRewardRuleGroups(): GrowthRewardRuleGroup[] {
         milestoneDays: milestone.days,
       })),
     },
+    { key: 'daily', title: '今天只做一件事', items: [...getDailyRewardRules(), ...getActiveRewardRules()] },
+    { key: 'passive', title: '之外', items: getPassiveRewardRules() },
   ]
 }
 

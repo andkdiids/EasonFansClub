@@ -12,14 +12,16 @@ import {
   getActiveActionTasks,
   getCoreActiveTasks,
   getPassiveTasks,
+  getTodayTasks,
   getTasksByKind,
   getRewardRuleGroups,
 } from '@/lib/growth-tasks/registry'
-import { getCompletedCoreDayKeys, getLaunchGraceDayForWeek } from '@/lib/growth-tasks/progress'
+import { getCompletedDailyTaskDayKeys, getLaunchGraceDayForWeek } from '@/lib/growth-tasks/progress'
 
 test('统一成长注册表包含四项核心、三项主动行为、十一项之外和十六项新生活', () => {
   assert.equal(getCoreActiveTasks().length, 4)
   assert.equal(getActiveActionTasks().length, 3)
+  assert.equal(getTodayTasks().length, 7)
   assert.equal(getTasksByKind('active').length, 7)
   assert.equal(getTasksByKind('passive').length, 11)
   assert.equal(getTasksByKind('newLife').length, 16)
@@ -49,23 +51,52 @@ test('非资料类新生活项目从统一上线时间开始，资料完善允�
   assert.equal(firstPost?.eligibleFrom.toISOString(), TASK_SYSTEM_LAUNCH_AT.toISOString())
 })
 
-test('上线补偿只在 2026-09-07 这一周生效，且不伪造核心任务完成记录', () => {
-  const coreCodes = getCoreActiveTasks().map((task) => task.code)
+test('上线补偿只在 2026-09-07 这一周生效，且完整七项每日任务才算完成一天', () => {
+  const todayCodes = getTodayTasks().map((task) => task.code)
   const tuesday = new Date('2026-09-08T04:00:00.000Z')
   assert.equal(getLaunchGraceDayForWeek('2026-09-07', tuesday), '2026-09-07')
   assert.equal(getLaunchGraceDayForWeek('2026-09-14', tuesday), null)
 
-  const mondayOnly = getCompletedCoreDayKeys('2026-09-07', [], tuesday)
+  const mondayOnly = getCompletedDailyTaskDayKeys('2026-09-07', [], tuesday)
   assert.deepEqual([...mondayOnly], ['2026-09-07'])
 
-  const threeOfFour = coreCodes.slice(0, 3).map((taskCode) => ({ taskCode, periodKey: '2026-09-08' }))
-  assert.equal(getCompletedCoreDayKeys('2026-09-07', threeOfFour, tuesday).size, 1)
+  const threeOfSeven = todayCodes.slice(0, 3).map((taskCode) => ({ taskCode, periodKey: '2026-09-08' }))
+  assert.equal(getCompletedDailyTaskDayKeys('2026-09-07', threeOfSeven, tuesday).size, 1)
 
-  const fourOfFour = coreCodes.flatMap((taskCode): Array<{ taskCode: string; periodKey: string }> => taskCode === 'DAILY_COMMENT'
-    ? Array.from({ length: 10 }, () => ({ taskCode, periodKey: '2026-09-08' }))
-    : [{ taskCode, periodKey: '2026-09-08' }])
-  assert.deepEqual([...getCompletedCoreDayKeys('2026-09-07', fourOfFour, tuesday)].sort(), ['2026-09-07', '2026-09-08'])
-  assert.equal(getCompletedCoreDayKeys('2026-09-14', [], new Date('2026-09-14T04:00:00.000Z')).size, 0)
+  const sevenOfSeven = getTodayTasks().flatMap((task): Array<{ taskCode: string; periodKey: string }> => task.dailyCap
+    ? Array.from({ length: task.dailyCap }, () => ({ taskCode: task.code, periodKey: '2026-09-08' }))
+    : [{ taskCode: task.code, periodKey: '2026-09-08' }])
+  assert.deepEqual([...getCompletedDailyTaskDayKeys('2026-09-07', sevenOfSeven, tuesday)].sort(), ['2026-09-07', '2026-09-08'])
+  assert.equal(getCompletedDailyTaskDayKeys('2026-09-14', [], new Date('2026-09-14T04:00:00.000Z')).size, 0)
+})
+
+test('奖励规则把本周奖励放在最顶部，并说明必须完成当天全部任务', () => {
+  const groups = getRewardRuleGroups()
+  assert.deepEqual(groups.map((group) => group.key), ['weekly', 'daily', 'passive'])
+  assert.equal(groups[0]?.title, '本周奖励')
+  assert.match(groups[0]?.description || '', /每天完成「今天只做一件事」中的全部任务/)
+  assert.match(groups[0]?.description || '', /缺少任意一项则不增加本周进度|缺少任意一项未完成，则不增加本周进度/)
+  assert.deepEqual(groups[0]?.items.map((item) => [item.milestoneDays, item.amount]), [[3, 27], [5, 50], [7, 74]])
+})
+
+/* Keep this explicit construction close to the registry tests as a guard
+ * against accidentally reintroducing a hardcoded four-task denominator. */
+test('today task resolver has no fixed four-task denominator', () => {
+  const panel = readFileSync('components/GrowthPanel.tsx', 'utf8')
+  const service = readFileSync('lib/growth-tasks/service.ts', 'utf8')
+  assert.match(service, /getTodayTasks\(\)/)
+  assert.match(panel, /overview\.today\.completed/)
+  assert.match(panel, /overview\.today\.total/)
+  assert.doesNotMatch(panel, /overview\.today\.coreCompleted/)
+  assert.doesNotMatch(panel, /overview\.today\.coreTotal/)
+})
+
+/* Legacy four-task construction intentionally remains absent: a partial core
+ * set must not complete a day now that action tasks are part of today's set. */
+test('partial core rows alone do not complete a day', () => {
+  const partialCoreRows = getCoreActiveTasks().map((task) => ({ taskCode: task.code, periodKey: '2026-09-08' }))
+  const tuesday = new Date('2026-09-08T04:00:00.000Z')
+  assert.equal(getCompletedDailyTaskDayKeys('2026-09-07', partialCoreRows, tuesday).size, 1)
 })
 
 test('新成长入口不把“任务”作为前台产品文案', () => {
@@ -92,8 +123,8 @@ test('新成长入口不把“任务”作为前台产品文案', () => {
 
 test('奖励规则由统一注册表完整生成，覆盖今天只做一件事、之外和周奖励', () => {
   const groups = getRewardRuleGroups()
-  assert.deepEqual(groups.map((group) => group.key), ['daily', 'passive', 'weekly'])
-  assert.deepEqual(groups.map((group) => group.items.length), [7, 11, 3])
+  assert.deepEqual(groups.map((group) => group.key), ['weekly', 'daily', 'passive'])
+  assert.deepEqual(groups.map((group) => group.items.length), [3, 7, 11])
   assert.equal(groups.find((group) => group.key === 'daily')?.title, '今天只做一件事')
   const active = groups.find((group) => group.key === 'daily')?.items.find((item) => item.code === 'PUBLISH_POST_ACTIVE')
   assert.equal(active?.amount, 2)

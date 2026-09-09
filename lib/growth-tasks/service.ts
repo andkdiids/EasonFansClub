@@ -7,16 +7,16 @@ import {
   TASK_SYSTEM_LAUNCH_AT,
   WEEKLY_MILESTONES,
   getActiveActionTasks,
-  getCoreActiveTasks,
   getEconomyReport,
   getGrowthTask,
   getPassiveTasks,
   getRewardRuleGroups,
   getTasksByKind,
+  getTodayTasks,
   resolveGrowthTaskDestination,
   type GrowthTaskCode,
 } from './registry'
-import { getCompletedCoreDayKeys, resolveTodayTaskProgress } from './progress'
+import { getCompletedDailyTaskDayKeys, resolveTodayTaskProgress } from './progress'
 import { isQualifiedPublishedPost } from '@/lib/post-moderation'
 import { isProfileGenderComplete } from '@/lib/gender'
 
@@ -387,23 +387,44 @@ export async function claimGrowthTask(userId: string, taskCode: GrowthTaskCode, 
 }
 
 async function completedActiveDays(tx: GrowthTransaction, userId: string, weekKey: string, now = new Date()) {
-  const coreCodes = getCoreActiveTasks().map((task) => task.code)
+  const todayTasks = getTodayTasks()
+  const todayTaskCodes = todayTasks.map((task) => task.code)
+  const actionTaskCodes = todayTasks.filter((task) => task.surface === 'action').map((task) => task.code)
+  const actionTaskCodeSet = new Set<string>(actionTaskCodes)
   const weekDateKeys = dayKeysForWeek(weekKey)
-  const [rows, checkIns, prescriptions, commentRewards] = await Promise.all([
-    tx.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: coreCodes }, periodKey: { in: weekDateKeys } }, select: { taskCode: true, periodKey: true } }),
+  const range = weekRange(weekKey)
+  const [rows, checkIns, prescriptions, commentRewards, actionRewards] = await Promise.all([
+    tx.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: todayTaskCodes }, periodKey: { in: weekDateKeys } }, select: { taskCode: true, periodKey: true } }),
     tx.checkIn.findMany({ where: { userId, checkinDateKey: { in: weekDateKeys } }, select: { checkinDateKey: true } }),
     tx.entertainmentDailyDraw.findMany({ where: { userId, dateKey: { in: weekDateKeys } }, select: { dateKey: true } }),
-    tx.pointLog.findMany({ where: { userId, action: 'COMMENT_POST', points: { gt: 0 }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { dateKey: true, createdAt: true } }),
+    tx.pointLog.findMany({ where: { userId, action: 'COMMENT_POST', points: { gt: 0 }, createdAt: { gte: range.start, lt: range.end } }, select: { dateKey: true, createdAt: true } }),
+    tx.pointLog.findMany({ where: { userId, growthTaskCode: { in: actionTaskCodes }, points: { gt: 0 }, createdAt: { gte: range.start, lt: range.end } }, select: { growthTaskCode: true, dateKey: true, createdAt: true } }),
   ])
   const commentRewardCountsByDate = new Map<string, number>(weekDateKeys.map((dateKey) => [dateKey, 0]))
   for (const row of commentRewards) {
     const rewardDateKey = row.dateKey || getShanghaiDateKey(row.createdAt)
     commentRewardCountsByDate.set(rewardDateKey, (commentRewardCountsByDate.get(rewardDateKey) || 0) + 1)
   }
-  return getCompletedCoreDayKeys(weekKey, rows, now, {
+  const actionProgressCountsByDate = new Map<string, Map<string, number>>()
+  const addActionProgress = (dateKey: string, taskCode: string) => {
+    if (!weekDateKeys.includes(dateKey)) return
+    const counts = actionProgressCountsByDate.get(dateKey) || new Map<string, number>()
+    counts.set(taskCode, (counts.get(taskCode) || 0) + 1)
+    actionProgressCountsByDate.set(dateKey, counts)
+  }
+  for (const row of actionRewards) {
+    if (row.growthTaskCode && row.growthTaskCode !== 'PUBLISH_POST_ACTIVE') {
+      addActionProgress(row.dateKey || getShanghaiDateKey(row.createdAt), row.growthTaskCode)
+    }
+  }
+  for (const row of rows) {
+    if (actionTaskCodeSet.has(row.taskCode)) addActionProgress(row.periodKey, row.taskCode)
+  }
+  return getCompletedDailyTaskDayKeys(weekKey, rows, now, {
     checkinDateKeys: checkIns.map((row) => row.checkinDateKey),
     prescriptionDateKeys: prescriptions.map((row) => row.dateKey),
     commentRewardCountsByDate,
+    actionProgressCountsByDate,
   }).size
 }
 
@@ -486,8 +507,8 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
       .filter((row) => row.action === 'COMMENT_POST' && row.points > 0 && (row.dateKey || getShanghaiDateKey(row.createdAt)) === dateKey)
       .reduce((sum, row) => sum + row.points, 0),
   }
-  const active = getCoreActiveTasks()
-  const activeActions = getActiveActionTasks()
+  const todayTasks = getTodayTasks()
+  const activeActions = getActiveActionTasks(todayTasks)
   const passive = getPassiveTasks()
   const activeActionItems = activeActions.map((task) => {
     const positiveRows = pointLogs.filter((row) => row.growthTaskCode === task.code && row.points > 0 && row.createdAt >= todayRange.start && row.createdAt < todayRange.end)
@@ -510,11 +531,31 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
       todayReward: earned,
     }
   })
+  const actionTaskCodes = new Set(activeActions.map((task) => task.code))
+  const actionProgressCountsByDate = new Map<string, Map<string, number>>()
+  const addActionProgress = (dateKey: string, taskCode: string) => {
+    if (!weekDateKeys.includes(dateKey) || !actionTaskCodes.has(taskCode as GrowthTaskCode)) return
+    const counts = actionProgressCountsByDate.get(dateKey) || new Map<string, number>()
+    counts.set(taskCode, (counts.get(taskCode) || 0) + 1)
+    actionProgressCountsByDate.set(dateKey, counts)
+  }
+  // Likes and shares expose progress through positive reward events. Publish
+  // progress is based on its completion rows so a valid post remains visible
+  // even when its monetary cap was already exhausted.
+  for (const row of pointLogs) {
+    if (row.points > 0 && row.growthTaskCode && row.growthTaskCode !== 'PUBLISH_POST_ACTIVE') {
+      addActionProgress(getShanghaiDateKey(row.createdAt), row.growthTaskCode)
+    }
+  }
+  for (const row of completions) {
+    if (row.taskCode === 'PUBLISH_POST_ACTIVE') addActionProgress(row.periodKey, row.taskCode)
+  }
   const businessFacts = {
     checkinDateKeys: checkIns.map((row) => row.checkinDateKey),
     prescriptionDateKeys: prescriptions.map((row) => row.dateKey),
     commentRewardCountsByDate,
     gameCompletionCountsByDate,
+    actionProgressCountsByDate,
   }
   const todayProgress = resolveTodayTaskProgress({
     dateKey,
@@ -523,7 +564,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     actionProgress: activeActionItems.map((item) => ({ taskCode: item.code, progress: item.progress, earned: item.earned, cap: item.cap })),
   })
   const statusByCode = new Map(todayProgress.tasks.map((item) => [item.code, item]))
-  const todayItems = [...active, ...activeActions].map((task) => {
+  const todayItems = todayTasks.map((task) => {
     const status = statusByCode.get(task.code)
     const isAction = task.surface === 'action'
     return {
@@ -539,7 +580,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
       todayReward: isAction ? status?.earned || 0 : activeRewardByCode[task.code] || 0,
     }
   })
-  const activeDays = getCompletedCoreDayKeys(weekKey, completions, now, businessFacts).size
+  const activeDays = getCompletedDailyTaskDayKeys(weekKey, completions, now, businessFacts).size
   const passiveItems = passive.map((task) => {
     if (task.code === 'POST_COMMENT_RECEIVED') {
       const progress = Math.min(COMMUNITY_REWARD_LIMITS.postCommentReceivedDaily, task.dailyCap || 0, receivedCommentCountsByDate.get(dateKey) || 0)
@@ -603,10 +644,11 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     taskSystemLaunchAt: TASK_SYSTEM_LAUNCH_AT.toISOString(),
     today: {
       dateKey,
-      // Bonus actions remain visible in the same list but never change the
-      // core daily-completion denominator used by the weekly milestones.
-      total: todayProgress.coreTotal,
-      completed: todayProgress.coreCompleted,
+      // The top counter and the list are both based on the same enabled daily
+      // task set. Core/action fields remain as a diagnostic breakdown for
+      // existing consumers, but are not used for day completion.
+      total: todayProgress.total,
+      completed: todayProgress.completed,
       coreTotal: todayProgress.coreTotal,
       coreCompleted: todayProgress.coreCompleted,
       bonusTotal: todayProgress.bonusTotal,
@@ -614,7 +656,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
       listTotal: todayProgress.total,
       listCompleted: todayProgress.completed,
       items: todayItems,
-      complete: todayProgress.coreCompleted === todayProgress.coreTotal,
+      complete: todayProgress.complete,
     },
     passive: { dateKey, weekKey, items: passiveItems },
     week: {

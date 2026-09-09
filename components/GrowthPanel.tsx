@@ -62,7 +62,7 @@ type GrowthOverview = {
     milestones: Array<{ days: number; reward: number; claimable: boolean; claimed: boolean }>
   }
   newLife: { total: number; completedCount: number; items: GrowthItem[] }
-  rewardRules: Array<{ key: string; title: string; items: GrowthRewardRule[] }>
+  rewardRules: Array<{ key: string; title: string; description?: string; items: GrowthRewardRule[] }>
 }
 
 function formatTodayProgress(item: GrowthItem) {
@@ -246,8 +246,8 @@ export function GrowthPanel({
     )
   }
 
-  const completedToday = overview.today.coreCompleted
-  const totalCoreTasks = overview.today.coreTotal
+  const completedToday = overview.today.completed
+  const totalTodayTasks = overview.today.total
   const weekPercent = Math.min(100, overview.week.completedDays / Math.max(1, overview.week.totalDays) * 100)
 
   return (
@@ -255,7 +255,7 @@ export function GrowthPanel({
       {view === 'today' ? (
         <>
           <section className="growth-today-summary" aria-label="今日与本周进度">
-            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {totalCoreTasks}</strong></div>
+            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {totalTodayTasks}</strong></div>
             <div className="growth-summary-line"><span>本周进度</span><strong>{overview.week.completedDays} / {overview.week.totalDays} 天</strong></div>
             <div className="growth-week-track" role="progressbar" aria-valuemin={0} aria-valuemax={overview.week.totalDays} aria-valuenow={overview.week.completedDays} aria-label={`本周进度 ${overview.week.completedDays} / ${overview.week.totalDays} 天`}>
               <span style={{ width: `${weekPercent}%` }} />
@@ -268,6 +268,7 @@ export function GrowthPanel({
               {overview.rewardRules.map((group) => (
                 <section className="growth-reward-rule-group" key={group.key}>
                   <h3>{group.title}</h3>
+                  {group.description ? <p className="growth-reward-rule-group-description">{group.description}</p> : null}
                   <div className="growth-rule-list">
                     {group.items.map((rule) => {
                       const caps = formatRuleCaps(rule)

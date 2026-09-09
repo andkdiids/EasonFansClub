@@ -302,6 +302,9 @@ export type UnifiedNotification = {
   category: string
   title: string
   content: string | null
+  imageUrl: string | null
+  activityId: string | null
+  activityTitle: string | null
   key?: string | null
   link: string | null
   targetUrl: string | null
@@ -894,6 +897,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         type: true,
         title: true,
         content: true,
+        imageUrl: true,
+        activityId: true,
         link: true,
         key: true,
         isRead: true,
@@ -921,6 +926,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
             Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
           },
         },
+        Activity: { select: { title: true } },
       },
     }) : [],
     systemIds.length ? prisma.systemNotification.findMany({
@@ -1107,6 +1113,9 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         category: getNotificationCategory(item.type, link, item.key),
         title: likeTitle || resolveNotificationActorText(item.title, actorName) || getNotificationTypeLabel(item.type, link, 'personal', item.key),
         content: likeTitle ? null : resolveNotificationActorText(item.content, actorName),
+        imageUrl: publicImageUrl(item.imageUrl),
+        activityId: item.activityId,
+        activityTitle: item.Activity?.title || null,
         key: item.key,
         link,
         targetUrl: link,
@@ -1148,6 +1157,9 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       category: getNotificationCategory(item.type, targetUrl),
       title: item.title || getNotificationTypeLabel(item.type, targetUrl, 'system'),
       content: item.content || null,
+      imageUrl: null,
+      activityId: null,
+      activityTitle: null,
       link: targetUrl,
       targetUrl,
       actorName: null,
@@ -1408,6 +1420,9 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       category: getNotificationCategory(item.type, targetUrl),
       title: item.title,
       content: item.content,
+      imageUrl: null,
+      activityId: null,
+      activityTitle: null,
       link: targetUrl,
       targetUrl,
       actorName: null,

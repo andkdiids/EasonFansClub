@@ -82,6 +82,8 @@ model Activity {
   UpdatedBy                    User?                          @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   ActivityFavorite             ActivityFavorite[]
   ActivityRegistration         ActivityRegistration[]
+  ActivityNotificationBatches  ActivityNotificationBatch[]    @relation("ActivityNotificationBatches")
+  Notifications                Notification[]                 @relation("ActivityNotifications")
   ActivityRegistrationQuestion ActivityRegistrationQuestion[]
   ActivityReward               ActivityReward[]
   linkedMaterial               MaterialRedemption?            @relation("ActivityMaterialLink")
@@ -151,6 +153,26 @@ model ActivityRegistration {
   @@index([checkInSource, verifiedAt])
   @@index([activityId, registrationDeviceId], map: "ActivityRegistration_activityDevice_idx")
   @@index([activityId, registrationIpHash, registeredAt], map: "ActivityRegistration_activityIpHashRegisteredAt_idx")
+}
+
+model ActivityNotificationBatch {
+  id             String   @id @default(cuid())
+  activityId     String
+  title          String   @db.VarChar(191)
+  content        String   @db.Text
+  imageUrl       String?  @db.Text
+  idempotencyKey String   @unique @db.VarChar(191)
+  status         String   @default("SENDING") @db.VarChar(16)
+  recipientCount Int
+  sentCount      Int      @default(0)
+  skippedCount   Int      @default(0)
+  createdById    String
+  createdAt      DateTime @default(now())
+  Activity       Activity @relation("ActivityNotificationBatches", fields: [activityId], references: [id], onDelete: Restrict)
+  CreatedBy      User     @relation("ActivityNotificationBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([activityId, createdAt])
+  @@index([createdById, createdAt])
 }
 
 model ActivityRegistrationQuestion {
@@ -3038,8 +3060,10 @@ model Notification {
   id                                  String           @id @default(cuid())
   type                                NotificationType
   title                               String
-  content                             String?
+  content                             String?          @db.Text
+  imageUrl                            String?          @db.Text
   link                                String?
+  activityId                          String?
   isRead                              Boolean          @default(false)
   createdAt                           DateTime         @default(now())
   readAt                              DateTime?
@@ -3049,11 +3073,13 @@ model Notification {
   completedAt                         DateTime?
   User_Notification_actorIdToUser     User?            @relation("Notification_actorIdToUser", fields: [actorId], references: [id])
   User_Notification_recipientIdToUser User             @relation("Notification_recipientIdToUser", fields: [recipientId], references: [id], onDelete: Cascade)
+  Activity                            Activity?        @relation("ActivityNotifications", fields: [activityId], references: [id], onDelete: SetNull)
 
   @@unique([recipientId, key])
   @@index([recipientId, isRead, createdAt])
   @@index([recipientId, readAt, createdAt])
   @@index([type])
+  @@index([activityId, createdAt])
 }
 
 model OnlineSession {
@@ -4322,6 +4348,7 @@ model User {
   AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]                   @relation("AdminActionLog_targetUserIdToUser")
   UserOperationLog_UserOperationLog_userIdToUser         UserOperationLog[]                 @relation("UserOperationLogUser")
   UserOperationLog_UserOperationLog_operatorUserIdToUser UserOperationLog[]                 @relation("UserOperationLogOperator")
+  ActivityNotificationBatchesCreated                     ActivityNotificationBatch[]        @relation("ActivityNotificationBatchCreatedBy")
   AdminPermission                                        AdminPermission[]
   MaterialRedemptionsCreated                             MaterialRedemption[]               @relation("MaterialRedemptionCreatedByAdmin")
   MaterialRedemptionOrders                               MaterialRedemptionOrder[]          @relation("MaterialRedemptionOrderUser")

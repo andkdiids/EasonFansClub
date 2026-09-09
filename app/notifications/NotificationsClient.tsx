@@ -11,6 +11,7 @@ import { SafeAvatar } from '@/components/SafeAvatar'
 import { Pagination } from '@/components/ui/Pagination'
 import { useNotificationSummary } from '@/components/NotificationProvider'
 import { getNotificationTarget } from '@/lib/notification-target'
+import { ImageViewer } from '@/components/ImageViewer'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { parseNotificationCategory, type NotificationCategory } from '@/lib/notification-categories'
@@ -1037,6 +1038,8 @@ export function NotificationsClient({
             ) : !isReplyNotification && fallbackContent ? (
               <p className={`mt-0.5 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600 ${isUserReward ? '' : 'line-clamp-2'}`}>{fallbackContent}</p>
             ) : null}
+            {item.activityTitle ? <p className="mt-1 text-xs font-black text-violet-700">活动：{item.activityTitle}</p> : null}
+            {item.imageUrl ? <div className="mt-2 max-w-full" onClick={(event) => event.stopPropagation()}><ImageViewer src={item.imageUrl} alt={`${item.activityTitle || '活动'}通知图片`} imageClassName="max-h-40 w-full rounded-lg object-contain" buttonClassName="block max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-slate-50 text-left" /></div> : null}
 
             {/* 智能入口：不同通知提供不同快捷入口（账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动） */}
             {smartEntry?.action === 'dock' ? (

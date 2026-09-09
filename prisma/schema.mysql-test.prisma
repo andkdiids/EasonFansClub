@@ -45,6 +45,7 @@ model User {
   securityLogs                    AccountSecurityLog[]
   activityFavorites               ActivityFavorite[]
   activityRegistrations           ActivityRegistration[]
+  activityNotificationBatchesCreated ActivityNotificationBatch[] @relation("ActivityNotificationBatchCreatedBy")
   adminActions                    AdminAction[]               @relation("AdminOperator")
   targetAdminActions              AdminAction[]               @relation("AdminTargetUser")
   administeredActionLogs          AdminActionLog[]            @relation("AdminActionLogAdmin")
@@ -895,8 +896,10 @@ model Notification {
   id          String           @id @default(cuid())
   type        NotificationType
   title       String
-  content     String?
+  content     String?          @db.Text
+  imageUrl    String?          @db.Text
   link        String?
+  activityId  String?
   isRead      Boolean          @default(false)
   createdAt   DateTime         @default(now())
   readAt      DateTime?
@@ -906,10 +909,12 @@ model Notification {
   completedAt DateTime?
   actor       User?            @relation("NotificationActor", fields: [actorId], references: [id])
   recipient   User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  activity    Activity?        @relation("ActivityNotifications", fields: [activityId], references: [id], onDelete: SetNull)
 
   @@unique([recipientId, key])
   @@index([recipientId, isRead, createdAt])
   @@index([type])
+  @@index([activityId, createdAt])
 }
 
 model SystemNotification {
@@ -1395,11 +1400,33 @@ model Activity {
   updatedAt     DateTime               @updatedAt
   favorites     ActivityFavorite[]
   registrations ActivityRegistration[]
+  notificationBatches ActivityNotificationBatch[] @relation("ActivityNotificationBatches")
+  notifications Notification[] @relation("ActivityNotifications")
   lotteries     Lottery[]
 
   @@index([status, startsAt])
   @@index([status, createdAt])
   @@index([type])
+}
+
+model ActivityNotificationBatch {
+  id             String   @id @default(cuid())
+  activityId     String
+  title          String   @db.VarChar(191)
+  content        String   @db.Text
+  imageUrl       String?  @db.Text
+  idempotencyKey String   @unique @db.VarChar(191)
+  status         String   @default("SENDING") @db.VarChar(16)
+  recipientCount Int
+  sentCount      Int      @default(0)
+  skippedCount   Int      @default(0)
+  createdById    String
+  createdAt      DateTime @default(now())
+  activity       Activity @relation("ActivityNotificationBatches", fields: [activityId], references: [id], onDelete: Restrict)
+  createdBy      User     @relation("ActivityNotificationBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([activityId, createdAt])
+  @@index([createdById, createdAt])
 }
 
 model ActivityRegistration {

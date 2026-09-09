@@ -133,6 +133,27 @@ CREATE TABLE `ActivityRegistration` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `ActivityNotificationBatch` (
+    `id` VARCHAR(191) NOT NULL,
+    `activityId` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(191) NOT NULL,
+    `content` TEXT NOT NULL,
+    `imageUrl` TEXT NULL,
+    `idempotencyKey` VARCHAR(191) NOT NULL,
+    `status` VARCHAR(16) NOT NULL DEFAULT 'SENDING',
+    `recipientCount` INTEGER NOT NULL,
+    `sentCount` INTEGER NOT NULL DEFAULT 0,
+    `skippedCount` INTEGER NOT NULL DEFAULT 0,
+    `createdById` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `ActivityNotificationBatch_idempotencyKey_key`(`idempotencyKey`),
+    INDEX `ActivityNotificationBatch_activityId_createdAt_idx`(`activityId`, `createdAt`),
+    INDEX `ActivityNotificationBatch_createdById_createdAt_idx`(`createdById`, `createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `ActivityRegistrationQuestion` (
     `id` VARCHAR(191) NOT NULL,
     `activityId` VARCHAR(191) NOT NULL,
@@ -2804,8 +2825,10 @@ CREATE TABLE `Notification` (
     `id` VARCHAR(191) NOT NULL,
     `type` ENUM('REPLY', 'LIKE', 'SYSTEM', 'MESSAGE', 'ACTIVITY', 'ADMIN', 'FOLLOW', 'BADGE', 'FRIEND_REQUEST', 'BIRTHDAY_GREETING', 'FEEDBACK', 'REVIEW') NOT NULL,
     `title` VARCHAR(191) NOT NULL,
-    `content` VARCHAR(191) NULL,
+    `content` TEXT NULL,
+    `imageUrl` TEXT NULL,
     `link` VARCHAR(191) NULL,
+    `activityId` VARCHAR(191) NULL,
     `isRead` BOOLEAN NOT NULL DEFAULT false,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `readAt` DATETIME(3) NULL,
@@ -2817,6 +2840,7 @@ CREATE TABLE `Notification` (
     INDEX `Notification_recipientId_isRead_createdAt_idx`(`recipientId`, `isRead`, `createdAt`),
     INDEX `Notification_recipientId_readAt_createdAt_idx`(`recipientId`, `readAt`, `createdAt`),
     INDEX `Notification_type_idx`(`type`),
+    INDEX `Notification_activityId_createdAt_idx`(`activityId`, `createdAt`),
     UNIQUE INDEX `Notification_recipientId_key_key`(`recipientId`, `key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -5044,6 +5068,15 @@ ALTER TABLE `Notification` ADD CONSTRAINT `Notification_actorId_fkey` FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE `Notification` ADD CONSTRAINT `Notification_recipientId_fkey` FOREIGN KEY (`recipientId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityNotificationBatch` ADD CONSTRAINT `ActivityNotificationBatch_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ActivityNotificationBatch` ADD CONSTRAINT `ActivityNotificationBatch_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `Notification` ADD CONSTRAINT `Notification_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `OnlineSession` ADD CONSTRAINT `OnlineSession_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
