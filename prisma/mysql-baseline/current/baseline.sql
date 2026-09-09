@@ -1265,7 +1265,7 @@ CREATE TABLE `FriendActivity` (
     `moodType` VARCHAR(16) NULL,
     `moodEmoji` VARCHAR(32) NULL,
     `moodText` VARCHAR(191) NULL,
-    `content` VARCHAR(191) NULL,
+    `content` TEXT NULL,
     `moderationStatus` ENUM('NORMAL', 'VIOLATION') NOT NULL DEFAULT 'NORMAL',
     `moderationReason` VARCHAR(191) NULL,
     `matchedBannedWords` TEXT NULL,
@@ -3476,7 +3476,7 @@ CREATE TABLE `RateLimitLog` (
 -- CreateTable
 CREATE TABLE `Reply` (
     `id` VARCHAR(191) NOT NULL,
-    `content` VARCHAR(191) NOT NULL,
+    `content` TEXT NOT NULL,
     `ipRegion` VARCHAR(191) NULL,
     `stickerId` VARCHAR(191) NULL,
     `isDeleted` BOOLEAN NOT NULL DEFAULT false,

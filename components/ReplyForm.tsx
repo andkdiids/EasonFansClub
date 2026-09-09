@@ -8,6 +8,7 @@ import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
+import { getReplyErrorMessage } from '@/lib/reply-errors'
 
 export function ReplyForm({
   postId,
@@ -87,7 +88,7 @@ export function ReplyForm({
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        setError(data.message || data.errors?.content || '回复失败')
+        setError(getReplyErrorMessage(response.status, data))
         return
       }
       if (!data.success || !data.reply?.id || !data.reply?.author) {
@@ -111,7 +112,7 @@ export function ReplyForm({
         }
       }
     } catch {
-      setError('网络异常，无法确认回复状态，请刷新评论区后再试')
+      setError('网络连接失败，请重试')
     } finally {
       submittingRef.current = false
       setIsSubmitting(false)

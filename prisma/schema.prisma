@@ -1433,7 +1433,7 @@ model FriendActivity {
   moodType           String?                 @db.VarChar(16)
   moodEmoji          String?                 @db.VarChar(32)
   moodText           String?                 @db.VarChar(191)
-  content            String?
+  content            String?                 @db.Text
   moderationStatus   ContentModerationStatus @default(NORMAL)
   moderationReason   String?
   matchedBannedWords String?                 @db.Text
@@ -3741,7 +3741,7 @@ model RateLimitLog {
 
 model Reply {
   id                 String                  @id @default(cuid())
-  content            String
+  content            String                  @db.Text
   ipRegion           String?
   stickerId          String?
   sticker            Sticker?                @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)

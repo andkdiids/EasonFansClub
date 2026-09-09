@@ -274,7 +274,7 @@ model Post {
 
 model Reply {
   id           String        @id @default(cuid())
-  content      String
+  content      String        @db.Text
   isDeleted    Boolean       @default(false)
   deletedAt    DateTime?
   createdAt    DateTime      @default(now())
@@ -508,7 +508,7 @@ model FriendActivity {
   moodType       String?       @db.VarChar(16)
   moodEmoji      String?       @db.VarChar(32)
   moodText       String?       @db.VarChar(191)
-  content        String?
+  content        String?       @db.Text
   createdAt      DateTime      @default(now())
   actorId        String
   checkInId      String?
