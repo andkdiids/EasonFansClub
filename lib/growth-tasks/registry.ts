@@ -292,6 +292,13 @@ function getActiveRewardRules() {
         detail: '每天首次有效使用站内分享',
       })
     }
+    if (task.code === 'PUBLISH_POST_ACTIVE') {
+      return makeRewardRule(task, {
+        amount: task.reward,
+        amountLabel: `+${task.reward} / 篇`,
+        unit: '篇',
+      })
+    }
     return makeRewardRule(task, {
       amount: task.reward,
       amountLabel: `+${task.reward} / 篇`,
