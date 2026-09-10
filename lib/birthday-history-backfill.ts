@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { getZodiacFromRuleConfig } from '@/lib/badge-rules'
 import { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
-import { resolveZodiac, type ZodiacSign } from '@/lib/zodiac'
+import { isCurrentDateWithinZodiac, resolveZodiac, type ZodiacSign } from '@/lib/zodiac'
 
 export const BIRTHDAY_HISTORY_BACKFILL_SOURCE = 'BIRTHDAY_HISTORY_BACKFILL'
 export const BIRTHDAY_HISTORY_BACKFILL_TIMEZONE = 'Asia/Shanghai'
@@ -195,11 +195,12 @@ function zodiacEligibleDate(user: CandidateUser, index: DateIndex) {
   if (user.birthMonth == null || user.birthDay == null) return { zodiac: null, eligibleDate: null }
   const zodiac = resolveZodiac(user.birthMonth, user.birthDay)
   if (!zodiac) return { zodiac: null, eligibleDate: null }
-  // Zodiac ownership is not a seasonal event. The selected range only limits
-  // the historical cohort; the sign itself always comes from the current
-  // stored birthday above. Use the first in-window date as the audit/grant
-  // anchor after the account's registration date.
-  return { zodiac, eligibleDate: firstDateOnOrAfter(index.windowDates, getBeijingDateKey(user.createdAt)) }
+  // Historical zodiac backfill is still as-of-period qualification. Never
+  // use the first arbitrary date in the selected window as a fake grant date.
+  const minimum = getBeijingDateKey(user.createdAt)
+  const eligibleDate = index.windowDates.find((date) => date >= minimum
+    && isCurrentDateWithinZodiac(zodiac, localDateTime(date, 'start'), BIRTHDAY_HISTORY_BACKFILL_TIMEZONE)) || null
+  return { zodiac, eligibleDate }
 }
 
 function normalizeInput(input: BirthdayHistoryBackfillInput) {

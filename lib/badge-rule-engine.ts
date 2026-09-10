@@ -7,7 +7,7 @@ import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMet
 import { getSeriesCompletionEligibleUserIds, getSeriesCompletionPreview, processBadgeGrantEffects } from '@/lib/badge-phase3'
 import { getBatchHistoricalBadgeMetrics, getHistoricalBackfillCapability, getHistoricalQualificationWindow, type HistoricalQualificationWindow } from '@/lib/badge-historical'
 import { getActivityParticipationBadgeStats, grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
-import { getBirthdayWhereForZodiac, isBirthdayToday, resolveZodiac, type ZodiacSign } from '@/lib/zodiac'
+import { getBirthdayWhereForZodiac, getCurrentZodiacSign, isBirthdayToday, resolveZodiac, resolveZodiacGrantEligibility, type ZodiacSign } from '@/lib/zodiac'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { getTodayMonthDay } from '@/lib/today'
 import { backfillBadgeOwnershipRule, getBadgeOwnershipRuleStats } from '@/lib/badge-ownership'
@@ -114,7 +114,7 @@ export type BadgeRuleEvaluation = {
   configJson?: unknown
 }
 
-export type BadgeRuleEvaluationMode = 'AUTO' | 'ADMIN_BACKFILL'
+export type BadgeRuleEvaluationMode = 'AUTO' | 'ADMIN_BACKFILL' | 'RETENTION'
 
 function isBirthdayRuleType(ruleType: SupportedBadgeRuleType) {
   return ruleType === 'BIRTHDAY_ZODIAC' || ruleType === 'BIRTHDAY_TODAY'
@@ -143,15 +143,17 @@ function grantKeyForRule(
  * backfill/preview. Non-numeric rules must not be represented by a made-up
  * threshold; birthday rules are evaluated from their typed month/day facts.
  *
- * BIRTHDAY_ZODIAC is a persistent qualification: the user's current stored
- * birthday resolves to one sign regardless of today's calendar date. The
- * mode argument remains for API compatibility with admin backfill callers.
+ * BIRTHDAY_ZODIAC grant eligibility requires both the user's current stored
+ * birthday and the current Shanghai zodiac period. Retention deliberately
+ * passes RETENTION so an already legitimate permanent ownership is not
+ * revoked when the calendar moves to another sign.
  */
 export function evaluateBadgeRule({
   user,
   rule,
   metric = 0,
   now = new Date(),
+  mode = 'AUTO',
 }: {
   user: BadgeRuleEvaluationUser
   rule: BadgeRuleEvaluation
@@ -160,10 +162,15 @@ export function evaluateBadgeRule({
   mode?: BadgeRuleEvaluationMode
 }) {
   if (rule.ruleType === 'BIRTHDAY_ZODIAC') {
-    if (user.birthMonth == null || user.birthDay == null) return false
-    const zodiac = resolveZodiac(user.birthMonth, user.birthDay)
     const configuredZodiac = getZodiacFromRuleConfig(rule.configJson)
-    return zodiac !== null && configuredZodiac === zodiac
+    const eligibility = resolveZodiacGrantEligibility({
+      birthMonth: user.birthMonth,
+      birthDay: user.birthDay,
+      targetZodiac: configuredZodiac,
+      now,
+      timezone: 'Asia/Shanghai',
+    })
+    return mode === 'RETENTION' ? eligibility.birthdayMatches : eligibility.eligible
   }
 
   if (rule.ruleType === 'BIRTHDAY_TODAY') {
@@ -354,13 +361,17 @@ export type ZodiacBadgeScanSummary = {
 }
 
 /**
- * Daily zodiac scan. Scan all current birthday qualifications. The current
- * calendar zodiac period is deliberately not used as an eligibility filter:
- * a Leo user remains a Leo user throughout the year.
+ * Daily zodiac scan. Resolve one Shanghai zodiac period first, then scan only
+ * users and rules for that period. The evaluator repeats the same gate so a
+ * future caller cannot accidentally turn this back into a birthday-only scan.
  */
 export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<ZodiacBadgeScanSummary> {
-  const summary: ZodiacBadgeScanSummary = { zodiac: null, scanned: 0, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, failed: 0, failures: [] }
-  const rules = await loadEnabledRules(['BIRTHDAY_ZODIAC'], now)
+  const zodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
+  const summary: ZodiacBadgeScanSummary = { zodiac, scanned: 0, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, failed: 0, failures: [] }
+  if (!zodiac) return summary
+
+  const rules = (await loadEnabledRules(['BIRTHDAY_ZODIAC'], now))
+    .filter((rule) => getZodiacFromRuleConfig(rule.configJson) === zodiac)
   if (!rules.length) return summary
 
   let cursor: string | undefined
@@ -369,7 +380,7 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
       where: {
         status: 'ACTIVE',
         isDeleted: false,
-        OR: [{ birthMonth: { not: null } }, { birthDay: { not: null } }],
+        ...getBirthdayWhereForZodiac(zodiac),
         ...(cursor ? { id: { gt: cursor } } : {}),
       },
       orderBy: { id: 'asc' },
@@ -655,10 +666,12 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
 
   if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY') {
     const configuredZodiac = getZodiacFromRuleConfig(badge.BadgeRule.configJson)
-    // An invalid zodiac rule must not fall through to the birthday-today
-    // query. A valid zodiac backfill is based on the user's birthday zodiac,
-    // not the zodiac period currently in progress.
-    if (type === 'BIRTHDAY_ZODIAC' && !configuredZodiac) {
+    const currentZodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
+    // A zodiac backfill is still an automatic grant path: it must use the
+    // same current-period resolver as the daily scanner and preview. Explicit
+    // historical qualification is handled only by the separate historical
+    // backfill service, which records its own non-auto source.
+    if (type === 'BIRTHDAY_ZODIAC' && (!configuredZodiac || configuredZodiac !== currentZodiac)) {
       return {
         badgeId,
         ruleId: badge.BadgeRule.id,
@@ -952,6 +965,7 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
   const availability = getBadgeAvailability(badge, now)
   const type = badge.BadgeRule.ruleType as SupportedBadgeRuleType
   const operator = badge.BadgeRule.operator as BadgeRuleOperatorValue
+  const configuredZodiac = type === 'BIRTHDAY_ZODIAC' ? getZodiacFromRuleConfig(badge.BadgeRule.configJson) : null
   const capability = getHistoricalBackfillCapability(type)
   const isLimited = Boolean(badge.availableFrom || badge.availableUntil)
   const historicalWindow = isLimited ? getHistoricalQualificationWindow({ availableFrom: badge.availableFrom, availableUntil: badge.availableUntil }, now) : null
@@ -979,6 +993,26 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     }
   }
 
+  if (type === 'BIRTHDAY_ZODIAC' && (!configuredZodiac || getCurrentZodiacSign(now, 'Asia/Shanghai') !== configuredZodiac)) {
+    return {
+      badgeId,
+      ruleId: badge.BadgeRule.id,
+      ruleType: type,
+      operator,
+      threshold: null,
+      availability,
+      eligibleCount: 0,
+      ownedCount,
+      pendingCount: 0,
+      historical: {
+        ...historical,
+        message: configuredZodiac
+          ? `当前不在${configuredZodiac}星座周期内，自动发放预览没有候选`
+          : '当前星座规则缺少有效配置，自动发放预览没有候选',
+      },
+    }
+  }
+
   if (type === 'BADGE_SERIES_COMPLETE') {
     const config = badge.BadgeRule.configJson && typeof badge.BadgeRule.configJson === 'object' && !Array.isArray(badge.BadgeRule.configJson) ? badge.BadgeRule.configJson as { seriesId?: unknown } : null
     const seriesId = typeof config?.seriesId === 'string' ? config.seriesId : ''
@@ -1002,21 +1036,6 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     return { badgeId, ruleId: badge.BadgeRule.id, ruleType: type, operator, threshold: null, availability, ...stats, historical }
   }
   if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY') {
-    const configuredZodiac = getZodiacFromRuleConfig(badge.BadgeRule.configJson)
-    if (type === 'BIRTHDAY_ZODIAC' && !configuredZodiac) {
-      return {
-        badgeId,
-        ruleId: badge.BadgeRule.id,
-        ruleType: type,
-        operator,
-        threshold: null,
-        availability,
-        eligibleCount: 0,
-        ownedCount,
-        pendingCount: 0,
-        historical,
-      }
-    }
     const { month, day } = getTodayMonthDay(now)
     const birthdayWhere = type === 'BIRTHDAY_ZODIAC' && configuredZodiac
       ? getBirthdayWhereForZodiac(configuredZodiac)

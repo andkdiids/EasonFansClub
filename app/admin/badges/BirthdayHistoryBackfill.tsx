@@ -129,7 +129,7 @@ export function BirthdayHistoryBackfill() {
       <header>
         <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-700">Historical Badge Backfill</p>
         <h2 className="mt-2 text-2xl font-black text-brand-950">生日 / 星座勋章历史补发</h2>
-        <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-600">按上海时区的历史日期判断生日当天是否命中；星座始终按用户当前保存的生日月日解析。预览只读；确认执行后只补发缺失勋章，不修改生日、不回收勋章。</p>
+        <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-600">按上海时区的历史日期判断生日当天和对应星座周期；预览只读；确认执行后只补发缺失勋章，不修改生日、不回收勋章。</p>
       </header>
 
       <form onSubmit={previewBackfill} className="mt-5 grid gap-3 rounded-2xl border border-violet-100 bg-white/75 p-4 md:grid-cols-2">

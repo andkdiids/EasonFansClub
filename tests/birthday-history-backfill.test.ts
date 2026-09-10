@@ -34,7 +34,7 @@ test('生日当天按生日日期判断，星座只按当前生日并受历史�
   const birthdayMiss = getHistoricalBirthdayEligibility(user(7, 15, '2026-08-01T00:00:00+08:00'), range('2026-07-01', '2026-09-01'))
   assert.equal(birthdayMiss.birthdayDate, null)
   assert.equal(birthdayMiss.zodiac, 'CANCER')
-  assert.equal(birthdayMiss.zodiacDate, '2026-08-01')
+  assert.equal(birthdayMiss.zodiacDate, null)
 
   const zodiacAfterRegistration = getHistoricalBirthdayEligibility(user(8, 8, '2026-08-10T00:00:00+08:00'), range('2026-07-01', '2026-09-01'))
   assert.equal(zodiacAfterRegistration.birthdayDate, null)
@@ -43,7 +43,7 @@ test('生日当天按生日日期判断，星座只按当前生日并受历史�
 
   const outsideSeason = getHistoricalBirthdayEligibility(user(5, 1, '2026-06-01T00:00:00+08:00'), range('2026-07-01', '2026-09-01'))
   assert.equal(outsideSeason.zodiac, 'TAURUS')
-  assert.equal(outsideSeason.zodiacDate, '2026-07-01')
+  assert.equal(outsideSeason.zodiacDate, null)
 
   const registeredAfterWindow = getHistoricalBirthdayEligibility(user(5, 1, '2026-09-02T00:00:00+08:00'), range('2026-07-01', '2026-09-01'))
   assert.equal(registeredAfterWindow.zodiac, 'TAURUS')
@@ -66,11 +66,11 @@ test('跨年星座和生日使用现有 resolver，摩羯座边界可计算', ()
   const capricorn = getHistoricalBirthdayEligibility(user(12, 25, '2026-12-20T00:00:00+08:00'), range('2026-12-20', '2027-01-10'))
   assert.equal(capricorn.birthdayDate, '2026-12-25')
   assert.equal(capricorn.zodiac, 'CAPRICORN')
-  assert.equal(capricorn.zodiacDate, '2026-12-20')
+  assert.equal(capricorn.zodiacDate, '2026-12-22')
 
   const januaryBirthday = getHistoricalBirthdayEligibility(user(1, 5, '2026-12-20T00:00:00+08:00'), range('2026-12-20', '2027-01-10'))
   assert.equal(januaryBirthday.birthdayDate, '2027-01-05')
-  assert.equal(januaryBirthday.zodiacDate, '2026-12-20')
+  assert.equal(januaryBirthday.zodiacDate, '2026-12-22')
 })
 
 test('2 月 29 日只在实际闰年日期出现，2 月 30 日永远无效', () => {
@@ -137,7 +137,7 @@ test('生日和星座 target 只读 active AUTO 规则，公开开关不会参�
   assert.doesNotMatch(service, /birthdayPublic/)
   assert.match(service, /getZodiacFromRuleConfig/)
   assert.match(service, /resolveZodiac/)
-  assert.doesNotMatch(service, /getCurrentZodiacSign/)
+  assert.match(service, /isCurrentDateWithinZodiac/)
 })
 
 test('无 Schema、migration 或生产执行入口变更', () => {

@@ -268,7 +268,7 @@ export const BADGE_RULE_REGISTRY = {
   BIRTHDAY_ZODIAC: {
     group: '账号',
     label: '星座',
-    dataDescription: '用户当前生日属于指定星座时满足条件，与当前日期无关',
+    dataDescription: '用户当前生日属于指定星座，且上海时区当前日期处于该星座周期；已合法获得的永久勋章按保留策略继续持有',
     metricLoader: 'BIRTHDAY_ZODIAC',
     supportedOperators: ['GTE'],
     events: ['USER_LOGIN', 'USER_ACTIVE', 'USER_BIRTHDAY_UPDATED'],
@@ -276,12 +276,12 @@ export const BADGE_RULE_REGISTRY = {
     specialKind: 'BIRTHDAY_ZODIAC',
     supportsHistoricalBackfill: false,
     supportsRetentionWhileEligible: true,
-    historicalBasis: '仅按用户当前保存的生日月日解析所属星座，不受当前日期星座周期影响',
+    historicalBasis: '自动发放按发放时上海时区星座周期与用户生日所属星座共同判断；保留资格只按当前生日所属星座判断',
     defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => {
       const zodiac = getZodiacFromRuleConfig(configJson)
       return zodiac
-        ? `用户当前生日属于${ZODIAC_LABELS[zodiac]}时自动获得。`
-        : '用户当前生日属于指定星座时自动获得。'
+        ? `用户当前生日属于${ZODIAC_LABELS[zodiac]}，且当前处于${ZODIAC_LABELS[zodiac]}周期时自动获得。`
+        : '用户当前生日属于指定星座，且当前处于对应星座周期时自动获得。'
     },
   },
   BIRTHDAY_TODAY: {

@@ -127,6 +127,49 @@ export function getCurrentZodiacSign(now = new Date(), timezone = BEIJING_TIME_Z
   return resolveZodiac(today.month, today.day)
 }
 
+export type ZodiacGrantEligibility = {
+  birthdayZodiac: ZodiacSign | null
+  targetZodiac: ZodiacSign | null
+  currentZodiac: ZodiacSign | null
+  birthdayMatches: boolean
+  currentPeriodMatches: boolean
+  eligible: boolean
+}
+
+/**
+ * Canonical first-grant predicate for BIRTHDAY_ZODIAC. The current period is
+ * intentionally part of grant eligibility only; retention uses the returned
+ * birthdayMatches fact so a previously legitimate permanent badge survives
+ * after the calendar moves to another sign.
+ */
+export function resolveZodiacGrantEligibility({
+  birthMonth,
+  birthDay,
+  targetZodiac,
+  now = new Date(),
+  timezone = BEIJING_TIME_ZONE,
+}: {
+  birthMonth: number | null | undefined
+  birthDay: number | null | undefined
+  targetZodiac: unknown
+  now?: Date
+  timezone?: string
+}): ZodiacGrantEligibility {
+  const birthdayZodiac = birthMonth == null || birthDay == null ? null : resolveZodiac(birthMonth, birthDay)
+  const normalizedTarget = isZodiacSign(targetZodiac) ? targetZodiac : null
+  const currentZodiac = getCurrentZodiacSign(now, timezone)
+  const birthdayMatches = birthdayZodiac !== null && normalizedTarget === birthdayZodiac
+  const currentPeriodMatches = normalizedTarget !== null && currentZodiac === normalizedTarget
+  return {
+    birthdayZodiac,
+    targetZodiac: normalizedTarget,
+    currentZodiac,
+    birthdayMatches,
+    currentPeriodMatches,
+    eligible: birthdayMatches && currentPeriodMatches,
+  }
+}
+
 /** Stable yearly business key for the zodiac period currently in progress. */
 export function getZodiacPeriodKey(now = new Date(), timezone = BEIJING_TIME_ZONE) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(now)

@@ -225,6 +225,7 @@ export async function isBadgeRuleSatisfied(
       user: { id: user.id, birthMonth: user.birthMonth, birthDay: user.birthDay },
       rule: { ruleType, operator: rule.operator, threshold: rule.threshold ?? null, configJson: rule.configJson },
       now,
+      mode: ruleType === 'BIRTHDAY_ZODIAC' ? 'RETENTION' : 'AUTO',
     })
   }
 
