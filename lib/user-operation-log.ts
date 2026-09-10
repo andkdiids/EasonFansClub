@@ -6,6 +6,7 @@ export type UserOperationCategory =
   | 'CONTENT'
   | 'SOCIAL'
   | 'GAME'
+  | 'ANGEL_GIFT'
   | 'REWARD'
   | 'BADGE'
   | 'ACTIVITY'

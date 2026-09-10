@@ -6,9 +6,10 @@ import type { BadgeCollectionView, BadgeGalleryView, BadgeHistoryView, BadgeShow
 import { calculateBadgeRuleProgress, canExposeLiveBadgeProgress, getBadgeAvailability, getBadgeOwnershipStats, getUserBadgeRuleProgress, type BadgeOwnershipStats } from '@/lib/badge-phase2'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { resolveBadgeAcquisitionDescription } from '@/lib/badge-acquisition'
-import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { generateBadgeAcquisitionDescription, getZodiacFromRuleConfig, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { activeUserBadgeWhere, calculateBadgeExpiresAt, isUserBadgeActive, remainingBadgeDays } from '@/lib/badge-validity'
-import { INCIDENT_INVALID_ZODIAC_PERIOD_GRANT, isBadgeRevokeReason, resolveAutomaticRegrantEligibility, type BadgeRevokeReason } from '@/lib/badge-revocation'
+import { INCIDENT_INVALID_ZODIAC_PERIOD_GRANT, isBadgeRevokeReason, type BadgeRevokeReason } from '@/lib/badge-revocation'
+import { resolveZodiacBadgeGrantEligibility, type ZodiacGrantHistoryRecord } from '@/lib/birthday-zodiac-grant'
 import { completeTask } from '@/lib/growth-tasks/service'
 
 const BADGE_SELECT = {
@@ -1069,10 +1070,10 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   // All grant paths lock the User row first. This serializes concurrent
   // evaluators for one badge holder while activeKey remains the DB invariant.
   await lockUserForMutation(tx, input.userId)
-  const user = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
+  const user = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true, birthMonth: true, birthDay: true } })
   const badge = await tx.badge.findUnique({
     where: { id: input.badgeId },
-    select: { id: true, name: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true, validityType: true, validityDays: true, BadgeRule: { select: { ruleType: true } } },
+    select: { id: true, name: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true, validityType: true, validityDays: true, BadgeRule: { select: { ruleType: true, configJson: true } } },
   })
   if (!user) throw new BadgeServiceError('USER_NOT_FOUND', '目标用户不存在')
   if (!badge) throw new BadgeServiceError('BADGE_NOT_FOUND', '勋章不存在')
@@ -1125,6 +1126,7 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
       orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
+        badgeId: true,
         status: true,
         expiresAt: true,
         sourceType: true,
@@ -1132,12 +1134,19 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
         UserBadgeSource: { select: { isActive: true, sourceType: true, sourceId: true, expiresAt: true, revokeReason: true } },
       },
     })
-    const decision = resolveAutomaticRegrantEligibility(history, now)
-    if (!decision.allowed && decision.reason !== 'ACTIVE_OWNERSHIP') {
+    const decision = resolveZodiacBadgeGrantEligibility({
+      badgeId: input.badgeId,
+      birthMonth: user.birthMonth,
+      birthDay: user.birthDay,
+      targetZodiac: getZodiacFromRuleConfig(badge.BadgeRule?.configJson),
+      history: history as ZodiacGrantHistoryRecord[],
+      now,
+    })
+    if (decision.hasBlockedTargetHistory) {
       const recordId = history.find((record) => record.status === 'REVOKED')?.id || regrantRecordId || ''
-      return skippedGrantResult(input, badge.name, recordId, decision.reason)
+      return skippedGrantResult(input, badge.name, recordId, decision.regrantDecision.reason)
     }
-    if (decision.reason === 'INCIDENT_REVOKED' && !regrantRecordId) {
+    if (decision.regrantDecision.reason === 'INCIDENT_REVOKED' && !regrantRecordId) {
       const incidentRecord = history.find((record) => record.status === 'REVOKED' && (
         record.revokeReason === INCIDENT_INVALID_ZODIAC_PERIOD_GRANT
         || record.UserBadgeSource.some((source) => source.sourceType === 'AUTO_RULE' && source.revokeReason === INCIDENT_INVALID_ZODIAC_PERIOD_GRANT)

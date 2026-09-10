@@ -180,6 +180,6 @@ test('all birthday zodiac automatic paths share the repair gate and never use bi
   const repairEnd = retention.indexOf('\nasync function loadRevokeRuleContext', repairStart)
   const repair = retention.slice(repairStart, repairEnd)
   assert.match(repair, /isBirthdayAutomaticSourceRepairEligible\(/)
-  assert.match(retention, /resolveZodiacGrantEligibility\(/)
+  assert.match(retention, /resolveZodiacBadgeGrantEligibility\(/)
   assert.doesNotMatch(repair, /if \(birthdayMatches\)[\s\S]*grantBadge/)
 })

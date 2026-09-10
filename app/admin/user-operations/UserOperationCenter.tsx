@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import type { UserOperationAngelGiftSummary } from '@/lib/user-operation-center'
 
-type Category = 'ALL' | 'ACCOUNT' | 'CHECKIN' | 'CONTENT' | 'SOCIAL' | 'GAME' | 'REWARD' | 'BADGE' | 'ACTIVITY' | 'RISK' | 'ADMIN'
+type Category = 'ALL' | 'ACCOUNT' | 'CHECKIN' | 'CONTENT' | 'SOCIAL' | 'GAME' | 'ANGEL_GIFT' | 'REWARD' | 'BADGE' | 'ACTIVITY' | 'RISK' | 'ADMIN'
 type View = 'today' | 'risk'
 type User = {
   id: string
@@ -30,13 +31,15 @@ type Event = {
   operator: { type: string; userId: string | null; uid: number | null; nickname: string | null } | null
   target: { type: string; id: string; title: string | null } | null
   riskLevel: string | null
+  audit?: { themeId: string; drawId?: string; combineId?: string }
   user?: User
 }
 type RiskUser = { user: User; riskLevel: string; reasons: string[]; latestRiskAt: string; eventCount: number }
 type Pagination = { page: number; pageSize: number; total: number; totalPages: number; hasMore: boolean }
+type AngelGiftSummary = UserOperationAngelGiftSummary
 
 const categoryLabels: Record<Category, string> = {
-  ALL: '全部', ACCOUNT: '账号 / 资料', CHECKIN: '挂号 / 补签', CONTENT: '内容', SOCIAL: '好友 / 社交', GAME: '娱乐天空', REWARD: '奖励 / 积分', BADGE: '勋章', ACTIVITY: '活动', RISK: '风险', ADMIN: '管理员操作',
+  ALL: '全部', ACCOUNT: '账号 / 资料', CHECKIN: '挂号 / 补签', CONTENT: '内容', SOCIAL: '好友 / 社交', GAME: '娱乐天空', ANGEL_GIFT: '天使的礼物', REWARD: '奖励 / 积分', BADGE: '勋章', ACTIVITY: '活动', RISK: '风险', ADMIN: '管理员操作',
 }
 const categoryOptions = Object.keys(categoryLabels) as Category[]
 const emptyPagination: Pagination = { page: 1, pageSize: 30, total: 0, totalPages: 1, hasMore: false }
@@ -74,13 +77,16 @@ export function UserOperationCenter() {
   const [riskUsers, setRiskUsers] = useState<RiskUser[]>([])
   const [pagination, setPagination] = useState<Pagination>(emptyPagination)
   const [dateKey, setDateKey] = useState('')
+  const [themeId, setThemeId] = useState('')
+  const [angelGiftSummary, setAngelGiftSummary] = useState<AngelGiftSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [searchResults, setSearchResults] = useState<User[]>([])
   const [searching, setSearching] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
-  const [timeline, setTimeline] = useState<{ user: User; events: Event[]; pagination: Pagination; days: number } | null>(null)
+  const [timeline, setTimeline] = useState<{ user: User; events: Event[]; pagination: Pagination; days: number; angelGift?: AngelGiftSummary | null } | null>(null)
   const [timelineCategory, setTimelineCategory] = useState<Category>('ALL')
+  const [timelineThemeId, setTimelineThemeId] = useState('')
   const [timelineDays, setTimelineDays] = useState('30')
   const [timelinePage, setTimelinePage] = useState(1)
 
@@ -88,9 +94,10 @@ export function UserOperationCenter() {
     const params = new URLSearchParams({ view, page: String(page), pageSize: '30' })
     if (appliedQuery) params.set('q', appliedQuery)
     if (view === 'today' && category !== 'ALL') params.set('category', category)
+    if (view === 'today' && category === 'ANGEL_GIFT' && themeId) params.set('themeId', themeId)
     if (view === 'risk') params.set('days', '90')
     return `/api/admin/user-operations?${params.toString()}`
-  }, [appliedQuery, category, page, view])
+  }, [appliedQuery, category, page, themeId, view])
 
   useEffect(() => {
     if (selectedUserId) return
@@ -103,16 +110,20 @@ export function UserOperationCenter() {
         if (!response.ok) throw new Error(body?.message || '用户操作记录加载失败')
         if (!active) return
         setPagination(body?.pagination || emptyPagination)
-        if (view === 'risk') setRiskUsers(Array.isArray(body?.users) ? body.users as RiskUser[] : [])
+        if (view === 'risk') {
+          setRiskUsers(Array.isArray(body?.users) ? body.users as RiskUser[] : [])
+          setAngelGiftSummary(null)
+        }
         else {
           setEvents(Array.isArray(body?.events) ? body.events as Event[] : [])
           setDateKey(typeof body?.dateKey === 'string' ? body.dateKey : '')
+          setAngelGiftSummary(category === 'ANGEL_GIFT' && body?.angelGift ? body.angelGift as AngelGiftSummary : null)
         }
       })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '用户操作记录加载失败') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [listUrl, selectedUserId, view])
+  }, [category, listUrl, selectedUserId, view])
 
   useEffect(() => {
     if (!selectedUserId) return
@@ -121,6 +132,7 @@ export function UserOperationCenter() {
     setError('')
     const params = new URLSearchParams({ view: 'timeline', userId: selectedUserId, page: String(timelinePage), pageSize: '30', days: timelineDays })
     if (timelineCategory !== 'ALL') params.set('category', timelineCategory)
+    if (timelineCategory === 'ANGEL_GIFT' && timelineThemeId) params.set('themeId', timelineThemeId)
     fetch(`/api/admin/user-operations?${params.toString()}`, { cache: 'no-store' })
       .then(async (response) => {
         const body = await response.json().catch(() => null)
@@ -130,7 +142,7 @@ export function UserOperationCenter() {
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '用户时间线加载失败') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [selectedUserId, timelineCategory, timelineDays, timelinePage])
+  }, [selectedUserId, timelineCategory, timelineDays, timelinePage, timelineThemeId])
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -157,6 +169,7 @@ export function UserOperationCenter() {
   function openUser(userId: string) {
     setSelectedUserId(userId)
     setTimelinePage(1)
+    setTimelineThemeId('')
     setSearchResults([])
   }
 
@@ -164,7 +177,15 @@ export function UserOperationCenter() {
     setView(nextView)
     setPage(1)
     setAppliedQuery('')
+    setThemeId('')
+    setAngelGiftSummary(null)
     setSearchResults([])
+  }
+
+  function changeCategory(nextCategory: Category) {
+    setCategory(nextCategory)
+    setPage(1)
+    if (nextCategory !== 'ANGEL_GIFT') setThemeId('')
   }
 
   return <main className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-5 sm:py-8">
@@ -186,9 +207,9 @@ export function UserOperationCenter() {
     </div>
 
     {error ? <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700 dark:bg-red-950/40 dark:text-red-200">{error}</p> : null}
-    {selectedUserId ? <TimelinePanel timeline={timeline} loading={loading} category={timelineCategory} setCategory={(next) => { setTimelineCategory(next); setTimelinePage(1) }} days={timelineDays} setDays={(next) => { setTimelineDays(next); setTimelinePage(1) }} onPage={(next) => setTimelinePage(next)} onBack={() => { setSelectedUserId(null); setTimeline(null) }} /> : (
+    {selectedUserId ? <TimelinePanel timeline={timeline} loading={loading} category={timelineCategory} setCategory={(next) => { setTimelineCategory(next); setTimelineThemeId(''); setTimelinePage(1) }} themeId={timelineThemeId} setThemeId={(next) => { setTimelineThemeId(next); setTimelinePage(1) }} days={timelineDays} setDays={(next) => { setTimelineDays(next); setTimelinePage(1) }} onPage={(next) => setTimelinePage(next)} onBack={() => { setSelectedUserId(null); setTimeline(null) }} /> : (
       <section className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7">
-        {view === 'today' ? <><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-black text-brand-950 dark:text-slate-100">今日操作记录 <span className="text-base text-slate-500 dark:text-slate-400">{pagination.total}</span></h2><p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">资料、补签、内容、社交、奖励、勋章、活动和风险事件。</p></div><select value={category} onChange={(event) => { setCategory(event.target.value as Category); setPage(1) }} className="min-h-10 rounded-xl border border-sky-100 bg-white px-3 text-sm font-black dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{categoryOptions.map((item) => <option key={item} value={item}>{categoryLabels[item]}</option>)}</select></div><EventList events={events} loading={loading} onUser={openUser} /></> : <><div><h2 className="text-2xl font-black text-brand-950 dark:text-slate-100">高风险用户 <span className="text-base text-slate-500 dark:text-slate-400">{pagination.total}</span></h2><p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">风险等级沿用现有风控信号；点击用户进入同一条完整时间线。</p></div><RiskList users={riskUsers} loading={loading} onUser={openUser} /></>}
+        {view === 'today' ? <><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-black text-brand-950 dark:text-slate-100">今日操作记录 <span className="text-base text-slate-500 dark:text-slate-400">{pagination.total}</span></h2><p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">资料、补签、内容、社交、天使的礼物、奖励、勋章、活动和风险事件。</p></div><div className="flex flex-wrap gap-2"><select value={category} onChange={(event) => changeCategory(event.target.value as Category)} className="min-h-10 rounded-xl border border-sky-100 bg-white px-3 text-sm font-black dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{categoryOptions.map((item) => <option key={item} value={item}>{categoryLabels[item]}</option>)}</select>{category === 'ANGEL_GIFT' ? <AngelGiftThemeSelect summary={angelGiftSummary} value={themeId} onChange={(next) => { setThemeId(next); setPage(1) }} /> : null}</div></div>{category === 'ANGEL_GIFT' && angelGiftSummary ? <AngelGiftSummaryPanel summary={angelGiftSummary} /> : null}<EventList events={events} loading={loading} onUser={openUser} /></> : <><div><h2 className="text-2xl font-black text-brand-950 dark:text-slate-100">高风险用户 <span className="text-base text-slate-500 dark:text-slate-400">{pagination.total}</span></h2><p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">风险等级沿用现有风控信号；点击用户进入同一条完整时间线。</p></div><RiskList users={riskUsers} loading={loading} onUser={openUser} /></>}
         <PaginationBar pagination={pagination} loading={loading} onPage={setPage} />
       </section>
     )}
@@ -198,7 +219,7 @@ export function UserOperationCenter() {
 function EventList({ events, loading, onUser }: { events: Event[]; loading: boolean; onUser: (id: string) => void }) {
   if (loading) return <p className="py-12 text-center text-sm font-bold text-slate-500">加载中…</p>
   if (!events.length) return <p className="py-12 text-center text-sm font-bold text-slate-500">今天暂无符合条件的用户操作记录。</p>
-  return <div className="mt-5 divide-y divide-sky-100 dark:divide-slate-700">{events.map((item) => <article key={item.id} className="grid gap-3 py-4 md:grid-cols-[150px_minmax(220px,0.8fr)_minmax(0,1.5fr)_auto] md:items-start"><time className="text-xs font-black text-slate-500 dark:text-slate-400">{formatDate(item.occurredAt)}</time><div><button type="button" onClick={() => onUser(item.userId)} className="text-left"><UserIdentity user={item.user!} compact /></button><p className="mt-1 text-xs font-bold text-slate-400">{categoryLabels[item.category]} · {item.source}</p></div><div className="min-w-0"><p className="font-black text-brand-950 dark:text-slate-100">{item.summary}</p><dl className="mt-1 grid gap-x-3 gap-y-1 text-xs font-bold text-slate-500 dark:text-slate-400 sm:grid-cols-2">{Object.entries(item.detail).filter(([, value]) => value != null && value !== '').slice(0, 6).map(([key, value]) => <div key={key} className="min-w-0"><dt className="inline text-slate-400">{key}：</dt><dd className="inline break-words">{formatValue(value)}</dd></div>)}</dl></div><span className={`justify-self-start rounded-full px-2.5 py-1 text-xs font-black ${item.riskLevel === 'HIGH' ? 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-200' : item.riskLevel === 'MEDIUM' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-200' : 'bg-sky-50 text-sky-700 dark:bg-slate-800 dark:text-sky-200'}`}>{item.riskLevel || (item.operator?.type === 'ADMIN' ? '管理员操作' : item.operator?.type === 'USER' ? '用户操作' : '系统自动')}</span></article>)}</div>
+  return <div className="mt-5 divide-y divide-sky-100 dark:divide-slate-700">{events.map((item) => <article key={item.id} className="grid gap-3 py-4 md:grid-cols-[150px_minmax(220px,0.8fr)_minmax(0,1.5fr)_auto] md:items-start"><time className="text-xs font-black text-slate-500 dark:text-slate-400">{formatDate(item.occurredAt)}</time><div><button type="button" onClick={() => onUser(item.userId)} className="text-left"><UserIdentity user={item.user!} compact /></button><p className="mt-1 text-xs font-bold text-slate-400">{categoryLabels[item.category]} · {item.source}</p></div><div className="min-w-0"><p className="font-black text-brand-950 dark:text-slate-100">{item.summary}</p><dl className="mt-1 grid gap-x-3 gap-y-1 text-xs font-bold text-slate-500 dark:text-slate-400 sm:grid-cols-2">{Object.entries(item.detail).filter(([, value]) => value != null && value !== '').slice(0, item.category === 'ANGEL_GIFT' ? 10 : 6).map(([key, value]) => <div key={key} className="min-w-0"><dt className="inline text-slate-400">{key}：</dt><dd className="inline break-words">{formatValue(value)}</dd></div>)}</dl></div><span className={`justify-self-start rounded-full px-2.5 py-1 text-xs font-black ${item.riskLevel === 'HIGH' ? 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-200' : item.riskLevel === 'MEDIUM' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-200' : 'bg-sky-50 text-sky-700 dark:bg-slate-800 dark:text-sky-200'}`}>{item.riskLevel || (item.operator?.type === 'ADMIN' ? '管理员操作' : item.operator?.type === 'USER' ? '用户操作' : '系统自动')}</span></article>)}</div>
 }
 
 function RiskList({ users, loading, onUser }: { users: RiskUser[]; loading: boolean; onUser: (id: string) => void }) {
@@ -207,9 +228,17 @@ function RiskList({ users, loading, onUser }: { users: RiskUser[]; loading: bool
   return <div className="mt-5 grid gap-3 md:grid-cols-2">{users.map((item) => <button type="button" key={item.user.id} onClick={() => onUser(item.user.id)} className="rounded-2xl border border-sky-100 p-4 text-left hover:border-sky-300 dark:border-slate-700 dark:hover:border-sky-600"><div className="flex items-start justify-between gap-3"><UserIdentity user={item.user} /><span className={`rounded-full px-2.5 py-1 text-xs font-black ${item.riskLevel === 'HIGH' ? 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-200'}`}>{item.riskLevel === 'HIGH' ? '高风险' : '中风险'}</span></div><p className="mt-3 text-sm font-black text-slate-700 dark:text-slate-200">原因：{item.reasons.join('、') || '已有风控事件'}</p><p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">最近 {formatDate(item.latestRiskAt)} · 事件 {item.eventCount} 条 · {statusLabel(item.user.status)}</p></button>)}</div>
 }
 
-function TimelinePanel({ timeline, loading, category, setCategory, days, setDays, onPage, onBack }: { timeline: { user: User; events: Event[]; pagination: Pagination; days: number } | null; loading: boolean; category: Category; setCategory: (value: Category) => void; days: string; setDays: (value: string) => void; onPage: (page: number) => void; onBack: () => void }) {
+function AngelGiftThemeSelect({ summary, value, onChange }: { summary: AngelGiftSummary | null; value: string; onChange: (value: string) => void }) {
+  return <label className="flex min-h-10 items-center gap-2 text-sm font-black text-brand-950 dark:text-slate-100"><span className="text-xs text-slate-500 dark:text-slate-400">主题奖池</span><select aria-label="主题奖池" value={value} onChange={(event) => onChange(event.target.value)} className="min-h-10 rounded-xl border border-sky-100 bg-white px-3 text-sm font-black dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="">全部主题</option>{summary?.themes.map((theme) => <option key={theme.id} value={theme.id}>{theme.title}（{theme.drawCount} 次）</option>)}</select></label>
+}
+
+function AngelGiftSummaryPanel({ summary }: { summary: AngelGiftSummary }) {
+  return <section className="mt-5 border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-lg font-black text-brand-950 dark:text-slate-100">天使的礼物</h3>{summary.selectedThemeId ? <span className="text-xs font-bold text-slate-500 dark:text-slate-400">已筛选主题</span> : null}</div><div className="mt-3 grid gap-2 text-sm font-black text-slate-700 dark:text-slate-200 sm:grid-cols-3"><span>总抽奖次数：{summary.totalDrawCount.toLocaleString('zh-CN')} 次</span><span>参与主题：{summary.themeCount} 个</span><span>累计消耗：{summary.totalCost.toLocaleString('zh-CN')} 挂号费</span></div>{summary.firstDrawAt || summary.lastDrawAt ? <p className="mt-3 text-xs font-bold text-slate-500 dark:text-slate-400">首次抽取：{summary.firstDrawAt ? formatDate(summary.firstDrawAt) : '—'} · 最近抽取：{summary.lastDrawAt ? formatDate(summary.lastDrawAt) : '—'}</p> : null}{summary.combineCount ? <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">重复勋章合成：{summary.combineCount} 次（不计入抽奖次数）</p> : null}</section>
+}
+
+function TimelinePanel({ timeline, loading, category, setCategory, themeId, setThemeId, days, setDays, onPage, onBack }: { timeline: { user: User; events: Event[]; pagination: Pagination; days: number; angelGift?: AngelGiftSummary | null } | null; loading: boolean; category: Category; setCategory: (value: Category) => void; themeId: string; setThemeId: (value: string) => void; days: string; setDays: (value: string) => void; onPage: (page: number) => void; onBack: () => void }) {
   if (!timeline) return <section className="rounded-[28px] border border-sky-100 bg-white/90 p-6 text-center font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-900/90">{loading ? '加载用户时间线…' : '暂无用户资料'}</section>
-  return <section className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><UserIdentity user={timeline.user} /><p className="mt-3 text-sm font-bold text-slate-500 dark:text-slate-400">注册于 {formatDate(timeline.user.createdAt)} · 最后活跃 {timeline.user.lastActiveAt ? formatDate(timeline.user.lastActiveAt) : '暂无记录'}</p><p className="mt-1 break-all text-xs font-bold text-slate-500 dark:text-slate-400">手机号：{timeline.user.phone || '未绑定'} · 邮箱：{timeline.user.email || '未绑定'}</p></div><button type="button" onClick={onBack} className="rounded-xl border border-sky-200 px-4 py-2 text-sm font-black text-brand-700 dark:border-slate-600 dark:text-sky-200">返回列表</button></div><div className="mt-5 flex flex-wrap gap-2"><select value={category} onChange={(event) => setCategory(event.target.value as Category)} className="min-h-10 rounded-xl border border-sky-100 bg-white px-3 text-sm font-black dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{categoryOptions.map((item) => <option key={item} value={item}>{categoryLabels[item]}</option>)}</select><select value={days} onChange={(event) => setDays(event.target.value)} className="min-h-10 rounded-xl border border-sky-100 bg-white px-3 text-sm font-black dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="1">今天</option><option value="7">近 7 天</option><option value="30">近 30 天</option><option value="90">近 90 天</option><option value="365">近一年</option></select><span className="self-center text-xs font-bold text-slate-500 dark:text-slate-400">敏感资料仅向有用户管理权限的管理员展示。</span></div><EventList events={timeline.events} loading={loading} onUser={() => undefined} /><PaginationBar pagination={timeline.pagination} loading={loading} onPage={onPage} /></section>
+  return <section className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><UserIdentity user={timeline.user} /><p className="mt-3 text-sm font-bold text-slate-500 dark:text-slate-400">注册于 {formatDate(timeline.user.createdAt)} · 最后活跃 {timeline.user.lastActiveAt ? formatDate(timeline.user.lastActiveAt) : '暂无记录'}</p><p className="mt-1 break-all text-xs font-bold text-slate-500 dark:text-slate-400">手机号：{timeline.user.phone || '未绑定'} · 邮箱：{timeline.user.email || '未绑定'}</p></div><button type="button" onClick={onBack} className="rounded-xl border border-sky-200 px-4 py-2 text-sm font-black text-brand-700 dark:border-slate-600 dark:text-sky-200">返回列表</button></div><div className="mt-5 flex flex-wrap gap-2"><select value={category} onChange={(event) => setCategory(event.target.value as Category)} className="min-h-10 rounded-xl border border-sky-100 bg-white px-3 text-sm font-black dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{categoryOptions.map((item) => <option key={item} value={item}>{categoryLabels[item]}</option>)}</select>{category === 'ANGEL_GIFT' ? <AngelGiftThemeSelect summary={timeline.angelGift || null} value={themeId} onChange={setThemeId} /> : null}<select value={days} onChange={(event) => setDays(event.target.value)} className="min-h-10 rounded-xl border border-sky-100 bg-white px-3 text-sm font-black dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="1">今天</option><option value="7">近 7 天</option><option value="30">近 30 天</option><option value="90">近 90 天</option><option value="365">近一年</option></select><span className="self-center text-xs font-bold text-slate-500 dark:text-slate-400">敏感资料仅向有用户管理权限的管理员展示。</span></div>{category === 'ANGEL_GIFT' && timeline.angelGift ? <AngelGiftSummaryPanel summary={timeline.angelGift} /> : null}<EventList events={timeline.events} loading={loading} onUser={() => undefined} /><PaginationBar pagination={timeline.pagination} loading={loading} onPage={onPage} /></section>
 }
 
 function PaginationBar({ pagination, loading, onPage }: { pagination: Pagination; loading: boolean; onPage: (page: number) => void }) {

@@ -17,7 +17,8 @@ import {
 import { grantBadge, revokeBadgeAcquisitionSource } from '@/lib/badge-service'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday-constants'
-import { resolveZodiac, resolveZodiacGrantEligibility, ZODIAC_LABELS } from '@/lib/zodiac'
+import { resolveZodiac, ZODIAC_LABELS } from '@/lib/zodiac'
+import { resolveZodiacBadgeGrantEligibility } from '@/lib/birthday-zodiac-grant'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 
 /**
@@ -392,12 +393,14 @@ type BirthdayAutomaticSource = {
  * so a legitimate historical zodiac ownership survives a period change.
  */
 export function isBirthdayAutomaticSourceRepairEligible({
+  badgeId = 'birthday-zodiac-source-repair',
   ruleType,
   configJson,
   birthMonth,
   birthDay,
   now = new Date(),
 }: {
+  badgeId?: string
   ruleType: SupportedBadgeRuleType
   configJson: unknown
   birthMonth: number | null | undefined
@@ -405,13 +408,14 @@ export function isBirthdayAutomaticSourceRepairEligible({
   now?: Date
 }) {
   if (ruleType !== 'BIRTHDAY_ZODIAC') return true
-  return resolveZodiacGrantEligibility({
+  const eligibility = resolveZodiacBadgeGrantEligibility({
+    badgeId,
     birthMonth,
     birthDay,
     targetZodiac: getZodiacFromRuleConfig(configJson),
     now,
-    timezone: 'Asia/Shanghai',
-  }).eligible
+  })
+  return eligibility.eligible
 }
 
 function isBirthdayRetentionRule(rule: StoredRetentionRule) {
@@ -454,6 +458,7 @@ async function repairBirthdayAutomaticSource(
     ? await prisma.user.findUnique({ where: { id: userId }, select: { birthMonth: true, birthDay: true } })
     : null
   if (rule.ruleType === 'BIRTHDAY_ZODIAC' && (!birthday || !isBirthdayAutomaticSourceRepairEligible({
+    badgeId: rule.badgeId,
     ruleType: rule.ruleType,
     configJson: rule.configJson,
     birthMonth: birthday.birthMonth,

@@ -11,6 +11,7 @@ export const USER_OPERATION_CATEGORIES = [
   'CONTENT',
   'SOCIAL',
   'GAME',
+  'ANGEL_GIFT',
   'REWARD',
   'BADGE',
   'ACTIVITY',
@@ -28,6 +29,7 @@ export const userOperationCategoryLabels: Record<UserOperationCategory, string> 
   CONTENT: '内容',
   SOCIAL: '好友 / 社交',
   GAME: '娱乐天空',
+  ANGEL_GIFT: '天使的礼物',
   REWARD: '奖励 / 积分',
   BADGE: '勋章',
   ACTIVITY: '活动',
@@ -68,6 +70,7 @@ export type UserOperationEvent = {
   operator: UserOperationOperator | null
   target: { type: string; id: string; title: string | null } | null
   riskLevel: string | null
+  audit?: { themeId: string; drawId?: string; combineId?: string }
   user?: UserOperationUser
 }
 
@@ -77,6 +80,28 @@ export type UserOperationPagination = {
   total: number
   totalPages: number
   hasMore: boolean
+}
+
+export type UserOperationAngelGiftTheme = {
+  id: string
+  title: string
+  drawCount: number
+}
+
+export type UserOperationAngelGiftSummary = {
+  totalDrawCount: number
+  themeCount: number
+  totalCost: number
+  firstDrawAt: string | null
+  lastDrawAt: string | null
+  totalRecordCount: number
+  combineCount: number
+  selectedThemeId: string | null
+  themes: UserOperationAngelGiftTheme[]
+}
+
+function emptyAngelGiftSummary(selectedThemeId: string | null = null): UserOperationAngelGiftSummary {
+  return { totalDrawCount: 0, themeCount: 0, totalCost: 0, firstDrawAt: null, lastDrawAt: null, totalRecordCount: 0, combineCount: 0, selectedThemeId, themes: [] }
 }
 
 export type UserOperationRiskUser = {
@@ -219,6 +244,7 @@ type OperationLoadOptions = OperationScope & {
   to: Date
   category: UserOperationCategory
   take: number
+  themeId?: string | null
 }
 
 function operator(type: string, userId: string | null = null, row?: { uid?: number | null; nickname?: string | null } | null): UserOperationOperator {
@@ -443,10 +469,222 @@ async function loadCheckInEvents(options: OperationLoadOptions) {
   })
 }
 
+const angelGiftPointLogSelect = {
+  id: true,
+  action: true,
+  points: true,
+  before: true,
+  after: true,
+  businessKey: true,
+  createdAt: true,
+} as const
+
+const angelGiftDrawSelect = {
+  id: true,
+  userId: true,
+  campaignId: true,
+  drawAt: true,
+  campaignTitle: true,
+  drawCost: true,
+  prizeType: true,
+  prizeName: true,
+  badgeName: true,
+  rewardAmount: true,
+  resultType: true,
+  isNewBadge: true,
+  isDuplicate: true,
+  duplicateQuantity: true,
+  balanceBefore: true,
+  balanceAfter: true,
+  PointLogs: { select: angelGiftPointLogSelect },
+} as const
+
+const angelGiftRecycleSelect = {
+  id: true,
+  userId: true,
+  campaignId: true,
+  createdAt: true,
+  campaignTitle: true,
+  requiredCount: true,
+  rewardAmount: true,
+  beforeQuantity: true,
+  afterQuantity: true,
+  balanceBefore: true,
+  balanceAfter: true,
+  PointLogs: { select: angelGiftPointLogSelect },
+} as const
+
+function angelGiftDrawWhere(options: OperationLoadOptions, includeTheme = true): Prisma.PharmacyDrawWhereInput {
+  return {
+    ...scopeFor('userId', options),
+    drawAt: dateRange(options.from, options.to),
+    ...(includeTheme && options.themeId ? { campaignId: options.themeId } : {}),
+  }
+}
+
+function angelGiftRecycleWhere(options: OperationLoadOptions): Prisma.PharmacyRecycleLogWhereInput {
+  return {
+    ...scopeFor('userId', options),
+    createdAt: dateRange(options.from, options.to),
+    ...(options.themeId ? { campaignId: options.themeId } : {}),
+  }
+}
+
+const angelGiftPrizeTypeLabels: Record<string, string> = {
+  BADGE: '勋章',
+  POINTS: '挂号费',
+  EMPTY: '未中奖',
+  ITEM: '道具',
+  COUPON: '优惠券',
+  CUSTOM: '其他',
+}
+
+function angelGiftPrizeTypeLabel(value: string) {
+  return angelGiftPrizeTypeLabels[value] || '其他'
+}
+
+function angelGiftDrawResultLabel(row: {
+  prizeType: string
+  prizeName: string
+  badgeName: string | null
+  rewardAmount: number | null
+}) {
+  if (row.prizeType === 'POINTS') return `+${row.rewardAmount || 0} 挂号费`
+  return row.badgeName || row.prizeName || '未知奖品'
+}
+
+async function loadAngelGiftEvents(options: OperationLoadOptions) {
+  if (!categoryEnabled('ANGEL_GIFT', options.category)) return []
+  const [draws, recycles] = await Promise.all([
+    safeQuery('angel-gift-draws', prisma.pharmacyDraw.findMany({
+      where: angelGiftDrawWhere(options),
+      orderBy: [{ drawAt: 'desc' }, { id: 'desc' }],
+      take: options.take,
+      select: angelGiftDrawSelect,
+    }), []),
+    safeQuery('angel-gift-combines', prisma.pharmacyRecycleLog.findMany({
+      where: angelGiftRecycleWhere(options),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: options.take,
+      select: angelGiftRecycleSelect,
+    }), []),
+  ])
+
+  const drawEvents = draws.map((row) => {
+    const pointLogs = row.PointLogs
+    const costLog = pointLogs.find((log) => String(log.action) === 'PHARMACY_DRAW_COST' && log.points === -row.drawCost)
+    const rewardLog = pointLogs.find((log) => String(log.action) === 'PHARMACY_PRIZE_REWARD')
+    const rewardStatus = row.prizeType === 'POINTS'
+      ? rewardLog ? '已到账' : '未找到对应流水'
+      : row.prizeType === 'BADGE'
+        ? row.isDuplicate ? '重复，未再次发放' : '已发放'
+        : '已记录'
+    const actualRewardAmount = rewardLog?.points ?? row.rewardAmount ?? 0
+    const result = angelGiftDrawResultLabel({ ...row, rewardAmount: actualRewardAmount })
+    return event({
+      id: `ANGEL_GIFT_DRAW:${row.id}`,
+      userId: row.userId,
+      category: 'ANGEL_GIFT',
+      action: row.resultType,
+      summary: `天使的礼物：抽中 ${result}`,
+      source: 'PharmacyDraw',
+      detail: detailOf({
+        主题: row.campaignTitle,
+        抽奖结果: result,
+        奖品类型: angelGiftPrizeTypeLabel(row.prizeType),
+        抽奖消耗: costLog?.points ?? -row.drawCost,
+        抽中奖励: row.prizeType === 'POINTS' ? actualRewardAmount : null,
+        重复勋章: row.isDuplicate,
+        重复数量: row.isDuplicate ? row.duplicateQuantity : null,
+        消费流水: costLog ? '已记账' : '未找到对应流水',
+        奖励实际到账: rewardStatus,
+      }),
+      operator: operator('USER', row.userId),
+      target: target('ANGEL_GIFT_DRAW', row.id, row.campaignTitle),
+      riskLevel: null,
+      audit: { themeId: row.campaignId, drawId: row.id },
+      occurredAt: row.drawAt,
+    })
+  })
+
+  const combineEvents = recycles.map((row) => {
+    const rewardLog = row.PointLogs.find((log) => String(log.action) === 'PHARMACY_DUPLICATE_RECYCLE')
+    return event({
+      id: `ANGEL_GIFT_COMBINE:${row.id}`,
+      userId: row.userId,
+      category: 'ANGEL_GIFT',
+      action: 'DUPLICATE_COMBINE',
+      summary: '天使的礼物：重复勋章合成',
+      source: 'PharmacyRecycleLog',
+      detail: detailOf({
+        主题: row.campaignTitle,
+        合成内容: `${row.requiredCount} 枚重复勋章`,
+        合成结果: `+${rewardLog?.points ?? row.rewardAmount} 挂号费`,
+        奖品类型: '挂号费',
+        奖励实际到账: rewardLog ? '已到账' : '未找到对应流水',
+        合成前余量: row.beforeQuantity,
+        合成后余量: row.afterQuantity,
+      }),
+      operator: operator('USER', row.userId),
+      target: target('ANGEL_GIFT_COMBINE', row.id, row.campaignTitle),
+      riskLevel: null,
+      audit: { themeId: row.campaignId, combineId: row.id },
+      occurredAt: row.createdAt,
+    })
+  })
+
+  return [...drawEvents, ...combineEvents]
+}
+
+async function getAngelGiftSummary(options: OperationLoadOptions): Promise<UserOperationAngelGiftSummary> {
+  const allDrawWhere = angelGiftDrawWhere(options, false)
+  const filteredDrawWhere = angelGiftDrawWhere(options)
+  const recycleWhere = angelGiftRecycleWhere(options)
+  const [drawCount, costAggregate, themeGroups, firstDraw, lastDraw, combineCount] = await Promise.all([
+    safeQuery('angel-gift-summary-count', prisma.pharmacyDraw.count({ where: filteredDrawWhere }), 0),
+    safeQuery('angel-gift-summary-cost', prisma.pharmacyDraw.aggregate({ where: filteredDrawWhere, _sum: { drawCost: true } }), { _sum: { drawCost: null } }),
+    safeQuery('angel-gift-theme-groups', prisma.pharmacyDraw.groupBy({ by: ['campaignId'], where: allDrawWhere, _count: { _all: true } }), []),
+    safeQuery('angel-gift-first-draw', prisma.pharmacyDraw.findFirst({ where: filteredDrawWhere, orderBy: [{ drawAt: 'asc' }, { id: 'asc' }], select: { drawAt: true } }), null),
+    safeQuery('angel-gift-last-draw', prisma.pharmacyDraw.findFirst({ where: filteredDrawWhere, orderBy: [{ drawAt: 'desc' }, { id: 'desc' }], select: { drawAt: true } }), null),
+    safeQuery('angel-gift-summary-combines', prisma.pharmacyRecycleLog.count({ where: recycleWhere }), 0),
+  ])
+
+  const themeIds = themeGroups.map((row) => row.campaignId)
+  const titleRows = themeIds.length
+    ? await safeQuery('angel-gift-theme-titles', prisma.pharmacyDraw.findMany({
+      where: { ...allDrawWhere, campaignId: { in: themeIds } },
+      orderBy: [{ drawAt: 'desc' }, { id: 'desc' }],
+      distinct: ['campaignId'],
+      select: { campaignId: true, campaignTitle: true },
+    }), [])
+    : []
+  const titleById = new Map(titleRows.map((row) => [row.campaignId, row.campaignTitle.trim() || '未知主题']))
+  const orderById = new Map(titleRows.map((row, index) => [row.campaignId, index]))
+  const themes = themeGroups
+    .map((row) => ({ id: row.campaignId, title: titleById.get(row.campaignId) || '未知主题', drawCount: row._count._all }))
+    .sort((left, right) => (orderById.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (orderById.get(right.id) ?? Number.MAX_SAFE_INTEGER) || left.title.localeCompare(right.title, 'zh-CN'))
+
+  return {
+    totalDrawCount: drawCount,
+    themeCount: options.themeId ? (drawCount || combineCount ? 1 : 0) : themes.length,
+    totalCost: costAggregate._sum.drawCost || 0,
+    firstDrawAt: firstDraw?.drawAt.toISOString() || null,
+    lastDrawAt: lastDraw?.drawAt.toISOString() || null,
+    totalRecordCount: drawCount + combineCount,
+    combineCount,
+    selectedThemeId: options.themeId || null,
+    themes,
+  }
+}
+
 async function loadPointEvents(options: OperationLoadOptions) {
   if (!categoryEnabled('REWARD', options.category)) return []
   const rows = await safeQuery('point-log', prisma.pointLog.findMany({
-    where: { ...scopeFor('userId', options), createdAt: dateRange(options.from, options.to) },
+    // Angel Gift draws and duplicate-combine records are represented by their
+    // own audit events below. Keeping their ledger rows out of the generic
+    // reward category avoids showing the same business action twice while the
+    // Angel Gift event still cross-references the actual PointLog rows.
+    where: { ...scopeFor('userId', options), createdAt: dateRange(options.from, options.to), pharmacyDrawId: null, pharmacyRecycleLogId: null },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: options.take,
     select: { id: true, userId: true, action: true, points: true, before: true, after: true, reason: true, createdAt: true, businessKey: true, growthTaskCode: true },
@@ -771,6 +1009,7 @@ async function loadOperationEvents(options: OperationLoadOptions) {
     loadUserRewardEvents(options),
     loadBadgeEvents(options),
     loadGameEvents(options),
+    loadAngelGiftEvents(options),
     loadRiskEvents(options),
   ]
   const sourceRows = await Promise.all(loaders)
@@ -783,17 +1022,18 @@ async function attachEventUsers(events: UserOperationEvent[]) {
   return events.map((item) => ({ ...item, user: users.get(item.userId) })).filter((item) => item.user)
 }
 
-function paginateEvents(events: UserOperationEvent[], page: number, pageSize: number, sourceHasMore: boolean) {
+function paginateEvents(events: UserOperationEvent[], page: number, pageSize: number, sourceHasMore: boolean, totalOverride?: number) {
   const start = (page - 1) * pageSize
   const pageItems = events.slice(start, start + pageSize)
-  const hasMore = sourceHasMore || start + pageSize < events.length
+  const total = totalOverride ?? events.length
+  const hasMore = sourceHasMore || start + pageSize < total
   return {
     events: pageItems,
     pagination: {
       page,
       pageSize,
-      total: events.length,
-      totalPages: Math.max(1, Math.ceil(events.length / pageSize)),
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
       hasMore,
     } satisfies UserOperationPagination,
   }
@@ -802,6 +1042,7 @@ function paginateEvents(events: UserOperationEvent[], page: number, pageSize: nu
 export async function getTodayUserOperations(input: {
   query?: string
   category?: UserOperationCategory
+  themeId?: string | null
   page?: number
   pageSize?: number
   now?: Date
@@ -814,16 +1055,28 @@ export async function getTodayUserOperations(input: {
   let userIds: string[] | undefined
   if (input.query?.trim()) {
     userIds = (await searchUserOperationUsers(input.query, 100)).map((user) => user.id)
-    if (!userIds.length) return { events: [], pagination: { page, pageSize, total: 0, totalPages: 1, hasMore: false } satisfies UserOperationPagination, dateKey: getShanghaiDayRange(now).dateKey }
+    if (!userIds.length) {
+      return {
+        events: [],
+        pagination: { page, pageSize, total: 0, totalPages: 1, hasMore: false } satisfies UserOperationPagination,
+        dateKey: getShanghaiDayRange(now).dateKey,
+        ...(category === 'ANGEL_GIFT' ? { angelGift: emptyAngelGiftSummary(input.themeId || null) } : {}),
+      }
+    }
   }
-  const loaded = await loadOperationEvents({ from: start, to: now, category, userIds, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) })
-  const paged = paginateEvents(await attachEventUsers(loaded.events), page, pageSize, loaded.sourceHasMore)
-  return { ...paged, dateKey: getShanghaiDayRange(now).dateKey }
+  const options = { from: start, to: now, category, userIds, themeId: input.themeId || null, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) }
+  const [loaded, angelGift] = await Promise.all([
+    loadOperationEvents(options),
+    category === 'ANGEL_GIFT' ? getAngelGiftSummary(options) : Promise.resolve(null),
+  ])
+  const paged = paginateEvents(await attachEventUsers(loaded.events), page, pageSize, loaded.sourceHasMore, angelGift?.totalRecordCount)
+  return { ...paged, dateKey: getShanghaiDayRange(now).dateKey, ...(angelGift ? { angelGift } : {}) }
 }
 
 export async function getUserOperationTimeline(input: {
   userId: string
   category?: UserOperationCategory
+  themeId?: string | null
   days?: number
   page?: number
   pageSize?: number
@@ -836,9 +1089,14 @@ export async function getUserOperationTimeline(input: {
   const pageSize = Math.min(EVENT_PAGE_LIMIT, normalizePage(input.pageSize, 30, EVENT_PAGE_LIMIT))
   const days = Math.min(365, Math.max(1, normalizePage(input.days, 30, 365)))
   const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
-  const loaded = await loadOperationEvents({ from, to: now, category: input.category || 'ALL', userId: input.userId, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) })
-  const paged = paginateEvents(await attachEventUsers(loaded.events), page, pageSize, loaded.sourceHasMore)
-  return { user: userCard(user), days, ...paged }
+  const category = input.category || 'ALL'
+  const options = { from, to: now, category, userId: input.userId, themeId: input.themeId || null, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) }
+  const [loaded, angelGift] = await Promise.all([
+    loadOperationEvents(options),
+    category === 'ANGEL_GIFT' ? getAngelGiftSummary(options) : Promise.resolve(null),
+  ])
+  const paged = paginateEvents(await attachEventUsers(loaded.events), page, pageSize, loaded.sourceHasMore, angelGift?.totalRecordCount)
+  return { user: userCard(user), days, ...paged, ...(angelGift ? { angelGift } : {}) }
 }
 
 function riskRank(value: string | null) {

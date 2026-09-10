@@ -98,7 +98,7 @@ test('event grants require a new event key and birthday grants use stable qualif
   assert.match(engine, /grantKey: grantKeyForRule\(rule, now, grantKeyPrefix\)/)
   assert.match(engine, /account-age:\$\{rule\.id\}:\$\{rule\.threshold \?\? 'none'\}/)
   assert.match(engine, /birthday:\$\{getShanghaiDateKey\(now\)\}/)
-  assert.match(engine, /zodiac:\$\{rule\.id\}/)
+  assert.match(engine, /zodiacGrantKey/)
   assert.match(read('lib/birthday.ts'), /grantKey: `birthday:\$\{dateKey\}`/)
   assert.match(read('lib/zodiac.ts'), /getZodiacPeriodKey/)
 })
