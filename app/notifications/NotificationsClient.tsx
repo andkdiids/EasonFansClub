@@ -68,6 +68,7 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
     case 'FOLLOW':
       return { label: '去好友', href: '/friends#received-requests' }
     case 'ACTIVITY':
+      if (item.key?.startsWith('global-points-grant:')) return { label: '查看挂号费', href: item.link || '/profile' }
       if (item.key?.startsWith('user-reward:')) return { label: '查看成长', href: item.link || '/profile' }
       if (item.link?.startsWith('/user/')) return { label: '去好友主页', href: item.link }
       return item.link?.startsWith('/games/guess-song/duel')
@@ -934,7 +935,8 @@ export function NotificationsClient({
     const systemLike = isSystemLikeNotification(item)
     const actorCardFriend = !systemLike ? getNotificationActorCardFriend(item) : null
     const isBirthday = isBirthdayNotification(item)
-    const isUserReward = item.key?.startsWith('user-reward:') === true
+    const isUserReward = item.key?.startsWith('user-reward:') === true || item.key?.startsWith('global-points-grant:') === true
+    const isGlobalPointsGrant = item.key?.startsWith('global-points-grant:') === true
     const isReplyNotification = item.type === 'REPLY' || item.category === 'feedback'
     const replyPreview = item.replyPreview?.trim() || null
     const fallbackContent = item.content?.trim() || null
@@ -1039,7 +1041,7 @@ export function NotificationsClient({
               <p className={`mt-0.5 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600 ${isUserReward ? '' : 'line-clamp-2'}`}>{fallbackContent}</p>
             ) : null}
             {item.activityTitle ? <p className="mt-1 text-xs font-black text-violet-700">活动：{item.activityTitle}</p> : null}
-            {item.imageUrl ? <div className="mt-2 max-w-full" onClick={(event) => event.stopPropagation()}><ImageViewer src={item.imageUrl} alt={`${item.activityTitle || '活动'}通知图片`} imageClassName="max-h-40 w-full rounded-lg object-contain" buttonClassName="block max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-slate-50 text-left" /></div> : null}
+            {item.imageUrl ? <div className="mt-2 max-w-full" onClick={(event) => event.stopPropagation()}><ImageViewer src={item.imageUrl} alt={`${isGlobalPointsGrant ? '挂号费发放' : item.activityTitle || '活动'}通知图片`} imageClassName="max-h-40 w-full rounded-lg object-contain" buttonClassName="block max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-slate-50 text-left" /></div> : null}
 
             {/* 智能入口：不同通知提供不同快捷入口（账号安全→去设置、资料→编辑资料、审核→查看帖子、互动→查看互动） */}
             {smartEntry?.action === 'dock' ? (

@@ -24,6 +24,7 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
       { href: '/admin/checkin-makeup', title: '手动补签', desc: '免费为用户补历史挂号，并记录管理员审计原因。' },
       { href: '/admin/default-avatars', title: '默认头像管理', desc: '维护系统默认头像池。' },
       { href: '/admin/user-rewards', title: '用户奖励', desc: '用户投稿、建议或内容被采纳后，记录并发放贡献奖励。' },
+      { href: '/admin/global-points-grants', title: '全站挂号费发放', desc: '向全站有效用户批量发放挂号费，并保留批次结果与审计记录。' },
     ],
   },
   {

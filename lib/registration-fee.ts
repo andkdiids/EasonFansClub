@@ -38,6 +38,7 @@ export const REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, str
   PHARMACY_DUPLICATE_RECYCLE: '天使的礼物·余药回收',
   GROWTH_REWARD: '成长奖励',
   GROWTH_REWARD_REVERSAL: '成长奖励追回',
+  GLOBAL_POINTS_GRANT: '全站挂号费发放',
 }
 
 const COMMUNITY_REGISTRATION_FEE_SOURCE_LABELS: Partial<Record<PointActionType, string>> = {

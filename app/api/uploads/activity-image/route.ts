@@ -10,8 +10,14 @@ import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
 
 export const runtime = 'nodejs'
 
+async function requireActivityImageAdmin() {
+  const activityGuard = await requireAdmin('activity_manage')
+  if (activityGuard.user || activityGuard.response?.status !== 403) return activityGuard
+  return requireAdmin('user_reward_manage')
+}
+
 export async function POST(request: Request) {
-  const guard = await requireAdmin('activity_manage')
+  const guard = await requireActivityImageAdmin()
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/uploads/activity-image',

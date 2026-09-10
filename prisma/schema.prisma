@@ -175,6 +175,45 @@ model ActivityNotificationBatch {
   @@index([createdById, createdAt])
 }
 
+model GlobalPointsGrantBatch {
+  id             String                       @id @default(cuid())
+  idempotencyKey String                       @unique @db.VarChar(191)
+  title          String                       @db.VarChar(191)
+  content        String                       @db.Text
+  imageUrl       String?                      @db.Text
+  amount         Int
+  recipientCount Int
+  totalAmount    Int
+  successCount   Int                          @default(0)
+  failedCount    Int                          @default(0)
+  status         String                       @default("PENDING") @db.VarChar(20)
+  createdById    String
+  createdAt      DateTime                     @default(now())
+  completedAt    DateTime?
+  CreatedBy      User                         @relation("GlobalPointsGrantBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  Recipients     GlobalPointsGrantRecipient[]
+
+  @@index([createdById, createdAt])
+  @@index([status, createdAt])
+}
+
+model GlobalPointsGrantRecipient {
+  id            String                 @id @default(cuid())
+  batchId       String
+  userId        String
+  amount        Int
+  status        String                 @default("PENDING") @db.VarChar(20)
+  failureReason String?                @db.Text
+  processedAt   DateTime?
+  createdAt     DateTime               @default(now())
+  Batch         GlobalPointsGrantBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  User          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, userId])
+  @@index([batchId, status, id])
+  @@index([userId, createdAt])
+}
+
 model ActivityRegistrationQuestion {
   id          String                               @id @default(cuid())
   activityId  String
@@ -4349,6 +4388,8 @@ model User {
   UserOperationLog_UserOperationLog_userIdToUser         UserOperationLog[]                 @relation("UserOperationLogUser")
   UserOperationLog_UserOperationLog_operatorUserIdToUser UserOperationLog[]                 @relation("UserOperationLogOperator")
   ActivityNotificationBatchesCreated                     ActivityNotificationBatch[]        @relation("ActivityNotificationBatchCreatedBy")
+  GlobalPointsGrantBatchesCreated                        GlobalPointsGrantBatch[]           @relation("GlobalPointsGrantBatchCreatedBy")
+  GlobalPointsGrantRecipients                            GlobalPointsGrantRecipient[]
   AdminPermission                                        AdminPermission[]
   MaterialRedemptionsCreated                             MaterialRedemption[]               @relation("MaterialRedemptionCreatedByAdmin")
   MaterialRedemptionOrders                               MaterialRedemptionOrder[]          @relation("MaterialRedemptionOrderUser")
@@ -5196,6 +5237,7 @@ enum PointActionType {
   PHARMACY_DUPLICATE_RECYCLE
   GROWTH_REWARD
   GROWTH_REWARD_REVERSAL
+  GLOBAL_POINTS_GRANT
 }
 
 enum PharmacyCampaignStatus {

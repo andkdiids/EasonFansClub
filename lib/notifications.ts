@@ -239,6 +239,7 @@ export {
 function getNotificationTypeLabel(type: string, link?: string | null, source?: 'personal' | 'system', key?: string | null) {
   if (type === 'FEEDBACK' || link?.startsWith('/feedback/') || isLegacyFeedbackNotification(type, key)) return '反馈'
   if (type === 'REVIEW' || isLegacyReviewNotification(type, link, key)) return '审核'
+  if (type === 'ACTIVITY' && key?.startsWith('global-points-grant:')) return '挂号费'
   return source === 'system' ? systemTypeLabels[type] || type : personalTypeLabels[type] || type
 }
 

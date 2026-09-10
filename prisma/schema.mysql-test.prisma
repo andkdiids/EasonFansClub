@@ -46,6 +46,8 @@ model User {
   activityFavorites               ActivityFavorite[]
   activityRegistrations           ActivityRegistration[]
   activityNotificationBatchesCreated ActivityNotificationBatch[] @relation("ActivityNotificationBatchCreatedBy")
+  globalPointsGrantBatchesCreated GlobalPointsGrantBatch[] @relation("GlobalPointsGrantBatchCreatedBy")
+  globalPointsGrantRecipients    GlobalPointsGrantRecipient[]
   adminActions                    AdminAction[]               @relation("AdminOperator")
   targetAdminActions              AdminAction[]               @relation("AdminTargetUser")
   administeredActionLogs          AdminActionLog[]            @relation("AdminActionLogAdmin")
@@ -1429,6 +1431,45 @@ model ActivityNotificationBatch {
   @@index([createdById, createdAt])
 }
 
+model GlobalPointsGrantBatch {
+  id             String                         @id @default(cuid())
+  idempotencyKey String                         @unique @db.VarChar(191)
+  title          String                         @db.VarChar(191)
+  content        String                         @db.Text
+  imageUrl       String?                        @db.Text
+  amount         Int
+  recipientCount Int
+  totalAmount    Int
+  successCount   Int                          @default(0)
+  failedCount    Int                          @default(0)
+  status         String                       @default("PENDING") @db.VarChar(20)
+  createdById    String
+  createdAt      DateTime                     @default(now())
+  completedAt    DateTime?
+  createdBy      User                         @relation("GlobalPointsGrantBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  recipients     GlobalPointsGrantRecipient[]
+
+  @@index([createdById, createdAt])
+  @@index([status, createdAt])
+}
+
+model GlobalPointsGrantRecipient {
+  id            String                  @id @default(cuid())
+  batchId       String
+  userId        String
+  amount        Int
+  status        String                  @default("PENDING") @db.VarChar(20)
+  failureReason String?                 @db.Text
+  processedAt   DateTime?
+  createdAt     DateTime                @default(now())
+  batch         GlobalPointsGrantBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, userId])
+  @@index([batchId, status, id])
+  @@index([userId, createdAt])
+}
+
 model ActivityRegistration {
   id          String    @id @default(cuid())
   note        String?
@@ -1941,6 +1982,7 @@ enum PointActionType {
   ENTERTAINMENT_DAILY_DRAW
   POST_DAILY_FIRST
   POST_COMMENT_DAILY
+  GLOBAL_POINTS_GRANT
 }
 
 enum AdminActionType {

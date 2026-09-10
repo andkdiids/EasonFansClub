@@ -34,6 +34,7 @@ export const adminAuditOperations = {
   ANGEL_GIFT_CAMPAIGN_UPDATE: 'ANGEL_GIFT_CAMPAIGN_UPDATE',
   ANGEL_GIFT_CAMPAIGN_STATUS: 'ANGEL_GIFT_CAMPAIGN_STATUS',
   ANGEL_GIFT_PRIZE_UPDATE: 'ANGEL_GIFT_PRIZE_UPDATE',
+  ADMIN_GLOBAL_POINTS_GRANT: 'ADMIN_GLOBAL_POINTS_GRANT',
 } as const
 
 export type AdminAuditOperation = typeof adminAuditOperations[keyof typeof adminAuditOperations]
@@ -70,6 +71,7 @@ export const adminAuditOperationLabels: Record<AdminAuditOperation, string> = {
   ANGEL_GIFT_CAMPAIGN_UPDATE: '编辑天使的礼物主题',
   ANGEL_GIFT_CAMPAIGN_STATUS: '更新天使的礼物主题状态',
   ANGEL_GIFT_PRIZE_UPDATE: '更新天使的礼物奖池',
+  ADMIN_GLOBAL_POINTS_GRANT: '全站发放挂号费',
 }
 
 type AuditDatabaseClient = Pick<Prisma.TransactionClient, 'user' | 'adminAction' | 'postModerationHistory'>
