@@ -886,15 +886,22 @@ export async function answerWantListenQuestion(input: { userId: string; sessionI
       })
     }
 
-    if (isFinal && !assessment.suspicious && session.antiCheatStatus !== 'SUSPICIOUS') {
-      await updateWantListenStats(database, updated, '', false, 1, finalScore, finalCorrectCount)
-      await recordWantListenLeaderboard(session.id, database)
+    // Growth 的“完成一局”只依赖服务端已经完成本局的事实；它不应和
+    // 排行榜投榜资格绑在一起。想听模式的正常答题节奏更容易触发反作弊
+    // 风险评估，之前把 Growth 写入放在下面的 CLEAN 分支里，会出现会话已
+    // COMPLETED 但 DAILY_GAME 没有完成记录的情况。反作弊仍然继续拦截
+    // 统计与排行榜，不改变游戏分数或规则。
+    if (isFinal) {
       await recordEntertainmentGameCompletion(database, {
         userId: session.userId,
         gameCode: `WANT_LISTEN_${session.mode}`,
         gameId: session.id,
         now: completedAt || new Date(),
       })
+    }
+    if (isFinal && !assessment.suspicious && session.antiCheatStatus !== 'SUSPICIOUS') {
+      await updateWantListenStats(database, updated, '', false, 1, finalScore, finalCorrectCount)
+      await recordWantListenLeaderboard(session.id, database)
     }
     return { duplicate: false, sessionId: updated.id, questionId: current.id, finalized: isFinal }
   })
@@ -1030,15 +1037,20 @@ export async function finishWantListenSession(userId: string, sessionId: string,
       })
     }
 
-    if (!assessment.suspicious && active.antiCheatStatus !== 'SUSPICIOUS' && updated.totalQuestions > 0) {
-      await updateWantListenStats(database, updated, '', false, 1, updated.score, updated.correctCount)
-      await recordWantListenLeaderboard(active.id, database)
+    // A manually finished endless round is a valid daily-game completion once
+    // at least one answer was accepted. Keep the anti-cheat gate only for the
+    // game's statistics and leaderboard, not for the shared Growth event.
+    if (updated.totalQuestions > 0) {
       await recordEntertainmentGameCompletion(database, {
         userId: active.userId,
         gameCode: `WANT_LISTEN_${active.mode}`,
         gameId: active.id,
         now: finishedAt,
       })
+    }
+    if (!assessment.suspicious && active.antiCheatStatus !== 'SUSPICIOUS' && updated.totalQuestions > 0) {
+      await updateWantListenStats(database, updated, '', false, 1, updated.score, updated.correctCount)
+      await recordWantListenLeaderboard(active.id, database)
     }
     return { duplicate: false, finalized: true }
   })

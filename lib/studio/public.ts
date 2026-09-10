@@ -1,8 +1,9 @@
 import type { Prisma } from '@prisma/client'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { normalizeArtistSlug } from './artists'
 import { getStudioTool } from './tools'
-import type { StudioGalleryProject, StudioGallerySort } from './types'
+import type { StudioArtistSummary, StudioGalleryProject, StudioGallerySort } from './types'
 
 export const PUBLIC_STUDIO_PROJECT_WHERE = {
   visibility: 'PUBLIC' as const,
@@ -28,6 +29,7 @@ const gallerySelect = {
   updatedAt: true,
   lastOpenedAt: true,
   User: { select: { nickname: true } },
+  Artist: { select: { id: true, slug: true, name: true, avatar: true, description: true } },
 } satisfies Prisma.StudioProjectSelect
 
 type GalleryRow = Prisma.StudioProjectGetPayload<{ select: typeof gallerySelect }>
@@ -68,6 +70,17 @@ function publicProjectSummary(row: GalleryRow, liked: boolean, favorited: boolea
     lastOpenedAt: row.lastOpenedAt?.toISOString() || null,
     metadata: studioProjectMetadata(row.data),
     author: row.User.nickname || '私家E院',
+    artist: row.Artist ? publicArtistSummary(row.Artist) : null,
+  }
+}
+
+function publicArtistSummary(artist: { id: string; slug: string; name: string; avatar: string | null; description: string | null }): StudioArtistSummary {
+  return {
+    id: artist.id,
+    slug: artist.slug,
+    name: artist.name,
+    avatar: publicImageUrl(artist.avatar),
+    description: artist.description,
   }
 }
 
@@ -113,6 +126,43 @@ export async function listPublicStudioProjects(options: PublicStudioProjectListO
     hasMore: rows.length > pageSize,
     sort,
     toolSlug: selectedTool,
+  }
+}
+
+async function addParticipantCounts(projects: StudioGalleryProject[]) {
+  if (!projects.length) return projects
+  const ids = projects.map((project) => project.id)
+  const [likes, favorites] = await Promise.all([
+    prisma.studioProjectLike.findMany({ where: { projectId: { in: ids } }, select: { projectId: true, userId: true } }),
+    prisma.studioProjectFavorite.findMany({ where: { projectId: { in: ids } }, select: { projectId: true, userId: true } }),
+  ])
+  const participants = new Map<string, Set<string>>()
+  for (const row of [...likes, ...favorites]) {
+    const users = participants.get(row.projectId) || new Set<string>()
+    users.add(row.userId)
+    participants.set(row.projectId, users)
+  }
+  return projects.map((project) => ({ ...project, participantCount: participants.get(project.id)?.size || 0 }))
+}
+
+export async function getPublicArtistPage(slug: string) {
+  const normalizedSlug = normalizeArtistSlug(slug)
+  if (!normalizedSlug) return null
+  const artist = await prisma.artist.findUnique({
+    where: { slug: normalizedSlug },
+    select: { id: true, slug: true, name: true, avatar: true, description: true },
+  })
+  if (!artist) return null
+
+  const rows = await prisma.studioProject.findMany({
+    where: { ...PUBLIC_STUDIO_PROJECT_WHERE, artistId: artist.id },
+    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    select: gallerySelect,
+  })
+  const projects = await addParticipantCounts(rows.map((row) => publicProjectSummary(row, false, false)))
+  return {
+    artist: publicArtistSummary(artist),
+    projects,
   }
 }
 

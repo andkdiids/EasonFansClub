@@ -41,6 +41,7 @@ function GalleryCard({ project, busy, onInteract }: Readonly<{ project: StudioGa
         <div className={styles.galleryFacts}><span>{project.metadata?.width || '—'} × {project.metadata?.height || '—'}</span><span>{project.metadata?.totalBeads ?? '—'} 颗</span><span>{project.metadata?.colorCount ?? '—'} 色</span><span>↓ {downloadCount}</span></div>
       </div>
     </Link>
+    {project.artist ? <Link href={`/artists/${encodeURIComponent(project.artist.slug)}`} className={styles.galleryArtistLink} aria-label={`查看艺术家${project.artist.name}主页`}><span className={styles.galleryArtistAvatar}>{project.artist.avatar ? <img src={project.artist.avatar} alt="" loading="lazy" /> : project.artist.name.slice(0, 1)}</span><span>{project.artist.name}</span></Link> : null}
     <div className={styles.galleryActions}>
       <button type="button" className={`${styles.galleryInteraction} ${project.isLiked ? styles.galleryInteractionActive : ''}`} onClick={() => onInteract(project, 'like')} disabled={busy === `${project.id}:like`} aria-pressed={project.isLiked}>{project.isLiked ? '♥' : '♡'} {likeCount}</button>
       <button type="button" className={`${styles.galleryInteraction} ${project.isFavorited ? styles.galleryInteractionFavorite : ''}`} onClick={() => onInteract(project, 'favorite')} disabled={busy === `${project.id}:favorite`} aria-pressed={project.isFavorited}>{project.isFavorited ? '★' : '☆'} {favoriteCount}</button>

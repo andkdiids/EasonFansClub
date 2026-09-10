@@ -1,6 +1,6 @@
 import type { PointActionType, Prisma } from '@prisma/client'
 import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
-import { getShanghaiDayRange } from '@/lib/checkin'
+import { getShanghaiDateKey, getShanghaiDayRange, parseBeijingDate, shiftShanghaiDateKey } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 import { REGISTRATION_FEE_HISTORY_PAGE_SIZE } from '@/lib/registration-fee-constants'
 
@@ -351,11 +351,88 @@ const registrationFeeRecordSelect = {
 
 type RegistrationFeeRecord = Prisma.PointLogGetPayload<{ select: typeof registrationFeeRecordSelect }>
 
+export type RegistrationFeeHistoryRange = 'all' | 'today' | 'yesterday' | 'week' | 'date'
+
+export class RegistrationFeeHistoryQueryError extends Error {
+  constructor(message = 'INVALID_REGISTRATION_FEE_HISTORY_QUERY') {
+    super(message)
+    this.name = 'RegistrationFeeHistoryQueryError'
+  }
+}
+
+const shanghaiWeekdayFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Shanghai',
+  weekday: 'short',
+})
+
+const weekdayIndex: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+}
+
+function getShanghaiWeekKeyForHistory(date = new Date()) {
+  const dateKey = getShanghaiDateKey(date)
+  const localStart = parseBeijingDate(dateKey)
+  if (!localStart) return dateKey
+
+  const weekday = weekdayIndex[shanghaiWeekdayFormatter.format(date)] ?? 1
+  const daysFromMonday = (weekday + 6) % 7
+  return getShanghaiDateKey(new Date(localStart.getTime() - daysFromMonday * 24 * 60 * 60 * 1000))
+}
+
+function getShanghaiDateWindow(dateKey: string) {
+  const start = parseBeijingDate(dateKey)
+  if (!start) throw new RegistrationFeeHistoryQueryError('INVALID_REGISTRATION_FEE_HISTORY_DATE')
+  return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) }
+}
+
+export function getRegistrationFeeHistoryWindow(options: {
+  range?: RegistrationFeeHistoryRange
+  dateKey?: string
+  now?: Date
+} = {}) {
+  const range = options.range || 'all'
+  if (range === 'all') return { range, dateKey: null, start: null, end: null }
+
+  if (range === 'date') {
+    if (!options.dateKey) throw new RegistrationFeeHistoryQueryError('REGISTRATION_FEE_HISTORY_DATE_REQUIRED')
+    const window = getShanghaiDateWindow(options.dateKey)
+    return { range, dateKey: options.dateKey, ...window }
+  }
+
+  const now = options.now || new Date()
+  if (range === 'today') {
+    const window = getShanghaiDayRange(now)
+    return { range, dateKey: window.dateKey, start: window.start, end: window.end }
+  }
+
+  if (range === 'yesterday') {
+    const dateKey = shiftShanghaiDateKey(getShanghaiDateKey(now), -1)
+    const window = getShanghaiDateWindow(dateKey)
+    return { range, dateKey, ...window }
+  }
+
+  if (range === 'week') {
+    const dateKey = getShanghaiWeekKeyForHistory(now)
+    const start = parseBeijingDate(dateKey)
+    if (!start) throw new RegistrationFeeHistoryQueryError('INVALID_REGISTRATION_FEE_HISTORY_WEEK')
+    return { range, dateKey, start, end: new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000) }
+  }
+
+  throw new RegistrationFeeHistoryQueryError('INVALID_REGISTRATION_FEE_HISTORY_RANGE')
+}
+
 function getRegistrationFeeRelatedId(record: RegistrationFeeRecord) {
   return record.dailyDrawId || record.checkInId || record.postId || record.replyId || record.activityId || record.badgeId || null
 }
 
 export function serializeRegistrationFeeRecord(record: RegistrationFeeRecord) {
+  const displayDateTime = formatBeijingDateTimeMinute(record.createdAt)
   return {
     id: record.id,
     amount: record.points,
@@ -365,7 +442,8 @@ export function serializeRegistrationFeeRecord(record: RegistrationFeeRecord) {
     relatedId: getRegistrationFeeRelatedId(record),
     activityRegistrationId: record.activityRegistrationId,
     createdAt: record.createdAt.toISOString(),
-    displayTime: formatBeijingDateTimeMinute(record.createdAt).slice(-5),
+    displayTime: displayDateTime.slice(-5),
+    displayDateTime: displayDateTime.slice(5),
   }
 }
 
@@ -389,12 +467,20 @@ export async function getTodayRegistrationFeeSummary(userId: string, now = new D
   }
 }
 
-export async function getRegistrationFeeHistory(userId: string, options: { page?: number; pageSize?: number } = {}) {
+export async function getRegistrationFeeHistory(userId: string, options: {
+  page?: number
+  pageSize?: number
+  range?: RegistrationFeeHistoryRange
+  dateKey?: string
+  now?: Date
+} = {}) {
   const pageSize = Math.min(Math.max(Math.trunc(options.pageSize || REGISTRATION_FEE_HISTORY_PAGE_SIZE) || REGISTRATION_FEE_HISTORY_PAGE_SIZE, 1), 50)
   const requestedPage = Math.max(1, Math.trunc(options.page || 1) || 1)
+  const window = getRegistrationFeeHistoryWindow({ range: options.range, dateKey: options.dateKey, now: options.now })
   // Keep the full non-zero ledger here so reversals and manual balance
   // corrections retain their correct negative sign in the history page.
-  const where = { userId, points: { not: 0 } }
+  const where = { userId, points: { not: 0 } } as Prisma.PointLogWhereInput
+  if (window.start && window.end) where.createdAt = { gte: window.start, lt: window.end }
   const [user, total] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { points: true } }),
     prisma.pointLog.count({ where }),
@@ -418,5 +504,6 @@ export async function getRegistrationFeeHistory(userId: string, options: { page?
     pageSize,
     total,
     totalPages,
+    filter: { range: window.range, dateKey: window.dateKey, timezone: 'Asia/Shanghai' as const },
   }
 }

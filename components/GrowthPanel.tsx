@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { formatListenDuelProgress } from '@/lib/growth-tasks/presentation'
+import { RegistrationFeeHistoryDialog } from '@/components/RegistrationFeeHistoryDialog'
 
 type GrowthView = 'today' | 'new-life'
 
@@ -181,6 +182,7 @@ export function GrowthPanel({
   const [busyKey, setBusyKey] = useState('')
   const [error, setError] = useState('')
   const [rewardNotice, setRewardNotice] = useState('')
+  const [feeHistoryOpen, setFeeHistoryOpen] = useState(false)
 
   const applyOverview = useCallback((next: GrowthOverview) => {
     setOverview(next)
@@ -277,86 +279,97 @@ export function GrowthPanel({
   const weekPercent = Math.min(100, overview.week.completedDays / Math.max(1, overview.week.totalDays) * 100)
 
   return (
-    <div className={`growth-panel ${view === 'today' ? 'growth-today-panel' : 'growth-new-life-panel'}`}>
-      {view === 'today' ? (
-        <>
-          <section className="growth-today-summary" aria-label="今日与本周进度">
-            <div className="growth-summary-line"><span>今日</span><strong>{completedToday} / {totalTodayTasks}</strong></div>
-            <div className="growth-summary-line"><span>本周进度</span><strong>{overview.week.completedDays} / {overview.week.totalDays} 天</strong></div>
-            <div className="growth-week-track" role="progressbar" aria-valuemin={0} aria-valuemax={overview.week.totalDays} aria-valuenow={overview.week.completedDays} aria-label={`本周进度 ${overview.week.completedDays} / ${overview.week.totalDays} 天`}>
-              <span style={{ width: `${weekPercent}%` }} />
-            </div>
-          </section>
+    <>
+      <div className={`growth-panel ${view === 'today' ? 'growth-today-panel' : 'growth-new-life-panel'}`}>
+        {view === 'today' ? (
+          <>
+            <section className="growth-today-summary" aria-label="医保余额与本周进度">
+              <div className="growth-asset-row">
+                <span className="growth-balance"><span>医保余额</span><strong>{overview.points}</strong></span>
+                <button type="button" className="growth-fee-history-trigger" onClick={() => setFeeHistoryOpen(true)}>
+                  挂号费记录 <span aria-hidden="true">›</span>
+                </button>
+              </div>
+              <div className="growth-summary-line"><span>本周进度</span><strong>{overview.week.completedDays} / {overview.week.totalDays} 天</strong></div>
+              <div className="growth-week-track" role="progressbar" aria-valuemin={0} aria-valuemax={overview.week.totalDays} aria-valuenow={overview.week.completedDays} aria-label={`本周进度 ${overview.week.completedDays} / ${overview.week.totalDays} 天`}>
+                <span style={{ width: `${weekPercent}%` }} />
+              </div>
+            </section>
 
-          <details className="growth-panel-section growth-reward-rules">
-            <summary>奖励规则 <span aria-hidden="true">›</span></summary>
-            <div className="growth-reward-rule-groups">
-              {overview.rewardRules.map((group) => (
-                <section className="growth-reward-rule-group" data-reward-group={group.key} key={group.key}>
-                  <h3>{group.title}</h3>
-                  {group.description ? <p className="growth-reward-rule-group-description">{group.description}</p> : null}
-                  <div className="growth-rule-list">
-                    {group.items.map((rule) => {
-                      const caps = formatRuleCaps(rule)
-                      const details = [caps, rule.detail].filter(Boolean).join(' · ')
-                      const amount = rule.claimed
-                        ? `✓ ${rule.amountLabel} · 已领取`
-                        : rule.claimable
-                          ? `✓ ${rule.amountLabel}`
-                          : rule.amountLabel
-                      const content = (
-                        <>
-                          <span className="growth-rule-main">
-                            <span>{rule.title}</span>
-                            {details ? <small>{details}</small> : null}
-                          </span>
-                          <strong className="growth-rule-reward">{amount}</strong>
-                        </>
-                      )
-                      const key = rule.milestoneDays === undefined ? rule.code : `milestone-${rule.milestoneDays}`
-                      return <div className="growth-rule-row" key={key}>{content}</div>
-                    })}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </details>
+            <details className="growth-panel-section growth-reward-rules">
+              <summary>奖励规则 <span aria-hidden="true">›</span></summary>
+              <div className="growth-reward-rule-groups">
+                {overview.rewardRules.map((group) => (
+                  <section className="growth-reward-rule-group" data-reward-group={group.key} key={group.key}>
+                    <h3>{group.title}</h3>
+                    {group.description ? <p className="growth-reward-rule-group-description">{group.description}</p> : null}
+                    <div className="growth-rule-list">
+                      {group.items.map((rule) => {
+                        const caps = formatRuleCaps(rule)
+                        const details = [caps, rule.detail].filter(Boolean).join(' · ')
+                        const amount = rule.claimed
+                          ? `✓ ${rule.amountLabel} · 已领取`
+                          : rule.claimable
+                            ? `✓ ${rule.amountLabel}`
+                            : rule.amountLabel
+                        const content = (
+                          <>
+                            <span className="growth-rule-main">
+                              <span>{rule.title}</span>
+                              {details ? <small>{details}</small> : null}
+                            </span>
+                            <strong className="growth-rule-reward">{amount}</strong>
+                          </>
+                        )
+                        const key = rule.milestoneDays === undefined ? rule.code : `milestone-${rule.milestoneDays}`
+                        return <div className="growth-rule-row" key={key}>{content}</div>
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </details>
 
-          <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
-            <h3 id="growth-core-title">今天只做一件事<span className="growth-core-title-note">（每日必做）</span></h3>
-            <div className="growth-item-list">
-              {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayProgress(item)} completed={Boolean(item.completed)} />)}
-            </div>
-          </section>
+            <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
+              <div className="growth-core-heading">
+                <h3 id="growth-core-title">今天只做一件事<span className="growth-core-title-note">（每日必做）</span></h3>
+                <strong className="growth-core-title-progress">{completedToday}/{totalTodayTasks}</strong>
+              </div>
+              <div className="growth-item-list">
+                {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayProgress(item)} completed={Boolean(item.completed)} />)}
+              </div>
+            </section>
 
-          <details className="growth-panel-section growth-passive-section">
-            <summary>之外 <span aria-hidden="true">›</span></summary>
-            <div className="growth-item-list">
-              {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} completed={isPassiveItemComplete(item)} />)}
+            <details className="growth-panel-section growth-passive-section">
+              <summary>之外 <span aria-hidden="true">›</span></summary>
+              <div className="growth-item-list">
+                {overview.passive.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatPassiveProgress(item)} completed={isPassiveItemComplete(item)} />)}
+              </div>
+            </details>
+          </>
+        ) : (
+          <>
+            <div className="growth-panel-intro">
+              <div>
+                <h2>新生活</h2>
+                <p>把真正属于你的第一次，留成一份可领取的纪念。</p>
+              </div>
+              <div className="growth-new-life-tools">
+                <strong className="growth-new-life-count">{overview.newLife.completedCount}/{overview.newLife.total}</strong>
+                <button type="button" className="growth-refresh-button" onClick={() => void requestOverview(true)} disabled={loading}>
+                  {loading ? '刷新中…' : '刷新'}
+                </button>
+              </div>
             </div>
-          </details>
-        </>
-      ) : (
-        <>
-          <div className="growth-panel-intro">
-            <div>
-              <h2>新生活</h2>
-              <p>把真正属于你的第一次，留成一份可领取的纪念。</p>
+            <div className="growth-item-list growth-new-life-list">
+              {overview.newLife.items.map((item) => <GrowthNewLifeRow key={item.code} item={item} busy={busyKey === item.code} onClaim={() => void claim({ taskCode: item.code }, item.code)} />)}
             </div>
-            <div className="growth-new-life-tools">
-              <strong className="growth-new-life-count">{overview.newLife.completedCount}/{overview.newLife.total}</strong>
-              <button type="button" className="growth-refresh-button" onClick={() => void requestOverview(true)} disabled={loading}>
-                {loading ? '刷新中…' : '刷新'}
-              </button>
-            </div>
-          </div>
-          <div className="growth-item-list growth-new-life-list">
-            {overview.newLife.items.map((item) => <GrowthNewLifeRow key={item.code} item={item} busy={busyKey === item.code} onClaim={() => void claim({ taskCode: item.code }, item.code)} />)}
-          </div>
-        </>
-      )}
-      {rewardNotice ? <p className="growth-panel-success" role="status">{rewardNotice}</p> : null}
-      {error ? <p className="growth-panel-error" role="alert">{error}</p> : null}
-    </div>
+          </>
+        )}
+        {rewardNotice ? <p className="growth-panel-success" role="status">{rewardNotice}</p> : null}
+        {error ? <p className="growth-panel-error" role="alert">{error}</p> : null}
+      </div>
+      <RegistrationFeeHistoryDialog open={feeHistoryOpen} onClose={() => setFeeHistoryOpen(false)} />
+    </>
   )
 }

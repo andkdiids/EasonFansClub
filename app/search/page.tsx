@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
-import { profileImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { calculateGrowthSummary, listGrowthLevels } from '@/lib/growth'
 import { AddFriendButton, FriendRequestDecision } from '@/components/FriendRequestActions'
@@ -27,9 +27,17 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const params = await searchParams
   const q = (params.q || '').trim()
   const page = parseGlobalSearchPage(params.page)
-  const [users, albums, songs] = q
+  const [users, artists, albums, songs] = q
     ? await Promise.all([
         findGlobalSearchUsers(q),
+        prisma.artist.findMany({
+          where: {
+            OR: [{ name: { contains: q } }, { slug: { contains: q } }, { description: { contains: q } }],
+          },
+          orderBy: [{ name: 'asc' }, { id: 'asc' }],
+          select: { id: true, slug: true, name: true, avatar: true, description: true },
+          take: 10,
+        }),
         prisma.musicAlbum.findMany({
           where: {
             status: 'PUBLISHED',
@@ -62,7 +70,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           take: 16,
         }),
       ])
-    : [[], [], []]
+    : [[], [], [], []]
 
   const postSearch = q
     ? await searchPublicPosts(q, users.map((user) => user.id), page)
@@ -74,6 +82,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     : await prisma.searchKeyword.findMany({ orderBy: [{ count: 'desc' }, { lastUsedAt: 'desc' }], take: 8 })
 
   const viewer = await getCurrentUser()
+  for (const artist of artists) artist.avatar = publicImageUrl(artist.avatar)
   for (const album of albums) album.coverUrl = publicImageVariantUrl(album.coverUrl, 'thumb-sm')
   for (const song of songs) {
     song.coverUrl = publicImageVariantUrl(song.coverUrl || song.MusicAlbum.coverUrl, 'thumb-sm')
@@ -104,7 +113,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             <input
               name="q"
               defaultValue={q}
-              placeholder="搜索帖子、用户、板块、标签"
+              placeholder="搜索帖子、用户、艺术家、板块、标签"
               className="min-w-0 flex-1 rounded-xl border border-sky-100 bg-white px-4 py-3 font-bold outline-none focus:border-brand-400"
             />
             <button className="min-h-11 shrink-0 rounded-xl bg-brand-700 px-6 py-3 font-black text-white">搜索</button>
@@ -124,6 +133,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           </section>
         ) : (
           <section className="space-y-6">
+            {artists.length ? <h2 className="pt-3 text-lg font-black text-brand-950">艺术家</h2> : null}
+            {artists.map((artist) => (
+              <Link key={artist.id} href={`/artists/${encodeURIComponent(artist.slug)}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
+                <span className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden bg-brand-950 text-lg font-black text-white">{artist.avatar ? <img src={artist.avatar} alt="" className="h-full w-full object-cover" loading="lazy" /> : artist.name.slice(0, 1)}</span>
+                <span className="min-w-0"><strong className="block break-words font-black text-slate-950">{artist.name}</strong><small className="mt-1 block break-words text-sm text-slate-500">艺术家 · {artist.description || '浏览相关作品'}</small></span>
+              </Link>
+            ))}
             {users.length ? <h2 className="pt-3 text-lg font-black text-brand-950">用户</h2> : null}
             {users.map((item) => {
               const name = getPublicUserDisplayName(item)
@@ -180,7 +196,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <span className="min-w-0"><strong className="block break-words font-black text-slate-950">{song.title}</strong><small className="mt-1 block break-words text-sm text-slate-500">{song.artist} · {song.MusicAlbum.name} · {song.previewUrl ? '支持试听' : '暂无试听'}</small></span>
               </Link>
             ))}
-            {posts.length + users.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-center text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
+            {posts.length + users.length + artists.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-center text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
           </section>
         )}
       </PageContainer>

@@ -8,6 +8,7 @@ import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { resolveBadgeAcquisitionDescription } from '@/lib/badge-acquisition'
 import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { activeUserBadgeWhere, calculateBadgeExpiresAt, isUserBadgeActive, remainingBadgeDays } from '@/lib/badge-validity'
+import { INCIDENT_INVALID_ZODIAC_PERIOD_GRANT, isBadgeRevokeReason, resolveAutomaticRegrantEligibility, type BadgeRevokeReason } from '@/lib/badge-revocation'
 import { completeTask } from '@/lib/growth-tasks/service'
 
 const BADGE_SELECT = {
@@ -91,6 +92,7 @@ const USER_BADGE_SELECT = {
   expiresAt: true,
   expiredAt: true,
   revokedAt: true,
+  revokeReason: true,
   status: true,
   sourceType: true,
   sourceId: true,
@@ -143,6 +145,8 @@ export type GrantBadgeInput = {
 export type BadgeOperationResult = {
   created: boolean
   alreadyOwned?: boolean
+  skipped?: boolean
+  skipReason?: string
   /** True when this call added a new durable earning source to an existing aggregate. */
   sourceAttached?: boolean
   recordId: string
@@ -311,6 +315,7 @@ function badgeHistoryView(record: DbUserBadge): BadgeHistoryView {
     expiresAt: record.expiresAt?.toISOString() || null,
     expiredAt: record.expiredAt?.toISOString() || (runtimeExpired ? record.expiresAt?.toISOString() || null : null),
     revokedAt: record.revokedAt?.toISOString() || null,
+    revokeReason: record.revokeReason,
     status,
     sourceType: record.sourceType,
     grantReason: record.grantReason,
@@ -947,6 +952,10 @@ function operationResult(input: GrantBadgeInput, badgeName: string, recordId: st
   return { created: false, alreadyOwned: true, sourceAttached, recordId, userId: input.userId, badgeId: input.badgeId, badgeName }
 }
 
+function skippedGrantResult(input: GrantBadgeInput, badgeName: string, recordId: string, skipReason: string): BadgeOperationResult {
+  return { created: false, alreadyOwned: false, skipped: true, skipReason, recordId, userId: input.userId, badgeId: input.badgeId, badgeName }
+}
+
 async function loadActiveBadgeSources(tx: Prisma.TransactionClient, userId: string, badgeId: string, now: Date) {
   return tx.userBadgeSource.findMany({
     where: { userId, badgeId, isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
@@ -976,14 +985,14 @@ async function refreshBadgeAggregate(tx: Prisma.TransactionClient, userId: strin
     ? null
     : sources.reduce<Date | null>((latest, source) => !latest || (source.expiresAt && source.expiresAt > latest) ? source.expiresAt : latest, null)
   const changed = (record.expiresAt?.getTime() || null) !== (expiresAt?.getTime() || null)
-  if (changed) await tx.userBadge.update({ where: { id: record.id }, data: { expiresAt, expiredAt: null, revokedAt: null, activeKey: activeBadgeKey(userId, badgeId) } })
+  if (changed) await tx.userBadge.update({ where: { id: record.id }, data: { expiresAt, expiredAt: null, revokedAt: null, revokeReason: null, activeKey: activeBadgeKey(userId, badgeId) } })
   return { owned: true, recordId: record.id, changed }
 }
 
 async function expireStaleUserBadgeRows(tx: Prisma.TransactionClient, input: GrantBadgeInput, now: Date) {
   await tx.userBadgeSource.updateMany({
     where: { userId: input.userId, badgeId: input.badgeId, isActive: true, expiresAt: { not: null, lte: now } },
-    data: { isActive: false, expiredAt: now },
+    data: { isActive: false, expiredAt: now, revokeReason: 'NORMAL_EXPIRED' },
   })
   const aggregate = await refreshBadgeAggregate(tx, input.userId, input.badgeId, now)
   if (aggregate.owned) return
@@ -994,7 +1003,7 @@ async function expireStaleUserBadgeRows(tx: Prisma.TransactionClient, input: Gra
   if (!stale.length) return
   await tx.userBadge.updateMany({
     where: { id: { in: stale.map((row) => row.id) }, status: 'ACTIVE' },
-    data: { status: 'EXPIRED', expiredAt: now, activeKey: null },
+    data: { status: 'EXPIRED', expiredAt: now, revokeReason: 'NORMAL_EXPIRED', activeKey: null },
   })
   await clearBadgePresentationIfUnowned(tx, input.userId, input.badgeId)
 }
@@ -1026,6 +1035,7 @@ async function upsertBadgeAcquisitionSource(tx: Prisma.TransactionClient, input:
       expiresAt: input.expiresAt,
       expiredAt: input.active ? null : input.expiresAt,
       revokedAt: null,
+      revokeReason: null,
       grantReason: input.grantReason,
       grantedBy: input.grantedBy,
     },
@@ -1040,6 +1050,7 @@ async function upsertBadgeAcquisitionSource(tx: Prisma.TransactionClient, input:
       grantedAt: input.grantedAt,
       expiresAt: input.expiresAt,
       expiredAt: input.active ? null : input.expiresAt,
+      revokeReason: null,
       grantReason: input.grantReason,
       grantedBy: input.grantedBy,
     },
@@ -1061,16 +1072,24 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   const user = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true } })
   const badge = await tx.badge.findUnique({
     where: { id: input.badgeId },
-    select: { id: true, name: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true, validityType: true, validityDays: true },
+    select: { id: true, name: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true, validityType: true, validityDays: true, BadgeRule: { select: { ruleType: true } } },
   })
   if (!user) throw new BadgeServiceError('USER_NOT_FOUND', '目标用户不存在')
   if (!badge) throw new BadgeServiceError('BADGE_NOT_FOUND', '勋章不存在')
 
+  const isAutomaticZodiacGrant = sourceType === 'AUTO_RULE' && badge.BadgeRule?.ruleType === 'BIRTHDAY_ZODIAC'
+
   let regrantRecordId: string | null = null
   if (grantKey) {
-    const sameGrant = await tx.userBadge.findUnique({ where: { grantKey }, select: { id: true, status: true, expiresAt: true } })
+    const sameGrant = await tx.userBadge.findUnique({ where: { grantKey }, select: { id: true, status: true, expiresAt: true, revokeReason: true } })
     if (sameGrant) {
-      const sameSource = await tx.userBadgeSource.findUnique({ where: { sourceKey }, select: { isActive: true } })
+      const sameSource = await tx.userBadgeSource.findUnique({ where: { sourceKey }, select: { isActive: true, revokeReason: true } })
+      if (isAutomaticZodiacGrant && sameGrant.status === 'REVOKED') {
+        const reasons = [sameGrant.revokeReason, sameSource?.revokeReason].filter((reason): reason is string => Boolean(reason))
+        if (!reasons.length || reasons.some((reason) => reason !== INCIDENT_INVALID_ZODIAC_PERIOD_GRANT)) {
+          return skippedGrantResult(input, badge.name, sameGrant.id, 'NORMAL_REVOKED')
+        }
+      }
       // A retained automatic source may be revoked when eligibility is lost,
       // then become eligible again within the same event/period key. Reuse the
       // durable record and reactivate its source instead of being stopped by
@@ -1078,6 +1097,10 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
       const sameGrantIsActive = sameGrant.status === 'ACTIVE'
         && (!sameGrant.expiresAt || sameGrant.expiresAt > now)
       if (sameGrantIsActive && (!sameSource || sameSource.isActive)) return operationResult(input, badge.name, sameGrant.id)
+      if (isAutomaticZodiacGrant && sameGrantIsActive && sameSource && !sameSource.isActive
+        && (!sameSource.revokeReason || sameSource.revokeReason !== INCIDENT_INVALID_ZODIAC_PERIOD_GRANT)) {
+        return skippedGrantResult(input, badge.name, sameGrant.id, 'NORMAL_REVOKED')
+      }
       regrantRecordId = sameGrant.id
     }
     // Older zodiac grants used a calendar-period grant key. Once the
@@ -1085,12 +1108,43 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
     // compatibility bridge that lets a revoked historical row be reactivated
     // instead of being skipped or duplicated under the new stable key.
     if (!regrantRecordId) {
-      const sameSource = await tx.userBadgeSource.findUnique({ where: { sourceKey }, select: { userBadgeId: true, isActive: true } })
-      if (sameSource && !sameSource.isActive) regrantRecordId = sameSource.userBadgeId
+      const sameSource = await tx.userBadgeSource.findUnique({ where: { sourceKey }, select: { userBadgeId: true, isActive: true, revokeReason: true } })
+      if (sameSource && !sameSource.isActive) {
+        if (isAutomaticZodiacGrant && sameSource.revokeReason !== INCIDENT_INVALID_ZODIAC_PERIOD_GRANT) {
+          return skippedGrantResult(input, badge.name, sameSource.userBadgeId, 'NORMAL_REVOKED')
+        }
+        regrantRecordId = sameSource.userBadgeId
+      }
     }
   }
 
   await expireStaleUserBadgeRows(tx, input, now)
+  if (isAutomaticZodiacGrant) {
+    const history = await tx.userBadge.findMany({
+      where: { userId: input.userId, badgeId: input.badgeId },
+      orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        sourceType: true,
+        revokeReason: true,
+        UserBadgeSource: { select: { isActive: true, sourceType: true, sourceId: true, expiresAt: true, revokeReason: true } },
+      },
+    })
+    const decision = resolveAutomaticRegrantEligibility(history, now)
+    if (!decision.allowed && decision.reason !== 'ACTIVE_OWNERSHIP') {
+      const recordId = history.find((record) => record.status === 'REVOKED')?.id || regrantRecordId || ''
+      return skippedGrantResult(input, badge.name, recordId, decision.reason)
+    }
+    if (decision.reason === 'INCIDENT_REVOKED' && !regrantRecordId) {
+      const incidentRecord = history.find((record) => record.status === 'REVOKED' && (
+        record.revokeReason === INCIDENT_INVALID_ZODIAC_PERIOD_GRANT
+        || record.UserBadgeSource.some((source) => source.sourceType === 'AUTO_RULE' && source.revokeReason === INCIDENT_INVALID_ZODIAC_PERIOD_GRANT)
+      ))
+      regrantRecordId = incidentRecord?.id || null
+    }
+  }
   const active = await tx.userBadge.findFirst({
     where: { userId: input.userId, badgeId: input.badgeId, ...activeUserBadgeWhere(now) },
     orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
@@ -1160,6 +1214,7 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
         expiresAt,
         expiredAt: status === 'EXPIRED' ? now : null,
         revokedAt: null,
+        revokeReason: null,
         status,
         activeKey: status === 'ACTIVE' ? activeBadgeKey(input.userId, input.badgeId) : null,
         grantKey,
@@ -1295,6 +1350,7 @@ export async function revokeBadgeAcquisitionSource(input: {
   sourceType: string
   sourceId: string
   reason?: string | null
+  revokeReason?: BadgeRevokeReason
   /** Internal guard/context for chained BADGE_OWNERSHIP evaluation. */
   deferOwnershipRecheck?: boolean
   ownershipVisitedBadgeIds?: ReadonlySet<string>
@@ -1319,10 +1375,12 @@ export async function revokeBadgeAcquisitionSource(input: {
       where: { id: source.userBadgeId, userId: input.userId, badgeId: input.badgeId, status: 'ACTIVE' },
       select: { id: true, expiresAt: true },
     })
-    await tx.userBadgeSource.update({ where: { id: source.id }, data: { isActive: false, revokedAt: now, grantReason: input.reason?.trim().slice(0, 500) || null } })
+    const revokeReason: BadgeRevokeReason = isBadgeRevokeReason(input.revokeReason) ? input.revokeReason : 'SYSTEM_REVOKED'
+    await tx.userBadgeSource.update({ where: { id: source.id }, data: { isActive: false, revokedAt: now, revokeReason, grantReason: input.reason?.trim().slice(0, 500) || null } })
     const refreshed = await refreshBadgeAggregate(tx, input.userId, input.badgeId, now)
     if (!refreshed.owned && aggregate) {
-      await tx.userBadge.update({ where: { id: aggregate.id }, data: { status: aggregate.expiresAt && aggregate.expiresAt <= now ? 'EXPIRED' : 'REVOKED', ...(aggregate.expiresAt && aggregate.expiresAt <= now ? { expiredAt: now } : { revokedAt: now }), activeKey: null } })
+      const status = aggregate.expiresAt && aggregate.expiresAt <= now ? 'EXPIRED' : 'REVOKED'
+      await tx.userBadge.update({ where: { id: aggregate.id }, data: { status, ...(status === 'EXPIRED' ? { expiredAt: now, revokeReason: 'NORMAL_EXPIRED' } : { revokedAt: now, revokeReason }), activeKey: null } })
       await clearBadgePresentationIfUnowned(tx, input.userId, input.badgeId)
     }
     // The aggregate can be stale when a source expires between scheduler
@@ -1341,7 +1399,7 @@ export async function revokeBadgeAcquisitionSource(input: {
   return result
 }
 
-export async function revokeBadge({ userId, badgeId, actorId, reason }: { userId: string; badgeId: string; actorId?: string | null; reason?: string | null }) {
+export async function revokeBadge({ userId, badgeId, actorId, reason, revokeReason = 'ADMIN_REVOKED' }: { userId: string; badgeId: string; actorId?: string | null; reason?: string | null; revokeReason?: BadgeRevokeReason }) {
   const result = await prisma.$transaction(async (tx) => {
     await lockUserForMutation(tx, userId)
     await lockBadgeForMutation(tx, badgeId)
@@ -1353,8 +1411,9 @@ export async function revokeBadge({ userId, badgeId, actorId, reason }: { userId
     })
     if (!record) throw new BadgeServiceError('NOT_FOUND', '该用户尚未拥有此勋章')
 
-    await tx.userBadge.update({ where: { id: record.id }, data: { status: 'REVOKED', revokedAt: new Date(), activeKey: null } })
-    await tx.userBadgeSource.updateMany({ where: { userId, badgeId, isActive: true }, data: { isActive: false, revokedAt: new Date() } })
+    const revokedAt = new Date()
+    await tx.userBadge.update({ where: { id: record.id }, data: { status: 'REVOKED', revokedAt, revokeReason, activeKey: null } })
+    await tx.userBadgeSource.updateMany({ where: { userId, badgeId, isActive: true }, data: { isActive: false, revokedAt, revokeReason } })
     await clearBadgePresentationIfUnowned(tx, userId, badgeId)
 
     if (actorId) await writeBadgeAdminAction(tx, {
@@ -1640,6 +1699,7 @@ export async function listBadgeOwners(badgeId: string) {
       expiresAt: true,
       expiredAt: true,
       revokedAt: true,
+      revokeReason: true,
       status: true,
       grantReason: true,
       sourceType: true,

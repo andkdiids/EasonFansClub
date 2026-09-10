@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { publicImageUrl } from '@/lib/images'
@@ -8,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 import {
   GLOBAL_POINTS_GRANT_BATCH_SIZE,
+  GLOBAL_POINTS_GRANT_CLAIM_TIMEOUT_MS,
   GLOBAL_POINTS_GRANT_CONCURRENCY,
   GLOBAL_POINTS_GRANT_CONFIRMATION_TEXT,
   GLOBAL_POINTS_GRANT_CONTENT_MAX_LENGTH,
@@ -22,6 +24,7 @@ import {
 
 export {
   GLOBAL_POINTS_GRANT_BATCH_SIZE,
+  GLOBAL_POINTS_GRANT_CLAIM_TIMEOUT_MS,
   GLOBAL_POINTS_GRANT_CONCURRENCY,
   GLOBAL_POINTS_GRANT_CONFIRMATION_TEXT,
   GLOBAL_POINTS_GRANT_CONTENT_MAX_LENGTH,
@@ -38,6 +41,8 @@ const eligibleUserWhere = {
   status: 'ACTIVE' as const,
   isDeleted: false,
 }
+
+type GrantProcessingPhase = 'POINTS' | 'NOTIFICATION'
 
 export class GlobalPointsGrantError extends Error {
   constructor(
@@ -143,6 +148,11 @@ const batchViewSelect = {
   totalAmount: true,
   successCount: true,
   failedCount: true,
+  processedCount: true,
+  pendingCount: true,
+  processingCount: true,
+  notificationSuccessCount: true,
+  notificationFailedCount: true,
   status: true,
   createdAt: true,
   completedAt: true,
@@ -155,7 +165,22 @@ function normalizeStatus(value: string): GlobalPointsGrantStatus | string {
   return (globalPointsGrantStatuses as readonly string[]).includes(value) ? value as GlobalPointsGrantStatus : value
 }
 
+export function getGlobalPointsGrantBatchStatus(input: {
+  successCount: number
+  failedCount: number
+  pendingCount: number
+  processingCount: number
+}): GlobalPointsGrantStatus {
+  if (input.pendingCount > 0 || input.processingCount > 0) return 'PROCESSING'
+  if (input.failedCount === 0) return 'COMPLETED'
+  return input.successCount > 0 ? 'PARTIAL_FAILED' : 'FAILED'
+}
+
 function serializeBatch(batch: GlobalPointsGrantBatchRow) {
+  // A failed points recipient does not need a notification retry. Exclude it
+  // from the derived notification-pending count so the admin UI does not poll
+  // forever for a notification that can never be sent.
+  const notificationPendingCount = Math.max(0, batch.recipientCount - batch.notificationSuccessCount - batch.notificationFailedCount - batch.failedCount)
   return {
     id: batch.id,
     title: batch.title,
@@ -167,6 +192,12 @@ function serializeBatch(batch: GlobalPointsGrantBatchRow) {
     successAmount: batch.successCount * batch.amount,
     successCount: batch.successCount,
     failedCount: batch.failedCount,
+    processedCount: batch.processedCount,
+    pendingCount: batch.pendingCount,
+    processingCount: batch.processingCount,
+    notificationSuccessCount: batch.notificationSuccessCount,
+    notificationFailedCount: batch.notificationFailedCount,
+    notificationPendingCount,
     status: normalizeStatus(batch.status),
     createdAt: batch.createdAt.toISOString(),
     completedAt: batch.completedAt?.toISOString() || null,
@@ -195,10 +226,6 @@ function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
 }
 
-function shouldRetryFailedOnly(status: string) {
-  return status === 'PARTIAL_FAILED' || status === 'FAILED'
-}
-
 function errorMessage(error: unknown) {
   if (error instanceof GlobalPointsGrantError) return error.message
   if (error instanceof Error && error.message) return error.message.slice(0, 500)
@@ -223,7 +250,12 @@ export async function getGlobalPointsGrantOverview() {
 const batchDetailSelect = {
   ...batchViewSelect,
   Recipients: {
-    where: { status: 'FAILED' },
+    where: {
+      OR: [
+        { pointsStatus: 'FAILED' },
+        { notificationStatus: 'FAILED' },
+      ],
+    },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: 100,
     select: {
@@ -231,8 +263,13 @@ const batchDetailSelect = {
       userId: true,
       amount: true,
       status: true,
+      pointsStatus: true,
+      notificationStatus: true,
       failureReason: true,
+      notificationFailureReason: true,
       processedAt: true,
+      pointsProcessedAt: true,
+      notificationProcessedAt: true,
       User: { select: { uid: true, username: true, nickname: true } },
     },
   },
@@ -253,8 +290,13 @@ export async function getGlobalPointsGrantDetail(batchId: string) {
       nickname: recipient.User?.nickname || null,
       amount: recipient.amount,
       status: recipient.status,
+      pointsStatus: recipient.pointsStatus,
+      notificationStatus: recipient.notificationStatus,
       failureReason: recipient.failureReason,
+      notificationFailureReason: recipient.notificationFailureReason,
       processedAt: recipient.processedAt?.toISOString() || null,
+      pointsProcessedAt: recipient.pointsProcessedAt?.toISOString() || null,
+      notificationProcessedAt: recipient.notificationProcessedAt?.toISOString() || null,
     })),
   }
 }
@@ -267,124 +309,315 @@ type GrantBatchRecord = {
   amount: number
 }
 
-async function processRecipient(batch: GrantBatchRecord, recipientId: string) {
+type ClaimedRecipient = {
+  id: string
+  userId: string
+  amount: number
+  processingToken: string
+}
+
+async function recoverStaleClaims(batchId: string, now = new Date()) {
+  const staleBefore = new Date(now.getTime() - GLOBAL_POINTS_GRANT_CLAIM_TIMEOUT_MS)
+  const [legacyPoints, stalePoints, legacyNotifications, staleNotifications] = await prisma.$transaction([
+    prisma.globalPointsGrantRecipient.updateMany({
+      where: { batchId, pointsStatus: 'PROCESSING', processingToken: null },
+      data: { pointsStatus: 'PENDING', status: 'PENDING', processingPhase: null, processingStartedAt: null },
+    }),
+    prisma.globalPointsGrantRecipient.updateMany({
+      where: {
+        batchId,
+        pointsStatus: 'PROCESSING',
+        processingPhase: 'POINTS',
+        processingStartedAt: { lt: staleBefore },
+      },
+      data: { pointsStatus: 'PENDING', status: 'PENDING', processingToken: null, processingPhase: null, processingStartedAt: null },
+    }),
+    prisma.globalPointsGrantRecipient.updateMany({
+      where: { batchId, notificationStatus: 'PROCESSING', processingToken: null },
+      data: { notificationStatus: 'PENDING', processingPhase: null, processingStartedAt: null },
+    }),
+    prisma.globalPointsGrantRecipient.updateMany({
+      where: {
+        batchId,
+        notificationStatus: 'PROCESSING',
+        processingPhase: 'NOTIFICATION',
+        processingStartedAt: { lt: staleBefore },
+      },
+      data: { notificationStatus: 'PENDING', processingToken: null, processingPhase: null, processingStartedAt: null },
+    }),
+  ])
+  return {
+    recoveredPoints: legacyPoints.count + stalePoints.count,
+    recoveredNotifications: legacyNotifications.count + staleNotifications.count,
+  }
+}
+
+export async function recoverStaleGlobalPointsGrantRecipientClaims(batchId?: string, now = new Date()) {
+  if (batchId) return recoverStaleClaims(batchId, now)
+  const batches = await prisma.globalPointsGrantBatch.findMany({ select: { id: true } })
+  let recoveredPoints = 0
+  let recoveredNotifications = 0
+  for (const batch of batches) {
+    const result = await recoverStaleClaims(batch.id, now)
+    recoveredPoints += result.recoveredPoints
+    recoveredNotifications += result.recoveredNotifications
+  }
+  return { recoveredPoints, recoveredNotifications }
+}
+
+async function reconcileRecipientState(batchId: string) {
+  const candidates = await prisma.globalPointsGrantRecipient.findMany({
+    where: {
+      batchId,
+      processingToken: null,
+      OR: [
+        { pointsStatus: { in: ['PENDING', 'PROCESSING', 'FAILED'] } },
+        { pointsStatus: 'SUCCESS', notificationStatus: 'PENDING' },
+      ],
+    },
+    orderBy: [{ id: 'asc' }],
+    take: GLOBAL_POINTS_GRANT_BATCH_SIZE,
+    select: { id: true, userId: true, pointsStatus: true, notificationStatus: true },
+  })
+  if (!candidates.length) return { pointsReconciled: 0, notificationsReconciled: 0 }
+
+  const pointKeys = candidates.map((recipient) => getGlobalPointsGrantPointBusinessKey(batchId, recipient.userId))
+  const pointLogs = await prisma.pointLog.findMany({
+    where: { businessKey: { in: pointKeys } },
+    select: { businessKey: true },
+  })
+  const pointKeySet = new Set(pointLogs.map((log) => log.businessKey).filter((key): key is string => Boolean(key)))
+  const notificationRows = await prisma.notification.findMany({
+    where: {
+      recipientId: { in: candidates.map((recipient) => recipient.userId) },
+      key: { in: pointKeys },
+    },
+    select: { recipientId: true, key: true },
+  })
+  const notificationKeySet = new Set(notificationRows.map((row) => `${row.recipientId}:${row.key || ''}`))
+  let pointsReconciled = 0
+  let notificationsReconciled = 0
+  await prisma.$transaction(async (tx) => {
+    for (const recipient of candidates) {
+      const pointKey = getGlobalPointsGrantPointBusinessKey(batchId, recipient.userId)
+      if (recipient.pointsStatus !== 'SUCCESS' && pointKeySet.has(pointKey)) {
+        const updated = await tx.globalPointsGrantRecipient.updateMany({
+          where: { id: recipient.id, pointsStatus: { in: ['PENDING', 'PROCESSING', 'FAILED'] }, processingToken: null },
+          data: { pointsStatus: 'SUCCESS', status: 'SUCCESS', failureReason: null, pointsProcessedAt: new Date(), processedAt: new Date(), processingPhase: null, processingStartedAt: null },
+        })
+        pointsReconciled += updated.count
+      }
+      if (recipient.notificationStatus !== 'SUCCESS' && notificationKeySet.has(`${recipient.userId}:${pointKey}`)) {
+        const updated = await tx.globalPointsGrantRecipient.updateMany({
+          where: { id: recipient.id, pointsStatus: 'SUCCESS', notificationStatus: 'PENDING', processingToken: null },
+          data: { notificationStatus: 'SUCCESS', notificationFailureReason: null, notificationProcessedAt: new Date(), processingPhase: null, processingStartedAt: null },
+        })
+        notificationsReconciled += updated.count
+      }
+    }
+  })
+  return { pointsReconciled, notificationsReconciled }
+}
+
+async function claimRecipient(recipientId: string, phase: GrantProcessingPhase): Promise<ClaimedRecipient | null> {
+  const processingToken = randomUUID()
+  const processingStartedAt = new Date()
+  return prisma.$transaction(async (tx) => {
+    const claimed = await tx.globalPointsGrantRecipient.updateMany({
+      where: phase === 'POINTS'
+        ? { id: recipientId, pointsStatus: 'PENDING', processingToken: null }
+        : { id: recipientId, pointsStatus: 'SUCCESS', notificationStatus: 'PENDING', processingToken: null },
+      data: phase === 'POINTS'
+        ? { pointsStatus: 'PROCESSING', status: 'PROCESSING', failureReason: null, processingToken, processingPhase: phase, processingStartedAt }
+        : { notificationStatus: 'PROCESSING', notificationFailureReason: null, processingToken, processingPhase: phase, processingStartedAt },
+    })
+    if (claimed.count !== 1) return null
+    const recipient = await tx.globalPointsGrantRecipient.findUnique({
+      where: { id: recipientId },
+      select: { id: true, userId: true, amount: true, processingToken: true },
+    })
+    if (!recipient?.processingToken) return null
+    return { ...recipient, processingToken: recipient.processingToken }
+  })
+}
+
+async function markPointsFailed(recipientId: string, processingToken: string, reason: string) {
+  await prisma.globalPointsGrantRecipient.updateMany({
+    where: { id: recipientId, pointsStatus: 'PROCESSING', processingPhase: 'POINTS', processingToken },
+    data: {
+      pointsStatus: 'FAILED',
+      status: 'FAILED',
+      failureReason: reason,
+      pointsProcessedAt: new Date(),
+      processedAt: new Date(),
+      processingToken: null,
+      processingPhase: null,
+      processingStartedAt: null,
+    },
+  }).catch(() => undefined)
+}
+
+async function markNotificationFailed(recipientId: string, processingToken: string, reason: string) {
+  await prisma.globalPointsGrantRecipient.updateMany({
+    where: { id: recipientId, notificationStatus: 'PROCESSING', processingPhase: 'NOTIFICATION', processingToken },
+    data: {
+      notificationStatus: 'FAILED',
+      notificationFailureReason: reason,
+      notificationProcessedAt: new Date(),
+      processingToken: null,
+      processingPhase: null,
+      processingStartedAt: null,
+    },
+  }).catch(() => undefined)
+}
+
+async function processPointsRecipient(batch: GrantBatchRecord, recipientId: string) {
+  const claimed = await claimRecipient(recipientId, 'POINTS')
+  if (!claimed) return { status: 'skipped' as const, awardedAmount: 0 }
+  if (!claimed.processingToken) return { status: 'skipped' as const, awardedAmount: 0 }
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      const claimed = await tx.globalPointsGrantRecipient.updateMany({
-        where: { id: recipientId, status: { in: ['PENDING', 'FAILED'] } },
-        data: { status: 'PROCESSING', failureReason: null },
-      })
-      if (claimed.count !== 1) return { claimed: false as const }
-
-      const recipient = await tx.globalPointsGrantRecipient.findUnique({
-        where: { id: recipientId },
-        select: { id: true, userId: true, amount: true },
-      })
-      if (!recipient) throw new Error('GRANT_RECIPIENT_NOT_FOUND')
-
+    const pointResult = await prisma.$transaction(async (tx) => {
       const user = await tx.user.findFirst({
-        where: { id: recipient.userId, ...getGlobalPointsGrantRecipientWhere() },
+        // The recipient row is the immutable audience snapshot for this batch.
+        // Do not re-evaluate the current global eligibility filter here: a
+        // later account-state change must not silently change this batch's
+        // fixed audience or make a retry select a different population.
+        where: { id: claimed.userId },
         select: { id: true },
       })
       if (!user) throw new Error('RECIPIENT_NOT_ELIGIBLE')
 
-      const pointResult = await awardRegistrationFee(tx, {
-        userId: recipient.userId,
-        requestedAmount: recipient.amount,
+      const result = await awardRegistrationFee(tx, {
+        userId: claimed.userId,
+        requestedAmount: claimed.amount,
         action: 'GLOBAL_POINTS_GRANT',
         reason: `全站挂号费发放：${batch.title}`,
-        businessKey: getGlobalPointsGrantPointBusinessKey(batch.id, recipient.userId),
+        businessKey: getGlobalPointsGrantPointBusinessKey(batch.id, claimed.userId),
         sourceEventId: batch.id,
       })
+      const processedAt = new Date()
+      const updated = await tx.globalPointsGrantRecipient.updateMany({
+        where: { id: claimed.id, pointsStatus: 'PROCESSING', processingPhase: 'POINTS', processingToken: claimed.processingToken },
+        data: {
+          pointsStatus: 'SUCCESS',
+          status: 'SUCCESS',
+          failureReason: null,
+          pointsProcessedAt: processedAt,
+          processedAt,
+          processingToken: null,
+          processingPhase: null,
+          processingStartedAt: null,
+        },
+      })
+      if (updated.count !== 1) throw new Error('GRANT_RECIPIENT_CLAIM_LOST')
+      return result
+    }, { timeout: 15_000, maxWait: 5_000 })
+    return { status: 'success' as const, awardedAmount: pointResult.awardedAmount }
+  } catch (error) {
+    await markPointsFailed(recipientId, claimed.processingToken, errorMessage(error))
+    return { status: 'failed' as const, awardedAmount: 0 }
+  }
+}
 
-      const notificationKey = getGlobalPointsGrantNotificationKey(batch.id, recipient.userId)
+async function processNotificationRecipient(batch: GrantBatchRecord, recipientId: string) {
+  const claimed = await claimRecipient(recipientId, 'NOTIFICATION')
+  if (!claimed) return { status: 'skipped' as const }
+  if (!claimed.processingToken) return { status: 'skipped' as const }
+  try {
+    await prisma.$transaction(async (tx) => {
+      const notificationKey = getGlobalPointsGrantNotificationKey(batch.id, claimed.userId)
       await upsertNotificationWithDb(tx, {
-        where: { recipientId_key: { recipientId: recipient.userId, key: notificationKey } },
+        where: { recipientId_key: { recipientId: claimed.userId, key: notificationKey } },
         update: {},
         create: {
-          recipientId: recipient.userId,
+          recipientId: claimed.userId,
           type: 'ACTIVITY',
           title: batch.title,
-          content: buildGlobalPointsGrantNotificationContent(batch.content, recipient.amount),
+          content: buildGlobalPointsGrantNotificationContent(batch.content, claimed.amount),
           imageUrl: batch.imageUrl,
           link: '/profile',
           key: notificationKey,
           isRead: false,
         },
-      }, { operation: 'global-points-grant.notification', userId: recipient.userId })
-
-      await tx.globalPointsGrantRecipient.update({
-        where: { id: recipient.id },
-        data: { status: 'SUCCESS', failureReason: null, processedAt: new Date() },
+      }, { operation: 'global-points-grant.notification', userId: claimed.userId })
+      const processedAt = new Date()
+      const updated = await tx.globalPointsGrantRecipient.updateMany({
+        where: { id: claimed.id, pointsStatus: 'SUCCESS', notificationStatus: 'PROCESSING', processingPhase: 'NOTIFICATION', processingToken: claimed.processingToken },
+        data: {
+          notificationStatus: 'SUCCESS',
+          notificationFailureReason: null,
+          notificationProcessedAt: processedAt,
+          processingToken: null,
+          processingPhase: null,
+          processingStartedAt: null,
+        },
       })
-
-      return { claimed: true as const, duplicate: pointResult.duplicate }
+      if (updated.count !== 1) throw new Error('GRANT_RECIPIENT_CLAIM_LOST')
     }, { timeout: 15_000, maxWait: 5_000 })
-    return result.claimed ? 'success' as const : 'skipped' as const
+    return { status: 'success' as const }
   } catch (error) {
-    // The financial transaction rolls back on notification failure. Only mark
-    // a recipient failed after that rollback, and never overwrite a retry that
-    // another worker has already claimed in the meantime.
-    await prisma.globalPointsGrantRecipient.updateMany({
-      where: { id: recipientId, status: { in: ['PENDING', 'FAILED'] } },
-      data: { status: 'FAILED', failureReason: errorMessage(error), processedAt: new Date() },
-    }).catch(() => undefined)
-    return 'failed' as const
+    await markNotificationFailed(recipientId, claimed.processingToken, errorMessage(error))
+    return { status: 'failed' as const }
   }
 }
 
-async function processRecipientChunks(batch: GrantBatchRecord, recipientIds: string[]) {
-  let successCount = 0
-  let failedCount = 0
-  for (let offset = 0; offset < recipientIds.length; offset += GLOBAL_POINTS_GRANT_BATCH_SIZE) {
-    const chunk = recipientIds.slice(offset, offset + GLOBAL_POINTS_GRANT_BATCH_SIZE)
-    let nextIndex = 0
-    const results: Array<'success' | 'skipped' | 'failed'> = []
-    const workers = Array.from({ length: Math.min(GLOBAL_POINTS_GRANT_CONCURRENCY, chunk.length) }, async () => {
-      while (nextIndex < chunk.length) {
-        const recipientId = chunk[nextIndex]
-        nextIndex += 1
-        results.push(await processRecipient(batch, recipientId))
-      }
-    })
-    await Promise.all(workers)
-    successCount += results.filter((result) => result === 'success').length
-    failedCount += results.filter((result) => result === 'failed').length
-  }
-  return { successCount, failedCount }
+async function processWithConcurrency<T>(ids: string[], processor: (id: string) => Promise<T>) {
+  let nextIndex = 0
+  const results: T[] = []
+  const workers = Array.from({ length: Math.min(GLOBAL_POINTS_GRANT_CONCURRENCY, ids.length) }, async () => {
+    while (true) {
+      const index = nextIndex
+      nextIndex += 1
+      if (index >= ids.length) return
+      results.push(await processor(ids[index]))
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
 
-async function refreshBatch(batchId: string, operatorId: string, auditRetry: boolean) {
+async function refreshGlobalPointsGrantBatch(batchId: string, operatorId?: string) {
   return prisma.$transaction(async (tx) => {
     const current = await tx.globalPointsGrantBatch.findUnique({
       where: { id: batchId },
-      select: { id: true, title: true, amount: true, recipientCount: true, totalAmount: true, status: true },
+      select: { id: true, title: true, amount: true, recipientCount: true, totalAmount: true, status: true, completedAt: true, createdById: true },
     })
     if (!current) throw new GlobalPointsGrantError('BATCH_NOT_FOUND', '发放批次不存在', 404)
 
-    const [successCount, failedCount, pendingCount, processingCount] = await Promise.all([
-      tx.globalPointsGrantRecipient.count({ where: { batchId, status: 'SUCCESS' } }),
-      tx.globalPointsGrantRecipient.count({ where: { batchId, status: 'FAILED' } }),
-      tx.globalPointsGrantRecipient.count({ where: { batchId, status: 'PENDING' } }),
-      tx.globalPointsGrantRecipient.count({ where: { batchId, status: 'PROCESSING' } }),
+    const [successCount, failedCount, pendingCount, processingCount, notificationSuccessCount, notificationFailedCount] = await Promise.all([
+      tx.globalPointsGrantRecipient.count({ where: { batchId, pointsStatus: 'SUCCESS' } }),
+      tx.globalPointsGrantRecipient.count({ where: { batchId, pointsStatus: 'FAILED' } }),
+      tx.globalPointsGrantRecipient.count({ where: { batchId, pointsStatus: 'PENDING' } }),
+      tx.globalPointsGrantRecipient.count({ where: { batchId, pointsStatus: 'PROCESSING' } }),
+      tx.globalPointsGrantRecipient.count({ where: { batchId, notificationStatus: 'SUCCESS' } }),
+      tx.globalPointsGrantRecipient.count({ where: { batchId, notificationStatus: 'FAILED' } }),
     ])
-    const finished = pendingCount === 0 && processingCount === 0
-    const status = finished
-      ? failedCount === 0 ? 'COMPLETED' : successCount > 0 ? 'PARTIAL_FAILED' : 'FAILED'
-      : 'PROCESSING'
-    const completedAt = finished ? new Date() : null
+    const processedCount = successCount + failedCount
+    const status = getGlobalPointsGrantBatchStatus({ successCount, failedCount, pendingCount, processingCount })
+    const pointsFinished = pendingCount === 0 && processingCount === 0
+    const completedAt = pointsFinished ? current.completedAt || new Date() : null
     const updated = await tx.globalPointsGrantBatch.update({
       where: { id: batchId },
-      data: { successCount, failedCount, status, completedAt },
+      data: {
+        successCount,
+        failedCount,
+        processedCount,
+        pendingCount,
+        processingCount,
+        notificationSuccessCount,
+        notificationFailedCount,
+        status,
+        completedAt,
+      },
       select: batchViewSelect,
     })
 
-    if (finished && (auditRetry || !(await tx.adminAction.findFirst({
+    if (pointsFinished && !(await tx.adminAction.findFirst({
       where: { operationType: adminAuditOperations.ADMIN_GLOBAL_POINTS_GRANT, targetId: batchId },
       select: { id: true },
-    })))) {
+    }))) {
       await createAdminActionAudit(tx, {
-        operatorId,
+        operatorId: operatorId || current.createdById,
         action: 'UPDATE_SETTING',
         operationType: adminAuditOperations.ADMIN_GLOBAL_POINTS_GRANT,
         targetType: 'GLOBAL_POINTS_GRANT_BATCH',
@@ -398,9 +631,12 @@ async function refreshBatch(batchId: string, operatorId: string, auditRetry: boo
           totalAmount: current.totalAmount,
           successCount,
           failedCount,
+          processedCount,
+          notificationSuccessCount,
+          notificationFailedCount,
           successfulTotalAmount: successCount * current.amount,
           status,
-          retry: auditRetry,
+          asynchronous: true,
         } as Prisma.InputJsonValue,
       })
     }
@@ -408,30 +644,86 @@ async function refreshBatch(batchId: string, operatorId: string, auditRetry: boo
   }, { timeout: 15_000, maxWait: 5_000 })
 }
 
+export async function refreshGlobalPointsGrantBatchStatus(batchId: string) {
+  const refreshed = await refreshGlobalPointsGrantBatch(batchId)
+  return serializeBatch(refreshed)
+}
+
+export async function getGlobalPointsGrantWorkerBatchCandidates(limit = 4) {
+  return prisma.globalPointsGrantBatch.findMany({
+    where: {
+      OR: [
+        { status: 'PROCESSING' },
+        { Recipients: { some: { pointsStatus: { in: ['PENDING', 'PROCESSING'] } } } },
+        { Recipients: { some: { pointsStatus: 'SUCCESS', notificationStatus: 'PENDING' } } },
+      ],
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: Math.max(1, Math.min(limit, 20)),
+    select: { id: true },
+  })
+}
+
+export async function processGlobalPointsGrantBatchChunk(batchId: string) {
+  const batch = await prisma.globalPointsGrantBatch.findUnique({
+    where: { id: batchId },
+    select: { id: true, title: true, content: true, imageUrl: true, amount: true },
+  })
+  if (!batch) throw new GlobalPointsGrantError('BATCH_NOT_FOUND', '发放批次不存在', 404)
+
+  await recoverStaleClaims(batchId)
+  await reconcileRecipientState(batchId)
+  const pointRecipients = await prisma.globalPointsGrantRecipient.findMany({
+    where: { batchId, pointsStatus: 'PENDING', processingToken: null },
+    orderBy: [{ id: 'asc' }],
+    take: GLOBAL_POINTS_GRANT_BATCH_SIZE,
+    select: { id: true },
+  })
+  const pointResults = await processWithConcurrency(pointRecipients.map((recipient) => recipient.id), (id) => processPointsRecipient(batch, id))
+
+  const notificationRecipients = await prisma.globalPointsGrantRecipient.findMany({
+    where: { batchId, pointsStatus: 'SUCCESS', notificationStatus: 'PENDING', processingToken: null },
+    orderBy: [{ id: 'asc' }],
+    take: GLOBAL_POINTS_GRANT_BATCH_SIZE,
+    select: { id: true },
+  })
+  const notificationResults = await processWithConcurrency(notificationRecipients.map((recipient) => recipient.id), (id) => processNotificationRecipient(batch, id))
+  const refreshed = await refreshGlobalPointsGrantBatch(batchId)
+  return {
+    batch: serializeBatch(refreshed),
+    pointsSuccessCount: pointResults.filter((result) => result.status === 'success').length,
+    pointsFailedCount: pointResults.filter((result) => result.status === 'failed').length,
+    notificationSuccessCount: notificationResults.filter((result) => result.status === 'success').length,
+    notificationFailedCount: notificationResults.filter((result) => result.status === 'failed').length,
+  }
+}
+
 export async function processGlobalPointsGrantBatch(batchId: string, operatorId: string, options: { retryFailed?: boolean } = {}) {
   const retryFailed = Boolean(options.retryFailed)
   const batch = await prisma.globalPointsGrantBatch.findUnique({
     where: { id: batchId },
-    select: { id: true, title: true, content: true, imageUrl: true, amount: true, status: true },
+    select: { id: true, status: true },
   })
   if (!batch) throw new GlobalPointsGrantError('BATCH_NOT_FOUND', '发放批次不存在', 404)
-  if (batch.status === 'COMPLETED') {
-    const current = await prisma.globalPointsGrantBatch.findUniqueOrThrow({ where: { id: batchId }, select: batchViewSelect })
-    return serializeBatch(current)
+
+  if (retryFailed) {
+    await prisma.$transaction([
+      prisma.globalPointsGrantRecipient.updateMany({
+        where: { batchId, pointsStatus: 'FAILED' },
+        data: { pointsStatus: 'PENDING', status: 'PENDING', failureReason: null, pointsProcessedAt: null, processedAt: null, processingToken: null, processingPhase: null, processingStartedAt: null },
+      }),
+      prisma.globalPointsGrantRecipient.updateMany({
+        where: { batchId, notificationStatus: 'FAILED' },
+        data: { notificationStatus: 'PENDING', notificationFailureReason: null, notificationProcessedAt: null, processingToken: null, processingPhase: null, processingStartedAt: null },
+      }),
+      prisma.globalPointsGrantBatch.update({ where: { id: batchId }, data: { status: 'PROCESSING', completedAt: null } }),
+    ])
+  } else if (batch.status !== 'COMPLETED') {
+    await prisma.globalPointsGrantBatch.update({ where: { id: batchId }, data: { status: 'PROCESSING', completedAt: null } })
   }
 
-  await prisma.globalPointsGrantBatch.update({
-    where: { id: batchId },
-    data: { status: 'PROCESSING', completedAt: null },
-  })
-  const recipients = await prisma.globalPointsGrantRecipient.findMany({
-    where: { batchId, status: retryFailed ? 'FAILED' : { in: ['PENDING', 'FAILED'] } },
-    orderBy: [{ id: 'asc' }],
-    select: { id: true },
-  })
-  await processRecipientChunks(batch, recipients.map((recipient) => recipient.id))
-  const completed = await refreshBatch(batchId, operatorId, retryFailed)
-  return serializeBatch(completed)
+  const refreshed = await refreshGlobalPointsGrantBatch(batchId, operatorId)
+  return serializeBatch(refreshed)
 }
 
 export async function createGlobalPointsGrant(input: {
@@ -448,9 +740,9 @@ export async function createGlobalPointsGrant(input: {
   const existingBeforePreview = await prisma.globalPointsGrantBatch.findUnique({ where: { idempotencyKey: normalized.idempotencyKey }, select: batchMatchSelect })
   if (existingBeforePreview) {
     assertIdempotencyMatch(existingBeforePreview, normalized)
-    const batch = await processGlobalPointsGrantBatch(existingBeforePreview.id, input.operatorId, { retryFailed: shouldRetryFailedOnly(existingBeforePreview.status) })
-    return { duplicate: true, batch }
+    return { duplicate: true, batch: serializeBatch(existingBeforePreview) }
   }
+
   const recipientPreview = await getGlobalPointsGrantRecipientPreview(normalized.amount)
   if (recipientPreview.recipientCount === 0) throw new GlobalPointsGrantError('NO_RECIPIENTS', '当前没有可发放的有效用户', 409)
   if (!recipientPreview.totalAmountWithinLimit) throw new GlobalPointsGrantError('TOTAL_AMOUNT_TOO_LARGE', '本次发放总额超过系统可保存范围', 400)
@@ -486,14 +778,26 @@ export async function createGlobalPointsGrant(input: {
           amount: normalized.amount,
           recipientCount: users.length,
           totalAmount,
+          processedCount: 0,
+          pendingCount: users.length,
+          processingCount: 0,
+          notificationSuccessCount: 0,
+          notificationFailedCount: 0,
           createdById: input.operatorId,
-          status: 'PENDING',
+          status: 'PROCESSING',
         },
         select: batchViewSelect,
       })
       for (let offset = 0; offset < users.length; offset += GLOBAL_POINTS_GRANT_BATCH_SIZE) {
         await tx.globalPointsGrantRecipient.createMany({
-          data: users.slice(offset, offset + GLOBAL_POINTS_GRANT_BATCH_SIZE).map((user) => ({ batchId: batch.id, userId: user.id, amount: normalized.amount })),
+          data: users.slice(offset, offset + GLOBAL_POINTS_GRANT_BATCH_SIZE).map((user) => ({
+            batchId: batch.id,
+            userId: user.id,
+            amount: normalized.amount,
+            status: 'PENDING',
+            pointsStatus: 'PENDING',
+            notificationStatus: 'PENDING',
+          })),
         })
       }
       return { batch, duplicate: false }
@@ -510,6 +814,5 @@ export async function createGlobalPointsGrant(input: {
   }
 
   if (!created) throw new Error('GLOBAL_POINTS_GRANT_BATCH_CREATE_FAILED')
-  const batch = await processGlobalPointsGrantBatch(created.id, input.operatorId, { retryFailed: duplicate && shouldRetryFailedOnly(created.status) })
-  return { duplicate, batch }
+  return { duplicate, batch: serializeBatch(created) }
 }

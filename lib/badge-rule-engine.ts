@@ -12,6 +12,8 @@ import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { getTodayMonthDay } from '@/lib/today'
 import { backfillBadgeOwnershipRule, getBadgeOwnershipRuleStats } from '@/lib/badge-ownership'
 import { getBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
+import { getPublicUserDisplayName } from '@/lib/friend-display'
+import { resolveAutomaticRegrantEligibility, type AutomaticRegrantHistoryRecord, type BadgeRevokeReason } from '@/lib/badge-revocation'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
@@ -47,6 +49,7 @@ export type BadgeEvaluationSummary = {
   alreadyOwned: number
   failed: number
   failures: string[]
+  skippedByRevoke?: number
 }
 
 export type BadgeBackfillSummary = {
@@ -63,10 +66,54 @@ export type BadgeBackfillSummary = {
   done: boolean
   mode: 'CURRENT' | 'HISTORICAL_WINDOW'
   historicalWindow: { from: string; until: string } | null
+  skippedByRevoke?: number
 }
 
 function emptySummary(userId: string): BadgeEvaluationSummary {
-  return { userId, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, failed: 0, failures: [] }
+  return { userId, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, failed: 0, failures: [], skippedByRevoke: 0 }
+}
+
+type ZodiacRegrantHistoryRow = AutomaticRegrantHistoryRecord & {
+  id: string
+  userId: string
+}
+
+export type ZodiacBadgePreviewCandidate = {
+  userId: string
+  uid: number
+  displayName: string
+  birthday: string | null
+  zodiac: ZodiacSign | null
+  status: 'PENDING' | 'INCIDENT_REGRANT'
+  revokeReason: BadgeRevokeReason | null
+}
+
+async function loadZodiacRegrantHistory(userIds: readonly string[], badgeId: string) {
+  if (!userIds.length) return new Map<string, ZodiacRegrantHistoryRow[]>()
+  const rows = await prisma.userBadge.findMany({
+    where: { badgeId, userId: { in: [...new Set(userIds)] } },
+    orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
+    select: {
+      id: true,
+      userId: true,
+      status: true,
+      expiresAt: true,
+      sourceType: true,
+      revokeReason: true,
+      UserBadgeSource: { select: { isActive: true, sourceType: true, sourceId: true, expiresAt: true, revokeReason: true } },
+    },
+  })
+  const byUserId = new Map<string, ZodiacRegrantHistoryRow[]>()
+  for (const row of rows) {
+    const existing = byUserId.get(row.userId) || []
+    existing.push(row)
+    byUserId.set(row.userId, existing)
+  }
+  return byUserId
+}
+
+function toBirthdayLabel(month: number | null | undefined, day: number | null | undefined) {
+  return month != null && day != null ? `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null
 }
 
 export function evaluateBadgeMetric(value: number, operator: BadgeRuleOperatorValue, threshold: number) {
@@ -232,6 +279,14 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
     if (!eligible) continue
     summary.eligible += 1
     try {
+      if (type === 'BIRTHDAY_ZODIAC') {
+        const history = await loadZodiacRegrantHistory([userId], rule.badgeId)
+        const decision = resolveAutomaticRegrantEligibility(history.get(userId) || [], now)
+        if (!decision.allowed && decision.reason === 'NORMAL_REVOKED') {
+          summary.skippedByRevoke = (summary.skippedByRevoke || 0) + 1
+          continue
+        }
+      }
       const result = await grantBadge({
         userId,
         badgeId: rule.badgeId,
@@ -245,6 +300,7 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
         summary.granted += 1
         newlyGranted.push({ badgeId: result.badgeId, recordId: result.recordId, ruleType: type })
       }
+      else if (result.skipped) summary.skippedByRevoke = (summary.skippedByRevoke || 0) + 1
       else summary.alreadyOwned += 1
     } catch (error) {
       summary.failed += 1
@@ -356,6 +412,7 @@ export type ZodiacBadgeScanSummary = {
   eligible: number
   granted: number
   alreadyOwned: number
+  skippedByRevoke: number
   failed: number
   failures: string[]
 }
@@ -367,7 +424,7 @@ export type ZodiacBadgeScanSummary = {
  */
 export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<ZodiacBadgeScanSummary> {
   const zodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
-  const summary: ZodiacBadgeScanSummary = { zodiac, scanned: 0, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, failed: 0, failures: [] }
+  const summary: ZodiacBadgeScanSummary = { zodiac, scanned: 0, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, skippedByRevoke: 0, failed: 0, failures: [] }
   if (!zodiac) return summary
 
   const rules = (await loadEnabledRules(['BIRTHDAY_ZODIAC'], now))
@@ -402,6 +459,12 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
         if (!eligible) continue
         summary.eligible += 1
         try {
+          const history = await loadZodiacRegrantHistory([user.id], rule.badgeId)
+          const decision = resolveAutomaticRegrantEligibility(history.get(user.id) || [], now)
+          if (!decision.allowed && decision.reason === 'NORMAL_REVOKED') {
+            summary.skippedByRevoke += 1
+            continue
+          }
           const result = await grantBadge({
             userId: user.id,
             badgeId: rule.badgeId,
@@ -416,7 +479,8 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
           if (result.created) {
             summary.granted += 1
             newlyGranted.push({ badgeId: result.badgeId, recordId: result.recordId })
-          } else summary.alreadyOwned += 1
+          } else if (result.skipped) summary.skippedByRevoke += 1
+          else summary.alreadyOwned += 1
         } catch (error) {
           summary.failed += 1
           summary.failures.push(`${user.id}:${rule.id}:${error instanceof Error ? error.message : '发放失败'}`)
@@ -719,6 +783,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
       done: !hasMore,
       mode: 'CURRENT',
       historicalWindow: null,
+      skippedByRevoke: 0,
     }
     const rule = {
       ruleType: type,
@@ -727,6 +792,9 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
       configJson: badge.BadgeRule.configJson,
     }
     const newlyGranted: Array<{ userId: string; recordId: string }> = []
+    const historyByUserId = type === 'BIRTHDAY_ZODIAC'
+      ? await loadZodiacRegrantHistory(rows.map((user) => user.id), badgeId)
+      : new Map<string, ZodiacRegrantHistoryRow[]>()
     for (const user of rows) {
       if (!evaluateBadgeRule({ user, rule, now, mode: type === 'BIRTHDAY_ZODIAC' ? 'ADMIN_BACKFILL' : 'AUTO' })) {
         if (type === 'BIRTHDAY_ZODIAC' && (user.birthMonth !== null || user.birthDay !== null) && !resolveZodiac(user.birthMonth || 0, user.birthDay || 0)) {
@@ -734,6 +802,13 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
         }
         summary.notEligible += 1
         continue
+      }
+      if (type === 'BIRTHDAY_ZODIAC') {
+        const decision = resolveAutomaticRegrantEligibility(historyByUserId.get(user.id) || [], now)
+        if (!decision.allowed && decision.reason === 'NORMAL_REVOKED') {
+          summary.skippedByRevoke = (summary.skippedByRevoke || 0) + 1
+          continue
+        }
       }
       try {
         const result = await grantBadge({
@@ -750,7 +825,8 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
         if (result.created) {
           summary.granted += 1
           newlyGranted.push({ userId: user.id, recordId: result.recordId })
-        } else summary.alreadyOwned += 1
+        } else if (result.skipped) summary.skippedByRevoke = (summary.skippedByRevoke || 0) + 1
+        else summary.alreadyOwned += 1
       } catch (error) {
         summary.failed += 1
         summary.failures.push(`${user.id}:${error instanceof Error ? error.message : '发放失败'}`)
@@ -931,6 +1007,9 @@ export type BadgeRulePreview = {
   eligibleCount: number
   ownedCount: number
   pendingCount: number
+  regrantableCount?: number
+  blockedByRevokeCount?: number
+  pendingUsers?: ZodiacBadgePreviewCandidate[]
   historical: {
     supported: boolean
     mode: 'CURRENT' | 'HISTORICAL_WINDOW' | 'UNSUPPORTED' | 'UPCOMING'
@@ -1043,6 +1122,9 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     let cursor: string | undefined
     let eligibleCount = 0
     let pendingCount = 0
+    let regrantableCount = 0
+    let blockedByRevokeCount = 0
+    const pendingUsers: ZodiacBadgePreviewCandidate[] = []
     const rule = {
       ruleType: type,
       operator,
@@ -1059,14 +1141,35 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
         },
         orderBy: { id: 'asc' },
         take: BACKFILL_BATCH_MAX,
-        select: { id: true, birthMonth: true, birthDay: true },
+        select: { id: true, uid: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, birthMonth: true, birthDay: true },
       })
       if (!users.length) break
-      const eligibleIds = users.filter((user) => evaluateBadgeRule({ user, rule, now, mode: type === 'BIRTHDAY_ZODIAC' ? 'ADMIN_BACKFILL' : 'AUTO' })).map((user) => user.id)
-      eligibleCount += eligibleIds.length
-      if (eligibleIds.length) {
-        const ownedEligibleCount = await prisma.userBadge.count({ where: { badgeId, userId: { in: eligibleIds }, ...activeUserBadgeWhere(now) } })
-        pendingCount += Math.max(0, eligibleIds.length - ownedEligibleCount)
+      const eligibleUsers = users.filter((user) => evaluateBadgeRule({ user, rule, now, mode: type === 'BIRTHDAY_ZODIAC' ? 'ADMIN_BACKFILL' : 'AUTO' }))
+      eligibleCount += eligibleUsers.length
+      const historyByUserId = type === 'BIRTHDAY_ZODIAC'
+        ? await loadZodiacRegrantHistory(eligibleUsers.map((user) => user.id), badgeId)
+        : new Map<string, ZodiacRegrantHistoryRow[]>()
+      for (const user of eligibleUsers) {
+        const decision = type === 'BIRTHDAY_ZODIAC'
+          ? resolveAutomaticRegrantEligibility(historyByUserId.get(user.id) || [], now)
+          : { allowed: true, reason: 'NEVER_OR_EXPIRED' as const, revokeReason: null }
+        if (!decision.allowed) {
+          if (decision.reason === 'NORMAL_REVOKED') blockedByRevokeCount += 1
+          continue
+        }
+        pendingCount += 1
+        if (decision.reason === 'INCIDENT_REVOKED') regrantableCount += 1
+        if (pendingUsers.length < 100) {
+          pendingUsers.push({
+            userId: user.id,
+            uid: user.uid,
+            displayName: getPublicUserDisplayName(user),
+            birthday: toBirthdayLabel(user.birthMonth, user.birthDay),
+            zodiac: resolveZodiac(user.birthMonth || 0, user.birthDay || 0),
+            status: decision.reason === 'INCIDENT_REVOKED' ? 'INCIDENT_REGRANT' : 'PENDING',
+            revokeReason: decision.revokeReason,
+          })
+        }
       }
       cursor = users.at(-1)?.id
       if (users.length < BACKFILL_BATCH_MAX) break
@@ -1081,6 +1184,9 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
       eligibleCount,
       ownedCount,
       pendingCount,
+      regrantableCount,
+      blockedByRevokeCount,
+      pendingUsers,
       historical,
     }
   }

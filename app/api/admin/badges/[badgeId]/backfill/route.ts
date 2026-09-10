@@ -48,6 +48,7 @@ export async function POST(request: Request, context: RouteContext) {
           scanned: summary.scanned,
           granted: summary.granted,
           alreadyOwned: summary.alreadyOwned,
+          skippedByRevoke: summary.skippedByRevoke || 0,
           notEligible: summary.notEligible,
           failed: summary.failed,
           mode: summary.mode,

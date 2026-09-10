@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ActivityImageUploader, uploadActivityImage, type ActivityImageSelection, type ActivityImageUploadStatus } from '@/components/activities/ActivityImageUploader'
 import {
@@ -20,6 +20,12 @@ type Batch = {
   successAmount: number
   successCount: number
   failedCount: number
+  processedCount: number
+  pendingCount: number
+  processingCount: number
+  notificationSuccessCount: number
+  notificationFailedCount: number
+  notificationPendingCount: number
   status: string
   createdAt: string
   completedAt: string | null
@@ -36,8 +42,13 @@ type Detail = Batch & {
     nickname: string | null
     amount: number
     status: string
+    pointsStatus: string
+    notificationStatus: string
     failureReason: string | null
+    notificationFailureReason: string | null
     processedAt: string | null
+    pointsProcessedAt: string | null
+    notificationProcessedAt: string | null
   }>
 }
 
@@ -69,6 +80,10 @@ function statusClass(status: string) {
   return 'bg-amber-50 text-amber-700'
 }
 
+function isBatchActive(batch: Batch) {
+  return batch.pendingCount > 0 || batch.processingCount > 0 || batch.notificationPendingCount > 0
+}
+
 export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initialOverview: Overview }>) {
   const [overview, setOverview] = useState(initialOverview)
   const [detail, setDetail] = useState<Detail | null>(null)
@@ -92,31 +107,43 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
   const previewTotal = validAmount ? overview.recipientCount * numericAmount : 0
   const requiresStrongConfirmation = validAmount && requiresGlobalPointsGrantStrongConfirmation(numericAmount, previewTotal)
 
-  async function loadOverview() {
-    setHistoryLoading(true)
+  const loadOverview = useCallback(async (options: { silent?: boolean } = {}) => {
+    const silent = options.silent === true
+    if (!silent) setHistoryLoading(true)
     try {
       const response = await fetch('/api/admin/global-points-grants', { credentials: 'same-origin', cache: 'no-store' })
       const data = await response.json().catch(() => null) as Overview & { message?: string } | null
       if (!response.ok || !data) throw new Error(data?.message || '发放记录加载失败')
       setOverview(data)
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '发放记录加载失败')
+      if (!silent) setError(loadError instanceof Error ? loadError.message : '发放记录加载失败')
     } finally {
-      setHistoryLoading(false)
+      if (!silent) setHistoryLoading(false)
     }
-  }
+  }, [])
 
-  async function loadDetail(batchId: string) {
-    setError('')
+  const loadDetail = useCallback(async (batchId: string, options: { silent?: boolean } = {}) => {
+    const silent = options.silent === true
+    if (!silent) setError('')
     try {
       const response = await fetch(`/api/admin/global-points-grants?id=${encodeURIComponent(batchId)}`, { credentials: 'same-origin', cache: 'no-store' })
       const data = await response.json().catch(() => null) as Detail & { message?: string } | null
       if (!response.ok || !data) throw new Error(data?.message || '发放详情加载失败')
       setDetail(data)
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '发放详情加载失败')
+      if (!silent) setError(loadError instanceof Error ? loadError.message : '发放详情加载失败')
     }
-  }
+  }, [])
+
+  const activeBatch = overview.history.some(isBatchActive)
+  useEffect(() => {
+    if (!activeBatch && !detail) return
+    const timer = window.setInterval(() => {
+      void loadOverview({ silent: true })
+      if (detail) void loadDetail(detail.id, { silent: true })
+    }, 4_000)
+    return () => window.clearInterval(timer)
+  }, [activeBatch, detail, loadDetail, loadOverview])
 
   async function handleImageSelection(selection: ActivityImageSelection) {
     setImageError('')
@@ -190,9 +217,9 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
         }),
       })
       const data = await response.json().catch(() => null) as { message?: string; batch?: Batch } | null
-      if (!response.ok) throw new Error(data?.message || '发放失败，请稍后重试')
+      if (!response.ok) throw new Error(data?.message || '任务创建失败，请稍后重试')
       setConfirmOpen(false)
-      setMessage(data?.message || '全站挂号费发放完成')
+      setMessage(data?.message || '全站挂号费发放已开始，后台会继续处理')
       setTitle('')
       setContent('')
       setAmount('')
@@ -202,15 +229,16 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
       setResetSignal((value) => value + 1)
       idempotencyKeyRef.current = newIdempotencyKey()
       await loadOverview()
+      if (data?.batch?.id) await loadDetail(data.batch.id)
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '发放失败，请稍后重试')
+      setError(submitError instanceof Error ? submitError.message : '任务创建失败，请稍后重试')
     } finally {
       setLoading(false)
     }
   }
 
-  async function retryFailed() {
-    if (!detail || loading || detail.failedCount === 0) return
+  async function updateBatch(action: 'continue' | 'retry') {
+    if (!detail || loading) return
     setLoading(true)
     setError('')
     try {
@@ -218,14 +246,14 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'retry', batchId: detail.id }),
+        body: JSON.stringify({ action, batchId: detail.id }),
       })
       const data = await response.json().catch(() => null) as { message?: string } | null
-      if (!response.ok) throw new Error(data?.message || '失败用户重试失败')
-      setMessage(data?.message || '失败用户重试完成')
+      if (!response.ok) throw new Error(data?.message || '批次操作失败')
+      setMessage(data?.message || (action === 'retry' ? '失败项目已加入后台重试队列' : '批次已加入后台处理队列'))
       await Promise.all([loadOverview(), loadDetail(detail.id)])
-    } catch (retryError) {
-      setError(retryError instanceof Error ? retryError.message : '失败用户重试失败')
+    } catch (batchError) {
+      setError(batchError instanceof Error ? batchError.message : '批次操作失败')
     } finally {
       setLoading(false)
     }
@@ -236,7 +264,7 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
       <section className="border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-6">
         <p className="text-xs font-black tracking-[0.18em] text-brand-700">运营工具</p>
         <h1 className="mt-1 text-2xl font-black text-brand-950 sm:text-3xl">全站挂号费发放</h1>
-        <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-500">只向服务端筛选出的有效用户发放挂号费。每位用户独立记账、通知和处理结果，管理员与普通用户按现有有效用户规则一并计入。</p>
+        <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-500">只向服务端筛选出的有效用户发放挂号费。确认后仅固化收件人快照并创建后台任务，积分与通知分开处理，浏览器关闭后任务仍会继续。</p>
       </section>
 
       {message ? <p role="status" className="border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</p> : null}
@@ -265,7 +293,7 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
             {requiresStrongConfirmation ? <label className="block border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-black text-amber-900">金额较大，请在确认前输入 {GLOBAL_POINTS_GRANT_CONFIRMATION_TEXT}
               <input value={strongConfirmation} onChange={(event) => setStrongConfirmation(event.target.value)} placeholder={GLOBAL_POINTS_GRANT_CONFIRMATION_TEXT} className="mt-2 min-h-10 w-full border border-amber-200 bg-white px-3 font-bold outline-none" />
             </label> : null}
-            <button type="button" onClick={prepareSend} disabled={loading || historyLoading} className="min-h-11 bg-brand-950 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">发放</button>
+            <button type="button" onClick={prepareSend} disabled={loading || historyLoading} className="min-h-11 bg-brand-950 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">创建后台任务</button>
           </div>
 
           <aside className="border border-sky-100 bg-sky-50/60 p-4">
@@ -275,7 +303,7 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
               <div className="flex items-baseline justify-between gap-3 border-b border-sky-100 pb-3"><dt className="text-sm font-bold text-slate-500">单人金额</dt><dd className="text-xl font-black text-emerald-700">{validAmount ? `+${formatNumber(numericAmount)}` : '—'}</dd></div>
               <div className="flex items-baseline justify-between gap-3"><dt className="text-sm font-bold text-slate-500">预计总额</dt><dd className="text-xl font-black text-brand-950">{validAmount ? formatNumber(previewTotal) : '—'}</dd></div>
             </dl>
-            <p className="mt-5 border-t border-sky-100 pt-3 text-xs font-bold leading-5 text-slate-500">发放前服务端会重新统计有效用户并计算总额，前端人数只用于预览。</p>
+            <p className="mt-5 border-t border-sky-100 pt-3 text-xs font-bold leading-5 text-slate-500">发放前服务端会重新统计有效用户并固化快照。创建成功后后台 worker 分块处理，页面无需保持打开。</p>
           </aside>
         </div>
       </section>
@@ -291,7 +319,7 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
                   <img src={batch.imageUrl} alt="发放通知图片" className="size-16 object-cover" />
                 </span>
               ) : <span className="grid size-16 shrink-0 place-items-center bg-slate-50 text-xs font-black text-slate-400">无图片</span>}
-              <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><span className="break-words font-black text-brand-950">{batch.title}</span><span className={`px-2 py-0.5 text-[11px] font-black ${statusClass(batch.status)}`}>{statusLabel(batch.status)}</span></span><span className="mt-1 block text-xs font-bold text-slate-500">+{formatNumber(batch.amount)} · {formatNumber(batch.recipientCount)} 人 · 成功 {formatNumber(batch.successCount)} · 失败 {formatNumber(batch.failedCount)}</span><span className="mt-1 block text-[11px] font-bold text-slate-400">总额 {formatNumber(batch.totalAmount)} · {formatDateTime(batch.createdAt)}{batch.createdBy ? ` · ${batch.createdBy.nickname}（UID ${batch.createdBy.uid}）` : ''}</span></span>
+              <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><span className="break-words font-black text-brand-950">{batch.title}</span><span className={`px-2 py-0.5 text-[11px] font-black ${statusClass(batch.status)}`}>{statusLabel(batch.status)}</span></span><span className="mt-1 block text-xs font-bold text-slate-500">已处理 {formatNumber(batch.processedCount)} / {formatNumber(batch.recipientCount)} · 成功 {formatNumber(batch.successCount)} · 失败 {formatNumber(batch.failedCount)} · 待处理 {formatNumber(batch.pendingCount)} · 处理中 {formatNumber(batch.processingCount)}</span><span className="mt-1 block text-[11px] font-bold text-slate-400">成功总额 {formatNumber(batch.successAmount)} · 通知成功 {formatNumber(batch.notificationSuccessCount)} · 通知失败 {formatNumber(batch.notificationFailedCount)} · {formatDateTime(batch.createdAt)}{batch.createdBy ? ` · ${batch.createdBy.nickname}（UID ${batch.createdBy.uid}）` : ''}</span></span>
             </button>
           )) : <p className="border border-sky-100 bg-sky-50/50 p-6 text-center text-sm font-bold text-slate-500">暂无发放记录</p>}
         </div>
@@ -299,7 +327,7 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
 
       {detail ? <section className="border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">Batch detail</p><h2 className="mt-1 break-words text-xl font-black text-brand-950">{detail.title}</h2></div><button type="button" onClick={() => setDetail(null)} className="min-h-10 border border-sky-200 bg-white px-4 text-sm font-black text-slate-600">关闭详情</button></div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">金额</span><strong className="mt-1 block text-lg font-black text-emerald-700">+{formatNumber(detail.amount)}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">预计人数</span><strong className="mt-1 block text-lg font-black text-brand-950">{formatNumber(detail.recipientCount)}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">成功 / 失败</span><strong className="mt-1 block text-lg font-black text-brand-950">{detail.successCount} / {detail.failedCount}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">成功总额</span><strong className="mt-1 block text-lg font-black text-brand-950">{formatNumber(detail.successAmount)}</strong></div></div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">状态</span><strong className={`mt-1 block text-lg font-black ${statusClass(detail.status)}`}>{statusLabel(detail.status)}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">已处理 / 总人数</span><strong className="mt-1 block text-lg font-black text-brand-950">{formatNumber(detail.processedCount)} / {formatNumber(detail.recipientCount)}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">待处理 / 处理中</span><strong className="mt-1 block text-lg font-black text-brand-950">{formatNumber(detail.pendingCount)} / {formatNumber(detail.processingCount)}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">成功 / 失败</span><strong className="mt-1 block text-lg font-black text-brand-950">{formatNumber(detail.successCount)} / {formatNumber(detail.failedCount)}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">成功金额</span><strong className="mt-1 block text-lg font-black text-brand-950">{formatNumber(detail.successAmount)}</strong></div><div className="bg-sky-50 p-3"><span className="text-xs font-black text-slate-500">通知成功 / 失败</span><strong className="mt-1 block text-lg font-black text-brand-950">{formatNumber(detail.notificationSuccessCount)} / {formatNumber(detail.notificationFailedCount)}</strong></div></div>
         <p className="mt-4 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-slate-600">{detail.content}</p>
         {detail.imageUrl ? (
           <span className="mt-4 block">
@@ -307,11 +335,11 @@ export function GlobalPointsGrantManager({ initialOverview }: Readonly<{ initial
             <img src={detail.imageUrl} alt="发放通知图片" className="max-h-56 max-w-full object-contain" />
           </span>
         ) : null}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-sky-100 pt-4"><p className="text-xs font-bold text-slate-400">创建：{formatDateTime(detail.createdAt)} · 完成：{formatDateTime(detail.completedAt)}</p>{detail.failedCount > 0 ? <button type="button" onClick={() => void retryFailed()} disabled={loading} className="min-h-10 bg-amber-600 px-4 text-sm font-black text-white disabled:opacity-50">重试失败用户</button> : null}</div>
-        {detail.failedRecipients.length ? <div className="mt-4 overflow-x-auto"><table className="min-w-[680px] w-full border-collapse text-left text-sm"><thead className="border-b border-sky-100 text-xs font-black text-slate-400"><tr><th className="px-2 py-2">用户</th><th className="px-2 py-2">UID</th><th className="px-2 py-2">失败原因</th><th className="px-2 py-2">时间</th></tr></thead><tbody>{detail.failedRecipients.map((recipient) => <tr key={recipient.id} className="border-b border-sky-50"><td className="px-2 py-2 font-black text-brand-950">{recipient.username || recipient.userId}</td><td className="px-2 py-2 font-bold text-slate-500">{recipient.uid || '—'}</td><td className="max-w-sm whitespace-pre-wrap break-words px-2 py-2 font-bold text-red-700">{recipient.failureReason || '处理失败'}</td><td className="px-2 py-2 font-bold text-slate-400">{formatDateTime(recipient.processedAt)}</td></tr>)}</tbody></table></div> : <p className="mt-4 text-sm font-bold text-slate-500">当前没有失败用户。</p>}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-sky-100 pt-4"><p className="text-xs font-bold text-slate-400">创建：{formatDateTime(detail.createdAt)} · 积分完成：{formatDateTime(detail.completedAt)}</p><span className="flex flex-wrap gap-2">{detail.pendingCount > 0 || detail.processingCount > 0 ? <button type="button" onClick={() => void updateBatch('continue')} disabled={loading} className="min-h-10 bg-brand-700 px-4 text-sm font-black text-white disabled:opacity-50">继续处理</button> : null}{detail.failedCount > 0 || detail.notificationFailedCount > 0 ? <button type="button" onClick={() => void updateBatch('retry')} disabled={loading} className="min-h-10 bg-amber-600 px-4 text-sm font-black text-white disabled:opacity-50">重试失败用户</button> : null}</span></div>
+        {detail.failedRecipients.length ? <div className="mt-4 overflow-x-auto"><table className="min-w-[860px] w-full border-collapse text-left text-sm"><thead className="border-b border-sky-100 text-xs font-black text-slate-400"><tr><th className="px-2 py-2">用户</th><th className="px-2 py-2">UID</th><th className="px-2 py-2">积分状态</th><th className="px-2 py-2">通知状态</th><th className="px-2 py-2">失败原因</th><th className="px-2 py-2">时间</th></tr></thead><tbody>{detail.failedRecipients.map((recipient) => <tr key={recipient.id} className="border-b border-sky-50"><td className="px-2 py-2 font-black text-brand-950">{recipient.username || recipient.nickname || recipient.userId}</td><td className="px-2 py-2 font-bold text-slate-500">{recipient.uid || '—'}</td><td className="px-2 py-2 font-bold text-slate-600">{recipient.pointsStatus}</td><td className="px-2 py-2 font-bold text-slate-600">{recipient.notificationStatus}</td><td className="max-w-sm whitespace-pre-wrap break-words px-2 py-2 font-bold text-red-700">{recipient.failureReason || recipient.notificationFailureReason || '处理失败'}</td><td className="px-2 py-2 font-bold text-slate-400">{formatDateTime(recipient.pointsProcessedAt || recipient.notificationProcessedAt || recipient.processedAt)}</td></tr>)}</tbody></table></div> : <p className="mt-4 text-sm font-bold text-slate-500">当前没有失败项目。</p>}
       </section> : null}
 
-      <ConfirmDialog open={confirmOpen} title="确认全站发放挂号费？" description={`即将向 ${formatNumber(overview.recipientCount)} 名有效用户发放：\n挂号费：+${formatNumber(numericAmount)}\n总发放挂号费：${formatNumber(previewTotal)}\n标题：${title.trim()}\n\n确认后将为每位用户写入挂号费流水并发送一条通知。`} confirmLabel="确认发放" loading={loading} confirmDisabled={Boolean(requiresStrongConfirmation && strongConfirmation.trim() !== GLOBAL_POINTS_GRANT_CONFIRMATION_TEXT)} onConfirm={() => void submitGrant()} onCancel={() => { if (!loading) setConfirmOpen(false) }} />
+      <ConfirmDialog open={confirmOpen} title="确认全站发放挂号费？" description={`将向服务端重新筛选并固化的有效用户快照创建后台任务：\n挂号费：+${formatNumber(numericAmount)}\n预计总发放挂号费：${formatNumber(previewTotal)}\n标题：${title.trim()}\n\n创建后立即返回批次编号，积分和通知由后台 worker 继续处理，关闭浏览器不会中断。`} confirmLabel="确认发放" loading={loading} confirmDisabled={Boolean(requiresStrongConfirmation && strongConfirmation.trim() !== GLOBAL_POINTS_GRANT_CONFIRMATION_TEXT)} onConfirm={() => void submitGrant()} onCancel={() => { if (!loading) setConfirmOpen(false) }} />
     </div>
   )
 }

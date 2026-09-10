@@ -4,117 +4,117 @@ generator client {
 
 datasource db {
   provider = "mysql"
-  url = env("MIGRATION_MYSQL_URL")
+  url      = env("MIGRATION_MYSQL_URL")
 }
 
 model User {
-  id                              String                      @id @default(cuid())
-  username                        String
-  email                           String?
-  phone                           String?
-  passwordHash                    String
-  nickname                        String
-  avatarUrl                       String?
-  bio                             String?
-  role                            UserRole                    @default(USER)
-  level                           Int                         @default(1)
-  points                          Int                         @default(0)
-  consecutiveDays                 Int                         @default(0)
-  lastCheckInDate                 DateTime?
-  isDeleted                       Boolean                     @default(false)
-  deletedAt                       DateTime?
-  createdAt                       DateTime                    @default(now())
-  updatedAt                       DateTime                    @updatedAt
-  backgroundUrl                   String?
-  emailVerifiedAt                 DateTime?
-  exp                             Int                         @default(0)
-  isOnline                        Boolean                     @default(false)
-  lastActiveAt                    DateTime?
-  lastLoginAt                     DateTime?
-  phoneVerifiedAt                 DateTime?
-  status                          UserStatus                  @default(ACTIVE)
-  verificationStatus              VerificationStatus          @default(NONE)
-  nicknameChangedAt               DateTime?
-  uid                             Int                         @unique @default(autoincrement())
-  experience                      Int                         @default(0)
-  securityQuestionRecoveryEnabled Boolean                     @default(false)
-  registrationIdempotencyKeyHash  String?                     @unique
-  mustSetupSecurity               Boolean                     @default(false)
-  usernameNormalized              String                      @unique
-  checkinMoodEnabled              Boolean                     @default(true)
-  securityLogs                    AccountSecurityLog[]
-  activityFavorites               ActivityFavorite[]
-  activityRegistrations           ActivityRegistration[]
-  activityNotificationBatchesCreated ActivityNotificationBatch[] @relation("ActivityNotificationBatchCreatedBy")
-  globalPointsGrantBatchesCreated GlobalPointsGrantBatch[] @relation("GlobalPointsGrantBatchCreatedBy")
-  globalPointsGrantRecipients    GlobalPointsGrantRecipient[]
-  adminActions                    AdminAction[]               @relation("AdminOperator")
-  targetAdminActions              AdminAction[]               @relation("AdminTargetUser")
-  administeredActionLogs          AdminActionLog[]            @relation("AdminActionLogAdmin")
-  targetedActionLogs              AdminActionLog[]            @relation("AdminActionLogTarget")
-  adminPermissions                AdminPermission[]
-  blockedBy                       Block[]                     @relation("Blocked")
-  blocksMade                      Block[]                     @relation("Blocker")
-  boardFavorites                  BoardFavorite[]
-  createdChangelogs               Changelog[]                 @relation("ChangelogCreator")
-  checkIns                        CheckIn[]
-  conversations                   ConversationParticipant[]
-  cultureComments                 CultureComment[]
-  cultureFavorites                CultureFavorite[]
-  dailyExperienceRecords          DailyExperienceRecord[]
-  dailyMessages                   DailyMessage[]
-  dailyMessageComments            DailyMessageComment[]
-  dailyMessageFavorites           DailyMessageFavorite[]
-  dailyMessageLikes               DailyMessageLike[]
-  dailyTaskProgress               DailyTaskProgress[]
-  messages                        DirectMessage[]
-  emailVerifications              EmailVerification[]
-  entertainmentDailyDraws         EntertainmentDailyDraw[]
-  experienceLogs                  ExperienceLog[]
-  feedbacks                       Feedback[]
-  feedbackReplies                 FeedbackReply[]
-  following                       Follow[]                    @relation("FollowFollower")
-  followers                       Follow[]                    @relation("FollowFollowing")
-  friendActivities                FriendActivity[]            @relation("FriendActivityActor")
-  receivedFriendRequests          FriendRequest[]             @relation("FriendRequestReceiver")
-  sentFriendRequests              FriendRequest[]             @relation("FriendRequestSender")
-  friendshipsA                    Friendship[]                @relation("FriendshipUserA")
-  friendshipsB                    Friendship[]                @relation("FriendshipUserB")
-  guessSongLeaderboardEntries     GuessSongLeaderboardEntry[]
-  guessSongSessions               GuessSongSession[]
-  likes                           Like[]
-  devices                         LoginDevice[]
-  lotteryEntries                  LotteryEntry[]
-  lyricCards                      LyricCard[]
-  musicFavorites                  MusicFavorite[]
-  musicPlayRecords                MusicPlayRecord[]
-  sentNotifications               Notification[]              @relation("NotificationActor")
-  notifications                   Notification[]              @relation("NotificationRecipient")
-  onlineSessions                  OnlineSession[]
-  publishedPageLayouts            PageLayout[]                @relation("PageLayoutPublishedBy")
-  updatedPageLayouts              PageLayout[]                @relation("PageLayoutUpdatedBy")
-  pageLayoutRevisions             PageLayoutRevision[]        @relation("PageLayoutRevisionPublisher")
-  passwordResets                  PasswordResetToken[]
-  pointLogs                       PointLog[]
-  posts                           Post[]
-  favorites                       PostFavorite[]
-  profile                         Profile?
-  profileWallLikes                ProfileWallLike[]
-  profileWallMessagesReceived     ProfileWallMessage[]        @relation("ProfileWallReceiver")
-  profileWallMessagesSent         ProfileWallMessage[]        @relation("ProfileWallSender")
-  replies                         Reply[]
-  replyLikes                      ReplyLike[]
-  replyMentionsCreated            ReplyMention[]              @relation("ReplyMentionMentioner")
-  replyMentionsReceived           ReplyMention[]              @relation("ReplyMentionMentionedUser")
-  reports                         Report[]                    @relation("Reporter")
-  reportedReports                 Report[]                    @relation("ReportedUser")
-  searchHistory                   SearchHistory[]
-  createdSystemNotifications      SystemNotification[]        @relation("SystemNotificationCreator")
-  systemNotificationReads         SystemNotificationRead[]
-  achievements                    UserAchievement[]
-  albumCollections                UserAlbumCollection[]
-  badges                          UserBadge[]
-  securityQuestions               UserSecurityQuestion?
+  id                                 String                       @id @default(cuid())
+  username                           String
+  email                              String?
+  phone                              String?
+  passwordHash                       String
+  nickname                           String
+  avatarUrl                          String?
+  bio                                String?
+  role                               UserRole                     @default(USER)
+  level                              Int                          @default(1)
+  points                             Int                          @default(0)
+  consecutiveDays                    Int                          @default(0)
+  lastCheckInDate                    DateTime?
+  isDeleted                          Boolean                      @default(false)
+  deletedAt                          DateTime?
+  createdAt                          DateTime                     @default(now())
+  updatedAt                          DateTime                     @updatedAt
+  backgroundUrl                      String?
+  emailVerifiedAt                    DateTime?
+  exp                                Int                          @default(0)
+  isOnline                           Boolean                      @default(false)
+  lastActiveAt                       DateTime?
+  lastLoginAt                        DateTime?
+  phoneVerifiedAt                    DateTime?
+  status                             UserStatus                   @default(ACTIVE)
+  verificationStatus                 VerificationStatus           @default(NONE)
+  nicknameChangedAt                  DateTime?
+  uid                                Int                          @unique @default(autoincrement())
+  experience                         Int                          @default(0)
+  securityQuestionRecoveryEnabled    Boolean                      @default(false)
+  registrationIdempotencyKeyHash     String?                      @unique
+  mustSetupSecurity                  Boolean                      @default(false)
+  usernameNormalized                 String                       @unique
+  checkinMoodEnabled                 Boolean                      @default(true)
+  securityLogs                       AccountSecurityLog[]
+  activityFavorites                  ActivityFavorite[]
+  activityRegistrations              ActivityRegistration[]
+  activityNotificationBatchesCreated ActivityNotificationBatch[]  @relation("ActivityNotificationBatchCreatedBy")
+  globalPointsGrantBatchesCreated    GlobalPointsGrantBatch[]     @relation("GlobalPointsGrantBatchCreatedBy")
+  globalPointsGrantRecipients        GlobalPointsGrantRecipient[]
+  adminActions                       AdminAction[]                @relation("AdminOperator")
+  targetAdminActions                 AdminAction[]                @relation("AdminTargetUser")
+  administeredActionLogs             AdminActionLog[]             @relation("AdminActionLogAdmin")
+  targetedActionLogs                 AdminActionLog[]             @relation("AdminActionLogTarget")
+  adminPermissions                   AdminPermission[]
+  blockedBy                          Block[]                      @relation("Blocked")
+  blocksMade                         Block[]                      @relation("Blocker")
+  boardFavorites                     BoardFavorite[]
+  createdChangelogs                  Changelog[]                  @relation("ChangelogCreator")
+  checkIns                           CheckIn[]
+  conversations                      ConversationParticipant[]
+  cultureComments                    CultureComment[]
+  cultureFavorites                   CultureFavorite[]
+  dailyExperienceRecords             DailyExperienceRecord[]
+  dailyMessages                      DailyMessage[]
+  dailyMessageComments               DailyMessageComment[]
+  dailyMessageFavorites              DailyMessageFavorite[]
+  dailyMessageLikes                  DailyMessageLike[]
+  dailyTaskProgress                  DailyTaskProgress[]
+  messages                           DirectMessage[]
+  emailVerifications                 EmailVerification[]
+  entertainmentDailyDraws            EntertainmentDailyDraw[]
+  experienceLogs                     ExperienceLog[]
+  feedbacks                          Feedback[]
+  feedbackReplies                    FeedbackReply[]
+  following                          Follow[]                     @relation("FollowFollower")
+  followers                          Follow[]                     @relation("FollowFollowing")
+  friendActivities                   FriendActivity[]             @relation("FriendActivityActor")
+  receivedFriendRequests             FriendRequest[]              @relation("FriendRequestReceiver")
+  sentFriendRequests                 FriendRequest[]              @relation("FriendRequestSender")
+  friendshipsA                       Friendship[]                 @relation("FriendshipUserA")
+  friendshipsB                       Friendship[]                 @relation("FriendshipUserB")
+  guessSongLeaderboardEntries        GuessSongLeaderboardEntry[]
+  guessSongSessions                  GuessSongSession[]
+  likes                              Like[]
+  devices                            LoginDevice[]
+  lotteryEntries                     LotteryEntry[]
+  lyricCards                         LyricCard[]
+  musicFavorites                     MusicFavorite[]
+  musicPlayRecords                   MusicPlayRecord[]
+  sentNotifications                  Notification[]               @relation("NotificationActor")
+  notifications                      Notification[]               @relation("NotificationRecipient")
+  onlineSessions                     OnlineSession[]
+  publishedPageLayouts               PageLayout[]                 @relation("PageLayoutPublishedBy")
+  updatedPageLayouts                 PageLayout[]                 @relation("PageLayoutUpdatedBy")
+  pageLayoutRevisions                PageLayoutRevision[]         @relation("PageLayoutRevisionPublisher")
+  passwordResets                     PasswordResetToken[]
+  pointLogs                          PointLog[]
+  posts                              Post[]
+  favorites                          PostFavorite[]
+  profile                            Profile?
+  profileWallLikes                   ProfileWallLike[]
+  profileWallMessagesReceived        ProfileWallMessage[]         @relation("ProfileWallReceiver")
+  profileWallMessagesSent            ProfileWallMessage[]         @relation("ProfileWallSender")
+  replies                            Reply[]
+  replyLikes                         ReplyLike[]
+  replyMentionsCreated               ReplyMention[]               @relation("ReplyMentionMentioner")
+  replyMentionsReceived              ReplyMention[]               @relation("ReplyMentionMentionedUser")
+  reports                            Report[]                     @relation("Reporter")
+  reportedReports                    Report[]                     @relation("ReportedUser")
+  searchHistory                      SearchHistory[]
+  createdSystemNotifications         SystemNotification[]         @relation("SystemNotificationCreator")
+  systemNotificationReads            SystemNotificationRead[]
+  achievements                       UserAchievement[]
+  albumCollections                   UserAlbumCollection[]
+  badges                             UserBadge[]
+  securityQuestions                  UserSecurityQuestion?
 
   @@index([role])
   @@index([status])
@@ -276,21 +276,21 @@ model Post {
 }
 
 model Reply {
-  id           String        @id @default(cuid())
-  content      String        @db.Text
-  isDeleted    Boolean       @default(false)
+  id           String         @id @default(cuid())
+  content      String         @db.Text
+  isDeleted    Boolean        @default(false)
   deletedAt    DateTime?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
   postId       String
   authorId     String
   parentId     String?
-  likeCount    Int           @default(0)
+  likeCount    Int            @default(0)
   adminActions AdminAction[]
-  author       User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  parent       Reply?        @relation("ReplyThread", fields: [parentId], references: [id], onDelete: NoAction)
-  children     Reply[]       @relation("ReplyThread")
-  post         Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author       User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent       Reply?         @relation("ReplyThread", fields: [parentId], references: [id], onDelete: NoAction)
+  children     Reply[]        @relation("ReplyThread")
+  post         Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
   likes        ReplyLike[]
   mentions     ReplyMention[]
   reports      Report[]
@@ -887,6 +887,7 @@ model UserBadge {
   grantedAt    DateTime @default(now())
   userId       String
   badgeId      String
+  revokeReason String?  @db.VarChar(64)
   badge        Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1185,21 +1186,21 @@ model MusicTrack {
 }
 
 model MusicAlbum {
-  id           String                     @id @default(cuid())
+  id           String                 @id @default(cuid())
   name         String
-  artist       String                     @default("陈奕迅")
+  artist       String                 @default("陈奕迅")
   releaseYear  Int
   coverUrl     String?
-  description  String? @db.LongText
-  language     String                     @default("粤语")
-  createdAt    DateTime                   @default(now())
+  description  String?                @db.LongText
+  language     String                 @default("粤语")
+  createdAt    DateTime               @default(now())
   era          String?
   albumType    String?
   releaseDate  DateTime?
   company      String?
-  story        String? @db.LongText
-  status       MusicPublicationStatus     @default(DRAFT)
-  displayOrder Int                        @default(0)
+  story        String?                @db.LongText
+  status       MusicPublicationStatus @default(DRAFT)
+  displayOrder Int                    @default(0)
   songs        MusicSong[]
 
   @@unique([name, artist, releaseYear])
@@ -1387,24 +1388,24 @@ model SearchHistory {
 }
 
 model Activity {
-  id            String                 @id @default(cuid())
-  title         String
-  description   String
-  type          ActivityType           @default(OTHER)
-  status        ActivityStatus         @default(DRAFT)
-  coverUrl      String?
-  pointsReward  Int?
-  signupLimit   Int?
-  signupCount   Int                    @default(0)
-  startsAt      DateTime?
-  endsAt        DateTime?
-  createdAt     DateTime               @default(now())
-  updatedAt     DateTime               @updatedAt
-  favorites     ActivityFavorite[]
-  registrations ActivityRegistration[]
+  id                  String                      @id @default(cuid())
+  title               String
+  description         String
+  type                ActivityType                @default(OTHER)
+  status              ActivityStatus              @default(DRAFT)
+  coverUrl            String?
+  pointsReward        Int?
+  signupLimit         Int?
+  signupCount         Int                         @default(0)
+  startsAt            DateTime?
+  endsAt              DateTime?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  favorites           ActivityFavorite[]
+  registrations       ActivityRegistration[]
   notificationBatches ActivityNotificationBatch[] @relation("ActivityNotificationBatches")
-  notifications Notification[] @relation("ActivityNotifications")
-  lotteries     Lottery[]
+  notifications       Notification[]              @relation("ActivityNotifications")
+  lotteries           Lottery[]
 
   @@index([status, startsAt])
   @@index([status, createdAt])
@@ -1432,41 +1433,58 @@ model ActivityNotificationBatch {
 }
 
 model GlobalPointsGrantBatch {
-  id             String                         @id @default(cuid())
-  idempotencyKey String                         @unique @db.VarChar(191)
-  title          String                         @db.VarChar(191)
-  content        String                         @db.Text
-  imageUrl       String?                        @db.Text
-  amount         Int
-  recipientCount Int
-  totalAmount    Int
-  successCount   Int                          @default(0)
-  failedCount    Int                          @default(0)
-  status         String                       @default("PENDING") @db.VarChar(20)
-  createdById    String
-  createdAt      DateTime                     @default(now())
-  completedAt    DateTime?
-  createdBy      User                         @relation("GlobalPointsGrantBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  recipients     GlobalPointsGrantRecipient[]
+  id                       String                       @id @default(cuid())
+  idempotencyKey           String                       @unique @db.VarChar(191)
+  title                    String                       @db.VarChar(191)
+  content                  String                       @db.Text
+  imageUrl                 String?                      @db.Text
+  amount                   Int
+  recipientCount           Int
+  totalAmount              Int
+  successCount             Int                          @default(0)
+  failedCount              Int                          @default(0)
+  processedCount           Int                          @default(0)
+  pendingCount             Int                          @default(0)
+  processingCount          Int                          @default(0)
+  notificationSuccessCount Int                          @default(0)
+  notificationFailedCount  Int                          @default(0)
+  status                   String                       @default("PENDING") @db.VarChar(20)
+  createdById              String
+  createdAt                DateTime                     @default(now())
+  completedAt              DateTime?
+  updatedAt                DateTime                     @updatedAt
+  createdBy                User                         @relation("GlobalPointsGrantBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  recipients               GlobalPointsGrantRecipient[]
 
   @@index([createdById, createdAt])
   @@index([status, createdAt])
 }
 
 model GlobalPointsGrantRecipient {
-  id            String                  @id @default(cuid())
-  batchId       String
-  userId        String
-  amount        Int
-  status        String                  @default("PENDING") @db.VarChar(20)
-  failureReason String?                 @db.Text
-  processedAt   DateTime?
-  createdAt     DateTime                @default(now())
-  batch         GlobalPointsGrantBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                        String                 @id @default(cuid())
+  batchId                   String
+  userId                    String
+  amount                    Int
+  status                    String                 @default("PENDING") @db.VarChar(20)
+  pointsStatus              String                 @default("PENDING") @db.VarChar(20)
+  notificationStatus        String                 @default("PENDING") @db.VarChar(20)
+  failureReason             String?                @db.Text
+  notificationFailureReason String?                @db.Text
+  processedAt               DateTime?
+  pointsProcessedAt         DateTime?
+  notificationProcessedAt   DateTime?
+  processingToken           String?                @db.VarChar(64)
+  processingPhase           String?                @db.VarChar(20)
+  processingStartedAt       DateTime?
+  createdAt                 DateTime               @default(now())
+  batch                     GlobalPointsGrantBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  user                      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, userId])
   @@index([batchId, status, id])
+  @@index([batchId, pointsStatus, id])
+  @@index([batchId, notificationStatus, id])
+  @@index([processingPhase, processingStartedAt], map: "GlobalPointsGrantRecipient_processing_claim_idx")
   @@index([userId, createdAt])
 }
 

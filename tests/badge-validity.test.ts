@@ -67,8 +67,8 @@ test('automatic expiration marks rows EXPIRED, preserves history and clears stal
   const expiration = read('lib/badge-expiration.ts')
   assert.match(expiration, /export async function expireUserBadges/)
   assert.match(expiration, /status: 'ACTIVE', expiresAt: \{ not: null, lte: now \}/)
-  assert.match(expiration, /status: 'EXPIRED', expiredAt: now, activeKey: null/)
-  assert.match(expiration, /equippedBadgeId: row\.badgeId.*data: \{ equippedBadgeId: null \}/)
+  assert.match(expiration, /data: \{ status: 'EXPIRED', expiredAt: now, revokeReason: 'NORMAL_EXPIRED', activeKey: null \}/)
+  assert.match(expiration, /user\.updateMany\(\{[\s\S]*?equippedBadgeId: row\.badgeId[\s\S]*?data: \{ equippedBadgeId: null \}/)
   assert.match(expiration, /userBadgeShowcase\.deleteMany/)
 })
 
@@ -112,7 +112,8 @@ test('automatic event callers pass stable source event identities', () => {
 
 test('revoke is distinct from natural expiration and never deletes UserBadge history', () => {
   const service = read('lib/badge-service.ts')
-  assert.match(service, /status: 'REVOKED', revokedAt: new Date\(\), activeKey: null/)
+  assert.match(service, /const revokedAt = new Date\(\)/)
+  assert.match(service, /data: \{ status: 'REVOKED', revokedAt, revokeReason, activeKey: null \}/)
   assert.doesNotMatch(service, /userBadge\.delete\(/)
   assert.match(service, /userBadgeShowcase\.deleteMany\(\{ where: \{ userId, badgeId \} \}\)/)
 })

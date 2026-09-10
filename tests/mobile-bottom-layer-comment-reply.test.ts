@@ -123,13 +123,13 @@ test('当前页圆形按钮不应用 disabled 透明度', () => {
   assert.doesNotMatch(pagination, /pagination-page is-current[^\n]*disabled/)
 })
 
-test('好友入口贴右侧并位于导航总高上方', () => {
+test('活跃症入口贴右侧并位于导航总高上方', () => {
   assert.match(css, /\.friend-dock \{ right:0; bottom:calc\(var\(--mobile-bottom-nav-total\) \+ 72px\)/)
 })
 
-test('好友入口收起状态按用户隔离存入 localStorage', () => {
+test('活跃症入口收起状态按用户隔离存入 localStorage', () => {
   assert.match(friendDock, /friend-dock:collapsed:\$\{currentUserId\}/)
-  assert.match(friendDock, /aria-label="展开好友入口"/)
+  assert.match(friendDock, /aria-label="展开活跃症入口"/)
 })
 
 test('好友入口复用 AppShell 的统一未读统计并显示 99+', () => {
@@ -144,15 +144,15 @@ test('统一未读计数覆盖通知、反馈、好友申请和私信', () => {
   for (const field of ['notifications', 'feedback', 'friendRequests', 'directMessages', 'messages']) assert.match(notifications, new RegExp(field))
 })
 
-test('好友窗 outside-click 使用 body portal 遮罩且不干扰窗口内部', () => {
+test('活跃症浮窗 outside-click 使用 body portal 遮罩且不干扰窗口内部', () => {
   assert.match(friendDock, /createPortal\(/)
   assert.match(friendDock, /friend-dock-backdrop[\s\S]*onPointerDown=\{consumeBackdropEvent\}[\s\S]*onPointerUp=\{handleBackdropPointerUp\}[\s\S]*onClick=\{handleBackdropClick\}/)
   assert.match(friendDock, /FriendProfileCard/)
 })
 
-test('好友窗支持遮罩、关闭按钮、Esc、再次点击入口和路由关闭', () => {
+test('活跃症浮窗支持遮罩、关闭按钮、Esc、再次点击入口和路由关闭', () => {
   assert.match(friendDock, /handleBackdropClick[\s\S]*closeDock\(\)/)
-  assert.match(friendDock, /aria-label="关闭好友窗口"/)
+  assert.match(friendDock, /aria-label="关闭活跃症窗口"/)
   assert.match(friendDock, /event\.key !== 'Escape'/)
   assert.match(friendDock, /onClick=\{open \? closeDock : openFriendList\}/)
   assert.match(friendDock, /\[clearFriendListReturnState, pathname, currentUserId, resetChat\]/)

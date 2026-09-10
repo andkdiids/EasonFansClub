@@ -127,7 +127,18 @@ test('FriendDock panel actions remain separate from backdrop closing', () => {
   assert.match(friendDock, /<section[\s\S]*className=\{`friend-dock-panel/)
   assert.match(friendDock, /onChat=\{\(\) => void openChat\(friend\)\}/)
   assert.match(friendDock, /href="\/notifications"/)
-  assert.match(friendDock, /aria-label="关闭好友窗口"/)
+  assert.match(friendDock, /aria-label="关闭活跃症窗口"/)
+})
+
+test('FriendDock uses 活跃症 as the overall name while keeping child tabs unchanged', () => {
+  assert.match(friendDock, /aria-label="活跃症"/)
+  assert.match(friendDock, /className="friend-dock-title">活跃症<\/strong>/)
+  assert.match(friendDock, /aria-label="活跃症栏目"/)
+  assert.match(friendDock, />好友<\/button>/)
+  assert.match(friendDock, />通讯录<\/button>/)
+  assert.match(friendDock, />今天只做一件事<\/button>/)
+  assert.match(friendDock, />新生活<\/button>/)
+  assert.match(friendDock, />\s*活跃症\{friendDockUnreadCount/)
 })
 
 test('E center backdrop is a full viewport body portal independent from sheet', () => {

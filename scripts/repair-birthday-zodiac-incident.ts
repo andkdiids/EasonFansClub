@@ -2,10 +2,11 @@ import 'dotenv/config'
 
 import { getZodiacFromRuleConfig } from '../lib/badge-rules'
 import { revokeBadgeAcquisitionSource } from '../lib/badge-service'
+import { INCIDENT_INVALID_ZODIAC_PERIOD_GRANT } from '../lib/badge-revocation'
 import { prisma } from '../lib/prisma'
 import { getCurrentZodiacSign, resolveZodiac, ZODIAC_SIGNS, type ZodiacSign } from '../lib/zodiac'
 
-export const INCIDENT_REVOKE_REASON = 'INCIDENT_INVALID_ZODIAC_PERIOD_GRANT'
+export const INCIDENT_REVOKE_REASON = INCIDENT_INVALID_ZODIAC_PERIOD_GRANT
 export const INCIDENT_TIMEZONE = 'Asia/Shanghai'
 
 type SourceHistory = {
@@ -416,6 +417,7 @@ async function main() {
       sourceType: grant.sourceType,
       sourceId: grant.sourceId || '',
       reason: INCIDENT_REVOKE_REASON,
+      revokeReason: INCIDENT_REVOKE_REASON,
     })
     if (result.revoked) revoked += 1
   }

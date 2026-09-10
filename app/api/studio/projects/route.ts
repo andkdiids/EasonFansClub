@@ -9,6 +9,7 @@ import { parseStudioThumbnail } from '@/lib/studio/thumbnail'
 import { uploadSiteImage } from '@/lib/site-media-storage'
 import { normalizeBeadProjectData } from '@/lib/studio/beads/compat'
 import { CURRENT_BEAD_PROJECT_VERSION } from '@/lib/studio/beads/types'
+import { BEETHOVEN_ARTIST_ID } from '@/lib/studio/artists'
 import { completeTask } from '@/lib/growth-tasks/service'
 
 export const dynamic = 'force-dynamic'
@@ -140,7 +141,7 @@ export async function POST(request: Request) {
   const thumbnailUrl = parseStudioThumbnail(body.thumbnailUrl)
   const requestedId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
   try {
-    const existing = requestedId ? await prisma.studioProject.findFirst({ where: { id: requestedId, userId: guard.user.id }, select: { id: true, thumbnailUrl: true } }) : null
+    const existing = requestedId ? await prisma.studioProject.findFirst({ where: { id: requestedId, userId: guard.user.id }, select: { id: true, thumbnailUrl: true, artistId: true } }) : null
     // Core work data is persisted WITHOUT the preview image so a preview/upload
     // failure can never lose the saved work. The preview is attached only after
     // it is successfully generated and uploaded.
@@ -148,6 +149,7 @@ export async function POST(request: Request) {
       data: {
         ...(requestedId ? { id: requestedId } : {}),
         userId: guard.user.id,
+        ...(toolSlug === 'beads' ? { artistId: BEETHOVEN_ARTIST_ID } : {}),
         toolSlug,
         title,
         description,
@@ -157,7 +159,7 @@ export async function POST(request: Request) {
       },
     })
     const project = existing
-      ? await prisma.studioProject.update({ where: { id: existing.id }, data: { toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, lastOpenedAt: new Date() } })
+      ? await prisma.studioProject.update({ where: { id: existing.id }, data: { ...(toolSlug === 'beads' && !existing.artistId ? { artistId: BEETHOVEN_ARTIST_ID } : {}), toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, lastOpenedAt: new Date() } })
       : toolSlug !== 'beads' || typeof prisma.$transaction !== 'function'
         ? await createProject(prisma)
         : await prisma.$transaction(async (tx) => {

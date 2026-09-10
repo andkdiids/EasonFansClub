@@ -18,6 +18,7 @@ import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
 import { getHomeCheckInDisplay } from '@/lib/home-checkin-display'
 import type { HomeActivityStatusLabel } from '@/lib/home-activity'
 import { salonCategoryLabel } from '@/lib/salon-shared'
+import { getHomeTodayPageItems, getHomeTodayPageCount, HOME_TODAY_PAGE_SIZE, normalizeHomeTodayIndex } from '@/lib/home-today'
 
 const homeText = {
   goCheckin: '去挂号',
@@ -199,6 +200,8 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
   const [todayPageIndex, setTodayPageIndex] = useState(0)
   const [todayAutoplayReset, setTodayAutoplayReset] = useState(0)
   const [todaySwipeDirection, setTodaySwipeDirection] = useState<'next' | 'previous' | null>(null)
+  const [todayEventsLoaded, setTodayEventsLoaded] = useState(false)
+  const homeLoadSequence = useRef(0)
   const todayTouchStart = useRef<{ x: number; y: number } | null>(null)
   const todayTouchCurrent = useRef<{ x: number; y: number } | null>(null)
   const fmt = (value: number) => new Intl.NumberFormat('zh-CN').format(value)
@@ -208,11 +211,13 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
     const controller = new AbortController()
     let disposed = false
     async function load() {
+      const requestId = ++homeLoadSequence.current
       try {
         const response = await fetch('/api/home', { cache: 'no-store', signal: controller.signal })
         if (!response.ok) throw new Error('home request failed')
         const nextData = await response.json() as Payload
-        if (!disposed) {
+        if (!disposed && requestId === homeLoadSequence.current) {
+          const nextTodayEvents = Array.isArray(nextData.todayEvents) ? nextData.todayEvents : null
           // The main home payload intentionally keeps entertainment ranking in
           // its own request. Do not let its legacy null field overwrite the
           // independently loaded result.
@@ -224,12 +229,14 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
             checkedInToday: typeof nextData.checkedInToday === 'boolean' ? nextData.checkedInToday : Boolean(nextData.stats?.checkIns?.length),
             todayCheckInCount: typeof nextData.todayCheckInCount === 'number' ? nextData.todayCheckInCount : nextData.siteStats?.todayCheckIns ?? 0,
             dailyPrescriptionReward: nextData.dailyPrescriptionReward ?? null,
+            todayEvents: nextTodayEvents ?? current.todayEvents,
             entertainmentRanking: current.entertainmentRanking,
           }))
+          if (nextTodayEvents) setTodayEventsLoaded(true)
           setFailed(false)
         }
       } catch (error) {
-        if (!disposed && !(error instanceof Error && error.name === 'AbortError')) setFailed(true)
+        if (!disposed && requestId === homeLoadSequence.current && !(error instanceof Error && error.name === 'AbortError')) setFailed(true)
       }
     }
     async function loadEntertainmentRanking() {
@@ -278,11 +285,11 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
     if (!dailyMusicCoverUrl) console.log('album cover missing')
   }, [data.dailyMusic, dailyMusicCoverUrl])
 
-  const todayPageCount = Math.ceil(data.todayEvents.length / 2)
+  const todayPageCount = getHomeTodayPageCount(data.todayEvents.length)
 
   useEffect(() => {
-    setTodayEventIndex((current) => data.todayEvents.length ? current % data.todayEvents.length : 0)
-    setTodayPageIndex((current) => todayPageCount ? current % todayPageCount : 0)
+    setTodayEventIndex((current) => normalizeHomeTodayIndex(current, data.todayEvents.length))
+    setTodayPageIndex((current) => normalizeHomeTodayIndex(current, data.todayEvents.length, HOME_TODAY_PAGE_SIZE))
     if (data.todayEvents.length <= 2) return
     const timer = window.setInterval(() => {
       if (device === 'desktop') {
@@ -297,11 +304,11 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
   const homeDataLoaded = Boolean(data.siteStats)
   const checkinDisplay = getHomeCheckInDisplay({ loaded: homeDataLoaded, checkedInToday: data.checkedInToday, todayCheckInCount: data.todayCheckInCount })
   const checkinStateClass = checkinDisplay.status === 'loading' ? 'is-loading' : checkinDisplay.status === 'checked-in' ? 'is-checked' : 'is-not-checked'
-  const todayEvent = data.todayEvents[todayEventIndex] || null
-  const desktopTodayEvents = useMemo(() => {
-    if (todayPageCount <= 1) return []
-    return data.todayEvents.slice(todayPageIndex * 2, todayPageIndex * 2 + 2)
-  }, [data.todayEvents, todayPageCount, todayPageIndex])
+  const safeTodayEventIndex = normalizeHomeTodayIndex(todayEventIndex, data.todayEvents.length)
+  const todayEvent = data.todayEvents[safeTodayEventIndex] || null
+  const desktopTodayPage = useMemo(() => getHomeTodayPageItems(data.todayEvents, todayPageIndex), [data.todayEvents, todayPageIndex])
+  const desktopTodayEvents = desktopTodayPage.items
+  const safeTodayPageIndex = desktopTodayPage.pageIndex
 
   const handleTodayTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) return
@@ -387,53 +394,38 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
   // 今日模块：≤2 条直接展开为普通列表；桌面端 >2 条显示双卡轮播，移动端保留单卡轮播。
   const renderTodayPanel = () => {
     const events = data.todayEvents
+    const renderTodayEventCard = (event: TodayEvent, onAnimationEnd?: () => void) => (
+      <Link key={event.id} href={event.href || '/today'} onAnimationEnd={onAnimationEnd} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
+        <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(event.year, event.month, event.day)}</time>
+          <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(event.date)} {homeText.years}</b>
+        </div>
+        <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{event.title}</strong>
+        <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[event.type] || event.type} · {excerpt(event.content, 46)}</small>
+      </Link>
+    )
     return (
       <section className="community-panel concert-panel home-first-row-panel home-today-panel" aria-label="Today in history">
         <header><h2>{homeText.today}</h2><Link href="/today" className="home-module-entry">{homeText.todayMore} {'>>'}</Link></header>
-        <div className="home-today-content">
-        {events.length === 0 ? <p className="community-empty">{homeText.noToday}</p> : null}
-        {events.length > 0 && events.length <= 2 ? (
-          <div className="home-today-list">
-            {events.map((event) => (
-              <Link key={event.id} href={event.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
-                <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(event.year, event.month, event.day)}</time>
-                  <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(event.date)} {homeText.years}</b>
-                </div>
-                <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{event.title}</strong>
-                <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[event.type] || event.type} · {excerpt(event.content, 46)}</small>
-              </Link>
-            ))}
+        <div className="home-today-content" aria-busy={!todayEventsLoaded}>
+          <div className="home-today-content-viewport">
+            {events.length === 0 ? (todayEventsLoaded ? <p className="community-empty home-today-empty">{homeText.noToday}</p> : null) : events.length <= 2 ? (
+              <div className="home-today-list">{events.map((event) => renderTodayEventCard(event))}</div>
+            ) : device === 'desktop' ? (
+              <div className="home-today-desktop-carousel">{desktopTodayEvents.map((event) => renderTodayEventCard(event))}</div>
+            ) : (
+              <div className="home-today-mobile-carousel" data-swipe-direction={todaySwipeDirection || undefined} onTouchStart={handleTodayTouchStart} onTouchMove={handleTodayTouchMove} onTouchEnd={handleTodayTouchEnd} onTouchCancel={handleTodayTouchEnd}>
+                {todayEvent ? renderTodayEventCard({ ...todayEvent, href: todayEvent.href || '/today' }, () => setTodaySwipeDirection(null)) : null}
+              </div>
+            )}
           </div>
-        ) : events.length > 2 ? (
-          <div>
+          {events.length > 2 ? <div className="home-today-pagination-footer">
             {device === 'desktop' ? (
-              <div className="home-today-desktop-carousel">
-                {desktopTodayEvents.map((event) => (
-                  <Link key={event.id} href={event.href || '/today'} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
-                    <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(event.year, event.month, event.day)}</time>
-                      <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(event.date)} {homeText.years}</b>
-                    </div>
-                    <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{event.title}</strong>
-                    <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[event.type] || event.type} · {excerpt(event.content, 46)}</small>
-                  </Link>
-                ))}
-              </div>
-            ) : <div className="home-today-mobile-carousel" data-swipe-direction={todaySwipeDirection || undefined} onTouchStart={handleTodayTouchStart} onTouchMove={handleTodayTouchMove} onTouchEnd={handleTodayTouchEnd} onTouchCancel={handleTodayTouchEnd}>
-              {todayEvent ? <Link key={todayEvent.id} href={todayEvent.href || '/today'} onAnimationEnd={() => setTodaySwipeDirection(null)} className="home-today-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-subtle)', color: 'var(--foreground)', textDecoration: 'none' }}>
-              <div className="home-today-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <time className="text-[11px] font-bold whitespace-nowrap text-sky-700" style={{ display: 'block', whiteSpace: 'nowrap' }}>{formatTodayDate(todayEvent.year, todayEvent.month, todayEvent.day)}</time>
-                <b className="text-[11px] font-bold whitespace-nowrap text-slate-500" style={{ display: 'block', whiteSpace: 'nowrap' }}>{homeText.distance} {yearsFromToday(todayEvent.date)} {homeText.years}</b>
-              </div>
-              <strong className="home-today-title block text-sm font-bold leading-snug break-words" style={{ display: 'block', minWidth: 0, overflowWrap: 'anywhere' }}>{todayEvent.title}</strong>
-              <small className="home-today-desc block truncate text-[11px] text-slate-500" style={{ display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{todayTypeLabels[todayEvent.type] || todayEvent.type} · {excerpt(todayEvent.content, 46)}</small>
-              </Link> : null}
-            </div>}
-            <div className="home-today-desktop-carousel-controls" aria-label="今日事件分页控制"><button type="button" onClick={() => setTodayPageIndex((current) => (current - 1 + todayPageCount) % todayPageCount)} aria-label="上一页">←</button>{Array.from({ length: todayPageCount }, (_, pageIndex) => <button key={pageIndex} type="button" className={pageIndex === todayPageIndex ? 'is-active' : ''} onClick={() => setTodayPageIndex(pageIndex)} aria-label={'查看第 ' + (pageIndex + 1) + ' 页'}>●</button>)}<button type="button" onClick={() => setTodayPageIndex((current) => (current + 1) % todayPageCount)} aria-label="下一页">→</button></div>
-            <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => (current - 1 + events.length) % events.length)} aria-label="上一条">←</button>{events.map((event, index) => <button key={event.id} type="button" className={index === todayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => (current + 1) % events.length)} aria-label="下一条">→</button></div>
-          </div>
-        ) : null}
+              <div className="home-today-desktop-carousel-controls" aria-label="今日事件分页控制"><button type="button" onClick={() => setTodayPageIndex((current) => normalizeHomeTodayIndex(current - 1, events.length, HOME_TODAY_PAGE_SIZE))} aria-label="上一页">←</button>{Array.from({ length: todayPageCount }, (_, pageIndex) => <button key={pageIndex} type="button" className={pageIndex === safeTodayPageIndex ? 'is-active' : ''} onClick={() => setTodayPageIndex(pageIndex)} aria-label={'查看第 ' + (pageIndex + 1) + ' 页'}>●</button>)}<button type="button" onClick={() => setTodayPageIndex((current) => normalizeHomeTodayIndex(current + 1, events.length, HOME_TODAY_PAGE_SIZE))} aria-label="下一页">→</button></div>
+            ) : (
+              <div className="home-today-carousel-controls" aria-label="今日事件轮播控制"><button type="button" onClick={() => setTodayEventIndex((current) => normalizeHomeTodayIndex(current - 1, events.length))} aria-label="上一条">←</button>{events.map((event, index) => <button key={event.id} type="button" className={index === safeTodayEventIndex ? 'is-active' : ''} onClick={() => setTodayEventIndex(index)} aria-label={`查看第 ${index + 1} 条`}>●</button>)}<button type="button" onClick={() => setTodayEventIndex((current) => normalizeHomeTodayIndex(current + 1, events.length))} aria-label="下一条">→</button></div>
+            )}
+          </div> : null}
         </div>
       </section>
     )

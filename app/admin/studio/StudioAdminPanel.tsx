@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { calculateMaterialList } from '@/lib/studio/beads/grid'
 import { renderPatternToCanvas } from '@/lib/studio/beads/renderer'
 import type { BeadPatternGrid } from '@/lib/studio/beads/types'
@@ -15,11 +16,20 @@ type ProjectRow = {
   reviewStatus: string
   visibility: string
   thumbnailUrl: string | null
+  artistId: string | null
   createdAt: string
   updatedAt: string
   pattern: BeadPatternGrid | null
   metadata: { width: number | null; height: number | null; totalBeads: number; colorCount: number }
   User: { uid: number; nickname: string }
+}
+
+type ArtistRow = {
+  id: string
+  slug: string
+  name: string
+  avatar: string | null
+  description: string | null
 }
 
 function formatDateTime(value: string) {
@@ -69,9 +79,13 @@ function DetailField({ label, value }: Readonly<{ label: string; value: string }
   return <div className="border border-slate-100 bg-slate-50/70 p-3"><dt className="text-[10px] font-black tracking-[0.12em] text-slate-400">{label}</dt><dd className="mt-1 break-words text-sm font-black text-brand-950">{value}</dd></div>
 }
 
-export function StudioAdminPanel({ initialProjects, initialProjectId }: Readonly<{ initialProjects: ProjectRow[]; initialProjectId?: string | null }>) {
-  const [projects] = useState(initialProjects)
+export function StudioAdminPanel({ initialProjects, initialProjectId, initialArtists }: Readonly<{ initialProjects: ProjectRow[]; initialProjectId?: string | null; initialArtists: ArtistRow[] }>) {
+  const [projects, setProjects] = useState(initialProjects)
+  const [artists, setArtists] = useState(initialArtists)
   const [selectedProject, setSelectedProject] = useState<ProjectRow | null>(null)
+  const [artistForm, setArtistForm] = useState({ slug: '', name: '', avatar: '', description: '' })
+  const [artistBusy, setArtistBusy] = useState('')
+  const [artistMessage, setArtistMessage] = useState('')
 
   useEffect(() => {
     if (!initialProjectId) return
@@ -93,7 +107,87 @@ export function StudioAdminPanel({ initialProjects, initialProjectId }: Readonly
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [selectedProject])
 
+  async function createArtist(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (artistBusy) return
+    setArtistBusy('create')
+    setArtistMessage('')
+    try {
+      const response = await fetch('/api/admin/studio/artists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(artistForm) })
+      const body = await response.json().catch(() => null) as { message?: string; artist?: ArtistRow } | null
+      if (!response.ok || !body?.artist) throw new Error(body?.message || '艺术家创建失败')
+      setArtists((current) => [...current, body.artist!].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN')))
+      setArtistForm({ slug: '', name: '', avatar: '', description: '' })
+      setArtistMessage('艺术家已创建。')
+    } catch (error) {
+      setArtistMessage(error instanceof Error ? error.message : '艺术家创建失败')
+    } finally {
+      setArtistBusy('')
+    }
+  }
+
+  function updateArtistField(id: string, field: keyof Pick<ArtistRow, 'slug' | 'name' | 'avatar' | 'description'>, value: string) {
+    setArtists((current) => current.map((artist) => artist.id === id ? { ...artist, [field]: value } : artist))
+  }
+
+  async function saveArtist(artist: ArtistRow) {
+    if (artistBusy) return
+    setArtistBusy(artist.id)
+    setArtistMessage('')
+    try {
+      const response = await fetch(`/api/admin/studio/artists/${encodeURIComponent(artist.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(artist) })
+      const body = await response.json().catch(() => null) as { message?: string; artist?: ArtistRow } | null
+      if (!response.ok || !body?.artist) throw new Error(body?.message || '艺术家保存失败')
+      setArtists((current) => current.map((item) => item.id === artist.id ? body.artist! : item))
+      setArtistMessage('艺术家信息已保存。')
+    } catch (error) {
+      setArtistMessage(error instanceof Error ? error.message : '艺术家保存失败')
+    } finally {
+      setArtistBusy('')
+    }
+  }
+
+  async function bindArtist(project: ProjectRow, artistId: string) {
+    if (artistBusy) return
+    setArtistBusy(`project:${project.id}`)
+    setArtistMessage('')
+    try {
+      const response = await fetch(`/api/admin/studio/projects/${encodeURIComponent(project.id)}/artist`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artistId: artistId || null }) })
+      const body = await response.json().catch(() => null) as { message?: string; project?: { id: string; artistId: string | null } } | null
+      if (!response.ok || !body?.project) throw new Error(body?.message || '作品绑定失败')
+      setProjects((current) => current.map((item) => item.id === project.id ? { ...item, artistId: body.project!.artistId } : item))
+      setSelectedProject((current) => current?.id === project.id ? { ...current, artistId: body.project!.artistId } : current)
+      setArtistMessage('作品艺术家已更新。')
+    } catch (error) {
+      setArtistMessage(error instanceof Error ? error.message : '作品绑定失败')
+    } finally {
+      setArtistBusy('')
+    }
+  }
+
   return <section className="space-y-4">
+    <section className="border border-sky-100 bg-white/90 p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-black text-brand-950">艺术家管理</h2><p className="mt-1 text-xs font-bold text-slate-500">艺术家与用户主页分开维护；这里可以新增、编辑艺术家资料，并在作品审核列表中绑定作品。</p></div>{artistMessage ? <p className="text-xs font-black text-brand-700" role="status">{artistMessage}</p> : null}</div>
+      <form onSubmit={(event) => void createArtist(event)} className="mt-4 grid gap-2 border border-sky-100 bg-sky-50/35 p-3 sm:grid-cols-2 lg:grid-cols-5">
+        <input value={artistForm.slug} onChange={(event) => setArtistForm((current) => ({ ...current, slug: event.target.value }))} placeholder="slug，如 beethoven" className="min-h-10 border border-sky-100 bg-white px-3 text-xs font-bold outline-none focus:border-sky-400" aria-label="艺术家 slug" />
+        <input value={artistForm.name} onChange={(event) => setArtistForm((current) => ({ ...current, name: event.target.value }))} placeholder="艺术家名称" className="min-h-10 border border-sky-100 bg-white px-3 text-xs font-bold outline-none focus:border-sky-400" aria-label="艺术家名称" />
+        <input value={artistForm.avatar} onChange={(event) => setArtistForm((current) => ({ ...current, avatar: event.target.value }))} placeholder="头像地址（可选）" className="min-h-10 border border-sky-100 bg-white px-3 text-xs font-bold outline-none focus:border-sky-400" aria-label="艺术家头像地址" />
+        <input value={artistForm.description} onChange={(event) => setArtistForm((current) => ({ ...current, description: event.target.value }))} placeholder="简介（可选）" className="min-h-10 border border-sky-100 bg-white px-3 text-xs font-bold outline-none focus:border-sky-400" aria-label="艺术家简介" />
+        <button type="submit" disabled={Boolean(artistBusy)} className="min-h-10 bg-brand-950 px-3 text-xs font-black text-white disabled:opacity-50">{artistBusy === 'create' ? '创建中…' : '新增艺术家'}</button>
+      </form>
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        {artists.map((artist) => <article key={artist.id} className="grid gap-2 border border-sky-100 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input value={artist.slug} onChange={(event) => updateArtistField(artist.id, 'slug', event.target.value)} className="min-h-9 border border-sky-100 px-2 text-xs font-bold outline-none focus:border-sky-400" aria-label={`${artist.name} slug`} />
+            <input value={artist.name} onChange={(event) => updateArtistField(artist.id, 'name', event.target.value)} className="min-h-9 border border-sky-100 px-2 text-xs font-bold outline-none focus:border-sky-400" aria-label={`${artist.name}名称`} />
+            <input value={artist.avatar || ''} onChange={(event) => updateArtistField(artist.id, 'avatar', event.target.value)} placeholder="头像地址" className="min-h-9 border border-sky-100 px-2 text-xs font-bold outline-none focus:border-sky-400" aria-label={`${artist.name}头像地址`} />
+            <input value={artist.description || ''} onChange={(event) => updateArtistField(artist.id, 'description', event.target.value)} placeholder="艺术家简介" className="min-h-9 border border-sky-100 px-2 text-xs font-bold outline-none focus:border-sky-400" aria-label={`${artist.name}简介`} />
+          </div>
+          <button type="button" onClick={() => void saveArtist(artist)} disabled={Boolean(artistBusy)} className="min-h-9 border border-sky-200 px-3 text-xs font-black text-brand-700 disabled:opacity-50">{artistBusy === artist.id ? '保存中…' : '保存'}</button>
+        </article>)}
+        {!artists.length ? <p className="border border-dashed border-sky-200 p-4 text-xs font-bold text-slate-500">暂无艺术家，请先新增。</p> : null}
+      </div>
+    </section>
     <div className="overflow-hidden border border-sky-100 bg-white/90">
       <div className="border-b border-sky-100 px-4 py-3"><h2 className="text-lg font-black text-brand-950">待审核公开作品预览</h2><p className="mt-1 text-xs font-bold text-slate-500">只有通过审核的作品才会进入公开访问流程；审核动作已统一到审核中心，点击缩略图或详情可查看完整图纸。</p></div>
       <div className="divide-y divide-sky-100">
@@ -105,6 +199,7 @@ export function StudioAdminPanel({ initialProjects, initialProjectId }: Readonly
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2"><strong className="break-words text-base font-black text-brand-950">{project.title}</strong><span className="border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-black text-amber-800">待审核</span></div>
             <p className="mt-2 text-xs font-bold text-slate-500">作者：{project.User.nickname}（UID {project.User.uid}）</p>
+            <label className="mt-3 flex max-w-sm items-center gap-2 text-xs font-black text-slate-500">艺术家<select value={project.artistId || ''} onChange={(event) => void bindArtist(project, event.target.value)} disabled={Boolean(artistBusy)} className="min-h-9 min-w-0 flex-1 border border-sky-100 bg-white px-2 text-xs font-bold text-brand-950 outline-none focus:border-sky-400"><option value="">未绑定</option>{artists.map((artist) => <option key={artist.id} value={artist.id}>{artist.name} · {artist.slug}</option>)}</select></label>
             <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
               <DetailField label="尺寸" value={formatDimensions(project.metadata.width, project.metadata.height)} />
               <DetailField label="色板" value={getStudioReviewPaletteLabel(project.pattern)} />

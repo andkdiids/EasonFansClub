@@ -176,41 +176,58 @@ model ActivityNotificationBatch {
 }
 
 model GlobalPointsGrantBatch {
-  id             String                       @id @default(cuid())
-  idempotencyKey String                       @unique @db.VarChar(191)
-  title          String                       @db.VarChar(191)
-  content        String                       @db.Text
-  imageUrl       String?                      @db.Text
-  amount         Int
-  recipientCount Int
-  totalAmount    Int
-  successCount   Int                          @default(0)
-  failedCount    Int                          @default(0)
-  status         String                       @default("PENDING") @db.VarChar(20)
-  createdById    String
-  createdAt      DateTime                     @default(now())
-  completedAt    DateTime?
-  CreatedBy      User                         @relation("GlobalPointsGrantBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  Recipients     GlobalPointsGrantRecipient[]
+  id                       String                       @id @default(cuid())
+  idempotencyKey           String                       @unique @db.VarChar(191)
+  title                    String                       @db.VarChar(191)
+  content                  String                       @db.Text
+  imageUrl                 String?                      @db.Text
+  amount                   Int
+  recipientCount           Int
+  totalAmount              Int
+  successCount             Int                          @default(0)
+  failedCount              Int                          @default(0)
+  processedCount           Int                          @default(0)
+  pendingCount             Int                          @default(0)
+  processingCount          Int                          @default(0)
+  notificationSuccessCount Int                          @default(0)
+  notificationFailedCount  Int                          @default(0)
+  status                   String                       @default("PENDING") @db.VarChar(20)
+  createdById              String
+  createdAt                DateTime                     @default(now())
+  completedAt              DateTime?
+  updatedAt                DateTime                     @updatedAt
+  CreatedBy                User                         @relation("GlobalPointsGrantBatchCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  Recipients               GlobalPointsGrantRecipient[]
 
   @@index([createdById, createdAt])
   @@index([status, createdAt])
 }
 
 model GlobalPointsGrantRecipient {
-  id            String                 @id @default(cuid())
-  batchId       String
-  userId        String
-  amount        Int
-  status        String                 @default("PENDING") @db.VarChar(20)
-  failureReason String?                @db.Text
-  processedAt   DateTime?
-  createdAt     DateTime               @default(now())
-  Batch         GlobalPointsGrantBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  User          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                        String                 @id @default(cuid())
+  batchId                   String
+  userId                    String
+  amount                    Int
+  status                    String                 @default("PENDING") @db.VarChar(20)
+  pointsStatus              String                 @default("PENDING") @db.VarChar(20)
+  notificationStatus        String                 @default("PENDING") @db.VarChar(20)
+  failureReason             String?                @db.Text
+  notificationFailureReason String?                @db.Text
+  processedAt               DateTime?
+  pointsProcessedAt         DateTime?
+  notificationProcessedAt   DateTime?
+  processingToken           String?                @db.VarChar(64)
+  processingPhase           String?                @db.VarChar(20)
+  processingStartedAt       DateTime?
+  createdAt                 DateTime               @default(now())
+  Batch                     GlobalPointsGrantBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  User                      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, userId])
   @@index([batchId, status, id])
+  @@index([batchId, pointsStatus, id])
+  @@index([batchId, notificationStatus, id])
+  @@index([processingPhase, processingStartedAt], map: "GlobalPointsGrantRecipient_processing_claim_idx")
   @@index([userId, createdAt])
 }
 
@@ -3987,9 +4004,23 @@ enum StudioProjectReviewStatus {
   REJECTED
 }
 
+model Artist {
+  id            String          @id @default(cuid())
+  slug          String          @unique @db.VarChar(120)
+  name          String          @db.VarChar(160)
+  avatar        String?         @db.Text
+  description   String?         @db.Text
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  StudioProject StudioProject[]
+
+  @@index([name])
+}
+
 model StudioProject {
   id                    String                    @id @default(cuid())
   userId                String
+  artistId              String?
   toolSlug              String                    @db.VarChar(64)
   title                 String                    @db.VarChar(160)
   description           String?                   @db.Text
@@ -4006,10 +4037,12 @@ model StudioProject {
   updatedAt             DateTime                  @updatedAt
   lastOpenedAt          DateTime?
   User                  User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Artist                Artist?                   @relation(fields: [artistId], references: [id], onDelete: SetNull)
   StudioProjectLike     StudioProjectLike[]
   StudioProjectFavorite StudioProjectFavorite[]
 
   @@index([userId, updatedAt])
+  @@index([artistId, updatedAt])
   @@index([toolSlug, visibility, reviewStatus, updatedAt])
   @@index([visibility, reviewStatus, likeCount, updatedAt])
 }
@@ -4614,6 +4647,7 @@ model UserBadge {
   expiresAt       DateTime?
   expiredAt       DateTime?
   revokedAt       DateTime?
+  revokeReason    String?           @db.VarChar(64)
   status          UserBadgeStatus   @default(ACTIVE)
   activeKey       String?           @unique @db.VarChar(191)
   grantKey        String?           @unique @db.VarChar(191)
@@ -4643,26 +4677,27 @@ model UserBadge {
  * one source must not erase the other valid sources.
  */
 model UserBadgeSource {
-  id          String    @id @default(cuid())
-  sourceKey   String    @unique @db.VarChar(191)
-  sourceType  String    @db.VarChar(32)
-  sourceId    String?   @db.VarChar(191)
-  isActive    Boolean   @default(true)
-  grantedAt   DateTime  @default(now())
-  expiresAt   DateTime?
-  expiredAt   DateTime?
-  revokedAt   DateTime?
-  grantReason String?   @db.VarChar(500)
-  grantedBy   String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  userId      String
-  badgeId     String
-  userBadgeId String
-  UserBadge   UserBadge @relation(fields: [userBadgeId], references: [id], onDelete: Cascade)
-  User        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  Badge       Badge     @relation(fields: [badgeId], references: [id], onDelete: Cascade)
-  GrantedBy   User?     @relation("UserBadgeSourceGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
+  id           String    @id @default(cuid())
+  sourceKey    String    @unique @db.VarChar(191)
+  sourceType   String    @db.VarChar(32)
+  sourceId     String?   @db.VarChar(191)
+  isActive     Boolean   @default(true)
+  grantedAt    DateTime  @default(now())
+  expiresAt    DateTime?
+  expiredAt    DateTime?
+  revokedAt    DateTime?
+  revokeReason String?   @db.VarChar(64)
+  grantReason  String?   @db.VarChar(500)
+  grantedBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  userId       String
+  badgeId      String
+  userBadgeId  String
+  UserBadge    UserBadge @relation(fields: [userBadgeId], references: [id], onDelete: Cascade)
+  User         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Badge        Badge     @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  GrantedBy    User?     @relation("UserBadgeSourceGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
 
   @@index([userId, badgeId, isActive])
   @@index([badgeId, sourceType, sourceId, isActive])

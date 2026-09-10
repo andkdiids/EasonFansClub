@@ -803,6 +803,7 @@ export async function executeBadgeRuleRevocations(
           sourceType: source.sourceType,
           sourceId: source.sourceId || '',
           reason: `ADMIN_REVOKE_PREVIEW_EXECUTION：${decision.reason}`,
+          revokeReason: 'ADMIN_REVOKED',
         })
         if (result.revoked) revoked = true
       } catch (error) {
@@ -915,6 +916,7 @@ export async function evaluateBadgeRetentionForUser(
           sourceType: source.sourceType,
           sourceId: source.sourceId || '',
           reason,
+          revokeReason: 'SYSTEM_REVOKED',
         })
         if (result.revoked) summary.revoked += 1
       }

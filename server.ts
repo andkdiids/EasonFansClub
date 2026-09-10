@@ -7,6 +7,7 @@ import { authCookieName, getCurrentUserFromSessionToken } from './lib/auth'
 import { getClientIpFromHeaders } from './lib/client-ip'
 import { hasValidRequestOrigin } from './lib/security'
 import { ensureRuntimeObservability } from './lib/runtime-observability'
+import { startGlobalPointsGrantWorker } from './lib/global-points-grant-worker'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
 import { undercoverRealtimeHub } from './lib/undercover-star-realtime'
@@ -213,6 +214,9 @@ async function start() {
   const app = next({ dev, hostname, port })
   const handle = app.getRequestHandler()
   await app.prepare()
+  const stopGlobalPointsGrantWorker = process.env.NODE_ENV === 'production'
+    ? startGlobalPointsGrantWorker()
+    : null
 
   const server = createServer((request, response) => {
     void handle(request, response)
@@ -379,6 +383,7 @@ async function start() {
   const shutdown = () => {
     clearInterval(heartbeat)
     if (productionActivityAutoCheckInHeartbeat) clearInterval(productionActivityAutoCheckInHeartbeat)
+    stopGlobalPointsGrantWorker?.()
     for (const socket of realtimeSockets) socket.close(1001, 'server shutdown')
     websocketServer.close()
     server.close()

@@ -138,6 +138,39 @@ test('任意娱乐模式只有正式结算才写入 DAILY_GAME，1v1 进入之�
   assert.equal(read('lib/growth-tasks/service.ts').match(/taskCode:\s*'DAILY_GAME'/g)?.length, 1)
 })
 
+test('想听三种模式的正式结束与 Growth 事件不受排行榜反作弊分支阻断', () => {
+  const wantListen = read('lib/want-listen.ts')
+  const config = read('lib/want-listen-config.ts')
+  for (const mode of ['WANT_LISTEN', 'CANTONESE_FRAGMENT', 'FALSE_TITLE']) {
+    assert.match(config, new RegExp(`'${mode}'`))
+  }
+
+  const answerStart = wantListen.indexOf('export async function answerWantListenQuestion')
+  const answerEnd = wantListen.indexOf('export async function nextWantListenQuestion')
+  assert.ok(answerStart >= 0 && answerEnd > answerStart)
+  const answer = wantListen.slice(answerStart, answerEnd)
+  const answerGrowth = answer.indexOf('await recordEntertainmentGameCompletion')
+  const answerLeaderboardGate = answer.indexOf('if (isFinal && !assessment.suspicious')
+  assert.match(answer, /if \(isFinal\) \{\s+await recordEntertainmentGameCompletion/)
+  assert.match(answer, /gameCode: `WANT_LISTEN_\$\{session\.mode\}`/)
+  assert.ok(answerGrowth >= 0 && answerLeaderboardGate > answerGrowth)
+
+  const finishStart = wantListen.indexOf('export async function finishWantListenSession')
+  const finishEnd = wantListen.indexOf('type StatsRow')
+  assert.ok(finishStart >= 0 && finishEnd > finishStart)
+  const finish = wantListen.slice(finishStart, finishEnd)
+  const finishGrowth = finish.indexOf('await recordEntertainmentGameCompletion')
+  const finishLeaderboardGate = finish.indexOf('if (!assessment.suspicious')
+  assert.match(finish, /if \(updated\.totalQuestions > 0\) \{\s+await recordEntertainmentGameCompletion/)
+  assert.match(finish, /gameCode: `WANT_LISTEN_\$\{active\.mode\}`/)
+  assert.ok(finishGrowth >= 0 && finishLeaderboardGate > finishGrowth)
+
+  const createStart = wantListen.indexOf('export async function createWantListenSession')
+  assert.doesNotMatch(wantListen.slice(createStart, answerStart), /recordEntertainmentGameCompletion/)
+  const abandonStart = wantListen.indexOf('export async function abandonWantListenSession')
+  assert.doesNotMatch(wantListen.slice(abandonStart, finishStart), /recordEntertainmentGameCompletion/)
+})
+
 test('发布帖子只认统一公开资格，普通待审不会奖励，免审公开无需伪造审核', () => {
   const helper = read('lib/post-moderation.ts')
   const service = read('lib/growth-tasks/service.ts')

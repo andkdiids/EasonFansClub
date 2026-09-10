@@ -47,7 +47,7 @@ export async function expireUserBadges(now = new Date(), batchSize = 500): Promi
         const { userId, badgeId } = row
         const expiredSources = await tx.userBadgeSource.updateMany({
           where: { userId, badgeId, isActive: true, expiresAt: { not: null, lte: now } },
-          data: { isActive: false, expiredAt: now },
+          data: { isActive: false, expiredAt: now, revokeReason: 'NORMAL_EXPIRED' },
         })
         const record = await tx.userBadge.findFirst({
           where: { userId, badgeId, status: 'ACTIVE' },
@@ -65,7 +65,7 @@ export async function expireUserBadges(now = new Date(), batchSize = 500): Promi
             ? null
             : survivingSources.reduce<Date | null>((latest, source) => !latest || (source.expiresAt && source.expiresAt > latest) ? source.expiresAt : latest, null)
           if ((record.expiresAt?.getTime() || null) !== (expiresAt?.getTime() || null)) {
-            await tx.userBadge.update({ where: { id: record.id }, data: { expiresAt, expiredAt: null, revokedAt: null, activeKey: activeBadgeKey(userId, badgeId) } })
+            await tx.userBadge.update({ where: { id: record.id }, data: { expiresAt, expiredAt: null, revokedAt: null, revokeReason: null, activeKey: activeBadgeKey(userId, badgeId) } })
           }
           continue
         }
@@ -73,7 +73,7 @@ export async function expireUserBadges(now = new Date(), batchSize = 500): Promi
         if (!expiredSources.count && (!record.expiresAt || record.expiresAt > now)) continue
         const updated = await tx.userBadge.updateMany({
           where: { id: record.id, status: 'ACTIVE' },
-          data: { status: 'EXPIRED', expiredAt: now, activeKey: null },
+          data: { status: 'EXPIRED', expiredAt: now, revokeReason: 'NORMAL_EXPIRED', activeKey: null },
         })
         if (!updated.count) continue
         expired += updated.count

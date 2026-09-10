@@ -6,6 +6,8 @@ export const GLOBAL_POINTS_GRANT_IDEMPOTENCY_KEY_MAX_LENGTH = 191
 export const GLOBAL_POINTS_GRANT_MAX_AMOUNT = 100_000
 export const GLOBAL_POINTS_GRANT_BATCH_SIZE = 200
 export const GLOBAL_POINTS_GRANT_CONCURRENCY = 12
+export const GLOBAL_POINTS_GRANT_WORKER_INTERVAL_MS = 5_000
+export const GLOBAL_POINTS_GRANT_CLAIM_TIMEOUT_MS = 5 * 60_000
 export const GLOBAL_POINTS_GRANT_MAX_TOTAL_AMOUNT = 2_147_483_647
 export const GLOBAL_POINTS_GRANT_STRONG_CONFIRM_AMOUNT = 500
 export const GLOBAL_POINTS_GRANT_STRONG_CONFIRM_TOTAL = 5_000_000
@@ -22,6 +24,7 @@ export const globalPointsGrantStatuses = [
 
 export type GlobalPointsGrantStatus = (typeof globalPointsGrantStatuses)[number]
 export type GlobalPointsGrantRecipientStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED'
+export type GlobalPointsGrantNotificationStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED'
 
 export function requiresGlobalPointsGrantStrongConfirmation(amount: number, totalAmount: number) {
   return amount >= GLOBAL_POINTS_GRANT_STRONG_CONFIRM_AMOUNT || totalAmount >= GLOBAL_POINTS_GRANT_STRONG_CONFIRM_TOTAL

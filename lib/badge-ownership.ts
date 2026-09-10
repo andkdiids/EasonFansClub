@@ -206,7 +206,7 @@ export async function recheckBadgeOwnershipDependents(
         const retentionPolicy = resolveBadgeRetentionPolicy({ ruleType: 'BADGE_OWNERSHIP', retentionPolicy: rule.retentionPolicy as BadgeRetentionPolicyValue | null })
         if (retentionPolicy !== 'RETAIN_WHILE_ELIGIBLE') continue
         const { revokeBadgeAcquisitionSource } = await import('@/lib/badge-service')
-        const result = await revokeBadgeAcquisitionSource({ userId, badgeId: rule.badgeId, sourceType: BADGE_OWNERSHIP_SOURCE_TYPE, sourceId: rule.id, reason: '前置勋章条件已失效', deferOwnershipRecheck: true, ownershipVisitedBadgeIds: visited })
+        const result = await revokeBadgeAcquisitionSource({ userId, badgeId: rule.badgeId, sourceType: BADGE_OWNERSHIP_SOURCE_TYPE, sourceId: rule.id, reason: '前置勋章条件已失效', revokeReason: 'SYSTEM_REVOKED', deferOwnershipRecheck: true, ownershipVisitedBadgeIds: visited })
         if (result.revoked) {
           summary.revoked += 1
           const chained = await recheckBadgeOwnershipDependents(userId, rule.badgeId, { visitedBadgeIds: visited, now })

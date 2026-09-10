@@ -35,10 +35,20 @@ export type StudioProjectSummary = {
   }
 }
 
+export type StudioArtistSummary = {
+  id: string
+  slug: string
+  name: string
+  avatar: string | null
+  description: string | null
+}
+
 export type StudioGallerySort = 'latest' | 'hot'
 
 export type StudioGalleryProject = StudioProjectSummary & {
   author: string
+  artist: StudioArtistSummary | null
+  participantCount?: number
 }
 
 export type StudioLocalProject = StudioProjectSummary & {

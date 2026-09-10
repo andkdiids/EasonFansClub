@@ -69,7 +69,13 @@ export async function POST(request: Request) {
       const batchId = typeof input.batchId === 'string' ? input.batchId.trim() : ''
       if (!batchId) return jsonError('发放批次不存在', 404, 'BATCH_NOT_FOUND')
       const batch = await processGlobalPointsGrantBatch(batchId, guard.user.id, { retryFailed: true })
-      return NextResponse.json({ ok: true, batch, message: `失败用户重试完成：成功 ${batch.successCount} 人，失败 ${batch.failedCount} 人` }, { headers: privateHeaders })
+      return NextResponse.json({ ok: true, batch, message: '失败项目已加入后台重试队列，页面可以关闭' }, { status: 202, headers: privateHeaders })
+    }
+    if (action === 'continue') {
+      const batchId = typeof input.batchId === 'string' ? input.batchId.trim() : ''
+      if (!batchId) return jsonError('发放批次不存在', 404, 'BATCH_NOT_FOUND')
+      const batch = await processGlobalPointsGrantBatch(batchId, guard.user.id)
+      return NextResponse.json({ ok: true, batch, message: '批次已加入后台处理队列，页面可以关闭' }, { status: 202, headers: privateHeaders })
     }
 
     const result = await createGlobalPointsGrant({
@@ -86,8 +92,10 @@ export async function POST(request: Request) {
       ok: true,
       duplicate: result.duplicate,
       batch: result.batch,
-      message: result.duplicate ? '该发放批次已处理，未重复到账' : `发放完成：成功 ${result.batch.successCount} 人，失败 ${result.batch.failedCount} 人`,
-    }, { status: result.duplicate ? 200 : 201, headers: privateHeaders })
+      message: result.duplicate
+        ? '该发放批次已存在，未重复到账'
+        : `全站挂号费发放已开始，批次 ${result.batch.id} 已加入后台处理队列，页面可以关闭`,
+    }, { status: result.duplicate ? 200 : 202, headers: privateHeaders })
   } catch (error) {
     if (error instanceof GlobalPointsGrantError) return jsonError(error.message, error.status, error.code)
     console.error('[admin.global-points-grant.send]', { operatorId: guard.user.id, errorName: error instanceof Error ? error.name : 'UnknownError' })

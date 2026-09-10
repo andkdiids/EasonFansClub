@@ -195,6 +195,10 @@
 .galleryTool { flex: none; color: var(--studio-blue); font-size: 9px; font-weight: 900; }
 .galleryMeta { margin-top: 8px; color: var(--studio-muted); font-size: 10px; font-weight: 750; }
 .galleryFacts { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 15px; color: var(--studio-muted); font-size: 9px; font-weight: 800; }
+.galleryArtistLink { display: flex; min-width: 0; align-items: center; gap: 8px; margin: 0 16px 12px; color: var(--studio-muted); font-size: 9px; font-weight: 900; text-decoration: none; }
+.galleryArtistLink:hover { color: var(--studio-blue); }
+.galleryArtistAvatar { display: grid; width: 24px; height: 24px; flex: none; place-items: center; overflow: hidden; color: var(--studio-blue); background: var(--studio-blue-soft); font-size: 10px; font-weight: 950; }
+.galleryArtistAvatar img { width: 100%; height: 100%; object-fit: cover; }
 .galleryActions { display: flex; align-items: center; gap: 6px; margin: 0; border-top: 1px solid var(--studio-line); padding: 12px 16px 16px; }
 .galleryInteraction { min-height: 31px; border: 1px solid var(--studio-line-strong); padding: 0 8px; color: var(--studio-muted); background: transparent; font-size: 11px; font-weight: 900; }
 .galleryInteraction:hover, .galleryInteractionActive { border-color: var(--studio-blue); color: var(--studio-blue); background: var(--studio-blue-soft); }
@@ -236,6 +240,14 @@
 :global(:root[data-theme='midnight']) .publicCanvasCard { background: #0b131d; }
 .publicCanvas { display: block; width: min(100%, 760px); height: auto; image-rendering: pixelated; box-shadow: 0 14px 35px rgba(10, 24, 39, .18); }
 .publicInfoCard { align-self: start; border: 1px solid var(--studio-line-strong); background: var(--studio-card); }
+.publicArtistLink { display: flex; min-width: 0; align-items: center; gap: 10px; border-bottom: 1px solid var(--studio-line); padding: 13px 17px; color: inherit; text-decoration: none; }
+.publicArtistLink:hover { background: var(--studio-blue-soft); }
+.publicArtistAvatar { display: grid; width: 36px; height: 36px; flex: none; place-items: center; overflow: hidden; color: var(--studio-blue); background: var(--studio-blue-soft); font-size: 13px; font-weight: 950; }
+.publicArtistAvatar img { width: 100%; height: 100%; object-fit: cover; }
+.publicArtistLink > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
+.publicArtistLink small { color: var(--studio-muted); font-size: 9px; font-weight: 800; }
+.publicArtistLink strong { overflow: hidden; color: var(--studio-ink); font-size: 12px; font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
+.publicArtistLink b { margin-left: auto; color: var(--studio-blue); font-size: 14px; }
 .publicAuthor { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--studio-line); padding: 17px; }
 .publicAuthorMark { display: grid; width: 34px; height: 34px; place-items: center; color: var(--studio-blue); background: var(--studio-blue-soft); }
 .publicAuthorMark svg { width: 17px; height: 17px; }
@@ -260,6 +272,35 @@
 .publicMaterial { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 7px 0; color: var(--studio-muted); font-size: 9px; font-weight: 800; }
 .publicMaterial i { width: 16px; height: 16px; border: 1px solid rgba(0,0,0,.16); }
 .publicMaterial strong { color: var(--studio-ink); font-size: 10px; }
+
+.artistPage { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 54px 0 80px; }
+.artistBack { display: inline-flex; min-height: 34px; align-items: center; border: 1px solid var(--studio-line-strong); padding: 0 11px; color: var(--studio-muted); font-size: 10px; font-weight: 900; text-decoration: none; }
+.artistBack:hover { border-color: var(--studio-blue); color: var(--studio-blue); background: var(--studio-blue-soft); }
+.artistHero { display: flex; align-items: center; gap: 18px; margin-top: 24px; border-bottom: 1px solid var(--studio-line-strong); padding: 0 0 26px; }
+.artistAvatar { display: grid; width: 92px; height: 92px; flex: none; place-items: center; overflow: hidden; color: var(--studio-blue); background: var(--studio-blue-soft); font-size: 30px; font-weight: 950; }
+.artistAvatar img { width: 100%; height: 100%; object-fit: cover; }
+.artistKicker { color: var(--studio-blue); font-size: 10px; font-weight: 950; letter-spacing: .12em; }
+.artistName { margin: 7px 0 0; color: var(--studio-ink); font-size: clamp(30px, 5vw, 55px); font-weight: 950; letter-spacing: -.07em; }
+.artistDescription { max-width: 700px; margin: 9px 0 0; color: var(--studio-muted); font-size: 13px; font-weight: 750; line-height: 1.7; }
+.artistWorksHeader { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin: 26px 0 14px; }
+.artistWorksHeader h2 { margin: 0; color: var(--studio-ink); font-size: 20px; font-weight: 950; }
+.artistWorksHeader span { color: var(--studio-muted); font-size: 10px; font-weight: 800; }
+.artistWorksGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
+.artistProjectCard { display: block; min-width: 0; border: 1px solid var(--studio-line-strong); color: inherit; background: var(--studio-card); text-decoration: none; transition: border-color 170ms ease, box-shadow 170ms ease; }
+.artistProjectCard:hover { border-color: var(--studio-blue); box-shadow: 0 10px 24px rgba(10, 24, 39, .08); }
+.artistProjectThumb { display: grid; min-height: 190px; place-items: center; overflow: hidden; border-bottom: 1px solid var(--studio-line); background: #edf2f5; }
+.artistProjectThumb > img { width: 100%; height: 100%; object-fit: contain; }
+.artistProjectPattern { display: grid; width: min(132px, 56%); aspect-ratio: 1; grid-template-columns: repeat(10, 1fr); gap: 2px; }
+.artistProjectPattern i { background: #d6e0e8; }
+.artistProjectPattern i:nth-child(3n) { background: #1769df; }
+.artistProjectPattern i:nth-child(5n) { background: #f5c542; }
+.artistProjectContent { min-width: 0; padding: 15px; }
+.artistProjectContent h3 { overflow: hidden; margin: 0; color: var(--studio-ink); font-size: 15px; font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
+.artistProjectContent p { margin: 8px 0 0; color: var(--studio-muted); font-size: 10px; font-weight: 750; line-height: 1.6; }
+.artistProjectFacts { display: flex; flex-wrap: wrap; gap: 7px 12px; margin-top: 12px; color: var(--studio-muted); font-size: 9px; font-weight: 850; }
+.artistEmpty { border: 1px solid var(--studio-line-strong); padding: 28px; color: var(--studio-muted); background: var(--studio-card); text-align: center; }
+.artistEmpty p { margin: 0; font-size: 14px; font-weight: 900; }
+.artistEmpty small { display: block; margin-top: 7px; font-size: 10px; font-weight: 700; }
 
 .toolShell { min-height: 100%; color: var(--studio-ink); background: var(--studio-paper); }
 .toolHeader { display: flex; min-height: 70px; align-items: center; gap: 22px; border-bottom: 1px solid var(--studio-line-strong); padding: 0 clamp(16px, 3vw, 32px); background: var(--studio-card); }
@@ -545,7 +586,7 @@
 }
 
 @media (max-width: 767px) {
-  .navInner, .platformPage, .projectsPage, .galleryPage, .publicPage { width: calc(100% - 28px); }
+  .navInner, .platformPage, .projectsPage, .galleryPage, .publicPage, .artistPage { width: calc(100% - 28px); }
   .navInner { min-height: 60px; gap: 12px; }
   .navMark { width: 32px; height: 32px; }
   .navBrandCopy strong { font-size: 13px; }
@@ -579,6 +620,14 @@
   .galleryTabs, .galleryFilters { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 7px; }
   .galleryCount { display: block; margin-top: 7px; }
   .galleryGrid { grid-template-columns: 1fr; }
+  .artistPage { padding-top: 34px; padding-bottom: calc(54px + var(--mobile-bottom-nav-total, 0px)); }
+  .artistHero { align-items: flex-start; gap: 13px; margin-top: 18px; padding-bottom: 20px; }
+  .artistAvatar { width: 68px; height: 68px; font-size: 22px; }
+  .artistName { font-size: clamp(28px, 10vw, 42px); }
+  .artistDescription { font-size: 11px; }
+  .artistWorksHeader { align-items: center; margin-top: 20px; }
+  .artistWorksHeader h2 { font-size: 17px; }
+  .artistWorksGrid { grid-template-columns: 1fr; }
   .publicHeader { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 8px; }
   .publicHeaderTitle { grid-column: 1 / -1; grid-row: 2; }
   .publicHeaderKicker { font-size: 9px; }
@@ -648,7 +697,7 @@
 }
 
 @media (max-width: 390px) {
-  .navInner, .platformPage, .projectsPage, .galleryPage, .publicPage { width: calc(100% - 22px); }
+  .navInner, .platformPage, .projectsPage, .galleryPage, .publicPage, .artistPage { width: calc(100% - 22px); }
   .navBack { max-width: 65px; }
   .toolCard { grid-template-columns: 96px minmax(0,1fr); }
   .toolCardVisual { min-height: 190px; }

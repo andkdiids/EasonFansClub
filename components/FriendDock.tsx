@@ -1697,7 +1697,7 @@ export function FriendDock({
           '--friend-dock-viewport-height': `${viewport.height || window.innerHeight}px`,
           '--friend-dock-viewport-top': `${viewport.top}px`,
         } as React.CSSProperties}
-        aria-label={growthView ? (growthView === 'today' ? '今天只做一件事' : '新生活') : '好友与私信'}
+        aria-label="活跃症"
       >
         <header className="friend-dock-header">
           {chatFriend ? (
@@ -1708,7 +1708,7 @@ export function FriendDock({
                 <span><strong><UserDisplayName name={getFriendDisplayName({ nickname: chatFriend.nickname, friendRemark: chatFriend.friendRemark, isFriendContext: true })} uid={chatFriend.uid} badges={chatFriend.equippedBadges} badge={chatFriend.equippedBadge} compact /></strong><small>{chatFriend.isOnline ? '在线' : chatFriend.levelName}</small></span>
               </button>
             </>
-          ) : <strong className="friend-dock-title">好友与私信</strong>}
+          ) : <strong className="friend-dock-title">活跃症</strong>}
           {!chatFriend && !growthView ? <span className="friend-dock-count">{friendTotal}个病友</span> : null}
           <div className="friend-dock-header-actions">
             {chatFriend ? (
@@ -1746,7 +1746,7 @@ export function FriendDock({
                 ) : null}
               </Link>
             ) : null}
-            <button type="button" onClick={closeDock} aria-label="关闭好友窗口">×</button>
+            <button type="button" onClick={closeDock} aria-label="关闭活跃症窗口">×</button>
           </div>
         </header>
 
@@ -1922,7 +1922,7 @@ export function FriendDock({
             </div>
           ) : (
             <>
-              <nav className="friend-dock-primary-tabs" role="tablist" aria-label="好友与私信栏目">
+              <nav className="friend-dock-primary-tabs" role="tablist" aria-label="活跃症栏目">
                 <button
                   type="button"
                   role="tab"
@@ -2180,15 +2180,15 @@ export function FriendDock({
     <div className={`friend-dock ${collapsed ? 'is-collapsed' : ''}`} data-friend-dock-open={open || undefined}>
       {overlay}
       {!open && collapsed ? (
-        <button ref={toggleRef} type="button" className="friend-dock-toggle is-handle" onClick={() => setCollapsed(false)} aria-label="展开好友入口">
+        <button ref={toggleRef} type="button" className="friend-dock-toggle is-handle" onClick={() => setCollapsed(false)} aria-label="展开活跃症入口">
           ‹{friendDockUnreadCount !== null && friendDockUnreadCount > 0 ? <span className="friend-dock-unread-dot" /> : null}
         </button>
       ) : !open || !isMobileDrawer ? (
         <div className="friend-dock-actions">
-          <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={open ? closeDock : openFriendList} aria-label={open ? '关闭好友窗口' : '打开好友窗口'} aria-expanded={open}>
-            好友{friendDockUnreadCount !== null && friendDockUnreadCount > 0 ? <b>{friendDockUnreadCount > 99 ? '99+' : friendDockUnreadCount}</b> : null}
+          <button ref={toggleRef} type="button" className="friend-dock-toggle" onClick={open ? closeDock : openFriendList} aria-label={open ? '关闭活跃症窗口' : '打开活跃症窗口'} aria-expanded={open}>
+            活跃症{friendDockUnreadCount !== null && friendDockUnreadCount > 0 ? <b>{friendDockUnreadCount > 99 ? '99+' : friendDockUnreadCount}</b> : null}
           </button>
-          <button type="button" className="friend-dock-collapse" onClick={() => { closeDock(); setCollapsed(true) }} aria-label="收起好友入口">›</button>
+          <button type="button" className="friend-dock-collapse" onClick={() => { closeDock(); setCollapsed(true) }} aria-label="收起活跃症入口">›</button>
         </div>
       ) : null}
     </div>

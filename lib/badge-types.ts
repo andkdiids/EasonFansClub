@@ -108,6 +108,7 @@ export type BadgeHistoryView = {
   expiresAt: string | null
   expiredAt: string | null
   revokedAt: string | null
+  revokeReason?: string | null
   status: UserBadgeStatus
   sourceType: string | null
   grantReason?: string | null
