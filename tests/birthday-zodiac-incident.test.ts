@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   buildZodiacIncidentDryRun,
   type ZodiacIncidentSourceRow,
 } from '@/scripts/repair-birthday-zodiac-incident'
+import { isBirthdayAutomaticSourceRepairEligible } from '@/lib/badge-retention'
 
 const incidentStart = new Date('2026-09-07T13:01:25.000Z')
 const incidentEnd = new Date('2026-09-10T16:00:00.000Z')
@@ -131,4 +133,53 @@ test('missing source evidence and birthday changes are never auto-revoked', () =
   assert.equal(result.report.falseFuturePreviousPeriodGrants, 0)
   assert.equal(result.report.ambiguousGrants, 2)
   assert.equal(result.report.ownershipsToRevoke, 0)
+})
+
+test('birthday zodiac repair uses the current-period grant resolver', () => {
+  const now = new Date('2026-09-10T04:00:00.000Z')
+  assert.equal(isBirthdayAutomaticSourceRepairEligible({
+    ruleType: 'BIRTHDAY_ZODIAC',
+    configJson: { zodiac: 'CAPRICORN' },
+    birthMonth: 12,
+    birthDay: 25,
+    now,
+  }), false)
+  assert.equal(isBirthdayAutomaticSourceRepairEligible({
+    ruleType: 'BIRTHDAY_ZODIAC',
+    configJson: { zodiac: 'VIRGO' },
+    birthMonth: 9,
+    birthDay: 1,
+    now,
+  }), true)
+})
+
+test('birthday zodiac repair does not recreate a revoked source outside its period and preserves historical ownership semantics', () => {
+  const now = new Date('2026-09-10T04:00:00.000Z')
+  const leo = {
+    ruleType: 'BIRTHDAY_ZODIAC' as const,
+    configJson: { zodiac: 'LEO' },
+    birthMonth: 8,
+    birthDay: 8,
+    now,
+  }
+  assert.equal(isBirthdayAutomaticSourceRepairEligible(leo), false)
+  assert.equal(isBirthdayAutomaticSourceRepairEligible({
+    ...leo,
+    birthMonth: 9,
+    birthDay: 1,
+    configJson: { zodiac: 'VIRGO' },
+  }), true)
+  // A mixed ownership is protected by its valid historical source; the
+  // repair gate must not recreate the invalid current-period source.
+  assert.equal(isBirthdayAutomaticSourceRepairEligible(leo), false)
+})
+
+test('all birthday zodiac automatic paths share the repair gate and never use birthday-only matching', () => {
+  const retention = readFileSync('lib/badge-retention.ts', 'utf8')
+  const repairStart = retention.indexOf('async function repairBirthdayAutomaticSource')
+  const repairEnd = retention.indexOf('\nasync function loadRevokeRuleContext', repairStart)
+  const repair = retention.slice(repairStart, repairEnd)
+  assert.match(repair, /isBirthdayAutomaticSourceRepairEligible\(/)
+  assert.match(retention, /resolveZodiacGrantEligibility\(/)
+  assert.doesNotMatch(repair, /if \(birthdayMatches\)[\s\S]*grantBadge/)
 })
