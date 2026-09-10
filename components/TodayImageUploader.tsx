@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { ImageEditor } from '@/components/ImageEditor'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { todayImageFileError } from '@/lib/today-image'
 
@@ -39,6 +40,8 @@ export function TodayImageUploader({ initialUrl, disabled = false, status = 'idl
   const inputRef = useRef<HTMLInputElement | null>(null)
   const objectUrlRef = useRef<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [editing, setEditing] = useState(false)
   const [hasSelection, setHasSelection] = useState(false)
   const [selectionError, setSelectionError] = useState('')
 
@@ -46,6 +49,8 @@ export function TodayImageUploader({ initialUrl, disabled = false, status = 'idl
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     objectUrlRef.current = null
     setPreviewUrl(originalUrl ? publicImageVariantUrl(originalUrl, 'card') || originalUrl : null)
+    setSelectedFile(null)
+    setEditing(false)
     setHasSelection(false)
     setSelectionError('')
   }, [originalUrl])
@@ -69,18 +74,31 @@ export function TodayImageUploader({ initialUrl, disabled = false, status = 'idl
     const nextPreviewUrl = URL.createObjectURL(file)
     objectUrlRef.current = nextPreviewUrl
     setPreviewUrl(nextPreviewUrl)
+    setSelectedFile(file)
     setHasSelection(true)
     setSelectionError('')
     onSelectionChange({ file, removed: false })
   }
 
   function removeImage() {
+    setEditing(false)
+    setSelectedFile(null)
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     objectUrlRef.current = null
     setPreviewUrl(null)
     setHasSelection(false)
     setSelectionError('')
     onSelectionChange({ file: null, removed: true })
+  }
+
+  function completeEdit(editedFile: File) {
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
+    const nextPreviewUrl = URL.createObjectURL(editedFile)
+    objectUrlRef.current = nextPreviewUrl
+    setPreviewUrl(nextPreviewUrl)
+    setSelectedFile(editedFile)
+    setEditing(false)
+    onSelectionChange({ file: editedFile, removed: false })
   }
 
   const statusLabel = status === 'uploading'
@@ -108,6 +126,7 @@ export function TodayImageUploader({ initialUrl, disabled = false, status = 'idl
             删除图片
           </button>
         ) : null}
+        {previewUrl && selectedFile ? <button type="button" onClick={() => setEditing(true)} disabled={disabled || status === 'uploading'} className="rounded-full border border-sky-200 px-4 py-2 text-sm font-black text-brand-700 disabled:cursor-not-allowed disabled:opacity-60">编辑</button> : null}
         {statusLabel ? <span role="status" className={`text-sm font-black ${status === 'error' ? 'text-red-600' : status === 'success' ? 'text-emerald-600' : 'text-sky-700'}`}>{statusLabel}</span> : null}
       </div>
       {previewUrl ? (
@@ -123,6 +142,7 @@ export function TodayImageUploader({ initialUrl, disabled = false, status = 'idl
       <p className="text-xs font-bold text-slate-400">支持常见图片格式，单张不超过 10MB</p>
       {selectionError ? <p role="alert" className="text-sm font-bold text-red-600">{selectionError}</p> : null}
       {hasSelection ? <span className="sr-only">已选择新图片</span> : null}
+      {editing && selectedFile ? <ImageEditor file={selectedFile} onCancel={() => setEditing(false)} onComplete={completeEdit} /> : null}
     </div>
   )
 }

@@ -486,11 +486,15 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
       select: USER_BADGE_SELECT,
     }),
     isSelf
-      ? prisma.userBadge.findMany({ where: { userId }, orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }], select: USER_BADGE_SELECT })
+      ? prisma.userBadge.findMany({ where: { userId, ...activeUserBadgeWhere(now) }, orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }], select: USER_BADGE_SELECT })
       : Promise.resolve([] as DbUserBadge[]),
     isSelf
       ? prisma.badge.findMany({
-          where: { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId } } }] },
+          // Previously owned badges are only retained in the owner's catalog
+          // while an active ownership row still exists. A revoked/expired
+          // hidden or secret badge must not reappear as a user-facing catalog
+          // placeholder after it has left current ownership.
+          where: { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId, ...activeUserBadgeWhere(now) } } }] },
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: BADGE_COLLECTION_SELECT,
         })
@@ -620,7 +624,7 @@ export async function getBadgeExhibitionGallery(viewerId?: string | null): Promi
   const [allBadges, ownedRecords, equippedBadges] = await Promise.all([
     prisma.badge.findMany({
       where: viewerId
-        ? { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId: viewerId } } }] }
+        ? { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId: viewerId, ...activeUserBadgeWhere() } } }] }
         : { isEnabled: true, isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       select: BADGE_COLLECTION_SELECT,
@@ -1076,6 +1080,14 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
       if (sameGrantIsActive && (!sameSource || sameSource.isActive)) return operationResult(input, badge.name, sameGrant.id)
       regrantRecordId = sameGrant.id
     }
+    // Older zodiac grants used a calendar-period grant key. Once the
+    // qualification became birthday-based, the durable source key is the
+    // compatibility bridge that lets a revoked historical row be reactivated
+    // instead of being skipped or duplicated under the new stable key.
+    if (!regrantRecordId) {
+      const sameSource = await tx.userBadgeSource.findUnique({ where: { sourceKey }, select: { userBadgeId: true, isActive: true } })
+      if (sameSource && !sameSource.isActive) regrantRecordId = sameSource.userBadgeId
+    }
   }
 
   await expireStaleUserBadgeRows(tx, input, now)
@@ -1150,6 +1162,7 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
         revokedAt: null,
         status,
         activeKey: status === 'ACTIVE' ? activeBadgeKey(input.userId, input.badgeId) : null,
+        grantKey,
         sourceType,
         sourceId,
         grantReason,

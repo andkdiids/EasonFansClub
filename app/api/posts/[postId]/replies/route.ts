@@ -15,7 +15,7 @@ import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
 import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
-import { completeTask } from '@/lib/growth-tasks/service'
+import { completeTask, resolveAndGrantWeeklyMilestonesInTransaction } from '@/lib/growth-tasks/service'
 import { getShanghaiDateKey } from '@/lib/checkin'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -165,6 +165,7 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const replyRecipientId = parentReply?.authorId || post.authorId
+  const now = new Date()
   const reply = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     // The first visibility query above is only an early response optimization.
@@ -255,13 +256,16 @@ export async function POST(request: Request, { params }: Params) {
       postId,
       commenterId: user.id,
       postAuthorId: post.authorId,
+      now,
     })
     await completeTask(tx, {
       userId: user.id,
       taskCode: 'DAILY_COMMENT',
-      periodKey: getShanghaiDateKey(new Date()),
+      periodKey: getShanghaiDateKey(now),
       sourceEventId: createdReply.id,
+      now,
     })
+    const weeklyMilestones = await resolveAndGrantWeeklyMilestonesInTransaction(tx, user.id, now)
     if (user.id !== post.authorId) {
       await completeTask(tx, { userId: user.id, taskCode: 'FIRST_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
       await completeTask(tx, { userId: post.authorId, taskCode: 'FIRST_RECEIVED_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
@@ -271,6 +275,8 @@ export async function POST(request: Request, { params }: Params) {
       createdReply,
       floorNumber,
       rewardPoints: communityReward.commenterRewardPoints,
+      weeklyMilestoneRewards: weeklyMilestones.rewards,
+      points: weeklyMilestones.balance,
       notificationRecipientIds: [
         ...requestedMentions.map((mention) => mention.userId),
         ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : []),
@@ -288,7 +294,7 @@ export async function POST(request: Request, { params }: Params) {
     }, { status: 409 })
   }
 
-  const { createdReply, floorNumber, rewardPoints } = reply
+  const { createdReply, floorNumber, rewardPoints, weeklyMilestoneRewards, points } = reply
   const notificationData = [
     ...requestedMentions.map((mention) => ({
       recipientId: mention.userId,
@@ -361,5 +367,7 @@ export async function POST(request: Request, { params }: Params) {
       }),
     },
     rewardPoints,
+    weeklyMilestoneRewards,
+    points,
   }, { status: 201 })
 }

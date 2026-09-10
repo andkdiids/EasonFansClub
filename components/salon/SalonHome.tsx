@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { formatUid } from '@/lib/uid'
 import {
@@ -21,6 +21,17 @@ import {
 } from '@/lib/salon-shared'
 import { SalonLikeButton } from './SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
+import {
+  clearSalonListScrollStateFromStorage,
+  createSalonListScrollState,
+  getSalonListSessionStorage,
+  matchesSalonListContext,
+  readSalonListScrollStateFromHistory,
+  readSalonListScrollStateFromStorage,
+  updateSalonListHistoryState,
+  writeSalonListScrollStateToStorage,
+  type SalonListScrollState,
+} from '@/lib/salon-scroll-state'
 
 const categoryTabs: Array<{ value: SalonCategoryValue | ''; label: string }> = [
   { value: '', label: '全部' },
@@ -67,7 +78,14 @@ function categoryHref(pathname: string, searchParams: SearchParamsLike, category
   return `${pathname}${value ? `?${value}` : ''}`
 }
 
-export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, initialFeedSeed = null, initialCategoryCounts, options, currentUserId }: Readonly<{
+function buildSalonListHref(pathname: string, queryString: string) {
+  const query = new URLSearchParams(queryString)
+  query.delete('restore')
+  const value = query.toString()
+  return `${pathname}${value ? `?${value}` : ''}`
+}
+
+export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, initialFeedSeed = null, initialCategoryCounts, options, currentUserId, restoreOnMount = false }: Readonly<{
   initialPosts: SalonPostView[]
   initialHasMore: boolean
   initialNextCursor: string | null
@@ -75,10 +93,12 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
   initialCategoryCounts?: SalonCategoryCounts
   options: SalonOptions
   currentUserId: string | null
+  restoreOnMount?: boolean
 }>) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const queryString = searchParams.toString()
   const selectedCategory = searchParams.get('category') || ''
   const selectedTourId = searchParams.get('concert') || ''
   const selectedSessionId = searchParams.get('session') || ''
@@ -100,6 +120,7 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [pullDistance, setPullDistance] = useState(0)
   const [refreshNotice, setRefreshNotice] = useState('')
+  const [pendingRestore, setPendingRestore] = useState<SalonListScrollState | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const postsRef = useRef<SalonPostView[]>(initialPosts)
   const hasMoreRef = useRef(initialHasMore)
@@ -113,14 +134,17 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
   const refreshingRef = useRef(false)
   const touchStartRef = useRef<number | null>(null)
   const pullDistanceRef = useRef(0)
+  const restoreAttemptedRef = useRef(false)
+  const currentListHref = useMemo(() => buildSalonListHref(pathname, queryString), [pathname, queryString])
 
   const queryWithoutCursor = useMemo(() => {
-    const query = new URLSearchParams(searchParams.toString())
+    const query = new URLSearchParams(queryString)
     query.delete('cursor')
     query.delete('mode')
     query.delete('feedSeed')
+    query.delete('restore')
     return query.toString()
-  }, [searchParams])
+  }, [queryString])
 
   useEffect(() => {
     requestRef.current?.controller.abort()
@@ -145,6 +169,90 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
     setPullDistance(0)
     setRefreshNotice('')
   }, [initialCategoryCounts, initialFeedSeed, initialHasMore, initialNextCursor, initialPosts, safeInitialCounts, selectedCategory, selectedSessionId, selectedSort, selectedTourId])
+
+  useEffect(() => {
+    if (restoreAttemptedRef.current) return
+    restoreAttemptedRef.current = true
+
+    const navigationEntries = typeof window.performance?.getEntriesByType === 'function'
+      ? window.performance.getEntriesByType('navigation')
+      : []
+    const navigationEntry = navigationEntries[0] as PerformanceNavigationTiming | undefined
+    const storage = getSalonListSessionStorage()
+    if (navigationEntry?.type === 'reload') {
+      window.history.replaceState(updateSalonListHistoryState(window.history.state, null), '', currentListHref)
+      clearSalonListScrollStateFromStorage(storage)
+      return
+    }
+
+    const context = {
+      pathname,
+      listHref: currentListHref,
+      category: selectedCategory,
+      concert: selectedTourId,
+      session: selectedSessionId,
+      sort: selectedSort,
+    }
+    const candidates = [
+      readSalonListScrollStateFromHistory(window.history.state),
+      restoreOnMount ? readSalonListScrollStateFromStorage(storage) : null,
+    ]
+    const pending = candidates.find((value) => value && matchesSalonListContext(value, context))
+    if (!pending || Date.now() - pending.savedAt > 30 * 60_000) {
+      if (restoreOnMount) clearSalonListScrollStateFromStorage(storage)
+      return
+    }
+
+    postsRef.current = pending.posts
+    hasMoreRef.current = pending.hasMore
+    nextCursorRef.current = pending.nextCursor
+    feedModeRef.current = pending.feedMode
+    feedSeedRef.current = pending.feedSeed
+    autoLoadBlockedRef.current = false
+    setPosts(pending.posts)
+    setHasMore(pending.hasMore)
+    setNextCursor(pending.nextCursor)
+    setCategoryCounts(pending.categoryCounts)
+    setFeedMode(pending.feedMode)
+    setFeedSeed(pending.feedSeed)
+    setLoadingMore(false)
+    setLoadError('')
+    setPendingRestore(pending)
+  }, [currentListHref, pathname, restoreOnMount, selectedCategory, selectedSessionId, selectedSort, selectedTourId])
+
+  useEffect(() => {
+    if (!pendingRestore) return
+    let cancelled = false
+    let frame = 0
+    let attempts = 0
+
+    const restore = () => {
+      if (cancelled) return
+      attempts += 1
+      const pageHasEnoughHeight = document.documentElement.scrollHeight >= pendingRestore.scrollY + window.innerHeight
+      const anchor = Array.from(document.querySelectorAll<HTMLElement>('[data-salon-post-id]')).find((element) => element.dataset.salonPostId === pendingRestore.anchorPostId) || null
+      if (pageHasEnoughHeight) {
+        window.scrollTo({ top: pendingRestore.scrollY, behavior: 'auto' })
+      } else if (anchor) {
+        anchor.scrollIntoView({ behavior: 'auto', block: 'center' })
+      } else if (attempts < 30) {
+        frame = window.requestAnimationFrame(restore)
+        return
+      } else {
+        window.scrollTo({ top: pendingRestore.scrollY, behavior: 'auto' })
+      }
+
+      window.history.replaceState(updateSalonListHistoryState(window.history.state, null), '', currentListHref)
+      clearSalonListScrollStateFromStorage(getSalonListSessionStorage())
+      setPendingRestore(null)
+    }
+
+    frame = window.requestAnimationFrame(restore)
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+    }
+  }, [currentListHref, pendingRestore])
 
   const loadMore = useCallback(async (manual = false) => {
     if (autoLoadBlockedRef.current && !manual) return
@@ -325,6 +433,29 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
     updateUrl(router, pathname, searchParams, { sort: sort === 'popular' ? 'popular' : null, cursor: null })
   }
 
+  const saveScrollStateBeforeDetail = useCallback((anchorPostId: string) => {
+    if (typeof window === 'undefined') return
+    const state = createSalonListScrollState({
+      pathname,
+      listHref: currentListHref,
+      category: selectedCategory,
+      concert: selectedTourId,
+      session: selectedSessionId,
+      sort: selectedSort,
+      posts: postsRef.current,
+      hasMore: hasMoreRef.current,
+      nextCursor: nextCursorRef.current,
+      feedMode: feedModeRef.current,
+      feedSeed: feedSeedRef.current,
+      categoryCounts,
+      anchorPostId,
+      scrollY: window.scrollY,
+      savedAt: Date.now(),
+    })
+    window.history.replaceState(updateSalonListHistoryState(window.history.state, state), '', currentListHref)
+    writeSalonListScrollStateToStorage(getSalonListSessionStorage(), state)
+  }, [categoryCounts, currentListHref, pathname, selectedCategory, selectedSessionId, selectedSort, selectedTourId])
+
   return <main className="salon-page">
     <header className="salon-header">
       <div>
@@ -359,7 +490,7 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
 
     {selectedTour ? <p className="salon-filter-summary">正在查看：{selectedTour.name}{selectedSessionId ? ` · ${sessions.find((session) => session.id === selectedSessionId)?.city || '指定场次'}` : ' · 全部场次'}</p> : null}
     {!posts.length ? <section className="salon-empty"><strong>还没有公开作品</strong><span>成为第一个把现场那一刻带进沙龙的人。</span></section> : <section className="salon-gallery" aria-label="沙龙作品">
-      {posts.map((post, index) => <SalonGalleryCard key={post.id} post={post} priority={index < 4} />)}
+      {posts.map((post, index) => <SalonGalleryCard key={post.id} post={post} priority={index < 4} returnHref={currentListHref} onOpenDetail={saveScrollStateBeforeDetail} />)}
     </section>}
     <div ref={sentinelRef} className={`salon-load-more${loadError ? ' salon-load-error' : ''}`} aria-live="polite">
       {loadingMore ? '正在加载更多作品…' : loadError ? <><span>{loadError}</span><button type="button" onClick={() => void loadMore(true)}>点击重试</button></> : hasMore ? '向下滚动加载更多' : posts.length ? '已经看到全部作品' : ''}
@@ -367,20 +498,24 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
   </main>
 }
 
-function SalonGalleryCard({ post, priority }: Readonly<{ post: SalonPostView; priority: boolean }>) {
+function SalonGalleryCard({ post, priority, returnHref, onOpenDetail }: Readonly<{ post: SalonPostView; priority: boolean; returnHref: string; onOpenDetail: (postId: string) => void }>) {
   const media = post.media[0]
   if (!media) return null
   const contextLabel = formatSalonPostContext(post.category, post.concert)
   const sessionLabel = post.concert ? formatSalonSession({ city: post.concert.city, concertDate: post.concert.date, venue: post.concert.venue, title: post.concert.title, sessionNumber: post.concert.sessionNumber }) : null
-  return <article className="salon-gallery-card">
-    <Link href={`/salon/${post.id}`} className="salon-gallery-image-link">
+  const detailHref = `/salon/${encodeURIComponent(post.id)}?${new URLSearchParams({ from: returnHref }).toString()}`
+  const saveBeforeDetail = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) onOpenDetail(post.id)
+  }
+  return <article className="salon-gallery-card" data-salon-post-id={post.id}>
+    <Link href={detailHref} className="salon-gallery-image-link" onClick={saveBeforeDetail}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={media.thumbnailUrl} alt={post.title || contextLabel} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} />
       {post.media.length > 1 ? <span className="salon-media-count">{post.media.length} 张</span> : null}
       <span className="salon-category-tag">{SALON_CATEGORY_CONFIG[post.category].label}</span>
     </Link>
     <div className="salon-gallery-caption">
-      <Link href={`/salon/${post.id}`} className="salon-gallery-concert">{contextLabel}</Link>
+      <Link href={detailHref} className="salon-gallery-concert" onClick={saveBeforeDetail}>{contextLabel}</Link>
       {sessionLabel ? <p>{sessionLabel}</p> : null}
       <div className="salon-gallery-meta">
         <Link href={`/user/${formatUid(post.author.uid)}`} className="salon-author-link"><SafeAvatar src={post.author.avatarUrl} name={post.author.nickname} uid={post.author.uid} className="salon-avatar" textClassName="salon-avatar-fallback" variant="avatar-sm" /><span>{post.author.nickname}</span></Link>

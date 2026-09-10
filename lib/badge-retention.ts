@@ -17,7 +17,7 @@ import {
 import { grantBadge, revokeBadgeAcquisitionSource } from '@/lib/badge-service'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday-constants'
-import { getCurrentZodiacSign, getZodiacSignFromBirthday, ZODIAC_LABELS } from '@/lib/zodiac'
+import { resolveZodiac, ZODIAC_LABELS } from '@/lib/zodiac'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 
 /**
@@ -535,19 +535,17 @@ function formatBirthday(month: number | null, day: number | null) {
   return month != null && day != null ? `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null
 }
 
-function describeUnsatisfiedRule(rule: StoredRetentionRule, user: Pick<ActiveBadgeOwner['user'], 'birthMonth' | 'birthDay'>, now: Date) {
+function describeUnsatisfiedRule(rule: StoredRetentionRule, user: Pick<ActiveBadgeOwner['user'], 'birthMonth' | 'birthDay'>) {
   if (rule.ruleType === 'BIRTHDAY_ZODIAC') {
     const birthday = user.birthMonth != null && user.birthDay != null
       ? { month: user.birthMonth, day: user.birthDay }
       : null
     if (!birthday) return '用户未设置有效生日'
-    const birthdayZodiac = getZodiacSignFromBirthday(birthday)
+    const birthdayZodiac = birthday ? resolveZodiac(birthday.month, birthday.day) : null
     const configuredZodiac = getZodiacFromRuleConfig(rule.configJson)
     if (!birthdayZodiac) return `当前生日 ${formatBirthday(user.birthMonth, user.birthDay)} 无对应星座`
     if (!configuredZodiac) return '当前配置规则缺少有效星座'
     if (birthdayZodiac !== configuredZodiac) return `用户生日所属星座为${ZODIAC_LABELS[birthdayZodiac]}，规则要求${ZODIAC_LABELS[configuredZodiac]}`
-    const currentZodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
-    if (currentZodiac !== configuredZodiac) return `当前不在${ZODIAC_LABELS[configuredZodiac]}星座周期内`
   }
   if (rule.ruleType === 'BIRTHDAY_TODAY') return '当前生日并非今天'
   if (rule.ruleType === 'ACTIVITY_PARTICIPATION') return '用户已不满足活动参与资格'
@@ -576,7 +574,7 @@ async function evaluateOwnerForRevocation(owner: ActiveBadgeOwner, contexts: rea
     const reason = satisfied
       ? `仍符合「${BADGE_RULE_REGISTRY[context.rule.ruleType]?.label || context.rule.ruleType}」规则`
       : canRevoke
-        ? describeUnsatisfiedRule(context.rule, owner.user, now)
+        ? describeUnsatisfiedRule(context.rule, owner.user)
         : sources.length === 0
           ? '当前持有记录没有可回收的自动来源，管理员或其他来源将保留'
           : !supportsBadgeRetentionPolicy(context.rule.ruleType)
@@ -585,7 +583,7 @@ async function evaluateOwnerForRevocation(owner: ActiveBadgeOwner, contexts: rea
               ? `资格已失效，但当前保留策略为${context.retentionPolicy === 'PERMANENT_AFTER_GRANT' ? '永久保留' : context.retentionPolicy}`
               : availability === 'ENDED' || availability === 'UPCOMING'
                 ? '限定勋章已不在可回收的有效窗口内'
-                : describeUnsatisfiedRule(context.rule, owner.user, now)
+                : describeUnsatisfiedRule(context.rule, owner.user)
     decisions.push({ context, sources, satisfied, canRevoke, reason })
   }
 

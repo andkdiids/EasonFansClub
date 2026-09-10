@@ -5,7 +5,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import { ImageViewer } from '@/components/ImageViewer'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { ShareButton } from '@/components/share/ShareButton'
@@ -17,14 +17,16 @@ import { shareCardImageCandidates } from '@/lib/share-metadata'
 import { SalonComments } from './SalonComments'
 import { SalonLikeButton } from './SalonLikeButton'
 import { SalonViewCounter } from './SalonViewCounter'
+import { appendSalonListRestoreParam, updateSalonListHistoryState } from '@/lib/salon-scroll-state'
 
-export function SalonDetail({ post, initialComments, initialCommentsHasMore, initialCommentsNextCursor, currentUserId, canModerate }: Readonly<{
+export function SalonDetail({ post, initialComments, initialCommentsHasMore, initialCommentsNextCursor, currentUserId, canModerate, returnHref = null }: Readonly<{
   post: SalonPostView
   initialComments: SalonCommentView[]
   initialCommentsHasMore: boolean
   initialCommentsNextCursor: string | null
   currentUserId: string | null
   canModerate: boolean
+  returnHref?: string | null
 }>) {
   const router = useRouter()
   const [activeIndex, setActiveIndex] = useState(0)
@@ -49,6 +51,19 @@ export function SalonDetail({ post, initialComments, initialCommentsHasMore, ini
     date: new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt)),
     meta: [{ label: '沙龙', value: categoryLabel }, ...(concert ? [{ label: '演唱会', value: concert.tour.name }, { label: '场次', value: formatSalonSession({ city: concert.city, concertDate: concert.date, venue: concert.venue, title: concert.title, sessionNumber: concert.sessionNumber }) }] : [])],
   }
+  const returnLinkHref = returnHref ? appendSalonListRestoreParam(returnHref) : '/salon'
+
+  useEffect(() => {
+    // The list state belongs to the previous history entry. Clear any copied
+    // state from the detail entry so a fresh /salon visit cannot restore it.
+    window.history.replaceState(updateSalonListHistoryState(window.history.state, null), '', window.location.href)
+  }, [])
+
+  function handleReturnToSalon(event: MouseEvent<HTMLAnchorElement>) {
+    if (!returnHref || window.history.length <= 1 || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    router.back()
+  }
 
   async function removePost() {
     if (!window.confirm('确定删除这篇沙龙作品吗？删除后无法恢复。')) return
@@ -62,7 +77,7 @@ export function SalonDetail({ post, initialComments, initialCommentsHasMore, ini
   if (!activeMedia) return <main className="salon-page"><div className="salon-empty"><strong>作品图片暂时不可用</strong><Link href="/salon">返回沙龙</Link></div></main>
 
   return <main className="salon-page salon-detail-page">
-    <div className="salon-page-back"><Link href="/salon">← 返回沙龙</Link><ShareButton data={shareCardData} label="分享" triggerClassName="salon-share-button" ariaLabel="分享沙龙作品" /></div>
+    <div className="salon-page-back"><Link href={returnLinkHref} onClick={handleReturnToSalon}>← 返回沙龙</Link><ShareButton data={shareCardData} label="分享" triggerClassName="salon-share-button" ariaLabel="分享沙龙作品" /></div>
     {post.status !== 'APPROVED' ? <div className={`salon-review-banner salon-review-${post.status.toLowerCase()}`}><strong>{SALON_STATUS_LABELS[post.status]}</strong><span>{post.status === 'PENDING' ? '这篇作品正在等待管理员审核，暂不会出现在公开图库。' : `原因：${post.rejectReason || '请根据审核意见修改后重新投稿。'}`}</span></div> : null}
     <section className="salon-detail-layout">
       <div className="salon-detail-gallery">

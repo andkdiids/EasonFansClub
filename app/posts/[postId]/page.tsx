@@ -18,6 +18,7 @@ import { ShareButton } from '@/components/share/ShareButton'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getForumBoardDisplayName } from '@/lib/boards'
+import { normalizePostReturnTo, postBackHref, postEditHref } from '@/lib/post-navigation'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
@@ -158,11 +159,11 @@ function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR
 }
 
 // 帖子审核中：用户通过通知/收藏/历史链接进入 PENDING 帖子时显示，而非 404。
-function ModerationFallbackActions({ postId, canEdit }: Readonly<{ postId: string; canEdit: boolean }>) {
+function ModerationFallbackActions({ postId, canEdit, returnTo }: Readonly<{ postId: string; canEdit: boolean; returnTo?: string | null }>) {
   if (!canEdit) return null
   return (
     <div className="mt-6 flex flex-wrap justify-center gap-3">
-      <Link href={`/posts/${postId}/edit`} className="inline-flex min-h-11 items-center rounded-full border border-sky-200 bg-white px-5 text-sm font-black text-brand-700">
+      <Link href={postEditHref(postId, returnTo)} className="inline-flex min-h-11 items-center rounded-full border border-sky-200 bg-white px-5 text-sm font-black text-brand-700">
         编辑
       </Link>
       <DeletePostButton postId={postId} redirectTo="/forum" />
@@ -170,7 +171,7 @@ function ModerationFallbackActions({ postId, canEdit }: Readonly<{ postId: strin
   )
 }
 
-function ModerationPendingFallback({ postId, canEdit }: Readonly<{ postId: string; canEdit: boolean }>) {
+function ModerationPendingFallback({ postId, canEdit, returnTo }: Readonly<{ postId: string; canEdit: boolean; returnTo?: string | null }>) {
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
       <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
@@ -179,8 +180,8 @@ function ModerationPendingFallback({ postId, canEdit }: Readonly<{ postId: strin
         <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
           该帖子正在等待审核，审核通过后即可正常查看。
         </p>
-        <ModerationFallbackActions postId={postId} canEdit={canEdit} />
-        <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+        <ModerationFallbackActions postId={postId} canEdit={canEdit} returnTo={returnTo} />
+        <Link href={postBackHref(returnTo)} className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
           返回 E院广场
         </Link>
       </section>
@@ -189,7 +190,7 @@ function ModerationPendingFallback({ postId, canEdit }: Readonly<{ postId: strin
 }
 
 // 帖子未通过审核：REJECTED 帖子显示提示，而非 404。
-function ModerationRejectedFallback({ postId, canEdit, rejectionReason }: Readonly<{ postId: string; canEdit: boolean; rejectionReason: string | null }>) {
+function ModerationRejectedFallback({ postId, canEdit, rejectionReason, returnTo }: Readonly<{ postId: string; canEdit: boolean; rejectionReason: string | null; returnTo?: string | null }>) {
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
       <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
@@ -199,8 +200,8 @@ function ModerationRejectedFallback({ postId, canEdit, rejectionReason }: Readon
           该帖子未通过审核，暂时无法查看。
         </p>
         {rejectionReason ? <p className="mt-3 whitespace-pre-wrap text-left text-sm font-bold leading-7 text-red-700">拒绝原因：{rejectionReason}</p> : null}
-        <ModerationFallbackActions postId={postId} canEdit={canEdit} />
-        <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+        <ModerationFallbackActions postId={postId} canEdit={canEdit} returnTo={returnTo} />
+        <Link href={postBackHref(returnTo)} className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
           返回 E院广场
         </Link>
       </section>
@@ -734,9 +735,10 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string; returnTo?: string }> }>) {
   const { postId } = await params
   const query = await searchParams
+  const returnTo = normalizePostReturnTo(query.returnTo)
   const focusId = (query.focus ?? query.replyId ?? query.commentId ?? query.reply)?.slice(0, 80)
   const rawCommentSort = query.commentSort ?? query.sort
   const commentSort = parsePostReplySort(rawCommentSort)
@@ -788,10 +790,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   // 管理员和作者保留项目原有的私有查看能力。
   const moderationAccess = getPostModerationAccess(postCore.moderationStatus, viewerIsAdmin, viewerIsAuthor)
   if (moderationAccess === 'PENDING') {
-    return <ModerationPendingFallback postId={postId} canEdit={viewerIsAuthor} />
+    return <ModerationPendingFallback postId={postId} canEdit={viewerIsAuthor} returnTo={returnTo} />
   }
   if (moderationAccess === 'REJECTED') {
-    return <ModerationRejectedFallback postId={postId} canEdit={viewerIsAuthor} rejectionReason={viewerIsAuthor || viewerIsAdmin ? postCore.rejectionReason : null} />
+    return <ModerationRejectedFallback postId={postId} canEdit={viewerIsAuthor} rejectionReason={viewerIsAuthor || viewerIsAdmin ? postCore.rejectionReason : null} returnTo={returnTo} />
   }
 
   const support = await loadPostSupport(postCore, user?.id)
@@ -977,6 +979,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
   const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
   const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
+  const detailBackHref = postBackHref(returnTo, post.Board?.slug)
   const publicRichContent = richResult?.valid ? richResult.value : null
   let renderedRichContent = publicRichContent
   if (publicRichContent) {
@@ -1111,6 +1114,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           </div>
         ) : null}
         <ForumDiscoveryDetailTopbar
+          backHref={detailBackHref}
           shareTitle={shareTitle}
           shareText={shareText}
           shareCardData={shareCardData}
@@ -1123,11 +1127,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
               canManage={canManagePost}
               canDelete={canDeletePost}
               canEdit={canEditPost}
+              returnTo={returnTo}
               redirectTo="/forum"
             />
           ) : null}
         />
-        <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref="/forum" /></div>
+        <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref="/forum" targetHref={detailBackHref} replaceTarget /></div>
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
           <div className="post-detail-card-header mb-4 flex items-start justify-between gap-4">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1204,7 +1209,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {canEditPost ? (
-                <Link href={`/posts/${post.id}/edit`} className="rounded-lg border border-sky-200 px-3 py-2 text-sm font-black text-brand-700">
+                <Link href={postEditHref(post.id, returnTo)} className="rounded-lg border border-sky-200 px-3 py-2 text-sm font-black text-brand-700">
                   编辑帖子
                 </Link>
               ) : null}

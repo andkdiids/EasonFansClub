@@ -3,8 +3,10 @@ import { redirect } from 'next/navigation'
 import { SavePrescriptionButton } from '@/components/games/SavePrescriptionButton'
 import { PrescriptionUserBadge } from '@/components/games/PrescriptionUserBadge'
 import { PrescriptionHistoryPagination } from '@/components/games/PrescriptionHistoryPagination'
+import { PrescriptionHistorySearch } from '@/components/games/PrescriptionHistorySearch'
 import { getEntertainmentDailyDrawHistory } from '@/lib/entertainment'
 import { getCurrentUser } from '@/lib/auth'
+import { parsePrescriptionHistoryDateQuery } from '@/lib/prescription-history-search'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,11 +15,23 @@ function parsePage(value?: string) {
   return Number.isSafeInteger(page) && page > 0 ? page : 1
 }
 
-export default async function PrescriptionHistoryPage({ searchParams }: Readonly<{ searchParams: Promise<{ page?: string }> }>) {
+export default async function PrescriptionHistoryPage({ searchParams }: Readonly<{ searchParams: Promise<{ page?: string; q?: string; date?: string }> }>) {
   const user = await getCurrentUser()
   if (!user) redirect('/login?redirect=%2Fprescription%2Fhistory')
 
-  const result = await getEntertainmentDailyDrawHistory(user.id, parsePage((await searchParams).page))
+  const params = await searchParams
+  const page = parsePage(params.page)
+  const query = params.q?.trim() || ''
+  const dateKey = parsePrescriptionHistoryDateQuery(params.date)
+  const hasSearch = Boolean(query || dateKey)
+  const [result, searchResult] = hasSearch
+    ? await Promise.all([
+        getEntertainmentDailyDrawHistory(user.id, page),
+        getEntertainmentDailyDrawHistory(user.id, page, { query, dateKey }),
+      ])
+    : [await getEntertainmentDailyDrawHistory(user.id, page), null]
+  const initialSearchData = searchResult || result
+  const initialSearchQuery = dateKey || query
 
   return (
     <main className="site-page-main flat-page daily-prescription-page prescription-history-page mx-auto max-w-7xl px-4 py-5 sm:px-5">
@@ -33,48 +47,50 @@ export default async function PrescriptionHistoryPage({ searchParams }: Readonly
         </div>
       </header>
 
-      {result.records.length ? (
-        <div className="mt-4 space-y-3">
-          {result.records.map((record) => (
-            <article key={record.id} id={`prescription-${record.id}`} className="prescription-card">
-              <header>
-                <p>私家E院 · 历史处方</p>
-                <PrescriptionUserBadge user={record.user} />
-              </header>
-              <div className="prescription-points">
-                <span>获得奖励</span>
-                <strong>{record.rewarded ? `+${record.points} 挂号费` : '未获得奖励'}</strong>
-                <small>{record.rewardFromLedger ? '奖励来自当日挂号费流水' : '奖励来自处方记录快照'}</small>
-              </div>
-              <div className="prescription-lyric">
-                <span>当日歌词处方</span>
-                {record.lyric ? (
-                  <>
-                    <blockquote>「{record.lyric.text}」</blockquote>
-                    <cite>——《{record.lyric.songTitle}》</cite>
-                  </>
-                ) : (
-                  <p>当天没有歌词处方内容。</p>
-                )}
-              </div>
-              <footer>
-                <span>处方编号：{record.prescriptionCode} · 开具时间：{record.issuedAtBeijing}</span>
-                <SavePrescriptionButton data={record} />
-              </footer>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <section className="mt-5 rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
-          <p className="text-lg font-black text-brand-950">还没有历史处方</p>
-          <p className="mt-2 text-sm font-bold text-slate-500">完成今天的每日处方后，这里会立即出现记录。</p>
-          <Link href="/games/daily-prescription" className="mt-4 inline-flex rounded-xl bg-brand-950 px-4 py-2 text-sm font-black text-white">去领取今日处方</Link>
-        </section>
-      )}
+      <PrescriptionHistorySearch initialData={initialSearchData} initialQuery={initialSearchQuery} initialDateKey={dateKey}>
+        {result.records.length ? (
+          <div className="mt-4 space-y-3">
+            {result.records.map((record) => (
+              <article key={record.id} id={`prescription-${record.id}`} className="prescription-card">
+                <header>
+                  <p>私家E院 · 历史处方</p>
+                  <PrescriptionUserBadge user={record.user} />
+                </header>
+                <div className="prescription-points">
+                  <span>获得奖励</span>
+                  <strong>{record.rewarded ? `+${record.points} 挂号费` : '未获得奖励'}</strong>
+                  <small>{record.rewardFromLedger ? '奖励来自当日挂号费流水' : '奖励来自处方记录快照'}</small>
+                </div>
+                <div className="prescription-lyric">
+                  <span>当日歌词处方</span>
+                  {record.lyric ? (
+                    <>
+                      <blockquote>「{record.lyric.text}」</blockquote>
+                      <cite>——《{record.lyric.songTitle}》</cite>
+                    </>
+                  ) : (
+                    <p>当天没有歌词处方内容。</p>
+                  )}
+                </div>
+                <footer>
+                  <span>处方编号：{record.prescriptionCode} · 开具时间：{record.issuedAtBeijing}</span>
+                  <SavePrescriptionButton data={record} />
+                </footer>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <section className="mt-5 rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
+            <p className="text-lg font-black text-brand-950">还没有历史处方</p>
+            <p className="mt-2 text-sm font-bold text-slate-500">完成今天的每日处方后，这里会立即出现记录。</p>
+            <Link href="/games/daily-prescription" className="mt-4 inline-flex rounded-xl bg-brand-950 px-4 py-2 text-sm font-black text-white">去领取今日处方</Link>
+          </section>
+        )}
 
-      {result.pagination.totalPages > 1 ? (
-        <PrescriptionHistoryPagination currentPage={result.pagination.page} totalPages={result.pagination.totalPages} />
-      ) : null}
+        {result.pagination.totalPages > 1 ? (
+          <PrescriptionHistoryPagination currentPage={result.pagination.page} totalPages={result.pagination.totalPages} />
+        ) : null}
+      </PrescriptionHistorySearch>
     </main>
   )
 }

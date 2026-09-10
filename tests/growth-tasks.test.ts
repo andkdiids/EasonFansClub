@@ -17,6 +17,7 @@ import {
   getRewardRuleGroups,
 } from '@/lib/growth-tasks/registry'
 import { getCompletedDailyTaskDayKeys, getLaunchGraceDayForWeek } from '@/lib/growth-tasks/progress'
+import { getDueWeeklyMilestones } from '@/lib/growth-tasks/service'
 
 test('统一成长注册表包含四项核心、三项主动行为、十一项之外和十六项新生活', () => {
   assert.equal(getCoreActiveTasks().length, 4)
@@ -115,7 +116,7 @@ test('新成长入口不把“任务”作为前台产品文案', () => {
   assert.match(growthPanel, /formatTodayProgress/)
   assert.match(growthPanel, /overview\.today\.items\.map/)
   assert.doesNotMatch(growthPanel, /activeActions/)
-  assert.match(growthPanel, /<h3 id="growth-core-title">今天只做一件事<\/h3>/)
+  assert.match(growthPanel, /<h3 id="growth-core-title">今天只做一件事<span className="growth-core-title-note">（每日必做）<\/span><\/h3>/)
   assert.match(growthPanel, /<summary>之外/)
   assert.doesNotMatch(growthPanel, /<summary>支线/)
   assert.match(css, /\.friend-dock-primary-tabs[\s\S]*grid-template-columns: repeat\(4/)
@@ -165,4 +166,36 @@ test('之外按真实 frequency 将每日任务排在每周任务前，并保留
 
 test('周奖励采用三档累计，而不是只领取最高一档', () => {
   assert.equal(WEEKLY_MILESTONES.reduce((sum, item) => sum + item.reward, 0), 151)
+})
+
+test('周里程碑按最新完成天数即时补发所有未领取档位', () => {
+  assert.deepEqual(getDueWeeklyMilestones(2, []), [])
+  assert.deepEqual(getDueWeeklyMilestones(3, []), [{ days: 3, reward: 27 }])
+  assert.deepEqual(getDueWeeklyMilestones(4, []), [{ days: 3, reward: 27 }])
+  assert.deepEqual(getDueWeeklyMilestones(5, []), [{ days: 3, reward: 27 }, { days: 5, reward: 50 }])
+  assert.deepEqual(getDueWeeklyMilestones(7, []), [
+    { days: 3, reward: 27 },
+    { days: 5, reward: 50 },
+    { days: 7, reward: 74 },
+  ])
+  assert.deepEqual(getDueWeeklyMilestones(7, [
+    { milestone: 3, claimedAt: new Date('2026-09-09T00:00:00.000Z') },
+    { milestone: 5, claimedAt: new Date('2026-09-11T00:00:00.000Z') },
+  ]), [{ days: 7, reward: 74 }])
+})
+
+test('周奖励完成链路在最新进度与流水写入后统一 reconcile，并保留幂等约束', () => {
+  const service = readFileSync('lib/growth-tasks/service.ts', 'utf8')
+  const checkin = readFileSync('app/api/checkin/route.ts', 'utf8')
+  const prescription = readFileSync('lib/entertainment.ts', 'utf8')
+  const replies = readFileSync('app/api/posts/[postId]/replies/route.ts', 'utf8')
+  const panel = readFileSync('components/GrowthPanel.tsx', 'utf8')
+  assert.match(service, /completedDays >= milestone\.days/)
+  assert.match(service, /userId_weekKey_milestone/)
+  assert.match(service, /awardRegistrationFee\(tx, \{/)
+  assert.match(service, /resolveAndGrantWeeklyMilestones\(userId, now\)/)
+  assert.match(checkin, /resolveAndGrantWeeklyMilestonesInTransaction\(tx, user\.id, checkedAt\)/)
+  assert.match(prescription, /resolveAndGrantWeeklyMilestonesInTransaction\(tx, userId, now\)/)
+  assert.match(replies, /resolveAndGrantWeeklyMilestonesInTransaction\(tx, user\.id, now\)/)
+  assert.doesNotMatch(panel, /claim\(\{ milestone:/)
 })

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { evaluateBadgeRule } from '@/lib/badge-rule-engine'
 import { generateBadgeAcquisitionDescription, parseBadgeRuleInput } from '@/lib/badge-rules'
-import { getCurrentZodiacSign, getZodiacSignFromBirthday, isBirthdayToday } from '@/lib/zodiac'
+import { getCurrentZodiacSign, getZodiacSignFromBirthday, isBirthdayToday, resolveZodiac } from '@/lib/zodiac'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -13,6 +13,7 @@ const boundaries: Array<[number, number, string]> = [
   [5, 20, 'TAURUS'], [5, 21, 'GEMINI'],
   [6, 21, 'GEMINI'], [6, 22, 'CANCER'],
   [7, 22, 'CANCER'], [7, 23, 'LEO'],
+  [8, 8, 'LEO'],
   [8, 22, 'LEO'], [8, 23, 'VIRGO'],
   [9, 22, 'VIRGO'], [9, 23, 'LIBRA'],
   [10, 23, 'LIBRA'], [10, 24, 'SCORPIO'],
@@ -32,7 +33,7 @@ const zodiacRule = {
 
 test('zodiac resolver uses month/day only and honors every configured boundary', () => {
   for (const [month, day, expected] of boundaries) {
-    assert.equal(getZodiacSignFromBirthday({ month, day }), expected, `${month}/${day}`)
+    assert.equal(resolveZodiac(month, day), expected, `${month}/${day}`)
   }
   assert.equal(getZodiacSignFromBirthday({ month: 4, day: 5 }), 'ARIES')
   assert.equal(getZodiacSignFromBirthday({ month: 4, day: 5 }), getZodiacSignFromBirthday({ month: 4, day: 5 }))
@@ -60,24 +61,25 @@ test('current zodiac period uses Asia/Shanghai boundaries', () => {
   for (const [date, expected] of dates) assert.equal(getCurrentZodiacSign(new Date(date)), expected, date)
 })
 
-test('BIRTHDAY_ZODIAC requires user zodiac and current zodiac period, not birthday today', () => {
+test('BIRTHDAY_ZODIAC uses only the current stored birthday, not today\'s zodiac period or birthday-today state', () => {
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 4, birthDay: 5 }, rule: zodiacRule, now: new Date('2026-03-25T04:00:00.000Z') }), true)
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 4, birthDay: 5 }, rule: zodiacRule, now: new Date('2026-04-05T04:00:00.000Z') }), true)
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 4, birthDay: 5 }, rule: zodiacRule, now: new Date('2026-04-19T04:00:00.000Z') }), true)
-  assert.equal(evaluateBadgeRule({ user: { birthMonth: 4, birthDay: 5 }, rule: zodiacRule, now: new Date('2026-04-20T04:00:00.000Z') }), false)
+  assert.equal(evaluateBadgeRule({ user: { birthMonth: 4, birthDay: 5 }, rule: zodiacRule, now: new Date('2026-04-20T04:00:00.000Z') }), true)
+  assert.equal(evaluateBadgeRule({ user: { birthMonth: 4, birthDay: 5 }, rule: zodiacRule, now: new Date('2026-12-01T04:00:00.000Z') }), true)
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 4, birthDay: 5 }, rule: { ...zodiacRule, configJson: { zodiac: 'TAURUS' } }, now: new Date('2026-03-25T04:00:00.000Z') }), false)
   assert.equal(evaluateBadgeRule({ user: { birthMonth: null, birthDay: null }, rule: zodiacRule, now: new Date('2026-03-25T04:00:00.000Z') }), false)
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 2, birthDay: 30 }, rule: zodiacRule, now: new Date('2026-03-25T04:00:00.000Z') }), false)
 })
 
-test('ADMIN_BACKFILL accepts 08/10 Leo outside the current zodiac period while AUTO waits', () => {
+test('AUTO and ADMIN_BACKFILL use the same persistent birthday zodiac', () => {
   const now = new Date('2026-09-07T04:00:00.000Z')
   const user = { birthMonth: 8, birthDay: 10 }
   const leoRule = { ...zodiacRule, configJson: { zodiac: 'LEO' } }
 
   assert.equal(getZodiacSignFromBirthday({ month: user.birthMonth, day: user.birthDay }), 'LEO')
   assert.equal(getCurrentZodiacSign(now), 'VIRGO')
-  assert.equal(evaluateBadgeRule({ user, rule: leoRule, now }), false)
+  assert.equal(evaluateBadgeRule({ user, rule: leoRule, now }), true)
   assert.equal(evaluateBadgeRule({ user, rule: leoRule, now, mode: 'ADMIN_BACKFILL' }), true)
   assert.equal(evaluateBadgeRule({ user, rule: { ...leoRule, configJson: { zodiac: 'VIRGO' } }, now, mode: 'ADMIN_BACKFILL' }), false)
 })
@@ -97,7 +99,7 @@ test('ADMIN_BACKFILL uses the birthday zodiac at every boundary regardless of to
   for (const [month, day, zodiac] of cases) {
     const user = { birthMonth: month, birthDay: day }
     const rule = { ...zodiacRule, configJson: { zodiac } }
-    assert.equal(getZodiacSignFromBirthday({ month, day }), zodiac, `${month}/${day}`)
+    assert.equal(resolveZodiac(month, day), zodiac, `${month}/${day}`)
     assert.equal(evaluateBadgeRule({ user, rule, now, mode: 'ADMIN_BACKFILL' }), true, `${month}/${day}`)
   }
 })
@@ -106,7 +108,7 @@ test('BIRTHDAY_ZODIAC handles Capricorn across the year boundary and Feb 29 with
   const capricornRule = { ...zodiacRule, configJson: { zodiac: 'CAPRICORN' } }
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 12, birthDay: 25 }, rule: capricornRule, now: new Date('2026-12-25T04:00:00.000Z') }), true)
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 12, birthDay: 25 }, rule: capricornRule, now: new Date('2027-01-05T04:00:00.000Z') }), true)
-  assert.equal(evaluateBadgeRule({ user: { birthMonth: 12, birthDay: 25 }, rule: capricornRule, now: new Date('2027-01-20T04:00:00.000Z') }), false)
+  assert.equal(evaluateBadgeRule({ user: { birthMonth: 12, birthDay: 25 }, rule: capricornRule, now: new Date('2027-01-20T04:00:00.000Z') }), true)
   const piscesRule = { ...zodiacRule, configJson: { zodiac: 'PISCES' } }
   assert.equal(evaluateBadgeRule({ user: { birthMonth: 2, birthDay: 29 }, rule: piscesRule, now: new Date('2027-02-20T04:00:00.000Z') }), true)
 })
@@ -135,7 +137,7 @@ test('birthday rule configs are independent and never use a numeric threshold', 
   })
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', configJson: { zodiac: 'ARIES' }, threshold: 1 }).error || '', /不需要数值阈值/)
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', configJson: { zodiac: 'UNKNOWN' } }).error || '', /所属星座/)
-  assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_ZODIAC', null, { zodiac: 'ARIES' }), '用户生日属于白羊座，并在白羊座星座周期内自动获得。')
+  assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_ZODIAC', null, { zodiac: 'ARIES' }), '用户当前生日属于白羊座时自动获得。')
   assert.deepEqual(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', operator: 'GTE' }).rule, {
     ruleType: 'BIRTHDAY_TODAY', operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: {}, isEnabled: true, retentionPolicy: null,
   })
@@ -143,13 +145,16 @@ test('birthday rule configs are independent and never use a numeric threshold', 
   assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_TODAY', null, {}), '生日当天自动获得。')
 })
 
-test('daily scans keep current-period semantics while admin zodiac backfill does not', () => {
+test('daily scans and admin preview/backfill use the persistent birthday resolver', () => {
   const engine = read('lib/badge-rule-engine.ts')
-  const dailyScan = engine.slice(engine.indexOf('export async function grantCurrentZodiacBadgeRewards'))
+  const dailyScanStart = engine.indexOf('export async function grantCurrentZodiacBadgeRewards')
+  const dailyScanEnd = engine.indexOf('\nexport async function evaluateBadgesForEvent', dailyScanStart)
+  const dailyScan = engine.slice(dailyScanStart, dailyScanEnd)
   const backfill = engine.slice(engine.indexOf('export async function backfillBadgeRule'), engine.indexOf('export type BadgeRulePreview'))
   const preview = engine.slice(engine.indexOf('export async function previewBadgeRule'))
-  assert.match(dailyScan, /getCurrentZodiacSign/)
-  assert.match(dailyScan, /getBirthdayWhereForZodiac/)
+  assert.doesNotMatch(dailyScan, /getCurrentZodiacSign|getZodiacPeriodKey|getBirthdayWhereForZodiac/)
+  assert.match(dailyScan, /OR: \[\{ birthMonth: \{ not: null \} \}, \{ birthDay: \{ not: null \} \}\]/)
+  assert.match(dailyScan, /grantKey: `zodiac:\$\{rule\.id\}`/)
   assert.match(dailyScan, /evaluateBadgeRule\(/)
   assert.match(backfill, /mode: type === 'BIRTHDAY_ZODIAC' \? 'ADMIN_BACKFILL' : 'AUTO'/)
   assert.match(backfill, /getBirthdayWhereForZodiac/)
@@ -169,7 +174,7 @@ test('admin and public acquisition copy keep zodiac period and birthday-day rule
   assert.match(manager, /BIRTHDAY_TODAY/)
   assert.match(manager, /ZODIAC_SIGNS/)
   assert.match(manager, /!isBirthdayRule\(draft\.ruleType\)/)
-  assert.match(manager, /星座周期内自动获得/)
+  assert.match(manager, /当前生日属于.*时自动获得/)
   assert.match(manager, /生日当天自动获得/)
   assert.match(manager, /不受当前日期星座周期限制/)
   assert.doesNotMatch(manager, /扫描当前星座周期/)
@@ -207,7 +212,7 @@ test('central grant contract is repeatable by period and birthday updates use re
   assert.match(engine, /'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY'/)
 })
 
-test('birthday reconciliation covers legacy birthday source and waits for the current zodiac period', () => {
+test('birthday reconciliation covers legacy birthday source without a current zodiac-period gate', () => {
   const engine = read('lib/badge-rule-engine.ts')
   const retention = read('lib/badge-retention.ts')
   const rules = read('lib/badge-rules.ts')
@@ -224,6 +229,8 @@ test('birthday reconciliation covers legacy birthday source and waits for the cu
   assert.match(retention, /ruleType: 'BIRTHDAY_TODAY'/)
   assert.match(rules, /BIRTHDAY_ZODIAC: 'RETAIN_WHILE_ELIGIBLE'/)
   assert.match(rules, /BIRTHDAY_TODAY: 'RETAIN_WHILE_ELIGIBLE'/)
+  assert.doesNotMatch(engine, /getCurrentZodiacSign|getZodiacPeriodKey/)
+  assert.doesNotMatch(retention, /getCurrentZodiacSign|getZodiacPeriodKey/)
 })
 
 test('生日变更场景 A-E 使用最新生日判断旧资格、新资格与未来周期', () => {
@@ -239,14 +246,14 @@ test('生日变更场景 A-E 使用最新生日判断旧资格、新资格与未
     newToday: evaluateBadgeRule({ user: newBirthday, rule: birthdayRule, now }),
   })
 
-  // A: Cancer -> Virgo during the Virgo period.
+  // A: Cancer -> Virgo; both predicates are based on their respective stored birthdays.
   const scenarioA = evaluateChange({ birthMonth: 7, birthDay: 15 }, { birthMonth: 9, birthDay: 5 }, new Date('2026-09-10T04:00:00.000Z'))
-  assert.equal(scenarioA.oldZodiac, false)
+  assert.equal(scenarioA.oldZodiac, true)
   assert.equal(scenarioA.newZodiac, true)
 
-  // B: Virgo -> Capricorn during the Capricorn period.
+  // B: Virgo -> Capricorn.
   const scenarioB = evaluateChange({ birthMonth: 9, birthDay: 5 }, { birthMonth: 12, birthDay: 25 }, new Date('2026-12-28T04:00:00.000Z'))
-  assert.equal(scenarioB.oldZodiac, false)
+  assert.equal(scenarioB.oldZodiac, true)
   assert.equal(scenarioB.newZodiac, true)
 
   // C: today's birthday becomes a non-today birthday.
@@ -259,10 +266,10 @@ test('生日变更场景 A-E 使用最新生日判断旧资格、新资格与未
   assert.equal(scenarioD.oldToday, false)
   assert.equal(scenarioD.newToday, true)
 
-  // E: the new Aquarius badge waits until the Aquarius period, then qualifies.
+  // E: the new Aquarius badge qualifies immediately from the new birthday.
   const scenarioENow = evaluateChange({ birthMonth: 7, birthDay: 15 }, { birthMonth: 1, birthDay: 25 }, new Date('2026-09-10T04:00:00.000Z'))
-  assert.equal(scenarioENow.oldZodiac, false)
-  assert.equal(scenarioENow.newZodiac, false)
+  assert.equal(scenarioENow.oldZodiac, true)
+  assert.equal(scenarioENow.newZodiac, true)
   const scenarioELater = evaluateBadgeRule({
     user: { birthMonth: 1, birthDay: 25 },
     rule: { ...zodiacRule, configJson: { zodiac: 'AQUARIUS' } },
@@ -271,12 +278,14 @@ test('生日变更场景 A-E 使用最新生日判断旧资格、新资格与未
   assert.equal(scenarioELater, true)
 })
 
-test('场景 F：星座来源软回收后保留历史并允许按同一周期键重新激活', () => {
+test('场景 F：星座来源软回收后保留历史并允许按稳定资格键重新激活', () => {
   const service = read('lib/badge-service.ts')
   const revokeStart = service.indexOf('export async function revokeBadgeAcquisitionSource')
   const revoke = service.slice(revokeStart)
   assert.match(service, /sameSource\.isActive/)
   assert.match(service, /regrantRecordId = sameGrant\.id/)
+  assert.match(service, /regrantRecordId = sameSource\.userBadgeId/)
+  assert.match(service, /grantKey,/)
   assert.match(service, /reactivated: true/)
   assert.match(revoke, /userBadgeSource\.update\(/)
   assert.doesNotMatch(revoke, /userBadge\.deleteMany|userBadge\.delete\(/i)

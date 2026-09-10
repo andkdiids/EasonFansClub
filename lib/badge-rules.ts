@@ -268,7 +268,7 @@ export const BADGE_RULE_REGISTRY = {
   BIRTHDAY_ZODIAC: {
     group: '账号',
     label: '星座',
-    dataDescription: '用户生日属于指定星座，并在该星座周期内满足条件',
+    dataDescription: '用户当前生日属于指定星座时满足条件，与当前日期无关',
     metricLoader: 'BIRTHDAY_ZODIAC',
     supportedOperators: ['GTE'],
     events: ['USER_LOGIN', 'USER_ACTIVE', 'USER_BIRTHDAY_UPDATED'],
@@ -276,12 +276,12 @@ export const BADGE_RULE_REGISTRY = {
     specialKind: 'BIRTHDAY_ZODIAC',
     supportsHistoricalBackfill: false,
     supportsRetentionWhileEligible: true,
-    historicalBasis: '仅按上海时区当前星座周期与用户生日月日判断，不追溯已经结束的星座周期',
+    historicalBasis: '仅按用户当前保存的生日月日解析所属星座，不受当前日期星座周期影响',
     defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => {
       const zodiac = getZodiacFromRuleConfig(configJson)
       return zodiac
-        ? `用户生日属于${ZODIAC_LABELS[zodiac]}，并在${ZODIAC_LABELS[zodiac]}星座周期内自动获得。`
-        : '用户生日属于指定星座，并在对应星座周期内自动获得。'
+        ? `用户当前生日属于${ZODIAC_LABELS[zodiac]}时自动获得。`
+        : '用户当前生日属于指定星座时自动获得。'
     },
   },
   BIRTHDAY_TODAY: {

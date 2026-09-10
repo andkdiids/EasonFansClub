@@ -42,6 +42,8 @@ type GrowthRewardRule = {
 }
 
 type GrowthOverview = {
+  points: number
+  weeklyMilestoneRewards?: Array<{ days: number; reward: number }>
   today: {
     dateKey: string
     total: number
@@ -178,15 +180,25 @@ export function GrowthPanel({
   const [loading, setLoading] = useState(true)
   const [busyKey, setBusyKey] = useState('')
   const [error, setError] = useState('')
+  const [rewardNotice, setRewardNotice] = useState('')
 
   const applyOverview = useCallback((next: GrowthOverview) => {
     setOverview(next)
     onOverviewChange?.(next)
+    const rewards = next.weeklyMilestoneRewards || []
+    if (rewards.length) {
+      const rewardText = rewards.map((item) => `+${item.reward}`).join('、')
+      setRewardNotice(`本周已完成 ${next.week.completedDays} 天，获得 ${rewardText} 挂号费`)
+      window.dispatchEvent(new CustomEvent('user:points-updated', {
+        detail: { source: 'growth-panel', points: next.points, gainedPoints: rewards.reduce((sum, item) => sum + item.reward, 0) },
+      }))
+    }
   }, [onOverviewChange])
 
   const requestOverview = useCallback(async (refreshProfile = false) => {
     setLoading(true)
     setError('')
+    setRewardNotice('')
     try {
       const response = await fetch(refreshProfile ? '/api/growth/refresh' : '/api/growth', {
         method: refreshProfile ? 'POST' : 'GET',
@@ -211,8 +223,22 @@ export function GrowthPanel({
     const refreshAfterProfileUpdate = () => {
       void requestOverview(true)
     }
+    const refreshAfterGrowthAction = () => {
+      void requestOverview(false)
+    }
+    const refreshAfterPointsUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ source?: string }>).detail
+      if (detail?.source === 'growth-panel') return
+      void requestOverview(false)
+    }
     window.addEventListener('profile-updated', refreshAfterProfileUpdate)
-    return () => window.removeEventListener('profile-updated', refreshAfterProfileUpdate)
+    window.addEventListener('checkin:completed', refreshAfterGrowthAction)
+    window.addEventListener('user:points-updated', refreshAfterPointsUpdate)
+    return () => {
+      window.removeEventListener('profile-updated', refreshAfterProfileUpdate)
+      window.removeEventListener('checkin:completed', refreshAfterGrowthAction)
+      window.removeEventListener('user:points-updated', refreshAfterPointsUpdate)
+    }
   }, [requestOverview])
 
   const claim = useCallback(async (payload: { taskCode?: string; milestone?: number }, key: string) => {
@@ -266,7 +292,7 @@ export function GrowthPanel({
             <summary>奖励规则 <span aria-hidden="true">›</span></summary>
             <div className="growth-reward-rule-groups">
               {overview.rewardRules.map((group) => (
-                <section className="growth-reward-rule-group" key={group.key}>
+                <section className="growth-reward-rule-group" data-reward-group={group.key} key={group.key}>
                   <h3>{group.title}</h3>
                   {group.description ? <p className="growth-reward-rule-group-description">{group.description}</p> : null}
                   <div className="growth-rule-list">
@@ -280,16 +306,15 @@ export function GrowthPanel({
                           : rule.amountLabel
                       const content = (
                         <>
-                          <span className="growth-rule-main"><span>{rule.title}</span><strong>{amount}</strong></span>
-                          {details ? <small>{details}</small> : null}
+                          <span className="growth-rule-main">
+                            <span>{rule.title}</span>
+                            {details ? <small>{details}</small> : null}
+                          </span>
+                          <strong className="growth-rule-reward">{amount}</strong>
                         </>
                       )
                       const key = rule.milestoneDays === undefined ? rule.code : `milestone-${rule.milestoneDays}`
-                      return rule.milestoneDays !== undefined && rule.claimable && !rule.claimed ? (
-                        <button type="button" className="growth-rule-row" key={key} onClick={() => void claim({ milestone: rule.milestoneDays }, `milestone-${rule.milestoneDays}`)} disabled={busyKey === `milestone-${rule.milestoneDays}`}>
-                          {content}
-                        </button>
-                      ) : <div className="growth-rule-row" key={key}>{content}</div>
+                      return <div className="growth-rule-row" key={key}>{content}</div>
                     })}
                   </div>
                 </section>
@@ -298,7 +323,7 @@ export function GrowthPanel({
           </details>
 
           <section className="growth-panel-section growth-core-list" aria-labelledby="growth-core-title">
-            <h3 id="growth-core-title">今天只做一件事</h3>
+            <h3 id="growth-core-title">今天只做一件事<span className="growth-core-title-note">（每日必做）</span></h3>
             <div className="growth-item-list">
               {overview.today.items.map((item) => <GrowthActionRow key={item.code} item={item} right={formatTodayProgress(item)} completed={Boolean(item.completed)} />)}
             </div>
@@ -330,6 +355,7 @@ export function GrowthPanel({
           </div>
         </>
       )}
+      {rewardNotice ? <p className="growth-panel-success" role="status">{rewardNotice}</p> : null}
       {error ? <p className="growth-panel-error" role="alert">{error}</p> : null}
     </div>
   )

@@ -1,6 +1,7 @@
 'use client'
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { ImageEditor } from '@/components/ImageEditor'
 import {
   ClipboardImageReadError,
   ContentImageClientError,
@@ -30,6 +31,18 @@ type PendingUpload = {
   phase: PendingUploadPhase
   error?: string
   previewFailed?: boolean
+}
+
+type LocalUploadedFile = {
+  file: File
+  previewUrl: string
+}
+
+type EditingImage = {
+  kind: 'pending' | 'uploaded'
+  id: string
+  file: File
+  url?: string
 }
 
 function createUploadId() {
@@ -74,6 +87,8 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   const [error, setError] = useState('')
   const [draggingUrl, setDraggingUrl] = useState<string | null>(null)
   const [clipboardReading, setClipboardReading] = useState(false)
+  const [editingImage, setEditingImage] = useState<EditingImage | null>(null)
+  const [replacingUrl, setReplacingUrl] = useState<string | null>(null)
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
   const onBusyChangeRef = useRef(onBusyChange)
@@ -82,6 +97,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   const draggingUrlRef = useRef<string | null>(null)
   const pointerDragRef = useRef<PointerDragState | null>(null)
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
+  const localUploadedFilesRef = useRef(new Map<string, LocalUploadedFile>())
 
   useEffect(() => {
     valueRef.current = value
@@ -94,11 +110,22 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
 
   useEffect(() => {
     pendingUploadsRef.current = pendingUploads
-    onBusyChangeRef.current?.(pendingUploads.some((item) => isBusyPhase(item.phase)))
-  }, [pendingUploads])
+    onBusyChangeRef.current?.(pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl))
+  }, [editingImage, pendingUploads, replacingUrl])
+
+  useEffect(() => {
+    const currentUrls = new Set(value)
+    for (const [url, local] of localUploadedFilesRef.current) {
+      if (!currentUrls.has(url)) {
+        URL.revokeObjectURL(local.previewUrl)
+        localUploadedFilesRef.current.delete(url)
+      }
+    }
+  }, [value])
 
   useEffect(() => () => {
     pendingUploadsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
+    localUploadedFilesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
   }, [])
 
   function updatePendingUpload(id: string, update: Partial<PendingUpload>) {
@@ -115,6 +142,13 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     setPendingUploads(next)
   }
 
+  function completePendingUpload(item: PendingUpload, url: string) {
+    const next = pendingUploadsRef.current.filter((current) => current.id !== item.id)
+    pendingUploadsRef.current = next
+    setPendingUploads(next)
+    localUploadedFilesRef.current.set(url, { file: item.file, previewUrl: item.previewUrl })
+  }
+
   function appendUploadedUrl(url: string) {
     const current = valueRef.current
     if (current.includes(url)) return
@@ -124,6 +158,11 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   }
 
   function removeUploadedUrl(url: string) {
+    const local = localUploadedFilesRef.current.get(url)
+    if (local) {
+      URL.revokeObjectURL(local.previewUrl)
+      localUploadedFilesRef.current.delete(url)
+    }
     const next = valueRef.current.filter((item) => item !== url)
     valueRef.current = next
     onChangeRef.current(next)
@@ -139,10 +178,51 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
 
       appendUploadedUrl(url)
-      removePendingUpload(item.id)
+      completePendingUpload(item, url)
     } catch (reason) {
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
       updatePendingUpload(item.id, { phase: 'failed', error: failureMessage(reason) })
+    }
+  }
+
+  function completePendingEdit(id: string, editedFile: File) {
+    const current = pendingUploadsRef.current.find((item) => item.id === id)
+    if (!current) return
+    const previewUrl = URL.createObjectURL(editedFile)
+    URL.revokeObjectURL(current.previewUrl)
+    const replacement: PendingUpload = { ...current, file: editedFile, previewUrl, phase: 'processing', error: undefined }
+    updatePendingUpload(id, replacement)
+    setEditingImage(null)
+    void uploadItem(replacement)
+  }
+
+  async function completeUploadedEdit(url: string, editedFile: File) {
+    const current = localUploadedFilesRef.current.get(url)
+    if (!current) return
+    const previewUrl = URL.createObjectURL(editedFile)
+    localUploadedFilesRef.current.set(url, { file: editedFile, previewUrl })
+    setEditingImage(null)
+    setReplacingUrl(url)
+    setError('')
+    try {
+      const { url: nextUrl } = await uploadContentImage(editedFile, () => undefined)
+      if (nextUrl === url) {
+        URL.revokeObjectURL(current.previewUrl)
+        localUploadedFilesRef.current.set(url, { file: editedFile, previewUrl })
+        return
+      }
+      const next = valueRef.current.map((item) => item === url ? nextUrl : item)
+      valueRef.current = next
+      onChangeRef.current(next)
+      localUploadedFilesRef.current.delete(url)
+      URL.revokeObjectURL(current.previewUrl)
+      localUploadedFilesRef.current.set(nextUrl, { file: editedFile, previewUrl })
+    } catch (reason) {
+      localUploadedFilesRef.current.set(url, current)
+      URL.revokeObjectURL(previewUrl)
+      setError(failureMessage(reason))
+    } finally {
+      setReplacingUrl(null)
     }
   }
 
@@ -299,7 +379,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     setDragging(null)
   }
 
-  const busy = pendingUploads.some((item) => isBusyPhase(item.phase))
+  const busy = pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl)
   const pendingCount = pendingUploads.filter((item) => isBusyPhase(item.phase)).length
   const totalCount = existingCount + value.length + pendingCount
   const canAddMore = totalCount < MAX_CONTENT_IMAGES
@@ -354,6 +434,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
                 </p>
                 {item.phase === 'failed' && item.error ? <p className="break-words text-red-600">{item.error}</p> : null}
                 <div className="flex gap-2">
+                  <button type="button" onClick={() => setEditingImage({ kind: 'pending', id: item.id, file: item.file })} disabled={isBusyPhase(item.phase)} className="text-brand-700 disabled:opacity-40">编辑</button>
                   {item.phase === 'failed' ? <button type="button" onClick={() => void uploadItem(item)} className="text-brand-700">重试</button> : null}
                   <button type="button" onClick={() => removePendingUpload(item.id)} className="text-red-600">删除</button>
                 </div>
@@ -370,8 +451,9 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
           onPointerUp={finishPointerDrag}
           onPointerCancel={finishPointerDrag}
         >
-          {value.map((url) => (
-            <div
+          {value.map((url) => {
+            const local = localUploadedFilesRef.current.get(url)
+            return <div
               key={url}
               ref={(element) => {
                 if (element) itemRefs.current.set(url, element)
@@ -391,7 +473,14 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
               style={{ touchAction: 'none' }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={publicImageVariantUrl(url, 'thumb-md') || url} alt="已上传内容，拖拽可调整顺序" className="pointer-events-none h-24 w-full rounded-xl object-cover" loading="lazy" />
+              <img src={local?.previewUrl || publicImageVariantUrl(url, 'thumb-md') || url} alt="已上传内容，拖拽可调整顺序" className="pointer-events-none h-24 w-full rounded-xl object-cover" loading="lazy" />
+              {local ? <button
+                type="button"
+                disabled={replacingUrl === url}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => setEditingImage({ kind: 'uploaded', id: url, url, file: local.file })}
+                className="absolute left-1 top-1 rounded-full bg-sky-600/90 px-2 py-1 text-xs text-white disabled:opacity-50"
+              >{replacingUrl === url ? '处理中…' : '编辑'}</button> : null}
               <button
                 type="button"
                 onPointerDown={(event) => event.stopPropagation()}
@@ -401,11 +490,12 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
                 删除
               </button>
             </div>
-          ))}
+          })}
         </div>
       ) : null}
       {error ? <p className="text-sm font-bold text-red-600" role="alert">{error}</p> : null}
       {busy ? <p className="text-xs font-bold text-slate-500" role="status">图片处理完成后才能发布帖子。</p> : null}
+      {editingImage ? <ImageEditor file={editingImage.file} onCancel={() => setEditingImage(null)} onComplete={(editedFile) => editingImage.kind === 'pending' ? completePendingEdit(editingImage.id, editedFile) : void completeUploadedEdit(editingImage.url!, editedFile)} /> : null}
     </div>
   )
 })

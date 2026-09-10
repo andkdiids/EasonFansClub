@@ -59,7 +59,7 @@ test('reply client preserves actionable status messages and only uses generic co
   assert.equal(getReplyErrorMessage(500, {}), '回复失败，请稍后重试')
   assert.equal(getReplyErrorMessage(400, { errors: { content: '回复最多 300 字' } }), '回复最多 300 字')
   assert.match(replyForm, /getReplyErrorMessage\(response\.status, data\)/)
-  assert.match(replyForm, /setContent\(''\)/)
+  assert.match(replyForm, /onDraftClear\?\.\(\)/)
 })
 
 test('baseline metadata stays bound to the edited schema and baseline', () => {

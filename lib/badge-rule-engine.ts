@@ -7,7 +7,7 @@ import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMet
 import { getSeriesCompletionEligibleUserIds, getSeriesCompletionPreview, processBadgeGrantEffects } from '@/lib/badge-phase3'
 import { getBatchHistoricalBadgeMetrics, getHistoricalBackfillCapability, getHistoricalQualificationWindow, type HistoricalQualificationWindow } from '@/lib/badge-historical'
 import { getActivityParticipationBadgeStats, grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
-import { getBirthdayWhereForZodiac, getCurrentZodiacSign, getZodiacPeriodKey, getZodiacSignFromBirthday, isBirthdayToday, type ZodiacSign } from '@/lib/zodiac'
+import { getBirthdayWhereForZodiac, isBirthdayToday, resolveZodiac, type ZodiacSign } from '@/lib/zodiac'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { getTodayMonthDay } from '@/lib/today'
 import { backfillBadgeOwnershipRule, getBadgeOwnershipRuleStats } from '@/lib/badge-ownership'
@@ -132,7 +132,9 @@ function grantKeyForRule(
 ) {
   if (rule.ruleType === 'ACCOUNT_AGE_DAYS') return `account-age:${rule.id}:${rule.threshold ?? 'none'}`
   if (rule.ruleType === 'BIRTHDAY_TODAY') return `birthday:${getShanghaiDateKey(now)}`
-  if (rule.ruleType === 'BIRTHDAY_ZODIAC') return `zodiac:${getZodiacPeriodKey(now, 'Asia/Shanghai') || getShanghaiDateKey(now)}`
+  // Zodiac ownership is persistent qualification based on the user's
+  // birthday, so the key must not rotate with the current zodiac period.
+  if (rule.ruleType === 'BIRTHDAY_ZODIAC') return `zodiac:${rule.id}`
   return grantKeyPrefix ? `${grantKeyPrefix}:rule:${rule.id}` : undefined
 }
 
@@ -141,16 +143,15 @@ function grantKeyForRule(
  * backfill/preview. Non-numeric rules must not be represented by a made-up
  * threshold; birthday rules are evaluated from their typed month/day facts.
  *
- * Automatic evaluation keeps the current zodiac-period requirement. Admin
- * backfill evaluates the user's persistent birthday zodiac only, so a
- * historical scan is not limited by today's zodiac period.
+ * BIRTHDAY_ZODIAC is a persistent qualification: the user's current stored
+ * birthday resolves to one sign regardless of today's calendar date. The
+ * mode argument remains for API compatibility with admin backfill callers.
  */
 export function evaluateBadgeRule({
   user,
   rule,
   metric = 0,
   now = new Date(),
-  mode = 'AUTO',
 }: {
   user: BadgeRuleEvaluationUser
   rule: BadgeRuleEvaluation
@@ -160,10 +161,9 @@ export function evaluateBadgeRule({
 }) {
   if (rule.ruleType === 'BIRTHDAY_ZODIAC') {
     if (user.birthMonth == null || user.birthDay == null) return false
-    const zodiac = getZodiacSignFromBirthday({ month: user.birthMonth, day: user.birthDay })
+    const zodiac = resolveZodiac(user.birthMonth, user.birthDay)
     const configuredZodiac = getZodiacFromRuleConfig(rule.configJson)
-    if (zodiac === null || configuredZodiac !== zodiac) return false
-    return mode === 'ADMIN_BACKFILL' || getCurrentZodiacSign(now, 'Asia/Shanghai') === configuredZodiac
+    return zodiac !== null && configuredZodiac === zodiac
   }
 
   if (rule.ruleType === 'BIRTHDAY_TODAY') {
@@ -188,7 +188,7 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
     ? await prisma.user.findUnique({ where: { id: userId }, select: { id: true, birthMonth: true, birthDay: true } })
     : null
   if (birthdayUser && birthdayUser.birthMonth != null && birthdayUser.birthDay != null
-    && !getZodiacSignFromBirthday({ month: birthdayUser.birthMonth, day: birthdayUser.birthDay })) {
+    && !resolveZodiac(birthdayUser.birthMonth, birthdayUser.birthDay)) {
     console.warn('[badge-rule.birthday.invalid-birthday]', { userId })
   }
   const needsConcertTargets = rules.some((rule) => rule.ruleType === 'CONCERT_SHOW_ATTENDED' || rule.ruleType === 'CONCERT_TOUR_ATTENDED')
@@ -298,7 +298,7 @@ export async function reconcileBirthdayRelatedBadges(userId: string, now = new D
 
   // Retention runs first so old ineligible sources are removed before the
   // grant pass can re-activate a previously revoked record for the new
-  // birthday/zodiac period.
+  // birthday/zodiac qualification.
   try {
     const { evaluateBadgeRetentionForUser } = await import('@/lib/badge-retention')
     const retention = await evaluateBadgeRetentionForUser(userId, {
@@ -354,17 +354,13 @@ export type ZodiacBadgeScanSummary = {
 }
 
 /**
- * Daily zodiac scan. Resolve one Shanghai zodiac period first, then query
- * only users whose birthdays fall in that period and only rules configured
- * for that period. Other zodiac rules are not scanned.
+ * Daily zodiac scan. Scan all current birthday qualifications. The current
+ * calendar zodiac period is deliberately not used as an eligibility filter:
+ * a Leo user remains a Leo user throughout the year.
  */
 export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<ZodiacBadgeScanSummary> {
-  const zodiac = getCurrentZodiacSign(now, 'Asia/Shanghai')
-  const summary: ZodiacBadgeScanSummary = { zodiac, scanned: 0, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, failed: 0, failures: [] }
-  if (!zodiac) return summary
-
-  const rules = (await loadEnabledRules(['BIRTHDAY_ZODIAC'], now))
-    .filter((rule) => getZodiacFromRuleConfig(rule.configJson) === zodiac)
+  const summary: ZodiacBadgeScanSummary = { zodiac: null, scanned: 0, evaluated: 0, eligible: 0, granted: 0, alreadyOwned: 0, failed: 0, failures: [] }
+  const rules = await loadEnabledRules(['BIRTHDAY_ZODIAC'], now)
   if (!rules.length) return summary
 
   let cursor: string | undefined
@@ -373,7 +369,7 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
       where: {
         status: 'ACTIVE',
         isDeleted: false,
-        ...getBirthdayWhereForZodiac(zodiac),
+        OR: [{ birthMonth: { not: null } }, { birthDay: { not: null } }],
         ...(cursor ? { id: { gt: cursor } } : {}),
       },
       orderBy: { id: 'asc' },
@@ -400,7 +396,7 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
             badgeId: rule.badgeId,
             sourceType: 'AUTO_RULE',
             sourceId: rule.id,
-            grantKey: `zodiac:${getZodiacPeriodKey(now, 'Asia/Shanghai') || getShanghaiDateKey(now)}:rule:${rule.id}`,
+            grantKey: `zodiac:${rule.id}`,
             grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: rule.threshold, configJson: rule.configJson })}`,
             obtainedAt: now,
             availabilityMode: 'CURRENT',
@@ -720,7 +716,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
     const newlyGranted: Array<{ userId: string; recordId: string }> = []
     for (const user of rows) {
       if (!evaluateBadgeRule({ user, rule, now, mode: type === 'BIRTHDAY_ZODIAC' ? 'ADMIN_BACKFILL' : 'AUTO' })) {
-        if (type === 'BIRTHDAY_ZODIAC' && (user.birthMonth !== null || user.birthDay !== null) && !getZodiacSignFromBirthday({ month: user.birthMonth || 0, day: user.birthDay || 0 })) {
+        if (type === 'BIRTHDAY_ZODIAC' && (user.birthMonth !== null || user.birthDay !== null) && !resolveZodiac(user.birthMonth || 0, user.birthDay || 0)) {
           console.warn('[badge-rule.birthday.invalid-birthday]', { userId: user.id })
         }
         summary.notEligible += 1
@@ -732,7 +728,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
           badgeId,
           sourceType: 'AUTO_RULE',
           sourceId: badge.BadgeRule.id,
-          grantKey: `backfill:${badge.BadgeRule.id}:${type === 'BIRTHDAY_ZODIAC' ? `zodiac:${getZodiacPeriodKey(now, 'Asia/Shanghai') || getShanghaiDateKey(now)}` : `birthday:${getShanghaiDateKey(now)}`}`,
+          grantKey: `backfill:${badge.BadgeRule.id}:${type === 'BIRTHDAY_ZODIAC' ? `zodiac:${badge.BadgeRule.id}` : `birthday:${getShanghaiDateKey(now)}`}`,
           grantReason: `自动达成：${ruleDescription(rule)}`,
           obtainedAt: now,
           availabilityMode: 'CURRENT',

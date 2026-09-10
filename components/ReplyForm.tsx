@@ -15,6 +15,9 @@ export function ReplyForm({
   replyTo,
   onReplyCancel,
   onReplyCreated,
+  draftContent,
+  onDraftChange,
+  onDraftClear,
   autoFocus = false,
   className = '',
 }: Readonly<{
@@ -22,13 +25,16 @@ export function ReplyForm({
   replyTo?: { id: string; name: string } | null
   onReplyCancel?: () => void
   onReplyCreated?: (reply: unknown) => void
+  draftContent?: string
+  onDraftChange?: (content: string) => void
+  onDraftClear?: () => void
   autoFocus?: boolean
   className?: string
 }>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const submittingRef = useRef(false)
-  const [content, setContent] = useState('')
+  const [localContent, setLocalContent] = useState('')
   const [mentions, setMentions] = useState<MentionDraft[]>([])
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
@@ -36,8 +42,14 @@ export function ReplyForm({
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const content = draftContent ?? localContent
   const contentLength = getReplyLengthMetrics(content)
   const isOverLimit = contentLength.exceededBy > 0
+
+  function setContent(nextContent: string) {
+    if (draftContent !== undefined && onDraftChange) onDraftChange(nextContent)
+    else setLocalContent(nextContent)
+  }
 
   useEffect(() => {
     if (!autoFocus) return
@@ -95,15 +107,20 @@ export function ReplyForm({
         setError('回复已提交，但评论数据加载失败，请刷新评论区重试')
         return
       }
-      setContent('')
+      onDraftClear?.()
+      if (draftContent === undefined) setLocalContent('')
       setMentions([])
       setImageUrls([])
       setPendingSticker(null)
       setPickerOpen(false)
       onReplyCancel?.()
       onReplyCreated?.(data.reply)
-      setSuccess(data.rewardPoints ? `评论成功，获得 +${data.rewardPoints} 挂号费` : '评论成功')
-      if (data.rewardPoints) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints } }))
+      const weeklyRewardText = Array.isArray(data.weeklyMilestoneRewards)
+        ? data.weeklyMilestoneRewards.filter((item: { reward?: unknown }) => Number.isSafeInteger(item?.reward) && Number(item.reward) > 0).map((item: { reward: number }) => `+${item.reward}`).join('、')
+        : ''
+      const commentSuccess = data.rewardPoints ? `评论成功，获得 +${data.rewardPoints} 挂号费` : '评论成功'
+      setSuccess(weeklyRewardText ? `${commentSuccess}；本周里程碑奖励 ${weeklyRewardText} 挂号费` : commentSuccess)
+      if (data.rewardPoints || weeklyRewardText) window.dispatchEvent(new CustomEvent('user:points-updated', { detail: { delta: data.rewardPoints, points: data.points } }))
       if (!onReplyCreated) {
         try {
           router.refresh()

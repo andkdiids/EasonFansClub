@@ -7,10 +7,17 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
-import { completeTask } from '@/lib/growth-tasks/service'
+import { completeTask, resolveAndGrantWeeklyMilestonesInTransaction } from '@/lib/growth-tasks/service'
+import {
+  buildLyricMatchSnippet,
+  getPrescriptionHistorySearchTerms,
+  normalizePrescriptionHistoryQuery,
+  parsePrescriptionHistoryDateQuery,
+} from '@/lib/prescription-history-search'
 
 export const EMPTY_LYRIC_MESSAGE = '今日处方暂未开具，请等待管理员补充歌词库'
 export const PRESCRIPTION_HISTORY_PAGE_SIZE = 12
+export const PRESCRIPTION_HISTORY_SEARCH_PAGE_SIZE = 20
 
 const dailyDrawInclude = {
   User: {
@@ -55,6 +62,14 @@ const dailyDrawHistoryInclude = {
       createdAt: true,
     },
   },
+  LyricPrescription: {
+    select: {
+      id: true,
+      text: true,
+      songTitle: true,
+      albumTitle: true,
+    },
+  },
 } satisfies Prisma.EntertainmentDailyDrawInclude
 
 type DailyDrawHistoryRow = Prisma.EntertainmentDailyDrawGetPayload<{
@@ -72,7 +87,15 @@ export type DailyPrescriptionHistoryRecord = {
   prescriptionCode: string
   issuedAtBeijing: string
   lyric: { text: string; songTitle: string; albumTitle: string | null } | null
+  lyricSnippet?: string | null
 }
+
+export type PrescriptionHistoryOptions = Readonly<{
+  query?: string | null
+  dateKey?: string | null
+  pageSize?: number
+  now?: Date
+}>
 
 export type LyricCandidate = {
   id: string
@@ -158,11 +181,23 @@ export async function getEntertainmentDailyDrawStatus(userId: string, now = new 
   }
 }
 
-function serializeDailyDrawHistory(draw: DailyDrawHistoryRow): DailyPrescriptionHistoryRecord {
+function getHistoryLyric(draw: DailyDrawHistoryRow) {
+  if (draw.lyricText && draw.songTitle) {
+    return { text: draw.lyricText, songTitle: draw.songTitle, albumTitle: draw.albumTitle }
+  }
+  if (draw.LyricPrescription) {
+    return {
+      text: draw.LyricPrescription.text,
+      songTitle: draw.LyricPrescription.songTitle,
+      albumTitle: draw.LyricPrescription.albumTitle,
+    }
+  }
+  return null
+}
+
+function serializeDailyDrawHistory(draw: DailyDrawHistoryRow, searchQuery = ''): DailyPrescriptionHistoryRecord {
   const points = draw.PointLog?.points ?? draw.points
-  const lyric = draw.lyricText && draw.songTitle
-    ? { text: draw.lyricText, songTitle: draw.songTitle, albumTitle: draw.albumTitle }
-    : null
+  const lyric = getHistoryLyric(draw)
 
   return {
     id: draw.id,
@@ -175,29 +210,62 @@ function serializeDailyDrawHistory(draw: DailyDrawHistoryRow): DailyPrescription
     prescriptionCode: draw.prescriptionCode,
     issuedAtBeijing: formatBeijingDateTimeMinute(draw.createdAt),
     lyric,
+    ...(searchQuery ? { lyricSnippet: buildLyricMatchSnippet(lyric?.text, searchQuery) } : {}),
   }
 }
 
-export async function getEntertainmentDailyDrawHistory(userId: string, requestedPage = 1) {
-  const total = await prisma.entertainmentDailyDraw.count({ where: { userId } })
-  const totalPages = Math.max(1, Math.ceil(total / PRESCRIPTION_HISTORY_PAGE_SIZE))
+function buildHistoryWhere(userId: string, options: PrescriptionHistoryOptions): Prisma.EntertainmentDailyDrawWhereInput {
+  const normalizedQuery = normalizePrescriptionHistoryQuery(options.query)
+  const dateKey = options.dateKey
+    ? parsePrescriptionHistoryDateQuery(options.dateKey, options.now)
+    : parsePrescriptionHistoryDateQuery(normalizedQuery, options.now)
+  if (dateKey) return { userId, dateKey }
+  if (!normalizedQuery) return { userId }
+
+  const terms = getPrescriptionHistorySearchTerms(normalizedQuery)
+  return {
+    userId,
+    OR: terms.flatMap((term) => [
+      { songTitle: { contains: term } },
+      { lyricText: { contains: term } },
+      { LyricPrescription: { is: { songTitle: { contains: term } } } },
+      { LyricPrescription: { is: { text: { contains: term } } } },
+    ]),
+  }
+}
+
+export async function getEntertainmentDailyDrawHistory(userId: string, requestedPage = 1, options: PrescriptionHistoryOptions = {}) {
+  const normalizedQuery = normalizePrescriptionHistoryQuery(options.query)
+  const dateKey = options.dateKey
+    ? parsePrescriptionHistoryDateQuery(options.dateKey, options.now)
+    : parsePrescriptionHistoryDateQuery(normalizedQuery, options.now)
+  const isSearch = Boolean(dateKey || normalizedQuery)
+  const normalHistoryQuery = { where: { userId } }
+  const where = isSearch ? buildHistoryWhere(userId, options) : normalHistoryQuery.where
+  const pageSize = isSearch
+    ? Math.min(50, Math.max(1, Number.isSafeInteger(options.pageSize) ? options.pageSize! : PRESCRIPTION_HISTORY_SEARCH_PAGE_SIZE))
+    : PRESCRIPTION_HISTORY_PAGE_SIZE
+  const total = await prisma.entertainmentDailyDraw.count({ where })
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const page = Math.min(
     totalPages,
     Math.max(1, Number.isSafeInteger(requestedPage) ? requestedPage : 1),
   )
   const draws = await prisma.entertainmentDailyDraw.findMany({
-    where: { userId },
+    where,
     orderBy: [{ dateKey: 'desc' }, { createdAt: 'desc' }],
-    skip: (page - 1) * PRESCRIPTION_HISTORY_PAGE_SIZE,
-    take: PRESCRIPTION_HISTORY_PAGE_SIZE,
+    skip: (page - 1) * pageSize,
+    take: pageSize,
     include: dailyDrawHistoryInclude,
   })
 
   return {
-    records: draws.map(serializeDailyDrawHistory),
+    records: draws.map((draw) => serializeDailyDrawHistory(draw, dateKey ? '' : normalizedQuery)),
+    query: normalizedQuery,
+    dateKey,
     pagination: {
       page,
-      pageSize: PRESCRIPTION_HISTORY_PAGE_SIZE,
+      pageSize,
       total,
       totalPages,
       hasPrevious: page > 1,
@@ -277,9 +345,12 @@ async function createDrawTransaction(userId: string, dateKey: string, now: Date)
         data: { displayCount: { increment: 1 } },
       })
     }
+    const weeklyMilestones = await resolveAndGrantWeeklyMilestonesInTransaction(tx, userId, now)
 
     return {
-      ...serializeDailyDraw(draw, feeAward.totalPoints),
+      ...serializeDailyDraw(draw, weeklyMilestones.balance),
+      weeklyMilestoneRewards: weeklyMilestones.rewards,
+      weeklyCompletedDays: weeklyMilestones.days,
     }
   })
 }

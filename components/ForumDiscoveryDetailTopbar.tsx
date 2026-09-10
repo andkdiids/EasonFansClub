@@ -5,16 +5,21 @@ import { type ReactNode } from 'react'
 import type { ShareCardData } from '@/lib/share-card'
 import { ShareButton } from '@/components/share/ShareButton'
 
-export function ForumDiscoveryDetailTopbar({ postActions, shareTitle, shareText, shareCardData, canShare }: Readonly<{
+export function ForumDiscoveryDetailTopbar({ postActions, shareTitle, shareText, shareCardData, canShare, backHref }: Readonly<{
   postActions?: ReactNode
   shareTitle: string
   shareText: string
   shareCardData: ShareCardData
   canShare?: boolean
+  backHref?: string
 }>) {
   const router = useRouter()
 
   function goBack() {
+    if (backHref) {
+      router.replace(backHref)
+      return
+    }
     if (window.history.length > 1) router.back()
     else router.push('/forum')
   }

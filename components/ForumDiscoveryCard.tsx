@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { LikeButton } from '@/components/PostActions'
 import { getForumDiscoveryCoverFit, type ForumDiscoveryPost } from '@/lib/forum-discovery'
+import { postDetailHref } from '@/lib/post-navigation'
 import { UserDisplayName } from '@/components/UserDisplayName'
 
 function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost; priority: boolean }>) {
@@ -37,14 +38,15 @@ function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost;
   )
 }
 
-export function ForumDiscoveryCard({ post, priority = false, onOpen }: Readonly<{
+export function ForumDiscoveryCard({ post, priority = false, returnTo = null, onOpen }: Readonly<{
   post: ForumDiscoveryPost
   priority?: boolean
+  returnTo?: string | null
   onOpen: (postId: string) => void
 }>) {
   return (
     <article className="forum-discovery-card">
-      <Link href={`/posts/${post.id}`} className="forum-discovery-card-link" onClick={(event) => { event.preventDefault(); onOpen(post.id) }}>
+      <Link href={postDetailHref(post.id, returnTo)} className="forum-discovery-card-link" onClick={(event) => { event.preventDefault(); onOpen(post.id) }}>
         <DiscoveryCover post={post} priority={priority} />
         <div className="forum-discovery-card-body">
           <div className="forum-discovery-card-badges" aria-label="帖子标签">

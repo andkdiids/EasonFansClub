@@ -84,8 +84,12 @@ export function isZodiacSign(value: unknown): value is ZodiacSign {
   return typeof value === 'string' && ZODIAC_CODE_SET.has(value)
 }
 
-/** Resolve a zodiac from month/day only; the birth year is intentionally ignored. */
-export function getZodiacSignFromBirthday(value: BirthdayParts | null | undefined): ZodiacSign | null {
+/**
+ * Canonical zodiac resolver. Zodiac ownership is determined only from the
+ * stored birthday month/day; the current date and birth year are irrelevant.
+ */
+export function resolveZodiac(month: number, day: number): ZodiacSign | null {
+  const value = { month, day }
   if (!isValidBirthdayParts(value)) return null
   const current = ordinal(value)
 
@@ -101,9 +105,14 @@ export function getZodiacSignFromBirthday(value: BirthdayParts | null | undefine
   return null
 }
 
+/** Compatibility wrapper for callers that already have typed birthday parts. */
+export function getZodiacSignFromBirthday(value: BirthdayParts | null | undefined): ZodiacSign | null {
+  return value ? resolveZodiac(value.month, value.day) : null
+}
+
 export function getZodiacSignFromUserBirthday(value: UserBirthdayParts | null | undefined) {
   if (!value || value.birthMonth == null || value.birthDay == null) return null
-  return getZodiacSignFromBirthday({ month: value.birthMonth, day: value.birthDay })
+  return resolveZodiac(value.birthMonth, value.birthDay)
 }
 
 /** Resolve the current zodiac period from a calendar date in the requested timezone. */
@@ -115,14 +124,14 @@ export function getCurrentZodiacSign(now = new Date(), timezone = BEIJING_TIME_Z
         const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
         return { month: Number(values.month), day: Number(values.day) }
       })()
-  return getZodiacSignFromBirthday(today)
+  return resolveZodiac(today.month, today.day)
 }
 
 /** Stable yearly business key for the zodiac period currently in progress. */
 export function getZodiacPeriodKey(now = new Date(), timezone = BEIJING_TIME_ZONE) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(now)
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  const sign = getZodiacSignFromBirthday({ month: Number(values.month), day: Number(values.day) })
+  const sign = resolveZodiac(Number(values.month), Number(values.day))
   if (!sign) return null
   const range = ZODIAC_DATE_RANGES[sign]
   const currentOrdinal = Number(values.month) * 100 + Number(values.day)

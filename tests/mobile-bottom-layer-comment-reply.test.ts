@@ -52,7 +52,7 @@ test('回复表单用同步 ref 和 disabled 状态双重防重复提交', () =>
 })
 
 test('回复失败保留输入且刷新异常只显示评论区错误', () => {
-  const clearIndex = replyForm.indexOf("setContent('')")
+  const clearIndex = replyForm.indexOf('onDraftClear?.()')
   const successCheck = replyForm.indexOf('if (!data.success')
   assert.ok(clearIndex > successCheck)
   assert.match(replyForm, /router\.refresh\(\)[\s\S]*评论刷新失败/)

@@ -26,6 +26,7 @@ import {
   parseForumPresentationMode,
   type ForumPresentationMode,
 } from '@/lib/forum-discovery'
+import { postDetailHref } from '@/lib/post-navigation'
 
 type DiscoverySession = {
   posts: ForumDiscoveryPost[]
@@ -108,6 +109,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const searchParams = useSearchParams()
   const isDesktop = useIsDesktopMediaQuery()
   const queryString = searchParams.toString()
+  const discoveryReturnTo = `${pathname}${queryString ? `?${queryString}` : ''}`
   const boardValue = searchParams.get('board') || ''
   const query = searchParams.get('query') || ''
   const activeBoard = boardValue && boardValue !== 'all' ? boardValue : ''
@@ -703,7 +705,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
       scrollY: window.scrollY,
       savedAt: Date.now(),
     })
-    router.push(`/posts/${postId}`, { scroll: false })
+    router.push(postDetailHref(postId, discoveryReturnTo), { scroll: false })
   }
 
   const tabItems = useMemo(() => buildForumDiscoveryTabs(boards), [boards])
@@ -801,7 +803,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
             </div>
           ) : (
             <div className="forum-discovery-grid">
-              {posts.map((post, index) => <ForumDiscoveryCard key={post.id} post={post} priority={index < 2} onOpen={openPost} />)}
+              {posts.map((post, index) => <ForumDiscoveryCard key={post.id} post={post} priority={index < 2} returnTo={discoveryReturnTo} onOpen={openPost} />)}
             </div>
           )
         ) : null}
@@ -815,6 +817,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
         <ForumFishModePreview
           post={fishPreviewPost}
           minimal={minimalMode}
+          returnTo={discoveryReturnTo}
           focusComments={fishPreviewFocusComments}
           hasPrevious={fishPreviewIndex > 0}
           hasNext={fishPreviewIndex >= 0 && fishPreviewIndex < posts.length - 1}

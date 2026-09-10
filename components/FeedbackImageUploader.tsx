@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE } from '@/lib/feedback'
+import { ImageEditor } from '@/components/ImageEditor'
 
 export type UploadedFeedbackAttachment = { url: string; mimeType?: string | null }
 type UploadItem = {
@@ -18,6 +19,7 @@ export function FeedbackImageUploader({ onChange, onBusyChange }: {
   onBusyChange: (busy: boolean) => void
 }) {
   const [items, setItems] = useState<UploadItem[]>([])
+  const [editingId, setEditingId] = useState<string | null>(null)
   const itemsRef = useRef(items)
   const onChangeRef = useRef(onChange)
   const onBusyChangeRef = useRef(onBusyChange)
@@ -27,9 +29,9 @@ export function FeedbackImageUploader({ onChange, onBusyChange }: {
 
   useEffect(() => () => itemsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl)), [])
   useEffect(() => {
-    onChangeRef.current(items.flatMap((item) => item.status === 'success' && item.uploaded ? [item.uploaded] : []))
-    onBusyChangeRef.current(items.some((item) => item.status !== 'success'))
-  }, [items])
+    onChangeRef.current(items.flatMap((item) => item.uploaded ? [item.uploaded] : []))
+    onBusyChangeRef.current(items.some((item) => item.status !== 'success') || Boolean(editingId))
+  }, [editingId, items])
 
   async function uploadItem(item: UploadItem) {
     setItems((current) => current.map((row) => row.id === item.id ? { ...row, status: 'uploading', error: undefined } : row))
@@ -67,11 +69,23 @@ export function FeedbackImageUploader({ onChange, onBusyChange }: {
   }
 
   function remove(id: string) {
+    if (editingId === id) setEditingId(null)
     setItems((current) => {
       const target = current.find((item) => item.id === id)
       if (target) URL.revokeObjectURL(target.previewUrl)
       return current.filter((item) => item.id !== id)
     })
+  }
+
+  function completeEdit(id: string, editedFile: File) {
+    const current = itemsRef.current.find((item) => item.id === id)
+    if (!current) return
+    const previewUrl = URL.createObjectURL(editedFile)
+    URL.revokeObjectURL(current.previewUrl)
+    const replacement: UploadItem = { ...current, file: editedFile, previewUrl, status: 'waiting', error: undefined }
+    setItems((rows) => rows.map((row) => row.id === id ? replacement : row))
+    setEditingId(null)
+    void uploadItem(replacement)
   }
 
   return <div className="space-y-3">
@@ -88,11 +102,16 @@ export function FeedbackImageUploader({ onChange, onBusyChange }: {
             {item.status === 'waiting' ? '等待上传' : item.status === 'uploading' ? '上传中…' : item.status === 'success' ? '上传成功' : item.error || '上传失败'}
           </p>
           <div className="flex gap-2">
+            <button type="button" onClick={() => setEditingId(item.id)} disabled={item.status === 'uploading'} className="text-brand-700 disabled:opacity-40">编辑</button>
             {item.status === 'failed' && !item.error?.startsWith('仅支持') && !item.error?.includes('10MB') ? <button type="button" onClick={() => void uploadItem(item)} className="text-brand-700">重试</button> : null}
             <button type="button" onClick={() => remove(item.id)} className="text-red-600">删除</button>
           </div>
         </div>
       </article>)}
     </div> : null}
+    {editingId ? (() => {
+      const target = items.find((item) => item.id === editingId)
+      return target ? <ImageEditor file={target.file} onCancel={() => setEditingId(null)} onComplete={(editedFile) => completeEdit(target.id, editedFile)} /> : null
+    })() : null}
   </div>
 }

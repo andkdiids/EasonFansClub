@@ -197,15 +197,22 @@ export async function grantGrowthReward(
   const isDailyGame = task?.code === 'DAILY_GAME'
   if (!task || (task.kind !== 'passive' && !isActiveAction && !isDailyGame)) throw new Error('GROWTH_REWARD_TASK_NOT_REWARDABLE')
   const now = input.now || new Date()
+  const shouldResolveWeeklyMilestones = task.frequency === 'daily' && getTodayTasks().some((todayTask) => todayTask.code === task.code)
+  const resolveWeeklyMilestones = async () => shouldResolveWeeklyMilestones
+    ? resolveAndGrantWeeklyMilestonesInTransaction(tx, input.userId, now)
+    : null
   const sourceEventId = normalizeSource(input.sourceEventId)
   const periodKey = task.frequency === 'daily' ? getShanghaiDateKey(now) : getShanghaiWeekKey(now)
   const completion = await completeTask(tx, { userId: input.userId, taskCode: input.taskCode, periodKey, sourceEventId, now })
-  if (!completion.eligible || !completion.completion) return { awardedAmount: 0, capped: true, duplicate: false }
+  if (!completion.eligible || !completion.completion) return { awardedAmount: 0, capped: true, duplicate: false, weeklyMilestoneRewards: [] }
 
   await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${input.userId} FOR UPDATE`
   const businessKey = input.businessKey || stableBusinessKey([input.taskCode, input.userId, periodKey, sourceEventId])
   const original = await tx.pointLog.findUnique({ where: { businessKey }, select: { id: true } })
-  if (original) return { awardedAmount: 0, capped: false, duplicate: true }
+  if (original) {
+    const weekly = await resolveWeeklyMilestones()
+    return { awardedAmount: 0, capped: false, duplicate: true, weeklyMilestoneRewards: weekly?.rewards || [] }
+  }
 
   const [window, ...additionalWindows] = capWindows(task, now)
   const getUsed = async (scopedWindow: GrowthRewardWindow) => {
@@ -231,7 +238,8 @@ export async function grantGrowthReward(
   const effectiveRemaining = Math.max(0, Math.min(remaining, ...additionalRemaining))
   if (effectiveRemaining <= 0) {
     await tx.growthTaskCompletion.update({ where: { id: completion.completion.id }, data: { rewardAmount: 0 } })
-    return { awardedAmount: 0, capped: true, duplicate: false }
+    const weekly = await resolveWeeklyMilestones()
+    return { awardedAmount: 0, capped: true, duplicate: false, weeklyMilestoneRewards: weekly?.rewards || [] }
   }
   const amount = task.capUnit === 'events' ? task.reward : Math.min(task.reward, effectiveRemaining)
   const award = await awardRegistrationFee(tx, {
@@ -250,7 +258,8 @@ export async function grantGrowthReward(
     now,
   })
   await tx.growthTaskCompletion.update({ where: { id: completion.completion.id }, data: { rewardAmount: award.awardedAmount } })
-  return { awardedAmount: award.awardedAmount, capped: false, duplicate: award.duplicate }
+  const weekly = await resolveWeeklyMilestones()
+  return { awardedAmount: award.awardedAmount, capped: false, duplicate: award.duplicate, weeklyMilestoneRewards: weekly?.rewards || [] }
 }
 
 /**
@@ -428,43 +437,105 @@ async function completedActiveDays(tx: GrowthTransaction, userId: string, weekKe
   }).size
 }
 
-export async function claimWeeklyMilestone(userId: string, milestone: number, now = new Date()) {
-  const definition = WEEKLY_MILESTONES.find((item) => item.days === milestone)
-  if (!definition) throw new Error('INVALID_WEEKLY_MILESTONE')
+export type WeeklyMilestoneReward = Readonly<{
+  days: number
+  reward: number
+}>
+
+/**
+ * A pure threshold resolver shared by the transactional reconciler and tests.
+ * It deliberately uses >= so a repaired or imported progress value cannot
+ * skip an earlier milestone.
+ */
+export function getDueWeeklyMilestones(
+  completedDays: number,
+  claims: Iterable<Readonly<{ milestone: number; claimedAt?: Date | null }>>,
+) {
+  const claimed = new Set(Array.from(claims).filter((claim) => Boolean(claim.claimedAt)).map((claim) => claim.milestone))
+  return WEEKLY_MILESTONES
+    .filter((milestone) => completedDays >= milestone.days && !claimed.has(milestone.days))
+    .map((milestone): WeeklyMilestoneReward => ({ days: milestone.days, reward: milestone.reward }))
+}
+
+export async function resolveAndGrantWeeklyMilestonesInTransaction(
+  tx: GrowthTransaction,
+  userId: string,
+  now = new Date(),
+) {
+  // Every resolver entry point (task completion and overview reconciliation)
+  // uses the same user-row lock order before touching milestone claims. This
+  // keeps concurrent requests serialized without weakening the claim unique
+  // key or the PointLog business-key idempotency guard.
+  await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
   const weekKey = getShanghaiWeekKey(now)
-  return prismaTransaction(async (tx) => {
-    const days = await completedActiveDays(tx, userId, weekKey, now)
-    if (days < definition.days) throw new Error('WEEKLY_MILESTONE_NOT_REACHED')
+  const days = await completedActiveDays(tx, userId, weekKey, now)
+  const existingClaims = await tx.growthWeeklyMilestoneClaim.findMany({
+    where: { userId, weekKey },
+    select: { milestone: true, claimedAt: true },
+  })
+  const dueMilestones = getDueWeeklyMilestones(days, existingClaims)
+  const rewards: WeeklyMilestoneReward[] = []
+
+  for (const milestone of dueMilestones) {
     const claim = await tx.growthWeeklyMilestoneClaim.upsert({
-      where: { userId_weekKey_milestone: { userId, weekKey, milestone } },
+      where: { userId_weekKey_milestone: { userId, weekKey, milestone: milestone.days } },
       update: {},
-      create: { userId, weekKey, milestone, rewardAmount: definition.reward },
+      create: { userId, weekKey, milestone: milestone.days, rewardAmount: milestone.reward },
     })
-    await tx.$queryRaw`SELECT \`id\` FROM \`GrowthWeeklyMilestoneClaim\` WHERE \`id\` = ${claim.id} FOR UPDATE`
-    const locked = await tx.growthWeeklyMilestoneClaim.findUniqueOrThrow({ where: { id: claim.id } })
-    if (locked.claimedAt) return { claimed: false, reward: 0, alreadyClaimed: true, weekKey, days }
+    const lockedRows = await tx.$queryRaw<Array<{ claimedAt: Date | null }>>`
+      SELECT \`claimedAt\` FROM \`GrowthWeeklyMilestoneClaim\` WHERE \`id\` = ${claim.id} FOR UPDATE
+    `
+    if (lockedRows[0]?.claimedAt) continue
+
     const award = await awardRegistrationFee(tx, {
       userId,
-      requestedAmount: definition.reward,
+      requestedAmount: milestone.reward,
       action: 'GROWTH_REWARD',
-      reason: `本周完成 ${definition.days} 天` ,
-      businessKey: stableBusinessKey(['milestone', userId, weekKey, String(milestone)]),
-      growthTaskCode: `WEEKLY_MILESTONE_${milestone}`,
+      reason: `本周完成 ${milestone.days} 天`,
+      businessKey: stableBusinessKey(['milestone', userId, weekKey, String(milestone.days)]),
+      growthTaskCode: `WEEKLY_MILESTONE_${milestone.days}`,
       sourceEventId: weekKey,
       now,
     })
-    await tx.growthWeeklyMilestoneClaim.update({ where: { id: locked.id }, data: { claimedAt: now } })
-    return { claimed: true, reward: award.awardedAmount || definition.reward, alreadyClaimed: false, weekKey, days }
-  })
+    await tx.growthWeeklyMilestoneClaim.update({
+      where: { id: claim.id },
+      data: { claimedAt: now },
+    })
+    if (!award.duplicate && award.awardedAmount > 0) rewards.push(milestone)
+  }
+
+  const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { points: true } })
+  return { weekKey, days, rewards, balance: user.points }
+}
+
+export async function resolveAndGrantWeeklyMilestones(userId: string, now = new Date()) {
+  return prismaTransaction((tx) => resolveAndGrantWeeklyMilestonesInTransaction(tx, userId, now))
+}
+
+export async function claimWeeklyMilestone(userId: string, milestone: number, now = new Date()) {
+  const definition = WEEKLY_MILESTONES.find((item) => item.days === milestone)
+  if (!definition) throw new Error('INVALID_WEEKLY_MILESTONE')
+  const result = await resolveAndGrantWeeklyMilestones(userId, now)
+  if (result.days < definition.days) throw new Error('WEEKLY_MILESTONE_NOT_REACHED')
+  const awarded = result.rewards.find((item) => item.days === definition.days)
+  return {
+    claimed: Boolean(awarded),
+    reward: awarded?.reward || 0,
+    alreadyClaimed: !awarded,
+    weekKey: result.weekKey,
+    days: result.days,
+    balance: result.balance,
+  }
 }
 
 export async function getGrowthOverview(userId: string, now = new Date()) {
   const { prisma } = await import('@/lib/prisma')
   const dateKey = getShanghaiDateKey(now)
   const weekKey = getShanghaiWeekKey(now)
+  const weeklyReconciliation = await resolveAndGrantWeeklyMilestones(userId, now)
   const todayRange = getShanghaiDayRange(now)
   const weekDateKeys = dayKeysForWeek(weekKey)
-  const [completions, newLifeCompletions, pointLogs, checkIns, prescriptions, communityRewardLogs, duelCount] = await Promise.all([
+  const [completions, newLifeCompletions, pointLogs, checkIns, prescriptions, communityRewardLogs, duelCount, user] = await Promise.all([
     prisma.growthTaskCompletion.findMany({ where: { userId, periodKey: { in: [dateKey, weekKey, ...weekDateKeys] } }, orderBy: { completedAt: 'asc' } }),
     prisma.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: getTasksByKind('newLife').map((task) => task.code) }, oneTimeKey: { not: null } }, orderBy: { completedAt: 'asc' } }),
     prisma.pointLog.findMany({ where: { userId, growthTaskCode: { not: null }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { growthTaskCode: true, points: true, createdAt: true } }),
@@ -472,6 +543,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     prisma.entertainmentDailyDraw.findMany({ where: { userId, dateKey: { in: weekDateKeys } }, select: { dateKey: true } }),
     prisma.pointLog.findMany({ where: { userId, action: { in: ['COMMENT_POST', 'POST_COMMENT_RECEIVED'] }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { action: true, points: true, dateKey: true, createdAt: true } }),
     prisma.guessSongDuelMatch.count({ where: { status: 'FINISHED', finishedAt: { gte: todayRange.start, lt: todayRange.end }, GuessSongDuelPlayer: { some: { userId } } } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { points: true } }),
   ])
   const commentRewardCountsByDate = new Map<string, number>(weekDateKeys.map((dateKey) => [dateKey, 0]))
   const receivedCommentCountsByDate = new Map<string, number>()
@@ -633,15 +705,15 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
           const milestone = rule.milestoneDays === undefined
             ? null
             : milestones.find((claim) => claim.milestone === rule.milestoneDays)
-          return milestone
-            ? { ...rule, claimable: milestoneDays >= (rule.milestoneDays || 0), claimed: Boolean(milestone.claimedAt) }
-            : rule
+           return { ...rule, claimable: milestoneDays >= (rule.milestoneDays || 0), claimed: Boolean(milestone?.claimedAt) }
         }),
       }
     : group)
   return {
     timezone: 'Asia/Shanghai',
     taskSystemLaunchAt: TASK_SYSTEM_LAUNCH_AT.toISOString(),
+    points: user?.points ?? weeklyReconciliation.balance,
+    weeklyMilestoneRewards: weeklyReconciliation.rewards,
     today: {
       dateKey,
       // The top counter and the list are both based on the same enabled daily

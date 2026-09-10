@@ -5,6 +5,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { ImageEditor } from '@/components/ImageEditor'
 import {
   formatSalonSession,
   SALON_CATEGORIES,
@@ -41,6 +42,7 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [files, setFiles] = useState<PreviewFile[]>([])
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [watermarkEnabled, setWatermarkEnabled] = useState(false)
   const [watermarkOpacity, setWatermarkOpacity] = useState(SALON_DEFAULT_WATERMARK_OPACITY)
   const [watermarkPosition, setWatermarkPosition] = useState<SalonWatermarkPosition>('BOTTOM_RIGHT')
@@ -84,11 +86,21 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
   }
 
   function removeFile(index: number) {
+    if (editingIndex === index) setEditingIndex(null)
     setFiles((current) => {
       const removed = current[index]
       if (removed) URL.revokeObjectURL(removed.url)
       return current.filter((_, itemIndex) => itemIndex !== index)
     })
+  }
+
+  function completeFileEdit(index: number, editedFile: File) {
+    const target = filesRef.current[index]
+    if (!target) return
+    const nextUrl = URL.createObjectURL(editedFile)
+    URL.revokeObjectURL(target.url)
+    setFiles((current) => current.map((item, itemIndex) => itemIndex === index ? { file: editedFile, url: nextUrl } : item))
+    setEditingIndex(null)
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -142,7 +154,7 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
     </section>
     <section className="salon-form-section"><div className="salon-form-section-heading"><div><p className="salon-kicker">02 · IMAGES</p><h2>选择图片</h2></div><span>最多 9 张 · 单张不超过 20MB</span></div>
       <div className="salon-upload-note">{preservesOriginal ? '会保留无水印原图，图库只使用优化后的缩略图；壁纸不会被强制裁成固定比例。' : '此分类只保存优化后的 WebP 展示图，不长期保留原始上传文件。'}</div>
-      <div className="salon-upload-previews">{files.map((item, index) => <figure key={`${item.file.name}-${index}`}><img src={item.url} alt={`待上传图片 ${index + 1}`} />{watermarkEnabled ? <span className={`salon-preview-watermark salon-preview-watermark-${watermarkPosition}`} style={{ opacity: watermarkOpacity / 100 }}>{watermarkText}</span> : null}<button type="button" onClick={() => removeFile(index)} aria-label={`移除第 ${index + 1} 张图片`}>×</button><figcaption>{index + 1}</figcaption></figure>)}<button type="button" className="salon-add-image" onClick={() => inputRef.current?.click()} disabled={files.length >= MAX_FILES}><span>＋</span><small>{files.length >= MAX_FILES ? '已达上限' : '添加图片'}</small></button></div>
+      <div className="salon-upload-previews">{files.map((item, index) => <figure key={`${item.file.name}-${index}`}><img src={item.url} alt={`待上传图片 ${index + 1}`} />{watermarkEnabled ? <span className={`salon-preview-watermark salon-preview-watermark-${watermarkPosition}`} style={{ opacity: watermarkOpacity / 100 }}>{watermarkText}</span> : null}<div className="salon-preview-actions"><button type="button" onClick={() => setEditingIndex(index)} disabled={submitting} aria-label={`编辑第 ${index + 1} 张图片`}>编辑</button><button type="button" onClick={() => removeFile(index)} disabled={submitting} aria-label={`移除第 ${index + 1} 张图片`}>×</button></div><figcaption>{index + 1}</figcaption></figure>)}<button type="button" className="salon-add-image" onClick={() => inputRef.current?.click()} disabled={files.length >= MAX_FILES || submitting}><span>＋</span><small>{files.length >= MAX_FILES ? '已达上限' : '添加图片'}</small></button></div>
       <input ref={inputRef} className="salon-hidden-file-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple onChange={addFiles} />
     </section>
     <section className="salon-form-section"><div className="salon-form-section-heading"><div><p className="salon-kicker">03 · WATERMARK</p><h2>展示设置</h2></div><span>默认关闭，原图永远不加水印</span></div>
@@ -152,5 +164,6 @@ export function SalonUploadForm({ options, watermarkText }: Readonly<{ options: 
     {error ? <p className="salon-form-error" role="alert">{error}</p> : null}
     {message ? <p className="salon-form-success" role="status">{message}</p> : null}
     <div className="salon-upload-submit"><button type="submit" className="salon-primary-button" disabled={submitting}>{submitting ? '提交中…' : '提交审核'}</button><span>投稿后默认进入审核中，审核通过后才会公开。</span></div>
+    {editingIndex !== null && files[editingIndex] ? <ImageEditor file={files[editingIndex].file} onCancel={() => setEditingIndex(null)} onComplete={(editedFile) => completeFileEdit(editingIndex, editedFile)} /> : null}
   </form>
 }

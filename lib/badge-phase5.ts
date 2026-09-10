@@ -220,11 +220,12 @@ function yearBounds(year: number) {
 }
 
 export async function getBadgeYearReview(userId: string, year: number) {
-  const currentYear = Number(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(new Date()))
+  const now = new Date()
+  const currentYear = Number(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(now))
   if (!Number.isInteger(year) || year < 2000 || year > currentYear) return null
   const { start, end } = yearBounds(year)
   const records = await prisma.userBadge.findMany({
-    where: { userId, obtainedAt: { gte: start, lt: end } },
+    where: { userId, ...activeUserBadgeWhere(now), obtainedAt: { gte: start, lt: end } },
     orderBy: [{ obtainedAt: 'asc' }, { id: 'asc' }],
     select: { id: true, obtainedAt: true, Badge: { select: { id: true, name: true, iconUrl: true, rarity: true, effectType: true, availableFrom: true, availableUntil: true } } },
   })
@@ -253,7 +254,11 @@ export async function getBadgeYearReview(userId: string, year: number) {
   }
   const availableYears = await prisma.$queryRaw<Array<{ year: number }>>(Prisma.sql`
     SELECT DISTINCT YEAR(CONVERT_TZ(obtainedAt, '+00:00', '+08:00')) AS year
-    FROM UserBadge WHERE userId = ${userId} ORDER BY year DESC
+    FROM UserBadge
+    WHERE userId = ${userId}
+      AND status = 'ACTIVE'
+      AND (expiresAt IS NULL OR expiresAt > ${now})
+    ORDER BY year DESC
   `)
   return {
     year, total: records.length, months,

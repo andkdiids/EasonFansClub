@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { ImageEditor } from '@/components/ImageEditor'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
 export type ActivityImageSelection = { file: File | null; removed: boolean }
@@ -37,6 +38,8 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
   const inputRef = useRef<HTMLInputElement | null>(null)
   const objectUrlRef = useRef<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [editing, setEditing] = useState(false)
   const [selectionError, setSelectionError] = useState('')
   const originalUrl = initialUrl?.trim() || null
 
@@ -44,6 +47,8 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     objectUrlRef.current = null
     setPreviewUrl(originalUrl ? publicImageVariantUrl(originalUrl, 'card') || originalUrl : null)
+    setSelectedFile(null)
+    setEditing(false)
     setSelectionError('')
   }, [originalUrl, resetSignal])
 
@@ -58,16 +63,28 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     objectUrlRef.current = URL.createObjectURL(file)
     setPreviewUrl(objectUrlRef.current)
+    setSelectedFile(file)
     setSelectionError('')
     onSelectionChange({ file, removed: false })
   }
 
   function remove() {
+    setEditing(false)
+    setSelectedFile(null)
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
     objectUrlRef.current = null
     setPreviewUrl(null)
     setSelectionError('')
     onSelectionChange({ file: null, removed: true })
+  }
+
+  function completeEdit(editedFile: File) {
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
+    objectUrlRef.current = URL.createObjectURL(editedFile)
+    setPreviewUrl(objectUrlRef.current)
+    setSelectedFile(editedFile)
+    setEditing(false)
+    onSelectionChange({ file: editedFile, removed: false })
   }
 
   const statusLabel = status === 'uploading' ? '上传中...' : status === 'success' ? '上传成功' : status === 'error' ? '上传失败' : ''
@@ -78,6 +95,7 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
         <button type="button" onClick={() => inputRef.current?.click()} disabled={disabled} className="rounded-full bg-sky-50 px-3 py-1.5 text-xs font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">{previewUrl ? replaceLabel : '上传图片'}</button>
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={selectFile} disabled={disabled} className="sr-only" />
         {previewUrl ? <button type="button" onClick={remove} disabled={disabled} className="rounded-full bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">{removeLabel}</button> : null}
+        {previewUrl && selectedFile ? <button type="button" onClick={() => setEditing(true)} disabled={disabled || status === 'uploading'} className="rounded-full border border-sky-200 px-3 py-1.5 text-xs font-black text-brand-700 disabled:opacity-50 dark:border-slate-700 dark:text-sky-200">编辑</button> : null}
         {statusLabel ? <span role="status" className={`text-xs font-black ${status === 'error' ? 'text-red-600' : status === 'success' ? 'text-emerald-600' : 'text-sky-700'}`}>{statusLabel}</span> : null}
       </div>
       {previewUrl ? (
@@ -86,6 +104,7 @@ export function ActivityImageUploader({ label, initialUrl, disabled = false, sta
       ) : <p className="text-xs font-bold text-slate-400">尚未上传。支持 JPG、PNG、WebP，单张不超过 5MB。</p>}
       {selectionError ? <p role="alert" className="text-xs font-bold text-red-600">{selectionError}</p> : null}
       {errorMessage ? <p role="alert" className="text-xs font-bold text-red-600">{errorMessage}</p> : null}
+      {editing && selectedFile ? <ImageEditor file={selectedFile} onCancel={() => setEditing(false)} onComplete={completeEdit} /> : null}
     </div>
   )
 }

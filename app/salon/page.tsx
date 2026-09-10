@@ -23,5 +23,5 @@ export default async function SalonPage({ searchParams }: { searchParams: Promis
     getSalonOptions(),
     getSalonCategoryCounts(),
   ])
-  return <SalonHome initialPosts={feed.posts} initialHasMore={feed.hasMore} initialNextCursor={feed.nextCursor} initialFeedSeed={feed.feedSeed} initialCategoryCounts={categoryCounts} options={options} currentUserId={currentUser?.id || null} />
+  return <SalonHome initialPosts={feed.posts} initialHasMore={feed.hasMore} initialNextCursor={feed.nextCursor} initialFeedSeed={feed.feedSeed} initialCategoryCounts={categoryCounts} options={options} currentUserId={currentUser?.id || null} restoreOnMount={params.restore === '1'} />
 }

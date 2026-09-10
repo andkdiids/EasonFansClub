@@ -292,7 +292,11 @@ export function CheckInButton({
       
       const streakBonus = Number(data.streakBonusRegistrationFee) || 0
       const feeMessage = `今日挂号成功，获得 +${nextCheckIn.points} 挂号费、+${nextCheckIn.exp} 经验`
-      setMessage(streakBonus ? `${feeMessage}（含长期患者奖励 +${streakBonus} 挂号费）` : feeMessage)
+      const weeklyRewards = Array.isArray(data.weeklyMilestoneRewards)
+        ? data.weeklyMilestoneRewards.filter((item: { reward?: unknown }) => Number.isSafeInteger(item?.reward) && Number(item.reward) > 0).map((item: { reward: number }) => `+${item.reward}`).join('、')
+        : ''
+      const checkInMessage = streakBonus ? `${feeMessage}（含长期患者奖励 +${streakBonus} 挂号费）` : feeMessage
+      setMessage(weeklyRewards ? `${checkInMessage}；本周里程碑奖励 ${weeklyRewards} 挂号费` : checkInMessage)
       let createdMessage = data.dailyMessage || null
       if (!createdMessage && data.dailyMessageId) {
         const messagesResponse = await fetch(

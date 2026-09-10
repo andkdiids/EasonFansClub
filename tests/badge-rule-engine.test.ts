@@ -74,7 +74,7 @@ test('默认获取文案集中生成，并覆盖所有首版支持指标', () =>
   assert.equal(generateBadgeAcquisitionDescription('ACCOUNT_AGE_DAYS', 365), '注册满 365 天后获得')
   assert.equal(generateBadgeAcquisitionDescription('DUEL_WIN_COUNT', 5), '累计赢得 5 场听听 1v1 对决后获得')
   assert.equal(generateBadgeAcquisitionDescription('RATING_COUNT', 10), '累计完成 10 次歌·颂评分后获得')
-  assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_ZODIAC', null, { zodiac: 'ARIES' }), '用户生日属于白羊座，并在白羊座星座周期内自动获得。')
+  assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_ZODIAC', null, { zodiac: 'ARIES' }), '用户当前生日属于白羊座时自动获得。')
   assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_TODAY', null, {}), '生日当天自动获得。')
 })
 

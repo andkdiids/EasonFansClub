@@ -62,7 +62,7 @@ test('预览来源精确绑定规则或活动，生日兼容来源覆盖旧生�
   assert.match(engine, /sourceType: 'ACTIVITY_PARTICIPATION', sourceId: activityId/)
   assert.match(engine, /sourceType: 'AUTO', sourceId: BIRTHDAY_BADGE_SLUG/)
   assert.match(engine, /sourceType: 'LEGACY', sourceId: null/)
-  assert.match(engine, /getZodiacSignFromBirthday/)
+  assert.match(engine, /resolveZodiac/)
   assert.match(engine, /当前生日并非今天/)
 })
 

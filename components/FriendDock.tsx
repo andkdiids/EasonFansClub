@@ -1153,20 +1153,29 @@ export function FriendDock({
     const bodyOverflow = body.style.overflow
     const bodyPosition = body.style.position
     const bodyTop = body.style.top
+    const bodyLeft = body.style.left
     const bodyWidth = body.style.width
+    const rootOverscrollBehavior = root.style.overscrollBehavior
+    const bodyOverscrollBehavior = body.style.overscrollBehavior
 
     root.style.overflow = 'hidden'
+    root.style.overscrollBehavior = 'none'
     body.style.overflow = 'hidden'
     body.style.position = 'fixed'
     body.style.top = `-${scrollY}px`
+    body.style.left = `-${scrollX}px`
     body.style.width = '100%'
+    body.style.overscrollBehavior = 'none'
 
     return () => {
       root.style.overflow = rootOverflow
+      root.style.overscrollBehavior = rootOverscrollBehavior
       body.style.overflow = bodyOverflow
       body.style.position = bodyPosition
       body.style.top = bodyTop
+      body.style.left = bodyLeft
       body.style.width = bodyWidth
+      body.style.overscrollBehavior = bodyOverscrollBehavior
       window.scrollTo({ top: scrollY, left: scrollX, behavior: 'auto' })
     }
   }, [open])
@@ -1671,7 +1680,7 @@ export function FriendDock({
   ], [friendGroups, groupFriends, ungroupedCount])
   const groupedMessages = useMemo(() => groupMessages(messages), [messages])
   const overlay = open && typeof document !== 'undefined' ? createPortal(
-    <>
+    <div className="friend-dock-modal-root">
       {isMobileDrawer ? (
         <div
           className="friend-dock-backdrop"
@@ -2163,7 +2172,7 @@ export function FriendDock({
         onCompositionEnd={handleFriendGroupDialogCompositionEnd}
         onKeyDown={handleFriendGroupDialogKeyDown}
       />
-    </>,
+    </div>,
     document.body,
   ) : null
 

@@ -2,9 +2,13 @@
 
 import { useRouter } from 'next/navigation'
 
-export function BackButton({ fallbackHref = '/', label = '返回上一页' }: Readonly<{ fallbackHref?: string; label?: string }>) {
+export function BackButton({ fallbackHref = '/', targetHref, label = '返回上一页', replaceTarget = false }: Readonly<{ fallbackHref?: string; targetHref?: string; label?: string; replaceTarget?: boolean }>) {
   const router = useRouter()
   function goBack() {
+    if (targetHref) {
+      if (replaceTarget) return router.replace(targetHref)
+      return router.push(targetHref)
+    }
     if (window.history.length > 1) return router.back()
     router.push(fallbackHref)
   }

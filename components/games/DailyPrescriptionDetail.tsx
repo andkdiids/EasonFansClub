@@ -14,6 +14,7 @@ type DrawResult = {
   prescriptionCode: string
   issuedAtBeijing: string
   lyric: { text: string; songTitle: string } | null
+  weeklyMilestoneRewards?: Array<{ days: number; reward: number }>
 }
 type DrawStatus = {
   hasDrawn: boolean
@@ -109,6 +110,7 @@ export function DailyPrescriptionDetail() {
           </header>
           <span>获得奖励</span>
           <strong>+{status.draw.points} 挂号费</strong>
+          {status.draw.weeklyMilestoneRewards?.length ? <p>本周里程碑奖励：{status.draw.weeklyMilestoneRewards.map((item) => `+${item.reward}`).join('、')} 挂号费</p> : null}
           {status.draw.lyric ? <blockquote>“{status.draw.lyric.text}”<cite>《{status.draw.lyric.songTitle}》</cite></blockquote> : null}
           <small>处方编号：{status.draw.prescriptionCode}</small>
           <footer className="daily-prescription-footer">

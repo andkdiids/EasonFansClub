@@ -30,6 +30,12 @@ import {
 import { Pagination } from '@/components/ui/Pagination'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import {
+  clearPostReplyDrafts,
+  getPostReplyDraftKey,
+  readPostReplyDrafts,
+  writePostReplyDraft,
+} from '@/lib/post-reply-drafts'
 
 type ReplyItem = {
   id: string
@@ -147,6 +153,7 @@ export function PostRepliesSection({
   const [myReplies, setMyReplies] = useState(() => (initialMyReplies || []).map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
   const [replyCount, setReplyCount] = useState(() => Math.max(initialReplyCount, 0))
   const [replyTo, setReplyTo] = useState<{ id: string; name: string } | null>(null)
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [mobileReplySheetOpen, setMobileReplySheetOpen] = useState(false)
   const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
   const activeReplyId = replyTo?.id
@@ -154,10 +161,60 @@ export function PostRepliesSection({
   const commentsTopRef = useRef<HTMLDivElement | null>(null)
   const navigationReasonRef = useRef<PostReplyNavigationReason>(null)
   const previousCommentViewRef = useRef({ page: pagination.page, sort, direction })
+  const replyDraftKey = useCallback((target: { id: string; name: string } | null) => getPostReplyDraftKey(
+    postId,
+    target ? { targetType: 'COMMENT', targetId: target.id } : { targetType: 'POST', targetId: postId },
+  ), [postId])
+  const updateReplyDraft = useCallback((key: string, content: string) => {
+    setReplyDrafts((current) => {
+      if (!content.trim()) {
+        if (!(key in current)) return current
+        const next = { ...current }
+        delete next[key]
+        return next
+      }
+      if (current[key] === content) return current
+      return { ...current, [key]: content }
+    })
+    writePostReplyDraft(key, content)
+  }, [])
+  const clearReplyDraft = useCallback((key: string) => {
+    setReplyDrafts((current) => {
+      if (!(key in current)) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+    writePostReplyDraft(key, '')
+  }, [])
   const closeMobileReplySheet = useCallback(() => {
     setMobileReplySheetOpen(false)
     setReplyTo(null)
   }, [])
+  useEffect(() => {
+    setReplyDrafts(readPostReplyDrafts(postId))
+  }, [postId])
+  useEffect(() => {
+    const postPath = `/posts/${postId}`
+    if (pathname && pathname !== postPath) {
+      clearPostReplyDrafts(postId)
+      setReplyDrafts({})
+      return
+    }
+
+    return () => {
+      const clearIfPostLeft = () => {
+        if (window.location.pathname !== postPath) clearPostReplyDrafts(postId)
+      }
+      // App Router may update the URL just after the page subtree unmounts.
+      // Check across the transition window so a real post-to-post navigation
+      // does not leave the old post's session fallback behind, while a refresh
+      // or same-post query change keeps the temporary draft.
+      const delays = [0, 50, 250, 1000]
+      clearIfPostLeft()
+      delays.forEach((delay) => window.setTimeout(clearIfPostLeft, delay))
+    }
+  }, [pathname, postId])
   useEffect(() => {
     setReplies(initialReplies.map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
     setMyReplies((initialMyReplies || []).map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
@@ -473,6 +530,9 @@ export function PostRepliesSection({
                   replyTo={replyTo}
                   onReplyCancel={() => setReplyTo(null)}
                   onReplyCreated={addReply}
+                  draftContent={replyDrafts[replyDraftKey(replyTo)] || ''}
+                  onDraftChange={(content) => updateReplyDraft(replyDraftKey(replyTo), content)}
+                  onDraftClear={() => clearReplyDraft(replyDraftKey(replyTo))}
                 />
               </div>
             ) : null}
@@ -554,6 +614,9 @@ export function PostRepliesSection({
               replyTo={replyTo}
               onReplyCancel={() => setReplyTo(null)}
               onReplyCreated={addReply}
+              draftContent={replyDrafts[replyDraftKey(replyTo)] || ''}
+              onDraftChange={(content) => updateReplyDraft(replyDraftKey(replyTo), content)}
+              onDraftClear={() => clearReplyDraft(replyDraftKey(replyTo))}
             />
           </div>
         ) : null}
@@ -585,6 +648,9 @@ export function PostRepliesSection({
               postId={postId}
               onReplyCancel={() => setReplyTo(null)}
               onReplyCreated={addReply}
+              draftContent={replyDrafts[replyDraftKey(null)] || ''}
+              onDraftChange={(content) => updateReplyDraft(replyDraftKey(null), content)}
+              onDraftClear={() => clearReplyDraft(replyDraftKey(null))}
             />
           </div>
           <div className="post-replies-mobile-composer-trigger">
@@ -695,6 +761,9 @@ export function PostRepliesSection({
         replyTo={replyTo}
         onClose={closeMobileReplySheet}
         onReplyCreated={addReply}
+        draftContent={replyDrafts[replyDraftKey(replyTo)] || ''}
+        onDraftChange={(content) => updateReplyDraft(replyDraftKey(replyTo), content)}
+        onDraftClear={() => clearReplyDraft(replyDraftKey(replyTo))}
       />
     ) : null}
     </>

@@ -10,12 +10,18 @@ export function PostReplyBottomSheet({
   replyTo,
   onClose,
   onReplyCreated,
+  draftContent,
+  onDraftChange,
+  onDraftClear,
 }: Readonly<{
   open: boolean
   postId: string
   replyTo?: { id: string; name: string } | null
   onClose: () => void
   onReplyCreated: (reply: unknown) => void
+  draftContent: string
+  onDraftChange: (content: string) => void
+  onDraftClear: () => void
 }>) {
   const [mounted, setMounted] = useState(false)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
@@ -158,6 +164,9 @@ export function PostReplyBottomSheet({
           className="post-reply-bottom-form"
           onReplyCancel={requestClose}
           onReplyCreated={onReplyCreated}
+          draftContent={draftContent}
+          onDraftChange={onDraftChange}
+          onDraftClear={onDraftClear}
         />
       </section>
     </>,

@@ -20,7 +20,7 @@ import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } f
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { updateUserIpRegion } from '@/lib/ip-region'
 import { ensureRuntimeObservability } from '@/lib/runtime-observability'
-import { completeTask } from '@/lib/growth-tasks/service'
+import { completeTask, resolveAndGrantWeeklyMilestonesInTransaction } from '@/lib/growth-tasks/service'
 
 function getCheckInRequestId(request: Request) {
   const provided = request.headers.get('x-request-id')?.trim()
@@ -472,9 +472,10 @@ export async function POST(request: Request) {
       },
       select: { points: true, exp: true, experience: true, consecutiveDays: true, level: true },
     })
+    const weeklyMilestones = await resolveAndGrantWeeklyMilestonesInTransaction(tx, user.id, checkedAt)
 
     return {
-      user: updatedUser,
+      user: { ...updatedUser, points: weeklyMilestones.balance },
       checkIn,
       gainedPoints: checkIn.points,
       gainedExp: checkIn.exp,
@@ -483,6 +484,8 @@ export async function POST(request: Request) {
       streakBonusRegistrationFee: streakFeeAward?.awardedAmount || 0,
       dailyMessageId,
       streaks,
+      weeklyMilestoneRewards: weeklyMilestones.rewards,
+      weeklyCompletedDays: weeklyMilestones.days,
     }
     })
   } catch (error) {
@@ -576,6 +579,8 @@ export async function POST(request: Request) {
     currentStreak: result.streaks.currentStreak,
     longestStreak: result.streaks.longestStreak,
     points: result.user.points,
+    weeklyMilestoneRewards: result.weeklyMilestoneRewards,
+    weeklyCompletedDays: result.weeklyCompletedDays,
     exp: result.user.exp,
     experience: result.user.experience,
     level: result.user.level,

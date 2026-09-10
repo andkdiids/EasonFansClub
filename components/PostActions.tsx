@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { PostFeatureConfirmDialog } from '@/components/PostFeatureConfirmDialog'
 import { redirectToLoginAfterConfirmedSessionInvalid } from '@/lib/client-auth'
+import { postEditHref } from '@/lib/post-navigation'
 
 export type PostInteractionLiker = {
   id: string
@@ -194,6 +195,7 @@ export function PostManagementMenu({
   canManage,
   canDelete,
   canEdit,
+  returnTo = null,
   redirectTo = '/forum',
 }: Readonly<{
   postId: string
@@ -202,6 +204,7 @@ export function PostManagementMenu({
   canManage: boolean
   canDelete: boolean
   canEdit: boolean
+  returnTo?: string | null
   redirectTo?: string
 }>) {
   const router = useRouter()
@@ -294,7 +297,7 @@ export function PostManagementMenu({
               type="button"
               role="menuitem"
               disabled={isSubmitting}
-              onClick={() => { setMenuOpen(false); router.push(`/posts/${postId}/edit`) }}
+              onClick={() => { setMenuOpen(false); router.push(postEditHref(postId, returnTo)) }}
             >
               编辑帖子
             </button>

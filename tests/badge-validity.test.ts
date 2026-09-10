@@ -92,13 +92,13 @@ test('expired history can be earned again while an active grant is blocked', () 
   assert.match(read('components/BadgeCollectionPanel.tsx'), /key=\{item\.recordId\}/)
 })
 
-test('event grants require a new event key and periodic grants use a new period key', () => {
+test('event grants require a new event key and birthday grants use stable qualification keys', () => {
   const engine = read('lib/badge-rule-engine.ts')
   assert.match(engine, /eventKey = eventId\?\.trim\(\) \? `event:\$\{eventType\}:\$\{eventId\.trim\(\)\}`/)
   assert.match(engine, /grantKey: grantKeyForRule\(rule, now, grantKeyPrefix\)/)
   assert.match(engine, /account-age:\$\{rule\.id\}:\$\{rule\.threshold \?\? 'none'\}/)
   assert.match(engine, /birthday:\$\{getShanghaiDateKey\(now\)\}/)
-  assert.match(engine, /zodiac:\$\{getZodiacPeriodKey\(now, 'Asia\/Shanghai'\)/)
+  assert.match(engine, /zodiac:\$\{rule\.id\}/)
   assert.match(read('lib/birthday.ts'), /grantKey: `birthday:\$\{dateKey\}`/)
   assert.match(read('lib/zodiac.ts'), /getZodiacPeriodKey/)
 })
@@ -138,13 +138,14 @@ test('admin UI exposes validity setting and manual grant expiry preview', () => 
   assert.match(grantRoute, /previewExpiresAt: calculateBadgeExpiresAt\(/)
 })
 
-test('current badge display excludes expired grants and history displays each record', () => {
+test('current badge display and owner history exclude expired or revoked grants', () => {
   const service = read('lib/badge-service.ts')
   const panel = read('components/BadgeCollectionPanel.tsx')
   assert.match(service, /where: \{ userId, \.\.\.activeUserBadgeWhere\(now\)/)
   assert.match(service, /history: historyRecords\.map\(badgeHistoryView\)/)
   assert.match(panel, /历史获得/)
-  assert.match(panel, /已过期/)
+  assert.match(panel, /activeHistory/)
+  assert.doesNotMatch(panel, /item\.status === 'REVOKED'/)
   assert.match(panel, /有效至：/)
   assert.match(panel, /item\.recordId/)
 })

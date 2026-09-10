@@ -5,7 +5,8 @@ import { processBadgeGrantEffects } from '@/lib/badge-phase3'
 import { prisma } from '@/lib/prisma'
 import { getZodiacFromRuleConfig } from '@/lib/badge-rules'
 import { BIRTHDAY_BADGE_SLUG } from '@/lib/birthday'
-import { getCurrentZodiacSign, getZodiacSignFromBirthday, type ZodiacSign } from '@/lib/zodiac'
+import { activeUserBadgeWhere } from '@/lib/badge-validity'
+import { resolveZodiac, type ZodiacSign } from '@/lib/zodiac'
 
 export const BIRTHDAY_HISTORY_BACKFILL_SOURCE = 'BIRTHDAY_HISTORY_BACKFILL'
 export const BIRTHDAY_HISTORY_BACKFILL_TIMEZONE = 'Asia/Shanghai'
@@ -101,7 +102,8 @@ type HistoryGrantPlan = {
 
 type DateIndex = {
   birthdayDates: Map<string, string[]>
-  zodiacDates: Map<ZodiacSign, string[]>
+  /** Calendar dates inside the administrator-selected historical cohort window. */
+  windowDates: string[]
 }
 
 const CALENDAR_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
@@ -152,10 +154,6 @@ function dateKeyFromUtcDate(date: Date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
 }
 
-function dateAtShanghaiNoon(key: string) {
-  return new Date(`${key}T12:00:00.000+08:00`)
-}
-
 /** Build date indexes once per operation; users are never multiplied by days. */
 function buildDateIndex(input: BirthdayHistoryBackfillInput): DateIndex {
   const start = parseCalendarDateKey(input.startDate, '开始日期')
@@ -163,21 +161,16 @@ function buildDateIndex(input: BirthdayHistoryBackfillInput): DateIndex {
   if ('error' in start || 'error' in end) throw new Error('历史补发日期范围无效')
 
   const birthdayDates = new Map<string, string[]>()
-  const zodiacDates = new Map<ZodiacSign, string[]>()
+  const windowDates: string[] = []
   for (let date = start.date; date.getTime() <= end.date.getTime(); date = new Date(date.getTime() + DAY_MS)) {
     const key = dateKeyFromUtcDate(date)
+    windowDates.push(key)
     const monthDay = key.slice(5)
     const birthdayValues = birthdayDates.get(monthDay) || []
     birthdayValues.push(key)
     birthdayDates.set(monthDay, birthdayValues)
-    const zodiac = getCurrentZodiacSign(dateAtShanghaiNoon(key), BIRTHDAY_HISTORY_BACKFILL_TIMEZONE)
-    if (zodiac) {
-      const zodiacValues = zodiacDates.get(zodiac) || []
-      zodiacValues.push(key)
-      zodiacDates.set(zodiac, zodiacValues)
-    }
   }
-  return { birthdayDates, zodiacDates }
+  return { birthdayDates, windowDates }
 }
 
 function firstDateOnOrAfter(dates: readonly string[] | undefined, minimum: string) {
@@ -200,9 +193,13 @@ function birthdayEligibleDate(user: CandidateUser, index: DateIndex) {
 
 function zodiacEligibleDate(user: CandidateUser, index: DateIndex) {
   if (user.birthMonth == null || user.birthDay == null) return { zodiac: null, eligibleDate: null }
-  const zodiac = getZodiacSignFromBirthday({ month: user.birthMonth, day: user.birthDay })
+  const zodiac = resolveZodiac(user.birthMonth, user.birthDay)
   if (!zodiac) return { zodiac: null, eligibleDate: null }
-  return { zodiac, eligibleDate: firstDateOnOrAfter(index.zodiacDates.get(zodiac), getBeijingDateKey(user.createdAt)) }
+  // Zodiac ownership is not a seasonal event. The selected range only limits
+  // the historical cohort; the sign itself always comes from the current
+  // stored birthday above. Use the first in-window date as the audit/grant
+  // anchor after the account's registration date.
+  return { zodiac, eligibleDate: firstDateOnOrAfter(index.windowDates, getBeijingDateKey(user.createdAt)) }
 }
 
 function normalizeInput(input: BirthdayHistoryBackfillInput) {
@@ -292,7 +289,7 @@ function buildPlans(
   const plans: HistoryGrantPlan[] = []
   for (const user of users) {
     const birth = user.birthMonth != null && user.birthDay != null ? { month: user.birthMonth, day: user.birthDay } : null
-    const resolvedZodiac = birth ? getZodiacSignFromBirthday(birth) : null
+    const resolvedZodiac = birth ? resolveZodiac(birth.month, birth.day) : null
     const hasBirthdayPart = user.birthMonth != null || user.birthDay != null
     if (hasBirthdayPart && (!birth || !resolvedZodiac)) summary.invalidBirthdayUserCount += 1
 
@@ -350,7 +347,7 @@ async function loadOwnedKeys(plans: readonly HistoryGrantPlan[]) {
   const badgeIds = [...new Set(plans.map((plan) => plan.badgeId))]
   if (!userIds.length || !badgeIds.length) return new Set<string>()
   const owned = await prisma.userBadge.findMany({
-    where: { userId: { in: userIds }, badgeId: { in: badgeIds } },
+    where: { userId: { in: userIds }, badgeId: { in: badgeIds }, ...activeUserBadgeWhere() },
     select: { userId: true, badgeId: true },
   })
   return new Set(owned.map(planKey))

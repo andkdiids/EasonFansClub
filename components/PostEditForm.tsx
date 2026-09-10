@@ -33,6 +33,7 @@ function removePendingPostFromDiscoverySessions(postId: string) {
 
 export function PostEditForm({
   postId,
+  detailHref,
   initialTitle,
   initialContent,
   initialRichContent,
@@ -41,6 +42,7 @@ export function PostEditForm({
   initialMedia,
 }: Readonly<{
   postId: string
+  detailHref: string
   initialTitle: string
   initialContent: string
   initialRichContent?: unknown | null
@@ -115,7 +117,9 @@ export function PostEditForm({
           boardTo: slugOf(boardId),
         })
       }
-      router.push(`/posts/${postId}`)
+      // Replace the editor entry so browser/system back returns to the
+      // original plaza source instead of reopening the editor.
+      router.replace(detailHref)
       router.refresh()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '保存失败')
@@ -229,7 +233,7 @@ export function PostEditForm({
 
       <div className="flex items-center justify-between gap-3 border-t border-sky-100 pt-5">
         <Link
-          href={`/posts/${postId}`}
+          href={detailHref}
           className="rounded-lg border border-slate-200 px-5 py-3 text-sm font-black text-slate-600 transition hover:bg-slate-50"
         >
           取消

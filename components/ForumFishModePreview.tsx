@@ -13,6 +13,7 @@ import { splitContentImages } from '@/lib/content-images'
 import type { ForumDiscoveryMedia, ForumDiscoveryPost } from '@/lib/forum-discovery'
 import { RichPostContent } from '@/components/posts/RichPostContent'
 import { formatUid } from '@/lib/uid'
+import { postDetailHref } from '@/lib/post-navigation'
 
 type FishDetailReplyAuthor = {
   id: string
@@ -134,9 +135,10 @@ function FishModeReplyLikeButton({ reply }: Readonly<{ reply: FishDetailReply }>
   )
 }
 
-export function ForumFishModePreview({ post, minimal = false, focusComments = false, hasPrevious, hasNext, onClose, onNavigate }: Readonly<{
+export function ForumFishModePreview({ post, minimal = false, returnTo = null, focusComments = false, hasPrevious, hasNext, onClose, onNavigate }: Readonly<{
   post: ForumDiscoveryPost
   minimal?: boolean
+  returnTo?: string | null
   focusComments?: boolean
   hasPrevious: boolean
   hasNext: boolean
@@ -407,7 +409,7 @@ export function ForumFishModePreview({ post, minimal = false, focusComments = fa
             <button type="button" className="fish-mode-preview-action-button" onClick={() => { setActiveReplyId(null); setMainComposerOpen(true) }}>说点什么</button>
             <span className="fish-mode-preview-action-count">浏览 {detail?.viewCount ?? post.viewCount}</span>
           </div>
-          <div className="fish-mode-full-post-row"><Link href={`/posts/${post.id}`} className="fish-mode-full-post-link">查看完整帖子</Link></div>
+          <div className="fish-mode-full-post-row"><Link href={postDetailHref(post.id, returnTo)} className="fish-mode-full-post-link">查看完整帖子</Link></div>
           {mainComposerOpen ? (
             <FishModeCommentComposer
               postId={post.id}

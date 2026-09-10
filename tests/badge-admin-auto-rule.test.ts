@@ -74,7 +74,7 @@ test('星座与生日当天规则使用独立配置并隐藏数值条件', () =>
   const manager = read('app/admin/badges/BadgeAdminManager.tsx')
   assert.match(manager, /所属星座/)
   assert.match(manager, /!isBirthdayRule\(draft\.ruleType\)/)
-  assert.match(manager, /星座周期内自动获得/)
+  assert.match(manager, /当前生日属于.*时自动获得/)
   assert.match(manager, /生日当天自动获得/)
   const birthdayToday = parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', operator: 'GTE', configJson: {} })
   assert.equal(birthdayToday.error, undefined)
