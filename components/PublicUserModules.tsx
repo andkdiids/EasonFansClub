@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { ModuleFallback } from '@/components/ModuleFallback'
@@ -24,6 +24,7 @@ import { PersonalPostGroupMenu, ProfilePostGroupBar } from '@/components/Profile
 import { formatSalonPostContext, getSalonPostDisplayTitle, type SalonPostView } from '@/lib/salon-shared'
 import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
+import { postDetailHref } from '@/lib/post-navigation'
 
 type ModuleKey = PublicProfileModuleKey
 const ALL_MODULE_KEYS: ModuleKey[] = PROFILE_RECORD_SECTIONS.map((section) => section.key) as ModuleKey[]
@@ -77,6 +78,7 @@ function moduleLabel(moduleKey: ModuleKey, isSelf: boolean) {
 
 export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferences, recentMessages = [], recentMessagesPagination, initialModule, initialPage, initialGroupId }: { uid: string; isSelf: boolean; visibleModules?: readonly ModuleKey[]; recordPreferences?: readonly ProfileRecordPreference[]; recentMessages?: ProfileRecentMessage[]; recentMessagesPagination?: ProfileRecordPagination; initialModule?: string; initialPage?: number;     initialGroupId?: string }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [recordLayout, setRecordLayout] = useState<ProfileRecordPreference[]>(() => recordPreferences?.length ? [...recordPreferences] : normalizeProfileRecordPreferences([]))
   const visibleModuleKeys = useMemo(() => {
     const allowed = new Set(visibleModules || PROFILE_RECORD_SECTIONS.map((section) => section.key))
@@ -118,6 +120,17 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
   }))
   const activePage = isPaginatedModule(active) ? modulePages[active] : 1
   const state = cache[moduleCacheKey(active, activePage, active === 'posts' ? postGroupFilter : ALL_POST_GROUPS)]
+  const profilePath = pathname || (isSelf ? '/profile' : `/user/${uid}`)
+  const profileReturnTo = useMemo(() => {
+    const params = new URLSearchParams()
+    if (active !== firstVisibleModule) params.set('module', active)
+    if (active === 'posts') {
+      if (modulePages.posts > 1) params.set('page', String(modulePages.posts))
+      if (postGroupFilter && postGroupFilter !== ALL_POST_GROUPS) params.set('groupId', postGroupFilter)
+    }
+    const query = params.toString()
+    return `${profilePath}${query ? `?${query}` : ''}`
+  }, [active, firstVisibleModule, modulePages.posts, postGroupFilter, profilePath])
 
   // #5 浏览器前进/后退时，以 URL 的 module/page/groupId 为准同步本地 state。
   // 不依赖 useSearchParams（避免预渲染 Suspense 约束），改用 popstate 监听 + 挂载时同步。
@@ -157,10 +170,10 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
       if (postGroupFilter && postGroupFilter !== ALL_POST_GROUPS) params.set('groupId', postGroupFilter)
     }
     const query = params.toString()
-    const target = `/user/${uid}${query ? `?${query}` : ''}`
-    const current = `/user/${uid}${window.location.search}`
+    const target = `${profilePath}${query ? `?${query}` : ''}`
+    const current = `${window.location.pathname}${window.location.search}`
     if (target !== current) router.replace(target, { scroll: false })
-  }, [active, modulePages, postGroupFilter, uid, router, firstVisibleModule])
+  }, [active, firstVisibleModule, modulePages, postGroupFilter, profilePath, router])
   useEffect(() => { syncUrlFromState() }, [syncUrlFromState])
 
   // #5 返回个人主页时 best-effort 恢复滚动位置（仅当存在与当前 module/page/group 匹配的保存项）。
@@ -466,6 +479,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
             selectedPostIds={selectedPostIds}
             onToggleSelect={toggleSelectPost}
             onPostNavigate={handlePostNavigate}
+            postReturnTo={profileReturnTo}
             onProfilePostDeleted={handleProfilePostDeleted}
             expandedRecentMessages={expandedRecentMessages}
             onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
@@ -516,6 +530,7 @@ function ModuleContent({
   selectedPostIds,
   onToggleSelect,
   onPostNavigate,
+  postReturnTo,
   onProfilePostDeleted,
   expandedRecentMessages,
   onToggleRecentMessage,
@@ -538,6 +553,7 @@ function ModuleContent({
   selectedPostIds: Set<string>
   onToggleSelect: (postId: string) => void
   onPostNavigate: () => void
+  postReturnTo: string
   onProfilePostDeleted: () => void
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
@@ -583,7 +599,7 @@ function ModuleContent({
               </label>
             ) : (
               <>
-                <Link href={`/posts/${post.id}`} className="block min-w-0 p-3 pr-40" onClick={onPostNavigate}>
+                <Link href={postDetailHref(post.id, postReturnTo)} className="block min-w-0 p-3 pr-40" onClick={onPostNavigate}>
                   <p className="text-xs font-black text-brand-700">{post.board?.name}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {post.isProfilePinned ? <span className="rounded-sm bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">置顶</span> : null}
@@ -629,7 +645,7 @@ function ModuleContent({
         {replies.map((reply) => (
 <Link
   key={reply.id}
-  href={`/posts/${reply.post.id}`}
+  href={postDetailHref(reply.post.id, postReturnTo)}
   className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
 >            <p className="font-black text-brand-950">{reply.post.title}</p>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{reply.content}</p>
@@ -777,7 +793,7 @@ function ModuleContent({
         return (
 <Link
   key={item.id}
-  href={`/posts/${item.post.id}`}
+  href={postDetailHref(item.post.id, postReturnTo)}
   className="block border border-[var(--border)] bg-[var(--surface-subtle)] p-3"
 >            <h3 className="text-lg font-black text-brand-950">{item.post.title}</h3>
             <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{item.post.content}</p>

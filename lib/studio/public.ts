@@ -1,15 +1,29 @@
 import type { Prisma } from '@prisma/client'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
+import { parseUidParam } from '@/lib/uid'
 import { normalizeArtistSlug } from './artists'
 import { getStudioTool } from './tools'
-import type { StudioArtistSummary, StudioGalleryProject, StudioGallerySort } from './types'
+import type { StudioArtistSummary, StudioCreatorSummary, StudioGalleryProject, StudioGallerySort } from './types'
 
 export const PUBLIC_STUDIO_PROJECT_WHERE = {
   visibility: 'PUBLIC' as const,
   reviewStatus: 'APPROVED' as const,
   User: { status: 'ACTIVE' as const, isDeleted: false },
 }
+
+const publicCreatorSelect = {
+  id: true,
+  uid: true,
+  nickname: true,
+  avatarUrl: true,
+  bio: true,
+  status: true,
+  isDeleted: true,
+  Profile: { select: { avatarUrl: true, bio: true } },
+} satisfies Prisma.UserSelect
+
+export type PublicCreatorRecord = Prisma.UserGetPayload<{ select: typeof publicCreatorSelect }>
 
 const gallerySelect = {
   id: true,
@@ -28,8 +42,7 @@ const gallerySelect = {
   createdAt: true,
   updatedAt: true,
   lastOpenedAt: true,
-  User: { select: { nickname: true } },
-  Artist: { select: { id: true, slug: true, name: true, avatar: true, description: true } },
+  User: { select: publicCreatorSelect },
 } satisfies Prisma.StudioProjectSelect
 
 type GalleryRow = Prisma.StudioProjectGetPayload<{ select: typeof gallerySelect }>
@@ -50,6 +63,7 @@ export function studioProjectMetadata(data: unknown) {
 }
 
 function publicProjectSummary(row: GalleryRow, liked: boolean, favorited: boolean): StudioGalleryProject {
+  const creator = publicCreatorSummary(row.User)
   return {
     id: row.id,
     toolSlug: row.toolSlug,
@@ -69,8 +83,19 @@ function publicProjectSummary(row: GalleryRow, liked: boolean, favorited: boolea
     updatedAt: row.updatedAt.toISOString(),
     lastOpenedAt: row.lastOpenedAt?.toISOString() || null,
     metadata: studioProjectMetadata(row.data),
-    author: row.User.nickname || '私家E院',
-    artist: row.Artist ? publicArtistSummary(row.Artist) : null,
+    author: creator.name,
+    creator,
+  }
+}
+
+export function publicCreatorSummary(user: PublicCreatorRecord): StudioCreatorSummary {
+  const visible = user.status === 'ACTIVE' && !user.isDeleted
+  return {
+    id: user.id,
+    uid: user.uid,
+    name: visible ? user.nickname?.trim() || '私家E院' : '私家E院',
+    avatar: visible ? profileImageUrl(user.Profile?.avatarUrl || user.avatarUrl) : null,
+    description: visible ? user.Profile?.bio || user.bio || null : null,
   }
 }
 
@@ -126,6 +151,27 @@ export async function listPublicStudioProjects(options: PublicStudioProjectListO
     hasMore: rows.length > pageSize,
     sort,
     toolSlug: selectedTool,
+  }
+}
+
+export async function getPublicCreatorPage(userId: string) {
+  const uid = parseUidParam(userId)
+  if (uid === null || uid <= 0) return null
+  const creator = await prisma.user.findFirst({
+    where: { uid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+    select: publicCreatorSelect,
+  })
+  if (!creator) return null
+
+  const rows = await prisma.studioProject.findMany({
+    where: { ...PUBLIC_STUDIO_PROJECT_WHERE, userId: creator.id },
+    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    select: gallerySelect,
+  })
+  const projects = await addParticipantCounts(rows.map((row) => publicProjectSummary(row, false, false)))
+  return {
+    creator: publicCreatorSummary(creator),
+    projects,
   }
 }
 

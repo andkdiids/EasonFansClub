@@ -18,7 +18,7 @@ import { ShareButton } from '@/components/share/ShareButton'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getForumBoardDisplayName } from '@/lib/boards'
-import { normalizePostReturnTo, postBackHref, postEditHref } from '@/lib/post-navigation'
+import { normalizePostReturnTo, postBackHref, postBoardFallbackHref, postDetailHref, postEditHref } from '@/lib/post-navigation'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
@@ -114,7 +114,7 @@ function isDatabasePostDetailError(error: unknown) {
   return isRetryableDatabaseConnectionError(error) || Boolean(code?.startsWith('P'))
 }
 
-function PostLoadFallback({ postId, databaseUnavailable }: Readonly<{ postId: string; databaseUnavailable: boolean }>) {
+function PostLoadFallback({ postId, databaseUnavailable, returnTo }: Readonly<{ postId: string; databaseUnavailable: boolean; returnTo?: string | null }>) {
   return (
     <>
       <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
@@ -125,10 +125,10 @@ function PostLoadFallback({ postId, databaseUnavailable }: Readonly<{ postId: st
             {databaseUnavailable ? '数据库连接可能正在恢复中。' : '帖子服务暂时不可用。'} 请稍后刷新页面，或返回 E院广场继续浏览。
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
-            <Link href={`/posts/${encodeURIComponent(postId)}`} className="inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+            <Link href={postDetailHref(postId, returnTo)} className="inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
               重新加载
             </Link>
-            <Link href="/forum" className="inline-flex min-h-11 items-center rounded-full border border-sky-200 bg-white px-5 text-sm font-black text-brand-700">
+            <Link href={postBackHref(returnTo)} className="inline-flex min-h-11 items-center rounded-full border border-sky-200 bg-white px-5 text-sm font-black text-brand-700">
               返回 E院广场
             </Link>
           </div>
@@ -138,7 +138,7 @@ function PostLoadFallback({ postId, databaseUnavailable }: Readonly<{ postId: st
   )
 }
 
-function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR' }>) {
+function PostUnavailableFallback({ reason, returnTo }: Readonly<{ reason: 'POST' | 'AUTHOR'; returnTo?: string | null }>) {
   const title = reason === 'POST' ? '该帖子已被删除或无法查看' : '该帖子作者资料暂时无法查看'
   const description = reason === 'POST'
     ? '帖子可能已被删除、撤回或尚未公开。'
@@ -150,7 +150,7 @@ function PostUnavailableFallback({ reason }: Readonly<{ reason: 'POST' | 'AUTHOR
         <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-700">Post</p>
         <h1 className="mt-3 text-3xl font-black text-brand-950">{title}</h1>
         <p className="mt-3 text-sm font-bold leading-7 text-slate-500">{description}</p>
-        <Link href="/forum" className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
+        <Link href={postBackHref(returnTo)} className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
           返回 E院广场
         </Link>
       </section>
@@ -756,7 +756,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       error,
       startedAt: postLoadStartedAt,
     })
-    return <PostLoadFallback postId={postId} databaseUnavailable={isDatabasePostDetailError(error)} />
+    return <PostLoadFallback postId={postId} databaseUnavailable={isDatabasePostDetailError(error)} returnTo={returnTo} />
   }
 
   if (postCore === null) {
@@ -782,7 +782,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const viewerIsAdmin = Boolean(user && await loadPostAdminPermission(user, 'post_manage', postId))
   const viewerIsAuthor = Boolean(user && user.id === postCore.authorId)
   if (postCore.isDeleted || postCore.status !== 'PUBLISHED') {
-    return <PostUnavailableFallback reason="POST" />
+    return <PostUnavailableFallback reason="POST" returnTo={returnTo} />
   }
 
   // 审核状态处理：用户可能通过通知/收藏/历史链接进入未审核帖子。
@@ -820,7 +820,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       authorIsDeleted: post.User.isDeleted,
       authorHasProfile: Boolean(post.User.Profile),
     })
-    return <PostUnavailableFallback reason="AUTHOR" />
+    return <PostUnavailableFallback reason="AUTHOR" returnTo={returnTo} />
   }
 
   let commentsLoadError = false
@@ -979,7 +979,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
   const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
   const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
-  const detailBackHref = postBackHref(returnTo, post.Board?.slug)
+  const detailFallbackHref = postBoardFallbackHref(post.Board?.slug)
   const publicRichContent = richResult?.valid ? richResult.value : null
   let renderedRichContent = publicRichContent
   if (publicRichContent) {
@@ -1114,7 +1114,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           </div>
         ) : null}
         <ForumDiscoveryDetailTopbar
-          backHref={detailBackHref}
+          backHref={returnTo || undefined}
+          fallbackHref={detailFallbackHref}
           shareTitle={shareTitle}
           shareText={shareText}
           shareCardData={shareCardData}
@@ -1132,7 +1133,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             />
           ) : null}
         />
-        <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref="/forum" targetHref={detailBackHref} replaceTarget /></div>
+        <div className="forum-discovery-detail-legacy-back"><BackButton fallbackHref={detailFallbackHref} targetHref={returnTo || undefined} replaceTarget /></div>
         <article className="post-detail-article border border-sky-100 bg-white/85 p-7">
           <div className="post-detail-card-header mb-4 flex items-start justify-between gap-4">
             <div className="flex min-w-0 flex-wrap items-center gap-2">

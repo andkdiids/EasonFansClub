@@ -94,11 +94,15 @@ test('帖子编辑来源 URL 在广场、编辑页和详情页之间保持不变
   assert.equal(normalizePostReturnTo('/posts/another-post'), null)
 })
 
-test('编辑保存使用 replace，详情返回不依赖 router.back，直接 URL 走广场 fallback', () => {
+test('编辑保存使用 replace，详情显式来源优先，直接 URL 才走 history/fallback', () => {
   assert.match(form, /router\.replace\(detailHref\)/)
   assert.doesNotMatch(form, /router\.push\(detailHref\)/)
   assert.match(detailTopbar, /if \(backHref\)[\s\S]*router\.replace\(backHref\)/)
-  assert.match(detail, /const detailBackHref = postBackHref\(returnTo, post\.Board\?\.slug\)/)
+  assert.match(detailTopbar, /window\.history\.length > 1[\s\S]*router\.back\(\)[\s\S]*router\.push\(fallbackHref\)/)
+  assert.match(detail, /const detailFallbackHref = postBoardFallbackHref\(post\.Board\?\.slug\)/)
+  assert.match(detail, /backHref=\{returnTo \|\| undefined\}/)
+  assert.match(detail, /fallbackHref=\{detailFallbackHref\}/)
+  assert.match(detail, /BackButton fallbackHref=\{detailFallbackHref\} targetHref=\{returnTo \|\| undefined\}/)
   assert.match(editPage, /const returnTo = normalizePostReturnTo\(query\.returnTo\)/)
   assert.match(editPage, /detailHref = postDetailHref\(postId, returnTo\)/)
   assert.match(discoveryHome, /router\.push\(postDetailHref\(postId, discoveryReturnTo\)/)

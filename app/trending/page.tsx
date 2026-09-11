@@ -5,6 +5,7 @@ import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import { getTrendingPosts, type TrendingRange } from '@/lib/trending-posts'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
+import { postDetailHref } from '@/lib/post-navigation'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,7 +55,7 @@ export default async function TrendingPostsPage({
             const image = publicImageVariantUrl(post.imageUrl, 'card')
             return (
               <article key={post.id} className="relative grid min-w-0 gap-4 border border-sky-100 bg-white/85 p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_180px] sm:p-5">
-                <Link href={`/posts/${post.id}`} className="absolute inset-0 z-[1]" aria-label={`查看帖子：${post.title}`} />
+                <Link href={postDetailHref(post.id, rangeHref(range, page))} className="absolute inset-0 z-[1]" aria-label={`查看帖子：${post.title}`} />
                 <div className="pointer-events-none min-w-0">
                   <div className="flex flex-wrap items-center gap-2 text-xs font-black">
                     <span className="bg-sky-50 px-2 py-1 text-brand-700">{post.boardName}</span>

@@ -31,9 +31,9 @@ test('公共帖子不被 session、权限、勋章或互动状态读取失败拖
   assert.match(detail, /const \[viewerPostLike, viewerReplyLikes\] = await Promise\.allSettled\(/)
 })
 
-test('主查询 null 走 404，数据库异常保留可重试的详情错误页', () => {
+test('主查询 null 走 404，数据库异常保留可重试的详情错误页并保留来源', () => {
   assert.match(detail, /if \(postCore === null\) \{\s*notFound\(\)/)
-  assert.match(detail, /return <PostLoadFallback postId=\{postId\} databaseUnavailable=\{isDatabasePostDetailError\(error\)} \/>/)
+  assert.match(detail, /return <PostLoadFallback postId=\{postId\} databaseUnavailable=\{isDatabasePostDetailError\(error\)\} returnTo=\{returnTo\} \/>/)
   assert.match(detail, /operation: 'post\.findUnique'/)
   assert.match(detail, /errorCode/)
   assert.match(detail, /isRetryableDatabaseConnectionError\(error\)/)

@@ -71,7 +71,7 @@ test('热门热度公式与稳定排序覆盖浏览、点赞、回复和收藏',
 })
 
 test('热门卡片只负责跳转并展示摘要、作者、板块、指标和首图', () => {
-  assert.match(trendingPage, /href=\{`\/posts\/\$\{post\.id\}`\}/)
+  assert.match(trendingPage, /href=\{postDetailHref\(post\.id, rangeHref\(range, page\)\)\}/)
   assert.match(trendingPage, /post\.summary/)
   assert.match(trendingPage, /post\.authorName/)
   assert.match(trendingPage, /post\.boardName/)

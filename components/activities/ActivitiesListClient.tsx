@@ -1,10 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { ActivityCard } from '@/components/activities/ActivityCard'
 import { activityDisplayStatusLabels, activityTypeLabels, activityTypeValues, sortActivities, type ActivityDisplayStatus, type ActivityView } from '@/lib/activity'
 
-export function ActivitiesListClient({ initialActivities }: Readonly<{ initialActivities: ActivityView[] }>) {
+export function ActivitiesListClient({ initialActivities, canCheckIn = false }: Readonly<{ initialActivities: ActivityView[]; canCheckIn?: boolean }>) {
   const [status, setStatus] = useState<'ALL' | ActivityDisplayStatus>('ALL')
   const [type, setType] = useState<'ALL' | ActivityView['type']>('ALL')
   const [query, setQuery] = useState('')
@@ -20,6 +21,7 @@ export function ActivitiesListClient({ initialActivities }: Readonly<{ initialAc
 
   return (
     <section>
+      {canCheckIn ? <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm dark:border-emerald-900/70 dark:bg-emerald-950/20 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-sm font-black text-emerald-900 dark:text-emerald-200">活动核销</p><p className="mt-1 text-xs font-bold text-emerald-800/80 dark:text-emerald-300/80">扫描报名二维码，核验活动签到及物料</p></div><Link href="/activities/checkin" className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-full bg-emerald-700 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900">扫码核销</Link></div> : null}
       <div className="grid gap-3 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_11rem_11rem] dark:border-slate-700 dark:bg-slate-900/80">
           <label className="text-sm font-black text-[var(--foreground)]">搜索活动
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题或说明" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-[var(--foreground)] outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950" />

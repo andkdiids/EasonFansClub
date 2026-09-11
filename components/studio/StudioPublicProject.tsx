@@ -10,7 +10,9 @@ import { calculateMaterialList } from '@/lib/studio/beads/grid'
 import { createBrandedBeadPatternJpg, createBrandedBeadPatternPdf } from '@/lib/studio/beads/branded-export'
 import { isStudioGalleryPath, STUDIO_GALLERY_RETURN_STORAGE_KEY } from '@/lib/studio/navigation'
 import { renderPatternToCanvas } from '@/lib/studio/beads/renderer'
+import { creatorPath } from '@/lib/studio/artists'
 import { UiIcon } from '@/components/UiIcon'
+import type { StudioCreatorSummary } from '@/lib/studio/types'
 import styles from './studio.module.css'
 
 type PublicProject = {
@@ -25,7 +27,7 @@ type PublicProject = {
   createdAt: string
   updatedAt: string
   author: string
-  artist: { id: string; slug: string; name: string; avatar: string | null; description: string | null } | null
+  creator: StudioCreatorSummary
   data: BeadProjectData
 }
 
@@ -172,8 +174,7 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
     <section className={styles.publicLayout}>
       <div className={styles.publicCanvasCard}><canvas ref={canvasRef} className={styles.publicCanvas} aria-label={`${project.title}拼豆图纸`} /></div>
       <aside className={styles.publicInfoCard}>
-        {project.artist ? <Link href={`/artists/${encodeURIComponent(project.artist.slug)}`} className={styles.publicArtistLink} aria-label={`查看艺术家${project.artist.name}主页`}><span className={styles.publicArtistAvatar}>{project.artist.avatar ? <img src={project.artist.avatar} alt="" /> : project.artist.name.slice(0, 1)}</span><span><small>艺术家</small><strong>{project.artist.name}</strong></span><b aria-hidden>→</b></Link> : null}
-        <div className={styles.publicAuthor}><span className={styles.publicAuthorMark}><UiIcon name="user" /></span><div><span>创作者</span><strong>{project.author}</strong></div></div>
+        <Link href={creatorPath(project.creator.uid)} className={styles.publicArtistLink} aria-label={`查看${project.creator.name}的拼豆作品主页`}><span className={styles.publicArtistAvatar}>{project.creator.avatar ? <img src={project.creator.avatar} alt="" /> : project.creator.name.slice(0, 1)}</span><span><small>ARTIST</small><strong>{project.creator.name}</strong></span><b aria-hidden>→</b></Link>
         <dl className={styles.publicStats}><div><dt>尺寸</dt><dd>{pattern.width} × {pattern.height} 颗</dd></div><div><dt>拼豆板</dt><dd>{materials.boardCount} 块</dd></div><div><dt>豆子数量</dt><dd>{materials.totalBeads.toLocaleString()} 颗</dd></div><div><dt>颜色数量</dt><dd>{materials.colorCount} 种</dd></div></dl>
         <p className={styles.publicDate}>更新于 {new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(project.updatedAt))} · 浏览 {viewCount}</p>
         <div className={styles.publicInteractions} aria-label="作品互动">

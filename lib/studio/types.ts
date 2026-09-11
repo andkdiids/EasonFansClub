@@ -43,11 +43,19 @@ export type StudioArtistSummary = {
   description: string | null
 }
 
+export type StudioCreatorSummary = {
+  id: string
+  uid: number
+  name: string
+  avatar: string | null
+  description: string | null
+}
+
 export type StudioGallerySort = 'latest' | 'hot'
 
 export type StudioGalleryProject = StudioProjectSummary & {
   author: string
-  artist: StudioArtistSummary | null
+  creator: StudioCreatorSummary
   participantCount?: number
 }
 

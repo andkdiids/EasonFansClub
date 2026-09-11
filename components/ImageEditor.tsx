@@ -26,6 +26,7 @@ import {
   type DecodedImageEditorImage,
   type RenderedImageEditorCanvas,
 } from '@/lib/image-editor-browser'
+import { UiIcon } from '@/components/UiIcon'
 
 type ImageEditorProps = Readonly<{
   file: File
@@ -45,6 +46,13 @@ type Interaction = {
   start: ImageEditorPoint
   changed: boolean
 }
+
+type FloatingSelectionPosition = Readonly<{
+  deleteLeft: number
+  deleteTop: number
+  copyLeft: number
+  copyTop: number
+}>
 
 const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#38bdf8', '#ffffff']
 
@@ -122,6 +130,16 @@ function moveAnnotation(annotation: ImageEditorAnnotation, delta: ImageEditorPoi
     start: { x: annotation.start.x + delta.x, y: annotation.start.y + delta.y },
     end: { x: annotation.end.x + delta.x, y: annotation.end.y + delta.y },
   }
+}
+
+function duplicateAnnotation(annotation: ImageEditorAnnotation, imageWidth: number, imageHeight: number) {
+  const id = createImageEditorId(`${annotation.type}-copy`)
+  const translated = { ...moveAnnotation(annotation, { x: 20, y: 20 }), id }
+  const bounds = annotationBounds(translated)
+  if (!bounds) return translated
+  const correctionX = bounds.x < 0 ? -bounds.x : bounds.x + bounds.width > imageWidth ? imageWidth - bounds.x - bounds.width : 0
+  const correctionY = bounds.y < 0 ? -bounds.y : bounds.y + bounds.height > imageHeight ? imageHeight - bounds.y - bounds.height : 0
+  return { ...moveAnnotation(translated, { x: correctionX, y: correctionY }), id }
 }
 
 function resizeAnnotation(annotation: ImageEditorAnnotation, handle: 'start' | 'end', point: ImageEditorPoint): ImageEditorAnnotation {
@@ -217,8 +235,15 @@ function buttonClass(active = false) {
   return `min-h-10 shrink-0 border px-3 text-xs font-black transition ${active ? 'border-sky-300 bg-sky-500 text-white' : 'border-white/15 bg-white/[0.06] text-white/85 hover:bg-white/15'}`
 }
 
+function iconButtonClass() {
+  return 'grid size-10 place-items-center rounded-md border border-white/15 bg-slate-950/55 text-white/70 opacity-75 shadow-lg backdrop-blur-sm transition hover:border-white/35 hover:bg-slate-900/80 hover:text-white hover:opacity-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30'
+}
+
 export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
+  const footerRef = useRef<HTMLElement>(null)
+  const floatingPositionUpdateRef = useRef<() => void>(() => undefined)
   const decodedRef = useRef<DecodedImageEditorImage | null>(null)
   const renderRef = useRef<RenderedImageEditorCanvas | null>(null)
   const historyRef = useRef<ImageEditorState[]>([createInitialImageEditorState()])
@@ -234,6 +259,7 @@ export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
   const [history, setHistory] = useState<ImageEditorState[]>(historyRef.current)
   const [historyIndex, setHistoryIndex] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [floatingSelection, setFloatingSelection] = useState<FloatingSelectionPosition | null>(null)
   const [tool, setTool] = useState<ImageEditorTool>('select')
   const [shape, setShape] = useState<ImageEditorShape>('rect')
   const [cropRatio, setCropRatio] = useState<CropRatio>('free')
@@ -251,6 +277,42 @@ export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
   historyRef.current = history
   historyIndexRef.current = historyIndex
   exportingRef.current = exporting
+
+  function updateFloatingSelectionPosition() {
+    const annotation = selectedId ? stateRef.current.annotations.find((candidate) => candidate.id === selectedId) : null
+    const canvas = canvasRef.current
+    const rendered = renderRef.current
+    const bounds = annotation ? annotationBounds(annotation) : null
+    if (!annotation || !canvas || !rendered || !bounds) {
+      setFloatingSelection(null)
+      return
+    }
+
+    const canvasRect = canvas.getBoundingClientRect()
+    const viewWidth = Math.max(1, rendered.viewRect.width)
+    const viewHeight = Math.max(1, rendered.viewRect.height)
+    const scaleX = canvasRect.width / viewWidth
+    const scaleY = canvasRect.height / viewHeight
+    const boundsLeft = canvasRect.left + (bounds.x - rendered.viewRect.x) * scaleX
+    const boundsTop = canvasRect.top + (bounds.y - rendered.viewRect.y) * scaleY
+    const boundsRight = boundsLeft + bounds.width * scaleX
+    const boundsBottom = boundsTop + bounds.height * scaleY
+    const buttonSize = 40
+    const edge = 8
+    const contentTop = (mainRef.current?.getBoundingClientRect().top || 0) + edge
+    const footerTop = footerRef.current?.getBoundingClientRect().top || window.innerHeight
+    const maxTop = Math.max(contentTop, footerTop - buttonSize - edge)
+    const clampToViewport = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+    const next = {
+      deleteLeft: clampToViewport(boundsRight + edge, edge, Math.max(edge, window.innerWidth - buttonSize - edge)),
+      deleteTop: clampToViewport(boundsTop - buttonSize / 2, contentTop, maxTop),
+      copyLeft: clampToViewport(boundsLeft, edge, Math.max(edge, window.innerWidth - buttonSize - edge)),
+      copyTop: clampToViewport(boundsBottom + edge, contentTop, maxTop),
+    }
+    setFloatingSelection((previous) => previous && Object.keys(next).every((key) => previous[key as keyof FloatingSelectionPosition] === next[key as keyof FloatingSelectionPosition]) ? previous : next)
+  }
+
+  floatingPositionUpdateRef.current = updateFloatingSelectionPosition
 
   useEffect(() => {
     let alive = true
@@ -324,6 +386,17 @@ export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '图片预览失败')
     }
+  }, [decoded, selectedId, state, tool])
+
+  useEffect(() => {
+    const update = () => floatingPositionUpdateRef.current()
+    window.addEventListener('resize', update)
+    update()
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
+  useEffect(() => {
+    floatingPositionUpdateRef.current()
   }, [decoded, selectedId, state, tool])
 
   function replaceCurrentState(next: ImageEditorState) {
@@ -608,6 +681,16 @@ export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
     setSelectedId(null)
   }
 
+  function copySelected() {
+    if (!decoded || !selectedId || exporting) return
+    const selected = stateRef.current.annotations.find((annotation) => annotation.id === selectedId)
+    if (!selected) return
+    const dimensions = imageEditorDimensions(decoded.width, decoded.height, stateRef.current.rotation)
+    const copy = duplicateAnnotation(selected, dimensions.width, dimensions.height)
+    commitState({ ...stateRef.current, annotations: [...stateRef.current.annotations, copy] })
+    setSelectedId(copy.id)
+  }
+
   function rotate() {
     if (!decoded || exporting) return
     commitState(rotateImageEditorState(stateRef.current, decoded.width, decoded.height))
@@ -710,13 +793,21 @@ export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
         <button type="button" onClick={() => void complete()} disabled={editorDisabled} className="min-h-10 bg-sky-500 px-4 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">{exporting ? '导出中…' : '完成'}</button>
       </header>
 
-      <main className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-3 sm:p-6">
+      <main ref={mainRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-3 sm:p-6">
+        <div className="pointer-events-none absolute right-3 top-3 z-20 flex gap-2">
+          <button type="button" onClick={undo} disabled={historyIndex <= 0 || exporting} className={`${iconButtonClass()} pointer-events-auto`} aria-label="撤销" title="撤销"><UiIcon name="undo" className="size-5" /></button>
+          <button type="button" onClick={redo} disabled={historyIndex >= history.length - 1 || exporting} className={`${iconButtonClass()} pointer-events-auto`} aria-label="重做" title="重做"><UiIcon name="redo" className="size-5" /></button>
+        </div>
         {decodeError ? <div className="max-w-sm space-y-3 text-center"><p className="text-sm font-bold text-rose-300">{decodeError}</p><p className="text-xs font-bold text-white/55">这张图片无法在当前浏览器中编辑，可以取消并按原有流程继续上传。</p></div> : null}
         {!decodeError && !decoded ? <p className="text-sm font-bold text-white/65">正在准备图片…</p> : null}
         {decoded ? <canvas ref={canvasRef} className="block max-h-full max-w-full bg-black object-contain shadow-2xl" style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }} onContextMenu={(event) => event.preventDefault()} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onMouseMove={handleMouseMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerCancel} aria-label="图片编辑画布" /> : null}
+        {selectedId && floatingSelection ? <>
+          <button type="button" data-image-editor-floating-delete onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); removeSelected() }} disabled={exporting} className={`${iconButtonClass()} fixed z-30 text-rose-200`} style={{ left: floatingSelection.deleteLeft, top: floatingSelection.deleteTop }} aria-label="删除当前标注" title="删除当前标注"><UiIcon name="trash" className="size-5" /></button>
+          <button type="button" data-image-editor-floating-copy onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); copySelected() }} disabled={exporting} className={`${iconButtonClass()} fixed z-30`} style={{ left: floatingSelection.copyLeft, top: floatingSelection.copyTop }} aria-label="复制当前标注" title="复制当前标注"><span className="relative grid size-6 place-items-center"><UiIcon name="copy" className="size-5" /><span aria-hidden="true" className="absolute -right-2 -top-2 text-[9px] font-black leading-none text-sky-200">+1</span></span></button>
+        </> : null}
       </main>
 
-      <footer className="shrink-0 border-t border-white/10 bg-slate-900/95 pb-[env(safe-area-inset-bottom)]">
+      <footer ref={footerRef} className="shrink-0 border-t border-white/10 bg-slate-900/95 pb-[env(safe-area-inset-bottom)]">
         <div className="flex gap-2 overflow-x-auto px-3 py-2 sm:justify-center">
           <button type="button" disabled={editorDisabled} className={buttonClass(tool === 'select')} onClick={() => chooseTool('select')}>选择</button>
           <button type="button" disabled={editorDisabled} className={buttonClass(tool === 'crop')} onClick={() => chooseTool('crop')}>裁剪</button>
@@ -729,7 +820,7 @@ export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
         </div>
 
         <div className="flex min-h-12 flex-wrap items-center gap-2 px-3 pb-2 text-xs font-bold sm:justify-center">
-          {tool === 'select' ? <span className="text-white/55">{selectedId ? '已选择标注，可拖动或删除' : '点击已有标注进行选择'}</span> : null}
+          {tool === 'select' ? <span className="text-white/55">{selectedId ? '已选择标注，可拖动调整' : '选择模式'}</span> : null}
           {tool === 'crop' ? <>
             <label className="flex items-center gap-2 text-white/75">比例<select value={cropRatio} onChange={(event) => setCropRatio(event.target.value as CropRatio)} className="min-h-9 border border-white/15 bg-slate-800 px-2 text-xs text-white"><option value="free">自由</option><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="3:4">3:4</option><option value="16:9">16:9</option></select></label>
             <button type="button" onClick={clearCrop} disabled={!state.crop || exporting} className={buttonClass(false)}>清除裁剪</button>
@@ -746,14 +837,9 @@ export function ImageEditor({ file, onCancel, onComplete }: ImageEditorProps) {
             <label className="flex items-center gap-2 text-white/55">笔刷<input type="range" min="12" max="120" value={mosaicBrushSize} onChange={(event) => changeWidth(Number(event.target.value))} /></label>
             <label className="flex items-center gap-2 text-white/55">像素<input type="range" min="6" max="48" value={mosaicPixelSize} onChange={(event) => changeMosaicPixelSize(Number(event.target.value))} /></label>
           </> : null}
-          <button type="button" onClick={removeSelected} disabled={!selectedId || exporting} className="ml-auto min-h-9 border border-rose-400/40 px-3 text-rose-200 disabled:cursor-not-allowed disabled:opacity-40">删除选中标注</button>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-white/10 px-3 py-2 sm:justify-center">
-          <div className="flex gap-2">
-            <button type="button" onClick={undo} disabled={historyIndex <= 0 || exporting} className={buttonClass(false)}>撤销</button>
-            <button type="button" onClick={redo} disabled={historyIndex >= history.length - 1 || exporting} className={buttonClass(false)}>重做</button>
-          </div>
+        <div className="flex items-center justify-center gap-2 border-t border-white/10 px-3 py-2">
           <button type="button" onClick={restoreOriginal} disabled={editorDisabled} className="min-h-10 border border-amber-300/35 px-3 text-xs font-black text-amber-200 disabled:opacity-40">恢复原图</button>
         </div>
         {error ? <p className="px-3 pb-2 text-center text-xs font-bold text-rose-300" role="alert">{error}</p> : null}

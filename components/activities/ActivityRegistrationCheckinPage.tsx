@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import type { ActivityRedemptionLookupView } from '@/lib/activity-redemption'
@@ -17,13 +18,15 @@ function defaultSelections(lookup: ActivityRedemptionLookupView) {
   return lookup.entitlements.filter((item) => item.defaultSelected).map(selectionKey)
 }
 
-export function ActivityRegistrationCheckinPage({ token, initialLookup }: Readonly<{ token: string; initialLookup: ActivityRedemptionLookupView }>) {
+export function ActivityRegistrationCheckinPage({ token, initialLookup, onContinueScan }: Readonly<{ token: string; initialLookup: ActivityRedemptionLookupView; onContinueScan?: () => void }>) {
+  const router = useRouter()
   const [lookup, setLookup] = useState(initialLookup)
   const [selected, setSelected] = useState(() => defaultSelections(initialLookup))
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [completed, setCompleted] = useState(false)
   const registrationEntitlement = lookup.entitlements.find((item) => item.type === 'ACTIVITY_REGISTRATION')
   const selectedItems = lookup.entitlements.filter((item) => item.selectable && selected.includes(selectionKey(item)))
   const hasSelectableItems = lookup.entitlements.some((item) => item.selectable)
@@ -40,6 +43,7 @@ export function ActivityRegistrationCheckinPage({ token, initialLookup }: Readon
     if (!selectedItems.length || busy) return
     setBusy(true)
     setError('')
+    setCompleted(false)
     try {
       const response = await fetch(`/api/admin/activities/${encodeURIComponent(lookup.activity.id)}/redemption-confirm`, {
         method: 'POST',
@@ -58,11 +62,21 @@ export function ActivityRegistrationCheckinPage({ token, initialLookup }: Readon
       setSelected(defaultSelections(nextLookup))
       setConfirmOpen(false)
       setMessage(nextLookup.registration.verifiedAt ? '✓ 核销完成' : '核销完成')
+      setCompleted(true)
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : '核销失败，请稍后重试')
     } finally {
       setBusy(false)
     }
+  }
+
+  function continueScanning() {
+    if (busy) return
+    if (onContinueScan) {
+      onContinueScan()
+      return
+    }
+    router.push('/activities/checkin?scan=1')
   }
 
   return (
@@ -99,6 +113,8 @@ export function ActivityRegistrationCheckinPage({ token, initialLookup }: Readon
         {lookup.risk && lookup.risk.level !== 'LOW' ? <p className="mt-4 border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black leading-5 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">⚠️ 该用户存在多账号报名风险，仅供人工核验，不自动阻止核销。</p> : null}
         {message ? <p role="status" className="mt-4 border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">{message}</p> : null}
         {!confirmOpen && error ? <p role="alert" className="mt-4 border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-black text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">{error}</p> : null}
+
+        {completed ? <div className="mt-5 grid gap-2 sm:grid-cols-2"><button type="button" onClick={continueScanning} className="min-h-12 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-black text-white">继续扫码</button><Link href="/activities" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-[var(--border)] px-5 py-3 text-sm font-black text-[var(--primary)]">返回活动中心</Link></div> : null}
 
         <button type="button" onClick={() => { setError(''); setConfirmOpen(true) }} disabled={!hasSelectableItems || !selectedItems.length || busy} className="mt-6 min-h-12 w-full bg-emerald-700 px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">{busy ? '核销中…' : registrationEntitlement?.selectable ? '确认核销' : hasSelectableItems ? '确认核销所选项目' : '已完成核销'}</button>
         <Link href="/activities" className="mt-3 block text-center text-sm font-black text-[var(--primary)]">返回活动中心</Link>

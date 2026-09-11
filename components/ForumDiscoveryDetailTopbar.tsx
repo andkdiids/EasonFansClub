@@ -5,13 +5,14 @@ import { type ReactNode } from 'react'
 import type { ShareCardData } from '@/lib/share-card'
 import { ShareButton } from '@/components/share/ShareButton'
 
-export function ForumDiscoveryDetailTopbar({ postActions, shareTitle, shareText, shareCardData, canShare, backHref }: Readonly<{
+export function ForumDiscoveryDetailTopbar({ postActions, shareTitle, shareText, shareCardData, canShare, backHref, fallbackHref = '/forum' }: Readonly<{
   postActions?: ReactNode
   shareTitle: string
   shareText: string
   shareCardData: ShareCardData
   canShare?: boolean
   backHref?: string
+  fallbackHref?: string
 }>) {
   const router = useRouter()
 
@@ -21,12 +22,12 @@ export function ForumDiscoveryDetailTopbar({ postActions, shareTitle, shareText,
       return
     }
     if (window.history.length > 1) router.back()
-    else router.push('/forum')
+    else router.push(fallbackHref)
   }
 
   return (
     <header className="forum-discovery-detail-topbar">
-      <button type="button" onClick={goBack} className="forum-discovery-detail-back" aria-label="返回广场">‹</button>
+      <button type="button" onClick={goBack} className="forum-discovery-detail-back" aria-label="返回上一页">‹</button>
       <div className="forum-discovery-detail-actions">
         {postActions ? <span className="forum-discovery-detail-post-actions">{postActions}</span> : null}
         {canShare !== false ? <ShareButton

@@ -37,11 +37,10 @@ function GalleryCard({ project, busy, onInteract }: Readonly<{ project: StudioGa
       <div className={styles.galleryThumb}>{project.thumbnailUrl ? <img src={project.thumbnailUrl} alt="作品缩略图" /> : <PatternThumb />}</div>
       <div className={styles.galleryContent}>
         <div className={styles.galleryTopline}><strong className={styles.galleryTitle} title={project.title}>{project.title}</strong><span className={styles.galleryTool}>{tool?.name || project.toolSlug}</span></div>
-        <p className={styles.galleryMeta}>{project.author} · {formatDate(project.updatedAt)}</p>
+        <p className={styles.galleryMeta}>作者：{project.author} · {formatDate(project.updatedAt)}</p>
         <div className={styles.galleryFacts}><span>{project.metadata?.width || '—'} × {project.metadata?.height || '—'}</span><span>{project.metadata?.totalBeads ?? '—'} 颗</span><span>{project.metadata?.colorCount ?? '—'} 色</span><span>↓ {downloadCount}</span></div>
       </div>
     </Link>
-    {project.artist ? <Link href={`/artists/${encodeURIComponent(project.artist.slug)}`} className={styles.galleryArtistLink} aria-label={`查看艺术家${project.artist.name}主页`}><span className={styles.galleryArtistAvatar}>{project.artist.avatar ? <img src={project.artist.avatar} alt="" loading="lazy" /> : project.artist.name.slice(0, 1)}</span><span>{project.artist.name}</span></Link> : null}
     <div className={styles.galleryActions}>
       <button type="button" className={`${styles.galleryInteraction} ${project.isLiked ? styles.galleryInteractionActive : ''}`} onClick={() => onInteract(project, 'like')} disabled={busy === `${project.id}:like`} aria-pressed={project.isLiked}>{project.isLiked ? '♥' : '♡'} {likeCount}</button>
       <button type="button" className={`${styles.galleryInteraction} ${project.isFavorited ? styles.galleryInteractionFavorite : ''}`} onClick={() => onInteract(project, 'favorite')} disabled={busy === `${project.id}:favorite`} aria-pressed={project.isFavorited}>{project.isFavorited ? '★' : '☆'} {favoriteCount}</button>

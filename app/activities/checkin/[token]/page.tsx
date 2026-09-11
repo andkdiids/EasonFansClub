@@ -16,7 +16,8 @@ function Notice({ title, description }: Readonly<{ title: string; description: s
 function errorNotice(error: ActivityRedemptionError) {
   if (error.code === 'ACTIVITY_CANCELLED') return <Notice title="活动已取消" description="该活动已取消，无法核销。" />
   if (error.code === 'REGISTRATION_CANCELLED') return <Notice title="报名已取消" description="该报名已经取消，无法核销。" />
-  if (error.code === 'INVALID_TOKEN' || error.code === 'REGISTRATION_NOT_FOUND') return <Notice title="二维码无效" description="找不到对应的活动报名记录，请让工作人员重新确认二维码。" />
+  if (error.code === 'INVALID_TOKEN') return <Notice title="二维码无效或已失效" description="请让工作人员重新确认报名二维码。" />
+  if (error.code === 'REGISTRATION_NOT_FOUND') return <Notice title="未找到报名记录" description="找不到对应的活动报名记录，请让工作人员重新确认二维码。" />
   return <Notice title="扫码查询失败" description="暂时无法读取这条报名记录，请稍后重试或联系活动工作人员。" />
 }
 

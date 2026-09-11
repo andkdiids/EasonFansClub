@@ -14,6 +14,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { findGlobalSearchUsers, getGlobalSearchPagination, parseGlobalSearchPage, searchPublicPosts } from '@/lib/global-search'
+import { postDetailHref } from '@/lib/post-navigation'
 
 export const dynamic = 'force-dynamic'
 
@@ -168,7 +169,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             })}
             {posts.length ? <h2 className="pt-3 text-lg font-black text-brand-950">帖子</h2> : null}
             {posts.map((post) => (
-              <Link key={post.id} href={`/posts/${post.id}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
+              <Link key={post.id} href={postDetailHref(post.id, searchHref(q, postPagination.page))} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
                 <p className="break-words font-black text-slate-950">{publicModerationText(post.title, post.moderationStatus)}</p>
                 <p className="mt-2 break-words text-sm text-slate-500">
                   {getForumBoardDisplayName(post.Board)} · <UserDisplayName name={getPublicUserDisplayName(post.User)} uid={post.User.uid} badges={equippedBadges.get(post.User.id) || []} compact /> · 回复 {post.replyCount}

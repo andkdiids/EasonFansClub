@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-export type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker' | 'stethoscope' | 'pill' | 'gift' | 'camera' | 'eye' | 'palette' | 'brush' | 'eraser' | 'eyedropper' | 'fill' | 'select' | 'move' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'fit' | 'fullscreen' | 'fullscreen-exit' | 'replace' | 'layers' | 'download' | 'trash' | 'eye-off' | 'align' | 'upload'
+export type IconName = 'home' | 'forum' | 'music' | 'calendar' | 'archive' | 'activity' | 'bell' | 'star' | 'check' | 'chart' | 'friends' | 'log' | 'feedback' | 'help' | 'settings' | 'logout' | 'search' | 'edit' | 'grid' | 'menu' | 'user' | 'arrow-up' | 'sticker' | 'stethoscope' | 'pill' | 'gift' | 'camera' | 'eye' | 'palette' | 'brush' | 'eraser' | 'eyedropper' | 'fill' | 'select' | 'move' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'fit' | 'fullscreen' | 'fullscreen-exit' | 'replace' | 'layers' | 'download' | 'trash' | 'copy' | 'eye-off' | 'align' | 'upload'
 
 const paths: Record<IconName, React.ReactNode> = {
   home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></>,
@@ -49,6 +49,7 @@ const paths: Record<IconName, React.ReactNode> = {
   layers: <><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></>,
   download: <><path d="M12 3v12m-5-5 5 5 5-5M4 20h16"/></>,
   trash: <><path d="M4 7h16M10 11v5m4-5v5M9 7V4h6v3m-9 0 1 14h10l1-14"/></>,
+  copy: <><rect x="8" y="8" width="11" height="11" rx="1"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></>,
   'eye-off': <><path d="m3 3 18 18M10.6 6.2A10.8 10.8 0 0 1 12 6c6.3 0 9.5 6 9.5 6a16 16 0 0 1-3 3.7M6.6 6.7C3.6 8.5 2.5 12 2.5 12S5.7 18 12 18c1 0 1.9-.2 2.7-.4"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
   align: <><rect x="5" y="5" width="14" height="14"/><path d="M2 9h3m14 0h3M2 15h3m14 0h3"/></>,
   upload: <><path d="M12 16V4m-5 5 5-5 5 5M4 20h16"/></>,

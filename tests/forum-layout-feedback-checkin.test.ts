@@ -49,12 +49,13 @@ test('个人主页保持自己的代码布局并直接渲染业务模块', () =>
   assert.doesNotMatch(page, /PageLayoutRenderer|getPublishedPageLayoutConfig|layoutConfig/)
 })
 
-test('统一返回按钮优先返回历史，无历史时回首页或业务列表', () => {
+test('统一返回按钮优先返回显式来源或历史，无历史时回业务列表', () => {
   const button = readFileSync('components/BackButton.tsx', 'utf8')
   const detail = readFileSync('app/posts/[postId]/page.tsx', 'utf8')
   assert.match(button, /window\.history\.length > 1/)
   assert.match(button, /router\.push\(fallbackHref\)/)
-  assert.match(detail, /<BackButton fallbackHref="\/forum"/)
+  assert.match(detail, /const detailFallbackHref = postBoardFallbackHref\(post\.Board\?\.slug\)/)
+  assert.match(detail, /<BackButton fallbackHref=\{detailFallbackHref\} targetHref=\{returnTo \|\| undefined\}/)
 })
 
 test('验收修复保持真实签到记录、整卡点击、申请过滤与通知清除', () => {

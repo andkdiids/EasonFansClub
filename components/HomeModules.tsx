@@ -7,7 +7,7 @@ import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
-import { postCreateHref } from '@/lib/post-navigation'
+import { postCreateHref, postDetailHref } from '@/lib/post-navigation'
 
 type LoadState<T> = { loading: boolean; failed: boolean; data: T }
 type Post = {
@@ -89,7 +89,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
                     {post.isFeatured ? <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">精华</span> : null}
                     <Link href={`/boards/${post.board.slug}`} className="rounded bg-sky-50 px-2 py-1 text-xs font-black text-brand-700">{post.board.name}</Link>
                   </div>
-                  <Link href={`/posts/${post.id}`} className="text-2xl font-black text-brand-950 hover:text-brand-700">{post.title}</Link>
+                  <Link href={postDetailHref(post.id, '/')} className="text-2xl font-black text-brand-950 hover:text-brand-700">{post.title}</Link>
                   <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
                   <p className="mt-4 text-xs font-bold text-slate-500">
                     <Link href={`/user/${formatUid(post.author.uid)}`} className="text-brand-950"><UserDisplayName name={authorName} uid={post.author.uid} badges={post.author.equippedBadges} badge={post.author.equippedBadge} compact /></Link>
