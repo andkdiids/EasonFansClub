@@ -3,6 +3,7 @@ import { getShanghaiDateKey, shiftShanghaiDateKey } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 import {
   getAspirinDailyQualifiedCaseIds,
+  getAspirinDailyProgress,
   getAspirinQualifiedDateKeys,
   calculateAspirinCurrentStreak,
   isValidAspirinConsultation,
@@ -32,7 +33,7 @@ export type AspirinRuleRecord = {
   revokeAfterDays: number | null
 }
 
-type AspirinConsultationQueryRow = {
+export type AspirinConsultationQueryRow = {
   id: string
   recordId: string
   authorId: string
@@ -43,8 +44,8 @@ type AspirinConsultationQueryRow = {
   record: { authorId: string; category: string; status: string; deletedAt: Date | null }
 }
 
-function asFacts(rows: readonly AspirinConsultationQueryRow[]): AspirinConsultationFact[] {
-  return rows.map((row) => ({
+export function toAspirinConsultationFact(row: AspirinConsultationQueryRow): AspirinConsultationFact {
+  return {
     id: row.id,
     recordId: row.recordId,
     authorId: row.authorId,
@@ -53,7 +54,11 @@ function asFacts(rows: readonly AspirinConsultationQueryRow[]): AspirinConsultat
     deletedAt: row.deletedAt,
     createdAt: row.createdAt,
     record: row.record,
-  }))
+  }
+}
+
+function asFacts(rows: readonly AspirinConsultationQueryRow[]): AspirinConsultationFact[] {
+  return rows.map(toAspirinConsultationFact)
 }
 
 /**
@@ -64,8 +69,10 @@ async function loadAspirinConsultationFacts(userId: string, now: Date) {
   const rows = await prisma.clinicConsultation.findMany({
     where: {
       authorId: userId,
+      status: 'ACTIVE',
+      deletedAt: null,
       createdAt: { lte: now },
-      record: { category: 'ASK_DOCTORS' },
+      record: { category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null },
     },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: {
@@ -80,6 +87,21 @@ async function loadAspirinConsultationFacts(userId: string, now: Date) {
     },
   })
   return asFacts(rows)
+}
+
+/**
+ * Detail and tracking views need today's live case count, not the acquisition
+ * cursor used after a formal revoke. In particular, a previous revoke must
+ * never make a valid consultation disappear from the current X/5 display.
+ */
+export async function getAspirinDailyProgressForUser(input: { userId: string; rule: AspirinRuleRecord; now?: Date }) {
+  const now = input.now || new Date()
+  const facts = await loadAspirinConsultationFacts(input.userId, now)
+  const config = getAspirinRuleConfig(input.rule.configJson)
+  const dailyTarget = Number.isSafeInteger(input.rule.threshold) && (input.rule.threshold || 0) > 0 ? input.rule.threshold! : 1
+  if (!config) return { current: 0, target: dailyTarget, caseIds: new Set<string>(), dateKey: getShanghaiDateKey(now), config: null }
+  const progress = getAspirinDailyProgress(facts, input.userId, getShanghaiDateKey(now), config, dailyTarget)
+  return { ...progress, dateKey: getShanghaiDateKey(now), config }
 }
 
 export type AspirinRuleEvaluation = {

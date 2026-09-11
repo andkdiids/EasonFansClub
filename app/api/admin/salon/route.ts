@@ -1,9 +1,10 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
+import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { createNotification } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
-import { completeSalonReviewNotifications } from '@/lib/salon-review-notifications'
+import { completeSalonReviewNotifications, getSalonEditReviewPostIds } from '@/lib/salon-review-notifications'
 import { publicImageUrl } from '@/lib/images'
 import { normalizeSalonConcertSelection, parseSalonCategory, SALON_CATEGORY_CONFIG, SALON_POST_STATUSES, salonCategoryLabel, supportsOriginal } from '@/lib/salon'
 import { prisma } from '@/lib/prisma'
@@ -36,6 +37,7 @@ function serializeAdminPost(post: {
   commentCount: number
   viewCount: number
   createdAt: Date
+  updatedAt: Date
   approvedAt: Date | null
   author: { id: string; uid: number; nickname: string; avatarUrl: string | null; Profile: { avatarUrl: string | null } | null }
   concert: { id: string; title: string | null; concertDate: Date; city: string; stageType: string; venue: string | null; sessionNumber: string | null; MusicTour: { id: string; name: string } } | null
@@ -53,6 +55,7 @@ function serializeAdminPost(post: {
     commentCount: post.commentCount,
     viewCount: post.viewCount || 0,
     createdAt: post.createdAt.toISOString(),
+    updatedAt: post.updatedAt.toISOString(),
     approvedAt: post.approvedAt?.toISOString() || null,
     author: {
       id: post.author.id,
@@ -94,6 +97,7 @@ const adminSelect = {
   commentCount: true,
   viewCount: true,
   createdAt: true,
+  updatedAt: true,
   approvedAt: true,
   author: { select: { id: true, uid: true, nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
   concert: { select: { id: true, title: true, concertDate: true, city: true, stageType: true, venue: true, sessionNumber: true, MusicTour: { select: { id: true, name: true } } } },
@@ -146,7 +150,7 @@ export async function PATCH(request: Request) {
   const action = body.action === 'approve' || body.action === 'reject' || body.action === 'update' ? body.action : ''
   if (!postId || !action) return reviewErrorResponse('INVALID_REVIEW_ACTION', '审核操作无效')
 
-  type CurrentSalonPost = { id: string; category: string; status: string; userId: string; title: string | null; concertId: string | null }
+  type CurrentSalonPost = { id: string; category: string; status: string; userId: string; title: string | null; concertId: string | null; createdAt: Date; approvedAt: Date | null; updatedAt: Date }
   let failureStage: SalonReviewFailureStage = 'LOAD'
   let current: CurrentSalonPost | null = null
   // This mutation uses updateMany for the review-state compare-and-set.
@@ -159,7 +163,7 @@ export async function PATCH(request: Request) {
   let updated: { id: string; status: string } | null = null
 
   try {
-    current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, category: true, status: true, userId: true, title: true, concertId: true } })
+    current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, category: true, status: true, userId: true, title: true, concertId: true, createdAt: true, approvedAt: true, updatedAt: true } })
     if (!current) return reviewErrorResponse('POST_NOT_FOUND', '作品不存在')
 
     failureStage = 'VALIDATION'
@@ -208,6 +212,16 @@ export async function PATCH(request: Request) {
     if (Object.prototype.hasOwnProperty.call(body, 'title')) data.title = sanitizeText(body.title, 200) || null
     if (Object.prototype.hasOwnProperty.call(body, 'content')) data.content = sanitizeText(body.content, 5000) || null
 
+    // The admin manager also uses this endpoint for direct content edits. Keep
+    // that path separate from review decisions: an admin edit is immediately
+    // approved and never creates a pending review task.
+    if (action === 'update') {
+      data.status = 'APPROVED'
+      data.approvedAt = new Date()
+      data.approvedById = guard.user.id
+      data.rejectReason = null
+    }
+
     if (action === 'approve' || action === 'reject') {
       reviewStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
       if (current.status === reviewStatus) return reviewErrorResponse('ALREADY_REVIEWED', '这篇作品已经被处理，不能重复审核', 409)
@@ -231,7 +245,7 @@ export async function PATCH(request: Request) {
       await tx.$queryRaw`SELECT \`id\` FROM \`SalonPost\` WHERE \`id\` = ${postId} FOR UPDATE`
       const lockedCurrent = await tx.salonPost.findUnique({
         where: { id: postId },
-        select: { id: true, category: true, status: true, userId: true, title: true, concertId: true },
+        select: { id: true, category: true, status: true, userId: true, title: true, concertId: true, createdAt: true, approvedAt: true, updatedAt: true },
       })
       if (!lockedCurrent) throw new Error('SALON_POST_NOT_FOUND')
       current = lockedCurrent
@@ -247,13 +261,13 @@ export async function PATCH(request: Request) {
           : {}
       const changed = await tx.salonPost.updateMany({ where: { id: postId, ...allowedReviewStates }, data })
       if (!changed.count) throw new Error('SALON_POST_ALREADY_REVIEWED')
-      if (reviewStatus === 'APPROVED') {
+      if (reviewStatus === 'APPROVED' || (action === 'update' && lockedCurrent.status !== 'APPROVED')) {
         failureStage = 'REWARD'
         await grantGrowthReward(tx, {
           userId: current!.userId,
           taskCode: 'SALON_APPROVED',
           sourceEventId: current!.id,
-          reason: '沙龙作品通过审核',
+          reason: action === 'update' ? '管理员编辑沙龙作品并直接通过' : '沙龙作品通过审核',
         })
         await completeTask(tx, { userId: current!.userId, taskCode: 'FIRST_SALON', periodKey: 'ALL', sourceEventId: current!.id })
       } else if (lockedCurrent.status === 'APPROVED') {
@@ -263,6 +277,25 @@ export async function PATCH(request: Request) {
           taskCode: 'SALON_APPROVED',
           sourceEventId: lockedCurrent.id,
           reason: '沙龙审核拒绝，撤销通过奖励',
+        })
+      }
+      if (action === 'update') {
+        await createAdminActionAudit(tx, {
+          operatorId: guard.user!.id,
+          action: 'UPDATE_SETTING',
+          operationType: adminAuditOperations.SALON_POST_ADMIN_EDIT,
+          targetType: 'SALON_POST',
+          targetId: postId,
+          targetTitle: typeof data.title === 'string' ? data.title : lockedCurrent.title,
+          targetUserId: lockedCurrent.userId,
+          metadata: {
+            salonId: postId,
+            adminUserId: guard.user!.id,
+            operation: 'ADMIN_EDIT',
+            beforeCategory: lockedCurrent.category,
+            afterCategory: typeof data.category === 'string' ? data.category : lockedCurrent.category,
+            changedFields: Object.keys(data).filter((field) => !['status', 'approvedAt', 'approvedById', 'rejectReason'].includes(field)),
+          } as Prisma.InputJsonValue,
         })
       }
       failureStage = 'DATABASE_UPDATE'
@@ -286,12 +319,23 @@ export async function PATCH(request: Request) {
   const reviewedCurrent = current
   if (!reviewedCurrent || !updated) return reviewErrorResponse('DATABASE_ERROR', '数据库操作未完成，请稍后重试', 500)
   if (reviewStatus && reviewedAt) {
+    const editPostIds = await safeNotificationWrite(
+      () => getSalonEditReviewPostIds([postId]),
+      {
+        operation: 'salon.review.edit-marker.lookup',
+        userId: guard.user.id,
+        targetId: postId,
+        notificationType: 'REVIEW',
+      },
+    )
+    const reviewKind = editPostIds?.has(postId) ? 'EDIT' : 'CREATE'
     const adminRecipientIds = await safeNotificationWrite(
       () => completeSalonReviewNotifications({
         postId,
         status: reviewStatus!,
         title: reviewedCurrent.title,
         completedAt: reviewedAt!,
+        reviewKind,
       }),
       {
         operation: 'salon.review.admin-notification-complete',
@@ -312,8 +356,8 @@ export async function PATCH(request: Request) {
       )
     }
     const content = reviewStatus === 'APPROVED'
-      ? `你提交的沙龙作品《${reviewedCurrent.title || '无标题作品'}》已通过审核。`
-      : `你提交的沙龙作品《${reviewedCurrent.title || '无标题作品'}》未通过审核。原因：${String(data.rejectReason || '')}`
+      ? `${reviewKind === 'EDIT' ? '你提交的沙龙内容修改' : '你提交的沙龙作品'}《${reviewedCurrent.title || '无标题作品'}》已通过审核。`
+      : `${reviewKind === 'EDIT' ? '你提交的沙龙内容修改' : '你提交的沙龙作品'}《${reviewedCurrent.title || '无标题作品'}》未通过审核。原因：${String(data.rejectReason || '')}`
     await safeNotificationWrite(() => createNotification({
       data: {
         recipientId: reviewedCurrent.userId,
@@ -323,7 +367,9 @@ export async function PATCH(request: Request) {
         // users can see their own approval/rejection result.
         type: 'ADMIN',
         key: `salon-review:${postId}:${reviewStatus}:${reviewedAt!.getTime()}`,
-        title: reviewStatus === 'APPROVED' ? '你的沙龙投稿已通过审核' : '你的沙龙投稿未通过审核',
+        title: reviewStatus === 'APPROVED'
+          ? reviewKind === 'EDIT' ? '你的沙龙内容修改已通过审核' : '你的沙龙投稿已通过审核'
+          : reviewKind === 'EDIT' ? '你的沙龙内容修改未通过审核' : '你的沙龙投稿未通过审核',
         content,
         link: '/salon/mine',
       },

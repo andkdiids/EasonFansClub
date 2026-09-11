@@ -141,6 +141,7 @@ const salonPostSelect = {
   commentCount: true,
   viewCount: true,
   createdAt: true,
+  updatedAt: true,
   approvedAt: true,
   author: {
     select: {
@@ -230,6 +231,7 @@ export function serializeSalonPost(row: SalonPostRow, likedByMe = false, include
     commentCount: row.commentCount,
     viewCount: row.viewCount || 0,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
     approvedAt: row.approvedAt?.toISOString() || null,
     likedByMe,
     author: publicAuthor(row.author),

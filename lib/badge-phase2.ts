@@ -128,11 +128,12 @@ export function calculateBadgeRuleProgress(currentValue: number, rule: BadgeProg
 export async function getUserBadgeRuleProgress(userId: string, rule: BadgeProgressRuleInput | null | undefined) {
   if (!isBadgeProgressRule(rule)) return null
   if (rule.ruleType === 'CLINIC_CONSULTATION_STREAK') {
-    // This rule's metric is a live, configured daily distinct-case count. It
-    // must use the same resolver as grants/backfills rather than a scalar
-    // metric loader with no access to BadgeRule.configJson.
-    const { getAspirinRuleEvaluation } = await import('@/lib/aspirin-badge')
-    const evaluation = await getAspirinRuleEvaluation({
+    // This rule's metric is today's live, configured distinct-case count. It
+    // deliberately does not use the acquisition-cycle cursor after a revoke:
+    // the detail view must show today's valid 1/5, 2/5, ... regardless of when
+    // the user last entered a new acquisition cycle.
+    const { getAspirinDailyProgressForUser } = await import('@/lib/aspirin-badge')
+    const progress = await getAspirinDailyProgressForUser({
       userId,
       rule: {
         id: rule.id || 'progress',
@@ -147,7 +148,7 @@ export async function getUserBadgeRuleProgress(userId: string, rule: BadgeProgre
         revokeAfterDays: null,
       },
     })
-    return calculateBadgeRuleProgress(evaluation.dailyCount, rule)
+    return calculateBadgeRuleProgress(progress.current, rule)
   }
   const current = await getUserBadgeMetric(userId, rule.ruleType as SupportedBadgeRuleType)
   return calculateBadgeRuleProgress(current, rule)

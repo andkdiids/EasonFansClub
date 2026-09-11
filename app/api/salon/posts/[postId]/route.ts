@@ -1,10 +1,16 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
+import { createAdminActionAudit, adminAuditOperations } from '@/lib/admin-audit'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser } from '@/lib/auth'
+import { safeNotificationWrite } from '@/lib/notification-transaction'
+import { createSalonReviewNotifications, salonReviewNotificationKey } from '@/lib/salon-review-notifications'
 import { getSalonPostForViewer, normalizeSalonConcertSelection, parseSalonCategory, SALON_CATEGORY_CONFIG, type SalonCategoryValue } from '@/lib/salon'
 import { prisma } from '@/lib/prisma'
+import { emitRealtimeMany } from '@/lib/realtime'
 import { requireUser, sanitizeText } from '@/lib/security'
+import { completeTask, grantGrowthReward } from '@/lib/growth-tasks/service'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
@@ -38,22 +44,32 @@ export async function DELETE(_request: Request, context: RouteContext) {
 export async function PATCH(request: Request, context: RouteContext) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
-  const canModerate = await hasAdminPermission(guard.user, 'post_manage')
-  if (!canModerate) return NextResponse.json({ ok: false, message: '没有修改沙龙作品的权限' }, { status: 403 })
   const { postId } = await context.params
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return NextResponse.json({ ok: false, message: '请求内容无效' }, { status: 400 })
 
-  const current = await prisma.salonPost.findUnique({ where: { id: postId }, select: { id: true, category: true, concertId: true } })
+  const current = await prisma.salonPost.findUnique({
+    where: { id: postId },
+    select: { id: true, userId: true, category: true, concertId: true, title: true, content: true, status: true, approvedAt: true, updatedAt: true },
+  })
   if (!current) return NextResponse.json({ ok: false, message: '作品不存在' }, { status: 404 })
+  const canModerate = await hasAdminPermission(guard.user, 'post_manage').catch(() => false)
+  const isOwner = current.userId === guard.user.id
+  if (!isOwner && !canModerate) return NextResponse.json({ ok: false, message: '没有修改这篇沙龙作品的权限' }, { status: 403 })
 
-  const data: { category?: SalonCategoryValue; concert?: { connect: { id: string } } | { disconnect: true }; title?: string | null; content?: string | null } = {}
+  const baseUpdatedAtValue = body.baseUpdatedAt
+  const baseUpdatedAt = baseUpdatedAtValue === undefined || baseUpdatedAtValue === null || baseUpdatedAtValue === ''
+    ? null
+    : typeof baseUpdatedAtValue === 'string' ? new Date(baseUpdatedAtValue) : null
+  if (baseUpdatedAtValue !== undefined && baseUpdatedAtValue !== null && baseUpdatedAtValue !== '' && (!baseUpdatedAt || Number.isNaN(baseUpdatedAt.getTime()))) {
+    return NextResponse.json({ ok: false, message: '编辑版本标识无效，请刷新后重试' }, { status: 400 })
+  }
+
   let requestedCategory: SalonCategoryValue | undefined
   if (Object.prototype.hasOwnProperty.call(body, 'category')) {
     const category = parseSalonCategory(body.category)
     if (!category) return NextResponse.json({ ok: false, message: '投稿分类无效' }, { status: 400 })
     requestedCategory = category
-    data.category = category
   }
   const hasAssociationInput = ['tourId', 'sessionId', 'concertId'].some((key) => Object.prototype.hasOwnProperty.call(body, key))
   const selection = normalizeSalonConcertSelection({
@@ -88,16 +104,123 @@ export async function PATCH(request: Request, context: RouteContext) {
     selectedConcertId = current.concertId
   }
   if (categoryConfig.requiresConcert && !selectedConcertId) return NextResponse.json({ ok: false, message: '演唱会记录必须关联演唱会场次' }, { status: 400 })
-  if (hasAssociationInput) data.concert = selectedConcertId ? { connect: { id: selectedConcertId } } : { disconnect: true }
-  if (requestedCategory && !categoryConfig.allowsConcert) data.concert = { disconnect: true }
-  if (Object.prototype.hasOwnProperty.call(body, 'title')) data.title = sanitizeText(body.title, 200) || null
-  if (Object.prototype.hasOwnProperty.call(body, 'content')) data.content = sanitizeText(body.content, 5000) || null
-  if (!Object.keys(data).length) return NextResponse.json({ ok: false, message: '没有需要更新的内容' }, { status: 400 })
+  const nextCategory = requestedCategory || current.category
+  const nextConcertId = requestedCategory && !categoryConfig.allowsConcert
+    ? null
+    : hasAssociationInput ? selectedConcertId : current.concertId
+  const nextTitle = Object.prototype.hasOwnProperty.call(body, 'title') ? sanitizeText(body.title, 200) || null : current.title
+  const nextContent = Object.prototype.hasOwnProperty.call(body, 'content') ? sanitizeText(body.content, 5000) || null : current.content
+  const changedFields = [
+    nextCategory !== current.category ? 'category' : null,
+    nextConcertId !== current.concertId ? 'concertId' : null,
+    nextTitle !== current.title ? 'title' : null,
+    nextContent !== current.content ? 'content' : null,
+  ].filter((field): field is string => Boolean(field))
+  if (!changedFields.length) return NextResponse.json({ ok: false, message: '没有需要更新的内容' }, { status: 400 })
 
-  const updated = await prisma.salonPost.update({ where: { id: postId }, data, select: { id: true } }).catch(() => null)
-  if (!updated) return NextResponse.json({ ok: false, message: '作品不存在或更新失败' }, { status: 404 })
+  const isAdminEdit = canModerate
+  const reviewSubmittedAt = new Date()
+  let updated: { id: string; status: string; updatedAt: Date } | null = null
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM \`SalonPost\` WHERE id = ${postId} FOR UPDATE`
+      const locked = await tx.salonPost.findUnique({
+        where: { id: postId },
+        select: { id: true, userId: true, category: true, concertId: true, title: true, content: true, status: true, approvedAt: true, updatedAt: true },
+      })
+      if (!locked) throw new Error('SALON_POST_NOT_FOUND')
+      if (baseUpdatedAt && locked.updatedAt.getTime() !== baseUpdatedAt.getTime()) throw new Error('SALON_EDIT_CONFLICT')
+
+      const data: Prisma.SalonPostUncheckedUpdateInput = {
+        category: nextCategory,
+        concertId: nextConcertId,
+        title: nextTitle,
+        content: nextContent,
+        ...(isAdminEdit
+          ? { status: 'APPROVED' as const, approvedAt: reviewSubmittedAt, approvedById: guard.user!.id, rejectReason: null }
+          : { status: 'PENDING' as const, approvedAt: null, approvedById: null, rejectReason: null }),
+      }
+      const saved = await tx.salonPost.update({ where: { id: postId }, data, select: { id: true, status: true, updatedAt: true } })
+
+      if (isAdminEdit) {
+        if (locked.status !== 'APPROVED') {
+          await grantGrowthReward(tx, {
+            userId: locked.userId,
+            taskCode: 'SALON_APPROVED',
+            sourceEventId: locked.id,
+            reason: '管理员编辑沙龙作品并直接通过',
+          })
+          await completeTask(tx, { userId: locked.userId, taskCode: 'FIRST_SALON', periodKey: 'ALL', sourceEventId: locked.id })
+        }
+        await createAdminActionAudit(tx, {
+          operatorId: guard.user!.id,
+          action: 'UPDATE_SETTING',
+          operationType: adminAuditOperations.SALON_POST_ADMIN_EDIT,
+          targetType: 'SALON_POST',
+          targetId: postId,
+          targetTitle: nextTitle,
+          targetUserId: locked.userId,
+          metadata: {
+            salonId: postId,
+            adminUserId: guard.user!.id,
+            operation: 'ADMIN_EDIT',
+            beforeCategory: locked.category,
+            afterCategory: nextCategory,
+            changedFields,
+          } as Prisma.InputJsonValue,
+        })
+      }
+      return saved
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'SALON_EDIT_CONFLICT') {
+      return NextResponse.json({ ok: false, code: 'SALON_EDIT_CONFLICT', message: '内容在编辑期间已被修改，请刷新后重新检查' }, { status: 409 })
+    }
+    if (error instanceof Error && error.message === 'SALON_POST_NOT_FOUND') return NextResponse.json({ ok: false, message: '作品不存在或已经删除' }, { status: 404 })
+    console.error('[salon.posts.edit]', { postId, userId: guard.user.id, isAdminEdit, error: error instanceof Error ? error.message : String(error) })
+    return NextResponse.json({ ok: false, message: '作品更新失败，请稍后重试' }, { status: 500 })
+  }
+
+  if (!updated) return NextResponse.json({ ok: false, message: '作品更新失败，请稍后重试' }, { status: 500 })
+  if (!isAdminEdit) {
+    const adminRecipientIds = await safeNotificationWrite(
+      () => createSalonReviewNotifications({
+        postId,
+        authorId: guard.user!.id,
+        nickname: guard.user!.nickname,
+        category: nextCategory,
+        title: nextTitle,
+        reviewKind: 'EDIT',
+        notificationKey: `${salonReviewNotificationKey(postId, 'EDIT')}:${updated.updatedAt.getTime()}`,
+      }),
+      {
+        operation: 'salon.edit.admin-review-notification.failed',
+        userId: guard.user.id,
+        targetId: postId,
+        notificationType: 'REVIEW',
+      },
+    )
+    if (adminRecipientIds?.length) {
+      await safeNotificationWrite(
+        async () => { emitRealtimeMany(adminRecipientIds, 'notification') },
+        {
+          operation: 'salon.edit.admin-review-notification.realtime',
+          userId: guard.user.id,
+          targetId: postId,
+          notificationType: 'REVIEW',
+        },
+      )
+    }
+  }
   revalidatePath('/salon')
   revalidatePath('/salon/mine')
   revalidatePath(`/salon/${postId}`)
-  return NextResponse.json({ ok: true, message: '沙龙作品已更新' })
+  revalidatePath('/admin/review')
+  return NextResponse.json({
+    ok: true,
+    postId,
+    status: updated.status,
+    updatedAt: updated.updatedAt.toISOString(),
+    message: isAdminEdit ? '沙龙作品已更新并直接通过' : '修改已保存，正在等待审核。',
+  })
 }

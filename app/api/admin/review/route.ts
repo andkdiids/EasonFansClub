@@ -15,6 +15,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { postContentPlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
 import { publicImageUrl } from '@/lib/images'
+import { getSalonEditReviewPostIds } from '@/lib/salon-review-notifications'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import {
   canApplyReviewDecision,
@@ -237,15 +238,16 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
     const rows = await prisma.salonPost.findMany({
       where: withTargetId(salonWhere(status, targetId ? '' : keyword), targetId), orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }], take,
       select: {
-        id: true, title: true, content: true, category: true, status: true, rejectReason: true, createdAt: true, approvedAt: true,
+        id: true, title: true, content: true, category: true, status: true, rejectReason: true, createdAt: true, updatedAt: true, approvedAt: true,
         author: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
         approvedBy: { select: { id: true, uid: true, nickname: true } },
         concert: { select: { title: true, city: true, MusicTour: { select: { name: true } } } },
         media: { orderBy: { sortOrder: 'asc' }, select: { id: true, previewUrl: true, thumbnailUrl: true } },
       },
     })
+    const editPostIds = await getSalonEditReviewPostIds(rows.map((row) => row.id))
     return rows.map((row) => buildItem({
-      id: row.id, sourceType: 'SALON', sourceId: row.id, title: row.title || '无标题作品',
+      id: row.id, sourceType: 'SALON', sourceId: row.id, reviewKind: editPostIds.has(row.id) ? 'EDIT' : 'CREATE', title: row.title || '无标题作品',
       author: author({ id: row.author.id, uid: row.author.uid, nickname: row.author.nickname, displayName: row.author.Profile?.displayName }), authorId: row.author.id,
       createdAt: row.createdAt.toISOString(), status: row.status as ReviewStatus,
       cover: publicImageUrl(row.media[0]?.thumbnailUrl || row.media[0]?.previewUrl), summary: summary(row.content), category: reviewSalonCategoryLabel(row.category), relatedEntity: row.concert ? `${row.concert.MusicTour.name} · ${row.concert.city}${row.concert.title ? ` · ${row.concert.title}` : ''}` : null,

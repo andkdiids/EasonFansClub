@@ -7254,7 +7254,26 @@ body:has(.duel-page) .app-page-content {
 .salon-modal { display: grid; width: min(520px, 100%); max-height: calc(100dvh - 36px); gap: 14px; overflow: auto; border: 1px solid var(--salon-border-strong); padding: 20px; color: var(--salon-text); background: var(--salon-elevated); box-shadow: 0 22px 70px rgba(0,0,0,.28); }
 .salon-modal h2 { margin: 0; font-size: 20px; }
 .salon-modal p { margin: 0; color: var(--salon-muted); font-size: 12px; }
-.salon-modal > div:last-child { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.salon-modal > div:last-child,.salon-modal > div:last-of-type { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.salon-badge-modal { width: min(600px, 100%); }
+.salon-badge-modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.salon-badge-modal-heading > button { min-width: 34px; padding: 0; font-size: 20px; line-height: 1; }
+.salon-badge-target { display: flex; align-items: center; gap: 11px; border: 1px solid var(--salon-border); padding: 11px; background: var(--salon-subtle); }
+.salon-badge-target-avatar { display: grid; width: 42px; height: 42px; flex: none; place-items: center; overflow: hidden; border-radius: 50%; color: var(--salon-primary); background: color-mix(in srgb, var(--salon-primary), transparent 88%); font-size: 15px; font-weight: 900; }
+.salon-badge-target-avatar img,.salon-badge-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.salon-badge-target strong { color: var(--salon-text); font-size: 12px; }
+.salon-badge-target p + p { margin-top: 4px; }
+.salon-badge-list { display: grid; max-height: 280px; gap: 7px; overflow: auto; margin-top: 2px; }
+.salon-badge-option { display: flex; align-items: center; gap: 10px; min-height: 58px; border: 1px solid var(--salon-border); padding: 8px 10px; color: var(--salon-text); background: var(--salon-surface); text-align: left; cursor: pointer; }
+.salon-badge-option:hover,.salon-badge-option.is-selected { border-color: var(--salon-primary); background: color-mix(in srgb, var(--salon-primary), transparent 94%); }
+.salon-badge-option:disabled { cursor: not-allowed; opacity: .6; }
+.salon-badge-option > span:last-child { display: grid; gap: 4px; }
+.salon-badge-option strong { font-size: 12px; }
+.salon-badge-option small { color: var(--salon-muted); font-size: 10px; font-weight: 800; }
+.salon-badge-icon { display: grid; width: 38px; height: 38px; flex: none; place-items: center; overflow: hidden; border-radius: 50%; color: var(--salon-primary); background: color-mix(in srgb, var(--salon-primary), transparent 88%); font-size: 10px; font-weight: 900; }
+.salon-badge-empty { border: 1px dashed var(--salon-border-strong); padding: 15px; color: var(--salon-muted); background: var(--salon-subtle); line-height: 1.65; }
+.salon-badge-confirm { border-left: 3px solid var(--success); padding: 9px 11px; color: var(--salon-text) !important; background: color-mix(in srgb, var(--success), transparent 94%); line-height: 1.65; }
+.salon-action-toast { position: fixed; z-index: var(--layer-toast, 150); right: 22px; bottom: 22px; max-width: min(390px, calc(100vw - 44px)); border: 1px solid color-mix(in srgb, var(--success), var(--salon-border-strong) 40%); padding: 12px 15px; color: var(--salon-text); background: var(--salon-elevated); box-shadow: 0 12px 38px rgba(0,0,0,.18); font-size: 12px; font-weight: 850; }
 
 @media (max-width: 900px) {
   .salon-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }

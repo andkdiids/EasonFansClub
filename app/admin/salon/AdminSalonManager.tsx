@@ -115,6 +115,7 @@ export function AdminSalonManager({ initialPosts, initialHasMore, initialPostId,
         concertId: allowsConcert && editing.sessionId ? editing.sessionId : null,
         title: editing.title,
         content: editing.content,
+        baseUpdatedAt: editing.post.updatedAt,
       }
       const response = await fetch(`/api/salon/posts/${encodeURIComponent(editing.post.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await response.json().catch(() => null) as { message?: string } | null

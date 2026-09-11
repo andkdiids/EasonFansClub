@@ -17,15 +17,17 @@ import { shareCardImageCandidates } from '@/lib/share-metadata'
 import { SalonComments } from './SalonComments'
 import { SalonLikeButton } from './SalonLikeButton'
 import { SalonViewCounter } from './SalonViewCounter'
+import { SalonBadgeGrant } from './SalonBadgeGrant'
 import { appendSalonListRestoreParam, updateSalonListHistoryState } from '@/lib/salon-scroll-state'
 
-export function SalonDetail({ post, initialComments, initialCommentsHasMore, initialCommentsNextCursor, currentUserId, canModerate, returnHref = null }: Readonly<{
+export function SalonDetail({ post, initialComments, initialCommentsHasMore, initialCommentsNextCursor, currentUserId, canModerate, canGrantBadges, returnHref = null }: Readonly<{
   post: SalonPostView
   initialComments: SalonCommentView[]
   initialCommentsHasMore: boolean
   initialCommentsNextCursor: string | null
   currentUserId: string | null
   canModerate: boolean
+  canGrantBadges: boolean
   returnHref?: string | null
 }>) {
   const router = useRouter()
@@ -53,6 +55,7 @@ export function SalonDetail({ post, initialComments, initialCommentsHasMore, ini
     meta: [{ label: '沙龙', value: categoryLabel }, ...(concert ? [{ label: '演唱会', value: concert.tour.name }, { label: '场次', value: formatSalonSession({ city: concert.city, concertDate: concert.date, venue: concert.venue, title: concert.title, sessionNumber: concert.sessionNumber }) }] : [])],
   }
   const returnLinkHref = returnHref ? appendSalonListRestoreParam(returnHref) : '/salon'
+  const editHref = `/salon/${encodeURIComponent(post.id)}/edit${returnHref ? `?from=${encodeURIComponent(returnHref)}` : ''}`
 
   useEffect(() => {
     // The list state belongs to the previous history entry. Clear any copied
@@ -92,7 +95,7 @@ export function SalonDetail({ post, initialComments, initialCommentsHasMore, ini
         <h1>{displayTitle}</h1>
         {concert ? <Link href={buildConcertSlugPath(concert.tour.name, concert.city, concert.date, concert.stageType)} className="salon-detail-concert">{metadata}</Link> : <p className="salon-detail-concert">{metadata}</p>}
         {post.content ? <p className="salon-detail-content">{post.content}</p> : null}
-        <div className="salon-detail-actions"><SalonLikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /><span>评论 {post.commentCount}</span><SalonViewCounter postId={post.id} initialCount={post.viewCount} />{currentUserId === post.author.id || canModerate ? <button type="button" onClick={() => void removePost()} className="salon-danger-button">删除作品</button> : null}</div>
+        <div className="salon-detail-actions"><SalonLikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /><span>评论 {post.commentCount}</span><SalonViewCounter postId={post.id} initialCount={post.viewCount} />{currentUserId === post.author.id || canModerate ? <Link href={editHref} className="salon-secondary-button">编辑</Link> : null}{currentUserId === post.author.id || canModerate ? <button type="button" onClick={() => void removePost()} className="salon-danger-button">删除作品</button> : null}{canGrantBadges ? <SalonBadgeGrant postId={post.id} postTitle={displayTitle} postSummary={post.content || metadata} author={post.author} /> : null}</div>
       </aside>
     </section>
     <SalonComments postId={post.id} initialComments={initialComments} initialCommentCount={post.commentCount} initialHasMore={initialCommentsHasMore} initialNextCursor={initialCommentsNextCursor} currentUserId={currentUserId} canModerate={canModerate} />

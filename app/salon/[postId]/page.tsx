@@ -17,9 +17,10 @@ export default async function SalonDetailPage({ params, searchParams }: { params
   const [{ postId }, query] = await Promise.all([params, searchParams])
   const user = await getCurrentUser()
   const canModerate = Boolean(user && await hasAdminPermission(user, 'post_manage').catch(() => false))
+  const canGrantBadges = Boolean(user && await hasAdminPermission(user, 'achievement_manage').catch(() => false))
   const post = await getSalonPostForViewer(postId, user?.id, canModerate)
   if (!post) notFound()
   const comments = await getSalonComments(postId)
   const returnHref = normalizeSalonReturnTo(query.from || query.returnTo)
-  return <SalonDetail post={post} initialComments={comments.comments} initialCommentsHasMore={comments.hasMore} initialCommentsNextCursor={comments.nextCursor} currentUserId={user?.id || null} canModerate={canModerate} returnHref={returnHref} />
+  return <SalonDetail post={post} initialComments={comments.comments} initialCommentsHasMore={comments.hasMore} initialCommentsNextCursor={comments.nextCursor} currentUserId={user?.id || null} canModerate={canModerate} canGrantBadges={canGrantBadges} returnHref={returnHref} />
 }

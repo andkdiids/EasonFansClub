@@ -20,6 +20,7 @@ import {
   countShanghaiNaturalDaysSince,
   evaluateAspirinConsultationFacts,
   getSustainedQualificationState,
+  toAspirinConsultationFact,
 } from '@/lib/aspirin-badge'
 
 const userId = 'user-a'
@@ -108,6 +109,32 @@ test('每日按不同病例去重，重复回答和无效内容不会污染进�
   const afterDeletion = dailyFacts(5)
   afterDeletion[0] = fact({ id: 'deleted', recordId: 'case-0', status: 'DELETED' })
   assert.equal(getAspirinDailyQualifiedCaseIds(afterDeletion, userId, '2026-09-11', config).size, 4)
+})
+
+test('详情今日进度不受重新获取周期截断影响，并复现真实 ClinicConsultation 投影', () => {
+  const persistedRow = {
+    id: 'consultation-from-submit-route',
+    recordId: 'clinic-record-from-submit-route',
+    authorId: userId,
+    content: uniqueText(24),
+    status: 'ACTIVE',
+    deletedAt: null,
+    createdAt: new Date('2026-09-11T04:00:00.000Z'),
+    record: { authorId: 'case-owner', category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null },
+  } as const
+  const factFromPersistedRow = toAspirinConsultationFact(persistedRow)
+  const daily = getAspirinDailyProgress([factFromPersistedRow], userId, '2026-09-11', config, 5)
+  assert.equal(daily.current, 1)
+
+  const acquisitionEvaluation = evaluateAspirinConsultationFacts({
+    userId,
+    rule,
+    facts: [factFromPersistedRow],
+    now: new Date('2026-09-11T05:00:00.000Z'),
+    qualificationStartsAt: new Date('2026-09-11T05:00:00.000Z'),
+  })
+  assert.equal(acquisitionEvaluation.dailyCount, 0)
+  assert.equal(daily.current, 1)
 })
 
 test('字符重复率严格使用小于 70% 的边界', () => {

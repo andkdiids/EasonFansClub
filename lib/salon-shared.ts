@@ -159,6 +159,7 @@ export type SalonPostView = {
   commentCount: number
   viewCount: number
   createdAt: string
+  updatedAt: string
   approvedAt: string | null
   likedByMe: boolean
   author: {
