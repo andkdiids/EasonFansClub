@@ -38,7 +38,6 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
 
   useEffect(() => {
     const canRequestProgress = refreshProgress
-      && badge.status === 'NOT_OBTAINED'
       && badge.visibility === 'PUBLIC'
       && badge.grantType === 'AUTO'
       && badge.isEnabled
@@ -65,14 +64,17 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
     }
     void refresh()
     const onCheckinChanged = () => { void refresh() }
+    const onBadgeProgressUpdated = () => { void refresh() }
     const onVisibilityChanged = () => { if (document.visibilityState === 'visible') void refresh() }
     window.addEventListener('checkin:dayChanged', onCheckinChanged)
+    window.addEventListener('eason-badge-progress-updated', onBadgeProgressUpdated)
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', onVisibilityChanged)
     return () => {
       active = false
       requestController?.abort()
       window.removeEventListener('checkin:dayChanged', onCheckinChanged)
+      window.removeEventListener('eason-badge-progress-updated', onBadgeProgressUpdated)
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', onVisibilityChanged)
     }
@@ -122,7 +124,7 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
         {displayBadge.isGrayed ? <p className="mt-1 text-xs font-black text-amber-700">持续条件未达成，勋章暂时失效；重新完成当日问诊要求即可恢复。</p> : null}
         {displayBadge.status !== 'HIDDEN' && displayBadge.availabilityStatus ? <p className="mt-1 text-xs font-black text-brand-700">状态：{displayBadge.availabilityStatus === 'PERMANENT' ? '永久可获得' : displayBadge.availabilityStatus === 'UPCOMING' ? '即将开放' : displayBadge.availabilityStatus === 'ENDED' ? '限定 · 已绝版' : '限定开放中'}</p> : null}
         {displayBadge.status !== 'HIDDEN' && displayBadge.availabilityStatus && displayBadge.availabilityStatus !== 'PERMANENT' ? <p className="mt-1 text-xs font-bold text-slate-500">限定时间：{formatDateTime(displayBadge.availableFrom || null) || '不限开始'} – {formatDateTime(displayBadge.availableUntil || null) || '不限结束'}{displayBadge.availabilityStatus === 'AVAILABLE' && remainingLabel(displayBadge.availableUntil || null) ? ` · ${remainingLabel(displayBadge.availableUntil || null)}` : ''}</p> : null}
-        {progressLoading && displayBadge.status === 'NOT_OBTAINED' && !displayBadge.progress ? <p className="mt-3 text-left text-xs font-bold text-slate-500">正在读取当前进度…</p> : null}
+        {progressLoading && !displayBadge.progress ? <p className="mt-3 text-left text-xs font-bold text-slate-500">正在读取当前进度…</p> : null}
         {displayBadge.progress && !displayBadge.progress.progressUnsupported ? <div className="mt-3 w-full text-left"><div className="flex justify-between text-xs font-black text-slate-600"><span>当前进度</span><span>{displayBadge.progress.current} / {displayBadge.progress.target}{displayBadge.progress.unitLabel ? ` ${displayBadge.progress.unitLabel}` : ''} · {displayBadge.progress.percentage}%</span></div><div className="mt-1 h-2 overflow-hidden rounded-full bg-sky-100"><span className="block h-full rounded-full bg-brand-700" style={{ width: `${displayBadge.progress.percentage}%` }} /></div></div> : null}
         {tierItems.length > 1 ? <div className="mt-3 text-left"><p className="text-xs font-black text-slate-600">成长等级</p><div className="mt-1 flex flex-wrap gap-2">{tierItems.map((tier) => <span key={tier.id} className={`rounded-sm px-2 py-1 text-[11px] font-black ${tier.id === displayBadge.id ? 'bg-brand-950 text-white' : 'bg-sky-50 text-brand-700'}`}>第 {tier.tierLevel} 级 {tier.status === 'OBTAINED' ? '✓' : tier.progress && !tier.progress.progressUnsupported ? `${tier.progress.current}/${tier.progress.target}` : '未获得'}</span>)}</div></div> : null}
         {displayBadge.ownershipStats && displayBadge.visibility === 'PUBLIC' ? <p className="mt-2 text-xs font-bold text-slate-500">全站获得率：{displayBadge.ownershipStats.display}（{displayBadge.ownershipStats.ownerCount} 人）</p> : null}
@@ -292,9 +294,16 @@ export function BadgeCollectionPanel({ uid, isSelf, previewOnly = true }: Props)
       if (detail?.uid !== undefined && String(detail.uid) !== String(uid)) return
       void load()
     }
+    const refreshProgress = () => {
+      if (isSelf) void load()
+    }
     window.addEventListener('eason-badge-collection-updated', refreshCollection)
-    return () => window.removeEventListener('eason-badge-collection-updated', refreshCollection)
-  }, [load, uid])
+    window.addEventListener('eason-badge-progress-updated', refreshProgress)
+    return () => {
+      window.removeEventListener('eason-badge-collection-updated', refreshCollection)
+      window.removeEventListener('eason-badge-progress-updated', refreshProgress)
+    }
+  }, [isSelf, load, uid])
 
   useEffect(() => {
     if (!collection) return

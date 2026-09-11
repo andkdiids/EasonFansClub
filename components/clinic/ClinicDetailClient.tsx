@@ -34,6 +34,10 @@ function findParentName(items: ClinicPublicConsultation[], id: string) {
   return item?.author?.displayName || '这位医师'
 }
 
+function notifyAspirinBadgeProgressChanged() {
+  window.dispatchEvent(new Event('eason-badge-progress-updated'))
+}
+
 export function ClinicDetailClient({ record: initialRecord, isAuthenticated, initialFocusId, returnHref }: Readonly<{ record: ClinicPublicRecordDetail; isAuthenticated: boolean; initialFocusId?: string | null; returnHref?: string | null }>) {
   const router = useRouter()
   const [record, setRecord] = useState(initialRecord)
@@ -107,6 +111,9 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
       const body = await response.json().catch(() => null) as { ok?: boolean; data?: { record?: ClinicPublicRecordDetail }; message?: string }
       if (!response.ok || !body?.ok || !body.data?.record || 'unavailable' in body.data.record) throw new Error(body?.message || '会诊提交失败，请稍后再试。')
       setRecord(body.data.record)
+      // The response is committed on the server before this signal is emitted;
+      // badge details use their no-store endpoint to read the live clinic stream.
+      notifyAspirinBadgeProgressChanged()
       setDraft('')
       setReplyTo(null)
     } catch (error) {
@@ -166,6 +173,7 @@ export function ClinicDetailClient({ record: initialRecord, isAuthenticated, ini
       return
     }
     setRecord((current) => ({ ...current, consultationCount: Math.max(0, current.consultationCount - (item.isDeleted ? 0 : 1)), consultations: updateConsultation(current.consultations, item.id, (value) => ({ ...value, isDeleted: true, author: null, content: '这条会诊已被删除。', canDelete: false })) }))
+    notifyAspirinBadgeProgressChanged()
   }
 
   async function openReply(item: ClinicPublicConsultation) {

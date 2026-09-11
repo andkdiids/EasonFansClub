@@ -93,6 +93,19 @@ test('detail refresh listens for the existing check-in update event', () => {
   assert.match(component, /setDisplayBadge\(data\.badge\)/)
 })
 
+test('clinic consultation completion refreshes live Aspirin progress from the committed server stream', () => {
+  const clinicService = read('lib/clinic-service.ts')
+  const clinicClient = read('components/clinic/ClinicDetailClient.tsx')
+  const badgeService = read('lib/badge-service.ts')
+  const detailSource = badgeService.slice(badgeService.indexOf('export async function getBadgeDetailForUser'), badgeService.indexOf('/**\n * Load the public exhibition hall'))
+  assert.match(clinicService, /triggerBadgeEvaluation\(input\.authorId, 'CLINIC_CONSULTATION_CHANGED', result\.id\)/)
+  assert.match(clinicClient, /new Event\('eason-badge-progress-updated'\)/)
+  assert.match(clinicClient, /setRecord\(body\.data\.record\)[\s\S]*notifyAspirinBadgeProgressChanged\(\)/)
+  assert.match(clinicClient, /isDeleted: true[\s\S]*notifyAspirinBadgeProgressChanged\(\)/)
+  assert.match(detailSource, /if \(record\) \{[\s\S]*canExposeLiveBadgeProgress\(badge\)[\s\S]*getUserBadgeRuleProgress\(userId, badge\.BadgeRule\)/)
+  assert.match(read('components/BadgeCollectionPanel.tsx'), /eason-badge-progress-updated/)
+})
+
 test('detail and Task Center share the server-side live eligibility gate', () => {
   const service = read('lib/badge-service.ts')
   const taskCenter = read('lib/badge-phase5.ts')

@@ -10,6 +10,7 @@ import {
 import {
   calculateAspirinRepeatRate,
   getAspirinDailyQualifiedCaseIds,
+  getAspirinDailyProgress,
   getAspirinQualifiedDateKeys,
   isAspirinInitialQualificationComplete,
   isValidAspirinConsultation,
@@ -98,6 +99,8 @@ test('每日按不同病例去重，重复回答和无效内容不会污染进�
   const repeated = Array.from({ length: 5 }, (_, index) => fact({ id: `same-${index}` }))
   assert.equal(getAspirinDailyQualifiedCaseIds(repeated, userId, '2026-09-11', config).size, 1)
   assert.equal(getAspirinDailyQualifiedCaseIds(dailyFacts(5), userId, '2026-09-11', config).size, 5)
+  assert.equal(getAspirinDailyProgress([fact()], userId, '2026-09-11', config, 5).current, 1)
+  assert.equal(getAspirinDailyProgress(dailyFacts(5), userId, '2026-09-11', config, 5).current, 5)
   assert.equal(isValidAspirinConsultation(fact({ content: uniqueText(20) }), userId, config), false)
   assert.equal(isValidAspirinConsultation(fact({ content: uniqueText(21) }), userId, config), true)
   assert.equal(isValidAspirinConsultation(fact({ status: 'DELETED' }), userId, config), false)

@@ -617,7 +617,15 @@ export async function getBadgeDetailForUser(userId: string, badgeId: string): Pr
     ? (await getBadgeOwnershipStats([badge.id])).get(badge.id) || null
     : null
   const equippedPosition = equippedBadges.find((equipped) => equipped.id === badge.id)?.position
-  if (record) return obtainedBadgeView(record, equippedPosition !== undefined, ownershipStats, false, equippedPosition)
+  if (record) {
+    const detail = obtainedBadgeView(record, equippedPosition !== undefined, ownershipStats, false, equippedPosition)
+    // Ownership does not make the live progress stale: sustained badges still
+    // expose today's server-derived clinic progress in their detail view.
+    if (canExposeLiveBadgeProgress(badge)) {
+      detail.progress = await getUserBadgeRuleProgress(userId, badge.BadgeRule)
+    }
+    return detail
+  }
   if (badge.visibility === 'HIDDEN') return hiddenBadgeView(badge)
 
   const detail: BadgeView = {
