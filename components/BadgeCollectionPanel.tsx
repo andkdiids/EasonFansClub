@@ -25,6 +25,18 @@ function remainingLabel(value: string | null) {
 
 export type BadgeDetailDialogProps = { badge: BadgeView; tierItems: BadgeView[]; onClose: () => void; canEquip: boolean; canTrack?: boolean; refreshProgress?: boolean; onEquip: () => void; onUnequip: () => void; onShare?: () => void; busy: boolean }
 
+async function readBadgeTrackingState(badgeId: string) {
+  const response = await fetch('/api/users/me/badge-tasks', { cache: 'no-store' })
+  const data = await response.json().catch(() => null) as { tracking?: Array<{ id: string }>; maxTracking?: unknown } | null
+  if (!response.ok || !data) return null
+  const items = Array.isArray(data.tracking) ? data.tracking : []
+  return {
+    tracked: items.some((item) => item.id === badgeId),
+    count: items.length,
+    maxTracking: Number.isInteger(data.maxTracking) ? Number(data.maxTracking) : null,
+  }
+}
+
 export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrack = false, refreshProgress = false, onEquip, onUnequip, onShare, busy }: BadgeDetailDialogProps) {
   const [displayBadge, setDisplayBadge] = useState(badge)
   const [progressLoading, setProgressLoading] = useState(false)
@@ -88,12 +100,11 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
     setTrackingMessage('')
     if (!canTrackNow) return
     let active = true
-    void fetch('/api/users/me/badge-tasks', { cache: 'no-store' }).then((response) => response.ok ? response.json() : null).then((data) => {
-      if (!active) return
-      const items = Array.isArray(data?.tracking) ? data.tracking as Array<{ id: string }> : []
-      setTracked(items.some((item) => item.id === displayBadge.id))
-      setTrackingCount(items.length)
-      if (Number.isInteger(data?.maxTracking)) setTrackingLimit(data.maxTracking)
+    void readBadgeTrackingState(displayBadge.id).then((state) => {
+      if (!active || !state) return
+      setTracked(state.tracked)
+      setTrackingCount(state.count)
+      if (state.maxTracking !== null) setTrackingLimit(state.maxTracking)
     }).catch(() => undefined)
     return () => { active = false }
   }, [displayBadge.id, canTrackNow])
@@ -104,10 +115,12 @@ export function BadgeDetailDialog({ badge, tierItems, onClose, canEquip, canTrac
       const response = await fetch(`/api/users/me/badge-tasks/${encodeURIComponent(displayBadge.id)}`, { method: tracked ? 'DELETE' : 'POST' })
       const data = await response.json().catch(() => null) as { message?: string } | null
       if (!response.ok) throw new Error(data?.message || '操作失败')
-      const nextTracked = !tracked
-      setTracked(nextTracked)
-      setTrackingCount((value) => Math.max(0, value + (nextTracked ? 1 : -1)))
-      window.dispatchEvent(new CustomEvent('eason-badge-task-updated', { detail: { badgeId: displayBadge.id, tracked: nextTracked } }))
+      const state = await readBadgeTrackingState(displayBadge.id)
+      if (!state) throw new Error('追踪状态刷新失败，请稍后重试')
+      setTracked(state.tracked)
+      setTrackingCount(state.count)
+      if (state.maxTracking !== null) setTrackingLimit(state.maxTracking)
+      window.dispatchEvent(new CustomEvent('eason-badge-task-updated', { detail: { badgeId: displayBadge.id, tracked: state.tracked } }))
     } catch (error) { setTrackingMessage(error instanceof Error ? error.message : '操作失败') } finally { setTrackingBusy(false) }
   }
   return (

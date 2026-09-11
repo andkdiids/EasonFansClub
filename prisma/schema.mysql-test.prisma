@@ -1089,7 +1089,7 @@ model Feedback {
   id                 String               @id @default(cuid())
   type               FeedbackType
   title              String
-  content            String
+  content            String               @db.Text
   imageUrl           String?
   status             FeedbackStatus       @default(OPEN)
   createdAt          DateTime             @default(now())
@@ -1115,7 +1115,7 @@ model Feedback {
 
 model FeedbackReply {
   id            String               @id @default(cuid())
-  content       String
+  content       String               @db.Text
   createdAt     DateTime             @default(now())
   feedbackId    String
   adminId       String

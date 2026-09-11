@@ -4,6 +4,8 @@ import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { publicModerationText } from '@/lib/content-moderation'
 
 export const FEEDBACK_DESCRIPTION_MIN_LENGTH = 10
+export const FEEDBACK_DESCRIPTION_MAX_LENGTH = 2000
+export const FEEDBACK_DESCRIPTION_TOO_LONG_ERROR = '反馈内容超过最大长度限制'
 export const FEEDBACK_MAX_ATTACHMENTS = 5
 export const FEEDBACK_MAX_FILE_SIZE = 10 * 1024 * 1024
 export const FEEDBACK_ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const

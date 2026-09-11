@@ -1440,7 +1440,7 @@ model Feedback {
   id                 String                  @id @default(cuid())
   type               FeedbackType
   title              String
-  content            String
+  content            String                  @db.Text
   imageUrl           String?
   status             FeedbackStatus          @default(OPEN)
   moderationStatus   ContentModerationStatus @default(NORMAL)
@@ -1483,7 +1483,7 @@ model FeedbackAttachment {
 
 model FeedbackReply {
   id                 String                  @id @default(cuid())
-  content            String
+  content            String                  @db.Text
   moderationStatus   ContentModerationStatus @default(NORMAL)
   moderationReason   String?
   matchedBannedWords String?                 @db.Text

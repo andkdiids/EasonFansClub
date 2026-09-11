@@ -6,7 +6,7 @@ import { BackButton } from '@/components/BackButton'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { FeedbackImageUploader, type UploadedFeedbackAttachment } from '@/components/FeedbackImageUploader'
 import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
-import { FEEDBACK_DESCRIPTION_MIN_LENGTH } from '@/lib/feedback'
+import { FEEDBACK_DESCRIPTION_MAX_LENGTH, FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_DESCRIPTION_TOO_LONG_ERROR } from '@/lib/feedback'
 import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -89,6 +89,7 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
   const [uploadingCreate, setUploadingCreate] = useState(false)
   const [uploadingReply, setUploadingReply] = useState(false)
   const [uploadReset, setUploadReset] = useState(0)
+  const descriptionRef = useRef<HTMLTextAreaElement | null>(null)
   const feedbackIdempotencyKey = useRef(
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -129,7 +130,7 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
   async function requestJson(url: string, init?: RequestInit) {
     const response = await fetch(url, init)
     const data = await response.json().catch(() => null)
-    if (!response.ok) throw new Error(data?.message || '操作失败，请稍后重试')
+    if (!response.ok) throw new Error(data?.message || data?.error || '操作失败，请稍后重试')
     return data
   }
 
@@ -172,6 +173,13 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
     event.preventDefault()
     if (submitting || uploadingCreate) return
     setFieldErrors({})
+    if (form.description.length > FEEDBACK_DESCRIPTION_MAX_LENGTH) {
+      const message = '反馈内容过长，请减少部分文字后再提交'
+      setFieldErrors({ description: message })
+      setError(message)
+      descriptionRef.current?.focus()
+      return
+    }
     if (!form.title.trim()) {
       setFieldErrors({ title: '请填写反馈标题' })
       setError('请填写反馈标题')
@@ -201,7 +209,14 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
       setMessage('反馈已提交')
       router.replace(`/feedback/${data.feedback.id}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '提交失败')
+      if (err instanceof Error && err.message === FEEDBACK_DESCRIPTION_TOO_LONG_ERROR) {
+        const message = '反馈内容过长，请修改后重新提交'
+        setFieldErrors({ description: message })
+        setError(message)
+        descriptionRef.current?.focus()
+      } else {
+        setError(err instanceof Error ? err.message : '提交失败')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -263,8 +278,8 @@ export function FeedbackCenter({ initialFeedbackId, initialFocusId, initialTab =
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none">
                 {typeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
-              <textarea value={form.description} maxLength={3000} required onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-3 min-h-32 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="详细描述" />
-              <p className={`mt-1 text-xs font-bold ${form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH ? 'text-orange-600' : 'text-emerald-600'}`}>已输入 {form.description.trim().length} / 最少 {FEEDBACK_DESCRIPTION_MIN_LENGTH} 字</p>
+              <textarea ref={descriptionRef} value={form.description} maxLength={FEEDBACK_DESCRIPTION_MAX_LENGTH} required onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-3 min-h-32 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="详细描述" />
+              <p aria-live="polite" className={`mt-1 text-xs font-bold ${form.description.length > FEEDBACK_DESCRIPTION_MAX_LENGTH ? 'text-red-600' : form.description.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH ? 'text-orange-600' : 'text-emerald-600'}`}>{form.description.length} / {FEEDBACK_DESCRIPTION_MAX_LENGTH} 字<span className="ml-2">至少 {FEEDBACK_DESCRIPTION_MIN_LENGTH} 字</span></p>
               {fieldErrors.description ? <p className="mt-1 text-xs font-bold text-red-600">{fieldErrors.description}</p> : null}
               <input value={form.contact} maxLength={120} onChange={(e) => setForm({ ...form, contact: e.target.value })} className="mt-3 w-full rounded-2xl border border-sky-100 px-4 py-2 text-sm font-bold outline-none" placeholder="联系方式（选填，仅本人和管理员可见）" />
               <div className="mt-3"><FeedbackImageUploader key={`create-${uploadReset}`} onChange={setAttachments} onBusyChange={setUploadingCreate} /></div>

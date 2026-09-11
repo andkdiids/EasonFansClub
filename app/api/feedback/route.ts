@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createHash } from 'node:crypto'
 import { Prisma } from '@prisma/client'
-import { FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
+import { FEEDBACK_DESCRIPTION_MAX_LENGTH, FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_DESCRIPTION_TOO_LONG_ERROR, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
@@ -33,6 +33,18 @@ export async function POST(request: Request) {
   const guard = await requireUser()
   if (!guard.user) return guard.response
 
+  const body = await request.json().catch(() => null)
+  const rawContent = typeof (body?.description ?? body?.content) === 'string' ? String(body?.description ?? body?.content) : ''
+  if (rawContent.length > FEEDBACK_DESCRIPTION_MAX_LENGTH) {
+    return NextResponse.json({
+      ok: false,
+      code: 'FEEDBACK_DESCRIPTION_TOO_LONG',
+      error: FEEDBACK_DESCRIPTION_TOO_LONG_ERROR,
+      message: FEEDBACK_DESCRIPTION_TOO_LONG_ERROR,
+      errors: { description: FEEDBACK_DESCRIPTION_TOO_LONG_ERROR },
+    }, { status: 400 })
+  }
+
   const idempotencyKey = request.headers.get('Idempotency-Key')?.trim() || ''
   if (idempotencyKey.length < 16 || idempotencyKey.length > 128) return NextResponse.json({ message: '提交标识无效，请刷新后重试' }, { status: 400 })
   const idempotencyKeyHash = createHash('sha256').update(`${guard.user.id}:${idempotencyKey}`).digest('hex')
@@ -42,15 +54,12 @@ export async function POST(request: Request) {
   const limited = await rateLimit(getClientIp(request), 'feedback:create', 10, 60 * 60)
   if (limited) return limited
 
-  const body = await request.json().catch(() => null)
   const rawTitle = typeof body?.title === 'string' ? body.title : ''
-  const rawContent = typeof (body?.description ?? body?.content) === 'string' ? String(body?.description ?? body?.content) : ''
   const rawContact = typeof body?.contact === 'string' ? body.contact : ''
   if (rawTitle.length > 80) return NextResponse.json({ message: '反馈标题最多 80 个字' }, { status: 400 })
-  if (rawContent.length > 3000) return NextResponse.json({ message: '反馈描述最多 3000 个字' }, { status: 400 })
   if (rawContact.length > 120) return NextResponse.json({ message: '联系方式最多 120 个字' }, { status: 400 })
   const title = sanitizeText(body?.title, 80)
-  const content = sanitizeText(body?.description ?? body?.content, 3000)
+  const content = sanitizeText(rawContent, FEEDBACK_DESCRIPTION_MAX_LENGTH)
   const contact = sanitizeText(body?.contact, 120)
   const type = parseFeedbackType(body?.type ?? body?.category)
   const attachments = parseFeedbackAttachments(body?.attachments)

@@ -64,6 +64,8 @@ export function calculateBadgeProgress(currentValue: number, operator: 'GTE' | '
 }
 
 export type BadgeProgressRuleInput = {
+  id?: string
+  badgeId?: string
   ruleType: string
   operator: string
   threshold: number | null
@@ -133,8 +135,8 @@ export async function getUserBadgeRuleProgress(userId: string, rule: BadgeProgre
     const evaluation = await getAspirinRuleEvaluation({
       userId,
       rule: {
-        id: 'progress',
-        badgeId: '',
+        id: rule.id || 'progress',
+        badgeId: rule.badgeId || '',
         ruleType: rule.ruleType,
         threshold: rule.threshold,
         secondaryThreshold: null,

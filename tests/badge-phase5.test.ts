@@ -64,9 +64,11 @@ test('recommendations are safe, available, stable and limited to three', () => {
 
 test('task metrics are deduplicated by rule type', () => {
   const source = read('lib/badge-phase5.ts')
-  assert.match(source, /new Set\(badges\.map/)
-  assert.match(source, /Promise\.all\(types\.map/)
-  assert.doesNotMatch(source, /badges\.map\(async[\s\S]*getUserBadgeMetric/)
+  const metricLoader = source.slice(source.indexOf('async function loadMetrics'), source.indexOf('async function loadProgress'))
+  assert.match(metricLoader, /new Set\(badges[\s\S]*\.map/)
+  assert.match(metricLoader, /Promise\.all\(types\.map/)
+  assert.doesNotMatch(metricLoader, /getUserBadgeMetric\(userId,\s*['"]CLINIC_CONSULTATION_STREAK['"]\)/)
+  assert.match(source, /async function loadProgress[\s\S]*getUserBadgeRuleProgress/)
 })
 
 test('year review is private, uses obtainedAt and Shanghai year boundaries', () => {

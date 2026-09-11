@@ -1268,7 +1268,7 @@ CREATE TABLE `Feedback` (
     `id` VARCHAR(191) NOT NULL,
     `type` ENUM('BUG', 'SUGGESTION', 'CONTENT', 'ACCOUNT', 'OTHER', 'EXPERIENCE') NOT NULL,
     `title` VARCHAR(191) NOT NULL,
-    `content` VARCHAR(191) NOT NULL,
+    `content` TEXT NOT NULL,
     `imageUrl` VARCHAR(191) NULL,
     `status` ENUM('OPEN', 'REPLIED', 'CLOSED', 'PROCESSING', 'RESOLVED') NOT NULL DEFAULT 'OPEN',
     `moderationStatus` ENUM('NORMAL', 'VIOLATION') NOT NULL DEFAULT 'NORMAL',
@@ -1311,7 +1311,7 @@ CREATE TABLE `FeedbackAttachment` (
 -- CreateTable
 CREATE TABLE `FeedbackReply` (
     `id` VARCHAR(191) NOT NULL,
-    `content` VARCHAR(191) NOT NULL,
+    `content` TEXT NOT NULL,
     `moderationStatus` ENUM('NORMAL', 'VIOLATION') NOT NULL DEFAULT 'NORMAL',
     `moderationReason` VARCHAR(191) NULL,
     `matchedBannedWords` TEXT NULL,

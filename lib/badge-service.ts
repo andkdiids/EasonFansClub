@@ -478,7 +478,7 @@ async function addProgressToUnownedBadges(userId: string, badges: readonly DbCol
     const type = rule.ruleType as Parameters<typeof getUserBadgeMetric>[1]
     const item = itemByBadgeId.get(badge.id)
     if (type === 'CLINIC_CONSULTATION_STREAK') {
-      if (item?.status === 'NOT_OBTAINED') item.progress = await getUserBadgeRuleProgress(userId, rule)
+      if (item?.status === 'NOT_OBTAINED') item.progress = await getUserBadgeRuleProgress(userId, { ...rule, badgeId: badge.id })
       continue
     }
     if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
@@ -622,7 +622,7 @@ export async function getBadgeDetailForUser(userId: string, badgeId: string): Pr
     // Ownership does not make the live progress stale: sustained badges still
     // expose today's server-derived clinic progress in their detail view.
     if (canExposeLiveBadgeProgress(badge)) {
-      detail.progress = await getUserBadgeRuleProgress(userId, badge.BadgeRule)
+      detail.progress = await getUserBadgeRuleProgress(userId, { ...badge.BadgeRule!, badgeId: badge.id })
     }
     return detail
   }
@@ -637,7 +637,7 @@ export async function getBadgeDetailForUser(userId: string, badgeId: string): Pr
     ownershipStats,
   }
   if (canExposeLiveBadgeProgress(badge)) {
-    detail.progress = await getUserBadgeRuleProgress(userId, badge.BadgeRule)
+    detail.progress = await getUserBadgeRuleProgress(userId, { ...badge.BadgeRule!, badgeId: badge.id })
   }
   return detail
 }
