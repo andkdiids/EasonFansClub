@@ -3,11 +3,12 @@ import { PostCreateForm } from '@/components/PostCreateForm'
 import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { mergeForumBoardOptions, normalizeForumBoards } from '@/lib/boards'
+import { normalizePostReturnTo } from '@/lib/post-navigation'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
-export default async function NewPostPage({ searchParams }: { searchParams: Promise<{ board?: string }> }) {
+export default async function NewPostPage({ searchParams }: { searchParams: Promise<{ board?: string; returnTo?: string }> }) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
@@ -23,6 +24,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
   })
   const boards = mergeForumBoardOptions(boardRows)
   const query = await searchParams
+  const returnTo = normalizePostReturnTo(query.returnTo)
 
   return (
     <>
@@ -30,7 +32,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
         <div className="mb-6">
           <h1 className="mt-2 text-4xl font-black text-brand-950">发布帖子</h1>
         </div>
-        <PostCreateForm boards={normalizeForumBoards(boards)} userId={user.id} initialBoardSlug={query.board} />
+        <PostCreateForm boards={normalizeForumBoards(boards)} userId={user.id} initialBoardSlug={query.board} returnTo={returnTo} />
       </main>
     </>
   )

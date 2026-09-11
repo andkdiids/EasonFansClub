@@ -17,7 +17,7 @@ import { formatUid } from '@/lib/uid'
 import { getHomeDailyPrescriptionDisplay } from '@/lib/home-daily-prescription'
 import { getHomeCheckInDisplay } from '@/lib/home-checkin-display'
 import type { HomeActivityStatusLabel } from '@/lib/home-activity'
-import { salonCategoryLabel } from '@/lib/salon-shared'
+import { getSalonPostDisplayTitle, salonCategoryLabel } from '@/lib/salon-shared'
 import { getHomeTodayPageItems, getHomeTodayPageCount, HOME_TODAY_PAGE_SIZE, normalizeHomeTodayIndex } from '@/lib/home-today'
 
 const homeText = {
@@ -468,7 +468,7 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
       {data.salonPosts.length ? <div className="home-salon-content">
         {data.salonPosts.map((post, index) => {
           const categoryLabel = salonCategoryLabel(post.category) || '沙龙作品'
-          const title = post.title?.trim() || categoryLabel
+          const title = getSalonPostDisplayTitle({ title: post.title, content: null })
           return <Link key={post.id} href={`/salon/${post.id}`} className="home-salon-item">
             <span className="home-salon-thumb">
               {post.thumbnailUrl ? <>

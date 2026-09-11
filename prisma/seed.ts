@@ -66,8 +66,8 @@ async function main() {
     })
   }
 
-  // 生日纪念徽章：用户生日当天由 lib/birthday.ts 自动授予；旧来源由
-  // BIRTHDAY_TODAY 兼容规则按资格保持策略回收，历史记录仍然保留。
+  // 生日纪念徽章：用户生日当天由 lib/birthday.ts 自动授予；
+  // BIRTHDAY_TODAY 只负责获取窗口，已获得的 ownership 永久保留。
   await prisma.badge.upsert({
     where: { slug: 'birthday-commemorative' },
     update: { name: '生日纪念', code: 'birthday-commemorative', description: '生日当天自动获得的纪念徽章', isAutoGrant: true, grantType: 'AUTO', category: 'BIRTHDAY' },

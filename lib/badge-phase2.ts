@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { activeUserBadgeWhere } from '@/lib/badge-validity'
+import { currentUserBadgeWhere } from '@/lib/badge-validity'
 import { parseBeijingDateTime } from '@/lib/registration-availability'
 import type { BadgeProgressView } from '@/lib/badge-types'
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
@@ -68,6 +68,7 @@ export type BadgeProgressRuleInput = {
   operator: string
   threshold: number | null
   isEnabled?: boolean
+  configJson?: unknown
 }
 
 export type BadgeProgressBadgeInput = {
@@ -124,6 +125,28 @@ export function calculateBadgeRuleProgress(currentValue: number, rule: BadgeProg
 /** Load one user's current metric for a supported BadgeRule. */
 export async function getUserBadgeRuleProgress(userId: string, rule: BadgeProgressRuleInput | null | undefined) {
   if (!isBadgeProgressRule(rule)) return null
+  if (rule.ruleType === 'CLINIC_CONSULTATION_STREAK') {
+    // This rule's metric is a live, configured daily distinct-case count. It
+    // must use the same resolver as grants/backfills rather than a scalar
+    // metric loader with no access to BadgeRule.configJson.
+    const { getAspirinRuleEvaluation } = await import('@/lib/aspirin-badge')
+    const evaluation = await getAspirinRuleEvaluation({
+      userId,
+      rule: {
+        id: 'progress',
+        badgeId: '',
+        ruleType: rule.ruleType,
+        threshold: rule.threshold,
+        secondaryThreshold: null,
+        configJson: rule.configJson,
+        isEnabled: rule.isEnabled !== false,
+        sustainedQualification: false,
+        inactiveAfterDays: null,
+        revokeAfterDays: null,
+      },
+    })
+    return calculateBadgeRuleProgress(evaluation.dailyCount, rule)
+  }
   const current = await getUserBadgeMetric(userId, rule.ruleType as SupportedBadgeRuleType)
   return calculateBadgeRuleProgress(current, rule)
 }
@@ -159,7 +182,7 @@ export async function getBadgeOwnershipStats(badgeIds: readonly string[]) {
       by: ['badgeId'],
       where: {
         badgeId: { in: ids },
-        ...activeUserBadgeWhere(now),
+        ...currentUserBadgeWhere(now),
         User: { status: 'ACTIVE', isDeleted: false },
       },
       _count: { _all: true },

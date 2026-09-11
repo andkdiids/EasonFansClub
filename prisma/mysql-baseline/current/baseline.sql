@@ -174,7 +174,7 @@ CREATE TABLE `GlobalPointsGrantBatch` (
     `createdById` VARCHAR(191) NOT NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `completedAt` DATETIME(3) NULL,
-    `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
 
     UNIQUE INDEX `GlobalPointsGrantBatch_idempotencyKey_key`(`idempotencyKey`),
     INDEX `GlobalPointsGrantBatch_createdById_createdAt_idx`(`createdById`, `createdAt`),
@@ -201,10 +201,10 @@ CREATE TABLE `GlobalPointsGrantRecipient` (
     `processingStartedAt` DATETIME(3) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
+    INDEX `GlobalPointsGrantRecipient_batchId_status_id_idx`(`batchId`, `status`, `id`),
     INDEX `GlobalPointsGrantRecipient_batchId_pointsStatus_id_idx`(`batchId`, `pointsStatus`, `id`),
     INDEX `GlobalPointsGrantRecipient_batchId_notificationStatus_id_idx`(`batchId`, `notificationStatus`, `id`),
     INDEX `GlobalPointsGrantRecipient_processing_claim_idx`(`processingPhase`, `processingStartedAt`),
-    INDEX `GlobalPointsGrantRecipient_batchId_status_id_idx`(`batchId`, `status`, `id`),
     INDEX `GlobalPointsGrantRecipient_userId_createdAt_idx`(`userId`, `createdAt`),
     UNIQUE INDEX `GlobalPointsGrantRecipient_batchId_userId_key`(`batchId`, `userId`),
     PRIMARY KEY (`id`)
@@ -554,12 +554,15 @@ CREATE TABLE `Badge` (
 CREATE TABLE `BadgeRule` (
     `id` VARCHAR(191) NOT NULL,
     `badgeId` VARCHAR(191) NOT NULL,
-    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY', 'BADGE_OWNERSHIP') NOT NULL,
+    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY', 'BADGE_OWNERSHIP', 'CLINIC_CONSULTATION_STREAK') NOT NULL,
     `operator` ENUM('GTE', 'LTE', 'EQ') NOT NULL DEFAULT 'GTE',
     `threshold` INTEGER NULL,
     `secondaryThreshold` INTEGER NULL,
     `configJson` JSON NULL,
     `isEnabled` BOOLEAN NOT NULL DEFAULT true,
+    `sustainedQualification` BOOLEAN NOT NULL DEFAULT false,
+    `inactiveAfterDays` INTEGER NULL,
+    `revokeAfterDays` INTEGER NULL,
     `retentionPolicy` ENUM('PERMANENT_AFTER_GRANT', 'RETAIN_WHILE_ELIGIBLE') NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
@@ -3720,9 +3723,25 @@ CREATE TABLE `DailyJobExecution` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `Artist` (
+    `id` VARCHAR(191) NOT NULL,
+    `slug` VARCHAR(120) NOT NULL,
+    `name` VARCHAR(160) NOT NULL,
+    `avatar` TEXT NULL,
+    `description` TEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `Artist_slug_key`(`slug`),
+    INDEX `Artist_name_idx`(`name`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `StudioProject` (
     `id` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
+    `artistId` VARCHAR(191) NULL,
     `toolSlug` VARCHAR(64) NOT NULL,
     `title` VARCHAR(160) NOT NULL,
     `description` TEXT NULL,
@@ -3740,6 +3759,7 @@ CREATE TABLE `StudioProject` (
     `lastOpenedAt` DATETIME(3) NULL,
 
     INDEX `StudioProject_userId_updatedAt_idx`(`userId`, `updatedAt`),
+    INDEX `StudioProject_artistId_updatedAt_idx`(`artistId`, `updatedAt`),
     INDEX `StudioProject_toolSlug_visibility_reviewStatus_updatedAt_idx`(`toolSlug`, `visibility`, `reviewStatus`, `updatedAt`),
     INDEX `StudioProject_visibility_reviewStatus_likeCount_updatedAt_idx`(`visibility`, `reviewStatus`, `likeCount`, `updatedAt`),
     PRIMARY KEY (`id`)
@@ -4157,7 +4177,8 @@ CREATE TABLE `UserBadge` (
     `expiredAt` DATETIME(3) NULL,
     `revokedAt` DATETIME(3) NULL,
     `revokeReason` VARCHAR(64) NULL,
-    `status` ENUM('ACTIVE', 'EXPIRED', 'REVOKED') NOT NULL DEFAULT 'ACTIVE',
+    `status` ENUM('ACTIVE', 'GRAYED', 'EXPIRED', 'REVOKED') NOT NULL DEFAULT 'ACTIVE',
+    `lastQualifiedAt` DATETIME(3) NULL,
     `activeKey` VARCHAR(191) NULL,
     `grantKey` VARCHAR(191) NULL,
     `sourceType` VARCHAR(32) NULL,
@@ -5385,6 +5406,9 @@ ALTER TABLE `BannedWord` ADD CONSTRAINT `BannedWord_createdById_fkey` FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE `StudioProject` ADD CONSTRAINT `StudioProject_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `StudioProject` ADD CONSTRAINT `StudioProject_artistId_fkey` FOREIGN KEY (`artistId`) REFERENCES `Artist`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `StudioProjectLike` ADD CONSTRAINT `StudioProjectLike_projectId_fkey` FOREIGN KEY (`projectId`) REFERENCES `StudioProject`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

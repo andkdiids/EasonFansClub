@@ -9,6 +9,7 @@ import {
   BADGE_RETENTION_POLICIES,
   generateBadgeAcquisitionDescription,
   getZodiacFromRuleConfig,
+  isAcquisitionOnlyBadgeRule,
   resolveBadgeRetentionPolicy,
   supportsBadgeRetentionPolicy,
   type BadgeRetentionPolicyValue,
@@ -273,10 +274,9 @@ async function loadRecyclableRules(options: { ruleTypes?: readonly SupportedBadg
 
   // `birthday-commemorative` predates BadgeRule and is still granted by
   // ensureBirthdayBadge. Treat that automatic source as the compatibility
-  // representation of BIRTHDAY_TODAY so existing users get the same
-  // retention/regrant semantics as rule-created birthday badges. A configured
-  // BIRTHDAY_TODAY rule on the same badge may explicitly opt into permanent
-  // retention; when absent, the rule-type default applies.
+  // representation of the acquisition-only BIRTHDAY_TODAY rule. It is kept
+  // here so legacy sources remain visible to the rule engine, but it must not
+  // enter post-grant retention/revocation.
   const wantsBirthdayToday = !options.ruleTypes?.length || options.ruleTypes.includes('BIRTHDAY_TODAY')
   if (!wantsBirthdayToday) {
     return rules
@@ -613,6 +613,7 @@ async function evaluateOwnerForRevocation(owner: ActiveBadgeOwner, contexts: rea
     const availability = getBadgeAvailability({ availableFrom: context.rule.availableFrom, availableUntil: context.rule.availableUntil }, now)
     const canRevoke = !satisfied
       && sources.length > 0
+      && !isAcquisitionOnlyBadgeRule(context.rule.ruleType)
       && supportsBadgeRetentionPolicy(context.rule.ruleType)
       && context.retentionPolicy === 'RETAIN_WHILE_ELIGIBLE'
       && availability !== 'ENDED'
@@ -863,6 +864,12 @@ export async function evaluateBadgeRetentionForUser(
   for (const rule of rules) {
     // Two independent switches: the rule type must be re-derivable from
     // durable data, and the administrator must have opted in.
+    // BIRTHDAY_TODAY is an acquisition window only; tomorrow's false result
+    // is never a reason to touch an already granted ownership.
+    if (isAcquisitionOnlyBadgeRule(rule.ruleType)) {
+      summary.skipped += 1
+      continue
+    }
     if (!supportsBadgeRetentionPolicy(rule.ruleType)) continue
     if (resolveBadgeRetentionPolicy(rule) !== 'RETAIN_WHILE_ELIGIBLE') continue
 

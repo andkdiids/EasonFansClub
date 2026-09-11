@@ -134,6 +134,9 @@ export async function POST(request: Request) {
             configJson: parsed.rule.configJson ?? Prisma.JsonNull,
             isEnabled: parsed.rule.isEnabled,
             retentionPolicy: parsed.rule.retentionPolicy ?? null,
+            sustainedQualification: parsed.rule.sustainedQualification,
+            inactiveAfterDays: parsed.rule.inactiveAfterDays,
+            revokeAfterDays: parsed.rule.revokeAfterDays,
           },
         })
       }

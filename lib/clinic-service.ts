@@ -16,6 +16,7 @@ import { sanitizeTextPreservingLength } from '@/lib/text'
 import { prisma } from '@/lib/prisma'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
+import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 const clinicAuthorSelect = {
   id: true,
@@ -344,6 +345,9 @@ export async function createClinicConsultation(input: {
     )
   }
   if (result.notifiedUserId) emitRealtime(result.notifiedUserId, 'notification')
+  // The badge evaluator rereads the committed clinic stream, so deletion or
+  // moderation can later remove a case from the same day's live progress.
+  void triggerBadgeEvaluation(input.authorId, 'CLINIC_CONSULTATION_CHANGED', result.id)
   return result
 }
 
@@ -613,7 +617,7 @@ export async function getPublicClinicRecordDetail(recordId: string, viewerId?: s
 }
 
 export async function removeClinicRecord(recordId: string, userId: string, canManage = false) {
-  const record = await prisma.clinicRecord.findUnique({ where: { id: recordId }, select: { id: true, authorId: true, status: true } })
+  const record = await prisma.clinicRecord.findUnique({ where: { id: recordId }, select: { id: true, authorId: true, status: true, consultations: { select: { authorId: true } } } })
   if (!record) throw new ClinicServiceError('RECORD_NOT_FOUND', '这份病历不存在。', 404)
   if (!canManage && record.authorId !== userId) throw new ClinicServiceError('FORBIDDEN', '你只能烧掉自己的病历。', 403)
   if (record.status === 'DELETED' || record.status === 'REMOVED') return
@@ -621,17 +625,20 @@ export async function removeClinicRecord(recordId: string, userId: string, canMa
     prisma.clinicRecord.update({ where: { id: recordId }, data: { status: canManage ? 'REMOVED' : 'DELETED', deletedAt: new Date() } }),
     prisma.clinicConsultation.updateMany({ where: { recordId, status: 'ACTIVE' }, data: { status: canManage ? 'REMOVED' : 'DELETED', deletedAt: new Date() } }),
   ])
+  for (const authorId of new Set(record.consultations.map((item) => item.authorId))) {
+    void triggerBadgeEvaluation(authorId, 'CLINIC_CONSULTATION_CHANGED', recordId)
+  }
 }
 
 export async function removeClinicConsultation(consultationId: string, userId: string, canManage = false) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const consultation = await tx.clinicConsultation.findUnique({
       where: { id: consultationId },
       select: { id: true, recordId: true, authorId: true, status: true, mouthpieceCount: true },
     })
     if (!consultation) throw new ClinicServiceError('CONSULTATION_NOT_FOUND', '这条会诊不存在。', 404)
     if (!canManage && consultation.authorId !== userId) throw new ClinicServiceError('FORBIDDEN', '你只能删除自己的会诊。', 403)
-    if (consultation.status !== 'ACTIVE') return
+    if (consultation.status !== 'ACTIVE') return { authorId: consultation.authorId, changed: false }
     await tx.clinicConsultation.update({ where: { id: consultationId }, data: { status: canManage ? 'REMOVED' : 'DELETED', deletedAt: new Date() } })
     await tx.clinicRecord.updateMany({
       where: { id: consultation.recordId, consultationCount: { gt: 0 } },
@@ -640,7 +647,10 @@ export async function removeClinicConsultation(consultationId: string, userId: s
         ...(consultation.mouthpieceCount > 0 ? { mouthpieceCount: { decrement: consultation.mouthpieceCount } } : {}),
       },
     })
+    return { authorId: consultation.authorId, changed: true }
   })
+  if (result?.changed) void triggerBadgeEvaluation(result.authorId, 'CLINIC_CONSULTATION_CHANGED', consultationId)
+  return result
 }
 
 export async function giveClinicAspirin(input: { userId: string; recordId?: string; consultationId?: string }) {
@@ -942,22 +952,25 @@ export async function listClinicAdminData(tab: ClinicAdminTab, page = 1, pageSiz
 
 export async function updateClinicAdminContent(input: { target: 'record' | 'consultation'; id: string; status: ClinicContentStatus; adminId: string }) {
   if (input.target === 'record') {
-    const record = await prisma.clinicRecord.findUnique({ where: { id: input.id }, select: { id: true } })
+    const record = await prisma.clinicRecord.findUnique({ where: { id: input.id }, select: { id: true, consultations: { select: { authorId: true } } } })
     if (!record) throw new ClinicServiceError('RECORD_NOT_FOUND', '病历不存在。', 404)
     const deletedAt = input.status === 'ACTIVE' ? null : new Date()
     await prisma.$transaction([
       prisma.clinicRecord.update({ where: { id: input.id }, data: { status: input.status, deletedAt } }),
       ...(input.status === 'ACTIVE' ? [] : [prisma.clinicConsultation.updateMany({ where: { recordId: input.id, status: 'ACTIVE' }, data: { status: input.status, deletedAt } })]),
     ])
+    for (const authorId of new Set(record.consultations.map((item) => item.authorId))) {
+      void triggerBadgeEvaluation(authorId, 'CLINIC_CONSULTATION_CHANGED', input.id)
+    }
     return
   }
-  await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const consultation = await tx.clinicConsultation.findUnique({
       where: { id: input.id },
-      select: { id: true, recordId: true, status: true, mouthpieceCount: true },
+      select: { id: true, recordId: true, authorId: true, status: true, mouthpieceCount: true },
     })
     if (!consultation) throw new ClinicServiceError('CONSULTATION_NOT_FOUND', '会诊不存在。', 404)
-    if (consultation.status === input.status) return
+    if (consultation.status === input.status) return { authorId: consultation.authorId, changed: false }
     const wasActive = consultation.status === 'ACTIVE'
     const willBeActive = input.status === 'ACTIVE'
     await tx.clinicConsultation.update({
@@ -981,7 +994,9 @@ export async function updateClinicAdminContent(input: { target: 'record' | 'cons
         },
       })
     }
+    return { authorId: consultation.authorId, changed: true }
   })
+  if (result.changed) void triggerBadgeEvaluation(result.authorId, 'CLINIC_CONSULTATION_CHANGED', input.id)
 }
 
 export async function handleClinicReport(input: { reportId: string; status: ReportStatus; adminId: string }) {

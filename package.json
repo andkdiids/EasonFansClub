@@ -43,6 +43,8 @@
     "badges:concert:backfill": "tsx scripts/backfill-concert-badges.ts",
     "badges:birthday:audit": "tsx scripts/audit-birthday-zodiac-badges.ts",
     "badges:birthday:incident": "tsx scripts/repair-birthday-zodiac-incident.ts",
+    "badges:aspirin:audit": "tsx scripts/audit-aspirin-badges.ts",
+    "badges:aspirin:seed": "tsx scripts/seed-aspirin-badge-rule.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",

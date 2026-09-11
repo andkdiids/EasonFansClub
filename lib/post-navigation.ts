@@ -26,6 +26,17 @@ export function postDetailHref(postId: string, returnTo?: string | null) {
   return normalized ? `${path}?${new URLSearchParams({ returnTo: normalized }).toString()}` : path
 }
 
+/** Build a create-post URL while preserving the originating forum/list view. */
+export function postCreateHref(boardSlug?: string | null, returnTo?: string | null) {
+  const params = new URLSearchParams()
+  const normalizedBoard = typeof boardSlug === 'string' ? boardSlug.trim() : ''
+  if (normalizedBoard) params.set('board', normalizedBoard)
+  const normalizedReturnTo = normalizePostReturnTo(returnTo)
+  if (normalizedReturnTo) params.set('returnTo', normalizedReturnTo)
+  const query = params.toString()
+  return query ? `/posts/new?${query}` : '/posts/new'
+}
+
 export function postEditHref(postId: string, returnTo?: string | null) {
   const path = `/posts/${encodeURIComponent(postId)}/edit`
   const normalized = normalizePostReturnTo(returnTo)

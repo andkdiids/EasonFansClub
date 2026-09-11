@@ -538,6 +538,7 @@ enum BadgeValidityType {
 
 enum UserBadgeStatus {
   ACTIVE
+  GRAYED
   EXPIRED
   REVOKED
 }
@@ -610,6 +611,7 @@ enum BadgeRuleType {
   BIRTHDAY_ZODIAC
   BIRTHDAY_TODAY
   BADGE_OWNERSHIP
+  CLINIC_CONSULTATION_STREAK
 }
 
 enum BadgeRuleOperator {
@@ -715,23 +717,29 @@ model Badge {
 }
 
 model BadgeRule {
-  id                 String                @id @default(cuid())
-  badgeId            String                @unique
-  ruleType           BadgeRuleType
-  operator           BadgeRuleOperator     @default(GTE)
-  threshold          Int?
-  secondaryThreshold Int?
-  configJson         Json?
-  isEnabled          Boolean               @default(true)
+  id                     String                @id @default(cuid())
+  badgeId                String                @unique
+  ruleType               BadgeRuleType
+  operator               BadgeRuleOperator     @default(GTE)
+  threshold              Int?
+  secondaryThreshold     Int?
+  configJson             Json?
+  isEnabled              Boolean               @default(true)
+  /**
+   * Optional post-award qualification lifecycle; disabled preserves legacy behaviour.
+   */
+  sustainedQualification Boolean               @default(false)
+  inactiveAfterDays      Int?
+  revokeAfterDays        Int?
   /**
    * Nullable on purpose: NULL means "inherit the rule-type default", which
    * keeps every existing row on its current behaviour without a data rewrite
    * and lets the default evolve per rule type.
    */
-  retentionPolicy    BadgeRetentionPolicy?
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
-  Badge              Badge                 @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  retentionPolicy        BadgeRetentionPolicy?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  Badge                  Badge                 @relation(fields: [badgeId], references: [id], onDelete: Cascade)
 
   @@index([ruleType, isEnabled])
 }
@@ -4649,6 +4657,10 @@ model UserBadge {
   revokedAt       DateTime?
   revokeReason    String?           @db.VarChar(64)
   status          UserBadgeStatus   @default(ACTIVE)
+  /**
+   * Last Shanghai natural day on which the sustained rule was fully qualified.
+   */
+  lastQualifiedAt DateTime?
   activeKey       String?           @unique @db.VarChar(191)
   grantKey        String?           @unique @db.VarChar(191)
   sourceType      String?           @db.VarChar(32)

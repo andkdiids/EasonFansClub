@@ -98,6 +98,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   const pointerDragRef = useRef<PointerDragState | null>(null)
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
   const localUploadedFilesRef = useRef(new Map<string, LocalUploadedFile>())
+  const editingImageRef = useRef<EditingImage | null>(null)
 
   useEffect(() => {
     valueRef.current = value
@@ -110,6 +111,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
 
   useEffect(() => {
     pendingUploadsRef.current = pendingUploads
+    editingImageRef.current = editingImage
     onBusyChangeRef.current?.(pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl))
   }, [editingImage, pendingUploads, replacingUrl])
 
@@ -147,6 +149,10 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     pendingUploadsRef.current = next
     setPendingUploads(next)
     localUploadedFilesRef.current.set(url, { file: item.file, previewUrl: item.previewUrl })
+    const editing = editingImageRef.current
+    if (editing?.kind === 'pending' && editing.id === item.id) {
+      setEditingImage({ kind: 'uploaded', id: url, url, file: item.file })
+    }
   }
 
   function appendUploadedUrl(url: string) {
@@ -187,7 +193,11 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
 
   function completePendingEdit(id: string, editedFile: File) {
     const current = pendingUploadsRef.current.find((item) => item.id === id)
-    if (!current) return
+    if (!current) {
+      const editing = editingImageRef.current
+      if (editing?.kind === 'uploaded' && editing.url) void completeUploadedEdit(editing.url, editedFile)
+      return
+    }
     const previewUrl = URL.createObjectURL(editedFile)
     URL.revokeObjectURL(current.previewUrl)
     const replacement: PendingUpload = { ...current, file: editedFile, previewUrl, phase: 'processing', error: undefined }

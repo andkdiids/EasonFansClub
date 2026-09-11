@@ -7,6 +7,7 @@ import { RichTextEditor, type RichTextEditorHandle } from '@/components/posts/Ri
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { getPostCreateInitialBoardId } from '@/lib/boards'
 import { publicImageVariantUrl } from '@/lib/image-variants'
+import { postDetailHref } from '@/lib/post-navigation'
 import {
   createStoredPostDraft,
   hasMeaningfulPostDraftContent,
@@ -34,7 +35,8 @@ export function PostCreateForm({
   userId,
   boards,
   initialBoardSlug,
-}: Readonly<{ userId: string; boards: Board[]; initialBoardSlug?: string }>) {
+  returnTo = null,
+}: Readonly<{ userId: string; boards: Board[]; initialBoardSlug?: string; returnTo?: string | null }>) {
   const router = useRouter()
   const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const editorRef = useRef<RichTextEditorHandle>(null)
@@ -416,12 +418,15 @@ export function PostCreateForm({
       if (draftCleared) removeLocalDrafts()
 
       if (isPending) {
-        router.push(`/post/submitted?postId=${postId}&status=${data.moderationStatus}`)
+        const submittedParams = new URLSearchParams({
+          postId,
+          status: typeof data?.moderationStatus === 'string' ? data.moderationStatus : 'PENDING',
+        })
+        if (returnTo) submittedParams.set('returnTo', returnTo)
+        router.replace(`/post/submitted?${submittedParams.toString()}`)
       } else {
-        const detailUrl = typeof data?.detailUrl === 'string' ? data.detailUrl : `/posts/${postId}`
-        router.push(detailUrl)
+        router.replace(postDetailHref(postId, returnTo))
       }
-      router.refresh()
     } catch (error) {
       console.error('[post:create:request]', {
         name: error instanceof Error ? error.name : undefined,

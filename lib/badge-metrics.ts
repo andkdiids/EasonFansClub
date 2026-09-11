@@ -27,7 +27,7 @@ export function accountAgeDays(createdAt: Date, now = new Date()) {
 
 type BadgeMetricLoader = (userId: string) => Promise<number>
 
-const BADGE_RULE_METRIC_LOADERS: Record<SupportedBadgeRuleType, BadgeMetricLoader> = {
+const BADGE_RULE_METRIC_LOADERS: Partial<Record<SupportedBadgeRuleType, BadgeMetricLoader>> = {
   POST_COUNT: (userId) => prisma.post.count({ where: { authorId: userId, ...VALID_POST_WHERE } }),
   FEATURED_POST_COUNT: (userId) => prisma.post.count({ where: { authorId: userId, isFeatured: true, ...VALID_POST_WHERE } }),
   CHECKIN_TOTAL_DAYS: async (userId) => {
@@ -102,7 +102,9 @@ const BADGE_RULE_METRIC_LOADERS: Record<SupportedBadgeRuleType, BadgeMetricLoade
 
 export function getBadgeMetricLoader(ruleType: SupportedBadgeRuleType) {
   const loaderKey = BADGE_RULE_REGISTRY[ruleType].metricLoader as SupportedBadgeRuleType
-  return BADGE_RULE_METRIC_LOADERS[loaderKey]
+  const loader = BADGE_RULE_METRIC_LOADERS[loaderKey]
+  if (!loader) throw new Error(`规则 ${ruleType} 没有标量指标加载器，请使用其专用 resolver`)
+  return loader
 }
 
 export async function getUserBadgeMetric(userId: string, ruleType: SupportedBadgeRuleType) {

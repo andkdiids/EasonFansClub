@@ -140,12 +140,15 @@ test('birthday rule configs are independent and never use a numeric threshold', 
     configJson: { zodiac: 'ARIES' },
     isEnabled: true,
     retentionPolicy: null,
+    sustainedQualification: false,
+    inactiveAfterDays: null,
+    revokeAfterDays: null,
   })
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', configJson: { zodiac: 'ARIES' }, threshold: 1 }).error || '', /不需要数值阈值/)
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_ZODIAC', configJson: { zodiac: 'UNKNOWN' } }).error || '', /所属星座/)
   assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_ZODIAC', null, { zodiac: 'ARIES' }), '用户当前生日属于白羊座，且当前处于白羊座周期时自动获得。')
   assert.deepEqual(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', operator: 'GTE' }).rule, {
-    ruleType: 'BIRTHDAY_TODAY', operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: {}, isEnabled: true, retentionPolicy: null,
+    ruleType: 'BIRTHDAY_TODAY', operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: {}, isEnabled: true, retentionPolicy: null, sustainedQualification: false, inactiveAfterDays: null, revokeAfterDays: null,
   })
   assert.match(parseBadgeRuleInput({ ruleType: 'BIRTHDAY_TODAY', configJson: { zodiac: 'ARIES' } }).error || '', /不需要星座/)
   assert.equal(generateBadgeAcquisitionDescription('BIRTHDAY_TODAY', null, {}), '生日当天自动获得。')
@@ -235,7 +238,8 @@ test('birthday reconciliation separates current grant eligibility from retention
   assert.match(retention, /sourceType: 'LEGACY', sourceId: null/)
   assert.match(retention, /ruleType: 'BIRTHDAY_TODAY'/)
   assert.match(rules, /BIRTHDAY_ZODIAC: 'RETAIN_WHILE_ELIGIBLE'/)
-  assert.match(rules, /BIRTHDAY_TODAY: 'RETAIN_WHILE_ELIGIBLE'/)
+  assert.match(rules, /BIRTHDAY_TODAY:[\s\S]{0,500}supportsRetentionWhileEligible: false/)
+  assert.match(retention, /isAcquisitionOnlyBadgeRule\(rule\.ruleType\)/)
   assert.match(engine, /getCurrentZodiacSign/)
   assert.match(retention, /mode: ruleType === 'BIRTHDAY_ZODIAC' \? 'RETENTION' : 'AUTO'/)
 })

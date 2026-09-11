@@ -107,15 +107,16 @@ export function BadgeName({ badge, className = '' }: { badge: BadgeNameBadge; cl
   )
 }
 
-export function BadgeImage({ badge, size = 'inline', className = '' }: { badge: Pick<UserDisplayNameBadge, 'name' | 'imageUrl' | 'effectType'>; size?: 'inline' | 'wall' | 'detail'; className?: string }) {
+export function BadgeImage({ badge, size = 'inline', className = '', grayscale = false }: { badge: Pick<UserDisplayNameBadge, 'name' | 'imageUrl' | 'effectType'> & { isGrayed?: boolean }; size?: 'inline' | 'wall' | 'detail'; className?: string; grayscale?: boolean }) {
   const [failedSource, setFailedSource] = useState<string | null>(null)
   useEffect(() => setFailedSource(null), [badge.imageUrl])
   const sizeClass = size === 'detail' ? 'badge-image-detail' : size === 'wall' ? 'badge-image-wall' : 'badge-image-inline'
+  const showGrayscale = grayscale || badge.isGrayed === true
   const hasImage = Boolean(badge.imageUrl && failedSource !== badge.imageUrl)
-  if (!hasImage) return <span className={`user-badge-placeholder ${sizeClass} ${className}`} aria-label={badge.name}>?</span>
+  if (!hasImage) return <span className={`user-badge-placeholder ${sizeClass} ${showGrayscale ? 'badge-visual-grayscale' : ''} ${className}`} aria-label={badge.name}>?</span>
   const effectClass = badgeEffectClass(badge.effectType)
   return (
-    <span className={`badge-visual ${sizeClass} ${effectClass} ${className}`.trim()}>
+    <span className={`badge-visual ${sizeClass} ${effectClass} ${showGrayscale ? 'badge-visual-grayscale' : ''} ${className}`.trim()}>
       {badge.effectType === 'SPARKLE' ? <span className="badge-visual-sparkles" aria-hidden="true"><i /><i /><i /><i /></span> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={badge.imageUrl || ''} alt={badge.name} onError={() => { if (process.env.NODE_ENV === 'development') console.warn('[badge-image] failed to load', badge.imageUrl); setFailedSource(badge.imageUrl) }} className="user-badge-image" loading="lazy" />

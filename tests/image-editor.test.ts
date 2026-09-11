@@ -7,6 +7,7 @@ import {
   rotateImageEditorPoint,
   rotateImageEditorState,
 } from '../lib/image-editor'
+import { clientPointToImagePoint, getImageEditorCanvasMetrics } from '../lib/image-editor-browser'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -55,4 +56,44 @@ test('编辑器仍使用既有内容图片压缩限制，而不是另起一条�
   assert.match(contentUpload, /CONTENT_IMAGE_MAX_FILE_SIZE/u)
   assert.match(contentUpload, /image\/heic/u)
   assert.match(contentUpload, /image\/heif/u)
+})
+
+test('图片编辑器 pointer 坐标以 CSS 画布矩形映射到原图空间，不重复乘 DPR', () => {
+  const canvas = {
+    width: 1080,
+    height: 1920,
+    getBoundingClientRect: () => ({ left: 20, top: 30, width: 360, height: 640, right: 380, bottom: 670, x: 20, y: 30, toJSON: () => ({}) }),
+  } as unknown as HTMLCanvasElement
+  const center = clientPointToImagePoint(200, 350, canvas, { x: 0, y: 0, width: 1080, height: 1920 })
+  assert.deepEqual(center, { x: 540, y: 960 })
+  const metrics = getImageEditorCanvasMetrics(canvas, { x: 0, y: 0, width: 1080, height: 1920 })
+  assert.equal(metrics.backingWidth, 1080)
+  assert.equal(metrics.backingHeight, 1920)
+  assert.equal(metrics.cssWidth, 360)
+  assert.equal(metrics.cssHeight, 640)
+})
+
+test('图片编辑器坐标 resolver 正确处理裁剪视口偏移，并拒绝画布外 pointer', () => {
+  const canvas = {
+    width: 600,
+    height: 400,
+    getBoundingClientRect: () => ({ left: 100, top: 80, width: 600, height: 400, right: 700, bottom: 480, x: 100, y: 80, toJSON: () => ({}) }),
+  } as unknown as HTMLCanvasElement
+  const point = clientPointToImagePoint(250, 180, canvas, { x: 300, y: 500, width: 1200, height: 800 })
+  assert.deepEqual(point, { x: 600, y: 700 })
+  assert.equal(clientPointToImagePoint(99, 180, canvas, { x: 300, y: 500, width: 1200, height: 800 }), null)
+  assert.equal(clientPointToImagePoint(250, 481, canvas, { x: 300, y: 500, width: 1200, height: 800 }), null)
+})
+
+test('图片编辑器工具控制与移动端事件契约保持隔离', () => {
+  const editor = read('components/ImageEditor.tsx')
+  const browser = read('lib/image-editor-browser.ts')
+  assert.match(editor, /clientPointToImagePoint/u)
+  assert.match(editor, /setPointerCapture\(event\.pointerId\)/u)
+  assert.match(editor, /onPointerCancel=\{handlePointerCancel\}/u)
+  assert.match(editor, /tool === 'mosaic' \?/u)
+  assert.match(editor, /tool === 'draw' \|\| tool === 'shape' \|\| tool === 'arrow' \|\| tool === 'text'/u)
+  assert.doesNotMatch(editor, /tool === 'draw' \|\| tool === 'shape' \|\| tool === 'arrow' \|\| tool === 'mosaic' \|\| tool === 'text'/u)
+  assert.match(browser, /showCropOverlay/u)
+  assert.match(browser, /makePixelatedCanvas/u)
 })

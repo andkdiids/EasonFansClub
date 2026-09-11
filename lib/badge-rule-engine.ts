@@ -1,7 +1,7 @@
 import { calculateCheckinStreaks, getShanghaiDateKey } from '@/lib/checkin'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
 import { prisma } from '@/lib/prisma'
-import { grantBadge } from '@/lib/badge-service'
+import { grantBadge, getSustainedBadgeOwnership } from '@/lib/badge-service'
 import { badgeAvailabilityWhere, getBadgeAvailability } from '@/lib/badge-phase2'
 import { ACTIVE_RELATION_USER_WHERE, accountAgeDays, getUserBadgeMetric, safeMetric, VALID_POST_WHERE } from '@/lib/badge-metrics'
 import { getSeriesCompletionEligibleUserIds, getSeriesCompletionPreview, processBadgeGrantEffects } from '@/lib/badge-phase3'
@@ -9,12 +9,13 @@ import { getBatchHistoricalBadgeMetrics, getHistoricalBackfillCapability, getHis
 import { getActivityParticipationBadgeStats, grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 import { getBirthdayWhereForZodiac, getCurrentZodiacSign, isBirthdayToday, resolveZodiac, resolveZodiacGrantEligibility, type ZodiacSign } from '@/lib/zodiac'
 import { resolveZodiacBadgeGrantEligibility, zodiacGrantKey, type ZodiacGrantHistoryRecord } from '@/lib/birthday-zodiac-grant'
-import { activeUserBadgeWhere } from '@/lib/badge-validity'
+import { activeUserBadgeWhere, currentUserBadgeWhere } from '@/lib/badge-validity'
 import { getTodayMonthDay } from '@/lib/today'
 import { backfillBadgeOwnershipRule, getBadgeOwnershipRuleStats } from '@/lib/badge-ownership'
 import { getBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { type BadgeRevokeReason } from '@/lib/badge-revocation'
+import { reconcileAspirinBadgeRule } from '@/lib/aspirin-badge'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
@@ -146,6 +147,9 @@ async function loadEnabledRules(ruleTypes?: readonly SupportedBadgeRuleType[], n
       secondaryThreshold: true,
       configJson: true,
       isEnabled: true,
+      sustainedQualification: true,
+      inactiveAfterDays: true,
+      revokeAfterDays: true,
     },
   })
 }
@@ -161,6 +165,7 @@ export type BadgeRuleEvaluation = {
   operator?: BadgeRuleOperatorValue | string
   threshold?: number | null
   configJson?: unknown
+  secondaryThreshold?: number | null
 }
 
 export type BadgeRuleEvaluationMode = 'AUTO' | 'ADMIN_BACKFILL' | 'RETENTION'
@@ -230,6 +235,10 @@ export function evaluateBadgeRule({
     return isBirthdayToday({ month: user.birthMonth, day: user.birthDay }, now)
   }
 
+  if (rule.ruleType === 'CLINIC_CONSULTATION_STREAK') {
+    return evaluateBadgeMetric(metric, 'GTE', rule.threshold || 1)
+  }
+
   const target = rule.ruleType === 'CONCERT_SHOW_ATTENDED' || rule.ruleType === 'CONCERT_TOUR_ATTENDED'
     ? 1
     : rule.threshold
@@ -260,6 +269,36 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
     // Activity participation has an activity-scoped predicate and is handled
     // by the shared activity scanner, never by the scalar event evaluator.
     if (type === 'BADGE_SERIES_COMPLETE' || type === 'ACTIVITY_PARTICIPATION' || type === 'BADGE_OWNERSHIP') continue
+    if (type === 'CLINIC_CONSULTATION_STREAK') {
+      summary.evaluated += 1
+      try {
+        const result = await reconcileAspirinBadgeRule({
+          userId,
+          rule: {
+            id: rule.id,
+            badgeId: rule.badgeId,
+            ruleType: type,
+            threshold: rule.threshold,
+            secondaryThreshold: rule.secondaryThreshold,
+            configJson: rule.configJson,
+            isEnabled: rule.isEnabled,
+            sustainedQualification: rule.sustainedQualification,
+            inactiveAfterDays: rule.inactiveAfterDays,
+            revokeAfterDays: rule.revokeAfterDays,
+          },
+          now,
+        })
+        if (result.qualifiedToday) summary.eligible += 1
+        if (result.granted) {
+          summary.granted += 1
+          newlyGranted.push({ badgeId: rule.badgeId, recordId: result.recordId!, ruleType: type })
+        } else if (result.restored || result.state === 'ACTIVE') summary.alreadyOwned += 1
+      } catch (error) {
+        summary.failed += 1
+        summary.failures.push(`${rule.id}:${error instanceof Error ? error.message : '阿士匹灵规则计算失败'}`)
+      }
+      continue
+    }
     const config = rule.configJson && typeof rule.configJson === 'object' && !Array.isArray(rule.configJson) ? rule.configJson as { concertId?: unknown; tourId?: unknown } : null
     const isTargetRule = type === 'CONCERT_SHOW_ATTENDED' || type === 'CONCERT_TOUR_ATTENDED'
     const metricKey = isTargetRule ? `${type}:${String(config?.concertId || config?.tourId || '')}` : type
@@ -305,6 +344,7 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
         sourceType: 'AUTO_RULE',
         sourceId: rule.id,
         grantKey: grantKeyForRule(rule, now, grantKeyPrefix),
+        ...(rule.sustainedQualification ? { initialQualificationAt: now } : {}),
         grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: rule.threshold, configJson: rule.configJson })}`,
         deferPhase3Effects: true,
       })
@@ -692,6 +732,7 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
     case 'BADGE_OWNERSHIP':
     case 'BIRTHDAY_ZODIAC':
     case 'BIRTHDAY_TODAY':
+    case 'CLINIC_CONSULTATION_STREAK':
       return metrics
   }
   return metrics
@@ -709,7 +750,7 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
       grantType: true,
       availableFrom: true,
       availableUntil: true,
-      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, configJson: true, isEnabled: true } },
+      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true, sustainedQualification: true, inactiveAfterDays: true, revokeAfterDays: true } },
     },
   })
   if (!badge || !badge.BadgeRule) throw new Error('勋章或自动规则不存在')
@@ -745,6 +786,54 @@ export async function backfillBadgeRule({ badgeId, cursor, batchSize = 200, now 
       mode,
       historicalWindow: historicalWindow ? { from: historicalWindow.from.toISOString(), until: historicalWindow.until.toISOString() } : null,
     }
+  }
+
+  if (type === 'CLINIC_CONSULTATION_STREAK') {
+    const users = await prisma.user.findMany({
+      where: { status: 'ACTIVE', isDeleted: false, ...(normalizedCursor ? { id: { gt: normalizedCursor } } : {}) },
+      orderBy: { id: 'asc' },
+      take: boundedBatchSize + 1,
+      select: { id: true },
+    })
+    const hasMore = users.length > boundedBatchSize
+    const rows = hasMore ? users.slice(0, boundedBatchSize) : users
+    const summary: BadgeBackfillSummary = {
+      badgeId,
+      ruleId: badge.BadgeRule.id,
+      ruleType: type,
+      scanned: rows.length,
+      granted: 0,
+      alreadyOwned: 0,
+      notEligible: 0,
+      failed: 0,
+      failures: [],
+      nextCursor: hasMore ? rows.at(-1)?.id || null : null,
+      done: !hasMore,
+      mode,
+      historicalWindow: historicalWindow ? { from: historicalWindow.from.toISOString(), until: historicalWindow.until.toISOString() } : null,
+    }
+    const newlyGranted: Array<{ userId: string; recordId: string }> = []
+    for (const user of rows) {
+      try {
+        const result = await reconcileAspirinBadgeRule({
+          userId: user.id,
+          rule: { ...badge.BadgeRule, badgeId, ruleType: type },
+          now,
+        })
+        if (result.granted) {
+          summary.granted += 1
+          if (result.recordId) newlyGranted.push({ userId: user.id, recordId: result.recordId })
+        } else if (result.qualifiedToday && result.currentStreakDays >= result.initialStreakDays) summary.alreadyOwned += 1
+        else summary.notEligible += 1
+      } catch (error) {
+        summary.failed += 1
+        summary.failures.push(`${user.id}:${error instanceof Error ? error.message : '阿士匹灵规则扫描失败'}`)
+      }
+    }
+    for (const grant of newlyGranted) {
+      await processBadgeGrantEffects({ userId: grant.userId, grants: [{ badgeId, recordId: grant.recordId }] }).catch((error) => console.error('[badge.backfill.aspirin.effects]', { userId: grant.userId, badgeId, error }))
+    }
+    return summary
   }
 
   if (type === 'BIRTHDAY_ZODIAC' || type === 'BIRTHDAY_TODAY') {
@@ -1062,7 +1151,7 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
       isActive: true,
       availableFrom: true,
       availableUntil: true,
-      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, configJson: true, isEnabled: true } },
+      BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true, sustainedQualification: true, inactiveAfterDays: true, revokeAfterDays: true } },
     },
   })
   if (!badge?.BadgeRule) throw new Error('勋章或自动规则不存在')
@@ -1084,7 +1173,7 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
     until: historicalWindow?.until.toISOString() || null,
     message: availability === 'UPCOMING' ? '限定勋章尚未开始，当前没有可扫描的历史资格' : isLimited && !capability.supported ? `该规则无法可靠判断限定期历史资格：${capability.basis}` : null,
   }
-  const ownedCount = await prisma.userBadge.count({ where: { badgeId, ...activeUserBadgeWhere(now), User: ACTIVE_RELATION_USER_WHERE } })
+  const ownedCount = await prisma.userBadge.count({ where: { badgeId, ...currentUserBadgeWhere(now), User: ACTIVE_RELATION_USER_WHERE } })
   if (availability === 'UPCOMING' || (isLimited && !capability.supported)) {
     return {
       badgeId,
@@ -1117,6 +1206,49 @@ export async function previewBadgeRule(badgeId: string, now = new Date()): Promi
           ? `当前不在${configuredZodiac}星座周期内，自动发放预览没有候选`
           : '当前星座规则缺少有效配置，自动发放预览没有候选',
       },
+    }
+  }
+
+  if (type === 'CLINIC_CONSULTATION_STREAK') {
+    let cursor: string | undefined
+    let eligibleCount = 0
+    let pendingCount = 0
+    while (true) {
+      const users = await prisma.user.findMany({
+        where: { status: 'ACTIVE', isDeleted: false, ...(cursor ? { id: { gt: cursor } } : {}) },
+        orderBy: { id: 'asc' },
+        take: BACKFILL_BATCH_MAX,
+        select: { id: true },
+      })
+      if (!users.length) break
+      for (const user of users) {
+        const evaluation = await reconcileAspirinBadgeRule({
+          userId: user.id,
+          rule: { ...badge.BadgeRule, badgeId, ruleType: type },
+          now,
+          applyStateTransitions: false,
+        })
+        const eligible = evaluation.qualifiedToday && evaluation.currentStreakDays >= evaluation.initialStreakDays
+        if (eligible) {
+          eligibleCount += 1
+          const owned = await getSustainedBadgeOwnership(user.id, badgeId, badge.BadgeRule.id, now)
+          if (!owned) pendingCount += 1
+        }
+      }
+      cursor = users.at(-1)?.id
+      if (users.length < BACKFILL_BATCH_MAX) break
+    }
+    return {
+      badgeId,
+      ruleId: badge.BadgeRule.id,
+      ruleType: type,
+      operator,
+      threshold: badge.BadgeRule.threshold,
+      availability,
+      eligibleCount,
+      ownedCount,
+      pendingCount,
+      historical,
     }
   }
 

@@ -21,16 +21,42 @@ export type DecodedImageEditorImage = {
   cleanup: () => void
 }
 
+export type ImageEditorCanvasMetrics = {
+  left: number
+  top: number
+  cssWidth: number
+  cssHeight: number
+  backingWidth: number
+  backingHeight: number
+  devicePixelRatio: number
+  viewRect: ImageEditorRect
+}
+
 export type RenderedImageEditorCanvas = {
   canvas: HTMLCanvasElement
   width: number
   height: number
   scale: number
   viewRect: ImageEditorRect
+  imageRect: ImageEditorRect
+  metrics: {
+    originalWidth: number
+    originalHeight: number
+    renderWidth: number
+    renderHeight: number
+    offsetX: number
+    offsetY: number
+    scale: number
+    dpr: number
+  }
 }
 
+export type RenderImageEditorOptions = Readonly<{
+  showCropOverlay?: boolean
+}>
+
 function numberInRange(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min
 }
 
 function clampRect(rect: ImageEditorRect, width: number, height: number): ImageEditorRect {
@@ -78,7 +104,7 @@ async function readJpegOrientation(file: File) {
       offset += segmentLength
     }
   } catch {
-    // A malformed or unsupported EXIF block should not prevent editing.
+    // A malformed EXIF block should not prevent editing.
   }
   return 1
 }
@@ -108,8 +134,7 @@ export async function decodeImageForEditor(file: File): Promise<DecodedImageEdit
         },
       }
     } catch {
-      // Safari and some WebViews do not implement createImageBitmap for all
-      // formats. The HTMLImageElement fallback below keeps those uploads usable.
+      // Some Safari/WebView combinations cannot decode every format via createImageBitmap.
     }
   }
 
@@ -145,12 +170,12 @@ function createCanvas(width: number, height: number) {
   return canvas
 }
 
-function drawExifOrientedSource(decoded: DecodedImageEditorImage, scale: number) {
-  const canvas = createCanvas(decoded.width * scale, decoded.height * scale)
+function drawExifOrientedSource(decoded: DecodedImageEditorImage, sourceScale: number) {
+  const canvas = createCanvas(decoded.width * sourceScale, decoded.height * sourceScale)
   const context = canvas.getContext('2d')
   if (!context) throw new Error('当前浏览器不支持图片画布')
-  const width = decoded.rawWidth * scale
-  const height = decoded.rawHeight * scale
+  const width = decoded.rawWidth * sourceScale
+  const height = decoded.rawHeight * sourceScale
   context.save()
   switch (decoded.orientation) {
     case 2:
@@ -218,7 +243,10 @@ function drawPath(context: CanvasRenderingContext2D, points: readonly ImageEdito
   context.beginPath()
   context.moveTo((points[0].x - offset.x) * scale, (points[0].y - offset.y) * scale)
   for (const point of points.slice(1)) context.lineTo((point.x - offset.x) * scale, (point.y - offset.y) * scale)
-  if (points.length === 1) context.lineTo((points[0].x - offset.x + 0.01) * scale, (points[0].y - offset.y + 0.01) * scale)
+  if (points.length === 1) {
+    const epsilon = Math.max(0.5, 0.01 * scale)
+    context.lineTo((points[0].x - offset.x) * scale + epsilon, (points[0].y - offset.y) * scale + epsilon)
+  }
   context.stroke()
 }
 
@@ -226,10 +254,13 @@ function drawArrow(context: CanvasRenderingContext2D, annotation: Extract<ImageE
   const start = { x: (annotation.start.x - offset.x) * scale, y: (annotation.start.y - offset.y) * scale }
   const end = { x: (annotation.end.x - offset.x) * scale, y: (annotation.end.y - offset.y) * scale }
   const angle = Math.atan2(end.y - start.y, end.x - start.x)
-  const headLength = Math.max(8 * scale, annotation.width * scale * 3)
+  const length = Math.hypot(end.x - start.x, end.y - start.y)
+  if (length < 0.5) return
+  const headLength = Math.min(Math.max(12 * scale, annotation.width * scale * 3), Math.max(6 * scale, length * 0.45))
   context.beginPath()
   context.moveTo(start.x, start.y)
   context.lineTo(end.x, end.y)
+  context.moveTo(end.x, end.y)
   context.lineTo(end.x - headLength * Math.cos(angle - Math.PI / 6), end.y - headLength * Math.sin(angle - Math.PI / 6))
   context.moveTo(end.x, end.y)
   context.lineTo(end.x - headLength * Math.cos(angle + Math.PI / 6), end.y - headLength * Math.sin(angle + Math.PI / 6))
@@ -268,8 +299,9 @@ function drawAnnotation(context: CanvasRenderingContext2D, annotation: ImageEdit
   context.restore()
 }
 
-function makePixelatedCanvas(source: HTMLCanvasElement) {
-  const low = createCanvas(Math.max(1, Math.ceil(source.width / 12)), Math.max(1, Math.ceil(source.height / 12)))
+function makePixelatedCanvas(source: HTMLCanvasElement, pixelSize: number) {
+  const block = Math.max(2, Math.round(pixelSize))
+  const low = createCanvas(Math.max(1, Math.ceil(source.width / block)), Math.max(1, Math.ceil(source.height / block)))
   const lowContext = low.getContext('2d')
   if (!lowContext) throw new Error('当前浏览器不支持图片画布')
   lowContext.imageSmoothingEnabled = false
@@ -282,27 +314,48 @@ function makePixelatedCanvas(source: HTMLCanvasElement) {
   return pixelated
 }
 
-function drawMosaic(context: CanvasRenderingContext2D, source: HTMLCanvasElement, annotation: Extract<ImageEditorAnnotation, { type: 'mosaic' }>, scale: number, offset: ImageEditorPoint) {
+function drawMosaic(context: CanvasRenderingContext2D, pixelated: HTMLCanvasElement, annotation: Extract<ImageEditorAnnotation, { type: 'mosaic' }>, scale: number, offset: ImageEditorPoint) {
   if (!annotation.points.length) return
-  const pixelated = makePixelatedCanvas(source)
-  const layer = createCanvas(context.canvas.width, context.canvas.height)
+  const padding = Math.max(annotation.width / 2, 4)
+  const minX = Math.min(...annotation.points.map((point) => point.x)) - padding
+  const minY = Math.min(...annotation.points.map((point) => point.y)) - padding
+  const maxX = Math.max(...annotation.points.map((point) => point.x)) + padding
+  const maxY = Math.max(...annotation.points.map((point) => point.y)) + padding
+  const regionLeft = Math.max(0, Math.floor((minX - offset.x) * scale) - 2)
+  const regionTop = Math.max(0, Math.floor((minY - offset.y) * scale) - 2)
+  const regionRight = Math.min(context.canvas.width, Math.ceil((maxX - offset.x) * scale) + 2)
+  const regionBottom = Math.min(context.canvas.height, Math.ceil((maxY - offset.y) * scale) + 2)
+  const regionWidth = regionRight - regionLeft
+  const regionHeight = regionBottom - regionTop
+  if (regionWidth <= 0 || regionHeight <= 0) return
+
+  const layer = createCanvas(regionWidth, regionHeight)
   const layerContext = layer.getContext('2d')
-  const mask = createCanvas(context.canvas.width, context.canvas.height)
+  const mask = createCanvas(regionWidth, regionHeight)
   const maskContext = mask.getContext('2d')
   if (!layerContext || !maskContext) throw new Error('当前浏览器不支持图片画布')
   layerContext.imageSmoothingEnabled = false
-  layerContext.drawImage(pixelated, -offset.x * scale, -offset.y * scale, source.width, source.height)
+  // `pixelated` is already the current view. Composite only the annotation's
+  // local bounds so a large image or several mosaic strokes do not allocate
+  // full-size layer and mask canvases on every pointer update.
+  layerContext.drawImage(pixelated, regionLeft, regionTop, regionWidth, regionHeight, 0, 0, regionWidth, regionHeight)
   maskContext.strokeStyle = '#fff'
-  maskContext.beginPath()
-  maskContext.moveTo((annotation.points[0].x - offset.x) * scale, (annotation.points[0].y - offset.y) * scale)
-  for (const point of annotation.points.slice(1)) maskContext.lineTo((point.x - offset.x) * scale, (point.y - offset.y) * scale)
-  maskContext.lineWidth = Math.max(annotation.width * scale * 2.5, 12 * scale)
+  maskContext.lineWidth = Math.max(annotation.width * scale, 8 * scale)
   maskContext.lineCap = 'round'
   maskContext.lineJoin = 'round'
-  maskContext.stroke()
+  maskContext.beginPath()
+  maskContext.moveTo((annotation.points[0].x - offset.x) * scale - regionLeft, (annotation.points[0].y - offset.y) * scale - regionTop)
+  for (const point of annotation.points.slice(1)) maskContext.lineTo((point.x - offset.x) * scale - regionLeft, (point.y - offset.y) * scale - regionTop)
+  if (annotation.points.length === 1) {
+    maskContext.arc((annotation.points[0].x - offset.x) * scale - regionLeft, (annotation.points[0].y - offset.y) * scale - regionTop, Math.max(annotation.width * scale / 2, 4 * scale), 0, Math.PI * 2)
+    maskContext.fillStyle = '#fff'
+    maskContext.fill()
+  } else {
+    maskContext.stroke()
+  }
   layerContext.globalCompositeOperation = 'destination-in'
   layerContext.drawImage(mask, 0, 0)
-  context.drawImage(layer, 0, 0)
+  context.drawImage(layer, regionLeft, regionTop)
 }
 
 function annotationBounds(annotation: ImageEditorAnnotation) {
@@ -310,12 +363,17 @@ function annotationBounds(annotation: ImageEditorAnnotation) {
     if (!annotation.points.length) return null
     const xs = annotation.points.map((point) => point.x)
     const ys = annotation.points.map((point) => point.y)
-    return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) }
+    const padding = Math.max(2, annotation.width / 2)
+    const x = Math.min(...xs) - padding
+    const y = Math.min(...ys) - padding
+    return { x, y, width: Math.max(1, Math.max(...xs) - Math.min(...xs) + padding * 2), height: Math.max(1, Math.max(...ys) - Math.min(...ys) + padding * 2) }
   }
   if (annotation.type === 'text') {
-    return { x: annotation.position.x, y: annotation.position.y, width: annotation.text.length * annotation.fontSize * 0.6, height: annotation.fontSize * 1.25 }
+    return { x: annotation.position.x, y: annotation.position.y, width: Math.max(annotation.fontSize, annotation.text.length * annotation.fontSize * 0.6), height: annotation.fontSize * 1.3 }
   }
-  return normalizeImageEditorRect(annotation.start, annotation.end)
+  const rect = normalizeImageEditorRect(annotation.start, annotation.end)
+  const padding = Math.max(2, annotation.width / 2)
+  return { x: rect.x - padding, y: rect.y - padding, width: Math.max(1, rect.width + padding * 2), height: Math.max(1, rect.height + padding * 2) }
 }
 
 function drawSelection(context: CanvasRenderingContext2D, annotation: ImageEditorAnnotation, scale: number, offset: ImageEditorPoint) {
@@ -337,27 +395,74 @@ function drawSelection(context: CanvasRenderingContext2D, annotation: ImageEdito
   context.restore()
 }
 
+function drawCropOverlay(context: CanvasRenderingContext2D, crop: ImageEditorRect | null, fullRect: ImageEditorRect, scale: number, offset: ImageEditorPoint) {
+  if (!crop) {
+    context.save()
+    context.strokeStyle = 'rgba(255,255,255,.85)'
+    context.lineWidth = Math.max(1, scale * 2)
+    context.strokeRect(0, 0, fullRect.width * scale, fullRect.height * scale)
+    context.restore()
+    return
+  }
+  const x = (crop.x - offset.x) * scale
+  const y = (crop.y - offset.y) * scale
+  const width = crop.width * scale
+  const height = crop.height * scale
+  context.save()
+  context.fillStyle = 'rgba(0,0,0,.52)'
+  context.beginPath()
+  context.rect(0, 0, fullRect.width * scale, fullRect.height * scale)
+  context.rect(x, y, width, height)
+  context.fill('evenodd')
+  context.strokeStyle = '#fff'
+  context.lineWidth = Math.max(1, scale * 2)
+  context.strokeRect(x, y, width, height)
+  context.fillStyle = '#fff'
+  for (const handle of [[x, y], [x + width, y], [x, y + height], [x + width, y + height]]) {
+    context.fillRect(handle[0] - 5, handle[1] - 5, 10, 10)
+  }
+  context.restore()
+}
+
 export function renderImageEditorState(
   decoded: DecodedImageEditorImage,
   state: ImageEditorState,
   maxEdge: number,
   selectedId: string | null = null,
+  options: RenderImageEditorOptions = {},
 ): RenderedImageEditorCanvas {
-  const view = imageEditorViewRect(decoded.width, decoded.height, state)
   const dimensions = imageEditorDimensions(decoded.width, decoded.height, state.rotation)
-  const safeView = clampRect(view, dimensions.width, dimensions.height)
+  const fullRect: ImageEditorRect = { x: 0, y: 0, width: dimensions.width, height: dimensions.height }
+  const showCropOverlay = options.showCropOverlay === true
+  const requestedView = showCropOverlay ? fullRect : imageEditorViewRect(decoded.width, decoded.height, state)
+  const safeView = clampRect(requestedView, dimensions.width, dimensions.height)
   const scale = Math.min(1, maxEdge / Math.max(1, safeView.width, safeView.height))
-  const oriented = drawExifOrientedSource(decoded, scale)
+  const sourceScale = Math.min(1, maxEdge / Math.max(1, decoded.width, decoded.height))
+  const oriented = drawExifOrientedSource(decoded, sourceScale)
   const rotated = rotateCanvas(oriented, state.rotation)
   const canvas = createCanvas(safeView.width * scale, safeView.height * scale)
   const context = canvas.getContext('2d')
   if (!context) throw new Error('当前浏览器不支持图片画布')
   context.imageSmoothingEnabled = true
-  context.drawImage(rotated, -safeView.x * scale, -safeView.y * scale)
+  const drawScale = scale / sourceScale
+  context.drawImage(rotated, 0, 0, rotated.width * drawScale, rotated.height * drawScale, -safeView.x * scale, -safeView.y * scale, rotated.width * drawScale, rotated.height * drawScale)
+  const baseView = createCanvas(canvas.width, canvas.height)
+  const baseViewContext = baseView.getContext('2d')
+  if (!baseViewContext) throw new Error('当前浏览器不支持图片画布')
+  baseViewContext.drawImage(canvas, 0, 0)
 
   const offset = { x: safeView.x, y: safeView.y }
+  const pixelatedBySize = new Map<number, HTMLCanvasElement>()
   for (const annotation of state.annotations) {
-    if (annotation.type === 'mosaic') drawMosaic(context, rotated, annotation, scale, offset)
+    if (annotation.type !== 'mosaic') continue
+    const pixelSize = Math.max(4, (annotation.pixelSize ?? 16) * scale)
+    const key = Math.round(pixelSize)
+    let pixelated = pixelatedBySize.get(key)
+    if (!pixelated) {
+      pixelated = makePixelatedCanvas(baseView, key)
+      pixelatedBySize.set(key, pixelated)
+    }
+    drawMosaic(context, pixelated, annotation, scale, offset)
   }
   for (const annotation of state.annotations) {
     if (annotation.type !== 'mosaic') drawAnnotation(context, annotation, scale, offset)
@@ -366,21 +471,74 @@ export function renderImageEditorState(
     const selected = state.annotations.find((annotation) => annotation.id === selectedId)
     if (selected) drawSelection(context, selected, scale, offset)
   }
-  return { canvas, width: canvas.width, height: canvas.height, scale, viewRect: safeView }
+  if (showCropOverlay) drawCropOverlay(context, state.crop, fullRect, scale, offset)
+  return {
+    canvas,
+    width: canvas.width,
+    height: canvas.height,
+    scale,
+    viewRect: safeView,
+    imageRect: fullRect,
+    metrics: {
+      originalWidth: decoded.width,
+      originalHeight: decoded.height,
+      renderWidth: canvas.width,
+      renderHeight: canvas.height,
+      offsetX: safeView.x,
+      offsetY: safeView.y,
+      scale,
+      dpr: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+    },
+  }
 }
 
+export function getImageEditorCanvasMetrics(canvas: HTMLCanvasElement, viewRect: ImageEditorRect): ImageEditorCanvasMetrics {
+  const rect = canvas.getBoundingClientRect()
+  return {
+    left: rect.left,
+    top: rect.top,
+    cssWidth: rect.width,
+    cssHeight: rect.height,
+    backingWidth: canvas.width,
+    backingHeight: canvas.height,
+    devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+    viewRect,
+  }
+}
+
+/** Convert a CSS/client pointer to the canonical image-space coordinate. */
+export function clientPointToImagePoint(
+  clientX: number,
+  clientY: number,
+  canvas: HTMLCanvasElement,
+  viewRect: ImageEditorRect,
+): ImageEditorPoint | null {
+  const metrics = getImageEditorCanvasMetrics(canvas, viewRect)
+  if (!metrics.cssWidth || !metrics.cssHeight) return null
+  const normalizedX = (clientX - metrics.left) / metrics.cssWidth
+  const normalizedY = (clientY - metrics.top) / metrics.cssHeight
+  if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) return null
+  return {
+    x: numberInRange(viewRect.x + normalizedX * viewRect.width, viewRect.x, viewRect.x + viewRect.width),
+    y: numberInRange(viewRect.y + normalizedY * viewRect.height, viewRect.y, viewRect.y + viewRect.height),
+  }
+}
+
+/** Backwards-compatible clamped resolver for callers that need an edge point. */
 export function editorPointFromClient(
   clientX: number,
   clientY: number,
   canvas: HTMLCanvasElement,
   viewRect: ImageEditorRect,
 ): ImageEditorPoint {
-  const rect = canvas.getBoundingClientRect()
-  const x = rect.width ? (clientX - rect.left) / rect.width : 0
-  const y = rect.height ? (clientY - rect.top) / rect.height : 0
+  const point = clientPointToImagePoint(clientX, clientY, canvas, viewRect)
+  if (point) return point
+  const metrics = getImageEditorCanvasMetrics(canvas, viewRect)
+  const normalizedX = metrics.cssWidth ? (clientX - metrics.left) / metrics.cssWidth : 0
+  const normalizedY = metrics.cssHeight ? (clientY - metrics.top) / metrics.cssHeight : 0
   return {
-    x: numberInRange(viewRect.x + x * viewRect.width, viewRect.x, viewRect.x + viewRect.width),
-    y: numberInRange(viewRect.y + y * viewRect.height, viewRect.y, viewRect.y + viewRect.height),
+    x: numberInRange(viewRect.x + normalizedX * viewRect.width, viewRect.x, viewRect.x + viewRect.width),
+    y: numberInRange(viewRect.y + normalizedY * viewRect.height, viewRect.y, viewRect.y + viewRect.height),
   }
 }
 

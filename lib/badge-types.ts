@@ -5,7 +5,7 @@ export type BadgeEffectType = 'NONE' | 'SHINE' | 'GLOW' | 'SPARKLE'
 export type BadgeNicknameEffect = 'NONE' | 'COLOR' | 'GOLD' | 'GRADIENT' | 'GLOW'
 export type BadgeAvailabilityStatus = 'PERMANENT' | 'UPCOMING' | 'AVAILABLE' | 'ENDED'
 export type BadgeValidityType = 'PERMANENT' | 'DAYS'
-export type UserBadgeStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED'
+export type UserBadgeStatus = 'ACTIVE' | 'GRAYED' | 'EXPIRED' | 'REVOKED'
 
 export type BadgeSeriesView = {
   id: string
@@ -89,6 +89,9 @@ export type BadgeView = Omit<EquippedBadgeView, 'rarity' | 'obtainedAt'> & {
   validityDays?: number | null
   remainingDays?: number | null
   isEquipped: boolean
+  /** Current ownership lifecycle; grayed ownership remains in the gallery but cannot be equipped. */
+  ownershipStatus?: 'ACTIVE' | 'GRAYED'
+  isGrayed?: boolean
   series?: BadgeSeriesView | null
   tierGroupCode?: string | null
   tierLevel?: number | null

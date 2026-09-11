@@ -7,6 +7,7 @@ import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { postCreateHref } from '@/lib/post-navigation'
 
 type LoadState<T> = { loading: boolean; failed: boolean; data: T }
 type Post = {
@@ -73,7 +74,7 @@ export function HomeModules({ emptyText }: { emptyText: string }) {
             <p className="text-sm font-black uppercase tracking-[0.22em] text-sky-700">Forum</p>
             <h2 className="mt-2 text-4xl font-black text-brand-950">E院广场精选</h2>
           </div>
-          <Link href="/posts/new" className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white">发布帖子</Link>
+          <Link href={postCreateHref(null, '/')} className="rounded-full bg-brand-950 px-5 py-3 text-sm font-black text-white">发布帖子</Link>
         </div>
         {posts.failed ? <ModuleFallback /> : null}
         {posts.loading ? <ModuleFallback title="正在加载帖子..." /> : null}

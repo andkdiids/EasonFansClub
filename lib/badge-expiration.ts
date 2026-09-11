@@ -21,7 +21,7 @@ export async function expireUserBadges(now = new Date(), batchSize = 500): Promi
     const batch = await prisma.$transaction(async (tx) => {
       const [dueAggregates, dueSources] = await Promise.all([
         tx.userBadge.findMany({
-          where: { status: 'ACTIVE', expiresAt: { not: null, lte: now } },
+          where: { status: { in: ['ACTIVE', 'GRAYED'] }, expiresAt: { not: null, lte: now } },
           orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
           take: boundedBatchSize,
           select: { userId: true, badgeId: true },
@@ -50,7 +50,7 @@ export async function expireUserBadges(now = new Date(), batchSize = 500): Promi
           data: { isActive: false, expiredAt: now, revokeReason: 'NORMAL_EXPIRED' },
         })
         const record = await tx.userBadge.findFirst({
-          where: { userId, badgeId, status: 'ACTIVE' },
+          where: { userId, badgeId, status: { in: ['ACTIVE', 'GRAYED'] } },
           orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
           select: { id: true, expiresAt: true },
         })
@@ -72,7 +72,7 @@ export async function expireUserBadges(now = new Date(), batchSize = 500): Promi
 
         if (!expiredSources.count && (!record.expiresAt || record.expiresAt > now)) continue
         const updated = await tx.userBadge.updateMany({
-          where: { id: record.id, status: 'ACTIVE' },
+          where: { id: record.id, status: { in: ['ACTIVE', 'GRAYED'] } },
           data: { status: 'EXPIRED', expiredAt: now, revokeReason: 'NORMAL_EXPIRED', activeKey: null },
         })
         if (!updated.count) continue

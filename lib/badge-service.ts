@@ -7,10 +7,11 @@ import { calculateBadgeRuleProgress, canExposeLiveBadgeProgress, getBadgeAvailab
 import { getUserBadgeMetric } from '@/lib/badge-metrics'
 import { resolveBadgeAcquisitionDescription } from '@/lib/badge-acquisition'
 import { generateBadgeAcquisitionDescription, getZodiacFromRuleConfig, type SupportedBadgeRuleType } from '@/lib/badge-rules'
-import { activeUserBadgeWhere, calculateBadgeExpiresAt, isUserBadgeActive, remainingBadgeDays } from '@/lib/badge-validity'
+import { activeUserBadgeWhere, calculateBadgeExpiresAt, currentUserBadgeWhere, isUserBadgeActive, remainingBadgeDays } from '@/lib/badge-validity'
 import { INCIDENT_INVALID_ZODIAC_PERIOD_GRANT, isBadgeRevokeReason, type BadgeRevokeReason } from '@/lib/badge-revocation'
 import { resolveZodiacBadgeGrantEligibility, type ZodiacGrantHistoryRecord } from '@/lib/birthday-zodiac-grant'
 import { completeTask } from '@/lib/growth-tasks/service'
+import { getShanghaiDateKey } from '@/lib/checkin'
 
 const BADGE_SELECT = {
   id: true,
@@ -77,7 +78,7 @@ const EQUIPPED_BADGE_SELECT = {
 type DbBadge = Prisma.BadgeGetPayload<{ select: typeof BADGE_SELECT }>
 const BADGE_COLLECTION_SELECT = {
   ...BADGE_SELECT,
-  BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, configJson: true, isEnabled: true } },
+  BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true, sustainedQualification: true, inactiveAfterDays: true, revokeAfterDays: true } },
   PharmacyPrize: {
     where: { type: 'BADGE', enabled: true, Campaign: { status: { not: 'ENDED' } } },
     select: { id: true },
@@ -95,6 +96,7 @@ const USER_BADGE_SELECT = {
   revokedAt: true,
   revokeReason: true,
   status: true,
+  lastQualifiedAt: true,
   sourceType: true,
   sourceId: true,
   grantReason: true,
@@ -137,6 +139,10 @@ export type GrantBadgeInput = {
   historicalWindow?: { from: Date; until: Date }
   /** Stable event/period/operation identity. It is namespaced by user+badge in the service. */
   grantKey?: string | null
+  /** Optional acquisition-cycle identity for rules that must preserve revoked source history. */
+  acquisitionCycleKey?: string | null
+  /** Shanghai timestamp of the first fully qualified day for a sustained rule. */
+  initialQualificationAt?: Date | null
   /** Used by a batch evaluator so Phase 3 effects can be emitted once. */
   deferPhase3Effects?: boolean
   /** Internal guard used while a chained BADGE_OWNERSHIP evaluation is running. */
@@ -284,6 +290,7 @@ function equippedBadgeView(row: DbUserEquippedBadge, ownership: DbEquippedOwners
 
 function obtainedBadgeView(record: DbUserBadge, isEquipped: boolean, ownershipStats?: BadgeOwnershipStats | null, isHighestTier = false, position?: number): BadgeView {
   const badge = publicBadge(record.Badge)
+  const isGrayed = record.status === 'GRAYED'
   // Keep the public source wording stable: 于「天使的礼物」执药获得.
   return {
     ...badge,
@@ -298,7 +305,10 @@ function obtainedBadgeView(record: DbUserBadge, isEquipped: boolean, ownershipSt
     validityType: record.Badge.validityType,
     validityDays: record.Badge.validityDays,
     remainingDays: remainingBadgeDays(record.expiresAt),
-    isEquipped,
+    isEquipped: isGrayed ? false : isEquipped,
+    ownershipStatus: isGrayed ? 'GRAYED' : 'ACTIVE',
+    isGrayed,
+    isWearable: isGrayed ? false : badge.isWearable,
     ...(isEquipped && typeof position === 'number' ? { position } : {}),
     isHighestTier,
     ownershipStats: ownershipStats || null,
@@ -466,8 +476,12 @@ async function addProgressToUnownedBadges(userId: string, badges: readonly DbCol
     const rule = badge.BadgeRule
     if (!rule) continue
     const type = rule.ruleType as Parameters<typeof getUserBadgeMetric>[1]
-    if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
     const item = itemByBadgeId.get(badge.id)
+    if (type === 'CLINIC_CONSULTATION_STREAK') {
+      if (item?.status === 'NOT_OBTAINED') item.progress = await getUserBadgeRuleProgress(userId, rule)
+      continue
+    }
+    if (!metrics.has(type)) metrics.set(type, await getUserBadgeMetric(userId, type))
     if (item?.status === 'NOT_OBTAINED') item.progress = calculateBadgeRuleProgress(metrics.get(type) || 0, rule)
   }
 }
@@ -487,12 +501,12 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
   const [equippedBadges, records, historyRecords, allBadges] = await Promise.all([
     getEquippedBadgesForUser(userId),
     prisma.userBadge.findMany({
-      where: { userId, ...activeUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }) },
+      where: { userId, ...currentUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }) },
       orderBy: [{ awardedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
       select: USER_BADGE_SELECT,
     }),
     isSelf
-      ? prisma.userBadge.findMany({ where: { userId, ...activeUserBadgeWhere(now) }, orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }], select: USER_BADGE_SELECT })
+      ? prisma.userBadge.findMany({ where: { userId, ...currentUserBadgeWhere(now) }, orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }], select: USER_BADGE_SELECT })
       : Promise.resolve([] as DbUserBadge[]),
     isSelf
       ? prisma.badge.findMany({
@@ -500,7 +514,7 @@ export async function getBadgeCollection(userId: string, viewerId?: string | nul
           // while an active ownership row still exists. A revoked/expired
           // hidden or secret badge must not reappear as a user-facing catalog
           // placeholder after it has left current ownership.
-          where: { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId, ...activeUserBadgeWhere(now) } } }] },
+          where: { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId, ...currentUserBadgeWhere(now) } } }] },
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
           select: BADGE_COLLECTION_SELECT,
         })
@@ -589,7 +603,7 @@ export async function getBadgeDetailForUser(userId: string, badgeId: string): Pr
   const [badge, record, equippedBadges] = await Promise.all([
     prisma.badge.findUnique({ where: { id: badgeId }, select: BADGE_COLLECTION_SELECT }),
     prisma.userBadge.findFirst({
-      where: { userId, badgeId, ...activeUserBadgeWhere() },
+      where: { userId, badgeId, ...currentUserBadgeWhere() },
       orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
       select: USER_BADGE_SELECT,
     }),
@@ -630,14 +644,14 @@ export async function getBadgeExhibitionGallery(viewerId?: string | null): Promi
   const [allBadges, ownedRecords, equippedBadges] = await Promise.all([
     prisma.badge.findMany({
       where: viewerId
-        ? { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId: viewerId, ...activeUserBadgeWhere() } } }] }
+        ? { OR: [{ isEnabled: true, isActive: true }, { UserBadge: { some: { userId: viewerId, ...currentUserBadgeWhere() } } }] }
         : { isEnabled: true, isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       select: BADGE_COLLECTION_SELECT,
     }),
     viewerId
       ? prisma.userBadge.findMany({
-          where: { userId: viewerId, ...activeUserBadgeWhere() },
+          where: { userId: viewerId, ...currentUserBadgeWhere() },
           orderBy: [{ awardedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
           select: USER_BADGE_SELECT,
         })
@@ -762,13 +776,13 @@ export async function getBadgeProfileSummary(userId: string, viewerId?: string |
   const isSelf = viewerId === userId
   const now = new Date()
   const [ownedCount, publicObtainedCount, hiddenObtainedCount, publicTotal, hiddenTotal, records, showcaseRows, equippedBadges] = await Promise.all([
-    prisma.userBadge.count({ where: { userId, ...activeUserBadgeWhere(now) } }),
-    prisma.userBadge.count({ where: { userId, ...activeUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }), Badge: { visibility: 'PUBLIC' } } }),
-    prisma.userBadge.count({ where: { userId, ...activeUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }), Badge: { visibility: 'HIDDEN' } } }),
+    prisma.userBadge.count({ where: { userId, ...currentUserBadgeWhere(now) } }),
+    prisma.userBadge.count({ where: { userId, ...currentUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }), Badge: { visibility: 'PUBLIC' } } }),
+    prisma.userBadge.count({ where: { userId, ...currentUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }), Badge: { visibility: 'HIDDEN' } } }),
     prisma.badge.count({ where: { isEnabled: true, isActive: true, visibility: 'PUBLIC' } }),
     prisma.badge.count({ where: { isEnabled: true, isActive: true, visibility: 'HIDDEN' } }),
     prisma.userBadge.findMany({
-      where: { userId, ...activeUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }) },
+      where: { userId, ...currentUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }) },
       orderBy: [{ awardedAt: 'desc' }, { grantedAt: 'desc' }, { id: 'desc' }],
       take: 5,
       select: USER_BADGE_SELECT,
@@ -799,7 +813,7 @@ export async function getBadgeProfileSummary(userId: string, viewerId?: string |
   const equippedBadgeId = visibleEquippedBadges[0]?.id || null
   const showcaseOwnedRecords = showcaseRows.length
     ? await prisma.userBadge.findMany({
-      where: { userId, badgeId: { in: showcaseRows.map((row) => row.badgeId) }, ...activeUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }) },
+      where: { userId, badgeId: { in: showcaseRows.map((row) => row.badgeId) }, ...currentUserBadgeWhere(now), ...(isSelf ? {} : { isHidden: false }) },
       orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
         select: USER_BADGE_SELECT,
       })
@@ -839,12 +853,12 @@ export async function updateUserBadgeShowcase(userId: string, badgeIds: readonly
       where: {
         userId,
         badgeId: { in: normalized },
-        ...activeUserBadgeWhere(),
+        ...currentUserBadgeWhere(),
         Badge: { isEnabled: true, isActive: true },
       },
       select: { badgeId: true },
     })
-    if (owned.length !== normalized.length) throw new BadgeServiceError('NOT_OWNED', '橱窗只能展示自己已获得且仍启用的勋章')
+    if (owned.length !== normalized.length) throw new BadgeServiceError('NOT_OWNED', '橱窗只能展示自己当前拥有且仍启用的勋章')
     await tx.userBadgeShowcase.deleteMany({ where: { userId } })
     if (normalized.length) await tx.userBadgeShowcase.createMany({ data: normalized.map((badgeId, index) => ({ userId, badgeId, slot: index + 1 })) })
     return { badgeIds: normalized, count: normalized.length }
@@ -939,9 +953,9 @@ function namespacedGrantKey(input: GrantBadgeInput) {
   return raw ? stableGrantHash(`grant:${input.userId}:${input.badgeId}:${raw}`) : null
 }
 
-function acquisitionSourceKey(userId: string, badgeId: string, sourceType: string | null, sourceId: string | null, grantKey: string | null) {
+function acquisitionSourceKey(userId: string, badgeId: string, sourceType: string | null, sourceId: string | null, grantKey: string | null, acquisitionCycleKey: string | null = null) {
   const type = sourceType || 'UNSPECIFIED'
-  const identity = sourceId || grantKey || 'default'
+  const identity = acquisitionCycleKey || sourceId || grantKey || 'default'
   return stableGrantHash(`badge-source:${userId}:${badgeId}:${type}:${identity}`)
 }
 
@@ -972,12 +986,18 @@ async function clearBadgePresentationIfUnowned(tx: Prisma.TransactionClient, use
   await tx.userBadgeShowcase.deleteMany({ where: { userId, badgeId } })
 }
 
+/** Gray ownership keeps the historical/catalog row and showcase, but cannot remain equipped. */
+async function clearBadgeEquipmentOnly(tx: Prisma.TransactionClient, userId: string, badgeId: string) {
+  await tx.userEquippedBadge.deleteMany({ where: { userId, badgeId } })
+  await tx.user.updateMany({ where: { id: userId, equippedBadgeId: badgeId }, data: { equippedBadgeId: null } })
+}
+
 /** Recompute the aggregate UserBadge expiry from all currently valid sources. */
 async function refreshBadgeAggregate(tx: Prisma.TransactionClient, userId: string, badgeId: string, now: Date) {
   const record = await tx.userBadge.findFirst({
-    where: { userId, badgeId, status: 'ACTIVE' },
+    where: { userId, badgeId, status: { in: ['ACTIVE', 'GRAYED'] } },
     orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
-    select: { id: true, expiresAt: true },
+    select: { id: true, expiresAt: true, status: true },
   })
   if (!record) return { owned: false, recordId: null as string | null, changed: false }
   const sources = await loadActiveBadgeSources(tx, userId, badgeId, now)
@@ -985,9 +1005,132 @@ async function refreshBadgeAggregate(tx: Prisma.TransactionClient, userId: strin
   const expiresAt = sources.some((source) => !source.expiresAt)
     ? null
     : sources.reduce<Date | null>((latest, source) => !latest || (source.expiresAt && source.expiresAt > latest) ? source.expiresAt : latest, null)
-  const changed = (record.expiresAt?.getTime() || null) !== (expiresAt?.getTime() || null)
-  if (changed) await tx.userBadge.update({ where: { id: record.id }, data: { expiresAt, expiredAt: null, revokedAt: null, revokeReason: null, activeKey: activeBadgeKey(userId, badgeId) } })
+  // A gray row is retained while its single sustained source is inactive.
+  // When another valid source is attached, the aggregate becomes active again.
+  const restoreFromGray = record.status === 'GRAYED'
+    && (sources.length > 1 || sources.some((source) => source.sourceType !== 'AUTO_RULE'))
+  const changed = (record.expiresAt?.getTime() || null) !== (expiresAt?.getTime() || null) || restoreFromGray
+  if (changed) await tx.userBadge.update({ where: { id: record.id }, data: { expiresAt, expiredAt: null, revokedAt: null, revokeReason: null, ...(restoreFromGray ? { status: 'ACTIVE' as const } : {}), activeKey: activeBadgeKey(userId, badgeId) } })
   return { owned: true, recordId: record.id, changed }
+}
+
+export type SustainedBadgeOwnership = {
+  id: string
+  status: 'ACTIVE' | 'GRAYED'
+  awardedAt: Date
+  lastQualifiedAt: Date | null
+  expiresAt: Date | null
+  activeSource: { id: string; sourceId: string | null; revokeReason: string | null }
+}
+
+/** Read the aggregate/source pair used by the generic sustained lifecycle. */
+export async function getSustainedBadgeOwnership(userId: string, badgeId: string, ruleId: string, now = new Date()): Promise<SustainedBadgeOwnership | null> {
+  const record = await prisma.userBadge.findFirst({
+    where: {
+      userId,
+      badgeId,
+      ...currentUserBadgeWhere(now),
+      UserBadgeSource: { some: { sourceType: 'AUTO_RULE', sourceId: ruleId, isActive: true } },
+    },
+    orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
+    select: {
+      id: true,
+      status: true,
+      awardedAt: true,
+      lastQualifiedAt: true,
+      expiresAt: true,
+      UserBadgeSource: {
+        where: { sourceType: 'AUTO_RULE', sourceId: ruleId, isActive: true },
+        orderBy: [{ grantedAt: 'desc' }, { id: 'desc' }],
+        take: 1,
+        select: { id: true, sourceId: true, revokeReason: true },
+      },
+    },
+  })
+  const source = record?.UserBadgeSource[0]
+  if (!record || !source || (record.status !== 'ACTIVE' && record.status !== 'GRAYED')) return null
+  return { id: record.id, status: record.status, awardedAt: record.awardedAt, lastQualifiedAt: record.lastQualifiedAt, expiresAt: record.expiresAt, activeSource: source }
+}
+
+/** Mark only a sustained auto-owned aggregate gray; other active earning sources keep it active. */
+export async function markBadgeGrayed(input: { userId: string; badgeId: string; ruleId: string; lastQualifiedAt?: Date | null; now?: Date }) {
+  return prisma.$transaction(async (tx) => {
+    const now = input.now || new Date()
+    await lockUserForMutation(tx, input.userId)
+    await lockBadgeForMutation(tx, input.badgeId)
+    const record = await tx.userBadge.findFirst({
+      where: {
+        userId: input.userId,
+        badgeId: input.badgeId,
+        status: { in: ['ACTIVE', 'GRAYED'] },
+        UserBadgeSource: { some: { sourceType: 'AUTO_RULE', sourceId: input.ruleId, isActive: true } },
+      },
+      orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, status: true, lastQualifiedAt: true },
+    })
+    if (!record) return { changed: false, blockedByOtherSource: false, recordId: null as string | null }
+    const otherSources = await tx.userBadgeSource.count({
+      where: {
+        userBadgeId: record.id,
+        isActive: true,
+        NOT: { sourceType: 'AUTO_RULE', sourceId: input.ruleId },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+    })
+    if (otherSources > 0) return { changed: false, blockedByOtherSource: true, recordId: record.id }
+    const changed = record.status !== 'GRAYED'
+    await tx.userBadge.update({
+      where: { id: record.id },
+      data: {
+        status: 'GRAYED',
+        activeKey: null,
+        ...(input.lastQualifiedAt !== undefined ? { lastQualifiedAt: input.lastQualifiedAt } : {}),
+      },
+    })
+    await clearBadgeEquipmentOnly(tx, input.userId, input.badgeId)
+    return { changed, blockedByOtherSource: false, recordId: record.id }
+  })
+}
+
+/** Restore gray ownership in place; this never creates a second UserBadge row. */
+export async function restoreGrayedBadge(input: { userId: string; badgeId: string; ruleId: string; lastQualifiedAt: Date }) {
+  return prisma.$transaction(async (tx) => {
+    await lockUserForMutation(tx, input.userId)
+    await lockBadgeForMutation(tx, input.badgeId)
+    const record = await tx.userBadge.findFirst({
+      where: {
+        userId: input.userId,
+        badgeId: input.badgeId,
+        status: 'GRAYED',
+        UserBadgeSource: { some: { sourceType: 'AUTO_RULE', sourceId: input.ruleId, isActive: true } },
+      },
+      orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true },
+    })
+    if (!record) return { changed: false, recordId: null as string | null }
+    await tx.userBadge.update({ where: { id: record.id }, data: { status: 'ACTIVE', activeKey: activeBadgeKey(input.userId, input.badgeId), lastQualifiedAt: input.lastQualifiedAt, revokedAt: null, revokeReason: null } })
+    return { changed: true, recordId: record.id }
+  })
+}
+
+/** Update the sustained checkpoint only after a complete qualified natural day. */
+export async function recordBadgeQualificationDay(input: { userId: string; badgeId: string; ruleId: string; lastQualifiedAt: Date }) {
+  return prisma.$transaction(async (tx) => {
+    await lockUserForMutation(tx, input.userId)
+    const record = await tx.userBadge.findFirst({
+      where: {
+        userId: input.userId,
+        badgeId: input.badgeId,
+        status: { in: ['ACTIVE', 'GRAYED'] },
+        UserBadgeSource: { some: { sourceType: 'AUTO_RULE', sourceId: input.ruleId, isActive: true } },
+      },
+      select: { id: true, lastQualifiedAt: true },
+    })
+    if (!record) return { changed: false, recordId: null as string | null }
+    if (record.lastQualifiedAt && getShanghaiDateKey(record.lastQualifiedAt) === getShanghaiDateKey(input.lastQualifiedAt)) return { changed: false, recordId: record.id }
+    await tx.userBadge.update({ where: { id: record.id }, data: { lastQualifiedAt: input.lastQualifiedAt } })
+    return { changed: true, recordId: record.id }
+  })
 }
 
 async function expireStaleUserBadgeRows(tx: Prisma.TransactionClient, input: GrantBadgeInput, now: Date) {
@@ -998,12 +1141,12 @@ async function expireStaleUserBadgeRows(tx: Prisma.TransactionClient, input: Gra
   const aggregate = await refreshBadgeAggregate(tx, input.userId, input.badgeId, now)
   if (aggregate.owned) return
   const stale = await tx.userBadge.findMany({
-    where: { userId: input.userId, badgeId: input.badgeId, status: 'ACTIVE', expiresAt: { not: null, lte: now } },
+    where: { userId: input.userId, badgeId: input.badgeId, status: { in: ['ACTIVE', 'GRAYED'] }, expiresAt: { not: null, lte: now } },
     select: { id: true },
   })
   if (!stale.length) return
   await tx.userBadge.updateMany({
-    where: { id: { in: stale.map((row) => row.id) }, status: 'ACTIVE' },
+    where: { id: { in: stale.map((row) => row.id) }, status: { in: ['ACTIVE', 'GRAYED'] } },
     data: { status: 'EXPIRED', expiredAt: now, revokeReason: 'NORMAL_EXPIRED', activeKey: null },
   })
   await clearBadgePresentationIfUnowned(tx, input.userId, input.badgeId)
@@ -1065,7 +1208,14 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   const sourceId = input.sourceId?.trim().slice(0, 191) || null
   const grantReason = input.grantReason?.trim().slice(0, 500) || null
   const grantKey = namespacedGrantKey(input)
-  const sourceKey = acquisitionSourceKey(input.userId, input.badgeId, sourceType, sourceId, input.grantKey?.trim() || null)
+  const sourceKey = acquisitionSourceKey(
+    input.userId,
+    input.badgeId,
+    sourceType,
+    sourceId,
+    input.grantKey?.trim() || null,
+    input.acquisitionCycleKey?.trim() || null,
+  )
 
   // All grant paths lock the User row first. This serializes concurrent
   // evaluators for one badge holder while activeKey remains the DB invariant.
@@ -1155,7 +1305,10 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
     }
   }
   const active = await tx.userBadge.findFirst({
-    where: { userId: input.userId, badgeId: input.badgeId, ...activeUserBadgeWhere(now) },
+    // GRAYED is still a retained ownership row. Attach a newly valid source
+    // to it instead of creating a second aggregate, then refresh will restore
+    // the aggregate to ACTIVE when more than the graying source remains.
+    where: { userId: input.userId, badgeId: input.badgeId, ...currentUserBadgeWhere(now) },
     orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
     select: { id: true },
   })
@@ -1183,6 +1336,9 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
       await tx.userBadge.update({ where: { id: active.id }, data: { sourceType, sourceId, grantReason, grantedBy: input.actorId || null } })
     }
     await refreshBadgeAggregate(tx, input.userId, input.badgeId, now)
+    if (input.initialQualificationAt) {
+      await tx.userBadge.update({ where: { id: active.id }, data: { lastQualifiedAt: input.initialQualificationAt } })
+    }
     const sourceAttached = !existingSource || !existingSource.isActive
     if (sourceAttached && input.actorId) await writeBadgeAdminAction(tx, {
       actorId: input.actorId,
@@ -1225,6 +1381,7 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
         revokedAt: null,
         revokeReason: null,
         status,
+        lastQualifiedAt: input.initialQualificationAt || null,
         activeKey: status === 'ACTIVE' ? activeBadgeKey(input.userId, input.badgeId) : null,
         grantKey,
         sourceType,
@@ -1271,6 +1428,7 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
       expiresAt,
       expiredAt: immediatelyExpired ? now : null,
       status,
+      lastQualifiedAt: input.initialQualificationAt || null,
       activeKey: status === 'ACTIVE' ? activeBadgeKey(input.userId, input.badgeId) : null,
       grantKey,
       sourceType,
@@ -1381,7 +1539,7 @@ export async function revokeBadgeAcquisitionSource(input: {
     if (!source || !source.isActive) return { revoked: false, ownershipChanged: false }
 
     const aggregate = await tx.userBadge.findFirst({
-      where: { id: source.userBadgeId, userId: input.userId, badgeId: input.badgeId, status: 'ACTIVE' },
+      where: { id: source.userBadgeId, userId: input.userId, badgeId: input.badgeId, status: { in: ['ACTIVE', 'GRAYED'] } },
       select: { id: true, expiresAt: true },
     })
     const revokeReason: BadgeRevokeReason = isBadgeRevokeReason(input.revokeReason) ? input.revokeReason : 'SYSTEM_REVOKED'
@@ -1414,7 +1572,7 @@ export async function revokeBadge({ userId, badgeId, actorId, reason, revokeReas
     await lockBadgeForMutation(tx, badgeId)
     await expireStaleUserBadgeRows(tx, { userId, badgeId }, new Date())
     const record = await tx.userBadge.findFirst({
-      where: { userId, badgeId, ...activeUserBadgeWhere() },
+      where: { userId, badgeId, ...currentUserBadgeWhere() },
       orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
       select: { id: true, Badge: { select: { name: true } } },
     })
@@ -1628,6 +1786,9 @@ export const badgeAdminSelect = {
       configJson: true,
       isEnabled: true,
       retentionPolicy: true,
+      sustainedQualification: true,
+      inactiveAfterDays: true,
+      revokeAfterDays: true,
       createdAt: true,
       updatedAt: true,
     },

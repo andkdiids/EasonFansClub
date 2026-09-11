@@ -28,6 +28,8 @@ export type ImageEditorStroke = BaseAnnotation & {
 export type ImageEditorMosaic = BaseAnnotation & {
   type: 'mosaic'
   points: ImageEditorPoint[]
+  /** Pixel block size in canonical image-space pixels. */
+  pixelSize?: number
 }
 
 export type ImageEditorShapeAnnotation = BaseAnnotation & {

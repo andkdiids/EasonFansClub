@@ -8,7 +8,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { prisma } from '@/lib/prisma'
 import { buildPublicMediaUrl } from '@/lib/media-url'
-import { buildSalonFeedWhere, formatSalonSession, SALON_CATEGORY_CONFIG } from '@/lib/salon'
+import { buildSalonFeedWhere, formatSalonSession, getSalonPostDisplayTitle, SALON_CATEGORY_CONFIG } from '@/lib/salon'
 import { validateRichPostContent } from '@/lib/rich-text'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { publicPostWhere } from '@/lib/post-moderation'
@@ -255,7 +255,7 @@ export async function loadSalonShareCardData(postId: string): Promise<ShareCardD
     sessionNumber: post.concert.sessionNumber,
   }) : ''
   const categoryLabel = SALON_CATEGORY_CONFIG[post.category].label
-  const title = post.title?.trim() || (post.concert ? `${post.concert.MusicTour.name} · ${post.concert.city}` : categoryLabel)
+  const title = getSalonPostDisplayTitle(post)
   const description = post.content?.trim() || sessionDescription || categoryLabel
   const firstMedia = firstShareCardImageCandidate(post.media.map((media) => ({ url: media.previewUrl, width: media.width, height: media.height })))
   const imageCandidates = shareCardImageCandidates(post.media.map((media) => ({ url: media.previewUrl, width: media.width, height: media.height })))

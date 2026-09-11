@@ -104,9 +104,9 @@ test('public badge collection uses a redacted HIDDEN placeholder', () => {
   assert.match(service, /imageUrl: null/)
 })
 
-test('non-owners cannot read hidden UserBadge records', () => {
+test('non-owners cannot read hidden current UserBadge records', () => {
   const service = read('lib/badge-service.ts')
-  assert.match(service, /where: \{ userId, \.\.\.activeUserBadgeWhere\(now\), \.\.\.\(isSelf \? \{\} : \{ isHidden: false \}\) \}/)
+  assert.match(service, /where: \{ userId, \.\.\.currentUserBadgeWhere\(now\), \.\.\.\(isSelf \? \{\} : \{ isHidden: false \}\) \}/)
 })
 
 test('equip API requires an authenticated user and rate limits writes', () => {

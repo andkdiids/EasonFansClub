@@ -87,7 +87,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         availableUntil: true,
         validityType: true,
         validityDays: true,
-        BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true, retentionPolicy: true } },
+        BadgeRule: { select: { id: true, ruleType: true, operator: true, threshold: true, secondaryThreshold: true, configJson: true, isEnabled: true, retentionPolicy: true, sustainedQualification: true, inactiveAfterDays: true, revokeAfterDays: true } },
       },
     })
     if (!previous) return NextResponse.json({ message: '更新失败，勋章不存在' }, { status: 404 })
@@ -174,6 +174,9 @@ export async function PATCH(request: Request, context: RouteContext) {
           configJson: previous.BadgeRule.configJson,
           isEnabled: previous.BadgeRule.isEnabled,
           retentionPolicy: previous.BadgeRule.retentionPolicy,
+          sustainedQualification: previous.BadgeRule.sustainedQualification,
+          inactiveAfterDays: previous.BadgeRule.inactiveAfterDays,
+          revokeAfterDays: previous.BadgeRule.revokeAfterDays,
         }
       : null
     const effectiveRule = nextGrantType === 'AUTO'
@@ -232,6 +235,9 @@ export async function PATCH(request: Request, context: RouteContext) {
           configJson: effectiveRule.configJson ?? Prisma.JsonNull,
           isEnabled: nextGrantType === 'AUTO' ? effectiveRule.isEnabled : false,
           retentionPolicy: effectiveRule.retentionPolicy ?? null,
+          sustainedQualification: effectiveRule.sustainedQualification,
+          inactiveAfterDays: effectiveRule.inactiveAfterDays,
+          revokeAfterDays: effectiveRule.revokeAfterDays,
         }
         await tx.badgeRule.upsert({
           where: { badgeId },

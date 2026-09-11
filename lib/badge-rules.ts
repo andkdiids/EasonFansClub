@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { isZodiacSign, ZODIAC_LABELS, type ZodiacSign } from '@/lib/zodiac'
 import { describeBadgeOwnershipRule, normalizeBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
+import { describeAspirinRule, getAspirinRuleConfig, validateSustainedQualificationSettings } from '@/lib/aspirin-badge-config'
 
 export const BADGE_EVALUATION_EVENTS = [
   'POST_CREATED',
@@ -17,6 +18,7 @@ export const BADGE_EVALUATION_EVENTS = [
   'CONCERT_ATTENDANCE_CREATED',
   'USER_ACTIVE',
   'USER_BIRTHDAY_UPDATED',
+  'CLINIC_CONSULTATION_CHANGED',
 ] as const
 
 export type BadgeEvaluationEvent = typeof BADGE_EVALUATION_EVENTS[number]
@@ -287,15 +289,15 @@ export const BADGE_RULE_REGISTRY = {
   BIRTHDAY_TODAY: {
     group: '账号',
     label: '生日当天',
-    dataDescription: '用户仅在上海时区自己的生日当天满足条件，不区分所属星座',
+    dataDescription: '仅在上海时区自己的生日当天满足获取条件；获得后永久保留，不再按当天资格回收',
     metricLoader: 'BIRTHDAY_TODAY',
     supportedOperators: ['GTE'],
     events: ['USER_LOGIN', 'USER_ACTIVE', 'USER_BIRTHDAY_UPDATED'],
     threshold: null,
     specialKind: 'BIRTHDAY_TODAY',
     supportsHistoricalBackfill: false,
-    supportsRetentionWhileEligible: true,
-    historicalBasis: '仅按上海时区当前月日判断；2 月 29 日生日在非闰年不顺延',
+    supportsRetentionWhileEligible: false,
+    historicalBasis: '仅按上海时区当前月日判断获取窗口；获得后永久保留，2 月 29 日生日在非闰年不顺延',
     defaultAcquisitionDescription: () => '生日当天自动获得。',
   },
   BADGE_SERIES_COMPLETE: {
@@ -326,6 +328,19 @@ export const BADGE_RULE_REGISTRY = {
     historicalBasis: '按当前仍有效的 UserBadge 记录判断；已过期或已收回的勋章不计入',
     defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => describeBadgeOwnershipRule(configJson),
   },
+  CLINIC_CONSULTATION_STREAK: {
+    group: '社区', unit: '个病例',
+    label: '阿士匹灵连续问诊',
+    dataDescription: '仅统计阿士匹灵门诊部中回复其他用户问诊病例的有效问诊；按上海时区每日不同病例去重',
+    metricLoader: 'CLINIC_CONSULTATION_STREAK',
+    supportedOperators: ['GTE'],
+    events: ['CLINIC_CONSULTATION_CHANGED'],
+    threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: false,
+    supportsRetentionWhileEligible: false,
+    historicalBasis: '问诊内容和病例公开状态会动态变化，只支持按当前真实门诊数据重算',
+    defaultAcquisitionDescription: (threshold: number | null, configJson?: unknown) => describeAspirinRule(threshold, configJson),
+  },
 } as const satisfies Record<string, BadgeRuleRegistryEntry>
 
 export type SupportedBadgeRuleType = keyof typeof BADGE_RULE_REGISTRY
@@ -352,6 +367,9 @@ export type ParsedBadgeRule = {
   isEnabled: boolean
   /** Null keeps the rule-type default; see resolveBadgeRetentionPolicy. */
   retentionPolicy: BadgeRetentionPolicyValue | null
+  sustainedQualification: boolean
+  inactiveAfterDays: number | null
+  revokeAfterDays: number | null
 }
 
 export const BADGE_RETENTION_POLICIES = ['PERMANENT_AFTER_GRANT', 'RETAIN_WHILE_ELIGIBLE'] as const
@@ -367,12 +385,11 @@ export const DEFAULT_BADGE_RETENTION_POLICY: BadgeRetentionPolicyValue = 'PERMAN
  * These rule families describe live eligibility rather than a one-time
  * achievement. A NULL policy on them must therefore participate in the
  * retention pass; otherwise a birthday change can never revoke the old
- * automatic source. Explicit PERMANENT_AFTER_GRANT still wins through the
- * resolver below.
+ * automatic source. BIRTHDAY_TODAY is intentionally excluded: its current
+ * date check is an acquisition window, not a post-grant qualification.
  */
 const DEFAULT_RETENTION_POLICY_BY_RULE_TYPE: Partial<Record<SupportedBadgeRuleType, BadgeRetentionPolicyValue>> = {
   BIRTHDAY_ZODIAC: 'RETAIN_WHILE_ELIGIBLE',
-  BIRTHDAY_TODAY: 'RETAIN_WHILE_ELIGIBLE',
   BADGE_OWNERSHIP: 'RETAIN_WHILE_ELIGIBLE',
 }
 
@@ -390,6 +407,11 @@ export function getDefaultBadgeRetentionPolicy(ruleType: SupportedBadgeRuleType)
   return DEFAULT_RETENTION_POLICY_BY_RULE_TYPE[ruleType] || DEFAULT_BADGE_RETENTION_POLICY
 }
 
+/** BIRTHDAY_TODAY is a one-day acquisition window with permanent ownership. */
+export function isAcquisitionOnlyBadgeRule(ruleType: SupportedBadgeRuleType) {
+  return ruleType === 'BIRTHDAY_TODAY'
+}
+
 /**
  * Effective policy for a stored rule. A NULL column inherits the rule-type
  * default, which is how pre-existing rows keep their current behaviour.
@@ -398,12 +420,16 @@ export function resolveBadgeRetentionPolicy(rule: {
   ruleType: SupportedBadgeRuleType
   retentionPolicy?: BadgeRetentionPolicyValue | null
 }): BadgeRetentionPolicyValue {
+  // Protect the birthday badge even if an old row still contains the former
+  // RETAIN_WHILE_ELIGIBLE value. The date predicate must never revoke a
+  // successfully acquired birthday ownership.
+  if (isAcquisitionOnlyBadgeRule(rule.ruleType)) return 'PERMANENT_AFTER_GRANT'
   return rule.retentionPolicy || getDefaultBadgeRetentionPolicy(rule.ruleType)
 }
 
 /** Whether this rule type may be configured with RETAIN_WHILE_ELIGIBLE. */
 export function supportsBadgeRetentionPolicy(ruleType: SupportedBadgeRuleType) {
-  return BADGE_RULE_REGISTRY[ruleType]?.supportsRetentionWhileEligible === true
+  return !isAcquisitionOnlyBadgeRule(ruleType) && BADGE_RULE_REGISTRY[ruleType]?.supportsRetentionWhileEligible === true
 }
 
 /** Validate the administrator-supplied retention policy against the rule type. */
@@ -418,6 +444,11 @@ export function normalizeBadgeRetentionPolicy(
   if (!normalized) return { policy: null }
   if (!(BADGE_RETENTION_POLICIES as readonly string[]).includes(normalized)) return { error: '资格保持方式无效' }
   const policy = normalized as BadgeRetentionPolicyValue
+  // Be backward compatible with old explicitly configured rows while making
+  // the new birthday semantics unambiguous on the next admin save.
+  if (isAcquisitionOnlyBadgeRule(ruleType) && policy === 'RETAIN_WHILE_ELIGIBLE') {
+    return { policy: 'PERMANENT_AFTER_GRANT' }
+  }
   if (policy === 'RETAIN_WHILE_ELIGIBLE' && !supportsBadgeRetentionPolicy(ruleType)) {
     return { error: `${BADGE_RULE_REGISTRY[ruleType]?.label || '该规则'}不能按资格持续满足回收，请选择永久保留` }
   }
@@ -464,6 +495,15 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
   const retention = normalizeBadgeRetentionPolicy(body.retentionPolicy, ruleTypeValue as SupportedBadgeRuleType)
   if (retention.error) return { error: retention.error }
   const retentionPolicy = retention.policy ?? null
+  const sustained = ruleTypeValue === 'BIRTHDAY_TODAY'
+    ? { sustainedQualification: false as const, inactiveAfterDays: null, revokeAfterDays: null }
+    : validateSustainedQualificationSettings(body)
+  if ('error' in sustained) return { error: sustained.error }
+  const sustainedFields = {
+    sustainedQualification: sustained.sustainedQualification,
+    inactiveAfterDays: sustained.inactiveAfterDays,
+    revokeAfterDays: sustained.revokeAfterDays,
+  }
 
   if (definition.specialKind === 'BIRTHDAY_ZODIAC' || definition.specialKind === 'BIRTHDAY_TODAY') {
     const ruleLabel = definition.specialKind === 'BIRTHDAY_ZODIAC' ? '星座' : '生日当天'
@@ -485,6 +525,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
           configJson: { zodiac },
           isEnabled: body.isEnabled !== false,
           retentionPolicy,
+          ...sustainedFields,
         },
       }
     }
@@ -503,6 +544,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         configJson: {},
         isEnabled: body.isEnabled !== false,
         retentionPolicy,
+        ...sustainedFields,
       },
     }
   }
@@ -524,6 +566,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         configJson: { seriesId: seriesId.trim() },
         isEnabled: body.isEnabled !== false,
         retentionPolicy,
+        ...sustainedFields,
       },
     }
   }
@@ -543,6 +586,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         configJson: ownershipConfig.config,
         isEnabled: body.isEnabled !== false,
         retentionPolicy,
+        ...sustainedFields,
       },
     }
   }
@@ -556,7 +600,29 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
     if (typeof targetId !== 'string' || !/^[A-Za-z0-9_-]{1,191}$/.test(targetId.trim())) return { error: `请选择有效的${targetLabel}` }
     if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: `指定${targetLabel}规则不需要填写数量` }
     if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
-    return { rule: { ruleType: ruleTypeValue as SupportedBadgeRuleType, operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: { [key]: targetId.trim() }, isEnabled: body.isEnabled !== false, retentionPolicy } }
+    return { rule: { ruleType: ruleTypeValue as SupportedBadgeRuleType, operator: 'GTE', threshold: null, secondaryThreshold: null, configJson: { [key]: targetId.trim() }, isEnabled: body.isEnabled !== false, retentionPolicy, ...sustainedFields } }
+  }
+
+  if (ruleTypeValue === 'CLINIC_CONSULTATION_STREAK') {
+    const thresholdResult = parsePositiveInteger(body.threshold, '每日不同问诊数', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)
+    if ('error' in thresholdResult) return thresholdResult
+    const streakResult = parsePositiveInteger(body.secondaryThreshold, '连续完成天数', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)
+    if ('error' in streakResult) return streakResult
+    const config = getAspirinRuleConfig(body.configJson)
+    if (!config) return { error: '阿士匹灵规则必须指定 ASPIRIN_CLINIC、最低字数和最高重复率配置' }
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
+    return {
+      rule: {
+        ruleType: ruleTypeValue as SupportedBadgeRuleType,
+        operator: 'GTE',
+        threshold: thresholdResult.value,
+        secondaryThreshold: streakResult.value,
+        configJson: config,
+        isEnabled: body.isEnabled !== false,
+        retentionPolicy,
+        ...sustainedFields,
+      },
+    }
   }
 
   const thresholdResult = parsePositiveInteger(body.threshold, '规则阈值', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)
@@ -581,6 +647,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
       configJson: null,
       isEnabled: body.isEnabled !== false,
       retentionPolicy,
+      ...sustainedFields,
     },
   }
 }

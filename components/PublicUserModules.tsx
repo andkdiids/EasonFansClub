@@ -21,7 +21,7 @@ import { ProfileRecordSettings } from '@/components/ProfileRecordSettings'
 import { getOrderedProfileRecordSectionKeys, getProfileRecordLabel, normalizeProfileRecordPreferences, PROFILE_RECORD_SECTIONS, type ProfileRecordPreference } from '@/lib/profile-record-sections'
 import type { ProfilePostGroupView } from '@/lib/profile-post-groups'
 import { PersonalPostGroupMenu, ProfilePostGroupBar } from '@/components/ProfilePostGroups'
-import { formatSalonPostContext, type SalonPostView } from '@/lib/salon-shared'
+import { formatSalonPostContext, getSalonPostDisplayTitle, type SalonPostView } from '@/lib/salon-shared'
 import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
 
@@ -709,16 +709,17 @@ function ModuleContent({
       <div className="space-y-3">
         {salonPosts.map((post) => {
           const media = post.media[0]
+          const displayTitle = getSalonPostDisplayTitle(post)
           const context = formatSalonPostContext(post.category, post.concert)
           return <article key={post.id} className="min-w-0 overflow-hidden rounded-none border border-[var(--border)] bg-[var(--surface-subtle)] sm:flex">
             {media ? <Link href={`/salon/${post.id}`} className="block shrink-0 sm:w-40">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={media.thumbnailUrl} alt={post.title || context} className="h-40 w-full object-cover sm:h-full" loading="lazy" />
+              <img src={media.thumbnailUrl} alt={displayTitle} className="h-40 w-full object-cover sm:h-full" loading="lazy" />
             </Link> : null}
             <div className="min-w-0 flex-1 p-3 sm:p-4">
               <Link href={`/salon/${post.id}`} className="block min-w-0">
-                <p className="text-xs font-black text-brand-700">{context}</p>
-                <h3 className="mt-1 break-words text-base font-black text-brand-950">{post.title || (post.concert?.title || '沙龙作品')}</h3>
+                <h3 className="line-clamp-2 break-words text-base font-semibold text-brand-950">{displayTitle}</h3>
+                <p className="mt-1 truncate text-xs font-normal text-slate-500">{context}</p>
                 <time className="mt-2 block text-xs font-bold text-slate-500">{new Date(post.createdAt).toLocaleString('zh-CN')}</time>
               </Link>
               <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">

@@ -66,7 +66,7 @@ test('central grant service snapshots Badge validity and permits re-grant after 
 test('automatic expiration marks rows EXPIRED, preserves history and clears stale equipment/showcase', () => {
   const expiration = read('lib/badge-expiration.ts')
   assert.match(expiration, /export async function expireUserBadges/)
-  assert.match(expiration, /status: 'ACTIVE', expiresAt: \{ not: null, lte: now \}/)
+  assert.match(expiration, /status: \{ in: \['ACTIVE', 'GRAYED'\] \}, expiresAt: \{ not: null, lte: now \}/)
   assert.match(expiration, /data: \{ status: 'EXPIRED', expiredAt: now, revokeReason: 'NORMAL_EXPIRED', activeKey: null \}/)
   assert.match(expiration, /user\.updateMany\(\{[\s\S]*?equippedBadgeId: row\.badgeId[\s\S]*?data: \{ equippedBadgeId: null \}/)
   assert.match(expiration, /userBadgeShowcase\.deleteMany/)
@@ -86,7 +86,7 @@ test('daily scheduler invokes the unified expiration task before reward scans', 
 
 test('expired history can be earned again while an active grant is blocked', () => {
   const service = read('lib/badge-service.ts')
-  assert.match(service, /where: \{ userId: input\.userId, badgeId: input\.badgeId, \.\.\.activeUserBadgeWhere\(now\) \}/)
+  assert.match(service, /where: \{ userId: input\.userId, badgeId: input\.badgeId, \.\.\.currentUserBadgeWhere\(now\) \}/)
   assert.match(service, /if \(active\) \{[\s\S]*?operationResult\(input, badge\.name, active\.id\)/)
   assert.match(service, /const record = await tx\.userBadge\.create\(/)
   assert.match(read('components/BadgeCollectionPanel.tsx'), /key=\{item\.recordId\}/)
@@ -142,7 +142,7 @@ test('admin UI exposes validity setting and manual grant expiry preview', () => 
 test('current badge display and owner history exclude expired or revoked grants', () => {
   const service = read('lib/badge-service.ts')
   const panel = read('components/BadgeCollectionPanel.tsx')
-  assert.match(service, /where: \{ userId, \.\.\.activeUserBadgeWhere\(now\)/)
+  assert.match(service, /where: \{ userId, \.\.\.currentUserBadgeWhere\(now\)/)
   assert.match(service, /history: historyRecords\.map\(badgeHistoryView\)/)
   assert.match(panel, /历史获得/)
   assert.match(panel, /activeHistory/)

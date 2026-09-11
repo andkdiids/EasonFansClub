@@ -342,19 +342,21 @@ async function start() {
     if (activityAutoCheckInRunning) return
     activityAutoCheckInRunning = true
     try {
-      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }, { expireUserBadges }] = await Promise.all([
+      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }, { expireUserBadges }, { scanSustainedBadgeQualifications }] = await Promise.all([
         import('./lib/activity-registration'),
         import('./lib/activity-lottery'),
         import('./lib/activity-badge-rewards'),
         import('./lib/badge-expiration'),
+        import('./lib/aspirin-badge'),
       ])
-      const [expirationResult, result, lotteryResult, badgeRewardResult] = await Promise.all([
+      const [expirationResult, result, lotteryResult, badgeRewardResult, sustainedQualificationResult] = await Promise.all([
         expireUserBadges(),
         autoCheckInEndedActivityRegistrations({ batchSize: 100 }),
         drawDueActivityLotteries({ batchSize: 200 }),
         grantEligibleActivityBadges({ batchSize: 200 }),
+        scanSustainedBadgeQualifications(),
       ])
-      if (expirationResult.expiredCount || expirationResult.clearedEquippedCount || result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed) {
+      if (expirationResult.expiredCount || expirationResult.clearedEquippedCount || result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed || sustainedQualificationResult.evaluated || sustainedQualificationResult.granted || sustainedQualificationResult.restored || sustainedQualificationResult.grayed || sustainedQualificationResult.revoked || sustainedQualificationResult.failed) {
         console.info('[activities.auto-check-in.completed]', {
           event: 'activities.auto_check_in.completed',
           badgeExpiration: expirationResult,
@@ -363,6 +365,7 @@ async function start() {
           failed: result.failed,
           lotteries: lotteryResult,
           activityBadgeRewards: badgeRewardResult,
+          sustainedBadgeQualifications: sustainedQualificationResult,
         })
       }
     } catch (error) {

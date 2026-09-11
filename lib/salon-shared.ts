@@ -288,25 +288,46 @@ function formatSessionDate(value: Date | string) {
 }
 
 export function formatSalonSession(session: Pick<SalonOptions['tours'][number]['sessions'][number], 'city' | 'concertDate' | 'venue' | 'title' | 'sessionNumber'>) {
-  const name = session.title?.trim() || session.city
-  const sessionNumber = session.sessionNumber?.trim() ? ` · ${session.sessionNumber.trim()}` : ''
-  const venue = session.venue?.trim() ? ` · ${session.venue.trim()}` : ''
-  return `${name} · ${formatSessionDate(session.concertDate)}${sessionNumber}${venue}`
+  const name = session.title?.trim() || session.city?.trim() || ''
+  const sessionNumber = session.sessionNumber?.trim() || ''
+  const venue = session.venue?.trim() || ''
+  return [name, formatSessionDate(session.concertDate), sessionNumber, venue].filter(Boolean).join(' · ')
 }
 
 export function formatSalonPostConcert(concert: SalonPostView['concert']) {
   if (!concert) return ''
-  return `${concert.tour.name} · ${formatSalonSession({
+  return [concert.tour.name?.trim(), formatSalonSession({
     city: concert.city,
     concertDate: concert.date,
     venue: concert.venue,
     title: concert.title,
     sessionNumber: concert.sessionNumber,
-  })}`
+  }).trim()].filter(Boolean).join(' · ')
 }
 
+type SalonPostTitleSource = Pick<SalonPostView, 'title' | 'content'>
+
+function firstSalonContentParagraph(value: string | null | undefined) {
+  const content = value?.trim() || ''
+  if (!content) return ''
+  return content.split(/\r?\n\s*\r?\n/)[0]?.replace(/\s+/g, ' ').trim() || ''
+}
+
+/** The user-entered title is always the primary label; metadata never replaces it. */
+export function getSalonPostDisplayTitle(post: SalonPostTitleSource) {
+  const title = post.title?.trim()
+  if (title) return title
+  return firstSalonContentParagraph(post.content) || '沙龙分享'
+}
+
+/** Category, tour and session information belongs below the user title. */
+export function getSalonPostMetadata(category: SalonCategoryValue | string, concert: SalonPostView['concert']) {
+  return [salonCategoryLabel(category)?.trim(), concert ? formatSalonPostConcert(concert) : ''].filter(Boolean).join(' · ')
+}
+
+/** Backward-compatible name for callers that previously rendered post context. */
 export function formatSalonPostContext(category: SalonCategoryValue | string, concert: SalonPostView['concert']) {
-  return concert ? formatSalonPostConcert(concert) : salonCategoryLabel(category)
+  return getSalonPostMetadata(category, concert)
 }
 
 export function appendUniqueSalonPosts<T extends { id: string }>(

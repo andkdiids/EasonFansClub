@@ -26,7 +26,7 @@ import {
   parseForumPresentationMode,
   type ForumPresentationMode,
 } from '@/lib/forum-discovery'
-import { postDetailHref } from '@/lib/post-navigation'
+import { postCreateHref, postDetailHref } from '@/lib/post-navigation'
 
 type DiscoverySession = {
   posts: ForumDiscoveryPost[]
@@ -157,7 +157,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const previousDiscoveryQueryStringRef = useRef(queryString)
 
   const activeTab = query ? '' : boardValue || mode
-  const createHref = activeBoard ? `/posts/new?board=${encodeURIComponent(activeBoard)}` : '/posts/new'
+  const createHref = postCreateHref(activeBoard, discoveryReturnTo)
   const presentationMode: ForumPresentationMode = isDesktop && presentationPreference === 'fish' ? 'fish' : 'xiaochenshu'
 
   const persistSession = useCallback((session: DiscoverySession) => {

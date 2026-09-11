@@ -29,6 +29,16 @@ export type ActivityRedemptionEntitlement = {
 
 export type ActivityRedemptionLookupView = {
   activity: { id: string; title: string }
+  registration: {
+    id: string
+    status: 'ACTIVE' | 'CANCELLED'
+    registeredAt: string
+    verifiedAt: string | null
+    checkedInAt: string | null
+    verificationMethod: 'MANUAL' | 'QR' | null
+    checkInSource: 'MANUAL' | 'QR' | 'AUTO_AFTER_ACTIVITY_END' | null
+    verifiedBy: { uid: number; nickname: string } | null
+  }
   user: { uid: number; nickname: string; avatarUrl: string | null }
   entitlements: ActivityRedemptionEntitlement[]
   risk: ActivityRiskAlert | null
@@ -45,8 +55,11 @@ const lookupRegistrationSelect = {
   id: true,
   status: true,
   userId: true,
+  registeredAt: true,
   verifiedAt: true,
+  verifiedById: true,
   checkedInAt: true,
+  verificationMethod: true,
   checkInSource: true,
   LinkedMaterialRedemption: {
     select: {
@@ -58,6 +71,7 @@ const lookupRegistrationSelect = {
       material: { select: { title: true } },
     },
   },
+  VerifiedBy: { select: { uid: true, nickname: true } },
   User: { select: { uid: true, nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
   Activity: { select: { id: true, title: true, status: true, startsAt: true, endsAt: true } },
 } satisfies Prisma.ActivityRegistrationSelect
@@ -85,6 +99,16 @@ export async function resolveActivityVerificationToken(db: ActivityRegistrationL
   return { token, registration }
 }
 
+/** Resolve the opaque QR token without trusting an activity id from the URL. */
+export async function resolveActivityVerificationTokenByToken(db: ActivityRegistrationLookupDb, rawToken: string) {
+  const token = tokenFromInput(rawToken)
+  const registration = await db.activityRegistration.findFirst({ where: { verificationToken: token }, select: lookupRegistrationSelect })
+  if (!registration) throw new ActivityRedemptionError('REGISTRATION_NOT_FOUND', '找不到对应的有效活动报名记录', 404)
+  if (registration.Activity.status === 'CANCELLED') throw new ActivityRedemptionError('ACTIVITY_CANCELLED', '活动已取消，无法核销', 409)
+  if (registration.status === 'CANCELLED') throw new ActivityRedemptionError('REGISTRATION_CANCELLED', '该报名已取消', 409)
+  return { token, registration }
+}
+
 function materialEntitlement(registration: LookupRegistration, now: Date): ActivityRedemptionEntitlement | null {
   const order = registration.LinkedMaterialRedemption
   if (!order) return null
@@ -105,10 +129,12 @@ function materialEntitlement(registration: LookupRegistration, now: Date): Activ
   }
 }
 
-async function loadLookupRows(activityId: string, token: string) {
-  const { registration } = await resolveActivityVerificationToken(prisma, activityId, token)
+async function loadLookupRows(activityId: string | null, token: string) {
+  const { registration } = activityId
+    ? await resolveActivityVerificationToken(prisma, activityId, token)
+    : await resolveActivityVerificationTokenByToken(prisma, token)
   const winners = await prisma.lotteryEntry.findMany({
-    where: { userId: registration.userId, Lottery: { activityId, status: 'DRAWN' } },
+    where: { userId: registration.userId, Lottery: { activityId: registration.Activity.id, status: 'DRAWN' } },
     orderBy: [{ wonAt: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
@@ -137,10 +163,9 @@ function lotteryWinnerSubtitle(state: ActivityLotteryWinnerRedemptionState) {
   return '已中奖 · 需完成活动签到后兑奖，可与活动签到一并核销'
 }
 
-export async function getActivityRedemptionLookup(activityId: string, rawToken: string): Promise<ActivityRedemptionLookupView> {
-  const { registration, winners } = await loadLookupRows(activityId, rawToken)
+async function serializeActivityRedemptionLookup(registration: LookupRegistration, winners: Awaited<ReturnType<typeof loadLookupRows>>['winners']): Promise<ActivityRedemptionLookupView> {
   const now = new Date()
-  const risk = await getActivityRiskAlert(activityId, registration.userId)
+  const risk = await getActivityRiskAlert(registration.Activity.id, registration.userId)
   const registrationSelectable = !registration.verifiedAt
   const material = materialEntitlement(registration, now)
   const entitlements: ActivityRedemptionEntitlement[] = [
@@ -189,10 +214,30 @@ export async function getActivityRedemptionLookup(activityId: string, rawToken: 
   ]
   return {
     activity: { id: registration.Activity.id, title: registration.Activity.title },
+    registration: {
+      id: registration.id,
+      status: registration.status,
+      registeredAt: registration.registeredAt.toISOString(),
+      verifiedAt: registration.verifiedAt?.toISOString() || null,
+      checkedInAt: registration.checkedInAt?.toISOString() || null,
+      verificationMethod: registration.verificationMethod,
+      checkInSource: registration.checkInSource,
+      verifiedBy: registration.VerifiedBy ? { uid: registration.VerifiedBy.uid, nickname: registration.VerifiedBy.nickname } : null,
+    },
     user: { uid: registration.User.uid, nickname: registration.User.nickname, avatarUrl: publicImageUrl(registration.User.Profile?.avatarUrl || registration.User.avatarUrl) },
     entitlements,
     risk,
   }
+}
+
+export async function getActivityRedemptionLookup(activityId: string, rawToken: string): Promise<ActivityRedemptionLookupView> {
+  const { registration, winners } = await loadLookupRows(activityId, rawToken)
+  return serializeActivityRedemptionLookup(registration, winners)
+}
+
+export async function getActivityRedemptionLookupByToken(rawToken: string): Promise<ActivityRedemptionLookupView> {
+  const { registration, winners } = await loadLookupRows(null, rawToken)
+  return serializeActivityRedemptionLookup(registration, winners)
 }
 
 function assertSelection(value: unknown): ActivityRedemptionSelection[] {

@@ -1333,6 +1333,9 @@ body.easmusic-route-active { min-height:100%; background:#06101d; }
 .app-topbar-avatar { position:relative; display:grid; width:30px; height:30px; place-items:center; overflow:hidden; border-radius:50%; color:#fff; background:var(--primary); font-size:11px; }
 .app-topbar-menu { position:absolute; top:44px; right:0; display:flex; width:168px; flex-direction:column; border:1px solid var(--border); border-radius:2px; padding:5px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 8px 24px rgba(0,0,0,.12); }.app-topbar-menu a,.app-topbar-menu button { min-height:36px; border:0; padding:0 10px; color:inherit; background:transparent; font-size:12px; text-align:left; text-decoration:none; line-height:36px; }.app-topbar-menu a:hover,.app-topbar-menu button:hover { background:var(--surface-subtle); }.app-topbar-menu .app-topbar-admin-link { color:var(--primary); font-weight:800; }
 .app-mobile-nav { display:none; }
+body.image-editor-open .app-mobile-nav,
+body.image-editor-open .friend-dock,
+body.image-editor-open .back-to-top-button { display:none !important; }
 .mobile-center-backdrop,.mobile-center-sheet { display:none; }
 .back-to-top-button { position:fixed; z-index:var(--layer-floating-action); right:24px; bottom:24px; display:grid; width:44px; height:44px; place-items:center; border:1px solid var(--border-strong); border-radius:2px; color:var(--foreground); background:var(--surface-elevated); }
 .back-to-top-button:hover { color:var(--primary); background:var(--surface-subtle); }
@@ -5990,6 +5993,8 @@ body:has(.duel-page) .app-page-content {
 .badge-visual.badge-image-wall { width:52px; height:52px; }
 .badge-visual.badge-image-detail { width:108px; height:108px; }
 .badge-visual .user-badge-image { position:relative; z-index:1; display:block; width:100%; height:100%; object-fit:contain; }
+.badge-visual-grayscale .user-badge-image { filter:grayscale(1) saturate(.2) !important; opacity:.62; animation:none !important; }
+.badge-visual-grayscale .badge-shimmer-clip,.badge-visual-grayscale .badge-visual-sparkles { display:none; }
 .badge-shimmer-clip { position:absolute; z-index:2; inset:0; overflow:hidden; pointer-events:none; opacity:0; }
 .badge-shimmer-layer { position:absolute; inset:0; display:block; width:100%; height:100%; object-fit:contain; pointer-events:none; clip-path:polygon(-35% 0,0 0,42% 100%,7% 100%); filter:brightness(1.45) saturate(1.15) drop-shadow(0 0 2px rgba(255,231,157,.6)); opacity:0; transform:translate3d(-140%,0,0); will-change:transform,opacity; }
 .badge-effect-shine .user-badge-image { animation:eason-badge-shine-fallback 4s linear infinite; animation-play-state:running; }
@@ -7073,9 +7078,9 @@ body:has(.duel-page) .app-page-content {
 .salon-category-tag { left: 8px; }
 .salon-media-count { right: 8px; }
 .salon-gallery-caption { min-width: 0; padding: 11px 12px 12px; }
-.salon-gallery-concert { display: block; overflow: hidden; color: var(--salon-text); font-size: 12px; font-weight: 900; text-overflow: ellipsis; text-decoration: none; white-space: nowrap; }
-.salon-gallery-concert:hover { color: var(--salon-primary); }
-.salon-gallery-caption > p { margin: 5px 0 0; overflow: hidden; color: var(--salon-muted); font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.salon-gallery-title { display: -webkit-box; overflow: hidden; color: var(--salon-text); font-size: 12px; font-weight: 600; line-height: 1.45; text-decoration: none; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.salon-gallery-title:hover { color: var(--salon-primary); }
+.salon-gallery-context { margin: 4px 0 0; overflow: hidden; color: var(--salon-muted); font-size: 11px; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .salon-gallery-meta { display: grid; min-width: 0; gap: 8px; margin-top: 12px; }
 .salon-gallery-stats-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
 .salon-author-link { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--salon-muted); font-size: 10px; font-weight: 800; text-decoration: none; }
@@ -7214,8 +7219,8 @@ body:has(.duel-page) .app-page-content {
 .salon-status-badge { display: inline-flex; border: 1px solid var(--salon-border); padding: 4px 6px; color: var(--salon-muted); font-size: 9px; font-weight: 900; }
 .salon-status-approved { border-color: color-mix(in srgb, var(--success), transparent 45%); color: var(--success); }
 .salon-status-rejected { border-color: color-mix(in srgb, var(--salon-danger), transparent 45%); color: var(--salon-danger); }
-.salon-mine-card h2 { margin: 10px 0 0; font-size: 18px; overflow-wrap: anywhere; }
-.salon-mine-card p { margin: 7px 0 0; color: var(--salon-muted); font-size: 11px; font-weight: 750; }
+.salon-mine-card h2 { display: -webkit-box; margin: 10px 0 0; overflow: hidden; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.salon-mine-card p { margin: 7px 0 0; overflow: hidden; color: var(--salon-muted); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .salon-mine-card time { display: block; margin-top: 10px; color: var(--salon-muted); font-size: 10px; }
 .salon-reject-reason { margin-top: 11px; }
 .salon-mine-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 15px; }

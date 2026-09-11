@@ -77,7 +77,7 @@ export async function countTodayBirthdays(dateKey = getShanghaiDateKey()): Promi
 /**
  * 若今天是该用户的生日，则授予「生日纪念」徽章。
  * - 幂等：以生日 dateKey 作为周期 grantKey，同一用户同一天只发一次。
- * - 新年份会生成新的周期 key；若上一次记录已过期，下一次生日可以重新获得。
+ * - 日期 key 只用于当天获取尝试的幂等；生日纪念勋章本身永久保留，下一年不会创建重复 ownership。
  * - 失败向调用方抛出：登录 / 资料页调用方自行隔离；每日任务据此标记失败并重试。
  */
 export async function ensureBirthdayBadge(userId: string, dateKey = getShanghaiDateKey()): Promise<void> {
@@ -259,7 +259,7 @@ export async function sendFriendBirthdayReminders(dateKey = getShanghaiDateKey()
  * 统一生日奖励服务：先按用户当前保存的生日扫描星座资格，
  * 再扫描今天过生日的有效用户，分别处理星座规则与生日当天规则；同时保留既有「生日纪念」徽章和生日祝福通知，
  * 并给这些生日用户的「好友」发送生日提醒。
- * - 幂等：星座徽章使用稳定规则 grantKey，生日当天徽章使用日期 grantKey，通知靠 key 唯一约束，重复执行安全。
+ * - 幂等：星座徽章使用稳定规则 grantKey，生日当天徽章使用日期 grantKey，通知靠 key 唯一约束，重复执行安全；生日当天仅是获取窗口，不会回收历史 ownership。
  * - 单用户失败不影响其他生日用户；失败计数会让每日任务失败并允许后续重试。
  * - 由受保护的内部每日任务调用；重复执行由通知、徽章唯一约束共同保证安全。
  */

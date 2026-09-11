@@ -1,8 +1,10 @@
+import type { Prisma } from '@prisma/client'
+
 export type BadgeValidityTypeValue = 'PERMANENT' | 'DAYS'
-export type UserBadgeStatusValue = 'ACTIVE' | 'EXPIRED' | 'REVOKED'
+export type UserBadgeStatusValue = 'ACTIVE' | 'GRAYED' | 'EXPIRED' | 'REVOKED'
 
 export const BADGE_VALIDITY_TYPES: readonly BadgeValidityTypeValue[] = ['PERMANENT', 'DAYS']
-export const USER_BADGE_STATUSES: readonly UserBadgeStatusValue[] = ['ACTIVE', 'EXPIRED', 'REVOKED']
+export const USER_BADGE_STATUSES: readonly UserBadgeStatusValue[] = ['ACTIVE', 'GRAYED', 'EXPIRED', 'REVOKED']
 export const BADGE_DAY_MS = 24 * 60 * 60 * 1000
 
 export function isBadgeValidityType(value: unknown): value is BadgeValidityTypeValue {
@@ -41,6 +43,21 @@ export function activeUserBadgeWhere(now = new Date()) {
     status: 'ACTIVE' as const,
     OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
   }
+}
+
+/** Current ownership includes temporarily grayed badges; revoked/expired rows remain history only. */
+export function currentUserBadgeWhere(now = new Date()): Pick<Prisma.UserBadgeWhereInput, 'status' | 'OR'> {
+  return {
+    status: { in: ['ACTIVE', 'GRAYED'] },
+    OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+  }
+}
+
+export function isUserBadgeCurrent(record: { status?: string | null; expiresAt?: Date | string | null }, now = new Date()) {
+  if (record.status !== 'ACTIVE' && record.status !== 'GRAYED') return false
+  if (!record.expiresAt) return true
+  const expiresAt = record.expiresAt instanceof Date ? record.expiresAt : new Date(record.expiresAt)
+  return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > now.getTime()
 }
 
 export function remainingBadgeDays(expiresAt: Date | string | null, now = new Date()) {

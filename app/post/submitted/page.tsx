@@ -2,20 +2,22 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { normalizePostReturnTo, postDetailHref } from '@/lib/post-navigation'
 
 function SubmittedContent() {
   const router = useRouter()
   const params = useSearchParams()
   const postId = params.get('postId') || ''
   const status = params.get('status') || ''
+  const returnTo = normalizePostReturnTo(params.get('returnTo'))
   const [count, setCount] = useState(5)
 
-  // 审核通过（已公开）且存在 postId → 返回帖子详情；否则返回 E院广场。
-  const target = status === 'APPROVED' && postId ? `/posts/${postId}` : '/forum'
+  // 审核通过（已公开）且存在 postId → 返回帖子详情；否则回到原始来源或 E院广场。
+  const target = status === 'APPROVED' && postId ? postDetailHref(postId, returnTo) : returnTo || '/forum'
 
   useEffect(() => {
     if (count <= 0) {
-      router.push(target)
+      router.replace(target)
       return
     }
     const timer = window.setTimeout(() => setCount((value) => value - 1), 1000)
@@ -23,7 +25,7 @@ function SubmittedContent() {
   }, [count, target, router])
 
   function goBack() {
-    router.push(target)
+    router.replace(target)
   }
 
   return (

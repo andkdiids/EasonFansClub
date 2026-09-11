@@ -10,6 +10,7 @@ import {
   createEmptySalonCategoryCounts,
   formatSalonPostContext,
   formatSalonSession,
+  getSalonPostDisplayTitle,
   SALON_CATEGORIES,
   SALON_CATEGORY_CONFIG,
   type SalonCategoryCounts,
@@ -501,8 +502,8 @@ export function SalonHome({ initialPosts, initialHasMore, initialNextCursor, ini
 function SalonGalleryCard({ post, priority, returnHref, onOpenDetail }: Readonly<{ post: SalonPostView; priority: boolean; returnHref: string; onOpenDetail: (postId: string) => void }>) {
   const media = post.media[0]
   if (!media) return null
+  const displayTitle = getSalonPostDisplayTitle(post)
   const contextLabel = formatSalonPostContext(post.category, post.concert)
-  const sessionLabel = post.concert ? formatSalonSession({ city: post.concert.city, concertDate: post.concert.date, venue: post.concert.venue, title: post.concert.title, sessionNumber: post.concert.sessionNumber }) : null
   const detailHref = `/salon/${encodeURIComponent(post.id)}?${new URLSearchParams({ from: returnHref }).toString()}`
   const saveBeforeDetail = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) onOpenDetail(post.id)
@@ -510,13 +511,13 @@ function SalonGalleryCard({ post, priority, returnHref, onOpenDetail }: Readonly
   return <article className="salon-gallery-card" data-salon-post-id={post.id}>
     <Link href={detailHref} className="salon-gallery-image-link" onClick={saveBeforeDetail}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={media.thumbnailUrl} alt={post.title || contextLabel} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} />
+      <img src={media.thumbnailUrl} alt={displayTitle} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} />
       {post.media.length > 1 ? <span className="salon-media-count">{post.media.length} 张</span> : null}
       <span className="salon-category-tag">{SALON_CATEGORY_CONFIG[post.category].label}</span>
     </Link>
     <div className="salon-gallery-caption">
-      <Link href={detailHref} className="salon-gallery-concert" onClick={saveBeforeDetail}>{contextLabel}</Link>
-      {sessionLabel ? <p>{sessionLabel}</p> : null}
+      <Link href={detailHref} className="salon-gallery-title" onClick={saveBeforeDetail}>{displayTitle}</Link>
+      <p className="salon-gallery-context">{contextLabel}</p>
       <div className="salon-gallery-meta">
         <Link href={`/user/${formatUid(post.author.uid)}`} className="salon-author-link"><SafeAvatar src={post.author.avatarUrl} name={post.author.nickname} uid={post.author.uid} className="salon-avatar" textClassName="salon-avatar-fallback" variant="avatar-sm" /><span>{post.author.nickname}</span></Link>
         <div className="salon-gallery-stats-row"><SalonLikeButton postId={post.id} initialLiked={post.likedByMe} initialCount={post.likeCount} /><span className="salon-card-stats"><span className="salon-view-stat"><UiIcon name="eye" className="salon-stat-icon" /><span>{post.viewCount || 0}</span></span><span>评论 {post.commentCount}</span></span></div>
