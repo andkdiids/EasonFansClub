@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { FormError } from '@/components/FormError'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
+import { PasswordInput } from '@/components/PasswordInput'
 import { validateNicknameValue } from '@/lib/login-account'
 import { getPhoneInputParts, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import { DEFAULT_REGISTRATION_CLOSED_MESSAGE, DEFAULT_REGISTRATION_CLOSED_TITLE, formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
@@ -1267,8 +1268,8 @@ export function RegisterForm({ policy }: { policy: RegisterPolicy }) {
                 />
                 <FormError message={errors.phone} />
               </div>
-              <label className="block"><span className="text-sm font-bold text-white">密码</span><input value={form.password} onChange={(event) => updateField('password', event.target.value)} type="password" autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="请输入密码（至少8位）" /><FormError message={errors.password} /></label>
-              <label className="block"><span className="text-sm font-bold text-white">确认密码</span><input value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} type="password" autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="请再次输入密码" /><FormError message={errors.confirmPassword} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">密码</span><PasswordInput value={form.password} onChange={(event) => updateField('password', event.target.value)} autoComplete="new-password" data-register-field="password" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="请输入密码（至少8位）" /><FormError message={errors.password} /></label>
+              <label className="block"><span className="text-sm font-bold text-white">确认密码</span><PasswordInput value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} autoComplete="new-password" data-register-field="confirmPassword" className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4" placeholder="请再次输入密码" /><FormError message={errors.confirmPassword} /></label>
               <label className="block sm:col-span-2"><span className="text-sm font-bold text-white">邮箱 <small className="font-normal text-white/60">（必填）</small></span><input value={form.email} onChange={(event) => updateField('email', event.target.value)} type="email" autoComplete="email" data-register-field="email" disabled={emailCodeSent && !emailEditing && !emailVerified} className="mt-1 w-full rounded-lg border border-sky-100 bg-white px-3 py-2 outline-none ring-brand-500/20 focus:ring-4 disabled:bg-emerald-50" placeholder="用于最终验证码验证" /><FormError message={errors.email} /></label>
             </div>
 

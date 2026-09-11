@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { FormError } from '@/components/FormError'
 import { InternationalPhoneInput } from '@/components/InternationalPhoneInput'
+import { PasswordInput } from '@/components/PasswordInput'
 import { getPhoneInputParts, getPhoneValidationMessage, isLikelyPhoneInput, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
 import { normalizeStoredInternalPath } from '@/lib/url-safety'
 import Link from 'next/link'
@@ -207,10 +208,9 @@ export function LoginForm({ redirectTo, initialAccount = '' }: Readonly<{ redire
 
       <label className="block" htmlFor="login-password">
         <span className="text-sm font-bold text-slate-700">密码</span>
-        <input
+        <PasswordInput
           id="login-password"
           name="password"
-          type="password"
           autoComplete="current-password"
           enterKeyHint="go"
           required

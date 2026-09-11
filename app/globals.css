@@ -2330,6 +2330,12 @@ padding-top:18vh; }.auth-brand-copy { display:none; }.auth-form-panel { padding:
 .profile-phone-input .phone-country-options button .text-slate-400 { color:var(--foreground-muted); }
 .auth-input { min-height:44px; padding:0 13px; outline:none; }
 .auth-input:focus { border-color:#6ea9ff!important; }
+.password-input-shell { position:relative; display:block; width:100%; }
+.password-input-field { padding-right:2.75rem!important; }
+.password-input-toggle { position:absolute; top:50%; right:.65rem; display:inline-flex; width:1.75rem; height:1.75rem; align-items:center; justify-content:center; transform:translateY(-50%); border:0; border-radius:2px; padding:0; color:#667085; background:transparent; cursor:pointer; transition:color 160ms ease,background-color 160ms ease; }
+.password-input-toggle:hover { color:var(--primary); background:color-mix(in srgb,var(--primary) 10%,transparent); }
+.password-input-toggle:focus-visible { outline:2px solid color-mix(in srgb,var(--primary) 55%,transparent); outline-offset:2px; }
+.password-input-icon { width:1rem; height:1rem; }
 .auth-submit-button { min-height:46px; border:1px solid var(--primary); border-radius:2px; color:#fff; background:var(--primary); font-size:13px; font-weight:850; box-shadow:none; }
 .auth-submit-button:hover { background:#0e58bd; }
 
