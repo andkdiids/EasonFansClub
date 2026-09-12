@@ -86,7 +86,11 @@ export function calculateAspirinRepeatRate(value: unknown) {
 }
 
 export function isValidAspirinConsultation(fact: AspirinConsultationFact, userId: string, config: AspirinRuleConfig) {
-  if (fact.authorId !== userId || fact.authorId === fact.record.authorId) return false
+  // The Aspirin badge counts the current user's valid clinic consultations.
+  // Whether the case was opened by the same user is not a badge qualification
+  // condition; keep the relation available for clinic business logic, but do
+  // not exclude the consultation from progress or streak qualification.
+  if (fact.authorId !== userId) return false
   if (fact.record.category !== 'ASK_DOCTORS') return false
   if (fact.status !== 'ACTIVE' || fact.record.status !== 'ACTIVE') return false
   if (fact.deletedAt || fact.record.deletedAt) return false
