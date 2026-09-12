@@ -380,6 +380,7 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .post-share-recent-list::-webkit-scrollbar { display:none; }
 .post-share-recent-friend { display:grid; width:62px; flex:none; justify-items:center; gap:7px; border:0; padding:0; color:var(--foreground); background:transparent; font:inherit; cursor:pointer; touch-action:manipulation; }
 .post-share-recent-friend:disabled { cursor:wait; opacity:.6; }
+.post-share-recent-friend.is-selected .post-share-avatar { outline:2px solid var(--primary); outline-offset:2px; }
 .post-share-recent-friend>span:last-child { width:62px; overflow:hidden; color:var(--foreground-muted); font-size:10px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; text-align:center; }
 .post-share-recent-friend:hover:not(:disabled) .post-share-avatar,.post-share-recent-friend:focus-visible .post-share-avatar { outline:2px solid var(--primary); outline-offset:2px; }
 .post-share-avatar { display:block; width:52px; height:52px; flex:none; overflow:hidden; border:1px solid var(--border); border-radius:50%; background:var(--surface-subtle); }
@@ -407,10 +408,15 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .post-share-contact-friend { display:flex; min-height:58px; align-items:center; gap:10px; border:0; border-bottom:1px solid var(--border); padding:7px 2px; color:var(--foreground); background:transparent; font:inherit; text-align:left; cursor:pointer; touch-action:manipulation; }
 .post-share-contact-friend:hover,.post-share-contact-friend:focus-visible { background:var(--navigation-active); outline:none; }
 .post-share-contact-friend:disabled { cursor:wait; opacity:.6; }
+.post-share-contact-friend.is-selected { background:var(--navigation-active); }
 .post-share-contact-copy { display:grid; min-width:0; flex:1; gap:3px; }
 .post-share-contact-copy strong { overflow:hidden; font-size:12px; font-weight:900; text-overflow:ellipsis; white-space:nowrap; }
 .post-share-contact-copy small { color:var(--foreground-muted); font-size:10px; }
 .post-share-contact-send { flex:none; color:var(--primary); font-size:10px; font-weight:900; }
+.post-share-selection-bar { display:flex; min-height:54px; align-items:center; justify-content:space-between; gap:10px; border-top:1px solid var(--border); padding:9px 20px; color:var(--foreground-muted); font-size:11px; font-weight:800; }
+.post-share-selection-bar span { min-width:0; }
+.post-share-selection-bar button { min-height:36px; flex:none; border:1px solid var(--primary); border-radius:4px; padding:0 10px; color:var(--primary-foreground); background:var(--primary); font-size:11px; font-weight:900; cursor:pointer; touch-action:manipulation; }
+.post-share-selection-bar button:disabled { cursor:not-allowed; opacity:.45; }
 .post-share-load-more { min-height:34px; margin:8px auto 0; border:0; color:var(--primary); background:transparent; font-size:11px; font-weight:850; cursor:pointer; }
 .post-share-load-more:disabled { cursor:wait; opacity:.55; }
 .post-share-footer { display:grid; grid-template-columns:1fr 1fr; gap:10px; flex:none; border-top:1px solid var(--border); padding:13px 20px max(13px,env(safe-area-inset-bottom)); background:var(--surface-elevated); }
@@ -421,6 +427,7 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
 .post-share-confirm-backdrop { position:fixed; z-index:100101; inset:0; display:grid; place-items:center; padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); background:rgba(2,8,18,.42); }
 .post-share-confirm { display:grid; width:min(360px,100%); gap:14px; border:1px solid var(--border-strong); padding:20px; color:var(--foreground); background:var(--surface-elevated); box-shadow:0 18px 52px rgba(0,0,0,.28); }
 .post-share-confirm-header h2 { margin:0; font-size:18px; font-weight:950; }
+.post-share-confirm-recipient-list { display:grid; max-height:180px; gap:8px; overflow-y:auto; overscroll-behavior:contain; }
 .post-share-confirm-recipient { display:flex; min-width:0; align-items:center; gap:11px; }
 .post-share-confirm-recipient>div { display:grid; min-width:0; gap:3px; }
 .post-share-confirm-recipient strong { overflow:hidden; font-size:13px; font-weight:900; text-overflow:ellipsis; white-space:nowrap; }
@@ -476,6 +483,7 @@ button.entertainment-entry:hover { background:var(--surface-subtle); }
   .post-share-header { padding:15px 14px 12px; }
   .post-share-recent-section,.post-share-contacts-section { padding-inline:14px; }
   .post-share-recent-list { margin-inline:-14px; padding-inline:14px; }
+  .post-share-selection-bar { padding-inline:14px; }
   .post-share-footer { padding-inline:14px; }
   .post-share-confirm-backdrop { padding:16px; }
   .post-share-confirm { width:100%; }
@@ -769,6 +777,8 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   .forum-discovery-header-row { display:flex; width:100%; min-height:72px; margin:0 auto; align-items:center; justify-content:space-between; gap:20px; }
   .forum-discovery-header-row h1 { margin:0; color:var(--foreground); font-size:24px; font-weight:900; letter-spacing:.02em; }
   .forum-discovery-header-actions { display:flex; align-items:center; gap:10px; }
+  .forum-discovery-drafts { display:inline-flex; min-height:40px; align-items:center; border:1px solid var(--border); border-radius:2px; padding:0 12px; color:var(--foreground); background:var(--surface-elevated); font-size:12px; font-weight:850; text-decoration:none; white-space:nowrap; }
+  .forum-discovery-drafts:hover { background:var(--surface-subtle); }
   .forum-discovery-publish { display:grid; width:40px; height:40px; place-items:center; border-radius:50%; color:#fff; background:var(--primary); font-size:27px; line-height:1; text-decoration:none; }
   .forum-discovery-refresh-button { display:inline-flex; min-height:40px; align-items:center; gap:6px; border:1px solid var(--border); border-radius:2px; padding:0 13px; color:var(--foreground); background:var(--surface-elevated); font-size:12px; font-weight:850; }
   .forum-discovery-refresh-button:hover { background:var(--surface-subtle); }
@@ -866,6 +876,8 @@ button.checkin-history-day-cell:hover { border-color:var(--primary); background:
   }
 
   .forum-discovery-header-actions { display:flex; align-items:center; gap:8px; }
+  .forum-discovery-drafts { display:inline-flex; min-height:28px; max-width:7rem; align-items:center; border:1px solid var(--border); border-radius:2px; padding:0 8px; overflow:hidden; color:var(--foreground); background:var(--surface-elevated); font-size:10px; font-weight:850; text-decoration:none; text-overflow:ellipsis; white-space:nowrap; }
+  .forum-discovery-drafts:hover { background:var(--surface-subtle); }
   .forum-discovery-publish {
     display:grid;
     width:28px;
@@ -1433,6 +1445,10 @@ body.image-editor-open .back-to-top-button { display:none !important; }
 .friend-chat-sticker-btn { display:grid; width:44px; height:44px; place-items:center; flex:none; border:1px solid var(--border); border-radius:12px; padding:0; color:var(--foreground); background:var(--surface-subtle); font-size:21px; line-height:1; cursor:pointer; }.friend-chat-sticker-btn:hover:not(:disabled) { border-color:var(--primary); background:var(--navigation-active); }.friend-chat-sticker-btn:disabled { cursor:not-allowed; opacity:.45; }
 .friend-chat-sticker-preview { position:relative; display:inline-flex; flex:none; width:44px; height:44px; align-items:center; justify-content:center; border:1px solid var(--primary); border-radius:12px; padding:3px; background:var(--surface-subtle); }.friend-chat-sticker-preview img { width:100%; height:100%; object-fit:contain; }.friend-chat-sticker-remove { position:absolute; top:-6px; right:-6px; display:grid; width:18px; height:18px; place-items:center; border:0; border-radius:50%; color:#fff; background:var(--danger); font-size:12px; line-height:1; cursor:pointer; }
 .friend-chat-sticker-message { display:block; margin:0; padding:0; border:0; background:transparent; border-radius:0; line-height:0; cursor:pointer; }
+
+.friend-chat-recalled { border:1px solid var(--border); border-radius:10px; padding:7px 10px; color:var(--foreground-muted); background:var(--surface-subtle); font-size:12px; line-height:1.45; }
+.friend-chat-recall { border:0; padding:0; color:var(--primary); background:transparent; font-size:9px; font-weight:850; cursor:pointer; }
+.friend-chat-recall:disabled { cursor:wait; opacity:.55; }
 
 /* 微信式表情面板（StickerPicker） */
 .sticker-wechat-panel { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }

@@ -27,7 +27,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     where: {
       id: messageId,
       conversationId,
-      isDeleted: false,
       ...(participant.clearedAt ? { createdAt: { gt: participant.clearedAt } } : {}),
     },
     select: { createdAt: true },

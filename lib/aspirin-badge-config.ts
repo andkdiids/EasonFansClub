@@ -45,8 +45,8 @@ export function validateAspirinRuleConfig(value: unknown) {
 export function describeAspirinRule(threshold: number | null, value: unknown) {
   const config = getAspirinRuleConfig(value)
   const daily = Number.isSafeInteger(threshold) && threshold !== null && threshold > 0 ? threshold : ASPIRIN_DAILY_CONSULTATIONS
-  if (!config) return `连续完成 ${daily} 个不同病例的有效问诊后获得。`
-  return `连续 ${config.initialStreakDays} 天，每天在阿士匹灵门诊部完成 ${daily} 个不同病例的有效问诊；每条至少 ${config.minLength} 字且字符重复率低于 ${Math.round(config.maxRepeatRate * 100)}%。`
+  if (!config) return `连续完成 ${daily} 位不同用户的病例问诊后获得。`
+  return `连续 ${config.initialStreakDays} 天，每天在阿士匹灵门诊部完成 ${daily} 位不同用户的病例问诊；同一用户发布的多个病例，当天仅计 1 次；每条至少 ${config.minLength} 字且字符重复率低于 ${Math.round(config.maxRepeatRate * 100)}%。`
 }
 
 /** Generic sustained settings are validated separately from the Aspirin rule config. */

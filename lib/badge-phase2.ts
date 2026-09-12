@@ -128,7 +128,7 @@ export function calculateBadgeRuleProgress(currentValue: number, rule: BadgeProg
 export async function getUserBadgeRuleProgress(userId: string, rule: BadgeProgressRuleInput | null | undefined) {
   if (!isBadgeProgressRule(rule)) return null
   if (rule.ruleType === 'CLINIC_CONSULTATION_STREAK') {
-    // This rule's metric is today's live, configured distinct-case count. It
+    // This rule's metric is today's live, configured distinct-case-owner count. It
     // deliberately does not use the acquisition-cycle cursor after a revoke:
     // the detail view must show today's valid 1/5, 2/5, ... regardless of when
     // the user last entered a new acquisition cycle.

@@ -56,6 +56,18 @@ type ShareResponse = {
   recentFriends?: RecentFriend[]
 }
 
+const MAX_SHARE_RECIPIENTS = 20
+
+type BatchShareResponse = {
+  success?: boolean
+  partial?: boolean
+  sentCount?: number
+  failedCount?: number
+  results?: Array<{ recipientId?: unknown; success?: unknown; error?: unknown }>
+  message?: unknown
+  error?: unknown
+}
+
 function createClientMessageId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   const bytes = new Uint8Array(16)
@@ -95,11 +107,13 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
   const [selectedLetter, setSelectedLetter] = useState<FriendDirectoryLetter | null>(null)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [selectedFriend, setSelectedFriend] = useState<ShareRecipient | null>(null)
+  const [selectedFriends, setSelectedFriends] = useState<ShareRecipient[]>([])
   const [shareError, setShareError] = useState('')
   const requestIdRef = useRef(0)
   const contactsRequestIdRef = useRef(0)
   const contactPageRef = useRef(1)
   const sendingIdRef = useRef<string | null>(null)
+  const clientMessageIdsRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
     if (!open) return undefined
@@ -189,6 +203,8 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
     setSelectedGroupId('')
     setSelectedLetter(null)
     setSelectedFriend(null)
+    setSelectedFriends([])
+    clientMessageIdsRef.current = {}
     setShareError('')
     setContacts([])
     setGroups([])
@@ -207,6 +223,7 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
 
   const contactSections = useMemo(() => groupFriendsByLetter(contacts, getContactName), [contacts])
   const availableLetters = useMemo(() => contactSections.map((section) => section.letter), [contactSections])
+  const selectedFriendIds = useMemo(() => new Set(selectedFriends.map((friend) => friend.id)), [selectedFriends])
   const visibleContacts = useMemo(() => {
     const flattened = contactSections.flatMap((section) => section.friends)
     const trimmedQuery = query.trim().toLocaleLowerCase()
@@ -219,27 +236,57 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
     })
   }, [contactSections, query, selectedGroupId, selectedLetter])
 
-  async function shareWithFriend(friend: ShareRecipient) {
-    if (!postId || sendingId || sendingIdRef.current) return
-    sendingIdRef.current = friend.id
-    setSendingId(friend.id)
+  async function shareWithFriend(friend: ShareRecipient | null) {
+    const recipients = selectedFriends.length ? selectedFriends : friend ? [friend] : []
+    if (!postId || !recipients.length || sendingId || sendingIdRef.current) return
+    const clientMessageIds = Object.fromEntries(recipients.map((recipient) => {
+      const existing = clientMessageIdsRef.current[recipient.id]
+      const clientMessageId = existing || createClientMessageId()
+      clientMessageIdsRef.current[recipient.id] = clientMessageId
+      return [recipient.id, clientMessageId]
+    }))
+    sendingIdRef.current = 'batch'
+    setSendingId('batch')
     setShareError('')
     try {
       const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/share`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ recipientId: friend.id, clientMessageId: createClientMessageId() }),
+        body: JSON.stringify({
+          recipientIds: recipients.map((recipient) => recipient.id),
+          clientMessageIds,
+          ...(recipients.length === 1 ? { recipientId: recipients[0].id, clientMessageId: clientMessageIds[recipients[0].id] } : {}),
+        }),
       })
-      const result = await response.json().catch(() => ({})) as { message?: unknown; error?: unknown }
+      const result = await response.json().catch(() => ({})) as BatchShareResponse
       if (!response.ok) throw new Error(typeof result.message === 'string' ? result.message : typeof result.error === 'string' ? result.error : '分享失败，请稍后重试')
+      if (result.success !== true) {
+        const firstFailure = result.results?.find((item) => item.success !== true)
+        throw new Error(typeof firstFailure?.error === 'string' ? firstFailure.error : '分享失败，请稍后重试')
+      }
+
+      const sentCount = Number.isSafeInteger(result.sentCount) ? Number(result.sentCount) : recipients.length
+      const failedCount = Number.isSafeInteger(result.failedCount) ? Number(result.failedCount) : 0
+      if (failedCount > 0) {
+        const failedIds = new Set((result.results || [])
+          .filter((item) => item.success !== true && typeof item.recipientId === 'string')
+          .map((item) => item.recipientId as string))
+        const failedRecipients = recipients.filter((recipient) => failedIds.has(recipient.id))
+        recipients.filter((recipient) => !failedIds.has(recipient.id)).forEach((recipient) => { delete clientMessageIdsRef.current[recipient.id] })
+        setSelectedFriends(failedRecipients.length ? failedRecipients : recipients)
+        setSelectedFriend(failedRecipients[0] || recipients[0] || null)
+        setShareError(`已分享给 ${sentCount} 位好友，另有 ${failedCount} 位失败，请重试`)
+        return
+      }
+
       setSelectedFriend(null)
-      onShareSuccess(friend.displayName)
+      setSelectedFriends([])
+      clientMessageIdsRef.current = {}
+      onShareSuccess(recipients.length === 1 ? recipients[0].displayName : `${sentCount} 位好友`)
     } catch (error) {
       const message = error instanceof Error ? error.message : '分享失败，请稍后重试'
       setShareError(message)
-      setContactsError(message)
-      setRecentError(message)
     } finally {
       sendingIdRef.current = null
       setSendingId(null)
@@ -249,7 +296,24 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
   function selectFriend(friend: ShareRecipient) {
     if (sendingId || sendingIdRef.current) return
     setShareError('')
-    setSelectedFriend(friend)
+    setSelectedFriends((current) => {
+      if (current.some((item) => item.id === friend.id)) {
+        delete clientMessageIdsRef.current[friend.id]
+        return current.filter((item) => item.id !== friend.id)
+      }
+      if (current.length >= MAX_SHARE_RECIPIENTS) {
+        setShareError(`一次最多选择 ${MAX_SHARE_RECIPIENTS} 位好友`)
+        return current
+      }
+      if (!clientMessageIdsRef.current[friend.id]) clientMessageIdsRef.current[friend.id] = createClientMessageId()
+      return [...current, friend]
+    })
+  }
+
+  function openSelectedFriendsConfirm() {
+    if (sendingId || sendingIdRef.current || !selectedFriends.length) return
+    setShareError('')
+    setSelectedFriend(selectedFriends[0] || null)
   }
 
   function cancelFriendShare() {
@@ -297,7 +361,7 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
             {recentFriends.length ? (
               <div className="post-share-recent-list" aria-label="最近聊天好友">
                 {recentFriends.map((friend) => (
-                  <button key={friend.id} type="button" className="post-share-recent-friend" onClick={() => selectFriend(friend)} disabled={Boolean(sendingId)}>
+                  <button key={friend.id} type="button" className={`post-share-recent-friend ${selectedFriendIds.has(friend.id) ? 'is-selected' : ''}`} aria-pressed={selectedFriendIds.has(friend.id)} onClick={() => selectFriend(friend)} disabled={Boolean(sendingId)}>
                     <span className="post-share-avatar"><SafeAvatar src={friend.avatarUrl} name={friend.displayName} uid={friend.uid} className="h-full w-full" /></span>
                     <span title={friend.displayName}>{friend.displayName}</span>
                   </button>
@@ -335,11 +399,12 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
             <div className="post-share-contact-list">
               {visibleContacts.map((friend) => {
                 const displayName = getContactName(friend)
+                const selected = selectedFriendIds.has(friend.id)
                 return (
-                  <button key={friend.id} type="button" className="post-share-contact-friend" onClick={() => selectFriend({ id: friend.id, uid: friend.uid, displayName, avatarUrl: friend.avatarUrl })} disabled={Boolean(sendingId)}>
+                  <button key={friend.id} type="button" className={`post-share-contact-friend ${selected ? 'is-selected' : ''}`} aria-pressed={selected} onClick={() => selectFriend({ id: friend.id, uid: friend.uid, displayName, avatarUrl: friend.avatarUrl })} disabled={Boolean(sendingId)}>
                     <span className="post-share-avatar"><SafeAvatar src={friend.avatarUrl} name={displayName} uid={friend.uid} className="h-full w-full" /></span>
                     <span className="post-share-contact-copy"><strong>{displayName}</strong><small>UID {friend.uid}</small></span>
-                    <span className="post-share-contact-send">分享</span>
+                    <span className="post-share-contact-send">{selected ? '已选择' : '选择'}</span>
                   </button>
                 )
               })}
@@ -347,6 +412,13 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
             {contactHasMore && !query.trim() && !selectedGroupId ? <button type="button" className="post-share-load-more" onClick={() => { void loadContacts(true) }} disabled={contactsLoading}>{contactsLoading ? '加载中…' : '加载更多好友'}</button> : null}
           </div>
         )}
+
+        <div className="post-share-selection-bar">
+          <span role="status">已选择 {selectedFriends.length} 位好友</span>
+          <button type="button" onClick={openSelectedFriendsConfirm} disabled={!selectedFriends.length || Boolean(sendingId)}>
+            分享给 {selectedFriends.length} 位好友
+          </button>
+        </div>
 
         <footer className="post-share-footer">
           <button type="button" className="post-share-footer-action" onClick={onCreateCard} disabled={!canSaveCard || Boolean(sendingId)}>
@@ -374,14 +446,18 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
             <header className="post-share-confirm-header">
               <h2 id="post-share-confirm-title">确认分享</h2>
             </header>
-            <div className="post-share-confirm-recipient">
-              <span className="post-share-avatar"><SafeAvatar src={selectedFriend.avatarUrl} name={selectedFriend.displayName} uid={selectedFriend.uid} className="h-full w-full" /></span>
-              <div>
-                <strong>{selectedFriend.displayName}</strong>
-                <small>好友</small>
-              </div>
+            <div className="post-share-confirm-recipient-list">
+              {(selectedFriends.length ? selectedFriends : [selectedFriend]).map((friend) => (
+                <div key={friend.id} className="post-share-confirm-recipient">
+                  <span className="post-share-avatar"><SafeAvatar src={friend.avatarUrl} name={friend.displayName} uid={friend.uid} className="h-full w-full" /></span>
+                  <div>
+                    <strong>{friend.displayName}</strong>
+                    <small>好友</small>
+                  </div>
+                </div>
+              ))}
             </div>
-            <p id="post-share-confirm-description" className="post-share-confirm-copy">确定要把这篇帖子分享给该好友吗？</p>
+            <p id="post-share-confirm-description" className="post-share-confirm-copy">确定要把这篇帖子分享给选中的 {selectedFriends.length || 1} 位好友吗？</p>
             {data.title ? <p className="post-share-confirm-title">「{data.title}」</p> : null}
             {shareError ? <p className="post-share-confirm-error" role="alert">{shareError}</p> : null}
             <footer className="post-share-confirm-actions">

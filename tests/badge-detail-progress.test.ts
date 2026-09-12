@@ -17,6 +17,13 @@ test('detail progress keeps consecutive check-in days distinct from cumulative d
   assert.equal(progress?.unitLabel, '天')
 })
 
+test('Aspirin detail progress labels the author-based daily unit', () => {
+  const progress = calculateBadgeRuleProgress(3, { ruleType: 'CLINIC_CONSULTATION_STREAK', operator: 'GTE', threshold: 5, isEnabled: true })
+  assert.equal(progress?.current, 3)
+  assert.equal(progress?.target, 5)
+  assert.equal(progress?.unitLabel, '位不同用户的病例问诊')
+})
+
 test('all numeric GTE registry rules expose progress while special rules do not', () => {
   for (const ruleType of ['POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'RATING_COUNT']) {
     assert.equal(isBadgeProgressRule({ ruleType, operator: 'GTE', threshold: 10, isEnabled: true }), true, ruleType)
@@ -107,6 +114,9 @@ test('clinic consultation completion refreshes live Aspirin progress from the co
   assert.match(detailSource, /if \(record\) \{[\s\S]*canExposeLiveBadgeProgress\(badge\)[\s\S]*getUserBadgeRuleProgress\(userId, \{ \.\.\.badge\.BadgeRule!, badgeId: badge\.id \}\)/)
   assert.match(aspirin, /prisma\.clinicConsultation\.findMany\([\s\S]*authorId: userId[\s\S]*status: 'ACTIVE'[\s\S]*record: \{ category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null \}/)
   assert.match(aspirin, /getAspirinDailyProgressForUser/)
+  assert.match(aspirin, /getAspirinDailyQualifiedAuthorIds/)
+  assert.match(aspirin, /authorIds\.size/)
+  assert.match(read('lib/aspirin-consultation.ts'), /getAspirinProgressKey[\s\S]*return fact\.record\.authorId/)
   assert.match(read('lib/badge-phase2.ts'), /getAspirinDailyProgressForUser[\s\S]*calculateBadgeRuleProgress\(progress\.current, rule\)/)
   assert.match(phase5, /getUserBadgeRuleProgress\(userId, \{ \.\.\.rule, badgeId: badge\.id \}\)/)
   assert.match(phase5, /configJson: true/)

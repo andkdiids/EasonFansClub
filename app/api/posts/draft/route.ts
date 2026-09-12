@@ -167,8 +167,9 @@ export async function GET(request: Request) {
   })
   if (limited) return limited
 
+  const summaryOnly = new URL(request.url).searchParams.get('summary') === '1'
   const row = await prisma.postDraft.findUnique({ where: { userId: auth.user.id } })
-  return json({ ok: true, draft: row ? serializeDraft(row) : null })
+  return json({ ok: true, draftCount: row ? 1 : 0, ...(summaryOnly ? {} : { draft: row ? serializeDraft(row) : null }) })
 }
 
 export async function PUT(request: Request) {

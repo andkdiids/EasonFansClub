@@ -103,30 +103,38 @@ export function getAspirinQualifiedDateKey(value: Date | string) {
   return getShanghaiDateKey(value instanceof Date ? value : new Date(value))
 }
 
-export function getAspirinDailyQualifiedCaseIds(facts: readonly AspirinConsultationFact[], userId: string, dateKey: string, config: AspirinRuleConfig) {
+/** The daily unit is the user who published the clinic case, not a reply row. */
+export function getAspirinProgressKey(fact: AspirinConsultationFact) {
+  return fact.record.authorId
+}
+
+export function getAspirinDailyQualifiedAuthorIds(facts: readonly AspirinConsultationFact[], userId: string, dateKey: string, config: AspirinRuleConfig) {
   return new Set(
     facts
       .filter((fact) => getAspirinQualifiedDateKey(fact.createdAt) === dateKey && isValidAspirinConsultation(fact, userId, config))
-      .map((fact) => fact.recordId),
+      .map(getAspirinProgressKey),
   )
 }
 
+/** @deprecated Use getAspirinDailyQualifiedAuthorIds; retained for callers using the old name. */
+export const getAspirinDailyQualifiedCaseIds = getAspirinDailyQualifiedAuthorIds
+
 export function getAspirinDailyProgress(facts: readonly AspirinConsultationFact[], userId: string, dateKey: string, config: AspirinRuleConfig, dailyTarget: number) {
-  const caseIds = getAspirinDailyQualifiedCaseIds(facts, userId, dateKey, config)
-  return { current: caseIds.size, target: dailyTarget, caseIds }
+  const authorIds = getAspirinDailyQualifiedAuthorIds(facts, userId, dateKey, config)
+  return { current: authorIds.size, target: dailyTarget, authorIds }
 }
 
 export function getAspirinQualifiedDateKeys(facts: readonly AspirinConsultationFact[], userId: string, config: AspirinRuleConfig, dailyTarget: number) {
-  const caseIdsByDate = new Map<string, Set<string>>()
+  const authorIdsByDate = new Map<string, Set<string>>()
   for (const fact of facts) {
     if (!isValidAspirinConsultation(fact, userId, config)) continue
     const dateKey = getAspirinQualifiedDateKey(fact.createdAt)
-    const caseIds = caseIdsByDate.get(dateKey) || new Set<string>()
-    caseIds.add(fact.recordId)
-    caseIdsByDate.set(dateKey, caseIds)
+    const authorIds = authorIdsByDate.get(dateKey) || new Set<string>()
+    authorIds.add(getAspirinProgressKey(fact))
+    authorIdsByDate.set(dateKey, authorIds)
   }
-  return new Set([...caseIdsByDate.entries()]
-    .filter(([, caseIds]) => caseIds.size >= dailyTarget)
+  return new Set([...authorIdsByDate.entries()]
+    .filter(([, authorIds]) => authorIds.size >= dailyTarget)
     .map(([dateKey]) => dateKey))
 }
 
@@ -149,6 +157,6 @@ export function isAspirinInitialQualificationComplete(
   dailyTarget: number,
 ) {
   const dates = getAspirinQualifiedDateKeys(facts, userId, config, dailyTarget)
-  const today = getAspirinDailyQualifiedCaseIds(facts, userId, dateKey, config).size >= dailyTarget
+  const today = getAspirinDailyQualifiedAuthorIds(facts, userId, dateKey, config).size >= dailyTarget
   return { dateKeys: dates, streakDays: calculateAspirinCurrentStreak(dates, dateKey), qualifiedToday: today }
 }

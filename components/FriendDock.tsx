@@ -44,6 +44,7 @@ import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { GrowthPanel } from '@/components/GrowthPanel'
 import type { PostShareMessageView } from '@/lib/post-share-types'
+import { canRecallDirectMessage, RECALLED_DIRECT_MESSAGE_TEXT } from '@/lib/direct-message-recall'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
 type FriendListViewMode = 'alphabetical' | 'groups'
@@ -66,6 +67,7 @@ type Message = {
   stickerId?: string | null
   stickerUrl?: string | null
   postShare?: PostShareMessageView | null
+  recalled?: boolean
 }
 
 type FriendGroup = {
@@ -92,6 +94,7 @@ type ConversationSummary = {
     createdAt: string
     senderId: string
     type?: string | null
+    recalled?: boolean
     preview?: string
   } | null
   unreadCount: number
@@ -215,6 +218,8 @@ export function FriendDock({
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [sending, setSending] = useState(false)
+  const [recallClock, setRecallClock] = useState(0)
+  const [recallingMessageId, setRecallingMessageId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [friendGroupDialog, setFriendGroupDialog] = useState<{ mode: FriendGroupDialogMode; group: FriendGroup | null } | null>(null)
   const [friendGroupDialogName, setFriendGroupDialogName] = useState('')
@@ -313,6 +318,8 @@ export function FriendDock({
     setPendingSticker(null)
     setPickerOpen(false)
     setSending(false)
+    setRecallClock(0)
+    setRecallingMessageId(null)
     setPinningConversationId(null)
     setClearingChat(false)
     setError('')
@@ -1253,12 +1260,12 @@ export function FriendDock({
     notifyClients('unread')
   }, [notifyClients])
 
-  const syncOpenConversation = useCallback(async (id: string) => {
+  const syncOpenConversation = useCallback(async (id: string, forceRefresh = false) => {
     if (!id || document.visibilityState === 'hidden') return
     const chatSession = chatSessionRef.current
     const controller = new AbortController()
     try {
-      const params = cursorRef.current ? `?after=${encodeURIComponent(cursorRef.current)}` : ''
+      const params = !forceRefresh && cursorRef.current ? `?after=${encodeURIComponent(cursorRef.current)}` : ''
       const response = await fetch(`/api/direct-conversations/${id}/messages${params}`, {
         cache: 'no-store',
         signal: controller.signal,
@@ -1285,13 +1292,21 @@ export function FriendDock({
       const detail = (event as CustomEvent<{ type?: string; changed?: string[]; conversationIds?: string[]; source?: string }>).detail
       const changed = detail?.changed || []
       const matchesConversation = !detail?.conversationIds?.length || detail.conversationIds.includes(conversationId)
-      if (matchesConversation && (detail?.source === 'fallback' || detail?.type === 'notification-changed' || changed.includes('message'))) void syncOpenConversation(conversationId)
+      if (matchesConversation && (detail?.source === 'fallback' || detail?.type === 'notification-changed' || changed.includes('message'))) void syncOpenConversation(conversationId, true)
     }
     window.addEventListener('realtime:event', onRealtimeEvent)
     return () => {
       window.removeEventListener('realtime:event', onRealtimeEvent)
     }
   }, [conversationId, open, syncOpenConversation])
+
+  useEffect(() => {
+    if (!open || !chatFriend) return undefined
+    const updateClock = () => setRecallClock(Date.now())
+    updateClock()
+    const timer = window.setInterval(updateClock, 1000)
+    return () => window.clearInterval(timer)
+  }, [chatFriend, open])
 
   function consumeBackdropEvent(event: ReactPointerEvent<HTMLDivElement> | ReactMouseEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget) return false
@@ -1523,6 +1538,71 @@ export function FriendDock({
     }
   }
 
+  function sendSticker(sticker: PickerSticker) {
+    if (!conversationId || clearingChat || sending || sendingMessageIdsRef.current.size > 0) return
+    setError('')
+    setPendingSticker(sticker)
+    setPickerOpen(false)
+    let clientMessageId = ''
+    try {
+      clientMessageId = createMessageId()
+    } catch (messageIdError) {
+      console.error('[friend-dock.message-id]', messageIdError)
+      setError('发送失败，请稍后重试')
+      return
+    }
+    void sendMessage({ content: '', clientMessageId, stickerId: sticker.id, stickerUrl: sticker.url }).then((success) => {
+      if (success) setPendingSticker((current) => current?.id === sticker.id ? null : current)
+    })
+  }
+
+  async function recallMessage(message: Message) {
+    if (!conversationId || recallingMessageId || message.recalled) return
+    const decision = canRecallDirectMessage({
+      senderId: message.senderId,
+      createdAt: new Date(message.createdAt),
+      isDeleted: Boolean(message.recalled),
+      type: message.type,
+      clientMessageId: message.clientMessageId,
+    }, currentUserId, new Date())
+    if (!decision.ok) {
+      setError(decision.code === 'NOT_SENDER'
+        ? '只能撤回自己发送的消息'
+        : decision.code === 'NOT_RECALLABLE'
+          ? '该消息不可撤回'
+          : '消息发送已超过1分钟，无法撤回')
+      return
+    }
+    setRecallingMessageId(message.id)
+    setError('')
+    try {
+      const response = await fetch(`/api/direct-conversations/${conversationId}/messages/${encodeURIComponent(message.id)}/recall`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      const data = await response.json().catch(() => ({})) as { message?: string; error?: string }
+      if (!response.ok) {
+        setError(data.message || data.error || '消息撤回失败，请稍后重试')
+        return
+      }
+      setMessages((current) => current.map((item) => item.id === message.id
+        ? { ...item, content: '', recalled: true, stickerId: null, stickerUrl: null, postShare: null }
+        : item))
+      setConversations((current) => current.map((conversation) => conversation.id === conversationId && conversation.latestMessage?.id === message.id
+        ? {
+            ...conversation,
+            latestMessage: { ...conversation.latestMessage, content: '', preview: RECALLED_DIRECT_MESSAGE_TEXT, recalled: true },
+          }
+        : conversation))
+      notifyClients('messages')
+    } catch (recallError) {
+      setError(recallError instanceof TypeError ? '网络连接中断，请重试' : '消息撤回失败，请稍后重试')
+    } finally {
+      setRecallingMessageId(null)
+    }
+  }
+
   function submitMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault()
     if (sending || clearingChat || sendingMessageIdsRef.current.size > 0) return
@@ -1538,7 +1618,7 @@ export function FriendDock({
     if (pendingSticker) {
       const sticker = pendingSticker
       void sendMessage({ content: '', clientMessageId, stickerId: sticker.id, stickerUrl: sticker.url }).then((success) => {
-        if (success) { setPendingSticker(null); setContent('') }
+        if (success) setPendingSticker((current) => current?.id === sticker.id ? null : current)
       })
       return
     }
@@ -1768,7 +1848,19 @@ export function FriendDock({
                   <div className="friend-chat-date">{group.label}</div>
                   {group.messages.map((message) => {
                     const mine = message.senderId === currentUserId
-                    const postShareCard = message.type === 'POST_SHARE' ? message.postShare : null
+                    const recallNow = new Date(recallClock || Date.now())
+                    const recallDecision = canRecallDirectMessage({
+                      senderId: message.senderId,
+                      createdAt: new Date(message.createdAt),
+                      isDeleted: Boolean(message.recalled),
+                      type: message.type,
+                      clientMessageId: message.clientMessageId,
+                    }, currentUserId, recallNow)
+                    const canRecall = message.status !== 'SENDING'
+                      && message.status !== 'FAILED'
+                      && recallDecision.ok
+                      && recallDecision.code === 'RECALLABLE'
+                    const postShareCard = !message.recalled && message.type === 'POST_SHARE' ? message.postShare : null
                     // 表情包消息：直接展示图片，不套用文字气泡（无 border/background/白框/padding）。
                     const stickerImg = message.stickerUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1780,7 +1872,9 @@ export function FriendDock({
                     ) : null
                     return (
                       <div key={message.id} className={`friend-chat-message ${mine ? 'is-mine' : 'is-peer'}`}>
-                        {postShareCard ? (
+                        {message.recalled ? (
+                          <span className="friend-chat-recalled" role="status">{mine ? '你撤回了一条消息' : '对方撤回了一条消息'}</span>
+                        ) : postShareCard ? (
                           postShareCard.available ? (
                             <Link href={postShareCard.url} className="friend-chat-post-share-card" aria-label={`查看帖子：${postShareCard.title}`}>
                               {postShareCard.imageUrl ? (
@@ -1818,6 +1912,8 @@ export function FriendDock({
                                     optimisticId: message.id,
                                     stickerId: message.stickerId ?? undefined,
                                     stickerUrl: message.stickerUrl ?? null,
+                                  }).then((success) => {
+                                    if (success) setPendingSticker((current) => current?.id === message.stickerId ? null : current)
                                   })
                                 }
                               }}
@@ -1849,7 +1945,17 @@ export function FriendDock({
                         )}
                         <div className="friend-chat-message-meta">
                           <time>{formatMessageTime(message.createdAt)}</time>
-                          {mine ? <MessageTicks status={message.status || (message.readAt ? 'READ' : 'SENT')} /> : null}
+                          {canRecall ? (
+                            <button
+                              type="button"
+                              className="friend-chat-recall"
+                              onClick={() => void recallMessage(message)}
+                              disabled={recallingMessageId === message.id}
+                            >
+                              {recallingMessageId === message.id ? '撤回中…' : '撤回'}
+                            </button>
+                          ) : null}
+                          {mine && !message.recalled ? <MessageTicks status={message.status || (message.readAt ? 'READ' : 'SENT')} /> : null}
                         </div>
                       </div>
                     )
@@ -1907,10 +2013,7 @@ export function FriendDock({
               <StickerPicker
                 open={pickerOpen}
                 onClose={() => setPickerOpen(false)}
-                onSelectSticker={(sticker) => {
-                  setPendingSticker(sticker)
-                  setPickerOpen(false)
-                }}
+                onSelectSticker={sendSticker}
                 onSelectEmoji={insertEmoji}
                 composerRef={messageInputRef}
                 mobileColumns={5}

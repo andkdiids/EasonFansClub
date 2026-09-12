@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { getShanghaiDateKey, shiftShanghaiDateKey } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 import {
-  getAspirinDailyQualifiedCaseIds,
+  getAspirinDailyQualifiedAuthorIds,
   getAspirinDailyProgress,
   getAspirinQualifiedDateKeys,
   calculateAspirinCurrentStreak,
@@ -90,7 +90,7 @@ async function loadAspirinConsultationFacts(userId: string, now: Date) {
 }
 
 /**
- * Detail and tracking views need today's live case count, not the acquisition
+ * Detail and tracking views need today's live distinct-case-author count, not the acquisition
  * cursor used after a formal revoke. In particular, a previous revoke must
  * never make a valid consultation disappear from the current X/5 display.
  */
@@ -99,7 +99,7 @@ export async function getAspirinDailyProgressForUser(input: { userId: string; ru
   const facts = await loadAspirinConsultationFacts(input.userId, now)
   const config = getAspirinRuleConfig(input.rule.configJson)
   const dailyTarget = Number.isSafeInteger(input.rule.threshold) && (input.rule.threshold || 0) > 0 ? input.rule.threshold! : 1
-  if (!config) return { current: 0, target: dailyTarget, caseIds: new Set<string>(), dateKey: getShanghaiDateKey(now), config: null }
+  if (!config) return { current: 0, target: dailyTarget, authorIds: new Set<string>(), dateKey: getShanghaiDateKey(now), config: null }
   const progress = getAspirinDailyProgress(facts, input.userId, getShanghaiDateKey(now), config, dailyTarget)
   return { ...progress, dateKey: getShanghaiDateKey(now), config }
 }
@@ -141,15 +141,15 @@ export function evaluateAspirinConsultationFacts(input: {
     ? validFacts.filter((fact) => new Date(fact.createdAt).getTime() > qualificationStartsAt.getTime())
     : validFacts
   const qualifiedDateKeys = config ? getAspirinQualifiedDateKeys(qualificationFacts, input.userId, config, dailyTarget) : new Set<string>()
-  const caseIds = config ? getAspirinDailyQualifiedCaseIds(qualificationFacts, input.userId, dateKey, config) : new Set<string>()
+  const authorIds = config ? getAspirinDailyQualifiedAuthorIds(qualificationFacts, input.userId, dateKey, config) : new Set<string>()
   return {
     config,
     dailyTarget,
     initialStreakDays,
     dateKey,
     qualificationStartsAt,
-    dailyCount: caseIds.size,
-    qualifiedToday: caseIds.size >= dailyTarget,
+    dailyCount: authorIds.size,
+    qualifiedToday: authorIds.size >= dailyTarget,
     qualifiedDateKeys,
     currentStreakDays: calculateAspirinCurrentStreak(qualifiedDateKeys, dateKey),
     validFacts,
@@ -253,7 +253,7 @@ export async function reconcileAspirinBadgeRule(input: { userId: string; rule: A
 
   if (!current) {
     if (!initialQualified) {
-      return { ...base, reason: evaluation.qualifiedToday ? '当前仅达到当日目标，连续获取天数不足' : '当前未达到当日不同病例目标' }
+      return { ...base, reason: evaluation.qualifiedToday ? '当前仅达到当日目标，连续获取天数不足' : '当前未达到当日不同病例发布者目标' }
     }
     if (!applyStateTransitions) {
       return { ...base, reason: `已完成连续 ${evaluation.initialStreakDays} 天获取条件，可发放` }

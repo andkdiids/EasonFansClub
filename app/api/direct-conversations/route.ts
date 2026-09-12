@@ -33,7 +33,7 @@ export async function GET(request: Request) {
       where: { ConversationParticipant: { some: { userId: user.id, isDeleted: false } } },
       include: {
         ConversationParticipant: { select: { userId: true, lastReadAt: true, clearedAt: true, pinnedAt: true, isDeleted: true, User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, bio: true, bioModerationStatus: true, experience: true, isOnline: true, lastActiveAt: true, createdAt: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } } } } } },
-        DirectMessage: { where: { isDeleted: false }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, moderationStatus: true, createdAt: true, senderId: true, type: true, imageUrl: true, stickerId: true, metadata: true } },
+        DirectMessage: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, content: true, moderationStatus: true, createdAt: true, senderId: true, type: true, imageUrl: true, stickerId: true, metadata: true, isDeleted: true } },
       },
     }),
     prisma.friendship.count({ where: friendshipWhere }),
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
       const other = row.ConversationParticipant.find((item) => item.userId !== user.id && !item.isDeleted)
       const latest = row.DirectMessage[0]
       // Opening a contact can create an empty Conversation. It is not a chat
-      // until a visible message exists. A cleared conversation stays hidden
+      // until a message exists. A cleared conversation stays hidden
       // for this participant until a newer message is written.
       if (!participant || !other || !latest) return null
       if (participant.clearedAt && latest.createdAt <= participant.clearedAt) return null
@@ -147,10 +147,11 @@ export async function GET(request: Request) {
     const latestMessage = row.DirectMessage[0]
       ? {
           id: row.DirectMessage[0].id,
-          content: publicModerationText(row.DirectMessage[0].content, row.DirectMessage[0].moderationStatus),
+          content: row.DirectMessage[0].isDeleted ? '' : publicModerationText(row.DirectMessage[0].content, row.DirectMessage[0].moderationStatus),
           createdAt: row.DirectMessage[0].createdAt,
           senderId: row.DirectMessage[0].senderId,
           type: row.DirectMessage[0].type,
+          recalled: row.DirectMessage[0].isDeleted,
           preview: getConversationMessagePreview(row.DirectMessage[0]),
         }
       : null
@@ -171,8 +172,10 @@ function getConversationMessagePreview(message: {
   type: string
   imageUrl: string | null
   stickerId: string | null
+  isDeleted: boolean
   metadata?: unknown
 }) {
+  if (message.isDeleted) return '消息已撤回'
   if (message.type === 'IMAGE' || message.imageUrl) return '[图片]'
   if (message.type === 'STICKER' || message.stickerId) return '[表情]'
   if (message.type === 'POST_SHARE') {

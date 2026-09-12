@@ -122,6 +122,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const [posts, setPosts] = useState<ForumDiscoveryPost[]>([])
   const [boards, setBoards] = useState<ForumDiscoveryResponse['boards']>([])
   const [permissions, setPermissions] = useState<ForumDiscoveryResponse['permissions']>({ canCreatePost: false, canCreateAnnouncement: false })
+  const [draftCount, setDraftCount] = useState(0)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
@@ -320,6 +321,30 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   }, [boardValue, mode, persistSession, query, sessionKey])
 
   useEffect(() => setSearchValue(query), [query])
+
+  useEffect(() => {
+    if (!permissions.canCreatePost) {
+      setDraftCount(0)
+      return
+    }
+    let cancelled = false
+    async function loadDraftCount() {
+      try {
+        const response = await fetch('/api/posts/draft?summary=1', { cache: 'no-store', credentials: 'same-origin' })
+        if (!response.ok) return
+        const data = await response.json().catch(() => null) as { draftCount?: unknown; draft?: unknown } | null
+        if (cancelled) return
+        if (typeof data?.draftCount === 'number') setDraftCount(Math.max(0, Math.trunc(data.draftCount)))
+        else setDraftCount(data?.draft ? 1 : 0)
+      } catch {
+        // The entry remains useful even when its optional count is unavailable.
+      }
+    }
+    void loadDraftCount()
+    return () => {
+      cancelled = true
+    }
+  }, [permissions.canCreatePost])
 
   useEffect(() => {
     try {
@@ -748,6 +773,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
                   <span>极简</span>
                 </label>
               ) : null}
+              {permissions.canCreatePost ? <Link href="/drafts" className="forum-discovery-drafts">草稿箱{draftCount > 0 ? ` ${draftCount}` : ''}</Link> : null}
               {permissions.canCreatePost ? <Link href={createHref} className="forum-discovery-publish" aria-label="发布帖子">+</Link> : null}
             </div>
           </div>

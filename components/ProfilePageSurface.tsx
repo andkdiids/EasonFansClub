@@ -149,6 +149,7 @@ export function ProfilePageSurface({
               <Link href={wallHref} className={actionLinkClass()}>去留言</Link>
               <Link href="/music/live/me" className={actionLinkClass()}>我的现场</Link>
               <Link href="/profile/stickers" className={actionLinkClass()}>我的表情包</Link>
+              <Link href="/me/history" className={actionLinkClass()}>最近足迹</Link>
             </>
           ) : (
             <FriendProfileActions

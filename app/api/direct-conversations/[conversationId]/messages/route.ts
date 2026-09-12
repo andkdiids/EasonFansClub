@@ -23,6 +23,7 @@ const messageSelect = {
   clientMessageId: true,
   metadata: true,
   stickerId: true,
+  isDeleted: true,
   sticker: { select: { url: true } },
 } as const
 
@@ -57,7 +58,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
   const rows = await prisma.directMessage.findMany({
     where: {
       conversationId,
-      isDeleted: false,
       ...(viewerParticipant?.clearedAt ? { createdAt: { gt: viewerParticipant.clearedAt } } : {}),
       ...(cursor ? {
         OR: [
@@ -302,21 +302,24 @@ function serializeMessage(
     createdAt: Date
     clientMessageId: string | null
     stickerId: string | null
+    isDeleted: boolean
     sticker: { url: string } | null
     metadata: unknown
   },
   currentUserId: string,
   peerLastReadAt: Date | null,
-  postShare?: PostShareMessageView,
+  postShareView?: PostShareMessageView,
 ) {
+  const postShare = message.isDeleted ? null : postShareView
   return {
     id: message.id,
     type: message.type,
-    content: publicModerationText(message.content, message.moderationStatus),
+    content: message.isDeleted ? '' : publicModerationText(message.content, message.moderationStatus),
     senderId: message.senderId,
     clientMessageId: message.clientMessageId,
-    stickerId: message.stickerId,
-    stickerUrl: toPublicMediaUrl(message.sticker?.url),
+    recalled: message.isDeleted,
+    stickerId: message.isDeleted ? null : message.stickerId,
+    stickerUrl: message.isDeleted ? null : toPublicMediaUrl(message.sticker?.url),
     postShare: message.type === 'POST_SHARE' ? postShare || null : null,
     createdAt: message.createdAt.toISOString(),
     readAt: message.senderId === currentUserId && peerLastReadAt && message.createdAt <= peerLastReadAt

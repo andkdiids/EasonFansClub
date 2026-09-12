@@ -29,6 +29,22 @@ const messageSelect = {
   metadata: true,
 } as const
 
+const MAX_SHARE_RECIPIENTS = 20
+
+type StoredPostShareMessage = Prisma.DirectMessageGetPayload<{ select: typeof messageSelect }>
+
+type ShareRecipientResult = {
+  recipientId: string
+  success: boolean
+  duplicate: boolean
+  awardedAmount: number
+  status: number
+  code?: string
+  error?: string
+  conversationId: string
+  message: StoredPostShareMessage | null
+}
+
 type Params = { params: Promise<{ postId: string }> }
 
 export async function GET(request: Request, { params }: Params) {
@@ -60,30 +76,107 @@ export async function POST(request: Request, { params }: Params) {
 
   const { postId } = await params
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
-  const recipientId = typeof body?.recipientId === 'string' ? body.recipientId.trim() : ''
-  const clientMessageId = typeof body?.clientMessageId === 'string' ? body.clientMessageId.trim() : ''
-  if (!recipientId || recipientId.length > 191) return shareFailure(400, 'INVALID_RECIPIENT', '请选择有效好友')
-  if (!uuidPattern.test(clientMessageId)) return shareFailure(400, 'INVALID_CLIENT_MESSAGE_ID', '分享请求无效，请重试')
+  const rawRecipientIds = Array.isArray(body?.recipientIds)
+    ? body.recipientIds
+    : [body?.recipientId]
+  const recipientIds = [...new Set(rawRecipientIds
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter(Boolean))]
+  if (!recipientIds.length || recipientIds.some((recipientId) => recipientId.length > 191)) return shareFailure(400, 'INVALID_RECIPIENT', '请选择有效好友')
+  if (recipientIds.length > MAX_SHARE_RECIPIENTS) return shareFailure(413, 'TOO_MANY_RECIPIENTS', `一次最多分享给 ${MAX_SHARE_RECIPIENTS} 位好友`)
+
+  const clientMessageIds = recipientIds.map((recipientId) => ({
+    recipientId,
+    clientMessageId: getClientMessageId(body, recipientId, recipientIds.length),
+  }))
 
   const post = await findShareablePost(guard.user.id, postId)
   if (!post) return shareFailure(404, 'POST_NOT_SHAREABLE', '帖子不存在或暂不可分享')
-  if (!(await assertFriendShareTarget(guard.user.id, recipientId))) {
-    return shareFailure(403, 'NOT_FRIEND', '只能分享给当前好友')
-  }
 
   const snapshot = toPostShareSnapshot(post)
-  const content = postSharePreview(snapshot)
   const now = new Date()
+  const results: ShareRecipientResult[] = []
+  for (const { recipientId, clientMessageId } of clientMessageIds) {
+    if (!uuidPattern.test(clientMessageId)) {
+      results.push({ recipientId, success: false, duplicate: false, awardedAmount: 0, status: 400, code: 'INVALID_CLIENT_MESSAGE_ID', error: '分享请求无效，请重试', conversationId: '', message: null })
+      continue
+    }
+    if (!(await assertFriendShareTarget(guard.user.id, recipientId))) {
+      results.push({ recipientId, success: false, duplicate: false, awardedAmount: 0, status: 403, code: 'NOT_FRIEND', error: '只能分享给当前好友', conversationId: '', message: null })
+      continue
+    }
+    const result = await createPostShareMessage({
+      senderId: guard.user.id,
+      recipientId,
+      clientMessageId,
+      snapshot,
+      now,
+    })
+    results.push(result)
+    if (result.success) emitRealtimeMany([guard.user.id, recipientId], 'message', { conversationId: result.conversationId })
+  }
+
+  const successful = results.filter((result) => result.success)
+  const failed = results.filter((result) => !result.success)
+  if (recipientIds.length === 1) {
+    const result = results[0]
+    if (!result.success) return shareFailure(result.status, result.code || 'SEND_FAILED', result.error || '分享失败，请稍后重试')
+    return NextResponse.json({
+      success: true,
+      duplicate: result.duplicate,
+      awardedAmount: result.awardedAmount,
+      message: serializePostShareMessage(result.message!, snapshot),
+    }, { status: result.duplicate ? 200 : 201, headers: privateHeaders })
+  }
+
+  return NextResponse.json({
+    success: successful.length > 0,
+    partial: successful.length > 0 && failed.length > 0,
+    recipientCount: recipientIds.length,
+    sentCount: successful.length,
+    failedCount: failed.length,
+    awardedAmount: successful.reduce((total, result) => total + result.awardedAmount, 0),
+    results: results.map((result) => ({
+      recipientId: result.recipientId,
+      success: result.success,
+      duplicate: result.duplicate,
+      awardedAmount: result.awardedAmount,
+      ...(result.success ? { message: serializePostShareMessage(result.message!, snapshot) } : { code: result.code, error: result.error }),
+    })),
+  }, { status: successful.length || failed.length ? 200 : 400, headers: privateHeaders })
+}
+
+class ShareMessageConflictError extends Error {}
+
+function getClientMessageId(body: Record<string, unknown> | null, recipientId: string, recipientCount: number) {
+  const mapped = body?.clientMessageIds
+  if (mapped && typeof mapped === 'object' && !Array.isArray(mapped)) {
+    const candidate = (mapped as Record<string, unknown>)[recipientId]
+    if (typeof candidate === 'string') return candidate.trim()
+  }
+  if (recipientCount === 1 && typeof body?.clientMessageId === 'string') return body.clientMessageId.trim()
+  return ''
+}
+
+async function createPostShareMessage(input: {
+  senderId: string
+  recipientId: string
+  clientMessageId: string
+  snapshot: ReturnType<typeof toPostShareSnapshot>
+  now: Date
+}): Promise<ShareRecipientResult & { conversationId: string }> {
+  const content = postSharePreview(input.snapshot)
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const conversation = await ensureFriendConversation(tx, guard.user.id, recipientId)
+      const conversation = await ensureFriendConversation(tx, input.senderId, input.recipientId)
       const existing = await tx.directMessage.findUnique({
-        where: { senderId_clientMessageId: { senderId: guard.user.id, clientMessageId } },
+        where: { senderId_clientMessageId: { senderId: input.senderId, clientMessageId: input.clientMessageId } },
         select: messageSelect,
       })
       if (existing) {
         const existingSnapshot = parsePostShareSnapshot(existing.metadata)
-        if (existing.conversationId !== conversation.id || existingSnapshot?.postId !== snapshot.postId) {
+        if (existing.conversationId !== conversation.id || existingSnapshot?.postId !== input.snapshot.postId) {
           throw new ShareMessageConflictError()
         }
         return { conversationId: conversation.id, message: existing, duplicate: true, awardedAmount: 0 }
@@ -92,11 +185,11 @@ export async function POST(request: Request, { params }: Params) {
       const message = await tx.directMessage.create({
         data: {
           conversationId: conversation.id,
-          senderId: guard.user.id,
+          senderId: input.senderId,
           type: POST_SHARE_MESSAGE_TYPE,
           content,
-          metadata: snapshot,
-          clientMessageId,
+          metadata: input.snapshot,
+          clientMessageId: input.clientMessageId,
         },
         select: messageSelect,
       })
@@ -108,61 +201,42 @@ export async function POST(request: Request, { params }: Params) {
         data: { lastMessageAt: message.createdAt },
       })
       await tx.conversationParticipant.updateMany({
-        where: { conversationId: conversation.id, userId: guard.user.id },
-        data: { lastReadAt: now, isDeleted: false },
+        where: { conversationId: conversation.id, userId: input.senderId },
+        data: { lastReadAt: input.now, isDeleted: false },
       })
-      const task = await recordContentShareTask(tx, guard.user.id, now)
+      const task = await recordContentShareTask(tx, input.senderId, input.now)
       return { conversationId: conversation.id, message, duplicate: false, awardedAmount: task.awardedAmount }
     }, { timeout: 20_000, maxWait: 5_000 })
-
-    emitRealtimeMany([guard.user.id, recipientId], 'message', { conversationId: result.conversationId })
-    return NextResponse.json({
-      success: true,
-      duplicate: result.duplicate,
-      awardedAmount: result.awardedAmount,
-      message: {
-        id: result.message.id,
-        type: POST_SHARE_MESSAGE_TYPE,
-        content: result.message.content,
-        senderId: result.message.senderId,
-        clientMessageId: result.message.clientMessageId,
-        createdAt: result.message.createdAt.toISOString(),
-        readAt: null,
-        postShare: toPostShareMessageView(snapshot),
-      },
-    }, { status: result.duplicate ? 200 : 201, headers: privateHeaders })
+    return { recipientId: input.recipientId, success: true, duplicate: result.duplicate, awardedAmount: result.awardedAmount, status: result.duplicate ? 200 : 201, conversationId: result.conversationId, message: result.message }
   } catch (error) {
-    if (error instanceof ShareMessageConflictError) return shareFailure(409, 'DUPLICATE_MESSAGE', '分享请求已被其他内容使用，请重试')
+    if (error instanceof ShareMessageConflictError) return { recipientId: input.recipientId, success: false, duplicate: false, awardedAmount: 0, status: 409, code: 'DUPLICATE_MESSAGE', error: '分享请求已被其他内容使用，请重试', conversationId: '', message: null }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const duplicate = await prisma.directMessage.findUnique({
-        where: { senderId_clientMessageId: { senderId: guard.user.id, clientMessageId } },
+        where: { senderId_clientMessageId: { senderId: input.senderId, clientMessageId: input.clientMessageId } },
         select: messageSelect,
       }).catch(() => null)
       const duplicateSnapshot = duplicate ? parsePostShareSnapshot(duplicate.metadata) : null
-      if (duplicate && duplicateSnapshot?.postId === snapshot.postId) {
-        return NextResponse.json({
-          success: true,
-          duplicate: true,
-          awardedAmount: 0,
-          message: {
-            id: duplicate.id,
-            type: POST_SHARE_MESSAGE_TYPE,
-            content: duplicate.content,
-            senderId: duplicate.senderId,
-            clientMessageId: duplicate.clientMessageId,
-            createdAt: duplicate.createdAt.toISOString(),
-            readAt: null,
-            postShare: toPostShareMessageView(snapshot),
-          },
-        }, { headers: privateHeaders })
+      if (duplicate && duplicateSnapshot?.postId === input.snapshot.postId) {
+        return { recipientId: input.recipientId, success: true, duplicate: true, awardedAmount: 0, status: 200, conversationId: duplicate.conversationId, message: duplicate }
       }
     }
     console.error('[post-share.send]', { name: error instanceof Error ? error.name : 'UnknownError' })
-    return shareFailure(500, 'SEND_FAILED', '分享失败，请稍后重试')
+    return { recipientId: input.recipientId, success: false, duplicate: false, awardedAmount: 0, status: 500, code: 'SEND_FAILED', error: '分享失败，请稍后重试', conversationId: '', message: null }
   }
 }
 
-class ShareMessageConflictError extends Error {}
+function serializePostShareMessage(storedMessage: StoredPostShareMessage, snapshot: ReturnType<typeof toPostShareSnapshot>) {
+  return {
+    id: storedMessage.id,
+    type: POST_SHARE_MESSAGE_TYPE,
+    content: storedMessage.content,
+    senderId: storedMessage.senderId,
+    clientMessageId: storedMessage.clientMessageId,
+    createdAt: storedMessage.createdAt.toISOString(),
+    readAt: null,
+    postShare: toPostShareMessageView(snapshot),
+  }
+}
 
 function shareFailure(status: number, code: string, message: string) {
   return NextResponse.json({ success: false, code, error: message, message }, { status, headers: privateHeaders })
