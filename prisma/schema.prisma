@@ -665,6 +665,7 @@ model Badge {
   visibility                       BadgeVisibility              @default(PUBLIC)
   rarity                           BadgeRarity                  @default(COMMON)
   grantType                        BadgeGrantType               @default(MANUAL)
+  salonAssignable                  Boolean                      @default(false)
   validityType                     BadgeValidityType            @default(PERMANENT)
   validityDays                     Int?
   isWearable                       Boolean                      @default(true)
@@ -711,6 +712,7 @@ model Badge {
   @@index([musicTourId])
   @@index([visibility, isEnabled, sortOrder])
   @@index([grantType])
+  @@index([salonAssignable, isEnabled, isActive])
   @@index([rarity])
   @@index([seriesId, sortOrder])
   @@index([availableFrom, availableUntil])
@@ -1163,6 +1165,7 @@ model DailyMessage {
   isAdminMessage       Boolean                @default(false)
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
+  editedAt             DateTime?
   userId               String
   checkInId            String?                @unique
   CheckIn              CheckIn?               @relation(fields: [checkInId], references: [id])

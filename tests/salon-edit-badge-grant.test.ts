@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { parseBadgeDefinition } from '@/lib/badge-admin'
 import { SALON_BADGE_CLASSIFICATION } from '@/lib/salon-badges'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -51,18 +52,49 @@ test('统一审核中心标识沙龙编辑类型并复用现有通过/拒绝链�
   assert.match(notifications, /startsWith: salonEditReviewNotificationKeyPrefix\(postId\)/)
 })
 
-test('没有可靠沙龙勋章分类时不猜测、不展示全站勋章，但保留真实权限与统一发放适配器', () => {
+test('沙龙勋章目录只使用显式配置，后台可维护并复用统一发放服务', () => {
+  const schema = read('prisma/schema.prisma')
+  const migration = read('prisma/migrations/20260914100000_add_salon_badge_assignable/migration.sql')
+  const catalog = read('lib/salon-badges.ts')
   const route = read('app/api/salon/posts/[postId]/badges/route.ts')
   const grantAdapter = read('lib/salon-badge-grant.ts')
   const ui = read('components/salon/SalonBadgeGrant.tsx')
-  assert.equal(SALON_BADGE_CLASSIFICATION.available, false)
+  const admin = read('app/admin/badges/BadgeAdminManager.tsx')
+  const service = read('lib/badge-service.ts')
+  assert.equal(SALON_BADGE_CLASSIFICATION.available, true)
+  assert.equal(SALON_BADGE_CLASSIFICATION.field, 'Badge.salonAssignable')
+  assert.match(schema, /salonAssignable\s+Boolean\s+@default\(false\)/)
+  assert.match(migration, /ADD COLUMN `salonAssignable` BOOLEAN NOT NULL DEFAULT false/)
+  assert.match(catalog, /salonAssignable: true/)
+  assert.match(catalog, /currentUserBadgeWhere\(now\)/)
+  assert.match(route, /listSalonAssignableBadges\(/)
+  assert.match(route, /classificationField: SALON_BADGE_CLASSIFICATION\.field/)
   assert.match(route, /requireAdmin\('achievement_manage'\)/)
   assert.doesNotMatch(route, /isAdmin\s*===\s*true/)
-  assert.match(route, /SALON_BADGE_CLASSIFICATION_UNAVAILABLE/)
-  assert.doesNotMatch(route, /name\.toLowerCase\(\).*沙龙|includes\(['"]沙龙/)
+  assert.doesNotMatch(route, /SALON_BADGE_CLASSIFICATION_UNAVAILABLE/)
+  assert.doesNotMatch(catalog, /name\.toLowerCase\(\).*沙龙|includes\(['"]沙龙/)
   assert.match(grantAdapter, /grantBadge\(/)
   assert.match(grantAdapter, /sourceType: 'SALON_ADMIN_GRANT'/)
   assert.match(grantAdapter, /grantKey: `salon-admin:/)
+  assert.match(grantAdapter, /requireSalonAssignable: true/)
+  assert.match(grantAdapter, /rejectIfAlreadyOwned: true/)
+  assert.match(service, /BADGE_ALREADY_OWNED/)
+  assert.match(service, /if \(input\.rejectIfAlreadyOwned\)/)
   assert.match(ui, /派发对象：\{author\.nickname\}/)
+  assert.match(ui, /可派发勋章/)
+  assert.match(ui, /已拥有/)
+  assert.match(ui, /acquisitionDescription/)
   assert.doesNotMatch(ui, /搜索用户|输入 UID|选择用户/)
+  assert.match(admin, /draft\.salonAssignable/)
+})
+
+test('后台勋章配置显式校验沙龙派发开关，默认关闭且支持局部更新', () => {
+  const created = parseBadgeDefinition({ name: '沙龙测试勋章', salonAssignable: true })
+  assert.equal(created.data?.salonAssignable, true)
+  const defaulted = parseBadgeDefinition({ name: '普通测试勋章' })
+  assert.equal(defaulted.data?.salonAssignable, false)
+  const updated = parseBadgeDefinition({ salonAssignable: true }, true)
+  assert.equal(updated.data?.salonAssignable, true)
+  const invalid = parseBadgeDefinition({ salonAssignable: 'true' }, true)
+  assert.equal(invalid.error, '沙龙派发开关无效')
 })

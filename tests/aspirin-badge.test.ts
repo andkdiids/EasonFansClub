@@ -2,13 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   ASPIRIN_CLINIC_MODULE,
-  ASPIRIN_MAX_REPEAT_RATE,
   ASPIRIN_MIN_LENGTH,
+  describeAspirinRule,
   getAspirinRuleConfig,
   validateSustainedQualificationSettings,
 } from '@/lib/aspirin-badge-config'
 import {
-  calculateAspirinRepeatRate,
   getAspirinDailyQualifiedAuthorIds,
   getAspirinDailyProgress,
   getAspirinProgressKey,
@@ -28,7 +27,6 @@ const userId = 'user-a'
 const config = {
   module: ASPIRIN_CLINIC_MODULE,
   minLength: ASPIRIN_MIN_LENGTH,
-  maxRepeatRate: ASPIRIN_MAX_REPEAT_RATE,
   initialStreakDays: 2,
 } as const
 
@@ -74,6 +72,8 @@ function dailyFacts(count: number, date = '2026-09-11T04:00:00.000Z') {
 
 test('阿士匹灵规则只接受稳定的 ASPIRIN_CLINIC 配置，并校验持续资格边界', () => {
   assert.deepEqual(getAspirinRuleConfig(config), config)
+  assert.deepEqual(getAspirinRuleConfig({ ...config, maxRepeatRate: 0.7 }), config)
+  assert.doesNotMatch(describeAspirinRule(5, { ...config, maxRepeatRate: 0.7 }), /重复率|查重率|70%/u)
   assert.equal(getAspirinRuleConfig({ ...config, module: 'FORUM' }), null)
   assert.deepEqual(validateSustainedQualificationSettings({ sustainedQualification: true, inactiveAfterDays: 2, revokeAfterDays: 7 }), {
     sustainedQualification: true,
@@ -83,7 +83,7 @@ test('阿士匹灵规则只接受稳定的 ASPIRIN_CLINIC 配置，并校验持�
   assert.match(String(validateSustainedQualificationSettings({ sustainedQualification: true, inactiveAfterDays: 7, revokeAfterDays: 2 }).error), /大于/)
 })
 
-test('阿士匹灵只按有效问诊规则计入进度，并允许问诊自己发布的病例', () => {
+test('阿士匹灵只按有效问诊规则计入进度，并排除自己发布的病例', () => {
   const forum = fact({ record: { authorId: 'case-owner', category: 'FORUM', status: 'ACTIVE', deletedAt: null } })
   const salon = fact({ record: { authorId: 'case-owner', category: 'SALON', status: 'ACTIVE', deletedAt: null } })
   const activity = fact({ record: { authorId: 'case-owner', category: 'ACTIVITY', status: 'ACTIVE', deletedAt: null } })
@@ -92,13 +92,13 @@ test('阿士匹灵只按有效问诊规则计入进度，并允许问诊自己�
   assert.equal(isValidAspirinConsultation(forum, userId, config), false)
   assert.equal(isValidAspirinConsultation(salon, userId, config), false)
   assert.equal(isValidAspirinConsultation(activity, userId, config), false)
-  assert.equal(isValidAspirinConsultation(selfCase, userId, config), true)
+  assert.equal(isValidAspirinConsultation(selfCase, userId, config), false)
   assert.equal(isValidAspirinConsultation(clinic, userId, config), true)
-  assert.equal(getAspirinDailyQualifiedAuthorIds([forum, salon, activity, selfCase], userId, '2026-09-11', config).size, 1)
+  assert.equal(getAspirinDailyQualifiedAuthorIds([forum, salon, activity, selfCase], userId, '2026-09-11', config).size, 0)
   assert.equal(getAspirinDailyQualifiedAuthorIds([...dailyFacts(3), forum], userId, '2026-09-11', config).size, 3)
 })
 
-test('真实规则案例：自己病例有效时为 1/5，不足 21 字时仅因字数无效', () => {
+test('真实规则案例：自己病例不计入，不足 21 字时仅因字数无效', () => {
   const ownValid = fact({
     recordId: 'own-case-valid',
     record: { authorId: userId, category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null },
@@ -109,21 +109,21 @@ test('真实规则案例：自己病例有效时为 1/5，不足 21 字时仅因
     content: uniqueText(20),
     record: { authorId: userId, category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null },
   })
-  assert.equal(isValidAspirinConsultation(ownValid, userId, config), true)
+  assert.equal(isValidAspirinConsultation(ownValid, userId, config), false)
   assert.equal(isValidAspirinConsultation(ownTooShort, userId, config), false)
-  assert.equal(getAspirinDailyProgress([ownValid], userId, '2026-09-11', config, 5).current, 1)
+  assert.equal(getAspirinDailyProgress([ownValid], userId, '2026-09-11', config, 5).current, 0)
   assert.equal(getAspirinDailyProgress([ownTooShort], userId, '2026-09-11', config, 5).current, 0)
 })
 
-test('真实规则案例：自己病例与同一他人病例发布者混合时，按发布者去重', () => {
+test('真实规则案例：自己病例排除后，仍按其他病例发布者去重', () => {
   const facts = [
     ...['A', 'B', 'D'].map((caseId) => fact({ id: `own-${caseId}`, recordId: `case-${caseId}`, record: { authorId: userId, category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null } })),
-    ...['C', 'E'].map((caseId) => fact({ id: `other-${caseId}`, recordId: `case-${caseId}`, record: { authorId: 'other-user', category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null } })),
+    ...['C', 'E'].map((caseId) => fact({ id: `other-${caseId}`, recordId: `case-${caseId}`, record: { authorId: caseId === 'C' ? 'other-user-a' : 'other-user-b', category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null } })),
   ]
   assert.equal(getAspirinDailyProgress(facts, userId, '2026-09-11', config, 5).current, 2)
 })
 
-test('真实规则案例：自己发布的五个不同病例只计 1 位发布者，五位发布者才是 5/5', () => {
+test('真实规则案例：自己发布的病例全部排除，五位其他发布者才是 5/5', () => {
   const fiveOwnCases = Array.from({ length: 5 }, (_, index) => fact({
     id: `own-five-${index}`,
     recordId: `own-five-case-${index}`,
@@ -134,17 +134,17 @@ test('真实规则案例：自己发布的五个不同病例只计 1 位发布�
     recordId: 'own-repeat-case',
     record: { authorId: userId, category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null },
   }))
-  assert.equal(getAspirinDailyProgress(fiveOwnCases, userId, '2026-09-11', config, 5).current, 1)
-  assert.equal(getAspirinDailyProgress(repeatedOwnCase, userId, '2026-09-11', config, 5).current, 1)
+  assert.equal(getAspirinDailyProgress(fiveOwnCases, userId, '2026-09-11', config, 5).current, 0)
+  assert.equal(getAspirinDailyProgress(repeatedOwnCase, userId, '2026-09-11', config, 5).current, 0)
   assert.equal(getAspirinDailyProgress(dailyFacts(5), userId, '2026-09-11', config, 5).current, 5)
 })
 
-test('进度 key 始终使用病例发布者，允许本人病例但不按病例行数累计', () => {
+test('进度 key 始终使用病例发布者，并且本人病例不会进入进度', () => {
   const first = fact({ recordId: 'case-a', record: { authorId: userId, category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null } })
   const second = fact({ recordId: 'case-b', record: { authorId: userId, category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null } })
   const other = fact({ recordId: 'case-c', record: { authorId: 'user-b', category: 'ASK_DOCTORS', status: 'ACTIVE', deletedAt: null } })
   assert.equal(getAspirinProgressKey(first), userId)
-  assert.equal(getAspirinDailyProgress([first, second, other], userId, '2026-09-11', config, 5).current, 2)
+  assert.equal(getAspirinDailyProgress([first, second, other], userId, '2026-09-11', config, 5).current, 1)
 })
 
 test('真实规则案例：连续两天各完成五个病例后达到获取条件', () => {
@@ -213,13 +213,9 @@ test('详情今日进度不受重新获取周期截断影响，并复现真实 C
   assert.equal(daily.current, 1)
 })
 
-test('字符重复率严格使用小于 70% 的边界', () => {
-  const distinctTail = (length: number) => Array.from({ length }, (_, index) => String.fromCodePoint(0x5000 + index)).join('')
-  assert.equal(calculateAspirinRepeatRate(`${'a'.repeat(69)}${distinctTail(31)}`), 0.69)
-  assert.equal(calculateAspirinRepeatRate(`${'a'.repeat(70)}${distinctTail(30)}`), 0.7)
-  assert.equal(calculateAspirinRepeatRate(`${'a'.repeat(71)}${distinctTail(29)}`), 0.71)
-  assert.equal(isValidAspirinConsultation(fact({ content: `${'a'.repeat(69)}${distinctTail(31)}` }), userId, config), true)
-  assert.equal(isValidAspirinConsultation(fact({ content: `${'a'.repeat(70)}${distinctTail(30)}` }), userId, config), false)
+test('正文达到 21 字即有效，不再进行字符重复率判断', () => {
+  assert.equal(isValidAspirinConsultation(fact({ content: 'a'.repeat(21) }), userId, config), true)
+  assert.equal(isValidAspirinConsultation(fact({ content: 'a'.repeat(200) }), userId, config), true)
 })
 
 test('连续合格日按上海自然日计算，缺日不能凑成连续两天', () => {

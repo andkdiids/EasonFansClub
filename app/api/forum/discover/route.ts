@@ -41,6 +41,7 @@ type RecommendationCursor = {
 }
 
 type HotCursor = {
+  isPinned: boolean
   likeCount: number
   replyCount: number
   date: Date
@@ -90,8 +91,6 @@ function recommendationScore(row: DiscoveryRow, seed: DiscoveryFeedSeed) {
   const qualityScore = Math.log1p(row.likeCount) * 4
     + Math.log1p(row.replyCount) * 5
     + Math.log1p(row.viewCount) * 0.5
-    + (row.isFeatured ? 18 : 0)
-    + (row.isPinned ? 12 : 0)
     + (row.isRecommended ? 10 : 0)
   const explorationScore = stableRecommendationWeight(seed.value, row.id) * 18
   return freshnessScore + qualityScore + explorationScore
@@ -100,35 +99,41 @@ function recommendationScore(row: DiscoveryRow, seed: DiscoveryFeedSeed) {
 function parseCursor(value: unknown) {
   if (typeof value !== 'string' || !value) return null
   const parts = value.split('|')
-  const dateValue = parts.length >= 4 ? parts[2] : parts[0]
-  const id = parts.length >= 4 ? parts[3] : parts[1]
+  const hasLegacyPinAwareFields = parts.length >= 4
+  const hasPinAwareFields = parts.length >= 3 && (parts[0] === '0' || parts[0] === '1')
+  const dateValue = hasLegacyPinAwareFields ? parts[2] : hasPinAwareFields ? parts[1] : parts[0]
+  const id = hasLegacyPinAwareFields ? parts[3] : hasPinAwareFields ? parts[2] : parts[1]
   if (!dateValue || !id) return null
   const date = new Date(dateValue)
   return Number.isNaN(date.getTime()) ? null : {
     date,
     id: id.slice(0, 80),
-    isPinned: parts.length >= 4 ? parts[0] === '1' : undefined,
-    isFeatured: parts.length >= 4 ? parts[1] === '1' : undefined,
+    isPinned: hasLegacyPinAwareFields || hasPinAwareFields ? parts[0] === '1' : undefined,
   }
 }
 
-function buildCursor(row: Pick<DiscoveryRow, 'isPinned' | 'isFeatured' | 'createdAt' | 'id'>) {
-  return `${row.isPinned ? '1' : '0'}|${row.isFeatured ? '1' : '0'}|${row.createdAt.toISOString()}|${row.id}`
+function buildCursor(row: Pick<DiscoveryRow, 'isPinned' | 'createdAt' | 'id'>) {
+  return `${row.isPinned ? '1' : '0'}|${row.createdAt.toISOString()}|${row.id}`
 }
 
 function parseHotCursor(value: unknown): HotCursor | null {
   if (typeof value !== 'string' || !value) return null
-  const [prefix, likeValue, replyValue, dateValue, id] = value.split('|')
+  const parts = value.split('|')
+  const isCurrentFormat = parts.length === 6
+  const [prefix, pinnedValue, likeValue, replyValue, dateValue, id] = isCurrentFormat
+    ? parts
+    : [parts[0], '0', parts[1], parts[2], parts[3], parts[4]]
   const likeCount = Number.parseInt(likeValue || '', 10)
   const replyCount = Number.parseInt(replyValue || '', 10)
   const date = new Date(dateValue || '')
   if (prefix !== 'h' || !Number.isSafeInteger(likeCount) || likeCount < 0 || !Number.isSafeInteger(replyCount) || replyCount < 0) return null
   if (Number.isNaN(date.getTime()) || !id || id.length > 80) return null
-  return { likeCount, replyCount, date, id }
+  if (pinnedValue !== '0' && pinnedValue !== '1') return null
+  return { isPinned: pinnedValue === '1', likeCount, replyCount, date, id }
 }
 
-function buildHotCursor(row: Pick<DiscoveryRow, 'likeCount' | 'replyCount' | 'createdAt' | 'id'>) {
-  return `h|${row.likeCount}|${row.replyCount}|${row.createdAt.toISOString()}|${row.id}`
+function buildHotCursor(row: Pick<DiscoveryRow, 'isPinned' | 'likeCount' | 'replyCount' | 'createdAt' | 'id'>) {
+  return `h|${row.isPinned ? '1' : '0'}|${row.likeCount}|${row.replyCount}|${row.createdAt.toISOString()}|${row.id}`
 }
 
 function isGifUrl(value: string | null | undefined) {
@@ -239,21 +244,20 @@ const discoverySelect = {
 
 type DiscoveryRow = Prisma.PostGetPayload<{ select: typeof discoverySelect }>
 
-function buildWhere({ boardId, boardSlug, query, excludedPostIds, excludedAuthorIds, excludeSystemPosts }: {
+function buildWhere({ boardId, boardSlug, query, excludedPostIds, excludedAuthorIds, excludeAnnouncementBoard }: {
   boardId?: string
   boardSlug?: string
   query?: string
   excludedPostIds?: string[]
   excludedAuthorIds?: string[]
-  excludeSystemPosts?: boolean
+  excludeAnnouncementBoard?: boolean
 }): Prisma.PostWhereInput {
   return {
     ...publicPostWhere,
     User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     Board: boardSlug
       ? { isActive: true, slug: boardSlug }
-      : excludeSystemPosts ? { isActive: true, slug: { not: 'announcements' } } : { isActive: true },
-    ...(excludeSystemPosts ? { isPinned: false, isFeatured: false } : {}),
+      : excludeAnnouncementBoard ? { isActive: true, slug: { not: 'announcements' } } : { isActive: true },
     ...(boardId ? { boardId } : {}),
     ...(query ? { OR: [{ title: { contains: query } }, { summary: { contains: query } }] } : {}),
     ...(excludedPostIds?.length ? { id: { notIn: excludedPostIds } } : {}),
@@ -330,12 +334,12 @@ export async function POST(request: Request) {
   if (mode === 'recommend' && rawCursor && !recommendationCursor) return NextResponse.json({ message: 'cursor invalid' }, { status: 400 })
   const currentUserId = user?.id
   const interactionUserId = currentUserId || '__anonymous__'
-  const isSystemSort = !boardValue && !query && (mode === 'latest' || mode === 'hot')
+  const excludeAnnouncementBoard = !boardValue && !query && (mode === 'latest' || mode === 'hot')
   const where = buildWhere({
     boardId: selectedBoard && !isConfiguredForumBoardId(selectedBoard.id) ? selectedBoard.id : undefined,
     boardSlug: selectedBoard && isConfiguredForumBoardId(selectedBoard.id) ? selectedBoard.slug : undefined,
     query,
-    excludeSystemPosts: isSystemSort,
+    excludeAnnouncementBoard,
   })
 
   let rows: DiscoveryRow[] = []
@@ -357,6 +361,8 @@ export async function POST(request: Request) {
       const ranked = candidates
         .filter((row, index, all) => all.findIndex((candidate) => candidate.id === row.id) === index)
         .sort((left, right) => {
+          const pinnedDelta = Number(right.isPinned) - Number(left.isPinned)
+          if (pinnedDelta !== 0) return pinnedDelta
           const scoreDelta = recommendationScore(right, feedSeed!) - recommendationScore(left, feedSeed!)
           if (scoreDelta !== 0) return scoreDelta
           const dateDelta = right.createdAt.getTime() - left.createdAt.getTime()
@@ -379,7 +385,7 @@ export async function POST(request: Request) {
     for (let window = 0; window < DISCOVERY_MAX_RECOMMEND_WINDOWS && selectedRows.length < limit; window += 1) {
       const candidates = await prisma.post.findMany({
         where: recommendWhere,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         skip: (startWindow + window) * candidateSize,
         take: candidateSize,
         select: {
@@ -400,7 +406,7 @@ export async function POST(request: Request) {
     if (selectedRows.length === 0) {
       const fallbackCandidates = await prisma.post.findMany({
         where: { AND: [recommendWhere, { id: { notIn: [...remainingPostIds] } }] },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         select: {
           ...discoverySelect,
@@ -420,10 +426,11 @@ export async function POST(request: Request) {
   } else if (mode === 'hot') {
     const cursorConditions: Prisma.PostWhereInput[] = hotCursor
       ? [
-          { likeCount: { lt: hotCursor.likeCount } },
-          { likeCount: hotCursor.likeCount, replyCount: { lt: hotCursor.replyCount } },
-          { likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: { lt: hotCursor.date } },
-          { likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: hotCursor.date, id: { lt: hotCursor.id } },
+          ...(hotCursor.isPinned ? [{ isPinned: false }] : []),
+          { isPinned: hotCursor.isPinned, likeCount: { lt: hotCursor.likeCount } },
+          { isPinned: hotCursor.isPinned, likeCount: hotCursor.likeCount, replyCount: { lt: hotCursor.replyCount } },
+          { isPinned: hotCursor.isPinned, likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: { lt: hotCursor.date } },
+          { isPinned: hotCursor.isPinned, likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: hotCursor.date, id: { lt: hotCursor.id } },
         ]
       : []
     const hotWhere: Prisma.PostWhereInput = hotCursor
@@ -431,7 +438,7 @@ export async function POST(request: Request) {
       : where
     const pageRows = await prisma.post.findMany({
       where: hotWhere,
-      orderBy: [{ likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ isPinned: 'desc' }, { likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {
         ...discoverySelect,
@@ -444,13 +451,12 @@ export async function POST(request: Request) {
     const last = rows.at(-1)
     nextCursor = last ? buildHotCursor(last) : null
   } else {
-    const pinAwareOrder = !query && !isSystemSort
-    const cursorConditions: Prisma.PostWhereInput[] = cursor && pinAwareOrder && typeof cursor.isPinned === 'boolean' && typeof cursor.isFeatured === 'boolean'
+    const pinAwareOrder = !query
+    const cursorConditions: Prisma.PostWhereInput[] = cursor && pinAwareOrder && typeof cursor.isPinned === 'boolean'
       ? [
           ...(cursor.isPinned ? [{ isPinned: false }] : []),
-          ...(cursor.isFeatured ? [{ isPinned: cursor.isPinned, isFeatured: false }] : []),
-          { isPinned: cursor.isPinned, isFeatured: cursor.isFeatured, createdAt: { lt: cursor.date } },
-          { isPinned: cursor.isPinned, isFeatured: cursor.isFeatured, createdAt: cursor.date, id: { lt: cursor.id } },
+          { isPinned: cursor.isPinned, createdAt: { lt: cursor.date } },
+          { isPinned: cursor.isPinned, createdAt: cursor.date, id: { lt: cursor.id } },
         ]
       : cursor
         ? [
@@ -464,7 +470,7 @@ export async function POST(request: Request) {
     const pageRows = await prisma.post.findMany({
       where: latestWhere,
       orderBy: pinAwareOrder
-        ? [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+        ? [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
         : [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {

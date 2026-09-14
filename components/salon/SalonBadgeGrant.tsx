@@ -71,11 +71,11 @@ export function SalonBadgeGrant({ postId, postTitle, postSummary, author }: Read
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ badgeId: selected.id, operationId }),
       })
-      const data = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null
+      const data = await response.json().catch(() => null) as { ok?: boolean; message?: string; badgeName?: string } | null
       if (!response.ok || !data?.ok) throw new Error(data?.message || '勋章派发失败')
       setBadges((current) => current.map((badge) => badge.id === selected.id ? { ...badge, owned: true } : badge))
       setSelected(null)
-      setSuccess(`勋章已派发给「${author.nickname}」`)
+      setSuccess(data.message || `已向「${author.nickname}」派发「${data.badgeName || selected.name}」勋章`)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '勋章派发失败')
     } finally {
@@ -91,7 +91,7 @@ export function SalonBadgeGrant({ postId, postTitle, postSummary, author }: Read
       {loading ? <p role="status">正在读取可派发勋章…</p> : null}
       {error ? <p className="salon-form-error" role="alert">{error}</p> : null}
       {!loading && classificationMessage && !classificationAvailable ? <p className="salon-badge-empty" role="status">{classificationMessage}</p> : null}
-      {!loading && classificationAvailable ? <><label><span>搜索勋章</span><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索勋章名称" /></label><div className="salon-badge-list">{visibleBadges.map((badge) => <button type="button" key={badge.id} className={`salon-badge-option${selected?.id === badge.id ? ' is-selected' : ''}`} disabled={badge.owned} onClick={() => setSelected(badge)}><span className="salon-badge-icon">{badge.iconUrl ? <img src={badge.iconUrl} alt="" /> : '徽'}</span><span><strong>{badge.name}</strong><small>{badge.rarity || '普通'} · {badge.owned ? '已获得' : '可派发'}</small></span></button>)}{!visibleBadges.length ? <p className="salon-badge-empty">没有符合条件的沙龙勋章。</p> : null}</div></> : null}
+      {!loading && classificationAvailable ? <><p className="salon-badge-section-title">可派发勋章</p><label><span>搜索勋章</span><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索勋章名称" /></label><div className="salon-badge-list">{visibleBadges.map((badge) => <button type="button" key={badge.id} className={`salon-badge-option${selected?.id === badge.id ? ' is-selected' : ''}`} disabled={badge.owned} onClick={() => setSelected(badge)}><span className="salon-badge-icon">{badge.iconUrl ? <img src={badge.iconUrl} alt="" /> : '徽'}</span><span><strong>{badge.name}</strong><small>{badge.rarity || '普通'} · {badge.owned ? '已拥有' : '可派发'}</small>{badge.acquisitionDescription ? <small>{badge.acquisitionDescription}</small> : null}</span></button>)}{!visibleBadges.length ? <p className="salon-badge-empty">没有符合条件的沙龙勋章。</p> : null}</div></> : null}
       <div><button type="button" onClick={() => setOpen(false)}>关闭</button>{selected ? <button type="button" className="is-approve" disabled={submitting} onClick={() => void grant()}>{submitting ? '派发中…' : `确认派发给「${author.nickname}」`}</button> : null}</div>
       {selected ? <p className="salon-badge-confirm">确认向「{author.nickname}」派发：{selected.name}<br />当前内容：《{postTitle}》</p> : null}
     </section></div> : null}

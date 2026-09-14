@@ -10,7 +10,9 @@ import { formatUid } from '@/lib/uid'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
-const liveActionClass = 'inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-black text-[var(--primary)] transition hover:bg-[var(--surface-subtle)]'
+const messageActionClass = 'inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-3 py-2.5 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90 sm:px-4'
+const liveActionClass = 'inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-black text-[var(--primary)] transition hover:bg-[var(--surface-subtle)] sm:px-4'
+const destructiveActionClass = 'inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-[var(--danger)] bg-transparent px-3 py-2.5 text-sm font-black text-[var(--danger)] transition hover:bg-[var(--surface-subtle)] sm:px-4'
 
 export function FriendProfileActions({
   targetUserId,
@@ -63,27 +65,45 @@ export function FriendProfileActions({
     }
   }
 
+  function scrollToMessageWall() {
+    document.getElementById('profile-wall')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <>
-      {hasViewer && isFriend && !initialIsBlocked ? (
-        <>
-          <button
-            type="button"
-            onClick={() => {
-              setError('')
-              setConfirmOpen(true)
-            }}
-            className="inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--danger)] bg-transparent px-4 py-2.5 text-sm font-black text-[var(--danger)] transition hover:bg-[var(--surface-subtle)]"
-          >
-            删除好友
+      <div className="profile-actions-groups flex min-w-full items-start justify-between gap-3">
+        <div className="profile-actions-main flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <button type="button" onClick={scrollToMessageWall} className={messageActionClass} aria-controls="profile-wall">
+            去留言
           </button>
-          <FriendFollowButton userId={targetUserId} initialFollowed={isFollowed} onChanged={setIsFollowed} buttonClassName="inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-black text-[var(--primary)] transition hover:bg-[var(--surface-subtle)] disabled:cursor-wait disabled:opacity-60" />
-        </>
-      ) : null}
-      {hasViewer && !isFriend && !initialIsBlocked ? <AddFriendButton uid={targetUid} initialStatus={isFriend ? 'FRIEND' : friendStatus === 'FRIEND' ? 'NONE' : friendStatus} buttonClassName="inline-flex min-h-11 items-center justify-center rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-4 py-2.5 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70" /> : null}
-      {!hasViewer ? <Link href="/login" className={liveActionClass}>登录后添加好友</Link> : null}
-      {publicLiveCount > 0 ? <Link href={`/user/${formatUid(targetUid)}/live`} className={liveActionClass}>TA的现场</Link> : null}
-      {error ? <p role="alert" className="w-full basis-full text-xs font-bold text-[var(--danger)]">{error}</p> : null}
+          {hasViewer && isFriend && !initialIsBlocked ? (
+            <FriendFollowButton
+              userId={targetUserId}
+              initialFollowed={isFollowed}
+              onChanged={setIsFollowed}
+              buttonClassName="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-black text-[var(--primary)] transition hover:bg-[var(--surface-subtle)] disabled:cursor-wait disabled:opacity-60 sm:px-4"
+            />
+          ) : null}
+          {hasViewer && !isFriend && !initialIsBlocked ? <AddFriendButton uid={targetUid} initialStatus={isFriend ? 'FRIEND' : friendStatus === 'FRIEND' ? 'NONE' : friendStatus} buttonClassName="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-3 py-2.5 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70 sm:px-4" /> : null}
+          {!hasViewer ? <Link href="/login" className={liveActionClass}>登录后添加好友</Link> : null}
+          {publicLiveCount > 0 ? <Link href={`/user/${formatUid(targetUid)}/live`} className={liveActionClass}>TA的现场</Link> : null}
+          {error ? <p role="alert" className="w-full basis-full text-xs font-bold text-[var(--danger)]">{error}</p> : null}
+        </div>
+        {hasViewer && isFriend && !initialIsBlocked ? (
+          <div className="profile-actions-danger shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setError('')
+                setConfirmOpen(true)
+              }}
+              className={destructiveActionClass}
+            >
+              删除好友
+            </button>
+          </div>
+        ) : null}
+      </div>
       <ConfirmDialog
         open={confirmOpen}
         title="确定删除该好友吗？"

@@ -80,6 +80,11 @@ export function parseBadgeDefinition(body: BadgeInput, partial = false) {
     data.isAutoGrant = grantType === 'AUTO'
   }
 
+  if (!partial || 'salonAssignable' in body) {
+    if (body.salonAssignable !== undefined && typeof body.salonAssignable !== 'boolean') return { error: '沙龙派发开关无效' }
+    data.salonAssignable = body.salonAssignable === true
+  }
+
   if (!partial || 'isWearable' in body) data.isWearable = body.isWearable !== false
   if (!partial || 'isEnabled' in body) {
     data.isEnabled = body.isEnabled !== false

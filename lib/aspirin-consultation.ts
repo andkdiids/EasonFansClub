@@ -50,53 +50,22 @@ function removeInvisibleAndWhitespace(value: string) {
   return value.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/gu, '')
 }
 
-function isPunctuationOrSymbol(value: string) {
-  return /^[\p{P}\p{S}\s]+$/u.test(value)
-}
-
-function splitGraphemes(value: string) {
-  try {
-    const Segmenter = (Intl as typeof Intl & {
-      Segmenter?: new (locales?: string | string[], options?: { granularity: 'grapheme' }) => { segment(input: string): Iterable<{ segment: string }> }
-    }).Segmenter
-    if (Segmenter) return Array.from(new Segmenter('zh-CN', { granularity: 'grapheme' }).segment(value), (item) => item.segment)
-  } catch { /* Array.from below is a safe fallback for older runtimes. */ }
-  return Array.from(value)
-}
-
-/** The normalized text used by both the length and anti-repeat checks. */
+/** The normalized text used by the minimum-length check. */
 export function normalizeAspirinConsultationText(value: unknown) {
   return removeInvisibleAndWhitespace(extractVisibleClinicText(value))
 }
 
-/** Punctuation is ignored for repetition so repeated punctuation cannot mask a low-value answer. */
-export function normalizeAspirinRepeatText(value: unknown) {
-  const normalized = normalizeAspirinConsultationText(value).toLocaleLowerCase('en-US')
-  return splitGraphemes(normalized).filter((grapheme) => !isPunctuationOrSymbol(grapheme)).join('')
-}
-
-export function calculateAspirinRepeatRate(value: unknown) {
-  const normalized = normalizeAspirinRepeatText(value)
-  if (!normalized) return 1
-  const counts = new Map<string, number>()
-  const graphemes = splitGraphemes(normalized)
-  for (const grapheme of graphemes) counts.set(grapheme, (counts.get(grapheme) || 0) + 1)
-  const mostCommon = Math.max(...counts.values())
-  return mostCommon / graphemes.length
-}
-
 export function isValidAspirinConsultation(fact: AspirinConsultationFact, userId: string, config: AspirinRuleConfig) {
-  // The Aspirin badge counts the current user's valid clinic consultations.
-  // Whether the case was opened by the same user is not a badge qualification
-  // condition; keep the relation available for clinic business logic, but do
-  // not exclude the consultation from progress or streak qualification.
+  // The consultation must belong to the current user, but a case published by
+  // that same user is not an eligible "other user" case for this badge.
   if (fact.authorId !== userId) return false
   if (fact.record.category !== 'ASK_DOCTORS') return false
   if (fact.status !== 'ACTIVE' || fact.record.status !== 'ACTIVE') return false
   if (fact.deletedAt || fact.record.deletedAt) return false
+  if (fact.record.authorId === userId) return false
   const text = normalizeAspirinConsultationText(fact.content)
   if (countGraphemes(text) < config.minLength) return false
-  return calculateAspirinRepeatRate(text) < config.maxRepeatRate
+  return true
 }
 
 export function getAspirinQualifiedDateKey(value: Date | string) {

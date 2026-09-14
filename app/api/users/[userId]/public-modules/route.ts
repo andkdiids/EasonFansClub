@@ -6,7 +6,7 @@ import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { toPublicMediaUrl } from '@/lib/media-url'
-import { getProfileRecordPagination, loadProfileRecentMessagesPage } from '@/lib/profile-page'
+import { getProfileRecordPagination, loadProfileRecentMessagesPage, PROFILE_POST_PAGE_SIZE, PROFILE_RECORD_PAGE_SIZE } from '@/lib/profile-page'
 import { getProfileRecordPreferences } from '@/lib/profile-record-preferences'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
@@ -34,7 +34,10 @@ export async function GET(request: Request, context: RouteContext) {
   const { userId } = await context.params
   const { searchParams } = new URL(request.url)
   const moduleKey = searchParams.get('module') || 'posts'
-  const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1)
+  const pageParam = moduleKey === 'posts'
+    ? searchParams.get('postsPage') || searchParams.get('page') || '1'
+    : searchParams.get('page') || '1'
+  const page = Math.max(1, Number.parseInt(pageParam, 10) || 1)
   const viewer = await getCurrentUser()
   const now = new Date()
   const target = await safeDb('userModules.findUser', findPublicUserId(userId), null)
@@ -44,8 +47,13 @@ export async function GET(request: Request, context: RouteContext) {
   if (!(PUBLIC_PROFILE_MODULE_KEYS as readonly string[]).includes(moduleKey)) return NextResponse.json({ message: '模块不存在' }, { status: 404 })
   const visibility = await getProfileVisibility(target.id, viewer?.id)
   const typedModuleKey = moduleKey as PublicProfileModuleKey
+  const paginationFor = (total: number, requestedPage: number) => getProfileRecordPagination(
+    total,
+    requestedPage,
+    typedModuleKey === 'posts' ? PROFILE_POST_PAGE_SIZE : PROFILE_RECORD_PAGE_SIZE,
+  )
   if (!isProfileModuleVisible(visibility.settings, typedModuleKey, visibility.isSelf)) {
-    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' ? getProfileRecordPagination(0, page) : undefined
+    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' ? paginationFor(0, page) : undefined
     return NextResponse.json({ items: [], ...(pagination ? { pagination } : {}), visibility: { visible: false } })
   }
   let recordPreferences
@@ -56,7 +64,7 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ message: '个人记录暂时无法加载，请稍后重试' }, { status: 503, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } })
   }
   if (!visibility.isSelf && recordPreferences.find((preference) => preference.key === typedModuleKey)?.visible === false) {
-    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' || typedModuleKey === 'salon' ? getProfileRecordPagination(0, page) : undefined
+    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' || typedModuleKey === 'salon' ? paginationFor(0, page) : undefined
     return NextResponse.json({ items: [], ...(pagination ? { pagination } : {}), visibility: { visible: false } })
   }
 
@@ -73,13 +81,13 @@ export async function GET(request: Request, context: RouteContext) {
       [],
     )
     if (requestedGroupId && requestedGroupId !== PROFILE_POST_GROUP_UNGROUPED && !groups.some((group) => group.id === requestedGroupId)) {
-      return NextResponse.json({ items: [], pagination: getProfileRecordPagination(0, page), groups })
+      return NextResponse.json({ items: [], pagination: paginationFor(0, page), groups })
     }
     const postWhere = buildProfilePostWhere(target.id, canViewPendingPosts)
     if (requestedGroupId === PROFILE_POST_GROUP_UNGROUPED) Object.assign(postWhere, { userPostGroupId: null })
     else if (requestedGroupId) Object.assign(postWhere, { userPostGroupId: requestedGroupId })
     const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
-    const pagination = getProfileRecordPagination(total, page)
+    const pagination = paginationFor(total, page)
     const posts = await safeDb(
       'userModules.posts',
       prisma.post.findMany({

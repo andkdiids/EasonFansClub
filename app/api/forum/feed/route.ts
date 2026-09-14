@@ -53,14 +53,14 @@ export async function GET(request: Request) {
     ] } : {}),
   }
   const orderBy: Prisma.PostOrderByWithRelationInput[] = sort === 'latest-reply'
-    ? [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { updatedAt: 'desc' }]
+    ? [{ isPinned: 'desc' }, { updatedAt: 'desc' }, { id: 'desc' }]
     : sort === 'most-replies'
-      ? [{ replyCount: 'desc' }, { createdAt: 'desc' }]
+      ? [{ isPinned: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
       : sort === 'featured'
-        ? [{ isPinned: 'desc' }, { createdAt: 'desc' }]
+        ? [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
         : sort === 'pinned'
-          ? [{ createdAt: 'desc' }]
-          : [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }]
+          ? [{ createdAt: 'desc' }, { id: 'desc' }]
+          : [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
 
   const { total, totalPages, page, rows } = await prisma.$transaction(async (tx) => {
     const total = await tx.post.count({ where })

@@ -19,6 +19,24 @@ type DailyMessageDeletionSource = {
   content: string
 }
 
+/** Keep denormalized check-in and friend-activity projections in sync after an edit. */
+export async function syncDailyMessageContentEffects(
+  tx: Pick<Prisma.TransactionClient, 'checkIn' | 'friendActivity'>,
+  message: DailyMessageDeletionSource,
+) {
+  if (message.checkInId) {
+    await tx.checkIn.updateMany({
+      where: { id: message.checkInId, userId: message.userId },
+      data: { message: message.content },
+    })
+  }
+
+  await tx.friendActivity.updateMany({
+    where: { dailyMessageId: message.id },
+    data: { content: message.content },
+  })
+}
+
 /**
  * Keep the denormalized CheckIn.message and FriendActivity.content projection
  * in sync with the soft-deleted DailyMessage. The CheckIn row itself is never

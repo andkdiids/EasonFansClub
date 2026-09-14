@@ -8,7 +8,7 @@ import { ModuleFallback } from '@/components/ModuleFallback'
 import { Pagination } from '@/components/ui/Pagination'
 import { getMoodDisplay } from '@/lib/checkin-mood'
 import { formatUid } from '@/lib/uid'
-import { PROFILE_RECORD_PAGE_SIZE, type ProfileRecentMessage, type ProfileRecordPagination } from '@/lib/profile-page'
+import { PROFILE_POST_PAGE_SIZE, PROFILE_RECORD_PAGE_SIZE, type ProfileRecentMessage, type ProfileRecordPagination } from '@/lib/profile-page'
 import { scrollToSectionTop } from '@/lib/pagination'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
@@ -102,6 +102,11 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
   const [expandedRecentMessages, setExpandedRecentMessages] = useState<Record<string, boolean>>({})
   const [deleteTarget, setDeleteTarget] = useState<ProfileRecentMessage | null>(null)
   const [isDeletingRecentMessage, setIsDeletingRecentMessage] = useState(false)
+  const [editingRecentMessage, setEditingRecentMessage] = useState<ProfileRecentMessage | null>(null)
+  const [editingRecentMessageContent, setEditingRecentMessageContent] = useState('')
+  const [editConfirmOpen, setEditConfirmOpen] = useState(false)
+  const [isSavingRecentMessageEdit, setIsSavingRecentMessageEdit] = useState(false)
+  const [recentMessageEditError, setRecentMessageEditError] = useState('')
   const [recentMessageNotice, setRecentMessageNotice] = useState('')
   const [recentMessageError, setRecentMessageError] = useState('')
   // #3 个人主页「管理」模式：批量删除自己的帖子。
@@ -125,7 +130,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
     const params = new URLSearchParams()
     if (active !== firstVisibleModule) params.set('module', active)
     if (active === 'posts') {
-      if (modulePages.posts > 1) params.set('page', String(modulePages.posts))
+      if (modulePages.posts > 1) params.set('postsPage', String(modulePages.posts))
       if (postGroupFilter && postGroupFilter !== ALL_POST_GROUPS) params.set('groupId', postGroupFilter)
     }
     const query = params.toString()
@@ -139,14 +144,15 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
   const syncStateFromUrl = useCallback(() => {
     const params = new URLSearchParams(window.location.search)
     const urlModule = params.get('module')
-    const urlPageRaw = Number(params.get('page'))
+    const effectiveModule = urlModule || (params.has('postsPage') ? 'posts' : null)
+    const urlPageRaw = Number(effectiveModule === 'posts' ? (params.get('postsPage') || params.get('page')) : params.get('page'))
     const urlPage = Number.isFinite(urlPageRaw) && urlPageRaw > 0 ? Math.trunc(urlPageRaw) : 1
     const urlGroupId = params.get('groupId') || ALL_POST_GROUPS
-    if (urlModule && ALL_MODULE_KEYS.includes(urlModule as ModuleKey) && visibleModuleKeysRef.current.includes(urlModule as ModuleKey)) {
-      setActive((current) => (current === urlModule ? current : (urlModule as ModuleKey)))
-      if (urlModule === 'posts') setPostGroupFilter((current) => (current === urlGroupId ? current : urlGroupId))
+    if (effectiveModule && ALL_MODULE_KEYS.includes(effectiveModule as ModuleKey) && visibleModuleKeysRef.current.includes(effectiveModule as ModuleKey)) {
+      setActive((current) => (current === effectiveModule ? current : (effectiveModule as ModuleKey)))
+      if (effectiveModule === 'posts') setPostGroupFilter((current) => (current === urlGroupId ? current : urlGroupId))
     }
-    if (urlModule === 'posts' && urlPage > 1) {
+    if (effectiveModule === 'posts' && urlPage > 1) {
       setModulePages((current) => (current.posts === urlPage ? current : { ...current, posts: urlPage }))
     }
   }, [])
@@ -166,7 +172,7 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
     const params = new URLSearchParams()
     if (active !== firstVisibleModule) params.set('module', active)
     if (active === 'posts') {
-      if (modulePages.posts > 1) params.set('page', String(modulePages.posts))
+      if (modulePages.posts > 1) params.set('postsPage', String(modulePages.posts))
       if (postGroupFilter && postGroupFilter !== ALL_POST_GROUPS) params.set('groupId', postGroupFilter)
     }
     const query = params.toString()
@@ -220,8 +226,8 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
     try {
       const params = new URLSearchParams({ module: moduleKey })
       if (isPaginatedModule(moduleKey)) {
-        params.set('page', String(Math.max(1, Math.trunc(requestedPage) || 1)))
-        params.set('pageSize', String(PROFILE_RECORD_PAGE_SIZE))
+        params.set(moduleKey === 'posts' ? 'postsPage' : 'page', String(Math.max(1, Math.trunc(requestedPage) || 1)))
+        params.set('pageSize', String(moduleKey === 'posts' ? PROFILE_POST_PAGE_SIZE : PROFILE_RECORD_PAGE_SIZE))
       }
       if (moduleKey === 'posts' && requestedGroupId) params.set('groupId', requestedGroupId)
       const response = await fetch(`/api/users/${uid}/public-modules?${params.toString()}`, { cache: 'no-store' })
@@ -305,6 +311,85 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
       return next
     })
   }, [])
+
+  const updateRecentMessageInCache = useCallback((messageId: string, content: string, editedAt: string) => {
+    setCache((current) => {
+      const next: CacheState = {}
+      for (const [key, value] of Object.entries(current)) {
+        if (!value) continue
+        const isRecentMessagesCache = key.startsWith('recent-messages:')
+        next[key] = isRecentMessagesCache
+          ? {
+              ...value,
+              items: value.items.map((item) => item.id === messageId && 'comments' in item
+                ? { ...item, content, editedAt, canEdit: false }
+                : item),
+            }
+          : value
+      }
+      return next
+    })
+  }, [])
+
+  function startEditRecentMessage(message: ProfileRecentMessage) {
+    if (!isSelf || !message.canEdit || message.editedAt) return
+    setRecentMessageNotice('')
+    setRecentMessageError('')
+    setRecentMessageEditError('')
+    setEditingRecentMessage(message)
+    setEditingRecentMessageContent(message.content)
+  }
+
+  function cancelEditRecentMessage() {
+    if (isSavingRecentMessageEdit) return
+    setEditConfirmOpen(false)
+    setRecentMessageEditError('')
+    setEditingRecentMessage(null)
+    setEditingRecentMessageContent('')
+  }
+
+  function requestSubmitRecentMessageEdit() {
+    if (!editingRecentMessage || isSavingRecentMessageEdit) return
+    if (!editingRecentMessageContent.trim()) {
+      setRecentMessageEditError('留言不能为空且最多 300 字')
+      return
+    }
+    setRecentMessageEditError('')
+    setEditConfirmOpen(true)
+  }
+
+  async function confirmEditRecentMessage() {
+    if (!editingRecentMessage || isSavingRecentMessageEdit) return
+    const messageId = editingRecentMessage.id
+    setIsSavingRecentMessageEdit(true)
+    setRecentMessageEditError('')
+    try {
+      const response = await fetch(`/api/daily-messages/${encodeURIComponent(messageId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({ message: editingRecentMessageContent }),
+      })
+      const data = await response.json().catch(() => ({})) as {
+        message?: string
+        dailyMessage?: { content?: string; editedAt?: string }
+      }
+      if (!response.ok) throw new Error(typeof data.message === 'string' ? data.message : '留言修改失败，请稍后重试')
+
+      const content = typeof data.dailyMessage?.content === 'string' ? data.dailyMessage.content : editingRecentMessageContent.trim()
+      const editedAt = typeof data.dailyMessage?.editedAt === 'string' ? data.dailyMessage.editedAt : new Date().toISOString()
+      updateRecentMessageInCache(messageId, content, editedAt)
+      setEditingRecentMessage(null)
+      setEditingRecentMessageContent('')
+      setEditConfirmOpen(false)
+      setRecentMessageNotice('留言已修改')
+    } catch (editError) {
+      setRecentMessageEditError(editError instanceof Error ? editError.message : '留言修改失败，请稍后重试')
+    } finally {
+      setIsSavingRecentMessageEdit(false)
+    }
+  }
 
   async function confirmDeleteRecentMessage() {
     if (!deleteTarget || isDeletingRecentMessage) return
@@ -483,12 +568,31 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
             onProfilePostDeleted={handleProfilePostDeleted}
             expandedRecentMessages={expandedRecentMessages}
             onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
+            onRequestEditRecentMessage={isSelf ? startEditRecentMessage : undefined}
+            editingRecentMessageId={editingRecentMessage?.id || null}
+            editingRecentMessageContent={editingRecentMessageContent}
+            editingRecentMessageError={recentMessageEditError}
+            onEditingRecentMessageContentChange={setEditingRecentMessageContent}
+            onSubmitEditRecentMessage={requestSubmitRecentMessageEdit}
+            onCancelEditRecentMessage={cancelEditRecentMessage}
+            savingRecentMessageEdit={isSavingRecentMessageEdit}
             onRequestDeleteRecentMessage={isSelf ? (message) => { setRecentMessageNotice(''); setRecentMessageError(''); setDeleteTarget(message) } : undefined}
             deletingRecentMessageId={isDeletingRecentMessage ? deleteTarget?.id || null : null}
           />
         ) : null}
       </div>
     </section>
+      <ConfirmDialog
+        open={editConfirmOpen}
+        title="确认修改留言？"
+        description="每条每日挂号留言只有一次编辑机会。本次修改提交后，将无法再次编辑，请确认内容无误。"
+        confirmLabel="确认修改"
+        cancelLabel="取消"
+        loading={isSavingRecentMessageEdit}
+        error={recentMessageEditError}
+        onConfirm={() => void confirmEditRecentMessage()}
+        onCancel={() => { if (!isSavingRecentMessageEdit) { setEditConfirmOpen(false); setRecentMessageEditError('') } }}
+      />
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="删除挂号留言？"
@@ -534,6 +638,14 @@ function ModuleContent({
   onProfilePostDeleted,
   expandedRecentMessages,
   onToggleRecentMessage,
+  onRequestEditRecentMessage,
+  editingRecentMessageId,
+  editingRecentMessageContent,
+  editingRecentMessageError,
+  onEditingRecentMessageContentChange,
+  onSubmitEditRecentMessage,
+  onCancelEditRecentMessage,
+  savingRecentMessageEdit,
   onRequestDeleteRecentMessage,
   deletingRecentMessageId,
 }: {
@@ -557,6 +669,14 @@ function ModuleContent({
   onProfilePostDeleted: () => void
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
+  onRequestEditRecentMessage?: (message: ProfileRecentMessage) => void
+  editingRecentMessageId?: string | null
+  editingRecentMessageContent?: string
+  editingRecentMessageError?: string
+  onEditingRecentMessageContentChange?: (value: string) => void
+  onSubmitEditRecentMessage?: () => void
+  onCancelEditRecentMessage?: () => void
+  savingRecentMessageEdit?: boolean
   onRequestDeleteRecentMessage?: (message: ProfileRecentMessage) => void
   deletingRecentMessageId?: string | null
 }) {
@@ -661,14 +781,36 @@ function ModuleContent({
       <div className="space-y-3">
         {messages.map((message) => {
           const mood = getMoodDisplay(message)
+          const isEditingRecentMessage = editingRecentMessageId === message.id
           return (
           <article key={message.id} className="min-w-0 border border-[var(--border)] bg-[var(--surface-subtle)] p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2 text-xs font-black text-brand-950">
               {mood.formatted ? <span className="rounded-sm bg-sky-50 px-2 py-1 text-brand-700">{mood.formatted}</span> : null}
               <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString('zh-CN')}</time>
+              {message.editedAt ? <span className="text-emerald-700">已编辑</span> : null}
               <IpRegionLabel ipRegion={message.ipRegion} />
             </div>
-            <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{message.content}</p>
+            {isEditingRecentMessage ? (
+              <div className="mt-2">
+                <textarea
+                  value={editingRecentMessageContent || ''}
+                  maxLength={300}
+                  rows={4}
+                  autoFocus
+                  onChange={(event) => onEditingRecentMessageContentChange?.(event.target.value)}
+                  disabled={savingRecentMessageEdit}
+                  className="w-full resize-y border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none focus:border-[var(--primary)]"
+                  aria-label="编辑挂号留言"
+                />
+                {editingRecentMessageError ? <p role="alert" className="mt-2 text-xs font-bold text-red-600">{editingRecentMessageError}</p> : null}
+                <div className="mt-2 flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={onCancelEditRecentMessage} disabled={savingRecentMessageEdit} className="min-h-8 border border-[var(--border)] px-3 py-1 text-xs font-black text-[var(--foreground)] disabled:opacity-60">取消</button>
+                  <button type="button" onClick={onSubmitEditRecentMessage} disabled={savingRecentMessageEdit} className="min-h-8 bg-[var(--primary)] px-3 py-1 text-xs font-black text-[var(--primary-foreground)] disabled:opacity-60">提交修改</button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{message.content}</p>
+            )}
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-bold text-slate-500">
               <span>赞 {message.likeCount}</span>
               {message.commentCount > 0 || message.comments.length > 0 ? (
@@ -677,6 +819,16 @@ function ModuleContent({
                   <span className="ml-1">{expandedRecentMessages[message.id] ? '收起' : '查看'}</span>
                 </button>
               ) : <span>回复 0</span>}
+              {isSelf && !isEditingRecentMessage && message.canEdit && !message.editedAt && onRequestEditRecentMessage ? (
+                <button
+                  type="button"
+                  aria-label="编辑留言"
+                  onClick={() => onRequestEditRecentMessage(message)}
+                  className="inline-flex min-h-8 shrink-0 items-center rounded-sm bg-sky-50 px-2.5 py-1 text-xs font-black text-brand-700 transition hover:bg-sky-100"
+                >
+                  编辑
+                </button>
+              ) : null}
               {isSelf && onRequestDeleteRecentMessage ? (
                 <button
                   type="button"

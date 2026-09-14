@@ -88,7 +88,6 @@ export function ProfilePageSurface({
   remarkEditor?: ReactNode
 }) {
   const { isSelf, isFriend, isBlocked, hasViewer, friendStatus } = relationship
-  const wallHref = '#profile-wall'
   const canViewWall = isSelf || profile.wallVisibility === 'PUBLIC' || (profile.wallVisibility === 'FRIENDS' && isFriend && !isBlocked)
   const visibleModules = getVisibleProfileModules(profile.privacy, isSelf)
   const genderDisplay = getGenderDisplay(profile)
@@ -141,17 +140,16 @@ export function ProfilePageSurface({
       {isSelf || profile.privacy.showBadgeHistory ? <BadgeMiniShowcase uid={profile.uid} summary={profile.badgeSummary || null} equippedBadges={profile.equippedBadges} equippedBadge={profile.equippedBadge} isSelf={isSelf} /> : null}
 
       <div className="profile-actions-scroll min-w-0" aria-label={isSelf ? '个人操作' : '好友操作'}>
-        <div className="flex w-max min-w-full flex-nowrap items-center gap-2 py-0.5">
-          {isSelf ? (
-            <>
-              <Link href="/profile?edit=1" scroll={false} className={actionLinkClass('primary')}>编辑资料</Link>
-              <Link href={`/user/${formatUid(profile.uid)}`} className={actionLinkClass()}>查看公开主页</Link>
-              <Link href={wallHref} className={actionLinkClass()}>去留言</Link>
-              <Link href="/music/live/me" className={actionLinkClass()}>我的现场</Link>
-              <Link href="/profile/stickers" className={actionLinkClass()}>我的表情包</Link>
-              <Link href="/me/history" className={actionLinkClass()}>最近足迹</Link>
-            </>
-          ) : (
+        {isSelf ? (
+          <div className="flex w-max min-w-full flex-nowrap items-center gap-2 py-0.5">
+            <Link href="/profile?edit=1" scroll={false} className={actionLinkClass('primary')}>编辑资料</Link>
+            <Link href={`/user/${formatUid(profile.uid)}`} className={actionLinkClass()}>查看公开主页</Link>
+            <Link href="/music/live/me" className={actionLinkClass()}>我的现场</Link>
+            <Link href="/profile/stickers" className={actionLinkClass()}>我的表情包</Link>
+            <Link href="/me/history" className={actionLinkClass()}>最近足迹</Link>
+          </div>
+        ) : (
+          <div className="profile-actions-row flex min-w-full items-center gap-2 py-0.5">
             <FriendProfileActions
               targetUserId={profile.id}
               targetUid={profile.uid}
@@ -162,8 +160,8 @@ export function ProfilePageSurface({
               initialIsFollowed={relationship.isFollowed}
               friendStatus={friendStatus}
             />
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <section className="min-w-0 space-y-4">

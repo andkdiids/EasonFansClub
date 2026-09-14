@@ -486,6 +486,7 @@ model DailyMessage {
   deletedAt        DateTime?
   createdAt        DateTime               @default(now())
   updatedAt        DateTime               @updatedAt
+  editedAt         DateTime?
   userId           String
   checkInId        String?                @unique
   checkIn          CheckIn?               @relation(fields: [checkInId], references: [id])

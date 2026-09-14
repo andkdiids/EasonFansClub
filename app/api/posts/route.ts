@@ -140,7 +140,7 @@ export async function GET(request: Request) {
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
       },
-      orderBy: [{ isPinned: 'desc' }, { isFeatured: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       skip,
       take: take + 1,
       select: {

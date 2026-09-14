@@ -20,6 +20,7 @@ const BADGE_SELECT = {
   name: true,
   description: true,
   acquisitionDescription: true,
+  acquisitionDescriptionCustomized: true,
   iconUrl: true,
   visibility: true,
   rarity: true,
@@ -62,6 +63,7 @@ const EQUIPPED_BADGE_SELECT = {
   rarity: true,
   description: true,
   acquisitionDescription: true,
+  acquisitionDescriptionCustomized: true,
   isWearable: true,
   isEnabled: true,
   isActive: true,
@@ -147,6 +149,10 @@ export type GrantBadgeInput = {
   deferPhase3Effects?: boolean
   /** Internal guard used while a chained BADGE_OWNERSHIP evaluation is running. */
   deferOwnershipRecheck?: boolean
+  /** Require an explicit Salon manual-dispatch opt-in on the Badge row. */
+  requireSalonAssignable?: boolean
+  /** Reject a grant when the user already has current ownership. */
+  rejectIfAlreadyOwned?: boolean
 }
 
 export type BadgeOperationResult = {
@@ -180,7 +186,7 @@ async function recordFirstNonInitialBadge(
 }
 
 export class BadgeServiceError extends Error {
-  code: 'USER_NOT_FOUND' | 'BADGE_NOT_FOUND' | 'BADGE_DISABLED' | 'BADGE_NOT_WEARABLE' | 'BADGE_NOT_AVAILABLE' | 'NOT_OWNED' | 'NOT_FOUND' | 'HAS_OWNERS' | 'INVALID_EQUIPPED_ORDER'
+  code: 'USER_NOT_FOUND' | 'BADGE_NOT_FOUND' | 'BADGE_NOT_SALON_ASSIGNABLE' | 'BADGE_ALREADY_OWNED' | 'BADGE_DISABLED' | 'BADGE_NOT_WEARABLE' | 'BADGE_NOT_AVAILABLE' | 'NOT_OWNED' | 'NOT_FOUND' | 'HAS_OWNERS' | 'INVALID_EQUIPPED_ORDER'
 
   constructor(code: BadgeServiceError['code'], message: string) {
     super(message)
@@ -220,8 +226,9 @@ function resolvedAcquisitionForBadge(badge: DbBadge | DbCollectionBadge | Prisma
   const generatedDescription = rule
     ? generateBadgeAcquisitionDescription(rule.ruleType as SupportedBadgeRuleType, rule.threshold, rule.configJson)
     : null
+  const usesCanonicalAspirinDescription = rule?.ruleType === 'CLINIC_CONSULTATION_STREAK' && !badge.acquisitionDescriptionCustomized
   return resolveBadgeAcquisitionDescription({
-    storedDescription: badge.acquisitionDescription,
+    storedDescription: usesCanonicalAspirinDescription ? null : badge.acquisitionDescription,
     generatedDescription,
     hasAngelGiftPrize: 'PharmacyPrize' in badge && badge.PharmacyPrize.length > 0,
   })
@@ -1231,10 +1238,11 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   const user = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true, birthMonth: true, birthDay: true } })
   const badge = await tx.badge.findUnique({
     where: { id: input.badgeId },
-    select: { id: true, name: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true, validityType: true, validityDays: true, BadgeRule: { select: { ruleType: true, configJson: true } } },
+    select: { id: true, name: true, salonAssignable: true, isEnabled: true, isActive: true, availableFrom: true, availableUntil: true, validityType: true, validityDays: true, BadgeRule: { select: { ruleType: true, configJson: true } } },
   })
   if (!user) throw new BadgeServiceError('USER_NOT_FOUND', '目标用户不存在')
   if (!badge) throw new BadgeServiceError('BADGE_NOT_FOUND', '勋章不存在')
+  if (input.requireSalonAssignable && !badge.salonAssignable) throw new BadgeServiceError('BADGE_NOT_SALON_ASSIGNABLE', '该勋章未配置为可从沙龙派发')
 
   const isAutomaticZodiacGrant = sourceType === 'AUTO_RULE' && badge.BadgeRule?.ruleType === 'BIRTHDAY_ZODIAC'
 
@@ -1323,6 +1331,7 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   const expiresAt = calculateBadgeExpiresAt(awardedAt, badge.validityType, badge.validityDays)
   const awardedIsActive = !expiresAt || expiresAt > now
   if (active) {
+    if (input.rejectIfAlreadyOwned) throw new BadgeServiceError('BADGE_ALREADY_OWNED', '该用户已拥有此勋章')
     // UserBadge is the aggregate visible ownership row. Keep each earning
     // source independently so a later derived-rule revoke cannot remove a
     // manual, event, or other automatic source.
@@ -1774,6 +1783,7 @@ export const badgeAdminSelect = {
   ...BADGE_SELECT,
   acquisitionDescriptionCustomized: true,
   category: true,
+  salonAssignable: true,
   musicTourId: true,
   isAutoGrant: true,
   seriesId: true,
@@ -1819,10 +1829,11 @@ function resolveAdminBadgeAcquisition(badge: DbAdminBadge) {
   const generatedDescription = badge.BadgeRule
     ? generateBadgeAcquisitionDescription(badge.BadgeRule.ruleType as SupportedBadgeRuleType, badge.BadgeRule.threshold, badge.BadgeRule.configJson)
     : null
+  const usesCanonicalAspirinDescription = badge.BadgeRule?.ruleType === 'CLINIC_CONSULTATION_STREAK' && !badge.acquisitionDescriptionCustomized
   return {
     ...badge,
     resolvedAcquisitionDescription: resolveBadgeAcquisitionDescription({
-      storedDescription: badge.acquisitionDescription,
+      storedDescription: usesCanonicalAspirinDescription ? null : badge.acquisitionDescription,
       generatedDescription,
       hasAngelGiftPrize: badge.PharmacyPrize.length > 0,
     }),

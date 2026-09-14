@@ -331,7 +331,7 @@ export const BADGE_RULE_REGISTRY = {
   CLINIC_CONSULTATION_STREAK: {
     group: '社区', unit: '位不同用户的病例问诊',
     label: '阿士匹灵连续问诊',
-    dataDescription: '仅统计阿士匹灵门诊部的有效问诊；按上海时区每日不同病例发布者去重，同一用户发布的多个病例当天仅计 1 次',
+    dataDescription: '仅统计阿士匹灵门诊部的有效问诊；按上海时区每日不同其他用户的病例发布者去重，自己发布的病例不计入，同一用户发布的多个病例当天仅计 1 次，每条问诊正文至少 21 字',
     metricLoader: 'CLINIC_CONSULTATION_STREAK',
     supportedOperators: ['GTE'],
     events: ['CLINIC_CONSULTATION_CHANGED'],
@@ -609,7 +609,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
     const streakResult = parsePositiveInteger(body.secondaryThreshold, '连续完成天数', definition.threshold ?? BADGE_RULE_THRESHOLD_LIMITS)
     if ('error' in streakResult) return streakResult
     const config = getAspirinRuleConfig(body.configJson)
-    if (!config) return { error: '阿士匹灵规则必须指定 ASPIRIN_CLINIC、最低字数和最高重复率配置' }
+    if (!config) return { error: '阿士匹灵规则必须指定 ASPIRIN_CLINIC、最低字数和连续天数配置' }
     if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
     return {
       rule: {

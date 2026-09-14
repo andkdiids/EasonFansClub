@@ -39,6 +39,7 @@ export default async function AdminBadgesPage() {
     visibility: badge.visibility,
     rarity: badge.rarity,
     grantType: badge.grantType,
+    salonAssignable: badge.salonAssignable,
     validityType: badge.validityType,
     validityDays: badge.validityDays,
     isWearable: badge.isWearable,

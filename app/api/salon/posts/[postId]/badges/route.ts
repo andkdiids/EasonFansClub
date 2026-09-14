@@ -3,8 +3,9 @@ import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
-import { SALON_BADGE_CLASSIFICATION, salonBadgeClassificationMessage } from '@/lib/salon-badges'
+import { SALON_BADGE_CLASSIFICATION, listSalonAssignableBadges } from '@/lib/salon-badges'
 import { grantSalonBadge } from '@/lib/salon-badge-grant'
+import { BadgeServiceError } from '@/lib/badge-service'
 
 type RouteContext = { params: Promise<{ postId: string }> }
 
@@ -60,12 +61,13 @@ export async function GET(_request: Request, context: RouteContext) {
   const { postId } = await context.params
   const target = await loadTarget(postId)
   if ('response' in target) return target.response
+  const badges = await listSalonAssignableBadges(target.post.author.id)
   return NextResponse.json({
     ok: true,
     classificationAvailable: SALON_BADGE_CLASSIFICATION.available,
-    message: salonBadgeClassificationMessage(),
+    classificationField: SALON_BADGE_CLASSIFICATION.field,
     ...serializeTarget(target.post),
-    badges: [],
+    badges,
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }
 
@@ -79,13 +81,16 @@ export async function POST(request: Request, context: RouteContext) {
   const badgeId = sanitizeText(body?.badgeId, 191)
   if (!badgeId) return NextResponse.json({ ok: false, code: 'BADGE_REQUIRED', message: '请选择要派发的勋章' }, { status: 400 })
 
-  // Do not fall back to matching badge names or treating generic CONCERT
-  // badges as Salon badges. There is no reliable classifier in this schema.
-  if (!SALON_BADGE_CLASSIFICATION.available) {
-    return NextResponse.json({ ok: false, code: 'SALON_BADGE_CLASSIFICATION_UNAVAILABLE', message: salonBadgeClassificationMessage() }, { status: 409 })
+  try {
+    const result = await grantSalonBadge({ salonId: postId, userId: target.post.author.id, badgeId, adminUserId: guard.user.id })
+    if (!result.created && !result.sourceAttached) return NextResponse.json({ ok: false, code: 'BADGE_ALREADY_OWNED', message: '该用户已拥有此勋章' }, { status: 409 })
+    return NextResponse.json({ ok: true, ...result, ...serializeTarget(target.post), message: `已向「${getPublicUserDisplayName(target.post.author)}」派发「${result.badgeName}」勋章` }, { status: result.created ? 201 : 200 })
+  } catch (error) {
+    if (error instanceof BadgeServiceError) {
+      const status = error.code === 'BADGE_NOT_FOUND' || error.code === 'BADGE_NOT_SALON_ASSIGNABLE' || error.code === 'BADGE_ALREADY_OWNED' ? 409 : error.code === 'USER_NOT_FOUND' ? 404 : 400
+      return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status })
+    }
+    console.error('[salon.badge.grant]', { postId, badgeId, error })
+    return NextResponse.json({ ok: false, code: 'BADGE_GRANT_FAILED', message: '勋章派发失败，请稍后重试' }, { status: 500 })
   }
-
-  const result = await grantSalonBadge({ salonId: postId, userId: target.post.author.id, badgeId, adminUserId: guard.user.id })
-  if (!result.created && !result.sourceAttached) return NextResponse.json({ ok: false, code: 'BADGE_ALREADY_OWNED', message: '该用户已拥有此勋章' }, { status: 409 })
-  return NextResponse.json({ ok: true, ...result, ...serializeTarget(target.post), message: result.created ? `勋章已派发给「${getPublicUserDisplayName(target.post.author)}」` : '已为该用户补充沙龙管理员派发来源' }, { status: result.created ? 201 : 200 })
 }

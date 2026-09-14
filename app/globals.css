@@ -1974,6 +1974,7 @@ flex-direction:column;
 }
 .profile-actions-scroll::-webkit-scrollbar { display:none; }
 .profile-actions-scroll > div > * { flex:0 0 auto; }
+.profile-actions-row > .profile-actions-groups { flex:1 1 auto; min-width:0; }
 
 @media (max-width:767px) {
   .profile-archive-title { font-size:1rem; }

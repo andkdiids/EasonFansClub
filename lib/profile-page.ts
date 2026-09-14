@@ -1,11 +1,13 @@
 import { profileImageUrl } from '@/lib/images'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
+import { getShanghaiDateKey } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 
 export type ProfileWallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
 export const PROFILE_RECORD_PAGE_SIZE = 10
+export const PROFILE_POST_PAGE_SIZE = 5
 
 export type ProfileRecordPagination = {
   page: number
@@ -17,6 +19,7 @@ export type ProfileRecordPagination = {
 
 export type ProfileRecentMessage = {
   id: string
+  date: string
   mood: string | null
   moodType: string | null
   moodEmoji: string | null
@@ -24,6 +27,8 @@ export type ProfileRecentMessage = {
   content: string
   moderationStatus: string
   createdAt: string
+  editedAt: string | null
+  canEdit: boolean
   ipRegion: string | null
   likeCount: number
   commentCount: number
@@ -41,6 +46,7 @@ export type ProfileRecentMessage = {
 
 type ProfileRecentMessageRow = {
   id: string
+  date: Date
   mood: string | null
   moodType: string | null
   moodEmoji: string | null
@@ -48,9 +54,11 @@ type ProfileRecentMessageRow = {
   content: string
   moderationStatus: string
   createdAt: Date
+  editedAt: Date | null
   ipRegion: string | null
   likeCount: number
   commentCount: number
+  CheckIn: { userId: string; checkinDateKey: string; type: string; isMakeUp: boolean } | null
   DailyMessageComment: Array<{
     id: string
     parentId: string | null
@@ -77,9 +85,11 @@ export function getProfileRecordPagination(total: number, requestedPage: number,
   return { page, pageSize: safePageSize, total: safeTotal, totalPages, hasMore: page < totalPages }
 }
 
-async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[]): Promise<ProfileRecentMessage[]> {
+async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[], userId: string, viewerId?: string | null): Promise<ProfileRecentMessage[]> {
+  const todayKey = getShanghaiDateKey()
   return rows.map((message) => ({
     id: message.id,
+    date: message.date.toISOString(),
     mood: message.mood,
     moodType: message.moodType,
     moodEmoji: message.moodEmoji,
@@ -87,6 +97,13 @@ async function mapProfileRecentMessages(rows: ProfileRecentMessageRow[]): Promis
     content: publicModerationText(message.content, message.moderationStatus),
     moderationStatus: message.moderationStatus,
     createdAt: message.createdAt.toISOString(),
+    editedAt: message.editedAt?.toISOString() || null,
+    canEdit: viewerId === userId
+      && getShanghaiDateKey(message.date) === todayKey
+      && message.CheckIn?.userId === userId
+      && message.CheckIn.checkinDateKey === todayKey
+      && message.CheckIn.type === 'NORMAL'
+      && !message.CheckIn.isMakeUp,
     ipRegion: message.ipRegion,
     likeCount: message.likeCount,
     commentCount: message.commentCount,
@@ -119,6 +136,7 @@ export async function loadProfileRecentMessagesPage(
       take: pagination.pageSize,
       select: {
         id: true,
+        date: true,
         mood: true,
         moodType: true,
         moodEmoji: true,
@@ -126,9 +144,11 @@ export async function loadProfileRecentMessagesPage(
         content: true,
         moderationStatus: true,
         createdAt: true,
+        editedAt: true,
         ipRegion: true,
         likeCount: true,
         commentCount: true,
+        CheckIn: { select: { userId: true, checkinDateKey: true, type: true, isMakeUp: true } },
         DailyMessageComment: {
           where: { isDeleted: false },
           orderBy: { createdAt: 'asc' },
@@ -155,7 +175,7 @@ export async function loadProfileRecentMessagesPage(
       },
     })
 
-    return { messages: await mapProfileRecentMessages(rows), pagination }
+    return { messages: await mapProfileRecentMessages(rows, userId, viewerId), pagination }
   } catch (error) {
     console.error('[profile-page.recentMessages.page]', error)
     return { messages: [], pagination: getProfileRecordPagination(0, requestedPage, pageSize) }

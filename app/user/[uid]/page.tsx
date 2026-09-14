@@ -25,8 +25,13 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
   const { uid } = await params
   const sp = await searchParams
   const urlModule = typeof sp.module === 'string' ? sp.module : undefined
-  const urlPageRaw = typeof sp.page === 'string' ? Number(sp.page) : NaN
+  const urlPostsPageRaw = typeof sp.postsPage === 'string' ? Number(sp.postsPage) : NaN
+  const urlLegacyPageRaw = typeof sp.page === 'string' ? Number(sp.page) : NaN
+  const urlPageRaw = urlModule === 'posts'
+    ? (Number.isFinite(urlPostsPageRaw) ? urlPostsPageRaw : urlLegacyPageRaw)
+    : (urlModule ? urlLegacyPageRaw : (Number.isFinite(urlPostsPageRaw) ? urlPostsPageRaw : urlLegacyPageRaw))
   const urlPage = Number.isFinite(urlPageRaw) && urlPageRaw > 0 ? Math.trunc(urlPageRaw) : undefined
+  const initialModule = urlModule || (urlPage !== undefined && Number.isFinite(urlPostsPageRaw) ? 'posts' : undefined)
   const urlGroupId = typeof sp.groupId === 'string' ? sp.groupId : undefined
   const numericUid = parseUidParam(uid)
   if (numericUid === null || numericUid <= 0) notFound()
@@ -188,7 +193,7 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
       }}
       recentMessages={recentMessagesPage.messages}
       recentMessagesPagination={recentMessagesPage.pagination}
-      initialModule={urlModule}
+      initialModule={initialModule}
       initialPage={urlPage}
       initialGroupId={urlGroupId}
       remarkEditor={remarkEditor}

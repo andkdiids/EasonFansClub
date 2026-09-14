@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma'
-import { ASPIRIN_CLINIC_MODULE, ASPIRIN_INITIAL_STREAK_DAYS, ASPIRIN_MAX_REPEAT_RATE, ASPIRIN_MIN_LENGTH, getAspirinRuleConfig, validateSustainedQualificationSettings } from '../lib/aspirin-badge-config'
+import { ASPIRIN_CLINIC_MODULE, ASPIRIN_INITIAL_STREAK_DAYS, ASPIRIN_MIN_LENGTH, getAspirinRuleConfig, validateSustainedQualificationSettings } from '../lib/aspirin-badge-config'
 import { generateBadgeAcquisitionDescription, parseBadgeRuleInput } from '../lib/badge-rules'
 
 export const ASPIRIN_BADGE_NAME = '阿士匹灵'
@@ -12,7 +12,6 @@ export const ASPIRIN_RULE_SEED = {
   configJson: {
     module: ASPIRIN_CLINIC_MODULE,
     minLength: ASPIRIN_MIN_LENGTH,
-    maxRepeatRate: ASPIRIN_MAX_REPEAT_RATE,
     initialStreakDays: ASPIRIN_INITIAL_STREAK_DAYS,
   },
   isEnabled: true,
@@ -91,7 +90,7 @@ async function main() {
       && existing.sustainedQualification === true
       && existing.inactiveAfterDays === rule.inactiveAfterDays
       && existing.revokeAfterDays === rule.revokeAfterDays
-      && JSON.stringify(existing.configJson) === JSON.stringify(rule.configJson)
+      && JSON.stringify(getAspirinRuleConfig(existing.configJson)) === JSON.stringify(rule.config)
     if (!same) throw new Error(`阿士匹灵勋章已存在其他或不一致的自动规则（${existing.id}），不会覆盖现有配置。`)
     console.info(JSON.stringify({
       mode: apply ? 'apply' : 'dry-run',

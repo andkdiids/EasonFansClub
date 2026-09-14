@@ -511,6 +511,7 @@ CREATE TABLE `Badge` (
     `visibility` ENUM('PUBLIC', 'HIDDEN', 'SECRET') NOT NULL DEFAULT 'PUBLIC',
     `rarity` ENUM('COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'LIMITED') NOT NULL DEFAULT 'COMMON',
     `grantType` ENUM('AUTO', 'MANUAL', 'EVENT') NOT NULL DEFAULT 'MANUAL',
+    `salonAssignable` BOOLEAN NOT NULL DEFAULT false,
     `validityType` ENUM('PERMANENT', 'DAYS') NOT NULL DEFAULT 'PERMANENT',
     `validityDays` INTEGER NULL,
     `isWearable` BOOLEAN NOT NULL DEFAULT true,
@@ -543,6 +544,7 @@ CREATE TABLE `Badge` (
     INDEX `Badge_musicTourId_idx`(`musicTourId`),
     INDEX `Badge_visibility_isEnabled_sortOrder_idx`(`visibility`, `isEnabled`, `sortOrder`),
     INDEX `Badge_grantType_idx`(`grantType`),
+    INDEX `Badge_salonAssignable_isEnabled_isActive_idx`(`salonAssignable`, `isEnabled`, `isActive`),
     INDEX `Badge_rarity_idx`(`rarity`),
     INDEX `Badge_seriesId_sortOrder_idx`(`seriesId`, `sortOrder`),
     INDEX `Badge_availableFrom_availableUntil_idx`(`availableFrom`, `availableUntil`),
@@ -987,6 +989,7 @@ CREATE TABLE `DailyMessage` (
     `isAdminMessage` BOOLEAN NOT NULL DEFAULT false,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
+    `editedAt` DATETIME(3) NULL,
     `userId` VARCHAR(191) NOT NULL,
     `checkInId` VARCHAR(191) NULL,
 

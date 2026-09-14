@@ -244,9 +244,9 @@ test('管理员删除用户业务（admin-user-deletion）未纳入统一删除�
 // ---------------------------------------------------------------------------
 // PROFILE RETURN STATE（URL searchParams + sessionStorage scroll cache）
 // ---------------------------------------------------------------------------
-test('个人主页 Tab/页码/分组状态写入 URL（?module=posts&page=2）', () => {
+test('个人主页 Tab/发帖页码/分组状态写入 URL（?module=posts&postsPage=2）', () => {
   assert.match(profileModules, /params\.set\('module', active\)/)
-  assert.match(profileModules, /params\.set\('page', String\(modulePages\.posts\)\)/)
+  assert.match(profileModules, /params\.set\('postsPage', String\(modulePages\.posts\)\)/)
   assert.match(profileModules, /params\.set\('groupId', postGroupFilter\)/)
   assert.match(profileModules, /router\.replace\(target, \{ scroll: false \}\)/)
   assert.match(profileModules, /new URLSearchParams\(window\.location\.search\)/)
@@ -261,7 +261,7 @@ test('浏览器前进/后退（popstate）按 URL 恢复 Tab/页码/分组', () 
 test('服务端把 URL 的 module/page/groupId 透传给客户端初始状态', () => {
   assert.match(profileUserPage, /searchParams: Promise<Record<string, string \| string\[\] \| undefined>>/)
   assert.match(profileUserPage, /typeof sp\.module === 'string' \? sp\.module : undefined/)
-  assert.match(profileUserPage, /initialModule=\{urlModule\}/)
+  assert.match(profileUserPage, /initialModule=\{initialModule\}/)
   assert.match(profileUserPage, /initialPage=\{urlPage\}/)
   assert.match(profileUserPage, /initialGroupId=\{urlGroupId\}/)
   assert.match(profileSurface, /initialModule=\{initialModule\}/)
@@ -280,7 +280,7 @@ test('进入详情前 sessionStorage 缓存 scrollY，返回后按 URL 匹配恢
 
 test('刷新个人主页带 page 参数仍能打开正确页（发帖记录 Tab 保持）', () => {
   assert.match(profileModules, /initialModule && ALL_MODULE_KEYS\.includes\(initialModule as ModuleKey\)/)
-  assert.match(profileModules, /current === urlModule \? current : \(urlModule as ModuleKey\)\)/)
+  assert.match(profileModules, /current === effectiveModule \? current : \(effectiveModule as ModuleKey\)\)/)
 })
 
 // ---------------------------------------------------------------------------

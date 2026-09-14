@@ -7,6 +7,7 @@ const read = (path: string) => readFileSync(path, 'utf8')
 const schema = read('prisma/schema.prisma')
 const service = read('lib/daily-message-deletion.ts')
 const userRoute = read('app/api/daily-messages/[messageId]/route.ts')
+const userDeleteRoute = userRoute.slice(userRoute.indexOf('export async function DELETE'))
 const adminRoute = read('app/api/admin/daily-messages/[messageId]/route.ts')
 const registrationAdminRoute = read('app/api/admin/registration-messages/[id]/route.ts')
 const profileModules = read('components/PublicUserModules.tsx')
@@ -32,7 +33,7 @@ test('用户删除 API 做参数、登录、数据库 ownership 和幂等校验'
   assert.match(service, /status: 403/)
   assert.match(service, /status: 404/)
   assert.match(service, /updateMany\([\s\S]*?where: \{ id: messageId, userId \}/)
-  assert.doesNotMatch(userRoute, /request\.json|body.*userId/)
+  assert.doesNotMatch(userDeleteRoute, /request\.json|body.*userId/)
 })
 
 test('个人主页只给本人显示危险操作，复用 ConfirmDialog 并在成功后更新缓存', () => {

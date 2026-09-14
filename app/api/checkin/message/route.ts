@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
 import { formatBeijingDate, startOfLocalDay } from '@/lib/checkin'
-import { CHECK_IN_MESSAGE_MAX_LENGTH } from '@/lib/checkin-message-constants'
 import { CheckInMessageSupplementError, supplementTodayCheckInMessage } from '@/lib/checkin-message-supplement'
+import { validateCheckInMessage } from '@/lib/checkin-message-validation'
 import { getCheckInMessage, invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
-import { checkBannedWords, CONTENT_CONTAINS_BANNED_WORD, BANNED_WORD_MESSAGE } from '@/lib/content-moderation'
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { prisma } from '@/lib/prisma'
-import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,18 +21,9 @@ export async function POST(request: Request) {
   if (limited) return limited
 
   const body = await request.json().catch(() => null)
-  const rawMessage = body?.message
-  if (typeof rawMessage !== 'string' || rawMessage.length > CHECK_IN_MESSAGE_MAX_LENGTH || !rawMessage.trim()) {
-    return NextResponse.json({ ok: false, code: 'INVALID_MESSAGE', message: '留言不能为空且最多 300 字' }, { status: 400 })
-  }
-
-  const message = sanitizeText(rawMessage, CHECK_IN_MESSAGE_MAX_LENGTH)
-  if (!message) {
-    return NextResponse.json({ ok: false, code: 'INVALID_MESSAGE', message: '留言不能为空且最多 300 字' }, { status: 400 })
-  }
-  if ((await checkBannedWords(message)).blocked) {
-    return NextResponse.json({ ok: false, error: CONTENT_CONTAINS_BANNED_WORD, code: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
-  }
+  const validation = await validateCheckInMessage(body?.message)
+  if (!validation.ok) return NextResponse.json(validation, { status: 400 })
+  const { message } = validation
 
   const now = new Date()
   try {
