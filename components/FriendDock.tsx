@@ -44,6 +44,7 @@ import { formatUid } from '@/lib/uid'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { GrowthPanel } from '@/components/GrowthPanel'
 import type { PostShareMessageView } from '@/lib/post-share-types'
+import type { MaterialShareMessageView } from '@/lib/material-share-types'
 import { canRecallDirectMessage, RECALLED_DIRECT_MESSAGE_TEXT } from '@/lib/direct-message-recall'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
@@ -67,6 +68,7 @@ type Message = {
   stickerId?: string | null
   stickerUrl?: string | null
   postShare?: PostShareMessageView | null
+  materialShare?: MaterialShareMessageView | null
   recalled?: boolean
 }
 
@@ -1587,7 +1589,7 @@ export function FriendDock({
         return
       }
       setMessages((current) => current.map((item) => item.id === message.id
-        ? { ...item, content: '', recalled: true, stickerId: null, stickerUrl: null, postShare: null }
+        ? { ...item, content: '', recalled: true, stickerId: null, stickerUrl: null, postShare: null, materialShare: null }
         : item))
       setConversations((current) => current.map((conversation) => conversation.id === conversationId && conversation.latestMessage?.id === message.id
         ? {
@@ -1861,6 +1863,7 @@ export function FriendDock({
                       && recallDecision.ok
                       && recallDecision.code === 'RECALLABLE'
                     const postShareCard = !message.recalled && message.type === 'POST_SHARE' ? message.postShare : null
+                    const materialShareCard = !message.recalled && message.type === 'MATERIAL_SHARE' ? message.materialShare : null
                     // 表情包消息：直接展示图片，不套用文字气泡（无 border/background/白框/padding）。
                     const stickerImg = message.stickerUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1896,6 +1899,31 @@ export function FriendDock({
                             <div className="friend-chat-post-share-card is-unavailable" role="status">
                               <span className="friend-chat-post-share-label">帖子</span>
                               <strong>{postShareCard.title}</strong>
+                            </div>
+                          )
+                        ) : materialShareCard ? (
+                          materialShareCard.available ? (
+                            <Link href={materialShareCard.url} className="friend-chat-post-share-card friend-chat-material-share-card" aria-label={`查看物料：${materialShareCard.title}`}>
+                              {materialShareCard.imageUrl ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img
+                                  src={materialShareCard.imageUrl}
+                                  alt=""
+                                  className="friend-chat-post-share-image"
+                                  onError={(event) => { event.currentTarget.remove() }}
+                                />
+                              ) : null}
+                              <span className="friend-chat-post-share-label">物料</span>
+                              <strong>{materialShareCard.title}</strong>
+                              {materialShareCard.authorName ? <span>{materialShareCard.authorName}</span> : null}
+                              {materialShareCard.summary ? <small>{materialShareCard.summary}</small> : null}
+                              {materialShareCard.statusLabel ? <small>{materialShareCard.statusLabel}</small> : null}
+                              <em>查看物料 →</em>
+                            </Link>
+                          ) : (
+                            <div className="friend-chat-post-share-card friend-chat-material-share-card is-unavailable" role="status">
+                              <span className="friend-chat-post-share-label">物料</span>
+                              <strong>{materialShareCard.title}</strong>
                             </div>
                           )
                         ) : message.stickerUrl ? (

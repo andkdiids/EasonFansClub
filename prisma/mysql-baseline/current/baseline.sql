@@ -1107,7 +1107,7 @@ CREATE TABLE `DailyTaskTemplate` (
 -- CreateTable
 CREATE TABLE `DirectMessage` (
     `id` VARCHAR(191) NOT NULL,
-    `type` ENUM('TEXT', 'IMAGE', 'EMOJI', 'SYSTEM', 'STICKER', 'POST_SHARE') NOT NULL DEFAULT 'TEXT',
+    `type` ENUM('TEXT', 'IMAGE', 'EMOJI', 'SYSTEM', 'STICKER', 'POST_SHARE', 'MATERIAL_SHARE') NOT NULL DEFAULT 'TEXT',
     `content` VARCHAR(191) NOT NULL,
     `metadata` JSON NULL,
     `imageUrl` VARCHAR(191) NULL,

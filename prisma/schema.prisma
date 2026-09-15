@@ -5124,6 +5124,7 @@ enum MessageType {
   SYSTEM
   STICKER
   POST_SHARE
+  MATERIAL_SHARE
 }
 
 enum MusicPublicationStatus {

@@ -189,6 +189,43 @@ test('腾讯云拒绝 Simple 时，密码重置链接使用独立的 reset_url �
   }
 })
 
+test('未配置专用重置链接模板时，兼容回退到现有密码重置模板', async () => {
+  const originalFetch = globalThis.fetch
+  const originalSecretId = process.env.TENCENT_EMAIL_SECRET_ID
+  const originalSecretKey = process.env.TENCENT_EMAIL_SECRET_KEY
+  const originalLinkTemplateId = process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID
+  const originalResetTemplateId = process.env.TENCENT_EMAIL_RESET_TEMPLATE_ID
+  const requests: Array<Record<string, unknown>> = []
+
+  process.env.TENCENT_EMAIL_SECRET_ID = 'test-secret-id'
+  process.env.TENCENT_EMAIL_SECRET_KEY = 'test-secret-key'
+  delete process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID
+  process.env.TENCENT_EMAIL_RESET_TEMPLATE_ID = '211025'
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    requests.push(body)
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ Response: { Error: { Code: 'FailedOperation.WithOutPermission', Message: '仅支持使用模板发送邮件' } } }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ Response: { RequestId: 'reset-link-compatibility-request' } }), { status: 200 })
+  }) as typeof fetch
+
+  try {
+    assert.deepEqual(await sendPasswordResetLinkEmail('test@example.com', 'https://ecfc.fans/reset-password?token=abc'), { sent: true })
+    assert.deepEqual(requests[1]?.Template, { TemplateID: 211025, TemplateData: JSON.stringify({ reset_url: 'https://ecfc.fans/reset-password?token=abc' }) })
+  } finally {
+    globalThis.fetch = originalFetch
+    if (originalSecretId === undefined) delete process.env.TENCENT_EMAIL_SECRET_ID
+    else process.env.TENCENT_EMAIL_SECRET_ID = originalSecretId
+    if (originalSecretKey === undefined) delete process.env.TENCENT_EMAIL_SECRET_KEY
+    else process.env.TENCENT_EMAIL_SECRET_KEY = originalSecretKey
+    if (originalLinkTemplateId === undefined) delete process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID
+    else process.env.TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID = originalLinkTemplateId
+    if (originalResetTemplateId === undefined) delete process.env.TENCENT_EMAIL_RESET_TEMPLATE_ID
+    else process.env.TENCENT_EMAIL_RESET_TEMPLATE_ID = originalResetTemplateId
+  }
+})
+
 test('Tencent provider error 保留真实错误码、RequestId 和发送阶段但不携带邮件正文', async () => {
   const originalFetch = globalThis.fetch
   const originalSecretId = process.env.TENCENT_EMAIL_SECRET_ID

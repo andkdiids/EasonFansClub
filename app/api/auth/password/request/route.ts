@@ -7,6 +7,7 @@ import {
   normalizePasswordResetEmail,
   PASSWORD_RESET_LINK_MESSAGE,
 } from '@/lib/password-reset-link'
+import { logPasswordRecoveryError } from '@/lib/password-recovery-errors'
 import { prisma } from '@/lib/prisma'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
@@ -36,10 +37,16 @@ export async function POST(request: Request) {
   const emailLimit = await consumeRateLimit(`email:${hashToken(email)}`, 'password-reset:link-request', 3, 60 * 60)
   if (emailLimit.limited) return genericResponse()
 
-  const user = await prisma.user.findFirst({
-    where: { email, isDeleted: false, status: 'ACTIVE' },
-    select: { id: true, email: true },
-  })
+  let user: { id: string; email: string | null } | null
+  try {
+    user = await prisma.user.findFirst({
+      where: { email, isDeleted: false, status: 'ACTIVE' },
+      select: { id: true, email: true },
+    })
+  } catch (error) {
+    logPasswordRecoveryError('/api/auth/password/request', error, { stage: 'user_lookup' })
+    return NextResponse.json({ code: 'PASSWORD_RECOVERY_UNAVAILABLE', message: '暂时无法处理密码重置请求，请稍后重试' }, { status: 503, headers: noStoreHeaders })
+  }
   if (!user?.email) return genericResponse()
 
   const now = new Date()
@@ -65,13 +72,14 @@ export async function POST(request: Request) {
     const sent = await sendPasswordResetLinkEmail(user.email, buildPasswordResetUrl(generated.token))
     if (!sent.sent) throw new Error('TENCENT_EMAIL_NOT_CONFIGURED')
   } catch (error) {
-    if (recordId) await prisma.passwordResetToken.deleteMany({ where: { id: recordId } }).catch(() => undefined)
+    if (recordId) await prisma.passwordResetToken.deleteMany({ where: { id: recordId } }).catch((cleanupError) => logPasswordRecoveryError('/api/auth/password/request', cleanupError, { stage: 'token_cleanup' }))
     if (isMailFailure(error)) {
       logMailFailure(error, { route: '/api/auth/password/request', mailType: 'password_reset_link' })
+      return NextResponse.json({ message: '邮件暂时无法发送，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503, headers: noStoreHeaders })
     } else {
-      console.error('[auth.password.request]', error instanceof Error ? error.message : 'unknown_error')
+      logPasswordRecoveryError('/api/auth/password/request', error, { stage: 'token_create_or_email' })
     }
-    return NextResponse.json({ message: '邮件发送失败，请稍后重试', code: 'EMAIL_SEND_FAILED' }, { status: 503, headers: noStoreHeaders })
+    return NextResponse.json({ message: '暂时无法处理密码重置请求，请稍后重试', code: 'PASSWORD_RECOVERY_UNAVAILABLE' }, { status: 503, headers: noStoreHeaders })
   }
 
   return genericResponse()

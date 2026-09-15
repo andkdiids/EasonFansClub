@@ -98,3 +98,15 @@ test('后台勋章配置显式校验沙龙派发开关，默认关闭且支持�
   const invalid = parseBadgeDefinition({ salonAssignable: 'true' }, true)
   assert.equal(invalid.error, '沙龙派发开关无效')
 })
+
+test('沙龙派发列表区分配置为空与搜索无匹配，并报告迁移失配', () => {
+  const ui = read('components/salon/SalonBadgeGrant.tsx')
+  const route = read('app/api/salon/posts/[postId]/badges/route.ts')
+
+  assert.match(ui, /没有找到匹配的勋章/)
+  assert.match(ui, /暂无可派发的沙龙勋章/)
+  assert.match(ui, /允许在沙龙派发/)
+  assert.doesNotMatch(ui, /没有符合条件的沙龙勋章/)
+  assert.match(route, /DATABASE_MIGRATION_OUT_OF_SYNC/)
+  assert.match(route, /P2022/)
+})

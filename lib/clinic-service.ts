@@ -132,7 +132,9 @@ export type ClinicPublicRecordDetail = ClinicPublicRecord & {
   consultations: ClinicPublicConsultation[]
 }
 
-function publicIdentity(author: ClinicAuthorRow, mode: ClinicIdentityMode, anonymousNumber: number, role: 'patient' | 'doctor', equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>) : ClinicPublicIdentity {
+export type ClinicAuthorRole = 'patient' | 'doctor'
+
+function publicIdentity(author: ClinicAuthorRow, mode: ClinicIdentityMode, anonymousNumber: number, role: ClinicAuthorRole, equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>): ClinicPublicIdentity {
   if (mode === 'ANONYMOUS') {
     return {
       type: 'anonymous',
@@ -157,6 +159,10 @@ function publicIdentity(author: ClinicAuthorRow, mode: ClinicIdentityMode, anony
   }
 }
 
+export function resolveClinicAuthorRole(recordAuthorId: string, authorId: string): ClinicAuthorRole {
+  return authorId === recordAuthorId ? 'patient' : 'doctor'
+}
+
 function publicDate(value: Date) {
   return value.toISOString()
 }
@@ -176,6 +182,34 @@ function cleanClinicContent(value: unknown, maxLength: number, label = '内容')
     throw new ClinicServiceError('CONTENT_TOO_SHORT', `${label}至少需要 2 个有效字符。`)
   }
   return content
+}
+
+/**
+ * Resolve a clinic thread identity relative to the case being discussed.
+ *
+ * The case author is always the patient in that case. A consultation's
+ * stored identity mode can describe another participant, but it must not
+ * turn a patient's reply into a doctor identity. This also keeps historical
+ * rows with a mistaken stored mode safe to render.
+ */
+export function resolveClinicAuthorIdentity(input: {
+  recordAuthorId: string
+  recordIdentityMode: ClinicIdentityMode
+  recordAnonymousNumber: number
+  authorId: string
+  author: ClinicAuthorRow
+  identityMode: ClinicIdentityMode
+  anonymousNumber: number
+  equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>
+}): ClinicPublicIdentity {
+  const isRecordAuthor = resolveClinicAuthorRole(input.recordAuthorId, input.authorId) === 'patient'
+  return publicIdentity(
+    input.author,
+    isRecordAuthor ? input.recordIdentityMode : input.identityMode,
+    isRecordAuthor ? input.recordAnonymousNumber : input.anonymousNumber,
+    isRecordAuthor ? 'patient' : 'doctor',
+    input.equippedBadgeMap,
+  )
 }
 
 function cleanClinicConsultationContent(value: unknown) {
@@ -275,9 +309,12 @@ export async function createClinicConsultation(input: {
   const result = await prisma.$transaction(async (tx) => {
     const record = await tx.clinicRecord.findFirst({
       where: { id: input.recordId, status: 'ACTIVE' },
-      select: { id: true, authorId: true },
+      select: { id: true, authorId: true, identityMode: true, anonymousNumber: true },
     })
     if (!record) throw new ClinicServiceError('RECORD_NOT_FOUND', '这份病历不存在或已经不再公开。', 404)
+
+    const isRecordAuthor = input.authorId === record.authorId
+    const effectiveIdentityMode = isRecordAuthor ? record.identityMode : input.identityMode
 
     let parent: { id: string; authorId: string; parentId: string | null } | null = null
     if (input.parentId) {
@@ -288,8 +325,8 @@ export async function createClinicConsultation(input: {
       if (!parent) throw new ClinicServiceError('PARENT_NOT_FOUND', '这条会诊不存在或已经被删除。', 400)
     }
 
-    let anonymousNumber = randomAnonymousNumber()
-    if (input.identityMode === 'ANONYMOUS') {
+    let anonymousNumber = isRecordAuthor ? record.anonymousNumber : randomAnonymousNumber()
+    if (effectiveIdentityMode === 'ANONYMOUS' && !isRecordAuthor) {
       const previous = await tx.clinicConsultation.findFirst({
         where: { recordId: input.recordId, authorId: input.authorId, identityMode: 'ANONYMOUS' },
         orderBy: { createdAt: 'asc' },
@@ -303,7 +340,7 @@ export async function createClinicConsultation(input: {
         recordId: input.recordId,
         authorId: input.authorId,
         content,
-        identityMode: input.identityMode,
+        identityMode: effectiveIdentityMode,
         anonymousNumber,
         parentId: parent?.id || null,
         matchedBannedWords: clinicModerationStorageValue(moderation),
@@ -474,6 +511,9 @@ type ClinicConsultationRow = {
 
 function toPublicConsultation(
   row: ClinicConsultationRow,
+  recordAuthorId: string,
+  recordIdentityMode: ClinicIdentityMode,
+  recordAnonymousNumber: number,
   viewerId: string | null,
   aspirinIds: Set<string>,
   mouthpieceIds: Set<string>,
@@ -485,7 +525,16 @@ function toPublicConsultation(
     id: row.id,
     recordId: row.recordId,
     content: isDeleted ? '这条会诊已被删除。' : publicContent(row.content, publicWords),
-    author: isDeleted ? null : publicIdentity(row.author, row.identityMode, row.anonymousNumber, 'doctor', equippedBadgeMap),
+    author: isDeleted ? null : resolveClinicAuthorIdentity({
+      recordAuthorId,
+      recordIdentityMode,
+      recordAnonymousNumber,
+      authorId: row.authorId,
+      author: row.author,
+      identityMode: row.identityMode,
+      anonymousNumber: row.anonymousNumber,
+      equippedBadgeMap,
+    }),
     createdAt: publicDate(row.createdAt),
     parentId: row.parentId,
     aspirinCount: row.aspirinCount,
@@ -499,8 +548,8 @@ function toPublicConsultation(
   }
 }
 
-function buildConsultationTree(rows: ClinicConsultationRow[], viewerId: string | null, aspirinIds: Set<string>, mouthpieceIds: Set<string>, publicWords: ModerationWord[], equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>) {
-  const mapped = new Map(rows.map((row) => [row.id, toPublicConsultation(row, viewerId, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap)]))
+function buildConsultationTree(rows: ClinicConsultationRow[], recordAuthorId: string, recordIdentityMode: ClinicIdentityMode, recordAnonymousNumber: number, viewerId: string | null, aspirinIds: Set<string>, mouthpieceIds: Set<string>, publicWords: ModerationWord[], equippedBadgeMap?: ReadonlyMap<string, EquippedBadgeView[]>) {
+  const mapped = new Map(rows.map((row) => [row.id, toPublicConsultation(row, recordAuthorId, recordIdentityMode, recordAnonymousNumber, viewerId, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap)]))
   const rowsById = new Map(rows.map((row) => [row.id, row]))
   const roots: ClinicPublicConsultation[] = []
 
@@ -612,7 +661,7 @@ export async function getPublicClinicRecordDetail(recordId: string, viewerId?: s
   } satisfies ClinicPublicRecord
   return {
     ...record,
-    consultations: buildConsultationTree(row.consultations as ClinicConsultationRow[], viewerId || null, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap),
+    consultations: buildConsultationTree(row.consultations as ClinicConsultationRow[], row.author.id, row.identityMode, row.anonymousNumber, viewerId || null, aspirinIds, mouthpieceIds, publicWords, equippedBadgeMap),
   }
 }
 
@@ -902,11 +951,30 @@ export async function listClinicAdminData(tab: ClinicAdminTab, page = 1, pageSiz
           mouthpieceCount: true,
           createdAt: true,
           author: { select: { id: true, uid: true, nickname: true } },
-          record: { select: { category: true, status: true, author: { select: { uid: true, nickname: true } } } },
+          record: { select: { category: true, status: true, identityMode: true, anonymousNumber: true, author: { select: { id: true, uid: true, nickname: true } } } },
         },
       }),
     ])
-    return { tab, page: safePage, pageSize: safeSize, total, totalPages: Math.max(1, Math.ceil(total / safeSize)), items: rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString(), publicDisplayName: clinicAnonymousName(row.anonymousNumber, 'doctor') })) }
+    return {
+      tab,
+      page: safePage,
+      pageSize: safeSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safeSize)),
+      items: rows.map((row) => {
+        const authorRole = resolveClinicAuthorRole(row.record.author.id, row.author.id)
+        const identityMode = authorRole === 'patient' ? row.record.identityMode : row.identityMode
+        const anonymousNumber = authorRole === 'patient' ? row.record.anonymousNumber : row.anonymousNumber
+        return {
+          ...row,
+          identityMode,
+          anonymousNumber,
+          authorRole,
+          createdAt: row.createdAt.toISOString(),
+          publicDisplayName: clinicAnonymousName(anonymousNumber, authorRole),
+        }
+      }),
+    }
   }
 
   const [total, rows] = await Promise.all([

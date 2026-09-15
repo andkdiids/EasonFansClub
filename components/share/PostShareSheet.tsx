@@ -93,6 +93,10 @@ function isFriendResult(friend: ContactFriend) {
 
 export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCreateCard, onCopyLink, onShareSuccess }: Props) {
   const postId = data.contentId || ''
+  const postShareEndpoint = `/api/posts/${encodeURIComponent(postId)}/share`
+  const materialShareEndpoint = `/api/material-redemptions/${encodeURIComponent(postId)}/share`
+  const shareEndpoint = data.type === 'material' ? materialShareEndpoint : postShareEndpoint
+  const contentLabel = data.type === 'material' ? '物料' : '帖子'
   const [view, setView] = useState<'recent' | 'contacts'>('recent')
   const [recentFriends, setRecentFriends] = useState<RecentFriend[]>([])
   const [recentLoading, setRecentLoading] = useState(false)
@@ -130,12 +134,12 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
   }, [onClose, open])
 
   const loadRecentFriends = useCallback(async () => {
-    if (!postId) return
+    if (!postId || !shareEndpoint) return
     const requestId = ++requestIdRef.current
     setRecentLoading(true)
     setRecentError('')
     try {
-      const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/share`, {
+      const response = await fetch(shareEndpoint, {
         credentials: 'same-origin',
         cache: 'no-store',
         headers: { Accept: 'application/json' },
@@ -152,7 +156,7 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
     } finally {
       if (requestId === requestIdRef.current) setRecentLoading(false)
     }
-  }, [postId])
+  }, [postId, shareEndpoint])
 
   const loadContacts = useCallback(async (append = false) => {
     const requestId = ++contactsRequestIdRef.current
@@ -238,7 +242,7 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
 
   async function shareWithFriend(friend: ShareRecipient | null) {
     const recipients = selectedFriends.length ? selectedFriends : friend ? [friend] : []
-    if (!postId || !recipients.length || sendingId || sendingIdRef.current) return
+    if (!postId || !shareEndpoint || !recipients.length || sendingId || sendingIdRef.current) return
     const clientMessageIds = Object.fromEntries(recipients.map((recipient) => {
       const existing = clientMessageIdsRef.current[recipient.id]
       const clientMessageId = existing || createClientMessageId()
@@ -249,7 +253,7 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
     setSendingId('batch')
     setShareError('')
     try {
-      const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/share`, {
+      const response = await fetch(shareEndpoint, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -457,7 +461,7 @@ export function PostShareSheet({ open, data, canSaveCard = true, onClose, onCrea
                 </div>
               ))}
             </div>
-            <p id="post-share-confirm-description" className="post-share-confirm-copy">确定要把这篇帖子分享给选中的 {selectedFriends.length || 1} 位好友吗？</p>
+            <p id="post-share-confirm-description" className="post-share-confirm-copy">确定要把这个{contentLabel}分享给选中的 {selectedFriends.length || 1} 位好友吗？</p>
             {data.title ? <p className="post-share-confirm-title">「{data.title}」</p> : null}
             {shareError ? <p className="post-share-confirm-error" role="alert">{shareError}</p> : null}
             <footer className="post-share-confirm-actions">

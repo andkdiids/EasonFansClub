@@ -390,9 +390,21 @@ function getTemplateId(name: 'verification-link' | 'register' | 'profile' | 'res
         : name === 'reset-link'
           ? 'TENCENT_EMAIL_RESET_LINK_TEMPLATE_ID'
           : 'TENCENT_EMAIL_RESET_TEMPLATE_ID'
-  const fallbackKey = name === 'profile' ? 'TENCENT_EMAIL_REGISTER_TEMPLATE_ID' : undefined
-  const raw = process.env[key] || (fallbackKey ? process.env[fallbackKey] : '') || ''
-  return Number.parseInt(raw, 10)
+  const fallbackKeys = name === 'profile'
+    ? ['TENCENT_EMAIL_REGISTER_TEMPLATE_ID']
+    : name === 'reset-link'
+      ? ['TENCENT_EMAIL_RESET_TEMPLATE_ID']
+      : []
+
+  // A dedicated reset-link template is preferred. The older reset template
+  // was already used for reset links before the dedicated variable existed,
+  // so it remains a safe compatibility fallback for deployments that have
+  // not added a second Tencent SES template yet.
+  for (const candidateKey of [key, ...fallbackKeys]) {
+    const candidate = Number.parseInt(process.env[candidateKey] || '', 10)
+    if (Number.isInteger(candidate) && candidate > 0) return candidate
+  }
+  return Number.NaN
 }
 
 async function sendRenderedEmail({

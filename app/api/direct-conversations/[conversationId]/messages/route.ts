@@ -11,6 +11,8 @@ import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicModerationText } from '@/lib/content-moderation'
 import { resolvePostShareViews } from '@/lib/post-share-service'
 import { parsePostShareSnapshot, type PostShareMessageView } from '@/lib/post-share-types'
+import { resolveMaterialShareViews } from '@/lib/material-share-service'
+import { parseMaterialShareSnapshot, type MaterialShareMessageView } from '@/lib/material-share-types'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const messageSelect = {
@@ -83,10 +85,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
   const peer = conversation.ConversationParticipant.find((participant) => participant.userId !== user.id)
 
   const postShareViews = await resolvePostShareViews(ordered, user.id)
+  const materialShareViews = await resolveMaterialShareViews(ordered, user.id)
   return NextResponse.json({
     messages: ordered.map((message) => {
       const snapshot = parsePostShareSnapshot(message.metadata)
-      return serializeMessage(message, user.id, peer?.lastReadAt || null, snapshot ? postShareViews.get(snapshot.postId) : undefined)
+      const materialSnapshot = parseMaterialShareSnapshot(message.metadata)
+      return serializeMessage(
+        message,
+        user.id,
+        peer?.lastReadAt || null,
+        snapshot ? postShareViews.get(snapshot.postId) : undefined,
+        materialSnapshot ? materialShareViews.get(materialSnapshot.materialId) : undefined,
+      )
     }),
     cursor: ordered.length ? formatCursor(ordered[ordered.length - 1]) : url.searchParams.get('after'),
     beforeCursor: ordered.length ? formatCursor(ordered[0]) : url.searchParams.get('before'),
@@ -309,6 +319,7 @@ function serializeMessage(
   currentUserId: string,
   peerLastReadAt: Date | null,
   postShareView?: PostShareMessageView,
+  materialShareView?: MaterialShareMessageView,
 ) {
   const postShare = message.isDeleted ? null : postShareView
   return {
@@ -321,6 +332,7 @@ function serializeMessage(
     stickerId: message.isDeleted ? null : message.stickerId,
     stickerUrl: message.isDeleted ? null : toPublicMediaUrl(message.sticker?.url),
     postShare: message.type === 'POST_SHARE' ? postShare || null : null,
+    materialShare: message.type === 'MATERIAL_SHARE' ? materialShareView || null : null,
     createdAt: message.createdAt.toISOString(),
     readAt: message.senderId === currentUserId && peerLastReadAt && message.createdAt <= peerLastReadAt
       ? peerLastReadAt.toISOString()

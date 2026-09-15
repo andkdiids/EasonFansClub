@@ -55,13 +55,19 @@ export function AttendancePanel({ concertId, loggedIn, initialAttendance }: Read
     if (!open) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    window.setTimeout(() => firstInputRef.current?.focus(), 0)
+    firstInputRef.current?.focus({ preventScroll: true })
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') requestClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [open, requestClose])

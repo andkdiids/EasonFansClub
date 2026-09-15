@@ -27,6 +27,9 @@ export type SessionUser = {
   canPlayFullMusic?: boolean
   equippedBadges?: EquippedBadgeView[]
   equippedBadge?: EquippedBadgeView | null
+  /** Millisecond precision lets password-reset revocation distinguish a new same-second login. */
+  sessionIssuedAtMs?: number
+  iat?: number
 }
 
 export type SessionShellUser = Pick<SessionUser, 'id' | 'uid' | 'nickname' | 'avatarUrl' | 'equippedBadges' | 'equippedBadge'>
@@ -49,12 +52,37 @@ const secret = new TextEncoder().encode(
 const currentUserCacheTtlMs = Number(process.env.AUTH_USER_CACHE_TTL_MS || (process.env.NODE_ENV === 'production' ? 5000 : 15000))
 const currentUserCache = new Map<string, { expiresAt: number; user: SessionUser | null; promise?: Promise<SessionUser | null> }>()
 
+const passwordInvalidatingActions = [
+  'PASSWORD_RESET_SUCCEEDED',
+  'PASSWORD_RESET_WITH_SECURITY_QUESTION',
+  'PASSWORD_CHANGED_WITH_CURRENT_PASSWORD',
+] as const
+
+async function hasPasswordInvalidationAfterSessionIssue(sessionUser: SessionUser) {
+  const issuedAt = typeof sessionUser.sessionIssuedAtMs === 'number' && Number.isFinite(sessionUser.sessionIssuedAtMs)
+    ? sessionUser.sessionIssuedAtMs
+    : typeof sessionUser.iat === 'number' && Number.isFinite(sessionUser.iat)
+      ? sessionUser.iat * 1000
+      : null
+  if (issuedAt === null) return false
+
+  const invalidation = await prisma.accountSecurityLog.findFirst({
+    where: {
+      userId: sessionUser.id,
+      action: { in: [...passwordInvalidatingActions] },
+      createdAt: { gt: new Date(issuedAt) },
+    },
+    select: { id: true },
+  })
+  return Boolean(invalidation)
+}
+
 export function invalidateCurrentUserCache(userId: string) {
   currentUserCache.delete(userId)
 }
 
 export async function createSessionToken(user: SessionUser) {
-  return new SignJWT(user)
+  return new SignJWT({ ...user, sessionIssuedAtMs: Date.now() })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)
@@ -103,13 +131,24 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
   if (!sessionUser) return null
 
   const now = Date.now()
-  const cached = currentUserCache.get(sessionUser.id)
-  if (cached && cached.expiresAt > now) {
-    if (cached.promise) return cached.promise
-    return cached.user
-  }
 
   try {
+    // Login sessions are stateless JWTs. Password reset/change routes already
+    // write this audit event and clear OnlineSession records, so consult the
+    // durable event before the short-lived current-user cache as well. This
+    // prevents an old JWT from remaining usable merely because the process
+    // that handled the reset was different or the user cache is warm.
+    if (await hasPasswordInvalidationAfterSessionIssue(sessionUser)) {
+      currentUserCache.delete(sessionUser.id)
+      return null
+    }
+
+    const cached = currentUserCache.get(sessionUser.id)
+    if (cached && cached.expiresAt > now) {
+      if (cached.promise) return cached.promise
+      return cached.user
+    }
+
     const lookup = measureBootstrap(
       'auth.currentUser',
       withDbTimeout(

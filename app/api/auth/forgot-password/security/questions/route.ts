@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getAccountSecuritySettings, getSecurityQuestionRecoveryAvailability } from '@/lib/account-security'
+import { getAccountSecuritySettings, getSecurityQuestionRecoveryAvailability, type AccountSecuritySettings } from '@/lib/account-security'
+import { logPasswordRecoveryError } from '@/lib/password-recovery-errors'
 import { prisma } from '@/lib/prisma'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { createPlainToken, hashToken } from '@/lib/tokens'
@@ -19,13 +20,25 @@ export async function POST(request: Request) {
   })
   const body = await request.json().catch(() => null)
   const identifier = normalizeText(body?.identifier)
-  if (!identifier) return NextResponse.json({ message: '请输入账号标识' }, { status: 400 })
-  const settings = await getAccountSecuritySettings()
+  if (!identifier) return NextResponse.json({ code: 'IDENTIFIER_REQUIRED', message: '请输入账号标识', errors: { identifier: '请输入账号标识' } }, { status: 400 })
+  let settings: AccountSecuritySettings
+  try {
+    settings = await getAccountSecuritySettings()
+  } catch (error) {
+    logPasswordRecoveryError('/api/auth/forgot-password/security/questions', error, { stage: 'settings' })
+    return NextResponse.json({ code: 'PASSWORD_RECOVERY_UNAVAILABLE', message: '暂时无法开始密码找回，请稍后重试' }, { status: 503 })
+  }
   if (!settings.enableSecurityQuestionRecovery) return NextResponse.json({ message: '系统密保问题找回功能已关闭，请使用其他可用方式或联系管理员。' }, { status: 403 })
-  const user = await prisma.user.findFirst({
-    where: { isDeleted: false, status: 'ACTIVE', ...getLoginIdentifierWhere(identifier) },
-    select: { id: true, securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { question: true, sortOrder: true } } },
-  })
+  let user: { id: string; securityQuestionRecoveryEnabled: boolean; UserSecurityQuestion: { question: string; sortOrder: number } | null } | null
+  try {
+    user = await prisma.user.findFirst({
+      where: { isDeleted: false, status: 'ACTIVE', ...getLoginIdentifierWhere(identifier) },
+      select: { id: true, securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { question: true, sortOrder: true } } },
+    })
+  } catch (error) {
+    logPasswordRecoveryError('/api/auth/forgot-password/security/questions', error, { stage: 'user_lookup' })
+    return NextResponse.json({ code: 'PASSWORD_RECOVERY_UNAVAILABLE', message: '暂时无法开始密码找回，请稍后重试' }, { status: 503 })
+  }
   const availability = getSecurityQuestionRecoveryAvailability({
     globalEnabled: settings.enableSecurityQuestionRecovery,
     userEnabled: user?.securityQuestionRecoveryEnabled || false,
@@ -39,9 +52,14 @@ export async function POST(request: Request) {
     })
   }
   const challenge = createPlainToken()
-  await prisma.$transaction([
-    prisma.passwordResetToken.updateMany({ where: { userId: user.id, type: 'SECURITY_QUESTION', stage: 'CHALLENGE', consumedAt: null }, data: { consumedAt: new Date() } }),
-    prisma.passwordResetToken.create({ data: { userId: user.id, type: 'SECURITY_QUESTION', stage: 'CHALLENGE', tokenHash: hashToken(challenge), expiresAt: new Date(Date.now() + 10 * 60 * 1000) } }),
-  ])
+  try {
+    await prisma.$transaction([
+      prisma.passwordResetToken.updateMany({ where: { userId: user.id, type: 'SECURITY_QUESTION', stage: 'CHALLENGE', consumedAt: null }, data: { consumedAt: new Date() } }),
+      prisma.passwordResetToken.create({ data: { userId: user.id, type: 'SECURITY_QUESTION', stage: 'CHALLENGE', tokenHash: hashToken(challenge), expiresAt: new Date(Date.now() + 10 * 60 * 1000) } }),
+    ])
+  } catch (error) {
+    logPasswordRecoveryError('/api/auth/forgot-password/security/questions', error, { stage: 'challenge_create' })
+    return NextResponse.json({ code: 'PASSWORD_RECOVERY_UNAVAILABLE', message: '暂时无法开始密码找回，请稍后重试' }, { status: 503 })
+  }
   return NextResponse.json({ message: genericMessage, challenge, questions: user.UserSecurityQuestion ? [user.UserSecurityQuestion] : [] })
 }

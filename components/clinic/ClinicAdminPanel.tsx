@@ -38,6 +38,7 @@ type AdminConsultation = {
   mouthpieceCount: number
   createdAt: string
   author: AdminUser
+  authorRole: 'patient' | 'doctor'
   record: { category: string; status: ContentStatus; author: AdminUser }
 }
 type AdminReport = {
@@ -79,6 +80,11 @@ function actualUser(user: AdminUser | null | undefined) {
 
 function publicLabel(identityMode: 'PUBLIC' | 'ANONYMOUS', publicDisplayName: string, user: AdminUser) {
   return identityMode === 'ANONYMOUS' ? publicDisplayName : userLabel(user)
+}
+
+function consultationRoleLabel(identityMode: 'PUBLIC' | 'ANONYMOUS', role: 'patient' | 'doctor') {
+  if (role === 'patient') return identityMode === 'ANONYMOUS' ? '匿名患者' : '实名患者'
+  return identityMode === 'ANONYMOUS' ? '匿名医师' : '实名医师'
 }
 
 function formatDate(value: string) {
@@ -199,7 +205,7 @@ export function ClinicAdminPanel() {
             <thead><tr><th>ID / 时间</th><th>前台身份</th><th>实际用户</th><th>病历</th><th>原文</th><th>计数</th><th>状态</th><th>处理</th></tr></thead>
             <tbody>{(items as AdminConsultation[]).map((item) => <tr key={item.id}>
               <td>{item.id}<small>{formatDate(item.createdAt)}</small></td>
-              <td>{publicLabel(item.identityMode, item.publicDisplayName, item.author)}<small>{item.identityMode === 'ANONYMOUS' ? '匿名医师' : '实名医师'}</small></td>
+              <td>{publicLabel(item.identityMode, item.publicDisplayName, item.author)}<small>{consultationRoleLabel(item.identityMode, item.authorRole)}</small></td>
               <td>{actualUser(item.author)}</td>
               <td>{item.recordId}<small>{item.record.status}</small></td>
               <td><pre>{item.content}</pre></td>

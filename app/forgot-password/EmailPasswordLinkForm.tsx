@@ -9,6 +9,7 @@ export function EmailPasswordLinkForm() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [fieldError, setFieldError] = useState('')
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -16,6 +17,7 @@ export function EmailPasswordLinkForm() {
     setBusy(true)
     setMessage('')
     setError('')
+    setFieldError('')
     try {
       const response = await fetch('/api/auth/password/request', {
         method: 'POST',
@@ -25,7 +27,9 @@ export function EmailPasswordLinkForm() {
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        setError(data.message || '发送失败，请稍后再试')
+        const nextFieldError = typeof data.errors?.email === 'string' ? data.errors.email : ''
+        setFieldError(nextFieldError)
+        if (!nextFieldError) setError(data.message || '发送失败，请稍后再试')
         return
       }
       setMessage(data.message ? `${data.message}。` : genericMessage)
@@ -51,6 +55,7 @@ export function EmailPasswordLinkForm() {
           className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-2 font-bold outline-none focus:border-brand-500"
           placeholder="请输入注册邮箱"
         />
+        {fieldError ? <p className="mt-1 text-sm font-bold text-red-600">{fieldError}</p> : null}
       </label>
       <button type="submit" disabled={busy || !email.trim()} className="w-full rounded-xl bg-brand-700 px-4 py-2 font-black text-white disabled:opacity-50">
         {busy ? '发送中...' : '发送重置链接'}

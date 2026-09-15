@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ShareButton } from '@/components/share/ShareButton'
+import { createMaterialShareCardData } from '@/lib/material-share-types'
 
 type MaterialDetail = {
   id: string
@@ -35,6 +37,7 @@ type MaterialDetail = {
   } | null
   eligibility?: { qualified: boolean; reasons: string[]; canExchange: boolean; balanceEnough: boolean; priorQuantity: number; remainingUserQuota: number; progress: Array<{ type: string; operator: string; actual: number | boolean; qualified: boolean }> }
   currentBalance?: number
+  publishedAt: string | null
 }
 
 function formatDate(value: string) {
@@ -92,10 +95,14 @@ export function MaterialRedemptionDetailClient({ materialId }: { materialId: str
   const canExchange = !material.isActivityBound && Boolean(material.eligibility?.canExchange && maxQuantity > 0)
   const activity = material.linkedActivity
   const activityRegistration = material.activityRegistration
+  const shareCardData = createMaterialShareCardData(material)
 
   return (
     <main className="site-page-main mx-auto min-w-0 max-w-5xl space-y-5 px-4 py-6 sm:px-5 sm:py-9">
-      <Link href="/material-redemptions" className="text-sm font-black text-brand-700">← 返回物料列表</Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/material-redemptions" className="text-sm font-black text-brand-700">← 返回物料列表</Link>
+        <ShareButton data={shareCardData} label="分享" ariaLabel={`分享物料：${material.title}`} triggerClassName="inline-flex min-h-10 items-center border border-brand-700 px-4 text-sm font-black text-brand-700 hover:bg-sky-50" messageClassName="text-xs font-black text-emerald-700" />
+      </div>
       <section className="grid min-w-0 overflow-hidden border border-sky-100 bg-white/90 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="min-h-64 bg-sky-50 md:min-h-full">{material.coverImageUrl ? <img src={material.coverImageUrl} alt="" className="size-full object-cover" /> : <div className="grid size-full min-h-64 place-items-center text-7xl">🎁</div>}</div>
         <div className="min-w-0 p-6 sm:p-8">

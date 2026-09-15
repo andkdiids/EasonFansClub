@@ -6306,6 +6306,7 @@ body:has(.duel-page) .app-page-content {
 .material-redemption-grid { display:grid; min-width:0; align-items:start; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
 .material-redemption-card { display:block; min-width:0; overflow:hidden; border:1px solid var(--border); color:var(--foreground); background:var(--surface-elevated); box-shadow:0 4px 14px rgba(2,8,18,.06); text-decoration:none; transition:transform 160ms ease,border-color 160ms ease; }
 .material-redemption-card:hover { border-color:var(--primary); transform:translateY(-2px); }
+.material-redemption-card-link { display:block; min-width:0; color:inherit; text-decoration:none; }
 .material-redemption-card-image { display:grid; width:100%; aspect-ratio:4 / 3; place-items:center; overflow:hidden; background:var(--surface-subtle); }
 .material-redemption-card-image img { display:block; width:100%; height:100%; object-fit:contain; object-position:center; }
 .material-redemption-card-placeholder { color:var(--primary); font-size:42px; opacity:.68; }
@@ -6318,6 +6319,10 @@ body:has(.duel-page) .app-page-content {
 .material-redemption-card-meta p { min-width:0; margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .material-redemption-card-meta strong { color:var(--primary); font-weight:950; }
 .material-redemption-card-meta .is-sold-out { color:var(--danger); }
+.material-redemption-card-actions { display:flex; min-width:0; gap:8px; border-top:1px solid var(--border); padding:8px 10px; }
+.material-redemption-card-action { display:inline-flex; min-width:0; min-height:38px; flex:1 1 0; align-items:center; justify-content:center; border:1px solid var(--border); padding:0 10px; color:var(--primary); background:var(--surface); font-size:11px; font-weight:900; line-height:1.2; text-decoration:none; cursor:pointer; touch-action:manipulation; }
+.material-redemption-card-action:hover,.material-redemption-card-action:focus-visible { border-color:var(--primary); outline:none; }
+.material-redemption-card-share-message { position:absolute; right:0; bottom:calc(100% + 4px); white-space:nowrap; }
 
 /* 现场核销摄像头层：移动端接近全屏，扫码框只做视觉引导，不限制识别区域。 */
 .material-redemption-scanner { position:fixed; z-index:var(--layer-dialog); inset:0; display:grid; place-items:center; padding:16px; background:rgba(2,8,18,.82); }
@@ -6351,6 +6356,8 @@ body:has(.duel-page) .app-page-content {
   .material-redemption-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
   .material-redemption-card-image { aspect-ratio:1 / 1; }
   .material-redemption-card { box-shadow:none; }
+  .material-redemption-card-actions { gap:5px; padding:6px; }
+  .material-redemption-card-action { min-height:40px; padding-inline:5px; font-size:10px; }
   .material-redemption-card-body { padding:10px; }
   .material-redemption-card-heading { gap:4px; }
   .material-redemption-card-heading h2 { max-height:41px; font-size:15px; line-height:1.35; }

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { publicImageUrl } from '@/lib/images'
@@ -55,20 +56,47 @@ function serializeTarget(post: NonNullable<Awaited<ReturnType<typeof loadTarget>
   }
 }
 
+function isSchemaMismatch(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    ['P2021', 'P2022'].includes(error.code)
+  )
+}
+
 export async function GET(_request: Request, context: RouteContext) {
   const guard = await requireAdmin('achievement_manage')
   if (!guard.user) return guard.response
   const { postId } = await context.params
   const target = await loadTarget(postId)
   if ('response' in target) return target.response
-  const badges = await listSalonAssignableBadges(target.post.author.id)
-  return NextResponse.json({
-    ok: true,
-    classificationAvailable: SALON_BADGE_CLASSIFICATION.available,
-    classificationField: SALON_BADGE_CLASSIFICATION.field,
-    ...serializeTarget(target.post),
-    badges,
-  }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  try {
+    const badges = await listSalonAssignableBadges(target.post.author.id)
+    return NextResponse.json({
+      ok: true,
+      classificationAvailable: SALON_BADGE_CLASSIFICATION.available,
+      classificationField: SALON_BADGE_CLASSIFICATION.field,
+      ...serializeTarget(target.post),
+      badges,
+    }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  } catch (error) {
+    if (isSchemaMismatch(error)) {
+      console.error('[salon.badge.catalog.schema]', { postId, code: error.code })
+      return NextResponse.json({
+        ok: false,
+        code: 'DATABASE_MIGRATION_OUT_OF_SYNC',
+        message: '沙龙勋章派发配置尚未同步，请先完成数据库结构迁移。',
+      }, { status: 503, headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+    }
+    console.error('[salon.badge.catalog]', {
+      postId,
+      error: error instanceof Error ? error.message : 'unknown error',
+    })
+    return NextResponse.json({
+      ok: false,
+      code: 'SALON_BADGE_CATALOG_FAILED',
+      message: '勋章列表加载失败，请稍后重试。',
+    }, { status: 500, headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  }
 }
 
 export async function POST(request: Request, context: RouteContext) {

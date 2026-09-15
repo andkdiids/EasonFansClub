@@ -2,6 +2,8 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { ShareButton } from '@/components/share/ShareButton'
+import { createMaterialShareCardData } from '@/lib/material-share-types'
 
 type Material = {
   id: string
@@ -20,6 +22,7 @@ type Material = {
   linkedActivityId: string | null
   linkedActivity: { id: string; title: string; startsAt: string | null; endsAt: string | null; registrationFee: number } | null
   isActivityBound: boolean
+  publishedAt: string | null
 }
 
 function formatCompactDate(value: string) {
@@ -79,21 +82,33 @@ export function MaterialRedemptionsClient() {
       {!loading && !error && materials.length && !visibleMaterials.length ? <section className="border border-sky-100 bg-white/80 p-10 text-center font-bold text-slate-500">这个分类暂时没有物料。</section> : null}
       <section className="material-redemption-grid">
         {visibleMaterials.map((material) => (
-          <Link key={material.id} href={`/material-redemptions/${material.id}`} className="material-redemption-card group">
-            <div className="material-redemption-card-image">
-              {material.coverImageUrl ? <img src={material.coverImageUrl} alt="" loading="lazy" /> : <div className="material-redemption-card-placeholder">🎁</div>}
-            </div>
-            <div className="material-redemption-card-body">
-              <div className="material-redemption-card-heading"><h2>{material.title}</h2><span>{material.isActivityBound ? '活动限定' : displayStateLabel(material)}</span></div>
-              {material.description?.trim() ? <p className="material-redemption-card-description">{material.description}</p> : null}
-              {material.isActivityBound && material.linkedActivity ? <p className="text-sm font-black text-emerald-700">需报名「{material.linkedActivity.title}」后自动兑换</p> : null}
-              <div className="material-redemption-card-meta">
-                <p>{material.isActivityBound ? '随活动报名自动兑换' : material.cost === 0 ? '免费兑换' : <><strong>{material.cost}</strong> 挂号费</>}</p>
-                <p className={material.stockRemaining < 1 ? 'is-sold-out' : ''}>{material.stockRemaining < 1 ? '已兑完' : <>剩余 <strong>{material.stockRemaining}</strong> / {material.stockTotal}</>}</p>
-                <p>{material.isActivityBound ? `活动时间 ${formatCompactDate(material.exchangeStartAt)} — ${formatCompactDate(material.exchangeEndAt)}` : `核销至 ${formatCompactDate(material.redeemEndAt)}`}</p>
+          <article key={material.id} className="material-redemption-card group">
+            <Link href={`/material-redemptions/${material.id}`} className="material-redemption-card-link">
+              <div className="material-redemption-card-image">
+                {material.coverImageUrl ? <img src={material.coverImageUrl} alt="" loading="lazy" /> : <div className="material-redemption-card-placeholder">🎁</div>}
               </div>
+              <div className="material-redemption-card-body">
+                <div className="material-redemption-card-heading"><h2>{material.title}</h2><span>{material.isActivityBound ? '活动限定' : displayStateLabel(material)}</span></div>
+                {material.description?.trim() ? <p className="material-redemption-card-description">{material.description}</p> : null}
+                {material.isActivityBound && material.linkedActivity ? <p className="text-sm font-black text-emerald-700">需报名「{material.linkedActivity.title}」后自动兑换</p> : null}
+                <div className="material-redemption-card-meta">
+                  <p>{material.isActivityBound ? '随活动报名自动兑换' : material.cost === 0 ? '免费兑换' : <><strong>{material.cost}</strong> 挂号费</>}</p>
+                  <p className={material.stockRemaining < 1 ? 'is-sold-out' : ''}>{material.stockRemaining < 1 ? '已兑完' : <>剩余 <strong>{material.stockRemaining}</strong> / {material.stockTotal}</>}</p>
+                  <p>{material.isActivityBound ? `活动时间 ${formatCompactDate(material.exchangeStartAt)} — ${formatCompactDate(material.exchangeEndAt)}` : `核销至 ${formatCompactDate(material.redeemEndAt)}`}</p>
+                </div>
+              </div>
+            </Link>
+            <div className="material-redemption-card-actions">
+              <Link href={`/material-redemptions/${material.id}`} className="material-redemption-card-action">查看详情</Link>
+              <ShareButton
+                data={createMaterialShareCardData(material)}
+                label="分享"
+                ariaLabel={`分享物料：${material.title}`}
+                triggerClassName="material-redemption-card-action material-redemption-card-share-action"
+                messageClassName="material-redemption-card-share-message"
+              />
             </div>
-          </Link>
+          </article>
         ))}
       </section>
     </main>

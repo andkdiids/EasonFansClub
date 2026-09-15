@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
 import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
 import { parsePostShareSnapshot, postSharePreview } from '@/lib/post-share-types'
+import { materialSharePreview, parseMaterialShareSnapshot } from '@/lib/material-share-types'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -181,6 +182,10 @@ function getConversationMessagePreview(message: {
   if (message.type === 'POST_SHARE') {
     const snapshot = parsePostShareSnapshot(message.metadata)
     return snapshot ? postSharePreview(snapshot) : '[帖子] 分享了一个帖子'
+  }
+  if (message.type === 'MATERIAL_SHARE') {
+    const snapshot = parseMaterialShareSnapshot(message.metadata)
+    return snapshot ? materialSharePreview(snapshot) : '[物料] 分享了一份物料'
   }
   const text = publicModerationText(message.content, message.moderationStatus).replace(/\s+/g, ' ').trim()
   return text || '[消息]'

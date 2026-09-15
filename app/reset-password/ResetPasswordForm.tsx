@@ -9,6 +9,7 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string }>) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState(token ? '' : '重置链接缺失，请重新申请密码重置链接')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -16,6 +17,7 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string }>) {
     setBusy(true)
     setMessage('')
     setError('')
+    setFieldErrors({})
     try {
       const response = await fetch('/api/auth/password/reset', {
         method: 'POST',
@@ -25,7 +27,11 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string }>) {
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        setError(data.message || '密码修改失败，请重新申请重置链接')
+        const nextFieldErrors = data.errors && typeof data.errors === 'object'
+          ? Object.fromEntries(Object.entries(data.errors).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+          : {}
+        setFieldErrors(nextFieldErrors)
+        if (Object.keys(nextFieldErrors).length === 0) setError(data.message || '密码修改失败，请重新申请重置链接')
         return
       }
       setNewPassword('')
@@ -47,14 +53,17 @@ export function ResetPasswordForm({ token }: Readonly<{ token: string }>) {
       <label className="block" htmlFor="reset-new-password">
         <span className="text-sm font-black text-brand-950">新密码</span>
         <input id="reset-new-password" type="password" autoComplete="new-password" required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-2 font-bold outline-none focus:border-brand-500" placeholder="至少 8 位，最多 128 位" />
+        {fieldErrors.newPassword || fieldErrors.password ? <p className="mt-1 text-sm font-bold text-red-600">{fieldErrors.newPassword || fieldErrors.password}</p> : null}
       </label>
       <label className="block" htmlFor="reset-confirm-password">
         <span className="text-sm font-black text-brand-950">确认密码</span>
         <input id="reset-confirm-password" type="password" autoComplete="new-password" required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-2 font-bold outline-none focus:border-brand-500" placeholder="再次输入新密码" />
+        {fieldErrors.confirmPassword ? <p className="mt-1 text-sm font-bold text-red-600">{fieldErrors.confirmPassword}</p> : null}
       </label>
       <button type="submit" disabled={busy || !token || newPassword.length < 8 || newPassword !== confirmPassword} className="w-full rounded-xl bg-brand-950 px-4 py-2 font-black text-white disabled:opacity-50">
         {busy ? '提交中...' : '修改密码'}
       </button>
+      {fieldErrors.token ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black leading-6 text-red-700">{fieldErrors.token}</p> : null}
       {error ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black leading-6 text-red-700">{error}</p> : null}
       <p className="text-center text-sm font-bold text-slate-500"><Link href="/forgot-password" className="text-brand-700 hover:underline">重新申请重置链接</Link></p>
     </form>

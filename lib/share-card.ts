@@ -10,7 +10,7 @@ export const SHARE_CARD_LOGO_PATH = '/icon.png'
 const TRUSTED_INLINE_IMAGE_PATTERN = /^data:image\/(?:png|webp);base64,[A-Za-z0-9+/]+={0,2}$/i
 const TRUSTED_INLINE_IMAGE_MAX_CHARS = 480_000
 
-export type ShareCardType = 'home' | 'post' | 'activity' | 'salon' | 'clinic' | 'studio'
+export type ShareCardType = 'home' | 'post' | 'activity' | 'salon' | 'clinic' | 'studio' | 'material'
 
 export type ShareCardMeta = Readonly<{
   label: string
@@ -70,6 +70,7 @@ export function shareCardApiPath(data: Pick<ShareCardData, 'type' | 'contentId'>
   if (data.type === 'activity') return `/api/activities/${encodeURIComponent(data.contentId)}/share-card`
   if (data.type === 'salon') return `/api/salon/posts/${encodeURIComponent(data.contentId)}/share-card`
   if (data.type === 'studio') return `/api/studio/projects/${encodeURIComponent(data.contentId)}/share-card`
+  if (data.type === 'material') return `/api/material-redemptions/${encodeURIComponent(data.contentId)}/share-card`
   return null
 }
 
@@ -132,5 +133,6 @@ export function shareCardTypeLabel(type: ShareCardType) {
   if (type === 'salon') return '沙龙'
   if (type === 'clinic') return '病友会诊'
   if (type === 'studio') return '贝多芬与我'
+  if (type === 'material') return '物料兑换'
   return 'Eason Fans Club'
 }

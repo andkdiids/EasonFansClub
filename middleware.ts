@@ -120,6 +120,8 @@ function isPublicPath(pathname: string) {
   if (publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))) return true
   if (/^\/api\/(?:posts|activities)\/[^/]+\/share-card$/.test(pathname)) return true
   if (/^\/api\/salon\/posts\/[^/]+\/share-card$/.test(pathname)) return true
+  if (/^\/api\/material-redemptions\/[^/]+\/share-card$/.test(pathname)) return true
+  if (/^\/api\/material-redemptions\/(?!me$|reference-search$)[^/]+$/.test(pathname)) return true
   if (/^\/api\/salon\/media\/[^/]+\/original$/.test(pathname)) return true
   if (/^\/api\/salon\/posts\/[^/]+\/view$/.test(pathname)) return true
   // Public detail pages must be reachable by WeChat and other crawlers. The
@@ -127,6 +129,7 @@ function isPublicPath(pathname: string) {
   // guards because they do not match these exact one-segment detail paths.
   if (/^\/posts\/(?!new$)[^/]+$/.test(pathname)) return true
   if (/^\/salon\/[^/]+$/.test(pathname)) return true
+  if (/^\/material-redemptions\/(?!me$)[^/]+$/.test(pathname)) return true
   if (/^\/api\/salon\/posts\/[^/]+\/comments$/.test(pathname)) return true
   if (/^\/api\/salon\/posts\/[^/]+$/.test(pathname)) return true
   return /^\/activities\/[^/]+$/.test(pathname)

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
+import { getNewPasswordValidationError, validateNewPassword } from '@/lib/account-password'
 import { hashPassword } from '@/lib/password'
-import { validateNewPassword } from '@/lib/account-password'
+import { logPasswordRecoveryError } from '@/lib/password-recovery-errors'
 import { prisma } from '@/lib/prisma'
 import { consumeRateLimit, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { hashToken } from '@/lib/tokens'
@@ -23,45 +24,54 @@ export async function POST(request: Request) {
   const newPassword = typeof body?.newPassword === 'string' ? body.newPassword : typeof body?.password === 'string' ? body.password : ''
   const confirmPassword = typeof body?.confirmPassword === 'string' ? body.confirmPassword : newPassword
   const passwordError = validateNewPassword(newPassword, confirmPassword)
-  if (!token || passwordError) {
-    return NextResponse.json({ message: passwordError || '重置链接无效或已过期' }, { status: 400, headers: noStoreHeaders })
+  const passwordDetails = getNewPasswordValidationError(newPassword, confirmPassword)
+  if (!token) {
+    return NextResponse.json({ code: 'RESET_TOKEN_INVALID', message: '重置链接无效或已过期', errors: { token: '重置链接无效或已过期' } }, { status: 400, headers: noStoreHeaders })
+  }
+  if (passwordError) {
+    return NextResponse.json({ code: passwordDetails?.code || 'PASSWORD_INVALID', message: passwordError, errors: { [passwordDetails?.field || 'newPassword']: passwordError } }, { status: 400, headers: noStoreHeaders })
   }
 
-  const now = new Date()
-  const reset = await prisma.passwordResetToken.findFirst({
-    where: {
-      tokenHash: hashToken(token),
-      type: 'EMAIL_LINK',
-      stage: 'RESET_TOKEN',
-      consumedAt: null,
-      expiresAt: { gt: now },
-    },
-    select: { id: true, userId: true },
-  })
-  if (!reset) return NextResponse.json({ message: '重置链接无效或已过期' }, { status: 400, headers: noStoreHeaders })
-
-  const passwordHash = await hashPassword(newPassword)
-  const committed = await prisma.$transaction(async (tx) => {
-    const consumed = await tx.passwordResetToken.updateMany({
-      where: { id: reset.id, type: 'EMAIL_LINK', stage: 'RESET_TOKEN', consumedAt: null, expiresAt: { gt: now } },
-      data: { consumedAt: now },
-    })
-    if (consumed.count !== 1) return false
-    await tx.user.update({ where: { id: reset.userId }, data: { passwordHash } })
-    await tx.passwordResetToken.updateMany({ where: { userId: reset.userId, consumedAt: null }, data: { consumedAt: now } })
-    await tx.onlineSession.deleteMany({ where: { userId: reset.userId } })
-    await tx.accountSecurityLog.create({
-      data: {
-        userId: reset.userId,
-        action: 'PASSWORD_RESET_SUCCEEDED',
-        ipAddress: ip,
-        userAgent: request.headers.get('user-agent')?.slice(0, 500),
-        metadata: { method: 'EMAIL_LINK' },
+  try {
+    const now = new Date()
+    const reset = await prisma.passwordResetToken.findFirst({
+      where: {
+        tokenHash: hashToken(token),
+        type: 'EMAIL_LINK',
+        stage: 'RESET_TOKEN',
+        consumedAt: null,
+        expiresAt: { gt: now },
       },
+      select: { id: true, userId: true },
     })
-    return true
-  })
+    if (!reset) return NextResponse.json({ code: 'RESET_TOKEN_INVALID', message: '重置链接无效或已过期', errors: { token: '重置链接无效或已过期' } }, { status: 400, headers: noStoreHeaders })
 
-  if (!committed) return NextResponse.json({ message: '重置链接已经使用' }, { status: 409, headers: noStoreHeaders })
-  return NextResponse.json({ message: '密码修改成功，请重新登录' }, { headers: noStoreHeaders })
+    const passwordHash = await hashPassword(newPassword)
+    const committed = await prisma.$transaction(async (tx) => {
+      const consumed = await tx.passwordResetToken.updateMany({
+        where: { id: reset.id, type: 'EMAIL_LINK', stage: 'RESET_TOKEN', consumedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now },
+      })
+      if (consumed.count !== 1) return false
+      await tx.user.update({ where: { id: reset.userId }, data: { passwordHash } })
+      await tx.passwordResetToken.updateMany({ where: { userId: reset.userId, consumedAt: null }, data: { consumedAt: now } })
+      await tx.onlineSession.deleteMany({ where: { userId: reset.userId } })
+      await tx.accountSecurityLog.create({
+        data: {
+          userId: reset.userId,
+          action: 'PASSWORD_RESET_SUCCEEDED',
+          ipAddress: ip,
+          userAgent: request.headers.get('user-agent')?.slice(0, 500),
+          metadata: { method: 'EMAIL_LINK' },
+        },
+      })
+      return true
+    })
+
+    if (!committed) return NextResponse.json({ code: 'RESET_TOKEN_USED', message: '重置链接已经使用', errors: { token: '重置链接已经使用' } }, { status: 409, headers: noStoreHeaders })
+    return NextResponse.json({ message: '密码修改成功，请重新登录' }, { headers: noStoreHeaders })
+  } catch (error) {
+    logPasswordRecoveryError('/api/auth/password/reset', error, { stage: 'commit' })
+    return NextResponse.json({ code: 'PASSWORD_RESET_FAILED', message: '密码重置失败，请稍后重试' }, { status: 500, headers: noStoreHeaders })
+  }
 }

@@ -157,13 +157,21 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
   async function shareLink() {
     setMethodOpen(false)
     try {
-      // Keep the existing link share contract: current page URL goes to the
-      // existing helper; the card keeps its clean canonical URL separately.
-      const result = await shareContent({
-        title: (linkTitle || data.title).trim(),
-        text: linkText ?? data.description,
-        url: window.location.href,
-      })
+      // Existing post/activity/other content keeps the established current-page
+      // link behavior. Material cards are also rendered in list views, so their
+      // link must point to the material's stable detail URL.
+      const sharePayload = data.type === 'material'
+        ? {
+            title: (linkTitle || data.title).trim(),
+            text: linkText ?? data.description,
+            url: canonicalShareUrl(data.url),
+          }
+        : {
+            title: (linkTitle || data.title).trim(),
+            text: linkText ?? data.description,
+            url: window.location.href,
+          }
+      const result = await shareContent(sharePayload)
       const awardedAmount = await recordContentShare(data.contentId || data.url)
       const suffix = awardedAmount > 0 ? `，+${awardedAmount}挂号费` : ''
       announce(`${result === 'shared' ? '已打开分享面板' : '标题和链接已复制'}${suffix}`)
@@ -173,7 +181,7 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
   }
 
   async function copyPostLink() {
-    if (data.type !== 'post') return
+    if (data.type !== 'post' && data.type !== 'material') return
     try {
       await copyText(canonicalShareUrl(data.url))
       setMethodOpen(false)
@@ -210,6 +218,16 @@ export function ShareButton({ data, linkTitle, linkText, label = '分享', trigg
       </button>
       {message ? <span className={messageClassName || 'share-button-message'} role="status">{message}</span> : null}
       {data.type === 'post' ? (
+        <PostShareSheet
+          open={methodOpen}
+          data={data}
+          canSaveCard={canSaveCard}
+          onClose={() => setMethodOpen(false)}
+          onCreateCard={() => { void generateCard() }}
+          onCopyLink={() => { void copyPostLink() }}
+          onShareSuccess={onPostShareSuccess}
+        />
+      ) : data.type === 'material' ? (
         <PostShareSheet
           open={methodOpen}
           data={data}

@@ -21,6 +21,7 @@ import { headCosObject } from '@/lib/tencent-cos'
 import { uploadSiteImage } from '@/lib/site-media-storage'
 import { getStudioTool } from '@/lib/studio/tools'
 import { PUBLIC_STUDIO_PROJECT_WHERE, studioProjectMetadata } from '@/lib/studio/public'
+import { loadMaterialShareCardData } from '@/lib/material-share-service'
 
 const shareCardIdPattern = /^[a-zA-Z0-9_-]{1,191}$/
 
@@ -141,10 +142,10 @@ type ShareCardResult = Readonly<{
   mimeType: typeof SHARE_CARD_MIME_TYPE
 }>
 
-export type ShareCardContentType = 'post' | 'activity' | 'salon' | 'studio'
+export type ShareCardContentType = 'post' | 'activity' | 'salon' | 'studio' | 'material'
 
 function isShareCardContentType(type: ShareCardData['type']): type is ShareCardContentType {
-  return type === 'post' || type === 'activity' || type === 'salon' || type === 'studio'
+  return type === 'post' || type === 'activity' || type === 'salon' || type === 'studio' || type === 'material'
 }
 
 export class ShareCardContentNotFoundError extends Error {
@@ -316,13 +317,14 @@ export async function loadPublicShareCardData(type: ShareCardContentType, conten
   if (type === 'post') return loadPostShareCardData(contentId)
   if (type === 'activity') return loadActivityShareCardData(contentId)
   if (type === 'salon') return loadSalonShareCardData(contentId)
-  return loadStudioShareCardData(contentId)
+  if (type === 'studio') return loadStudioShareCardData(contentId)
+  return loadMaterialShareCardData(contentId)
 }
 
 export function shareCardObjectKey(type: ShareCardContentType, contentId: string, hash: string) {
   if (!isValidShareCardContentId(contentId)) throw new Error('SHARE_CARD_CONTENT_ID_INVALID')
   if (!/^[a-f0-9]{64}$/i.test(hash)) throw new Error('SHARE_CARD_HASH_INVALID')
-  const folder = type === 'post' ? 'posts' : type === 'activity' ? 'activities' : type === 'salon' ? 'salon' : 'studio'
+  const folder = type === 'post' ? 'posts' : type === 'activity' ? 'activities' : type === 'salon' ? 'salon' : type === 'studio' ? 'studio' : 'materials'
   return `share-cards/${folder}/${contentId}/${hash}.png`
 }
 
