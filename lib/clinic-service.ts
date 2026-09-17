@@ -17,6 +17,8 @@ import { prisma } from '@/lib/prisma'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
+import { ASPIRIN_MIN_LENGTH } from '@/lib/aspirin-badge-config'
+import { getAspirinConsultationLength } from '@/lib/aspirin-consultation'
 
 const clinicAuthorSelect = {
   id: true,
@@ -309,9 +311,21 @@ export async function createClinicConsultation(input: {
   const result = await prisma.$transaction(async (tx) => {
     const record = await tx.clinicRecord.findFirst({
       where: { id: input.recordId, status: 'ACTIVE' },
-      select: { id: true, authorId: true, identityMode: true, anonymousNumber: true },
+      select: { id: true, authorId: true, category: true, identityMode: true, anonymousNumber: true },
     })
     if (!record) throw new ClinicServiceError('RECORD_NOT_FOUND', '这份病历不存在或已经不再公开。', 404)
+
+    if (record.category === 'ASK_DOCTORS') {
+      const aspirinLength = getAspirinConsultationLength(content)
+      if (aspirinLength < ASPIRIN_MIN_LENGTH) {
+        throw new ClinicServiceError(
+          'ASPIRIN_CONTENT_TOO_SHORT',
+          `阿士匹灵有效会诊至少需要 ${ASPIRIN_MIN_LENGTH} 个有效字符。`,
+          400,
+          { minLength: ASPIRIN_MIN_LENGTH, actualLength: aspirinLength },
+        )
+      }
+    }
 
     const isRecordAuthor = input.authorId === record.authorId
     const effectiveIdentityMode = isRecordAuthor ? record.identityMode : input.identityMode

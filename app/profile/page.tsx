@@ -92,7 +92,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
-    getEquippedBadgesForUser(profile.id),
+    getEquippedBadgesForUser(profile.id, user.id),
     getBadgeProfileSummary(profile.id, user.id),
     getProfileRecordPreferencesSafe(profile.id),
   ])

@@ -1,8 +1,8 @@
 {
   "provider": "mysql",
-  "generatedAt": "2026-09-14T00:00:00.000+08:00",
-  "schemaHash": "d3028ea72e705e25dfb0508e1aa366e3654a182b9788ec5d5253a5cec5b43536",
-  "baselineHash": "7e78a357c02e2232bae6459b0a17b0701015b2670f6e3d6f1687a5fb4efe0b42",
+  "generatedAt": "2026-09-17T19:00:00.000+08:00",
+  "schemaHash": "52533e8ec1c77e72187954127098d4e91ca14d77388189e6e9b5f8ba1f92a2bd",
+  "baselineHash": "6f55fbbb14d6184018a24e36ee7d8853ad6842264916f81bfc611e4b98c264e6",
   "prismaVersion": "6.19.3",
   "baselineStatus": "CANDIDATE",
   "source": "prisma/schema.prisma",

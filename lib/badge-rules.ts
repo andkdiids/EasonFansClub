@@ -331,7 +331,7 @@ export const BADGE_RULE_REGISTRY = {
   CLINIC_CONSULTATION_STREAK: {
     group: '社区', unit: '位不同用户的病例问诊',
     label: '阿士匹灵连续问诊',
-    dataDescription: '仅统计阿士匹灵门诊部的有效问诊；按上海时区每日不同其他用户的病例发布者去重，自己发布的病例不计入，同一用户发布的多个病例当天仅计 1 次，每条问诊正文至少 21 字',
+    dataDescription: '仅统计「各位医师点睇」（ASK_DOCTORS）分类的有效问诊；按上海时区每日不同其他用户的病例发布者去重，自己发布的病例不计入，同一用户发布的多个病例当天仅计 1 次，每条问诊正文至少 21 字',
     metricLoader: 'CLINIC_CONSULTATION_STREAK',
     supportedOperators: ['GTE'],
     events: ['CLINIC_CONSULTATION_CHANGED'],

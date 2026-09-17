@@ -140,7 +140,7 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
     visibility.isSelf || visibility.settings.showCheckInMessages
       ? loadProfileRecentMessagesPage(user.id, viewer?.id)
       : Promise.resolve({ messages: [], pagination: getProfileRecordPagination(0, 1) }),
-    getEquippedBadgesForUser(user.id),
+    getEquippedBadgesForUser(user.id, viewer?.id),
     visibility.isSelf || visibility.settings.showBadgeHistory ? getBadgeProfileSummary(user.id, viewer?.id) : Promise.resolve(null),
     visibility.isSelf || visibility.settings.showConcertHistory
       ? prisma.userMusicConcert.count({ where: { userId: user.id, isPublic: true, MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } } } })

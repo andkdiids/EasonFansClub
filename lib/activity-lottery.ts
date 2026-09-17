@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { parseActivityDateInput } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { activityLotteryTierName, MAX_ACTIVITY_LOTTERY_PRIZES } from '@/lib/activity-lottery-levels'
+import { getUnrevealedAngelGiftBadgeIds } from '@/lib/angel-gift-collection'
 import { storedActivityImageUrl } from '@/lib/activity-image-url'
 import { createManyNotificationsWithDb } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
@@ -552,9 +553,12 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
         },
       })
     : []
+  const badgeIds = [...new Set(lotteries.flatMap((lottery) => lottery.LotteryPrize.flatMap((prize) => prize.Badge ? [prize.Badge.id] : [])))]
+  const unrevealedAngelGiftBadgeIds = await getUnrevealedAngelGiftBadgeIds(viewerId, badgeIds)
   const winners = new Map(winnerRows.map((winner) => [winner.lotteryId, winner]))
   return lotteries.filter((lottery): lottery is typeof lottery & { status: 'SCHEDULED' | 'DRAWN' } => lottery.status === 'SCHEDULED' || lottery.status === 'DRAWN').map((lottery) => {
     const winner = winners.get(lottery.id)
+    const winnerBadgeHidden = Boolean(winner?.LotteryPrize?.Badge && unrevealedAngelGiftBadgeIds.has(winner.LotteryPrize.Badge.id))
     const redemptionState = winner && winner.LotteryPrize?.prizeType !== 'VIRTUAL'
       ? getActivityLotteryWinnerRedemptionState({ redemptionStatus: winner.redemptionStatus, registration: winner.Registration, activityEndAt: lottery.Activity?.endsAt })
       : null
@@ -567,26 +571,29 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       eligibleCount: lottery.eligibleCount,
       winnerCount: lottery.winnerCount,
       drawnAt: iso(lottery.drawnAt),
-      prizes: lottery.LotteryPrize.map((prize) => ({
-        id: prize.id,
-        tierName: prize.tierName,
-        name: prize.name,
-        imageUrl: publicPrizeImageUrl(prize.imageUrl, prize.metadata),
-        description: prize.description,
-        quantity: prize.quantity,
-        prizeType: prize.prizeType,
-        virtualPrizeType: prize.virtualPrizeType,
-        badge: prize.Badge ? { id: prize.Badge.id, name: prize.Badge.name, imageUrl: publicImageUrl(prize.Badge.iconUrl) } : null,
-        registrationFeeAmount: prize.registrationFeeAmount,
-      })),
+      prizes: lottery.LotteryPrize.map((prize) => {
+        const badgeHidden = Boolean(prize.Badge && unrevealedAngelGiftBadgeIds.has(prize.Badge.id))
+        return {
+          id: prize.id,
+          tierName: prize.tierName,
+          name: badgeHidden ? '???' : prize.name,
+          imageUrl: badgeHidden ? null : publicPrizeImageUrl(prize.imageUrl, prize.metadata),
+          description: badgeHidden ? null : prize.description,
+          quantity: prize.quantity,
+          prizeType: prize.prizeType,
+          virtualPrizeType: prize.virtualPrizeType,
+          badge: badgeHidden || !prize.Badge ? null : { id: prize.Badge.id, name: prize.Badge.name, imageUrl: publicImageUrl(prize.Badge.iconUrl) },
+          registrationFeeAmount: prize.registrationFeeAmount,
+        }
+      }),
       winner: winner && winner.LotteryPrize
         ? winner.LotteryPrize.prizeType === 'VIRTUAL'
           ? {
               tierName: winner.LotteryPrize.tierName || '中奖奖项',
-              prizeName: winner.LotteryPrize.name,
+              prizeName: winnerBadgeHidden ? '???' : winner.LotteryPrize.name,
               prizeType: 'VIRTUAL' as const,
               virtualPrizeType: winner.LotteryPrize.virtualPrizeType || 'BADGE',
-              badge: winner.LotteryPrize.Badge ? { id: winner.LotteryPrize.Badge.id, name: winner.LotteryPrize.Badge.name, imageUrl: publicImageUrl(winner.LotteryPrize.Badge.iconUrl) } : null,
+              badge: winnerBadgeHidden || !winner.LotteryPrize.Badge ? null : { id: winner.LotteryPrize.Badge.id, name: winner.LotteryPrize.Badge.name, imageUrl: publicImageUrl(winner.LotteryPrize.Badge.iconUrl) },
               registrationFeeAmount: winner.LotteryPrize.registrationFeeAmount,
               redemptionStatus: winner.redemptionStatus,
               redemptionState: null,

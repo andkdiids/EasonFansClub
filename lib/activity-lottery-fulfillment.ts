@@ -13,6 +13,7 @@ export type ActivityLotteryFulfillmentResult = {
   status: 'NOT_REQUIRED' | 'FULFILLED' | 'ALREADY_FULFILLED' | 'FAILED'
   fulfilledAt: string | null
   error: string | null
+  badgeGrants?: Array<{ badgeId: string; recordId: string }>
 }
 
 export type ActivityLotteryFulfillmentSummary = {
@@ -122,9 +123,10 @@ async function fulfillInTransaction(
 
   await tx.lotteryEntry.update({ where: { id: winner.id }, data: { fulfillmentStatus: 'PENDING', fulfillmentError: null }, select: { id: true } })
 
+  let badgeGrants: Array<{ badgeId: string; recordId: string }> | undefined
   if (prize.virtualPrizeType === 'BADGE') {
     if (!prize.badgeId) throw new Error('虚拟勋章奖品缺少勋章配置')
-    await grantBadgeWithTransaction(tx, {
+    const granted = await grantBadgeWithTransaction(tx, {
       userId: winner.userId,
       badgeId: prize.badgeId,
       sourceType: FULFILLMENT_SOURCE_TYPE,
@@ -135,6 +137,7 @@ async function fulfillInTransaction(
       obtainedAt: now,
       availabilityMode: 'CURRENT',
     })
+    badgeGrants = granted.derivedGrants || []
   } else {
     const amount = prize.registrationFeeAmount
     if (typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount <= 0) throw new Error('虚拟挂号费奖品金额无效')
@@ -173,7 +176,7 @@ async function fulfillInTransaction(
     data: { fulfillmentStatus: 'FULFILLED', fulfilledAt: now, fulfillmentError: null },
     select: { fulfilledAt: true },
   })
-  return { winnerId, prizeType: 'VIRTUAL', status: 'FULFILLED', fulfilledAt: updated.fulfilledAt?.toISOString() || now.toISOString(), error: null }
+  return { winnerId, prizeType: 'VIRTUAL', status: 'FULFILLED', fulfilledAt: updated.fulfilledAt?.toISOString() || now.toISOString(), error: null, ...(badgeGrants?.length ? { badgeGrants } : {}) }
 }
 
 /** Fulfill one persisted winner. Retries always use the same winner row. */
@@ -181,6 +184,14 @@ export async function fulfillActivityLotteryPrize(winnerId: string, options: Act
   try {
     const result = await prisma.$transaction((tx) => fulfillInTransaction(tx, winnerId, options), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 5_000 })
     if (result.status === 'FULFILLED' || result.status === 'ALREADY_FULFILLED') {
+      if (result.badgeGrants?.length) {
+        try {
+          const { processBadgeGrantEffects } = await import('@/lib/badge-phase3')
+          await processBadgeGrantEffects({ userId: (await prisma.lotteryEntry.findUnique({ where: { id: winnerId }, select: { userId: true } }))?.userId || '', grants: result.badgeGrants })
+        } catch (error) {
+          console.error('[activity-lottery.badge-effects]', { winnerId, error })
+        }
+      }
       const badgePrize = await prisma.lotteryEntry.findUnique({
         where: { id: winnerId },
         select: { userId: true, LotteryPrize: { select: { virtualPrizeType: true, badgeId: true } } },

@@ -6,6 +6,7 @@ import { entertainmentGameCatalog, gameCategories, type GameCategoryFilter } fro
 import { GameBanner } from './GameBanner'
 import { GameGrid } from './GameGrid'
 import { EntertainmentLeaderboardCenter } from './EntertainmentLeaderboardCenter'
+import { ForgetLyricsSection } from './ForgetLyrics'
 
 type LobbySummary = {
   weeklyBest: number | null
@@ -58,6 +59,7 @@ return (
         </div>
         <Link href="/games/guess-song/duel">进入对决</Link>
       </section>
+      <ForgetLyricsSection />
       <section className="game-library" aria-labelledby="game-library-title">
         <div className="game-library-heading">
           <div>

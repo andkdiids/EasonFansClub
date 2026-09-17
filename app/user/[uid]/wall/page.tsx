@@ -37,7 +37,7 @@ export default async function ProfileWallPage({ params, searchParams }: { params
     })
     if (markedNotifications > 0) emitRealtime(viewer.id, 'notification')
   }
-  const equippedBadges = await getEquippedBadgesForUser(target.id)
+  const equippedBadges = await getEquippedBadgesForUser(target.id, viewer?.id)
   const name = getPublicUserDisplayName(target)
 
   return (

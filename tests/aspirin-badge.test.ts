@@ -10,6 +10,7 @@ import {
 import {
   getAspirinDailyQualifiedAuthorIds,
   getAspirinDailyProgress,
+  getAspirinConsultationLength,
   getAspirinProgressKey,
   getAspirinQualifiedDateKeys,
   isAspirinInitialQualificationComplete,
@@ -81,6 +82,12 @@ test('阿士匹灵规则只接受稳定的 ASPIRIN_CLINIC 配置，并校验持�
     revokeAfterDays: 7,
   })
   assert.match(String(validateSustainedQualificationSettings({ sustainedQualification: true, inactiveAfterDays: 7, revokeAfterDays: 2 }).error), /大于/)
+})
+
+test('提交校验和进度 resolver 共享阿士匹灵有效字数算法', () => {
+  assert.equal(getAspirinConsultationLength(`  <p>${uniqueText(20)}</p>\n`), 20)
+  assert.equal(getAspirinConsultationLength(`  <p>${uniqueText(21)}</p>\n`), ASPIRIN_MIN_LENGTH)
+  assert.equal(getAspirinConsultationLength('<p>   </p>'), 0)
 })
 
 test('阿士匹灵只按有效问诊规则计入进度，并排除自己发布的病例', () => {

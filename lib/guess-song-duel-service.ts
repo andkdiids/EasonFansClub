@@ -70,7 +70,15 @@ const publicUserSelect = {
   isOnline: true,
   Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
   EquippedBadges: {
-    where: { Badge: { isEnabled: true, isActive: true, isWearable: true } },
+    where: {
+      Badge: {
+        isEnabled: true,
+        isActive: true,
+        isWearable: true,
+        PharmacyPrize: { none: { type: 'BADGE', enabled: true, isHidden: true } },
+        PharmacyCampaignCollectionRewards: { none: {} },
+      },
+    },
     orderBy: equippedBadgesOrderBy,
     select: {
       position: true,

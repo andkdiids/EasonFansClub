@@ -10,6 +10,7 @@ import { evaluateBadgeMetric, getBatchBadgeMetrics } from '@/lib/badge-rule-engi
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { upsertNotification } from '@/lib/notification-write'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
+import { getUnrevealedAngelGiftBadgeIds, isAngelGiftBadgeUnrevealed } from '@/lib/angel-gift-collection'
 
 export const MAX_BADGE_TRACKING = 10
 export const BADGE_RECOMMENDATION_LIMIT = 3
@@ -112,10 +113,12 @@ export async function getBadgeTaskCenter(userId: string, now = new Date()) {
       select: taskBadgeSelect,
     }),
   ])
+  const unrevealedAngelGiftBadgeIds = await getUnrevealedAngelGiftBadgeIds(userId, [...new Set([...trackingRows.map((row) => row.Badge.id), ...candidates.map((badge) => badge.id)])], prisma)
   const validTracked = trackingRows.filter((row) => {
     const badge = row.Badge
     return TRACKABLE_RULE_TYPES.includes(badge.BadgeRule?.ruleType as SupportedBadgeRuleType)
       && canExposeLiveBadgeProgress(badge, now)
+      && !unrevealedAngelGiftBadgeIds.has(badge.id)
   })
   const validIds = new Set(validTracked.map((row) => row.Badge.id))
   const staleIds = trackingRows.filter((row) => !validIds.has(row.Badge.id)).map((row) => row.Badge.id)
@@ -126,6 +129,7 @@ export async function getBadgeTaskCenter(userId: string, now = new Date()) {
   const progressByBadgeId = await loadProgress(userId, allBadges)
   const tracking = validTracked.map((row) => toTaskItem(row.Badge, progressByBadgeId, row)).filter((item): item is NonNullable<typeof item> => Boolean(item))
   const recommendations = candidates
+    .filter((badge) => !unrevealedAngelGiftBadgeIds.has(badge.id))
     .map((badge) => toTaskItem(badge, progressByBadgeId))
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .filter((item) => item.progress.current < item.progress.target)
@@ -137,6 +141,7 @@ export async function getBadgeTaskCenter(userId: string, now = new Date()) {
 }
 
 export async function trackBadge(userId: string, badgeId: string) {
+  if (await isAngelGiftBadgeUnrevealed(userId, badgeId)) throw new Error('这枚勋章当前不可见')
   const badge = await prisma.badge.findUnique({
     where: { id: badgeId },
     select: {

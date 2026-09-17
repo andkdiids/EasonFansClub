@@ -3478,6 +3478,44 @@ body:has(.game-detail-page) .site-footer-info { color:rgba(226,232,240,.62); bor
 .game-duel-entry p { margin:5px 0 0; color:#a9c5bb; font-size:12px; }
 .game-duel-entry>a { display:inline-flex; min-height:44px; align-items:center; justify-content:center; border:1px solid #54dba4; padding:0 20px; color:#06150f; background:#54dba4; font-size:11px; font-weight:900; text-decoration:none; white-space:nowrap; }
 .game-duel-entry>a:hover { background:#8cf3c8; }
+.forget-lyrics-section { margin-top:14px; border:1px solid var(--game-line); padding:20px 22px 14px; background:rgba(9,20,33,.82); }
+.forget-lyrics-heading { display:flex; align-items:end; justify-content:space-between; gap:20px; }
+.forget-lyrics-heading p { margin:0; color:#54dba4; font-size:10px; font-weight:900; letter-spacing:.12em; }
+.forget-lyrics-heading h2 { margin:5px 0 0; color:#f8fafc; font-size:28px; letter-spacing:-.04em; }
+.forget-lyrics-heading>a { color:#54dba4; font-size:11px; font-weight:900; text-decoration:none; white-space:nowrap; }
+.forget-lyrics-heading>a:hover { color:#a6f6d6; }
+.forget-lyrics-song-list { display:grid; gap:7px; margin-top:16px; }
+.forget-lyrics-song-row { display:flex; min-width:0; align-items:center; gap:12px; border:1px solid rgba(148,180,210,.12); padding:7px 8px 7px 7px; background:#0b1624; }
+.forget-lyrics-song-link { display:flex; min-width:0; flex:1; align-items:center; gap:11px; color:#f5f8fb; text-decoration:none; }
+.forget-lyrics-song-link:hover strong { color:#9cefd0; }
+.forget-lyrics-song-cover { width:56px; height:56px; flex:none; border-radius:3px; }
+.forget-lyrics-song-copy { display:grid; min-width:0; gap:3px; }
+.forget-lyrics-song-copy :where(strong,small,em) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forget-lyrics-song-copy strong { color:#f1f7fb; font-size:13px; }
+.forget-lyrics-song-copy small { color:#91a5b8; font-size:10px; font-weight:800; }
+.forget-lyrics-song-copy em { color:#54dba4; font-size:10px; font-style:normal; font-weight:900; }
+.forget-lyrics-play { display:grid; width:38px; height:38px; flex:none; place-items:center; border:1px solid rgba(84,219,164,.6); border-radius:50%; color:#07150f; background:#54dba4; font-size:12px; font-weight:900; cursor:pointer; }
+.forget-lyrics-play:hover { background:#9cefd0; }
+.forget-lyrics-play:disabled { cursor:not-allowed; opacity:.42; }
+.forget-lyrics-empty { margin:14px 0 0; border:1px dashed rgba(148,180,210,.22); padding:18px; color:#91a5b8; font-size:12px; font-weight:800; text-align:center; }
+.forget-lyrics-page { position:relative; isolation:isolate; min-height:100dvh; color:#f4f8fb; }
+.forget-lyrics-page::before { position:fixed; z-index:-1; inset:0; background:radial-gradient(circle at 78% 5%,rgba(31,105,174,.18),transparent 32rem),linear-gradient(145deg,#07101d 0%,#091421 48%,#050b13 100%); content:""; }
+.forget-lyrics-page-inner { box-sizing:border-box; width:min(980px,100%); margin-inline:auto; padding:28px 24px calc(var(--mobile-fixed-total-height) + 40px); }
+.forget-lyrics-back { display:inline-flex; min-height:36px; align-items:center; color:#91a8ba; font-size:12px; font-weight:900; text-decoration:none; }
+.forget-lyrics-back:hover { color:#54dba4; }
+.forget-lyrics-page-heading { border-bottom:1px solid var(--game-line); padding:24px 0 20px; }
+.forget-lyrics-page-heading p { margin:0; color:#54dba4; font-size:10px; font-weight:900; letter-spacing:.14em; }
+.forget-lyrics-page-heading h1 { margin:7px 0 0; color:#f8fafc; font-size:36px; letter-spacing:-.05em; }
+.forget-lyrics-page-heading span { display:block; margin-top:8px; color:#91a5b8; font-size:12px; }
+.forget-lyrics-tabs,.forget-lyrics-sort { display:flex; flex-wrap:wrap; gap:7px; margin-top:16px; }
+.forget-lyrics-tabs button,.forget-lyrics-sort button { min-height:36px; border:1px solid var(--game-line); padding:0 14px; color:#8fa4ba; background:#0b1624; font-size:11px; font-weight:850; cursor:pointer; }
+.forget-lyrics-tabs button[aria-pressed='true'],.forget-lyrics-sort button[aria-pressed='true'] { border-color:#54dba4; color:#06150f; background:#54dba4; }
+.forget-lyrics-sort { align-items:center; margin-top:10px; }
+.forget-lyrics-sort span { color:#718a9d; font-size:10px; font-weight:900; }
+.forget-lyrics-count { margin:20px 0 0; color:#91a5b8; font-size:11px; font-weight:800; }
+.forget-lyrics-page-message { margin-top:20px; border:1px dashed var(--game-line); padding:20px; color:#91a5b8; font-size:12px; font-weight:800; text-align:center; }
+.forget-lyrics-page .forget-lyrics-song-list { margin-top:10px; }
+.forget-lyrics-page .forget-lyrics-song-row { padding:9px; }
 .game-library { margin-top:8px; }
 .game-library-heading { display:flex; align-items:end; justify-content:space-between; gap:24px; }
 .game-library-heading h2 {   color: #111827;margin:0; font-size:28px; }
@@ -3898,6 +3936,11 @@ align-self:center;border:1px solid rgba(171,199,220,.2); padding:22px 28px; back
   .game-duel-entry { min-height:0; align-items:flex-start; flex-direction:column; gap:14px; margin-top:12px; padding:18px; }
   .game-duel-entry>a { width:100%; }
   .game-library { margin-top:12px; }
+  .forget-lyrics-section { margin-top:12px; padding:16px 14px 12px; }
+  .forget-lyrics-heading h2 { font-size:24px; }
+  .forget-lyrics-song-cover { width:52px; height:52px; }
+  .forget-lyrics-page-inner { padding:18px 16px calc(var(--mobile-fixed-total-height) + 24px); }
+  .forget-lyrics-page-heading h1 { font-size:32px; }
   .game-library-heading { align-items:start; flex-direction:column; gap:6px; }
   .game-library-heading h2 { margin-top:4px; }
   .game-library-heading label,.game-library-heading input { width:100%; }

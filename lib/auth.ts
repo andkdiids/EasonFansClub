@@ -183,7 +183,7 @@ async function getCurrentUserForSessionUser(sessionUser: SessionUser | null) {
       ),
     ).then(async (user) => {
       if (!user || !isCompleteActiveUser(user)) return null
-      const equippedBadges = await getEquippedBadgesForUser(user.id).catch(() => [])
+      const equippedBadges = await getEquippedBadgesForUser(user.id, user.id).catch(() => [])
 
       return {
         id: user.id,

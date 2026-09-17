@@ -231,6 +231,7 @@ async function collectSeriesRewards(userId: string, sourceGrants: readonly Grant
       })
       if (result.created) {
         nextRewards.push({ badgeId: result.badgeId, recordId: result.recordId })
+        if (result.derivedGrants?.length) nextRewards.push(...result.derivedGrants)
         state.completedSeriesIds.push(series.id)
       }
     } catch (error) {

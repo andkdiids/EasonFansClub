@@ -12,6 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { getUnrevealedAngelGiftBadgeIds } from '@/lib/angel-gift-collection'
 import { getProfileSalonPosts } from '@/lib/salon'
 import { buildProfilePostWhere } from '@/lib/post-moderation'
 import { postContentPlainText } from '@/lib/share-metadata'
@@ -184,11 +185,12 @@ export async function GET(request: Request, context: RouteContext) {
         where: { userId: target.id, isHidden: false, ...activeUserBadgeWhere(now) },
         orderBy: { awardedAt: 'desc' },
         take: 12,
-        select: { id: true, grantedAt: true, Badge: { select: { name: true, description: true, iconUrl: true } } },
+        select: { id: true, grantedAt: true, Badge: { select: { id: true, name: true, description: true, iconUrl: true } } },
       }),
       [],
     )
-    return NextResponse.json({ items: badges.map(({ Badge, ...item }) => {
+    const unrevealedAngelGiftBadgeIds = await getUnrevealedAngelGiftBadgeIds(viewer?.id, badges.map(({ Badge }) => Badge.id))
+    return NextResponse.json({ items: badges.filter(({ Badge }) => !unrevealedAngelGiftBadgeIds.has(Badge.id)).map(({ Badge, ...item }) => {
       const imageUrl = toPublicMediaUrl(Badge.iconUrl)
       return { ...item, badge: { ...Badge, iconUrl: imageUrl, imageUrl } }
     }) })

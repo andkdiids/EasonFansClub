@@ -3081,6 +3081,7 @@ CREATE TABLE `PharmacyCampaign` (
     `dailyDrawLimit` INTEGER NULL,
     `totalDrawLimit` INTEGER NULL,
     `visualUrl` TEXT NULL,
+    `collectionRewardBadgeId` VARCHAR(191) NULL,
     `createdById` VARCHAR(191) NULL,
     `updatedById` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -3088,6 +3089,7 @@ CREATE TABLE `PharmacyCampaign` (
 
     INDEX `PharmacyCampaign_status_startsAt_endsAt_idx`(`status`, `startsAt`, `endsAt`),
     INDEX `PharmacyCampaign_createdAt_idx`(`createdAt`),
+    INDEX `PharmacyCampaign_collectionRewardBadgeId_idx`(`collectionRewardBadgeId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3101,6 +3103,7 @@ CREATE TABLE `PharmacyPrize` (
     `rewardAmount` INTEGER NULL,
     `weight` INTEGER NOT NULL DEFAULT 0,
     `enabled` BOOLEAN NOT NULL DEFAULT true,
+    `isHidden` BOOLEAN NOT NULL DEFAULT false,
     `sortOrder` INTEGER NOT NULL DEFAULT 0,
     `badgeId` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -5214,6 +5217,9 @@ ALTER TABLE `PharmacyCampaign` ADD CONSTRAINT `PharmacyCampaign_createdById_fkey
 
 -- AddForeignKey
 ALTER TABLE `PharmacyCampaign` ADD CONSTRAINT `PharmacyCampaign_updatedById_fkey` FOREIGN KEY (`updatedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyCampaign` ADD CONSTRAINT `PharmacyCampaign_collectionRewardBadgeId_fkey` FOREIGN KEY (`collectionRewardBadgeId`) REFERENCES `Badge`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `PharmacyPrize` ADD CONSTRAINT `PharmacyPrize_campaignId_fkey` FOREIGN KEY (`campaignId`) REFERENCES `PharmacyCampaign`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;

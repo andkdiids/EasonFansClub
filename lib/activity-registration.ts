@@ -919,6 +919,7 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
   let rewardGranted = false
   let rewardId: string | null = null
   let rewardBadgeId: string | null = null
+  let badgeGrants: Array<{ badgeId: string; recordId: string }> = []
   if (reward && !reward.badgeGrantAt) {
     rewardId = reward.id
     rewardBadgeId = reward.badgeId
@@ -933,6 +934,7 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
       availabilityMode: 'ADMIN_MANUAL',
     })
     rewardGranted = granted.created
+    badgeGrants = granted.derivedGrants || []
   }
   await createAdminActionAudit(tx, {
     operatorId: input.adminId,
@@ -944,7 +946,7 @@ export async function verifyActivityRegistrationInTransaction(tx: Prisma.Transac
     targetUserId: current.userId,
     metadata: { activityId: activity.id, registrationId: current.id, rewardId, method: input.method, rewardBadgeId, rewardGranted, linkedMaterialRedemptionId: linkedMaterial.orderId, linkedMaterialRedeemed: linkedMaterial.changed } as Prisma.InputJsonValue,
   })
-  return { alreadyVerified: false, registrationId: current.id, verifiedAt: verifiedAt.toISOString(), verificationMethod: input.method, checkInSource: input.method, rewardGranted, linkedMaterialRedemptionId: linkedMaterial.orderId, linkedMaterialRedeemed: linkedMaterial.changed }
+  return { alreadyVerified: false, registrationId: current.id, verifiedAt: verifiedAt.toISOString(), verificationMethod: input.method, checkInSource: input.method, rewardGranted, linkedMaterialRedemptionId: linkedMaterial.orderId, linkedMaterialRedeemed: linkedMaterial.changed, ...(badgeGrants.length ? { badgeGrants } : {}) }
 }
 
 export async function redeemActivityLinkedMaterialInTransaction(
@@ -971,6 +973,17 @@ export async function redeemActivityLinkedMaterialInTransaction(
 
 export async function verifyActivityRegistration(input: ActivityVerificationTransactionInput) {
   const result = await prismaTransaction((tx) => verifyActivityRegistrationInTransaction(tx, input))
+  if ('badgeGrants' in result && result.badgeGrants?.length) {
+    try {
+      const registration = await prisma.activityRegistration.findUnique({ where: { id: result.registrationId }, select: { userId: true } })
+      if (registration) {
+        const { processBadgeGrantEffects } = await import('@/lib/badge-phase3')
+        await processBadgeGrantEffects({ userId: registration.userId, grants: result.badgeGrants })
+      }
+    } catch (error) {
+      console.error('[activity.badge-effects]', { activityId: input.activityId, registrationId: result.registrationId, error })
+    }
+  }
   const [registration, reward] = await Promise.all([
     prisma.activityRegistration.findUnique({ where: { id: result.registrationId }, select: { userId: true } }),
     prisma.activityReward.findFirst({ where: { activityId: input.activityId, type: 'BADGE', enabled: true }, select: { badgeId: true } }),
@@ -1011,6 +1024,7 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
   const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
   let rewardGranted = false
   let rewardBadgeId: string | null = null
+  let badgeGrants: Array<{ badgeId: string; recordId: string }> = []
   if (reward && !reward.badgeGrantAt) {
     rewardBadgeId = reward.badgeId
     const granted = await grantBadgeWithTransaction(tx, {
@@ -1023,8 +1037,9 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
       availabilityMode: 'ADMIN_MANUAL',
     })
     rewardGranted = granted.created
+    badgeGrants = granted.derivedGrants || []
   }
-  return { processed: true, registrationId: registration.id, activityId: activity.id, linkedMaterialRedemptionId: linkedMaterial.orderId, rewardGranted, rewardBadgeId }
+  return { processed: true, registrationId: registration.id, activityId: activity.id, linkedMaterialRedemptionId: linkedMaterial.orderId, rewardGranted, rewardBadgeId, ...(badgeGrants.length ? { badgeGrants } : {}) }
 }
 
 export async function autoCheckInEndedActivityRegistrations(options: { activityId?: string; batchSize?: number; now?: Date } = {}) {
@@ -1047,6 +1062,15 @@ export async function autoCheckInEndedActivityRegistrations(options: { activityI
     try {
       const result = await prismaTransaction((tx) => autoCheckInActivityRegistrationInTransaction(tx, candidate.id, now))
       if (result.processed) processed += 1
+      if (result.processed && 'badgeGrants' in result && result.badgeGrants?.length) {
+        try {
+          const { processBadgeGrantEffects } = await import('@/lib/badge-phase3')
+          const registration = await prisma.activityRegistration.findUnique({ where: { id: result.registrationId }, select: { userId: true } })
+          if (registration) await processBadgeGrantEffects({ userId: registration.userId, grants: result.badgeGrants })
+        } catch (error) {
+          console.error('[activities.auto-check-in.badge-effects]', { registrationId: result.registrationId, error })
+        }
+      }
       if (result.processed && 'rewardBadgeId' in result && result.rewardBadgeId) {
         try {
           const { triggerBadgeOwnershipRecheck } = await import('@/lib/badge-ownership')

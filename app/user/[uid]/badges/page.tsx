@@ -23,7 +23,7 @@ export default async function UserBadgesPage({ params }: PageProps) {
   if (!target) notFound()
   const visibility = await getProfileVisibility(target.id, viewer?.id)
   if (!visibility.isSelf && !visibility.settings.showBadgeHistory) notFound()
-  const equippedBadges = await getEquippedBadgesForUser(target.id)
+  const equippedBadges = await getEquippedBadgesForUser(target.id, viewer?.id)
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-5xl space-y-4 px-4 py-5 sm:px-5 sm:py-7">

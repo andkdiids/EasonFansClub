@@ -55,6 +55,11 @@ export function normalizeAspirinConsultationText(value: unknown) {
   return removeInvisibleAndWhitespace(extractVisibleClinicText(value))
 }
 
+/** Count the meaningful characters used by both submission validation and the badge resolver. */
+export function getAspirinConsultationLength(value: unknown) {
+  return countGraphemes(normalizeAspirinConsultationText(value))
+}
+
 export function isValidAspirinConsultation(fact: AspirinConsultationFact, userId: string, config: AspirinRuleConfig) {
   // The consultation must belong to the current user, but a case published by
   // that same user is not an eligible "other user" case for this badge.
@@ -63,8 +68,7 @@ export function isValidAspirinConsultation(fact: AspirinConsultationFact, userId
   if (fact.status !== 'ACTIVE' || fact.record.status !== 'ACTIVE') return false
   if (fact.deletedAt || fact.record.deletedAt) return false
   if (fact.record.authorId === userId) return false
-  const text = normalizeAspirinConsultationText(fact.content)
-  if (countGraphemes(text) < config.minLength) return false
+  if (getAspirinConsultationLength(fact.content) < config.minLength) return false
   return true
 }
 
