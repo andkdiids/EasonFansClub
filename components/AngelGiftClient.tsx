@@ -121,6 +121,7 @@ export function AngelGiftClient({ initialData }: Props) {
   const recycleKeyRef = useRef<string | null>(null)
 
   const campaign = data.campaign
+  const upcomingCampaign = data.upcomingCampaign
   const user = data.user
   const required = data.duplicate.required
   const canRecycle = Boolean(user && campaign?.duplicateRecycleEnabled && required && data.duplicate.total >= required && !recycleBusy)
@@ -250,6 +251,12 @@ export function AngelGiftClient({ initialData }: Props) {
     return ''
   }
 
+  const upcomingPreview = upcomingCampaign ? <section className="angel-gift-theme-card angel-gift-upcoming-card" aria-labelledby="angel-gift-upcoming-title">
+    {upcomingCampaign.visualUrl ? <Image className="angel-gift-theme-visual" src={upcomingCampaign.visualUrl} alt={`${upcomingCampaign.title}主题视觉`} width={112} height={76} unoptimized /> : null}
+    <div><span className="angel-gift-label">下期预告</span><h2 id="angel-gift-upcoming-title">{upcomingCampaign.title}</h2>{upcomingCampaign.subtitle ? <p className="angel-gift-theme-subtitle">{upcomingCampaign.subtitle}</p> : null}{upcomingCampaign.description ? <p className="angel-gift-theme-description">{upcomingCampaign.description}</p> : null}</div>
+    <div className="angel-gift-status"><span>待开始</span><small>开始于 {formatDate(upcomingCampaign.startsAt, true)}</small></div>
+  </section> : null
+
   return (
     <section className="angel-gift-page" aria-labelledby="angel-gift-title">
       <header className="angel-gift-heading">
@@ -266,6 +273,8 @@ export function AngelGiftClient({ initialData }: Props) {
           <div><span className="angel-gift-label">本期主题</span><h2 id="angel-gift-theme-title">{campaign.title}</h2>{campaign.subtitle ? <p className="angel-gift-theme-subtitle">{campaign.subtitle}</p> : null}{campaign.description ? <p className="angel-gift-theme-description">{campaign.description}</p> : null}</div>
           <div className={`angel-gift-status is-${status?.toLowerCase()}`}><span>{status ? statusLabels[status] : '—'}</span>{campaign.endsAt && status !== 'ENDED' ? <small>至 {formatDate(campaign.endsAt)}</small> : null}</div>
         </section>
+
+        {upcomingPreview}
 
         <section className={`angel-gift-pharmacy-box ${drawing ? 'is-drawing' : ''}`} aria-label="E院药房">
           <div className="angel-gift-box-stamp">Rx</div><div className="angel-gift-box-mark">E院药房</div><div className="angel-gift-box-name">ANGEL&apos;S GIFT</div><div className="angel-gift-box-cn">天使的礼物</div><div className="angel-gift-box-line" />
@@ -291,7 +300,7 @@ export function AngelGiftClient({ initialData }: Props) {
         <section className="angel-gift-panel angel-gift-duplicate-panel" aria-labelledby="angel-gift-duplicate-title"><div className="angel-gift-panel-heading"><div><span className="angel-gift-label">余药库存</span><h2 id="angel-gift-duplicate-title">余药</h2></div><strong>{data.duplicate.total} <em>/ {required || '—'}</em></strong></div><p>{campaign.duplicateRecycleEnabled && required ? data.duplicate.total < required ? `还差 ${required - data.duplicate.total} 份` : `已集齐 ${required} 份，可以回收。` : '本期未开启余药回收。'}</p>{data.duplicate.byBadge.length ? <div className="angel-gift-duplicate-items">{data.duplicate.byBadge.map((entry) => <span key={entry.badgeId}>{entry.imageUrl ? <Image src={entry.imageUrl} alt="" width={22} height={22} unoptimized /> : null}{entry.badgeName} ×{entry.quantity}</span>)}</div> : null}<button type="button" className="angel-gift-button primary" disabled={!canRecycle} onClick={() => void recycle()}>{recycleBusy ? '回收中…' : required ? '回收余药' : '暂不回收'}</button></section>
 
         {data.isAuthenticated ? <section className="angel-gift-panel angel-gift-history-panel" aria-labelledby="angel-gift-history-title"><div className="angel-gift-panel-heading"><div><span className="angel-gift-label">执药流水</span><h2 id="angel-gift-history-title">执药记录</h2></div></div>{data.history.length ? <div className="angel-gift-history-list">{data.history.map((item) => <div className="angel-gift-history-row" key={`${item.kind}-${item.id}`}><time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time><span>{item.kind === 'DRAW' ? `−${item.drawCost || 0} 挂号费` : `余药 ×${item.quantity || 0}`}</span><strong>{item.result || '—'}</strong>{item.kind === 'RECYCLE' ? <em>+{item.rewardAmount || 0} 挂号费</em> : null}</div>)}</div> : <p className="angel-gift-empty">还没有本期执药记录。</p>}{data.historyHasMore ? <button type="button" className="angel-gift-more-button" disabled={historyBusy} onClick={() => void loadMoreHistory()}>{historyBusy ? '加载中…' : '加载更多记录'}</button> : null}</section> : null}
-      </> : <section className="angel-gift-empty-state"><span aria-hidden="true">Rx</span><h2>药房尚未开出本期处方</h2><p>管理员配置主题后，这里会显示当前正在进行的主题。</p></section>}
+      </> : <>{upcomingPreview}<section className="angel-gift-empty-state"><span aria-hidden="true">Rx</span><h2>药房尚未开出本期处方</h2><p>当前暂无正在进行的主题，待开始主题仅作为下期预告展示。</p></section></>}
 
       {drawing ? <div className="angel-gift-drawing-live" aria-live="polite">{phase}</div> : null}
       {result ? <ResultModal draws={result} duplicateTotal={data.duplicate.total} duplicateRequired={data.duplicate.required} cost={campaign?.drawCost || result[0].drawCost} onClose={() => setResult(null)} onContinue={() => { setResult(null); void draw(1) }} /> : null}

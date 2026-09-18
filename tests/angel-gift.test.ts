@@ -151,8 +151,9 @@ test('权限与前后台路由均使用天使的礼物固定命名', () => {
 
 test('无当前主题时仍从 User.points 返回登录用户真实余额', () => {
   const source = read('lib/pharmacy.ts')
-  assert.match(source, /const \[campaign, userRow\] = await Promise\.all\(/u)
+  assert.match(source, /const \[selection, userRow\] = await Promise\.all\(/u)
   assert.match(source, /userId \? prisma\.user\.findUnique\(\{ where: \{ id: userId \}, select: \{ points: true \} \}\)/u)
+  assert.match(source, /const campaign = selection\.activeCampaign/u)
   assert.match(source, /if \(!campaign\)[\s\S]*userRow\?\.points \?\? 0/u)
   assert.doesNotMatch(source, /if \(!campaign\)[\s\S]*balance: 0/u)
 })
