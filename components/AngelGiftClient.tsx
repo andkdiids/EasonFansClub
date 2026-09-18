@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import type { PharmacyDrawView, PharmacyHistoryItem, PharmacyPageData } from '@/lib/pharmacy'
+import { ALLOWED_PHARMACY_DRAW_COUNTS, calculateAvailablePharmacyDraws, type PharmacyDrawCount } from '@/lib/pharmacy-draw-options'
 
 type Props = { initialData: PharmacyPageData }
 
@@ -47,7 +48,7 @@ function errorMessage(payload: unknown, fallback: string) {
   return fallback
 }
 
-function ResultModal({ draw, duplicateTotal, duplicateRequired, cost, onClose, onContinue }: { draw: PharmacyDrawView; duplicateTotal: number; duplicateRequired: number | null; cost: number; onClose: () => void; onContinue: () => void }) {
+function ResultModal({ draws, duplicateTotal, duplicateRequired, cost, onClose, onContinue }: { draws: PharmacyDrawView[]; duplicateTotal: number; duplicateRequired: number | null; cost: number; onClose: () => void; onContinue: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -73,25 +74,33 @@ function ResultModal({ draw, duplicateTotal, duplicateRequired, cost, onClose, o
     }
   }, [onClose])
 
-  const isNew = draw.isNewBadge
-  const isDuplicate = draw.isDuplicate
-  const isPoints = draw.prizeType === 'POINTS'
-  const title = isNew ? '新药入柜' : isDuplicate ? '这味药，你已经有了。' : isPoints ? '药房找零' : '请接收你的药'
+  const firstDraw = draws[0]
+  const lastDraw = draws[draws.length - 1]
+  const isBatch = draws.length > 1
+  const title = isBatch ? `本次执药结果 · ${draws.length} 次` : firstDraw.isNewBadge ? '新药入柜' : firstDraw.isDuplicate ? '这味药，你已经有了。' : firstDraw.prizeType === 'POINTS' ? '药房找零' : '请接收你的药'
+  const renderDraw = (draw: PharmacyDrawView) => {
+    const isNew = draw.isNewBadge
+    const isDuplicate = draw.isDuplicate
+    const isPoints = draw.prizeType === 'POINTS'
+    return <div className="angel-gift-result-entry" key={draw.id}>
+      {draw.badge ? <div className={`angel-gift-result-badge ${draw.badge.imageUrl ? '' : 'is-empty'}`}>
+        {draw.badge.imageUrl ? <Image src={draw.badge.imageUrl} alt={`${draw.badge.name}勋章`} width={76} height={76} unoptimized /> : <span aria-hidden="true">?</span>}
+        <div><strong>{draw.badge.name}</strong><span>{rarityLabels[draw.badge.rarity || 'COMMON'] || draw.badge.rarity || '常规处方'}</span></div>
+      </div> : <div className="angel-gift-result-text"><strong>{draw.prizeName}</strong>{isPoints ? <span>+{formatFee(draw.rewardAmount || 0)} 挂号费</span> : null}</div>}
+      {isNew ? <p className="angel-gift-result-copy">「{draw.prizeName}」已收入你的勋章药柜。</p> : null}
+      {isDuplicate ? <div className="angel-gift-result-copy"><strong>余药 +1</strong><span>当前余药 {duplicateTotal} / {duplicateRequired || '—'}</span><small>{duplicateRequired ? `集齐 ${duplicateRequired} 份余药，可前往药房回收。` : '本期未开启余药回收。'}</small></div> : null}
+      {isPoints ? <div className="angel-gift-points-result"><strong>+{formatFee(draw.rewardAmount || 0)} 挂号费</strong>{(draw.rewardAmount || 0) >= cost ? <span>这次的药，算药房请你的。</span> : null}</div> : null}
+    </div>
+  }
   return (
     <div className="angel-gift-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <div ref={dialogRef} className="angel-gift-result-modal" role="dialog" aria-modal="true" aria-labelledby="angel-gift-result-title">
         <button ref={closeRef} type="button" className="angel-gift-modal-close" onClick={onClose} aria-label="关闭结果">×</button>
-        <p className="angel-gift-modal-kicker">执药记录 · {formatDate(draw.drawAt)}</p>
+        <p className="angel-gift-modal-kicker">执药记录 · {formatDate(firstDraw.drawAt)}</p>
         <h2 id="angel-gift-result-title">{title}</h2>
-        {draw.badge ? <div className={`angel-gift-result-badge ${draw.badge.imageUrl ? '' : 'is-empty'}`}>
-          {draw.badge.imageUrl ? <Image src={draw.badge.imageUrl} alt={`${draw.badge.name}勋章`} width={76} height={76} unoptimized /> : <span aria-hidden="true">?</span>}
-          <div><strong>{draw.badge.name}</strong><span>{rarityLabels[draw.badge.rarity || 'COMMON'] || draw.badge.rarity || '常规处方'}</span></div>
-        </div> : null}
-        {isNew ? <p className="angel-gift-result-copy">「{draw.prizeName}」已收入你的勋章药柜。</p> : null}
-        {isDuplicate ? <div className="angel-gift-result-copy"><strong>余药 +1</strong><span>当前余药 {duplicateTotal} / {duplicateRequired || '—'}</span><small>{duplicateRequired ? `集齐 ${duplicateRequired} 份余药，可前往药房回收。` : '本期未开启余药回收。'}</small></div> : null}
-        {isPoints ? <div className="angel-gift-points-result"><strong>+{formatFee(draw.rewardAmount || 0)} 挂号费</strong>{(draw.rewardAmount || 0) >= cost ? <span>这次的药，算药房请你的。</span> : null}</div> : null}
-        <div className="angel-gift-result-balance"><span>本次执药</span><strong>−{formatFee(draw.drawCost)} 挂号费</strong><span>当前挂号费</span><strong>{formatFee(draw.balanceAfter)}</strong></div>
-        <div className="angel-gift-modal-actions"><button type="button" className="angel-gift-button secondary" onClick={onClose}>{isNew ? '收下' : '知道了'}</button><button type="button" className="angel-gift-button primary" onClick={onContinue}>继续执药 · {draw.drawCost}</button></div>
+        {isBatch ? <div className="angel-gift-batch-results">{draws.map(renderDraw)}</div> : renderDraw(firstDraw)}
+        <div className="angel-gift-result-balance"><span>本次执药</span><strong>−{formatFee(lastDraw.drawCost * draws.length)} 挂号费</strong><span>当前挂号费</span><strong>{formatFee(lastDraw.balanceAfter)}</strong></div>
+        <div className="angel-gift-modal-actions"><button type="button" className="angel-gift-button secondary" onClick={onClose}>{firstDraw.isNewBadge ? '收下' : '知道了'}</button><button type="button" className="angel-gift-button primary" onClick={onContinue}>继续执药 · {lastDraw.drawCost}</button></div>
       </div>
     </div>
   )
@@ -101,7 +110,7 @@ export function AngelGiftClient({ initialData }: Props) {
   const [data, setData] = useState(initialData)
   const [drawing, setDrawing] = useState(false)
   const [phase, setPhase] = useState('')
-  const [result, setResult] = useState<PharmacyDrawView | null>(null)
+  const [result, setResult] = useState<PharmacyDrawView[] | null>(null)
   const [error, setError] = useState('')
   const [skipAnimation, setSkipAnimation] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(false)
@@ -118,7 +127,10 @@ export function AngelGiftClient({ initialData }: Props) {
   const status = campaign?.status || null
   const isLimitReached = Boolean(user && campaign && ((campaign.dailyDrawLimit !== null && user.todayCount >= campaign.dailyDrawLimit) || (campaign.totalDrawLimit !== null && user.totalCount >= campaign.totalDrawLimit)))
   const insufficient = Boolean(user && campaign && user.balance < campaign.drawCost)
-  const canDraw = Boolean(campaign && user && status === 'ACTIVE' && campaign.prizePoolValid && !isLimitReached && !insufficient && !drawing)
+  const availableDraws = campaign && user
+    ? calculateAvailablePharmacyDraws({ balance: user.balance, cost: campaign.drawCost, todayCount: user.todayCount, dailyLimit: campaign.dailyDrawLimit, totalCount: user.totalCount, totalLimit: campaign.totalDrawLimit })
+    : 0
+  const canDraw = Boolean(campaign && user && status === 'ACTIVE' && campaign.prizePoolValid && !isLimitReached && !drawing)
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -155,8 +167,8 @@ export function AngelGiftClient({ initialData }: Props) {
     setHistoryPage(1)
   }
 
-  async function draw() {
-    if (!campaign || !user || drawing) return
+  async function draw(requestedCount: PharmacyDrawCount = 1) {
+    if (!campaign || !user || drawing || !ALLOWED_PHARMACY_DRAW_COUNTS.includes(requestedCount) || availableDraws < requestedCount) return
     setError('')
     setDrawing(true)
     const idempotencyKey = drawKeyRef.current || makeIdempotencyKey('draw')
@@ -164,19 +176,20 @@ export function AngelGiftClient({ initialData }: Props) {
     const requestStarted = fetch('/api/angel-gift', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ campaignId: campaign.id, idempotencyKey }),
+      body: JSON.stringify({ campaignId: campaign.id, idempotencyKey, drawCount: requestedCount }),
     })
     const minimumAnimation = skipAnimation || reducedMotion ? Promise.resolve() : new Promise<void>((resolve) => window.setTimeout(resolve, 1500))
     try {
       const [response] = await Promise.all([requestStarted, minimumAnimation])
-      const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { draw: PharmacyDrawView; page?: PharmacyPageData | null; duplicateTotal?: number; duplicateRequired?: number | null }; message?: string }
-      if (!response.ok || !payload.ok || !payload.data?.draw) throw new Error(errorMessage(payload, '药房暂时无法完成执药，请稍后重试'))
+      const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { draw: PharmacyDrawView; draws?: PharmacyDrawView[]; page?: PharmacyPageData | null; duplicateTotal?: number; duplicateRequired?: number | null }; message?: string }
+      const nextDraws = payload.data?.draws?.length ? payload.data.draws : payload.data?.draw ? [payload.data.draw] : []
+      if (!response.ok || !payload.ok || !payload.data || !nextDraws.length) throw new Error(errorMessage(payload, '药房暂时无法完成执药，请稍后重试'))
       const nextPage = payload.data.page
       if (nextPage) setData(nextPage)
       else setData((current) => ({ ...current, user: current.user ? { ...current.user, balance: payload.data!.draw.balanceAfter } : current.user, duplicate: { ...current.duplicate, total: payload.data!.duplicateTotal ?? current.duplicate.total, required: payload.data!.duplicateRequired !== undefined ? payload.data!.duplicateRequired : current.duplicate.required } }))
       drawKeyRef.current = null
       setHistoryPage(1)
-      setResult(payload.data.draw)
+      setResult(nextDraws)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '药房暂时无法完成执药，请稍后重试')
     } finally {
@@ -257,7 +270,11 @@ export function AngelGiftClient({ initialData }: Props) {
         <section className={`angel-gift-pharmacy-box ${drawing ? 'is-drawing' : ''}`} aria-label="E院药房">
           <div className="angel-gift-box-stamp">Rx</div><div className="angel-gift-box-mark">E院药房</div><div className="angel-gift-box-name">ANGEL&apos;S GIFT</div><div className="angel-gift-box-cn">天使的礼物</div><div className="angel-gift-box-line" />
           <div className="angel-gift-box-phase" aria-live="polite">{drawing ? phase : '请把手伸进不知道名字的处方里。'}</div>
-          <button type="button" className="angel-gift-draw-button" onClick={() => void draw()} disabled={!canDraw} aria-disabled={!canDraw}>{drawing ? '配药中…' : `执药 · ${campaign.drawCost}`}</button>
+          <div className="angel-gift-draw-actions" aria-label="执药次数">
+            <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => void draw(1)} disabled={!canDraw || availableDraws < 1} aria-disabled={!canDraw || availableDraws < 1}>{drawing ? '配药中…' : '执药 1 次'}</button>
+            {availableDraws >= 5 ? <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => void draw(5)} disabled={!canDraw} aria-disabled={!canDraw}>执药 5 次</button> : null}
+            {availableDraws >= 10 ? <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => void draw(10)} disabled={!canDraw} aria-disabled={!canDraw}>执药 10 次</button> : null}
+          </div>
           <p className="angel-gift-box-note">每次执药消耗 {campaign.drawCost} 挂号费</p>
         </section>
 
@@ -277,7 +294,7 @@ export function AngelGiftClient({ initialData }: Props) {
       </> : <section className="angel-gift-empty-state"><span aria-hidden="true">Rx</span><h2>药房尚未开出本期处方</h2><p>管理员配置主题后，这里会显示当前正在进行的主题。</p></section>}
 
       {drawing ? <div className="angel-gift-drawing-live" aria-live="polite">{phase}</div> : null}
-      {result ? <ResultModal draw={result} duplicateTotal={data.duplicate.total} duplicateRequired={data.duplicate.required} cost={campaign?.drawCost || result.drawCost} onClose={() => setResult(null)} onContinue={() => { setResult(null); void draw() }} /> : null}
+      {result ? <ResultModal draws={result} duplicateTotal={data.duplicate.total} duplicateRequired={data.duplicate.required} cost={campaign?.drawCost || result[0].drawCost} onClose={() => setResult(null)} onContinue={() => { setResult(null); void draw(1) }} /> : null}
     </section>
   )
 }

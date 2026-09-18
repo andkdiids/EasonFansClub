@@ -8,6 +8,7 @@ import { getMediaPublicBaseUrl, PUBLIC_COS_HOST, toPublicMediaUrl } from '@/lib/
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
+import { resolveBadgeVisibility } from '@/lib/badge-visibility'
 
 const CARD_WIDTH = 900
 const CARD_HEIGHT = 1200
@@ -22,6 +23,13 @@ type ShareTextLayerInput = {
   fontSize: number
   color: string
   weight?: number
+}
+
+export class BadgeShareCardError extends Error {
+  constructor(readonly code: 'SECRET_NOT_SHAREABLE') {
+    super('秘密勋章无法公开分享')
+    this.name = 'BadgeShareCardError'
+  }
 }
 
 function escapePango(value: string) {
@@ -97,6 +105,7 @@ export async function generateBadgeShareCard(userId: string, badgeId: string) {
     where: { userId, badgeId, ...activeUserBadgeWhere() },
     orderBy: [{ awardedAt: 'desc' }, { id: 'desc' }],
     select: {
+      isHidden: true,
       obtainedAt: true,
       Badge: {
         select: {
@@ -114,6 +123,14 @@ export async function generateBadgeShareCard(userId: string, badgeId: string) {
     },
   })
   if (!record) return null
+  const shareDecision = resolveBadgeVisibility({
+    viewerId: userId,
+    ownerId: userId,
+    badge: record.Badge,
+    userBadge: record,
+    context: 'SHARE',
+  })
+  if (!shareDecision.canShare) throw new BadgeShareCardError('SECRET_NOT_SHAREABLE')
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {

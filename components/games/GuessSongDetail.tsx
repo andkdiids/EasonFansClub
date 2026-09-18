@@ -169,12 +169,14 @@ export function GuessSongDetail({ game }: Readonly<{ game: GameCatalogItem }>) {
         <Link href="/games/guess-song/duel">1v1 对决</Link>
         <Link href="/entertainment/guess-song/leaderboard">排行榜</Link>
         <a href="#history">历史记录</a>
+        <Link href="/games/forget-lyrics">忘记歌词</Link>
       </div>
-      {/* 移动端专用：Hero 右上角入口（规则 / 排行），点击展开对应内容 */}
+      {/* 移动端专用：Hero 右上角入口（规则 / 排行 / 忘记歌词） */}
       <div className="game-detail-mobile-top">
         <Link href="/games/guess-song/duel">1v1 对决</Link>
         <button type="button" onClick={() => setRuleOpen(true)}>规则</button>
         <Link href="/entertainment/guess-song/leaderboard">排行</Link>
+        <Link href="/games/forget-lyrics">忘记歌词</Link>
       </div>
       {/* 移动端专用：底部同行（紧凑记录信息 左 / 开始游戏 右）；开始游戏滚动到难度选择，不自动开局 */}
       <div className="game-detail-mobile-bottom">

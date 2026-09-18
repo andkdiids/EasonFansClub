@@ -644,7 +644,7 @@ async function getCheckInMessagesUncached({
     ...rowsWithFocus.flatMap((item) => item.DailyMessageComment.map((comment) => comment.User.id)),
   ]
   const [equippedBadges, friendRemarkMap] = await Promise.all([
-    getEquippedBadgesForUsers(displayNameUserIds),
+    getEquippedBadgesForUsers(displayNameUserIds, new Date(), viewerId),
     friendContext ? loadFriendRemarkMap(viewerId, displayNameUserIds) : Promise.resolve(new Map<string, string>()),
   ])
   return rowsWithFocus.map((item) => {

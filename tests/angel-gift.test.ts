@@ -36,6 +36,23 @@ test('余药回收规则为主题级可配置正整数', () => {
   assert.throws(() => normalizePharmacyCampaignInput({ title: '缺少规则', drawCost: 74, duplicateRecycleEnabled: true, status: 'DRAFT' }), /余药回收/)
 })
 
+test('主题视觉图只能来自站内上传媒体，且保存主题配置时保留已存图片', () => {
+  assert.throws(
+    () => normalizePharmacyCampaignInput({ title: '非法图片', drawCost: 27, status: 'DRAFT', visualUrl: 'blob:https://example.invalid/image' }),
+    /站内上传后的图片地址/,
+  )
+  assert.throws(
+    () => normalizePharmacyCampaignInput({ title: '非法图片', drawCost: 27, status: 'DRAFT', visualUrl: 'http://localhost:3000/uploads/theme.png' }),
+    /站内上传后的图片地址/,
+  )
+
+  const uploaded = normalizePharmacyCampaignInput({ title: '已上传图片', drawCost: 27, status: 'DRAFT', visualUrl: 'https://media.ecfc.fans/media/angel-gift/demo/source.webp' })
+  assert.match(uploaded.visualUrl || '', /angel-gift\/demo\/source\.webp/)
+
+  const retained = normalizePharmacyCampaignInput({ title: '保留图片', drawCost: 27, status: 'DRAFT' }, { visualUrl: uploaded.visualUrl })
+  assert.equal(retained.visualUrl, uploaded.visualUrl)
+})
+
 test('主题状态以后端时间判断', () => {
   const start = new Date('2026-09-10T00:00:00.000Z')
   const end = new Date('2026-09-20T00:00:00.000Z')

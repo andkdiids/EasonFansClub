@@ -36,6 +36,36 @@ test('Badge selector 使用一次 badgeIds 批量提交并阻止当前主题重�
   assert.match(angelGiftManager, /createPharmacyPrizes|campaigns\/\$\{selectedId\}\/prizes/)
 })
 
+test('系列成员与全收集奖励共用 Badge 资料选择，并允许空搜索加载全部结果', () => {
+  assert.match(angelGiftManager, /aria-label="系列勋章配置"/)
+  assert.match(angelGiftManager, /badgeSelectorPurpose === 'MEMBER'/)
+  assert.match(angelGiftManager, /badgeSelectorPurpose === 'REWARD'/)
+  assert.match(angelGiftManager, /留空搜索会显示全部可用 Badge/)
+  assert.match(angelGiftManager, /onClick=\{openCollectionRewardSelector\}/)
+  assert.doesNotMatch(angelGiftManager, /<select[^>]+全收集奖励勋章/)
+})
+
+test('主题视觉图使用专用上传组件和现有变体上传管线，不再手填 URL', () => {
+  const uploader = read('components/AngelGiftImageUploader.tsx')
+  const route = read('app/api/admin/angel-gift/visual-image/route.ts')
+  assert.match(angelGiftManager, /AngelGiftImageUploader/)
+  assert.doesNotMatch(angelGiftManager, /主题视觉图 URL/)
+  assert.match(uploader, /替换图片/)
+  assert.match(uploader, /移除/)
+  assert.match(route, /requireAdmin\('angel_gift_manage'\)/)
+  assert.match(route, /uploadImageVariantFamily/)
+  assert.match(route, /uploadSiteImage/)
+})
+
+test('主题列表展示系列普通款、隐藏款数量和全收集奖励名称', () => {
+  assert.match(angelGiftManager, /系列勋章 \{campaign\.seriesBadgeCount\}/)
+  assert.match(angelGiftManager, /普通 \{campaign\.seriesNormalCount\}/)
+  assert.match(angelGiftManager, /隐藏 \{campaign\.seriesHiddenCount\}/)
+  assert.match(angelGiftManager, /全收集奖励：\{campaign\.collectionRewardBadgeName/)
+  assert.match(pharmacy, /seriesBadgeCount/)
+  assert.match(pharmacy, /collectionRewardBadgeName/)
+})
+
 test('POINTS 表单支持任意多条自定义金额', () => {
   assert.match(angelGiftManager, /添加挂号费奖品/)
   assert.match(angelGiftManager, /奖励挂号费/)

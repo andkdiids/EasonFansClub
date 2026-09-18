@@ -135,7 +135,7 @@ export async function GET(request: Request) {
   const equippedBadges = await getEquippedBadgesForUsers([
     ...users.map((item) => item.id),
     ...posts.map((item) => item.User.id),
-  ])
+  ], new Date(), user?.id)
 
   return NextResponse.json({
     users: users.map(({ Profile, _count, ...item }) => ({

@@ -112,7 +112,10 @@ test('后台演唱会徽章入口已挂载到音乐管理页', () => {
 })
 
 test('个人主页徽章展示已覆盖 CONCERT 分类（无需改显示逻辑）', () => {
-  // public-modules API 返回全部 UserBadge，无 category 过滤，CONCERT 徽章自动出现
+  // public-modules API keeps the full badge query and applies the shared
+  // visibility policy instead of hard-coding a single isHidden predicate.
   const pub = read('app/api/users/[userId]/public-modules/route.ts')
-  assert.match(pub, /prisma\.userBadge\.findMany\(\{\s*where:\s*\{\s*userId:\s*target\.id,\s*isHidden:\s*false/)
+  assert.match(pub, /prisma\.userBadge\.findMany\(\{\s*where:\s*\{[\s\S]*userId:\s*target\.id/)
+  assert.match(pub, /visibility\.isSelf\s*\?\s*\{\}\s*:\s*\{\s*isHidden:\s*false\s*\}/)
+  assert.match(pub, /resolveBadgeVisibility/)
 })

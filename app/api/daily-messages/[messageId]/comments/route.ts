@@ -98,7 +98,7 @@ export async function GET(request: Request, context: RouteContext) {
     },
   })
 
-  const equippedBadges = await getEquippedBadgesForUsers(comments.map((comment) => comment.User.id))
+  const equippedBadges = await getEquippedBadgesForUsers(comments.map((comment) => comment.User.id), new Date(), viewer?.id)
   return NextResponse.json({ comments: comments.map((comment) => serializeComment(comment, equippedBadges.get(comment.User.id) || [])) }, { headers: viewer ? { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } : { Vary: 'Cookie' } })
 }
 
@@ -195,7 +195,7 @@ export async function POST(request: Request, context: RouteContext) {
     )
   }
   if (notifiedUserId) emitRealtime(notifiedUserId, 'notification')
-  const equippedBadges = await getEquippedBadgesForUsers([guard.user.id])
+  const equippedBadges = await getEquippedBadgesForUsers([guard.user.id], new Date(), guard.user.id)
   return NextResponse.json({
     comment: serializeComment(comment, equippedBadges.get(guard.user.id) || []),
   }, { status: 201 })

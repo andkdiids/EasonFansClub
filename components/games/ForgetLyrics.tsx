@@ -130,7 +130,7 @@ export function ForgetLyricsPage() {
   return (
     <main className="forget-lyrics-page games-full-width">
       <div className="forget-lyrics-page-inner">
-        <Link href="/games" className="forget-lyrics-back">← 返回娱乐天空</Link>
+        <Link href="/games/guess-song" className="forget-lyrics-back">← 返回听听</Link>
         <header className="forget-lyrics-page-heading">
           <p>听听答错的歌曲，只属于你。</p>
           <h1>我的忘记歌词</h1>

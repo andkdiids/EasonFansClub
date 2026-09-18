@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
+import { resolveBadgeVisibility } from '@/lib/badge-visibility'
 
 export const ANGEL_GIFT_COLLECTION_SOURCE = 'ANGEL_GIFT_COLLECTION'
 
@@ -173,20 +174,42 @@ export function resolveVisibleSeriesCollection(input: {
   const history = input.historicallyOwnedIds || new Set<string>()
   const activeOwnedAt = input.activeOwnedAt || new Map<string, Date>()
   const visibleBadges = input.requiredBadges
-    .filter((badge) => (!badge.isHidden && badge.visibility === 'PUBLIC') || history.has(badge.id))
-    .map((badge) => ({
-      ...badge,
-      obtainedAt: activeOwnedAt.get(badge.id)?.toISOString() || null,
-      isOwned: activeOwnedAt.has(badge.id),
-    }))
-  const rewardRevealed = Boolean(input.rewardBadge && history.has(input.rewardBadge.id))
-  const collectionReward = rewardRevealed && input.rewardBadge
-    ? {
-        ...input.rewardBadge,
-        obtainedAt: activeOwnedAt.get(input.rewardBadge.id)?.toISOString() || null,
-        isOwned: activeOwnedAt.has(input.rewardBadge.id),
-      }
+    .flatMap((badge) => {
+      const decision = resolveBadgeVisibility({
+        viewerRole: 'SELF',
+        badge,
+        userBadge: activeOwnedAt.has(badge.id) ? { isHidden: false } : null,
+        context: 'ANGEL_GIFT',
+        angelGiftReveal: { isHidden: badge.isHidden, revealed: history.has(badge.id) },
+      })
+      if (decision.renderMode !== 'FULL' || !decision.canSeeMetadata) return []
+      return [{
+        ...badge,
+        obtainedAt: activeOwnedAt.get(badge.id)?.toISOString() || null,
+        isOwned: activeOwnedAt.has(badge.id),
+      }]
+    })
+  const rewardHistoricallyRevealed = Boolean(input.rewardBadge && history.has(input.rewardBadge.id))
+  const collectionReward = rewardHistoricallyRevealed && input.rewardBadge
+    ? (() => {
+        const badge = input.rewardBadge!
+        const decision = resolveBadgeVisibility({
+          viewerRole: 'SELF',
+          badge,
+          userBadge: activeOwnedAt.has(badge.id) ? { isHidden: false } : null,
+          context: 'ANGEL_GIFT',
+          angelGiftReveal: { isHidden: true, revealed: true },
+        })
+        return decision.renderMode === 'FULL' && decision.canSeeMetadata
+          ? {
+              ...badge,
+              obtainedAt: activeOwnedAt.get(badge.id)?.toISOString() || null,
+              isOwned: activeOwnedAt.has(badge.id),
+            }
+          : null
+      })()
     : null
+  const rewardRevealed = Boolean(collectionReward)
   const allVisible = collectionReward ? [...visibleBadges, collectionReward] : visibleBadges
   return {
     seriesId: input.seriesId,

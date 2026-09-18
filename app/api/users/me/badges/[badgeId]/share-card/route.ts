@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { generateBadgeShareCard } from '@/lib/badge-share-card'
+import { BadgeShareCardError, generateBadgeShareCard } from '@/lib/badge-share-card'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -31,6 +31,7 @@ export async function POST(request: Request, context: RouteContext) {
       },
     })
   } catch (error) {
+    if (error instanceof BadgeShareCardError) return NextResponse.json({ message: error.message, code: error.code }, { status: 403 })
     console.error('[badge.share-card]', { userId: guard.user.id, badgeId, error })
     return NextResponse.json({ message: '分享卡片生成失败，请稍后再试' }, { status: 500 })
   }

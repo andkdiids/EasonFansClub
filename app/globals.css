@@ -4011,7 +4011,7 @@ align-self:center;border:1px solid rgba(171,199,220,.2); padding:22px 28px; back
   /* 二、六、Hero 移动端：隐藏桌面 actions，改用开始(滚动到难度) + 右上角入口展开 */
   .game-detail-banner { position:relative; }
   .game-detail-actions { display:none; }
-  .game-detail-mobile-top { position:absolute; top:14px; right:14px; z-index:2; display:flex; align-items:center; gap:8px; }
+  .game-detail-mobile-top { position:absolute; top:14px; right:14px; z-index:2; display:flex; width:calc(100% - 28px); max-width:calc(100% - 28px); flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
   .game-detail-mobile-top>button,.game-detail-mobile-top>a { display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:0 12px; border:1px solid rgba(146,180,207,.35); border-radius:999px; color:#cdd9e2; background:rgba(6,14,23,.72); font-size:12px; font-weight:800; line-height:1; text-decoration:none; backdrop-filter:blur(8px); }
   .game-detail-mobile-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:22px; }
   .guess-detail-records-inline { display:flex; flex-direction:column; gap:3px; min-width:0; color:#7f94a8; font-size:11px; line-height:1.3; }
@@ -8346,6 +8346,8 @@ body:has(.duel-page) .app-page-content {
 .angel-gift-draw-button { margin-top:18px; color:#261a12; background:#d9b475; box-shadow:0 5px 0 rgba(0,0,0,.18); }
 .angel-gift-draw-button:hover:not(:disabled) { background:#f0d29d; }
 .angel-gift-draw-button:disabled,.angel-gift-button:disabled { cursor:not-allowed; opacity:.42; }
+.angel-gift-draw-actions { display:flex; width:min(100%,520px); gap:8px; margin-top:18px; }
+.angel-gift-draw-actions .angel-gift-draw-button { flex:1; margin-top:0; padding-inline:10px; }
 .angel-gift-box-note { margin:14px 0 0; color:rgba(244,236,223,.65); font-size:10px; font-weight:750; }
 .angel-gift-controls { display:flex; min-height:42px; align-items:center; justify-content:space-between; gap:12px; color:var(--foreground-muted); font-size:11px; font-weight:800; }
 .angel-gift-controls label { display:inline-flex; align-items:center; gap:7px; cursor:pointer; }
@@ -8403,6 +8405,11 @@ body:has(.duel-page) .app-page-content {
 .angel-gift-result-badge>span { display:grid; place-items:center; border:1px dashed var(--border-strong); color:var(--foreground-muted); font-size:26px; }
 .angel-gift-result-badge strong,.angel-gift-result-badge>div>span { display:block; }
 .angel-gift-result-badge div span { margin-top:6px; color:var(--angel-gold); font-size:11px; font-weight:850; }
+.angel-gift-batch-results { display:grid; gap:8px; margin-top:18px; }
+.angel-gift-result-entry { min-width:0; }
+.angel-gift-result-entry .angel-gift-result-badge { margin-top:0; padding:10px 0; }
+.angel-gift-result-text { display:flex; align-items:center; justify-content:space-between; gap:12px; border-block:1px solid var(--border); padding:13px 0; font-size:13px; font-weight:900; }
+.angel-gift-result-text span { color:var(--angel-red); font-size:12px; }
 .angel-gift-result-copy { margin:19px 0 0; color:var(--foreground); font-size:13px; font-weight:850; line-height:1.7; }
 .angel-gift-result-copy strong,.angel-gift-points-result strong { display:block; color:var(--angel-red); font-size:20px; font-weight:950; }
 .angel-gift-result-copy span,.angel-gift-result-copy small,.angel-gift-points-result span { display:block; margin-top:6px; color:var(--foreground-muted); font-size:11px; font-weight:750; }

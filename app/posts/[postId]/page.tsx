@@ -929,7 +929,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   let equippedBadgeMap: Awaited<ReturnType<typeof getEquippedBadgesForUsers>> = new Map()
   const badgesStartedAt = Date.now()
   try {
-    equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds)
+    equippedBadgeMap = await getEquippedBadgesForUsers(displayNameUserIds, new Date(), user?.id)
   } catch (error) {
     logPostDetailReadError({
       postId,

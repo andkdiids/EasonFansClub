@@ -126,7 +126,8 @@ test('public collection redacts HIDDEN progress and metadata', () => {
 
 test('SECRET badges are omitted from another user’s collection', () => {
   const service = read('lib/badge-service.ts')
-  assert.match(service, /const visibleRecords = isSelf \? records : records\.filter\(\(record\) => record\.Badge\.visibility !== 'SECRET'\)/)
+  assert.match(service, /resolveBadgeVisibility\(\{[\s\S]*context: 'PROFILE'/)
+  assert.match(service, /decision\.canSeeOwnership && decision\.canSeeMetadata/)
   assert.match(service, /if \(badge\.visibility === 'SECRET'\) return \[\]/)
 })
 

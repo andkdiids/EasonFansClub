@@ -50,6 +50,7 @@ import { normalizeGuessSongAnswer } from '@/lib/guess-song-config'
 import { getGuessSongQuizConfigOrDefault, GUESS_SONG_QUESTION_TYPE_AUTO, GUESS_SONG_QUESTION_TYPE_MANUAL } from '@/lib/guess-song-quiz-config'
 import { createUUID } from '@/lib/utils/uuid'
 import { recordEntertainmentGameCompletion } from '@/lib/growth-tasks/service'
+import { resolveBadgeVisibility } from '@/lib/badge-visibility'
 
 // Declared separately as a mutable array: Prisma's generated `orderBy` types
 // reject the readonly tuples that `as const` produces on the select below.
@@ -75,18 +76,17 @@ const publicUserSelect = {
         isEnabled: true,
         isActive: true,
         isWearable: true,
-        PharmacyPrize: { none: { type: 'BADGE', enabled: true, isHidden: true } },
-        PharmacyCampaignCollectionRewards: { none: {} },
+        visibility: { not: 'SECRET' },
       },
     },
     orderBy: equippedBadgesOrderBy,
     select: {
       position: true,
       equippedAt: true,
-      Badge: { select: { id: true, code: true, name: true, iconUrl: true, isEnabled: true, isActive: true, isWearable: true, effectType: true, nicknameEffect: true, nicknameColor: true, nicknameGradientStart: true, nicknameGradientEnd: true, rarity: true } },
+      Badge: { select: { id: true, code: true, name: true, iconUrl: true, visibility: true, isEnabled: true, isActive: true, isWearable: true, effectType: true, nicknameEffect: true, nicknameColor: true, nicknameGradientStart: true, nicknameGradientEnd: true, rarity: true } },
     },
   },
-  UserBadge: { where: { status: 'ACTIVE' }, select: { badgeId: true, obtainedAt: true, expiresAt: true, status: true } },
+  UserBadge: { where: { status: 'ACTIVE' }, select: { badgeId: true, isHidden: true, obtainedAt: true, expiresAt: true, status: true } },
 } as const
 
 const roomMemberInclude = {
@@ -225,6 +225,14 @@ function publicUser(user: PublicUserRow, isOnline = user.isOnline): DuelPublicUs
   const equippedBadges = user.EquippedBadges.flatMap((row) => {
     const ownership = ownershipByBadgeId.get(row.Badge.id)
     if (!ownership || !isUserBadgeActive(ownership) || !row.Badge.isEnabled || !row.Badge.isActive || !row.Badge.isWearable) return []
+    const decision = resolveBadgeVisibility({
+      viewerId: null,
+      ownerId: user.id,
+      badge: row.Badge,
+      userBadge: ownership,
+      context: 'GAME',
+    })
+    if (!decision.canSeeOwnership || !decision.canSeeMetadata) return []
     return [{
       id: row.Badge.id,
       code: row.Badge.code,

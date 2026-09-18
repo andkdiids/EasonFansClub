@@ -81,6 +81,29 @@ test('系列全收集奖励不参与要求计数，只有获得过奖励后才�
   assert.equal(after.collectionReward?.isReward, true)
 })
 
+test('SECRET 的 Angel Gift 历史揭晓不能突破全局保密边界', () => {
+  const secret: AngelGiftCollectionBadgeDefinition = { id: 'secret-1', name: '秘密款', code: 'secret_1', imageUrl: '/secret.png', rarity: 'LIMITED', visibility: 'SECRET', sortOrder: 10, isHidden: true }
+  const revoked = resolveVisibleSeriesCollection({
+    seriesId: 'campaign-1',
+    seriesTitle: '测试系列',
+    requiredBadges: [secret],
+    historicallyOwnedIds: new Set([secret.id]),
+    activeOwnedAt: new Map(),
+  })
+  assert.equal(revoked.visibleTotalCount, 0)
+  assert.equal(revoked.visibleBadges.some((badge) => badge.id === secret.id), false)
+
+  const current = resolveVisibleSeriesCollection({
+    seriesId: 'campaign-1',
+    seriesTitle: '测试系列',
+    requiredBadges: [secret],
+    historicallyOwnedIds: new Set([secret.id]),
+    activeOwnedAt: new Map([[secret.id, new Date('2026-09-17T00:00:00.000Z')]]),
+  })
+  assert.equal(current.visibleTotalCount, 1)
+  assert.equal(current.visibleBadges[0]?.id, secret.id)
+})
+
 test('Angel Gift 隐藏/全收集接入不改变开奖权重与统一发放入口', () => {
   const pharmacy = read('lib/pharmacy.ts')
   const badgeService = read('lib/badge-service.ts')
@@ -107,12 +130,17 @@ test('后台提供隐藏款配置、全收集奖励选择与预览后确认回�
   assert.match(read('app/api/admin/angel-gift/campaigns/[campaignId]/collection-reward/execute/route.ts'), /body\?\.confirm !== true/)
 })
 
-test('公共 API 在服务端过滤未揭晓元数据，并保留历史来源揭晓', () => {
+test('公共投影统一使用全局 visibility，Angel Gift 关系隐藏只在 Angel context 生效', () => {
   const service = read('lib/badge-service.ts')
-  assert.match(service, /getUnrevealedAngelGiftBadgeIds/)
-  assert.match(read('app/api/users/[userId]/public-modules/route.ts'), /unrevealedAngelGiftBadgeIds/)
-  assert.match(read('lib/activity-lottery.ts'), /badgeHidden \? '\?\?\?'/)
-  assert.match(read('lib/guess-song-duel-service.ts'), /PharmacyPrize: \{ none: \{ type: 'BADGE', enabled: true, isHidden: true \} \}/)
+  assert.match(service, /resolveBadgeVisibility/)
+  assert.doesNotMatch(service, /getUnrevealedAngelGiftBadgeIds/)
+  assert.match(read('app/api/users/[userId]/public-modules/route.ts'), /resolveBadgeVisibility/)
+  assert.doesNotMatch(read('app/api/users/[userId]/public-modules/route.ts'), /getUnrevealedAngelGiftBadgeIds/)
+  assert.match(read('lib/activity-lottery.ts'), /神秘勋章/)
+  assert.match(read('lib/activity-lottery.ts'), /resolveBadgeVisibility/)
+  assert.match(read('lib/guess-song-duel-service.ts'), /visibility: \{ not: 'SECRET' \}/)
+  assert.match(read('lib/guess-song-duel-service.ts'), /isHidden: true/)
+  assert.match(read('lib/guess-song-duel-service.ts'), /resolveBadgeVisibility/)
   assert.match(read('lib/angel-gift-collection.ts'), /userBadgeSource\.findMany\(\{ where: collectionHistoryWhere/)
   assert.match(read('lib/angel-gift-collection.ts'), /grantKey: `angel-gift-collection:\$\{campaignId\}`/)
 })

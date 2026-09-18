@@ -3318,6 +3318,9 @@ model PharmacyCampaign {
   totalDrawLimit             Int?
   visualUrl                  String?                      @db.Text
   collectionRewardBadgeId    String?
+  pityEnabled                Boolean                      @default(false)
+  pityThreshold              Int?
+  pityIncludeHidden          Boolean                      @default(false)
   createdById                String?
   updatedById                String?
   createdAt                  DateTime                     @default(now())
@@ -3329,6 +3332,7 @@ model PharmacyCampaign {
   PharmacyDraw               PharmacyDraw[]
   PharmacyDuplicateInventory PharmacyDuplicateInventory[]
   PharmacyRecycleLog         PharmacyRecycleLog[]
+  PharmacyUserCampaignState  PharmacyUserCampaignState[]
 
   @@index([status, startsAt, endsAt])
   @@index([createdAt])
@@ -3380,6 +3384,7 @@ model PharmacyDraw {
   resultType            PharmacyDrawResultType
   isNewBadge            Boolean                @default(false)
   isDuplicate           Boolean                @default(false)
+  isPity                Boolean                @default(false)
   duplicateQuantity     Int                    @default(0)
   balanceBefore         Int
   balanceAfter          Int
@@ -3393,6 +3398,20 @@ model PharmacyDraw {
   @@index([campaignId, drawAt])
   @@index([userId, campaignId, drawAt])
   @@index([prizeId, drawAt])
+}
+
+model PharmacyUserCampaignState {
+  id         String           @id @default(cuid())
+  userId     String
+  campaignId String
+  pityCount  Int              @default(0)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  User       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Campaign   PharmacyCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, campaignId])
+  @@index([campaignId])
 }
 
 model PharmacyDuplicateInventory {
@@ -4533,6 +4552,7 @@ model User {
   GrowthTaskCompletion                                   GrowthTaskCompletion[]
   GrowthWeeklyMilestoneClaim                             GrowthWeeklyMilestoneClaim[]
   PharmacyDraws                                          PharmacyDraw[]
+  PharmacyUserCampaignState                              PharmacyUserCampaignState[]
   PharmacyDuplicateInventories                           PharmacyDuplicateInventory[]
   PharmacyRecycleLogs                                    PharmacyRecycleLog[]
   Post                                                   Post[]

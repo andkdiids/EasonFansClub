@@ -32,7 +32,7 @@ export default async function AlbumReviewDetailPage({ params }: Readonly<{ param
     prisma.albumReviewLike.findUnique({ where: { reviewId_userId: { reviewId, userId: user.id } } }),
     prisma.albumReviewFavorite.findUnique({ where: { reviewId_userId: { reviewId, userId: user.id } } }),
   ]) : [null, null]
-  const equippedBadges = await getEquippedBadgesForUsers([review.User.id])
+  const equippedBadges = await getEquippedBadgesForUsers([review.User.id], new Date(), user?.id)
   const reviewAuthorName = getPublicUserDisplayName(review.User)
   const images = readAlbumReviewImages(review.images).map((url) => publicImageVariantUrl(url, 'large') || url)
   const albumCoverForHero = publicImageVariantUrl(review.MusicAlbum.coverUrl, 'large')

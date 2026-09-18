@@ -110,3 +110,13 @@ test('首页限制默认只在显式传入时生效，完整历史页不会被�
   assert.equal(parseForgetLyricsLimit('99'), 5)
   assert.equal(parseForgetLyricsLimit('-1'), undefined)
 })
+
+test('听听一级操作区提供忘记歌词入口，移动端同步提供且返回听听', () => {
+  const detail = source('components/games/GuessSongDetail.tsx')
+  const page = source('components/games/ForgetLyrics.tsx')
+  const styles = source('app/globals.css')
+  assert.match(detail, /<a href="#history">历史记录<\/a>\s*<Link href="\/games\/forget-lyrics">忘记歌词<\/Link>/)
+  assert.equal((detail.match(/<Link href="\/games\/forget-lyrics">忘记歌词<\/Link>/g) || []).length, 2)
+  assert.match(page, /href="\/games\/guess-song" className="forget-lyrics-back">← 返回听听/)
+  assert.match(styles, /\.game-detail-mobile-top \{[^}]*flex-wrap:wrap/)
+})

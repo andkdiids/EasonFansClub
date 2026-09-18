@@ -57,7 +57,7 @@ export default async function RankingsPage() {
   const equippedBadges = await getEquippedBadgesForUsers([
     ...points.map((item) => item.id),
     ...streakTop.map((item) => item.userId),
-  ])
+  ], new Date(), user.id)
   const displayName = (item: { id: string; nickname: string; Profile?: { displayName: string | null } | null }) => getPublicUserDisplayName(item)
 
   const streakRows: RankingRow[] = streakTop.flatMap((item) => {

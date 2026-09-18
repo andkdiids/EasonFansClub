@@ -46,7 +46,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
       },
     },
   })
-  const equippedBadges = await getEquippedBadgesForUsers(likes.map((like) => like.userId))
+  const equippedBadges = await getEquippedBadgesForUsers(likes.map((like) => like.userId), new Date(), user.id)
   return NextResponse.json({
     likers: likes.map((like) => ({
       id: like.userId,

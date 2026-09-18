@@ -36,7 +36,7 @@ export default async function CultureDetailPage({ params }: { params: Promise<{ 
   })
   if (!item) notFound()
   item.coverUrl = publicImageVariantUrl(item.coverUrl, 'large')
-  const equippedBadges = await getEquippedBadgesForUsers(item.CultureComment.map((comment) => comment.User.id))
+  const equippedBadges = await getEquippedBadgesForUsers(item.CultureComment.map((comment) => comment.User.id), new Date(), user.id)
 
   const facts = [
     ['专辑', item.albumName],

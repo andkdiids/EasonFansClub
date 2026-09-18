@@ -22,10 +22,17 @@ export default async function AdminAngelGiftPage() {
     probabilityPublic: campaign.probabilityPublic,
     dailyDrawLimit: campaign.dailyDrawLimit,
     totalDrawLimit: campaign.totalDrawLimit,
+    pityEnabled: campaign.pityEnabled,
+    pityThreshold: campaign.pityThreshold,
+    pityIncludeHidden: campaign.pityIncludeHidden,
     prizeCount: campaign._count.PharmacyPrize,
     drawCount: campaign._count.PharmacyDraw,
     participantCount: campaign.participantCount,
     drawCostTotal: campaign.drawCostTotal,
+    seriesBadgeCount: campaign.seriesBadgeCount,
+    seriesNormalCount: campaign.seriesNormalCount,
+    seriesHiddenCount: campaign.seriesHiddenCount,
+    collectionRewardBadgeName: campaign.collectionRewardBadgeName,
     createdAt: campaign.createdAt.toISOString(),
     updatedAt: campaign.updatedAt.toISOString(),
   }))
@@ -40,4 +47,3 @@ export default async function AdminAngelGiftPage() {
     </main>
   )
 }
-

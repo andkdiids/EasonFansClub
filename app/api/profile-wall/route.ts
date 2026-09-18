@@ -274,7 +274,7 @@ export async function GET(request: Request) {
     ...rows.map((row) => row.senderId),
     ...rows.flatMap((row) => row.ProfileWallLike.map((like) => like.userId)),
   ]
-  const equippedBadgesMap = await getEquippedBadgesForUsers(displayNameUserIds)
+  const equippedBadgesMap = await getEquippedBadgesForUsers(displayNameUserIds, new Date(), viewer?.id)
   const tree = buildWallTree(rows)
 
   return NextResponse.json({
@@ -388,7 +388,7 @@ export async function POST(request: Request) {
   const equippedBadgesMap = await getEquippedBadgesForUsers([
     createdRow.senderId,
     ...createdRow.ProfileWallLike.map((like) => like.userId),
-  ])
+  ], new Date(), viewer.id)
   const wallMessage = serializeWallNode(
     { row: createdRow, children: [], commentCount: 0 },
     viewer,

@@ -71,7 +71,7 @@ export async function GET(_request: Request, context: RouteContext) {
   })
   const likerIds = likes.map((like) => like.User.id)
   const [equippedBadges, friendRemarkMap] = await Promise.all([
-    getEquippedBadgesForUsers(likerIds),
+    getEquippedBadgesForUsers(likerIds, new Date(), guard.user.id),
     loadFriendRemarkMap(guard.user.id, likerIds),
   ])
   return NextResponse.json({ likers: likes.map((like) => serializeLiker(like, equippedBadges, friendRemarkMap)) })

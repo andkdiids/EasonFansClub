@@ -470,7 +470,7 @@ export async function getGuessSongPersonalBest(input: {
   })
   if (!session?.completedAt) return null
 
-  const equippedBadgesMap = await getEquippedBadgesForUsers([session.User.id])
+  const equippedBadgesMap = await getEquippedBadgesForUsers([session.User.id], new Date(), input.userId)
   return serializeRow({
     userId: session.userId,
     mode: session.mode,
@@ -640,7 +640,7 @@ async function getYearGuessSongLeaderboard(input: {
   const topRows = rankedRows.filter((item) => item.rank <= 10)
   const ownRow = input.userId ? rankedRows.find((item) => item.row.userId === input.userId) || null : null
   const badgeTargets = [...topRows, ...(ownRow && ownRow.rank > 10 ? [ownRow] : [])]
-  const equippedBadgesMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId))
+  const equippedBadgesMap = await getEquippedBadgesForUsers(badgeTargets.map((item) => item.row.userId), new Date(), input.userId)
 
   return {
     periodType: input.periodType,
@@ -755,7 +755,7 @@ export async function getGuessSongLeaderboard(input: {
     // 不能在这里 take，否则重复用户会消耗名额，导致 Top 10 漏人。
     // guessSongLeaderboardEntry 已存储该用户该模式该周期的最高单局成绩，直接采用（非累计）
   const rows = selectBestGuessSongRows(entries)
-  const equippedBadgesMap = await getEquippedBadgesForUsers(rows.map((row) => row.userId))
+  const equippedBadgesMap = await getEquippedBadgesForUsers(rows.map((row) => row.userId), new Date(), input.userId)
   const ownIndex = rows.findIndex((row) => row.userId === input.userId)
   return {
     periodType,

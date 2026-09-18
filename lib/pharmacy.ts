@@ -10,10 +10,12 @@ import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from
 import { getBeijingDateKey, formatBeijingMonthDayTime } from '@/lib/beijing-time'
 import { getShanghaiDayRange } from '@/lib/checkin'
 import { publicImageUrl } from '@/lib/images'
+import { isPublicMediaProxyUrl, PUBLIC_COS_HOST, toStoredMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration-fee'
 import { parseBeijingDateTime } from '@/lib/registration-availability'
 import { resolveVisibleAngelGiftCollection, type AngelGiftVisibleBadge } from '@/lib/angel-gift-collection'
+import { advancePharmacyPityCount, parsePharmacyDrawCount, selectPharmacyPityCandidates, shouldUsePharmacyPity, type PharmacyDrawCount } from '@/lib/pharmacy-pity'
 
 export const ANGEL_GIFT_MODULE_NAME = '天使的礼物'
 export const ANGEL_GIFT_SUBTITLE = '有些药，不写在处方上。'
@@ -40,6 +42,7 @@ export type PharmacyErrorCode =
   | 'RECYCLE_NOT_AVAILABLE'
   | 'DUPLICATE_INSUFFICIENT'
   | 'IDEMPOTENCY_KEY_INVALID'
+  | 'INVALID_DRAW_COUNT'
 
 export class PharmacyError extends Error {
   readonly code: PharmacyErrorCode
@@ -115,6 +118,30 @@ function parseDateInput(value: unknown, field: string, nullable = true) {
   return parsed
 }
 
+function isTrustedThemeVisualUrl(value: string) {
+  if (isPublicMediaProxyUrl(value)) return true
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false
+    const hostname = parsed.hostname.toLowerCase()
+    return hostname === PUBLIC_COS_HOST || /^[^.]+\.cos\.[^.]+\.myqcloud\.com$/i.test(hostname)
+  } catch {
+    return false
+  }
+}
+
+function normalizeThemeVisualUrl(value: unknown, current?: string | null) {
+  if (value === undefined) return current ?? null
+  if (value === null || value === '') return null
+  if (typeof value !== 'string') throw new PharmacyError('INVALID_CAMPAIGN_CONFIG', '主题视觉图必须使用站内上传后的图片地址')
+  const trimmed = value.trim()
+  if (!trimmed || /^(?:blob|file|data|javascript):/i.test(trimmed) || !isTrustedThemeVisualUrl(trimmed)) {
+    throw new PharmacyError('INVALID_CAMPAIGN_CONFIG', '主题视觉图必须使用站内上传后的图片地址')
+  }
+  if (trimmed.length > 2000) throw new PharmacyError('INVALID_CAMPAIGN_CONFIG', '主题视觉图地址过长')
+  return toStoredMediaUrl(trimmed)
+}
+
 export function effectivePharmacyCampaignStatus(
   campaign: Pick<Prisma.PharmacyCampaignGetPayload<{ select: { status: true; startsAt: true; endsAt: true } }>, 'status' | 'startsAt' | 'endsAt'>,
   now = new Date(),
@@ -145,6 +172,9 @@ export function normalizePharmacyCampaignInput(
     totalDrawLimit: number | null
     visualUrl: string | null
     collectionRewardBadgeId: string | null
+    pityEnabled: boolean
+    pityThreshold: number | null
+    pityIncludeHidden: boolean
   }>,
 ) {
   const get = (key: string) => Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined
@@ -171,14 +201,19 @@ export function normalizePharmacyCampaignInput(
   if (duplicateRecycleEnabled && (!duplicateRecycleRequired || !duplicateRecycleReward)) throw new PharmacyError('INVALID_CAMPAIGN_CONFIG', '启用余药回收后必须设置所需数量和奖励')
   const dailyDrawLimit = get('dailyDrawLimit') === undefined ? current?.dailyDrawLimit ?? null : positiveInteger(get('dailyDrawLimit'), '每日执药次数限制', { nullable: true })
   const totalDrawLimit = get('totalDrawLimit') === undefined ? current?.totalDrawLimit ?? null : positiveInteger(get('totalDrawLimit'), '主题总执药次数限制', { nullable: true })
-  const visualUrlValue = get('visualUrl') === undefined ? current?.visualUrl ?? null : get('visualUrl')
-  const visualUrl = typeof visualUrlValue === 'string' && visualUrlValue.trim() ? visualUrlValue.trim().slice(0, 2000) : null
+  const visualUrl = normalizeThemeVisualUrl(get('visualUrl'), current?.visualUrl)
   const collectionRewardBadgeIdValue = get('collectionRewardBadgeId') === undefined ? current?.collectionRewardBadgeId ?? null : get('collectionRewardBadgeId')
   const collectionRewardBadgeId = collectionRewardBadgeIdValue === null || collectionRewardBadgeIdValue === undefined || collectionRewardBadgeIdValue === ''
     ? null
     : typeof collectionRewardBadgeIdValue === 'string' && collectionRewardBadgeIdValue.trim().length <= 191
       ? collectionRewardBadgeIdValue.trim()
       : (() => { throw new PharmacyError('INVALID_CAMPAIGN_CONFIG', '全收集奖励勋章标识无效') })()
+  const pityEnabled = get('pityEnabled') === undefined ? Boolean(current?.pityEnabled) : booleanValue(get('pityEnabled'))
+  const pityThreshold = get('pityThreshold') === undefined
+    ? current?.pityThreshold ?? null
+    : positiveInteger(get('pityThreshold'), '保底次数', { nullable: true, max: 1_000_000 })
+  const pityIncludeHidden = get('pityIncludeHidden') === undefined ? Boolean(current?.pityIncludeHidden) : booleanValue(get('pityIncludeHidden'))
+  if (pityEnabled && !pityThreshold) throw new PharmacyError('INVALID_CAMPAIGN_CONFIG', '启用保底后必须设置保底次数')
   return {
     title,
     subtitle: typeof subtitleValue === 'string' && subtitleValue.trim() ? subtitleValue.trim().slice(0, 300) : null,
@@ -196,6 +231,9 @@ export function normalizePharmacyCampaignInput(
     totalDrawLimit,
     visualUrl,
     collectionRewardBadgeId,
+    pityEnabled,
+    pityThreshold,
+    pityIncludeHidden,
   }
 }
 
@@ -244,6 +282,7 @@ const drawSelect = {
   resultType: true,
   isNewBadge: true,
   isDuplicate: true,
+  isPity: true,
   duplicateQuantity: true,
   balanceBefore: true,
   balanceAfter: true,
@@ -419,22 +458,48 @@ export type PharmacyDrawResult = {
   duplicateRequired: number | null
 }
 
-export async function executePharmacyDraw(input: { userId: string; campaignId: string; idempotencyKey: string; now?: Date }): Promise<PharmacyDrawResult> {
+export type PharmacyDrawBatchResult = {
+  ok: true
+  duplicateRequest: boolean
+  draws: PharmacyDrawView[]
+  balance: number
+  duplicateTotal: number
+  duplicateRequired: number | null
+}
+
+function batchIdempotencyKeys(baseKey: string, drawCount: PharmacyDrawCount) {
+  return Array.from({ length: drawCount }, (_, index) => index === 0 ? baseKey : `${baseKey}:${index}`)
+}
+
+async function getActiveOwnedBadgeIds(tx: Prisma.TransactionClient, userId: string, badgeIds: readonly string[], now: Date) {
+  if (!badgeIds.length) return new Set<string>()
+  const rows = await tx.userBadge.findMany({ where: { userId, badgeId: { in: [...new Set(badgeIds)] }, ...activeUserBadgeWhere(now) }, select: { badgeId: true } })
+  return new Set(rows.map((row) => row.badgeId))
+}
+
+export async function executePharmacyDraws(input: { userId: string; campaignId: string; idempotencyKey: string; drawCount: unknown; now?: Date }): Promise<PharmacyDrawBatchResult> {
   const campaignId = input.campaignId.trim()
   const idempotencyKey = input.idempotencyKey.trim()
+  const drawCount = parsePharmacyDrawCount(input.drawCount)
+  if (!drawCount) throw new PharmacyError('INVALID_DRAW_COUNT', '一次只能执药 1、5 或 10 次')
   if (!campaignId || !idempotencyKey || idempotencyKey.length > 191) throw new PharmacyError('IDEMPOTENCY_KEY_INVALID', '执药请求标识不正确')
+  const keys = batchIdempotencyKeys(idempotencyKey, drawCount)
+  if (keys.some((key) => key.length > 191)) throw new PharmacyError('IDEMPOTENCY_KEY_INVALID', '执药请求标识过长')
+  const allKeys = batchIdempotencyKeys(idempotencyKey, 10)
   const now = input.now || new Date()
   const badgeGrantsForEffects: Array<{ badgeId: string; recordId: string }> = []
 
   const outcome = await prisma.$transaction(async (tx) => {
     const lockedUser = await lockUser(tx, input.userId)
-    const existing = await tx.pharmacyDraw.findUnique({
-      where: { userId_idempotencyKey: { userId: input.userId, idempotencyKey } },
-      select: drawSelect,
-    })
-    if (existing) {
-      const campaign = await tx.pharmacyCampaign.findUnique({ where: { id: existing.campaignId }, select: { duplicateRecycleRequired: true } })
-      return { existing, duplicateRequest: true, balance: existing.balanceAfter, duplicateRequired: campaign?.duplicateRecycleRequired ?? null }
+    const existingRows = await tx.pharmacyDraw.findMany({ where: { userId: input.userId, idempotencyKey: { in: allKeys } }, select: drawSelect })
+    if (existingRows.length) {
+      const expected = new Set(keys)
+      if (existingRows.length !== drawCount || existingRows.some((row) => !expected.has(row.idempotencyKey))) {
+        throw new PharmacyError('IDEMPOTENCY_KEY_INVALID', '该执药请求标识已经用于其他次数的执药', 409)
+      }
+      const orderedRows = keys.map((key) => existingRows.find((row) => row.idempotencyKey === key)).filter((row): row is DrawRow => Boolean(row))
+      const campaign = await tx.pharmacyCampaign.findUnique({ where: { id: orderedRows[0]?.campaignId }, select: { duplicateRecycleRequired: true } })
+      return { rows: orderedRows, duplicateRequest: true, balance: orderedRows[orderedRows.length - 1]?.balanceAfter ?? lockedUser.points, duplicateRequired: campaign?.duplicateRecycleRequired ?? null, campaignId: orderedRows[0]?.campaignId || campaignId }
     }
 
     await lockCampaign(tx, campaignId)
@@ -448,126 +513,109 @@ export async function executePharmacyDraw(input: { userId: string; campaignId: s
       campaign.dailyDrawLimit === null ? Promise.resolve(0) : tx.pharmacyDraw.count({ where: { userId: input.userId, campaignId: campaign.id, drawAt: { gte: start, lt: end } } }),
       campaign.totalDrawLimit === null ? Promise.resolve(0) : tx.pharmacyDraw.count({ where: { userId: input.userId, campaignId: campaign.id } }),
     ])
-    if (campaign.dailyDrawLimit !== null && todayCount >= campaign.dailyDrawLimit) throw new PharmacyError('DAILY_LIMIT_REACHED', '今日已执完', 409, { current: todayCount, limit: campaign.dailyDrawLimit, dateKey })
-    if (campaign.totalDrawLimit !== null && totalCount >= campaign.totalDrawLimit) throw new PharmacyError('TOTAL_LIMIT_REACHED', '本期已执完', 409, { current: totalCount, limit: campaign.totalDrawLimit })
-    if (lockedUser.points < campaign.drawCost) throw new PharmacyError('INSUFFICIENT_POINTS', '挂号费不够，今天的药先欠着。', 409, { balance: lockedUser.points, required: campaign.drawCost })
+    if (campaign.dailyDrawLimit !== null && todayCount + drawCount > campaign.dailyDrawLimit) throw new PharmacyError('DAILY_LIMIT_REACHED', '今日剩余执药次数不足，无法完成本次执药。', 409, { current: todayCount, requested: drawCount, limit: campaign.dailyDrawLimit, dateKey })
+    if (campaign.totalDrawLimit !== null && totalCount + drawCount > campaign.totalDrawLimit) throw new PharmacyError('TOTAL_LIMIT_REACHED', '本期剩余执药次数不足，无法完成本次执药。', 409, { current: totalCount, requested: drawCount, limit: campaign.totalDrawLimit })
+    const batchCost = campaign.drawCost * drawCount
+    if (!Number.isSafeInteger(batchCost) || lockedUser.points < batchCost) throw new PharmacyError('INSUFFICIENT_POINTS', `挂号费不够，无法完成 ${drawCount} 次执药。`, 409, { balance: lockedUser.points, required: batchCost, requested: drawCount })
 
-    const roll = randomInt(pool.totalWeight)
-    const selected = chooseWeightedPharmacyPrize(pool.prizes, roll)
-    const selectedName = prizeDisplayName(selected)
-    const probability = calculatePharmacyProbability(selected.weight, pool.totalWeight)
-    const drawId = randomUUID()
-    const isBadge = selected.type === 'BADGE'
-    const ownedBadge = isBadge && selected.badgeId
-      ? await tx.userBadge.findFirst({ where: { userId: input.userId, badgeId: selected.badgeId, ...activeUserBadgeWhere(now) }, select: { id: true } })
-      : null
-    const predictedDuplicate = Boolean(ownedBadge)
-    const resultType: PharmacyDrawResultType = isBadge ? (predictedDuplicate ? 'BADGE_DUPLICATE' : 'BADGE_NEW') : 'POINTS_REWARD'
-    const expectedReward = selected.type === 'POINTS' ? selected.rewardAmount || 0 : 0
+    const state = await tx.pharmacyUserCampaignState.findUnique({ where: { userId_campaignId: { userId: input.userId, campaignId: campaign.id } }, select: { pityCount: true } })
+    let pityCount = Math.max(0, state?.pityCount || 0)
+    let currentBalance = lockedUser.points
+    const rows: DrawRow[] = []
+    const badgeIds = pool.prizes.filter((prize) => prize.type === 'BADGE' && prize.badgeId).map((prize) => prize.badgeId as string)
 
-    await tx.pharmacyDraw.create({
-      data: {
-        id: drawId,
-        userId: input.userId,
-        campaignId: campaign.id,
-        prizeId: selected.id,
-        idempotencyKey,
-        drawAt: now,
-        campaignTitle: campaign.title,
-        drawCost: campaign.drawCost,
-        prizeType: selected.type,
-        prizeName: selectedName,
-        badgeId: selected.Badge?.id || null,
-        badgeName: selected.Badge?.name || null,
-        badgeIconUrl: selected.Badge?.iconUrl || null,
-        rarity: selected.Badge?.rarity || null,
-        rewardAmount: selected.type === 'POINTS' ? expectedReward : null,
-        configuredWeight: selected.weight,
-        calculatedProbability: probability.toFixed(6),
-        resultType,
-        isNewBadge: isBadge && !predictedDuplicate,
-        isDuplicate: isBadge && predictedDuplicate,
-        duplicateQuantity: isBadge && predictedDuplicate ? 1 : 0,
-        balanceBefore: lockedUser.points,
-        balanceAfter: lockedUser.points - campaign.drawCost + expectedReward,
-        createdAt: now,
-      },
-    })
+    for (let index = 0; index < drawCount; index += 1) {
+      const activeOwnedBadgeIds = await getActiveOwnedBadgeIds(tx, input.userId, badgeIds, now)
+      const candidates = selectPharmacyPityCandidates(pool.prizes, activeOwnedBadgeIds, campaign.pityIncludeHidden, campaign.collectionRewardBadgeId)
+      const usePity = shouldUsePharmacyPity({ enabled: campaign.pityEnabled, threshold: campaign.pityThreshold, pityCount, candidateCount: candidates.length })
+      const selectedPool = usePity ? candidates : pool.prizes
+      const selectionTotalWeight = selectedPool.reduce((total, prize) => total + prize.weight, 0)
+      const roll = usePity ? randomInt(selectionTotalWeight) : randomInt(pool.totalWeight)
+      const selected = usePity
+        ? chooseWeightedPharmacyPrize(selectedPool, roll)
+        : chooseWeightedPharmacyPrize(pool.prizes, roll)
+      const selectedName = prizeDisplayName(selected)
+      const probability = calculatePharmacyProbability(selected.weight, pool.totalWeight)
+      const drawId = randomUUID()
+      const isBadge = selected.type === 'BADGE'
+      const predictedDuplicate = isBadge && selected.badgeId ? activeOwnedBadgeIds.has(selected.badgeId) : false
+      const resultType: PharmacyDrawResultType = isBadge ? (predictedDuplicate ? 'BADGE_DUPLICATE' : 'BADGE_NEW') : 'POINTS_REWARD'
+      const expectedReward = selected.type === 'POINTS' ? selected.rewardAmount || 0 : 0
 
-    const consumed = await consumeRegistrationFee(tx, {
-      userId: input.userId,
-      amount: campaign.drawCost,
-      action: 'PHARMACY_DRAW_COST',
-      reason: `「${campaign.title}」执药`,
-      businessKey: `pharmacy:draw:${drawId}:cost`,
-      pharmacyDrawId: drawId,
-      now,
-    })
-
-    let finalBalance = consumed.totalPoints
-    let isNewBadge = false
-    let isDuplicate = false
-    let resultTypeFinal: PharmacyDrawResultType = resultType
-    if (selected.type === 'BADGE' && selected.badgeId) {
-      const granted = await grantBadgeWithTransaction(tx, {
-        userId: input.userId,
-        badgeId: selected.badgeId,
-        sourceType: ANGEL_GIFT_BADGE_SOURCE,
-        sourceId: drawId,
-        grantKey: `pharmacy-draw:${drawId}`,
-        grantReason: `于「${ANGEL_GIFT_MODULE_NAME}」主题「${campaign.title}」执药获得`,
-        obtainedAt: now,
-        deferPhase3Effects: true,
+      await tx.pharmacyDraw.create({
+        data: {
+          id: drawId,
+          userId: input.userId,
+          campaignId: campaign.id,
+          prizeId: selected.id,
+          idempotencyKey: keys[index],
+          drawAt: now,
+          campaignTitle: campaign.title,
+          drawCost: campaign.drawCost,
+          prizeType: selected.type,
+          prizeName: selectedName,
+          badgeId: selected.Badge?.id || null,
+          badgeName: selected.Badge?.name || null,
+          badgeIconUrl: selected.Badge?.iconUrl || null,
+          rarity: selected.Badge?.rarity || null,
+          rewardAmount: selected.type === 'POINTS' ? expectedReward : null,
+          configuredWeight: selected.weight,
+          calculatedProbability: probability.toFixed(6),
+          resultType,
+          isPity: usePity,
+          isNewBadge: isBadge && !predictedDuplicate,
+          isDuplicate: isBadge && predictedDuplicate,
+          duplicateQuantity: isBadge && predictedDuplicate ? 1 : 0,
+          balanceBefore: currentBalance,
+          balanceAfter: currentBalance - campaign.drawCost + expectedReward,
+          createdAt: now,
+        },
       })
-      isNewBadge = granted.created
-      isDuplicate = !granted.created
-      resultTypeFinal = isNewBadge ? 'BADGE_NEW' : 'BADGE_DUPLICATE'
-      if (isDuplicate) {
-        await tx.pharmacyDuplicateInventory.upsert({
-          where: { userId_campaignId_sourceBadgeId: { userId: input.userId, campaignId: campaign.id, sourceBadgeId: selected.badgeId } },
-          update: { quantity: { increment: 1 } },
-          create: { userId: input.userId, campaignId: campaign.id, sourceBadgeId: selected.badgeId, quantity: 1, createdAt: now, updatedAt: now },
-        })
+
+      const consumed = await consumeRegistrationFee(tx, { userId: input.userId, amount: campaign.drawCost, action: 'PHARMACY_DRAW_COST', reason: `「${campaign.title}」执药`, businessKey: `pharmacy:draw:${drawId}:cost`, pharmacyDrawId: drawId, now })
+      let finalBalance = consumed.totalPoints
+      let isNewBadge = false
+      let isDuplicate = false
+      let resultTypeFinal: PharmacyDrawResultType = resultType
+      if (selected.type === 'BADGE' && selected.badgeId) {
+        const granted = await grantBadgeWithTransaction(tx, { userId: input.userId, badgeId: selected.badgeId, sourceType: ANGEL_GIFT_BADGE_SOURCE, sourceId: drawId, grantKey: `pharmacy-draw:${drawId}`, grantReason: `于「${ANGEL_GIFT_MODULE_NAME}」主题「${campaign.title}」执药获得`, obtainedAt: now, deferPhase3Effects: true })
+        isNewBadge = granted.created
+        isDuplicate = !granted.created
+        resultTypeFinal = isNewBadge ? 'BADGE_NEW' : 'BADGE_DUPLICATE'
+        if (isDuplicate) await tx.pharmacyDuplicateInventory.upsert({ where: { userId_campaignId_sourceBadgeId: { userId: input.userId, campaignId: campaign.id, sourceBadgeId: selected.badgeId } }, update: { quantity: { increment: 1 } }, create: { userId: input.userId, campaignId: campaign.id, sourceBadgeId: selected.badgeId, quantity: 1, createdAt: now, updatedAt: now } })
+        if (granted.created) badgeGrantsForEffects.push({ badgeId: granted.badgeId, recordId: granted.recordId })
+        if (granted.derivedGrants?.length) badgeGrantsForEffects.push(...granted.derivedGrants)
+      } else if (selected.type === 'POINTS') {
+        const rewarded = await awardRegistrationFee(tx, { userId: input.userId, requestedAmount: expectedReward, action: 'PHARMACY_PRIZE_REWARD', reason: `「${campaign.title}」药房找零`, businessKey: `pharmacy:draw:${drawId}:reward`, pharmacyDrawId: drawId, now })
+        finalBalance = rewarded.totalPoints
       }
-      if (granted.created) badgeGrantsForEffects.push({ badgeId: granted.badgeId, recordId: granted.recordId })
-      if (granted.derivedGrants?.length) badgeGrantsForEffects.push(...granted.derivedGrants)
-    } else if (selected.type === 'POINTS') {
-      const rewarded = await awardRegistrationFee(tx, {
-        userId: input.userId,
-        requestedAmount: expectedReward,
-        action: 'PHARMACY_PRIZE_REWARD',
-        reason: `「${campaign.title}」药房找零`,
-        businessKey: `pharmacy:draw:${drawId}:reward`,
-        pharmacyDrawId: drawId,
-        now,
-      })
-      finalBalance = rewarded.totalPoints
+
+      const updated = await tx.pharmacyDraw.update({ where: { id: drawId }, data: { resultType: resultTypeFinal, isNewBadge, isDuplicate, duplicateQuantity: isDuplicate ? 1 : 0, balanceAfter: finalBalance }, select: drawSelect })
+      rows.push(updated)
+      currentBalance = finalBalance
+      pityCount = advancePharmacyPityCount(pityCount, usePity)
     }
 
-    const updated = await tx.pharmacyDraw.update({
-      where: { id: drawId },
-      data: { resultType: resultTypeFinal, isNewBadge, isDuplicate, duplicateQuantity: isDuplicate ? 1 : 0, balanceAfter: finalBalance },
-      select: drawSelect,
-    })
-    return { existing: updated, duplicateRequest: false, balance: finalBalance, duplicateRequired: campaign.duplicateRecycleRequired }
-  }, { timeout: 15000 })
+    if (campaign.pityEnabled || state) {
+      await tx.pharmacyUserCampaignState.upsert({ where: { userId_campaignId: { userId: input.userId, campaignId: campaign.id } }, update: { pityCount }, create: { userId: input.userId, campaignId: campaign.id, pityCount } })
+    }
+    return { rows, duplicateRequest: false, balance: currentBalance, duplicateRequired: campaign.duplicateRecycleRequired, campaignId: campaign.id }
+  }, { timeout: 30000 })
 
-  if (badgeGrantsForEffects.length) {
+  if (!outcome.duplicateRequest && badgeGrantsForEffects.length) {
     try {
       await processBadgeGrantEffects({ userId: input.userId, grants: badgeGrantsForEffects })
     } catch (error) {
-      console.error('[pharmacy.badge-effects]', { userId: input.userId, drawId: outcome.existing.id, error })
+      console.error('[pharmacy.badge-effects]', { userId: input.userId, drawIds: outcome.rows.map((row) => row.id), error })
     }
   }
-  const duplicateTotal = await getDuplicateTotal(input.userId, outcome.existing.campaignId)
-  return {
-    ok: true,
-    duplicateRequest: outcome.duplicateRequest,
-    draw: serializeDraw(outcome.existing),
-    balance: outcome.balance,
-    duplicateTotal,
-    duplicateRequired: outcome.duplicateRequired,
-  }
+  const duplicateTotal = await getDuplicateTotal(input.userId, outcome.campaignId)
+  return { ok: true, duplicateRequest: outcome.duplicateRequest, draws: outcome.rows.map(serializeDraw), balance: outcome.balance, duplicateTotal, duplicateRequired: outcome.duplicateRequired }
+}
+
+export async function executePharmacyDraw(input: { userId: string; campaignId: string; idempotencyKey: string; now?: Date }): Promise<PharmacyDrawResult> {
+  const result = await executePharmacyDraws({ ...input, drawCount: 1 })
+  return { ...result, draw: result.draws[0] }
 }
 
 export type PharmacyRecycleResult = {
@@ -761,13 +809,33 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
 }
 
 export async function getAdminPharmacyCampaigns() {
-  const campaigns = await prisma.pharmacyCampaign.findMany({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 200, include: { _count: { select: { PharmacyPrize: true, PharmacyDraw: true, PharmacyRecycleLog: true } } } })
+  const campaigns = await prisma.pharmacyCampaign.findMany({
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: 200,
+    include: {
+      _count: { select: { PharmacyPrize: true, PharmacyDraw: true, PharmacyRecycleLog: true } },
+      CollectionRewardBadge: { select: { id: true, name: true } },
+      PharmacyPrize: { where: { type: 'BADGE', enabled: true }, select: { isHidden: true } },
+    },
+  })
   return Promise.all(campaigns.map(async (campaign) => {
     const [participants, cost] = await Promise.all([
       prisma.pharmacyDraw.groupBy({ by: ['userId'], where: { campaignId: campaign.id } }),
       prisma.pharmacyDraw.aggregate({ where: { campaignId: campaign.id }, _sum: { drawCost: true } }),
     ])
-    return { ...campaign, displayStatus: effectivePharmacyCampaignStatus(campaign, new Date()), participantCount: participants.length, drawCostTotal: cost._sum.drawCost || 0 }
+    const { CollectionRewardBadge, PharmacyPrize, ...campaignData } = campaign
+    const seriesBadgeCount = PharmacyPrize.length
+    const seriesHiddenCount = PharmacyPrize.filter((prize) => prize.isHidden).length
+    return {
+      ...campaignData,
+      displayStatus: effectivePharmacyCampaignStatus(campaign, new Date()),
+      participantCount: participants.length,
+      drawCostTotal: cost._sum.drawCost || 0,
+      seriesBadgeCount,
+      seriesNormalCount: seriesBadgeCount - seriesHiddenCount,
+      seriesHiddenCount,
+      collectionRewardBadgeName: CollectionRewardBadge?.name || null,
+    }
   }))
 }
 
@@ -1035,7 +1103,7 @@ export async function getAdminPharmacyDraws(campaignId: string, options: { page?
   })
   const hasMore = rows.length > pageSize
   return {
-    draws: rows.slice(0, pageSize).map((row) => ({ ...serializeDraw(row), user: row.User })),
+    draws: rows.slice(0, pageSize).map((row) => ({ ...serializeDraw(row), drawMode: row.isPity ? 'PITY' as const : 'NORMAL' as const, user: row.User })),
     page,
     pageSize,
     hasMore,

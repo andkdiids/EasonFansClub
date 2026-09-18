@@ -12,7 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
-import { getUnrevealedAngelGiftBadgeIds } from '@/lib/angel-gift-collection'
+import { resolveBadgeVisibility } from '@/lib/badge-visibility'
 import { getProfileSalonPosts } from '@/lib/salon'
 import { buildProfilePostWhere } from '@/lib/post-moderation'
 import { postContentPlainText } from '@/lib/share-metadata'
@@ -182,17 +182,29 @@ export async function GET(request: Request, context: RouteContext) {
     const badges = await safeDb(
       'userModules.badges',
       prisma.userBadge.findMany({
-        where: { userId: target.id, isHidden: false, ...activeUserBadgeWhere(now) },
+        where: {
+          userId: target.id,
+          ...(visibility.isSelf ? {} : { isHidden: false }),
+          ...activeUserBadgeWhere(now),
+          ...(visibility.isSelf ? {} : { Badge: { visibility: { not: 'SECRET' as const } } }),
+        },
         orderBy: { awardedAt: 'desc' },
         take: 12,
-        select: { id: true, grantedAt: true, Badge: { select: { id: true, name: true, description: true, iconUrl: true } } },
+        select: { id: true, isHidden: true, grantedAt: true, Badge: { select: { id: true, name: true, description: true, iconUrl: true, visibility: true } } },
       }),
       [],
     )
-    const unrevealedAngelGiftBadgeIds = await getUnrevealedAngelGiftBadgeIds(viewer?.id, badges.map(({ Badge }) => Badge.id))
-    return NextResponse.json({ items: badges.filter(({ Badge }) => !unrevealedAngelGiftBadgeIds.has(Badge.id)).map(({ Badge, ...item }) => {
+    return NextResponse.json({ items: badges.flatMap(({ Badge, isHidden, ...item }) => {
+      const decision = resolveBadgeVisibility({
+        viewerId: viewer?.id,
+        ownerId: target.id,
+        badge: Badge,
+        userBadge: { isHidden },
+        context: 'PROFILE',
+      })
+      if (!decision.canSeeOwnership || !decision.canSeeMetadata) return []
       const imageUrl = toPublicMediaUrl(Badge.iconUrl)
-      return { ...item, badge: { ...Badge, iconUrl: imageUrl, imageUrl } }
+      return [{ ...item, badge: { ...Badge, iconUrl: imageUrl, imageUrl } }]
     }) })
   }
 
@@ -238,7 +250,7 @@ export async function GET(request: Request, context: RouteContext) {
       [],
     )
     const authorIds = favorites.map((item) => item.Post.User.id)
-    const equippedBadges = await getEquippedBadgesForUsers(authorIds)
+    const equippedBadges = await getEquippedBadgesForUsers(authorIds, new Date(), viewer?.id)
     return NextResponse.json({
       items: favorites.map(({ Post, ...favorite }) => ({
         ...favorite,

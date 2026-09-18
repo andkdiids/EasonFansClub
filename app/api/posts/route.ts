@@ -176,7 +176,7 @@ export async function GET(request: Request) {
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
-    const equippedBadges = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id))
+    const equippedBadges = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id), new Date(), viewer?.id)
     const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, ...post }) => ({
       ...post,
       title: publicModerationText(post.title, moderationStatus),

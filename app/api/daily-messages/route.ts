@@ -102,7 +102,7 @@ export async function GET(request: Request) {
       ...visibleRows.map((row) => row.User.id),
       ...visibleRows.flatMap((row) => row.DailyMessageComment.map((comment) => comment.User.id)),
     ]
-    const equippedBadges = await getEquippedBadgesForUsers(displayNameUserIds)
+    const equippedBadges = await getEquippedBadgesForUsers(displayNameUserIds, new Date(), viewer?.id)
     const messages = visibleRows.map(({ User, DailyMessageComment, ...message }) => ({
       ...message,
       content: publicModerationText(message.content, message.moderationStatus),
