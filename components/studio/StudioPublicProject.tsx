@@ -20,6 +20,7 @@ type PublicProject = {
   title: string
   description: string | null
   thumbnailUrl: string | null
+  physicalCoverImage: string | null
   likeCount: number
   favoriteCount: number
   viewCount: number
@@ -46,14 +47,16 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
   const [isFavorited, setIsFavorited] = useState(false)
   const [interactionBusy, setInteractionBusy] = useState<'like' | 'favorite' | null>(null)
   const [downloadBusy, setDownloadBusy] = useState(false)
+  const [detailView, setDetailView] = useState<'physical' | 'pattern'>(project.physicalCoverImage ? 'physical' : 'pattern')
+  const [physicalCoverFailed, setPhysicalCoverFailed] = useState(false)
   const downloadBusyRef = useRef(false)
   const pattern = project.data.pattern
   const materials = calculateMaterialList(pattern)
 
   useEffect(() => {
     if (!canvasRef.current) return
-    renderPatternToCanvas(canvasRef.current, pattern, { displayGrid: true, displayCodes: true, displayCoordinates: true })
-  }, [pattern])
+    renderPatternToCanvas(canvasRef.current, pattern, { displayGrid: true, displayCodes: true })
+  }, [detailView, pattern])
 
   useEffect(() => {
     let cancelled = false
@@ -146,7 +149,7 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
     contentId: project.id,
     title: project.title,
     description: project.description || '来自贝多芬与我的拼豆图纸',
-    image: project.thumbnailUrl,
+    image: project.physicalCoverImage || project.thumbnailUrl,
     url: `/studio/project/${encodeURIComponent(project.id)}`,
     author: project.author,
     authorAvatar: null,
@@ -172,7 +175,7 @@ export function StudioPublicProject({ project }: Readonly<{ project: PublicProje
     </header>
     {message ? <p className={styles.notice} role="status">{message}</p> : null}
     <section className={styles.publicLayout}>
-      <div className={styles.publicCanvasCard}><canvas ref={canvasRef} className={styles.publicCanvas} aria-label={`${project.title}拼豆图纸`} /></div>
+      <div className={styles.publicCanvasCard}>{project.physicalCoverImage ? <div className={styles.publicViewToggle} role="tablist" aria-label="作品内容"><button type="button" role="tab" aria-selected={detailView === 'physical'} className={detailView === 'physical' ? styles.publicViewToggleActive : ''} onClick={() => setDetailView('physical')}>实物</button><button type="button" role="tab" aria-selected={detailView === 'pattern'} className={detailView === 'pattern' ? styles.publicViewToggleActive : ''} onClick={() => setDetailView('pattern')}>图纸</button></div> : null}{project.physicalCoverImage && detailView === 'physical' && !physicalCoverFailed ? <img src={project.physicalCoverImage} alt={`${project.title}实物封面`} className={styles.publicPhysicalCover} onError={() => { setPhysicalCoverFailed(true); setDetailView('pattern') }} /> : <canvas ref={canvasRef} className={styles.publicCanvas} aria-label={`${project.title}拼豆图纸`} />}</div>
       <aside className={styles.publicInfoCard}>
         <Link href={creatorPath(project.creator.uid)} className={styles.publicArtistLink} aria-label={`查看${project.creator.name}的拼豆作品主页`}><span className={styles.publicArtistAvatar}>{project.creator.avatar ? <img src={project.creator.avatar} alt="" /> : project.creator.name.slice(0, 1)}</span><span><small>ARTIST</small><strong>{project.creator.name}</strong></span><b aria-hidden>→</b></Link>
         <dl className={styles.publicStats}><div><dt>尺寸</dt><dd>{pattern.width} × {pattern.height} 颗</dd></div><div><dt>拼豆板</dt><dd>{materials.boardCount} 块</dd></div><div><dt>豆子数量</dt><dd>{materials.totalBeads.toLocaleString()} 颗</dd></div><div><dt>颜色数量</dt><dd>{materials.colorCount} 种</dd></div></dl>

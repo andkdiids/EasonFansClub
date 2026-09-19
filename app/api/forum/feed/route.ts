@@ -7,7 +7,7 @@ import { clampForumPage, getForumOffset, getForumTotalPages, parseForumSort } fr
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
@@ -41,16 +41,19 @@ export async function GET(request: Request) {
       ? { Board: { isActive: true, slug: selectedBoard.slug } }
       : { boardId: selectedBoard.id }
     : { Board: { isActive: true } }
+  const featuredFilter: Prisma.PostWhereInput | null = sort === 'featured' ? { isFeatured: true } : null
   const where: Prisma.PostWhereInput = {
-    ...publicPostWhere,
-    User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    ...boardWhere,
-    ...(sort === 'featured' ? { isFeatured: true } : {}),
-    ...(sort === 'pinned' ? { isPinned: true } : {}),
-    ...(query ? { OR: [
-      { title: { contains: query } },
-      { summary: { contains: query } },
-    ] } : {}),
+    AND: [
+      publicPostWhere(),
+      { User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
+      boardWhere,
+      ...(featuredFilter ? [featuredFilter] : []),
+      ...(sort === 'pinned' ? [{ isPinned: true }] : []),
+      ...(query ? [{ OR: [
+        { title: { contains: query } },
+        { summary: { contains: query } },
+      ] }] : []),
+    ],
   }
   const orderBy: Prisma.PostOrderByWithRelationInput[] = sort === 'latest-reply'
     ? [{ isPinned: 'desc' }, { updatedAt: 'desc' }, { id: 'desc' }]
@@ -75,7 +78,8 @@ export async function GET(request: Request) {
         id: true, title: true, moderationStatus: true,
         ipRegion: true,
         likeCount: true, replyCount: true, viewCount: true,
-        isPinned: true, isFeatured: true, createdAt: true, updatedAt: true,
+        isPinned: true, isFeatured: true, createdAt: true, updatedAt: true, expiresAt: true,
+        PostTopic: { select: { Topic: { select: { id: true, name: true } } } },
         Board: { select: { name: true, slug: true } },
         User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, level: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } } },
         Like: { where: { userId: user?.id || '__anonymous__' }, select: { id: true }, take: 1 },
@@ -90,8 +94,9 @@ export async function GET(request: Request) {
   return NextResponse.json({
     boards: publicBoards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
     selectedBoard: publicSelectedBoard ? { ...publicSelectedBoard, isAnnouncement: announcement } : null,
-    posts: rows.map(({ Like, User, Board, ...post }) => ({
+    posts: rows.map(({ Like, User, Board, PostTopic, ...post }) => ({
       ...post,
+      topics: PostTopic.map(({ Topic }) => Topic),
       title: publicModerationText(post.title, post.moderationStatus),
       author: {
         ...User,

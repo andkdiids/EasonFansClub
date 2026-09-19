@@ -195,6 +195,29 @@ test('评论区只显示楼层方向和最热，排序/分页完成后回评论�
   assert.match(replySection, /<Pagination/)
 })
 
+test('回复目标定位只消费一次，点赞更新不会重新触发滚动', () => {
+  assert.match(replySection, /const focusScrollKeyRef = useRef<string \| null>\(null\)/)
+  assert.match(replySection, /const focusScrollKey = `\$\{postId\}:\$\{focusId\}`/)
+  assert.match(replySection, /if \(focusScrollKeyRef\.current === focusScrollKey\) return/)
+  assert.match(replySection, /focusScrollKeyRef\.current = focusScrollKey/)
+  assert.match(replySection, /expandedReplies\[current\.id\]/)
+  assert.match(replySection, /if \(!target\) return/)
+
+  const focusEffectStart = replySection.indexOf('useEffect(() => {\n    if (!focusId)')
+  const focusEffectEnd = replySection.indexOf('\n  }, [expandedReplies, focusId, postId, replyMap])', focusEffectStart)
+  assert.ok(focusEffectStart >= 0)
+  assert.ok(focusEffectEnd > focusEffectStart)
+  const focusEffect = replySection.slice(focusEffectStart, focusEffectEnd)
+  assert.doesNotMatch(focusEffect, /setReplies|setMyReplies|router\.refresh\(\)/)
+
+  const toggleLikeStart = replySection.indexOf('async function toggleLike')
+  const toggleLikeEnd = replySection.indexOf('async function togglePin', toggleLikeStart)
+  const toggleLike = replySection.slice(toggleLikeStart, toggleLikeEnd)
+  assert.doesNotMatch(toggleLike, /scrollIntoView|scrollTo\(|scrollToBottom|router\.refresh\(\)/)
+  assert.match(replySection, /<div key=\{reply\.id\}/)
+  assert.match(replySection, /<article key=\{reply\.id\}/)
+})
+
 test('只有普通分页和排序会滚到评论顶部，目标评论/回复定位优先', () => {
   assert.equal(shouldScrollToPostRepliesTop('pagination', false), true)
   assert.equal(shouldScrollToPostRepliesTop('sort', false), true)

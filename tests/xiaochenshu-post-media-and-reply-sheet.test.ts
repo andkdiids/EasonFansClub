@@ -7,7 +7,7 @@ import { MAX_CONTENT_IMAGES } from '../lib/content-images'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-test('小臣书分类固定为全部、公告区、推荐、最新、热门，再接现有分区顺序', () => {
+test('小臣书分类固定为全部、公告区、吟游诗人、推荐、最新、热门，再接其他分区顺序', () => {
   const tabs = buildForumDiscoveryTabs([
     { slug: 'daily-chat', name: '吹水' },
     { slug: 'announcements', name: '旧公告名', isAnnouncement: true },
@@ -16,8 +16,8 @@ test('小臣书分类固定为全部、公告区、推荐、最新、热门，�
     { slug: 'bard', name: '吟游诗人' },
   ])
 
-  assert.deepEqual(tabs.map((tab) => tab.value), ['all', 'announcements', 'recommend', 'latest', 'hot', 'daily-chat', 'concert', 'material-trade', 'bard'])
-  assert.deepEqual(tabs.map((tab) => tab.label), ['全部', '公告区', '推荐', '最新', '热门', '吹水', '演唱会', '物料', '吟游诗人'])
+  assert.deepEqual(tabs.map((tab) => tab.value), ['all', 'announcements', 'bard', 'recommend', 'latest', 'hot', 'daily-chat', 'concert', 'material-trade'])
+  assert.deepEqual(tabs.map((tab) => tab.label), ['全部', '公告区', '吟游诗人', '推荐', '最新', '热门', '吹水', '演唱会', '物料'])
 })
 
 test('论坛分区改名保留 daily-chat slug，并新增吟游诗人默认分区', () => {

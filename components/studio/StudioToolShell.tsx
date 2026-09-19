@@ -16,14 +16,15 @@ function saveStatusLabel(status: StudioSaveStatus) {
   return '未保存'
 }
 
-export function StudioToolShell({ tool, title, saveStatus, onSave, onShare, shareDisabled, onExport, openExportOnMount = false, children }: Readonly<{
+export function StudioToolShell({ tool, title, saveStatus, onSave, onShare, shareDisabled, onExport, physicalCoverImage, openExportOnMount = false, children }: Readonly<{
   tool: StudioToolDefinition
   title: string
   saveStatus: StudioSaveStatus
   onSave: () => void
   onShare: () => void
   shareDisabled?: boolean
-  onExport: (format: StudioExportFormat) => void
+  onExport: (format: StudioExportFormat, options?: { includePhysicalCover?: boolean }) => void | Promise<void>
+  physicalCoverImage?: string | null
   openExportOnMount?: boolean
   children: ReactNode
 }>) {
@@ -33,9 +34,9 @@ export function StudioToolShell({ tool, title, saveStatus, onSave, onShare, shar
   }, [openExportOnMount])
   const status = saveStatusLabel(saveStatus)
   const openExport = () => setExportOpen(true)
-  const exportFile = (format: StudioExportFormat) => {
+  const exportFile = (format: StudioExportFormat, options?: { includePhysicalCover?: boolean }) => {
     setExportOpen(false)
-    onExport(format)
+    void onExport(format, options)
   }
   return (
     <div className={styles.toolShell}>
@@ -61,7 +62,7 @@ export function StudioToolShell({ tool, title, saveStatus, onSave, onShare, shar
         {tool.supportsShare ? <button type="button" className={styles.actionButton} onClick={onShare} disabled={shareDisabled}>分享</button> : null}
         {tool.supportsSave ? <button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={onSave} disabled={saveStatus === 'saving'}>完成</button> : null}
       </div>
-      <StudioExportDialog open={exportOpen} formats={tool.supportedExportFormats} onClose={() => setExportOpen(false)} onExport={exportFile} />
+      <StudioExportDialog open={exportOpen} formats={tool.supportedExportFormats} physicalCoverImage={physicalCoverImage} onClose={() => setExportOpen(false)} onExport={exportFile} />
     </div>
   )
 }

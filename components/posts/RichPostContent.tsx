@@ -18,6 +18,7 @@ import {
 } from '@/lib/rich-text'
 import { formatUid } from '@/lib/uid'
 import { getMusicPlaybackUrl } from '@/lib/music-playback'
+import { TopicText, type TopicLink } from '@/components/posts/TopicText'
 
 export type PostMusicReferenceDisplay = {
   id: string
@@ -34,6 +35,7 @@ type RichPostContentProps = {
   musicReferences?: readonly PostMusicReferenceDisplay[]
   enableSongPlayback?: boolean
   scopeKey?: string
+  topics?: readonly TopicLink[]
 }
 
 type PostSongPlayerContextValue = {
@@ -273,6 +275,7 @@ function formatReferenceDate(value: string | undefined) {
 type RichPostRenderContext = {
   musicReferences: ReadonlyMap<string, PostMusicReferenceDisplay>
   enableSongPlayback: boolean
+  topics: readonly TopicLink[]
 }
 
 function MusicReferenceInline({
@@ -455,7 +458,10 @@ function renderInline(node: RichTextInlineNode, key: string, context: RichPostRe
     )
   }
   if (node.type !== 'text') return null
-  return <span key={key}>{renderMarks(node.text, node.marks, key)}</span>
+  const topicText = node.marks?.some((mark) => mark.type === 'code' || mark.type === 'link')
+    ? node.text
+    : <TopicText text={node.text} topics={context.topics} />
+  return <span key={key}>{renderMarks(topicText, node.marks, key)}</span>
 }
 
 function renderInlineContent(content: RichTextInlineNode[] | undefined, key: string, context: RichPostRenderContext) {
@@ -520,6 +526,7 @@ export function RichPostContent({
   musicReferences = [],
   enableSongPlayback = true,
   scopeKey,
+  topics = [],
 }: RichPostContentProps) {
   const result = validateRichPostContent(richContent)
   const legacy = legacyHtmlToRichContent(fallbackContent)
@@ -537,6 +544,7 @@ export function RichPostContent({
   const renderContext: RichPostRenderContext = {
     musicReferences: musicReferenceMap,
     enableSongPlayback,
+    topics,
   }
   const firstReference = findFirstMusicReference(document)
   const firstSong = firstReference

@@ -3,6 +3,8 @@ import { resolveGrowthLevelName } from '@/lib/growth-display'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { ProfileBackgroundImage } from '@/components/ProfileBackgroundImage'
+import type { ProfileBackgroundTransform } from '@/lib/profile-background'
 
 type ProfileHeaderProps = {
   displayName: string
@@ -15,10 +17,13 @@ type ProfileHeaderProps = {
   createdAt: Date
   avatarUrl?: string | null
   backgroundUrl?: string | null
+  backgroundDesktopTransform?: ProfileBackgroundTransform | null
+  backgroundMobileTransform?: ProfileBackgroundTransform | null
   equippedBadges?: EquippedBadgeView[]
   equippedBadge?: EquippedBadgeView | null
   badgeInteraction?: 'interactive' | 'static'
   showGrowth?: boolean
+  backgroundLikeControl?: ReactNode
 }
 
 type ProfileStatsGridProps = {
@@ -87,10 +92,13 @@ export function ProfileHeader({
   createdAt,
   avatarUrl,
   backgroundUrl,
+  backgroundDesktopTransform,
+  backgroundMobileTransform,
   equippedBadges,
   equippedBadge = null,
   badgeInteraction = 'interactive',
   showGrowth = true,
+  backgroundLikeControl,
 }: ProfileHeaderProps) {
   const initial = formatUid(uid).slice(0, 1)
   const admissionInfo = formatAdmissionInfo(createdAt)
@@ -100,17 +108,14 @@ export function ProfileHeader({
 
   return (
     <section className="profile-hero overflow-hidden rounded-sm border border-sky-100 bg-white/88">
-  <div
-  className="profile-hero-background relative isolate flex h-auto w-full items-end justify-start overflow-hidden bg-slate-900 px-4 pb-3 sm:block sm:aspect-[9/2] sm:h-auto sm:items-stretch sm:justify-start sm:px-0 sm:pb-0"
-  style={{
-    backgroundImage: publicBackgroundUrl ? `url(${publicBackgroundUrl})` : undefined,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-  }}
->
-        {!publicBackgroundUrl ? <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
-        <div className="profile-hero-identity relative w-fit min-w-[190px] max-w-[min(320px,calc(100%_-_2rem))] p-0 text-left text-white sm:absolute sm:bottom-5 sm:left-5 sm:max-w-[380px]">
+      <div className="profile-hero-background relative isolate flex h-auto w-full items-end justify-start overflow-hidden bg-slate-900 px-4 pb-3 sm:block sm:aspect-[9/2] sm:h-auto sm:items-stretch sm:justify-start sm:px-0 sm:pb-0">
+        {!publicBackgroundUrl ? <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_18%_22%,rgba(14,165,233,0.35),transparent_32%),linear-gradient(135deg,#0f172a,#075985_48%,#164e63)]" /> : null}
+        <ProfileBackgroundImage
+          sourceUrl={publicBackgroundUrl}
+          desktopTransform={backgroundDesktopTransform}
+          mobileTransform={backgroundMobileTransform}
+        />
+        <div className="profile-hero-identity relative z-10 w-fit min-w-[190px] max-w-[min(320px,calc(100%_-_2rem))] p-0 text-left text-white sm:absolute sm:bottom-5 sm:left-5 sm:max-w-[380px]">
           <div className="flex min-w-0 flex-row items-center gap-2 sm:gap-3">
             {publicAvatarUrl ? (
               <img src={publicAvatarUrl} alt={displayName} className="h-[60px] w-[60px] shrink-0 rounded-full border-2 border-white/85 object-cover" />
@@ -140,6 +145,7 @@ export function ProfileHeader({
             </div>
           </div> : null}
         </div>
+        {backgroundLikeControl ? <div className="profile-background-like-slot z-20">{backgroundLikeControl}</div> : null}
       </div>
     </section>
   )

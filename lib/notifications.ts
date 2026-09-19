@@ -101,6 +101,7 @@ const personalTypeLabels: Record<string, string> = {
   FOLLOW: '关注',
   BADGE: '勋章',
   BIRTHDAY_GREETING: '生日',
+  PROFILE_BACKGROUND_LIKE: '点赞',
 }
 
 const systemTypeLabels: Record<string, string> = {
@@ -116,7 +117,7 @@ export function getNotificationCategory(type: string, link?: string | null, key?
   if (type === 'FEEDBACK' || link?.startsWith('/feedback/') || isLegacyFeedbackNotification(type, key)) return 'feedback'
   if (type === 'REVIEW' || isLegacyReviewNotification(type, link, key)) return 'review'
   if (type === 'REPLY') return 'reply'
-  if (type === 'LIKE') return 'like'
+  if (type === 'LIKE' || type === 'PROFILE_BACKGROUND_LIKE') return 'like'
   if (type === 'FRIEND_REQUEST' || type === 'FOLLOW') return 'application'
   if (type === 'ACTIVITY' && (link?.startsWith(DUEL_INVITE_LINK_PREFIX) || link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX))) return 'application'
   if (type === 'BIRTHDAY_GREETING' && link?.startsWith(FRIEND_BIRTHDAY_LINK_PREFIX)) return 'application'
@@ -149,7 +150,12 @@ export function getNotificationCategoryFilter(category: string, canReview = fals
   // 反馈回复历史上可能使用 REPLY + /feedback/，新通知使用 FEEDBACK。
   // 留言墙互动仍按真实行为归入回复 / 点赞，不再保留独立一级分类。
   if (normalizedCategory === 'reply') return { type: 'REPLY', OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] }
-  if (normalizedCategory === 'like') return { type: 'LIKE', OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] }
+  if (normalizedCategory === 'like') return {
+    OR: [
+      { type: 'PROFILE_BACKGROUND_LIKE' },
+      { type: 'LIKE', OR: [{ link: null }, { link: { not: { startsWith: '/feedback/' } } }] },
+    ],
+  }
   if (normalizedCategory === 'application') return {
     OR: [
       { type: { in: ['FRIEND_REQUEST', 'FOLLOW'] } },
@@ -161,7 +167,7 @@ export function getNotificationCategoryFilter(category: string, canReview = fals
   if (normalizedCategory === 'feedback') return feedbackNotificationWhere()
   if (normalizedCategory === 'review') return canReview ? reviewNotificationWhere() : { id: { in: [] } }
   return {
-    type: { notIn: ['REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW'] },
+    type: { notIn: ['REPLY', 'LIKE', 'PROFILE_BACKGROUND_LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW'] },
     AND: [
       { NOT: { type: 'ACTIVITY', link: { startsWith: DUEL_INVITE_LINK_PREFIX } } },
       { NOT: { type: 'ACTIVITY', link: { startsWith: FRIEND_BIRTHDAY_LINK_PREFIX } } },
@@ -199,13 +205,13 @@ function getSystemNotificationWhere(now: Date, category: NotificationCategory, u
 function getPersonalNotificationCategorySql(category: NotificationCategory, canReview = false) {
   switch (category) {
     case 'reply': return Prisma.raw("AND n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
-    case 'like': return Prisma.raw("AND n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'like': return Prisma.raw("AND (n.type = 'PROFILE_BACKGROUND_LIKE' OR (n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')))")
     case 'application': return Prisma.raw("AND (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%'))")
     case 'feedback': return Prisma.raw("AND (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.`key`, '') LIKE 'feedback-new:%'))")
     case 'review': return canReview
       ? Prisma.raw("AND (n.type = 'REVIEW' OR (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.`key`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') LIKE '/admin/salon%' AND COALESCE(n.`key`, '') LIKE 'salon-review:%') OR (COALESCE(n.link, '') LIKE '/admin/studio%' AND COALESCE(n.`key`, '') LIKE 'creator-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.`key`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.`key`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.`key`, '') LIKE 'today-review:%') OR (COALESCE(n.link, '') LIKE '/admin/music/concerts/contributions%' AND COALESCE(n.`key`, '') LIKE 'concert-review:%'))))")
       : Prisma.raw('AND 1 = 0')
-    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.`key`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') LIKE '/admin/salon%' AND COALESCE(n.`key`, '') LIKE 'salon-review:%') OR (COALESCE(n.link, '') LIKE '/admin/studio%' AND COALESCE(n.`key`, '') LIKE 'creator-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.`key`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.`key`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.`key`, '') LIKE 'today-review:%') OR (COALESCE(n.link, '') LIKE '/admin/music/concerts/contributions%' AND COALESCE(n.`key`, '') LIKE 'concert-review:%') OR COALESCE(n.`key`, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
+    case 'system': return Prisma.raw("AND n.type NOT IN ('REPLY', 'LIKE', 'PROFILE_BACKGROUND_LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.`key`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') LIKE '/admin/salon%' AND COALESCE(n.`key`, '') LIKE 'salon-review:%') OR (COALESCE(n.link, '') LIKE '/admin/studio%' AND COALESCE(n.`key`, '') LIKE 'creator-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.`key`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.`key`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.`key`, '') LIKE 'today-review:%') OR (COALESCE(n.link, '') LIKE '/admin/music/concerts/contributions%' AND COALESCE(n.`key`, '') LIKE 'concert-review:%') OR COALESCE(n.`key`, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')")
     case 'all': return canReview
       ? Prisma.raw("AND n.type <> 'MESSAGE'")
       : Prisma.raw("AND n.type NOT IN ('MESSAGE', 'REVIEW') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.`key`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') LIKE '/admin/salon%' AND COALESCE(n.`key`, '') LIKE 'salon-review:%') OR (COALESCE(n.link, '') LIKE '/admin/studio%' AND COALESCE(n.`key`, '') LIKE 'creator-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.`key`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.`key`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.`key`, '') LIKE 'today-review:%') OR (COALESCE(n.link, '') LIKE '/admin/music/concerts/contributions%' AND COALESCE(n.`key`, '') LIKE 'concert-review:%')))")
@@ -700,12 +706,12 @@ async function loadUnreadSummary(userId: string, canReview = false): Promise<Unr
     }>>`
       SELECT
         COUNT(CASE WHEN n.type = 'REPLY' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS replies,
-        COUNT(CASE WHEN n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS likes,
+        COUNT(CASE WHEN n.type = 'PROFILE_BACKGROUND_LIKE' OR (n.type = 'LIKE' AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%')) THEN 1 END) AS likes,
         0 AS wall,
         COUNT(CASE WHEN (n.type IN ('FRIEND_REQUEST', 'FOLLOW') OR (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) OR (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS friendRequests,
         0 AS messages,
         COUNT(CASE WHEN (n.type = 'FEEDBACK' OR n.link LIKE '/feedback/%' OR (n.type = 'ADMIN' AND COALESCE(n.\`key\`, '') LIKE 'feedback-new:%')) THEN 1 END) AS feedback,
-        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.\`key\`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') LIKE '/admin/salon%' AND COALESCE(n.\`key\`, '') LIKE 'salon-review:%') OR (COALESCE(n.link, '') LIKE '/admin/studio%' AND COALESCE(n.\`key\`, '') LIKE 'creator-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.\`key\`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.\`key\`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.\`key\`, '') LIKE 'today-review:%') OR (COALESCE(n.link, '') LIKE '/admin/music/concerts/contributions%' AND COALESCE(n.\`key\`, '') LIKE 'concert-review:%') OR COALESCE(n.\`key\`, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount,
+        COUNT(CASE WHEN n.type NOT IN ('REPLY', 'LIKE', 'PROFILE_BACKGROUND_LIKE', 'FRIEND_REQUEST', 'FOLLOW', 'MESSAGE', 'FEEDBACK', 'REVIEW') AND NOT (n.type = 'ACTIVITY' AND (n.link LIKE '/games/guess-song/duel%' OR n.link LIKE '/user/%')) AND NOT (n.type = 'BIRTHDAY_GREETING' AND n.link LIKE '/user/%') AND NOT (n.type = 'ADMIN' AND ((COALESCE(n.link, '') = '/admin/posts/review' AND COALESCE(n.\`key\`, '') LIKE 'post-review:%') OR (COALESCE(n.link, '') LIKE '/admin/salon%' AND COALESCE(n.\`key\`, '') LIKE 'salon-review:%') OR (COALESCE(n.link, '') LIKE '/admin/studio%' AND COALESCE(n.\`key\`, '') LIKE 'creator-review:%') OR (COALESCE(n.link, '') = '/admin/stickers' AND (COALESCE(n.\`key\`, '') LIKE 'sticker-pack-review:%' OR COALESCE(n.\`key\`, '') LIKE 'sticker-pack-resubmit:%')) OR (COALESCE(n.link, '') = '/admin/today' AND COALESCE(n.\`key\`, '') LIKE 'today-review:%') OR (COALESCE(n.link, '') LIKE '/admin/music/concerts/contributions%' AND COALESCE(n.\`key\`, '') LIKE 'concert-review:%') OR COALESCE(n.\`key\`, '') LIKE 'feedback-new:%')) AND (n.link IS NULL OR n.link NOT LIKE '/feedback/%') THEN 1 END) AS systemCount,
         ${reviewCountSql} AS review
       FROM Notification n
       WHERE n.recipientId = ${userId}
@@ -902,6 +908,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         activityId: true,
         link: true,
         key: true,
+        aggregateCount: true,
         isRead: true,
         createdAt: true,
         readAt: true,
@@ -1127,7 +1134,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         actorBadge: actor ? actorBadgeMap.get(actor.id)?.[0] || null : null,
         actorProfile,
         actorUnavailable: Boolean(actor && !actorProfile),
-        likeCount,
+        likeCount: item.type === 'PROFILE_BACKGROUND_LIKE' ? item.aggregateCount : likeCount,
         likeTargetKind: likeTarget?.kind || null,
         popup: false,
         sticky: false,

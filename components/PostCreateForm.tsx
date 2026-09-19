@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ContentImageUploader, type ContentImageUploaderHandle } from '@/components/ContentImageUploader'
 import { RichTextEditor, type RichTextEditorHandle } from '@/components/posts/RichTextEditor'
+import { PostTopicPicker } from '@/components/posts/PostTopicPicker'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { getPostCreateInitialBoardId } from '@/lib/boards'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -23,6 +24,7 @@ import {
   type ServerPostDraft,
 } from '@/lib/post-draft'
 import { type RichTextContent } from '@/lib/rich-text'
+import { POST_EXPIRY_OPTIONS, type PostExpiryType } from '@/lib/post-lifecycle'
 
 type Board = { id: string; name: string; slug: string }
 
@@ -45,6 +47,8 @@ export function PostCreateForm({
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [richContent, setRichContent] = useState<RichTextContent | null>(null)
+  const [topicNames, setTopicNames] = useState<string[]>([])
+  const [expiryType, setExpiryType] = useState<PostExpiryType | ''>('')
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -65,6 +69,8 @@ export function PostCreateForm({
     richContent: null,
     imageUrls: [],
     pendingSticker: null,
+    topicNames: [],
+    expiryType: null,
   })
   const queuedSaveRef = useRef<PostDraftPayload | null>(null)
   const saveInFlightRef = useRef<Promise<void> | null>(null)
@@ -87,8 +93,10 @@ export function PostCreateForm({
       pendingSticker: pendingSticker
         ? { id: pendingSticker.id, name: pendingSticker.name, url: pendingSticker.url, type: pendingSticker.type }
         : null,
+      topicNames: [...topicNames],
+      expiryType: expiryType || null,
     }
-  }, [boardId, title, content, richContent, imageUrls, pendingSticker])
+  }, [boardId, title, content, richContent, imageUrls, pendingSticker, topicNames, expiryType])
 
   const persistLocal = useCallback((payload: PostDraftPayload, serverVersion = draftVersionRef.current, key = localStorageKey) => {
     try {
@@ -115,6 +123,8 @@ export function PostCreateForm({
     setContent(payload.content)
     setImageUrls(payload.imageUrls)
     setPendingSticker(payload.pendingSticker)
+    setTopicNames(payload.topicNames)
+    setExpiryType(payload.expiryType || '')
   }, [validBoardIds])
 
   function setConflict(value: DraftConflict | null) {
@@ -389,7 +399,7 @@ export function PostCreateForm({
       const response = await fetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boardId, title, content, richContent, imageUrls, stickerId: pendingSticker?.id || undefined }),
+        body: JSON.stringify({ boardId, title, content, richContent, imageUrls, stickerId: pendingSticker?.id || undefined, topicNames, expiryType: expiryType || null }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -486,6 +496,15 @@ export function PostCreateForm({
         </div>
         {errors.content ? <p className="mt-2 text-sm font-bold text-red-600">{errors.content}</p> : null}
       </div>
+      <PostTopicPicker value={topicNames} onChange={setTopicNames} error={errors.topicNames} />
+      <label className="block">
+        <span className="text-sm font-black text-slate-700">限时发布</span>
+        <select value={expiryType} onChange={(event) => setExpiryType(event.target.value as PostExpiryType | '')} className="mt-2 w-full border border-sky-100 px-4 py-2">
+          <option value="">普通帖子（永久）</option>
+          {POST_EXPIRY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <span className="mt-1 block text-xs font-bold text-slate-400">普通用户帖子从审核通过公开时开始计算；编辑不能延长时限。</span>
+      </label>
       {pendingSticker ? (
         <div className="mb-3 flex items-center gap-3 rounded-xl border border-brand-100 bg-sky-50 px-3 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}

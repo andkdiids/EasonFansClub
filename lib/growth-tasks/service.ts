@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { Prisma } from '@prisma/client'
 import { getShanghaiDateKey, getShanghaiDayRange, parseBeijingDate, shiftShanghaiDateKey } from '@/lib/checkin'
 import { COMMUNITY_REWARD_LIMITS, COMMUNITY_REWARD_POINTS, getShanghaiWeekKey } from '@/lib/community-rewards'
-import { awardRegistrationFee, reverseRegistrationFee } from '@/lib/registration-fee'
+import { awardRegistrationFee, getTodayRegistrationFeeWindow, reverseRegistrationFee } from '@/lib/registration-fee'
 import {
   TASK_SYSTEM_LAUNCH_AT,
   WEEKLY_MILESTONES,
@@ -534,8 +534,9 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
   const weekKey = getShanghaiWeekKey(now)
   const weeklyReconciliation = await resolveAndGrantWeeklyMilestones(userId, now)
   const todayRange = getShanghaiDayRange(now)
+  const todayRegistrationFeeWindow = getTodayRegistrationFeeWindow(now)
   const weekDateKeys = dayKeysForWeek(weekKey)
-  const [completions, newLifeCompletions, pointLogs, checkIns, prescriptions, communityRewardLogs, duelCount, user] = await Promise.all([
+  const [completions, newLifeCompletions, pointLogs, checkIns, prescriptions, communityRewardLogs, duelCount, user, todayEarnedAggregate] = await Promise.all([
     prisma.growthTaskCompletion.findMany({ where: { userId, periodKey: { in: [dateKey, weekKey, ...weekDateKeys] } }, orderBy: { completedAt: 'asc' } }),
     prisma.growthTaskCompletion.findMany({ where: { userId, taskCode: { in: getTasksByKind('newLife').map((task) => task.code) }, oneTimeKey: { not: null } }, orderBy: { completedAt: 'asc' } }),
     prisma.pointLog.findMany({ where: { userId, growthTaskCode: { not: null }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { growthTaskCode: true, points: true, createdAt: true } }),
@@ -544,6 +545,10 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     prisma.pointLog.findMany({ where: { userId, action: { in: ['COMMENT_POST', 'POST_COMMENT_RECEIVED'] }, createdAt: { gte: weekRange(weekKey).start, lt: weekRange(weekKey).end } }, select: { action: true, points: true, dateKey: true, createdAt: true } }),
     prisma.guessSongDuelMatch.count({ where: { status: 'FINISHED', finishedAt: { gte: todayRange.start, lt: todayRange.end }, GuessSongDuelPlayer: { some: { userId } } } }),
     prisma.user.findUnique({ where: { id: userId }, select: { points: true } }),
+    prisma.pointLog.aggregate({
+      where: { userId, points: { gt: 0 }, createdAt: { gte: todayRegistrationFeeWindow.start, lt: todayRegistrationFeeWindow.end } },
+      _sum: { points: true },
+    }),
   ])
   const commentRewardCountsByDate = new Map<string, number>(weekDateKeys.map((dateKey) => [dateKey, 0]))
   const receivedCommentCountsByDate = new Map<string, number>()
@@ -713,6 +718,7 @@ export async function getGrowthOverview(userId: string, now = new Date()) {
     timezone: 'Asia/Shanghai',
     taskSystemLaunchAt: TASK_SYSTEM_LAUNCH_AT.toISOString(),
     points: user?.points ?? weeklyReconciliation.balance,
+    todayEarned: todayEarnedAggregate._sum.points || 0,
     weeklyMilestoneRewards: weeklyReconciliation.rewards,
     today: {
       dateKey,

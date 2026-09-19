@@ -35,6 +35,8 @@ import {
   validateAndNormalizeRichTextReferences,
 } from '@/lib/rich-text-references'
 import { countMusicReferenceNodes, MAX_RICH_TEXT_MUSIC_REFERENCES, validateRichPostContent } from '@/lib/rich-text'
+import { collectPostTopicNames, PostTopicInputError, syncPostTopics } from '@/lib/post-topics'
+import { isPostExpired } from '@/lib/post-lifecycle'
 
 type Params = { params: Promise<{ postId: string }> }
 
@@ -73,6 +75,8 @@ const postDetailSelect = {
   reviewedById: true,
   rejectionReason: true,
   summary: true,
+  expiryType: true,
+  expiresAt: true,
   stickerId: true,
   User: {
     select: {
@@ -87,6 +91,7 @@ const postDetailSelect = {
     },
   },
   Board: { select: { name: true, slug: true } },
+  PostTopic: { select: { Topic: { select: { id: true, name: true } } } },
   Reply: {
     where: {
       isDeleted: false,
@@ -319,8 +324,11 @@ export async function GET(_request: Request, { params }: Params) {
   if (!post) {
     return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
   }
+  if (!viewerCanManagePosts && post.User.id !== viewer?.id && isPostExpired(post.expiresAt)) {
+    return NextResponse.json({ message: '这条限时内容已经消失啦', code: 'POST_EXPIRED' }, { status: 404 })
+  }
 
-  const { User, Board, Reply, PostMedia, ...postData } = post
+  const { User, Board, Reply, PostMedia, PostTopic, ...postData } = post
   const viewerLikedReplyIds = viewer && Reply.length
     ? new Set((await prisma.replyLike.findMany({
       where: { userId: viewer.id, replyId: { in: Reply.map((reply) => reply.id) } },
@@ -358,6 +366,7 @@ export async function GET(_request: Request, { params }: Params) {
       richContent: publicRichContent,
       author,
       board: withForumBoardDisplayName(Board),
+      topics: PostTopic.map(({ Topic }) => Topic),
       media: PostMedia.map((media) => ({
         ...media,
         url: publicImageUrl(media.url) || media.url,
@@ -448,7 +457,8 @@ export async function PATCH(request: Request, { params }: Params) {
       Object.prototype.hasOwnProperty.call(body, 'richContent') ||
       typeof body.boardId === 'string' ||
       Array.isArray(body.keepMediaIds) ||
-      Array.isArray(body.addImageUrls)
+      Array.isArray(body.addImageUrls) ||
+      Object.prototype.hasOwnProperty.call(body, 'topicNames')
     if (wantsEdit) {
       phase = 'edit'
       return await handleEditPost(request, {
@@ -805,7 +815,28 @@ async function handleEditPost(
     || keptIds.length !== currentMediaIds.length
     || keptIds.some((id, index) => id !== currentMediaIds[index])
   const richContentChanged = JSON.stringify(nextRichContent) !== JSON.stringify(existing.richContent)
-  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || richContentChanged || nextBoardId !== existing.boardId || mediaChanged
+  const hasTopicNamesField = Object.prototype.hasOwnProperty.call(body, 'topicNames')
+  let nextTopicNames: string[] | null = null
+  if (hasTopicNamesField || shouldUpdateContent) {
+    try {
+      nextTopicNames = collectPostTopicNames({
+        content: rawContent,
+        richContent: nextRichContent,
+        topicNames: hasTopicNamesField ? body.topicNames : undefined,
+      })
+    } catch (error) {
+      const message = error instanceof PostTopicInputError && error.reason === 'TOO_MANY'
+        ? `每篇帖子最多添加 ${5} 个话题`
+        : '话题名称格式无效'
+      return NextResponse.json({ message, errors: { topicNames: message } }, { status: 400 })
+    }
+  }
+  const currentTopicNames = nextTopicNames === null
+    ? null
+    : (await prisma.postTopic.findMany({ where: { postId }, orderBy: { topicId: 'asc' }, select: { Topic: { select: { normalizedName: true } } } })).map((row) => row.Topic.normalizedName)
+  const nextTopicKeys = nextTopicNames === null ? null : nextTopicNames.map((name) => name.toLocaleLowerCase('en-US')).sort()
+  const topicNamesChanged = currentTopicNames !== null && JSON.stringify([...currentTopicNames].sort()) !== JSON.stringify(nextTopicKeys)
+  const contentChanged = rawTitle !== existing.title || rawContent !== existing.content || richContentChanged || nextBoardId !== existing.boardId || mediaChanged || topicNamesChanged
   const removedCount = currentMedia.length - keptIds.length
   const keptCount = keptIds.length
   if (hasTooManyContentImages(body.addImageUrls) || keptCount + addImageUrls.length > MAX_CONTENT_IMAGES) {
@@ -901,6 +932,10 @@ async function handleEditPost(
       })
     }
 
+    if (nextTopicNames !== null) {
+      await syncPostTopics(tx, postId, nextTopicNames, user.id)
+    }
+
     if (!canManagePosts && lockedExisting.moderationStatus === 'APPROVED') {
       const affectedBoardIds = [...new Set([lockedExisting.boardId, nextBoardId])]
       for (const affectedBoardId of affectedBoardIds) {
@@ -933,7 +968,7 @@ async function handleEditPost(
         targetUserId: lockedExisting.authorId,
       targetUserName: lockedExisting.User.nickname || 'E院用户',
         targetUserUid: lockedExisting.User.uid,
-        metadata: { changedFields: ['title', 'content', 'boardId', ...(mediaChanged ? ['media'] : [])] },
+        metadata: { changedFields: ['title', 'content', 'boardId', ...(mediaChanged ? ['media'] : []), ...(topicNamesChanged ? ['topics'] : [])] },
       },
     }
   })

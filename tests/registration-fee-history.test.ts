@@ -12,7 +12,7 @@ test('挂号费记录筛选使用北京时间的今日、昨日、本周和自�
   const today = getRegistrationFeeHistoryWindow({ range: 'today', now })
   assert.equal(today.dateKey, '2026-09-10')
   assert.equal(today.start?.toISOString(), '2026-09-09T16:00:00.000Z')
-  assert.equal(today.end?.toISOString(), '2026-09-10T16:00:00.000Z')
+  assert.equal(today.end?.toISOString(), now.toISOString())
 
   const yesterday = getRegistrationFeeHistoryWindow({ range: 'yesterday', now })
   assert.equal(yesterday.dateKey, '2026-09-09')
@@ -39,8 +39,11 @@ test('Growth 面板把余额、记录入口和动态每日进度放在正确区�
 
   assert.match(panel, /className="growth-asset-row"/)
   assert.match(panel, /医保余额[\s\S]*overview\.points/)
+  assert.match(panel, /growth-balance[\s\S]*growth-today-earned[\s\S]*growth-fee-history-trigger/)
+  assert.match(panel, /今日获取[\s\S]*\+\{overview\.todayEarned\}/)
   assert.match(panel, /setFeeHistoryOpen\(true\)/)
   assert.match(panel, /挂号费记录/)
+  assert.match(read('app/globals.css'), /\.growth-today-earned[\s\S]*white-space:nowrap/)
   assert.doesNotMatch(panel, /<div className="growth-summary-line"><span>今日<\/span>/)
   assert.match(panel, /growth-core-title-progress[\s\S]*completedToday[\s\S]*totalTodayTasks/)
   assert.match(dialog, /createPortal/)

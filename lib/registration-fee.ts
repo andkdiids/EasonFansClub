@@ -391,6 +391,11 @@ function getShanghaiDateWindow(dateKey: string) {
   return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) }
 }
 
+export function getTodayRegistrationFeeWindow(now = new Date()) {
+  const { start, dateKey } = getShanghaiDayRange(now)
+  return { start, end: now, dateKey }
+}
+
 export function getRegistrationFeeHistoryWindow(options: {
   range?: RegistrationFeeHistoryRange
   dateKey?: string
@@ -407,7 +412,7 @@ export function getRegistrationFeeHistoryWindow(options: {
 
   const now = options.now || new Date()
   if (range === 'today') {
-    const window = getShanghaiDayRange(now)
+    const window = getTodayRegistrationFeeWindow(now)
     return { range, dateKey: window.dateKey, start: window.start, end: window.end }
   }
 
@@ -448,11 +453,13 @@ export function serializeRegistrationFeeRecord(record: RegistrationFeeRecord) {
 }
 
 export async function getTodayRegistrationFeeSummary(userId: string, now = new Date()) {
-  const { start, end, dateKey } = getShanghaiDayRange(now)
-  const [user, records] = await Promise.all([
+  const { start, end, dateKey } = getTodayRegistrationFeeWindow(now)
+  const where = { userId, points: { gt: 0 }, createdAt: { gte: start, lt: end } } as const
+  const [user, todayEarnedAggregate, records] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { points: true } }),
+    prisma.pointLog.aggregate({ where, _sum: { points: true } }),
     prisma.pointLog.findMany({
-      where: { userId, points: { gt: 0 }, createdAt: { gte: start, lt: end } },
+      where,
       orderBy: { createdAt: 'desc' },
       select: registrationFeeRecordSelect,
     }),
@@ -461,7 +468,7 @@ export async function getTodayRegistrationFeeSummary(userId: string, now = new D
   if (!user) throw new Error('USER_NOT_FOUND')
   return {
     currentBalance: user.points,
-    todayEarned: sumPositiveRegistrationFees(records),
+    todayEarned: todayEarnedAggregate._sum.points || 0,
     dateKey,
     records: records.map(serializeRegistrationFeeRecord),
   }

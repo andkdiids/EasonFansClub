@@ -5,6 +5,7 @@ import { getStudioTool } from '@/lib/studio/tools'
 import { normalizeBeadProjectData } from '@/lib/studio/beads/compat'
 import { prisma } from '@/lib/prisma'
 import { buildPageMetadata } from '@/lib/share-metadata'
+import { publicImageUrl } from '@/lib/images'
 import { PUBLIC_STUDIO_PROJECT_WHERE, projectOwnerDisplayName, publicCreatorSummary } from '@/lib/studio/public'
 
 export const dynamic = 'force-dynamic'
@@ -17,11 +18,11 @@ export default async function StudioPublicProjectPage({ params }: Readonly<{ par
   const { projectId } = await params
   const project = await prisma.studioProject.findFirst({
     where: { id: projectId, OR: [{ visibility: 'PUBLIC', reviewStatus: 'APPROVED' }, { visibility: 'UNLISTED' }] },
-    select: { id: true, title: true, description: true, data: true, thumbnailUrl: true, likeCount: true, favoriteCount: true, viewCount: true, downloadCount: true, createdAt: true, updatedAt: true, User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, bio: true, isDeleted: true, status: true, Profile: { select: { avatarUrl: true, bio: true } } } } },
+    select: { id: true, title: true, description: true, data: true, thumbnailUrl: true, physicalCoverImage: true, likeCount: true, favoriteCount: true, viewCount: true, downloadCount: true, createdAt: true, updatedAt: true, User: { select: { id: true, uid: true, nickname: true, avatarUrl: true, bio: true, isDeleted: true, status: true, Profile: { select: { avatarUrl: true, bio: true } } } } },
   })
   const data = project ? normalizeBeadProjectData(project.data) : null
   if (!project || !data || !getStudioTool(data.tool)) notFound()
   void prisma.studioProject.updateMany({ where: { ...PUBLIC_STUDIO_PROJECT_WHERE, id: project.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined)
   const creator = publicCreatorSummary(project.User)
-  return <StudioPublicProject project={{ id: project.id, title: project.title, description: project.description, thumbnailUrl: project.thumbnailUrl, likeCount: project.likeCount, favoriteCount: project.favoriteCount, viewCount: project.viewCount, downloadCount: project.downloadCount, data, createdAt: project.createdAt.toISOString(), updatedAt: project.updatedAt.toISOString(), author: projectOwnerDisplayName(project.User), creator }} />
+  return <StudioPublicProject project={{ id: project.id, title: project.title, description: project.description, thumbnailUrl: publicImageUrl(project.thumbnailUrl), physicalCoverImage: publicImageUrl(project.physicalCoverImage), likeCount: project.likeCount, favoriteCount: project.favoriteCount, viewCount: project.viewCount, downloadCount: project.downloadCount, data, createdAt: project.createdAt.toISOString(), updatedAt: project.updatedAt.toISOString(), author: projectOwnerDisplayName(project.User), creator }} />
 }

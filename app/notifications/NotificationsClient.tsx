@@ -62,6 +62,8 @@ function getSmartEntry(item: UnifiedNotification): { label: string; href?: strin
   switch (item.type) {
     case 'LIKE':
       return target ? { label: '查看点赞', href: target } : null
+    case 'PROFILE_BACKGROUND_LIKE':
+      return { label: '查看主页获赞', href: item.link || '/profile?backgroundLikes=1' }
     case 'REPLY':
       return target ? { label: '查看回复', href: target } : null
     case 'FRIEND_REQUEST':

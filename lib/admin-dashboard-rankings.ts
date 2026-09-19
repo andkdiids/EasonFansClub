@@ -5,6 +5,7 @@ import { publicImageUrl } from '@/lib/images'
 import { BEIJING_TIME_ZONE, getBeijingDateKey, shiftBeijingDateKey } from '@/lib/beijing-time'
 import { parseBeijingDate } from '@/lib/checkin'
 import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPostExpiryWhere } from '@/lib/post-lifecycle'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 
@@ -224,6 +225,7 @@ export function sortRankingAggregates(rows: ReadonlyArray<RankingAggregate>) {
 function publicForumPostRelationWhere(): Prisma.PostWhereInput {
   return {
     ...publicPostWhere,
+    ...buildPostExpiryWhere(),
     deletedAt: null,
     Board: { isActive: true },
   }

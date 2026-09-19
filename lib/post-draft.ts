@@ -1,6 +1,8 @@
 import { parseContentImageUrls } from '@/lib/content-images'
 import { storedImageUrl } from '@/lib/images'
 import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
+import { normalizeTopicKey, normalizeTopicName } from '@/lib/post-topics'
+import { parsePostExpiryType, type PostExpiryType } from '@/lib/post-lifecycle'
 
 export const POST_DRAFT_STORAGE_KEY = 'eason-forum-post-draft:v2'
 export const POST_DRAFT_AUTOSAVE_DEBOUNCE_MS = 1000
@@ -24,6 +26,8 @@ export type PostDraftPayload = {
   richContent: RichTextContent | null
   imageUrls: string[]
   pendingSticker: PostDraftSticker | null
+  topicNames: string[]
+  expiryType: PostExpiryType | null
 }
 
 export type StoredPostDraft = PostDraftPayload & {
@@ -59,6 +63,22 @@ function normalizeSticker(value: unknown): PostDraftSticker | null {
     ? value.name.slice(0, POST_DRAFT_MAX_STICKER_NAME_LENGTH)
     : null
   return { id, name, url, type }
+}
+
+function normalizeTopicNames(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const item of value) {
+    const name = normalizeTopicName(item)
+    if (!name) continue
+    const key = normalizeTopicKey(name)
+    if (seen.has(key)) continue
+    seen.add(key)
+    names.push(name)
+    if (names.length >= 5) break
+  }
+  return names
 }
 
 /**
@@ -98,6 +118,8 @@ export function parsePostDraftPayload(
     richContent,
     imageUrls,
     pendingSticker: normalizeSticker(value.pendingSticker),
+    topicNames: normalizeTopicNames(value.topicNames),
+    expiryType: parsePostExpiryType(value.expiryType),
   }
 }
 
@@ -130,6 +152,8 @@ export function serializePostDraftPayload(payload: PostDraftPayload) {
     richContent: payload.richContent,
     imageUrls: [...payload.imageUrls],
     pendingSticker: payload.pendingSticker,
+    topicNames: [...payload.topicNames],
+    expiryType: payload.expiryType,
   }
 }
 
@@ -155,7 +179,9 @@ export function hasMeaningfulPostDraftContent(payload: PostDraftPayload) {
     || payload.content.trim()
     || payload.richContent?.content.length
     || payload.imageUrls.length
-    || payload.pendingSticker,
+    || payload.pendingSticker
+    || payload.topicNames.length
+    || payload.expiryType,
   )
 }
 

@@ -48,6 +48,7 @@ import type { MaterialShareMessageView } from '@/lib/material-share-types'
 import { canRecallDirectMessage, RECALLED_DIRECT_MESSAGE_TEXT } from '@/lib/direct-message-recall'
 
 type MessageStatus = 'SENDING' | 'SENT' | 'READ' | 'FAILED'
+type ComposerSendSource = 'text' | 'sticker' | 'image' | 'card' | 'link' | 'other'
 type FriendListViewMode = 'alphabetical' | 'groups'
 type FriendDockTab = 'chat' | 'contacts'
 type GrowthDockView = 'today' | 'new-life'
@@ -240,6 +241,11 @@ export function FriendDock({
   const friendListRef = useRef<HTMLDivElement>(null)
   const chatListRef = useRef<HTMLDivElement>(null)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
+  // A sticker is a click-to-send action. Keep a short-lived guard so closing
+  // the inline picker or committing the optimistic message cannot restore the
+  // text composer focus on mobile. A deliberate user focus clears the guard.
+  const stickerSendFocusGuardRef = useRef(false)
+  const composerFocusIntentRef = useRef(false)
   const cursorRef = useRef('')
   const beforeCursorRef = useRef('')
   const nearBottomRef = useRef(true)
@@ -301,6 +307,9 @@ export function FriendDock({
     const end = input?.selectionEnd ?? content.length
     const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`.slice(0, 1000)
     const cursor = Math.min(start + emoji.length, next.length)
+    // Selecting a system emoji is an explicit composer action, so it is
+    // allowed to restore the existing input focus behavior.
+    stickerSendFocusGuardRef.current = false
     setContent(next)
     window.requestAnimationFrame(() => {
       input?.focus()
@@ -1240,6 +1249,27 @@ export function FriendDock({
     }
   }, [currentUserId])
 
+  function blurComposerForStickerSend() {
+    composerFocusIntentRef.current = false
+    stickerSendFocusGuardRef.current = true
+    messageInputRef.current?.blur()
+  }
+
+  function settleStickerSendFocus() {
+    if (!stickerSendFocusGuardRef.current) return
+    messageInputRef.current?.blur()
+    // The picker is inline rather than a focus-managed dialog, but removing it
+    // and committing the optimistic message still causes a render boundary.
+    // Re-check on the next frame so that no late browser/UI-library focus can
+    // reopen the mobile keyboard. A real user focus clears the guard first.
+    window.requestAnimationFrame(() => {
+      if (!stickerSendFocusGuardRef.current) return
+      messageInputRef.current?.blur()
+      scrollToBottom('smooth')
+      stickerSendFocusGuardRef.current = false
+    })
+  }
+
   const markConversationRead = useCallback(async (id: string, messageId: string) => {
     if (!id || !messageId || document.visibilityState === 'hidden') return
     const response = await fetch(`/api/direct-conversations/${id}/read`, {
@@ -1475,7 +1505,8 @@ export function FriendDock({
     })
   }
 
-  async function sendMessage(input: { content: string; clientMessageId: string; optimisticId?: string; stickerId?: string; stickerUrl?: string | null }) {
+  async function sendMessage(input: { content: string; clientMessageId: string; source: ComposerSendSource; optimisticId?: string; stickerId?: string; stickerUrl?: string | null }) {
+    if (input.source === 'sticker') blurComposerForStickerSend()
     if (!conversationId || clearingChat || sendingMessageIdsRef.current.has(input.clientMessageId)) return false
     const chatSession = chatSessionRef.current
     sendingMessageIdsRef.current.add(input.clientMessageId)
@@ -1537,14 +1568,19 @@ export function FriendDock({
     } finally {
       sendingMessageIdsRef.current.delete(input.clientMessageId)
       if (chatSession === chatSessionRef.current) setSending(sendingMessageIdsRef.current.size > 0)
+      if (input.source === 'sticker') settleStickerSendFocus()
     }
   }
 
   function sendSticker(sticker: PickerSticker) {
     if (!conversationId || clearingChat || sending || sendingMessageIdsRef.current.size > 0) return
+    // Blur before closing the picker. Do not clear `content`: the sticker is
+    // independent of any unsent draft already in the textarea.
+    blurComposerForStickerSend()
     setError('')
     setPendingSticker(sticker)
     setPickerOpen(false)
+    settleStickerSendFocus()
     let clientMessageId = ''
     try {
       clientMessageId = createMessageId()
@@ -1553,7 +1589,7 @@ export function FriendDock({
       setError('发送失败，请稍后重试')
       return
     }
-    void sendMessage({ content: '', clientMessageId, stickerId: sticker.id, stickerUrl: sticker.url }).then((success) => {
+    void sendMessage({ content: '', clientMessageId, source: 'sticker', stickerId: sticker.id, stickerUrl: sticker.url }).then((success) => {
       if (success) setPendingSticker((current) => current?.id === sticker.id ? null : current)
     })
   }
@@ -1619,14 +1655,14 @@ export function FriendDock({
     }
     if (pendingSticker) {
       const sticker = pendingSticker
-      void sendMessage({ content: '', clientMessageId, stickerId: sticker.id, stickerUrl: sticker.url }).then((success) => {
+      void sendMessage({ content: '', clientMessageId, source: 'sticker', stickerId: sticker.id, stickerUrl: sticker.url }).then((success) => {
         if (success) setPendingSticker((current) => current?.id === sticker.id ? null : current)
       })
       return
     }
     const trimmed = content.trim()
     if (!trimmed) return
-    void sendMessage({ content: trimmed, clientMessageId }).then((success) => {
+    void sendMessage({ content: trimmed, clientMessageId, source: 'text' }).then((success) => {
       if (success) setContent((current) => current.trim() === trimmed ? '' : current)
     })
   }
@@ -1937,6 +1973,7 @@ export function FriendDock({
                                   void sendMessage({
                                     content: message.content,
                                     clientMessageId: message.clientMessageId,
+                                    source: 'sticker',
                                     optimisticId: message.id,
                                     stickerId: message.stickerId ?? undefined,
                                     stickerUrl: message.stickerUrl ?? null,
@@ -1962,6 +1999,7 @@ export function FriendDock({
                                 void sendMessage({
                                   content: message.content,
                                   clientMessageId: message.clientMessageId,
+                                  source: 'text',
                                   optimisticId: message.id,
                                 })
                               }
@@ -2026,6 +2064,22 @@ export function FriendDock({
                 maxLength={1000}
                 rows={1}
                 onChange={(event) => setContent(event.target.value)}
+                onPointerDown={() => {
+                  // Distinguish a real tap on the composer from a late
+                  // programmatic focus caused by picker/message updates.
+                  composerFocusIntentRef.current = true
+                }}
+                onFocus={() => {
+                  // Only an explicit tap should restore the keyboard after a
+                  // sticker send. System emoji insertion clears the same guard
+                  // before its intentional focus call.
+                  if (stickerSendFocusGuardRef.current && !composerFocusIntentRef.current) {
+                    messageInputRef.current?.blur()
+                    return
+                  }
+                  composerFocusIntentRef.current = false
+                  stickerSendFocusGuardRef.current = false
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault()

@@ -7,7 +7,7 @@ import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { grantGrowthReward } from '@/lib/growth-tasks/service'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
@@ -24,7 +24,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const { replyId } = await context.params
   const likes = await prisma.replyLike.findMany({
-    where: { replyId, Reply: { isDeleted: false, Post: publicPostWhere } },
+    where: { replyId, Reply: { isDeleted: false, Post: publicPostWhere() } },
     orderBy: { createdAt: 'desc' },
     take: 50,
     select: {
@@ -77,7 +77,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (!replyPost) return null
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${replyPost.postId} FOR UPDATE`
     const reply = await tx.reply.findFirst({
-      where: { id: replyId, isDeleted: false, Post: publicPostWhere },
+      where: { id: replyId, isDeleted: false, Post: publicPostWhere() },
       select: { id: true, authorId: true, postId: true },
     })
     if (!reply) return null
@@ -156,7 +156,7 @@ export async function DELETE(request: Request, context: RouteContext) {
     if (!replyPost) return null
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${replyPost.postId} FOR UPDATE`
     const reply = await tx.reply.findFirst({
-      where: { id: replyId, isDeleted: false, Post: publicPostWhere },
+      where: { id: replyId, isDeleted: false, Post: publicPostWhere() },
       select: { id: true, authorId: true, postId: true },
     })
     if (!reply) return null

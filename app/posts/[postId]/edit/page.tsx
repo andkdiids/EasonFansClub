@@ -37,6 +37,7 @@ export default async function EditPostPage({ params, searchParams }: Readonly<{ 
         orderBy: { sortOrder: 'asc' },
         select: { id: true, url: true },
       },
+      PostTopic: { select: { Topic: { select: { id: true, name: true } } } },
     },
   })
 
@@ -94,6 +95,7 @@ export default async function EditPostPage({ params, searchParams }: Readonly<{ 
           initialBoardId={post.boardId}
           boards={normalizeForumBoards(boards)}
           initialMedia={initialMedia}
+          initialTopics={post.PostTopic.map((row) => row.Topic)}
         />
       </div>
     </main>

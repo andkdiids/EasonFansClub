@@ -9,6 +9,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl } from '@/lib/share-card'
 import { parsePostShareSnapshot, postShareUrl, POST_SHARE_UNAVAILABLE_TITLE, type PostShareMessageView, type PostShareSnapshot } from '@/lib/post-share-types'
+import { buildPublicPostWhere } from '@/lib/post-moderation'
 
 export const postShareSelect = {
   id: true,
@@ -44,13 +45,18 @@ export type ShareablePost = Prisma.PostGetPayload<{ select: typeof postShareSele
 export async function findShareablePost(viewerId: string, postId: string) {
   return prisma.post.findFirst({
     where: {
-      id: postId,
-      status: 'PUBLISHED',
-      isDeleted: false,
-      User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-      OR: [
-        { moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const } },
-        { authorId: viewerId },
+      AND: [
+        buildPublicPostWhere(),
+        {
+          id: postId,
+          status: 'PUBLISHED' as const,
+          isDeleted: false,
+          User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+          OR: [
+            { moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const } },
+            { authorId: viewerId },
+          ],
+        },
       ],
     },
     select: postShareSelect,
@@ -104,13 +110,18 @@ export async function resolvePostShareViews(
 
   const posts = await prisma.post.findMany({
     where: {
-      id: { in: uniqueIds },
-      status: 'PUBLISHED',
-      isDeleted: false,
-      User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-      OR: [
-        { moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const } },
-        { authorId: viewerId },
+      AND: [
+        buildPublicPostWhere(),
+        {
+          id: { in: uniqueIds },
+          status: 'PUBLISHED' as const,
+          isDeleted: false,
+          User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+          OR: [
+            { moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const } },
+            { authorId: viewerId },
+          ],
+        },
       ],
     },
     select: postShareSelect,

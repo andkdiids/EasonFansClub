@@ -2886,7 +2886,7 @@ CREATE TABLE `MusicTrack` (
 -- CreateTable
 CREATE TABLE `Notification` (
     `id` VARCHAR(191) NOT NULL,
-    `type` ENUM('REPLY', 'LIKE', 'SYSTEM', 'MESSAGE', 'ACTIVITY', 'ADMIN', 'FOLLOW', 'BADGE', 'FRIEND_REQUEST', 'BIRTHDAY_GREETING', 'FEEDBACK', 'REVIEW') NOT NULL,
+    `type` ENUM('REPLY', 'LIKE', 'SYSTEM', 'MESSAGE', 'ACTIVITY', 'ADMIN', 'FOLLOW', 'BADGE', 'FRIEND_REQUEST', 'BIRTHDAY_GREETING', 'FEEDBACK', 'REVIEW', 'PROFILE_BACKGROUND_LIKE') NOT NULL,
     `title` VARCHAR(191) NOT NULL,
     `content` TEXT NULL,
     `imageUrl` TEXT NULL,
@@ -2894,10 +2894,12 @@ CREATE TABLE `Notification` (
     `activityId` VARCHAR(191) NULL,
     `isRead` BOOLEAN NOT NULL DEFAULT false,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
     `readAt` DATETIME(3) NULL,
     `recipientId` VARCHAR(191) NOT NULL,
     `actorId` VARCHAR(191) NULL,
     `key` VARCHAR(191) NULL,
+    `aggregateCount` INTEGER NULL,
     `completedAt` DATETIME(3) NULL,
 
     INDEX `Notification_recipientId_isRead_createdAt_idx`(`recipientId`, `isRead`, `createdAt`),
@@ -3082,6 +3084,9 @@ CREATE TABLE `PharmacyCampaign` (
     `totalDrawLimit` INTEGER NULL,
     `visualUrl` TEXT NULL,
     `collectionRewardBadgeId` VARCHAR(191) NULL,
+    `pityEnabled` BOOLEAN NOT NULL DEFAULT false,
+    `pityThreshold` INTEGER NULL,
+    `pityIncludeHidden` BOOLEAN NOT NULL DEFAULT false,
     `createdById` VARCHAR(191) NULL,
     `updatedById` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -3138,6 +3143,7 @@ CREATE TABLE `PharmacyDraw` (
     `resultType` ENUM('BADGE_NEW', 'BADGE_DUPLICATE', 'POINTS_REWARD', 'EMPTY', 'ITEM', 'COUPON', 'CUSTOM') NOT NULL,
     `isNewBadge` BOOLEAN NOT NULL DEFAULT false,
     `isDuplicate` BOOLEAN NOT NULL DEFAULT false,
+    `isPity` BOOLEAN NOT NULL DEFAULT false,
     `duplicateQuantity` INTEGER NOT NULL DEFAULT 0,
     `balanceBefore` INTEGER NOT NULL,
     `balanceAfter` INTEGER NOT NULL,
@@ -3147,6 +3153,20 @@ CREATE TABLE `PharmacyDraw` (
     INDEX `PharmacyDraw_userId_campaignId_drawAt_idx`(`userId`, `campaignId`, `drawAt`),
     INDEX `PharmacyDraw_prizeId_drawAt_idx`(`prizeId`, `drawAt`),
     UNIQUE INDEX `PharmacyDraw_userId_idempotencyKey_key`(`userId`, `idempotencyKey`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PharmacyUserCampaignState` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `campaignId` VARCHAR(191) NOT NULL,
+    `pityCount` INTEGER NOT NULL DEFAULT 0,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `PharmacyUserCampaignState_campaignId_idx`(`campaignId`),
+    UNIQUE INDEX `PharmacyUserCampaignState_userId_campaignId_key`(`userId`, `campaignId`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3261,6 +3281,8 @@ CREATE TABLE `Post` (
     `reviewedById` VARCHAR(191) NULL,
     `rejectionReason` TEXT NULL,
     `summary` VARCHAR(191) NULL,
+    `expiryType` ENUM('TODAY', 'HOURS_24', 'DAYS_3', 'DAYS_7') NULL,
+    `expiresAt` DATETIME(3) NULL,
     `stickerId` VARCHAR(191) NULL,
 
     INDEX `Post_authorId_createdAt_idx`(`authorId`, `createdAt`),
@@ -3281,6 +3303,7 @@ CREATE TABLE `Post` (
     INDEX `Post_replyCount_idx`(`replyCount`),
     INDEX `Post_status_idx`(`status`),
     INDEX `Post_moderationStatus_createdAt_idx`(`moderationStatus`, `createdAt`),
+    INDEX `Post_expiresAt_status_isDeleted_moderationStatus_idx`(`expiresAt`, `status`, `isDeleted`, `moderationStatus`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3294,6 +3317,8 @@ CREATE TABLE `PostDraft` (
     `richContent` JSON NULL,
     `imageUrls` JSON NOT NULL,
     `pendingSticker` JSON NULL,
+    `topicNames` JSON NULL,
+    `expiryType` ENUM('TODAY', 'HOURS_24', 'DAYS_3', 'DAYS_7') NULL,
     `version` INTEGER NOT NULL DEFAULT 1,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
@@ -3474,11 +3499,49 @@ CREATE TABLE `PostTag` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `Topic` (
+    `id` VARCHAR(191) NOT NULL,
+    `name` VARCHAR(120) NOT NULL,
+    `normalizedName` VARCHAR(120) NOT NULL,
+    `description` TEXT NULL,
+    `coverImage` TEXT NULL,
+    `isOfficial` BOOLEAN NOT NULL DEFAULT false,
+    `activityId` VARCHAR(191) NULL,
+    `startAt` DATETIME(3) NULL,
+    `endAt` DATETIME(3) NULL,
+    `createdById` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `Topic_normalizedName_key`(`normalizedName`),
+    INDEX `Topic_activityId_idx`(`activityId`),
+    INDEX `Topic_isOfficial_updatedAt_idx`(`isOfficial`, `updatedAt`),
+    INDEX `Topic_createdAt_idx`(`createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `PostTopic` (
+    `postId` VARCHAR(191) NOT NULL,
+    `topicId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `PostTopic_topicId_createdAt_idx`(`topicId`, `createdAt`),
+    PRIMARY KEY (`postId`, `topicId`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `Profile` (
     `id` VARCHAR(191) NOT NULL,
     `displayName` VARCHAR(191) NOT NULL,
     `avatarUrl` VARCHAR(191) NULL,
     `backgroundUrl` VARCHAR(191) NULL,
+    `backgroundDesktopScale` DOUBLE NULL,
+    `backgroundDesktopX` DOUBLE NULL,
+    `backgroundDesktopY` DOUBLE NULL,
+    `backgroundMobileScale` DOUBLE NULL,
+    `backgroundMobileX` DOUBLE NULL,
+    `backgroundMobileY` DOUBLE NULL,
     `bio` VARCHAR(191) NULL,
     `displayNameModerationStatus` ENUM('NORMAL', 'VIOLATION') NOT NULL DEFAULT 'NORMAL',
     `bioModerationStatus` ENUM('NORMAL', 'VIOLATION') NOT NULL DEFAULT 'NORMAL',
@@ -3511,6 +3574,34 @@ CREATE TABLE `ProfileRecordPreference` (
 
     INDEX `ProfileRecordPreference_userId_sortOrder_idx`(`userId`, `sortOrder`),
     UNIQUE INDEX `ProfileRecordPreference_userId_section_key`(`userId`, `section`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ProfileBackgroundLike` (
+    `id` VARCHAR(191) NOT NULL,
+    `likerId` VARCHAR(191) NOT NULL,
+    `profileOwnerId` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `ProfileBgLike_owner_created_idx`(`profileOwnerId`, `createdAt`),
+    INDEX `ProfileBgLike_liker_created_idx`(`likerId`, `createdAt`),
+    UNIQUE INDEX `ProfileBgLike_liker_owner_key`(`likerId`, `profileOwnerId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ProfileBackgroundLikeDailyAction` (
+    `id` VARCHAR(191) NOT NULL,
+    `likerId` VARCHAR(191) NOT NULL,
+    `profileOwnerId` VARCHAR(191) NOT NULL,
+    `businessDate` VARCHAR(10) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `ProfileBgLikeDaily_liker_date_idx`(`likerId`, `businessDate`),
+    INDEX `ProfileBgLikeDaily_owner_created_idx`(`profileOwnerId`, `createdAt`),
+    UNIQUE INDEX `ProfileBgLikeDaily_liker_owner_date_key`(`likerId`, `profileOwnerId`, `businessDate`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -3754,6 +3845,7 @@ CREATE TABLE `StudioProject` (
     `version` INTEGER NOT NULL DEFAULT 1,
     `data` JSON NOT NULL,
     `thumbnailUrl` TEXT NULL,
+    `physicalCoverImage` TEXT NULL,
     `likeCount` INTEGER NOT NULL DEFAULT 0,
     `favoriteCount` INTEGER NOT NULL DEFAULT 0,
     `viewCount` INTEGER NOT NULL DEFAULT 0,
@@ -5237,6 +5329,12 @@ ALTER TABLE `PharmacyDraw` ADD CONSTRAINT `PharmacyDraw_campaignId_fkey` FOREIGN
 ALTER TABLE `PharmacyDraw` ADD CONSTRAINT `PharmacyDraw_prizeId_fkey` FOREIGN KEY (`prizeId`) REFERENCES `PharmacyPrize`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `PharmacyUserCampaignState` ADD CONSTRAINT `PharmacyUserCampaignState_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PharmacyUserCampaignState` ADD CONSTRAINT `PharmacyUserCampaignState_campaignId_fkey` FOREIGN KEY (`campaignId`) REFERENCES `PharmacyCampaign`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `PharmacyDuplicateInventory` ADD CONSTRAINT `PharmacyDuplicateInventory_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -5345,10 +5443,34 @@ ALTER TABLE `PostTag` ADD CONSTRAINT `PostTag_postId_fkey` FOREIGN KEY (`postId`
 ALTER TABLE `PostTag` ADD CONSTRAINT `PostTag_tagId_fkey` FOREIGN KEY (`tagId`) REFERENCES `Tag`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `Topic` ADD CONSTRAINT `Topic_activityId_fkey` FOREIGN KEY (`activityId`) REFERENCES `Activity`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `Topic` ADD CONSTRAINT `Topic_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PostTopic` ADD CONSTRAINT `PostTopic_postId_fkey` FOREIGN KEY (`postId`) REFERENCES `Post`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `PostTopic` ADD CONSTRAINT `PostTopic_topicId_fkey` FOREIGN KEY (`topicId`) REFERENCES `Topic`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `Profile` ADD CONSTRAINT `Profile_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `ProfileRecordPreference` ADD CONSTRAINT `ProfileRecordPreference_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ProfileBackgroundLike` ADD CONSTRAINT `ProfileBackgroundLike_likerId_fkey` FOREIGN KEY (`likerId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ProfileBackgroundLike` ADD CONSTRAINT `ProfileBackgroundLike_profileOwnerId_fkey` FOREIGN KEY (`profileOwnerId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ProfileBackgroundLikeDailyAction` ADD CONSTRAINT `ProfileBackgroundLikeDailyAction_likerId_fkey` FOREIGN KEY (`likerId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `ProfileBackgroundLikeDailyAction` ADD CONSTRAINT `ProfileBackgroundLikeDailyAction_profileOwnerId_fkey` FOREIGN KEY (`profileOwnerId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `ProfileWallLike` ADD CONSTRAINT `ProfileWallLike_messageId_fkey` FOREIGN KEY (`messageId`) REFERENCES `ProfileWallMessage`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

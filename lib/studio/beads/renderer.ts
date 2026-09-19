@@ -5,6 +5,10 @@ export type BeadRenderOptions = {
   beadMode?: boolean
   displayGrid?: boolean
   displayCodes?: boolean
+  /**
+   * Kept for compatibility with older callers. Coordinates are now rendered
+   * by the editor's independent ruler overlay and never inside the grid.
+   */
   displayCoordinates?: boolean
   transparentBackground?: boolean
   /** Render into a larger offscreen bitmap while keeping logical layout coordinates. */
@@ -46,6 +50,24 @@ export function patternCellSize(width: number, height: number) {
   if (longest <= 87) return 11
   if (longest <= 150) return 7
   return 5
+}
+
+/**
+ * Pick a readable ruler density from the actual displayed cell size.
+ * The values returned here are UI-only and never change grid coordinates.
+ */
+export function coordinateStep(cellSizePx: number) {
+  if (!Number.isFinite(cellSizePx) || cellSizePx < 5) return 20
+  if (cellSizePx < 9) return 10
+  if (cellSizePx < 13) return 5
+  return 1
+}
+
+export function coordinateValues(length: number, cellSizePx: number) {
+  const safeLength = Math.max(0, Math.floor(length))
+  const step = coordinateStep(cellSizePx)
+  return Array.from({ length: safeLength }, (_, index) => index + 1)
+    .filter((value) => value === 1 || value % step === 0)
 }
 
 export function patternCellColor(pattern: BeadPatternGrid, paletteIndex: number) {
@@ -129,17 +151,6 @@ export function renderPatternToCanvas(canvas: HTMLCanvasElement, pattern: BeadPa
       context.lineTo(logicalWidth, y * cellSize + 0.5)
       context.stroke()
     }
-  }
-  if (options.displayCoordinates && cellSize * scale >= 8) {
-    context.fillStyle = '#52606d'
-    context.font = `700 ${Math.max(7 / scale, Math.floor(cellSize * 0.3))}px Arial`
-    context.textAlign = 'center'
-    context.textBaseline = 'top'
-    const coordinateStep = cellSize * scale >= 12 ? 1 : 5
-    for (let x = 0; x < pattern.width; x += coordinateStep) context.fillText(String(x + 1), x * cellSize + cellSize / 2, 2)
-    context.textAlign = 'left'
-    context.textBaseline = 'middle'
-    for (let y = 0; y < pattern.height; y += coordinateStep) context.fillText(String(y + 1), 2, y * cellSize + cellSize / 2)
   }
   if (options.selection) {
     const selection = options.selection

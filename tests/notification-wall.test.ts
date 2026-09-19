@@ -15,7 +15,8 @@ test('留言墙互动按真实语义归入回复 / 点赞，通知中心移除�
   assert.doesNotMatch(client, /messages: '私信'/)
   assert.match(client, /notification-category-tabs/)
   assert.ok(service.includes("normalizedCategory === 'reply') return { type: 'REPLY', OR:"))
-  assert.ok(service.includes("normalizedCategory === 'like') return { type: 'LIKE', OR:"))
+  assert.match(service, /normalizedCategory === 'like'\) return \{\s*OR:/)
+  assert.match(service, /\{ type: 'LIKE', OR:/)
 
   // 留言墙链接按通知真实行为归入回复 / 点赞，不再单独分组。
   assert.equal(getNotificationCategory('REPLY', '/user/00012/wall?focus=msg-1'), 'reply')

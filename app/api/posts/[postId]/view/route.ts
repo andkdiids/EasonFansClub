@@ -13,7 +13,7 @@ import {
   shouldCountPostView,
 } from '@/lib/post-views'
 import { prisma } from '@/lib/prisma'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { rejectInvalidRequestOrigin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -42,7 +42,7 @@ export async function POST(request: Request, context: { params: Promise<{ postId
   const shouldIncrement = !recentlyRequested && shouldCountPostView(history, key, now)
 
   const visiblePostWhere = {
-    ...publicPostWhere,
+    ...publicPostWhere(),
     id: postId,
     User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
   }

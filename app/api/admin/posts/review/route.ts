@@ -14,6 +14,7 @@ import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { createNotification } from '@/lib/notification-write'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
 import { recordQualifiedPublishedPostGrowth, reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
+import { calculatePostExpiresAt } from '@/lib/post-lifecycle'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +25,8 @@ const reviewSelect = {
   content: true,
   richContent: true,
   summary: true,
+  expiryType: true,
+  expiresAt: true,
   createdAt: true,
   moderationStatus: true,
   reviewedAt: true,
@@ -394,6 +397,8 @@ export async function PATCH(request: Request) {
           moderationStatus: true,
           reviewedAt: true,
           rejectionReason: true,
+          expiryType: true,
+          expiresAt: true,
           Board: { select: { id: true, name: true, slug: true } },
           User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
         },
@@ -415,6 +420,9 @@ export async function PATCH(request: Request) {
       const updateData: Prisma.PostUpdateManyMutationInput = {
         ...buildPostReviewUpdate({ status, reviewedAt, reviewedById: guard.user.id, rejectionReason }),
         ...(boardChanged ? { boardId: finalBoardId } : {}),
+        ...(status === 'APPROVED' && current.expiresAt === null
+          ? { expiresAt: calculatePostExpiresAt(current.expiryType, reviewedAt) }
+          : {}),
       }
       const updateResult = await tx.post.updateMany({
         where: { id: postId, isDeleted: false, moderationStatus: current.moderationStatus },

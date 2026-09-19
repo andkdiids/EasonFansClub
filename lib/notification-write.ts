@@ -16,6 +16,7 @@ export const NOTIFICATION_TYPE_VALUES = [
   NotificationType.BIRTHDAY_GREETING,
   NotificationType.FEEDBACK,
   NotificationType.REVIEW,
+  NotificationType.PROFILE_BACKGROUND_LIKE,
 ] as const satisfies readonly NotificationType[]
 
 export type ValidNotificationType = typeof NOTIFICATION_TYPE_VALUES[number]

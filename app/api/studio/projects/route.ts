@@ -11,6 +11,7 @@ import { normalizeBeadProjectData } from '@/lib/studio/beads/compat'
 import { CURRENT_BEAD_PROJECT_VERSION } from '@/lib/studio/beads/types'
 import { BEETHOVEN_ARTIST_ID } from '@/lib/studio/artists'
 import { completeTask } from '@/lib/growth-tasks/service'
+import { parseStudioPhysicalCover, publicStudioPhysicalCover } from '@/lib/studio/physical-cover'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,7 +83,7 @@ function projectMetadata(data: Prisma.InputJsonValue | Prisma.JsonValue | null) 
 
 type StudioProjectWriter = Pick<typeof prisma, 'studioProject'>
 
-function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; likeCount: number; favoriteCount: number; viewCount: number; downloadCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }, includeData = false) {
+function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; physicalCoverImage: string | null; likeCount: number; favoriteCount: number; viewCount: number; downloadCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }, includeData = false) {
   return {
     id: project.id,
     toolSlug: project.toolSlug,
@@ -90,6 +91,7 @@ function projectView(project: { id: string; toolSlug: string; title: string; des
     description: project.description,
     version: project.version,
     thumbnailUrl: project.thumbnailUrl,
+    physicalCoverImage: publicStudioPhysicalCover(project.physicalCoverImage),
     likeCount: project.likeCount,
     favoriteCount: project.favoriteCount,
     viewCount: project.viewCount,
@@ -139,6 +141,9 @@ export async function POST(request: Request) {
   const title = sanitizeText(body.title, 160) || '未命名作品'
   const description = sanitizeText(body.description, 500) || null
   const thumbnailUrl = parseStudioThumbnail(body.thumbnailUrl)
+  const physicalCover = parseStudioPhysicalCover(body.physicalCoverImage)
+  if (!physicalCover.valid) return errorResponse('INVALID_PHYSICAL_COVER', '实物封面地址无效，请重新上传图片', 400)
+  const physicalCoverImage = physicalCover.value
   const requestedId = typeof body.projectId === 'string' ? body.projectId.trim() : ''
   try {
     const existing = requestedId ? await prisma.studioProject.findFirst({ where: { id: requestedId, userId: guard.user.id }, select: { id: true, thumbnailUrl: true, artistId: true } }) : null
@@ -155,11 +160,12 @@ export async function POST(request: Request) {
         description,
         version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1,
         data,
+        ...(physicalCoverImage !== undefined ? { physicalCoverImage } : {}),
         lastOpenedAt: new Date(),
       },
     })
     const project = existing
-      ? await prisma.studioProject.update({ where: { id: existing.id }, data: { ...(toolSlug === 'beads' && !existing.artistId ? { artistId: BEETHOVEN_ARTIST_ID } : {}), toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, lastOpenedAt: new Date() } })
+      ? await prisma.studioProject.update({ where: { id: existing.id }, data: { ...(toolSlug === 'beads' && !existing.artistId ? { artistId: BEETHOVEN_ARTIST_ID } : {}), toolSlug, title, description, version: toolSlug === 'beads' ? CURRENT_BEAD_PROJECT_VERSION : 1, data, ...(physicalCoverImage !== undefined ? { physicalCoverImage } : {}), lastOpenedAt: new Date() } })
       : toolSlug !== 'beads' || typeof prisma.$transaction !== 'function'
         ? await createProject(prisma)
         : await prisma.$transaction(async (tx) => {

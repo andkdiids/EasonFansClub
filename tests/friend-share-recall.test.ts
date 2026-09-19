@@ -56,7 +56,7 @@ test('选择表情包后立即调用已有私信发送链路，失败时保留�
   const dock = read('components/FriendDock.tsx')
   assert.match(dock, /function sendSticker\(sticker: PickerSticker\)/)
   assert.match(dock, /onSelectSticker=\{sendSticker\}/)
-  assert.match(dock, /void sendMessage\(\{ content: '', clientMessageId, stickerId: sticker\.id, stickerUrl: sticker\.url \}\)/)
+  assert.match(dock, /void sendMessage\(\{ content: '', clientMessageId, source: 'sticker', stickerId: sticker\.id, stickerUrl: sticker\.url \}\)/)
   assert.match(dock, /if \(success\) setPendingSticker\(/)
   assert.match(dock, /recalled \? \(/)
   assert.match(dock, /你撤回了一条消息/)

@@ -3,6 +3,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationText } from '@/lib/content-moderation'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPostExpiryWhere } from '@/lib/post-lifecycle'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
   const posts = await prisma.post.findMany({
     where: {
       ...publicPostWhere,
+      ...buildPostExpiryWhere(),
       User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       Board: { isActive: true },
       OR: [

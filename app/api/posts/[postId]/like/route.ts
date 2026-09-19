@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { getCurrentUser } from '@/lib/auth'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { publicImageUrl } from '@/lib/images'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { decodePostLikeCursor, encodePostLikeCursor, POST_LIKE_PAGE_SIZE } from '@/lib/post-like-pagination'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
@@ -26,7 +26,7 @@ export async function GET(request: Request, { params }: Params) {
   const cursor = decodePostLikeCursor(new URL(request.url).searchParams.get('cursor'))
   const where: Prisma.LikeWhereInput = {
     postId,
-    Post: publicPostWhere,
+    Post: publicPostWhere(),
     ...(cursor ? {
       OR: [
         { createdAt: { lt: new Date(cursor.createdAt) } },
@@ -52,7 +52,7 @@ export async function GET(request: Request, { params }: Params) {
         },
       },
     }),
-    prisma.like.count({ where: { postId, Post: publicPostWhere } }),
+    prisma.like.count({ where: { postId, Post: publicPostWhere() } }),
   ])
   const likes = rows.slice(0, POST_LIKE_PAGE_SIZE)
   const last = likes[likes.length - 1]
@@ -87,7 +87,7 @@ export async function POST(request: Request, { params }: Params) {
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
-      where: { ...publicPostWhere, id: postId },
+      where: { ...publicPostWhere(), id: postId },
       select: { id: true, authorId: true, likeCount: true },
     })
     if (!post) return null
@@ -170,7 +170,7 @@ export async function DELETE(request: Request, { params }: Params) {
   let notificationInput: LikeNotificationSyncInput | null = null
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
-    const post = await tx.post.findFirst({ where: { ...publicPostWhere, id: postId }, select: { likeCount: true, authorId: true } })
+    const post = await tx.post.findFirst({ where: { ...publicPostWhere(), id: postId }, select: { likeCount: true, authorId: true } })
     if (!post) return null
 
     await tx.like.deleteMany({ where: { postId, userId: user.id } })

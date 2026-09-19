@@ -13,6 +13,10 @@ import { BIRTHDAY_ALREADY_SET, BIRTHDATE_SELF_EDIT_EXHAUSTED, isBirthdayConfigur
 import { decideBirthdaySave, daysForBirthdayMonth, resetInvalidBirthdayDay, type BirthdayDraft } from '@/lib/birthday-profile-flow'
 import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput, type GenderValue } from '@/lib/gender'
 import type { NicknameChangeView } from '@/lib/nickname-change'
+import { ProfileBackgroundEditor } from '@/components/ProfileBackgroundEditor'
+import { profileBackgroundTransformFromFields, type ProfileBackgroundTransform } from '@/lib/profile-background'
+
+// ProfileBackgroundEditor preserves the existing FormData contract: body.append('kind', 'background').
 
 type InitialProfile = {
   nickname: string
@@ -21,6 +25,8 @@ type InitialProfile = {
   avatarUrl: string
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
+  backgroundDesktopTransform?: ProfileBackgroundTransform | null
+  backgroundMobileTransform?: ProfileBackgroundTransform | null
   bio: string
   gender: GenderValue | null
   customGender: string
@@ -41,7 +47,7 @@ type InitialProfile = {
   showBadgeProgressNotifications: boolean
 }
 
-type UploadKind = 'avatar' | 'background'
+type UploadKind = 'avatar'
 type ProfileWallVisibility = 'PUBLIC' | 'FRIENDS' | 'CLOSED'
 
 type ProfileFieldErrors = Record<string, string>
@@ -99,14 +105,6 @@ const allowedAvatarExtensions = new Set(['jpg', 'jpeg', 'png', 'webp'])
 const unsupportedAvatarExtensions = new Set(['heic', 'heif'])
 const avatarProcessTimeoutMs = 12000
 const avatarUploadTimeoutMs = 30000
-
-const maxBackgroundSourceSize = 10 * 1024 * 1024
-const backgroundUploadTimeoutMs = 30000
-const BACKGROUND_MAX_WIDTH = 1920
-const BACKGROUND_TARGET_ASPECT = 4.5
-// 桌面端预览上限；移动端会按实际容器宽度缩放，导出时仍按原有目标尺寸放大。
-const BACKGROUND_FRAME_WIDTH = 450
-const BACKGROUND_FRAME_HEIGHT = 100
 
 function createCompatibleId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -264,77 +262,6 @@ async function cropAvatarToWebp(crop: CropState) {
   return { blob: output.blob, fileName: `avatar-${createCompatibleId()}.${extension}` }
 }
 
-function computeBackgroundLayout(
-  crop: CropState,
-  imageWidth: number,
-  imageHeight: number,
-  frameWidth: number,
-  frameHeight: number,
-) {
-  // 预览与导出共用的唯一坐标系：
-  // 1) 先按 cover 适配（scale=1 时铺满裁剪框，不拉伸变形）；
-  // 2) 再按 crop.scale 整体缩放；
-  // 3) 最后按 crop.x / crop.y 平移（单位与所在坐标系一致，未乘 scale，避免预览/导出偏移不一致）。
-  const baseScale = Math.max(frameWidth / imageWidth, frameHeight / imageHeight)
-  const drawWidth = imageWidth * baseScale * crop.scale
-  const drawHeight = imageHeight * baseScale * crop.scale
-  const translateX = (frameWidth - drawWidth) / 2 + crop.x
-  const translateY = (frameHeight - drawHeight) / 2 + crop.y
-  return { baseScale, drawWidth, drawHeight, translateX, translateY }
-}
-
-async function cropBackgroundToWebp(crop: CropState) {
-  const image = await loadImage(crop.url)
-
-  const IW = image.naturalWidth
-  const IH = image.naturalHeight
-
-  if (!IW || !IH) {
-    throw new Error('图片尺寸异常，请重新选择图片')
-  }
-
-  const targetWidth = Math.min(BACKGROUND_MAX_WIDTH, IW)
-  const targetHeight = Math.round(targetWidth / BACKGROUND_TARGET_ASPECT)
-
-  // 预览裁剪框可能因移动端宽度而变化，导出时按当前显示宽度换算回目标坐标系，
-  // 保证「预览看到的区域 === 导出保存的区域」，且不降低最终 WebP 的导出尺寸。
-  const factor = targetWidth / Math.max(1, crop.previewFrameWidth || BACKGROUND_FRAME_WIDTH)
-  const canvasCrop: CropState = {
-    ...crop,
-    x: crop.x * factor,
-    y: crop.y * factor,
-  }
-
-  const layout = computeBackgroundLayout(canvasCrop, IW, IH, targetWidth, targetHeight)
-
-  const canvas = document.createElement('canvas')
-  canvas.width = targetWidth
-  canvas.height = targetHeight
-
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    throw new Error('浏览器暂时无法处理这张图片')
-  }
-
-  ctx.drawImage(image, layout.translateX, layout.translateY, layout.drawWidth, layout.drawHeight)
-
-  const output = await canvasToBlobWithFallback(canvas)
-
-  if (!output.blob.size) {
-    throw new Error('图片处理失败')
-  }
-
-  const extension =
-    output.type === 'image/webp'
-      ? 'webp'
-      : 'jpg'
-
-  return {
-    blob: output.blob,
-    fileName: `background-${createCompatibleId()}.${extension}`,
-  }
-}
-
 export function ProfileSettingsForm({
   initialProfile,
   onCancel,
@@ -346,6 +273,7 @@ export function ProfileSettingsForm({
 }) {
   const router = useRouter()
   const [form, setForm] = useState(initialProfile)
+  const setProfileForm = setForm
   // form.birthMonth / form.birthDay are draft selections only. Locking is
   // driven exclusively by this server-backed snapshot.
   const [persistedBirthday, setPersistedBirthday] = useState(() => ({
@@ -364,56 +292,26 @@ export function ProfileSettingsForm({
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>({})
   const [uploading, setUploading] = useState<UploadKind | null>(null)
+  const [backgroundUploading, setBackgroundUploading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  // Avatar/background uploads are persisted by their upload endpoint before
+  // the profile form is submitted. Keep their saved baseline separate so an
+  // upload does not create a redundant profile PATCH or clear other drafts.
+  const savedImageUrlsRef = useRef({
+    avatarUrl: initialProfile.avatarUrl,
+    backgroundUrl: initialProfile.backgroundUrl,
+  })
   const [emailCode, setEmailCode] = useState('')
   const [emailCodeSent, setEmailCodeSent] = useState(false)
   const [emailSending, setEmailSending] = useState(false)
   const [emailVerifying, setEmailVerifying] = useState(false)
   const [emailCooldown, setEmailCooldown] = useState(0)
   const [crop, setCrop] = useState<CropState | null>(null)
-  const [backgroundCrop, setBackgroundCrop] = useState<CropState | null>(null)
   const dragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
-  const backgroundDragRef = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
   const mountedRef = useRef(true)
   const avatarInputRef = useRef<HTMLInputElement>(null)
-  const backgroundInputRef = useRef<HTMLInputElement>(null)
-  const backgroundFrameRef = useRef<HTMLDivElement>(null)
-  const [backgroundFrameSize, setBackgroundFrameSize] = useState({ width: BACKGROUND_FRAME_WIDTH, height: BACKGROUND_FRAME_HEIGHT })
-  const [backgroundFrameReady, setBackgroundFrameReady] = useState(false)
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const [pendingDefaultAvatarUrl, setPendingDefaultAvatarUrl] = useState<string | null>(null)
-  const [backgroundPreview, setBackgroundPreview] = useState(initialProfile.backgroundUrl || '')
-  const isBackgroundCropOpen = backgroundCrop !== null
-
-  useEffect(() => {
-    if (!isBackgroundCropOpen) {
-      setBackgroundFrameReady(false)
-      return
-    }
-
-    const frame = backgroundFrameRef.current
-    if (!frame) return
-
-    const updateFrameSize = () => {
-      const width = Math.max(1, Math.min(BACKGROUND_FRAME_WIDTH, Math.round(frame.getBoundingClientRect().width)))
-      const height = width / BACKGROUND_TARGET_ASPECT
-      setBackgroundFrameSize((current) => {
-        if (current.width === width && current.height === height) return current
-        return { width, height }
-      })
-      setBackgroundFrameReady(true)
-    }
-
-    updateFrameSize()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateFrameSize)
-    observer?.observe(frame)
-    window.addEventListener('resize', updateFrameSize)
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener('resize', updateFrameSize)
-    }
-  }, [isBackgroundCropOpen])
-  
 
   useEffect(() => {
     mountedRef.current = true
@@ -435,12 +333,6 @@ export function ProfileSettingsForm({
       if (crop?.url) URL.revokeObjectURL(crop.url)
     }
   }, [crop?.url])
-
-  useEffect(() => {
-    return () => {
-      if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
-    }
-  }, [backgroundCrop?.url])
 
   function update<K extends keyof InitialProfile>(key: K, value: InitialProfile[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -508,78 +400,6 @@ export function ProfileSettingsForm({
     if (avatarInputRef.current) avatarInputRef.current.value = ''
   }
 
-  function resetBackgroundCrop() {
-    if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
-    setBackgroundCrop(null)
-    setBackgroundFrameReady(false)
-    if (backgroundInputRef.current) backgroundInputRef.current.value = ''
-  }
-
-  async function openBackgroundCrop(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    setMessage('')
-    setError('')
-
-    if (isUnsupportedAvatarFile(file)) {
-      setError('暂不支持 HEIC/HEIF 图片，请先在相册中导出为 JPG、PNG 或 WebP 后再上传。')
-      event.target.value = ''
-      return
-    }
-
-    if (!isAllowedAvatarFile(file)) {
-      setError('背景图仅支持 JPG、PNG 或 WebP。')
-      event.target.value = ''
-      return
-    }
-
-    if (file.size > maxBackgroundSourceSize) {
-      setError('原始背景图片不能超过 10MB。')
-      event.target.value = ''
-      return
-    }
-
-    if (backgroundCrop?.url) URL.revokeObjectURL(backgroundCrop.url)
-    setBackgroundFrameReady(false)
-    const objectUrl = URL.createObjectURL(file)
-    let naturalWidth: number | undefined
-    let naturalHeight: number | undefined
-    try {
-      const loaded = await loadImage(objectUrl)
-      naturalWidth = loaded.naturalWidth
-      naturalHeight = loaded.naturalHeight
-    } catch {
-      // 自然尺寸获取失败时仍允许进入裁剪，导出时再读取。
-    }
-    setBackgroundCrop({
-  file,
-  url: objectUrl,
-  scale: 1.2,
-  x: 0,
-  y: 0,
-  naturalWidth,
-  naturalHeight,
-})
-  }
-
-  function onBackgroundCropPointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (!backgroundCrop) return
-    event.currentTarget.setPointerCapture(event.pointerId)
-    backgroundDragRef.current = { x: event.clientX, y: event.clientY, startX: backgroundCrop.x, startY: backgroundCrop.y }
-  }
-
-  function onBackgroundCropPointerMove(event: PointerEvent<HTMLDivElement>) {
-    const drag = backgroundDragRef.current
-    if (!backgroundCrop || !drag) return
-    setBackgroundCrop({ ...backgroundCrop, x: drag.startX + event.clientX - drag.x, y: drag.startY + event.clientY - drag.y })
-  }
-
-  function onBackgroundCropPointerUp(event: PointerEvent<HTMLDivElement>) {
-    event.currentTarget.releasePointerCapture(event.pointerId)
-    backgroundDragRef.current = null
-  }
-
   function openAvatarCrop(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
@@ -644,6 +464,7 @@ export function ProfileSettingsForm({
       if (!data?.url) throw new Error('头像已上传，但资料更新失败')
 
       setForm((current) => ({ ...current, avatarUrl: data.url }))
+      savedImageUrlsRef.current.avatarUrl = data.url
       setMessage('头像已更新，页面中的头像会使用新文件名立即刷新。')
       resetCrop()
       if (typeof CustomEvent === 'function') {
@@ -659,44 +480,6 @@ export function ProfileSettingsForm({
             ? uploadError.message
             : '头像上传失败，请换一张图片再试'
       setError(message)
-    } finally {
-      if (mountedRef.current) setUploading(null)
-    }
-  }
-
-  async function confirmBackgroundUpload() {
-    if (!backgroundCrop || uploading) return
-    
-
-    setUploading('background')
-    setError('')
-    setMessage('')
-
-    try {
-      const cropped = await cropBackgroundToWebp({ ...backgroundCrop, previewFrameWidth: backgroundFrameSize.width })
-      const body = new FormData()
-      body.append('file', cropped.blob, cropped.fileName)
-      body.append('kind', 'background')
-
-      const response = await fetchWithTimeout('/api/uploads/profile-image', { method: 'POST', body }, backgroundUploadTimeoutMs)
-      const data = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(data?.message || '背景图上传失败，请换一张图片再试')
-      if (!data?.url) throw new Error('背景图已上传，但服务器没有返回有效地址')
-
-      setForm((current) => ({ ...current, backgroundUrl: data.url }))
-      setBackgroundPreview(data.url)
-      setMessage('背景图已更新。')
-      resetBackgroundCrop()
-      router.refresh()
-    } catch (uploadError) {
-      if (!mountedRef.current) return
-      const uploadMessage =
-        uploadError instanceof DOMException && uploadError.name === 'AbortError'
-          ? '背景图上传超时，请稍后重试'
-          : uploadError instanceof TypeError
-            ? '网络连接中断，请检查网络后重试'
-            : uploadError instanceof Error ? uploadError.message : '背景图上传失败，请稍后重试'
-      setError(uploadMessage)
     } finally {
       if (mountedRef.current) setUploading(null)
     }
@@ -813,8 +596,14 @@ export function ProfileSettingsForm({
       ? { location: form.location }
       : {}
     Object.assign(payload, locationPayload)
-    if (form.avatarUrl !== initialProfile.avatarUrl) payload.avatarUrl = form.avatarUrl
-    if (form.backgroundUrl !== initialProfile.backgroundUrl) payload.backgroundUrl = form.backgroundUrl
+    if (form.avatarUrl !== savedImageUrlsRef.current.avatarUrl) payload.avatarUrl = form.avatarUrl
+    if (form.backgroundUrl !== savedImageUrlsRef.current.backgroundUrl) payload.backgroundUrl = form.backgroundUrl
+    if (!sameProfileValue(form.backgroundDesktopTransform ?? null, initialProfile.backgroundDesktopTransform ?? null)) {
+      payload.backgroundDesktopTransform = form.backgroundDesktopTransform ?? null
+    }
+    if (!sameProfileValue(form.backgroundMobileTransform ?? null, initialProfile.backgroundMobileTransform ?? null)) {
+      payload.backgroundMobileTransform = form.backgroundMobileTransform ?? null
+    }
 
     const rawPhone = phoneValue.trim()
     const normalizedPhone = rawPhone ? normalizePhoneNumber(rawPhone, phoneCountry) : null
@@ -844,8 +633,15 @@ export function ProfileSettingsForm({
     Object.assign(payload, birthdayPayload)
 
     if (Object.keys(payload).length === 0) {
-      setMessage(partialBirthdayDraft ? '资料已保存。生日尚未完整设置，本次不会保存生日。' : '没有需要保存的修改。')
       setBirthdayConfirmation(null)
+      if (partialBirthdayDraft) {
+        setMessage('资料已保存。生日尚未完整设置，本次不会保存生日。')
+        return
+      }
+      // Saving with no pending profile fields is still a successful edit
+      // completion. In particular, this is the normal path after an avatar
+      // or background upload has already been persisted.
+      onSaved?.()
       return
     }
 
@@ -879,6 +675,9 @@ export function ProfileSettingsForm({
         setForm((current) => ({
           ...current,
           nickname: typeof data.profile.nickname === 'string' ? data.profile.nickname : current.nickname,
+          backgroundUrl: typeof data.profile.backgroundUrl === 'string' ? data.profile.backgroundUrl : current.backgroundUrl,
+          backgroundDesktopTransform: profileBackgroundTransformFromFields(data.profile, 'desktop'),
+          backgroundMobileTransform: profileBackgroundTransformFromFields(data.profile, 'mobile'),
           phone: data.profile.phone || '',
           phoneVerifiedAt: data.profile.phoneVerifiedAt || null,
           wallVisibility: data.profile.wallVisibility || current.wallVisibility,
@@ -934,6 +733,7 @@ export function ProfileSettingsForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (isSaving || uploading !== null || backgroundUploading) return
     setFieldErrors({})
     const genderChanged = form.gender !== initialProfile.gender || form.customGender !== initialProfile.customGender
     if (genderChanged) {
@@ -1029,17 +829,6 @@ export function ProfileSettingsForm({
     </div>
   )
 
-  // 预览裁剪框保持个人主页背景的 9:2 横向比例，使用实际显示尺寸计算背景位置。
-  const backgroundLayout = backgroundCrop && backgroundFrameReady && backgroundCrop.naturalWidth
-    ? computeBackgroundLayout(
-        backgroundCrop,
-        backgroundCrop.naturalWidth,
-        backgroundCrop.naturalHeight ?? 0,
-        backgroundFrameSize.width,
-        backgroundFrameSize.height,
-      )
-    : null
-
   return (
     <>
       <form onSubmit={handleSubmit} className="profile-settings-form space-y-5 rounded-none border p-6 shadow-none">
@@ -1121,37 +910,36 @@ export function ProfileSettingsForm({
 
             <div className="rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4">
               <p className="text-sm font-black text-slate-700">个人病历背景图</p>
-              <div className="mt-3 overflow-hidden rounded-none border border-[var(--border)] bg-[var(--surface-subtle)]">
-                {backgroundPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={backgroundPreview}
-                    alt="当前背景图预览"
-                    className="aspect-[16/7] w-full object-cover"
-                  />
-                ) : (
-                  <div className="grid aspect-[16/7] place-items-center bg-gradient-to-r from-sky-100 via-white to-cyan-50 text-sm font-black text-slate-400">
-                    背景预览
-                  </div>
-                )}
+              <div className="mt-3">
+                <ProfileBackgroundEditor
+                  sourceUrl={form.backgroundUrl}
+                  desktopTransform={form.backgroundDesktopTransform}
+                  mobileTransform={form.backgroundMobileTransform}
+                  disabled={isSaving || uploading !== null || backgroundUploading}
+                  onUploadingChange={setBackgroundUploading}
+                  onChange={(desktop, mobile) => {
+                    setProfileForm((current) => ({
+                      ...current,
+                      backgroundDesktopTransform: desktop,
+                      backgroundMobileTransform: mobile,
+                    }))
+                    setMessage('背景显示配置已更新，点击“保存资料”后生效。')
+                    setError('')
+                  }}
+                  onUploaded={(url, desktop, mobile) => {
+                    setProfileForm((current) => ({
+                      ...current,
+                      backgroundUrl: url,
+                      backgroundDesktopTransform: desktop,
+                      backgroundMobileTransform: mobile,
+                    }))
+                    savedImageUrlsRef.current.backgroundUrl = url
+                    setMessage('背景图已上传，点击“保存资料”后保存两端显示配置。')
+                    setError('')
+                    router.refresh()
+                  }}
+                />
               </div>
-              <label
-                htmlFor="profile-background-upload"
-                aria-disabled={uploading !== null}
-                className={`mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-sm border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-2 text-sm font-black text-[var(--foreground)] ${uploading !== null ? 'pointer-events-none opacity-60' : ''}`}
-              >
-                {uploading === 'background' ? '上传中…' : '上传背景图'}
-              </label>
-              <p className="mt-2 text-xs font-bold leading-5 text-slate-500">选择后会进入裁切，可拖动位置、缩放调整显示区域，导出为 WebP（宽≤1920px）。</p>
-              <input
-                id="profile-background-upload"
-                ref={backgroundInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                disabled={uploading !== null}
-                onChange={openBackgroundCrop}
-                className="sr-only"
-              />
             </div>
           </div>
 
@@ -1430,12 +1218,12 @@ export function ProfileSettingsForm({
 
         <div className="profile-settings-actions">
           {onCancel ? (
-            <button type="button" onClick={onCancel} disabled={isSaving || uploading !== null} className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-5 py-3 text-sm font-black text-[var(--foreground)] transition hover:bg-[var(--surface-subtle)] disabled:cursor-not-allowed disabled:opacity-60">
+            <button type="button" onClick={onCancel} disabled={isSaving || uploading !== null || backgroundUploading} className="flex-1 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-5 py-3 text-sm font-black text-[var(--foreground)] transition hover:bg-[var(--surface-subtle)] disabled:cursor-not-allowed disabled:opacity-60">
               取消
             </button>
           ) : null}
-          <button disabled={isSaving || uploading !== null} className="flex-1 rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-5 py-3 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
-            {isSaving ? '保存中...' : '保存资料'}
+          <button type="submit" disabled={isSaving || uploading !== null || backgroundUploading} className="flex-1 rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-5 py-3 text-sm font-black text-[var(--primary-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
+            {isSaving ? '保存中...' : uploading || backgroundUploading ? '等待上传完成...' : '保存资料'}
           </button>
         </div>
       </form>
@@ -1510,56 +1298,6 @@ export function ProfileSettingsForm({
         </div>
       ) : null}
 
-      {backgroundCrop ? (
-        <div className="profile-background-crop-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55">
-          <section className="profile-background-crop flex max-h-[calc(100dvh-24px)] w-full max-w-lg min-w-0 flex-col rounded-sm p-5 shadow-none">
-            <div className="profile-background-crop-content min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
-              <h3 className="text-xl font-black text-brand-950">调整背景图</h3>
-              <p className="profile-background-crop-description mt-1 text-sm font-bold text-slate-500">拖动图片调整显示区域，使用滑块缩放。建议把人物主体放在画面中央。</p>
-              <div
-                ref={backgroundFrameRef}
-                className="profile-background-crop-frame relative mx-auto mt-5 aspect-[9/2] w-full max-w-[450px] min-w-0 touch-none overflow-hidden rounded-none bg-slate-900"
-                onPointerDown={onBackgroundCropPointerDown}
-                onPointerMove={onBackgroundCropPointerMove}
-                onPointerUp={onBackgroundCropPointerUp}
-              >
-                {backgroundLayout ? (
-                  <div
-                    className="absolute left-0 top-0"
-                    style={{
-                      width: backgroundFrameSize.width,
-                      height: backgroundFrameSize.height,
-                      backgroundImage: `url(${backgroundCrop.url})`,
-                      backgroundRepeat: 'no-repeat',
-                      backgroundSize: `${backgroundLayout.drawWidth}px ${backgroundLayout.drawHeight}px`,
-                      backgroundPosition: `${backgroundLayout.translateX}px ${backgroundLayout.translateY}px`,
-                    }}
-                  />
-                ) : null}
-                <div className="pointer-events-none absolute inset-0 ring-2 ring-white/70" />
-              </div>
-              <label className="mt-5 block min-w-0">
-                <span className="text-sm font-black text-slate-700">缩放</span>
-                <input
-                  type="range"
-                  min="1"
-                  max="3"
-                  step="0.01"
-                  value={backgroundCrop.scale}
-                  onChange={(event) => setBackgroundCrop({ ...backgroundCrop, scale: Number(event.target.value) })}
-                  className="profile-background-crop-range mt-2 w-full max-w-full min-w-0"
-                />
-              </label>
-            </div>
-            <div className="profile-background-crop-actions mt-5 flex shrink-0 min-w-0 justify-end gap-2">
-              <button type="button" onClick={resetBackgroundCrop} className="profile-background-crop-cancel min-w-0 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-5 py-2 text-sm font-black text-[var(--foreground)]">取消</button>
-              <button type="button" onClick={confirmBackgroundUpload} disabled={uploading === 'background'} className="profile-background-crop-confirm min-w-0 rounded-sm border border-[var(--primary)] bg-[var(--primary)] px-5 py-2 text-sm font-black text-[var(--primary-foreground)] disabled:opacity-60">
-                {uploading === 'background' ? '上传中...' : '使用此背景'}
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
     </>
   )
 }

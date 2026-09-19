@@ -19,7 +19,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { getMaterialExchangeState, type MaterialExchangeState } from '@/lib/material-redemption-domain'
 import { getMaterialExchangeStateLabel, materialScheduleFromRow } from '@/lib/material-redemptions'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 
 export type PostReferenceTarget = {
@@ -144,7 +144,7 @@ export function findPublicPostReferences(postIds: string[]) {
   return prisma.post.findMany({
     where: {
       id: { in: postIds },
-      ...publicPostWhere,
+      ...buildPublicPostWhere(),
       User: publicReferenceUserWhere,
       Board: { isActive: true },
     },

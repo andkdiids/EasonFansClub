@@ -25,6 +25,7 @@ import { formatSalonPostContext, getSalonPostDisplayTitle, type SalonPostView } 
 import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
 import { postDetailHref } from '@/lib/post-navigation'
+import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
 
 type ModuleKey = PublicProfileModuleKey
 const ALL_MODULE_KEYS: ModuleKey[] = PROFILE_RECORD_SECTIONS.map((section) => section.key) as ModuleKey[]
@@ -38,6 +39,7 @@ type PostItem = {
   replyCount: number
   likeCount: number
   viewCount: number
+  expiresAt: string | Date | null
   isProfilePinned: boolean
   userPostGroupId: string | null
   board?: { name: string }
@@ -726,8 +728,10 @@ function ModuleContent({
                     <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
                     {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-sm bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
                     {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-sm bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
+                    {isSelf && post.expiresAt && isPostExpired(post.expiresAt) ? <span className="rounded-sm bg-slate-100 px-2 py-1 text-xs font-black text-slate-600">已过期</span> : null}
                   </div>
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
+                  {isSelf && post.expiresAt && !isPostExpired(post.expiresAt) ? <p className="mt-2 text-xs font-bold text-amber-700">限时 · {formatPostExpiry(post.expiresAt)}</p> : null}
                   {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
                   <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
                     <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>

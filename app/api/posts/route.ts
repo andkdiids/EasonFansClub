@@ -14,7 +14,6 @@ import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/li
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
-import { publicPostWhere } from '@/lib/post-moderation'
 import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
 import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
@@ -35,6 +34,9 @@ import {
   validateAndNormalizeRichTextReferences,
 } from '@/lib/rich-text-references'
 import { summarizePlainText } from '@/lib/share-metadata'
+import { calculatePostExpiresAt, parsePostExpiryType } from '@/lib/post-lifecycle'
+import { collectPostTopicNames, PostTopicInputError, syncPostTopics } from '@/lib/post-topics'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -136,7 +138,7 @@ export async function GET(request: Request) {
   try {
     const rows = await prisma.post.findMany({
       where: {
-        ...publicPostWhere,
+        ...publicPostWhere(),
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
       },
@@ -157,6 +159,8 @@ export async function GET(request: Request) {
         isPinned: true,
         isFeatured: true,
         createdAt: true,
+        expiresAt: true,
+        PostTopic: { select: { Topic: { select: { id: true, name: true } } } },
           User: {
             select: {
               id: true,
@@ -177,8 +181,9 @@ export async function GET(request: Request) {
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
     const equippedBadges = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id), new Date(), viewer?.id)
-    const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, ...post }) => ({
+    const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, PostTopic, ...post }) => ({
       ...post,
+      topics: PostTopic.map(({ Topic }) => Topic),
       title: publicModerationText(post.title, moderationStatus),
       author: {
         ...User,
@@ -308,6 +313,20 @@ export async function POST(request: Request) {
     richContent,
   }
 
+  let topicNames: string[]
+  try {
+    topicNames = collectPostTopicNames({ content: rawContent, richContent: richContent as import('@/lib/rich-text').RichTextContent | null, topicNames: body.topicNames })
+  } catch (error) {
+    const message = error instanceof PostTopicInputError && error.reason === 'TOO_MANY'
+      ? `每篇帖子最多添加 ${5} 个话题`
+      : '话题名称格式无效'
+    return NextResponse.json({ message, errors: { topicNames: message } }, { status: 400 })
+  }
+  const expiryType = parsePostExpiryType(body.expiryType)
+  if (body.expiryType !== undefined && body.expiryType !== null && body.expiryType !== '' && !expiryType) {
+    return NextResponse.json({ message: '限时发布选项无效', errors: { expiryType: '请选择有效的限时发布时长' } }, { status: 400 })
+  }
+
   try {
     phase = 'content-moderation'
     const forbiddenWords = await checkPostForbiddenWords({ title: rawTitle, content: rawContent }, user)
@@ -410,12 +429,15 @@ export async function POST(request: Request) {
           richContent: input.richContent ? input.richContent as Prisma.InputJsonValue : Prisma.DbNull,
           ipRegion,
           summary: createSummary(input.content),
+          expiryType,
+          expiresAt: canPublishImmediately ? calculatePostExpiresAt(expiryType, new Date()) : null,
           status: 'PUBLISHED',
           moderationStatus,
           stickerId: rawStickerId || undefined,
         },
         select: { id: true, status: true, moderationStatus: true, isDeleted: true },
       })
+      await syncPostTopics(tx, post.id, topicNames, user.id)
       if (imageUrls.length) {
         phase = 'post-transaction.media-create'
         await tx.postMedia.createMany({ data: imageUrls.map((url, sortOrder) => ({ postId: post.id, type: 'IMAGE', url, sortOrder })) })

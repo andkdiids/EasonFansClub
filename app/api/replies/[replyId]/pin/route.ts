@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { canPinPostReply } from '@/lib/post-replies'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { requireUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ replyId: string }> }
@@ -26,7 +26,7 @@ export async function POST(request: Request, context: RouteContext) {
     // cannot let a stale APPROVED read mutate a now-rejected post.
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${replyPost.postId} FOR UPDATE`
     const reply = await tx.reply.findFirst({
-      where: { id: replyId, isDeleted: false, Post: publicPostWhere },
+      where: { id: replyId, isDeleted: false, Post: publicPostWhere() },
       select: {
         id: true,
         postId: true,

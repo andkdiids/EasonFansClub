@@ -60,6 +60,7 @@ export type ActivityView = {
   publishedAt: string | null
   createdAt: string
   updatedAt: string
+  topics?: Array<{ id: string; name: string }>
 }
 
 export type ActivityLinkedMaterialView = {
@@ -184,6 +185,7 @@ export function serializeActivity(activity: {
   publishedAt?: ActivityDateValue
   createdAt: ActivityDateValue
   updatedAt: ActivityDateValue
+  topics?: Array<{ id: string; name: string }>
 }, now: Date = new Date()): ActivityView {
   return {
     id: activity.id,
@@ -231,6 +233,7 @@ export function serializeActivity(activity: {
     publishedAt: iso(activity.publishedAt),
     createdAt: iso(activity.createdAt) || new Date(0).toISOString(),
     updatedAt: iso(activity.updatedAt) || new Date(0).toISOString(),
+    topics: activity.topics || [],
   }
 }
 

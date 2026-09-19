@@ -1,4 +1,4 @@
-import { appendMissingDefaultForumBoards, getForumBoardDisplayName } from '@/lib/boards'
+import { appendMissingDefaultForumBoards, BARD_BOARD_SLUG, getForumBoardDisplayName } from '@/lib/boards'
 
 export const FORUM_DISCOVERY_PAGE_SIZE = 12
 export const FORUM_DISCOVERY_MIN_PAGE_SIZE = 8
@@ -15,10 +15,12 @@ export type ForumDiscoveryTab = { value: string; label: string }
 export function buildForumDiscoveryTabs(boards: ReadonlyArray<{ slug: string; name: string; isAnnouncement?: boolean }>): ForumDiscoveryTab[] {
   const configuredBoards = appendMissingDefaultForumBoards(boards)
   const announcement = configuredBoards.find((board) => ('isAnnouncement' in board && board.isAnnouncement) || board.slug === 'announcements')
-  const otherBoards = configuredBoards.filter((board) => board !== announcement)
+  const bard = configuredBoards.find((board) => board.slug === BARD_BOARD_SLUG)
+  const otherBoards = configuredBoards.filter((board) => board !== announcement && board !== bard)
   return [
     { value: 'all', label: '全部' },
     { value: announcement?.slug || 'announcements', label: '公告区' },
+    ...(bard ? [{ value: bard.slug, label: getForumBoardDisplayName(bard) }] : []),
     { value: 'recommend', label: '推荐' },
     { value: 'latest', label: '最新' },
     { value: 'hot', label: '热门' },
@@ -83,6 +85,8 @@ export type ForumDiscoveryPost = {
   isFeatured: boolean
   createdAt: string
   updatedAt: string
+  expiresAt: string | null
+  topics: Array<{ id: string; name: string }>
   likedByMe: boolean
   favoritedByMe: boolean
   media: ForumDiscoveryMedia[]
@@ -118,6 +122,7 @@ export type ForumDiscoveryResponse = {
   hasMore: boolean
   permissions: { canCreatePost: boolean; canCreateAnnouncement: boolean }
   mode: ForumDiscoveryMode
+  trendingTopics: Array<{ id: string; name: string; isOfficial: boolean; participantCount: number; postCount: number; score: number; coverImage: string | null }>
 }
 
 /**

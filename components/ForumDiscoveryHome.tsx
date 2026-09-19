@@ -121,6 +121,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
   const [searchValue, setSearchValue] = useState(query)
   const [posts, setPosts] = useState<ForumDiscoveryPost[]>([])
   const [boards, setBoards] = useState<ForumDiscoveryResponse['boards']>([])
+  const [trendingTopics, setTrendingTopics] = useState<ForumDiscoveryResponse['trendingTopics']>([])
   const [permissions, setPermissions] = useState<ForumDiscoveryResponse['permissions']>({ canCreatePost: false, canCreateAnnouncement: false })
   const [draftCount, setDraftCount] = useState(0)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -281,6 +282,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
         hasMoreRef.current = payload.hasMore
         setPosts(merged)
         setBoards(payload.boards)
+        setTrendingTopics(payload.trendingTopics || [])
         setPermissions(payload.permissions)
         setNextCursor(payload.nextCursor)
         setHasMore(payload.hasMore)
@@ -788,6 +790,7 @@ export function ForumDiscoveryHome({ showDesktopRefresh = false }: Readonly<{ sh
             />
             <button type="submit" aria-label="执行搜索">⌕</button>
           </form>
+          {trendingTopics.length ? <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-black text-slate-500" aria-label="大家正在聊"><span className="text-brand-900">大家正在聊</span>{trendingTopics.map((topic) => <Link key={topic.id} href={`/topics/${encodeURIComponent(topic.id)}`} className="text-brand-700 underline underline-offset-2">#{topic.name}</Link>)}</div> : null}
           <nav className="forum-discovery-tabs" aria-label="广场分区">
             {tabItems.map((tab) => (
               <button key={tab.value} type="button" onClick={() => updateTab(tab.value)} aria-current={activeTab === tab.value ? 'page' : undefined}>

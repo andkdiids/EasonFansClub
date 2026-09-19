@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { ContentImageUploader, type ContentImageUploaderHandle } from '@/components/ContentImageUploader'
 import { RichTextEditor } from '@/components/posts/RichTextEditor'
+import { PostTopicPicker } from '@/components/posts/PostTopicPicker'
 import { MAX_CONTENT_IMAGES } from '@/lib/content-images'
 import { FORUM_DISCOVERY_SESSION_PREFIX, notifyForumDiscoveryFeedChanged } from '@/lib/forum-discovery-session'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -12,6 +13,7 @@ import { validateRichPostContent, type RichTextContent } from '@/lib/rich-text'
 
 export type ExistingMedia = { id: string; url: string; broken: boolean }
 export type EditableBoard = { id: string; name: string; slug: string }
+export type ExistingTopic = { id: string; name: string }
 
 function removePendingPostFromDiscoverySessions(postId: string) {
   try {
@@ -40,6 +42,7 @@ export function PostEditForm({
   initialBoardId,
   boards,
   initialMedia,
+  initialTopics,
 }: Readonly<{
   postId: string
   detailHref: string
@@ -49,6 +52,7 @@ export function PostEditForm({
   initialBoardId: string
   boards: EditableBoard[]
   initialMedia: ExistingMedia[]
+  initialTopics: ExistingTopic[]
 }>) {
   const router = useRouter()
   const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
@@ -61,6 +65,7 @@ export function PostEditForm({
   const [boardId, setBoardId] = useState(initialBoardId)
   const [media, setMedia] = useState(initialMedia.map((item) => ({ ...item, removed: false })))
   const [addImageUrls, setAddImageUrls] = useState<string[]>([])
+  const [topicNames, setTopicNames] = useState(initialTopics.map((topic) => topic.name))
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [imagesUploading, setImagesUploading] = useState(false)
@@ -95,10 +100,14 @@ export function PostEditForm({
     setError('')
     try {
       const keepMediaIds = media.filter((item) => !item.removed).map((item) => item.id)
+      const basePayload = { title, content, richContent, boardId, keepMediaIds, addImageUrls }
+      const requestBody = topicNames.length || initialTopics.length
+        ? JSON.stringify({ ...basePayload, topicNames })
+        : JSON.stringify({ title, content, richContent, boardId, keepMediaIds, addImageUrls })
       const response = await fetch(`/api/posts/${postId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content, richContent, boardId, keepMediaIds, addImageUrls }),
+        body: requestBody,
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -165,6 +174,8 @@ export function PostEditForm({
           />
         </div>
       </div>
+
+      <PostTopicPicker value={topicNames} onChange={setTopicNames} error={error && error.includes('话题') ? error : undefined} />
 
       <section className="space-y-3">
         <span className="text-sm font-black text-slate-700">图片（{totalImages}/{MAX_CONTENT_IMAGES}）</span>

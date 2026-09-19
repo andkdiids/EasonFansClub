@@ -227,7 +227,15 @@ export async function POST(request: Request) {
         update:
           kind === 'avatar'
             ? {avatarUrl:safeUrl}
-            : {backgroundUrl:safeUrl},
+            : {
+                backgroundUrl:safeUrl,
+                backgroundDesktopScale:null,
+                backgroundDesktopX:null,
+                backgroundDesktopY:null,
+                backgroundMobileScale:null,
+                backgroundMobileX:null,
+                backgroundMobileY:null,
+              },
 
 
         create:{
@@ -244,7 +252,14 @@ export async function POST(request: Request) {
           backgroundUrl:
             kind === 'background'
               ? safeUrl
-              : null
+              : null,
+
+          backgroundDesktopScale: null,
+          backgroundDesktopX: null,
+          backgroundDesktopY: null,
+          backgroundMobileScale: null,
+          backgroundMobileX: null,
+          backgroundMobileY: null,
 
         }
 

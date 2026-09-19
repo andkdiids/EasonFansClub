@@ -31,6 +31,8 @@ type DraftRow = {
   richContent: unknown
   imageUrls: unknown
   pendingSticker: unknown
+  topicNames: unknown
+  expiryType: import('@prisma/client').PostExpiryType | null
   version: number
   createdAt: Date
   updatedAt: Date
@@ -55,6 +57,8 @@ function serializeDraft(row: DraftRow): ServerPostDraft {
     richContent: row.richContent,
     imageUrls: row.imageUrls,
     pendingSticker: row.pendingSticker,
+    topicNames: row.topicNames,
+    expiryType: row.expiryType,
   })
   if (!draft) throw new Error('Stored post draft is invalid')
   return draft
@@ -101,6 +105,8 @@ function parseDraftInput(body: Record<string, unknown>): DraftInputResult {
     richContent,
     imageUrls: body.imageUrls,
     pendingSticker: body.pendingSticker,
+    topicNames: body.topicNames,
+    expiryType: body.expiryType,
   })
   if (!parsed) return { ok: false, message: '草稿格式无效', errors: { form: '草稿格式无效' } }
 
@@ -117,7 +123,7 @@ function parseDraftInput(body: Record<string, unknown>): DraftInputResult {
       title: sanitizeText(body.title, 120),
       content,
       richContent,
-      imageUrls: parseContentImageUrls(body.imageUrls),
+    imageUrls: parseContentImageUrls(body.imageUrls),
     },
   }
 }
@@ -149,6 +155,8 @@ function draftWriteData(value: PostDraftPayload) {
     richContent: value.richContent ? value.richContent as Prisma.InputJsonValue : Prisma.DbNull,
     imageUrls: value.imageUrls as Prisma.InputJsonValue,
     pendingSticker: value.pendingSticker ? value.pendingSticker as Prisma.InputJsonValue : Prisma.DbNull,
+    topicNames: value.topicNames as Prisma.InputJsonValue,
+    expiryType: value.expiryType,
   }
 }
 

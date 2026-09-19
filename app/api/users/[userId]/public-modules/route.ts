@@ -14,7 +14,7 @@ import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { resolveBadgeVisibility } from '@/lib/badge-visibility'
 import { getProfileSalonPosts } from '@/lib/salon'
-import { buildProfilePostWhere } from '@/lib/post-moderation'
+import { buildProfilePostWhere, buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { postContentPlainText } from '@/lib/share-metadata'
 import { PROFILE_POST_GROUP_UNGROUPED } from '@/lib/profile-post-groups'
 import { getProfileVisibility, isProfileModuleVisible, PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy'
@@ -85,6 +85,7 @@ export async function GET(request: Request, context: RouteContext) {
       return NextResponse.json({ items: [], pagination: paginationFor(0, page), groups })
     }
     const postWhere = buildProfilePostWhere(target.id, canViewPendingPosts)
+    if (!canViewPendingPosts) Object.assign(postWhere, { status: 'PUBLISHED' as const })
     if (requestedGroupId === PROFILE_POST_GROUP_UNGROUPED) Object.assign(postWhere, { userPostGroupId: null })
     else if (requestedGroupId) Object.assign(postWhere, { userPostGroupId: requestedGroupId })
     const total = await safeDb('userModules.posts.count', prisma.post.count({ where: postWhere }), 0)
@@ -109,6 +110,7 @@ export async function GET(request: Request, context: RouteContext) {
           likeCount: true,
           viewCount: true,
           createdAt: true,
+          expiresAt: true,
           userPostGroupId: true,
           Board: { select: { name: true, slug: true } },
         },
@@ -150,7 +152,7 @@ export async function GET(request: Request, context: RouteContext) {
     const replies = await safeDb(
       'userModules.replies',
       prisma.reply.findMany({
-        where: { authorId: target.id, isDeleted: false, Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } } },
+        where: { authorId: target.id, isDeleted: false, Post: { AND: [publicPostWhere()] } },
         orderBy: { createdAt: 'desc' },
         take: 10,
         select: { id: true, content: true, moderationStatus: true, createdAt: true, Post: { select: { id: true, title: true, moderationStatus: true } } },
@@ -228,7 +230,7 @@ export async function GET(request: Request, context: RouteContext) {
       prisma.postFavorite.findMany({
         where: {
           userId: target.id,
-          Post: { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] }, User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
+          Post: { AND: [publicPostWhere(), { User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } }] },
         },
         orderBy: { createdAt: 'desc' },
         take: 20,

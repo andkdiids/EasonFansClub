@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import type { StudioExportFormat } from '@/lib/studio/tools'
 import styles from './studio.module.css'
 
@@ -10,12 +11,17 @@ const labels: Record<StudioExportFormat, { title: string; description: string }>
   SVG: { title: 'SVG 矢量图', description: '适合继续编辑的矢量文件' },
 }
 
-export function StudioExportDialog({ open, formats, onClose, onExport }: Readonly<{
+export function StudioExportDialog({ open, formats, physicalCoverImage, onClose, onExport }: Readonly<{
   open: boolean
   formats: readonly StudioExportFormat[]
+  physicalCoverImage?: string | null
   onClose: () => void
-  onExport: (format: StudioExportFormat) => void
+  onExport: (format: StudioExportFormat, options?: { includePhysicalCover?: boolean }) => void
 }>) {
+  const [includePhysicalCover, setIncludePhysicalCover] = useState(false)
+  useEffect(() => {
+    if (open) setIncludePhysicalCover(false)
+  }, [open, physicalCoverImage])
   if (!open) return null
   return (
     <div className={styles.exportDialogBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -27,10 +33,11 @@ export function StudioExportDialog({ open, formats, onClose, onExport }: Readonl
           </div>
           <button type="button" className={styles.dialogClose} onClick={onClose} aria-label="关闭导出弹窗">×</button>
         </div>
+        {physicalCoverImage && formats.includes('PNG') ? <label className={styles.exportCoverOption}><input type="checkbox" checked={includePhysicalCover} onChange={(event) => setIncludePhysicalCover(event.target.checked)} /> <span><strong>包含实物封面</strong><small>PNG 将以“实物照片 + 图纸”组合导出，默认关闭。</small></span></label> : null}
         <div className={styles.exportOptionGrid}>
           {formats.map((format) => {
             const label = labels[format]
-            return <button key={format} type="button" className={styles.exportOption} onClick={() => onExport(format)}>
+            return <button key={format} type="button" className={styles.exportOption} onClick={() => onExport(format, { includePhysicalCover: format === 'PNG' && includePhysicalCover })}>
               <span className={styles.exportOptionIcon}>{format}</span>
               <span className={styles.exportOptionMeta}><strong>{label.title}</strong><span>{label.description}</span></span>
             </button>

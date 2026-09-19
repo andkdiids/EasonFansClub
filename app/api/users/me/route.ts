@@ -30,6 +30,7 @@ import { getEquippedBadgesForUser } from '@/lib/badge-service'
 import { writeUserOperationLog } from '@/lib/user-operation-log'
 import { CUSTOM_GENDER_MAX_LENGTH, validateGenderInput } from '@/lib/gender'
 import { refreshProfileCompletion } from '@/lib/growth-tasks/service'
+import { parseProfileBackgroundTransform, profileBackgroundTransformToFields } from '@/lib/profile-background'
 
 const profileWallVisibilities = new Set<string>(Object.values(ProfileWallVisibility))
 
@@ -255,6 +256,12 @@ export async function GET(request: Request) {
           displayName: true,
           avatarUrl: true,
           backgroundUrl: true,
+          backgroundDesktopScale: true,
+          backgroundDesktopX: true,
+          backgroundDesktopY: true,
+          backgroundMobileScale: true,
+          backgroundMobileX: true,
+          backgroundMobileY: true,
           bio: true,
           displayNameModerationStatus: true,
           bioModerationStatus: true,
@@ -326,6 +333,12 @@ export async function GET(request: Request) {
         displayName: Profile.displayName,
         avatarUrl: publicImageUrl(Profile.avatarUrl),
         backgroundUrl: publicImageUrl(Profile.backgroundUrl),
+        backgroundDesktopScale: Profile.backgroundDesktopScale,
+        backgroundDesktopX: Profile.backgroundDesktopX,
+        backgroundDesktopY: Profile.backgroundDesktopY,
+        backgroundMobileScale: Profile.backgroundMobileScale,
+        backgroundMobileX: Profile.backgroundMobileX,
+        backgroundMobileY: Profile.backgroundMobileY,
         bio: Profile.bio,
         displayNameModerationStatus: Profile.displayNameModerationStatus,
         bioModerationStatus: Profile.bioModerationStatus,
@@ -406,6 +419,20 @@ export async function PATCH(request: Request) {
   }
   const avatarUrl = sanitizeText(body?.avatarUrl, 500)
   const backgroundUrl = sanitizeText(body?.backgroundUrl, 500)
+  const desktopTransformProvided = hasBodyField('backgroundDesktopTransform')
+  const mobileTransformProvided = hasBodyField('backgroundMobileTransform')
+  const desktopBackgroundTransform = desktopTransformProvided
+    ? body.backgroundDesktopTransform === null ? null : parseProfileBackgroundTransform(body.backgroundDesktopTransform)
+    : undefined
+  if (desktopTransformProvided && body.backgroundDesktopTransform !== null && desktopBackgroundTransform === null) {
+    return profileFieldError('backgroundDesktopTransform', 'INVALID_BACKGROUND_TRANSFORM', '背景图显示配置无效，请重新调整')
+  }
+  const mobileBackgroundTransform = mobileTransformProvided
+    ? body.backgroundMobileTransform === null ? null : parseProfileBackgroundTransform(body.backgroundMobileTransform)
+    : undefined
+  if (mobileTransformProvided && body.backgroundMobileTransform !== null && mobileBackgroundTransform === null) {
+    return profileFieldError('backgroundMobileTransform', 'INVALID_BACKGROUND_TRANSFORM', '背景图显示配置无效，请重新调整')
+  }
   const email = body?.email === undefined ? undefined : normalizeEmail(body.email)
   const phone = body?.phone === undefined ? undefined : sanitizeText(body.phone, 20).replace(/\s+/g, '')
   const phoneCountry = isSupportedPhoneCountry(body?.phoneCountry) ? body.phoneCountry : DEFAULT_PHONE_COUNTRY
@@ -528,6 +555,26 @@ export async function PATCH(request: Request) {
     return profileFieldError('wallVisibility', 'INVALID_WALL_VISIBILITY', '留言墙隐私设置无效')
   }
   if (genderUpdate) Object.assign(data, genderUpdate)
+
+  // A new source image starts with default transforms. When the editor sends
+  // explicit transforms they override that reset; omitted transforms remain
+  // nullable for legacy callers and are never copied from another device.
+  const backgroundTransformData = {
+    ...(hasBodyField('backgroundUrl') ? {
+      backgroundDesktopScale: null,
+      backgroundDesktopX: null,
+      backgroundDesktopY: null,
+      backgroundMobileScale: null,
+      backgroundMobileX: null,
+      backgroundMobileY: null,
+    } : {}),
+    ...(desktopTransformProvided
+      ? profileBackgroundTransformToFields('desktop', desktopBackgroundTransform || null)
+      : {}),
+    ...(mobileTransformProvided
+      ? profileBackgroundTransformToFields('mobile', mobileBackgroundTransform || null)
+      : {}),
+  }
 
   const current = await prisma.user.findUnique({
     where: { id: guard.user.id },
@@ -860,6 +907,7 @@ export async function PATCH(request: Request) {
         ...(nicknameChanged && nickname && !isNicknameViolation ? { displayName: nickname, displayNameModerationStatus: 'NORMAL' as const } : {}),
         ...(data.avatarUrl !== undefined ? { avatarUrl: data.avatarUrl } : {}),
         ...(data.backgroundUrl !== undefined ? { backgroundUrl: data.backgroundUrl } : {}),
+        ...backgroundTransformData,
         ...(data.bio !== undefined ? { bio: data.bio, bioModerationStatus: 'NORMAL' as const } : {}),
         ...(wallVisibility !== undefined ? { wallVisibility } : {}),
         ...(location !== undefined ? {
@@ -874,6 +922,7 @@ export async function PATCH(request: Request) {
         displayName: updated.nickname,
         avatarUrl: updated.avatarUrl,
         backgroundUrl: updated.backgroundUrl,
+        ...backgroundTransformData,
         bio: updated.bio,
         wallVisibility: wallVisibility || 'PUBLIC',
         ...(location ? {
@@ -889,6 +938,12 @@ export async function PATCH(request: Request) {
         locationCountry: true,
         locationRegionCode: true,
         locationRegion: true,
+        backgroundDesktopScale: true,
+        backgroundDesktopX: true,
+        backgroundDesktopY: true,
+        backgroundMobileScale: true,
+        backgroundMobileX: true,
+        backgroundMobileY: true,
       },
     })
 
@@ -926,6 +981,12 @@ export async function PATCH(request: Request) {
       phoneVerifiedAt: updated.phoneVerifiedAt,
       avatarUrl: updated.avatarUrl,
       backgroundUrl: updated.backgroundUrl,
+      backgroundDesktopScale: profileRecord.backgroundDesktopScale,
+      backgroundDesktopX: profileRecord.backgroundDesktopX,
+      backgroundDesktopY: profileRecord.backgroundDesktopY,
+      backgroundMobileScale: profileRecord.backgroundMobileScale,
+      backgroundMobileX: profileRecord.backgroundMobileX,
+      backgroundMobileY: profileRecord.backgroundMobileY,
       bio: updated.bio,
       gender: updated.gender,
       customGender: updated.customGender,

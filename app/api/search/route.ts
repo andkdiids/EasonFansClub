@@ -9,6 +9,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { summarizePlainText } from '@/lib/share-metadata'
 import { findGlobalSearchUsers, parseGlobalSearchPage, searchPublicPosts } from '@/lib/global-search'
+import { findTopics } from '@/lib/topic-service'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -31,6 +32,7 @@ export async function GET(request: Request) {
     })
     return NextResponse.json({
       users: [],
+      topics: [],
       posts: [],
       boards: [],
       tags: [],
@@ -61,8 +63,9 @@ export async function GET(request: Request) {
     || keyword.includes(DAILY_CHAT_LEGACY_NAME)
     || DAILY_CHAT_LEGACY_NAME.includes(keyword)
 
-  const [users, boards, tags, albums, songs] = await Promise.all([
+  const [users, topics, boards, tags, albums, songs] = await Promise.all([
     findGlobalSearchUsers(keyword),
+    findTopics(keyword),
     prisma.board.findMany({
       where: {
         isActive: true,
@@ -154,6 +157,7 @@ export async function GET(request: Request) {
         .map(({ id, title, moderationStatus, createdAt }) => ({ id, title: publicModerationText(title, moderationStatus), moderationStatus, createdAt })),
       _count: { posts: _count.Post },
     })),
+    topics: topics.map(({ id, name, isOfficial, postCount, participantCount, description, coverImage }) => ({ id, name, isOfficial, postCount, participantCount, description, coverImage })),
     posts: posts.map(({ User, Board, ...post }) => ({
       id: post.id,
       title: publicModerationText(post.title, post.moderationStatus),

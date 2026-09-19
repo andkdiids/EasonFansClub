@@ -6,6 +6,7 @@ import { ProfileSettingsForm } from './ProfileSettingsForm'
 import type { UserLocation } from '@/lib/user-location'
 import type { GenderValue } from '@/lib/gender'
 import type { NicknameChangeView } from '@/lib/nickname-change'
+import type { ProfileBackgroundTransform } from '@/lib/profile-background'
 
 type InitialProfile = {
   nickname: string
@@ -14,6 +15,8 @@ type InitialProfile = {
   avatarUrl: string
   defaultAvatarOptions: Array<{ id: string; url: string }>
   backgroundUrl: string
+  backgroundDesktopTransform?: ProfileBackgroundTransform | null
+  backgroundMobileTransform?: ProfileBackgroundTransform | null
   bio: string
   gender: GenderValue | null
   customGender: string

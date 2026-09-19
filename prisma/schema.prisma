@@ -89,6 +89,7 @@ model Activity {
   linkedMaterial               MaterialRedemption?            @relation("ActivityMaterialLink")
   MaterialRedemptionOrders     MaterialRedemptionOrder[]      @relation("MaterialOrderLinkedActivity")
   Lottery                      Lottery[]
+  Topics                       Topic[]                        @relation("ActivityTopics")
 
   @@index([status, createdAt])
   @@index([status, startsAt])
@@ -3134,10 +3135,12 @@ model Notification {
   activityId                          String?
   isRead                              Boolean          @default(false)
   createdAt                           DateTime         @default(now())
+  updatedAt                           DateTime         @updatedAt
   readAt                              DateTime?
   recipientId                         String
   actorId                             String?
   key                                 String?
+  aggregateCount                      Int?
   completedAt                         DateTime?
   User_Notification_actorIdToUser     User?            @relation("Notification_actorIdToUser", fields: [actorId], references: [id])
   User_Notification_recipientIdToUser User             @relation("Notification_recipientIdToUser", fields: [recipientId], references: [id], onDelete: Cascade)
@@ -3525,6 +3528,8 @@ model Post {
   reviewedById          String?
   rejectionReason       String?                 @db.Text
   summary               String?
+  expiryType            PostExpiryType?
+  expiresAt             DateTime?
   AdminAction           AdminAction[]
   PostModerationHistory PostModerationHistory[]
   Like                  Like[]
@@ -3535,6 +3540,7 @@ model Post {
   Board                 Board                   @relation(fields: [boardId], references: [id])
   PostFavorite          PostFavorite[]
   PostMedia             PostMedia[]
+  PostTopic             PostTopic[]
   PostTag               PostTag[]
   Reply                 Reply[]
   Report                Report[]
@@ -3559,6 +3565,7 @@ model Post {
   @@index([replyCount])
   @@index([status])
   @@index([moderationStatus, createdAt])
+  @@index([expiresAt, status, isDeleted, moderationStatus])
 }
 
 /**
@@ -3567,18 +3574,20 @@ model Post {
  * growth, notification, or published-post counters.
  */
 model PostDraft {
-  id             String   @id @default(cuid())
-  userId         String   @unique
+  id             String          @id @default(cuid())
+  userId         String          @unique
   boardId        String?
-  title          String   @db.VarChar(120)
-  content        String   @db.Text
+  title          String          @db.VarChar(120)
+  content        String          @db.Text
   richContent    Json?
   imageUrls      Json
   pendingSticker Json?
-  version        Int      @default(1)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  User           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topicNames     Json?
+  expiryType     PostExpiryType?
+  version        Int             @default(1)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  User           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([updatedAt])
 }
@@ -3768,11 +3777,52 @@ model PostTag {
   @@id([postId, tagId])
 }
 
+/// User-facing discussion topics. The leading '#' is presentation-only; name
+/// stores the display value without it and normalizedName is the dedupe key.
+model Topic {
+  id             String      @id @default(cuid())
+  name           String      @db.VarChar(120)
+  normalizedName String      @unique @db.VarChar(120)
+  description    String?     @db.Text
+  coverImage     String?     @db.Text
+  isOfficial     Boolean     @default(false)
+  activityId     String?
+  startAt        DateTime?
+  endAt          DateTime?
+  createdById    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  Activity       Activity?   @relation("ActivityTopics", fields: [activityId], references: [id], onDelete: SetNull)
+  CreatedBy      User?       @relation("TopicCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  PostTopic      PostTopic[]
+
+  @@index([activityId])
+  @@index([isOfficial, updatedAt])
+  @@index([createdAt])
+}
+
+model PostTopic {
+  postId    String
+  topicId   String
+  createdAt DateTime @default(now())
+  Post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  Topic     Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([postId, topicId])
+  @@index([topicId, createdAt])
+}
+
 model Profile {
   id                          String                  @id @default(cuid())
   displayName                 String
   avatarUrl                   String?
   backgroundUrl               String?
+  backgroundDesktopScale      Float?
+  backgroundDesktopX          Float?
+  backgroundDesktopY          Float?
+  backgroundMobileScale       Float?
+  backgroundMobileX           Float?
+  backgroundMobileY           Float?
   bio                         String?
   displayNameModerationStatus ContentModerationStatus @default(NORMAL)
   bioModerationStatus         ContentModerationStatus @default(NORMAL)
@@ -3804,6 +3854,34 @@ model ProfileRecordPreference {
 
   @@unique([userId, section])
   @@index([userId, sortOrder])
+}
+
+model ProfileBackgroundLike {
+  id             String   @id @default(cuid())
+  likerId        String
+  profileOwnerId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  Liker          User     @relation("ProfileBackgroundLikeLiker", fields: [likerId], references: [id], onDelete: Cascade)
+  ProfileOwner   User     @relation("ProfileBackgroundLikeOwner", fields: [profileOwnerId], references: [id], onDelete: Cascade)
+
+  @@unique([likerId, profileOwnerId], map: "ProfileBgLike_liker_owner_key")
+  @@index([profileOwnerId, createdAt], map: "ProfileBgLike_owner_created_idx")
+  @@index([likerId, createdAt], map: "ProfileBgLike_liker_created_idx")
+}
+
+model ProfileBackgroundLikeDailyAction {
+  id             String   @id @default(cuid())
+  likerId        String
+  profileOwnerId String
+  businessDate   String   @db.VarChar(10)
+  createdAt      DateTime @default(now())
+  Liker          User     @relation("ProfileBackgroundLikeDailyActionLiker", fields: [likerId], references: [id], onDelete: Cascade)
+  ProfileOwner   User     @relation("ProfileBackgroundLikeDailyActionOwner", fields: [profileOwnerId], references: [id], onDelete: Cascade)
+
+  @@unique([likerId, profileOwnerId, businessDate], map: "ProfileBgLikeDaily_liker_owner_date_key")
+  @@index([likerId, businessDate], map: "ProfileBgLikeDaily_liker_date_idx")
+  @@index([profileOwnerId, createdAt], map: "ProfileBgLikeDaily_owner_created_idx")
 }
 
 model ProfileWallLike {
@@ -4062,6 +4140,7 @@ model StudioProject {
   version               Int                       @default(1)
   data                  Json
   thumbnailUrl          String?                   @db.Text
+  physicalCoverImage    String?                   @db.Text
   likeCount             Int                       @default(0)
   favoriteCount         Int                       @default(0)
   viewCount             Int                       @default(0)
@@ -4451,6 +4530,7 @@ model User {
   AdminAction_AdminAction_targetUserIdToUser             AdminAction[]                      @relation("AdminAction_targetUserIdToUser")
   PostReviewedBy                                         Post[]                             @relation("PostReviewedBy")
   PostModerationHistoryActor                             PostModerationHistory[]            @relation("PostModerationHistoryActor")
+  TopicCreated                                           Topic[]                            @relation("TopicCreatedBy")
   AdminActionLog_AdminActionLog_adminIdToUser            AdminActionLog[]                   @relation("AdminActionLog_adminIdToUser")
   AdminActionLog_AdminActionLog_targetUserIdToUser       AdminActionLog[]                   @relation("AdminActionLog_targetUserIdToUser")
   UserOperationLog_UserOperationLog_userIdToUser         UserOperationLog[]                 @relation("UserOperationLogUser")
@@ -4561,6 +4641,10 @@ model User {
   PostFavorite                                           PostFavorite[]
   Profile                                                Profile?
   ProfileRecordPreference                                ProfileRecordPreference[]
+  ProfileBackgroundLikesGiven                            ProfileBackgroundLike[]            @relation("ProfileBackgroundLikeLiker")
+  ProfileBackgroundLikesReceived                         ProfileBackgroundLike[]            @relation("ProfileBackgroundLikeOwner")
+  ProfileBackgroundLikeDailyActionsGiven                 ProfileBackgroundLikeDailyAction[] @relation("ProfileBackgroundLikeDailyActionLiker")
+  ProfileBackgroundLikeDailyActionsReceived              ProfileBackgroundLikeDailyAction[] @relation("ProfileBackgroundLikeDailyActionOwner")
   UserPrivacySetting                                     UserPrivacySetting?
   ProfileWallLike                                        ProfileWallLike[]
   ProfileWallMessage_ProfileWallMessage_receiverIdToUser ProfileWallMessage[]               @relation("ProfileWallMessage_receiverIdToUser")
@@ -5262,6 +5346,7 @@ enum NotificationType {
   BIRTHDAY_GREETING
   FEEDBACK
   REVIEW
+  PROFILE_BACKGROUND_LIKE
 }
 
 enum PageLayoutRevisionSource {
@@ -5402,6 +5487,13 @@ enum PostContentType {
   VIDEO
   POLL
   ARTICLE
+}
+
+enum PostExpiryType {
+  TODAY
+  HOURS_24
+  DAYS_3
+  DAYS_7
 }
 
 enum PostModerationStatus {

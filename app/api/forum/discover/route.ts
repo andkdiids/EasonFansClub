@@ -18,10 +18,11 @@ import {
   type ForumDiscoveryMode,
 } from '@/lib/forum-discovery'
 import { prisma } from '@/lib/prisma'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
+import { getTrendingTopics } from '@/lib/topic-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -186,6 +187,8 @@ function serializePost(row: DiscoveryRow) {
     isFeatured: row.isFeatured,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+    topics: row.PostTopic.map(({ Topic }) => Topic),
     likedByMe: row.Like.length > 0,
     favoritedByMe: row.PostFavorite.length > 0,
     media,
@@ -219,6 +222,8 @@ const discoverySelect = {
   isRecommended: true,
   createdAt: true,
   updatedAt: true,
+  expiresAt: true,
+  PostTopic: { select: { Topic: { select: { id: true, name: true } } } },
   Board: { select: { name: true, slug: true } },
   User: {
     select: {
@@ -253,15 +258,19 @@ function buildWhere({ boardId, boardSlug, query, excludedPostIds, excludedAuthor
   excludeAnnouncementBoard?: boolean
 }): Prisma.PostWhereInput {
   return {
-    ...publicPostWhere,
-    User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
-    Board: boardSlug
-      ? { isActive: true, slug: boardSlug }
-      : excludeAnnouncementBoard ? { isActive: true, slug: { not: 'announcements' } } : { isActive: true },
-    ...(boardId ? { boardId } : {}),
-    ...(query ? { OR: [{ title: { contains: query } }, { summary: { contains: query } }] } : {}),
-    ...(excludedPostIds?.length ? { id: { notIn: excludedPostIds } } : {}),
-    ...(excludedAuthorIds?.length ? { authorId: { notIn: excludedAuthorIds } } : {}),
+    AND: [
+      publicPostWhere(),
+      {
+        User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+        Board: boardSlug
+          ? { isActive: true, slug: boardSlug }
+          : excludeAnnouncementBoard ? { isActive: true, slug: { not: 'announcements' } } : { isActive: true },
+        ...(boardId ? { boardId } : {}),
+        ...(excludedPostIds?.length ? { id: { notIn: excludedPostIds } } : {}),
+        ...(excludedAuthorIds?.length ? { authorId: { notIn: excludedAuthorIds } } : {}),
+      },
+      ...(query ? [{ OR: [{ title: { contains: query } }, { summary: { contains: query } }] }] : []),
+    ],
   }
 }
 
@@ -487,6 +496,7 @@ export async function POST(request: Request) {
 
   const announcement = selectedBoard?.slug === 'announcements'
   const canCreateAnnouncement = Boolean(user && await hasAdminPermission(user, 'post_manage'))
+  const trendingTopics = await getTrendingTopics()
   return NextResponse.json({
     posts: rows.map((row) => serializePost(row)),
     boards: publicBoards.map((board) => ({ ...board, isAnnouncement: board.slug === 'announcements' })),
@@ -495,6 +505,7 @@ export async function POST(request: Request) {
     feedSeed: feedSeed?.value || null,
     hasMore,
     mode,
+    trendingTopics,
     permissions: {
       canCreatePost: Boolean(user && (!announcement || canCreateAnnouncement)),
       canCreateAnnouncement,

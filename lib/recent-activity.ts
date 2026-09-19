@@ -8,6 +8,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
 import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPostExpiryWhere } from '@/lib/post-lifecycle'
 
 export const RECENT_ACTIVITY_PAGE_SIZE = 20
 export const RECENT_ACTIVITY_MAX_PAGE = 10_000
@@ -59,11 +60,14 @@ function dateWhere(range: RecentActivityRange, now = new Date()) {
   return start && end ? { createdAt: { gte: start, lt: end } } : {}
 }
 
-const visiblePostWhere = {
-  ...publicPostWhere,
-  User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
-  Board: { isActive: true },
-} satisfies Prisma.PostWhereInput
+function visiblePostWhere(now = new Date()): Prisma.PostWhereInput {
+  return {
+    ...publicPostWhere,
+    ...buildPostExpiryWhere(now),
+    User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
+    Board: { isActive: true },
+  }
+}
 
 const activityPostSelect = {
   id: true,
@@ -197,7 +201,7 @@ function mapComment(row: CommentRow, post: ActivityPostRow): RecentActivityItem 
 export async function getRecentLikesPage(userId: string, range: RecentActivityRange, page: number, now = new Date()) {
   const where: Prisma.LikeWhereInput = {
     userId,
-    Post: visiblePostWhere,
+    Post: visiblePostWhere(),
     ...dateWhere(range, now),
   }
   const [total, rows] = await Promise.all([
@@ -224,7 +228,7 @@ export async function getRecentCommentsPage(userId: string, range: RecentActivit
     authorId: userId,
     isDeleted: false,
     deletedAt: null,
-    Post: visiblePostWhere,
+    Post: visiblePostWhere(),
     ...dateWhere(range, now),
   }
   const groups = await prisma.reply.groupBy({
@@ -251,7 +255,7 @@ export async function getRecentCommentsPage(userId: string, range: RecentActivit
       select: commentSelect,
     }),
     prisma.post.findMany({
-      where: { ...visiblePostWhere, id: { in: pageGroups.map((group) => group.postId) } },
+      where: { ...visiblePostWhere(), id: { in: pageGroups.map((group) => group.postId) } },
       select: activityPostSelect,
     }),
   ])

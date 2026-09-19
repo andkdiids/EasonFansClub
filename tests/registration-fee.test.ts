@@ -76,8 +76,14 @@ test('百日病历自动写入现有成就系统并发放一次性额外挂号�
 test('正向流水统计只累加收入，不计负数、零值或消费', () => {
   assert.equal(sumPositiveRegistrationFees([{ points: 10 }, { points: 27 }, { points: 8 }, { points: 0 }, { points: -6 }]), 45)
   const service = read('lib/registration-fee.ts')
+  const growthService = read('lib/growth-tasks/service.ts')
+  const schema = read('prisma/schema.prisma')
   assert.match(service, /points: \{ gt: 0 \}/)
-  assert.match(service, /todayEarned: sumPositiveRegistrationFees\(records\)/)
+  assert.match(service, /pointLog\.aggregate\(\{ where, _sum: \{ points: true \} \}\)/)
+  assert.match(service, /todayEarned: todayEarnedAggregate\._sum\.points \|\| 0/)
+  assert.match(growthService, /prisma\.pointLog\.aggregate\([\s\S]*points: \{ gt: 0 \}[\s\S]*_sum: \{ points: true \}/)
+  assert.match(growthService, /todayEarned: todayEarnedAggregate\._sum\.points \|\| 0/)
+  assert.match(schema, /@@index\(\[userId, createdAt\]\)/)
 })
 
 test('挂号费流水来源使用中文标签并覆盖真实入口', () => {

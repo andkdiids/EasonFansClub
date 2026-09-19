@@ -134,6 +134,12 @@ model Profile {
   displayName    String
   avatarUrl      String?
   backgroundUrl  String?
+  backgroundDesktopScale Float?
+  backgroundDesktopX     Float?
+  backgroundDesktopY     Float?
+  backgroundMobileScale  Float?
+  backgroundMobileX      Float?
+  backgroundMobileY      Float?
   bio            String?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt

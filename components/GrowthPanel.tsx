@@ -44,6 +44,7 @@ type GrowthRewardRule = {
 
 type GrowthOverview = {
   points: number
+  todayEarned: number
   weeklyMilestoneRewards?: Array<{ days: number; reward: number }>
   today: {
     dateKey: string
@@ -228,6 +229,10 @@ export function GrowthPanel({
     const refreshAfterGrowthAction = () => {
       void requestOverview(false)
     }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'hidden') return
+      void requestOverview(false)
+    }
     const refreshAfterPointsUpdate = (event: Event) => {
       const detail = (event as CustomEvent<{ source?: string }>).detail
       if (detail?.source === 'growth-panel') return
@@ -236,10 +241,16 @@ export function GrowthPanel({
     window.addEventListener('profile-updated', refreshAfterProfileUpdate)
     window.addEventListener('checkin:completed', refreshAfterGrowthAction)
     window.addEventListener('user:points-updated', refreshAfterPointsUpdate)
+    window.addEventListener('focus', refreshWhenVisible)
+    window.addEventListener('pageshow', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
       window.removeEventListener('profile-updated', refreshAfterProfileUpdate)
       window.removeEventListener('checkin:completed', refreshAfterGrowthAction)
       window.removeEventListener('user:points-updated', refreshAfterPointsUpdate)
+      window.removeEventListener('focus', refreshWhenVisible)
+      window.removeEventListener('pageshow', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [requestOverview])
 
@@ -286,6 +297,7 @@ export function GrowthPanel({
             <section className="growth-today-summary" aria-label="医保余额与本周进度">
               <div className="growth-asset-row">
                 <span className="growth-balance"><span>医保余额</span><strong>{overview.points}</strong></span>
+                <span className="growth-today-earned" aria-label={`今日获取 +${overview.todayEarned}`}><span>今日获取</span><strong>+{overview.todayEarned}</strong></span>
                 <button type="button" className="growth-fee-history-trigger" onClick={() => setFeeHistoryOpen(true)}>
                   挂号费记录 <span aria-hidden="true">›</span>
                 </button>

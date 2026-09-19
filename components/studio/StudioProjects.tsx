@@ -8,6 +8,7 @@ import { createStudioId, deleteLocalStudioProject, getLocalStudioProject, listLo
 import { studioProjectEditorPath } from '@/lib/studio/paths'
 import { getStudioTool } from '@/lib/studio/tools'
 import type { StudioLocalProject, StudioProjectSummary } from '@/lib/studio/types'
+import { StudioProjectCover } from './StudioProjectCover'
 import styles from './studio.module.css'
 
 function formatDate(value: string) {
@@ -18,16 +19,12 @@ function formatDate(value: string) {
   }
 }
 
-function PatternThumb() {
-  return <span className={styles.projectThumbPattern} aria-hidden>{Array.from({ length: 100 }, (_, index) => <i key={index} className={styles.projectThumbCell} />)}</span>
-}
-
 function ProjectCard({ project, onDelete, onCopy, onShare }: Readonly<{ project: StudioProjectSummary; onDelete: (project: StudioProjectSummary) => void; onCopy: (project: StudioProjectSummary) => void; onShare: (project: StudioProjectSummary) => void }>) {
   const tool = getStudioTool(project.toolSlug)
   const metadata = project.metadata || {}
   const editorHref = studioProjectEditorPath(project)
   return <article className={styles.projectCard}>
-    <div className={styles.projectThumb}>{project.thumbnailUrl ? <img src={project.thumbnailUrl} alt="作品图纸缩略图" /> : <PatternThumb />}</div>
+    <div className={styles.projectThumb}><StudioProjectCover project={project} alt={`${project.title}作品封面`} imageClassName={styles.projectThumbImage} patternClassName={styles.projectThumbPattern} patternCellClassName={styles.projectThumbCell} /></div>
     <div className={styles.projectContent}>
       <div className={styles.projectTopline}><strong className={styles.projectTitle} title={project.title}>{project.title}</strong><span className={styles.toolStatus}>{project.visibility === 'PRIVATE' ? '私密' : '公开'}</span></div>
       <p className={styles.projectMeta}>{tool?.name || '创作项目'} · {formatDate(project.updatedAt)}</p>
@@ -145,7 +142,7 @@ export function StudioProjects({ isAuthenticated }: Readonly<{ isAuthenticated: 
         const response = await fetch('/api/studio/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ toolSlug: duplicate.toolSlug, title: duplicate.title, description: duplicate.description, version: duplicate.version, data: duplicate.data }),
+          body: JSON.stringify({ toolSlug: duplicate.toolSlug, title: duplicate.title, description: duplicate.description, version: duplicate.version, data: duplicate.data, physicalCoverImage: duplicate.physicalCoverImage }),
         })
         if (response.ok) {
           const body = await response.json() as { project?: Partial<StudioLocalProject> & { data?: StudioLocalProject['data'] } }
@@ -161,6 +158,7 @@ export function StudioProjects({ isAuthenticated }: Readonly<{ isAuthenticated: 
               description: server?.description,
               version: server?.version || duplicate.version,
               thumbnailUrl: server?.thumbnailUrl || duplicate.thumbnailUrl,
+              physicalCoverImage: server?.physicalCoverImage ?? duplicate.physicalCoverImage,
               visibility: server?.visibility || 'PRIVATE',
               reviewStatus: server?.reviewStatus || 'NONE',
               createdAt: server?.createdAt || duplicate.createdAt,

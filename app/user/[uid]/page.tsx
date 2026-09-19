@@ -16,6 +16,8 @@ import { getBadgeProfileSummary, getEquippedBadgesForUser } from '@/lib/badge-se
 import { getProfileRecordPagination } from '@/lib/profile-page'
 import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
+import { getProfileBackgroundLikeSummary } from '@/lib/profile-background-likes'
+import { profileBackgroundTransformFromFields } from '@/lib/profile-background'
 
 export const dynamic = 'force-dynamic'
 
@@ -134,8 +136,10 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
   const displayName = baseDisplayName
   const avatar = profileImageUrl(user.Profile.avatarUrl || user.avatarUrl)
   const background = profileImageUrl(user.Profile.backgroundUrl || user.backgroundUrl)
+  const backgroundDesktopTransform = profileBackgroundTransformFromFields(user.Profile, 'desktop')
+  const backgroundMobileTransform = profileBackgroundTransformFromFields(user.Profile, 'mobile')
   const bio = publicModerationText(user.Profile.bio || user.bio || '', user.Profile.bioModerationStatus === 'VIOLATION' || user.bioModerationStatus === 'VIOLATION' ? 'VIOLATION' : 'NORMAL')
-  const [growth, recentMessagesPage, equippedBadges, badgeSummary, publicLiveCount, recordPreferences] = await Promise.all([
+  const [growth, recentMessagesPage, equippedBadges, badgeSummary, publicLiveCount, recordPreferences, backgroundLikeSummary] = await Promise.all([
     getGrowthSummarySafe(user.experience),
     visibility.isSelf || visibility.settings.showCheckInMessages
       ? loadProfileRecentMessagesPage(user.id, viewer?.id)
@@ -146,6 +150,7 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
       ? prisma.userMusicConcert.count({ where: { userId: user.id, isPublic: true, MusicConcert: { status: 'PUBLISHED', MusicTour: { status: 'PUBLISHED' } } } })
       : Promise.resolve(0),
     getProfileRecordPreferencesSafe(user.id),
+    getProfileBackgroundLikeSummary(user.id, viewer?.id),
   ])
   const friendStatus: 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED' = isFriend
     ? 'FRIEND'
@@ -172,6 +177,8 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
         ipRegion: user.ipRegion,
         avatarUrl: avatar,
         backgroundUrl: background,
+        backgroundDesktopTransform,
+        backgroundMobileTransform,
         createdAt: user.createdAt,
         wallVisibility: user.Profile.wallVisibility || 'PUBLIC',
         publicLiveCount,
@@ -196,6 +203,8 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
       initialModule={initialModule}
       initialPage={urlPage}
       initialGroupId={urlGroupId}
+      backgroundLikeSummary={backgroundLikeSummary}
+      initialBackgroundLikeListOpen={sp.backgroundLikes === '1'}
       remarkEditor={remarkEditor}
     />
   )

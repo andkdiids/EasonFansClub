@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getVisibleStudioTools } from '@/lib/studio/tools'
 import type { StudioCreatorSummary, StudioGalleryProject } from '@/lib/studio/types'
+import { StudioProjectCover } from './StudioProjectCover'
 import styles from './studio.module.css'
 
 function formatDate(value: string) {
@@ -9,14 +10,10 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }).format(date)
 }
 
-function PatternThumb() {
-  return <span className={styles.artistProjectPattern} aria-hidden>{Array.from({ length: 100 }, (_, index) => <i key={index} />)}</span>
-}
-
 function CreatorProjectCard({ project }: Readonly<{ project: StudioGalleryProject }>) {
   const tool = getVisibleStudioTools().find((item) => item.slug === project.toolSlug)
   return <Link href={`/studio/project/${encodeURIComponent(project.id)}`} className={styles.artistProjectCard} aria-label={`查看作品：${project.title}`}>
-    <div className={styles.artistProjectThumb}>{project.thumbnailUrl ? <img src={project.thumbnailUrl} alt="作品封面" loading="lazy" /> : <PatternThumb />}</div>
+    <div className={styles.artistProjectThumb}><StudioProjectCover project={project} alt={`${project.title}作品封面`} imageClassName={styles.artistProjectImage} patternClassName={styles.artistProjectPattern} patternCellClassName="" /></div>
     <div className={styles.artistProjectContent}>
       <h3 title={project.title}>{project.title}</h3>
       <p>{tool?.name || project.toolSlug} · 创建于 {formatDate(project.createdAt)}</p>

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireUser } from '@/lib/security'
 import { grantGrowthReward, reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
@@ -22,7 +22,7 @@ export async function POST(request: Request, context: RouteContext) {
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
-      where: { ...publicPostWhere, id: postId },
+      where: { ...publicPostWhere(), id: postId },
       select: { id: true, authorId: true },
     })
     if (!post) return null
@@ -104,7 +104,7 @@ export async function DELETE(request: Request, context: RouteContext) {
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
     const post = await tx.post.findFirst({
-      where: { ...publicPostWhere, id: postId },
+      where: { ...publicPostWhere(), id: postId },
       select: { id: true, authorId: true },
     })
     if (!post) return null

@@ -93,6 +93,7 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
             <h2 id={`activity-description-${activity.id}`} className="text-xl font-black text-[var(--foreground)]">活动详情</h2>
             <div className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-8 text-[var(--foreground)]">{activity.description || '暂无活动说明。'}</div>
           </section>
+          {activity.topics?.length ? <section aria-labelledby={`activity-topics-${activity.id}`} className="mt-7 border-t border-[var(--border)] pt-5"><h2 id={`activity-topics-${activity.id}`} className="text-lg font-black text-[var(--foreground)]">大家都在聊</h2><div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">{activity.topics.map((topic) => <Link key={topic.id} href={`/topics/${encodeURIComponent(topic.id)}`} className="text-sm font-black text-[var(--primary)] underline underline-offset-4">#{topic.name}</Link>)}</div></section> : null}
           </div>
         </div>
       </div>

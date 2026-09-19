@@ -18,7 +18,9 @@ import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
 import { getBirthdayEditState } from '@/lib/birthday-immutability'
 import { serializeNicknameChange } from '@/lib/nickname-change'
+import { getProfileBackgroundLikeSummary } from '@/lib/profile-background-likes'
 import { computeNicknameCooldownDays } from '@/lib/nickname-violation'
+import { profileBackgroundTransformFromFields } from '@/lib/profile-background'
 import { ProfileEditorDrawer } from './ProfileEditorDrawer'
 
 export const dynamic = 'force-dynamic'
@@ -26,7 +28,7 @@ export const dynamic = 'force-dynamic'
 export const metadata = { title: '个人主页' }
 
 type ProfilePageProps = {
-  searchParams?: Promise<{ edit?: string }>
+  searchParams?: Promise<{ edit?: string; backgroundLikes?: string }>
 }
 
 export default async function ProfilePage({ searchParams }: ProfilePageProps) {
@@ -87,14 +89,17 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const displayName = getPublicUserDisplayName(profile)
   const avatar = profileImageUrl(profile.Profile.avatarUrl || profile.avatarUrl)
   const background = profileImageUrl(profile.Profile.backgroundUrl || profile.backgroundUrl)
+  const backgroundDesktopTransform = profileBackgroundTransformFromFields(profile.Profile, 'desktop')
+  const backgroundMobileTransform = profileBackgroundTransformFromFields(profile.Profile, 'mobile')
   const bio = profile.Profile.bio || profile.bio || ''
-  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadges, badgeSummary, recordPreferences] = await Promise.all([
+  const [growth, recentMessagesPage, defaultAvatarOptions, equippedBadges, badgeSummary, recordPreferences, backgroundLikeSummary] = await Promise.all([
     getGrowthSummarySafe(profile.experience),
     loadProfileRecentMessagesPage(profile.id, user.id),
     getDefaultAvatarOptions(),
     getEquippedBadgesForUser(profile.id, user.id),
     getBadgeProfileSummary(profile.id, user.id),
     getProfileRecordPreferencesSafe(profile.id),
+    getProfileBackgroundLikeSummary(profile.id, user.id),
   ])
 
   const profileEditorInitialProfile = {
@@ -108,6 +113,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
     avatarUrl: avatar || '',
     defaultAvatarOptions,
     backgroundUrl: background || '',
+    backgroundDesktopTransform,
+    backgroundMobileTransform,
     bio,
     gender: profile.gender,
     customGender: profile.customGender || '',
@@ -144,6 +151,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           ipRegion: resolvedIpRegion,
           avatarUrl: avatar,
           backgroundUrl: background,
+          backgroundDesktopTransform,
+          backgroundMobileTransform,
           createdAt: profile.createdAt,
           wallVisibility: profile.Profile.wallVisibility || 'PUBLIC',
           publicLiveCount: 0,
@@ -165,6 +174,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         }}
         recentMessages={recentMessagesPage.messages}
         recentMessagesPagination={recentMessagesPage.pagination}
+        backgroundLikeSummary={backgroundLikeSummary}
+        initialBackgroundLikeListOpen={query?.backgroundLikes === '1'}
       />
     </>
   )

@@ -14,6 +14,7 @@ import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { findGlobalSearchUsers, getGlobalSearchPagination, parseGlobalSearchPage, searchPublicPosts } from '@/lib/global-search'
+import { findTopics } from '@/lib/topic-service'
 import { postDetailHref } from '@/lib/post-navigation'
 
 export const dynamic = 'force-dynamic'
@@ -28,9 +29,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const params = await searchParams
   const q = (params.q || '').trim()
   const page = parseGlobalSearchPage(params.page)
-  const [users, artists, albums, songs] = q
+  const [users, topics, artists, albums, songs] = q
     ? await Promise.all([
         findGlobalSearchUsers(q),
+        findTopics(q),
         prisma.artist.findMany({
           where: {
             OR: [{ name: { contains: q } }, { slug: { contains: q } }, { description: { contains: q } }],
@@ -71,7 +73,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           take: 16,
         }),
       ])
-    : [[], [], [], []]
+    : [[], [], [], [], []]
 
   const postSearch = q
     ? await searchPublicPosts(q, users.map((user) => user.id), page)
@@ -134,6 +136,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           </section>
         ) : (
           <section className="space-y-6">
+            {topics.length ? <h2 className="pt-3 text-lg font-black text-brand-950">话题</h2> : null}
+            {topics.map((topic) => (
+              <Link key={topic.id} href={`/topics/${encodeURIComponent(topic.id)}`} className="block rounded-2xl border border-sky-100 bg-white/80 p-5 shadow-sm">
+                <p className="font-black text-brand-950">#{topic.name} {topic.isOfficial ? <span className="text-xs text-amber-700">官方</span> : null}</p>
+                <p className="mt-2 text-sm font-bold text-slate-500">{topic.postCount} 篇帖子 · {topic.participantCount} 人参与</p>
+              </Link>
+            ))}
             {artists.length ? <h2 className="pt-3 text-lg font-black text-brand-950">艺术家</h2> : null}
             {artists.map((artist) => (
               <Link key={artist.id} href={`/artists/${encodeURIComponent(artist.slug)}`} className="flex items-center gap-4 rounded-2xl border border-sky-100 bg-white/80 p-4 shadow-sm">
@@ -197,7 +206,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <span className="min-w-0"><strong className="block break-words font-black text-slate-950">{song.title}</strong><small className="mt-1 block break-words text-sm text-slate-500">{song.artist} · {song.MusicAlbum.name} · {song.previewUrl ? '支持试听' : '暂无试听'}</small></span>
               </Link>
             ))}
-            {posts.length + users.length + artists.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-center text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
+            {posts.length + users.length + topics.length + artists.length + albums.length + songs.length === 0 ? <p className="rounded-2xl border border-sky-100 bg-white/80 p-6 text-center text-sm font-bold text-slate-500">没有找到匹配内容。</p> : null}
           </section>
         )}
       </PageContainer>

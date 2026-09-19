@@ -14,6 +14,7 @@ import type { ForumDiscoveryMedia, ForumDiscoveryPost } from '@/lib/forum-discov
 import { RichPostContent } from '@/components/posts/RichPostContent'
 import { formatUid } from '@/lib/uid'
 import { postDetailHref } from '@/lib/post-navigation'
+import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
 
 type FishDetailReplyAuthor = {
   id: string
@@ -49,6 +50,8 @@ type FishDetailResponse = {
     viewCount: number
     createdAt: string
     updatedAt: string
+    expiresAt: string | null
+    topics?: Array<{ id: string; name: string }>
     media: ForumDiscoveryMedia[]
     replies: FishDetailReply[]
   }
@@ -398,7 +401,8 @@ export function ForumFishModePreview({ post, minimal = false, returnTo = null, f
 
           <article className="fish-mode-preview-post">
             <h2 id={`fish-mode-preview-title-${post.id}`}>{detail?.title || post.title || '帖子'}</h2>
-            {detail ? <RichPostContent richContent={detail.richContent} fallbackContent={detail.content} className="fish-mode-preview-rich-content" enableSongPlayback={false} /> : post.contentPreview ? <p>{post.contentPreview}</p> : null}
+            {(detail?.expiresAt || post.expiresAt) && !isPostExpired(detail?.expiresAt || post.expiresAt) ? <p className="text-xs font-black text-amber-700">限时 · {formatPostExpiry(detail?.expiresAt || post.expiresAt)}</p> : null}
+            {detail ? <RichPostContent richContent={detail.richContent} fallbackContent={detail.content} className="fish-mode-preview-rich-content" enableSongPlayback={false} topics={detail.topics || post.topics} /> : post.contentPreview ? <p>{post.contentPreview}</p> : null}
             <FishModeMediaDisclosure source={mediaSource} minimal={minimal} />
           </article>
 

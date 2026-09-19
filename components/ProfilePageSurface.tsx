@@ -13,6 +13,9 @@ import { BadgeMiniShowcase } from '@/components/BadgeMiniShowcase'
 import { getVisibleProfileModules, type UserPrivacySettings } from '@/lib/user-privacy'
 import type { ProfileRecordPreference } from '@/lib/profile-record-sections'
 import { getGenderDisplay } from '@/lib/gender'
+import { ProfileBackgroundLikeControl } from '@/components/ProfileBackgroundLikeControl'
+import type { ProfileBackgroundLikeSummary } from '@/lib/profile-background-likes'
+import type { ProfileBackgroundTransform } from '@/lib/profile-background'
 
 type FriendStatus = 'NONE' | 'PENDING' | 'FRIEND' | 'RECEIVED'
 
@@ -28,6 +31,8 @@ export type ProfilePageSurfaceProfile = {
   ipRegion: string | null
   avatarUrl: string | null
   backgroundUrl: string | null
+  backgroundDesktopTransform?: ProfileBackgroundTransform | null
+  backgroundMobileTransform?: ProfileBackgroundTransform | null
   createdAt: Date
   wallVisibility: ProfileWallVisibility
   publicLiveCount: number
@@ -75,6 +80,8 @@ export function ProfilePageSurface({
   initialModule,
   initialPage,
   initialGroupId,
+  backgroundLikeSummary,
+  initialBackgroundLikeListOpen = false,
   remarkEditor,
 }: {
   profile: ProfilePageSurfaceProfile
@@ -85,6 +92,8 @@ export function ProfilePageSurface({
   initialModule?: string
   initialPage?: number
   initialGroupId?: string
+  backgroundLikeSummary: ProfileBackgroundLikeSummary
+  initialBackgroundLikeListOpen?: boolean
   remarkEditor?: ReactNode
 }) {
   const { isSelf, isFriend, isBlocked, hasViewer, friendStatus } = relationship
@@ -105,10 +114,23 @@ export function ProfilePageSurface({
         createdAt={profile.createdAt}
         avatarUrl={profile.avatarUrl}
         backgroundUrl={profile.backgroundUrl}
+        backgroundDesktopTransform={profile.backgroundDesktopTransform}
+        backgroundMobileTransform={profile.backgroundMobileTransform}
         equippedBadges={profile.equippedBadges}
         equippedBadge={profile.equippedBadge}
         badgeInteraction={isSelf ? 'static' : 'interactive'}
         showGrowth
+        backgroundLikeControl={profile.backgroundUrl ? (
+          <ProfileBackgroundLikeControl
+            key={profile.id}
+            profileOwnerId={profile.id}
+            isSelf={isSelf}
+            hasViewer={hasViewer}
+            canInteract={!isBlocked}
+            initialSummary={backgroundLikeSummary}
+            initialListOpen={initialBackgroundLikeListOpen}
+          />
+        ) : null}
       />
 
       <section className="min-w-0 rounded-none border border-[var(--border)] bg-[var(--surface)] p-4 shadow-none sm:p-5">

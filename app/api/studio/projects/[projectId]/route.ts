@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { publicStudioPhysicalCover } from '@/lib/studio/physical-cover'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ function projectMetadata(data: Prisma.JsonValue) {
   }
 }
 
-function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; likeCount: number; favoriteCount: number; viewCount: number; downloadCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }) {
+function projectView(project: { id: string; toolSlug: string; title: string; description: string | null; version: number; data: Prisma.JsonValue; thumbnailUrl: string | null; physicalCoverImage: string | null; likeCount: number; favoriteCount: number; viewCount: number; downloadCount: number; visibility: string; reviewStatus: string; createdAt: Date; updatedAt: Date; lastOpenedAt: Date | null }) {
   return {
     id: project.id,
     toolSlug: project.toolSlug,
@@ -30,6 +31,7 @@ function projectView(project: { id: string; toolSlug: string; title: string; des
     version: project.version,
     data: project.data,
     thumbnailUrl: project.thumbnailUrl,
+    physicalCoverImage: publicStudioPhysicalCover(project.physicalCoverImage),
     likeCount: project.likeCount,
     favoriteCount: project.favoriteCount,
     viewCount: project.viewCount,

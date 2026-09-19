@@ -1,3 +1,6 @@
+import type { Prisma } from '@prisma/client'
+import { buildPostExpiryWhere } from '@/lib/post-lifecycle'
+
 export const postModerationStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'VIOLATION'] as const
 export const postReviewableStatuses = ['PENDING', 'APPROVED', 'REJECTED'] as const
 export const POST_REVIEW_PAGE_SIZE = 50
@@ -7,6 +10,21 @@ export type PostReviewableStatus = typeof postReviewableStatuses[number]
 export type PostModerationAccess = 'VISIBLE' | 'PENDING' | 'REJECTED'
 
 const publicPostModerationStatuses: PostModerationStatus[] = ['APPROVED', 'VIOLATION']
+
+type PublicPostWhere = {
+  isDeleted: false
+  status: 'PUBLISHED'
+  moderationStatus: { in: PostModerationStatus[] }
+  OR: Prisma.PostWhereInput[]
+}
+
+type ProfilePostWhere = {
+  isDeleted: false
+  status: 'PUBLISHED'
+  authorId: string
+  moderationStatus: { in: PostModerationStatus[] }
+  OR?: Prisma.PostWhereInput[]
+}
 
 /**
  * The moderation state is deliberately separate from Post.status.
@@ -67,9 +85,14 @@ export function getPostModerationAccess(
 
 /** Shared filter for every ordinary-user-facing post query. */
 export const publicPostWhere = {
-  isDeleted: false,
+  isDeleted: false as const,
   status: 'PUBLISHED' as const,
   moderationStatus: { in: publicPostModerationStatuses },
+}
+
+/** Evaluate expiration at query time; never freeze `now` in a module constant. */
+export function buildPublicPostWhere(now = new Date()): PublicPostWhere {
+  return { ...publicPostWhere, ...buildPostExpiryWhere(now) }
 }
 
 /**
@@ -93,9 +116,9 @@ export function isQualifiedPublishedPost(post: {
  * preview path) may additionally see their moderation-private pending and
  * rejected posts; the caller only enables this branch for that trusted viewer.
  */
-export function buildProfilePostWhere(authorId: string, includePending = false) {
+export function buildProfilePostWhere(authorId: string, includePending = false, now = new Date()): ProfilePostWhere {
   return {
-    ...publicPostWhere,
+    ...(includePending ? publicPostWhere : buildPublicPostWhere(now)),
     authorId,
     ...(includePending
       ? { moderationStatus: { in: ['PENDING', 'REJECTED', ...publicPostModerationStatuses] as PostModerationStatus[] } }

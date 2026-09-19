@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere } from '@/lib/post-moderation'
 import { POST_HOT_SCORE_SQL } from '@/lib/post-hot-score'
 
 export const GLOBAL_SEARCH_USER_LIMIT = 10
@@ -15,7 +15,8 @@ export type GlobalSearchPagination = {
   hasMore: boolean
 }
 
-const globalSearchUserSelect = {
+function buildGlobalSearchUserSelect(now = new Date()) {
+  return {
   id: true,
   uid: true,
   nickname: true,
@@ -38,13 +39,14 @@ const globalSearchUserSelect = {
   _count: {
     select: {
       Post: {
-        where: { ...publicPostWhere, Board: { isActive: true } },
+        where: { ...buildPublicPostWhere(now), Board: { isActive: true } },
       },
     },
   },
-} satisfies Prisma.UserSelect
+  } satisfies Prisma.UserSelect
+}
 
-export type GlobalSearchUser = Prisma.UserGetPayload<{ select: typeof globalSearchUserSelect }>
+export type GlobalSearchUser = Prisma.UserGetPayload<{ select: ReturnType<typeof buildGlobalSearchUserSelect> }>
 
 /**
  * Global search intentionally follows the public nickname/display-name
@@ -73,7 +75,7 @@ export async function findGlobalSearchUsers(keyword: string): Promise<GlobalSear
 
   return prisma.user.findMany({
     where: buildGlobalSearchUserWhere(normalizedKeyword),
-    select: globalSearchUserSelect,
+    select: buildGlobalSearchUserSelect(),
     take: GLOBAL_SEARCH_USER_LIMIT,
   })
 }
@@ -136,7 +138,7 @@ export type GlobalSearchPost = Omit<GlobalSearchPostRow, 'hotScore' | 'authorUid
 
 type GlobalSearchCountRow = { total: number | string | bigint }
 
-function buildSearchPostFrom(keyword: string, authorIds: readonly string[]) {
+function buildSearchPostFrom(keyword: string, authorIds: readonly string[], now = new Date()) {
   const pattern = `%${keyword}%`
   const authorMatch = authorIds.length
     ? Prisma.sql`p.authorId IN (${Prisma.join(authorIds)})`
@@ -151,6 +153,7 @@ function buildSearchPostFrom(keyword: string, authorIds: readonly string[]) {
       p.isDeleted = false
       AND p.status = 'PUBLISHED'
       AND p.moderationStatus IN ('APPROVED', 'VIOLATION')
+      AND (p.expiresAt IS NULL OR p.expiresAt > ${now})
       AND u.status = 'ACTIVE'
       AND u.isDeleted = false
       AND b.isActive = true
@@ -232,7 +235,7 @@ export async function searchPublicPosts(keyword: string, authorIds: readonly str
   }
 
   const uniqueAuthorIds = [...new Set(authorIds.filter(Boolean))]
-  const fromWhere = buildSearchPostFrom(normalizedKeyword, uniqueAuthorIds)
+  const fromWhere = buildSearchPostFrom(normalizedKeyword, uniqueAuthorIds, new Date())
 
   return prisma.$transaction(async (tx) => {
     const countRows = await tx.$queryRaw<GlobalSearchCountRow[]>(Prisma.sql`

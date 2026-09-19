@@ -10,6 +10,8 @@ import { UserDisplayName } from '@/components/UserDisplayName'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { formatUid } from '@/lib/uid'
 import type { ForumDiscoveryMedia, ForumDiscoveryPost, ForumDiscoverySticker } from '@/lib/forum-discovery'
+import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
+import { TopicText } from '@/components/posts/TopicText'
 
 export type FishModeMediaSource = {
   id: string
@@ -258,11 +260,12 @@ export function ForumFishModePostRow({ post, minimal = false, active = false, on
         {post.board.name && !minimal ? <span className="fish-mode-board">· {post.board.name}</span> : null}
         {post.isPinned ? <span className="fish-mode-post-flag">置顶</span> : null}
         {post.isFeatured ? <span className="fish-mode-post-flag">精华</span> : null}
+        {post.expiresAt && !isPostExpired(post.expiresAt) ? <span className="fish-mode-post-flag">限时 · {formatPostExpiry(post.expiresAt)}</span> : null}
       </div>
 
       <div className="fish-mode-post-content" role="button" tabIndex={0} onClick={openPost} onKeyDown={onContentKeyDown}>
         {(post.title || '').trim() ? <h2>{post.title}</h2> : null}
-        {(post.contentPreview || '').trim() ? <p>{post.contentPreview}</p> : null}
+        {(post.contentPreview || '').trim() ? <p><TopicText text={post.contentPreview} topics={post.topics} /></p> : null}
       </div>
 
       <FishModeMediaDisclosure source={postMediaSource(post)} minimal={minimal} />

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { getVisibleStudioTools } from '@/lib/studio/tools'
 import { STUDIO_GALLERY_RETURN_STORAGE_KEY } from '@/lib/studio/navigation'
 import type { StudioGalleryProject, StudioGallerySort } from '@/lib/studio/types'
+import { StudioProjectCover } from './StudioProjectCover'
 import styles from './studio.module.css'
 
 type GalleryResponse = {
@@ -20,10 +21,6 @@ function formatDate(value: string) {
   }
 }
 
-function PatternThumb() {
-  return <span className={styles.projectThumbPattern} aria-hidden>{Array.from({ length: 100 }, (_, index) => <i key={index} className={styles.projectThumbCell} />)}</span>
-}
-
 function GalleryCard({ project, busy, onInteract }: Readonly<{ project: StudioGalleryProject; busy: string; onInteract: (project: StudioGalleryProject, kind: 'like' | 'favorite') => void }>) {
   const tool = getVisibleStudioTools().find((item) => item.slug === project.toolSlug)
   const likeCount = project.likeCount || 0
@@ -34,7 +31,7 @@ function GalleryCard({ project, busy, onInteract }: Readonly<{ project: StudioGa
     <Link href={href} className={styles.galleryCardLink} aria-label={`查看作品：${project.title}`} onClick={() => {
       try { window.sessionStorage.setItem(STUDIO_GALLERY_RETURN_STORAGE_KEY, JSON.stringify({ id: project.id, path: window.location.href })) } catch { /* storage may be unavailable */ }
     }}>
-      <div className={styles.galleryThumb}>{project.thumbnailUrl ? <img src={project.thumbnailUrl} alt="作品缩略图" /> : <PatternThumb />}</div>
+      <div className={styles.galleryThumb}><StudioProjectCover project={project} alt={`${project.title}作品封面`} imageClassName={styles.galleryThumbImage} patternClassName={styles.projectThumbPattern} patternCellClassName={styles.projectThumbCell} /></div>
       <div className={styles.galleryContent}>
         <div className={styles.galleryTopline}><strong className={styles.galleryTitle} title={project.title}>{project.title}</strong><span className={styles.galleryTool}>{tool?.name || project.toolSlug}</span></div>
         <p className={styles.galleryMeta}>作者：{project.author} · {formatDate(project.updatedAt)}</p>

@@ -160,6 +160,7 @@ export function PostRepliesSection({
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const commentsTopRef = useRef<HTMLDivElement | null>(null)
   const navigationReasonRef = useRef<PostReplyNavigationReason>(null)
+  const focusScrollKeyRef = useRef<string | null>(null)
   const previousCommentViewRef = useRef({ page: pagination.page, sort, direction })
   const replyDraftKey = useCallback((target: { id: string; name: string } | null) => getPostReplyDraftKey(
     postId,
@@ -357,14 +358,24 @@ export function PostRepliesSection({
   }
 
   useEffect(() => {
-    if (!focusId) return
+    if (!focusId) {
+      focusScrollKeyRef.current = null
+      return
+    }
+    const focusScrollKey = `${postId}:${focusId}`
+    if (focusScrollKeyRef.current === focusScrollKey) return
     let current = replyMap.get(focusId)
     if (!current) return
     while (current.parentId && replyMap.has(current.parentId)) current = replyMap.get(current.parentId)!
-    if (current.id !== focusId) setExpandedReplies((value) => ({ ...value, [current.id]: true }))
+    if (current.id !== focusId && !expandedReplies[current.id]) {
+      setExpandedReplies((value) => ({ ...value, [current.id]: true }))
+      return
+    }
     const frame = window.requestAnimationFrame(() => {
       const target = document.getElementById(`reply-${focusId}`)
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      if (!target) return
+      focusScrollKeyRef.current = focusScrollKey
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
       target?.classList.add('notification-focus-target')
     })
     const timer = window.setTimeout(() => {
@@ -374,7 +385,7 @@ export function PostRepliesSection({
       window.cancelAnimationFrame(frame)
       window.clearTimeout(timer)
     }
-  }, [focusId, replies, replyMap])
+  }, [expandedReplies, focusId, postId, replyMap])
 
   useEffect(() => {
     if (!activeReplyId) return

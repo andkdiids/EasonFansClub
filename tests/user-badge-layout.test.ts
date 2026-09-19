@@ -76,7 +76,7 @@ test('long badge names remain literal and the profile information block can grow
   assert.match(css, /\.user-display-name-nickname-row \{[^}]*white-space:normal/)
   assert.doesNotMatch(profileSummary, /<h1 className="truncate/)
   assert.match(profileSummary, /profile-hero-background relative isolate flex h-auto/)
-  assert.match(css, /\.profile-hero-background \{\s*height:auto !important;\s*min-height:210px;/)
+  assert.match(css, /\.profile-hero-background \{\s*height:max\(210px,calc\(\(100vw - 32px\) \* 7 \/ 12\)\) !important;\s*min-height:210px;/)
   assert.match(css, /\.friend-profile-card h2 \.user-display-name-text \{[^}]*overflow:visible[^}]*white-space:normal/)
 })
 

@@ -16,20 +16,17 @@ test('头像与背景卡片不拉伸留白：网格使用 items-start', () => {
   assert.match(form, /<div className="grid items-start gap-4 md:grid-cols-2">/)
 })
 
-test('背景预览从 initialProfile.backgroundUrl 初始化', () => {
-  assert.match(form, /const \[backgroundPreview, setBackgroundPreview\] = useState\(initialProfile\.backgroundUrl \|\| ''\)/)
+test('背景编辑器使用同一源图并保存桌面与移动端两套变换', () => {
+  assert.match(form, /<ProfileBackgroundEditor/)
+  assert.match(form, /sourceUrl=\{form\.backgroundUrl\}/)
+  assert.match(form, /desktopTransform=\{form\.backgroundDesktopTransform\}/)
+  assert.match(form, /mobileTransform=\{form\.backgroundMobileTransform\}/)
+  assert.match(form, /backgroundDesktopTransform: desktop/)
+  assert.match(form, /backgroundMobileTransform: mobile/)
 })
 
-test('背景预览使用 <img object-cover> 缩略图而非空白占位，上传后继续覆盖', () => {
-  // 有背景时渲染 img（object-cover 缩略图），无背景时才显示占位
-  assert.match(form, /<img\s+src=\{backgroundPreview\}[\s\S]*?className="aspect-\[16\/7\] w-full object-cover"/)
-  assert.match(form, /背景预览/)
-  // 上传成功后继续覆盖 preview
-  assert.match(form, /setForm\(\(current\) => \(\{ \.\.\.current, backgroundUrl: data\.url \}\)\)\s*\n\s*setBackgroundPreview\(data\.url\)/)
-})
-
-test('背景上传入口保持原有 label/id/accept（不影响上传流程）', () => {
-  assert.match(form, /htmlFor="profile-background-upload"/)
-  assert.match(form, /id="profile-background-upload"/)
-  assert.match(form, /accept="image\/jpeg,image\/png,image\/webp"/)
+test('背景保存请求包含两端变换，上传后会重置为新源图配置', () => {
+  assert.match(form, /payload\.backgroundDesktopTransform = form\.backgroundDesktopTransform \?\? null/)
+  assert.match(form, /payload\.backgroundMobileTransform = form\.backgroundMobileTransform \?\? null/)
+  assert.match(form, /背景图已上传，点击“保存资料”后保存两端显示配置。/)
 })

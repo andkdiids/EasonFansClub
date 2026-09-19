@@ -50,6 +50,7 @@ export const activitySelect = {
     },
   },
   _count: { select: { ActivityRegistration: { where: { status: { in: ['ACTIVE'] } } } } },
+  Topics: { select: { id: true, name: true } },
 } satisfies Prisma.ActivitySelect
 
 export type ActivityRow = Prisma.ActivityGetPayload<{ select: typeof activitySelect }>
@@ -58,6 +59,7 @@ export function serializeActivityRow(row: ActivityRow, now = new Date()) {
   const { _count, ...activity } = row
   return serializeActivity({
     ...activity,
+    topics: activity.Topics,
     coverUrl: publicImageUrl(activity.coverUrl),
     bannerUrl: publicImageUrl(activity.bannerUrl),
     linkedMaterial: activity.linkedMaterial

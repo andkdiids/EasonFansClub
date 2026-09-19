@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/auth'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { awardCommunityCommentRewards } from '@/lib/community-rewards'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
@@ -96,7 +96,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const post = await prisma.post.findFirst({
     where: {
-      ...publicPostWhere,
+      ...publicPostWhere(),
       id: postId,
       isLocked: false,
       Board: { isActive: true },
@@ -173,7 +173,7 @@ export async function POST(request: Request, { params }: Params) {
     // being prepared cannot receive a new reply.
     const currentPost = await tx.post.findFirst({
       where: {
-        ...publicPostWhere,
+        ...publicPostWhere(),
         id: postId,
         isLocked: false,
         Board: { isActive: true },

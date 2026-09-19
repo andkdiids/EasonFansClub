@@ -35,6 +35,8 @@ const payload: PostDraftPayload = {
   richContent,
   imageUrls: ['https://cdn.example.com/post-image.png'],
   pendingSticker: { id: 'sticker-1', name: '表情', url: 'https://cdn.example.com/sticker.png', type: 'STATIC' },
+  topicNames: ['跨设备话题'],
+  expiryType: 'HOURS_24',
 }
 
 test('草稿 payload 保留富文本、图片、分区、引用歌曲和表情，并可跨本地缓存往返', () => {

@@ -402,6 +402,16 @@ test('制作模式、导出、移动端和错误提示均由工作台接线', ()
   assert.match(read('lib/studio/beads/image.ts'), /EMPTY_CELL/)
 })
 
+test('画笔改色使用独立的工作副本和历史快照，整次拖动可一次撤回', () => {
+  const editor = read('components/studio/StudioBeadsTool.tsx')
+  assert.match(editor, /const before = \[\.\.\.patternRef\.current\.cells\]/)
+  assert.match(editor, /gestureCellsRef\.current = \[\.\.\.before\]/)
+  assert.match(editor, /pointerRef\.current = \{ kind: 'draw', before, changed: false/)
+  assert.match(editor, /const patches = diffCells\(gesture\.before, patternRef\.current\.cells\)/)
+  assert.match(editor, /setHistory\(\(items\) => \[\.\.\.items, \{ patches, label: editorTool === 'eraser' \? '擦除图纸' : '绘制图纸' \}\]/)
+  assert.match(editor, /setRedoStack\(\[\]\)/)
+})
+
 test('拼豆首次使用引导只展示一次，并且不阻塞工作台', () => {
   const editor = read('components/studio/StudioBeadsTool.tsx')
   const onboarding = read('components/studio/BeadStudioOnboarding.tsx')

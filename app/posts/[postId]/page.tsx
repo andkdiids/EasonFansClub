@@ -24,7 +24,8 @@ import { formatDate } from '@/lib/format'
 import { publicContentImageMarkers } from '@/lib/content-images'
 import { publicModerationText } from '@/lib/content-moderation'
 import { isSupabaseStorageUrl, profileImageUrl, publicImageUrl } from '@/lib/images'
-import { getPostModerationAccess, isPublicPostModerationStatus, publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere as publicPostWhere, getPostModerationAccess, isPublicPostModerationStatus } from '@/lib/post-moderation'
+import { isPostExpired, formatPostExpiry } from '@/lib/post-lifecycle'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
 import { isRetryableDatabaseConnectionError } from '@/lib/db-timeout'
@@ -58,6 +59,7 @@ const postMetadataSelect = {
   content: true,
   richContent: true,
   moderationStatus: true,
+  expiresAt: true,
   PostMedia: {
     where: { type: 'IMAGE' as const },
     orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }, { id: 'asc' as const }],
@@ -79,7 +81,7 @@ export async function generateMetadata({ params }: Readonly<{ params: Promise<{ 
     const post = await prisma.post.findFirst({
       where: {
         id: postId,
-        ...publicPostWhere,
+        ...publicPostWhere(),
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       },
       select: postMetadataSelect,
@@ -138,11 +140,17 @@ function PostLoadFallback({ postId, databaseUnavailable, returnTo }: Readonly<{ 
   )
 }
 
-function PostUnavailableFallback({ reason, returnTo }: Readonly<{ reason: 'POST' | 'AUTHOR'; returnTo?: string | null }>) {
-  const title = reason === 'POST' ? '该帖子已被删除或无法查看' : '该帖子作者资料暂时无法查看'
+function PostUnavailableFallback({ reason, returnTo }: Readonly<{ reason: 'POST' | 'AUTHOR' | 'EXPIRED'; returnTo?: string | null }>) {
+  const title = reason === 'POST'
+    ? '该帖子已被删除或无法查看'
+    : reason === 'EXPIRED'
+      ? '这条限时内容已经消失啦'
+      : '该帖子作者资料暂时无法查看'
   const description = reason === 'POST'
     ? '帖子可能已被删除、撤回或尚未公开。'
-    : '作者账号或公开资料当前不可用。'
+    : reason === 'EXPIRED'
+      ? '该内容已到期，作者仍可在自己的归档中查看。'
+      : '作者账号或公开资料当前不可用。'
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
@@ -227,6 +235,8 @@ const postCoreSelect = {
   favoriteCount: true,
   status: true,
   moderationStatus: true,
+  expiryType: true,
+  expiresAt: true,
   rejectionReason: true,
   stickerId: true,
 } satisfies Prisma.PostSelect
@@ -362,6 +372,7 @@ type PostDetailSupport = {
   media: PostMedia[]
   authorLoadFailed: boolean
   authorMissing: boolean
+  topics: Array<{ id: string; name: string }>
 }
 
 function fallbackPostAuthor(authorId: string): PostAuthor {
@@ -381,7 +392,7 @@ function fallbackPostAuthor(authorId: string): PostAuthor {
 }
 
 async function loadPostSupport(post: PostCore, userId?: string | null): Promise<PostDetailSupport> {
-  const [authorResult, boardResult, stickerResult, mediaResult, likesResult, favoriteResult] = await Promise.allSettled([
+  const [authorResult, boardResult, stickerResult, mediaResult, likesResult, favoriteResult, topicsResult] = await Promise.allSettled([
     readPostDetailQuery(post.id, 'author.findUnique', () => prisma.user.findUnique({ where: { id: post.authorId }, select: postAuthorSelect })),
     readPostDetailQuery(post.id, 'board.findUnique', () => prisma.board.findUnique({ where: { id: post.boardId }, select: postBoardSelect })),
     post.stickerId
@@ -404,6 +415,7 @@ async function loadPostSupport(post: PostCore, userId?: string | null): Promise<
           select: { id: true },
         }), 'support', userId)
       : Promise.resolve(null),
+    readPostDetailQuery(post.id, 'postTopic.findMany', () => prisma.postTopic.findMany({ where: { postId: post.id }, orderBy: { createdAt: 'asc' }, select: { Topic: { select: { id: true, name: true } } } })),
   ])
 
   const author = authorResult.status === 'fulfilled' ? authorResult.value : null
@@ -416,6 +428,7 @@ async function loadPostSupport(post: PostCore, userId?: string | null): Promise<
     media: mediaResult.status === 'fulfilled' ? mediaResult.value : [],
     authorLoadFailed: authorResult.status === 'rejected',
     authorMissing: authorResult.status === 'fulfilled' && authorResult.value === null,
+    topics: topicsResult.status === 'fulfilled' ? topicsResult.value.map((row) => row.Topic) : [],
   }
 }
 
@@ -784,6 +797,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   if (postCore.isDeleted || postCore.status !== 'PUBLISHED') {
     return <PostUnavailableFallback reason="POST" returnTo={returnTo} />
   }
+  if (!viewerIsAdmin && !viewerIsAuthor && isPostExpired(postCore.expiresAt)) {
+    return <PostUnavailableFallback reason="EXPIRED" returnTo={returnTo} />
+  }
 
   // 审核状态处理：用户可能通过通知/收藏/历史链接进入未审核帖子。
   // 非管理员访问 PENDING/REJECTED 帖子时显示审核提示页，而非暴露正文；
@@ -804,9 +820,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     sticker: support.sticker,
     Like: support.likes,
     PostMedia: support.media,
+    PostTopic: support.topics,
   }
   const authorLoadFailed = support.authorLoadFailed
-  const canInteractWithPost = isPublicPostModerationStatus(post.moderationStatus)
+  const canInteractWithPost = isPublicPostModerationStatus(post.moderationStatus) && !isPostExpired(post.expiresAt)
 
   if (!authorLoadFailed && (support.authorMissing || post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile)) {
     console.warn('[post:detail:unavailable]', {
@@ -1177,7 +1194,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             <IpRegionLabel ipRegion={post.ipRegion} />
             {canInteractWithPost ? <PostViewCounter postId={post.id} initialCount={post.viewCount} /> : null}
             <span>回复 {post.replyCount}</span>
+            {post.expiresAt && !isPostExpired(post.expiresAt) ? <span className="text-amber-700">限时 · {formatPostExpiry(post.expiresAt)}</span> : null}
           </div>
+          {post.PostTopic.length ? <nav aria-label="帖子话题" className="mt-4 flex flex-wrap gap-3 text-sm font-black">{post.PostTopic.map((topic) => <Link key={topic.id} href={`/topics/${encodeURIComponent(topic.id)}`} className="text-brand-700 underline underline-offset-2">#{topic.name}</Link>)}</nav> : null}
           <RichPostContent
             richContent={renderedRichContent}
             fallbackContent={publicPostContentSource}
@@ -1185,6 +1204,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             musicReferences={musicReferences}
             enableSongPlayback
             scopeKey={post.id}
+            topics={post.PostTopic}
           />
           {post.sticker?.url ? (
             <div className="mt-6 post-detail-sticker">

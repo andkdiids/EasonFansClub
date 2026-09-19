@@ -117,6 +117,7 @@ export async function saveLocalStudioProject(project: StudioLocalProject) {
     description: project.description,
     version: project.version,
     thumbnailUrl: project.thumbnailUrl,
+    physicalCoverImage: project.physicalCoverImage,
     visibility: project.visibility,
     reviewStatus: project.reviewStatus,
     createdAt: project.createdAt,

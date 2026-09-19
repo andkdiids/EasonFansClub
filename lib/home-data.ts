@@ -22,6 +22,9 @@ import { htmlToPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
 import { salonPublicBaseWhere, type SalonCategoryValue } from '@/lib/salon'
 import { getHomeActivityStatusLabel, sortHomeActivities } from '@/lib/home-activity'
+import type { Prisma } from '@prisma/client'
+import { buildPublicPostWhere } from '@/lib/post-moderation'
+import { isPostExpired } from '@/lib/post-lifecycle'
 
 export const homeCacheHeaders = {
   'Cache-Control': 'public, max-age=20, s-maxage=60, stale-while-revalidate=120',
@@ -64,22 +67,23 @@ export async function getHomePosts(userId?: string) {
   // Only the public post projection and public author badge are cached. The
   // current user's Like relation is deliberately queried after the cache.
   const posts = await getCachedHomePostsWithFallback()
-  if (!userId || posts.length === 0) return posts.map((post) => ({ ...post, likedByMe: false }))
+  const visiblePosts = posts.filter((post) => !isPostExpired(post.expiresAt))
+  if (!userId || visiblePosts.length === 0) return visiblePosts.map((post) => ({ ...post, likedByMe: false }))
   const liked = await prisma.like.findMany({
-    where: { userId, postId: { in: posts.map((post) => post.id) } },
+    where: { userId, postId: { in: visiblePosts.map((post) => post.id) } },
     select: { postId: true },
   })
   const likedIds = new Set(liked.map((item) => item.postId))
-  return posts.map((post) => ({ ...post, likedByMe: likedIds.has(post.id) }))
+  return visiblePosts.map((post) => ({ ...post, likedByMe: likedIds.has(post.id) }))
 }
 
 async function queryHomePosts() {
-  const baseWhere = {
-    isDeleted: false,
-    status: 'PUBLISHED' as const,
-    moderationStatus: { in: publicPostModerationStatuses },
-    OR: [{ isFeatured: true }, { isPinned: true }],
-    User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
+  const baseWhere: Prisma.PostWhereInput = {
+    AND: [
+      buildPublicPostWhere(),
+      { moderationStatus: { in: publicPostModerationStatuses }, OR: [{ isFeatured: true }, { isPinned: true }] },
+      { User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } },
+    ],
   }
   const select = {
     id: true,
@@ -93,6 +97,7 @@ async function queryHomePosts() {
     isPinned: true,
     isFeatured: true,
     createdAt: true,
+    expiresAt: true,
     Board: { select: { name: true, slug: true } },
     User: {
       select: {

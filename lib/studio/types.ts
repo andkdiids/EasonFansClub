@@ -16,6 +16,8 @@ export type StudioProjectSummary = {
   description?: string | null
   version: number
   thumbnailUrl?: string | null
+  /** Optional finished-work photo; kept outside StudioProjectData/grid JSON. */
+  physicalCoverImage?: string | null
   likeCount?: number
   favoriteCount?: number
   viewCount?: number

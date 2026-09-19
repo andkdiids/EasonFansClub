@@ -1,8 +1,9 @@
-import type { Prisma } from '@prisma/client'
+import type { Prisma, PharmacyCampaignStatus } from '@prisma/client'
 import { getShanghaiDayRange } from '@/lib/checkin'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
+import { effectivePharmacyCampaignStatus } from '@/lib/pharmacy'
 
 export const USER_OPERATION_CATEGORIES = [
   'ALL',
@@ -82,26 +83,30 @@ export type UserOperationPagination = {
   hasMore: boolean
 }
 
-export type UserOperationAngelGiftTheme = {
-  id: string
-  title: string
+export type UserOperationAngelGiftCampaign = {
+  campaignId: string
+  campaignName: string
+  status: string
+  startsAt: string | null
+  endsAt: string | null
   drawCount: number
+  firstDrawAt: string | null
+  lastDrawAt: string | null
+  duplicateRecycleCount: number
 }
 
 export type UserOperationAngelGiftSummary = {
-  totalDrawCount: number
-  themeCount: number
+  campaignCount: number
   totalCost: number
-  firstDrawAt: string | null
-  lastDrawAt: string | null
   totalRecordCount: number
-  combineCount: number
-  selectedThemeId: string | null
-  themes: UserOperationAngelGiftTheme[]
+  selectedCampaignId: string | null
+  campaigns: UserOperationAngelGiftCampaign[]
+  /** All participating campaigns, retained for the campaign filter options. */
+  campaignOptions: UserOperationAngelGiftCampaign[]
 }
 
-function emptyAngelGiftSummary(selectedThemeId: string | null = null): UserOperationAngelGiftSummary {
-  return { totalDrawCount: 0, themeCount: 0, totalCost: 0, firstDrawAt: null, lastDrawAt: null, totalRecordCount: 0, combineCount: 0, selectedThemeId, themes: [] }
+function emptyAngelGiftSummary(selectedCampaignId: string | null = null): UserOperationAngelGiftSummary {
+  return { campaignCount: 0, totalCost: 0, totalRecordCount: 0, selectedCampaignId, campaigns: [], campaignOptions: [] }
 }
 
 export type UserOperationRiskUser = {
@@ -244,7 +249,7 @@ type OperationLoadOptions = OperationScope & {
   to: Date
   category: UserOperationCategory
   take: number
-  themeId?: string | null
+  campaignId?: string | null
 }
 
 function operator(type: string, userId: string | null = null, row?: { uid?: number | null; nickname?: string | null } | null): UserOperationOperator {
@@ -514,11 +519,11 @@ const angelGiftRecycleSelect = {
   PointLogs: { select: angelGiftPointLogSelect },
 } as const
 
-function angelGiftDrawWhere(options: OperationLoadOptions, includeTheme = true): Prisma.PharmacyDrawWhereInput {
+function angelGiftDrawWhere(options: OperationLoadOptions, includeCampaign = true): Prisma.PharmacyDrawWhereInput {
   return {
     ...scopeFor('userId', options),
     drawAt: dateRange(options.from, options.to),
-    ...(includeTheme && options.themeId ? { campaignId: options.themeId } : {}),
+    ...(includeCampaign && options.campaignId ? { campaignId: options.campaignId } : {}),
   }
 }
 
@@ -526,7 +531,7 @@ function angelGiftRecycleWhere(options: OperationLoadOptions): Prisma.PharmacyRe
   return {
     ...scopeFor('userId', options),
     createdAt: dateRange(options.from, options.to),
-    ...(options.themeId ? { campaignId: options.themeId } : {}),
+    ...(options.campaignId ? { campaignId: options.campaignId } : {}),
   }
 }
 
@@ -636,44 +641,114 @@ async function loadAngelGiftEvents(options: OperationLoadOptions) {
   return [...drawEvents, ...combineEvents]
 }
 
+export type AngelGiftCampaignDrawAggregate = {
+  campaignId: string
+  drawCount: number
+  drawCostTotal: number
+  firstDrawAt: Date | null
+  lastDrawAt: Date | null
+}
+
+export type AngelGiftCampaignRecycleAggregate = {
+  campaignId: string
+  duplicateRecycleCount: number
+}
+
+export type AngelGiftCampaignMetadata = {
+  id: string
+  title: string
+  status: PharmacyCampaignStatus
+  startsAt: Date | null
+  endsAt: Date | null
+}
+
+/**
+ * Turn database aggregates into the per-campaign activity records shown to
+ * administrators. The grouping key is deliberately campaignId; names are
+ * metadata only and never participate in grouping or sorting.
+ */
+export function aggregateAngelGiftCampaignStats(input: {
+  draws: readonly AngelGiftCampaignDrawAggregate[]
+  recycles: readonly AngelGiftCampaignRecycleAggregate[]
+  campaigns: readonly AngelGiftCampaignMetadata[]
+  now: Date
+}): UserOperationAngelGiftCampaign[] {
+  const metadataById = new Map(input.campaigns.map((campaign) => [campaign.id, campaign]))
+  const duplicateCountById = new Map(input.recycles.map((row) => [row.campaignId, row.duplicateRecycleCount]))
+
+  return input.draws
+    .map((row) => {
+      const campaign = metadataById.get(row.campaignId)
+      return {
+        campaignId: row.campaignId,
+        campaignName: campaign?.title.trim() || '未知主题',
+        status: campaign ? effectivePharmacyCampaignStatus(campaign, input.now) : 'UNKNOWN',
+        startsAt: campaign?.startsAt?.toISOString() || null,
+        endsAt: campaign?.endsAt?.toISOString() || null,
+        drawCount: row.drawCount,
+        firstDrawAt: row.firstDrawAt?.toISOString() || null,
+        lastDrawAt: row.lastDrawAt?.toISOString() || null,
+        duplicateRecycleCount: duplicateCountById.get(row.campaignId) || 0,
+      }
+    })
+    .sort((left, right) => {
+      const leftTime = left.lastDrawAt ? new Date(left.lastDrawAt).getTime() : Number.NEGATIVE_INFINITY
+      const rightTime = right.lastDrawAt ? new Date(right.lastDrawAt).getTime() : Number.NEGATIVE_INFINITY
+      return rightTime - leftTime || left.campaignId.localeCompare(right.campaignId)
+    })
+}
+
 async function getAngelGiftSummary(options: OperationLoadOptions): Promise<UserOperationAngelGiftSummary> {
   const allDrawWhere = angelGiftDrawWhere(options, false)
-  const filteredDrawWhere = angelGiftDrawWhere(options)
   const recycleWhere = angelGiftRecycleWhere(options)
-  const [drawCount, costAggregate, themeGroups, firstDraw, lastDraw, combineCount] = await Promise.all([
-    safeQuery('angel-gift-summary-count', prisma.pharmacyDraw.count({ where: filteredDrawWhere }), 0),
-    safeQuery('angel-gift-summary-cost', prisma.pharmacyDraw.aggregate({ where: filteredDrawWhere, _sum: { drawCost: true } }), { _sum: { drawCost: null } }),
-    safeQuery('angel-gift-theme-groups', prisma.pharmacyDraw.groupBy({ by: ['campaignId'], where: allDrawWhere, _count: { _all: true } }), []),
-    safeQuery('angel-gift-first-draw', prisma.pharmacyDraw.findFirst({ where: filteredDrawWhere, orderBy: [{ drawAt: 'asc' }, { id: 'asc' }], select: { drawAt: true } }), null),
-    safeQuery('angel-gift-last-draw', prisma.pharmacyDraw.findFirst({ where: filteredDrawWhere, orderBy: [{ drawAt: 'desc' }, { id: 'desc' }], select: { drawAt: true } }), null),
-    safeQuery('angel-gift-summary-combines', prisma.pharmacyRecycleLog.count({ where: recycleWhere }), 0),
+  const [drawGroups, recycleGroups] = await Promise.all([
+    safeQuery('angel-gift-campaign-draw-groups', prisma.pharmacyDraw.groupBy({
+      by: ['campaignId'],
+      where: allDrawWhere,
+      _count: { _all: true },
+      _sum: { drawCost: true },
+      _min: { drawAt: true },
+      _max: { drawAt: true },
+    }), []),
+    safeQuery('angel-gift-campaign-recycle-groups', prisma.pharmacyRecycleLog.groupBy({
+      by: ['campaignId'],
+      where: recycleWhere,
+      _count: { _all: true },
+    }), []),
   ])
 
-  const themeIds = themeGroups.map((row) => row.campaignId)
-  const titleRows = themeIds.length
-    ? await safeQuery('angel-gift-theme-titles', prisma.pharmacyDraw.findMany({
-      where: { ...allDrawWhere, campaignId: { in: themeIds } },
-      orderBy: [{ drawAt: 'desc' }, { id: 'desc' }],
-      distinct: ['campaignId'],
-      select: { campaignId: true, campaignTitle: true },
+  const campaignIds = drawGroups.map((row) => row.campaignId)
+  const campaignRows = campaignIds.length
+    ? await safeQuery('angel-gift-campaign-metadata', prisma.pharmacyCampaign.findMany({
+      where: { id: { in: campaignIds } },
+      select: { id: true, title: true, status: true, startsAt: true, endsAt: true },
     }), [])
     : []
-  const titleById = new Map(titleRows.map((row) => [row.campaignId, row.campaignTitle.trim() || '未知主题']))
-  const orderById = new Map(titleRows.map((row, index) => [row.campaignId, index]))
-  const themes = themeGroups
-    .map((row) => ({ id: row.campaignId, title: titleById.get(row.campaignId) || '未知主题', drawCount: row._count._all }))
-    .sort((left, right) => (orderById.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (orderById.get(right.id) ?? Number.MAX_SAFE_INTEGER) || left.title.localeCompare(right.title, 'zh-CN'))
+  const drawAggregates: AngelGiftCampaignDrawAggregate[] = drawGroups.map((row) => ({
+    campaignId: row.campaignId,
+    drawCount: row._count._all,
+    drawCostTotal: row._sum.drawCost || 0,
+    firstDrawAt: row._min.drawAt,
+    lastDrawAt: row._max.drawAt,
+  }))
+  const recycleAggregates: AngelGiftCampaignRecycleAggregate[] = recycleGroups.map((row) => ({
+    campaignId: row.campaignId,
+    duplicateRecycleCount: row._count._all,
+  }))
+  const campaignStats = aggregateAngelGiftCampaignStats({ draws: drawAggregates, recycles: recycleAggregates, campaigns: campaignRows, now: options.to })
+  const campaigns = options.campaignId ? campaignStats.filter((campaign) => campaign.campaignId === options.campaignId) : campaignStats
+  const selectedCampaignIds = new Set(campaigns.map((campaign) => campaign.campaignId))
+  const selectedDrawCount = drawAggregates.filter((row) => selectedCampaignIds.has(row.campaignId)).reduce((total, row) => total + row.drawCount, 0)
+  const selectedRecycleCount = recycleAggregates.filter((row) => !options.campaignId || row.campaignId === options.campaignId).reduce((total, row) => total + row.duplicateRecycleCount, 0)
+  const totalCost = drawAggregates.filter((row) => selectedCampaignIds.has(row.campaignId)).reduce((total, row) => total + row.drawCostTotal, 0)
 
   return {
-    totalDrawCount: drawCount,
-    themeCount: options.themeId ? (drawCount || combineCount ? 1 : 0) : themes.length,
-    totalCost: costAggregate._sum.drawCost || 0,
-    firstDrawAt: firstDraw?.drawAt.toISOString() || null,
-    lastDrawAt: lastDraw?.drawAt.toISOString() || null,
-    totalRecordCount: drawCount + combineCount,
-    combineCount,
-    selectedThemeId: options.themeId || null,
-    themes,
+    campaignCount: campaigns.length,
+    totalCost,
+    totalRecordCount: selectedDrawCount + selectedRecycleCount,
+    selectedCampaignId: options.campaignId || null,
+    campaigns,
+    campaignOptions: campaignStats,
   }
 }
 
@@ -1042,7 +1117,7 @@ function paginateEvents(events: UserOperationEvent[], page: number, pageSize: nu
 export async function getTodayUserOperations(input: {
   query?: string
   category?: UserOperationCategory
-  themeId?: string | null
+  campaignId?: string | null
   page?: number
   pageSize?: number
   now?: Date
@@ -1060,11 +1135,11 @@ export async function getTodayUserOperations(input: {
         events: [],
         pagination: { page, pageSize, total: 0, totalPages: 1, hasMore: false } satisfies UserOperationPagination,
         dateKey: getShanghaiDayRange(now).dateKey,
-        ...(category === 'ANGEL_GIFT' ? { angelGift: emptyAngelGiftSummary(input.themeId || null) } : {}),
+        ...(category === 'ANGEL_GIFT' ? { angelGift: emptyAngelGiftSummary(input.campaignId || null) } : {}),
       }
     }
   }
-  const options = { from: start, to: now, category, userIds, themeId: input.themeId || null, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) }
+  const options = { from: start, to: now, category, userIds, campaignId: input.campaignId || null, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) }
   const [loaded, angelGift] = await Promise.all([
     loadOperationEvents(options),
     category === 'ANGEL_GIFT' ? getAngelGiftSummary(options) : Promise.resolve(null),
@@ -1076,7 +1151,7 @@ export async function getTodayUserOperations(input: {
 export async function getUserOperationTimeline(input: {
   userId: string
   category?: UserOperationCategory
-  themeId?: string | null
+  campaignId?: string | null
   days?: number
   page?: number
   pageSize?: number
@@ -1090,7 +1165,7 @@ export async function getUserOperationTimeline(input: {
   const days = Math.min(365, Math.max(1, normalizePage(input.days, 30, 365)))
   const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
   const category = input.category || 'ALL'
-  const options = { from, to: now, category, userId: input.userId, themeId: input.themeId || null, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) }
+  const options = { from, to: now, category, userId: input.userId, campaignId: input.campaignId || null, take: Math.min(SOURCE_MAX_TAKE, page * pageSize + 1) }
   const [loaded, angelGift] = await Promise.all([
     loadOperationEvents(options),
     category === 'ANGEL_GIFT' ? getAngelGiftSummary(options) : Promise.resolve(null),

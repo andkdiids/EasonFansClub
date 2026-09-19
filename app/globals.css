@@ -207,6 +207,239 @@
   .want-listen-pause-card dl { gap:6px; }
 }
 
+/* Profile-background likes are deliberately scoped to the profile hero and
+   its portal dialog so they cannot restyle existing post/message like UI. */
+.profile-background-like-slot {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 12px;
+  max-width: min(260px, calc(100% - 24px));
+}
+.profile-background-like-wrap {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.58);
+  border-radius: 999px;
+  background: rgba(15,23,42,.62);
+  box-shadow: 0 8px 22px rgba(15,23,42,.2);
+  color: #fff;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.profile-background-like-heart,
+.profile-background-like-count {
+  display: inline-grid;
+  min-height: 38px;
+  place-items: center;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-weight: 900;
+  transition: color .16s ease, background-color .16s ease, transform .16s ease;
+}
+.profile-background-like-heart {
+  min-width: 38px;
+  padding: 0 0 1px 2px;
+  font-size: 23px;
+  line-height: 1;
+}
+.profile-background-like-heart:not(.is-readonly):not(:disabled):hover {
+  transform: scale(1.08);
+  background: rgba(255,255,255,.1);
+}
+.profile-background-like-heart.is-liked,
+.profile-background-like-heart.is-readonly {
+  color: #fb7185;
+}
+.profile-background-like-heart:disabled {
+  cursor: wait;
+  opacity: .7;
+}
+.profile-background-like-count {
+  min-width: 34px;
+  padding: 0 12px 0 7px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.profile-background-like-count:hover,
+.profile-background-like-count:focus-visible {
+  background: rgba(255,255,255,.12);
+}
+.profile-background-like-busy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.profile-background-like-message {
+  margin-top: 6px;
+  border-radius: 10px;
+  background: rgba(127,29,29,.9);
+  padding: 7px 10px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+  box-shadow: 0 8px 22px rgba(15,23,42,.24);
+}
+.profile-background-likers-layer {
+  position: fixed;
+  z-index: 180;
+  inset: 0;
+  display: grid;
+  align-items: end;
+  justify-items: center;
+  background: rgba(15,23,42,.56);
+  padding: 0;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.profile-background-likers-dialog {
+  display: flex;
+  width: min(100%, 520px);
+  max-height: min(78dvh, 680px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 22px 22px 0 0;
+  background: var(--surface-elevated, var(--surface));
+  color: var(--foreground);
+  box-shadow: 0 -18px 60px rgba(15,23,42,.28);
+}
+.profile-background-likers-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding: 18px 18px 15px;
+}
+.profile-background-likers-kicker {
+  margin: 0 0 3px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .17em;
+}
+.profile-background-likers-header h2 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 900;
+}
+.profile-background-likers-close {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--foreground);
+  font-size: 23px;
+  line-height: 1;
+}
+.profile-background-likers-body {
+  min-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 5px 14px max(18px, env(safe-area-inset-bottom));
+}
+.profile-background-liker-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--border);
+  padding: 11px 2px;
+}
+.profile-background-liker-avatar {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--primary);
+  font-weight: 900;
+}
+.profile-background-liker-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profile-background-liker-row p {
+  margin: 3px 0 0;
+  color: var(--foreground-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.profile-background-liker-open {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 900;
+  text-decoration: none;
+}
+.profile-background-likers-empty,
+.profile-background-likers-loading,
+.profile-background-likers-error {
+  margin: 0;
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--foreground-muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+.profile-background-likers-error {
+  color: var(--danger, #dc2626);
+}
+.profile-background-likers-more {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 900;
+}
+@media (min-width: 640px) {
+  .profile-background-like-slot {
+    top: auto;
+    right: 18px;
+    bottom: 18px;
+  }
+  .profile-background-likers-layer {
+    align-items: center;
+    padding: 24px;
+  }
+  .profile-background-likers-dialog {
+    border-radius: 22px;
+    box-shadow: 0 22px 70px rgba(15,23,42,.3);
+  }
+}
+:root[data-theme='midnight'] .profile-background-like-wrap {
+  border-color: rgba(255,255,255,.25);
+  background: rgba(2,6,23,.72);
+}
+:root[data-theme='midnight'] .profile-background-likers-dialog {
+  background: var(--surface-elevated);
+}
+
 /* 卧底巨星：沿用娱乐天空的直角信息布局，并把动态对局的安全区域与深色主题集中在本页。 */
 .undercover-star-page { --undercover-bg:var(--background); --undercover-surface:var(--surface); --undercover-surface-subtle:var(--surface-subtle); --undercover-surface-elevated:var(--surface-elevated); --undercover-text:var(--foreground); --undercover-muted:var(--foreground-muted); --undercover-border:var(--border); --undercover-border-strong:var(--border-strong); --undercover-primary:var(--primary); --undercover-primary-foreground:var(--primary-foreground); color:var(--undercover-text); background:transparent; }
 .undercover-star-page .bg-white { background:var(--undercover-surface); }
@@ -1972,6 +2205,11 @@ flex-direction:column;
   scrollbar-width:none;
   -webkit-overflow-scrolling:touch;
 }
+.profile-background-layer { position:absolute; inset:0; z-index:0; overflow:hidden; pointer-events:none; }
+.profile-background-image { display:block; width:100%; height:100%; max-width:none; object-fit:cover; }
+.profile-background-layer-mobile { display:block; }
+.profile-background-layer-desktop { display:none; }
+
 .profile-actions-scroll::-webkit-scrollbar { display:none; }
 .profile-actions-scroll > div > * { flex:0 0 auto; }
 .profile-actions-row > .profile-actions-groups { flex:1 1 auto; min-width:0; }
@@ -1979,12 +2217,16 @@ flex-direction:column;
 @media (max-width:767px) {
   .profile-archive-title { font-size:1rem; }
   .profile-hero-background {
-    height:auto !important;
+    height:max(210px,calc((100vw - 32px) * 7 / 12)) !important;
     min-height:210px;
-    aspect-ratio:auto !important;
+    aspect-ratio:12 / 7 !important;
     padding-bottom:.75rem !important;
-    background-position:center 45% !important;
   }
+}
+
+@media (min-width:768px) {
+  .profile-background-layer-mobile { display:none; }
+  .profile-background-layer-desktop { display:block; }
 }
 
 @media (min-width: 768px) {
@@ -8925,6 +9167,48 @@ textarea.admin-form-input { min-height:84px; resize:vertical; }
 }
 .growth-fee-history-trigger:hover {
   color:var(--foreground);
+}
+.growth-balance,
+.growth-today-earned,
+.growth-fee-history-trigger {
+  white-space:nowrap;
+}
+.growth-balance {
+  flex:1 1 auto;
+}
+.growth-today-earned {
+  display:flex;
+  min-width:0;
+  flex:0 1 auto;
+  align-items:baseline;
+  gap:4px;
+  color:var(--foreground-muted);
+  font-size:11px;
+  font-weight:850;
+}
+.growth-today-earned strong {
+  color:var(--foreground);
+  font-size:13px;
+  font-weight:950;
+}
+@media (max-width: 360px) {
+  .growth-asset-row {
+    gap:6px;
+  }
+  .growth-balance,
+  .growth-today-earned,
+  .growth-fee-history-trigger {
+    font-size:10px;
+  }
+  .growth-balance strong {
+    font-size:14px;
+  }
+  .growth-today-earned {
+    gap:3px;
+  }
+  .growth-today-earned strong {
+    font-size:12px;
+  }
 }
 .growth-fee-history-backdrop {
   position:fixed;

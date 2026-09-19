@@ -6,6 +6,7 @@ import { LikeButton } from '@/components/PostActions'
 import { getForumDiscoveryCoverFit, type ForumDiscoveryPost } from '@/lib/forum-discovery'
 import { postDetailHref } from '@/lib/post-navigation'
 import { UserDisplayName } from '@/components/UserDisplayName'
+import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
 
 function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost; priority: boolean }>) {
   const [fit, setFit] = useState<'cover' | 'contain'>(getForumDiscoveryCoverFit(post.cover?.width, post.cover?.height))
@@ -53,6 +54,7 @@ export function ForumDiscoveryCard({ post, priority = false, returnTo = null, on
             {post.isPinned ? <span>置顶</span> : null}
             {post.isFeatured ? <span>精华</span> : null}
             {post.board.name ? <span>{post.board.name}</span> : null}
+            {post.expiresAt && !isPostExpired(post.expiresAt) ? <span>限时 · {formatPostExpiry(post.expiresAt)}</span> : null}
           </div>
           <h2>{post.title}</h2>
         </div>

@@ -11,7 +11,7 @@ import { buildPublicMediaUrl } from '@/lib/media-url'
 import { buildSalonFeedWhere, formatSalonSession, getSalonPostDisplayTitle, SALON_CATEGORY_CONFIG } from '@/lib/salon'
 import { validateRichPostContent } from '@/lib/rich-text'
 import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
-import { publicPostWhere } from '@/lib/post-moderation'
+import { buildPublicPostWhere } from '@/lib/post-moderation'
 import { firstShareCardImageCandidate, shareCardImageCandidates, createActivityShareCardDescription, createPostShareDescription, createPostShareTitle, postContentPlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl, SHARE_CARD_CANONICAL_ORIGIN, SHARE_CARD_MIME_TYPE, SHARE_CARD_WIDTH, type ShareCardData } from '@/lib/share-card'
 import { calculateShareCardLayout } from '@/lib/share-card-layout'
@@ -120,6 +120,7 @@ const studioShareCardSelect = {
   toolSlug: true,
   data: true,
   thumbnailUrl: true,
+  physicalCoverImage: true,
   createdAt: true,
   updatedAt: true,
   User: {
@@ -173,7 +174,7 @@ export async function loadPostShareCardData(postId: string): Promise<ShareCardDa
   const post = await prisma.post.findFirst({
     where: {
       id: postId,
-      ...publicPostWhere,
+      ...buildPublicPostWhere(),
       User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
     },
     select: postShareCardSelect,
@@ -293,7 +294,7 @@ export async function loadStudioShareCardData(projectId: string): Promise<ShareC
   if (!tool) return null
   const metadata = studioProjectMetadata(project.data)
   const dimensions = metadata.width && metadata.height ? `${metadata.width} × ${metadata.height}` : '自定义尺寸图纸'
-  const image = publicImageUrl(project.thumbnailUrl)
+  const image = publicImageUrl(project.physicalCoverImage) || publicImageUrl(project.thumbnailUrl)
   const author = project.User.status === 'ACTIVE' && !project.User.isDeleted ? project.User.nickname : '私家E院'
   return {
     type: 'studio',
