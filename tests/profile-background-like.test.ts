@@ -17,6 +17,7 @@ const service = read('lib/profile-background-likes.ts')
 const route = read('app/api/users/[userId]/profile-background-like/route.ts')
 const listRoute = read('app/api/users/[userId]/profile-background-like/likers/route.ts')
 const control = read('components/ProfileBackgroundLikeControl.tsx')
+const css = read('app/globals.css')
 const surface = read('components/ProfilePageSurface.tsx')
 const notificationWrite = read('lib/notification-write.ts')
 const notifications = read('lib/notifications.ts')
@@ -48,6 +49,20 @@ test('self-like and missing-background likes are rejected on the server', () => 
   assert.match(service, /PROFILE_BACKGROUND_REQUIRED/u)
   assert.match(surface, /backgroundLikeControl=\{profile\.backgroundUrl \? \(/u)
   assert.match(control, /canToggle = hasViewer && canInteract && !isSelf/u)
+})
+
+test('background like control stays light, white, and anchored to the bottom right', () => {
+  const slot = css.slice(css.indexOf('.profile-background-like-slot {'), css.indexOf('.profile-background-like-wrap {'))
+  const visual = css.slice(css.indexOf('.profile-background-like-wrap {'), css.indexOf('.profile-background-like-message {'))
+  assert.doesNotMatch(slot, /top:/u)
+  assert.match(slot, /right: 12px;[\s\S]*bottom: 12px;/u)
+  assert.match(css, /@media \(min-width: 640px\) \{[\s\S]*\.profile-background-like-slot \{[\s\S]*right: 16px;[\s\S]*bottom: 16px;/u)
+  assert.match(visual, /background: rgba\(0,0,0,\.36\)/u)
+  assert.match(visual, /border: 1px solid rgba\(255,255,255,\.26\)/u)
+  assert.match(visual, /min-height: 44px/u)
+  assert.match(css, /\.profile-background-like-heart\.is-liked,[\s\S]*color: #fff;/u)
+  assert.doesNotMatch(visual, /#fb7185|#ef4444|#f43f5e|#e11d48|#ec4899/u)
+  assert.match(control, /\{liked \? '♥' : '♡'\}/u)
 })
 
 test('daily quota is ten distinct owners and a previously counted owner can be reliked', () => {

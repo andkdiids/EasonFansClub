@@ -499,6 +499,7 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
       let cursor: string | undefined
       let granted = 0
       let scanned = 0
+      let failedCount = 0
       let done = false
       do {
         const response = await fetch(`/api/admin/badges/${badge.id}/backfill`, {
@@ -506,14 +507,16 @@ export function BadgeAdminManager({ initialBadges }: { initialBadges: AdminBadge
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cursor, batchSize: 200 }),
         })
-        const data = await response.json().catch(() => null) as { summary?: { granted: number; scanned: number; nextCursor: string | null; done: boolean }; message?: string } | null
+        const data = await response.json().catch(() => null) as { summary?: { granted: number; scanned: number; failed: number; nextCursor: string | null; done: boolean }; message?: string } | null
         if (!response.ok || !data?.summary) throw new Error(data?.message || '自动补发失败')
         granted += data.summary.granted
         scanned += data.summary.scanned
+        failedCount += data.summary.failed
         cursor = data.summary.nextCursor || undefined
         done = data.summary.done
       } while (!done)
-      notify(`已完成「${badge.name}」自动补发：扫描 ${scanned} 人，新增 ${granted} 枚`)
+      if (failedCount > 0) fail(`「${badge.name}」扫描完成：扫描 ${scanned} 人，新增 ${granted} 枚，失败 ${failedCount} 人；请查看补发审计记录。`)
+      else notify(`已完成「${badge.name}」自动补发：扫描 ${scanned} 人，新增 ${granted} 枚`)
       await reload()
     } catch (backfillError) { fail(backfillError instanceof Error ? backfillError.message : '自动补发失败') } finally { setBusy(false) }
   }

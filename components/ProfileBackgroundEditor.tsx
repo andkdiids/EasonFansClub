@@ -2,11 +2,14 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent } from 'react'
 import {
+  constrainProfileBackgroundTransform,
   DEFAULT_PROFILE_BACKGROUND_TRANSFORM,
+  getProfileBackgroundConstraints,
   normalizeProfileBackgroundTransform,
   profileBackgroundTransformStyle,
   updateProfileBackgroundTransformForDrag,
   type ProfileBackgroundDevice,
+  type ProfileBackgroundGeometry,
   type ProfileBackgroundTransform,
 } from '@/lib/profile-background'
 
@@ -74,7 +77,9 @@ export function ProfileBackgroundEditor({
     transform: ProfileBackgroundTransform
     width: number
     height: number
+    geometry: ProfileBackgroundGeometry | null
   } | null>(null)
+  const activeImageRef = useRef<HTMLImageElement>(null)
   const [isOpen, setIsOpen] = useState(false)
   const [device, setDevice] = useState<ProfileBackgroundDevice>('desktop')
   const [draft, setDraft] = useState(() => createDraft(desktopTransform, mobileTransform))
@@ -82,6 +87,7 @@ export function ProfileBackgroundEditor({
   const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [editorGeometry, setEditorGeometry] = useState<ProfileBackgroundGeometry | null>(null)
 
   useEffect(() => {
     const media = window.matchMedia('(min-width: 768px)')
@@ -95,11 +101,74 @@ export function ProfileBackgroundEditor({
     if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl)
   }, [pendingPreviewUrl])
 
+  useEffect(() => {
+    setEditorGeometry(null)
+  }, [pendingPreviewUrl, sourceUrl, device])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const frame = frameRef.current
+    if (!frame) return
+
+    const measure = () => {
+      const image = activeImageRef.current
+      const rect = frame.getBoundingClientRect()
+      if (!image || image.naturalWidth <= 0 || image.naturalHeight <= 0 || rect.width <= 0 || rect.height <= 0) return
+      const nextGeometry: ProfileBackgroundGeometry = {
+        device,
+        imageSize: { width: image.naturalWidth, height: image.naturalHeight },
+        containerSize: { width: rect.width, height: rect.height },
+      }
+      setEditorGeometry((current) => {
+        if (
+          current?.device === nextGeometry.device &&
+          current.imageSize.width === nextGeometry.imageSize.width &&
+          current.imageSize.height === nextGeometry.imageSize.height &&
+          current.containerSize.width === nextGeometry.containerSize.width &&
+          current.containerSize.height === nextGeometry.containerSize.height
+        ) return current
+        return nextGeometry
+      })
+    }
+
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(frame)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [pendingPreviewUrl, sourceUrl, device, isOpen])
+
   const activeSourceUrl = pendingPreviewUrl || sourceUrl
   const activeTransform = draft[device]
+  const activeConstraints = getProfileBackgroundConstraints({
+    device,
+    imageSize: editorGeometry?.imageSize,
+    containerSize: editorGeometry?.containerSize,
+  })
+
+  useEffect(() => {
+    if (!editorGeometry) return
+    setDraft((current) => {
+      const currentTransform = current[device]
+      const constrained = constrainProfileBackgroundTransform(currentTransform, editorGeometry)
+      if (
+        constrained.scale === currentTransform.scale &&
+        constrained.x === currentTransform.x &&
+        constrained.y === currentTransform.y
+      ) return current
+      return { ...current, [device]: constrained }
+    })
+  }, [device, editorGeometry])
+
+  function constrainActiveTransform(next: ProfileBackgroundTransform) {
+    return constrainProfileBackgroundTransform(next, editorGeometry)
+  }
 
   function setTransform(next: ProfileBackgroundTransform) {
-    setDraft((current) => ({ ...current, [device]: normalizeProfileBackgroundTransform(next) }))
+    setDraft((current) => ({ ...current, [device]: constrainActiveTransform(next) }))
   }
 
   function openEditor() {
@@ -164,6 +233,7 @@ export function ProfileBackgroundEditor({
       transform: activeTransform,
       width: rect.width,
       height: rect.height,
+      geometry: editorGeometry,
     }
   }
 
@@ -176,6 +246,7 @@ export function ProfileBackgroundEditor({
       event.clientY - drag.clientY,
       drag.width,
       drag.height,
+      drag.geometry,
     ))
   }
 
@@ -230,7 +301,7 @@ export function ProfileBackgroundEditor({
 
   return (
     <div className="profile-background-editor">
-      <div className="profile-background-editor-preview overflow-hidden rounded-none border border-[var(--border)] bg-[var(--surface-subtle)]">
+      <div className="profile-background-editor-preview overflow-hidden rounded-none border border-[var(--border)] bg-black">
         {sourceUrl ? (
           <div className="relative aspect-[9/2] overflow-hidden">
             {/* The same transform helper is used by the real profile hero. */}
@@ -247,7 +318,7 @@ export function ProfileBackgroundEditor({
         </button>
         {sourceUrl ? <button type="button" onClick={openEditor} disabled={disabled || uploading} className="rounded-sm border border-[var(--primary)] bg-[var(--surface)] px-4 py-2 text-sm font-black text-[var(--primary)] disabled:cursor-not-allowed disabled:opacity-60">调整背景显示</button> : null}
       </div>
-      <p className="mt-2 text-xs font-bold leading-5 text-slate-500">桌面端和移动端共用同一张原图，可分别调整缩放与位置；最终保存资料后生效。</p>
+      <p className="mt-2 text-xs font-bold leading-5 text-slate-500">桌面端和移动端共用同一张原图，可分别调整缩放与位置；缩小后允许自然留黑，最终保存资料后生效。</p>
       <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" disabled={disabled || uploading} onChange={handleFileChange} className="sr-only" />
       {error ? <p className="mt-2 text-xs font-black leading-5 text-rose-600">{error}</p> : null}
 
@@ -256,7 +327,7 @@ export function ProfileBackgroundEditor({
           <section className="profile-background-crop flex max-h-[calc(100dvh-24px)] w-full max-w-lg min-w-0 flex-col rounded-sm p-5 shadow-none" role="dialog" aria-modal="true" aria-label="设置个人主页背景">
             <div className="profile-background-crop-content min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
               <h3 className="text-xl font-black text-brand-950">设置个人主页背景</h3>
-              <p className="profile-background-crop-description mt-1 text-sm font-bold text-slate-500">同一张原图分别保存桌面端与移动端构图。拖动图片调整位置，滑块调整缩放。</p>
+              <p className="profile-background-crop-description mt-1 text-sm font-bold text-slate-500">同一张原图分别保存桌面端与移动端构图。拖动图片调整位置，滑块可缩小到 cover 以下并保留黑边。</p>
               <div className="mt-4 grid grid-cols-2 gap-2" role="tablist" aria-label="背景显示设备">
                 {(['desktop', 'mobile'] as const).map((value) => (
                   <button key={value} type="button" role="tab" aria-selected={device === value} onClick={() => setDevice(value)} className={`min-h-10 rounded-sm border px-3 py-2 text-sm font-black ${device === value ? 'border-[var(--primary)] bg-[var(--navigation-active)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--surface)] text-[var(--foreground-muted)]'}`}>
@@ -266,7 +337,7 @@ export function ProfileBackgroundEditor({
               </div>
               <div
                 ref={frameRef}
-                className="profile-background-crop-frame relative mx-auto mt-5 w-full max-w-[450px] min-w-0 touch-none overflow-hidden rounded-none bg-slate-900"
+                className="profile-background-crop-frame relative mx-auto mt-5 w-full max-w-[450px] min-w-0 touch-none overflow-hidden rounded-none bg-black"
                 style={{ aspectRatio: device === 'desktop' ? '9 / 2' : '12 / 7' }}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
@@ -275,15 +346,25 @@ export function ProfileBackgroundEditor({
               >
                 {activeSourceUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={activeSourceUrl} alt="背景图裁切预览" className="profile-background-image select-none" style={profileBackgroundTransformStyle(activeTransform)} draggable={false} />
+                  <img ref={activeImageRef} src={activeSourceUrl} alt="背景图裁切预览" className="profile-background-image select-none" style={profileBackgroundTransformStyle(activeTransform, editorGeometry)} onLoad={() => {
+                    const frame = frameRef.current
+                    const image = activeImageRef.current
+                    if (!frame || !image || image.naturalWidth <= 0 || image.naturalHeight <= 0) return
+                    const rect = frame.getBoundingClientRect()
+                    setEditorGeometry({
+                      device,
+                      imageSize: { width: image.naturalWidth, height: image.naturalHeight },
+                      containerSize: { width: rect.width, height: rect.height },
+                    })
+                  }} draggable={false} />
                 ) : <span className="absolute inset-0 grid place-items-center text-sm font-black text-white/60">背景预览</span>}
                 <div className="pointer-events-none absolute inset-0 ring-2 ring-white/70" />
               </div>
               <label className="mt-5 block min-w-0">
-                <span className="flex items-center justify-between gap-2 text-sm font-black text-slate-700"><span>缩放</span><span>{activeTransform.scale.toFixed(2)}×</span></span>
-                <input type="range" min="1" max="3" step="0.01" value={activeTransform.scale} onChange={(event) => setTransform({ ...activeTransform, scale: Number(event.target.value) })} className="profile-background-crop-range mt-2 w-full max-w-full min-w-0" />
+                <span className="flex items-center justify-between gap-2 text-sm font-black text-slate-700"><span>缩放</span><span>{Math.max(activeTransform.scale, activeConstraints.minScale).toFixed(2)}×</span></span>
+                <input type="range" min={activeConstraints.minScale} max={activeConstraints.maxScale} step="0.01" value={Math.max(activeTransform.scale, activeConstraints.minScale)} onChange={(event) => setTransform({ ...activeTransform, scale: Number(event.target.value) })} className="profile-background-crop-range mt-2 w-full max-w-full min-w-0" />
               </label>
-              <p className="mt-2 text-xs font-bold leading-5 text-slate-500">最小缩放会保持图片覆盖整个区域，不会露出空白边缘。</p>
+              <p className="mt-2 text-xs font-bold leading-5 text-slate-500">最小缩放会保留一部分图片可见；缩小后没有图片覆盖的区域显示纯黑。</p>
             </div>
             <div className="profile-background-crop-actions mt-5 flex shrink-0 min-w-0 justify-between gap-2">
               <button type="button" onClick={() => setTransform(DEFAULT_PROFILE_BACKGROUND_TRANSFORM)} disabled={uploading} className="profile-background-crop-cancel min-w-0 rounded-sm border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-black text-[var(--foreground)] disabled:opacity-60">恢复默认</button>

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { BackButton } from '@/components/BackButton'
 import { RichPostContent } from '@/components/posts/RichPostContent'
 import { formatDate } from '@/lib/format'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
@@ -29,6 +30,7 @@ export default async function TopicPage({
 
   return (
     <main className="site-page-main flat-page mx-auto max-w-6xl space-y-6 px-5 py-8">
+      <BackButton fallbackHref="/forum" />
       <header className="border-b border-sky-100 pb-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-3xl font-black text-brand-950">#{topic.name}</h1>

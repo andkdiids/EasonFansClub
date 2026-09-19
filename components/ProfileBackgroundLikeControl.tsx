@@ -210,7 +210,7 @@ export function ProfileBackgroundLikeControl({
             title={title}
             aria-label={`查看主页背景的 ${count} 位点赞用户`}
           >
-            <span aria-hidden="true">♥</span>
+            <span aria-hidden="true">{liked ? '♥' : '♡'}</span>
           </button>
         )}
         <button type="button" className="profile-background-like-count" onClick={() => setListOpen(true)} title={title} aria-label={`查看主页背景的 ${count} 位点赞用户`}>

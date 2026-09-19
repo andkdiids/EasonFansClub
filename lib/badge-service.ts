@@ -1296,6 +1296,22 @@ async function upsertBadgeAcquisitionSource(tx: Prisma.TransactionClient, input:
   })
 }
 
+function isValidHistoricalWindow(window: GrantBadgeInput['historicalWindow']) {
+  return Boolean(
+    window
+    && window.from instanceof Date
+    && window.until instanceof Date
+    && !Number.isNaN(window.from.getTime())
+    && !Number.isNaN(window.until.getTime())
+    && window.from <= window.until,
+  )
+}
+
+function assertBadgeEnabledForCurrentGrant(badge: { isEnabled: boolean; isActive: boolean }, historicalBackfill: boolean) {
+  if (historicalBackfill) return
+  if (!badge.isEnabled || !badge.isActive) throw new BadgeServiceError('BADGE_DISABLED', '这枚勋章当前已停用')
+}
+
 async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: GrantBadgeInput): Promise<BadgeOperationResult> {
   const now = new Date()
   const awardedAt = input.obtainedAt || now
@@ -1325,6 +1341,24 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
   if (input.requireSalonAssignable && !badge.salonAssignable) throw new BadgeServiceError('BADGE_NOT_SALON_ASSIGNABLE', '该勋章未配置为可从沙龙派发')
 
   const isAutomaticZodiacGrant = sourceType === 'AUTO_RULE' && badge.BadgeRule?.ruleType === 'BIRTHDAY_ZODIAC'
+  const availabilityMode = input.availabilityMode || 'CURRENT'
+  const availability = getBadgeAvailability(badge)
+  const historicalWindowValid = isValidHistoricalWindow(input.historicalWindow)
+  const historicalBackfill = availabilityMode === 'HISTORICAL_WINDOW'
+    && (badge.availableFrom !== null || badge.availableUntil !== null)
+    && availability !== 'UPCOMING'
+    && historicalWindowValid
+  assertBadgeEnabledForCurrentGrant(badge, historicalBackfill)
+  if (availabilityMode === 'CURRENT' && availability !== 'PERMANENT' && availability !== 'AVAILABLE') {
+    throw new BadgeServiceError('BADGE_NOT_AVAILABLE', availability === 'UPCOMING' ? '这枚限定勋章尚未开放' : '这枚限定勋章已经绝版，当前不能再授予')
+  }
+  if (availabilityMode === 'HISTORICAL_WINDOW') {
+    if (availability === 'UPCOMING') throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '这枚限定勋章尚未开始，不能进行历史资格补发')
+    if (availability !== 'PERMANENT' && !historicalWindowValid) throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '历史资格补发缺少有效的限定时间窗口')
+  }
+  if (availabilityMode === 'ADMIN_MANUAL' && availability !== 'PERMANENT' && !grantReason) {
+    throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '限定勋章手动补发必须填写补发原因')
+  }
 
   let regrantRecordId: string | null = null
   if (grantKey) {
@@ -1446,23 +1480,6 @@ async function grantBadgeInTransaction(tx: Prisma.TransactionClient, input: Gran
     })
     if (!sourceAttached) return operationResult(input, badge.name, active.id)
     return { ...operationResult(input, badge.name, active.id), sourceAttached: true }
-  }
-
-  if (!badge.isEnabled || !badge.isActive) throw new BadgeServiceError('BADGE_DISABLED', '这枚勋章当前已停用')
-  const availability = getBadgeAvailability(badge)
-  const availabilityMode = input.availabilityMode || 'CURRENT'
-  if (availabilityMode === 'CURRENT' && availability !== 'PERMANENT' && availability !== 'AVAILABLE') {
-    throw new BadgeServiceError('BADGE_NOT_AVAILABLE', availability === 'UPCOMING' ? '这枚限定勋章尚未开放' : '这枚限定勋章已经绝版，当前不能再授予')
-  }
-  if (availabilityMode === 'HISTORICAL_WINDOW') {
-    if (availability === 'UPCOMING') throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '这枚限定勋章尚未开始，不能进行历史资格补发')
-    const window = input.historicalWindow
-    if (availability !== 'PERMANENT' && (!window || !(window.from instanceof Date) || !(window.until instanceof Date) || Number.isNaN(window.from.getTime()) || Number.isNaN(window.until.getTime()) || window.from > window.until)) {
-      throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '历史资格补发缺少有效的限定时间窗口')
-    }
-  }
-  if (availabilityMode === 'ADMIN_MANUAL' && availability !== 'PERMANENT' && !grantReason) {
-    throw new BadgeServiceError('BADGE_NOT_AVAILABLE', '限定勋章手动补发必须填写补发原因')
   }
 
   if (regrantRecordId) {
