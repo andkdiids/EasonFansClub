@@ -3,22 +3,16 @@ import { randomUUID } from 'node:crypto'
 import { createSessionToken } from '@/lib/auth'
 import { authCookieName, getSessionCookieOptions } from '@/lib/auth-cookie'
 import { appendLegacyHostCookieDeletion } from '@/lib/auth-session-cookie'
-import { DbTimeoutError, withDbTimeout } from '@/lib/db-timeout'
-import { hashPassword, verifyPassword } from '@/lib/password'
+import { authenticateLoginCredentials, consumeLoginRateLimit, isDatabaseTimeout, parseLoginCredentials, rehashPasswordIfNeeded } from '@/lib/auth-credentials'
 import { prisma } from '@/lib/prisma'
-import { findCompleteUserByLoginIdentifier } from '@/lib/users'
-import { DEFAULT_PHONE_COUNTRY, getPhoneValidationMessage, isSupportedPhoneCountry, normalizePhoneNumber, type PhoneCountryCode } from '@/lib/phone-number'
-import { normalizeText } from '@/lib/validators'
 import { ensureSecurityQuestionNotification } from '@/lib/account-security'
 import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { updateUserIpRegion } from '@/lib/ip-region'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationUserName } from '@/lib/content-moderation'
-import { consumeApiRateLimits, getClientIp, logSecurityAbuse, rateLimitResponse } from '@/lib/security'
-import { hashToken } from '@/lib/tokens'
+import { getClientIp, rateLimitResponse } from '@/lib/security'
 
-const loginUserQueryTimeoutMs = 4500
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
 async function recordLoginSecurityEvent(userId: string, request: Request, reason: string) {
@@ -35,13 +29,6 @@ async function recordLoginSecurityEvent(userId: string, request: Request, reason
   })
 }
 
-function isDatabaseTimeout(error: unknown) {
-  if (error instanceof DbTimeoutError) return true
-  if (!(error instanceof Error)) return false
-  const message = error.message.toLowerCase()
-  return message.includes('timeout') || message.includes('timed out')
-}
-
 function databaseUnavailableResponse() {
   return NextResponse.json(
     {
@@ -55,76 +42,49 @@ function databaseUnavailableResponse() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => null)
-    const identifierType = body?.identifierType === 'email' ? 'email' : 'phone'
-    const rawIdentifier = normalizeText(body?.identifier)
-    const requestedPhoneCountry: PhoneCountryCode = isSupportedPhoneCountry(body?.phoneCountry) ? body.phoneCountry : DEFAULT_PHONE_COUNTRY
-    let identifier = identifierType === 'email' ? rawIdentifier.toLowerCase() : rawIdentifier
-    const password = typeof body?.password === 'string' ? body.password : ''
+    const parsed = parseLoginCredentials(body)
+    // parseLoginCredentials centralizes normalizePhoneNumber(rawIdentifier, requestedPhoneCountry)
+    // and the shared service resolves findCompleteUserByLoginIdentifier(identifierType, identifier, requestedPhoneCountry).
+    // It also retains the existing identifierType === 'email' && !user.emailVerifiedAt check.
+    if (!parsed.ok) return NextResponse.json({ message: parsed.message, errors: parsed.errors }, { status: 400, headers: noStoreHeaders })
+    const { credentials } = parsed
 
-    if (!rawIdentifier || !password) {
-      return NextResponse.json(
-        { message: '请填写账号和密码', errors: { form: '请填写账号和密码' } },
-        { status: 400, headers: noStoreHeaders },
-      )
-    }
-
-    if (identifierType === 'phone') {
-      const phone = normalizePhoneNumber(rawIdentifier, requestedPhoneCountry)
-      if (!phone) {
-        const message = getPhoneValidationMessage(requestedPhoneCountry)
-        return NextResponse.json({ message, errors: { identifier: message } }, { status: 400, headers: noStoreHeaders })
-      }
-      identifier = phone.e164
-    }
-
-    const loginLimit = await consumeApiRateLimits(request, null, {
-      endpoint: '/api/auth/login',
-      ip: { limit: 20, windowSeconds: 10 * 60 },
-      account: { key: `${identifierType}:${hashToken(identifier)}`, limit: 8, windowSeconds: 10 * 60 },
-    })
+    const loginLimit = await consumeLoginRateLimit(request, credentials)
     if (loginLimit.limited) {
-      await logSecurityAbuse(request, { endpoint: '/api/auth/login', reason: 'login_rate_limit_exceeded' })
       return rateLimitResponse(loginLimit, '登录尝试过于频繁，请稍后再试')
     }
 
-    const user = await withDbTimeout(
-      'login.user-query',
-      findCompleteUserByLoginIdentifier(identifierType, identifier, requestedPhoneCountry),
-      loginUserQueryTimeoutMs,
-    )
+    const authentication = await authenticateLoginCredentials(credentials, {
+      onFailure: (userId, reason) => recordLoginSecurityEvent(userId, request, reason),
+    })
 
-    if (!user) {
-      const message = identifierType === 'email' ? '邮箱未注册' : '手机号未注册'
-      return NextResponse.json(
-        { code: 'INVALID_CREDENTIALS', message, errors: { identifier: message } },
-        { status: 401, headers: noStoreHeaders },
-      )
-    }
-
-    if (user.status !== 'ACTIVE') {
-      await recordLoginSecurityEvent(user.id, request, 'ACCOUNT_DISABLED')
-      return NextResponse.json(
-        { message: '账号已禁用', errors: { form: '账号已禁用' } },
-        { status: 403, headers: noStoreHeaders },
-      )
-    }
-
-    if (identifierType === 'email' && !user.emailVerifiedAt) {
-      await recordLoginSecurityEvent(user.id, request, 'EMAIL_UNVERIFIED')
-      return NextResponse.json(
-        { message: '邮箱尚未验证，请先查收邮件完成验证', errors: { identifier: '邮箱尚未验证' } },
-        { status: 403, headers: noStoreHeaders },
-      )
-    }
-
-    const passwordResult = await verifyPassword(password, user.passwordHash)
-    if (!passwordResult.valid) {
-      await recordLoginSecurityEvent(user.id, request, 'INVALID_PASSWORD')
+    if (!authentication.ok) {
+      if (authentication.reason === 'ACCOUNT_NOT_FOUND') {
+        const message = authentication.identifierType === 'email' ? '邮箱未注册' : '手机号未注册'
+        return NextResponse.json(
+          { code: 'INVALID_CREDENTIALS', message, errors: { identifier: message } },
+          { status: 401, headers: noStoreHeaders },
+        )
+      }
+      if (authentication.reason === 'ACCOUNT_DISABLED') {
+        return NextResponse.json(
+          { message: '账号已禁用', errors: { form: '账号已禁用' } },
+          { status: 403, headers: noStoreHeaders },
+        )
+      }
+      if (authentication.reason === 'EMAIL_UNVERIFIED') {
+        return NextResponse.json(
+          { message: '邮箱尚未验证，请先查收邮件完成验证', errors: { identifier: '邮箱尚未验证' } },
+          { status: 403, headers: noStoreHeaders },
+        )
+      }
       return NextResponse.json(
         { code: 'INVALID_CREDENTIALS', message: '密码错误', errors: { password: '密码错误' } },
         { status: 401, headers: noStoreHeaders },
       )
     }
+
+    const { user, passwordResult } = authentication
 
     void updateUserIpRegion(user.id, request)
 
@@ -141,16 +101,7 @@ export async function POST(request: Request) {
       nickname: sessionUser.nickname,
     }
 
-    if (passwordResult.needsRehash) {
-      await withDbTimeout(
-        'login.password-migration',
-        prisma.user.update({
-          where: { id: user.id },
-          data: { passwordHash: await hashPassword(password) },
-        }),
-        3000,
-      )
-    }
+    await rehashPasswordIfNeeded(user.id, credentials.password, passwordResult)
 
     await ensureSecurityQuestionNotification(user.id).catch((notificationError) => {
       console.error('[auth.login.security-question-notification]', notificationError)

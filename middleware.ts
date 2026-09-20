@@ -38,6 +38,7 @@ const immutablePublicExactPaths = new Set([
 
 const publicPathPrefixes = [
   '/api/auth/',
+  '/api/mobile/auth/',
   '/api/health/',
   '/_next/',
   '/easmusic/',
@@ -137,6 +138,11 @@ function isPublicPath(pathname: string) {
 
 function isImmutablePublicPath(pathname: string) {
   return immutablePublicExactPaths.has(pathname) || immutablePublicPathPrefixes.some((prefix) => pathname.startsWith(prefix))
+}
+
+function isMobileBearerReadRequest(request: NextRequest, pathname: string) {
+  if (request.method !== 'GET' || !/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
+  return pathname === '/api/posts' || /^\/api\/posts\/[^/]+$/.test(pathname)
 }
 
 function isApiPath(pathname: string) {
@@ -333,7 +339,8 @@ export async function middleware(request: NextRequest) {
   // SameSite cookies are a useful baseline, but they do not cover every
   // browser/navigation edge case. Reject an explicitly cross-site browser
   // write while keeping Origin-less native clients and CLI integrations valid.
-  if (isApiPath(pathname) && isStateChangingMethod(request.method) && isCrossSiteRequest(request)) {
+  const isMobileAuthPath = pathname.startsWith('/api/mobile/auth/')
+  if (isApiPath(pathname) && isStateChangingMethod(request.method) && !isMobileAuthPath && isCrossSiteRequest(request)) {
     const response = NextResponse.json(
       { ok: false, code: 'CSRF_BLOCKED', message: '请求来源校验失败，请刷新页面后重试' },
       { status: 403, headers: { Vary: 'Origin, Referer, Sec-Fetch-Site' } },
@@ -343,6 +350,14 @@ export async function middleware(request: NextRequest) {
 
   if (guessSongMediaGatewayPaths.has(pathname)) {
     return NextResponse.next()
+  }
+
+  // The public square/detail GET handlers already resolve an optional viewer
+  // and do not require the browser Cookie session. Let the native app reach
+  // those read-only handlers with its Bearer credential; write handlers still
+  // perform their own Web auth guards and the global CSRF check remains active.
+  if (isMobileBearerReadRequest(request, pathname)) {
+    return withNoStoreHeaders(NextResponse.next())
   }
 
   if (isPublicPath(pathname)) {

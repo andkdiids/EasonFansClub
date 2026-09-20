@@ -2925,6 +2925,23 @@ CREATE TABLE `OnlineSession` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `MobileAuthSession` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `refreshTokenHash` VARCHAR(191) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `expiresAt` DATETIME(3) NOT NULL,
+    `lastUsedAt` DATETIME(3) NULL,
+    `revokedAt` DATETIME(3) NULL,
+
+    UNIQUE INDEX `MobileAuthSession_refreshTokenHash_key`(`refreshTokenHash`),
+    INDEX `MobileAuthSession_userId_idx`(`userId`),
+    INDEX `MobileAuthSession_expiresAt_idx`(`expiresAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `PageLayout` (
     `id` VARCHAR(191) NOT NULL,
     `pageKey` VARCHAR(191) NOT NULL,
@@ -5267,6 +5284,9 @@ ALTER TABLE `Notification` ADD CONSTRAINT `Notification_activityId_fkey` FOREIGN
 
 -- AddForeignKey
 ALTER TABLE `OnlineSession` ADD CONSTRAINT `OnlineSession_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `MobileAuthSession` ADD CONSTRAINT `MobileAuthSession_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `PageLayout` ADD CONSTRAINT `PageLayout_publishedById_fkey` FOREIGN KEY (`publishedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
