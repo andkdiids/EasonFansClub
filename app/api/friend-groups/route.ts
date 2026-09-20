@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { activeUserWhere } from '@/lib/friends'
 import { buildFriendGroupIndex } from '@/lib/friend-grouping'
 import { prisma } from '@/lib/prisma'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { requireRequestUser, sanitizeText } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const FRIEND_GROUP_NAME_MAX_LENGTH = 30
@@ -17,8 +17,8 @@ function parseGroupName(value: unknown) {
   return name ? { name, error: null } : { name: '', error: '分组名不能为空' }
 }
 
-export async function GET() {
-  const guard = await requireUser()
+export async function GET(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
 
@@ -56,7 +56,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  // Cookie compatibility remains the existing `const guard = await requireUser()` path; Bearer requests use the shared resolver.
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { DAILY_CHAT_BOARD_SLUG, DAILY_CHAT_DISPLAY_NAME, DAILY_CHAT_LEGACY_NAME, normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { toPublicMediaUrl } from '@/lib/media-url'
-import { getCurrentUser } from '@/lib/auth'
+import { resolveRequestAuth } from '@/lib/security'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, sanitizeText } from '@/lib/security'
@@ -15,7 +15,9 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const keyword = sanitizeText(searchParams.get('q'), 60)
   const page = parseGlobalSearchPage(searchParams.get('page'))
-  const user = await getCurrentUser()
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const user = auth.user
 
   const limited = await enforceApiRateLimit(request, user?.id, {
     endpoint: '/api/search',

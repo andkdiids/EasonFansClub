@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { withForumBoardDisplayName } from '@/lib/boards'
 import { safeDb } from '@/lib/db-timeout'
 import { publicContentImageMarkers } from '@/lib/content-images'
@@ -18,6 +17,7 @@ import { buildProfilePostWhere, buildPublicPostWhere as publicPostWhere } from '
 import { postContentPlainText } from '@/lib/share-metadata'
 import { PROFILE_POST_GROUP_UNGROUPED } from '@/lib/profile-post-groups'
 import { getProfileVisibility, isProfileModuleVisible, PUBLIC_PROFILE_MODULE_KEYS, type PublicProfileModuleKey } from '@/lib/user-privacy'
+import { resolveRequestAuth } from '@/lib/security'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
 type RouteContext = { params: Promise<{ userId: string }> }
@@ -39,7 +39,9 @@ export async function GET(request: Request, context: RouteContext) {
     ? searchParams.get('postsPage') || searchParams.get('page') || '1'
     : searchParams.get('page') || '1'
   const page = Math.max(1, Number.parseInt(pageParam, 10) || 1)
-  const viewer = await getCurrentUser()
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const viewer = auth.user
   const now = new Date()
   const target = await safeDb('userModules.findUser', findPublicUserId(userId), null)
 

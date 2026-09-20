@@ -152,19 +152,45 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/notifications/unread-count'
       || pathname === '/api/topics'
       || /^\/api\/topics\/[^/]+$/.test(pathname)
+      || pathname === '/api/posts/draft'
+      || pathname === '/api/boards'
+      || pathname === '/api/search'
+      || pathname === '/api/users/me'
+      || /^\/api\/users\/[^/]+\/public-modules$/.test(pathname)
+      || /^\/api\/users\/[^/]+\/badges$/.test(pathname)
+      || /^\/api\/users\/[^/]+\/post-groups$/.test(pathname)
+      || pathname === '/api/friends/list'
+      || pathname === '/api/friends/requests/received'
+      || pathname === '/api/friends/requests/sent'
+      || pathname === '/api/friend-groups'
   }
   if (request.method === 'POST') {
     return pathname === '/api/forum/discover'
+      || pathname === '/api/posts'
+      || pathname === '/api/uploads/content-image'
+      || pathname === '/api/friends/requests'
+      || /^\/api\/friends\/requests\/[^/]+\/(?:accept|reject)$/.test(pathname)
+      || pathname === '/api/friend-groups'
       || /^\/api\/posts\/[^/]+\/replies$/.test(pathname)
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
       || pathname === '/api/notifications/read-all'
       || /^\/api\/notifications\/[^/]+\/read$/.test(pathname)
   }
-  if (request.method === 'PATCH' || request.method === 'DELETE') {
-    return pathname === '/api/notifications'
+  if (request.method === 'PUT' || request.method === 'PATCH') {
+    return pathname === '/api/posts/draft'
+      || pathname === '/api/users/me'
+      || /^\/api\/friends\/requests\/[^/]+$/.test(pathname)
+      || /^\/api\/friends\/[^/]+\/group$/.test(pathname)
+      || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
+      || pathname === '/api/notifications'
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
+  }
+  if (request.method === 'DELETE') {
+    return pathname === '/api/posts/draft'
+      || /^\/api\/friends\/[^/]+$/.test(pathname)
+      || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
   }
   return false
 }

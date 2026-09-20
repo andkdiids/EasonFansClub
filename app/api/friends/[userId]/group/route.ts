@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { activeUserWhere, normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 type RouteContext = { params: Promise<{ userId: string }> }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const viewer = guard.user
 

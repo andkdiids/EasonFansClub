@@ -3,7 +3,7 @@ import { syncUserAchievements } from '@/lib/achievements'
 import { Prisma } from '@prisma/client'
 import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
 import { createPostModerationHistory } from '@/lib/admin-audit'
-import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
+import { isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
@@ -218,10 +218,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   let phase = 'auth'
-  let user: Awaited<ReturnType<typeof getCurrentUser>> = null
+  let user: SessionUser | null = null
 
   try {
-    user = await getCurrentUser()
+    const auth = await resolveRequestAuth(request)
+    if (auth.response) return auth.response
+    user = auth.user
   } catch (error) {
     logPostCreateError(phase, error)
     return NextResponse.json(

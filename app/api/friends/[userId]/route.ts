@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { invalidateCheckInMessagesCache } from '@/lib/checkin-messages'
 import { normalizeFriendPair } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -10,8 +10,8 @@ type RouteContext = { params: Promise<{ userId: string }> }
  * Removes only the Friendship and its private friend-follow marks. No
  * notification, message, or historical content is created or deleted here.
  */
-export async function DELETE(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function DELETE(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const viewer = guard.user
 

@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { requireRequestUser, sanitizeText } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 const FRIEND_GROUP_NAME_MAX_LENGTH = 30
@@ -17,7 +17,8 @@ function parseGroupName(value: unknown) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const guard = await requireUser()
+  // Cookie compatibility remains the existing `const guard = await requireUser()` path; Bearer requests use the shared resolver.
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
   const { groupId } = await context.params
@@ -41,8 +42,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function DELETE(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
   const { groupId } = await context.params

@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { decideFriendRequest } from '@/lib/friends'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 
 type RouteContext = { params: Promise<{ requestId: string }> }
 
-export async function POST(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function POST(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
 

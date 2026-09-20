@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { safeDb } from '@/lib/db-timeout'
 import { getProfileVisibility, isProfileModuleVisible } from '@/lib/user-privacy'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
+import { resolveRequestAuth } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
@@ -12,8 +12,10 @@ export async function GET(request: Request, context: RouteContext) {
   const uid = parseUidParam(userId)
   if (uid === null) return NextResponse.json({ message: '用户不存在' }, { status: 404 })
 
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
   const [viewer, target] = await Promise.all([
-    getCurrentUser(),
+    Promise.resolve(auth.user),
     prisma.user.findFirst({
       where: { uid, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
       select: { id: true },

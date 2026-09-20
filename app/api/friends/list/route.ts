@@ -6,7 +6,7 @@ import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
-import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
@@ -15,7 +15,8 @@ import { belongsToFriendGroup, buildFriendGroupIndex, UNGROUPED_FRIEND_GROUP_ID 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  // Cookie compatibility remains the existing `const guard = await requireUser()` path; Bearer requests use the shared resolver.
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {

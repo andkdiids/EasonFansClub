@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import sharp, { type Metadata } from 'sharp'
 import { publicImageUrl } from '@/lib/images'
 import { NextResponse } from 'next/server'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 import { uploadSiteImage, SiteMediaStorageError } from '@/lib/site-media-storage'
 import { createAnimatedImageVariants, createImageVariants, isAnimatedImageInput } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
@@ -53,7 +53,7 @@ function isMultipartFile(value: FormDataEntryValue | null): value is File {
 }
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/uploads/content-image',

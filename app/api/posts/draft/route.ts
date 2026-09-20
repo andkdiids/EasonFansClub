@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { getConfiguredForumBoardBySelectionId } from '@/lib/boards'
-import { getCurrentUser } from '@/lib/auth'
+import type { SessionUser } from '@/lib/auth'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } from '@/lib/content-images'
 import {
   normalizeServerPostDraft,
@@ -11,7 +11,7 @@ import {
 } from '@/lib/post-draft'
 import { prisma } from '@/lib/prisma'
 import { MAX_POST_PLAIN_TEXT_LENGTH, validateRichPostContent } from '@/lib/rich-text'
-import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 
 export const dynamic = 'force-dynamic'
@@ -128,7 +128,7 @@ function parseDraftInput(body: Record<string, unknown>): DraftInputResult {
   }
 }
 
-async function validateBoardSelection(boardId: string, user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
+async function validateBoardSelection(boardId: string, user: SessionUser) {
   if (!boardId) return null
   const configuredBoard = getConfiguredForumBoardBySelectionId(boardId)
   if (configuredBoard) {
@@ -160,13 +160,15 @@ function draftWriteData(value: PostDraftPayload) {
   }
 }
 
-async function currentUserOr401() {
-  const user = await getCurrentUser()
-  return user ? { user } : { response: unauthenticatedResponse() }
+async function currentUserOr401(request: Request) {
+  // requireRequestUser preserves the existing getCurrentUser Cookie path when
+  // no Authorization header is present, while allowing the native Bearer path.
+  const guard = await requireRequestUser(request)
+  return guard.user ? { user: guard.user } : { response: guard.response }
 }
 
 export async function GET(request: Request) {
-  const auth = await currentUserOr401()
+  const auth = await currentUserOr401(request)
   if ('response' in auth) return auth.response
   const limited = await enforceApiRateLimit(request, auth.user.id, {
     endpoint: '/api/posts/draft:read',
@@ -181,7 +183,7 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const auth = await currentUserOr401()
+  const auth = await currentUserOr401(request)
   if ('response' in auth) return auth.response
   const limited = await enforceApiRateLimit(request, auth.user.id, {
     endpoint: '/api/posts/draft:write',
@@ -275,7 +277,7 @@ export async function PUT(request: Request) {
 export const PATCH = PUT
 
 export async function DELETE(request: Request) {
-  const auth = await currentUserOr401()
+  const auth = await currentUserOr401(request)
   if ('response' in auth) return auth.response
   const limited = await enforceApiRateLimit(request, auth.user.id, {
     endpoint: '/api/posts/draft:delete',

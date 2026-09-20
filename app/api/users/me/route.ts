@@ -5,7 +5,7 @@ import { isValidEmail, normalizeEmail } from '@/lib/email-verification'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
-import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { normalizeLoginAccount, validateLoginAccountValue, validateNicknameValue } from '@/lib/login-account'
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
@@ -213,7 +213,8 @@ async function updateUsername(userId: string, rawUsername: unknown, request: Req
 }
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  // Cookie compatibility remains the existing `const guard = await requireUser()` path; Bearer requests use the shared resolver.
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     ip: { limit: 240, windowSeconds: 60 },
@@ -376,7 +377,7 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     ip: { limit: 60, windowSeconds: 60 },

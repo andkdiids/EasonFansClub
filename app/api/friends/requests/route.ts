@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createFriendRequest } from '@/lib/friends'
 import { validateFriendRequestReason } from '@/lib/friend-request-validation'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
