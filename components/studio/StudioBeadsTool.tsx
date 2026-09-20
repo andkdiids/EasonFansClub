@@ -11,7 +11,7 @@ import { getStudioTool } from '@/lib/studio/tools'
 import { createBeadPatternPdf } from '@/lib/studio/beads/pdf'
 import { getDefaultPalette, getPalette, getPaletteCoverage, getPaletteModeDefinition, getPaletteSourceNote, getSeriesForBrand, findPaletteColorByCode, normalizePaletteCode, PALETTE_MODES, supportedBeadBrands } from '@/lib/studio/beads/palette'
 import { findNearestBeadColor } from '@/lib/studio/beads/color'
-import { calculateMaterialList, createDemoPattern, floodFill, replaceColor } from '@/lib/studio/beads/grid'
+import { calculateMaterialList, createDemoPattern, floodFill, replaceColor, resizeBeadPattern } from '@/lib/studio/beads/grid'
 import { generatePatternFromImageInWorker } from '@/lib/studio/beads/image'
 import { DEFAULT_BEAD_EXPORT_SCALE, coordinateValues, renderPatternToCanvas, renderPatternToDataUrl } from '@/lib/studio/beads/renderer'
 import { createPatternWithPhysicalCoverPng } from '@/lib/studio/beads/physical-cover-export'
@@ -43,6 +43,7 @@ function getBeadStudioOnboardingStorage() {
 }
 
 type EditorTool = 'brush' | 'eraser' | 'eyedropper' | 'fill' | 'select' | 'pan'
+type DimensionKey = 'width' | 'height'
 type RightPanel = 'color' | 'layers' | 'materials' | 'view' | 'more'
 type MobilePanel = 'settings' | RightPanel
 type CellPatch = { index: number; before: number; after: number }
@@ -148,6 +149,8 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const requestedMode = searchParams.get('mode')
   const requestedExport = searchParams.get('export') === '1'
   const [settings, setSettings] = useState<BeadSettings>(defaultBeadSettings)
+  const [dimensionDraft, setDimensionDraft] = useState({ width: String(defaultBeadSettings.width), height: String(defaultBeadSettings.height) })
+  const [dimensionError, setDimensionError] = useState('')
   const [pattern, setPattern] = useState<BeadPatternGrid>(() => createDemoPattern(getDefaultPalette()))
   const [layers, setLayers] = useState<BeadLayerStack>(() => createDefaultLayerStack())
   const [title, setTitle] = useState('我的第一张图纸')
@@ -530,7 +533,13 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       if (cancelled) return
       setHasExistingBeadWork(hasExistingWork)
       if (data) {
-        setSettings(data.settings)
+        // The grid is the source of truth for a project's logical board size.
+        // Keep legacy settings metadata, but prevent stale settings dimensions
+        // from making the inputs disagree with the persisted cell array.
+        const loadedSettings = { ...data.settings, width: data.pattern.width, height: data.pattern.height }
+        setSettings(loadedSettings)
+        setDimensionDraft({ width: String(data.pattern.width), height: String(data.pattern.height) })
+        setDimensionError('')
         setPattern(data.pattern)
         patternRef.current = data.pattern
         setLayers(data.layers)
@@ -613,6 +622,70 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     setSaveStatus('unsaved')
     return true
   }, [])
+
+  function dimensionValidationMessage(rawValue: string) {
+    const value = rawValue.trim()
+    if (!/^\d+$/.test(value)) return '宽度和高度必须是 1–102 的整数。'
+    const numberValue = Number(value)
+    if (!Number.isSafeInteger(numberValue) || numberValue < 1) return '宽度和高度必须是 1–102 的整数。'
+    if (numberValue > MAX_BEAD_DIMENSION) return `画板最大为 ${MAX_BEAD_DIMENSION} × ${MAX_BEAD_DIMENSION}。`
+    return ''
+  }
+
+  function commitBoardDimensions(width: number, height: number) {
+    const current = patternRef.current
+    const next = resizeBeadPattern(current, width, height)
+    const changed = persistPattern(next.cells, '调整画板大小', true, next)
+    updateSettings({ width: next.width, height: next.height })
+    if (changed) {
+      setCompleted((previous) => {
+        const mapped = new Set<number>()
+        previous.forEach((index) => {
+          const x = index % current.width
+          const y = Math.floor(index / current.width)
+          if (x < next.width && y < next.height) mapped.add(y * next.width + x)
+        })
+        return mapped
+      })
+      setSelection(null)
+    }
+  }
+
+  function setBoardSize(width: number, height: number) {
+    if (dimensionValidationMessage(String(width)) || dimensionValidationMessage(String(height))) return
+    setDimensionDraft({ width: String(width), height: String(height) })
+    setDimensionError('')
+    commitBoardDimensions(width, height)
+  }
+
+  function setDimension(key: DimensionKey, rawValue: string) {
+    setDimensionDraft((current) => ({ ...current, [key]: rawValue }))
+    const errorMessage = dimensionValidationMessage(rawValue)
+    if (errorMessage) {
+      setDimensionError(errorMessage)
+      return
+    }
+
+    const value = Number(rawValue)
+    const current = settings
+    let width = key === 'width' ? value : current.width
+    let height = key === 'height' ? value : current.height
+    if (current.lockRatio) {
+      const ratio = current.width / Math.max(1, current.height)
+      if (key === 'width') height = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(value / Math.max(.0001, ratio))))
+      else width = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(value * ratio)))
+    }
+    setDimensionDraft({ width: String(width), height: String(height) })
+    setDimensionError('')
+    commitBoardDimensions(width, height)
+  }
+
+  function settleDimensionInput(key: DimensionKey) {
+    const errorMessage = dimensionValidationMessage(dimensionDraft[key])
+    if (!errorMessage) return
+    setDimensionDraft((current) => ({ ...current, [key]: String(settings[key]) }))
+    setDimensionError(errorMessage)
+  }
 
   function beginDrawGesture() {
     // Keep the history snapshot immutable while the stroke mutates its own
@@ -883,6 +956,11 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         })()
       patternRef.current = next
       setPattern(next)
+      if (entry.beforeGrid) {
+        setSettings((currentSettings) => ({ ...currentSettings, width: next.width, height: next.height }))
+        setDimensionDraft({ width: String(next.width), height: String(next.height) })
+        setDimensionError('')
+      }
       setSaveStatus('unsaved')
       if (entry.beforePaletteSettings) setSettings((currentSettings) => ({ ...currentSettings, ...entry.beforePaletteSettings }))
       return items.slice(0, -1)
@@ -904,6 +982,11 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         })()
       patternRef.current = next
       setPattern(next)
+      if (entry.afterGrid) {
+        setSettings((currentSettings) => ({ ...currentSettings, width: next.width, height: next.height }))
+        setDimensionDraft({ width: String(next.width), height: String(next.height) })
+        setDimensionError('')
+      }
       setSaveStatus('unsaved')
       if (entry.afterPaletteSettings) setSettings((currentSettings) => ({ ...currentSettings, ...entry.afterPaletteSettings }))
       return items.slice(0, -1)
@@ -952,15 +1035,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   function updateSettings(patch: Partial<BeadSettings>) {
     setSettings((current) => ({ ...current, ...patch }))
     setSaveStatus('unsaved')
-  }
-
-  function setDimension(key: 'width' | 'height', rawValue: number) {
-    const value = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(rawValue || 1)))
-    const current = settings
-    if (!current.lockRatio) return updateSettings({ [key]: value })
-    const ratio = current.width / Math.max(1, current.height)
-    if (key === 'width') updateSettings({ width: value, height: Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(value / ratio))) })
-    else updateSettings({ height: value, width: Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(value * ratio))) })
   }
 
   function switchPalette(brand: BeadSettings['brand'], series: string, mode: BeadSettings['paletteMode']) {
@@ -1082,6 +1156,11 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   }
 
   function generate() {
+    if (dimensionError || dimensionDraft.width !== String(settings.width) || dimensionDraft.height !== String(settings.height)) {
+      setError(dimensionError || '请先输入有效的画板宽度和高度。')
+      setActiveMobilePanel('settings')
+      return
+    }
     const source = sourceImageRef.current
     if (!source) {
       setError('请先上传一张图片，再生成拼豆图纸。')
@@ -1109,6 +1188,10 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
 
   const persistProject = useCallback(async (silent = false, physicalCoverOverride = physicalCoverImage) => {
     if (savingRef.current) return
+    if (dimensionError || dimensionDraft.width !== String(settings.width) || dimensionDraft.height !== String(settings.height)) {
+      if (!silent) showToast(dimensionError || '请先输入有效的画板宽度和高度。')
+      return
+    }
     savingRef.current = true
     const now = new Date().toISOString()
     const localId = projectId || createStudioId()
@@ -1194,7 +1277,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     } finally {
       savingRef.current = false
     }
-  }, [cloudProjectId, completed, createdAt, isAuthenticated, layers, packSize, physicalCoverImage, projectId, reviewStatus, settings, showToast, title, visibility])
+  }, [cloudProjectId, completed, createdAt, dimensionDraft.height, dimensionDraft.width, dimensionError, isAuthenticated, layers, packSize, physicalCoverImage, projectId, reviewStatus, settings, showToast, title, visibility])
 
   useEffect(() => {
     persistProjectRef.current = persistProject
@@ -1417,7 +1500,16 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
               {physicalCoverUploading ? <p className={styles.settingsSubtle}>正在安全保存实物封面…</p> : null}
             </div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>图片类型</label><div className={styles.segmented}><button type="button" className={`${styles.segment} ${settings.imageType === 'cartoon' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ imageType: 'cartoon' })}>卡通 / 像素</button><button type="button" className={`${styles.segment} ${settings.imageType === 'photo' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ imageType: 'photo' })}>照片</button></div></div>
-            <div className={styles.fieldGroup}><label className={styles.formLabel}>尺寸（颗） <span className={styles.formHint}>{settings.lockRatio ? '比例已锁定' : '自由尺寸'} · 最大 {MAX_BEAD_DIMENSION}×{MAX_BEAD_DIMENSION}</span></label><div className={styles.sizeRow}><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} value={settings.width} onChange={(event) => setDimension('width', Number(event.target.value))} aria-label="图纸宽度" /><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} value={settings.height} onChange={(event) => setDimension('height', Number(event.target.value))} aria-label="图纸高度" /></div><div className={styles.presetRow}>{([[29, 29], [58, 29], [58, 58], [87, 58], [87, 87], [102, 102]] as const).map(([width, height]) => <button key={`${width}x${height}`} type="button" className={`${styles.preset} ${settings.width === width && settings.height === height ? styles.presetActive : ''}`} onClick={() => updateSettings({ width, height })}>{width}×{height}</button>)}</div><label className={styles.checkboxRow} style={{ marginTop: 10 }}><input className={styles.checkbox} type="checkbox" checked={settings.lockRatio} onChange={(event) => updateSettings({ lockRatio: event.target.checked })} />锁定宽高比</label></div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.formLabel}>画板大小（格） <span className={styles.formHint}>{settings.lockRatio ? '比例已锁定' : '宽高可独立设置'} · 最大 {MAX_BEAD_DIMENSION}×{MAX_BEAD_DIMENSION}</span></label>
+              <div className={styles.sizeRow}>
+                <label className={styles.dimensionInput}><span>宽</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.width} onChange={(event) => setDimension('width', event.target.value)} onBlur={() => settleDimensionInput('width')} aria-label="图纸宽度" aria-invalid={Boolean(dimensionError)} /></label>
+                <label className={styles.dimensionInput}><span>高</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.height} onChange={(event) => setDimension('height', event.target.value)} onBlur={() => settleDimensionInput('height')} aria-label="图纸高度" aria-invalid={Boolean(dimensionError)} /></label>
+              </div>
+              {dimensionError ? <p className={styles.dimensionError} role="alert">{dimensionError}</p> : null}
+              <div className={styles.presetRow}>{([[29, 29], [58, 29], [58, 58], [87, 58], [87, 87], [102, 102]] as const).map(([width, height]) => <button key={`${width}x${height}`} type="button" className={`${styles.preset} ${settings.width === width && settings.height === height ? styles.presetActive : ''}`} onClick={() => setBoardSize(width, height)}>{width}×{height}</button>)}</div>
+              <label className={styles.checkboxRow} style={{ marginTop: 10 }}><input className={styles.checkbox} type="checkbox" checked={settings.lockRatio} onChange={(event) => updateSettings({ lockRatio: event.target.checked })} />锁定宽高比</label>
+            </div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>品牌 / 系列</label><div className={styles.sizeRow}><select className={styles.select} value={settings.brand} onChange={(event) => changeBrand(event.target.value as BeadSettings['brand'])}>{supportedBeadBrands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select><select className={styles.select} value={settings.series} onChange={(event) => changeSeries(event.target.value)}>{getSeriesForBrand(settings.brand).map((series) => <option key={series} value={series}>{series}</option>)}</select></div><label className={styles.formLabel} style={{ marginTop: 11 }}>颜色范围 <span className={styles.rangeValue}>{palette.length} / {paletteCoverage.requested} 已载入</span></label><div className={styles.paletteModeSwitch}>{PALETTE_MODES.map((mode) => <button key={mode.id} type="button" className={`${styles.paletteModeButton} ${settings.paletteMode === mode.id ? styles.paletteModeButtonActive : ''}`} onClick={() => changePaletteMode(mode.id)}>{mode.shortLabel}</button>)}</div><p className={styles.settingsSubtle}>{getPaletteSourceNote(settings.brand, settings.series)} 当前可用 {paletteCoverage.available} 色。</p></div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>颜色匹配</label><div className={styles.segmented}><button type="button" className={`${styles.segment} ${settings.matchingMode === 'fast' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'fast' })}>快速</button><button type="button" className={`${styles.segment} ${settings.matchingMode === 'balanced' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'balanced' })}>均衡</button><button type="button" className={`${styles.segment} ${settings.matchingMode === 'precise' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'precise' })}>精确</button></div></div>
             <details className={styles.advancedDetails}><summary className={styles.advancedSummary}>更多图像调整</summary><div className={styles.fieldGroup}><label className={styles.formLabel}>最大颜色数 <span className={styles.formHint}>量化后不超过此数</span></label><select className={styles.select} value={settings.maxColors} onChange={(event) => updateSettings({ maxColors: Number(event.target.value) as BeadSettings['maxColors'] })}>{[8, 12, 16, 24, 32, 0].map((value) => <option key={value} value={value}>{value || '不限'}</option>)}</select></div><div className={styles.fieldGroup}><label className={styles.formLabel}>亮度 <span className={styles.rangeValue}>{settings.brightness}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.brightness} onChange={(event) => updateSettings({ brightness: Number(event.target.value) })} /></div><div className={styles.fieldGroup}><label className={styles.formLabel}>对比度 <span className={styles.rangeValue}>{settings.contrast}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.contrast} onChange={(event) => updateSettings({ contrast: Number(event.target.value) })} /></div><div className={styles.fieldGroup}><label className={styles.formLabel}>饱和度 <span className={styles.rangeValue}>{settings.saturation}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.saturation} onChange={(event) => updateSettings({ saturation: Number(event.target.value) })} /><button type="button" className={styles.panelToggle} onClick={resetImageAdjustments}>重置亮度 / 对比度 / 饱和度</button></div><label className={styles.checkboxRow} style={{ marginTop: 12 }}><input className={styles.checkbox} type="checkbox" checked={settings.whiteAsEmpty} onChange={(event) => updateSettings({ whiteAsEmpty: event.target.checked })} />接近白色的区域视为空白</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={settings.removeBackground} onChange={(event) => updateSettings({ removeBackground: event.target.checked })} />吸管去背景（使用左上角颜色）</label><div className={styles.fieldGroup}><label className={styles.formLabel}>抖动</label><select className={styles.select} value={settings.dithering} onChange={(event) => updateSettings({ dithering: event.target.value as BeadSettings['dithering'] })}><option value="none">关闭</option><option value="floyd-steinberg">Floyd–Steinberg</option></select></div><div className={styles.fieldGroup}><label className={styles.formLabel}>清理零碎颜色</label><select className={styles.select} value={settings.cleanupThreshold} onChange={(event) => updateSettings({ cleanupThreshold: Number(event.target.value) as BeadSettings['cleanupThreshold'] })}><option value="0">关闭</option><option value="2">≤ 2 颗</option><option value="3">≤ 3 颗</option><option value="5">≤ 5 颗</option><option value="10">≤ 10 颗</option></select></div></details>

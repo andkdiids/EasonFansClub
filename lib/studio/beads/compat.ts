@@ -11,7 +11,9 @@ export const defaultBeadSettings: BeadSettings = {
   imageType: 'cartoon',
   width: 29,
   height: 29,
-  lockRatio: true,
+  // Custom width and height are independent by default. Existing projects
+  // retain their persisted lockRatio value when normalized below.
+  lockRatio: false,
   cropRatio: '1:1',
   cropZoom: 1,
   cropX: 0,

@@ -29,6 +29,26 @@ export function createDemoPattern(palette: BeadPaletteColor[], width = 29, heigh
   return { width, height, palette, cells }
 }
 
+/**
+ * Resize a bead pattern in logical grid cells, preserving the existing
+ * top-left portion of the drawing and initializing any new cells as empty.
+ * The dimensions are not CSS pixels; they are the persisted board width and
+ * height used by the renderer, editor, generator, and export pipeline.
+ */
+export function resizeBeadPattern(pattern: BeadPatternGrid, width: number, height: number): BeadPatternGrid {
+  const nextWidth = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(width)))
+  const nextHeight = Math.max(1, Math.min(MAX_BEAD_DIMENSION, Math.round(height)))
+  const cells = new Array<number>(nextWidth * nextHeight).fill(EMPTY_CELL)
+  const copyWidth = Math.min(pattern.width, nextWidth)
+  const copyHeight = Math.min(pattern.height, nextHeight)
+  for (let y = 0; y < copyHeight; y += 1) {
+    for (let x = 0; x < copyWidth; x += 1) {
+      cells[y * nextWidth + x] = pattern.cells[y * pattern.width + x] ?? EMPTY_CELL
+    }
+  }
+  return { ...pattern, width: nextWidth, height: nextHeight, cells }
+}
+
 export function calculateMaterialList(pattern: BeadPatternGrid, packSize = 500): BeadMaterialSummary {
   const counts = new Map<number, number>()
   pattern.cells.forEach((cell) => {

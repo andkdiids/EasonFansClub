@@ -7,7 +7,7 @@ import { defaultBeadSettings, createDefaultLayerStack, isValidBeadDimensions, no
 import { findPaletteColorByCode, getDefaultPalette, getPalette, getPaletteCoverage, getPaletteModeDefinition, getPaletteRegistry, getSeriesForBrand, MARD_221_PALETTE_REGISTRY, MARD_221_SOURCE, MARD_221_SOURCE_EXCEPTIONS, normalizePaletteCode, PALETTE_MODES, PALETTE_REGISTRY, PALETTE_SOURCE, supportedBeadBrands } from '../lib/studio/beads/palette'
 import { generatePatternFromPixels } from '../lib/studio/beads/image'
 import { EMPTY_CELL } from '../lib/studio/beads/types'
-import { calculateMaterialList, createDemoPattern, floodFill, removeTinyColorRegions, replaceColor, splitIntoBoards } from '../lib/studio/beads/grid'
+import { calculateMaterialList, createDemoPattern, floodFill, removeTinyColorRegions, replaceColor, resizeBeadPattern, splitIntoBoards } from '../lib/studio/beads/grid'
 import { createBeadPatternPdf } from '../lib/studio/beads/pdf'
 import { BEAD_GRID_DIVIDER_COLOR, DEFAULT_BEAD_EXPORT_SCALE, patternCellColor, patternCellSize, renderPatternToCanvas, renderPatternToDataUrl, safeRenderScale } from '../lib/studio/beads/renderer'
 import { BEAD_STUDIO_ONBOARDING_STORAGE_KEY, hasSeenBeadStudioOnboarding, markBeadStudioOnboardingSeen } from '../lib/studio/beads/onboarding'
@@ -314,6 +314,69 @@ test('102×102 尺寸边界和 legacy → current 兼容归一化', () => {
   assert.equal(normalizeBeadProjectData(legacyOversize)?.legacyOversize, true)
 })
 
+test('自定义画板尺寸支持横向、纵向、正方形和 102 边界', () => {
+  const palette = getDefaultPalette()
+  assert.equal(defaultBeadSettings.lockRatio, false)
+  const source = createDemoPattern(palette, 29, 29)
+  source.cells[0] = 7
+  for (const [width, height] of [[20, 20], [40, 80], [80, 40], [80, 80], [102, 102]] as const) {
+    const pattern = resizeBeadPattern(source, width, height)
+    assert.equal(pattern.width, width)
+    assert.equal(pattern.height, height)
+    assert.equal(pattern.cells.length, width * height)
+    assert.equal(pattern.cells[0], 7)
+  }
+  assert.equal(isValidBeadDimensions(1, 1), true)
+  assert.equal(isValidBeadDimensions(103, 102), false)
+  assert.equal(isValidBeadDimensions(102, 103), false)
+  assert.equal(isValidBeadDimensions(0, 50), false)
+  assert.equal(isValidBeadDimensions(-1, 50), false)
+  assert.equal(isValidBeadDimensions(50.5, 50), false)
+})
+
+test('矩形画板的 Canvas / 导出尺寸保持逻辑宽高比例', () => {
+  const pattern = createDemoPattern(getDefaultPalette(), 40, 80)
+  const context = {
+    fillStyle: '',
+    globalAlpha: 1,
+    strokeStyle: '',
+    lineWidth: 0,
+    font: '',
+    textAlign: '',
+    textBaseline: '',
+    clearRect() {},
+    fillRect() {},
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    arc() {},
+    fill() {},
+    fillText() {},
+    scale() {},
+    setLineDash() {},
+    strokeRect() {},
+  }
+  const canvas = { width: 0, height: 0, getContext: () => context } as unknown as HTMLCanvasElement
+  const result = renderPatternToCanvas(canvas, pattern, { displayGrid: false, renderScale: 1 })
+  assert.equal(result.logicalWidth, 40 * patternCellSize(40, 80))
+  assert.equal(result.logicalHeight, 80 * patternCellSize(40, 80))
+  assert.equal(canvas.width, result.logicalWidth)
+  assert.equal(canvas.height, result.logicalHeight)
+})
+
+test('图片自动生成使用自定义横竖画板尺寸', () => {
+  const palette = getDefaultPalette()
+  for (const [width, height] of [[40, 80], [80, 40]] as const) {
+    const settings = { ...defaultBeadSettings, width, height, maxColors: 8 as const, cleanupThreshold: 0 as const }
+    const samples = Array.from({ length: width * height }, (_, index) => ({ r: (index * 37) % 256, g: (index * 71) % 256, b: (index * 113) % 256 }))
+    const result = generatePatternFromPixels(samples, new Array(samples.length).fill(false), settings, palette)
+    assert.equal(result.width, width)
+    assert.equal(result.height, height)
+    assert.equal(result.cells.length, width * height)
+  }
+})
+
 test('参考图层独立于材料统计，默认隐藏配置不影响网格', () => {
   const stack = createDefaultLayerStack()
   assert.equal(stack.activeLayerId, 'beads')
@@ -361,6 +424,10 @@ test('制作模式、导出、移动端和错误提示均由工作台接线', ()
   assert.match(editor, /toggleFullscreen/)
   assert.match(editor, /requestFullscreen/)
   assert.match(editor, /MAX_BEAD_DIMENSION/)
+  assert.match(editor, /画板大小（格）/)
+  assert.match(editor, /inputMode="numeric"/)
+  assert.match(editor, /画板最大为/)
+  assert.match(editor, /resizeBeadPattern/)
   assert.match(editor, /passive: false/)
   assert.match(editor, /BeadPalettePicker/)
   assert.match(editor, /<UiIcon name="grid" className={styles\.generateButtonIcon}/)
