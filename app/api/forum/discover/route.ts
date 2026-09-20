@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
-import { getCurrentUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { isConfiguredForumBoardId, mergeForumBoardSummaries, normalizeForumBoards, withForumBoardDisplayName } from '@/lib/boards'
 import { splitContentImages } from '@/lib/content-images'
@@ -19,7 +18,7 @@ import {
 } from '@/lib/forum-discovery'
 import { prisma } from '@/lib/prisma'
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
-import { sanitizeText } from '@/lib/security'
+import { resolveRequestAuth, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { getTrendingTopics } from '@/lib/topic-service'
@@ -281,7 +280,9 @@ function hasInvalidDiscoveryIds(value: unknown, max = DISCOVERY_MAX_SEEN_IDS) {
 }
 
 export async function POST(request: Request) {
-  const user = await getCurrentUser()
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const user = auth.user
   const rawBody = await request.json().catch(() => null)
   if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
     return NextResponse.json({ message: '请求参数无效' }, { status: 400 })

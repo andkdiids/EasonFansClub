@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import type { UserRole } from '@prisma/client'
 import { type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
-import { getCurrentUser, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
+import { getCurrentUser, getCurrentUserById, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
 import { getClientIp } from '@/lib/client-ip'
 import { containsBannedWord, getEnabledBannedWords } from '@/lib/content-moderation'
+import { getBearerToken, isMobileAuthConfigurationError, resolveMobileAccess } from '@/lib/mobile-auth'
 import { prisma } from '@/lib/prisma'
 import { sanitizeTextPreservingLength } from '@/lib/text'
 
@@ -12,6 +13,11 @@ export { getClientIp, normalizeIp } from '@/lib/client-ip'
 
 export type GuardResult =
   | { user: SessionUser; response: null }
+  | { user: null; response: NextResponse }
+
+export type RequestAuthResult =
+  | { user: SessionUser; response: null }
+  | { user: null; response: null }
   | { user: null; response: NextResponse }
 
 export function isAdminRole(role: UserRole) {
@@ -57,6 +63,54 @@ export async function requireUser(): Promise<GuardResult> {
   }
 
   return { user, response: null }
+}
+
+function authServiceUnavailableResponse() {
+  return NextResponse.json(
+    { ok: false, code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后再试' },
+    { status: 503, headers: { 'Cache-Control': 'private, no-store, max-age=0' } },
+  )
+}
+
+/**
+ * Resolve request authentication for APIs that may be called by either the
+ * browser or the native app. Presence of an Authorization header selects the
+ * Bearer path exclusively; an invalid Bearer token never falls back to a
+ * browser Cookie session.
+ */
+export async function resolveRequestAuth(request: Request): Promise<RequestAuthResult> {
+  if (request.headers.has('authorization')) {
+    const token = getBearerToken(request.headers.get('authorization'))
+    if (!token) return { user: null, response: unauthenticatedResponse() }
+
+    try {
+      const mobileAccess = await resolveMobileAccess(request)
+      if (!mobileAccess) return { user: null, response: unauthenticatedResponse() }
+      const user = await getCurrentUserById(mobileAccess.claims.userId)
+      if (!user) return { user: null, response: unauthenticatedResponse() }
+      return { user, response: null }
+    } catch (error) {
+      if (isMobileAuthConfigurationError(error) || isAuthServiceUnavailableError(error)) {
+        return { user: null, response: authServiceUnavailableResponse() }
+      }
+      throw error
+    }
+  }
+
+  try {
+    const user = await getCurrentUser()
+    return { user, response: null }
+  } catch (error) {
+    if (isAuthServiceUnavailableError(error)) return { user: null, response: authServiceUnavailableResponse() }
+    throw error
+  }
+}
+
+export async function requireRequestUser(request: Request): Promise<GuardResult> {
+  const result = await resolveRequestAuth(request)
+  if (result.response) return { user: null, response: result.response }
+  if (!result.user) return { user: null, response: unauthenticatedResponse() }
+  return result
 }
 
 export async function requireAdmin(permissionKey?: AdminPermissionKey): Promise<GuardResult> {

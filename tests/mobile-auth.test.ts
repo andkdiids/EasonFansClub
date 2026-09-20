@@ -201,3 +201,21 @@ test('shared login credentials and rate limits are used by Web and Mobile', () =
   assert.match(middleware, /'\/api\/mobile\/auth\/'/)
   assert.match(middleware, /!isMobileAuthPath && isCrossSiteRequest/)
 })
+
+test('mobile community Bearer endpoints are explicitly allowlisted before Cookie middleware', () => {
+  const middleware = source('middleware.ts')
+  assert.match(middleware, /function isMobileBearerBusinessRequest\(/)
+  for (const pattern of [
+    /\/api\/forum\/discover/,
+    /posts.*replies/,
+    /posts.*like/,
+    /replies.*like/,
+    /\/api\/notifications\/read-all/,
+    /notifications.*read/,
+    /\/api\/notifications\/unread-count/,
+    /\/api\/topics/,
+  ]) {
+    assert.match(middleware, pattern)
+  }
+  assert.match(middleware, /isMobileBearerBusinessRequest\(request, pathname\)/)
+})

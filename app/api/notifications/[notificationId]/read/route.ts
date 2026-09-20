@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server'
 import { markUnifiedNotificationReadWithState } from '@/lib/notifications'
 import { emitRealtime } from '@/lib/realtime'
 import { logNotificationError } from '@/lib/notification-errors'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
 
 export async function POST(request: Request, { params }: { params: Promise<{ notificationId: string }> }) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/notifications/read',

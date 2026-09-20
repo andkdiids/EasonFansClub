@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
-import { getCurrentUser } from '@/lib/auth'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { publicImageUrl } from '@/lib/images'
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
@@ -9,7 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
 import { logNotificationError } from '@/lib/notification-errors'
-import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 import { grantGrowthReward } from '@/lib/growth-tasks/service'
 
 type Params = { params: Promise<{ postId: string }> }
@@ -71,8 +70,9 @@ export async function GET(request: Request, { params }: Params) {
 }
 
 export async function POST(request: Request, { params }: Params) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录后再点赞')
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     ip: { limit: 120, windowSeconds: 60 },
     user: { limit: 60, windowSeconds: 60 },
@@ -157,8 +157,9 @@ export async function POST(request: Request, { params }: Params) {
 }
 
 export async function DELETE(request: Request, { params }: Params) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse()
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     ip: { limit: 120, windowSeconds: 60 },
     user: { limit: 60, windowSeconds: 60 },

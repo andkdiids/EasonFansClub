@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { listUnifiedNotificationsPage, markAllUnifiedNotificationsRead, markUnifiedNotificationRead, parseNotificationCategory } from '@/lib/notifications'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { enforceApiRateLimit, requireAdmin, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { effectiveSystemNotificationWhere } from '@/lib/system-notifications'
@@ -18,7 +18,7 @@ export const revalidate = 0
 type NotificationReadInput = { id: string; source?: string }
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/notifications',
@@ -36,9 +36,8 @@ export async function GET(request: Request) {
   const category = parseNotificationCategory(searchParams.get('category'))
   let canReview = false
   if (category === 'review') {
-    const reviewGuard = await requireAdmin()
-    if (!reviewGuard.user) return reviewGuard.response
-    canReview = true
+    canReview = await hasAdminPermission(guard.user).catch(() => false)
+    if (!canReview) return NextResponse.json({ ok: false, code: 'FORBIDDEN', message: '当前用户无权查看审核通知' }, { status: 403, headers: privateHeaders })
   } else {
     canReview = await hasAdminPermission(guard.user).catch(() => false)
   }
@@ -87,7 +86,7 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/notifications',
@@ -123,7 +122,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/notifications',

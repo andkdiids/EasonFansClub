@@ -103,7 +103,7 @@ test('小臣书接口参数有明确边界，非法输入不会静默变成默�
   assert.equal(normalizeDiscoveryIds(Array.from({ length: 501 }, (_, index) => `post-${index}`)).length, 500)
 
   const route = readFileSync('app/api/forum/discover/route.ts', 'utf8')
-  assert.match(route, /getCurrentUser\(\)/)
+  assert.match(route, /resolveRequestAuth\(request\)/)
   assert.match(route, /parseForumDiscoveryMode/)
   assert.match(route, /parseForumDiscoveryLimit/)
   assert.match(route, /status: 400/)

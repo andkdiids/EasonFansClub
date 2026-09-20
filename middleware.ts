@@ -140,9 +140,33 @@ function isImmutablePublicPath(pathname: string) {
   return immutablePublicExactPaths.has(pathname) || immutablePublicPathPrefixes.some((prefix) => pathname.startsWith(prefix))
 }
 
-function isMobileBearerReadRequest(request: NextRequest, pathname: string) {
-  if (request.method !== 'GET' || !/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
-  return pathname === '/api/posts' || /^\/api\/posts\/[^/]+$/.test(pathname)
+function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
+  if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
+  if (request.method === 'GET') {
+    return pathname === '/api/posts'
+      || /^\/api\/posts\/[^/]+$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/replies$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
+      || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
+      || pathname === '/api/notifications'
+      || pathname === '/api/notifications/unread-count'
+      || pathname === '/api/topics'
+      || /^\/api\/topics\/[^/]+$/.test(pathname)
+  }
+  if (request.method === 'POST') {
+    return pathname === '/api/forum/discover'
+      || /^\/api\/posts\/[^/]+\/replies$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
+      || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
+      || pathname === '/api/notifications/read-all'
+      || /^\/api\/notifications\/[^/]+\/read$/.test(pathname)
+  }
+  if (request.method === 'PATCH' || request.method === 'DELETE') {
+    return pathname === '/api/notifications'
+      || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
+      || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
+  }
+  return false
 }
 
 function isApiPath(pathname: string) {
@@ -352,11 +376,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // The public square/detail GET handlers already resolve an optional viewer
-  // and do not require the browser Cookie session. Let the native app reach
-  // those read-only handlers with its Bearer credential; write handlers still
-  // perform their own Web auth guards and the global CSRF check remains active.
-  if (isMobileBearerReadRequest(request, pathname)) {
+  // These business handlers resolve Bearer auth at route level. Let the native
+  // app reach the allowlisted paths without a browser Cookie; the route guards
+  // still enforce the mobile credential and the global CSRF check remains active.
+  if (isMobileBearerBusinessRequest(request, pathname)) {
     return withNoStoreHeaders(NextResponse.next())
   }
 

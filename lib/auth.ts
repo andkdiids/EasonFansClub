@@ -223,6 +223,18 @@ export async function getCurrentUserFromSessionToken(token?: string) {
   return getCurrentUserForSessionUser(await verifySessionToken(token))
 }
 
+/**
+ * Resolve an already verified user id without consulting request cookies.
+ * Mobile Bearer routes use this after their access token and mobile session
+ * have been checked, while browser Cookie auth continues through
+ * getCurrentUser() unchanged.
+ */
+export async function getCurrentUserById(userId: string) {
+  const normalizedUserId = userId.trim()
+  if (!normalizedUserId) return null
+  return getCurrentUserForSessionUser({ id: normalizedUserId } as SessionUser)
+}
+
 export async function getCurrentUser() {
   const sessionUsers = await getSessionUsersFromCookie()
   for (const sessionUser of sessionUsers) {

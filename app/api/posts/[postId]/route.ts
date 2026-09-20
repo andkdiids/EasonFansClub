@@ -4,7 +4,7 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { adminAuditOperations, createAdminActionAudit, createPostModerationHistory } from '@/lib/admin-audit'
 import { awardFeaturedPostRewards } from '@/lib/community-rewards'
-import { getCurrentUser, type SessionUser } from '@/lib/auth'
+import { type SessionUser } from '@/lib/auth'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { hasAdminPermission, isSuperAdmin, isPrivilegedPostAuthor } from '@/lib/admin-permissions'
 import { deletePost } from '@/lib/post-deletion'
@@ -14,7 +14,7 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { requireUser, resolveRequestAuth, sanitizeText } from '@/lib/security'
 import { checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, CONTENT_CONTAINS_BANNED_WORD, publicModerationText } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
 import { buildReviewCenterUrl } from '@/lib/review-center'
@@ -300,8 +300,10 @@ function isAcceptableImageUrl(value: unknown): value is string {
   return url.startsWith('http://') || url.startsWith('https://')
 }
 
-export async function GET(_request: Request, { params }: Params) {
-  const viewer = await getCurrentUser()
+export async function GET(request: Request, { params }: Params) {
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const viewer = auth.user
   const { postId } = await params
   const viewerCanManagePosts = Boolean(viewer && await hasAdminPermission(viewer, 'post_manage'))
   const viewerCanManageReplies = Boolean(viewer && await hasAdminPermission(viewer, 'reply_manage'))
@@ -335,6 +337,9 @@ export async function GET(_request: Request, { params }: Params) {
       select: { replyId: true },
     })).map((like) => like.replyId))
     : new Set<string>()
+  const viewerLikedPost = viewer
+    ? Boolean(await prisma.like.findUnique({ where: { postId_userId: { postId, userId: viewer.id } }, select: { id: true } }))
+    : false
   const author = User.Profile ? {
     ...User,
     nickname: getPublicUserDisplayName(User),
@@ -367,6 +372,7 @@ export async function GET(_request: Request, { params }: Params) {
       author,
       board: withForumBoardDisplayName(Board),
       topics: PostTopic.map(({ Topic }) => Topic),
+      likedByMe: viewerLikedPost,
       media: PostMedia.map((media) => ({
         ...media,
         url: publicImageUrl(media.url) || media.url,

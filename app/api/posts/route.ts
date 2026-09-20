@@ -10,7 +10,7 @@ import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
-import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
+import { enforceApiRateLimit, resolveRequestAuth, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
@@ -120,7 +120,9 @@ async function runPostCreateSideEffect(
 }
 
 export async function GET(request: Request) {
-  const viewer = await getCurrentUser()
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const viewer = auth.user
   const limited = await enforceApiRateLimit(request, viewer?.id, {
     endpoint: '/api/posts',
     ip: { limit: 180, windowSeconds: 60 },

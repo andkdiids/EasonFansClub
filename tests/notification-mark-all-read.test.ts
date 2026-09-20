@@ -31,7 +31,7 @@ test('全部已读：后端一笔事务完成，不在热路径做对账', () =>
   const route = read('app/api/notifications/read-all/route.ts')
 
   // 路由鉴权后调用服务。
-  assert.match(route, /POST\(\)/)
+  assert.match(route, /export async function POST\(request: Request\)/)
   assert.match(route, /await markAllUnifiedNotificationsRead\(guard\.user\.id\)/)
 
   // 核心更新是一次 UPDATE WHERE (recipientId + readAt IS NULL)，配合系统通知已读标记放进同一事务。

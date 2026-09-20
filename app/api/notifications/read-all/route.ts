@@ -2,15 +2,15 @@ import { NextResponse } from 'next/server'
 import { markAllUnifiedNotificationsRead } from '@/lib/notifications'
 import { emitRealtime } from '@/lib/realtime'
 import { logNotificationError } from '@/lib/notification-errors'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
 
-export async function POST() {
-  const guard = await requireUser()
+export async function POST(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   try {

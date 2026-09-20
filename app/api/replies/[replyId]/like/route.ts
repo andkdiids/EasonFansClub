@@ -3,7 +3,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 import { syncLikeNotification, type LikeNotificationSyncInput } from '@/lib/like-notifications'
 import { logNotificationError } from '@/lib/notification-errors'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
@@ -14,7 +14,7 @@ type RouteContext = { params: Promise<{ replyId: string }> }
 
 // 点赞用户列表：供 LikeAvatars 组件展开「全部点赞用户」时懒加载。
 export async function GET(request: Request, context: RouteContext) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/replies/like',
@@ -58,7 +58,7 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     ip: { limit: 120, windowSeconds: 60 },
@@ -137,7 +137,7 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(request: Request, context: RouteContext) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     ip: { limit: 120, windowSeconds: 60 },

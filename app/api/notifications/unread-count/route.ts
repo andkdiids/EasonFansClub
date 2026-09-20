@@ -2,15 +2,15 @@ import { NextResponse } from 'next/server'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getUnreadNotificationCount } from '@/lib/notifications'
 import { logNotificationError } from '@/lib/notification-errors'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
 
-export async function GET() {
-  const guard = await requireUser()
+export async function GET(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   try {
