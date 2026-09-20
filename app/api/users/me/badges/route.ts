@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { getBadgeCollection, getBadgeProfileSummary } from '@/lib/badge-service'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const collection = new URL(request.url).searchParams.get('preview') === '1'
     ? await getBadgeProfileSummary(guard.user.id, guard.user.id)

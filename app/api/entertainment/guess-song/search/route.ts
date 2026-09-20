@@ -1,4 +1,4 @@
-import { consumeRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { consumeRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { guessSongError, guessSongOk, handleGuessSongError } from '@/lib/guess-song-api'
 import { prisma } from '@/lib/prisma'
 
@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guessSongError('请先登录', guard.response.status)
   const limit = await consumeRateLimit(guard.user.id, 'guess-song-search', 60, 60)
   if (limit.limited) return guessSongError('搜索请求过于频繁，请稍后再试', 429)

@@ -40,7 +40,7 @@ test('历史处方搜索服务端限定用户、快照和关联处方，并分�
   assert.match(service, /take: pageSize/)
   assert.match(service, /orderBy: \[\{ dateKey: 'desc' \}/)
   assert.match(service, /LyricPrescription:\s*\{\s*select:/)
-  assert.match(route, /const guard = await requireUser\(\)/)
+  assert.match(route, /const guard = await requireRequestUser\(request\)/)
   assert.match(route, /getEntertainmentDailyDrawHistory\(guard\.user\.id/)
   assert.doesNotMatch(route, /params\.get\(['"]userId['"]\)/)
   assert.match(page, /parsePrescriptionHistoryDateQuery/)

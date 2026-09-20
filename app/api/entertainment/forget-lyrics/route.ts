@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getForgetLyricsData, parseForgetLyricsLimit, type ForgetLyricsRange, type ForgetLyricsSort } from '@/lib/forget-lyrics'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -14,7 +14,7 @@ function parseSort(value: string | null): ForgetLyricsSort {
 }
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const params = new URL(request.url).searchParams

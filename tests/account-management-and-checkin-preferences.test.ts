@@ -89,7 +89,7 @@ test('签到偏好只能修改本人并由签到 API 依据数据库值判断 mo
   assert.match(preference, /where: \{ id: guard\.user\.id \}/)
   assert.doesNotMatch(preference, /body\?\.(userId|targetUserId)/)
   assert.match(auth, /checkinMoodEnabled: true/)
-  assert.match(checkin, /const user = await getCurrentUser\(\)/)
+  assert.match(checkin, /const guard = await requireRequestUser\(request\)[\s\S]*const user = guard\.user/)
   assert.match(checkin, /unauthenticatedResponse\(\)/)
   assert.match(checkin, /const preference = \{ checkinMoodEnabled: user\.checkinMoodEnabled \}/)
   assert.match(checkin, /preference\.checkinMoodEnabled \? requestedMood : null/)

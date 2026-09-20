@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { getBadgeDetailForUser } from '@/lib/badge-service'
-import { unauthenticatedResponse } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 type RouteContext = { params: Promise<{ badgeId: string }> }
 
 /** Current-user-only detail refresh; progress is calculated server-side. */
-export async function GET(_request: Request, context: RouteContext) {
-  const viewer = await getCurrentUser()
-  if (!viewer) return unauthenticatedResponse()
+export async function GET(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const viewer = guard.user
 
   const { badgeId } = await context.params
   const badge = await getBadgeDetailForUser(viewer.id, badgeId)

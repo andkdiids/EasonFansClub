@@ -1,4 +1,4 @@
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { abandonGuessSongSession } from '@/lib/guess-song-session'
 import { guessSongError, guessSongOk, handleGuessSongError } from '@/lib/guess-song-api'
 
@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 
 export async function POST(request: Request, { params }: Context) {
   if (rejectInvalidRequestOrigin(request)) return guessSongError('请求来源校验失败，请刷新后重试', 403)
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guessSongError('请先登录', guard.response.status)
   const { sessionId } = await params
   try {

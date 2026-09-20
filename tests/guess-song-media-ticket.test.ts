@@ -126,7 +126,7 @@ test('media gateway wiring preserves the legacy route and protects the new origi
   assert.match(session, /playCount: \{ increment: 1 \}/)
   assert.match(game, /audio\.src = data\.audioUrl/)
   assert.match(game, /fetch|api</)
-  assert.match(authorize, /requireUser\(\)/)
+  assert.match(authorize, /requireRequestUser\(request\)/)
   assert.match(authorize, /getGuessSongPlaybackSource\(/)
   assert.match(authorize, /X-Media-Cache-Key/)
   assert.match(origin, /isValidMediaGatewaySecret/)

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { getTodayRegistrationFeeSummary } from '@/lib/registration-fee'
-import { unauthenticatedResponse } from '@/lib/security'
+import { requireRequestUser, unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,9 +9,11 @@ const privateNoStoreHeaders = {
   Vary: 'Cookie',
 }
 
-export async function GET() {
-  const user = await getCurrentUser()
+export async function GET(request: Request) {
+  const guard = await requireRequestUser(request)
+  const user = guard.user
   if (!user) {
+    if (guard.response.status !== 401) return guard.response
     return unauthenticatedResponse('请先登录后查看挂号费记录', privateNoStoreHeaders, { data: null, error: '请先登录后查看挂号费记录' })
   }
 

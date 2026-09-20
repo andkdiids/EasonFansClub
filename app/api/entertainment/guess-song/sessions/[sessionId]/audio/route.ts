@@ -1,7 +1,7 @@
 import { getGuessSongPlaybackSource } from '@/lib/guess-song-session'
 import { streamProtectedGuessSongAudio } from '@/lib/protected-audio'
 import { guessSongError, handleGuessSongError } from '@/lib/guess-song-api'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { requireRequestUser, sanitizeText } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 type Context = { params: Promise<{ sessionId: string }> }
 
 async function handle(request: Request, { params }: Context) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guessSongError('璇峰厛鐧诲綍', guard.response.status)
 
   const { sessionId } = await params

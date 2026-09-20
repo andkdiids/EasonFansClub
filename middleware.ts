@@ -144,6 +144,23 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
   if (request.method === 'GET') {
     return pathname === '/api/posts'
+      || pathname === '/api/checkin'
+      || pathname === '/api/checkin/history'
+      || /^\/api\/checkin\/history\/[^/]+$/.test(pathname)
+      || pathname === '/api/entertainment/daily-draw'
+      || pathname === '/api/entertainment/daily-draw/history'
+      || pathname === '/api/points/today'
+      || pathname === '/api/points/history'
+      || pathname === '/api/entertainment/guess-song/sessions'
+      || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+$/.test(pathname)
+      || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/audio$/.test(pathname)
+      || pathname === '/api/entertainment/guess-song/search'
+      || pathname === '/api/entertainment/guess-song/leaderboard'
+      || pathname === '/api/entertainment/leaderboard'
+      || pathname === '/api/entertainment/forget-lyrics'
+      || pathname === '/api/users/me/badges'
+      || /^\/api\/users\/me\/badges\/[^/]+$/.test(pathname)
+      || /^\/api\/badge-series\/[^/]+$/.test(pathname)
       || /^\/api\/posts\/[^/]+$/.test(pathname)
       || /^\/api\/posts\/[^/]+\/replies$/.test(pathname)
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
@@ -166,6 +183,11 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'POST') {
     return pathname === '/api/forum/discover'
+      || pathname === '/api/checkin'
+      || pathname === '/api/entertainment/daily-draw'
+      || pathname === '/api/entertainment/guess-song/sessions'
+      || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/(?:play|answer|pause|resume|abandon)$/.test(pathname)
+      || pathname === '/api/users/me/badge/equip'
       || pathname === '/api/posts'
       || pathname === '/api/uploads/content-image'
       || pathname === '/api/friends/requests'
@@ -179,6 +201,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'PUT' || request.method === 'PATCH') {
     return pathname === '/api/posts/draft'
+      || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
       || pathname === '/api/users/me'
       || /^\/api\/friends\/requests\/[^/]+$/.test(pathname)
       || /^\/api\/friends\/[^/]+\/group$/.test(pathname)
@@ -189,8 +212,12 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
+      || pathname === '/api/users/me/badge/equip'
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
+  }
+  if (request.method === 'HEAD') {
+    return /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/audio$/.test(pathname)
   }
   return false
 }

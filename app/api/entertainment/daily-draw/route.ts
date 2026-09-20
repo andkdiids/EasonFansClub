@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
+import { isAuthServiceUnavailableError } from '@/lib/auth'
 import { getEntertainmentDailyDrawStatus, issueEntertainmentDailyDraw } from '@/lib/entertainment'
-import { rejectInvalidRequestOrigin, unauthenticatedResponse } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,10 +22,11 @@ function serviceError(error: unknown, operation: string) {
   )
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser()
-    if (!user) return unauthorized()
+    const guard = await requireRequestUser(request)
+    if (!guard.user) return guard.response.status === 401 ? unauthorized() : guard.response
+    const user = guard.user
     const data = await getEntertainmentDailyDrawStatus(user.id)
     return NextResponse.json({ ok: true, data, error: null })
   } catch (error) {
@@ -40,8 +41,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const user = await getCurrentUser()
-    if (!user) return unauthorized()
+    const guard = await requireRequestUser(request)
+    if (!guard.user) return guard.response.status === 401 ? unauthorized() : guard.response
+    const user = guard.user
     const result = await issueEntertainmentDailyDraw(user.id)
     return NextResponse.json({
       ok: true,

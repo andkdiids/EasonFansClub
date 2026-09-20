@@ -144,7 +144,7 @@ test('奖励业务键先查重、锁内再用当前读复核，保证并发只�
 test('每日挂号费查询按北京时间边界倒序读取当前用户正向流水', () => {
   const route = read('app/api/points/today/route.ts')
   const service = read('lib/registration-fee.ts')
-  assert.match(route, /getCurrentUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /unauthenticatedResponse\(/)
   assert.match(route, /private, no-store/)
   assert.match(service, /getShanghaiDayRange\(now\)/)

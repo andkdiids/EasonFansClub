@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getEntertainmentDailyDrawHistory } from '@/lib/entertainment'
-import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -16,7 +16,7 @@ function parseLimit(value: string | null) {
 }
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const limited = await enforceApiRateLimit(request, guard.user.id, {

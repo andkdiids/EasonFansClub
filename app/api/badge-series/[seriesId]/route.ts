@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getBadgeCollection } from '@/lib/badge-service'
-import { getCurrentUser } from '@/lib/auth'
 import { parseUidParam } from '@/lib/uid'
 import { prisma } from '@/lib/prisma'
-import { unauthenticatedResponse } from '@/lib/security'
+import { resolveRequestAuth, unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 type RouteContext = { params: Promise<{ seriesId: string }> }
@@ -11,7 +10,9 @@ type RouteContext = { params: Promise<{ seriesId: string }> }
 export async function GET(request: Request, context: RouteContext) {
   const { seriesId } = await context.params
   if (!seriesId || seriesId.length > 191) return NextResponse.json({ message: '系列不存在' }, { status: 404 })
-  const viewer = await getCurrentUser()
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const viewer = auth.user
   const requestedUid = new URL(request.url).searchParams.get('user')
   let targetId = viewer?.id || null
   if (requestedUid) {

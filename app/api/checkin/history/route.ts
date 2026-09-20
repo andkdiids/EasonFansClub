@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getCurrentCheckInMonth, getCheckInMonthBounds, getCheckInMonthKey, parseCheckInDateKey } from '@/lib/checkin-history'
-import { getCurrentUser } from '@/lib/auth'
 import { getBeijingDateKey } from '@/lib/beijing-time'
 import { prisma } from '@/lib/prisma'
 import { CHECK_IN_MAKEUP_COST, getEligibleMakeupDates, getMakeupOperationWeek, getShanghaiMonthKey, isMakeupOperationInWeek, USER_MAKEUP_TYPES } from '@/lib/checkin-makeup'
-import { unauthenticatedResponse } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,8 +20,9 @@ function parseYearParam(value: string | null) {
 }
 
 export async function GET(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse()
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
 
   const now = new Date()
   const current = getCurrentCheckInMonth(now)

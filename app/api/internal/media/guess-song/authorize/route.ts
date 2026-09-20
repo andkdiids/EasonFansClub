@@ -6,7 +6,7 @@ import {
   parseGuessSongMediaRequest,
   verifyGuessSongMediaTicket,
 } from '@/lib/guess-song-media-ticket'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,7 +32,7 @@ async function handle(request: Request) {
 
   let guard
   try {
-    guard = await requireUser()
+    guard = await requireRequestUser(request)
   } catch {
     return denied(503)
   }

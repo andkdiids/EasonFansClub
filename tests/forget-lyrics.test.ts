@@ -96,7 +96,7 @@ test('实现没有接入全局错答 hook，且 API 仅查询本人听听历史'
   assert.match(service, /GuessSongQuestion: \{ musicSongId: \{ not: null \} \}/)
   assert.match(service, /answeredAt: null/)
   assert.match(service, /status: \{ in: \['IN_PROGRESS', 'PAUSED'\] \}/)
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /userId: guard\.user\.id/)
   assert.match(route, /'Cache-Control': 'private, no-store/)
   assert.match(client, /useMusicPlayer/)

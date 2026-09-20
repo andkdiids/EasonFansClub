@@ -28,7 +28,7 @@ test('private media routes authenticate and stream COS objects without exposing 
 
   assert.match(fullRoute, /canPlayFullMusic/)
   assert.match(fullRoute, /streamProtectedGuessSongAudio/)
-  assert.match(guessRoute, /requireUser\(\)/)
+  assert.match(guessRoute, /requireRequestUser\(request\)/)
   assert.match(guessRoute, /getGuessSongPlaybackSource/)
   assert.match(hospitalRoute, /getEHospitalCheckAudioSource/)
   assert.match(stream, /getGuessSongObjectMetadata/)

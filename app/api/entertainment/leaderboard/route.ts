@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getEntertainmentLeaderboard, EntertainmentLeaderboardError } from '@/lib/entertainment-leaderboard'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -20,7 +20,7 @@ function errorResponse(message: string, status: number, code?: string) {
 }
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return errorResponse('请先登录', guard.response.status, 'UNAUTHENTICATED')
 
   const params = new URL(request.url).searchParams

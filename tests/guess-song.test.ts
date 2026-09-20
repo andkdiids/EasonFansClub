@@ -433,7 +433,7 @@ test('用户播放使用同源受保护音频接口而不是COS临时签名URL',
   const service = source('lib/guess-song-session.ts')
   const route = source('app/api/entertainment/guess-song/sessions/[sessionId]/audio/route.ts')
   assert.match(service, /audioUrl = `\/api\/entertainment\/guess-song\/sessions/)
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /streamProtectedGuessSongAudio\(request, source\.storagePath\)/)
   assert.doesNotMatch(service, /createGuessSongSignedUrl/)
 })

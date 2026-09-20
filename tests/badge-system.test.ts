@@ -111,7 +111,7 @@ test('non-owners cannot read hidden current UserBadge records', () => {
 
 test('equip API requires an authenticated user and rate limits writes', () => {
   const route = read('app/api/users/me/badge/equip/route.ts')
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /enforceApiRateLimit/)
 })
 

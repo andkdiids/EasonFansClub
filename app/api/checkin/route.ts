@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { syncUserAchievements } from '@/lib/achievements'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { getCurrentUser } from '@/lib/auth'
 import { calculateCheckinStreaks, formatBeijingDate, getShanghaiDateKey, startOfLocalDay } from '@/lib/checkin'
 import { logCheckInBackgroundTask, logSlowCheckInRequest, safeErrorCode } from '@/lib/checkin-observability'
 import { CUSTOM_MOOD_BANNED_WORD_MESSAGE, CUSTOM_MOOD_INVALID_MESSAGE, CUSTOM_MOOD_TYPE, PRESET_MOOD_TYPE, normalizeCustomMoodText, validateCustomMoodInput } from '@/lib/checkin-mood'
@@ -15,7 +14,7 @@ import { awardExperience, EXPERIENCE_REWARD_SOURCES, getRandomCheckInExperience 
 import { getRandomCheckInPoints } from '@/lib/points'
 import { prisma } from '@/lib/prisma'
 import { awardRegistrationFee } from '@/lib/registration-fee'
-import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { updateUserIpRegion } from '@/lib/ip-region'
@@ -196,10 +195,11 @@ export async function GET(request: Request) {
   const requestId = getCheckInRequestId(request)
   const routeStartedAt = Date.now()
   const authStartedAt = Date.now()
-  const user = await getCurrentUser()
+  const guard = await requireRequestUser(request)
+  const user = guard.user
   const authMs = Date.now() - authStartedAt
   if (!user) {
-    const response = unauthenticatedResponse()
+    const response = guard.response.status === 401 ? unauthenticatedResponse() : guard.response
     const responseBuildMs = Date.now() - routeStartedAt
     logSlowCheckInRequest({ requestId, method: 'GET', totalMs: Date.now() - routeStartedAt, authMs, responseBuildMs, success: false, errorCode: 'UNAUTHENTICATED' })
     return response
@@ -276,11 +276,12 @@ export async function POST(request: Request) {
   const requestId = getCheckInRequestId(request)
   const routeStartedAt = Date.now()
   const authStartedAt = Date.now()
-  const user = await getCurrentUser()
+  const guard = await requireRequestUser(request)
+  const user = guard.user
   const authMs = Date.now() - authStartedAt
   if (!user) {
     const responseBuildStartedAt = Date.now()
-    const response = unauthenticatedResponse('请先登录后再挂号')
+    const response = guard.response.status === 401 ? unauthenticatedResponse('请先登录后再挂号') : guard.response
     logSlowCheckInRequest({ requestId, method: 'POST', totalMs: Date.now() - routeStartedAt, authMs, responseBuildMs: Date.now() - responseBuildStartedAt, success: false, errorCode: 'UNAUTHENTICATED' })
     return response
   }

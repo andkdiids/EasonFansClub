@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { parseCheckInDateKey } from '@/lib/checkin-history'
 import { prisma } from '@/lib/prisma'
-import { unauthenticatedResponse } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 type RouteContext = { params: Promise<{ dateKey: string }> }
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(_request: Request, context: RouteContext) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse()
+export async function GET(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
 
   const { dateKey } = await context.params
   if (!parseCheckInDateKey(dateKey)) {

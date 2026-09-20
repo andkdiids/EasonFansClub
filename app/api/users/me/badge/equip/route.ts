@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { equipBadge, BadgeServiceError, reorderEquippedBadges, unequipBadge } from '@/lib/badge-service'
 import { formatUid } from '@/lib/uid'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +23,7 @@ async function revalidateBadgeViews(userId: string, uid: number) {
 }
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'users-me-badge-equip',
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'users-me-badge-unequip',
@@ -68,7 +68,7 @@ export async function DELETE(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: 'users-me-badge-reorder',

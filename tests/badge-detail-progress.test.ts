@@ -75,7 +75,7 @@ test('check-in progress keeps total-day and current-streak metrics on the existi
 test('detail refresh is current-user-only, no-store and does not calculate metrics in the browser', () => {
   const route = read('app/api/users/me/badges/[badgeId]/route.ts')
   const component = read('components/BadgeCollectionPanel.tsx')
-  assert.match(route, /getCurrentUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /getBadgeDetailForUser\(viewer\.id, badgeId\)/)
   assert.match(route, /Cache-Control.*private, no-store/)
   assert.match(component, /\/api\/users\/me\/badges\/\$\{encodeURIComponent\(badge\.id\)\}/)

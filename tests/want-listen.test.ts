@@ -698,7 +698,8 @@ test('API-only 活跃：middleware matcher 覆盖想听 API，rolling session �
   assert.match(middleware, /'\/apple-icon\.png'/)
   // 想听 API 路径不在此 public 前缀列表（/api/auth/ 等）→ 会走验证 + 滚动续期
   assert.match(middleware, /'\/api\/auth\/',/)
-  assert.doesNotMatch(middleware, /\/api\/entertainment\//)
+  assert.doesNotMatch(middleware, /pathname\.startsWith\(['"]\/api\/entertainment\//)
+  assert.doesNotMatch(middleware, /isMobileBearerBusinessRequest[\s\S]{0,6000}want-listen/)
   // 滚动续期逻辑：剩余 < 15 天时重签（对页面与 API 请求统一生效）
   assert.match(middleware, /needsRollingRenew/)
   assert.match(middleware, /renewSessionCookie/)

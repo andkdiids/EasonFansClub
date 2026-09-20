@@ -77,7 +77,7 @@ test('暂停和恢复 API 使用登录、来源校验、动态 no-store 路由',
   const api = source('lib/guess-song-api.ts')
   for (const route of [pause, resume]) {
     assert.match(route, /rejectInvalidRequestOrigin/)
-    assert.match(route, /requireUser/)
+    assert.match(route, /requireRequestUser\(request\)/)
     assert.match(route, /export const dynamic = 'force-dynamic'/)
   }
   assert.match(api, /Cache-Control.*private, no-store/)

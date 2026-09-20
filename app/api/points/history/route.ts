@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import {
   getRegistrationFeeHistory,
   REGISTRATION_FEE_HISTORY_PAGE_SIZE,
   type RegistrationFeeHistoryRange,
   RegistrationFeeHistoryQueryError,
 } from '@/lib/registration-fee'
-import { unauthenticatedResponse } from '@/lib/security'
+import { requireRequestUser, unauthenticatedResponse } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,8 +13,11 @@ const privateNoStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0',
 const registrationFeeHistoryRanges = new Set<RegistrationFeeHistoryRange>(['all', 'today', 'yesterday', 'week', 'date'])
 
 export async function GET(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录后查看挂号费记录', privateNoStoreHeaders)
+  const guard = await requireRequestUser(request)
+  const user = guard.user
+  if (!user) return guard.response.status === 401
+    ? unauthenticatedResponse('请先登录后查看挂号费记录', privateNoStoreHeaders)
+    : guard.response
 
   const { searchParams } = new URL(request.url)
   const rawRange = searchParams.get('range') || 'all'

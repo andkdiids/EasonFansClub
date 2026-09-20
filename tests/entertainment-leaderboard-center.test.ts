@@ -148,5 +148,5 @@ test('统一榜单 API 仅接受 game/mode/period，服务端固定 Top10 且 no
   assert.match(route, /params\.get\('period'\)/)
   assert.match(route, /limit: 10/)
   assert.match(route, /Cache-Control': 'private, no-store'/)
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
 })
