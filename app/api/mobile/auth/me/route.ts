@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isDatabaseTimeout } from '@/lib/auth-credentials'
 import { isMobileAuthConfigurationError, resolveMobileAccess } from '@/lib/mobile-auth'
+import { requireMobileBetaAccess } from '@/lib/mobile-beta'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
@@ -13,6 +14,8 @@ function unauthorizedResponse() {
 
 export async function GET(request: Request) {
   try {
+    const betaResponse = await requireMobileBetaAccess(request)
+    if (betaResponse) return betaResponse
     const auth = await resolveMobileAccess(request)
     if (!auth) return unauthorizedResponse()
     return NextResponse.json({ user: auth.user }, { headers: noStoreHeaders })

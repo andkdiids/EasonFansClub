@@ -57,6 +57,13 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     ],
   },
   {
+    title: 'Android 内测',
+    desc: '控制移动端内测准入与动态邀请码。',
+    items: [
+      { href: '/admin/beta-access', title: '内测管理', desc: '开启或关闭 Android 内测准入，生成一次性显示的邀请码并撤销设备资格。' },
+    ],
+  },
+  {
     title: '导航管理',
     desc: '统一管理 E院中心的功能入口顺序与显示状态。',
     items: [

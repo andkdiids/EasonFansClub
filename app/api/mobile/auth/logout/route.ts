@@ -6,11 +6,14 @@ import {
   revokeMobileSession,
   verifyMobileAccessToken,
 } from '@/lib/mobile-auth'
+import { requireMobileBetaAccess } from '@/lib/mobile-beta'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
 export async function POST(request: Request) {
   try {
+    const betaResponse = await requireMobileBetaAccess(request)
+    if (betaResponse) return betaResponse
     const body = await request.json().catch(() => null)
     const refreshToken = body && typeof body === 'object' && typeof (body as Record<string, unknown>).refreshToken === 'string'
       ? (body as Record<string, string>).refreshToken

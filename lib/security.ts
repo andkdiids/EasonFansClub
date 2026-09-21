@@ -6,6 +6,7 @@ import { getCurrentUser, getCurrentUserById, isAuthServiceUnavailableError, type
 import { getClientIp } from '@/lib/client-ip'
 import { containsBannedWord, getEnabledBannedWords } from '@/lib/content-moderation'
 import { getBearerToken, isMobileAuthConfigurationError, resolveMobileAccess } from '@/lib/mobile-auth'
+import { resolveMobileBetaAccess } from '@/lib/mobile-beta'
 import { prisma } from '@/lib/prisma'
 import { sanitizeTextPreservingLength } from '@/lib/text'
 
@@ -79,6 +80,9 @@ function authServiceUnavailableResponse() {
  * browser Cookie session.
  */
 export async function resolveRequestAuth(request: Request): Promise<RequestAuthResult> {
+  const betaResponse = await resolveMobileBetaAccess(request)
+  if (betaResponse) return { user: null, response: betaResponse }
+
   if (request.headers.has('authorization')) {
     const token = getBearerToken(request.headers.get('authorization'))
     if (!token) return { user: null, response: unauthenticatedResponse() }

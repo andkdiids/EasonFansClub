@@ -3181,6 +3181,44 @@ model MobileAuthSession {
   @@index([expiresAt])
 }
 
+model BetaInviteCode {
+  id              String                 @id @default(cuid())
+  codeHash        String                 @unique @db.VarChar(64)
+  codePrefix      String                 @db.VarChar(16)
+  maskedCode      String                 @db.VarChar(32)
+  status          BetaInviteStatus       @default(ACTIVE)
+  maxActivations  Int                    @default(1)
+  activationCount Int                    @default(0)
+  expiresAt       DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  createdById     String
+  CreatedBy       User                   @relation("BetaInviteCodeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  Activations     BetaDeviceActivation[]
+
+  @@index([status, expiresAt])
+  @@index([createdById, createdAt])
+}
+
+model BetaDeviceActivation {
+  id                 String               @id @default(cuid())
+  inviteCodeId       String
+  installationIdHash String               @db.VarChar(64)
+  credentialHash     String               @unique @db.VarChar(64)
+  status             BetaActivationStatus @default(ACTIVE)
+  activatedAt        DateTime             @default(now())
+  lastVerifiedAt     DateTime?
+  revokedAt          DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  InviteCode         BetaInviteCode       @relation(fields: [inviteCodeId], references: [id], onDelete: Cascade)
+
+  @@unique([inviteCodeId, installationIdHash])
+  @@index([installationIdHash])
+  @@index([status, lastVerifiedAt])
+  @@index([inviteCodeId, activatedAt])
+}
+
 model PageLayout {
   id                                  String               @id @default(cuid())
   pageKey                             String               @unique
@@ -4640,6 +4678,7 @@ model User {
   Notification_Notification_recipientIdToUser            Notification[]                     @relation("Notification_recipientIdToUser")
   OnlineSession                                          OnlineSession[]
   MobileAuthSession                                      MobileAuthSession[]
+  BetaInviteCodesCreated                                 BetaInviteCode[]                   @relation("BetaInviteCodeCreatedBy")
   PageLayout_PageLayout_publishedByIdToUser              PageLayout[]                       @relation("PageLayout_publishedByIdToUser")
   PageLayout_PageLayout_updatedByIdToUser                PageLayout[]                       @relation("PageLayout_updatedByIdToUser")
   PageLayoutRevision                                     PageLayoutRevision[]
@@ -5034,6 +5073,18 @@ enum AdminActionType {
   GRANT_BADGE
   CREATE_ACTIVITY
   UPDATE_SETTING
+}
+
+enum BetaInviteStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  REVOKED
+}
+
+enum BetaActivationStatus {
+  ACTIVE
+  REVOKED
 }
 
 enum ChangelogStatus {

@@ -27,6 +27,7 @@ const publicExactPaths = new Set([
   '/salon',
   '/activities',
   '/api/clinic',
+  '/api/mobile/config',
   '/api/salon/posts',
   '/api/salon/options',
   '/api/share/wechat-logo-v2.png',
@@ -39,6 +40,7 @@ const immutablePublicExactPaths = new Set([
 const publicPathPrefixes = [
   '/api/auth/',
   '/api/mobile/auth/',
+  '/api/mobile/beta/',
   '/api/health/',
   '/_next/',
   '/easmusic/',

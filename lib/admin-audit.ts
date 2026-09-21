@@ -36,6 +36,11 @@ export const adminAuditOperations = {
   ANGEL_GIFT_CAMPAIGN_STATUS: 'ANGEL_GIFT_CAMPAIGN_STATUS',
   ANGEL_GIFT_PRIZE_UPDATE: 'ANGEL_GIFT_PRIZE_UPDATE',
   ADMIN_GLOBAL_POINTS_GRANT: 'ADMIN_GLOBAL_POINTS_GRANT',
+  BETA_GATE_ENABLE: 'BETA_GATE_ENABLE',
+  BETA_GATE_DISABLE: 'BETA_GATE_DISABLE',
+  BETA_INVITE_CREATE: 'BETA_INVITE_CREATE',
+  BETA_INVITE_REVOKE: 'BETA_INVITE_REVOKE',
+  BETA_ACTIVATION_REVOKE: 'BETA_ACTIVATION_REVOKE',
 } as const
 
 export type AdminAuditOperation = typeof adminAuditOperations[keyof typeof adminAuditOperations]
@@ -74,6 +79,11 @@ export const adminAuditOperationLabels: Record<AdminAuditOperation, string> = {
   ANGEL_GIFT_CAMPAIGN_STATUS: '更新天使的礼物主题状态',
   ANGEL_GIFT_PRIZE_UPDATE: '更新天使的礼物奖池',
   ADMIN_GLOBAL_POINTS_GRANT: '全站发放挂号费',
+  BETA_GATE_ENABLE: '开启 Android 内测准入',
+  BETA_GATE_DISABLE: '关闭 Android 内测准入',
+  BETA_INVITE_CREATE: '创建 Android 内测码',
+  BETA_INVITE_REVOKE: '撤销 Android 内测码',
+  BETA_ACTIVATION_REVOKE: '撤销 Android 内测设备资格',
 }
 
 type AuditDatabaseClient = Pick<Prisma.TransactionClient, 'user' | 'adminAction' | 'postModerationHistory'>
