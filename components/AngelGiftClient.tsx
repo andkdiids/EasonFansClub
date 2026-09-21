@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import type { PharmacyDrawView, PharmacyHistoryItem, PharmacyPageData } from '@/lib/pharmacy'
 import { ALLOWED_PHARMACY_DRAW_COUNTS, calculateAvailablePharmacyDraws, type PharmacyDrawCount } from '@/lib/pharmacy-draw-options'
+import { getAngelGiftDrawConfirmationStorageKey, getAngelGiftShanghaiDateKey, shouldConfirmAngelGiftDraw } from '@/lib/angel-gift-draw-confirmation'
 
 type Props = { initialData: PharmacyPageData }
 
@@ -106,6 +107,60 @@ function ResultModal({ draws, duplicateTotal, duplicateRequired, cost, onClose, 
   )
 }
 
+function DrawConfirmationModal({ drawCount, campaignComplete, cost, onCancel, onConfirm }: { drawCount: PharmacyDrawCount; campaignComplete: boolean; cost: number; onCancel: () => void; onConfirm: (suppressToday: boolean) => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const [suppressToday, setSuppressToday] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    cancelRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCancel()
+      }
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])')].filter((element) => !element.hasAttribute('disabled'))
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (first && last && ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last))) {
+          event.preventDefault()
+          ;(event.shiftKey ? last : first).focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      previous?.focus()
+    }
+  }, [onCancel])
+
+  const copy = campaignComplete
+    ? drawCount === 1
+      ? '你已集齐本期药柜全部奖励，继续参与仍会按当前规则正常抽取。'
+      : `你已集齐本期药柜全部奖励，即将进行 ${drawCount} 连抽，是否仍要参与？`
+    : `即将进行 ${drawCount} 连抽，是否继续？`
+  function handleConfirm() {
+    if (submitting) return
+    setSubmitting(true)
+    onConfirm(suppressToday)
+  }
+  return (
+    <div className="angel-gift-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+      <div ref={dialogRef} className="angel-gift-result-modal angel-gift-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="angel-gift-draw-confirm-title" aria-describedby="angel-gift-draw-confirm-copy">
+        <p className="angel-gift-modal-kicker">执药前确认</p>
+        <h2 id="angel-gift-draw-confirm-title">{campaignComplete ? '当期奖励已全部拥有' : '确认参与抽取'}</h2>
+        <p id="angel-gift-draw-confirm-copy" className="angel-gift-confirm-copy">{copy}</p>
+        <p className="angel-gift-confirm-cost">本次消耗 {formatFee(cost * drawCount)} 挂号费</p>
+        <label className="angel-gift-confirm-checkbox"><input type="checkbox" checked={suppressToday} onChange={(event) => setSuppressToday(event.target.checked)} />今日不再提醒</label>
+        <div className="angel-gift-modal-actions"><button ref={cancelRef} type="button" className="angel-gift-button secondary" onClick={onCancel} disabled={submitting}>取消</button><button type="button" className="angel-gift-button primary" onClick={handleConfirm} disabled={submitting} aria-busy={submitting}>{submitting ? '处理中…' : campaignComplete ? '仍要参与' : '继续抽取'}</button></div>
+      </div>
+    </div>
+  )
+}
+
 export function AngelGiftClient({ initialData }: Props) {
   const [data, setData] = useState(initialData)
   const [drawing, setDrawing] = useState(false)
@@ -117,6 +172,8 @@ export function AngelGiftClient({ initialData }: Props) {
   const [recycleBusy, setRecycleBusy] = useState(false)
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyPage, setHistoryPage] = useState(1)
+  const [drawConfirmation, setDrawConfirmation] = useState<PharmacyDrawCount | null>(null)
+  const [drawConfirmationSubmitting, setDrawConfirmationSubmitting] = useState(false)
   const drawKeyRef = useRef<string | null>(null)
   const recycleKeyRef = useRef<string | null>(null)
 
@@ -126,6 +183,7 @@ export function AngelGiftClient({ initialData }: Props) {
   const required = data.duplicate.required
   const canRecycle = Boolean(user && campaign?.duplicateRecycleEnabled && required && data.duplicate.total >= required && !recycleBusy)
   const status = campaign?.status || null
+  const campaignComplete = Boolean(campaign?.collection.collectionComplete)
   const isLimitReached = Boolean(user && campaign && ((campaign.dailyDrawLimit !== null && user.todayCount >= campaign.dailyDrawLimit) || (campaign.totalDrawLimit !== null && user.totalCount >= campaign.totalDrawLimit)))
   const insufficient = Boolean(user && campaign && user.balance < campaign.drawCost)
   const availableDraws = campaign && user
@@ -144,6 +202,8 @@ export function AngelGiftClient({ initialData }: Props) {
   useEffect(() => {
     drawKeyRef.current = null
     recycleKeyRef.current = null
+    setDrawConfirmation(null)
+    setDrawConfirmationSubmitting(false)
   }, [campaign?.id])
 
   useEffect(() => {
@@ -197,6 +257,50 @@ export function AngelGiftClient({ initialData }: Props) {
       setDrawing(false)
       setPhase('')
     }
+  }
+
+  function isDrawConfirmationSuppressedToday(campaignId: string) {
+    if (typeof window === 'undefined') return false
+    try {
+      const dateKey = getAngelGiftShanghaiDateKey()
+      return window.localStorage.getItem(getAngelGiftDrawConfirmationStorageKey(campaignId, dateKey)) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  function suppressDrawConfirmationToday(campaignId: string) {
+    if (typeof window === 'undefined') return
+    try {
+      const dateKey = getAngelGiftShanghaiDateKey()
+      window.localStorage.setItem(getAngelGiftDrawConfirmationStorageKey(campaignId, dateKey), '1')
+    } catch {
+      // Private browsing and blocked storage should not prevent drawing.
+    }
+  }
+
+  function requestDraw(requestedCount: PharmacyDrawCount = 1) {
+    if (!campaign || !user || drawing || drawConfirmationSubmitting || !ALLOWED_PHARMACY_DRAW_COUNTS.includes(requestedCount) || availableDraws < requestedCount) return
+    const shouldConfirm = shouldConfirmAngelGiftDraw({ drawCount: requestedCount, campaignComplete, suppressToday: isDrawConfirmationSuppressedToday(campaign.id) })
+    if (!shouldConfirm) {
+      void draw(requestedCount)
+      return
+    }
+    setDrawConfirmation(requestedCount)
+  }
+
+  function cancelDrawConfirmation() {
+    setDrawConfirmation(null)
+    setDrawConfirmationSubmitting(false)
+  }
+
+  function confirmDraw(suppressToday: boolean) {
+    if (!campaign || !drawConfirmation || drawConfirmationSubmitting) return
+    const requestedCount = drawConfirmation
+    setDrawConfirmationSubmitting(true)
+    if (suppressToday) suppressDrawConfirmationToday(campaign.id)
+    setDrawConfirmation(null)
+    void draw(requestedCount).finally(() => setDrawConfirmationSubmitting(false))
   }
 
   async function recycle() {
@@ -268,21 +372,21 @@ export function AngelGiftClient({ initialData }: Props) {
       {error ? <div className="angel-gift-alert" role="alert">{error}</div> : null}
 
       {campaign ? <>
+        {upcomingPreview}
+
         <section className="angel-gift-theme-card" aria-labelledby="angel-gift-theme-title">
           {campaign.visualUrl ? <Image className="angel-gift-theme-visual" src={campaign.visualUrl} alt={`${campaign.title}主题视觉`} width={112} height={76} unoptimized /> : null}
           <div><span className="angel-gift-label">本期主题</span><h2 id="angel-gift-theme-title">{campaign.title}</h2>{campaign.subtitle ? <p className="angel-gift-theme-subtitle">{campaign.subtitle}</p> : null}{campaign.description ? <p className="angel-gift-theme-description">{campaign.description}</p> : null}</div>
           <div className={`angel-gift-status is-${status?.toLowerCase()}`}><span>{status ? statusLabels[status] : '—'}</span>{campaign.endsAt && status !== 'ENDED' ? <small>至 {formatDate(campaign.endsAt)}</small> : null}</div>
         </section>
 
-        {upcomingPreview}
-
         <section className={`angel-gift-pharmacy-box ${drawing ? 'is-drawing' : ''}`} aria-label="E院药房">
           <div className="angel-gift-box-stamp">Rx</div><div className="angel-gift-box-mark">E院药房</div><div className="angel-gift-box-name">ANGEL&apos;S GIFT</div><div className="angel-gift-box-cn">天使的礼物</div><div className="angel-gift-box-line" />
           <div className="angel-gift-box-phase" aria-live="polite">{drawing ? phase : '请把手伸进不知道名字的处方里。'}</div>
           <div className="angel-gift-draw-actions" aria-label="执药次数">
-            <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => void draw(1)} disabled={!canDraw || availableDraws < 1} aria-disabled={!canDraw || availableDraws < 1}>{drawing ? '配药中…' : '执药 1 次'}</button>
-            {availableDraws >= 5 ? <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => void draw(5)} disabled={!canDraw} aria-disabled={!canDraw}>执药 5 次</button> : null}
-            {availableDraws >= 10 ? <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => void draw(10)} disabled={!canDraw} aria-disabled={!canDraw}>执药 10 次</button> : null}
+            <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => requestDraw(1)} disabled={!canDraw || availableDraws < 1} aria-disabled={!canDraw || availableDraws < 1}>{drawing ? '配药中…' : '执药 1 次'}</button>
+            {availableDraws >= 5 ? <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => requestDraw(5)} disabled={!canDraw} aria-disabled={!canDraw}>执药 5 次</button> : null}
+            {availableDraws >= 10 ? <button type="button" className="angel-gift-draw-button angel-gift-draw-option" onClick={() => requestDraw(10)} disabled={!canDraw} aria-disabled={!canDraw}>执药 10 次</button> : null}
           </div>
           <p className="angel-gift-box-note">每次执药消耗 {campaign.drawCost} 挂号费</p>
         </section>
@@ -303,7 +407,8 @@ export function AngelGiftClient({ initialData }: Props) {
       </> : <>{upcomingPreview}<section className="angel-gift-empty-state"><span aria-hidden="true">Rx</span><h2>药房尚未开出本期处方</h2><p>当前暂无正在进行的主题，待开始主题仅作为下期预告展示。</p></section></>}
 
       {drawing ? <div className="angel-gift-drawing-live" aria-live="polite">{phase}</div> : null}
-      {result ? <ResultModal draws={result} duplicateTotal={data.duplicate.total} duplicateRequired={data.duplicate.required} cost={campaign?.drawCost || result[0].drawCost} onClose={() => setResult(null)} onContinue={() => { setResult(null); void draw(1) }} /> : null}
+      {drawConfirmation ? <DrawConfirmationModal drawCount={drawConfirmation} campaignComplete={campaignComplete} cost={campaign?.drawCost || 0} onCancel={cancelDrawConfirmation} onConfirm={confirmDraw} /> : null}
+      {result ? <ResultModal draws={result} duplicateTotal={data.duplicate.total} duplicateRequired={data.duplicate.required} cost={campaign?.drawCost || result[0].drawCost} onClose={() => setResult(null)} onContinue={() => { setResult(null); requestDraw(1) }} /> : null}
     </section>
   )
 }

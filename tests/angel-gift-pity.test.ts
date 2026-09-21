@@ -10,6 +10,7 @@ import {
   shouldUsePharmacyPity,
 } from '@/lib/pharmacy-pity'
 import { calculateAvailablePharmacyDraws } from '@/lib/pharmacy-draw-options'
+import { getAngelGiftDrawConfirmationStorageKey, getAngelGiftShanghaiDateKey, shouldConfirmAngelGiftDraw } from '@/lib/angel-gift-draw-confirmation'
 
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
@@ -51,6 +52,24 @@ test('抽数严格限制为 1、5、10，按钮可用次数同时受余额和额
   assert.equal(calculateAvailablePharmacyDraws({ balance: 1000, cost: 27, todayCount: 6, dailyLimit: 10, totalCount: 8, totalLimit: 14 }), 4)
 })
 
+test('天使的礼物二次确认按药柜完成度和抽数统一判断', () => {
+  assert.equal(shouldConfirmAngelGiftDraw({ drawCount: 1, campaignComplete: false, suppressToday: false }), false)
+  assert.equal(shouldConfirmAngelGiftDraw({ drawCount: 5, campaignComplete: false, suppressToday: false }), true)
+  assert.equal(shouldConfirmAngelGiftDraw({ drawCount: 10, campaignComplete: false, suppressToday: false }), true)
+  assert.equal(shouldConfirmAngelGiftDraw({ drawCount: 1, campaignComplete: true, suppressToday: false }), true)
+  assert.equal(shouldConfirmAngelGiftDraw({ drawCount: 5, campaignComplete: true, suppressToday: false }), true)
+  assert.equal(shouldConfirmAngelGiftDraw({ drawCount: 10, campaignComplete: true, suppressToday: false }), true)
+  assert.equal(shouldConfirmAngelGiftDraw({ drawCount: 10, campaignComplete: true, suppressToday: true }), false)
+})
+
+test('天使的礼物今日提醒使用上海业务日并按主题隔离', () => {
+  assert.equal(getAngelGiftShanghaiDateKey(new Date('2026-09-21T15:59:59.000Z')), '2026-09-21')
+  assert.equal(getAngelGiftShanghaiDateKey(new Date('2026-09-21T16:00:00.000Z')), '2026-09-22')
+  assert.equal(getAngelGiftDrawConfirmationStorageKey('campaign-a', '2026-09-21'), 'angel-gift-confirm-suppress:campaign-a:2026-09-21')
+  assert.notEqual(getAngelGiftDrawConfirmationStorageKey('campaign-a', '2026-09-21'), getAngelGiftDrawConfirmationStorageKey('campaign-b', '2026-09-21'))
+  assert.notEqual(getAngelGiftDrawConfirmationStorageKey('campaign-a', '2026-09-21'), getAngelGiftDrawConfirmationStorageKey('campaign-a', '2026-09-22'))
+})
+
 test('管理员配置要求启用时提供正整数，关闭时旧主题保持默认关闭', () => {
   assert.equal(normalizePharmacyCampaignInput({ title: '旧主题', drawCost: 27, status: 'DRAFT' }).pityEnabled, false)
   const configured = normalizePharmacyCampaignInput({ title: '新主题', drawCost: 27, status: 'DRAFT', pityEnabled: true, pityThreshold: 10, pityIncludeHidden: true })
@@ -83,6 +102,27 @@ test('批量事务先锁用户并预校验完整费用与每日/主题额度', (
   assert.match(pharmacy, /totalCount \+ drawCount > campaign\.totalDrawLimit/)
   assert.match(pharmacy, /const batchCost = campaign\.drawCost \* drawCount/)
   assert.match(pharmacy, /prisma\.\$transaction\(async \(tx\)/)
+})
+
+test('前端确认在抽取 API 之前，并使用单一 campaign 今日抑制偏好', () => {
+  const client = read('components/AngelGiftClient.tsx')
+  assert.match(client, /shouldConfirmAngelGiftDraw/)
+  assert.match(client, /getAngelGiftDrawConfirmationStorageKey\(campaignId, dateKey\)/)
+  assert.match(client, /setDrawConfirmation\(requestedCount\)/)
+  assert.match(client, /onConfirm=\{confirmDraw\}/)
+  assert.match(client, /collection\.collectionComplete/)
+  assert.match(client, /onClick=\{\(\) => requestDraw\(1\)\}/)
+  assert.match(client, /onClick=\{\(\) => requestDraw\(5\)\}/)
+  assert.match(client, /onClick=\{\(\) => requestDraw\(10\)\}/)
+  assert.match(client, /今日不再提醒/)
+  assert.match(client, /angel-gift-draw-confirm-title/)
+  assert.doesNotMatch(client, /onClick=\{\(\) => void draw\(1\)\}/)
+})
+
+test('药柜公开 10/10 但隐藏款未拥有时不会误判完成，真正集齐才完成', () => {
+  const collection = read('lib/angel-gift-collection.ts')
+  assert.match(collection, /collectionComplete: input\.requiredBadges\.length > 0 && input\.requiredBadges\.every\(\(badge\) => activeOwnedAt\.has\(badge\.id\)\)/)
+  assert.match(collection, /unrevealed hidden/)
 })
 
 test('Schema 与 migration 只新增私有配置、用户主题状态和审计字段', () => {

@@ -33,6 +33,7 @@ test('隐藏款未解锁时不会出现在系列总数，普通款仍保持动�
 
   assert.equal(result.visibleTotalCount, 10)
   assert.equal(result.visibleOwnedCount, 6)
+  assert.equal(result.collectionComplete, false)
   assert.equal(result.hiddenRevealedCount, 0)
   assert.equal(result.visibleBadges.some((badge) => badge.id === hidden.id), false)
 })
@@ -52,6 +53,7 @@ test('用户获得隐藏款后按本人历史解锁，撤销当前持有不撤�
   assert.equal(result.hiddenRevealedCount, 1)
   assert.equal(result.visibleBadges.find((badge) => badge.id === hidden.id)?.isOwned, false)
   assert.equal(result.visibleBadges.find((badge) => badge.id === hidden.id)?.obtainedAt, null)
+  assert.equal(result.collectionComplete, false)
 })
 
 test('关闭系列关系的隐藏开关后恢复普通成员语义', () => {
@@ -71,12 +73,14 @@ test('系列全收集奖励不参与要求计数，只有获得过奖励后才�
   const before = resolveVisibleSeriesCollection({ seriesId: 'campaign-1', seriesTitle: '测试系列', requiredBadges: ordinary, rewardBadge: reward, historicallyOwnedIds: new Set(ordinary.map((badge) => badge.id)), activeOwnedAt: new Map(ordinary.map((badge) => [badge.id, new Date('2026-09-17T00:00:00.000Z')])) })
   assert.equal(before.visibleTotalCount, 10)
   assert.equal(before.visibleOwnedCount, 10)
+  assert.equal(before.collectionComplete, true)
   assert.equal(before.collectionRewardRevealed, false)
   assert.equal(before.collectionReward, null)
 
   const after = resolveVisibleSeriesCollection({ seriesId: 'campaign-1', seriesTitle: '测试系列', requiredBadges: ordinary, rewardBadge: reward, historicallyOwnedIds: new Set([...requiredIds, reward.id]), activeOwnedAt: new Map([...ordinary, reward].map((badge) => [badge.id, new Date('2026-09-17T00:00:00.000Z')])) })
   assert.equal(after.visibleTotalCount, 11)
   assert.equal(after.visibleOwnedCount, 11)
+  assert.equal(after.collectionComplete, true)
   assert.equal(after.collectionRewardRevealed, true)
   assert.equal(after.collectionReward?.isReward, true)
 })

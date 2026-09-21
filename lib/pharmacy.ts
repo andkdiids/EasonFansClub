@@ -771,6 +771,7 @@ export type PharmacyPageData = {
       visibleBadges: AngelGiftVisibleBadge[]
       visibleOwnedCount: number
       visibleTotalCount: number
+      collectionComplete: boolean
       hiddenRevealedCount: number
       collectionRewardRevealed: boolean
     }
@@ -883,7 +884,7 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
     moduleSubtitle: ANGEL_GIFT_SUBTITLE,
     isAuthenticated: Boolean(userId),
     user: userId ? { balance: userRow?.points ?? 0, todayCount: campaign.dailyDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id, drawAt: { gte: getShanghaiDayRange(now).start, lt: getShanghaiDayRange(now).end } } }), totalCount: campaign.totalDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id } }) } : null,
-    campaign: { id: campaign.id, title: campaign.title, subtitle: campaign.subtitle, description: campaign.description, status: effectiveStatus, startsAt: campaign.startsAt?.toISOString() || null, endsAt: campaign.endsAt?.toISOString() || null, drawCost: campaign.drawCost, duplicateRecycleEnabled: campaign.duplicateRecycleEnabled, duplicateRecycleRequired: campaign.duplicateRecycleRequired, duplicateRecycleReward: campaign.duplicateRecycleReward, recycleAfterEndEnabled: campaign.recycleAfterEndEnabled, probabilityPublic: campaign.probabilityPublic, dailyDrawLimit: campaign.dailyDrawLimit, totalDrawLimit: campaign.totalDrawLimit, visualUrl: publicImageUrl(campaign.visualUrl), prizePoolValid, prizes, cabinet, collection: { visibleBadges: collection.visibleBadges, visibleOwnedCount: collection.visibleOwnedCount, visibleTotalCount: collection.visibleTotalCount, hiddenRevealedCount: collection.hiddenRevealedCount, collectionRewardRevealed: collection.collectionRewardRevealed } },
+    campaign: { id: campaign.id, title: campaign.title, subtitle: campaign.subtitle, description: campaign.description, status: effectiveStatus, startsAt: campaign.startsAt?.toISOString() || null, endsAt: campaign.endsAt?.toISOString() || null, drawCost: campaign.drawCost, duplicateRecycleEnabled: campaign.duplicateRecycleEnabled, duplicateRecycleRequired: campaign.duplicateRecycleRequired, duplicateRecycleReward: campaign.duplicateRecycleReward, recycleAfterEndEnabled: campaign.recycleAfterEndEnabled, probabilityPublic: campaign.probabilityPublic, dailyDrawLimit: campaign.dailyDrawLimit, totalDrawLimit: campaign.totalDrawLimit, visualUrl: publicImageUrl(campaign.visualUrl), prizePoolValid, prizes, cabinet, collection: { visibleBadges: collection.visibleBadges, visibleOwnedCount: collection.visibleOwnedCount, visibleTotalCount: collection.visibleTotalCount, collectionComplete: collection.collectionComplete, hiddenRevealedCount: collection.hiddenRevealedCount, collectionRewardRevealed: collection.collectionRewardRevealed } },
     upcomingCampaign,
     duplicate: { total: duplicateTotal, required: campaign.duplicateRecycleEnabled ? campaign.duplicateRecycleRequired : null, byBadge: inventoryRows.map((row) => ({ badgeId: row.sourceBadgeId, badgeName: row.SourceBadge.name, imageUrl: publicImageUrl(row.SourceBadge.iconUrl), quantity: row.quantity })) },
     history: history.items,

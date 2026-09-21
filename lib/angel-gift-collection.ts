@@ -69,6 +69,8 @@ export type VisibleSeriesCollection = {
   visibleBadges: AngelGiftVisibleBadge[]
   visibleOwnedCount: number
   visibleTotalCount: number
+  /** Completion follows required collection members, including revealed semantics for hidden members. */
+  collectionComplete: boolean
   hiddenRevealedCount: number
   collectionRewardRevealed: boolean
   collectionReward: AngelGiftVisibleBadge | null
@@ -217,6 +219,10 @@ export function resolveVisibleSeriesCollection(input: {
     visibleBadges: allVisible,
     visibleOwnedCount: allVisible.filter((badge) => badge.isOwned).length,
     visibleTotalCount: allVisible.length,
+    // Do not derive this from the public 10/10 projection: unrevealed hidden
+    // members are intentionally omitted from that projection but still belong
+    // to the existing collection-completion rule.
+    collectionComplete: input.requiredBadges.length > 0 && input.requiredBadges.every((badge) => activeOwnedAt.has(badge.id)),
     hiddenRevealedCount: visibleBadges.filter((badge) => badge.isHidden && !badge.isReward).length,
     collectionRewardRevealed: rewardRevealed,
     collectionReward,

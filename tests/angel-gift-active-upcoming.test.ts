@@ -81,6 +81,15 @@ test('本期药柜、collection、余药和执药上下文均绑定 active，不
   assert.match(client, /angel-gift-upcoming-card/u)
 })
 
+test('药房顶部先展示下期预告，再展示本期主题，标签框保持直角描边并提升可读性', () => {
+  const client = read('components/AngelGiftClient.tsx')
+  const styles = read('app/globals.css')
+  const upcomingIndex = client.indexOf('{upcomingPreview}')
+  const currentIndex = client.indexOf('<section className="angel-gift-theme-card" aria-labelledby="angel-gift-theme-title">')
+  assert.ok(upcomingIndex >= 0 && currentIndex > upcomingIndex)
+  assert.match(styles, /\.angel-gift-theme-card \.angel-gift-label \{[^}]*border:1px solid var\(--angel-red\)[^}]*font-size:13px[^}]*font-weight:900[^}]*white-space:nowrap/u)
+})
+
 test('未来主题的单抽、5 连抽、10 连抽都会在扣费和写入前拒绝', () => {
   const pharmacy = read('lib/pharmacy.ts')
   const drawStart = pharmacy.indexOf('export async function executePharmacyDraws')
