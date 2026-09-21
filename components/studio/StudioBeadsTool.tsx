@@ -29,6 +29,7 @@ const beadsTool = getStudioTool('beads')!
 const MIN_ZOOM = .5
 const MAX_ZOOM = 3
 const PAN_BUFFER_RATIO = .5
+const BOARD_PRESETS = [[29, 29], [58, 29], [58, 58], [87, 58], [87, 87], [102, 102]] as const
 const hasPreviousBeadStudioUse = typeof window !== 'undefined' && (
   listRecentStudioEvents().some((event) => event.toolSlug === 'beads')
   || listLocalStudioProjects().some((project) => project.toolSlug === 'beads')
@@ -130,6 +131,10 @@ function pointerCenter(left: PointerPoint, right: PointerPoint): PointerPoint {
   return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 }
 }
 
+function isPresetBoardSize(width: number, height: number) {
+  return BOARD_PRESETS.some(([presetWidth, presetHeight]) => presetWidth === width && presetHeight === height)
+}
+
 function snapshotGrid(pattern: BeadPatternGrid): GridSnapshot {
   return { width: pattern.width, height: pattern.height, palette: [...pattern.palette], cells: [...pattern.cells] }
 }
@@ -197,6 +202,8 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const [replaceFrom, setReplaceFrom] = useState(5)
   const [replaceWith, setReplaceWith] = useState(0)
   const [replaceDialogOpen, setReplaceDialogOpen] = useState(false)
+  const [customBoardSizeOpen, setCustomBoardSizeOpen] = useState(false)
+  const [resizeConfirmation, setResizeConfirmation] = useState<{ width: number; height: number } | null>(null)
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -539,6 +546,8 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         const loadedSettings = { ...data.settings, width: data.pattern.width, height: data.pattern.height }
         setSettings(loadedSettings)
         setDimensionDraft({ width: String(data.pattern.width), height: String(data.pattern.height) })
+        setCustomBoardSizeOpen(!isPresetBoardSize(data.pattern.width, data.pattern.height))
+        setResizeConfirmation(null)
         setDimensionError('')
         setPattern(data.pattern)
         patternRef.current = data.pattern
@@ -651,11 +660,26 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
   }
 
-  function setBoardSize(width: number, height: number) {
-    if (dimensionValidationMessage(String(width)) || dimensionValidationMessage(String(height))) return
+  function requestBoardDimensions(width: number, height: number) {
+    const widthError = dimensionValidationMessage(String(width))
+    const heightError = dimensionValidationMessage(String(height))
+    if (widthError || heightError) {
+      setDimensionError(widthError || heightError)
+      return
+    }
     setDimensionDraft({ width: String(width), height: String(height) })
     setDimensionError('')
+    if (width === settings.width && height === settings.height) return
+    if (loaded && projectId) {
+      setResizeConfirmation({ width, height })
+      return
+    }
+    setCustomBoardSizeOpen(!isPresetBoardSize(width, height))
     commitBoardDimensions(width, height)
+  }
+
+  function setBoardSize(width: number, height: number) {
+    requestBoardDimensions(width, height)
   }
 
   function setDimension(key: DimensionKey, rawValue: string) {
@@ -677,7 +701,34 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
     setDimensionDraft({ width: String(width), height: String(height) })
     setDimensionError('')
+    if (loaded && projectId) return
+    setCustomBoardSizeOpen(!isPresetBoardSize(width, height))
     commitBoardDimensions(width, height)
+  }
+
+  function applyDimensionDraft() {
+    const widthError = dimensionValidationMessage(dimensionDraft.width)
+    const heightError = dimensionValidationMessage(dimensionDraft.height)
+    if (widthError || heightError) {
+      setDimensionError(widthError || heightError)
+      return
+    }
+    requestBoardDimensions(Number(dimensionDraft.width), Number(dimensionDraft.height))
+  }
+
+  function cancelResizeConfirmation() {
+    setResizeConfirmation(null)
+    setDimensionDraft({ width: String(settings.width), height: String(settings.height) })
+    setDimensionError('')
+  }
+
+  function confirmResize() {
+    if (!resizeConfirmation) return
+    const next = resizeConfirmation
+    setResizeConfirmation(null)
+    setCustomBoardSizeOpen(!isPresetBoardSize(next.width, next.height))
+    setDimensionDraft({ width: String(next.width), height: String(next.height) })
+    commitBoardDimensions(next.width, next.height)
   }
 
   function settleDimensionInput(key: DimensionKey) {
@@ -1457,6 +1508,7 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const canvasViewportClassName = [styles.canvasViewport, editorTool === 'pan' ? styles.canvasViewportPan : '', isPanning ? styles.canvasViewportPanning : ''].filter(Boolean).join(' ')
   const palette = pattern.palette
   const replacementAmount = pattern.cells.filter((cell) => cell === replaceFrom).length
+  const customBoardSizeVisible = customBoardSizeOpen
   return <>
   <StudioToolShell tool={beadsTool} title={title} saveStatus={saveStatus} onSave={() => void persistProject(false)} onShare={share} shareDisabled={saveStatus === 'saving'} onExport={exportFile} physicalCoverImage={physicalCoverImage} openExportOnMount={requestedExport}>
     <div className={styles.beadsPage}>
@@ -1502,12 +1554,16 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
             <div className={styles.fieldGroup}><label className={styles.formLabel}>图片类型</label><div className={styles.segmented}><button type="button" className={`${styles.segment} ${settings.imageType === 'cartoon' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ imageType: 'cartoon' })}>卡通 / 像素</button><button type="button" className={`${styles.segment} ${settings.imageType === 'photo' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ imageType: 'photo' })}>照片</button></div></div>
             <div className={styles.fieldGroup}>
               <label className={styles.formLabel}>画板大小（格） <span className={styles.formHint}>{settings.lockRatio ? '比例已锁定' : '宽高可独立设置'} · 最大 {MAX_BEAD_DIMENSION}×{MAX_BEAD_DIMENSION}</span></label>
-              <div className={styles.sizeRow}>
-                <label className={styles.dimensionInput}><span>宽</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.width} onChange={(event) => setDimension('width', event.target.value)} onBlur={() => settleDimensionInput('width')} aria-label="图纸宽度" aria-invalid={Boolean(dimensionError)} /></label>
-                <label className={styles.dimensionInput}><span>高</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.height} onChange={(event) => setDimension('height', event.target.value)} onBlur={() => settleDimensionInput('height')} aria-label="图纸高度" aria-invalid={Boolean(dimensionError)} /></label>
-              </div>
-              {dimensionError ? <p className={styles.dimensionError} role="alert">{dimensionError}</p> : null}
-              <div className={styles.presetRow}>{([[29, 29], [58, 29], [58, 58], [87, 58], [87, 87], [102, 102]] as const).map(([width, height]) => <button key={`${width}x${height}`} type="button" className={`${styles.preset} ${settings.width === width && settings.height === height ? styles.presetActive : ''}`} onClick={() => setBoardSize(width, height)}>{width}×{height}</button>)}</div>
+              <div className={styles.presetRow}>{BOARD_PRESETS.map(([width, height]) => <button key={`${width}x${height}`} type="button" className={`${styles.preset} ${settings.width === width && settings.height === height ? styles.presetActive : ''}`} onClick={() => setBoardSize(width, height)}>{width}×{height}</button>)}<button type="button" className={`${styles.preset} ${customBoardSizeVisible ? styles.presetActive : ''}`} onClick={() => setCustomBoardSizeOpen((current) => !current)} aria-expanded={customBoardSizeVisible}>自定义画布大小</button></div>
+              {customBoardSizeVisible ? <div className={styles.customSizePanel}>
+                <div className={styles.sizeRow}>
+                  <label className={styles.dimensionInput}><span>宽</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.width} onChange={(event) => setDimension('width', event.target.value)} onBlur={() => settleDimensionInput('width')} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyDimensionDraft() } }} aria-label="图纸宽度" aria-invalid={Boolean(dimensionError)} /></label>
+                  <label className={styles.dimensionInput}><span>高</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.height} onChange={(event) => setDimension('height', event.target.value)} onBlur={() => settleDimensionInput('height')} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyDimensionDraft() } }} aria-label="图纸高度" aria-invalid={Boolean(dimensionError)} /></label>
+                </div>
+                <p className={styles.sizeSummary}>当前输入：{dimensionDraft.width || '—'} × {dimensionDraft.height || '—'} 格 · 最大 {MAX_BEAD_DIMENSION} × {MAX_BEAD_DIMENSION}</p>
+                {dimensionError ? <p className={styles.dimensionError} role="alert">{dimensionError}</p> : null}
+                <button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={applyDimensionDraft}>应用自定义尺寸</button>
+              </div> : null}
               <label className={styles.checkboxRow} style={{ marginTop: 10 }}><input className={styles.checkbox} type="checkbox" checked={settings.lockRatio} onChange={(event) => updateSettings({ lockRatio: event.target.checked })} />锁定宽高比</label>
             </div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>品牌 / 系列</label><div className={styles.sizeRow}><select className={styles.select} value={settings.brand} onChange={(event) => changeBrand(event.target.value as BeadSettings['brand'])}>{supportedBeadBrands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select><select className={styles.select} value={settings.series} onChange={(event) => changeSeries(event.target.value)}>{getSeriesForBrand(settings.brand).map((series) => <option key={series} value={series}>{series}</option>)}</select></div><label className={styles.formLabel} style={{ marginTop: 11 }}>颜色范围 <span className={styles.rangeValue}>{palette.length} / {paletteCoverage.requested} 已载入</span></label><div className={styles.paletteModeSwitch}>{PALETTE_MODES.map((mode) => <button key={mode.id} type="button" className={`${styles.paletteModeButton} ${settings.paletteMode === mode.id ? styles.paletteModeButtonActive : ''}`} onClick={() => changePaletteMode(mode.id)}>{mode.shortLabel}</button>)}</div><p className={styles.settingsSubtle}>{getPaletteSourceNote(settings.brand, settings.series)} 当前可用 {paletteCoverage.available} 色。</p></div>
@@ -1573,6 +1629,13 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
       </div>
       <p className={styles.replaceSummary}>{palette[replaceFrom]?.code || '—'} 将替换为 {palette[replaceWith]?.code || '—'}，共影响 <strong>{replacementAmount.toLocaleString()}</strong> 颗拼豆。</p>
       <div className={styles.dialogActions}><button type="button" className={styles.actionButton} onClick={() => setReplaceDialogOpen(false)}>取消</button><button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={replaceSelectedColor} disabled={replaceFrom === replaceWith || replacementAmount === 0}>确认换色</button></div>
+    </section>
+  </div> : null}
+  {resizeConfirmation ? <div className={styles.dialogBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelResizeConfirmation() }}>
+    <section className={styles.replaceDialog} role="dialog" aria-modal="true" aria-labelledby="beads-resize-title" aria-describedby="beads-resize-copy">
+      <header className={styles.replaceDialogHeader}><div><span className={styles.panelStep}>BOARD / RESIZE</span><h2 id="beads-resize-title" className={styles.panelTitle}>调整画板大小</h2></div><button type="button" className={styles.dialogClose} onClick={cancelResizeConfirmation} aria-label="关闭调整画板窗口">×</button></header>
+      <p id="beads-resize-copy" className={styles.replaceSummary}>当前 {settings.width} × {settings.height} 格 → {resizeConfirmation.width} × {resizeConfirmation.height} 格。{resizeConfirmation.width < settings.width || resizeConfirmation.height < settings.height ? '缩小画板可能裁掉现有内容，被裁掉区域无法自动恢复；本次操作会进入撤销历史。' : '已有内容会保留在左上角，新增区域为空；本次操作会进入撤销历史。'}</p>
+      <div className={styles.dialogActions}><button type="button" className={styles.actionButton} onClick={cancelResizeConfirmation}>取消</button><button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={confirmResize}>确认调整</button></div>
     </section>
   </div> : null}
   </>
