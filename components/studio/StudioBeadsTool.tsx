@@ -131,10 +131,6 @@ function pointerCenter(left: PointerPoint, right: PointerPoint): PointerPoint {
   return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 }
 }
 
-function isPresetBoardSize(width: number, height: number) {
-  return BOARD_PRESETS.some(([presetWidth, presetHeight]) => presetWidth === width && presetHeight === height)
-}
-
 function snapshotGrid(pattern: BeadPatternGrid): GridSnapshot {
   return { width: pattern.width, height: pattern.height, palette: [...pattern.palette], cells: [...pattern.cells] }
 }
@@ -202,7 +198,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const [replaceFrom, setReplaceFrom] = useState(5)
   const [replaceWith, setReplaceWith] = useState(0)
   const [replaceDialogOpen, setReplaceDialogOpen] = useState(false)
-  const [customBoardSizeOpen, setCustomBoardSizeOpen] = useState(false)
   const [resizeConfirmation, setResizeConfirmation] = useState<{ width: number; height: number } | null>(null)
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -546,7 +541,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
         const loadedSettings = { ...data.settings, width: data.pattern.width, height: data.pattern.height }
         setSettings(loadedSettings)
         setDimensionDraft({ width: String(data.pattern.width), height: String(data.pattern.height) })
-        setCustomBoardSizeOpen(!isPresetBoardSize(data.pattern.width, data.pattern.height))
         setResizeConfirmation(null)
         setDimensionError('')
         setPattern(data.pattern)
@@ -671,10 +665,18 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     setDimensionError('')
     if (width === settings.width && height === settings.height) return
     if (loaded && projectId) {
-      setResizeConfirmation({ width, height })
-      return
+      const current = patternRef.current
+      const hasCroppedContent = current.cells.some((cell, index) => {
+        if (cell === EMPTY_CELL) return false
+        const x = index % current.width
+        const y = Math.floor(index / current.width)
+        return x >= width || y >= height
+      })
+      if (hasCroppedContent) {
+        setResizeConfirmation({ width, height })
+        return
+      }
     }
-    setCustomBoardSizeOpen(!isPresetBoardSize(width, height))
     commitBoardDimensions(width, height)
   }
 
@@ -701,9 +703,8 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     }
     setDimensionDraft({ width: String(width), height: String(height) })
     setDimensionError('')
-    if (loaded && projectId) return
-    setCustomBoardSizeOpen(!isPresetBoardSize(width, height))
-    commitBoardDimensions(width, height)
+    // Keep typing separate from applying: resizing only happens after the
+    // user presses the explicit apply button.
   }
 
   function applyDimensionDraft() {
@@ -726,7 +727,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
     if (!resizeConfirmation) return
     const next = resizeConfirmation
     setResizeConfirmation(null)
-    setCustomBoardSizeOpen(!isPresetBoardSize(next.width, next.height))
     setDimensionDraft({ width: String(next.width), height: String(next.height) })
     commitBoardDimensions(next.width, next.height)
   }
@@ -1508,7 +1508,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
   const canvasViewportClassName = [styles.canvasViewport, editorTool === 'pan' ? styles.canvasViewportPan : '', isPanning ? styles.canvasViewportPanning : ''].filter(Boolean).join(' ')
   const palette = pattern.palette
   const replacementAmount = pattern.cells.filter((cell) => cell === replaceFrom).length
-  const customBoardSizeVisible = customBoardSizeOpen
   return <>
   <StudioToolShell tool={beadsTool} title={title} saveStatus={saveStatus} onSave={() => void persistProject(false)} onShare={share} shareDisabled={saveStatus === 'saving'} onExport={exportFile} physicalCoverImage={physicalCoverImage} openExportOnMount={requestedExport}>
     <div className={styles.beadsPage}>
@@ -1538,6 +1537,20 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
             <div className={styles.panelHeader}><div><span className={styles.panelStep}>02 / SETUP</span><h2 className={styles.panelTitle}>图纸设置</h2></div></div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>作品名称</label><input className={styles.numberInput} value={title} onChange={(event) => { setTitle(event.target.value); setSaveStatus('unsaved') }} maxLength={80} /></div>
             <div className={styles.fieldGroup}>
+              <label className={styles.formLabel}>画板大小 <span className={styles.formHint}>单位：格 · {settings.lockRatio ? '比例已锁定' : '宽高可独立设置'} · 最大 {MAX_BEAD_DIMENSION}×{MAX_BEAD_DIMENSION}</span></label>
+              <div className={styles.customSizePanel}>
+                <div className={styles.sizeRow}>
+                  <label className={styles.dimensionInput}><span>宽度</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.width} onChange={(event) => setDimension('width', event.target.value)} onBlur={() => settleDimensionInput('width')} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyDimensionDraft() } }} aria-label="图纸宽度" aria-invalid={Boolean(dimensionError)} /></label>
+                  <label className={styles.dimensionInput}><span>高度</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.height} onChange={(event) => setDimension('height', event.target.value)} onBlur={() => settleDimensionInput('height')} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyDimensionDraft() } }} aria-label="图纸高度" aria-invalid={Boolean(dimensionError)} /></label>
+                </div>
+                <p className={styles.sizeSummary}>当前：{settings.width} × {settings.height} 格</p>
+                {dimensionError ? <p className={styles.dimensionError} role="alert">{dimensionError}</p> : null}
+                <button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={applyDimensionDraft}>应用尺寸</button>
+              </div>
+              <div className={styles.presetRow} aria-label="常用画板尺寸">{BOARD_PRESETS.map(([width, height]) => <button key={`${width}x${height}`} type="button" className={`${styles.preset} ${settings.width === width && settings.height === height ? styles.presetActive : ''}`} onClick={() => setBoardSize(width, height)}>{width}×{height}</button>)}</div>
+              <label className={styles.checkboxRow} style={{ marginTop: 10 }}><input className={styles.checkbox} type="checkbox" checked={settings.lockRatio} onChange={(event) => updateSettings({ lockRatio: event.target.checked })} />锁定宽高比</label>
+            </div>
+            <div className={styles.fieldGroup}>
               <label className={styles.formLabel}>实物封面 <span className={styles.formHint}>选填</span></label>
               {physicalCoverPreviewUrl || physicalCoverImage ? <div className={styles.physicalCoverEditor}>
                 <img src={physicalCoverPreviewUrl || physicalCoverImage || ''} alt={`${title || '作品'}实物封面`} className={styles.physicalCoverPreview} />
@@ -1552,20 +1565,6 @@ export function StudioBeadsTool({ isAuthenticated }: Readonly<{ isAuthenticated:
               {physicalCoverUploading ? <p className={styles.settingsSubtle}>正在安全保存实物封面…</p> : null}
             </div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>图片类型</label><div className={styles.segmented}><button type="button" className={`${styles.segment} ${settings.imageType === 'cartoon' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ imageType: 'cartoon' })}>卡通 / 像素</button><button type="button" className={`${styles.segment} ${settings.imageType === 'photo' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ imageType: 'photo' })}>照片</button></div></div>
-            <div className={styles.fieldGroup}>
-              <label className={styles.formLabel}>画板大小（格） <span className={styles.formHint}>{settings.lockRatio ? '比例已锁定' : '宽高可独立设置'} · 最大 {MAX_BEAD_DIMENSION}×{MAX_BEAD_DIMENSION}</span></label>
-              <div className={styles.presetRow}>{BOARD_PRESETS.map(([width, height]) => <button key={`${width}x${height}`} type="button" className={`${styles.preset} ${settings.width === width && settings.height === height ? styles.presetActive : ''}`} onClick={() => setBoardSize(width, height)}>{width}×{height}</button>)}<button type="button" className={`${styles.preset} ${customBoardSizeVisible ? styles.presetActive : ''}`} onClick={() => setCustomBoardSizeOpen((current) => !current)} aria-expanded={customBoardSizeVisible}>自定义画布大小</button></div>
-              {customBoardSizeVisible ? <div className={styles.customSizePanel}>
-                <div className={styles.sizeRow}>
-                  <label className={styles.dimensionInput}><span>宽</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.width} onChange={(event) => setDimension('width', event.target.value)} onBlur={() => settleDimensionInput('width')} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyDimensionDraft() } }} aria-label="图纸宽度" aria-invalid={Boolean(dimensionError)} /></label>
-                  <label className={styles.dimensionInput}><span>高</span><input className={styles.numberInput} type="number" min="1" max={MAX_BEAD_DIMENSION} step="1" inputMode="numeric" value={dimensionDraft.height} onChange={(event) => setDimension('height', event.target.value)} onBlur={() => settleDimensionInput('height')} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyDimensionDraft() } }} aria-label="图纸高度" aria-invalid={Boolean(dimensionError)} /></label>
-                </div>
-                <p className={styles.sizeSummary}>当前输入：{dimensionDraft.width || '—'} × {dimensionDraft.height || '—'} 格 · 最大 {MAX_BEAD_DIMENSION} × {MAX_BEAD_DIMENSION}</p>
-                {dimensionError ? <p className={styles.dimensionError} role="alert">{dimensionError}</p> : null}
-                <button type="button" className={`${styles.actionButton} ${styles.actionButtonPrimary}`} onClick={applyDimensionDraft}>应用自定义尺寸</button>
-              </div> : null}
-              <label className={styles.checkboxRow} style={{ marginTop: 10 }}><input className={styles.checkbox} type="checkbox" checked={settings.lockRatio} onChange={(event) => updateSettings({ lockRatio: event.target.checked })} />锁定宽高比</label>
-            </div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>品牌 / 系列</label><div className={styles.sizeRow}><select className={styles.select} value={settings.brand} onChange={(event) => changeBrand(event.target.value as BeadSettings['brand'])}>{supportedBeadBrands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select><select className={styles.select} value={settings.series} onChange={(event) => changeSeries(event.target.value)}>{getSeriesForBrand(settings.brand).map((series) => <option key={series} value={series}>{series}</option>)}</select></div><label className={styles.formLabel} style={{ marginTop: 11 }}>颜色范围 <span className={styles.rangeValue}>{palette.length} / {paletteCoverage.requested} 已载入</span></label><div className={styles.paletteModeSwitch}>{PALETTE_MODES.map((mode) => <button key={mode.id} type="button" className={`${styles.paletteModeButton} ${settings.paletteMode === mode.id ? styles.paletteModeButtonActive : ''}`} onClick={() => changePaletteMode(mode.id)}>{mode.shortLabel}</button>)}</div><p className={styles.settingsSubtle}>{getPaletteSourceNote(settings.brand, settings.series)} 当前可用 {paletteCoverage.available} 色。</p></div>
             <div className={styles.fieldGroup}><label className={styles.formLabel}>颜色匹配</label><div className={styles.segmented}><button type="button" className={`${styles.segment} ${settings.matchingMode === 'fast' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'fast' })}>快速</button><button type="button" className={`${styles.segment} ${settings.matchingMode === 'balanced' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'balanced' })}>均衡</button><button type="button" className={`${styles.segment} ${settings.matchingMode === 'precise' ? styles.segmentActive : ''}`} onClick={() => updateSettings({ matchingMode: 'precise' })}>精确</button></div></div>
             <details className={styles.advancedDetails}><summary className={styles.advancedSummary}>更多图像调整</summary><div className={styles.fieldGroup}><label className={styles.formLabel}>最大颜色数 <span className={styles.formHint}>量化后不超过此数</span></label><select className={styles.select} value={settings.maxColors} onChange={(event) => updateSettings({ maxColors: Number(event.target.value) as BeadSettings['maxColors'] })}>{[8, 12, 16, 24, 32, 0].map((value) => <option key={value} value={value}>{value || '不限'}</option>)}</select></div><div className={styles.fieldGroup}><label className={styles.formLabel}>亮度 <span className={styles.rangeValue}>{settings.brightness}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.brightness} onChange={(event) => updateSettings({ brightness: Number(event.target.value) })} /></div><div className={styles.fieldGroup}><label className={styles.formLabel}>对比度 <span className={styles.rangeValue}>{settings.contrast}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.contrast} onChange={(event) => updateSettings({ contrast: Number(event.target.value) })} /></div><div className={styles.fieldGroup}><label className={styles.formLabel}>饱和度 <span className={styles.rangeValue}>{settings.saturation}</span></label><input className={styles.range} type="range" min="-100" max="100" value={settings.saturation} onChange={(event) => updateSettings({ saturation: Number(event.target.value) })} /><button type="button" className={styles.panelToggle} onClick={resetImageAdjustments}>重置亮度 / 对比度 / 饱和度</button></div><label className={styles.checkboxRow} style={{ marginTop: 12 }}><input className={styles.checkbox} type="checkbox" checked={settings.whiteAsEmpty} onChange={(event) => updateSettings({ whiteAsEmpty: event.target.checked })} />接近白色的区域视为空白</label><label className={styles.checkboxRow} style={{ marginTop: 9 }}><input className={styles.checkbox} type="checkbox" checked={settings.removeBackground} onChange={(event) => updateSettings({ removeBackground: event.target.checked })} />吸管去背景（使用左上角颜色）</label><div className={styles.fieldGroup}><label className={styles.formLabel}>抖动</label><select className={styles.select} value={settings.dithering} onChange={(event) => updateSettings({ dithering: event.target.value as BeadSettings['dithering'] })}><option value="none">关闭</option><option value="floyd-steinberg">Floyd–Steinberg</option></select></div><div className={styles.fieldGroup}><label className={styles.formLabel}>清理零碎颜色</label><select className={styles.select} value={settings.cleanupThreshold} onChange={(event) => updateSettings({ cleanupThreshold: Number(event.target.value) as BeadSettings['cleanupThreshold'] })}><option value="0">关闭</option><option value="2">≤ 2 颗</option><option value="3">≤ 3 颗</option><option value="5">≤ 5 颗</option><option value="10">≤ 10 颗</option></select></div></details>

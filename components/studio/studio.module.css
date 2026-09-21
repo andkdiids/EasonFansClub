@@ -374,7 +374,7 @@
 .onboardingActions .actionButton svg { width: 14px; height: 14px; }
 .beadsWorkspace { display: grid; min-width: 0; grid-template-columns: minmax(236px, 276px) minmax(0, 1fr) minmax(300px, 320px); gap: 14px; }
 .beadsPanel { min-width: 0; border: 1px solid var(--studio-line-strong); background: var(--studio-card); }
-.beadsSettingsPanel > .panelSection:nth-child(2) > .fieldGroup:nth-child(5), .beadsSettingsPanel > .panelSection:nth-child(2) > .fieldGroup:nth-child(6), .beadsSettingsPanel > .panelSection:nth-child(3) { display: none; }
+.beadsSettingsPanel > .panelSection:nth-child(2) > .fieldGroup:nth-child(6), .beadsSettingsPanel > .panelSection:nth-child(3) { display: none; }
 .beadsSettingsPanel .advancedDetails { display: none; }
 .panelSection { min-width: 0; border-bottom: 1px solid var(--studio-line); padding: 17px; }
 .panelSection:last-child { border-bottom: 0; }
