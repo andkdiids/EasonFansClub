@@ -12,17 +12,20 @@ import {
   getHomeTodayEvents,
   getHomeUserStats,
 } from '@/lib/home-data'
-import { getCurrentUser } from '@/lib/auth'
 import { DAILY_MUSIC_ANONYMOUS_COOKIE } from '@/lib/daily-music'
 import { getGrowthSummary } from '@/lib/growth'
+import { resolveRequestAuth } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const auth = await resolveRequestAuth(request)
+    if (auth.response) return auth.response
+
     const cookieStore = await cookies()
-    const user = await getCurrentUser()
+    const user = auth.user
     const existingAnonymousId = cookieStore.get(DAILY_MUSIC_ANONYMOUS_COOKIE)?.value
     const anonymousId = user ? undefined : existingAnonymousId || randomUUID()
     const [activities, albums, stats, dailyMusic, siteStats, todayEvents, anywhereDoor, dailyPrescriptionReward, salonPosts] = await Promise.all([

@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { refreshProfileCompletion, getGrowthOverview } from '@/lib/growth-tasks/service'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
-export async function POST() {
-  const guard = await requireUser()
+export async function POST(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   try {
     await refreshProfileCompletion(guard.user.id)

@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { recordContentShareTask } from '@/lib/share-task'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     ip: { limit: 30, windowSeconds: 60 },

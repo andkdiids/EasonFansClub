@@ -145,7 +145,8 @@ function isImmutablePublicPath(pathname: string) {
 function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
   if (request.method === 'GET') {
-    return pathname === '/api/posts'
+    return pathname === '/api/home'
+      || pathname === '/api/posts'
       || pathname === '/api/checkin'
       || pathname === '/api/checkin/history'
       || /^\/api\/checkin\/history\/[^/]+$/.test(pathname)
@@ -175,6 +176,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/boards'
       || pathname === '/api/search'
       || pathname === '/api/users/me'
+      || pathname === '/api/users/me/e-center-preferences'
+      || pathname === '/api/growth'
       || /^\/api\/users\/[^/]+\/public-modules$/.test(pathname)
       || /^\/api\/users\/[^/]+\/badges$/.test(pathname)
       || /^\/api\/users\/[^/]+\/post-groups$/.test(pathname)
@@ -185,6 +188,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'POST') {
     return pathname === '/api/forum/discover'
+      || pathname === '/api/growth/refresh'
+      || pathname === '/api/growth/claim'
+      || pathname === '/api/growth/actions/share'
       || pathname === '/api/checkin'
       || pathname === '/api/entertainment/daily-draw'
       || pathname === '/api/entertainment/guess-song/sessions'
@@ -204,6 +210,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'PUT' || request.method === 'PATCH') {
     return pathname === '/api/posts/draft'
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
+      || (request.method === 'PATCH' && pathname === '/api/users/me/e-center-preferences')
       || pathname === '/api/users/me'
       || /^\/api\/friends\/requests\/[^/]+$/.test(pathname)
       || /^\/api\/friends\/[^/]+\/group$/.test(pathname)

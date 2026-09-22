@@ -299,7 +299,7 @@ test('用户偏好接口只能使用当前登录身份，批量事务不会调�
   const route = read('app/api/users/me/e-center-preferences/route.ts')
   const schema = read('prisma/schema.prisma')
   const migration = read('prisma/migrations/20260824230000_add_user_ecenter_shortcut_preferences/migration.sql')
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /guard\.user\.id/)
   assert.doesNotMatch(route, /body\??\.(userId|targetUserId)/)
   assert.match(route, /prisma\.\$transaction/)
