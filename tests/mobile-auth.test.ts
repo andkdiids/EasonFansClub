@@ -285,6 +285,9 @@ test('Phase 4 Bearer middleware matrix covers every native method family', () =>
   for (const path of ['/api/posts/draft', 'friends', 'friend-groups']) {
     assert.match(remove, new RegExp(path.replaceAll('/', '\\/')))
   }
+  const postLikeRule = String.raw`/^\/api\/posts\/[^/]+\/like$/.test(pathname)`
+  assert.ok(post.includes(postLikeRule))
+  assert.ok(remove.includes(postLikeRule))
 })
 
 test('Bearer identity wins over Cookie identity and invalid Bearer never falls back', () => {

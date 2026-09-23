@@ -215,6 +215,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
   }

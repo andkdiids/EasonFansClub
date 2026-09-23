@@ -42,6 +42,13 @@ function makeRequest(path: string, token?: string | string[], host = 'ecfc.fans'
     : undefined)
 }
 
+function makeMutationRequest(path: string, method: string, auth: { cookie?: string; bearer?: string } = {}) {
+  const headers = new Headers()
+  if (auth.cookie) headers.set('cookie', `${authCookieName}=${auth.cookie}`)
+  if (auth.bearer) headers.set('authorization', `Bearer ${auth.bearer}`)
+  return new NextRequest(`https://ecfc.fans${path}`, { method, headers })
+}
+
 function getRedirect(response: Response) {
   assert.ok(response.status === 307 || response.status === 308)
   const location = response.headers.get('location')
@@ -74,6 +81,30 @@ test('未登录敏感 API 返回 JSON 401，不重定向 HTML', async () => {
   await expectUnauthorizedApi('/api/notifications/unread-summary')
   await expectUnauthorizedApi('/api/posts')
   await expectUnauthorizedApi('/api/checkin')
+})
+
+test('Post Like 的 POST/DELETE 支持 Bearer，同时保留 Cookie 与匿名保护', async () => {
+  const path = '/api/posts/test-post/like'
+  for (const method of ['POST', 'DELETE']) {
+    const bearerResponse = await middleware(makeMutationRequest(path, method, { bearer: 'middleware-test-bearer' }))
+    assert.equal(bearerResponse.status, 200, `${method} Bearer reaches the route guard`)
+  }
+
+  const anonymousResponse = await middleware(makeMutationRequest(path, 'DELETE'))
+  assert.equal(anonymousResponse.status, 401, 'anonymous DELETE remains blocked')
+
+  const validCookie = await createToken()
+  for (const method of ['POST', 'DELETE']) {
+    const cookieResponse = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookieResponse.status, 200, `Web Cookie ${method} remains authenticated`)
+  }
+
+  const unrelatedResponse = await middleware(makeMutationRequest('/api/admin/users', 'DELETE', { bearer: 'middleware-test-bearer' }))
+  assert.equal(unrelatedResponse.status, 401, 'Bearer is not opened for unrelated protected DELETE routes')
+
+  const route = readFileSync('app/api/posts/[postId]/like/route.ts', 'utf8')
+  assert.match(route, /export async function DELETE[\s\S]*?requireRequestUser\(request\)/)
+  assert.match(route, /where: \{ postId, userId: user\.id \}/)
 })
 
 test('有效 JWT 可以访问 EasMusic，JWT 必须包含有效 user id', async () => {
