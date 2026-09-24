@@ -143,7 +143,8 @@ export function getNotificationTarget(notification: NotificationTargetInput) {
   if (reviewTarget) return reviewTarget
   const normalizedExplicit = normalizeNotificationTarget(explicit)
   if (normalizedExplicit) return normalizedExplicit
-  if (notification.type === 'FRIEND_REQUEST' || notification.type === 'FOLLOW') return '/friends#received-requests'
+  if (notification.type === 'FRIEND_REQUEST') return '/friends#received-requests'
+  if (notification.type === 'FOLLOW') return '/profile'
   if (notification.type === 'ACTIVITY') return '/activities'
   // Legacy personal moderation notifications may have been created without a
   // link. Keep them actionable with the existing user-owned sticker list.

@@ -177,6 +177,11 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/users/me'
       || /^\/api\/users\/[^/]+\/public-modules$/.test(pathname)
       || /^\/api\/users\/[^/]+\/badges$/.test(pathname)
+      || /^\/api\/users\/[^/]+\/(?:relationship|followers|following)$/.test(pathname)
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/messages$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/share$/.test(pathname)
+      || /^\/api\/material-redemptions\/[^/]+\/share$/.test(pathname)
       || /^\/api\/users\/[^/]+\/post-groups$/.test(pathname)
       || pathname === '/api/friends/list'
       || pathname === '/api/friends/requests/received'
@@ -190,6 +195,13 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/entertainment/guess-song/sessions'
       || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/(?:play|answer|pause|resume|abandon)$/.test(pathname)
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/users\/[^/]+\/follow$/.test(pathname)
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/messages$/.test(pathname)
+      || /^\/api\/direct-conversations\/[^/]+\/(?:read|pin|clear)$/.test(pathname)
+      || /^\/api\/direct-conversations\/[^/]+\/messages\/[^/]+\/recall$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/share$/.test(pathname)
+      || /^\/api\/material-redemptions\/[^/]+\/share$/.test(pathname)
       || pathname === '/api/posts'
       || pathname === '/api/uploads/content-image'
       || pathname === '/api/friends/requests'
@@ -215,6 +227,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/users\/[^/]+\/follow$/.test(pathname)
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)

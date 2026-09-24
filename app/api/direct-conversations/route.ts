@@ -1,22 +1,23 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
-import { activeUserWhere, ensureFriendConversation, normalizeFriendPair } from '@/lib/friends'
+import { activeUserWhere, ensureFriendConversation } from '@/lib/friends'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
-import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
+import { assertCanDirectMessage } from '@/lib/direct-message-authorization'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 import { parsePostShareSnapshot, postSharePreview } from '@/lib/post-share-types'
 import { materialSharePreview, parseMaterialShareSnapshot } from '@/lib/material-share-types'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 export async function GET(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations',
     ip: { limit: 240, windowSeconds: 60 },
@@ -192,8 +193,9 @@ function getConversationMessagePreview(message: {
 }
 
 export async function POST(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations',
     ip: { limit: 60, windowSeconds: 60 },
@@ -202,11 +204,21 @@ export async function POST(request: Request) {
   if (limited) return limited
   const body = await request.json().catch(() => null)
   const targetUid = Number(body?.targetUid)
+  if (!Number.isInteger(targetUid)) return NextResponse.json({ message: '目标用户无效' }, { status: 400, headers: privateHeaders })
   const target = await prisma.user.findFirst({ where: { uid: targetUid, status: 'ACTIVE', isDeleted: false }, select: { id: true } })
-  if (!target || target.id === user.id) return NextResponse.json({ message: '用户不存在' }, { status: 404, headers: privateHeaders })
-  const [userAId, userBId] = normalizeFriendPair(user.id, target.id)
-  const friendship = await prisma.friendship.findUnique({ where: { userAId_userBId: { userAId, userBId } }, select: { id: true } })
-  if (!friendship) return NextResponse.json({ message: '只能给好友发送私信' }, { status: 403, headers: privateHeaders })
-  const conversation = await prisma.$transaction((tx) => ensureFriendConversation(tx, user.id, target.id), { timeout: 15_000, maxWait: 5_000 })
-  return NextResponse.json({ conversation }, { headers: privateHeaders })
+  if (!target) return NextResponse.json({ message: '用户不存在' }, { status: 404, headers: privateHeaders })
+  if (target.id === user.id) return NextResponse.json({ message: '不能给自己发送私信' }, { status: 400, headers: privateHeaders })
+
+  const result = await prisma.$transaction(async (tx) => {
+    const authorization = await assertCanDirectMessage(user.id, target.id, tx)
+    if (!authorization.allowed) return { authorization }
+    return {
+      authorization,
+      conversation: await ensureFriendConversation(tx, user.id, target.id),
+    }
+  }, { timeout: 15_000, maxWait: 5_000 })
+  if (!result.authorization.allowed) {
+    return NextResponse.json({ success: false, code: result.authorization.code, message: result.authorization.message, relationship: result.authorization.relationship }, { status: 403, headers: privateHeaders })
+  }
+  return NextResponse.json({ conversation: result.conversation }, { headers: privateHeaders })
 }

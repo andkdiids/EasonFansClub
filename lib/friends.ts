@@ -9,6 +9,7 @@ import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
 import { validateFriendRequestReason } from '@/lib/friend-request-validation'
 import { completeTask } from '@/lib/growth-tasks/service'
+import { ensureMutualFollowInTransaction } from '@/lib/follow-backfill-service'
 
 export const activeUserWhere = {
   status: 'ACTIVE' as const,
@@ -314,6 +315,11 @@ export async function decideFriendRequest(userId: string, requestId: string, act
         create: { userAId, userBId },
         select: { id: true },
       })
+      // Legacy acceptance remains compatible, but the canonical relationship
+      // is now the same two directional Follow edges used by Web and Mobile.
+      // createMany(skipDuplicates) keeps retries idempotent and preserves any
+      // existing Follow.createdAt values.
+      await ensureMutualFollowInTransaction(tx, friendRequest.senderId, friendRequest.receiverId)
       await ensureFriendRequestConversation(tx, {
         requestId,
         senderId: friendRequest.senderId,

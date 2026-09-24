@@ -62,7 +62,7 @@ test('站内帖子分享保存结构化 POST_SHARE 消息，并通过服务器�
   assert.match(schema, /model DirectMessage[\s\S]*metadata\s+Json\?[\s\S]*enum MessageType[\s\S]*POST_SHARE/)
   assert.match(migration, /ADD COLUMN `metadata` JSON NULL/)
   assert.match(migration, /'POST_SHARE'/)
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /assertFriendShareTarget\(guard\.user\.id, recipientId\)/)
   assert.match(route, /ensureFriendConversation\(tx, input\.senderId, input\.recipientId\)/)
   assert.match(route, /type: POST_SHARE_MESSAGE_TYPE/)

@@ -23,15 +23,15 @@ test('留言墙点赞由唯一约束和服务端事务保护', () => {
   assert.match(route, /message\.senderId !== user\.id/)
 })
 
-test('私信只允许好友且一对用户只有一个 pairKey 会话', () => {
+test('私信只允许互相关注且一对用户只有一个 pairKey 会话', () => {
   const schema = read('prisma/schema.prisma')
   const conversations = read('app/api/direct-conversations/route.ts')
   const messages = read('app/api/direct-conversations/[conversationId]/messages/route.ts')
   assert.match(schema, /pairKey\s+String\?\s+@unique/)
-  assert.match(conversations, /friendship\.findUnique/)
+  assert.match(conversations, /assertCanDirectMessage\(user\.id, target\.id, tx\)/)
   assert.match(conversations, /ensureFriendConversation/)
   assert.match(conversations, /prisma\.\$transaction/)
-  assert.match(messages, /只能给好友发送私信/)
+  assert.match(messages, /assertCanDirectMessage\(user\.id, otherUserId\)/)
   assert.match(messages, /lastReadAt/)
 })
 
