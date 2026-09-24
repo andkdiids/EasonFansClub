@@ -23,6 +23,11 @@ export async function DELETE(request: Request, context: RouteContext) {
   const [userAId, userBId] = normalizeFriendPair(viewer.id, userId)
   const result = await prisma.$transaction(async (tx) => {
     const friendship = await tx.friendship.deleteMany({ where: { userAId, userBId } })
+    // Legacy "delete friend" remains an adapter during the transition: the
+    // viewer unfollows the target, while the reverse Follow is preserved.
+    // This makes MUTUAL become FOLLOWED_BY without deleting conversation or
+    // message history.
+    await tx.follow.deleteMany({ where: { followerId: viewer.id, followingId: userId } })
     await tx.friendFollow.deleteMany({
       where: {
         OR: [

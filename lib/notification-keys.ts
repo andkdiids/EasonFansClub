@@ -14,6 +14,7 @@
  */
 export const FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX = 'friend-request:'
 export const FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX = 'friend-request-accepted:'
+export const FOLLOW_NOTIFICATION_KEY_PREFIX = 'follow:'
 
 export function getFriendRequestNotificationKey(requestId: string) {
   return `${FRIEND_REQUEST_NOTIFICATION_KEY_PREFIX}${requestId}`
@@ -21,4 +22,14 @@ export function getFriendRequestNotificationKey(requestId: string) {
 
 export function getFriendRequestAcceptedNotificationKey(requestId: string) {
   return `${FRIEND_REQUEST_ACCEPTED_NOTIFICATION_KEY_PREFIX}${requestId}`
+}
+
+/**
+ * A stable pair key makes repeated follow/unfollow/follow actions converge on
+ * one current notification instead of filling the recipient's inbox with
+ * duplicates. The direction is intentional: the recipient is the followed
+ * user and the actor is the follower.
+ */
+export function getFollowNotificationKey(followerId: string, followingId: string) {
+  return `${FOLLOW_NOTIFICATION_KEY_PREFIX}${followerId}:${followingId}`
 }

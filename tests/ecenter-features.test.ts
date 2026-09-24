@@ -297,11 +297,15 @@ test('桌面范围排序只重排桌面入口，不会把 E院中心专属入口
 
 test('用户偏好接口只能使用当前登录身份，批量事务不会调用业务删除接口', () => {
   const route = read('app/api/users/me/e-center-preferences/route.ts')
+  const patch = route.slice(route.indexOf('export async function PATCH'))
   const schema = read('prisma/schema.prisma')
   const migration = read('prisma/migrations/20260824230000_add_user_ecenter_shortcut_preferences/migration.sql')
   assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /guard\.user\.id/)
   assert.doesNotMatch(route, /body\??\.(userId|targetUserId)/)
+  assert.doesNotMatch(patch, /request\.nextUrl\.searchParams|headers\.get\(['"](?:x-user-id|x-uid)['"]\)/)
+  assert.match(patch, /if \(!request\.headers\.has\('authorization'\)\) \{[\s\S]*rejectInvalidRequestOrigin\(request\)/)
+  assert.ok(patch.indexOf('rejectInvalidRequestOrigin(request)') < patch.indexOf('requireRequestUser(request)'))
   assert.match(route, /prisma\.\$transaction/)
   assert.match(route, /userCenterShortcutPreference\.createMany/)
   assert.match(schema, /model UserCenterShortcutPreference/)

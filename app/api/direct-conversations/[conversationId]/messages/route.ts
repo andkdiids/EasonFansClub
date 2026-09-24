@@ -1,11 +1,10 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
-import { normalizeFriendPair } from '@/lib/friends'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
+import { assertCanDirectMessage, DirectMessageAuthorizationError } from '@/lib/direct-message-authorization'
+import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -40,8 +39,9 @@ async function getConversation(userId: string, conversationId: string) {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const rateLimited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations/messages',
     ip: { limit: 240, windowSeconds: 60 },
@@ -111,8 +111,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
   let idempotencyKey = ''
   let normalizedContent = ''
   try {
-    const user = await getCurrentUser()
-    if (!user) return messageFailure(401, 'UNAUTHENTICATED', '请先登录')
+    const guard = await requireRequestUser(request)
+    if (!guard.user) return guard.response
+    const user = guard.user
     senderId = user.id
     const limited = await enforceApiRateLimit(request, user.id, {
       endpoint: '/api/direct-conversations/messages',
@@ -144,12 +145,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         select: { id: true },
       })
       if (!recipient) return messageFailure(404, 'NOT_PARTICIPANT', '接收用户不存在或不可用')
-      const [userAId, userBId] = normalizeFriendPair(user.id, otherUserId)
-      const friendship = await prisma.friendship.findUnique({
-        where: { userAId_userBId: { userAId, userBId } },
-        select: { id: true },
-      })
-      if (!friendship) return messageFailure(403, 'NOT_FRIEND', '只能给好友发送私信')
+      const authorization = await assertCanDirectMessage(user.id, otherUserId)
+      if (!authorization.allowed) return messageFailure(403, authorization.code, authorization.message)
 
       const existing = await prisma.directMessage.findUnique({
         where: { senderId_clientMessageId: { senderId: user.id, clientMessageId } },
@@ -166,6 +163,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
 
       const now = new Date()
       const message = await prisma.$transaction(async (tx) => {
+        const authorization = await assertCanDirectMessage(user.id, otherUserId, tx)
+        if (!authorization.allowed) throw new DirectMessageAuthorizationError(authorization.code, authorization.message)
         const created = await tx.directMessage.create({
           data: { conversationId, senderId: user.id, type: 'STICKER', content: '', stickerId, clientMessageId },
           select: messageSelect,
@@ -213,12 +212,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       select: { id: true },
     })
     if (!recipient) return messageFailure(404, 'NOT_PARTICIPANT', '接收用户不存在或不可用')
-    const [userAId, userBId] = normalizeFriendPair(user.id, otherUserId)
-    const friendship = await prisma.friendship.findUnique({
-      where: { userAId_userBId: { userAId, userBId } },
-      select: { id: true },
-    })
-    if (!friendship) return messageFailure(403, 'NOT_FRIEND', '只能给好友发送私信')
+    const authorization = await assertCanDirectMessage(user.id, otherUserId)
+    if (!authorization.allowed) return messageFailure(403, authorization.code, authorization.message)
 
     const existing = await prisma.directMessage.findUnique({
       where: { senderId_clientMessageId: { senderId: user.id, clientMessageId } },
@@ -236,6 +231,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
 
     const now = new Date()
     const message = await prisma.$transaction(async (tx) => {
+      const authorization = await assertCanDirectMessage(user.id, otherUserId, tx)
+      if (!authorization.allowed) throw new DirectMessageAuthorizationError(authorization.code, authorization.message)
       const created = await tx.directMessage.create({
         data: { conversationId, senderId: user.id, content, type: 'TEXT', clientMessageId },
         select: messageSelect,
@@ -260,6 +257,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       message: serializeMessage(message, user.id, null),
     }, { status: 201, headers: privateHeaders })
   } catch (error) {
+    if (error instanceof DirectMessageAuthorizationError) {
+      return messageFailure(403, error.code, error.message)
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && senderId && idempotencyKey) {
       const duplicate = await prisma.directMessage.findUnique({
         where: { senderId_clientMessageId: { senderId, clientMessageId: idempotencyKey } },

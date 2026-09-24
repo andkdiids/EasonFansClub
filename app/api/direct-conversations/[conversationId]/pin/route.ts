@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { normalizeFriendPair } from '@/lib/friends'
 import { emitRealtime } from '@/lib/realtime'
 import { prisma } from '@/lib/prisma'
-import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 export async function POST(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations/pin',
     user: { limit: 120, windowSeconds: 60 },

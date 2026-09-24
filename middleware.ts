@@ -180,6 +180,11 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/growth'
       || /^\/api\/users\/[^/]+\/public-modules$/.test(pathname)
       || /^\/api\/users\/[^/]+\/badges$/.test(pathname)
+      || /^\/api\/users\/[^/]+\/(?:relationship|followers|following)$/.test(pathname)
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/messages$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/share$/.test(pathname)
+      || /^\/api\/material-redemptions\/[^/]+\/share$/.test(pathname)
       || /^\/api\/users\/[^/]+\/post-groups$/.test(pathname)
       || pathname === '/api/friends/list'
       || pathname === '/api/friends/requests/received'
@@ -196,6 +201,13 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/entertainment/guess-song/sessions'
       || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/(?:play|answer|pause|resume|abandon)$/.test(pathname)
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/users\/[^/]+\/follow$/.test(pathname)
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/messages$/.test(pathname)
+      || /^\/api\/direct-conversations\/[^/]+\/(?:read|pin|clear)$/.test(pathname)
+      || /^\/api\/direct-conversations\/[^/]+\/messages\/[^/]+\/recall$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/share$/.test(pathname)
+      || /^\/api\/material-redemptions\/[^/]+\/share$/.test(pathname)
       || pathname === '/api/posts'
       || pathname === '/api/uploads/content-image'
       || pathname === '/api/friends/requests'
@@ -222,6 +234,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/users\/[^/]+\/follow$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
   }
@@ -426,7 +440,17 @@ export async function middleware(request: NextRequest) {
   // browser/navigation edge case. Reject an explicitly cross-site browser
   // write while keeping Origin-less native clients and CLI integrations valid.
   const isMobileAuthPath = pathname.startsWith('/api/mobile/auth/')
-  if (isApiPath(pathname) && isStateChangingMethod(request.method) && !isMobileAuthPath && isCrossSiteRequest(request)) {
+  const mobileBearerBusinessRequest = isMobileBearerBusinessRequest(request, pathname)
+  const isEcenterPreferencesBearerPatch = request.method === 'PATCH'
+    && pathname === '/api/users/me/e-center-preferences'
+    && mobileBearerBusinessRequest
+  if (
+    isApiPath(pathname)
+    && isStateChangingMethod(request.method)
+    && !isMobileAuthPath
+    && !isEcenterPreferencesBearerPatch
+    && isCrossSiteRequest(request)
+  ) {
     const response = NextResponse.json(
       { ok: false, code: 'CSRF_BLOCKED', message: '请求来源校验失败，请刷新页面后重试' },
       { status: 403, headers: { Vary: 'Origin, Referer, Sec-Fetch-Site' } },
@@ -439,9 +463,9 @@ export async function middleware(request: NextRequest) {
   }
 
   // These business handlers resolve Bearer auth at route level. Let the native
-  // app reach the allowlisted paths without a browser Cookie; the route guards
-  // still enforce the mobile credential and the global CSRF check remains active.
-  if (isMobileBearerBusinessRequest(request, pathname)) {
+  // app reach the allowlisted paths without a browser Cookie; route guards still
+  // enforce credentials. Ecenter PATCH has only the narrow Bearer CSRF exception above.
+  if (mobileBearerBusinessRequest) {
     return withNoStoreHeaders(NextResponse.next())
   }
 

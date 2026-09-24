@@ -42,6 +42,20 @@ function makeRequest(path: string, token?: string | string[], host = 'ecfc.fans'
     : undefined)
 }
 
+function makeMutationRequest(path: string, method: string, auth: {
+  cookie?: string
+  bearer?: string
+  origin?: string
+  secFetchSite?: string
+} = {}) {
+  const headers = new Headers()
+  if (auth.cookie) headers.set('cookie', `${authCookieName}=${auth.cookie}`)
+  if (auth.bearer) headers.set('authorization', `Bearer ${auth.bearer}`)
+  if (auth.origin) headers.set('origin', auth.origin)
+  if (auth.secFetchSite) headers.set('sec-fetch-site', auth.secFetchSite)
+  return new NextRequest(`https://ecfc.fans${path}`, { method, headers })
+}
+
 function getRedirect(response: Response) {
   assert.ok(response.status === 307 || response.status === 308)
   const location = response.headers.get('location')
@@ -74,6 +88,90 @@ test('未登录敏感 API 返回 JSON 401，不重定向 HTML', async () => {
   await expectUnauthorizedApi('/api/notifications/unread-summary')
   await expectUnauthorizedApi('/api/posts')
   await expectUnauthorizedApi('/api/checkin')
+})
+
+test('Post Like 的 POST/DELETE 支持 Bearer，同时保留 Cookie 与匿名保护', async () => {
+  const path = '/api/posts/test-post/like'
+  for (const method of ['POST', 'DELETE']) {
+    const bearerResponse = await middleware(makeMutationRequest(path, method, { bearer: 'middleware-test-bearer' }))
+    assert.equal(bearerResponse.status, 200, `${method} Bearer reaches the route guard`)
+  }
+
+  for (const method of ['POST', 'DELETE']) {
+    const anonymousResponse = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymousResponse.status, 401, `anonymous ${method} remains blocked`)
+  }
+
+  const validCookie = await createToken()
+  for (const method of ['POST', 'DELETE']) {
+    const cookieResponse = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookieResponse.status, 200, `Web Cookie ${method} remains authenticated`)
+  }
+
+  const unrelatedResponse = await middleware(makeMutationRequest('/api/admin/users', 'DELETE', { bearer: 'middleware-test-bearer' }))
+  assert.equal(unrelatedResponse.status, 401, 'Bearer is not opened for unrelated protected DELETE routes')
+
+  const route = readFileSync('app/api/posts/[postId]/like/route.ts', 'utf8')
+  assert.match(route, /export async function DELETE[\s\S]*?requireRequestUser\(request\)/)
+  assert.match(route, /where: \{ postId, userId: user\.id \}/)
+})
+
+test('Ecenter preferences preserves Cookie Origin checks and lets only its Bearer PATCH reach the auth handler', async () => {
+  const path = '/api/users/me/e-center-preferences'
+  const cookie = await createToken()
+
+  const cookieGet = await middleware(makeMutationRequest(path, 'GET', {
+    cookie,
+    origin: 'https://ecfc.fans',
+    secFetchSite: 'same-origin',
+  }))
+  assert.equal(cookieGet.status, 200)
+
+  const bearerGet = await middleware(makeMutationRequest(path, 'GET', { bearer: 'test-bearer' }))
+  assert.equal(bearerGet.status, 200, 'Bearer GET reaches the route auth guard')
+
+  const anonymousGet = await middleware(makeMutationRequest(path, 'GET'))
+  assert.equal(anonymousGet.status, 401)
+
+  const cookiePatch = await middleware(makeMutationRequest(path, 'PATCH', {
+    cookie,
+    origin: 'https://ecfc.fans',
+    secFetchSite: 'same-origin',
+  }))
+  assert.equal(cookiePatch.status, 200)
+
+  const hostileCookiePatch = await middleware(makeMutationRequest(path, 'PATCH', {
+    cookie,
+    origin: 'https://evil.example',
+    secFetchSite: 'cross-site',
+  }))
+  assert.equal(hostileCookiePatch.status, 403)
+  assert.equal((await hostileCookiePatch.json()).code, 'CSRF_BLOCKED')
+
+  const missingOriginCookiePatch = await middleware(makeMutationRequest(path, 'PATCH', { cookie }))
+  assert.equal(missingOriginCookiePatch.status, 200, 'missing Origin retains existing hasValidRequestOrigin behavior')
+
+  const bearerPatch = await middleware(makeMutationRequest(path, 'PATCH', { bearer: 'test-bearer' }))
+  assert.equal(bearerPatch.status, 200, 'Bearer PATCH without Origin reaches the route auth guard')
+
+  const hostileBearerPatch = await middleware(makeMutationRequest(path, 'PATCH', {
+    bearer: 'test-bearer',
+    origin: 'https://evil.example',
+    secFetchSite: 'cross-site',
+  }))
+  assert.equal(hostileBearerPatch.status, 200, 'Bearer PATCH is not forced through browser CSRF; route auth remains authoritative')
+
+  const anonymousPatch = await middleware(makeMutationRequest(path, 'PATCH'))
+  assert.equal(anonymousPatch.status, 401)
+
+  const route = readFileSync('app/api/users/me/e-center-preferences/route.ts', 'utf8')
+  const patch = route.slice(route.indexOf('export async function PATCH'))
+  assert.match(patch, /if \(!request\.headers\.has\('authorization'\)\)[\s\S]*rejectInvalidRequestOrigin\(request\)/)
+  assert.match(patch, /requireRequestUser\(request\)/)
+
+  const middlewareSource = readFileSync('middleware.ts', 'utf8')
+  assert.match(middlewareSource, /const isEcenterPreferencesBearerPatch = request\.method === 'PATCH'[\s\S]*pathname === '\/api\/users\/me\/e-center-preferences'[\s\S]*mobileBearerBusinessRequest/)
+  assert.match(middlewareSource, /!isEcenterPreferencesBearerPatch\s*&&\s*isCrossSiteRequest\(request\)/)
 })
 
 test('有效 JWT 可以访问 EasMusic，JWT 必须包含有效 user id', async () => {

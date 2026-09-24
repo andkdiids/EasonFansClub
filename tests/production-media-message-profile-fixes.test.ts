@@ -22,6 +22,7 @@ const migration = read('prisma/migrations/20260730110000_add_music_song_preview/
 const audioReuseMigration = read('prisma/migrations/20260730190000_reuse_music_song_audio/migration.sql')
 const playerProvider = read('components/music/MusicPlayerProvider.tsx')
 const messagesRoute = read('app/api/direct-conversations/[conversationId]/messages/route.ts')
+const directMessageAuthorization = read('lib/direct-message-authorization.ts')
 const profileDrawer = read('app/profile/ProfileEditorDrawer.tsx')
 const headerFrame = read('components/SiteHeaderFrame.tsx')
 const css = read('app/globals.css')
@@ -137,9 +138,14 @@ test('Nginx 接收100MB音频并为转码保留超时时间', () => {
 })
 
 test('私信 API 始终返回结构化成功或失败代码', () => {
-  for (const code of ['UNAUTHENTICATED', 'INVALID_CONTENT', 'NOT_PARTICIPANT', 'NOT_FRIEND', 'INVALID_CLIENT_MESSAGE_ID', 'DUPLICATE_MESSAGE', 'DATABASE_ERROR']) {
+  for (const code of ['INVALID_CONTENT', 'NOT_PARTICIPANT', 'INVALID_CLIENT_MESSAGE_ID', 'DUPLICATE_MESSAGE', 'DATABASE_ERROR']) {
     assert.match(messagesRoute, new RegExp(`'${code}'`))
   }
+  assert.match(messagesRoute, /const guard = await requireRequestUser\(request\)/)
+  assert.match(messagesRoute, /if \(!guard\.user\) return guard\.response/)
+  assert.match(messagesRoute, /assertCanDirectMessage/)
+  assert.match(directMessageAuthorization, /'MUTUAL_FOLLOW_REQUIRED'/)
+  assert.match(directMessageAuthorization, /'BLOCKED'/)
   assert.match(messagesRoute, /\{ success: false, error, code, message: error \}/)
   assert.match(messagesRoute, /success: true/)
 })

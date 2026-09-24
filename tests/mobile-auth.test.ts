@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import { SignJWT } from 'jose'
+import { authCookieName } from '../lib/auth-cookie'
 import {
   consumeMobileRefreshSession,
   createMobileAccessToken,
@@ -15,6 +16,7 @@ import {
   MOBILE_REFRESH_TOKEN_TTL_SECONDS,
   verifyMobileAccessToken,
 } from '../lib/mobile-auth'
+import { requireRequestUser } from '../lib/security'
 
 const root = join(process.cwd())
 const source = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8')
@@ -199,7 +201,7 @@ test('shared login credentials and rate limits are used by Web and Mobile', () =
   assert.match(webLogin, /authenticateLoginCredentials/)
   assert.match(mobileLogin, /authenticateLoginCredentials/)
   assert.match(middleware, /'\/api\/mobile\/auth\/'/)
-  assert.match(middleware, /!isMobileAuthPath && isCrossSiteRequest/)
+  assert.match(middleware, /!isMobileAuthPath[\s\S]*!isEcenterPreferencesBearerPatch[\s\S]*isCrossSiteRequest\(request\)/)
 })
 
 test('mobile community Bearer endpoints are explicitly allowlisted before Cookie middleware', () => {
@@ -285,6 +287,9 @@ test('Phase 4 Bearer middleware matrix covers every native method family', () =>
   for (const path of ['/api/posts/draft', 'friends', 'friend-groups']) {
     assert.match(remove, new RegExp(path.replaceAll('/', '\\/')))
   }
+  const postLikeRule = String.raw`/^\/api\/posts\/[^/]+\/like$/.test(pathname)`
+  assert.ok(post.includes(postLikeRule))
+  assert.ok(remove.includes(postLikeRule))
 })
 
 test('Bearer identity wins over Cookie identity and invalid Bearer never falls back', () => {
@@ -296,6 +301,26 @@ test('Bearer identity wins over Cookie identity and invalid Bearer never falls b
   assert.match(security, /const mobileAccess = await resolveMobileAccess\(request\)/)
   assert.match(security, /if \(!mobileAccess\) return \{ user: null, response: unauthenticatedResponse\(\) \}/)
   assert.match(security, /getCurrentUserById\(mobileAccess\.claims\.userId\)/)
-  assert.match(middleware, /!isMobileAuthPath && isCrossSiteRequest\(request\)/)
+  assert.match(middleware, /!isMobileAuthPath[\s\S]*!isEcenterPreferencesBearerPatch[\s\S]*isCrossSiteRequest\(request\)/)
   assert.doesNotMatch(middleware, /Access-Control-Allow-Origin\s*:\s*\*|allow-origin.*\*/)
+})
+
+test('Invalid Ecenter Bearer is rejected and cannot fall back to a Cookie identity', async () => {
+  const previousSecret = process.env.MOBILE_ACCESS_TOKEN_SECRET
+  process.env.MOBILE_ACCESS_TOKEN_SECRET = 'test-mobile-access-token-secret-with-32-bytes'
+  try {
+    const request = new Request('https://ecfc.fans/api/users/me/e-center-preferences', {
+      method: 'PATCH',
+      headers: {
+        authorization: 'Bearer invalid-token',
+        cookie: `${authCookieName}=present-but-must-not-be-used`,
+      },
+    })
+    const result = await requireRequestUser(request)
+    assert.equal(result.user, null)
+    assert.equal(result.response?.status, 401)
+  } finally {
+    if (previousSecret === undefined) delete process.env.MOBILE_ACCESS_TOKEN_SECRET
+    else process.env.MOBILE_ACCESS_TOKEN_SECRET = previousSecret
+  }
 })

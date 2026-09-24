@@ -1515,6 +1515,7 @@ model Follow {
   User_Follow_followingIdToUser User     @relation("Follow_followingIdToUser", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId])
+  @@index([followerId, createdAt])
   @@index([followingId, createdAt])
 }
 

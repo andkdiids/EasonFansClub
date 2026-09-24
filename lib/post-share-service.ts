@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
-import { activeUserWhere, normalizeFriendPair } from '@/lib/friends'
+import { activeUserWhere } from '@/lib/friends'
 import { getFriendDisplayName } from '@/lib/friend-display-name'
 import { getForumBoardDisplayName } from '@/lib/boards'
 import { publicImageUrl } from '@/lib/images'
@@ -10,6 +10,7 @@ import { postContentPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { canonicalShareUrl } from '@/lib/share-card'
 import { parsePostShareSnapshot, postShareUrl, POST_SHARE_UNAVAILABLE_TITLE, type PostShareMessageView, type PostShareSnapshot } from '@/lib/post-share-types'
 import { buildPublicPostWhere } from '@/lib/post-moderation'
+import { resolveRelationship, resolveRelationships } from '@/lib/relationship-resolver'
 
 export const postShareSelect = {
   id: true,
@@ -187,29 +188,12 @@ export async function getRecentPostShareFriends(userId: string, limit = 12): Pro
   if (!candidateByUser.length) return []
 
   const candidateIds = [...new Set(candidateByUser.map((item) => item.friendId))]
-  const [friendships, blockedRows, users] = await Promise.all([
-    prisma.friendship.findMany({
-      where: {
-        OR: [
-          { userAId: userId, userBId: { in: candidateIds }, User_Friendship_userAIdToUser: activeUserWhere, User_Friendship_userBIdToUser: activeUserWhere },
-          { userBId: userId, userAId: { in: candidateIds }, User_Friendship_userAIdToUser: activeUserWhere, User_Friendship_userBIdToUser: activeUserWhere },
-        ],
-      },
-      select: { userAId: true, userBId: true },
-    }),
-    prisma.block.findMany({
-      where: {
-        OR: [
-          { blockerId: userId, blockedId: { in: candidateIds } },
-          { blockedId: userId, blockerId: { in: candidateIds } },
-        ],
-      },
-      select: { blockerId: true, blockedId: true },
-    }),
+  const [relationships, users] = await Promise.all([
+    resolveRelationships(userId, candidateIds),
     prisma.user.findMany({ where: { id: { in: candidateIds }, ...activeUserWhere }, select: recentShareFriendUserSelect }),
   ])
-  const friendIds = new Set(friendships.map((row) => row.userAId === userId ? row.userBId : row.userAId))
-  const blockedIds = new Set(blockedRows.map((row) => row.blockerId === userId ? row.blockedId : row.blockerId))
+  const friendIds = new Set(candidateIds.filter((id) => relationships.get(id)?.state === 'MUTUAL'))
+  const blockedIds = new Set(candidateIds.filter((id) => relationships.get(id)?.state === 'BLOCKED'))
   const userMap = new Map(users.map((user) => [user.id, user]))
   const remarkMap = await loadFriendRemarkMap(userId, friendIds)
   const result: RecentPostShareFriend[] = []
@@ -237,21 +221,9 @@ export async function getRecentPostShareFriends(userId: string, limit = 12): Pro
 
 export async function assertFriendShareTarget(userId: string, recipientId: string) {
   if (!recipientId || recipientId === userId) return false
-  const [recipient, friendship, block] = await Promise.all([
+  const [recipient, relationship] = await Promise.all([
     prisma.user.findFirst({ where: { id: recipientId, ...activeUserWhere }, select: { id: true } }),
-    (() => {
-      const [userAId, userBId] = normalizeFriendPair(userId, recipientId)
-      return prisma.friendship.findUnique({ where: { userAId_userBId: { userAId, userBId } }, select: { id: true } })
-    })(),
-    prisma.block.findFirst({
-      where: {
-        OR: [
-          { blockerId: userId, blockedId: recipientId },
-          { blockerId: recipientId, blockedId: userId },
-        ],
-      },
-      select: { id: true },
-    }),
+    resolveRelationship(userId, recipientId),
   ])
-  return Boolean(recipient && friendship && !block)
+  return Boolean(recipient && relationship.state === 'MUTUAL' && relationship.canMessage)
 }

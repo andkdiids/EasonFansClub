@@ -1,9 +1,10 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { requireUser, enforceApiRateLimit } from '@/lib/security'
+import { requireRequestUser, enforceApiRateLimit } from '@/lib/security'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { ensureFriendConversation } from '@/lib/friends'
 import { prisma } from '@/lib/prisma'
+import { assertCanDirectMessage, DirectMessageAuthorizationError } from '@/lib/direct-message-authorization'
 import { recordContentShareTask } from '@/lib/share-task'
 import {
   assertFriendShareTarget,
@@ -48,7 +49,7 @@ type ShareRecipientResult = {
 type Params = { params: Promise<{ postId: string }> }
 
 export async function GET(request: Request, { params }: Params) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/posts/share/recent-friends',
@@ -65,7 +66,7 @@ export async function GET(request: Request, { params }: Params) {
 }
 
 export async function POST(request: Request, { params }: Params) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/posts/share/send',
@@ -169,6 +170,8 @@ async function createPostShareMessage(input: {
   const content = postSharePreview(input.snapshot)
   try {
     const result = await prisma.$transaction(async (tx) => {
+      const authorization = await assertCanDirectMessage(input.senderId, input.recipientId, tx)
+      if (!authorization.allowed) throw new DirectMessageAuthorizationError(authorization.code, authorization.message)
       const conversation = await ensureFriendConversation(tx, input.senderId, input.recipientId)
       const existing = await tx.directMessage.findUnique({
         where: { senderId_clientMessageId: { senderId: input.senderId, clientMessageId: input.clientMessageId } },
@@ -209,6 +212,7 @@ async function createPostShareMessage(input: {
     }, { timeout: 20_000, maxWait: 5_000 })
     return { recipientId: input.recipientId, success: true, duplicate: result.duplicate, awardedAmount: result.awardedAmount, status: result.duplicate ? 200 : 201, conversationId: result.conversationId, message: result.message }
   } catch (error) {
+    if (error instanceof DirectMessageAuthorizationError) return { recipientId: input.recipientId, success: false, duplicate: false, awardedAmount: 0, status: 403, code: error.code, error: error.message, conversationId: '', message: null }
     if (error instanceof ShareMessageConflictError) return { recipientId: input.recipientId, success: false, duplicate: false, awardedAmount: 0, status: 409, code: 'DUPLICATE_MESSAGE', error: '分享请求已被其他内容使用，请重试', conversationId: '', message: null }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const duplicate = await prisma.directMessage.findUnique({

@@ -52,8 +52,13 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const originError = rejectInvalidRequestOrigin(request)
-  if (originError) return originError
+  // Authorization selects the exclusive Bearer path in resolveRequestAuth.
+  // The shared guard below still validates that credential and never falls
+  // back to a Cookie session when a Bearer token is invalid.
+  if (!request.headers.has('authorization')) {
+    const originError = rejectInvalidRequestOrigin(request)
+    if (originError) return originError
+  }
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 

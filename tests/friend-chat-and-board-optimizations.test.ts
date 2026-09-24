@@ -40,7 +40,7 @@ test('私信列表按当前用户的置顶状态优先，再按最新消息排�
   assert.deepEqual([unpinnedNewer, pinnedOlder].sort(compareFriendConversationOrder), [pinnedOlder, unpinnedNewer])
   assert.match(conversations, /pinnedAt: row\.ConversationParticipant\.find\([\s\S]*user\.id\)\?\.pinnedAt/)
   assert.match(conversations, /isPinned: Boolean\(left\.ConversationParticipant\.find\([\s\S]*pinnedAt\)/)
-  assert.match(pinRoute, /const user = await getCurrentUser\(\)/)
+  assert.match(pinRoute, /const guard = await requireRequestUser\(request\)/)
   assert.match(pinRoute, /conversationId_userId: \{ conversationId, userId: user\.id \}/)
   assert.match(pinRoute, /normalizeFriendPair\(user\.id, peerIds\[0\]\)/)
   assert.match(pinRoute, /data: \{ pinnedAt \}/)
