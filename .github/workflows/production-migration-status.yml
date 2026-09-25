@@ -17,14 +17,16 @@ concurrency:
 
 env:
   APP_DIR: /home/apps/easonfansclub
+  EXPECTED_LIVE_RELEASE_SHA: 1585f877a224055c98082990d7fdbc37b4bb498d
 
 jobs:
   inspect:
     name: Read-only production state inspection
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Validate input and existing SSH settings
+        id: validate
         shell: bash
         env:
           RELEASE_SHA: ${{ inputs.release_sha }}
@@ -48,257 +50,438 @@ jobs:
               exit 1
             fi
           done
+          if [[ ! "$SERVER_HOST" =~ ^[A-Za-z0-9._-]+$ && ! "$SERVER_HOST" =~ ^\[[A-Fa-f0-9:]+\]$ ]]; then
+            echo "::error::The configured SSH host has an unsupported format."
+            exit 1
+          fi
+          if [[ ! "$SERVER_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ || ! "$SERVER_PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$SERVER_PORT < 1 || 10#$SERVER_PORT > 65535 )); then
+            echo "::error::The configured SSH user or port has an unsupported format."
+            exit 1
+          fi
+          printf 'release_sha=%s\n' "${RELEASE_SHA,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Read sanitized production state
-        uses: appleboy/ssh-action@v1
-        env:
-          APP_DIR: ${{ env.APP_DIR }}
-          STATUS_SHA: ${{ inputs.release_sha }}
+      - name: Checkout the exact requested source SHA
+        uses: actions/checkout@v4
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          port: ${{ secrets.SERVER_PORT }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          timeout: 10m
-          command_timeout: 12m
-          envs: APP_DIR,STATUS_SHA
-          script: |
-            set -euo pipefail
-            umask 077
+          ref: ${{ steps.validate.outputs.release_sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
-            fail() {
-              printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=%s\n' "$1"
+      - name: Verify checkout and package only Prisma schema and migrations
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ steps.validate.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::The checked out source did not match the requested immutable SHA."
+            exit 1
+          fi
+          printf 'SOURCE_SHA_VERIFIED=YES\n'
+          [[ -f "$GITHUB_WORKSPACE/prisma/schema.prisma" && ! -L "$GITHUB_WORKSPACE/prisma/schema.prisma" ]]
+          [[ -d "$GITHUB_WORKSPACE/prisma/migrations" && ! -L "$GITHUB_WORKSPACE/prisma/migrations" ]]
+          archive="$RUNNER_TEMP/ecfc-prisma-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          tar -czf "$archive" -C "$GITHUB_WORKSPACE" prisma/schema.prisma prisma/migrations
+          listing="$RUNNER_TEMP/ecfc-prisma-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.list"
+          tar -tzf "$archive" > "$listing"
+          while IFS= read -r entry; do
+            case "$entry" in
+              prisma/|prisma/schema.prisma|prisma/migrations/|prisma/migrations/*) ;;
+              *) echo "::error::The diagnostic package contains an unexpected path."; exit 1 ;;
+            esac
+            if [[ "$entry" == *"/../"* || "$entry" == ../* || "$entry" == */.. ]]; then
+              echo "::error::The diagnostic package contains an unsafe path."
+              exit 1
+            fi
+          done < "$listing"
+          rm -f -- "$listing"
+
+      - name: Prepare temporary SSH credentials
+        id: ssh
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/ecfc-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          known_hosts="$RUNNER_TEMP/ecfc-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.known_hosts"
+          printf '%s\n' "$SERVER_SSH_KEY" | tr -d '\r' > "$key_file"
+          chmod 600 "$key_file"
+          if ! ssh-keyscan -T 15 -p "$SERVER_PORT" -H "$SERVER_HOST" > "$known_hosts" 2>/dev/null || [[ ! -s "$known_hosts" ]]; then
+            echo "::error::Unable to establish the configured production SSH host key."
+            exit 1
+          fi
+          chmod 600 "$known_hosts"
+          printf 'key_file=%s\nknown_hosts=%s\n' "$key_file" "$known_hosts" >> "$GITHUB_OUTPUT"
+
+      - name: Create an isolated temporary directory on the production host
+        id: remote
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+        run: |
+          set -euo pipefail
+          remote="$SERVER_USER@$SERVER_HOST"
+          remote_dir="$(ssh -q -T -i "$KEY_FILE" -p "$SERVER_PORT" \
+            -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" "$remote" \
+            'umask 077; mktemp -d /tmp/ecfc-migration-diagnostic.XXXXXXXX' 2>/dev/null)" || {
+              echo "::error::Unable to create the temporary diagnostic workspace."
               exit 1
             }
+          if [[ ! "$remote_dir" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]; then
+            echo "::error::The production host returned an invalid temporary path."
+            exit 1
+          fi
+          printf 'remote_dir=%s\n' "$remote_dir" >> "$GITHUB_OUTPUT"
 
-            status_tmp=''
-            cleanup() {
-              if [[ -n "${status_tmp:-}" && "$status_tmp" == /tmp/ecfc-readonly-diagnostic.* && -d "$status_tmp" ]]; then
-                rm -rf -- "$status_tmp" >/dev/null 2>&1 || true
-              fi
+      - name: Transfer only the Prisma diagnostic package
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_DIR" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]
+          archive="$RUNNER_TEMP/ecfc-prisma-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          remote="$SERVER_USER@$SERVER_HOST"
+          if ! scp -q -i "$KEY_FILE" -P "$SERVER_PORT" \
+            -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" \
+            "$archive" "$remote:$REMOTE_DIR/prisma-source.tar.gz" 2>/dev/null; then
+            echo "::error::Unable to transfer the Prisma-only diagnostic package."
+            exit 1
+          fi
+
+      - name: Run sanitized read-only production diagnostics
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
+          RELEASE_SHA: ${{ steps.validate.outputs.release_sha }}
+          APP_DIR: ${{ env.APP_DIR }}
+          EXPECTED_LIVE_RELEASE_SHA: ${{ env.EXPECTED_LIVE_RELEASE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_DIR" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_LIVE_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          remote="$SERVER_USER@$SERVER_HOST"
+          remote_command="bash -s -- '$REMOTE_DIR' '$RELEASE_SHA' '$APP_DIR' '$EXPECTED_LIVE_RELEASE_SHA'"
+          ssh -q -T -i "$KEY_FILE" -p "$SERVER_PORT" \
+            -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" "$remote" "$remote_command" 2>/dev/null <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          umask 077
+
+          status_tmp="${1:-}"
+          status_sha="${2:-}"
+          app_dir="${3:-}"
+          expected_live_sha="${4:-}"
+
+          fail() {
+            printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=%s\n' "$1"
+            exit 1
+          }
+          fail_live() {
+            printf 'LIVE_RELEASE_MATCH=NO\n'
+            fail "$1"
+          }
+
+          if [[ ! "$status_tmp" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]; then
+            fail "TEMPORARY_PATH_INVALID"
+          fi
+          cleanup() {
+            if [[ "$status_tmp" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ && -d "$status_tmp" ]]; then
+              rm -rf -- "$status_tmp" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          [[ "$status_sha" =~ ^[0-9a-f]{40}$ ]] || fail "RELEASE_SHA_INVALID"
+          [[ "$expected_live_sha" =~ ^[0-9a-f]{40}$ ]] || fail "EXPECTED_LIVE_SHA_INVALID"
+          [[ "$app_dir" == "/home/apps/easonfansclub" ]] || fail_live "APP_PATH_UNAVAILABLE"
+          [[ -d "$status_tmp" && -f "$status_tmp/prisma-source.tar.gz" ]] || fail "SOURCE_PACKAGE_UNAVAILABLE"
+
+          command -v flock >/dev/null 2>&1 || fail_live "DEPLOY_LOCK_UNAVAILABLE"
+          [[ -f "$app_dir/.deploy.lock" ]] || fail_live "DEPLOY_LOCK_UNAVAILABLE"
+          exec 8< "$app_dir/.deploy.lock" || fail_live "DEPLOY_LOCK_UNAVAILABLE"
+          flock -s -n 8 || fail_live "DEPLOY_IN_PROGRESS"
+
+          current_release="$(readlink -f -- "$app_dir/current" 2>/dev/null || true)"
+          [[ "$current_release" == "$app_dir"/releases/* && -d "$current_release" ]] || {
+            printf 'LIVE_RELEASE_MATCH=NO\n'
+            fail "CURRENT_RELEASE_UNAVAILABLE"
+          }
+          deployed_sha=''
+          if [[ -r "$current_release/.deployed-sha" ]]; then
+            deployed_sha="$(tr -d '[:space:]' < "$current_release/.deployed-sha")"
+          fi
+          if [[ "$deployed_sha" =~ ^[0-9a-fA-F]{40}$ && "${deployed_sha,,}" == "$expected_live_sha" ]]; then
+            printf 'LIVE_RELEASE_MATCH=YES\n'
+          else
+            printf 'LIVE_RELEASE_MATCH=NO\n'
+            fail "LIVE_RELEASE_MISMATCH"
+          fi
+
+          shared_env_real="$(readlink -f -- "$app_dir/shared/.env" 2>/dev/null || true)"
+          release_env_real="$(readlink -f -- "$current_release/.env" 2>/dev/null || true)"
+          [[ -n "$shared_env_real" && -r "$shared_env_real" && "$release_env_real" == "$shared_env_real" ]] || fail "PRODUCTION_ENV_UNAVAILABLE"
+          prisma_bin="$current_release/node_modules/.bin/prisma"
+          [[ -x "$prisma_bin" ]] || fail "PRISMA_UNAVAILABLE"
+          [[ -d "$current_release/node_modules/@prisma/client" ]] || fail "PRISMA_CLIENT_UNAVAILABLE"
+          [[ -d "$current_release/node_modules/dotenv" ]] || fail "DOTENV_UNAVAILABLE"
+          command -v node >/dev/null 2>&1 || fail "NODE_RUNTIME_UNAVAILABLE"
+
+          tree_dir="$status_tmp/tree"
+          mkdir -m 700 "$tree_dir"
+          archive_list="$status_tmp/archive.list"
+          tar -tzf "$status_tmp/prisma-source.tar.gz" > "$archive_list" 2>/dev/null || fail "SOURCE_PACKAGE_INVALID"
+          while IFS= read -r entry; do
+            case "$entry" in
+              prisma/|prisma/schema.prisma|prisma/migrations/|prisma/migrations/*) ;;
+              *) fail "SOURCE_PACKAGE_UNEXPECTED_PATH" ;;
+            esac
+            if [[ "$entry" == *"/../"* || "$entry" == ../* || "$entry" == */.. ]]; then
+              fail "SOURCE_PACKAGE_UNSAFE_PATH"
+            fi
+          done < "$archive_list"
+          tar -xzf "$status_tmp/prisma-source.tar.gz" --no-same-owner --no-same-permissions -C "$tree_dir" 2>/dev/null || fail "SOURCE_PACKAGE_INVALID"
+          schema_path="$tree_dir/prisma/schema.prisma"
+          migration_root="$tree_dir/prisma/migrations"
+          [[ -f "$schema_path" && -d "$migration_root" ]] || fail "PRISMA_TREE_UNAVAILABLE"
+
+          printf 'COMPARISON_SHA=%s\n' "$status_sha"
+          if [[ -d "$migration_root/20260925100000_add_checkin_on_date_badge_rule" ]]; then
+            printf 'CHECKIN_DATE_MIGRATION_IN_TREE=YES\n'
+          else
+            printf 'CHECKIN_DATE_MIGRATION_IN_TREE=NO\n'
+          fi
+
+          export STATUS_TMP="$status_tmp"
+          export CURRENT_RELEASE="$current_release"
+          export SHARED_ENV="$shared_env_real"
+          export PRISMA_BIN="$prisma_bin"
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const { spawnSync } = require('node:child_process')
+
+          const tmp = process.env.STATUS_TMP
+          const release = process.env.CURRENT_RELEASE
+          const schema = path.join(tmp, 'tree', 'prisma', 'schema.prisma')
+          const migrationsDir = path.join(tmp, 'tree', 'prisma', 'migrations')
+          const emit = (key, value) => console.log(`${key}=${value}`)
+          const safeName = value => /^[A-Za-z0-9_-]+$/.test(String(value))
+          const asCount = value => String(value == null ? 'UNKNOWN' : value)
+
+          async function main() {
+            let databaseUrl
+            try {
+              const dotenv = require(path.join(release, 'node_modules', 'dotenv'))
+              databaseUrl = dotenv.parse(fs.readFileSync(process.env.SHARED_ENV, 'utf8')).DATABASE_URL
+            } catch {
+              emit('DATABASE_DIAGNOSTIC', 'UNAVAILABLE')
+              return 1
             }
-            trap cleanup EXIT
-
-            [[ "${APP_DIR:-}" == "/home/apps/easonfansclub" ]] || fail "APP_PATH_UNAVAILABLE"
-            [[ "${STATUS_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]] || fail "RELEASE_SHA_INVALID"
-            STATUS_SHA="${STATUS_SHA,,}"
-            command -v flock >/dev/null 2>&1 || fail "DEPLOY_LOCK_UNAVAILABLE"
-            [[ -f "$APP_DIR/.deploy.lock" ]] || fail "DEPLOY_LOCK_UNAVAILABLE"
-            exec 8< "$APP_DIR/.deploy.lock" || fail "DEPLOY_LOCK_UNAVAILABLE"
-            flock -s -n 8 || fail "DEPLOY_IN_PROGRESS"
-
-            current_release="$(readlink -f -- "$APP_DIR/current" 2>/dev/null || true)"
-            [[ "$current_release" == "$APP_DIR"/releases/* && -d "$current_release" ]] || fail "CURRENT_RELEASE_UNAVAILABLE"
-            deployed_sha=''
-            if [[ -r "$current_release/.deployed-sha" ]]; then
-              deployed_sha="$(tr -d '[:space:]' < "$current_release/.deployed-sha")"
-            fi
-            if [[ "$deployed_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
-              printf 'LIVE_RELEASE_SHA=%s\n' "${deployed_sha,,}"
-            else
-              printf 'LIVE_RELEASE_SHA=UNKNOWN\n'
-            fi
-
-            shared_env_real="$(readlink -f -- "$APP_DIR/shared/.env" 2>/dev/null || true)"
-            release_env_real="$(readlink -f -- "$current_release/.env" 2>/dev/null || true)"
-            [[ -n "$shared_env_real" && -r "$shared_env_real" && "$release_env_real" == "$shared_env_real" ]] || fail "PRODUCTION_ENV_UNAVAILABLE"
-            prisma_bin="$current_release/node_modules/.bin/prisma"
-            [[ -x "$prisma_bin" ]] || fail "PRISMA_UNAVAILABLE"
-            [[ -d "$current_release/node_modules/@prisma/client" ]] || fail "PRISMA_CLIENT_UNAVAILABLE"
-            [[ -d "$current_release/node_modules/dotenv" ]] || fail "DOTENV_UNAVAILABLE"
-            command -v node >/dev/null 2>&1 || fail "NODE_RUNTIME_UNAVAILABLE"
-
-            status_tmp="$(mktemp -d /tmp/ecfc-readonly-diagnostic.XXXXXX 2>/dev/null)" || fail "TEMPORARY_WORKSPACE_UNAVAILABLE"
-            repo_dir="$APP_DIR/repo"
-            source_remote="$(git -C "$repo_dir" remote get-url origin 2>/dev/null || true)"
-            [[ -n "$source_remote" ]] || fail "SOURCE_CACHE_UNAVAILABLE"
-            source_git_dir="$status_tmp/source.git"
-            git init --bare --quiet "$source_git_dir" 2>/dev/null || fail "TEMPORARY_WORKSPACE_UNAVAILABLE"
-            git --git-dir="$source_git_dir" remote add origin "$source_remote" 2>/dev/null || fail "SOURCE_CACHE_UNAVAILABLE"
-            GIT_TERMINAL_PROMPT=0 git --git-dir="$source_git_dir" fetch --no-tags --quiet origin "$STATUS_SHA" >/dev/null 2>&1 || fail "SOURCE_SHA_UNAVAILABLE"
-            resolved_sha="$(git --git-dir="$source_git_dir" rev-parse "${STATUS_SHA}^{commit}" 2>/dev/null || true)"
-            [[ "$resolved_sha" == "$STATUS_SHA" ]] || fail "SOURCE_SHA_UNAVAILABLE"
-            git --git-dir="$source_git_dir" archive "$STATUS_SHA" prisma 2>/dev/null | tar -x -C "$status_tmp" 2>/dev/null || fail "PRISMA_TREE_UNAVAILABLE"
-            schema_path="$status_tmp/prisma/schema.prisma"
-            migration_root="$status_tmp/prisma/migrations"
-            [[ -f "$schema_path" && -d "$migration_root" ]] || fail "PRISMA_TREE_UNAVAILABLE"
-
-            printf 'COMPARISON_SHA=%s\n' "$STATUS_SHA"
-            if [[ -d "$migration_root/20260924090000_add_follow_follower_created_index" ]]; then
-              printf 'FOLLOW_MIGRATION_IN_TREE=YES\n'
-            else
-              printf 'FOLLOW_MIGRATION_IN_TREE=NO\n'
-            fi
-            if [[ -d "$migration_root/20260925100000_add_checkin_on_date_badge_rule" ]]; then
-              printf 'CHECKIN_DATE_MIGRATION_IN_TREE=YES\n'
-            else
-              printf 'CHECKIN_DATE_MIGRATION_IN_TREE=NO\n'
-            fi
-
-            export STATUS_TMP="$status_tmp"
-            export CURRENT_RELEASE="$current_release"
-            export SHARED_ENV="$shared_env_real"
-            export PRISMA_BIN="$prisma_bin"
-            node <<'NODE'
-            const fs = require('node:fs')
-            const path = require('node:path')
-            const { spawnSync } = require('node:child_process')
-
-            const tmp = process.env.STATUS_TMP
-            const release = process.env.CURRENT_RELEASE
-            const schema = path.join(tmp, 'prisma', 'schema.prisma')
-            const migrationsDir = path.join(tmp, 'prisma', 'migrations')
-            const emit = (key, value) => console.log(`${key}=${value}`)
-            const safeName = (value) => /^[A-Za-z0-9_-]+$/.test(String(value))
-            const asCount = (value) => String(value == null ? 'UNKNOWN' : value)
-
-            async function main() {
-              let databaseUrl
-              try {
-                const dotenv = require(path.join(release, 'node_modules', 'dotenv'))
-                const parsed = dotenv.parse(fs.readFileSync(process.env.SHARED_ENV, 'utf8'))
-                databaseUrl = parsed.DATABASE_URL
-              } catch {
-                emit('DATABASE_DIAGNOSTIC', 'UNAVAILABLE')
-                return 1
-              }
-              if (!databaseUrl) {
-                emit('DATABASE_DIAGNOSTIC', 'UNAVAILABLE')
-                return 1
-              }
-
-              const cli = spawnSync(process.env.PRISMA_BIN, ['migrate', 'status', '--schema', schema], {
-                cwd: tmp,
-                env: { ...process.env, DATABASE_URL: databaseUrl, CI: '1', NO_COLOR: '1' },
-                encoding: 'utf8',
-                timeout: 120000,
-                maxBuffer: 2 * 1024 * 1024,
-              })
-              const cliText = `${cli.stdout || ''}\n${cli.stderr || ''}`
-              const recognizedStatus = /(migrations? found in prisma\/migrations|following migrations? have not|migrations? have failed|applied to the database but missing from the local migrations directory|database schema is up to date|all migrations have been successfully applied)/i.test(cliText)
-              const cliRecognized = !cli.error && (cli.status === 0 || recognizedStatus)
-              if (cli.status === 0 && !cli.error) emit('MIGRATION_STATUS_CLI', 'SUCCESS')
-              else if (recognizedStatus && !cli.error) emit('MIGRATION_STATUS_CLI', 'NONZERO_STATUS_RECOGNIZED')
-              else emit('MIGRATION_STATUS_CLI', 'ERROR_OR_UNRECOGNIZED')
-
-              let PrismaClient
-              try {
-                ({ PrismaClient } = require(path.join(release, 'node_modules', '@prisma', 'client')))
-              } catch {
-                emit('DATABASE_DIAGNOSTIC', 'UNAVAILABLE')
-                return 1
-              }
-              process.env.DATABASE_URL = databaseUrl
-              const db = new PrismaClient({ log: [] })
-              let complete = cliRecognized
-              const unknown = (key) => { emit(key, 'UNKNOWN'); complete = false }
-
-              try {
-                const versionRows = await db.$queryRaw`SELECT VERSION() AS version`
-                const version = String(versionRows[0]?.version ?? '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 100)
-                if (version) emit('DB_VERSION', version)
-                else unknown('DB_VERSION')
-              } catch { unknown('DB_VERSION') }
-
-              let enumValues = null
-              try {
-                const rows = await db.$queryRaw`SELECT COLUMN_TYPE AS columnType FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'BadgeRule' AND COLUMN_NAME = 'ruleType'`
-                const columnType = String(rows[0]?.columnType ?? '')
-                const matches = [...columnType.matchAll(/'([^']+)'/g)].map((match) => match[1])
-                const stripped = columnType.replace(/'[^']+'/g, '').replace(/[(),\s]/g, '')
-                if (/^enum$/i.test(stripped) && matches.length > 0 && matches.every((value) => /^[A-Z][A-Z0-9_]*$/.test(value))) enumValues = matches
-              } catch {}
-              let baselineEnumValues = null
-              try {
-                const schemaText = fs.readFileSync(schema, 'utf8')
-                const enumBlock = schemaText.match(/\benum\s+BadgeRuleType\s*\{([^}]*)\}/m)
-                const values = enumBlock?.[1].split(/\r?\n/).map((line) => line.trim()).filter((line) => /^[A-Z][A-Z0-9_]*$/.test(line)) ?? []
-                if (values.length > 0) baselineEnumValues = values
-              } catch {}
-              if (enumValues) {
-                emit('BADGERULE_ENUM', enumValues.join(','))
-                emit('CHECKIN_ON_DATE_PRESENT', enumValues.includes('CHECKIN_ON_DATE') ? 'YES' : 'NO')
-              } else {
-                unknown('BADGERULE_ENUM')
-                unknown('CHECKIN_ON_DATE_PRESENT')
-              }
-              if (baselineEnumValues) emit('BADGERULE_BASELINE_ENUM', baselineEnumValues.join(','))
-              else unknown('BADGERULE_BASELINE_ENUM')
-              if (baselineEnumValues && enumValues) {
-                emit('BADGERULE_BASELINE_MATCH', baselineEnumValues.length === enumValues.length && baselineEnumValues.every((value, index) => value === enumValues[index]) ? 'YES' : 'NO')
-              } else unknown('BADGERULE_BASELINE_MATCH')
-
-              try {
-                const rows = await db.$queryRaw`SELECT COUNT(*) AS rowCount FROM \`BadgeRule\``
-                emit('BADGERULE_ROW_COUNT', asCount(rows[0]?.rowCount))
-              } catch { unknown('BADGERULE_ROW_COUNT') }
-
-              try {
-                const rows = await db.$queryRaw`SELECT ruleType AS ruleType, COUNT(*) AS rowCount FROM \`BadgeRule\` GROUP BY ruleType ORDER BY ruleType`
-                const safeRows = rows.filter((row) => safeName(row.ruleType)).map((row) => `${row.ruleType}:${row.rowCount}`)
-                if (safeRows.length === rows.length) emit('BADGERULE_RULE_TYPE_COUNTS', safeRows.length ? safeRows.join(',') : 'NONE')
-                else unknown('BADGERULE_RULE_TYPE_COUNTS')
-              } catch { unknown('BADGERULE_RULE_TYPE_COUNTS') }
-
-              try {
-                const rows = await db.$queryRaw`SELECT TABLE_ROWS AS rowsEstimate, DATA_LENGTH AS dataLength, INDEX_LENGTH AS indexLength FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'BadgeRule'`
-                if (rows.length) {
-                  emit('BADGERULE_TABLE_ROWS_ESTIMATE', asCount(rows[0].rowsEstimate))
-                  const bytes = BigInt(rows[0].dataLength ?? 0) + BigInt(rows[0].indexLength ?? 0)
-                  emit('BADGERULE_TABLE_SIZE_BYTES', bytes.toString())
-                } else {
-                  unknown('BADGERULE_TABLE_ROWS_ESTIMATE')
-                  unknown('BADGERULE_TABLE_SIZE_BYTES')
-                }
-              } catch {
-                unknown('BADGERULE_TABLE_ROWS_ESTIMATE')
-                unknown('BADGERULE_TABLE_SIZE_BYTES')
-              }
-
-              const repoMigrations = fs.readdirSync(migrationsDir, { withFileTypes: true })
-                .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(migrationsDir, entry.name, 'migration.sql')))
-                .map((entry) => entry.name)
-                .sort()
-              try {
-                const rows = await db.$queryRaw`SELECT migration_name AS migrationName, started_at AS startedAt, finished_at AS finishedAt, rolled_back_at AS rolledBackAt FROM \`_prisma_migrations\` ORDER BY started_at`
-                const states = new Map()
-                for (const row of rows) {
-                  if (!safeName(row.migrationName)) continue
-                  states.set(row.migrationName, row.rolledBackAt ? 'rolled_back' : row.finishedAt ? 'applied' : 'failed')
-                }
-                const repoSet = new Set(repoMigrations)
-                const applied = [...states].filter(([name, state]) => repoSet.has(name) && state === 'applied').map(([name]) => name).sort()
-                const pending = repoMigrations.filter((name) => !['applied', 'failed'].includes(states.get(name)))
-                const failed = [...states].filter(([, state]) => state === 'failed').map(([name]) => name).sort()
-                const divergence = [...states].filter(([name, state]) => state === 'applied' && !repoSet.has(name)).map(([name]) => name).sort()
-                emit('MIGRATION_REPO_COUNT', String(repoMigrations.length))
-                emit('MIGRATION_APPLIED_COUNT', String(applied.length))
-                emit('MIGRATION_PENDING_COUNT', String(pending.length))
-                emit('MIGRATION_PENDING_NAMES', pending.length ? pending.join(',') : 'NONE')
-                emit('MIGRATION_FAILED', failed.length ? 'YES' : 'NO')
-                emit('MIGRATION_FAILED_NAMES', failed.length ? failed.join(',') : 'NONE')
-                emit('MIGRATION_DIVERGENCE', divergence.length ? 'YES' : 'NO')
-                emit('MIGRATION_DIVERGENCE_NAMES', divergence.length ? divergence.join(',') : 'NONE')
-              } catch {
-                unknown('MIGRATION_REPO_COUNT')
-                unknown('MIGRATION_APPLIED_COUNT')
-                unknown('MIGRATION_PENDING_COUNT')
-                unknown('MIGRATION_PENDING_NAMES')
-                unknown('MIGRATION_FAILED')
-                unknown('MIGRATION_FAILED_NAMES')
-                unknown('MIGRATION_DIVERGENCE')
-                unknown('MIGRATION_DIVERGENCE_NAMES')
-              }
-
-              emit('BACKUP_PITR', 'UNKNOWN')
-              emit('ALTER_CAUTION', 'METADATA_LOCK_POSSIBLE;REBUILD_DEPENDS_ON_MYSQL_VERSION_AND_TABLE_SIZE')
-              emit('DATABASE_DIAGNOSTIC', complete ? 'COMPLETE' : 'PARTIAL')
-              await db.$disconnect().catch(() => {})
-              return complete ? 0 : 1
+            if (!databaseUrl) {
+              emit('DATABASE_DIAGNOSTIC', 'UNAVAILABLE')
+              return 1
             }
+            process.env.DATABASE_URL = databaseUrl
 
-            main().then((code) => { process.exitCode = code }).catch(async () => {
-              console.log('DATABASE_DIAGNOSTIC=UNAVAILABLE')
-              process.exitCode = 1
+            const cli = spawnSync(process.env.PRISMA_BIN, ['migrate', 'status', '--schema', schema], {
+              cwd: path.dirname(schema),
+              env: { ...process.env, DATABASE_URL: databaseUrl, CI: '1', NO_COLOR: '1' },
+              encoding: 'utf8',
+              timeout: 120000,
+              maxBuffer: 2 * 1024 * 1024,
             })
-            NODE
+            const cliText = `${cli.stdout || ''}\n${cli.stderr || ''}`
+            const recognizedStatus = /(migrations? found in prisma\/migrations|following migration(?:s|\(s\))? have not|migration(?:s|\(s\))? (are )?pending|migrations? have failed|found failed migrations|applied to the database but missing from the local migrations directory|database schema is up to date|all migrations have been successfully applied)/i.test(cliText)
+            const cliRecognized = !cli.error && (cli.status === 0 || recognizedStatus)
+            emit('MIGRATION_STATUS_CLI_EXIT_CODE', cli.error ? 'NO_EXIT_CODE' : String(cli.status))
+            if (cli.status === 0 && !cli.error) emit('MIGRATION_STATUS_CLI', 'SUCCESS')
+            else if (recognizedStatus && !cli.error) emit('MIGRATION_STATUS_CLI', 'NONZERO_STATUS_RECOGNIZED')
+            else emit('MIGRATION_STATUS_CLI', 'ERROR_OR_UNRECOGNIZED')
+
+            let PrismaClient
+            try {
+              ({ PrismaClient } = require(path.join(release, 'node_modules', '@prisma', 'client')))
+            } catch {
+              emit('DATABASE_DIAGNOSTIC', 'UNAVAILABLE')
+              return 1
+            }
+            const db = new PrismaClient({ log: [] })
+            let complete = cliRecognized
+            const unknown = key => { emit(key, 'UNKNOWN'); complete = false }
+            const optionalUnknown = key => emit(key, 'UNKNOWN')
+
+            try {
+              const rows = await db.$queryRaw`SELECT VERSION() AS version`
+              const version = String(rows[0]?.version ?? '').replace(/[^A-Za-z0-9 ._()+-]/g, '').trim().slice(0, 100)
+              if (version) emit('DB_VERSION', version)
+              else optionalUnknown('DB_VERSION')
+            } catch { optionalUnknown('DB_VERSION') }
+
+            let productionEnum = null
+            try {
+              const rows = await db.$queryRaw`SELECT COLUMN_TYPE AS columnType FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'BadgeRule' AND COLUMN_NAME = 'ruleType'`
+              const columnType = String(rows[0]?.columnType ?? '')
+              const values = [...columnType.matchAll(/'([^']+)'/g)].map(match => match[1])
+              const rest = columnType.replace(/'[^']+'/g, '').replace(/[(),\s]/g, '')
+              if (/^enum$/i.test(rest) && values.length > 0 && values.every(safeName)) productionEnum = values
+            } catch {}
+
+            let baselineEnum = null
+            try {
+              const schemaText = fs.readFileSync(schema, 'utf8')
+              const block = schemaText.match(/\benum\s+BadgeRuleType\s*\{([^}]*)\}/m)
+              const values = block?.[1].split(/\r?\n/).map(line => line.trim()).filter(safeName) ?? []
+              if (values.length > 0) baselineEnum = values
+            } catch {}
+
+            if (productionEnum) {
+              emit('BADGERULE_ENUM_VALUES', productionEnum.join(','))
+              emit('CHECKIN_ON_DATE_PRESENT', productionEnum.includes('CHECKIN_ON_DATE') ? 'YES' : 'NO')
+            } else {
+              unknown('BADGERULE_ENUM_VALUES')
+              unknown('CHECKIN_ON_DATE_PRESENT')
+            }
+            if (baselineEnum) emit('BADGERULE_BASELINE_ENUM', baselineEnum.join(','))
+            else unknown('BADGERULE_BASELINE_ENUM')
+            if (baselineEnum && productionEnum) {
+              emit('BADGERULE_BASELINE_MATCH', baselineEnum.length === productionEnum.length && baselineEnum.every((value, index) => value === productionEnum[index]) ? 'YES' : 'NO')
+            } else unknown('BADGERULE_BASELINE_MATCH')
+
+            try {
+              const rows = await db.$queryRaw`SELECT COUNT(*) AS rowCount FROM BadgeRule`
+              emit('BADGERULE_ROW_COUNT', asCount(rows[0]?.rowCount))
+            } catch { unknown('BADGERULE_ROW_COUNT') }
+
+            try {
+              const rows = await db.$queryRaw`SELECT ruleType AS ruleType, COUNT(*) AS rowCount FROM BadgeRule GROUP BY ruleType ORDER BY ruleType`
+              const safeRows = rows.filter(row => safeName(row.ruleType)).map(row => `${row.ruleType}:${row.rowCount}`)
+              if (safeRows.length === rows.length) emit('BADGERULE_RULE_TYPE_COUNTS', safeRows.length ? safeRows.join(',') : 'NONE')
+              else unknown('BADGERULE_RULE_TYPE_COUNTS')
+            } catch { unknown('BADGERULE_RULE_TYPE_COUNTS') }
+
+            try {
+              const rows = await db.$queryRaw`SELECT TABLE_ROWS AS rowsEstimate, DATA_LENGTH AS dataLength, INDEX_LENGTH AS indexLength FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'BadgeRule'`
+              if (rows.length) {
+                emit('BADGERULE_TABLE_ROWS_ESTIMATE', asCount(rows[0].rowsEstimate))
+                const bytes = BigInt(rows[0].dataLength ?? 0) + BigInt(rows[0].indexLength ?? 0)
+                emit('BADGERULE_TABLE_SIZE', bytes.toString())
+              } else {
+                optionalUnknown('BADGERULE_TABLE_ROWS_ESTIMATE')
+                optionalUnknown('BADGERULE_TABLE_SIZE')
+              }
+            } catch {
+              optionalUnknown('BADGERULE_TABLE_ROWS_ESTIMATE')
+              optionalUnknown('BADGERULE_TABLE_SIZE')
+            }
+
+            try {
+              const repoMigrations = fs.readdirSync(migrationsDir, { withFileTypes: true })
+                .filter(entry => entry.isDirectory() && fs.existsSync(path.join(migrationsDir, entry.name, 'migration.sql')))
+                .map(entry => entry.name).sort()
+              if (!repoMigrations.every(safeName)) throw new Error('unsafe migration name')
+              const rows = await db.$queryRaw`SELECT migration_name AS migrationName, started_at AS startedAt, finished_at AS finishedAt, rolled_back_at AS rolledBackAt FROM _prisma_migrations ORDER BY started_at`
+              const states = new Map()
+              for (const row of rows) {
+                if (!safeName(row.migrationName)) continue
+                states.set(row.migrationName, row.rolledBackAt ? 'rolled_back' : row.finishedAt ? 'applied' : 'failed')
+              }
+              const repoSet = new Set(repoMigrations)
+              const applied = [...states].filter(([, state]) => state === 'applied').map(([name]) => name).sort()
+              const pending = repoMigrations.filter(name => !['applied', 'failed'].includes(states.get(name)))
+              const failed = [...states].filter(([, state]) => state === 'failed').map(([name]) => name).sort()
+              const divergence = [...states].filter(([name, state]) => state === 'applied' && !repoSet.has(name)).map(([name]) => name).sort()
+              const status = failed.length ? 'FAILED' : divergence.length ? 'DIVERGENCE' : pending.length ? 'PENDING' : 'UP_TO_DATE'
+              emit('MIGRATION_STATUS', status)
+              emit('MIGRATION_REPO_COUNT', String(repoMigrations.length))
+              emit('MIGRATION_APPLIED_COUNT', String(applied.length))
+              emit('MIGRATION_PENDING_COUNT', String(pending.length))
+              emit('MIGRATION_PENDING_NAMES', pending.length ? pending.join(',') : 'NONE')
+              emit('MIGRATION_FAILED', failed.length ? 'YES' : 'NO')
+              emit('MIGRATION_FAILED_NAMES', failed.length ? failed.join(',') : 'NONE')
+              emit('MIGRATION_DIVERGENCE', divergence.length ? 'YES' : 'NO')
+              emit('MIGRATION_DIVERGENCE_NAMES', divergence.length ? divergence.join(',') : 'NONE')
+            } catch {
+              unknown('MIGRATION_REPO_COUNT')
+              unknown('MIGRATION_STATUS')
+              unknown('MIGRATION_APPLIED_COUNT')
+              unknown('MIGRATION_PENDING_COUNT')
+              unknown('MIGRATION_PENDING_NAMES')
+              unknown('MIGRATION_FAILED')
+              unknown('MIGRATION_FAILED_NAMES')
+              unknown('MIGRATION_DIVERGENCE')
+              unknown('MIGRATION_DIVERGENCE_NAMES')
+            }
+
+            emit('BACKUP_PITR', 'UNKNOWN')
+            emit('ALTER_CAUTION', 'METADATA_LOCK_POSSIBLE;TABLE_REBUILD_DEPENDS_ON_ENGINE_VERSION_AND_SIZE')
+            emit('DATABASE_DIAGNOSTIC', complete ? 'COMPLETE' : 'PARTIAL')
+            await db.$disconnect().catch(() => {})
+            return complete ? 0 : 1
+          }
+
+          main().then(code => { process.exitCode = code }).catch(async () => {
+            console.log('DATABASE_DIAGNOSTIC=UNAVAILABLE')
+            process.exitCode = 1
+          })
+          NODE
+          REMOTE_SCRIPT
+
+      - name: Remove temporary production diagnostic workspace
+        if: always() && steps.remote.outputs.remote_dir != ''
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_DIR" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]
+          remote="$SERVER_USER@$SERVER_HOST"
+          ssh -q -T -i "$KEY_FILE" -p "$SERVER_PORT" \
+            -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" "$remote" \
+            "bash -s -- '$REMOTE_DIR'" 2>/dev/null <<'REMOTE_CLEANUP'
+          set -euo pipefail
+          path="${1:-}"
+          if [[ "$path" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]; then
+            rm -rf -- "$path"
+          else
+            exit 1
+          fi
+          REMOTE_CLEANUP
+
+      - name: Remove temporary runner files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- \
+            "$RUNNER_TEMP/ecfc-prisma-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz" \
+            "$RUNNER_TEMP/ecfc-prisma-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.list" \
+            "$RUNNER_TEMP/ecfc-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key" \
+            "$RUNNER_TEMP/ecfc-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.known_hosts"
