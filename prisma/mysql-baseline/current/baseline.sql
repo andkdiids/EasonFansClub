@@ -556,7 +556,7 @@ CREATE TABLE `Badge` (
 CREATE TABLE `BadgeRule` (
     `id` VARCHAR(191) NOT NULL,
     `badgeId` VARCHAR(191) NOT NULL,
-    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY', 'BADGE_OWNERSHIP', 'CLINIC_CONSULTATION_STREAK') NOT NULL,
+    `ruleType` ENUM('POST_COUNT', 'FEATURED_POST_COUNT', 'CHECKIN_TOTAL_DAYS', 'CHECKIN_STREAK', 'ACCOUNT_AGE_DAYS', 'FRIEND_COUNT', 'FOLLOWER_COUNT', 'GUESS_SONG_MAX_STREAK', 'DUEL_WIN_COUNT', 'WANT_LISTEN_MAX_STREAK', 'CONCERT_ATTENDANCE_COUNT', 'CONCERT_SHOW_ATTENDED', 'CONCERT_TOUR_ATTENDED', 'RATING_COUNT', 'BADGE_SERIES_COMPLETE', 'ACTIVITY_PARTICIPATION', 'BIRTHDAY_ZODIAC', 'BIRTHDAY_TODAY', 'BADGE_OWNERSHIP', 'CLINIC_CONSULTATION_STREAK', 'CHECKIN_ON_DATE') NOT NULL,
     `operator` ENUM('GTE', 'LTE', 'EQ') NOT NULL DEFAULT 'GTE',
     `threshold` INTEGER NULL,
     `secondaryThreshold` INTEGER NULL,
@@ -1337,6 +1337,7 @@ CREATE TABLE `Follow` (
     `followerId` VARCHAR(191) NOT NULL,
     `followingId` VARCHAR(191) NOT NULL,
 
+    INDEX `Follow_followerId_createdAt_idx`(`followerId`, `createdAt`),
     INDEX `Follow_followingId_createdAt_idx`(`followingId`, `createdAt`),
     UNIQUE INDEX `Follow_followerId_followingId_key`(`followerId`, `followingId`),
     PRIMARY KEY (`id`)
@@ -2938,6 +2939,47 @@ CREATE TABLE `MobileAuthSession` (
     UNIQUE INDEX `MobileAuthSession_refreshTokenHash_key`(`refreshTokenHash`),
     INDEX `MobileAuthSession_userId_idx`(`userId`),
     INDEX `MobileAuthSession_expiresAt_idx`(`expiresAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `BetaInviteCode` (
+    `id` VARCHAR(191) NOT NULL,
+    `codeHash` VARCHAR(64) NOT NULL,
+    `codePrefix` VARCHAR(16) NOT NULL,
+    `maskedCode` VARCHAR(32) NOT NULL,
+    `status` ENUM('ACTIVE', 'USED', 'EXPIRED', 'REVOKED') NOT NULL DEFAULT 'ACTIVE',
+    `maxActivations` INTEGER NOT NULL DEFAULT 1,
+    `activationCount` INTEGER NOT NULL DEFAULT 0,
+    `expiresAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    `createdById` VARCHAR(191) NOT NULL,
+
+    UNIQUE INDEX `BetaInviteCode_codeHash_key`(`codeHash`),
+    INDEX `BetaInviteCode_status_expiresAt_idx`(`status`, `expiresAt`),
+    INDEX `BetaInviteCode_createdById_createdAt_idx`(`createdById`, `createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `BetaDeviceActivation` (
+    `id` VARCHAR(191) NOT NULL,
+    `inviteCodeId` VARCHAR(191) NOT NULL,
+    `installationIdHash` VARCHAR(64) NOT NULL,
+    `credentialHash` VARCHAR(64) NOT NULL,
+    `status` ENUM('ACTIVE', 'REVOKED') NOT NULL DEFAULT 'ACTIVE',
+    `activatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `lastVerifiedAt` DATETIME(3) NULL,
+    `revokedAt` DATETIME(3) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `BetaDeviceActivation_credentialHash_key`(`credentialHash`),
+    INDEX `BetaDeviceActivation_installationIdHash_idx`(`installationIdHash`),
+    INDEX `BetaDeviceActivation_status_lastVerifiedAt_idx`(`status`, `lastVerifiedAt`),
+    INDEX `BetaDeviceActivation_inviteCodeId_activatedAt_idx`(`inviteCodeId`, `activatedAt`),
+    UNIQUE INDEX `BetaDeviceActivation_inviteCodeId_installationIdHash_key`(`inviteCodeId`, `installationIdHash`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -5287,6 +5329,12 @@ ALTER TABLE `OnlineSession` ADD CONSTRAINT `OnlineSession_userId_fkey` FOREIGN K
 
 -- AddForeignKey
 ALTER TABLE `MobileAuthSession` ADD CONSTRAINT `MobileAuthSession_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `BetaInviteCode` ADD CONSTRAINT `BetaInviteCode_createdById_fkey` FOREIGN KEY (`createdById`) REFERENCES `User`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `BetaDeviceActivation` ADD CONSTRAINT `BetaDeviceActivation_inviteCodeId_fkey` FOREIGN KEY (`inviteCodeId`) REFERENCES `BetaInviteCode`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `PageLayout` ADD CONSTRAINT `PageLayout_publishedById_fkey` FOREIGN KEY (`publishedById`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;

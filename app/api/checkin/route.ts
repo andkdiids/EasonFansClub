@@ -138,7 +138,9 @@ async function runCheckInPostProcess(input: {
     {
       phase: 'badgeEvaluation',
       run: async () => {
-        const completed = await triggerBadgeEvaluation(input.userId, 'CHECKIN_CREATED', input.requestId)
+        // Include the server-created CheckIn id so event-only rules can
+        // distinguish a normal check-in from makeup/reconciliation events.
+        const completed = await triggerBadgeEvaluation(input.userId, 'CHECKIN_CREATED', `normal:${input.checkInId}`, 'LIVE_CHECKIN')
         if (!completed) throw new Error('BADGE_EVALUATION_FAILED')
       },
     },
@@ -391,6 +393,11 @@ export async function POST(request: Request) {
         checkDate: checkedAt,
         checkinDateKey: todayKey,
         createdAt: checkedAt,
+        // Keep the persisted event kind explicit. The specific-date badge rule
+        // must never rely on a schema default to distinguish a normal check-in
+        // from any makeup flow.
+        type: 'NORMAL',
+        isMakeUp: false,
         points: 0,
         exp: 0,
         streakDay: nextStreak,

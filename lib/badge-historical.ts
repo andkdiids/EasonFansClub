@@ -2,6 +2,7 @@ import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { accountAgeDays, VALID_POST_WHERE } from '@/lib/badge-metrics'
 import { BADGE_RULE_REGISTRY, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { normalizeCheckinOnDateRuleConfig } from '@/lib/checkin-specific-date'
 import { prisma } from '@/lib/prisma'
 
 export type HistoricalQualificationWindow = {
@@ -83,6 +84,16 @@ export async function getBatchHistoricalBadgeMetrics(
       const dates = new Map<string, string[]>()
       rows.forEach((row) => dates.set(row.userId, [...(dates.get(row.userId) || []), row.checkinDateKey]))
       users.forEach((user) => metrics.set(user.id, calculateCheckinStreaks(dates.get(user.id) || [], window.until).longestStreak))
+      return metrics
+    }
+    case 'CHECKIN_ON_DATE': {
+      const config = normalizeCheckinOnDateRuleConfig(configJson)
+      if (!config) return metrics
+      const rows = await prisma.checkIn.findMany({
+        where: { userId: { in: userIds }, checkDate: createdAt, type: 'NORMAL', isMakeUp: false, checkinDateKey: { in: config.dates } },
+        select: { userId: true },
+      })
+      rows.forEach((row) => metrics.set(row.userId, 1))
       return metrics
     }
     case 'ACCOUNT_AGE_DAYS':

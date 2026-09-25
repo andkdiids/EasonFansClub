@@ -16,6 +16,7 @@ import { getBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
 import { getPublicUserDisplayName } from '@/lib/friend-display'
 import { type BadgeRevokeReason } from '@/lib/badge-revocation'
 import { reconcileAspirinBadgeRule } from '@/lib/aspirin-badge'
+import { isNormalCheckinOnConfiguredDate, normalizeCheckinOnDateRuleConfig } from '@/lib/checkin-specific-date'
 import {
   BADGE_EVALUATION_EVENTS,
   BADGE_RULE_REGISTRY,
@@ -31,6 +32,18 @@ const BACKFILL_BATCH_MIN = 100
 const BACKFILL_BATCH_MAX = 500
 
 export type BadgeEvaluationEvent = typeof BADGE_EVALUATION_EVENTS[number]
+export type BadgeEvaluationSource = 'LIVE_CHECKIN' | 'HISTORICAL_RECONCILE' | 'ADMIN_EXPLICIT_BACKFILL' | 'OTHER'
+
+export function canEvaluateCheckinOnDate(input: {
+  source: BadgeEvaluationSource
+  eventType?: BadgeEvaluationEvent
+  eventId?: string | null
+}) {
+  return input.source === 'LIVE_CHECKIN'
+    && input.eventType === 'CHECKIN_CREATED'
+    && typeof input.eventId === 'string'
+    && input.eventId.startsWith('normal:')
+}
 
 function supportsEvent(ruleType: SupportedBadgeRuleType, eventType: BadgeEvaluationEvent) {
   return (BADGE_RULE_REGISTRY[ruleType].events as readonly string[]).includes(eventType)
@@ -194,6 +207,10 @@ function grantKeyForRule(
     const targetZodiac = getZodiacFromRuleConfig(rule.configJson)
     return targetZodiac ? zodiacGrantKey({ badgeId: rule.badgeId, ruleId: rule.id, targetZodiac }) : `zodiac:${rule.badgeId}:${rule.id}:UNKNOWN`
   }
+  // A specific-date check-in is a one-time achievement. Keep one stable
+  // source key for the rule so a later configured date or a retried event
+  // cannot create a second ownership/source/notification.
+  if (rule.ruleType === 'CHECKIN_ON_DATE') return `checkin-on-date:${rule.id}`
   return grantKeyPrefix ? `${grantKeyPrefix}:rule:${rule.id}` : undefined
 }
 
@@ -254,6 +271,8 @@ export function evaluateBadgeRule({
   if (rule.ruleType === 'CLINIC_CONSULTATION_STREAK') {
     return evaluateBadgeMetric(metric, 'GTE', rule.threshold || 1)
   }
+
+  if (rule.ruleType === 'CHECKIN_ON_DATE') return metric > 0
 
   const target = rule.ruleType === 'CONCERT_SHOW_ATTENDED' || rule.ruleType === 'CONCERT_TOUR_ATTENDED'
     ? 1
@@ -330,7 +349,7 @@ function assertBadgeBackfillConfiguration(
   }
 }
 
-export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonly SupportedBadgeRuleType[], now = new Date(), grantKeyPrefix?: string) {
+export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonly SupportedBadgeRuleType[], now = new Date(), grantKeyPrefix?: string, eventId?: string | null, evaluationSource: BadgeEvaluationSource = 'OTHER', evaluationEventType?: BadgeEvaluationEvent) {
   const summary = emptySummary(userId)
   const rules = await loadEnabledRules(ruleTypes, now)
   const metrics = new Map<string, number>()
@@ -380,6 +399,50 @@ export async function evaluateUserAutoBadges(userId: string, ruleTypes?: readonl
       } catch (error) {
         summary.failed += 1
         summary.failures.push(`${rule.id}:${error instanceof Error ? error.message : '阿士匹灵规则计算失败'}`)
+      }
+      continue
+    }
+    if (type === 'CHECKIN_ON_DATE') {
+      summary.evaluated += 1
+      try {
+        // This is event-only: a durable row replayed by generic historical
+        // reconciliation must never be mistaken for a newly completed check-in.
+        if (!canEvaluateCheckinOnDate({ source: evaluationSource, eventType: evaluationEventType, eventId })) continue
+        const checkinId = typeof eventId === 'string' && eventId.startsWith('normal:') ? eventId.slice('normal:'.length) : ''
+        const config = normalizeCheckinOnDateRuleConfig(rule.configJson)
+        const checkin = checkinId && config
+          ? await prisma.checkIn.findFirst({
+              where: { id: checkinId, userId, type: 'NORMAL', isMakeUp: false },
+              select: { userId: true, checkinDateKey: true, type: true, isMakeUp: true },
+            })
+          : null
+        const eligible = Boolean(checkin && config && isNormalCheckinOnConfiguredDate({
+          currentUserId: userId,
+          checkinUserId: checkin.userId,
+          checkinDateKey: checkin.checkinDateKey,
+          checkinType: checkin.type,
+          isMakeUp: checkin.isMakeUp,
+          configuredDates: config.dates,
+        }))
+        if (!eligible) continue
+        summary.eligible += 1
+        const result = await grantBadge({
+          userId,
+          badgeId: rule.badgeId,
+          sourceType: 'AUTO_RULE',
+          sourceId: rule.id,
+          grantKey: grantKeyForRule(rule, now, grantKeyPrefix),
+          grantReason: `自动达成：${ruleDescription({ ruleType: type, threshold: rule.threshold, configJson: rule.configJson })}`,
+          deferPhase3Effects: true,
+        })
+        if (result.created) {
+          summary.granted += 1
+          newlyGranted.push({ badgeId: result.badgeId, recordId: result.recordId, ruleType: type })
+        } else if (result.skipped) summary.skippedByRevoke = (summary.skippedByRevoke || 0) + 1
+        else summary.alreadyOwned += 1
+      } catch (error) {
+        summary.failed += 1
+        summary.failures.push(`${rule.id}:${error instanceof Error ? error.message : '指定日期挂号规则计算失败'}`)
       }
       continue
     }
@@ -641,7 +704,7 @@ export async function grantCurrentZodiacBadgeRewards(now = new Date()): Promise<
   return summary
 }
 
-export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEvaluationEvent, eventId?: string | null) {
+export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEvaluationEvent, eventId?: string | null, evaluationSource: BadgeEvaluationSource = 'OTHER') {
   const ruleTypes = EVENT_RULE_TYPES[eventType]
   if (!ruleTypes) {
     console.warn('[badge-rule.event.invalid]', { userId, eventType })
@@ -649,7 +712,7 @@ export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEva
   }
   const eventKey = eventId?.trim() ? `event:${eventType}:${eventId.trim()}` : `event:${eventType}`
   if (eventType === 'USER_BIRTHDAY_UPDATED') return reconcileBirthdayRelatedBadges(userId, new Date())
-  const summary = await evaluateUserAutoBadges(userId, ruleTypes, new Date(), eventKey)
+  const summary = await evaluateUserAutoBadges(userId, ruleTypes, new Date(), eventKey, eventId, evaluationSource, eventType)
   // Retention pass runs strictly after the grant pass so a badge that was just
   // re-earned by this very event is counted as still eligible, never revoked.
   // It only looks at RETAIN_WHILE_ELIGIBLE rules the user actually holds
@@ -664,8 +727,8 @@ export async function evaluateBadgesForEvent(userId: string, eventType: BadgeEva
 }
 
 /** Event hooks deliberately do not await this function, so badge rules cannot slow or roll back the primary action. */
-export function triggerBadgeEvaluation(userId: string, eventType: BadgeEvaluationEvent, eventId?: string | null): Promise<boolean> {
-  const task = evaluateBadgesForEvent(userId, eventType, eventId).then((summary) => {
+export function triggerBadgeEvaluation(userId: string, eventType: BadgeEvaluationEvent, eventId?: string | null, evaluationSource: BadgeEvaluationSource = 'OTHER'): Promise<boolean> {
+  const task = evaluateBadgesForEvent(userId, eventType, eventId, evaluationSource).then((summary) => {
     if (summary.failed > 0) {
       console.error('[badge-rule.event.partial]', { userId, eventType, failed: summary.failed, failures: summary.failures.slice(0, 10) })
       return false
@@ -724,6 +787,16 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
         else dates.set(row.userId, [row.checkinDateKey])
       })
       users.forEach((user) => metrics.set(user.id, calculateCheckinStreaks(dates.get(user.id) || []).currentStreak))
+      return metrics
+    }
+    case 'CHECKIN_ON_DATE': {
+      const config = normalizeCheckinOnDateRuleConfig(configJson)
+      if (!config) return metrics
+      const rows = await prisma.checkIn.findMany({
+        where: { userId: { in: userIds }, type: 'NORMAL', isMakeUp: false, checkinDateKey: { in: config.dates } },
+        select: { userId: true },
+      })
+      rows.forEach((row) => metrics.set(row.userId, 1))
       return metrics
     }
     case 'ACCOUNT_AGE_DAYS':
