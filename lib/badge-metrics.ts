@@ -38,6 +38,10 @@ const BADGE_RULE_METRIC_LOADERS: Partial<Record<SupportedBadgeRuleType, BadgeMet
     const rows = await prisma.checkIn.findMany({ where: { userId }, select: { checkinDateKey: true } })
     return calculateCheckinStreaks(rows.map((row) => row.checkinDateKey)).currentStreak
   },
+  // Specific-date check-ins require rule configJson and are evaluated by the
+  // event-aware/batch resolvers. Keep a guarded inert loader so generic metric
+  // consumers never turn a missing config into a runtime error.
+  CHECKIN_ON_DATE: async () => 0,
   ACCOUNT_AGE_DAYS: async (userId) => {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { createdAt: true } })
     return user ? accountAgeDays(user.createdAt) : 0

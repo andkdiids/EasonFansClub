@@ -105,7 +105,7 @@ test('event grants require a new event key and birthday grants use stable qualif
 
 test('automatic event callers pass stable source event identities', () => {
   assert.match(read('app/api/posts/route.ts'), /triggerBadgeEvaluation\(user\.id, 'POST_CREATED', result\.post\.id\)/)
-  assert.match(read('app/api/checkin/route.ts'), /triggerBadgeEvaluation\(input\.userId, 'CHECKIN_CREATED', input\.requestId\)/)
+  assert.match(read('app/api/checkin/route.ts'), /triggerBadgeEvaluation\(input\.userId, 'CHECKIN_CREATED', `normal:\$\{input\.checkInId\}`, 'LIVE_CHECKIN'\)/)
   assert.match(read('lib/guess-song-session.ts'), /triggerBadgeEvaluation\(input\.userId, 'GUESS_SONG_SESSION_FINISHED', input\.sessionId\)/)
   assert.match(read('lib/concert-badge.ts'), /grantKey: `concert:\$\{award\.sourceType\}:\$\{award\.sourceId\}`/)
 })

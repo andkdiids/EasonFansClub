@@ -613,6 +613,7 @@ enum BadgeRuleType {
   BIRTHDAY_TODAY
   BADGE_OWNERSHIP
   CLINIC_CONSULTATION_STREAK
+  CHECKIN_ON_DATE
 }
 
 enum BadgeRuleOperator {
