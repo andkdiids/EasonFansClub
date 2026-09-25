@@ -17,7 +17,6 @@ concurrency:
 
 env:
   APP_DIR: /home/apps/easonfansclub
-  EXPECTED_LIVE_RELEASE_SHA: 1585f877a224055c98082990d7fdbc37b4bb498d
 
 jobs:
   inspect:
@@ -175,14 +174,12 @@ jobs:
           REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
           RELEASE_SHA: ${{ steps.validate.outputs.release_sha }}
           APP_DIR: ${{ env.APP_DIR }}
-          EXPECTED_LIVE_RELEASE_SHA: ${{ env.EXPECTED_LIVE_RELEASE_SHA }}
         run: |
           set -euo pipefail
           [[ "$REMOTE_DIR" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_LIVE_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           remote="$SERVER_USER@$SERVER_HOST"
-          remote_command="bash -s -- '$REMOTE_DIR' '$RELEASE_SHA' '$APP_DIR' '$EXPECTED_LIVE_RELEASE_SHA'"
+          remote_command="bash -s -- '$REMOTE_DIR' '$RELEASE_SHA' '$APP_DIR'"
           ssh -q -T -i "$KEY_FILE" -p "$SERVER_PORT" \
             -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$KNOWN_HOSTS" "$remote" "$remote_command" 2>/dev/null <<'REMOTE_SCRIPT'
@@ -192,7 +189,6 @@ jobs:
           status_tmp="${1:-}"
           status_sha="${2:-}"
           app_dir="${3:-}"
-          expected_live_sha="${4:-}"
 
           fail() {
             printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=%s\n' "$1"
@@ -214,7 +210,6 @@ jobs:
           trap cleanup EXIT
 
           [[ "$status_sha" =~ ^[0-9a-f]{40}$ ]] || fail "RELEASE_SHA_INVALID"
-          [[ "$expected_live_sha" =~ ^[0-9a-f]{40}$ ]] || fail "EXPECTED_LIVE_SHA_INVALID"
           [[ "$app_dir" == "/home/apps/easonfansclub" ]] || fail_live "APP_PATH_UNAVAILABLE"
           [[ -d "$status_tmp" && -f "$status_tmp/prisma-source.tar.gz" ]] || fail "SOURCE_PACKAGE_UNAVAILABLE"
 
@@ -232,7 +227,7 @@ jobs:
           if [[ -r "$current_release/.deployed-sha" ]]; then
             deployed_sha="$(tr -d '[:space:]' < "$current_release/.deployed-sha")"
           fi
-          if [[ "$deployed_sha" =~ ^[0-9a-fA-F]{40}$ && "${deployed_sha,,}" == "$expected_live_sha" ]]; then
+          if [[ "$deployed_sha" =~ ^[0-9a-fA-F]{40}$ && "${deployed_sha,,}" == "${status_sha,,}" ]]; then
             printf 'LIVE_RELEASE_MATCH=YES\n'
           else
             printf 'LIVE_RELEASE_MATCH=NO\n'
