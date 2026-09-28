@@ -36,6 +36,23 @@ test('public profile lookup uses the same safe IP label without raw network data
   assert.doesNotMatch(route, /ipAddress:|rawIp:|latitude:|longitude:/)
 })
 
+test('SSR Profile passes only sanitized province or country labels to the page surface', () => {
+  const page = read('app/user/[uid]/page.tsx')
+  assert.match(page, /ipRegion: publicProfileIpRegion\(user\.ipRegion\)/)
+  assert.doesNotMatch(page, /ipRegion: user\.ipRegion\s*[,}]/)
+
+  for (const [stored, displayed] of [
+    ['广西', '广西'],
+    ['日本', '日本'],
+    [null, null],
+    ['not a region', null],
+    ['192.0.2.1', null],
+    ['2001:db8::1', null],
+  ] as const) {
+    assert.equal(publicProfileIpRegion(stored), displayed)
+  }
+})
+
 test('the existing nullable User.ipRegion field is reused; no new migration is needed', () => {
   const schema = read('prisma/schema.prisma')
   const resolver = read('lib/ip-region.ts')

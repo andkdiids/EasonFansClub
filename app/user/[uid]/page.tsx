@@ -18,6 +18,7 @@ import { getProfileVisibility } from '@/lib/user-privacy'
 import { getProfileRecordPreferencesSafe } from '@/lib/profile-record-preferences'
 import { getProfileBackgroundLikeSummary } from '@/lib/profile-background-likes'
 import { profileBackgroundTransformFromFields } from '@/lib/profile-background'
+import { publicProfileIpRegion } from '@/lib/ip-region'
 
 export const dynamic = 'force-dynamic'
 
@@ -174,7 +175,7 @@ export default async function PublicUserPage({ params, searchParams }: PageProps
         gender: user.gender,
         customGender: user.customGender,
         location: locationFromProfile(user.Profile),
-        ipRegion: user.ipRegion,
+        ipRegion: publicProfileIpRegion(user.ipRegion),
         avatarUrl: avatar,
         backgroundUrl: background,
         backgroundDesktopTransform,
