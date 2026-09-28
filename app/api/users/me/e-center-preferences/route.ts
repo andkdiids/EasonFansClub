@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
+import type { SessionUser } from '@/lib/auth'
 import {
   getEcenterFeatureEditorState,
   validateEcenterShortcutPreferences,
 } from '@/lib/ecenter-features'
 import { prisma } from '@/lib/prisma'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 
 export const dynamic = 'force-dynamic'
@@ -35,13 +36,13 @@ function serializeFeatures(features: Awaited<ReturnType<typeof getEcenterFeature
   }))
 }
 
-async function canAccessAdmin(user: Awaited<ReturnType<typeof requireUser>>['user']) {
+async function canAccessAdmin(user: SessionUser | null) {
   if (!user) return false
   return hasAdminPermission(user).catch(() => false)
 }
 
-export async function GET() {
-  const guard = await requireUser()
+export async function GET(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const state = await getEcenterFeatureEditorState(guard.user.id, await canAccessAdmin(guard.user))
@@ -53,7 +54,7 @@ export async function GET() {
 export async function PATCH(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null

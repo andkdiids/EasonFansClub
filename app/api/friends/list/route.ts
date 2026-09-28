@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
+import { publicProfileIpRegion } from '@/lib/ip-region'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { belongsToFriendGroup, buildFriendGroupIndex, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
 
@@ -346,6 +347,7 @@ const publicFriendSelect = {
   bioModerationStatus: true,
   avatarUrl: true,
   bio: true,
+  ipRegion: true,
   gender: true,
   customGender: true,
   experience: true,
@@ -365,6 +367,7 @@ function serializePublicUser(
     bioModerationStatus?: string | null
     avatarUrl: string | null
     bio: string | null
+    ipRegion: string | null
     gender?: string | null
     customGender?: string | null
     isOnline: boolean
@@ -388,6 +391,7 @@ function serializePublicUser(
     displayName: getFriendDisplayName({ nickname, friendRemark: normalizedRemark, isFriendContext }),
     avatarUrl: publicImageUrl(friend.avatarUrl),
     bio: publicModerationText(friend.Profile?.bio || friend.bio, friend.Profile?.bioModerationStatus || friend.bioModerationStatus),
+    ipRegion: publicProfileIpRegion(friend.ipRegion),
     gender: friend.gender || null,
     customGender: friend.customGender || null,
     isOnline: friend.isOnline,

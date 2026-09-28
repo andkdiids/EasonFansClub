@@ -1,5 +1,6 @@
 import { getCloudflareContext } from '@opennextjs/cloudflare'
 import { prisma } from '@/lib/prisma'
+import { LOCATION_COUNTRIES } from '@/lib/user-location'
 import {
   getClientIp,
   getClientIpResolution,
@@ -346,6 +347,20 @@ export function normalizeIpLocationFromGeo(input: EdgeGeo | null | undefined) {
 
 export function normalizeIpRegionFromGeo(input: EdgeGeo | null | undefined) {
   return normalizeLocation(input)?.label || null
+}
+
+// Profile DTOs may only expose labels produced by the existing coarse IP
+// resolver. Fail closed for legacy or malformed stored values (including raw
+// addresses and city-level strings) without deriving anything from the client.
+const publicProfileIpRegionLabels = new Set([
+  ...Object.values(chinaRegions),
+  ...LOCATION_COUNTRIES.flatMap(({ code }) => code === 'CN' ? [] : [countryName(code)].filter((label): label is string => Boolean(label))),
+])
+
+export function publicProfileIpRegion(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const label = value.trim()
+  return publicProfileIpRegionLabels.has(label) ? label : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

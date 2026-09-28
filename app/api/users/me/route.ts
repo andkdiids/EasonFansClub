@@ -10,7 +10,7 @@ import { normalizeLoginAccount, validateLoginAccountValue, validateNicknameValue
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
-import { updateUserIpRegion } from '@/lib/ip-region'
+import { publicProfileIpRegion, updateUserIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { computeNicknameCooldownDays, generateUniqueViolationNickname } from '@/lib/nickname-violation'
 import { getNicknameChangeAvailability, serializeNicknameChange } from '@/lib/nickname-change'
@@ -234,6 +234,7 @@ export async function GET(request: Request) {
       avatarUrl: true,
       backgroundUrl: true,
       bio: true,
+      ipRegion: true,
       gender: true,
       customGender: true,
       emailVerifiedAt: true,
@@ -316,6 +317,7 @@ export async function GET(request: Request) {
       avatarUrl: publicImageUrl(profile.avatarUrl),
       backgroundUrl: publicImageUrl(profile.backgroundUrl),
       bio: profile.bio,
+      ipRegion: publicProfileIpRegion(profile.ipRegion),
       gender: profile.gender,
       customGender: profile.customGender,
       birthMonth: profile.birthMonth,
