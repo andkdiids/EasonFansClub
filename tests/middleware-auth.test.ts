@@ -132,6 +132,20 @@ test('Ecenter 偏好 GET/PATCH 支持 Bearer 与 Web Cookie，匿名及其他受
   assert.equal(unrelated.status, 401, 'Bearer is not opened for unrelated protected routes')
 })
 
+test('Mobile Home Hero GET is public for anonymous and authenticated users', async () => {
+  const path = '/api/mobile/home-hero'
+  const anonymous = await middleware(new NextRequest(`https://ecfc.fans${path}`))
+  assert.equal(anonymous.status, 200)
+
+  const validCookie = await createToken()
+  const authenticated = await middleware(makeRequest(path, validCookie))
+  assert.equal(authenticated.status, 200)
+
+  const route = readFileSync('app/api/mobile/home-hero/route.ts', 'utf8')
+  assert.match(route, /export async function GET\(\)/)
+  assert.doesNotMatch(route, /export async function (POST|PATCH|PUT|DELETE)/)
+})
+
 test('有效 JWT 可以访问 EasMusic，JWT 必须包含有效 user id', async () => {
   const valid = await createToken()
   const response = await middleware(makeRequest('/music', valid))
