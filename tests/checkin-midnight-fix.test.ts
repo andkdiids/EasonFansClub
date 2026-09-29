@@ -102,11 +102,12 @@ test('签到后处理失败不会影响主响应，且性能日志不包含敏�
   assert.doesNotMatch(performanceLog, /token|session|password|phone|ipAddress|ip:/i)
 })
 
-test('IP 地理解析也在响应外执行，不把外部服务等待带入签到核心路径', () => {
+test('签到只为每日留言保存内容属地，不写 User.ipRegion', () => {
   const route = read('app/api/checkin/route.ts')
   assert.doesNotMatch(route, /resolveIpLocation\(request\)/)
-  assert.match(route, /phase: 'ipRegion'/)
-  assert.match(route, /updateUserIpRegion\(input\.userId, input\.ipSource/)
+  assert.match(route, /phase: 'dailyMessageIpRegion'/)
+  assert.match(route, /prisma\.dailyMessage\.update\([\s\S]*data: \{ ipRegion: region \}/)
+  assert.doesNotMatch(route, /updateUserIpRegion/)
   assert.match(route, /ipSource: request/)
 })
 

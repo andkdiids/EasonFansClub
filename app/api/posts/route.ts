@@ -15,7 +15,7 @@ import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } fr
 import { publicImageUrl } from '@/lib/images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
 import { buildReviewCenterUrl } from '@/lib/review-center'
@@ -504,7 +504,6 @@ export async function POST(request: Request) {
       rawStickerId
         ? runPostCreateSideEffect('sticker-usage', () => recordStickerUsage(user.id, rawStickerId), user.id, board.id)
         : Promise.resolve(),
-      runPostCreateSideEffect('ip-region', () => updateUserIpRegion(user.id, ipLocation), user.id, board.id),
       moderationStatus === 'PENDING'
         ? runPostCreateSideEffect('admin-realtime', () => emitRealtimeToAdmins('notification'), user.id, board.id)
         : Promise.resolve(),

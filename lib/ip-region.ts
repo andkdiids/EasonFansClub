@@ -706,24 +706,44 @@ function isRequest(value: Request | IpLocation | null): value is Request {
   return 'headers' in value
 }
 
-export async function updateUserIpRegion(userId: string, source: Request | IpLocation | null, options?: { rethrow?: boolean }) {
-  const location = isRequest(source)
-    ? await resolveIpLocation(source)
-    : source
-  const region = location?.label || null
+type UserIpRegionUpdateDependencies = {
+  resolve?: (request: Request) => Promise<IpLocation | null>
+  persist?: (userId: string, region: string, updatedAt: Date) => Promise<unknown>
+}
 
+export async function updateUserIpRegion(
+  userId: string,
+  source: Request | IpLocation | null,
+  dependencies: UserIpRegionUpdateDependencies = {},
+) {
   try {
-    await prisma.user.updateMany({
-      where: { id: userId },
-      data: { ipRegion: region, ipRegionUpdatedAt: new Date() },
-    })
-  } catch (error) {
-    // IP metadata is optional and must never block the primary user action.
-    console.error('[ip-region.update]', error)
-    if (options?.rethrow) throw error
-  }
+    const location = isRequest(source)
+      ? await (dependencies.resolve || resolveIpLocation)(source)
+      : source
+    const region = location
+      ? normalizeLocation({ countryCode: location.countryCode, region: location.province })?.label || null
+      : null
 
-  return region
+    // A failed lookup is not a new attribution. Preserve the last successful
+    // coarse region and its timestamp instead of overwriting it with null.
+    if (!region) return null
+
+    if (dependencies.persist) {
+      await dependencies.persist(userId, region, new Date())
+    } else {
+      await prisma.user.updateMany({
+        where: { id: userId },
+        data: { ipRegion: region, ipRegionUpdatedAt: new Date() },
+      })
+    }
+
+    return region
+  } catch (error) {
+    // IP attribution is secondary to the action that triggered it. Keep logs
+    // value-free: provider/client errors may contain request details.
+    console.warn('[ip-region.update]', { reason: error instanceof Error ? error.name : 'unknown' })
+    return null
+  }
 }
 
 export function clearIpLocationCacheForTests() {

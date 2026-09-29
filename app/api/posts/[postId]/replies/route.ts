@@ -192,9 +192,6 @@ export async function POST(request: Request, { params }: Params) {
   }, '评论过于频繁，请稍后再试')
   if (limited) return limited
 
-  const ipLocation = await resolveIpLocation(request)
-  const ipRegion = ipLocation?.label || null
-  void updateUserIpRegion(user.id, ipLocation)
   const { postId } = await params
   const body = await request.json().catch(() => null)
   const stickerId = body?.stickerId ? String(body.stickerId).trim() : ''
@@ -262,7 +259,7 @@ export async function POST(request: Request, { params }: Params) {
     if (duplicateReply) return { duplicateReplyId: duplicateReply.id }
     const floorNumber = parentId ? null : await allocatePostCommentFloor(tx, postId)
     const createdReply = await tx.reply.create({
-      data: { postId, authorId: user.id, content, ipRegion, stickerId: stickerId || null, parentId: parentId || null, floorNumber },
+      data: { postId, authorId: user.id, content, stickerId: stickerId || null, parentId: parentId || null, floorNumber },
       include: { User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, level: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } }, }, sticker: { select: { url: true } } },
     })
     if (requestedMentions.length) await tx.replyMention.createMany({ data: requestedMentions.map((mention) => ({ replyId: createdReply.id, mentionerId: user.id, mentionedUserId: mention.userId, startIndex: mention.startIndex, endIndex: mention.endIndex, displayText: mention.displayText })) })
@@ -282,6 +279,14 @@ export async function POST(request: Request, { params }: Params) {
   if ('duplicateReplyId' in reply) return NextResponse.json({ message: '相同回复正在处理中，请勿重复提交', replyId: reply.duplicateReplyId }, { status: 409 })
 
   const { createdReply, floorNumber, rewardPoints, weeklyMilestoneRewards, points } = reply
+  // The comment transaction has committed. Region resolution and attribution
+  // are best-effort secondary work and cannot change the comment result.
+  const ipLocation = await resolveIpLocation(request).catch(() => null)
+  const ipRegion = ipLocation ? await updateUserIpRegion(user.id, ipLocation) : null
+  if (ipRegion) {
+    await prisma.reply.updateMany({ where: { id: createdReply.id }, data: { ipRegion } }).catch(() => undefined)
+  }
+
   const notificationData = [
     ...requestedMentions.map((mention) => ({ recipientId: mention.userId, actorId: user.id, type: 'REPLY' as const, title: `${user.nickname}在回复中提到了你`, content: `${user.nickname}在回复中提到了你`, link: `/posts/${postId}?focus=${createdReply.id}`, key: `reply-mention:${createdReply.id}:${mention.userId}` })),
     ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [{ recipientId: replyRecipientId, actorId: user.id, type: 'REPLY' as const, title: parentReply ? '有人回复了你的评论' : '你的帖子有新回复', content: parentReply ? `${user.nickname} 回复了你的评论` : `${user.nickname} 回复了你的帖子`, link: `/posts/${postId}?focus=${createdReply.id}` }] : []),
