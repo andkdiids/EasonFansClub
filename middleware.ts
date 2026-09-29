@@ -159,6 +159,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/entertainment/guess-song/sessions'
       || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+$/.test(pathname)
       || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/audio$/.test(pathname)
+      || /^\/api\/learning\/cantonese\/audio\/[^/]+$/.test(pathname)
       || pathname === '/api/entertainment/guess-song/search'
       || pathname === '/api/entertainment/guess-song/leaderboard'
       || pathname === '/api/entertainment/leaderboard'
