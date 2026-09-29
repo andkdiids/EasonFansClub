@@ -146,7 +146,8 @@ function isImmutablePublicPath(pathname: string) {
 function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
   if (request.method === 'GET') {
-    return pathname === '/api/posts'
+    return pathname === '/api/admin/review'
+      || pathname === '/api/posts'
       || pathname === '/api/users/me/e-center-preferences'
       || pathname === '/api/checkin'
       || pathname === '/api/checkin/history'
@@ -204,7 +205,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/notifications\/[^/]+\/read$/.test(pathname)
   }
   if (request.method === 'PUT' || request.method === 'PATCH') {
-    return pathname === '/api/posts/draft'
+    return (request.method === 'PATCH' && pathname === '/api/admin/review')
+      || pathname === '/api/posts/draft'
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
       || (request.method === 'PATCH' && pathname === '/api/users/me/e-center-preferences')
       || pathname === '/api/users/me'

@@ -132,6 +132,17 @@ export async function requireAdmin(permissionKey?: AdminPermissionKey): Promise<
   return result
 }
 
+/** The same admin permission guard for browser Cookies and native Bearer requests. */
+export async function requireRequestAdmin(request: Request, permissionKey?: AdminPermissionKey): Promise<GuardResult> {
+  const result = await requireRequestUser(request)
+  if (!result.user) return result
+
+  if (!isAdminRole(result.user.role)) return { user: null, response: forbiddenResponse('当前管理员未获得此权限') }
+  const allowed = await hasAdminPermission(result.user, permissionKey)
+  if (!allowed) return { user: null, response: forbiddenResponse('当前管理员未获得此权限') }
+  return result
+}
+
 export async function requireSuperAdmin(): Promise<GuardResult> {
   const result = await requireUser()
   if (!result.user) return result

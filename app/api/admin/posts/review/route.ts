@@ -9,7 +9,7 @@ import { describePostModerationHistoryError, loadPostModerationHistoryByPostIds,
 import { postContentPlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { createNotification } from '@/lib/notification-write'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
@@ -351,7 +351,7 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const guard = await requireAdmin('post_manage')
+  const guard = await requireRequestAdmin(request, 'post_manage')
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const requestedStatus = body?.status

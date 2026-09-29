@@ -132,6 +132,25 @@ test('Ecenter 偏好 GET/PATCH 支持 Bearer 与 Web Cookie，匿名及其他受
   assert.equal(unrelated.status, 401, 'Bearer is not opened for unrelated protected routes')
 })
 
+test('审核中心 GET/PATCH 的 Bearer 仅通过 middleware，Cookie 保持可用，匿名与其他 admin 路由仍拒绝', async () => {
+  const path = '/api/admin/review'
+  for (const method of ['GET', 'PATCH']) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${method} Bearer reaches the route permission guard`)
+    const anonymous = await middleware(new NextRequest(`https://ecfc.fans${path}`, { method }))
+    assert.equal(anonymous.status, 401, `anonymous ${method} remains blocked`)
+  }
+
+  const validCookie = await createToken({ role: 'ADMIN' })
+  const cookieGet = await middleware(makeRequest(path, validCookie))
+  assert.equal(cookieGet.status, 200, 'Web Cookie GET remains authenticated')
+  const cookiePatch = await middleware(makeMutationRequest(path, 'PATCH', { cookie: validCookie }))
+  assert.equal(cookiePatch.status, 200, 'Web Cookie PATCH remains authenticated')
+
+  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'Bearer does not open other admin routes')
+})
+
 test('Mobile Home Hero GET is public for anonymous and authenticated users', async () => {
   const path = '/api/mobile/home-hero'
   const anonymous = await middleware(new NextRequest(`https://ecfc.fans${path}`))
