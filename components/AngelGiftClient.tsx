@@ -161,6 +161,46 @@ function DrawConfirmationModal({ drawCount, campaignComplete, cost, onCancel, on
   )
 }
 
+function RecycleAllConfirmationModal({ recyclableCount, recyclableTypeCount, rewardAmount, onCancel, onConfirm }: { recyclableCount: number; recyclableTypeCount: number; rewardAmount: number; onCancel: () => void; onConfirm: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    cancelRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCancel()
+      }
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])')].filter((element) => !element.hasAttribute('disabled'))
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (first && last && ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last))) {
+          event.preventDefault()
+          ;(event.shiftKey ? last : first).focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      previous?.focus()
+    }
+  }, [onCancel])
+
+  return (
+    <div className="angel-gift-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+      <div ref={dialogRef} className="angel-gift-result-modal angel-gift-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="angel-gift-recycle-confirm-title" aria-describedby="angel-gift-recycle-confirm-copy">
+        <p className="angel-gift-modal-kicker">余药回收确认</p>
+        <h2 id="angel-gift-recycle-confirm-title">确认一键回收</h2>
+        <p id="angel-gift-recycle-confirm-copy" className="angel-gift-confirm-copy">将回收本期全部 {recyclableCount} 枚余药，涉及 {recyclableTypeCount} 种勋章，共获得 {formatFee(rewardAmount)} 挂号费。</p>
+        <div className="angel-gift-modal-actions"><button ref={cancelRef} type="button" className="angel-gift-button secondary" onClick={onCancel}>暂不回收</button><button type="button" className="angel-gift-button primary" onClick={onConfirm}>确认全部回收</button></div>
+      </div>
+    </div>
+  )
+}
+
 export function AngelGiftClient({ initialData }: Props) {
   const [data, setData] = useState(initialData)
   const [drawing, setDrawing] = useState(false)
@@ -170,18 +210,22 @@ export function AngelGiftClient({ initialData }: Props) {
   const [skipAnimation, setSkipAnimation] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(false)
   const [recycleBusy, setRecycleBusy] = useState(false)
+  const [recycleAllConfirm, setRecycleAllConfirm] = useState(false)
+  const [recycleSuccess, setRecycleSuccess] = useState('')
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyPage, setHistoryPage] = useState(1)
   const [drawConfirmation, setDrawConfirmation] = useState<PharmacyDrawCount | null>(null)
   const [drawConfirmationSubmitting, setDrawConfirmationSubmitting] = useState(false)
   const drawKeyRef = useRef<string | null>(null)
   const recycleKeyRef = useRef<string | null>(null)
+  const recycleAllKeyRef = useRef<string | null>(null)
 
   const campaign = data.campaign
   const upcomingCampaign = data.upcomingCampaign
   const user = data.user
   const required = data.duplicate.required
   const canRecycle = Boolean(user && campaign?.duplicateRecycleEnabled && required && data.duplicate.total >= required && !recycleBusy)
+  const canRecycleAll = Boolean(user && campaign?.duplicateRecycleEnabled && data.duplicate.recyclableCount > 0 && !recycleBusy)
   const status = campaign?.status || null
   const campaignComplete = Boolean(campaign?.collection.collectionComplete)
   const isLimitReached = Boolean(user && campaign && ((campaign.dailyDrawLimit !== null && user.todayCount >= campaign.dailyDrawLimit) || (campaign.totalDrawLimit !== null && user.totalCount >= campaign.totalDrawLimit)))
@@ -202,6 +246,9 @@ export function AngelGiftClient({ initialData }: Props) {
   useEffect(() => {
     drawKeyRef.current = null
     recycleKeyRef.current = null
+    recycleAllKeyRef.current = null
+    setRecycleAllConfirm(false)
+    setRecycleSuccess('')
     setDrawConfirmation(null)
     setDrawConfirmationSubmitting(false)
   }, [campaign?.id])
@@ -327,6 +374,31 @@ export function AngelGiftClient({ initialData }: Props) {
     }
   }
 
+  async function recycleAll() {
+    if (!campaign || !canRecycleAll) return
+    setRecycleBusy(true)
+    setError('')
+    setRecycleSuccess('')
+    const idempotencyKey = recycleAllKeyRef.current || makeIdempotencyKey('recycle-all')
+    recycleAllKeyRef.current = idempotencyKey
+    try {
+      const response = await fetch('/api/angel-gift/recycle/all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotencyKey }) })
+      const payload = await response.json().catch(() => null) as { ok?: boolean; data?: { page?: PharmacyPageData | null; recycledCount?: number; rewardAmount?: number }; message?: string }
+      if (!response.ok || !payload.ok) throw new Error(errorMessage(payload, '余药回收暂时无法完成'))
+      recycleAllKeyRef.current = null
+      if (payload.data?.page) setData(payload.data.page)
+      else await reloadPage()
+      setHistoryPage(1)
+      setRecycleSuccess(payload.data?.recycledCount
+        ? `已回收 ${payload.data.recycledCount} 枚余药，共获得 ${formatFee(payload.data.rewardAmount || 0)} 挂号费`
+        : '暂无可回收余药')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '余药回收暂时无法完成')
+    } finally {
+      setRecycleBusy(false)
+    }
+  }
+
   async function loadMoreHistory() {
     if (!campaign || historyBusy || !data.historyHasMore) return
     setHistoryBusy(true)
@@ -392,7 +464,7 @@ export function AngelGiftClient({ initialData }: Props) {
         </section>
 
         <div className="angel-gift-controls"><span>{statusHint()}</span><label><input type="checkbox" checked={skipAnimation} onChange={(event) => setSkipAnimation(event.target.checked)} /> 跳过动画</label></div>
-        <div className="angel-gift-limits">{campaign.dailyDrawLimit !== null ? <span>今日 {user?.todayCount || 0} / {campaign.dailyDrawLimit}</span> : null}{campaign.totalDrawLimit !== null ? <span>本期 {user?.totalCount || 0} / {campaign.totalDrawLimit}</span> : null}{campaign.probabilityPublic ? <span>本期概率公开</span> : null}</div>
+        <div className="angel-gift-limits">{campaign.dailyDrawLimit !== null ? <span>今日 {user?.todayCount || 0} / {campaign.dailyDrawLimit}</span> : null}{user ? <span>本期累计抽取 {user.totalCount} 次</span> : null}{campaign.totalDrawLimit !== null ? <span>本期上限 {user?.totalCount || 0} / {campaign.totalDrawLimit}</span> : null}{campaign.probabilityPublic ? <span>本期概率公开</span> : null}</div>
 
         <section className="angel-gift-panel" aria-labelledby="angel-gift-cabinet-title">
           <div className="angel-gift-panel-heading"><div><span className="angel-gift-label">Angel&apos;s Gift</span><h2 id="angel-gift-cabinet-title">本期药柜</h2></div><strong>{collectionProgress.collected} <em>/ {collectionProgress.total}</em></strong></div>
@@ -401,13 +473,14 @@ export function AngelGiftClient({ initialData }: Props) {
 
         {campaign.probabilityPublic ? <section className="angel-gift-panel angel-gift-prize-panel" aria-labelledby="angel-gift-prizes-title"><div className="angel-gift-panel-heading"><div><span className="angel-gift-label">Prescription Index</span><h2 id="angel-gift-prizes-title">本期处方索引</h2></div></div><div className="angel-gift-prize-list">{campaign.prizes.map((prize) => <div key={prize.id}><span>{prize.badge?.locked ? '???' : prize.name}</span><strong>{prize.probability === null ? '—' : `${prize.probability.toFixed(2)}%`}</strong></div>)}</div></section> : null}
 
-        <section className="angel-gift-panel angel-gift-duplicate-panel" aria-labelledby="angel-gift-duplicate-title"><div className="angel-gift-panel-heading"><div><span className="angel-gift-label">余药库存</span><h2 id="angel-gift-duplicate-title">余药</h2></div><strong>{data.duplicate.total} <em>/ {required || '—'}</em></strong></div><p>{campaign.duplicateRecycleEnabled && required ? data.duplicate.total < required ? `还差 ${required - data.duplicate.total} 份` : `已集齐 ${required} 份，可以回收。` : '本期未开启余药回收。'}</p>{data.duplicate.byBadge.length ? <div className="angel-gift-duplicate-items">{data.duplicate.byBadge.map((entry) => <span key={entry.badgeId}>{entry.imageUrl ? <Image src={entry.imageUrl} alt="" width={22} height={22} unoptimized /> : null}{entry.badgeName} ×{entry.quantity}</span>)}</div> : null}<button type="button" className="angel-gift-button primary" disabled={!canRecycle} onClick={() => void recycle()}>{recycleBusy ? '回收中…' : required ? '回收余药' : '暂不回收'}</button></section>
+        <section className="angel-gift-panel angel-gift-duplicate-panel" aria-labelledby="angel-gift-duplicate-title"><div className="angel-gift-panel-heading"><div><span className="angel-gift-label">余药库存</span><h2 id="angel-gift-duplicate-title">余药</h2></div><strong>{data.duplicate.total} <em>/ {required || '—'}</em></strong></div><p>{campaign.duplicateRecycleEnabled && required ? data.duplicate.total < required ? `还差 ${required - data.duplicate.total} 份` : `已集齐 ${required} 份，可以回收。` : '本期未开启余药回收。'}</p>{data.duplicate.byBadge.length ? <div className="angel-gift-duplicate-items">{data.duplicate.byBadge.map((entry) => <span key={entry.badgeId}>{entry.imageUrl ? <Image src={entry.imageUrl} alt="" width={22} height={22} unoptimized /> : null}{entry.badgeName} ×{entry.quantity}</span>)}</div> : null}<div className="angel-gift-recycle-all"><p>{data.duplicate.recyclableCount > 0 ? `共 ${data.duplicate.recyclableCount} 枚可回收 · 可获得 ${formatFee(data.duplicate.recyclableReward)} 挂号费` : '暂无可回收余药'}</p><button type="button" className="angel-gift-button primary" disabled={!canRecycleAll} onClick={() => setRecycleAllConfirm(true)}>{recycleBusy ? '回收中…' : '一键回收'}</button></div>{recycleSuccess ? <p className="angel-gift-recycle-success" role="status">{recycleSuccess}</p> : null}<button type="button" className="angel-gift-button secondary" disabled={!canRecycle} onClick={() => void recycle()}>{recycleBusy ? '回收中…' : required ? '回收余药' : '暂不回收'}</button></section>
 
         {data.isAuthenticated ? <section className="angel-gift-panel angel-gift-history-panel" aria-labelledby="angel-gift-history-title"><div className="angel-gift-panel-heading"><div><span className="angel-gift-label">执药流水</span><h2 id="angel-gift-history-title">执药记录</h2></div></div>{data.history.length ? <div className="angel-gift-history-list">{data.history.map((item) => <div className="angel-gift-history-row" key={`${item.kind}-${item.id}`}><time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time><span>{item.kind === 'DRAW' ? `−${item.drawCost || 0} 挂号费` : `余药 ×${item.quantity || 0}`}</span><strong>{item.result || '—'}</strong>{item.kind === 'RECYCLE' ? <em>+{item.rewardAmount || 0} 挂号费</em> : null}</div>)}</div> : <p className="angel-gift-empty">还没有本期执药记录。</p>}{data.historyHasMore ? <button type="button" className="angel-gift-more-button" disabled={historyBusy} onClick={() => void loadMoreHistory()}>{historyBusy ? '加载中…' : '加载更多记录'}</button> : null}</section> : null}
       </> : <>{upcomingPreview}<section className="angel-gift-empty-state"><span aria-hidden="true">Rx</span><h2>药房尚未开出本期处方</h2><p>当前暂无正在进行的主题，待开始主题仅作为下期预告展示。</p></section></>}
 
       {drawing ? <div className="angel-gift-drawing-live" aria-live="polite">{phase}</div> : null}
       {drawConfirmation ? <DrawConfirmationModal drawCount={drawConfirmation} campaignComplete={campaignComplete} cost={campaign?.drawCost || 0} onCancel={cancelDrawConfirmation} onConfirm={confirmDraw} /> : null}
+      {recycleAllConfirm ? <RecycleAllConfirmationModal recyclableCount={data.duplicate.recyclableCount} recyclableTypeCount={data.duplicate.recyclableTypeCount} rewardAmount={data.duplicate.recyclableReward} onCancel={() => setRecycleAllConfirm(false)} onConfirm={() => { setRecycleAllConfirm(false); void recycleAll() }} /> : null}
       {result ? <ResultModal draws={result} duplicateTotal={data.duplicate.total} duplicateRequired={data.duplicate.required} cost={campaign?.drawCost || result[0].drawCost} onClose={() => setResult(null)} onContinue={() => { setResult(null); requestDraw(1) }} /> : null}
     </section>
   )

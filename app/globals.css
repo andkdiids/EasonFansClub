@@ -8619,6 +8619,10 @@ body:has(.duel-page) .app-page-content {
 .angel-gift-duplicate-items { display:flex; flex-wrap:wrap; gap:7px; margin:13px 20px 0; }
 .angel-gift-duplicate-items span { display:inline-flex; min-height:30px; align-items:center; gap:5px; border:1px solid var(--border); padding:4px 8px; color:var(--foreground-muted); background:var(--surface-subtle); font-size:10px; font-weight:850; }
 .angel-gift-duplicate-items img { width:22px; height:22px; object-fit:contain; }
+.angel-gift-recycle-all { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin:15px 20px 0; border:1px solid var(--border); padding:11px 12px; background:var(--surface-subtle); }
+.angel-gift-recycle-all p { flex:1 1 180px; margin:0; color:var(--foreground-muted); font-size:11px; font-weight:850; line-height:1.6; }
+.angel-gift-recycle-all .angel-gift-button { flex:0 0 auto; min-height:42px; padding-inline:14px; }
+.angel-gift-recycle-success { border-left:3px solid var(--angel-gold); padding:9px 11px; color:var(--foreground); background:var(--surface-subtle); }
 .angel-gift-duplicate-panel>.angel-gift-button { margin:16px 20px 20px; }
 .angel-gift-button.primary { color:#fff; background:var(--angel-red); }
 .angel-gift-button.primary:hover:not(:disabled) { background:var(--angel-red-deep); }
