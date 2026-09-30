@@ -132,6 +132,31 @@ test('Ecenter 偏好 GET/PATCH 支持 Bearer 与 Web Cookie，匿名及其他受
   assert.equal(unrelated.status, 401, 'Bearer is not opened for unrelated protected routes')
 })
 
+test('Mobile Growth and direct-message routes pass Bearer to route guards, preserve Cookie auth, and keep anonymous blocked', async () => {
+  const routes: Array<[string, string]> = [
+    ['/api/growth', 'GET'],
+    ['/api/growth/claim', 'POST'],
+    ['/api/growth/refresh', 'POST'],
+    ['/api/direct-conversations', 'GET'],
+    ['/api/direct-conversations', 'POST'],
+    ['/api/direct-conversations/conversation-1/messages', 'GET'],
+    ['/api/direct-conversations/conversation-1/messages', 'POST'],
+    ['/api/direct-conversations/conversation-1/read', 'POST'],
+  ]
+  const validCookie = await createToken()
+  for (const [path, method] of routes) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${method} ${path} lets the protected route guard validate Bearer`)
+    const cookie = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookie.status, 200, `${method} ${path} keeps Web Cookie auth`)
+    const anonymous = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymous.status, 401, `${method} ${path} remains blocked anonymously`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/direct-conversations/conversation-1/clear', 'POST', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'Bearer is not opened for unsupported conversation mutations')
+})
+
 test('审核中心 GET/PATCH 的 Bearer 仅通过 middleware，Cookie 保持可用，匿名与其他 admin 路由仍拒绝', async () => {
   const path = '/api/admin/review'
   for (const method of ['GET', 'PATCH']) {

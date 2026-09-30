@@ -127,7 +127,7 @@ test('聊天使用实时事件、稳定游标和去重', () => {
 })
 
 test('发送接口忽略 senderId、验证好友接收者并限制内容', () => {
-  assert.match(messages, /const user = await getCurrentUser\(\)/)
+  assert.match(messages, /const guard = await requireRequestUser\(request\)[\s\S]*const user = guard\.user/)
   assert.match(messages, /senderId: user\.id/)
   assert.match(messages, /只能给好友发送私信/)
   assert.match(messages, /接收用户不存在或不可用/)
@@ -148,7 +148,8 @@ test('clientMessageId 和数据库唯一约束保证重试幂等', () => {
 })
 
 test('已读接口仅以 session 参与者更新 lastReadAt', () => {
-  assert.match(readRoute, /getCurrentUser\(\)/)
+  assert.match(readRoute, /requireRequestUser\(request\)/)
+  assert.match(readRoute, /const guard = await requireRequestUser\(request\)[\s\S]*const user = guard\.user/)
   assert.match(readRoute, /conversationId_userId: \{ conversationId, userId: user\.id \}/)
   assert.match(readRoute, /messageId/)
   assert.match(readRoute, /visibleMessage\.createdAt/)

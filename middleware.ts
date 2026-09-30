@@ -147,6 +147,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
   if (request.method === 'GET') {
     return pathname === '/api/admin/review'
+      || pathname === '/api/growth'
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/messages$/.test(pathname)
       || pathname === '/api/posts'
       || pathname === '/api/users/me/e-center-preferences'
       || pathname === '/api/checkin'
@@ -188,6 +191,10 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'POST') {
     return pathname === '/api/forum/discover'
+      || pathname === '/api/growth/claim'
+      || pathname === '/api/growth/refresh'
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/(?:messages|read)$/.test(pathname)
       || pathname === '/api/checkin'
       || pathname === '/api/entertainment/daily-draw'
       || pathname === '/api/entertainment/guess-song/sessions'

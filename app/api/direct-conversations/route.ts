@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { compareFriendConversationOrder } from '@/lib/friend-conversation-order'
 import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { activeUserWhere, ensureFriendConversation, normalizeFriendPair } from '@/lib/friends'
@@ -8,15 +7,16 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { publicModerationText } from '@/lib/content-moderation'
-import { enforceApiRateLimit, unauthenticatedResponse } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 import { parsePostShareSnapshot, postSharePreview } from '@/lib/post-share-types'
 import { materialSharePreview, parseMaterialShareSnapshot } from '@/lib/material-share-types'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
 export async function GET(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations',
     ip: { limit: 240, windowSeconds: 60 },
@@ -192,8 +192,9 @@ function getConversationMessagePreview(message: {
 }
 
 export async function POST(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations',
     ip: { limit: 60, windowSeconds: 60 },
@@ -206,7 +207,7 @@ export async function POST(request: Request) {
   if (!target || target.id === user.id) return NextResponse.json({ message: '用户不存在' }, { status: 404, headers: privateHeaders })
   const [userAId, userBId] = normalizeFriendPair(user.id, target.id)
   const friendship = await prisma.friendship.findUnique({ where: { userAId_userBId: { userAId, userBId } }, select: { id: true } })
-  if (!friendship) return NextResponse.json({ message: '只能给好友发送私信' }, { status: 403, headers: privateHeaders })
+  if (!friendship) return NextResponse.json({ code: 'MUTUAL_FOLLOW_REQUIRED', message: '只能给好友发送私信' }, { status: 403, headers: privateHeaders })
   const conversation = await prisma.$transaction((tx) => ensureFriendConversation(tx, user.id, target.id), { timeout: 15_000, maxWait: 5_000 })
   return NextResponse.json({ conversation }, { headers: privateHeaders })
 }
