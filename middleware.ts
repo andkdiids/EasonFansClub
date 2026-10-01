@@ -146,7 +146,10 @@ function isImmutablePublicPath(pathname: string) {
 function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
   if (request.method === 'GET') {
-    return pathname === '/api/admin/review'
+    return pathname === '/api/admin/cantonese/review'
+      || /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname)
+      || /^\/api\/admin\/cantonese\/review\/audio\/[^/]+\/preview$/.test(pathname)
+      || pathname === '/api/admin/review'
       || pathname === '/api/growth'
       || pathname === '/api/direct-conversations'
       || /^\/api\/direct-conversations\/[^/]+\/messages$/.test(pathname)
@@ -191,7 +194,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/friend-groups'
   }
   if (request.method === 'POST') {
-    return pathname === '/api/forum/discover'
+    return pathname === '/api/admin/cantonese/review/batch'
+      || pathname === '/api/admin/cantonese/review/import'
+      || pathname === '/api/forum/discover'
       || pathname === '/api/growth/claim'
       || pathname === '/api/growth/refresh'
       || pathname === '/api/direct-conversations'
@@ -214,6 +219,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'PUT' || request.method === 'PATCH') {
     return (request.method === 'PATCH' && pathname === '/api/admin/review')
+      || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname))
       || pathname === '/api/posts/draft'
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
       || (request.method === 'PATCH' && pathname === '/api/users/me/e-center-preferences')

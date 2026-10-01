@@ -2547,9 +2547,103 @@ model LyricPrescription {
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime                 @updatedAt
   EntertainmentDailyDraw EntertainmentDailyDraw[]
+  CantoneseQuestion      CantoneseQuestion[]
 
   @@index([displayCount])
   @@index([enabled, createdAt])
+}
+
+model CantoneseLessonContent {
+  id           String                @id @default(cuid())
+  externalId   String                @unique @db.VarChar(191)
+  lessonId     String                @db.VarChar(32)
+  stageId      String                @db.VarChar(64)
+  stepId       String                @db.VarChar(100)
+  title        String                @db.VarChar(255)
+  body         String                @db.LongText
+  displayText  String?               @db.Text
+  jyutping     String?               @db.VarChar(255)
+  tone         String?               @db.VarChar(64)
+  examples     Json?
+  audioId      String?               @db.VarChar(191)
+  status       CantoneseReviewStatus @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?               @db.Text
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  reviewer     User?                 @relation("CantoneseLessonContentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([lessonId, stageId, stepId])
+  @@index([status, updatedAt])
+}
+
+model CantoneseQuestion {
+  id                     String                @id @default(cuid())
+  externalId             String                @unique @db.VarChar(191)
+  lessonId               String                @db.VarChar(32)
+  stageId                String                @db.VarChar(64)
+  questionType           String                @db.VarChar(40)
+  prompt                 String                @db.LongText
+  options                Json
+  correctAnswer          Json
+  explanation            String                @db.LongText
+  prerequisiteContentIds Json
+  audioId                String?               @db.VarChar(191)
+  lyricPrescriptionId    String?
+  status                 CantoneseReviewStatus @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById           String?
+  reviewedAt             DateTime?
+  reviewNote             String?               @db.Text
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  reviewer               User?                 @relation("CantoneseQuestionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  LyricPrescription      LyricPrescription?    @relation(fields: [lyricPrescriptionId], references: [id], onDelete: SetNull)
+
+  @@index([lessonId, stageId, questionType])
+  @@index([status, updatedAt])
+  @@index([lyricPrescriptionId])
+}
+
+model CantoneseAudioAsset {
+  id           String                    @id @default(cuid())
+  externalId   String                    @unique @db.VarChar(191)
+  text         String                    @db.Text
+  jyutping     String?                   @db.VarChar(255)
+  lessonId     String?                   @db.VarChar(32)
+  contentId    String?                   @db.VarChar(191)
+  cosKey       String?                   @db.VarChar(512)
+  audioVersion String                    @default("v1") @db.VarChar(32)
+  checksum     String?                   @db.Char(64)
+  fileSize     Int?
+  assetStatus  CantoneseAudioAssetStatus @default(NOT_GENERATED)
+  status       CantoneseReviewStatus     @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?                   @db.Text
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  reviewer     User?                     @relation("CantoneseAudioReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([lessonId, contentId])
+  @@index([assetStatus, status])
+  @@index([status, updatedAt])
+}
+
+model CantoneseReviewLog {
+  id         String                 @id @default(cuid())
+  reviewerId String?
+  targetType String                 @db.VarChar(32)
+  targetId   String                 @db.VarChar(191)
+  action     String                 @db.VarChar(40)
+  oldStatus  CantoneseReviewStatus?
+  newStatus  CantoneseReviewStatus
+  reason     String?                @db.Text
+  createdAt  DateTime               @default(now())
+  reviewer   User?                  @relation("CantoneseReviewActor", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([targetType, targetId, createdAt])
+  @@index([reviewerId, createdAt])
 }
 
 model MusicAlbum {
@@ -4746,6 +4840,10 @@ model User {
   StudioProjectFavorite                                  StudioProjectFavorite[]
   stickerReports                                         StickerReport[]
   StudioProject                                          StudioProject[]
+  CantoneseLessonContentReviewed                         CantoneseLessonContent[]           @relation("CantoneseLessonContentReviewer")
+  CantoneseQuestionReviewed                              CantoneseQuestion[]                @relation("CantoneseQuestionReviewer")
+  CantoneseAudioAssetReviewed                            CantoneseAudioAsset[]              @relation("CantoneseAudioReviewer")
+  CantoneseReviewLogs                                    CantoneseReviewLog[]               @relation("CantoneseReviewActor")
 
   @@index([createdAt])
   @@index([email])
@@ -5307,6 +5405,21 @@ enum MessageType {
 enum MusicPublicationStatus {
   DRAFT
   PUBLISHED
+}
+
+enum CantoneseReviewStatus {
+  DRAFT
+  CONTENT_REVIEW_REQUIRED
+  APPROVED
+  REJECTED
+}
+
+enum CantoneseAudioAssetStatus {
+  NOT_GENERATED
+  GENERATING
+  READY
+  FAILED
+  NEEDS_REGENERATION
 }
 
 enum RatingTargetType {

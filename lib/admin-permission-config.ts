@@ -33,6 +33,7 @@ export const adminPermissionGroups = [
   { key: 'sticker_manage', label: '表情包管理', description: '审核用户提交的表情包合集，预览、通过或拒绝。' },
   { key: 'banned_word_manage', label: '违禁词管理', description: '维护违禁词、启停匹配规则并重新扫描历史用户内容。' },
   { key: 'beta_access_manage', label: 'Android 内测准入管理', description: '开启或关闭 Android 内测准入，并生成、撤销动态内测码与设备资格。' },
+  { key: 'cantonese_review', label: '粤语课程审核', description: '审核移动端粤语教学内容、练习题和音频。' },
 ] as const
 
 export type AdminPermissionKey = (typeof adminPermissionGroups)[number]['key']
