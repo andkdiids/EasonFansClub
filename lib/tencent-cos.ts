@@ -143,6 +143,22 @@ export function getCosUrl(key: string) {
   return `https://${config.bucket}.cos.${config.region}.myqcloud.com/${key}`
 }
 
+/** Create a short-lived HTTPS object URL for an authorized preview response only. */
+export function getSignedCosObjectUrl(key: string, expiresSeconds = 180) {
+  const normalizedKey = key.trim().replace(/^\/+/, '')
+  if (!normalizedKey || normalizedKey.includes('..')) throw new Error('COS_OBJECT_KEY_INVALID')
+  const { cos, config } = getCosClient()
+  const expires = Math.max(30, Math.min(300, Math.floor(expiresSeconds)))
+  return cos.getObjectUrl({
+    Bucket: config.bucket,
+    Region: config.region,
+    Key: normalizedKey,
+    Sign: true,
+    Expires: expires,
+    Protocol: 'https:',
+  })
+}
+
 /** Read one server-selected object for a controlled download endpoint. */
 export async function getCosObject(key: string, timeoutMs = 30_000) {
   const normalizedKey = key.trim().replace(/^\/+/, '')
