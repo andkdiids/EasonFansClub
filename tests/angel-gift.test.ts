@@ -91,7 +91,8 @@ test('奖品快照、幂等约束和余药真实库存已落库', () => {
   assert.match(schema, /model PharmacyDuplicateInventory \{[\s\S]*quantity\s+Int[\s\S]*@@unique\(\[userId, campaignId, sourceBadgeId\]\)/)
   assert.match(schema, /model PharmacyRecycleLog \{[\s\S]*@@unique\(\[userId, idempotencyKey\]\)/)
   assert.match(read('lib/pharmacy.ts'), /pharmacyDuplicateInventory\.upsert/)
-  assert.match(read('lib/pharmacy.ts'), /quantity: \{ decrement: take \}/)
+  assert.match(read('lib/pharmacy.ts'), /planPharmacyRecycleAll\(inventory, requiredCount, rewardAmount, 1\)/)
+  assert.match(read('lib/pharmacy.ts'), /quantity: \{ decrement: allocation\.quantity \}/)
 })
 
 test('挂号费成本、奖品返还、余药回收使用独立 PointLog 类型', () => {
