@@ -192,9 +192,15 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/friends/requests/received'
       || pathname === '/api/friends/requests/sent'
       || pathname === '/api/friend-groups'
+      || pathname === '/api/learning/cantonese/speech/history'
   }
   if (request.method === 'POST') {
-    return pathname === '/api/admin/cantonese/review/batch'
+    return pathname === '/api/admin/cantonese/content'
+      || pathname === '/api/admin/cantonese/questions'
+      || pathname === '/api/admin/cantonese/audio'
+      || /^\/api\/admin\/cantonese\/audio\/[^/]+\/generate$/.test(pathname)
+      || pathname === '/api/learning/cantonese/speech/assess'
+      || pathname === '/api/admin/cantonese/review/batch'
       || pathname === '/api/admin/cantonese/review/import'
       || pathname === '/api/forum/discover'
       || pathname === '/api/growth/claim'

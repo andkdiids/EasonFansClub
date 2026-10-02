@@ -2554,27 +2554,34 @@ model LyricPrescription {
 }
 
 model CantoneseLessonContent {
-  id           String                @id @default(cuid())
-  externalId   String                @unique @db.VarChar(191)
-  lessonId     String                @db.VarChar(32)
-  stageId      String                @db.VarChar(64)
-  stepId       String                @db.VarChar(100)
-  title        String                @db.VarChar(255)
-  body         String                @db.LongText
-  displayText  String?               @db.Text
-  jyutping     String?               @db.VarChar(255)
-  tone         String?               @db.VarChar(64)
-  examples     Json?
-  audioId      String?               @db.VarChar(191)
-  status       CantoneseReviewStatus @default(CONTENT_REVIEW_REQUIRED)
-  reviewedById String?
-  reviewedAt   DateTime?
-  reviewNote   String?               @db.Text
-  createdAt    DateTime              @default(now())
-  updatedAt    DateTime              @updatedAt
-  reviewer     User?                 @relation("CantoneseLessonContentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  id               String                @id @default(cuid())
+  externalId       String                @unique @db.VarChar(191)
+  lessonId         String                @db.VarChar(32)
+  stageId          String                @db.VarChar(64)
+  stepId           String                @db.VarChar(100)
+  title            String                @db.VarChar(255)
+  body             String                @db.LongText
+  displayText      String?               @db.Text
+  jyutping         String?               @db.VarChar(255)
+  tone             String?               @db.VarChar(64)
+  examples         Json?
+  audioId          String?               @db.VarChar(191)
+  contentType      String                @default("CONCEPT") @db.VarChar(32)
+  translation      String?               @db.Text
+  explanation      String?               @db.Text
+  sortOrder        Int                   @default(0)
+  requiresAudio    Boolean               @default(false)
+  requiresSpeaking Boolean               @default(false)
+  status           CantoneseReviewStatus @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById     String?
+  reviewedAt       DateTime?
+  reviewNote       String?               @db.Text
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  reviewer         User?                 @relation("CantoneseLessonContentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([lessonId, stageId, stepId])
+  @@index([lessonId, stageId, stepId, sortOrder])
   @@index([status, updatedAt])
 }
 
@@ -2590,7 +2597,9 @@ model CantoneseQuestion {
   explanation            String                @db.LongText
   prerequisiteContentIds Json
   audioId                String?               @db.VarChar(191)
+  speakingReferenceId    String?               @db.VarChar(191)
   lyricPrescriptionId    String?
+  sortOrder              Int                   @default(0)
   status                 CantoneseReviewStatus @default(CONTENT_REVIEW_REQUIRED)
   reviewedById           String?
   reviewedAt             DateTime?
@@ -2601,6 +2610,7 @@ model CantoneseQuestion {
   LyricPrescription      LyricPrescription?    @relation(fields: [lyricPrescriptionId], references: [id], onDelete: SetNull)
 
   @@index([lessonId, stageId, questionType])
+  @@index([lessonId, stageId, questionType, sortOrder])
   @@index([status, updatedAt])
   @@index([lyricPrescriptionId])
 }
@@ -2612,8 +2622,14 @@ model CantoneseAudioAsset {
   jyutping     String?                   @db.VarChar(255)
   lessonId     String?                   @db.VarChar(32)
   contentId    String?                   @db.VarChar(191)
+  audioKey     String?                   @unique @db.VarChar(512)
   cosKey       String?                   @db.VarChar(512)
   audioVersion String                    @default("v1") @db.VarChar(32)
+  voiceProfile String                    @default("101019") @db.VarChar(64)
+  speed        Float?
+  sampleRate   Int                       @default(16000)
+  codec        String                    @default("mp3") @db.VarChar(16)
+  notes        String?                   @db.Text
   checksum     String?                   @db.Char(64)
   fileSize     Int?
   assetStatus  CantoneseAudioAssetStatus @default(NOT_GENERATED)
@@ -2644,6 +2660,33 @@ model CantoneseReviewLog {
 
   @@index([targetType, targetId, createdAt])
   @@index([reviewerId, createdAt])
+}
+
+model CantonesePronunciationAssessment {
+  id                  String   @id @default(cuid())
+  userId              String
+  contentId           String   @db.VarChar(191)
+  assessmentMode      String   @db.VarChar(32)
+  provider            String   @db.VarChar(64)
+  providerVersion     String   @db.VarChar(64)
+  assessmentVersion   String   @db.VarChar(64)
+  expectedText        String   @db.Text
+  recognizedText      String?  @db.Text
+  overallScore        Float?
+  pronunciationScore  Float?
+  toneScore           Float?
+  fluencyScore        Float?
+  completenessScore   Float?
+  confidence          Float?
+  wordResults         Json?
+  syllableResults     Json?
+  feedback            Json?
+  recordingDurationMs Int
+  createdAt           DateTime @default(now())
+  user                User     @relation("CantoneseSpeechAssessmentUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([contentId, createdAt])
 }
 
 model MusicAlbum {
@@ -4844,6 +4887,7 @@ model User {
   CantoneseQuestionReviewed                              CantoneseQuestion[]                @relation("CantoneseQuestionReviewer")
   CantoneseAudioAssetReviewed                            CantoneseAudioAsset[]              @relation("CantoneseAudioReviewer")
   CantoneseReviewLogs                                    CantoneseReviewLog[]               @relation("CantoneseReviewActor")
+  CantoneseSpeechAssessments                             CantonesePronunciationAssessment[] @relation("CantoneseSpeechAssessmentUser")
 
   @@index([createdAt])
   @@index([email])

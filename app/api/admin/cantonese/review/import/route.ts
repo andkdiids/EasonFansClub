@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { isCantoneseQuestionType, lessonIdForStage, safeReviewIdentifier } from '@/lib/cantonese-review'
+import { parseContentType } from '@/lib/cantonese-content-admin'
 import { requireRequestAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -73,14 +74,20 @@ export async function POST(request: Request) {
     const displayText = bounded(item?.displayText, 10_000)
     const jyutping = bounded(item?.jyutping, 255)
     const tone = bounded(item?.tone, 64)
+    const contentType = item?.contentType === undefined ? 'CONCEPT' : parseContentType(item.contentType)
+    const translation = bounded(item?.translation, 10_000)
+    const explanation = bounded(item?.explanation, 20_000)
+    const sortOrder = item?.sortOrder === undefined ? 0 : Number(item.sortOrder)
     const audioId = item?.audioId === null || item?.audioId === undefined ? null : safeReviewIdentifier(item.audioId)
     const examples = item?.examples === undefined || item.examples === null ? undefined : json(item.examples)
-    if (!lessonId || !externalId || !stepId || !title || !text || displayText === null || jyutping === null || tone === null
+    const requiresAudio = item?.requiresAudio === true
+    const requiresSpeaking = item?.requiresSpeaking === true
+    if (!lessonId || !externalId || !stepId || !title || !text || !contentType || displayText === null || jyutping === null || tone === null || translation === null || explanation === null || !Number.isSafeInteger(sortOrder) || sortOrder < 0
       || (item?.audioId !== null && item?.audioId !== undefined && !audioId)
       || (item?.examples !== undefined && item.examples !== null && examples === null)) {
       return NextResponse.json({ ok: false, code: 'INVALID_TEACHING_IMPORT' }, { status: 400, headers: NO_STORE })
     }
-    teaching.push({ externalId, lessonId, stageId: stageId!, stepId, title, body: text, displayText: displayText || null, jyutping: jyutping || null, tone: tone || null, audioId, examples: examples ?? undefined, status: 'CONTENT_REVIEW_REQUIRED' })
+    teaching.push({ externalId, lessonId, stageId: stageId!, stepId, title, body: text, displayText: displayText || null, jyutping: jyutping || null, tone: tone || null, examples: examples ?? undefined, audioId, contentType, translation: translation || null, explanation: explanation || null, sortOrder, requiresAudio, requiresSpeaking, status: 'CONTENT_REVIEW_REQUIRED' })
   }
 
   const questions: Prisma.CantoneseQuestionCreateManyInput[] = []
@@ -96,14 +103,18 @@ export async function POST(request: Request) {
     const correctAnswer = json(item?.correctAnswer)
     const prerequisiteContentIds = safeArray(item?.prerequisiteContentIds)
     const audioId = item?.audioId === null || item?.audioId === undefined ? null : safeReviewIdentifier(item.audioId)
+    const speakingReferenceId = item?.speakingReferenceId === null || item?.speakingReferenceId === undefined ? null : safeReviewIdentifier(item.speakingReferenceId)
     const lyricPrescriptionId = item?.lyricPrescriptionId === null || item?.lyricPrescriptionId === undefined ? null : safeReviewIdentifier(item.lyricPrescriptionId)
+    const sortOrder = item?.sortOrder === undefined ? 0 : Number(item.sortOrder)
     if (!lessonId || !externalId || !questionType || !prompt || !explanation || !Array.isArray(item?.options) || options === null
       || correctAnswer === null || prerequisiteContentIds === null
+      || !Number.isSafeInteger(sortOrder) || sortOrder < 0
       || (item?.audioId !== null && item?.audioId !== undefined && !audioId)
+      || (item?.speakingReferenceId !== null && item?.speakingReferenceId !== undefined && !speakingReferenceId)
       || (item?.lyricPrescriptionId !== null && item?.lyricPrescriptionId !== undefined && !lyricPrescriptionId)) {
       return NextResponse.json({ ok: false, code: 'INVALID_QUESTION_IMPORT' }, { status: 400, headers: NO_STORE })
     }
-    questions.push({ externalId, lessonId, stageId: stageId!, questionType, prompt, explanation, options, correctAnswer, prerequisiteContentIds, audioId, lyricPrescriptionId, status: 'CONTENT_REVIEW_REQUIRED' })
+    questions.push({ externalId, lessonId, stageId: stageId!, questionType, prompt, explanation, options, correctAnswer, prerequisiteContentIds, audioId, speakingReferenceId, lyricPrescriptionId, sortOrder, status: 'CONTENT_REVIEW_REQUIRED' })
   }
 
   const audio: Prisma.CantoneseAudioAssetCreateManyInput[] = []
@@ -115,11 +126,19 @@ export async function POST(request: Request) {
     const stageId = item?.stageId === null || item?.stageId === undefined ? null : bounded(item.stageId, 64, true)
     const lessonId = stageId === null ? null : stageLesson(stageId)
     const contentId = item?.contentId === null || item?.contentId === undefined ? null : safeReviewIdentifier(item.contentId)
+    const audioVersion = bounded(item?.audioVersion ?? 'v1', 32, true)
+    const voiceProfile = bounded(item?.voiceProfile ?? '101019', 64, true)
+    const speed = item?.speed === undefined || item?.speed === null || item?.speed === '' ? null : Number(item.speed)
+    const sampleRate = item?.sampleRate === undefined ? 16000 : Number(item.sampleRate)
+    const codec = String(item?.codec ?? 'mp3').toLowerCase()
+    const notes = bounded(item?.notes, 10_000)
     if (!externalId || !spokenText || jyutping === null || (stageId !== null && !lessonId)
-      || (item?.contentId !== null && item?.contentId !== undefined && !contentId)) {
+      || (item?.contentId !== null && item?.contentId !== undefined && !contentId)
+      || !audioVersion || !voiceProfile || (speed !== null && (!Number.isFinite(speed) || speed < -2 || speed > 6))
+      || !Number.isSafeInteger(sampleRate) || ![8000, 16000].includes(sampleRate) || codec !== 'mp3' || notes === null) {
       return NextResponse.json({ ok: false, code: 'INVALID_AUDIO_IMPORT' }, { status: 400, headers: NO_STORE })
     }
-    audio.push({ externalId, text: spokenText, jyutping: jyutping || null, lessonId, contentId, audioVersion: 'v1', assetStatus: 'NOT_GENERATED', status: 'CONTENT_REVIEW_REQUIRED' })
+    audio.push({ externalId, text: spokenText, jyutping: jyutping || null, lessonId, contentId, audioVersion, voiceProfile, speed, sampleRate, codec, notes: notes || null, assetStatus: 'NOT_GENERATED', status: 'CONTENT_REVIEW_REQUIRED' })
   }
 
   try {

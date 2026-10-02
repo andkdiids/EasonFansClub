@@ -14,9 +14,11 @@ function pageNumber(value: string | null) {
   return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 10000) : 1
 }
 
-function publicAudioAsset<T extends { cosKey: string | null; assetStatus: string }>(asset: T) {
+function publicAudioAsset<T extends { cosKey: string | null; audioKey?: string | null; assetStatus: string }>(asset: T) {
   const { cosKey, ...safeAsset } = asset
-  return { ...safeAsset, serverSupported: Boolean(cosKey && asset.assetStatus === 'READY') }
+  const publicAsset = { ...safeAsset }
+  delete (publicAsset as { audioKey?: string | null }).audioKey
+  return { ...publicAsset, serverSupported: Boolean(cosKey && asset.assetStatus === 'READY') }
 }
 
 export async function GET(request: Request) {

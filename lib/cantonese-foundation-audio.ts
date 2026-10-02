@@ -21,7 +21,7 @@ export function isFoundationAudioId(value: string): value is FoundationAudioId {
   return Object.hasOwn(FOUNDATION_AUDIO_TEXT, value)
 }
 
-type AudioConfig = {
+export type CantoneseAudioConfig = {
   secretId: string
   secretKey: string
   region: string
@@ -42,7 +42,7 @@ export class FoundationAudioUnavailable extends Error {
   }
 }
 
-export function readFoundationAudioConfig(env: Record<string, string | undefined> = process.env): AudioConfig {
+export function readFoundationAudioConfig(env: Record<string, string | undefined> = process.env): CantoneseAudioConfig {
   const secretId = env.TENCENT_TTS_SECRET_ID?.trim() || ''
   const secretKey = env.TENCENT_TTS_SECRET_KEY?.trim() || ''
   const region = env.TENCENT_TTS_REGION?.trim() || ''
@@ -68,7 +68,7 @@ export function readFoundationAudioConfig(env: Record<string, string | undefined
   }
 }
 
-export function foundationAudioObjectKey(text: string, config: Pick<AudioConfig, 'voiceType' | 'speed' | 'sampleRate' | 'codec'>) {
+export function foundationAudioObjectKey(text: string, config: Pick<CantoneseAudioConfig, 'voiceType' | 'speed' | 'sampleRate' | 'codec'>) {
   const settings = JSON.stringify({ version: 1, language: 'yue', text,
     voiceType: config.voiceType, speed: config.speed, sampleRate: config.sampleRate, codec: config.codec })
   return `learning/cantonese/foundation/v1/${createHash('sha256').update(settings).digest('hex')}.mp3`
@@ -83,7 +83,7 @@ function hmac(key: string | Buffer, value: string) {
 }
 
 /** Tencent Cloud API 3.0 signing; credentials never leave this server process. */
-export function signTencentTtsRequest(payload: string, config: Pick<AudioConfig, 'secretId' | 'secretKey'>, timestamp: number) {
+export function signTencentTtsRequest(payload: string, config: Pick<CantoneseAudioConfig, 'secretId' | 'secretKey'>, timestamp: number) {
   const host = 'tts.tencentcloudapi.com'
   const date = new Date(timestamp * 1000).toISOString().slice(0, 10)
   const canonicalRequest = ['POST', '/', '', 'content-type:application/json; charset=utf-8', `host:${host}`, '',
@@ -95,7 +95,7 @@ export function signTencentTtsRequest(payload: string, config: Pick<AudioConfig,
   return `TC3-HMAC-SHA256 Credential=${config.secretId}/${scope}, SignedHeaders=content-type;host, Signature=${signature}`
 }
 
-export async function synthesizeFoundationAudio(text: string, config: AudioConfig, fetcher: typeof fetch = fetch): Promise<Buffer> {
+export async function synthesizeFoundationAudio(text: string, config: CantoneseAudioConfig, fetcher: typeof fetch = fetch): Promise<Buffer> {
   const payload = JSON.stringify({ Text: text, SessionId: randomUUID(), VoiceType: config.voiceType,
     Speed: config.speed, SampleRate: config.sampleRate, Codec: config.codec, PrimaryLanguage: 1 })
   const timestamp = Math.floor(Date.now() / 1000)
@@ -134,11 +134,13 @@ export async function synthesizeFoundationAudio(text: string, config: AudioConfi
 
 export type FoundationAudioStorage = {
   exists(key: string): Promise<boolean>
+  read?(key: string): Promise<Buffer>
   upload(key: string, audio: Buffer): Promise<void>
   signedUrl(key: string): string
+  metadata?(key: string): Promise<{ fileSize: number | null }>
 }
 
-function createCosStorage(config: AudioConfig): FoundationAudioStorage {
+export function createFoundationAudioStorage(config: CantoneseAudioConfig): FoundationAudioStorage {
   const cos = new COS({ SecretId: config.cosSecretId, SecretKey: config.cosSecretKey })
   const base = (key: string) => ({ Bucket: config.bucket, Region: config.cosRegion, Key: key })
   return {
@@ -160,6 +162,27 @@ function createCosStorage(config: AudioConfig): FoundationAudioStorage {
         throw new FoundationAudioUnavailable('COS')
       }
     },
+    async read(key) {
+      try {
+        const result = await cos.getObject(base(key)) as { Body?: Buffer | string }
+        const body = result.Body
+        if (typeof body === 'string') return Buffer.from(body, 'binary')
+        if (Buffer.isBuffer(body)) return body
+        throw new FoundationAudioUnavailable('COS')
+      } catch {
+        throw new FoundationAudioUnavailable('COS')
+      }
+    },
+    async metadata(key) {
+      try {
+        const result = await cos.headObject(base(key)) as { headers?: Record<string, string>; ContentLength?: number | string }
+        const raw = result.ContentLength ?? result.headers?.['content-length'] ?? result.headers?.['Content-Length']
+        const fileSize = Number(raw)
+        return { fileSize: Number.isSafeInteger(fileSize) && fileSize >= 0 ? fileSize : null }
+      } catch {
+        throw new FoundationAudioUnavailable('COS')
+      }
+    },
     signedUrl(key) {
       try {
         return cos.getObjectUrl({ ...base(key), Sign: true, Method: 'GET', Protocol: 'https:', Expires: 300 })
@@ -173,13 +196,13 @@ function createCosStorage(config: AudioConfig): FoundationAudioStorage {
 const inFlight = new Map<string, Promise<void>>()
 
 export async function resolveFoundationAudioUrl(audioId: string, options: {
-  config?: AudioConfig
+  config?: CantoneseAudioConfig
   storage?: FoundationAudioStorage
-  synthesize?: (text: string, config: AudioConfig) => Promise<Buffer>
+  synthesize?: (text: string, config: CantoneseAudioConfig) => Promise<Buffer>
 } = {}): Promise<string | null> {
   if (!isFoundationAudioId(audioId)) return null
   const config = options.config ?? readFoundationAudioConfig()
-  const storage = options.storage ?? createCosStorage(config)
+  const storage = options.storage ?? createFoundationAudioStorage(config)
   const text = FOUNDATION_AUDIO_TEXT[audioId]
   const key = foundationAudioObjectKey(text, config)
   try {

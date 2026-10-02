@@ -48,8 +48,15 @@ export function safeReviewReason(value: unknown): string | null {
   return normalized
 }
 
+/** Increment the public cache version whenever synthesis inputs change. */
+export function nextCantoneseAudioVersion(current: string) {
+  const match = /^v(\d+)$/.exec(current.trim())
+  if (match) return `v${Number(match[1]) + 1}`
+  return `${current.trim().slice(0, 27)}-r2`
+}
+
 export const CANTONESE_QUESTION_TYPES = [
-  'SINGLE_SELECT', 'MULTI_SELECT', 'LISTENING', 'TRUE_FALSE', 'MATCH', 'ORDER', 'FILL',
+  'SINGLE_SELECT', 'MULTI_SELECT', 'LISTENING', 'TRUE_FALSE', 'MATCH', 'ORDER', 'FILL', 'SPEAKING',
   'JYUTPING', 'TONE', 'LYRIC_VOCAB', 'LYRIC_GRAMMAR',
 ] as const
 

@@ -6,9 +6,11 @@ import {
   nextCantoneseReviewStatus,
   parseCantoneseReviewAction,
   parseCantoneseReviewEntityType,
+  nextCantoneseAudioVersion,
   safeReviewIdentifier,
   safeReviewReason,
 } from '@/lib/cantonese-review'
+import { parseContentType } from '@/lib/cantonese-content-admin'
 import { requireRequestAdmin, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -42,8 +44,10 @@ function jsonValue(value: unknown, maxBytes = 64_000) {
 }
 
 function safeAudio<T extends { cosKey: string | null; assetStatus: string }>(asset: T) {
-  const { cosKey, ...safe } = asset
-  return { ...safe, serverSupported: Boolean(cosKey && asset.assetStatus === 'READY') }
+  const { cosKey, ...safe } = asset as T & { audioKey?: string | null }
+  const publicAsset = { ...safe }
+  delete (publicAsset as { audioKey?: string | null }).audioKey
+  return { ...publicAsset, serverSupported: Boolean(cosKey && asset.assetStatus === 'READY') }
 }
 
 function audioFromUnion(record: NonNullable<Awaited<ReturnType<typeof prisma.cantoneseAudioAsset.findUnique>>>) {
@@ -108,12 +112,24 @@ export async function PATCH(request: Request, context: RouteContext) {
           const displayText = boundedText(body.displayText, 10_000)
           const jyutping = boundedText(body.jyutping, 255)
           const tone = boundedText(body.tone, 64)
+          const contentType = body.contentType === undefined ? undefined : parseContentType(body.contentType)
+          const translation = boundedText(body.translation, 10_000)
+          const explanation = boundedText(body.explanation, 20_000)
+          const sortOrder = body.sortOrder === undefined ? undefined : Number(body.sortOrder)
           const examples = jsonValue(body.examples)
-          if (!title || !lessonId || !stageId || !stepId || !content || (body.displayText !== undefined && displayText === null) || (body.jyutping !== undefined && jyutping === null) || (body.tone !== undefined && tone === null) || (body.examples !== undefined && examples === null)) throw new Error('INVALID_EDIT')
+          const requiresAudio = body.requiresAudio === undefined ? undefined : body.requiresAudio === true
+          const requiresSpeaking = body.requiresSpeaking === undefined ? undefined : body.requiresSpeaking === true
+          if (!title || !lessonId || !stageId || !stepId || !content || (body.displayText !== undefined && displayText === null) || (body.jyutping !== undefined && jyutping === null) || (body.tone !== undefined && tone === null) || (body.contentType !== undefined && !contentType) || (body.translation !== undefined && translation === null) || (body.explanation !== undefined && explanation === null) || (body.sortOrder !== undefined && (sortOrder === undefined || !Number.isSafeInteger(sortOrder) || sortOrder < 0)) || (body.examples !== undefined && examples === null)) throw new Error('INVALID_EDIT')
           Object.assign(update, { title, lessonId, stageId, stepId, body: content, status: nextCantoneseReviewStatus(current.status, 'edit'), reviewer: { disconnect: true }, reviewedAt: null, reviewNote: null })
           if (body.displayText !== undefined) update.displayText = displayText
           if (body.jyutping !== undefined) update.jyutping = jyutping
           if (body.tone !== undefined) update.tone = tone
+          if (body.contentType !== undefined) update.contentType = contentType as string
+          if (body.translation !== undefined) update.translation = translation ?? null
+          if (body.explanation !== undefined) update.explanation = explanation ?? null
+          if (body.sortOrder !== undefined) update.sortOrder = sortOrder as number
+          if (body.requiresAudio !== undefined) update.requiresAudio = requiresAudio
+          if (body.requiresSpeaking !== undefined) update.requiresSpeaking = requiresSpeaking
           if (body.examples !== undefined) update.examples = examples === Prisma.JsonNull ? Prisma.JsonNull : examples as Prisma.InputJsonValue
         } else if (action === 'approve' || action === 'reject') {
           update.status = nextCantoneseReviewStatus(current.status, action)
@@ -142,11 +158,15 @@ export async function PATCH(request: Request, context: RouteContext) {
           const correctAnswer = jsonValue(body.correctAnswer)
           const prerequisiteContentIds = jsonValue(body.prerequisiteContentIds)
           const audioId = boundedText(body.audioId, 191)
+          const speakingReferenceId = boundedText(body.speakingReferenceId, 191)
           const lyricPrescriptionId = boundedText(body.lyricPrescriptionId, 191)
-          if (!lessonId || !stageId || !prompt || !explanation || !questionType || !Array.isArray(body.options) || options === null || correctAnswer === undefined || correctAnswer === null || !Array.isArray(body.prerequisiteContentIds) || prerequisiteContentIds === null || (body.audioId !== undefined && audioId === null) || (body.lyricPrescriptionId !== undefined && lyricPrescriptionId === null)) throw new Error('INVALID_EDIT')
+          const sortOrder = body.sortOrder === undefined ? undefined : Number(body.sortOrder)
+          if (!lessonId || !stageId || !prompt || !explanation || !questionType || !Array.isArray(body.options) || options === null || correctAnswer === undefined || correctAnswer === null || !Array.isArray(body.prerequisiteContentIds) || prerequisiteContentIds === null || (body.audioId !== undefined && audioId === null) || (body.speakingReferenceId !== undefined && speakingReferenceId === null) || (body.lyricPrescriptionId !== undefined && lyricPrescriptionId === null) || (body.sortOrder !== undefined && (sortOrder === undefined || !Number.isSafeInteger(sortOrder) || sortOrder < 0))) throw new Error('INVALID_EDIT')
           if (lyricPrescriptionId && !await tx.lyricPrescription.findUnique({ where: { id: lyricPrescriptionId }, select: { id: true } })) throw new Error('LYRIC_SOURCE_NOT_FOUND')
           Object.assign(update, { lessonId, stageId, prompt, explanation, questionType, options, correctAnswer, prerequisiteContentIds, status: nextCantoneseReviewStatus(current.status, 'edit'), reviewer: { disconnect: true }, reviewedAt: null, reviewNote: null })
           if (body.audioId !== undefined) update.audioId = audioId
+          if (body.speakingReferenceId !== undefined) update.speakingReferenceId = speakingReferenceId
+          if (body.sortOrder !== undefined) update.sortOrder = sortOrder as number
           if (body.lyricPrescriptionId !== undefined) update.LyricPrescription = lyricPrescriptionId ? { connect: { id: lyricPrescriptionId } } : { disconnect: true }
         } else if (action === 'approve' || action === 'reject') {
           update.status = nextCantoneseReviewStatus(current.status, action)
@@ -169,13 +189,17 @@ export async function PATCH(request: Request, context: RouteContext) {
         const jyutping = boundedText(body.jyutping, 255)
         const lessonId = boundedText(body.lessonId, 32)
         const contentId = boundedText(body.contentId, 191)
-        const audioVersion = boundedText(body.audioVersion, 32, true)
-        const checksum = boundedText(body.checksum, 64)
-        const fileSize = body.fileSize === undefined ? undefined : Number(body.fileSize)
-        if (!spokenText || !audioVersion || (body.jyutping !== undefined && jyutping === null) || (body.lessonId !== undefined && lessonId === null) || (body.contentId !== undefined && contentId === null) || (body.checksum !== undefined && checksum === null) || (fileSize !== undefined && (!Number.isSafeInteger(fileSize) || fileSize < 0))) throw new Error('INVALID_EDIT')
+        const voiceProfile = boundedText(body.voiceProfile, 64, true)
+        const speed = body.speed === undefined || body.speed === null || body.speed === '' ? undefined : Number(body.speed)
+        const sampleRate = body.sampleRate === undefined ? undefined : Number(body.sampleRate)
+        const codec = body.codec === undefined ? undefined : boundedText(body.codec, 16, true)
+        const notes = boundedText(body.notes, 10_000)
+        if (!spokenText || body.audioVersion !== undefined || body.checksum !== undefined || body.fileSize !== undefined || body.cosKey !== undefined || body.audioKey !== undefined || (body.voiceProfile !== undefined && !voiceProfile) || (body.jyutping !== undefined && jyutping === null) || (body.lessonId !== undefined && lessonId === null) || (body.contentId !== undefined && contentId === null) || (body.notes !== undefined && notes === null) || (speed !== undefined && (!Number.isFinite(speed) || speed < -2 || speed > 6)) || (sampleRate !== undefined && (!Number.isSafeInteger(sampleRate) || ![8000, 16000].includes(sampleRate))) || (codec !== undefined && codec !== 'mp3')) throw new Error('INVALID_EDIT')
+        const audioVersion = nextCantoneseAudioVersion(current.audioVersion)
         Object.assign(update, {
           text: spokenText,
           audioVersion,
+          audioKey: null,
           status: nextCantoneseReviewStatus(current.status, 'edit'),
           assetStatus: 'NEEDS_REGENERATION',
           cosKey: null,
@@ -188,8 +212,11 @@ export async function PATCH(request: Request, context: RouteContext) {
         if (body.jyutping !== undefined) update.jyutping = jyutping
         if (body.lessonId !== undefined) update.lessonId = lessonId
         if (body.contentId !== undefined) update.contentId = contentId
-        if (body.checksum !== undefined) update.checksum = checksum
-        if (fileSize !== undefined) update.fileSize = fileSize
+        if (body.voiceProfile !== undefined) update.voiceProfile = voiceProfile as string
+        if (speed !== undefined) update.speed = speed
+        if (sampleRate !== undefined) update.sampleRate = sampleRate
+        if (codec !== undefined) update.codec = codec
+        if (body.notes !== undefined) update.notes = notes ?? null
       } else if (action === 'approve' || action === 'reject') {
         if (action === 'approve' && (!current.cosKey || current.assetStatus !== 'READY')) throw new Error('AUDIO_NOT_READY')
         update.status = nextCantoneseReviewStatus(current.status, action)
@@ -199,6 +226,11 @@ export async function PATCH(request: Request, context: RouteContext) {
       } else if (action === 'mark-needs-regeneration') {
         update.assetStatus = 'NEEDS_REGENERATION'
         update.status = 'CONTENT_REVIEW_REQUIRED'
+        update.audioVersion = nextCantoneseAudioVersion(current.audioVersion)
+        update.audioKey = null
+        update.cosKey = null
+        update.checksum = null
+        update.fileSize = null
         update.reviewer = { connect: { id: guard.user.id } }
         update.reviewedAt = new Date()
         update.reviewNote = reason || '需重新生成音频'
