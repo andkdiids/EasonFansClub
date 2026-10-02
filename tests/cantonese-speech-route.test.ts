@@ -1,8 +1,23 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { isCantonesePronunciationAssessmentEnabled } from '../lib/cantonese-speech-config'
 
 const read = (path: string) => readFileSync(path, 'utf8')
+
+test('pronunciation assessment is disabled by default and only enables explicitly', () => {
+  assert.equal(isCantonesePronunciationAssessmentEnabled({}), false)
+  assert.equal(isCantonesePronunciationAssessmentEnabled({ CANTONESE_PRONUNCIATION_ASSESSMENT_ENABLED: 'false' }), false)
+  assert.equal(isCantonesePronunciationAssessmentEnabled({ CANTONESE_PRONUNCIATION_ASSESSMENT_ENABLED: 'true' }), true)
+})
+
+test('disabled speech assessment exits before parsing or creating an Azure provider', () => {
+  const route = read('app/api/learning/cantonese/speech/assess/route.ts')
+  assert.match(route, /isCantonesePronunciationAssessmentEnabled\(\)/)
+  assert.match(route, /if \(!isCantonesePronunciationAssessmentEnabled\(\)\) return jsonError\('FEATURE_DISABLED', 404\)/)
+  assert.ok(route.indexOf("jsonError('FEATURE_DISABLED', 404)") < route.indexOf("request.headers.get('content-type')"))
+  assert.ok(route.indexOf("request.headers.get('content-type')") < route.indexOf('new AzureCantoneseSpeechAssessmentProvider()'))
+})
 
 test('speech API authorizes identity and derives the approved reference on Server', () => {
   const route = read('app/api/learning/cantonese/speech/assess/route.ts')

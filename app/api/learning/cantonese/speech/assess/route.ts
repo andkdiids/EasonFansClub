@@ -7,6 +7,7 @@ import {
   CantoneseSpeechError,
   normalizeSpeechRecording,
 } from '@/lib/cantonese-speech'
+import { isCantonesePronunciationAssessmentEnabled } from '@/lib/cantonese-speech-config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -56,6 +57,7 @@ async function boundedFormData(request: Request, contentType: string): Promise<F
 export async function POST(request: Request) {
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
+  if (!isCantonesePronunciationAssessmentEnabled()) return jsonError('FEATURE_DISABLED', 404)
   const contentType = request.headers.get('content-type') || ''
   if (!contentType.toLowerCase().startsWith('multipart/form-data;')) return jsonError('INVALID_AUDIO', 415)
   const declaredSize = Number(request.headers.get('content-length') || 0)
