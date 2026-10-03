@@ -119,7 +119,9 @@ export async function PATCH(request: Request, context: RouteContext) {
           const examples = jsonValue(body.examples)
           const requiresAudio = body.requiresAudio === undefined ? undefined : body.requiresAudio === true
           const requiresSpeaking = body.requiresSpeaking === undefined ? undefined : body.requiresSpeaking === true
-          if (!title || !lessonId || !stageId || !stepId || !content || (body.displayText !== undefined && displayText === null) || (body.jyutping !== undefined && jyutping === null) || (body.tone !== undefined && tone === null) || (body.contentType !== undefined && !contentType) || (body.translation !== undefined && translation === null) || (body.explanation !== undefined && explanation === null) || (body.sortOrder !== undefined && (sortOrder === undefined || !Number.isSafeInteger(sortOrder) || sortOrder < 0)) || (body.examples !== undefined && examples === null)) throw new Error('INVALID_EDIT')
+          if (!title || !lessonId || !stageId || !stepId || !content || (body.displayText !== undefined && displayText === null) || (body.jyutping !== undefined && jyutping === null) || (body.tone !== undefined && tone === null) || (body.contentType !== undefined && !contentType) || (body.translation !== undefined && translation === null) || (body.explanation !== undefined && explanation === null) || (body.sortOrder !== undefined && (sortOrder === undefined || !Number.isSafeInteger(sortOrder) || sortOrder < 0)) || (body.examples !== undefined && examples === null)
+            || ((requiresSpeaking ?? current.requiresSpeaking) && !(requiresAudio ?? current.requiresAudio))
+            || ((requiresAudio ?? current.requiresAudio) && !(body.displayText === undefined ? current.displayText : displayText)?.trim())) throw new Error('INVALID_EDIT')
           Object.assign(update, { title, lessonId, stageId, stepId, body: content, status: nextCantoneseReviewStatus(current.status, 'edit'), reviewer: { disconnect: true }, reviewedAt: null, reviewNote: null })
           if (body.displayText !== undefined) update.displayText = displayText
           if (body.jyutping !== undefined) update.jyutping = jyutping
@@ -132,6 +134,13 @@ export async function PATCH(request: Request, context: RouteContext) {
           if (body.requiresSpeaking !== undefined) update.requiresSpeaking = requiresSpeaking
           if (body.examples !== undefined) update.examples = examples === Prisma.JsonNull ? Prisma.JsonNull : examples as Prisma.InputJsonValue
         } else if (action === 'approve' || action === 'reject') {
+          if (action === 'approve') {
+            if (current.requiresSpeaking && !current.requiresAudio) throw new Error('INVALID_EDIT')
+            if (current.requiresAudio) {
+              const audio = current.audioId ? await tx.cantoneseAudioAsset.findUnique({ where: { externalId: current.audioId } }) : null
+              if (!audio || audio.status !== 'APPROVED' || audio.assetStatus !== 'READY' || !audio.cosKey || !audio.checksum || !audio.fileSize) throw new Error('AUDIO_NOT_READY')
+            }
+          }
           update.status = nextCantoneseReviewStatus(current.status, action)
           update.reviewer = { connect: { id: guard.user.id } }
           update.reviewedAt = new Date()
@@ -218,7 +227,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         if (codec !== undefined) update.codec = codec
         if (body.notes !== undefined) update.notes = notes ?? null
       } else if (action === 'approve' || action === 'reject') {
-        if (action === 'approve' && (!current.cosKey || current.assetStatus !== 'READY')) throw new Error('AUDIO_NOT_READY')
+        if (action === 'approve' && (!current.cosKey || !current.checksum || !current.fileSize || current.assetStatus !== 'READY')) throw new Error('AUDIO_NOT_READY')
         update.status = nextCantoneseReviewStatus(current.status, action)
         update.reviewer = { connect: { id: guard.user.id } }
         update.reviewedAt = new Date()

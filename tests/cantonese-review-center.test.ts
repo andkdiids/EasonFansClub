@@ -70,12 +70,14 @@ test('admin review routes apply the Mobile Bearer-aware permission guard', () =>
 
 test('candidate import is admin-only, create-only, and forces every imported item into review', () => {
   const route = read('app/api/admin/cantonese/review/import/route.ts')
+  const parser = read('lib/cantonese-candidate-import.ts')
   assert.match(route, /requireRequestAdmin\(request, 'cantonese_review'\)/)
+  assert.match(route, /parseCandidateImport\(/)
   assert.match(route, /createMany\(\{ data: teaching, skipDuplicates: true \}\)/)
   assert.match(route, /createMany\(\{ data: questions, skipDuplicates: true \}\)/)
   assert.match(route, /createMany\(\{ data: audio, skipDuplicates: true \}\)/)
   assert.match(route, /status: 'CONTENT_REVIEW_REQUIRED'/)
-  assert.match(route, /assetStatus: 'NOT_GENERATED'/)
+  assert.match(parser, /assetStatus: 'NOT_GENERATED'/)
   assert.doesNotMatch(route, /status:\s*item\.status|APPROVED/)
 })
 

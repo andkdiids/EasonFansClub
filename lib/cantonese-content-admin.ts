@@ -8,6 +8,20 @@ export const CANTONESE_CONTENT_TYPES = [
 
 export const CANTONESE_AUDIO_CODECS = ['mp3'] as const
 
+/** A teaching step that promises playback cannot be published without its reviewed asset. */
+export function teachingAudioReady(
+  content: { requiresAudio: boolean; requiresSpeaking: boolean; audioId: string | null },
+  audio: { externalId: string; status: string; assetStatus: string; cosKey: string | null; checksum: string | null; fileSize: number | null } | null,
+): boolean {
+  if (content.requiresSpeaking && !content.requiresAudio) return false
+  if (!content.requiresAudio) return true
+  return Boolean(
+    content.audioId && audio?.externalId === content.audioId
+      && audio.status === 'APPROVED' && audio.assetStatus === 'READY'
+      && audio.cosKey && audio.checksum && audio.fileSize && audio.fileSize > 0,
+  )
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -99,6 +113,7 @@ export function parseTeachingCreate(value: unknown): {
   const audioId = optionalIdentifier(body.audioId)
   if (!externalId || !lessonId || !stageId || !stepId || !title || !text || sortOrder === null
     || (body.contentType !== undefined && !parseContentType(body.contentType))
+    || (requiresSpeaking && !requiresAudio)
     || ((requiresAudio || requiresSpeaking) && (!displayText?.trim() || displayText.length > 4000))
     || (body.displayText !== undefined && body.displayText !== null && displayText === null)
     || (body.jyutping !== undefined && body.jyutping !== null && jyutping === null)

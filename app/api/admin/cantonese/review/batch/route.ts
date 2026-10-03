@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { isBatchApprovalAllowed, parseCantoneseReviewEntityType, safeReviewIdentifier, safeReviewReason } from '@/lib/cantonese-review'
+import { teachingAudioReady } from '@/lib/cantonese-content-admin'
 import { requireRequestAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +24,10 @@ export async function POST(request: Request) {
   const reason = body.reason === undefined ? null : safeReviewReason(body.reason)
   if (action === 'reject' && !reason) return NextResponse.json({ ok: false, code: 'REJECTION_REASON_REQUIRED' }, { status: 400, headers: NO_STORE })
   if (body.reason !== undefined && !reason) return NextResponse.json({ ok: false, code: 'INVALID_REASON' }, { status: 400, headers: NO_STORE })
+  // The workbench must present the exact selected IDs and ask for confirmation.
+  if (type === 'teaching' && action === 'approve' && body.confirmed !== true) {
+    return NextResponse.json({ ok: false, code: 'CONFIRMATION_REQUIRED' }, { status: 400, headers: NO_STORE })
+  }
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -36,7 +41,12 @@ export async function POST(request: Request) {
         if (type === 'teaching') {
           const current = await tx.cantoneseLessonContent.findUnique({ where: { externalId: id } })
           if (!current) { missing.push(id); continue }
-          if (action === 'approve' && !isBatchApprovalAllowed({ type, audioId: current.audioId, prompt: current.title, explanation: current.body })) { blocked.push(id); continue }
+          if (action === 'approve') {
+            const audio = current.audioId && current.requiresAudio
+              ? await tx.cantoneseAudioAsset.findUnique({ where: { externalId: current.audioId } })
+              : null
+            if (!teachingAudioReady(current, audio)) { blocked.push(id); continue }
+          }
           if (current.status === nextStatus) { skipped.push(id); continue }
           const updated = await tx.cantoneseLessonContent.update({ where: { externalId: id }, data: { status: nextStatus, reviewer: { connect: { id: guard.user!.id } }, reviewedAt: new Date(), reviewNote: reason } })
           await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user!.id } }, targetType: 'TEACHING', targetId: id, action: action.toUpperCase(), oldStatus: current.status, newStatus: updated.status, reason } })
