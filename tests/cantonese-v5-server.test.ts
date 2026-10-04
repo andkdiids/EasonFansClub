@@ -101,7 +101,7 @@ test('readiness is per lesson, keeps pending text private, and separates teachin
   })
   assert.equal(initial[1].status, 'READY')
   assert.equal(initial[1].assessmentAvailability, 'REVIEW_PENDING')
-  assert.equal(initial[2].status, 'CONTENT_NOT_READY')
+  assert.equal(initial.length, 2)
 
   const approved = resolveCantoneseCourseReadiness({
     teaching: teaching.map((row) => row.externalId === 'l01-b' ? { ...row, status: 'APPROVED' as const } : row),
@@ -110,7 +110,7 @@ test('readiness is per lesson, keeps pending text private, and separates teachin
   })
   assert.equal(approved[0].status, 'READY')
   const invalidSpeaking = resolveCantoneseCourseReadiness({ teaching: [{ ...teaching[3], requiresSpeaking: true }], questions: [], readyAudioIds: new Set(), visibleQuestionIds: new Set() })
-  assert.equal(invalidSpeaking[1].status, 'CONTENT_NOT_READY')
+  assert.equal(invalidSpeaking[0].status, 'CONTENT_NOT_READY')
   assert.equal(approved[0].assessmentAvailability, 'READY')
   assert.equal(approved[0].approvedQuestionCount, 2)
 })

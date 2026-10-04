@@ -68,17 +68,19 @@ test('admin review routes apply the Mobile Bearer-aware permission guard', () =>
   assert.match(detailRoute, /assetStatus: 'NEEDS_REGENERATION'/)
 })
 
-test('candidate import is admin-only, create-only, and forces every imported item into review', () => {
+test('candidate import is admin-only, inserts only planned new rows, and never imports them as approved', () => {
   const route = read('app/api/admin/cantonese/review/import/route.ts')
   const parser = read('lib/cantonese-candidate-import.ts')
   assert.match(route, /requireRequestAdmin\(request, 'cantonese_review'\)/)
   assert.match(route, /parseCandidateImport\(/)
-  assert.match(route, /createMany\(\{ data: teaching, skipDuplicates: true \}\)/)
-  assert.match(route, /createMany\(\{ data: questions, skipDuplicates: true \}\)/)
-  assert.match(route, /createMany\(\{ data: audio, skipDuplicates: true \}\)/)
+  assert.match(route, /teachingPlan\.filter\(\(row\) => row\.decision === 'CREATE_PENDING'\)/)
+  assert.match(route, /questionPlan\.filter\(\(row\) => row\.decision === 'CREATE_PENDING'\)/)
+  assert.match(route, /audioPlan\.filter\(\(row\) => row\.decision === 'CREATE_PENDING'\)/)
+  assert.match(route, /SKIPPED_ALREADY_APPROVED/)
+  assert.match(route, /UPDATE_AVAILABLE/)
   assert.match(route, /status: 'CONTENT_REVIEW_REQUIRED'/)
   assert.match(parser, /assetStatus: 'NOT_GENERATED'/)
-  assert.doesNotMatch(route, /status:\s*item\.status|APPROVED/)
+  assert.doesNotMatch(route, /status:\s*item\.status|status:\s*['"]APPROVED['"]|data:\s*\{\s*status:\s*['"]APPROVED['"]/)
 })
 
 test('admin list never serializes COS object keys and preview signs only after authorization', () => {
@@ -93,7 +95,7 @@ test('admin list never serializes COS object keys and preview signs only after a
 
 test('public course source filters teaching, questions, and audio to approved records only', () => {
   const route = read('app/api/learning/cantonese/course/route.ts')
-  assert.equal((route.match(/status: 'APPROVED'/g) || []).length, 3)
+  assert.equal((route.match(/status: 'APPROVED'/g) || []).length, 4)
   assert.match(route, /assetStatus: 'READY'/)
   assert.doesNotMatch(route, /correctAnswer: true/)
   assert.doesNotMatch(route, /DRAFT|CONTENT_REVIEW_REQUIRED|REJECTED/)

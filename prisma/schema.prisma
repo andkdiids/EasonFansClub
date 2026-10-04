@@ -2553,6 +2553,25 @@ model LyricPrescription {
   @@index([enabled, createdAt])
 }
 
+model CantoneseCourseDefinition {
+  id                   String                @id @default(cuid())
+  lessonId             String                @unique @db.VarChar(32)
+  lessonNumber         Int                   @unique
+  title                String                @db.VarChar(255)
+  subtitle             String?               @db.VarChar(255)
+  description          String                @db.Text
+  sortOrder            Int
+  prerequisiteLessonId String?               @db.VarChar(32)
+  status               CantoneseCourseStatus @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById         String?
+  reviewedAt           DateTime?
+  reviewNote           String?               @db.Text
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([status, sortOrder])
+}
+
 model CantoneseLessonContent {
   id               String                @id @default(cuid())
   externalId       String                @unique @db.VarChar(191)
@@ -2569,6 +2588,12 @@ model CantoneseLessonContent {
   contentType      String                @default("CONCEPT") @db.VarChar(32)
   translation      String?               @db.Text
   explanation      String?               @db.Text
+  section          String?               @db.VarChar(100)
+  usageNote        String?               @db.Text
+  sourceReference  String?               @db.Text
+  dialogueId       String?               @db.VarChar(100)
+  speaker          String?               @db.VarChar(16)
+  contentVersion   Int                   @default(1)
   sortOrder        Int                   @default(0)
   requiresAudio    Boolean               @default(false)
   requiresSpeaking Boolean               @default(false)
@@ -2595,6 +2620,8 @@ model CantoneseQuestion {
   options                Json
   correctAnswer          Json
   explanation            String                @db.LongText
+  sourceReference        String?               @db.Text
+  contentVersion         Int                   @default(1)
   prerequisiteContentIds Json
   audioId                String?               @db.VarChar(191)
   speakingReferenceId    String?               @db.VarChar(191)
@@ -5456,6 +5483,13 @@ enum CantoneseReviewStatus {
   CONTENT_REVIEW_REQUIRED
   APPROVED
   REJECTED
+}
+
+enum CantoneseCourseStatus {
+  DRAFT
+  CONTENT_REVIEW_REQUIRED
+  APPROVED
+  ARCHIVED
 }
 
 enum CantoneseAudioAssetStatus {

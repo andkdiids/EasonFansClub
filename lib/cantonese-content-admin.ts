@@ -1,9 +1,10 @@
 import type { Prisma } from '@prisma/client'
 import { isCantoneseQuestionType, safeReviewIdentifier } from '@/lib/cantonese-review'
 import { sanitizeText } from '@/lib/security'
+import { validateCantoneseQuestionQuality } from '@/lib/cantonese-question-quality'
 
 export const CANTONESE_CONTENT_TYPES = [
-  'CONCEPT', 'CHARACTER', 'WORD', 'SENTENCE', 'DIALOGUE', 'CONTRAST', 'SUMMARY', 'SPEAKING_PRACTICE',
+  'CONCEPT', 'CHARACTER', 'WORD', 'PHRASE', 'SENTENCE', 'DIALOGUE', 'CONTRAST', 'SUMMARY', 'SPEAKING_PRACTICE',
 ] as const
 
 export const CANTONESE_AUDIO_CODECS = ['mp3'] as const
@@ -160,9 +161,10 @@ export function parseQuestionCreate(value: unknown): {
   const speakingReferenceId = optionalIdentifier(body.speakingReferenceId)
   const lyricPrescriptionId = optionalIdentifier(body.lyricPrescriptionId)
   const sortOrder = nonNegativeInteger(body.sortOrder)
+  const qualityCode = questionType ? validateCantoneseQuestionQuality({ questionType, options: body.options, correctAnswer: body.correctAnswer, audioId, speakingReferenceId }) : null
   if (questionType === 'MULTI_SELECT' && (!Array.isArray(body.correctAnswer) || body.correctAnswer.length < 2 || !body.correctAnswer.every((answer: unknown) => typeof answer === 'string'))) return null
   if (!externalId || !lessonId || !stageId || !questionType || !prompt || !explanation
-    || options === null || correctAnswer === null || prereqJson === null || sortOrder === null) return null
+    || options === null || correctAnswer === null || prereqJson === null || sortOrder === null || qualityCode) return null
   return { externalId, lessonId, stageId, questionType, prompt, options, correctAnswer,
     explanation, prerequisiteContentIds: prereqJson, audioId, speakingReferenceId, lyricPrescriptionId, sortOrder }
 }

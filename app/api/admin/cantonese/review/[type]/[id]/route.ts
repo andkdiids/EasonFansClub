@@ -11,6 +11,8 @@ import {
   safeReviewReason,
 } from '@/lib/cantonese-review'
 import { parseContentType } from '@/lib/cantonese-content-admin'
+import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION } from '@/lib/cantonese-jyutping-review'
+import { validateCantoneseQuestionQuality } from '@/lib/cantonese-question-quality'
 import { requireRequestAdmin, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -54,6 +56,15 @@ function audioFromUnion(record: NonNullable<Awaited<ReturnType<typeof prisma.can
   return safeAudio(record)
 }
 
+async function hasJyutpingVerification(tx: Prisma.TransactionClient, targetType: 'TEACHING' | 'AUDIO', targetId: string, text: string | null, jyutping: string | null) {
+  const digest = cantoneseJyutpingReviewDigest(text, jyutping)
+  if (!digest) return false
+  return Boolean(await tx.cantoneseReviewLog.findFirst({
+    where: { targetType, targetId, action: CANTONESE_JYUTPING_REVIEW_ACTION, reason: digest },
+    select: { id: true },
+  }))
+}
+
 export async function GET(request: Request, context: RouteContext) {
   const guard = await requireRequestAdmin(request, 'cantonese_review')
   if (!guard.user) return guard.response
@@ -77,7 +88,18 @@ export async function GET(request: Request, context: RouteContext) {
     }),
   ])
   if (!record) return jsonError('NOT_FOUND', '审核内容不存在', 404)
-  return NextResponse.json({ item: type === 'audio' ? audioFromUnion(record as NonNullable<Awaited<ReturnType<typeof prisma.cantoneseAudioAsset.findUnique>>>) : record, logs }, { headers: NO_STORE })
+  const reviewDigest = type === 'audio' && 'text' in record
+    ? cantoneseJyutpingReviewDigest(record.text, record.jyutping)
+    : type === 'teaching' && 'displayText' in record && (record.requiresAudio || record.requiresSpeaking)
+      ? cantoneseJyutpingReviewDigest(record.displayText, record.jyutping)
+      : null
+  const verified = Boolean(reviewDigest && logs.some((entry) => entry.action === CANTONESE_JYUTPING_REVIEW_ACTION && entry.reason === reviewDigest))
+  const item = type === 'audio'
+    ? { ...audioFromUnion(record as NonNullable<Awaited<ReturnType<typeof prisma.cantoneseAudioAsset.findUnique>>>), jyutpingReviewStatus: verified ? 'VERIFIED' : 'JYUTPING_REVIEW_REQUIRED' }
+    : type === 'teaching'
+      ? { ...record, jyutpingReviewStatus: reviewDigest ? (verified ? 'VERIFIED' : 'JYUTPING_REVIEW_REQUIRED') : 'NOT_REQUIRED' }
+      : record
+  return NextResponse.json({ item, logs: logs.map((entry) => entry.action === CANTONESE_JYUTPING_REVIEW_ACTION ? { ...entry, reason: '粤拼核对记录' } : entry) }, { headers: NO_STORE })
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
@@ -92,7 +114,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return jsonError('INVALID_BODY', '请求内容无效', 400)
   const action = parseCantoneseReviewAction(body.action)
-  if (!action || (action === 'mark-needs-regeneration' && type !== 'audio')) return jsonError('INVALID_ACTION', '审核操作无效', 400)
+  if (!action || (action === 'mark-needs-regeneration' && type !== 'audio') || (action === 'verify-jyutping' && type === 'question')) return jsonError('INVALID_ACTION', '审核操作无效', 400)
   const reason = body.reason === undefined ? null : safeReviewReason(body.reason)
   if (action === 'reject' && !reason) return jsonError('REJECTION_REASON_REQUIRED', '退回时必须填写原因', 400)
   if (body.reason !== undefined && !reason) return jsonError('INVALID_REASON', '审核说明无效', 400)
@@ -103,7 +125,12 @@ export async function PATCH(request: Request, context: RouteContext) {
         const current = await tx.cantoneseLessonContent.findUnique({ where: { externalId: id } })
         if (!current) return null
         const update: Prisma.CantoneseLessonContentUpdateInput = {}
-        if (action === 'edit') {
+        if (action === 'verify-jyutping') {
+          const digest = cantoneseJyutpingReviewDigest(current.displayText, current.jyutping)
+          if (!digest) throw new Error('JYUTPING_REVIEW_REQUIRED')
+          await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'TEACHING', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, oldStatus: current.status, newStatus: current.status, reason: digest } })
+          return current
+        } else if (action === 'edit') {
           const title = boundedText(body.title, 255, true)
           const lessonId = boundedText(body.lessonId, 32, true)
           const stageId = boundedText(body.stageId, 64, true)
@@ -115,11 +142,16 @@ export async function PATCH(request: Request, context: RouteContext) {
           const contentType = body.contentType === undefined ? undefined : parseContentType(body.contentType)
           const translation = boundedText(body.translation, 10_000)
           const explanation = boundedText(body.explanation, 20_000)
+          const section = boundedText(body.section, 100)
+          const usageNote = boundedText(body.usageNote, 10_000)
+          const sourceReference = boundedText(body.sourceReference, 2_000)
+          const dialogueId = boundedText(body.dialogueId, 100)
+          const speaker = boundedText(body.speaker, 16)
           const sortOrder = body.sortOrder === undefined ? undefined : Number(body.sortOrder)
           const examples = jsonValue(body.examples)
           const requiresAudio = body.requiresAudio === undefined ? undefined : body.requiresAudio === true
           const requiresSpeaking = body.requiresSpeaking === undefined ? undefined : body.requiresSpeaking === true
-          if (!title || !lessonId || !stageId || !stepId || !content || (body.displayText !== undefined && displayText === null) || (body.jyutping !== undefined && jyutping === null) || (body.tone !== undefined && tone === null) || (body.contentType !== undefined && !contentType) || (body.translation !== undefined && translation === null) || (body.explanation !== undefined && explanation === null) || (body.sortOrder !== undefined && (sortOrder === undefined || !Number.isSafeInteger(sortOrder) || sortOrder < 0)) || (body.examples !== undefined && examples === null)
+          if (!title || !lessonId || !stageId || !stepId || !content || (body.displayText !== undefined && displayText === null) || (body.jyutping !== undefined && jyutping === null) || (body.tone !== undefined && tone === null) || (body.contentType !== undefined && !contentType) || (body.translation !== undefined && translation === null) || (body.explanation !== undefined && explanation === null) || (body.section !== undefined && section === null) || (body.usageNote !== undefined && usageNote === null) || (body.sourceReference !== undefined && sourceReference === null) || (body.dialogueId !== undefined && dialogueId === null) || (body.speaker !== undefined && speaker === null) || (body.sortOrder !== undefined && (sortOrder === undefined || !Number.isSafeInteger(sortOrder) || sortOrder < 0)) || (body.examples !== undefined && examples === null)
             || ((requiresSpeaking ?? current.requiresSpeaking) && !(requiresAudio ?? current.requiresAudio))
             || ((requiresAudio ?? current.requiresAudio) && !(body.displayText === undefined ? current.displayText : displayText)?.trim())) throw new Error('INVALID_EDIT')
           Object.assign(update, { title, lessonId, stageId, stepId, body: content, status: nextCantoneseReviewStatus(current.status, 'edit'), reviewer: { disconnect: true }, reviewedAt: null, reviewNote: null })
@@ -129,6 +161,12 @@ export async function PATCH(request: Request, context: RouteContext) {
           if (body.contentType !== undefined) update.contentType = contentType as string
           if (body.translation !== undefined) update.translation = translation ?? null
           if (body.explanation !== undefined) update.explanation = explanation ?? null
+          if (body.section !== undefined) update.section = section || null
+          if (body.usageNote !== undefined) update.usageNote = usageNote || null
+          if (body.sourceReference !== undefined) update.sourceReference = sourceReference || null
+          if (body.dialogueId !== undefined) update.dialogueId = dialogueId || null
+          if (body.speaker !== undefined) update.speaker = speaker || null
+          update.contentVersion = current.contentVersion + 1
           if (body.sortOrder !== undefined) update.sortOrder = sortOrder as number
           if (body.requiresAudio !== undefined) update.requiresAudio = requiresAudio
           if (body.requiresSpeaking !== undefined) update.requiresSpeaking = requiresSpeaking
@@ -136,9 +174,11 @@ export async function PATCH(request: Request, context: RouteContext) {
         } else if (action === 'approve' || action === 'reject') {
           if (action === 'approve') {
             if (current.requiresSpeaking && !current.requiresAudio) throw new Error('INVALID_EDIT')
+            if ((current.requiresAudio || current.requiresSpeaking) && !await hasJyutpingVerification(tx, 'TEACHING', id, current.displayText, current.jyutping)) throw new Error('JYUTPING_REVIEW_REQUIRED')
             if (current.requiresAudio) {
               const audio = current.audioId ? await tx.cantoneseAudioAsset.findUnique({ where: { externalId: current.audioId } }) : null
               if (!audio || audio.status !== 'APPROVED' || audio.assetStatus !== 'READY' || !audio.cosKey || !audio.checksum || !audio.fileSize) throw new Error('AUDIO_NOT_READY')
+              if (audio.text !== current.displayText || audio.jyutping !== current.jyutping) throw new Error('AUDIO_CONTENT_MISMATCH')
             }
           }
           update.status = nextCantoneseReviewStatus(current.status, action)
@@ -178,6 +218,29 @@ export async function PATCH(request: Request, context: RouteContext) {
           if (body.sortOrder !== undefined) update.sortOrder = sortOrder as number
           if (body.lyricPrescriptionId !== undefined) update.LyricPrescription = lyricPrescriptionId ? { connect: { id: lyricPrescriptionId } } : { disconnect: true }
         } else if (action === 'approve' || action === 'reject') {
+          if (action === 'approve') {
+            const qualityCode = validateCantoneseQuestionQuality(current)
+            if (qualityCode) throw new Error(`QUESTION_${qualityCode}`)
+            const prerequisites = Array.isArray(current.prerequisiteContentIds) && current.prerequisiteContentIds.every((value) => typeof value === 'string')
+              ? current.prerequisiteContentIds as string[] : null
+            if (!prerequisites) throw new Error('QUESTION_PREREQUISITE_NOT_APPROVED')
+            const requiredContents = await tx.cantoneseLessonContent.findMany({
+              where: { externalId: { in: prerequisites } },
+              select: { externalId: true, lessonId: true, status: true, requiresSpeaking: true, requiresAudio: true, displayText: true, jyutping: true },
+            })
+            if (requiredContents.length !== prerequisites.length || requiredContents.some((item) => item.lessonId !== current.lessonId || item.status !== 'APPROVED')) throw new Error('QUESTION_PREREQUISITE_NOT_APPROVED')
+            for (const item of requiredContents) {
+              if ((item.requiresAudio || item.requiresSpeaking) && !await hasJyutpingVerification(tx, 'TEACHING', item.externalId, item.displayText, item.jyutping)) throw new Error('JYUTPING_REVIEW_REQUIRED')
+            }
+            if (current.questionType === 'LISTENING' || current.questionType === 'SPEAKING') {
+              const audio = current.audioId ? await tx.cantoneseAudioAsset.findUnique({ where: { externalId: current.audioId } }) : null
+              if (!audio || audio.status !== 'APPROVED' || audio.assetStatus !== 'READY' || !audio.cosKey || !audio.checksum || !audio.fileSize) throw new Error('AUDIO_NOT_READY')
+            }
+            if (current.questionType === 'SPEAKING') {
+              const speaking = current.speakingReferenceId ? await tx.cantoneseLessonContent.findUnique({ where: { externalId: current.speakingReferenceId } }) : null
+              if (!speaking || speaking.status !== 'APPROVED' || speaking.lessonId !== current.lessonId || !speaking.requiresSpeaking || speaking.audioId !== current.audioId) throw new Error('SPEAKING_REFERENCE_NOT_READY')
+            }
+          }
           update.status = nextCantoneseReviewStatus(current.status, action)
           update.reviewer = { connect: { id: guard.user.id } }
           update.reviewedAt = new Date()
@@ -193,7 +256,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       const current = await tx.cantoneseAudioAsset.findUnique({ where: { externalId: id } })
       if (!current) return null
       const update: Prisma.CantoneseAudioAssetUpdateInput = {}
-      if (action === 'edit') {
+      if (action === 'verify-jyutping') {
+        const digest = cantoneseJyutpingReviewDigest(current.text, current.jyutping)
+        if (!digest) throw new Error('JYUTPING_REVIEW_REQUIRED')
+        await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'AUDIO', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, oldStatus: current.status, newStatus: current.status, reason: digest } })
+        return safeAudio(current)
+      } else if (action === 'edit') {
         const spokenText = boundedText(body.text, 4000, true)
         const jyutping = boundedText(body.jyutping, 255)
         const lessonId = boundedText(body.lessonId, 32)
@@ -227,6 +295,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         if (codec !== undefined) update.codec = codec
         if (body.notes !== undefined) update.notes = notes ?? null
       } else if (action === 'approve' || action === 'reject') {
+        if (action === 'approve' && !await hasJyutpingVerification(tx, 'AUDIO', id, current.text, current.jyutping)) throw new Error('JYUTPING_REVIEW_REQUIRED')
         if (action === 'approve' && (!current.cosKey || !current.checksum || !current.fileSize || current.assetStatus !== 'READY')) throw new Error('AUDIO_NOT_READY')
         update.status = nextCantoneseReviewStatus(current.status, action)
         update.reviewer = { connect: { id: guard.user.id } }
@@ -257,6 +326,11 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (error instanceof Error && error.message === 'INVALID_ACTION') return jsonError('INVALID_ACTION', '审核操作无效', 400)
     if (error instanceof Error && error.message === 'LYRIC_SOURCE_NOT_FOUND') return jsonError('LYRIC_SOURCE_NOT_FOUND', '关联的歌词来源不存在', 400)
     if (error instanceof Error && error.message === 'AUDIO_NOT_READY') return jsonError('AUDIO_NOT_READY', '音频资源尚未就绪，不能审核通过', 409)
+    if (error instanceof Error && error.message === 'JYUTPING_REVIEW_REQUIRED') return jsonError('JYUTPING_REVIEW_REQUIRED', '请先核对粤拼，再生成或审核标准音频。', 409)
+    if (error instanceof Error && error.message === 'AUDIO_CONTENT_MISMATCH') return jsonError('AUDIO_CONTENT_MISMATCH', '标准音频文本或粤拼与教学内容不一致', 409)
+    if (error instanceof Error && error.message === 'QUESTION_PREREQUISITE_NOT_APPROVED') return jsonError('QUESTION_PREREQUISITE_NOT_APPROVED', '题目关联的前置教学尚未审核通过', 409)
+    if (error instanceof Error && error.message === 'SPEAKING_REFERENCE_NOT_READY') return jsonError('SPEAKING_REFERENCE_NOT_READY', '跟读参考内容及音频尚未就绪', 409)
+    if (error instanceof Error && error.message.startsWith('QUESTION_')) return jsonError('INVALID_QUESTION', '题目结构或答案不符合审核要求', 409)
     return jsonError('REVIEW_UPDATE_FAILED', '审核操作暂时失败，请稍后重试', 500)
   }
 }

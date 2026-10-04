@@ -147,6 +147,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
   if (request.method === 'GET') {
     return pathname === '/api/admin/cantonese/review'
+      || pathname === '/api/admin/cantonese/courses'
       || pathname === '/api/learning/cantonese/course'
       || pathname === '/api/learning/cantonese/speaking'
       || /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname)
@@ -206,6 +207,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/learning/cantonese/speech/assess'
       || pathname === '/api/admin/cantonese/review/batch'
       || pathname === '/api/admin/cantonese/review/import'
+      || pathname === '/api/admin/cantonese/review/import/adopt'
       || pathname === '/api/forum/discover'
       || pathname === '/api/growth/claim'
       || pathname === '/api/growth/refresh'
@@ -229,6 +231,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'PUT' || request.method === 'PATCH') {
     return (request.method === 'PATCH' && pathname === '/api/admin/review')
+      || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/courses\/lesson-\d{2,3}$/.test(pathname))
       || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname))
       || pathname === '/api/posts/draft'
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')

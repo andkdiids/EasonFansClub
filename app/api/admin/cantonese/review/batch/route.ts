@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { isBatchApprovalAllowed, parseCantoneseReviewEntityType, safeReviewIdentifier, safeReviewReason } from '@/lib/cantonese-review'
 import { teachingAudioReady } from '@/lib/cantonese-content-admin'
+import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION } from '@/lib/cantonese-jyutping-review'
 import { requireRequestAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -42,10 +43,16 @@ export async function POST(request: Request) {
           const current = await tx.cantoneseLessonContent.findUnique({ where: { externalId: id } })
           if (!current) { missing.push(id); continue }
           if (action === 'approve') {
+            const digest = cantoneseJyutpingReviewDigest(current.displayText, current.jyutping)
+            const verified = digest && (current.requiresAudio || current.requiresSpeaking)
+              ? await tx.cantoneseReviewLog.findFirst({ where: { targetType: 'TEACHING', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, reason: digest }, select: { id: true } })
+              : null
+            if ((current.requiresAudio || current.requiresSpeaking) && !verified) { blocked.push(id); continue }
             const audio = current.audioId && current.requiresAudio
               ? await tx.cantoneseAudioAsset.findUnique({ where: { externalId: current.audioId } })
               : null
             if (!teachingAudioReady(current, audio)) { blocked.push(id); continue }
+            if (audio && (audio.text !== current.displayText || audio.jyutping !== current.jyutping)) { blocked.push(id); continue }
           }
           if (current.status === nextStatus) { skipped.push(id); continue }
           const updated = await tx.cantoneseLessonContent.update({ where: { externalId: id }, data: { status: nextStatus, reviewer: { connect: { id: guard.user!.id } }, reviewedAt: new Date(), reviewNote: reason } })

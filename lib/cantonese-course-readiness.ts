@@ -1,7 +1,3 @@
-export const CANTONESE_LESSON_IDS = [
-  'lesson-01', 'lesson-02', 'lesson-03', 'lesson-04', 'lesson-05', 'lesson-06',
-] as const
-
 type ReviewStatus = 'DRAFT' | 'CONTENT_REVIEW_REQUIRED' | 'APPROVED' | 'REJECTED'
 
 type TeachingRow = {
@@ -20,7 +16,7 @@ type QuestionRow = {
 }
 
 export type CantoneseCourseReadiness = {
-  lessonId: (typeof CANTONESE_LESSON_IDS)[number]
+  lessonId: string
   status: 'READY' | 'CONTENT_NOT_READY'
   contentCount: number
   approvedContentCount: number
@@ -32,12 +28,14 @@ export type CantoneseCourseReadiness = {
 }
 
 export function resolveCantoneseCourseReadiness(input: {
+  lessonIds?: readonly string[]
   teaching: TeachingRow[]
   questions: QuestionRow[]
   readyAudioIds: ReadonlySet<string>
   visibleQuestionIds: ReadonlySet<string>
 }): CantoneseCourseReadiness[] {
-  return CANTONESE_LESSON_IDS.map((lessonId) => {
+  const lessonIds = input.lessonIds ?? [...new Set([...input.teaching, ...input.questions].map((row) => row.lessonId))].sort()
+  return lessonIds.map((lessonId) => {
     // Rejected drafts are not intended for this lesson's eventual release.
     const teaching = input.teaching.filter((row) => row.lessonId === lessonId && row.status !== 'REJECTED')
     const questions = input.questions.filter((row) => row.lessonId === lessonId && row.status !== 'REJECTED')
