@@ -99,4 +99,5 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/anywhere-door': 'social_manage',
   '/admin/salon': 'post_manage',
   '/admin/beta-access': 'beta_access_manage',
+  '/admin/cantonese': 'cantonese_review',
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { isBatchApprovalAllowed, parseCantoneseReviewEntityType, safeReviewIdentifier, safeReviewReason } from '@/lib/cantonese-review'
 import { teachingAudioReady } from '@/lib/cantonese-content-admin'
-import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION } from '@/lib/cantonese-jyutping-review'
+import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION, isLatestJyutpingVerification } from '@/lib/cantonese-jyutping-review'
 import { requireRequestAdmin } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
@@ -44,10 +44,10 @@ export async function POST(request: Request) {
           if (!current) { missing.push(id); continue }
           if (action === 'approve') {
             const digest = cantoneseJyutpingReviewDigest(current.displayText, current.jyutping)
-            const verified = digest && (current.requiresAudio || current.requiresSpeaking)
-              ? await tx.cantoneseReviewLog.findFirst({ where: { targetType: 'TEACHING', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, reason: digest }, select: { id: true } })
-              : null
-            if ((current.requiresAudio || current.requiresSpeaking) && !verified) { blocked.push(id); continue }
+            const verificationLogs = digest && (current.requiresAudio || current.requiresSpeaking)
+              ? await tx.cantoneseReviewLog.findMany({ where: { targetType: 'TEACHING', targetId: id, action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] }, reason: digest }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { action: true, reason: true, createdAt: true } })
+              : []
+            if ((current.requiresAudio || current.requiresSpeaking) && !isLatestJyutpingVerification(verificationLogs, digest)) { blocked.push(id); continue }
             const audio = current.audioId && current.requiresAudio
               ? await tx.cantoneseAudioAsset.findUnique({ where: { externalId: current.audioId } })
               : null

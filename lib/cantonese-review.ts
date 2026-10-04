@@ -7,7 +7,7 @@ export const CANTONESE_REVIEW_STATUSES = [
 
 export type CantoneseReviewStatus = (typeof CANTONESE_REVIEW_STATUSES)[number]
 export type CantoneseReviewEntityType = 'teaching' | 'question' | 'audio'
-export type CantoneseReviewAction = 'approve' | 'reject' | 'edit' | 'mark-needs-regeneration' | 'verify-jyutping'
+export type CantoneseReviewAction = 'approve' | 'reject' | 'edit' | 'mark-needs-regeneration' | 'verify-jyutping' | 'revoke-jyutping'
 
 export function parseCantoneseReviewStatus(value: string | null): CantoneseReviewStatus | 'ALL' {
   if (value === 'ALL') return 'ALL'
@@ -19,14 +19,14 @@ export function parseCantoneseReviewEntityType(value: string | null): CantoneseR
 }
 
 export function parseCantoneseReviewAction(value: unknown): CantoneseReviewAction | null {
-  return value === 'approve' || value === 'reject' || value === 'edit' || value === 'mark-needs-regeneration' || value === 'verify-jyutping'
+  return value === 'approve' || value === 'reject' || value === 'edit' || value === 'mark-needs-regeneration' || value === 'verify-jyutping' || value === 'revoke-jyutping'
     ? value
     : null
 }
 
 export function nextCantoneseReviewStatus(
   current: CantoneseReviewStatus,
-  action: Exclude<CantoneseReviewAction, 'mark-needs-regeneration' | 'verify-jyutping'>,
+  action: Exclude<CantoneseReviewAction, 'mark-needs-regeneration' | 'verify-jyutping' | 'revoke-jyutping'>,
 ): CantoneseReviewStatus {
   if (action === 'approve') return 'APPROVED'
   if (action === 'reject') return 'REJECTED'

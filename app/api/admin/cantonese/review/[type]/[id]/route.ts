@@ -11,7 +11,7 @@ import {
   safeReviewReason,
 } from '@/lib/cantonese-review'
 import { parseContentType } from '@/lib/cantonese-content-admin'
-import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION } from '@/lib/cantonese-jyutping-review'
+import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION, isLatestJyutpingVerification } from '@/lib/cantonese-jyutping-review'
 import { validateCantoneseQuestionQuality } from '@/lib/cantonese-question-quality'
 import { requireRequestAdmin, sanitizeText } from '@/lib/security'
 
@@ -59,10 +59,12 @@ function audioFromUnion(record: NonNullable<Awaited<ReturnType<typeof prisma.can
 async function hasJyutpingVerification(tx: Prisma.TransactionClient, targetType: 'TEACHING' | 'AUDIO', targetId: string, text: string | null, jyutping: string | null) {
   const digest = cantoneseJyutpingReviewDigest(text, jyutping)
   if (!digest) return false
-  return Boolean(await tx.cantoneseReviewLog.findFirst({
-    where: { targetType, targetId, action: CANTONESE_JYUTPING_REVIEW_ACTION, reason: digest },
-    select: { id: true },
-  }))
+  const logs = await tx.cantoneseReviewLog.findMany({
+    where: { targetType, targetId, action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] }, reason: digest },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { action: true, reason: true, createdAt: true },
+  })
+  return isLatestJyutpingVerification(logs, digest)
 }
 
 export async function GET(request: Request, context: RouteContext) {
@@ -88,18 +90,28 @@ export async function GET(request: Request, context: RouteContext) {
     }),
   ])
   if (!record) return jsonError('NOT_FOUND', '审核内容不存在', 404)
-  const reviewDigest = type === 'audio' && 'text' in record
-    ? cantoneseJyutpingReviewDigest(record.text, record.jyutping)
-    : type === 'teaching' && 'displayText' in record && (record.requiresAudio || record.requiresSpeaking)
-      ? cantoneseJyutpingReviewDigest(record.displayText, record.jyutping)
+  const teachingRecord = type === 'teaching' ? record as NonNullable<Awaited<ReturnType<typeof prisma.cantoneseLessonContent.findUnique>>> : null
+  const questionRecord = type === 'question' ? record as NonNullable<Awaited<ReturnType<typeof prisma.cantoneseQuestion.findUnique>>> : null
+  const audioRecord = type === 'audio' ? record as NonNullable<Awaited<ReturnType<typeof prisma.cantoneseAudioAsset.findUnique>>> : null
+  const reviewDigest = audioRecord
+    ? cantoneseJyutpingReviewDigest(audioRecord.text, audioRecord.jyutping)
+    : teachingRecord && (teachingRecord.requiresAudio || teachingRecord.requiresSpeaking)
+      ? cantoneseJyutpingReviewDigest(teachingRecord.displayText, teachingRecord.jyutping)
       : null
-  const verified = Boolean(reviewDigest && logs.some((entry) => entry.action === CANTONESE_JYUTPING_REVIEW_ACTION && entry.reason === reviewDigest))
-  const item = type === 'audio'
-    ? { ...audioFromUnion(record as NonNullable<Awaited<ReturnType<typeof prisma.cantoneseAudioAsset.findUnique>>>), jyutpingReviewStatus: verified ? 'VERIFIED' : 'JYUTPING_REVIEW_REQUIRED' }
-    : type === 'teaching'
-      ? { ...record, jyutpingReviewStatus: reviewDigest ? (verified ? 'VERIFIED' : 'JYUTPING_REVIEW_REQUIRED') : 'NOT_REQUIRED' }
-      : record
-  return NextResponse.json({ item, logs: logs.map((entry) => entry.action === CANTONESE_JYUTPING_REVIEW_ACTION ? { ...entry, reason: '粤拼核对记录' } : entry) }, { headers: NO_STORE })
+  const verified = isLatestJyutpingVerification(logs, reviewDigest)
+  let item: Record<string, unknown> = audioRecord
+    ? { ...audioFromUnion(audioRecord), jyutpingReviewStatus: verified ? 'VERIFIED' : 'JYUTPING_REVIEW_REQUIRED' }
+    : teachingRecord
+      ? { ...teachingRecord, jyutpingReviewStatus: reviewDigest ? (verified ? 'VERIFIED' : 'JYUTPING_REVIEW_REQUIRED') : 'NOT_REQUIRED' }
+      : questionRecord || {}
+  if (teachingRecord?.audioId && teachingRecord.requiresAudio) {
+    const audio = await prisma.cantoneseAudioAsset.findUnique({ where: { externalId: teachingRecord.audioId }, select: { status: true, assetStatus: true, cosKey: true, checksum: true, fileSize: true } })
+    item = { ...item, audioReviewStatus: audio?.status || null, audioAssetStatus: audio?.assetStatus || null, audioReady: Boolean(audio?.status === 'APPROVED' && audio.assetStatus === 'READY' && audio.cosKey && audio.checksum && audio.fileSize) }
+  } else if (questionRecord?.audioId && (questionRecord.questionType === 'LISTENING' || questionRecord.questionType === 'SPEAKING')) {
+    const audio = await prisma.cantoneseAudioAsset.findUnique({ where: { externalId: questionRecord.audioId }, select: { status: true, assetStatus: true, cosKey: true, checksum: true, fileSize: true } })
+    item = { ...item, audioReviewStatus: audio?.status || null, audioAssetStatus: audio?.assetStatus || null, audioReady: Boolean(audio?.status === 'APPROVED' && audio.assetStatus === 'READY' && audio.cosKey && audio.checksum && audio.fileSize) }
+  }
+  return NextResponse.json({ item, logs: logs.map((entry) => entry.action === CANTONESE_JYUTPING_REVIEW_ACTION || entry.action === CANTONESE_JYUTPING_REVOKE_ACTION ? { ...entry, reason: '粤拼核对记录' } : entry) }, { headers: NO_STORE })
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
@@ -114,7 +126,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return jsonError('INVALID_BODY', '请求内容无效', 400)
   const action = parseCantoneseReviewAction(body.action)
-  if (!action || (action === 'mark-needs-regeneration' && type !== 'audio') || (action === 'verify-jyutping' && type === 'question')) return jsonError('INVALID_ACTION', '审核操作无效', 400)
+  if (!action || (action === 'mark-needs-regeneration' && type !== 'audio') || ((action === 'verify-jyutping' || action === 'revoke-jyutping') && type === 'question')) return jsonError('INVALID_ACTION', '审核操作无效', 400)
   const reason = body.reason === undefined ? null : safeReviewReason(body.reason)
   if (action === 'reject' && !reason) return jsonError('REJECTION_REASON_REQUIRED', '退回时必须填写原因', 400)
   if (body.reason !== undefined && !reason) return jsonError('INVALID_REASON', '审核说明无效', 400)
@@ -125,11 +137,18 @@ export async function PATCH(request: Request, context: RouteContext) {
         const current = await tx.cantoneseLessonContent.findUnique({ where: { externalId: id } })
         if (!current) return null
         const update: Prisma.CantoneseLessonContentUpdateInput = {}
-        if (action === 'verify-jyutping') {
+        if (action === 'verify-jyutping' || action === 'revoke-jyutping') {
           const digest = cantoneseJyutpingReviewDigest(current.displayText, current.jyutping)
           if (!digest) throw new Error('JYUTPING_REVIEW_REQUIRED')
-          await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'TEACHING', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, oldStatus: current.status, newStatus: current.status, reason: digest } })
-          return current
+          if (action === 'verify-jyutping') {
+            await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'TEACHING', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, oldStatus: current.status, newStatus: current.status, reason: digest } })
+            return current
+          }
+          const record = current.status === 'APPROVED'
+            ? await tx.cantoneseLessonContent.update({ where: { externalId: id }, data: { status: 'CONTENT_REVIEW_REQUIRED', reviewer: { disconnect: true }, reviewedAt: null, reviewNote: null } })
+            : current
+          await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'TEACHING', targetId: id, action: CANTONESE_JYUTPING_REVOKE_ACTION, oldStatus: current.status, newStatus: record.status, reason: digest } })
+          return record
         } else if (action === 'edit') {
           const title = boundedText(body.title, 255, true)
           const lessonId = boundedText(body.lessonId, 32, true)
@@ -256,11 +275,18 @@ export async function PATCH(request: Request, context: RouteContext) {
       const current = await tx.cantoneseAudioAsset.findUnique({ where: { externalId: id } })
       if (!current) return null
       const update: Prisma.CantoneseAudioAssetUpdateInput = {}
-      if (action === 'verify-jyutping') {
+      if (action === 'verify-jyutping' || action === 'revoke-jyutping') {
         const digest = cantoneseJyutpingReviewDigest(current.text, current.jyutping)
         if (!digest) throw new Error('JYUTPING_REVIEW_REQUIRED')
-        await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'AUDIO', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, oldStatus: current.status, newStatus: current.status, reason: digest } })
-        return safeAudio(current)
+        if (action === 'verify-jyutping') {
+          await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'AUDIO', targetId: id, action: CANTONESE_JYUTPING_REVIEW_ACTION, oldStatus: current.status, newStatus: current.status, reason: digest } })
+          return safeAudio(current)
+        }
+        const record = current.status === 'APPROVED'
+          ? await tx.cantoneseAudioAsset.update({ where: { externalId: id }, data: { status: 'CONTENT_REVIEW_REQUIRED', reviewer: { disconnect: true }, reviewedAt: null, reviewNote: null } })
+          : current
+        await tx.cantoneseReviewLog.create({ data: { reviewer: { connect: { id: guard.user.id } }, targetType: 'AUDIO', targetId: id, action: CANTONESE_JYUTPING_REVOKE_ACTION, oldStatus: current.status, newStatus: record.status, reason: digest } })
+        return safeAudio(record)
       } else if (action === 'edit') {
         const spokenText = boundedText(body.text, 4000, true)
         const jyutping = boundedText(body.jyutping, 255)

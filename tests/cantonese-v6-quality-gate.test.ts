@@ -27,7 +27,7 @@ test('audio generation and single/batch approval enforce the Jyutping quality ga
   assert.match(detail, /AUDIO_CONTENT_MISMATCH/)
   assert.match(detail, /validateCantoneseQuestionQuality/)
   assert.match(batch, /CANTONESE_JYUTPING_REVIEW_ACTION/)
-  assert.match(batch, /if \(\(current\.requiresAudio \|\| current\.requiresSpeaking\) && !verified\) \{ blocked\.push\(id\); continue \}/)
+  assert.match(batch, /isLatestJyutpingVerification\(verificationLogs, digest\)/)
   assert.match(batch, /teachingAudioReady/)
 })
 

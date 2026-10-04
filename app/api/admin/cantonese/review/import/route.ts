@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireRequestAdmin } from '@/lib/security'
-import { parseCandidateImport } from '@/lib/cantonese-candidate-import'
+import { parseCantoneseSeedRequest } from '@/lib/cantonese-course-pack-request'
 import { planSeedRows } from '@/lib/cantonese-seed-import'
 
 export const dynamic = 'force-dynamic'
@@ -13,7 +13,11 @@ export async function POST(request: Request) {
   if (guard.user.role !== 'ADMIN' && guard.user.role !== 'SUPER_ADMIN') {
     return NextResponse.json({ ok: false, code: 'FORBIDDEN' }, { status: 403, headers: NO_STORE })
   }
-  const parsed = parseCandidateImport(await request.text().catch(() => ''))
+  const rawBody = await request.text().catch(() => '')
+  let confirmation: unknown = null
+  try { confirmation = (JSON.parse(rawBody) as Record<string, unknown>).confirmed } catch { /* Parser returns a controlled body error. */ }
+  if (confirmation !== true) return NextResponse.json({ ok: false, code: 'IMPORT_CONFIRMATION_REQUIRED' }, { status: 400, headers: NO_STORE })
+  const parsed = parseCantoneseSeedRequest(rawBody)
   if (parsed instanceof NextResponse) return parsed
   const { definitions, teaching, questions, audio, selectedLessonId, updateExistingCandidates } = parsed
   try {
@@ -83,10 +87,31 @@ export async function POST(request: Request) {
           questions: questionPlan.filter((row) => row.decision === 'UPDATE_AVAILABLE').length,
           audio: audioPlan.filter((row) => row.decision === 'UPDATE_AVAILABLE').length,
         },
+        unchanged: {
+          definitions: definitionPlan.filter((row) => row.decision === 'SKIPPED_EXISTING').length,
+          teaching: teachingPlan.filter((row) => row.decision === 'SKIPPED_EXISTING').length,
+          questions: questionPlan.filter((row) => row.decision === 'SKIPPED_EXISTING').length,
+          audio: audioPlan.filter((row) => row.decision === 'SKIPPED_EXISTING').length,
+        },
+        blocked: {
+          definitions: 0,
+          teaching: teachingPlan.filter((row) => row.decision === 'AUDIO_ASSET_REVIEW_REQUIRED').length,
+          questions: questionPlan.filter((row) => row.decision === 'AUDIO_ASSET_REVIEW_REQUIRED').length,
+          audio: audioPlan.filter((row) => row.decision === 'AUDIO_ASSET_REVIEW_REQUIRED').length,
+        },
       }
     })
-    return NextResponse.json({ ...counts, selectedLessonId, status: 'CONTENT_REVIEW_REQUIRED', existingRecordsPreserved: true }, { headers: NO_STORE })
+    const sum = (groups: Record<string, number>) => Object.values(groups).reduce((total, value) => total + value, 0)
+    const result = {
+      created: sum(counts.imported),
+      updated: sum(counts.updated),
+      skippedAlreadyApproved: sum(counts.skippedAlreadyApproved),
+      unchanged: sum(counts.unchanged),
+      blocked: sum(counts.blocked),
+      failed: 0,
+    }
+    return NextResponse.json({ ...counts, result, selectedLessonId, status: 'CONTENT_REVIEW_REQUIRED', existingRecordsPreserved: true }, { headers: NO_STORE })
   } catch {
-    return NextResponse.json({ ok: false, code: 'CANDIDATE_IMPORT_FAILED' }, { status: 500, headers: NO_STORE })
+    return NextResponse.json({ ok: false, code: 'CANDIDATE_IMPORT_FAILED', result: { created: 0, updated: 0, skippedAlreadyApproved: 0, unchanged: 0, blocked: 0, failed: 1 } }, { status: 500, headers: NO_STORE })
   }
 }

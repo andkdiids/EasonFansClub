@@ -1,6 +1,18 @@
 import { createHash } from 'node:crypto'
 
 export const CANTONESE_JYUTPING_REVIEW_ACTION = 'VERIFY_JYUTPING'
+export const CANTONESE_JYUTPING_REVOKE_ACTION = 'REVOKE_JYUTPING'
+
+export type CantoneseJyutpingReviewEvent = { action: string; reason: string | null; createdAt?: Date | string }
+
+/** The latest event for an exact text+Jyutping digest determines its state. */
+export function isLatestJyutpingVerification(logs: CantoneseJyutpingReviewEvent[], digest: string | null) {
+  if (!digest) return false
+  const latest = logs
+    .filter((entry) => (entry.action === CANTONESE_JYUTPING_REVIEW_ACTION || entry.action === CANTONESE_JYUTPING_REVOKE_ACTION) && entry.reason === digest)
+    .sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime())[0]
+  return latest?.action === CANTONESE_JYUTPING_REVIEW_ACTION
+}
 
 /** Hash the reviewed transcription itself so later edits cannot inherit approval. */
 export function cantoneseJyutpingReviewDigest(text: string | null | undefined, jyutping: string | null | undefined) {

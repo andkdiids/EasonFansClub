@@ -11,7 +11,7 @@ import {
 } from '@/lib/cantonese-foundation-audio'
 import { publicAudioAsset } from '@/lib/cantonese-content-admin'
 import { safeReviewIdentifier } from '@/lib/cantonese-review'
-import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION } from '@/lib/cantonese-jyutping-review'
+import { cantoneseJyutpingReviewDigest, CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION, isLatestJyutpingVerification } from '@/lib/cantonese-jyutping-review'
 import { requireRequestAdmin } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -33,11 +33,12 @@ export async function POST(request: Request, context: RouteContext) {
   const current = await prisma.cantoneseAudioAsset.findUnique({ where: { externalId: audioId } })
   if (!current) return error('AUDIO_NOT_FOUND', '音频资源不存在', 404)
   const jyutpingDigest = cantoneseJyutpingReviewDigest(current.text, current.jyutping)
-  const jyutpingReview = jyutpingDigest ? await prisma.cantoneseReviewLog.findFirst({
-    where: { targetType: 'AUDIO', targetId: audioId, action: CANTONESE_JYUTPING_REVIEW_ACTION, reason: jyutpingDigest },
-    select: { id: true },
-  }) : null
-  if (!current.text.trim() || !current.jyutping?.trim() || !jyutpingReview) {
+  const jyutpingEvents = jyutpingDigest ? await prisma.cantoneseReviewLog.findMany({
+    where: { targetType: 'AUDIO', targetId: audioId, action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] }, reason: jyutpingDigest },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { action: true, reason: true, createdAt: true },
+  }) : []
+  if (!current.text.trim() || !current.jyutping?.trim() || !isLatestJyutpingVerification(jyutpingEvents, jyutpingDigest)) {
     return error('JYUTPING_REVIEW_REQUIRED', '请先核对粤拼，再生成标准音频', 409)
   }
   const staleGenerationBefore = new Date(Date.now() - 10 * 60 * 1000)

@@ -21,6 +21,7 @@ test('review filters accept only known states and types', () => {
   assert.equal(parseCantoneseReviewEntityType('teaching'), 'teaching')
   assert.equal(parseCantoneseReviewEntityType('other'), null)
   assert.equal(parseCantoneseReviewAction('mark-needs-regeneration'), 'mark-needs-regeneration')
+  assert.equal(parseCantoneseReviewAction('revoke-jyutping'), 'revoke-jyutping')
   assert.equal(parseCantoneseReviewAction('delete'), null)
 })
 
@@ -72,7 +73,7 @@ test('candidate import is admin-only, inserts only planned new rows, and never i
   const route = read('app/api/admin/cantonese/review/import/route.ts')
   const parser = read('lib/cantonese-candidate-import.ts')
   assert.match(route, /requireRequestAdmin\(request, 'cantonese_review'\)/)
-  assert.match(route, /parseCandidateImport\(/)
+  assert.match(route, /parseCantoneseSeedRequest\(/)
   assert.match(route, /teachingPlan\.filter\(\(row\) => row\.decision === 'CREATE_PENDING'\)/)
   assert.match(route, /questionPlan\.filter\(\(row\) => row\.decision === 'CREATE_PENDING'\)/)
   assert.match(route, /audioPlan\.filter\(\(row\) => row\.decision === 'CREATE_PENDING'\)/)

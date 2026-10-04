@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireRequestAdmin } from '@/lib/security'
-import { parseCandidateImport } from '@/lib/cantonese-candidate-import'
+import { parseCantoneseSeedRequest } from '@/lib/cantonese-course-pack-request'
 import { planSeedRows } from '@/lib/cantonese-seed-import'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   if (!/^[a-zA-Z0-9._:-]{1,191}$/.test(targetId)) return NextResponse.json({ ok: false, code: 'INVALID_TARGET' }, { status: 400, headers: NO_STORE })
   const expectedUpdatedAt = new Date(body.expectedUpdatedAt)
   if (Number.isNaN(expectedUpdatedAt.getTime())) return NextResponse.json({ ok: false, code: 'INVALID_VERSION' }, { status: 400, headers: NO_STORE })
-  const parsed = parseCandidateImport(raw)
+  const parsed = parseCantoneseSeedRequest(raw)
   if (parsed instanceof NextResponse) return parsed
   const rows = type === 'definition' ? parsed.definitions : type === 'teaching' ? parsed.teaching : type === 'question' ? parsed.questions : parsed.audio
   const key = type === 'definition' ? 'lessonId' : 'externalId'

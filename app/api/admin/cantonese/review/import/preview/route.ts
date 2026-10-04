@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireRequestAdmin } from '@/lib/security'
-import { parseCandidateImport } from '@/lib/cantonese-candidate-import'
+import { parseCantoneseSeedRequest } from '@/lib/cantonese-course-pack-request'
+import { getCantoneseSeedPackPreview } from '@/lib/cantonese-seed-pack-preview'
 import { planSeedRows, summarizeSeedPlan } from '@/lib/cantonese-seed-import'
 
 export const dynamic = 'force-dynamic'
@@ -13,7 +14,18 @@ export async function POST(request: Request) {
   if (guard.user.role !== 'ADMIN' && guard.user.role !== 'SUPER_ADMIN') {
     return NextResponse.json({ ok: false, code: 'FORBIDDEN' }, { status: 403, headers: NO_STORE })
   }
-  const parsed = parseCandidateImport(await request.text().catch(() => ''))
+  const rawBody = await request.text().catch(() => '')
+  let body: Record<string, unknown> | null = null
+  try {
+    const value = JSON.parse(rawBody) as unknown
+    if (value && typeof value === 'object' && !Array.isArray(value)) body = value as Record<string, unknown>
+  } catch { /* Existing parser returns a controlled validation response below. */ }
+  if (typeof body?.packId === 'string') {
+    const preview = await getCantoneseSeedPackPreview(body.packId)
+    if (!preview) return NextResponse.json({ ok: false, code: 'UNKNOWN_COURSE_PACK' }, { status: 404, headers: NO_STORE })
+    return NextResponse.json({ ...preview, selectedLessonId: body.packId, status: 'CONTENT_REVIEW_REQUIRED' }, { headers: NO_STORE })
+  }
+  const parsed = parseCantoneseSeedRequest(rawBody)
   if (parsed instanceof NextResponse) return parsed
   const { definitions, teaching, questions, audio, selectedLessonId } = parsed
   const [existingDefinitions, existingTeaching, existingQuestions, existingAudio] = await Promise.all([
