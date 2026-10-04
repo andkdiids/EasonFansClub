@@ -24,6 +24,41 @@ log_step() {
   printf '\n===== [deploy %s] %s =====\n' "$1" "$2"
 }
 
+fetch_exact_deploy_commit() {
+  local attempt resolved_sha
+
+  if git -C "${repo_dir}" cat-file -e "${DEPLOY_SHA}^{commit}" 2>/dev/null; then
+    resolved_sha="$(git -C "${repo_dir}" rev-parse "${DEPLOY_SHA}^{commit}" 2>/dev/null || true)"
+    if [ "${resolved_sha}" = "${DEPLOY_SHA}" ]; then
+      echo "SERVER_GIT_CACHE_HIT=YES"
+      return 0
+    fi
+  fi
+
+  for attempt in 1 2 3; do
+    echo "FETCH_ATTEMPT=${attempt}/3"
+    if git -C "${repo_dir}" fetch --no-tags --prune origin "${DEPLOY_SHA}"; then
+      resolved_sha="$(git -C "${repo_dir}" rev-parse "${DEPLOY_SHA}^{commit}" 2>/dev/null || true)"
+      if [ "${resolved_sha}" = "${DEPLOY_SHA}" ]; then
+        echo "SERVER_GIT_FETCH=OK"
+        return 0
+      fi
+      echo "Exact SHA fetch attempt ${attempt}/3 did not resolve to DEPLOY_SHA." >&2
+    else
+      echo "Exact SHA fetch attempt ${attempt}/3 failed." >&2
+    fi
+
+    if [ "${attempt}" -eq 1 ]; then
+      sleep 5
+    elif [ "${attempt}" -eq 2 ]; then
+      sleep 15
+    fi
+  done
+
+  echo "SERVER_GIT_ACCESS=NOT_READY: unable to fetch exact ${DEPLOY_SHA} from origin after 3 attempts." >&2
+  return 1
+}
+
 if [ "${APP_DIR}" != "/home/apps/easonfansclub" ]; then
   die "Refusing an unexpected production application directory: ${APP_DIR}"
 fi
@@ -235,11 +270,7 @@ echo "Release SHA: ${DEPLOY_SHA}"
 echo "Previous release: ${previous_target}"
 
 log_step "2/8" "Fetch the exact GitHub commit into the server-side cache"
-if ! git -C "${repo_dir}" fetch --no-tags --prune origin "${DEPLOY_SHA}"; then
-  die "SERVER_GIT_ACCESS=NOT_READY: unable to fetch ${DEPLOY_SHA} from origin."
-fi
-resolved_sha="$(git -C "${repo_dir}" rev-parse "${DEPLOY_SHA}^{commit}" 2>/dev/null || true)"
-[ "${resolved_sha}" = "${DEPLOY_SHA}" ] || die "Fetched commit does not resolve to DEPLOY_SHA."
+fetch_exact_deploy_commit || die "Exact deployment commit fetch failed."
 
 log_step "3/8" "Create an isolated release worktree"
 git -C "${repo_dir}" worktree add --detach "${release_dir}" "${DEPLOY_SHA}"
