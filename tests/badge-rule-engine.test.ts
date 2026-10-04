@@ -39,7 +39,7 @@ test('规则输入只接受受控类型、正整数阈值，首版后台只开�
 })
 
 test('规则注册表统一提供指标、文案、阈值、操作符和事件映射', () => {
-  assert.equal(BADGE_RULE_TYPES.length, 20)
+  assert.equal(BADGE_RULE_TYPES.length, 21)
   for (const ruleType of BADGE_RULE_TYPES) {
     const definition = BADGE_RULE_REGISTRY[ruleType]
     assert.equal(definition.metricLoader, ruleType)

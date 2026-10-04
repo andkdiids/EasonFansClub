@@ -10,6 +10,8 @@ import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '
 import { prisma } from '@/lib/prisma'
 import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
+import { normalizeTopicActivityConfig } from '@/lib/topic-activity-config'
+import { syncActivityPostInTransaction } from '@/lib/topic-activity'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,7 +90,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
     getActivityRegistrationQuestions(prisma, activityId),
     prisma.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { badgeId: true, enabled: true, badgeGrantAt: true, Badge: { select: { id: true, name: true, code: true } } } }),
   ])
-  return NextResponse.json({ activity: serializeActivityRow(activity), registrationQuestions: questions, activityReward: reward ? { badgeId: reward.badgeId, enabled: reward.enabled, badgeGrantAt: reward.badgeGrantAt?.toISOString() || null, badge: reward.Badge } : null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  return NextResponse.json({ activity: serializeActivityRow(activity, new Date(), true), registrationQuestions: questions, activityReward: reward ? { badgeId: reward.badgeId, enabled: reward.enabled, badgeGrantAt: reward.badgeGrantAt?.toISOString() || null, badge: reward.Badge } : null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
@@ -104,6 +106,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
   const normalized = normalizeActivityInput(body, editableActivity(current))
   if (!normalized.valid) return NextResponse.json({ message: normalized.message }, { status: 400 })
+  const currentRewardBadgeIds = Array.isArray(current.rewardBadgeIds) ? current.rewardBadgeIds.filter((id): id is string => typeof id === 'string') : []
+  const existingTopicConfig = {
+    pinToPlaza: current.pinToPlaza,
+    participationRule: current.participationRule,
+    rewardGrantMode: current.rewardGrantMode,
+    rewardGrantAt: current.rewardGrantAt,
+    rewardPoints: current.rewardPoints,
+    rewardBadgeIds: currentRewardBadgeIds,
+  }
+  const topicConfig = normalizeTopicActivityConfig(input, normalized.value.type, existingTopicConfig)
+  if (!topicConfig.valid) return NextResponse.json({ message: topicConfig.message }, { status: 400 })
+  if (normalized.value.type === 'TOPIC_ACTIVITY' && normalized.value.status === 'PUBLISHED' && !topicConfig.value.participationRule) return NextResponse.json({ message: '请填写话题活动参与方式' }, { status: 400 })
+  if (topicConfig.value.participationRule && (await checkBannedWords(topicConfig.value.participationRule)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   if (current.status === 'CANCELLED' && normalized.value.status !== 'CANCELLED') {
     return NextResponse.json({ code: 'ACTIVITY_CANCELLED', message: '已取消的活动不能恢复或重新发布' }, { status: 409 })
   }
@@ -116,7 +131,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     if (existingReward) return NextResponse.json({ message: '该活动已配置隐藏奖励，请先清除奖励或选择核销方式' }, { status: 400 })
   }
 
-  const fields = changedFields(editableActivity(current), normalized.value)
+  const fields = [
+    ...changedFields(editableActivity(current), normalized.value),
+    ...(current.pinToPlaza !== topicConfig.value.pinToPlaza ? ['pinToPlaza'] : []),
+    ...(current.participationRule !== topicConfig.value.participationRule ? ['participationRule'] : []),
+    ...(current.rewardGrantMode !== topicConfig.value.rewardGrantMode ? ['rewardGrantMode'] : []),
+    ...(current.rewardGrantAt?.getTime() !== topicConfig.value.rewardGrantAt?.getTime() ? ['rewardGrantAt'] : []),
+    ...(current.rewardPoints !== topicConfig.value.rewardPoints ? ['rewardPoints'] : []),
+    ...(JSON.stringify(currentRewardBadgeIds) !== JSON.stringify(topicConfig.value.rewardBadgeIds) ? ['rewardBadgeIds'] : []),
+  ]
+  const rewardConfigChanged = fields.some((field) => ['rewardGrantMode', 'rewardGrantAt', 'rewardPoints', 'rewardBadgeIds'].includes(field))
+  if (rewardConfigChanged && current.type === 'TOPIC_ACTIVITY') {
+    const existingParticipationCount = await prisma.topicActivityParticipation.count({ where: { activityId } })
+    if (existingParticipationCount > 0) return NextResponse.json({ code: 'TOPIC_REWARD_LOCKED', message: '已有用户获得话题活动参与资格，奖励定义暂不能修改' }, { status: 409 })
+  }
   const now = new Date()
   const publishedAt = normalized.value.status === 'PUBLISHED'
     ? (current.status === 'PUBLISHED' ? current.publishedAt || now : now)
@@ -133,10 +161,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     const transactionResult = await prisma.$transaction(async (tx) => {
       const { linkedMaterialId, ...activityData } = normalized.value
       await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
-      const lockedCurrent = await tx.activity.findUnique({ where: { id: activityId }, select: { status: true } })
+      const lockedCurrent = await tx.activity.findUnique({ where: { id: activityId }, select: { status: true, type: true } })
       if (!lockedCurrent) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
       if (lockedCurrent.status === 'CANCELLED' && normalized.value.status !== 'CANCELLED') {
         throw new ActivityRegistrationError('ACTIVITY_CANCELLED', '已取消的活动不能恢复或重新发布', 409)
+      }
+      if (rewardConfigChanged && lockedCurrent.type === 'TOPIC_ACTIVITY') {
+        const lockedParticipationCount = await tx.topicActivityParticipation.count({ where: { activityId } })
+        if (lockedParticipationCount > 0) throw new ActivityRegistrationError('TOPIC_REWARD_LOCKED', '已有用户获得话题活动参与资格，奖励定义暂不能修改', 409)
       }
       // Cancelling is a terminal business action and must not be blocked by
       // an unrelated legacy lottery schedule that would otherwise prevent a
@@ -146,6 +178,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         where: { id: activityId },
         data: {
           ...activityData,
+          ...topicConfig.value,
           publishedAt,
           updatedById: guard.user.id,
         },
@@ -155,6 +188,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       const cancellation = updated.status === 'CANCELLED'
         ? await cancelActivityInTransaction(tx, { activityId: updated.id, adminId: guard.user.id, now })
         : null
+      if (updated.status === 'CANCELLED') {
+        await tx.topicActivityRewardGrant.updateMany({ where: { activityId: updated.id, status: { in: ['PENDING', 'FAILED'] } }, data: { status: 'CANCELLED', errorMessage: '活动已取消' } })
+        await tx.topicActivityParticipation.updateMany({ where: { activityId: updated.id, rewardStatus: { in: ['PENDING', 'FAILED', 'PARTIAL'] } }, data: { rewardStatus: 'CANCELLED' } })
+      }
+      if (topicConfig.value.rewardBadgeIds.length) {
+        const availableBadges = await tx.badge.count({ where: { id: { in: topicConfig.value.rewardBadgeIds }, isEnabled: true, isActive: true } })
+        if (availableBadges !== topicConfig.value.rewardBadgeIds.length) throw new ActivityConfigurationError('奖励勋章中包含不存在或已停用的勋章')
+      }
+      await syncActivityPostInTransaction(tx, updated.id, now)
       if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, activityId, input.registrationQuestions)
       if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, activityId, input.activityReward, normalized.value.verificationMode)
       await createAdminActionAudit(tx, {
@@ -205,7 +247,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     return NextResponse.json({
       success: true,
       activityId,
-      activity: serializeActivityRow(transactionResult.activity),
+      activity: serializeActivityRow(transactionResult.activity, new Date(), true),
       cancellation,
       ...(cancellation || {}),
     })

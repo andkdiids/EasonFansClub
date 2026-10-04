@@ -28,6 +28,13 @@ export const activitySelect = {
   contactInfo: true,
   isFeatured: true,
   isPinned: true,
+  pinToPlaza: true,
+  activityPostId: true,
+  participationRule: true,
+  rewardGrantMode: true,
+  rewardGrantAt: true,
+  rewardPoints: true,
+  rewardBadgeIds: true,
   sortOrder: true,
   viewCount: true,
   publishedAt: true,
@@ -55,7 +62,7 @@ export const activitySelect = {
 
 export type ActivityRow = Prisma.ActivityGetPayload<{ select: typeof activitySelect }>
 
-export function serializeActivityRow(row: ActivityRow, now = new Date()) {
+export function serializeActivityRow(row: ActivityRow, now = new Date(), includeRewardBadgeIds = false) {
   const { _count, ...activity } = row
   return serializeActivity({
     ...activity,
@@ -68,5 +75,5 @@ export function serializeActivityRow(row: ActivityRow, now = new Date()) {
     // Activity.signupCount is a legacy denormalized value. The relation count
     // is the source of truth for every public/admin activity read.
     signupCount: _count.ActivityRegistration,
-  }, now)
+  }, now, includeRewardBadgeIds)
 }

@@ -29,7 +29,7 @@ export default async function ActivitiesPage() {
           {hasBanner ? <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" /> : null}
           <div className="relative z-10 p-7 sm:p-10"><h1 className="text-4xl font-black">活动中心</h1><p className={`mt-4 max-w-2xl leading-8 ${hasBanner ? 'text-white/80' : 'text-[var(--foreground-muted)]'}`}>演唱会、线下聚会、线上活动和粉丝福利都会在这里发布。</p></div>
         </section>
-        <ActivitiesListClient initialActivities={activities} canCheckIn={canCheckIn} />
+        <ActivitiesListClient initialActivities={activities} canCheckIn={canCheckIn} isAuthenticated={Boolean(user)} />
       </main>
     </>
   )

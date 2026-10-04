@@ -147,6 +147,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
   if (request.method === 'GET') {
     return pathname === '/api/admin/cantonese/review'
+      || pathname === '/api/activities'
+      || /^\/api\/activities\/[^/]+$/.test(pathname)
+      || pathname === '/api/activities/me/topic-participations'
       || pathname === '/api/admin/cantonese/courses'
       || pathname === '/api/learning/cantonese/course'
       || pathname === '/api/learning/cantonese/speaking'
@@ -231,6 +234,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'PUT' || request.method === 'PATCH') {
     return (request.method === 'PATCH' && pathname === '/api/admin/review')
+      || (request.method === 'PATCH' && /^\/api\/admin\/topic-activity-submissions\/[^/]+$/.test(pathname))
       || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/courses\/lesson-\d{2,3}$/.test(pathname))
       || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname))
       || pathname === '/api/posts/draft'

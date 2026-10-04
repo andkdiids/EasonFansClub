@@ -144,7 +144,7 @@ export async function GET(request: Request) {
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
       },
-      orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ isPinned: 'desc' }, { activityPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       skip,
       take: take + 1,
       select: {
@@ -159,6 +159,7 @@ export async function GET(request: Request) {
         replyCount: true,
         viewCount: true,
         isPinned: true,
+        activityPinned: true,
         isFeatured: true,
         createdAt: true,
         expiresAt: true,
@@ -177,14 +178,16 @@ export async function GET(request: Request) {
           },
         },
         Board: { select: { name: true, slug: true } },
+        TopicActivity: { select: { id: true, type: true, title: true, endsAt: true, rewardPoints: true, rewardBadgeIds: true } },
         sticker: { select: { url: true } },
       },
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
     const equippedBadges = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id), new Date(), viewer?.id)
-    const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, PostTopic, ...post }) => ({
+    const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, PostTopic, TopicActivity, ...post }) => ({
       ...post,
+      activity: TopicActivity ? { id: TopicActivity.id, type: TopicActivity.type, title: TopicActivity.title, endsAt: TopicActivity.endsAt, rewardPoints: TopicActivity.rewardPoints, rewardBadgeCount: Array.isArray(TopicActivity.rewardBadgeIds) ? TopicActivity.rewardBadgeIds.length : 0 } : null,
       topics: PostTopic.map(({ Topic }) => Topic),
       title: publicModerationText(post.title, moderationStatus),
       author: {

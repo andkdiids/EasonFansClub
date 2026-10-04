@@ -1,25 +1,26 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { activitySelect, serializeActivityRow } from '@/lib/activity-data'
 import { getActivityRegistrationState } from '@/lib/activity-registration'
 import { activityRegistrationSelect, getActivityRegistrationQuestions, serializeActivityRegistration } from '@/lib/activity-registration'
 import { prisma } from '@/lib/prisma'
 import { getPublicActivityLotteries } from '@/lib/activity-lottery'
+import { resolveRequestAuth } from '@/lib/security'
+import { resolveTopicSubmissionStatus } from '@/lib/topic-activity'
 
 export const dynamic = 'force-dynamic'
 
 const activityIdPattern = /^[A-Za-z0-9_-]{8,128}$/
 
-export async function GET(_request: Request, { params }: { params: Promise<{ activityId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const viewer = auth.user
   const { activityId } = await params
   if (!activityIdPattern.test(activityId)) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
-  const [activity, viewer] = await Promise.all([
-    prisma.activity.findFirst({
-      where: { id: activityId, status: { in: ['PUBLISHED', 'CANCELLED'] } },
-      select: activitySelect,
-    }),
-    getCurrentUser(),
-  ])
+  const activity = await prisma.activity.findFirst({
+    where: { id: activityId, status: { in: ['PUBLISHED', 'CANCELLED'] } },
+    select: activitySelect,
+  })
   if (!activity) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
 
   const view = serializeActivityRow(activity)
@@ -29,6 +30,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
       : Promise.resolve(null),
     getActivityRegistrationQuestions(prisma, activityId),
   ])
+  const [topicStatusGroups, topicParticipation] = view.type === 'TOPIC_ACTIVITY' && viewer
+    ? await Promise.all([
+        prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId, userId: viewer.id }, _count: { _all: true } }),
+        prisma.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId, userId: viewer.id } }, select: { approvedSubmissionCount: true, rewardStatus: true, rewardEligibleAt: true, rewardGrantedAt: true } }),
+      ])
+    : [[], null] as const
+  const topicCounts = { total: 0, pending: 0, approved: 0, rejected: 0 }
+  for (const row of topicStatusGroups) {
+    topicCounts.total += row._count._all
+    if (row.status === 'PENDING') topicCounts.pending = row._count._all
+    if (row.status === 'APPROVED') topicCounts.approved = row._count._all
+    if (row.status === 'REJECTED') topicCounts.rejected = row._count._all
+  }
   const availability = getActivityRegistrationState(view, view.signupCount)
   const lotteries = await getPublicActivityLotteries(activityId, viewer?.id)
   const activityCancelled = view.status === 'CANCELLED'
@@ -47,5 +61,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
     registrationState: availability.state,
     canRegister: availability.canRegister && Boolean(viewer) && !activityCancelled && !isRegistered && !isCancelled && activityMaterialAvailable,
     lotteries,
-  }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
+    topicParticipation: view.type === 'TOPIC_ACTIVITY' ? {
+      status: resolveTopicSubmissionStatus(topicCounts),
+      submissionCount: topicCounts.total,
+      approvedSubmissionCount: topicCounts.approved,
+      pendingSubmissionCount: topicCounts.pending,
+      rejectedSubmissionCount: topicCounts.rejected,
+      countedInActivity: Boolean(topicParticipation?.approvedSubmissionCount),
+      rewardStatus: topicParticipation?.rewardStatus || 'NOT_ELIGIBLE',
+      rewardEligibleAt: topicParticipation?.rewardEligibleAt?.toISOString() || null,
+      rewardGrantedAt: topicParticipation?.rewardGrantedAt?.toISOString() || null,
+    } : null,
+  }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
 }

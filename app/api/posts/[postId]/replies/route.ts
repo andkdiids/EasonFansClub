@@ -8,7 +8,7 @@ import { parsePostReplyDirection, parsePostReplySort, getPostReplyOrderBy, getPo
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { enforceApiRateLimit, requireRequestUser, resolveRequestAuth, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, isAdminRole, requireRequestUser, resolveRequestAuth, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
@@ -20,6 +20,8 @@ import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 import { completeTask, resolveAndGrantWeeklyMilestonesInTransaction } from '@/lib/growth-tasks/service'
 import { getShanghaiDateKey } from '@/lib/checkin'
+import { hasAdminPermission } from '@/lib/admin-permissions'
+import { createTopicSubmissionForCommentInTransaction } from '@/lib/topic-activity'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -114,12 +116,22 @@ export async function GET(request: Request, { params }: Params) {
   })
   if (!post) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
 
-  const rootWhere = {
+  const topicActivity = await prisma.activity.findFirst({
+    where: { activityPostId: postId, type: 'TOPIC_ACTIVITY' },
+    select: { id: true, title: true, startsAt: true, endsAt: true, participationRule: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true },
+  })
+  const canReviewTopicActivity = Boolean(topicActivity && viewer && await hasAdminPermission(viewer, 'activity_manage'))
+  const requestedTopicStatus = searchParams.get('topicStatus')
+  const topicStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN']
+  if (requestedTopicStatus && (!topicActivity || !topicStatuses.includes(requestedTopicStatus))) return NextResponse.json({ message: '话题审核筛选状态不正确' }, { status: 400 })
+
+  const rootWhere: Prisma.ReplyWhereInput = {
     postId,
     parentId: null,
     isPinned: false,
     isDeleted: false,
     User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
+    ...(topicActivity && requestedTopicStatus ? { TopicActivitySubmission: { is: { activityId: topicActivity.id, status: requestedTopicStatus as 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' } } } : {}),
   }
   const total = await prisma.reply.count({ where: rootWhere })
   const totalPages = getPostReplyTotalPages(total, pageSize)
@@ -163,10 +175,27 @@ export async function GET(request: Request, { params }: Params) {
     list.push(serializeReply(child, likedIds))
     childrenByParent.set(child.parentId || '', list)
   }
-  const serializeRoot = (reply: ReplyRecord) => ({
-    ...serializeReply(reply, likedIds),
-    replies: childrenByParent.get(reply.id) || [],
-  })
+  const topicSubmissions = topicActivity && allReplies.length
+    ? await prisma.topicActivitySubmission.findMany({
+        where: { activityId: topicActivity.id, commentId: { in: allReplies.map((reply) => reply.id) } },
+        select: { id: true, userId: true, commentId: true, status: true, rejectReason: true },
+      })
+    : []
+  const topicSubmissionByComment = new Map(topicSubmissions.filter((submission) => submission.commentId).map((submission) => [submission.commentId!, submission]))
+  const topicParticipants = topicActivity && topicSubmissions.length
+    ? await prisma.topicActivityParticipation.findMany({ where: { activityId: topicActivity.id, userId: { in: [...new Set(topicSubmissions.map((submission) => submission.userId))] } }, select: { userId: true, approvedSubmissionCount: true } })
+    : []
+  const approvedCountByUser = new Map(topicParticipants.map((participant) => [participant.userId, participant.approvedSubmissionCount]))
+  const serializeRoot = (reply: ReplyRecord) => {
+    const serialized = serializeReply(reply, likedIds)
+    const submission = topicSubmissionByComment.get(reply.id)
+    const visibleToViewer = submission && (viewer?.id === reply.authorId || canReviewTopicActivity)
+    return {
+      ...serialized,
+      ...(visibleToViewer ? { topicActivitySubmission: { id: submission.id, status: submission.status, rejectReason: submission.rejectReason, alreadyCounted: (approvedCountByUser.get(submission.userId) || 0) > 0 } } : {}),
+      replies: childrenByParent.get(reply.id) || [],
+    }
+  }
 
   return NextResponse.json({
     replies: roots.map(serializeRoot),
@@ -178,6 +207,7 @@ export async function GET(request: Request, { params }: Params) {
     hasMore: safePage < totalPages,
     sort,
     direction,
+    topicActivity: topicActivity ? { id: topicActivity.id, title: topicActivity.title, startsAt: topicActivity.startsAt, endsAt: topicActivity.endsAt, participationRule: topicActivity.participationRule, rewardGrantMode: topicActivity.rewardGrantMode, rewardGrantAt: topicActivity.rewardGrantAt, rewardPoints: topicActivity.rewardPoints, rewardBadgeCount: Array.isArray(topicActivity.rewardBadgeIds) ? topicActivity.rewardBadgeIds.length : 0, canReview: canReviewTopicActivity } : null,
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
 }
 
@@ -185,6 +215,7 @@ export async function POST(request: Request, { params }: Params) {
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
+  const isActivityAdmin = isAdminRole(user.role) || await hasAdminPermission(user, 'activity_manage')
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/posts/replies',
     ip: { limit: 120, windowSeconds: 10 * 60 },
@@ -262,6 +293,9 @@ export async function POST(request: Request, { params }: Params) {
       data: { postId, authorId: user.id, content, stickerId: stickerId || null, parentId: parentId || null, floorNumber },
       include: { User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, level: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } }, }, sticker: { select: { url: true } } },
     })
+    const topicSubmission = !parentId
+      ? await createTopicSubmissionForCommentInTransaction(tx, { postId, commentId: createdReply.id, userId: user.id, isAdmin: isActivityAdmin, now })
+      : null
     if (requestedMentions.length) await tx.replyMention.createMany({ data: requestedMentions.map((mention) => ({ replyId: createdReply.id, mentionerId: user.id, mentionedUserId: mention.userId, startIndex: mention.startIndex, endIndex: mention.endIndex, displayText: mention.displayText })) })
     await tx.post.update({ where: { id: postId }, data: { replyCount: { increment: 1 } }, select: { id: true } })
     await tx.friendActivity.create({ data: { actorId: user.id, type: 'COMMENT', content: stickerId ? '[表情]' : textContent, targetUrl: `/posts/${postId}?focus=${createdReply.id}` } })
@@ -272,13 +306,13 @@ export async function POST(request: Request, { params }: Params) {
       await completeTask(tx, { userId: user.id, taskCode: 'FIRST_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
       await completeTask(tx, { userId: post.authorId, taskCode: 'FIRST_RECEIVED_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
     }
-    return { createdReply, floorNumber, rewardPoints: communityReward.commenterRewardPoints, weeklyMilestoneRewards: weeklyMilestones.rewards, points: weeklyMilestones.balance, notificationRecipientIds: [...requestedMentions.map((mention) => mention.userId), ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : [])] }
+    return { createdReply, topicSubmission, floorNumber, rewardPoints: communityReward.commenterRewardPoints, weeklyMilestoneRewards: weeklyMilestones.rewards, points: weeklyMilestones.balance, notificationRecipientIds: [...requestedMentions.map((mention) => mention.userId), ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : [])] }
   }, { timeout: 15_000, maxWait: 5_000 })
 
   if ('unavailable' in reply) return NextResponse.json({ message: '帖子不存在或当前不允许回复' }, { status: 404 })
   if ('duplicateReplyId' in reply) return NextResponse.json({ message: '相同回复正在处理中，请勿重复提交', replyId: reply.duplicateReplyId }, { status: 409 })
 
-  const { createdReply, floorNumber, rewardPoints, weeklyMilestoneRewards, points } = reply
+  const { createdReply, topicSubmission, floorNumber, rewardPoints, weeklyMilestoneRewards, points } = reply
   // The comment transaction has committed. Region resolution and attribution
   // are best-effort secondary work and cannot change the comment result.
   const ipLocation = await resolveIpLocation(request).catch(() => null)
@@ -313,6 +347,7 @@ export async function POST(request: Request, { params }: Params) {
         if (!friend) return []
         return [{ id: `${createdReply.id}:${friend.id}`, startIndex: mention.startIndex, endIndex: mention.endIndex, user: { id: friend.id, uid: friend.uid, name: getPublicUserDisplayName(friend) } }]
       }),
+      ...(topicSubmission ? { topicActivitySubmission: topicSubmission } : {}),
     },
     rewardPoints,
     weeklyMilestoneRewards,
