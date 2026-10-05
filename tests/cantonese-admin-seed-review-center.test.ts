@@ -37,6 +37,9 @@ test('course pack list and preview are driven by the pack registry, and preview 
   assert.match(previewService, /approvedSkipped/)
   assert.match(previewService, /UPDATE_AVAILABLE/)
   assert.match(previewService, /SKIPPED_ALREADY_APPROVED/)
+  // Structured confirmation records and linked audio share the reviewed teaching source.
+  assert.doesNotMatch(previewService, /reason: \{ in:/)
+  assert.match(previewService, /candidateJyutpingVerified\('TEACHING', candidate\.contentId/)
 })
 
 test('candidate preview exposes item-level content safely and distinguishes unreviewed Jyutping/audio', () => {
@@ -86,7 +89,8 @@ test('review UI supports status/search/lesson filters and gates audio generation
   assert.match(ui, /搜索 ID \/ 关键词/)
   assert.match(ui, /disabled=\{busy \|\| jyutpingState !== 'VERIFIED'\}/)
   assert.match(generate, /JYUTPING_REVIEW_REQUIRED/)
-  assert.match(generate, /isLatestJyutpingVerification/)
+  assert.match(generate, /resolveAudioPronunciation\(prisma, asset\)/)
+  assert.match(read('lib/cantonese-audio-pronunciation.ts'), /isLatestJyutpingVerification/)
 })
 
 test('Jyutping confirmation can be revoked using review history; latest revoke closes approval and TTS gate', () => {

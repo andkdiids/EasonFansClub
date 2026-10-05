@@ -103,7 +103,6 @@ export async function getCantoneseSeedPackPreview(lessonId: string) {
         ...(audioPairs.length ? [{ targetType: 'AUDIO', targetId: { in: audioPairs.map((row) => row.id) } }] : []),
       ],
       action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] },
-      reason: { in: [...contentPairs, ...audioPairs].map((row) => row.digest) },
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: { targetType: true, targetId: true, action: true, reason: true, createdAt: true },
@@ -130,10 +129,15 @@ export async function getCantoneseSeedPackPreview(lessonId: string) {
         ? 'VERIFIED' : candidate.jyutping ? 'JYUTPING_REVIEW_REQUIRED' : 'MISSING',
   }))
   const questionItems = publicPlan(plans.questions, 'question', audioStatus)
-  const audioItems = publicPlan(plans.audio, 'audio', (candidate) => ({
-    jyutpingReviewStatus: candidateJyutpingVerified('AUDIO', candidate.externalId || '', cantoneseJyutpingReviewDigest(candidate.text, candidate.jyutping))
-      ? 'VERIFIED' : candidate.jyutping ? 'JYUTPING_REVIEW_REQUIRED' : 'MISSING',
-  }))
+  const contentById = new Map(teaching.map((candidate) => [candidate.externalId, candidate]))
+  const audioItems = publicPlan(plans.audio, 'audio', (candidate) => {
+    const source = candidate.contentId ? contentById.get(candidate.contentId) : null
+    const sourceMatches = source && source.audioId === candidate.externalId && source.displayText === candidate.text && source.jyutping === candidate.jyutping
+    const verified = candidate.contentId
+      ? Boolean(sourceMatches && candidateJyutpingVerified('TEACHING', candidate.contentId, cantoneseJyutpingReviewDigest(candidate.text, candidate.jyutping)))
+      : candidateJyutpingVerified('AUDIO', candidate.externalId || '', cantoneseJyutpingReviewDigest(candidate.text, candidate.jyutping))
+    return { jyutpingReviewStatus: verified ? 'VERIFIED' : candidate.jyutping ? 'JYUTPING_REVIEW_REQUIRED' : 'MISSING' }
+  })
   return {
     lesson: {
       lessonId,

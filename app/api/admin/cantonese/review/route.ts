@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { parseCantoneseReviewEntityType, parseCantoneseReviewStatus, safeReviewIdentifier } from '@/lib/cantonese-review'
 import { requireRequestAdmin } from '@/lib/security'
+import { decorateAudioPronunciation } from '@/lib/cantonese-audio-pronunciation'
 import { cantoneseJyutpingReviewDigest, cantoneseJyutpingReviewStatus, CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION, isLatestJyutpingVerification } from '@/lib/cantonese-jyutping-review'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +31,7 @@ async function includeJyutpingReviewStatus<T extends { externalId: string }>(
   const digests = items.map((item) => ({ item, digest: cantoneseJyutpingReviewDigest(getText(item), getJyutping(item)) }))
     .filter((row): row is { item: T; digest: string } => Boolean(row.digest && needsReview(row.item)))
   const logs = digests.length ? await prisma.cantoneseReviewLog.findMany({
-    where: { targetType, action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] }, targetId: { in: digests.map((row) => row.item.externalId) }, reason: { in: digests.map((row) => row.digest) } },
+    where: { targetType, action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] }, targetId: { in: digests.map((row) => row.item.externalId) } },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: { targetId: true, reason: true, action: true, createdAt: true },
   }) : []
@@ -89,11 +90,11 @@ export async function GET(request: Request) {
     ])
     const decorated = await includeJyutpingReviewStatus(items, 'TEACHING', (item) => item.requiresAudio || item.requiresSpeaking, (item) => item.displayText, (item) => item.jyutping)
     const audioIds = [...new Set(decorated.filter((item) => item.requiresAudio && item.audioId).map((item) => item.audioId!))]
-    const assets = audioIds.length ? await prisma.cantoneseAudioAsset.findMany({ where: { externalId: { in: audioIds } }, select: { externalId: true, status: true, assetStatus: true, cosKey: true, checksum: true, fileSize: true } }) : []
+    const assets = audioIds.length ? await prisma.cantoneseAudioAsset.findMany({ where: { externalId: { in: audioIds } }, select: { externalId: true, text: true, jyutping: true, status: true, assetStatus: true, cosKey: true, checksum: true, fileSize: true } }) : []
     const audioById = new Map(assets.map((asset) => [asset.externalId, asset]))
     const withAudio = decorated.map((item) => {
       const asset = item.audioId ? audioById.get(item.audioId) : null
-      return { ...item, audioReviewStatus: asset?.status || null, audioAssetStatus: asset?.assetStatus || null, audioReady: Boolean(asset?.status === 'APPROVED' && asset.assetStatus === 'READY' && asset.cosKey && asset.checksum && asset.fileSize) }
+      return { ...item, audioReviewStatus: asset?.status || null, audioAssetStatus: asset?.assetStatus || null, audioReady: Boolean(asset?.status === 'APPROVED' && asset.assetStatus === 'READY' && asset.cosKey && asset.checksum && asset.fileSize && asset.text === item.displayText && asset.jyutping === item.jyutping) }
     })
     return NextResponse.json({ type, status, lessonId, source, keyword, page, pageSize: PAGE_SIZE, total, hasMore: skip + items.length < total, items: withAudio }, { headers: NO_STORE })
   }
@@ -140,6 +141,6 @@ export async function GET(request: Request) {
     prisma.cantoneseAudioAsset.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { externalId: 'asc' }], skip, take: PAGE_SIZE }),
   ])
   const items = assets.map(publicAudioAsset)
-  const decorated = await includeJyutpingReviewStatus(items, 'AUDIO', () => true, (item) => item.text, (item) => item.jyutping)
+  const decorated = await Promise.all(items.map((item) => decorateAudioPronunciation(prisma, item)))
   return NextResponse.json({ type, status, lessonId, source, keyword, page, pageSize: PAGE_SIZE, total, hasMore: skip + items.length < total, items: decorated }, { headers: NO_STORE })
 }

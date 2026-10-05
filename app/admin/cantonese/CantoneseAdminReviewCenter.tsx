@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { buildCantoneseTeachingEditPayload, hasCantoneseTeachingEditChanges, type CantoneseTeachingEditValues } from '@/lib/cantonese-admin-edit-payload'
 
 type Tab = 'packs' | 'teaching' | 'question' | 'audio'
 type Pack = {
@@ -20,6 +21,23 @@ type PackPreview = {
   writes: false
 }
 type ReviewItem = Record<string, unknown> & { externalId: string; status: string }
+type JyutpingValueSource = 'RECORDED' | 'CURRENT_DIGEST_MATCH' | 'UNAVAILABLE'
+type ReviewLog = {
+  id?: string
+  action?: string
+  kind?: string
+  type?: string
+  oldStatus?: string | null
+  newStatus?: string | null
+  reason?: string | null
+  createdAt?: string | null
+  reviewer?: { id?: string; nickname?: string | null } | null
+  jyutping?: string | null
+  beforeJyutping?: string | null
+  afterJyutping?: string | null
+  jyutpingValueSource?: JyutpingValueSource
+}
+type ReviewDetail = { item: ReviewItem; logs: ReviewLog[] }
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'packs', label: '课程候选' }, { id: 'teaching', label: '教学内容' },
@@ -49,6 +67,9 @@ const fieldLabels: Record<string, string> = {
   requiresAudio: '需要标准音频', requiresSpeaking: '启用跟读', title: '标题', prompt: '题干', options: '选项',
   correctAnswer: '正确答案', prerequisiteContentIds: '前置教学', audioId: '音频引用', section: '课程小节',
 }
+const editFields: Array<[keyof CantoneseTeachingEditValues, string]> = [
+  ['title', '标题'], ['displayText', '显示文本'], ['jyutping', '粤拼候选'], ['translation', '中文意思'], ['explanation', '教学说明'], ['usageNote', '用法说明'],
+]
 
 function text(value: unknown, fallback = '—') {
   return typeof value === 'string' && value.trim() ? value : fallback
@@ -64,6 +85,35 @@ function optionsWithAnswers(candidate: Record<string, unknown>) {
   const options = Array.isArray(candidate.options) ? candidate.options as Array<{ id?: string; text?: string }> : []
   const answers = Array.isArray(candidate.correctAnswer) ? candidate.correctAnswer.map(String) : []
   return options.map((option) => ({ ...option, correct: option.id ? answers.includes(option.id) : false }))
+}
+
+function reviewDetailKey(type: Tab, externalId: string) {
+  return `${type}:${externalId}`
+}
+
+export function reviewLogFinalJyutping(log: ReviewLog) {
+  if (log.jyutpingValueSource === 'UNAVAILABLE') return '不可用（历史记录未保存粤拼）'
+  if (Object.prototype.hasOwnProperty.call(log, 'afterJyutping')) return log.afterJyutping || '已清除'
+  if (Object.prototype.hasOwnProperty.call(log, 'jyutping')) return log.jyutping || '已清除'
+  return '不可用（历史记录未保存粤拼）'
+}
+
+export function reviewLogJyutpingDisplay(log: ReviewLog) {
+  const hasBefore = Object.prototype.hasOwnProperty.call(log, 'beforeJyutping')
+  const hasAfter = Object.prototype.hasOwnProperty.call(log, 'afterJyutping')
+  if (log.jyutpingValueSource === 'CURRENT_DIGEST_MATCH') return `当前值与历史摘要匹配：${reviewLogFinalJyutping(log)}`
+  if (hasBefore && hasAfter) return `${log.beforeJyutping || '已清除'} → ${log.afterJyutping || '已清除'}`
+  return reviewLogFinalJyutping(log)
+}
+
+function reviewLogAction(log: ReviewLog) {
+  return log.action || log.kind || log.type || '未知操作'
+}
+
+function reviewLogDate(value: string | null | undefined) {
+  if (!value) return '时间未知'
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-CN')
 }
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -90,12 +140,15 @@ export function CantoneseAdminReviewCenter() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [reviewDetails, setReviewDetails] = useState<Record<string, ReviewDetail>>({})
+  const [reviewDetailLoading, setReviewDetailLoading] = useState('')
+  const [reviewDetailErrors, setReviewDetailErrors] = useState<Record<string, string>>({})
   const [importMode, setImportMode] = useState<'new' | 'new-and-pending-updates'>('new')
   const [showImportConfirm, setShowImportConfirm] = useState(false)
   const [showAdoptConfirm, setShowAdoptConfirm] = useState<PreviewLine | null>(null)
   const [busyId, setBusyId] = useState('')
   const [editItem, setEditItem] = useState<ReviewItem | null>(null)
-  const [editValues, setEditValues] = useState<Record<string, string>>({})
+  const [editValues, setEditValues] = useState<CantoneseTeachingEditValues>({ title: '', body: '', displayText: '', jyutping: '', translation: '', explanation: '', usageNote: '' })
   const [rejectItem, setRejectItem] = useState<ReviewItem | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null)
@@ -125,6 +178,68 @@ export function CantoneseAdminReviewCenter() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '审核列表加载失败') }
     finally { setReviewLoading(false) }
   }, [tab, reviewStatus, lessonFilter, sourceFilter, search, reviewPage])
+
+  async function fetchReviewDetail(type: Tab, externalId: string) {
+    const body = await readResponse<ReviewDetail>(await fetch(`/api/admin/cantonese/review/${type}/${encodeURIComponent(externalId)}`, { cache: 'no-store' }))
+    if (!body.item || !Array.isArray(body.logs)) throw new Error('审核详情响应无效')
+    return body
+  }
+
+  async function toggleReviewItem(item: ReviewItem) {
+    const key = reviewDetailKey(tab, item.externalId)
+    if (expanded === key) {
+      setExpanded(null)
+      return
+    }
+    setExpanded(key)
+    if (reviewDetails[key] || reviewDetailLoading === key) return
+    setReviewDetailLoading(key)
+    setReviewDetailErrors((errors) => ({ ...errors, [key]: '' }))
+    try {
+      const detail = await fetchReviewDetail(tab, item.externalId)
+      setReviewDetails((details) => ({ ...details, [key]: detail }))
+    } catch (cause) {
+      setReviewDetailErrors((errors) => ({ ...errors, [key]: cause instanceof Error ? cause.message : '审核记录加载失败' }))
+    } finally {
+      setReviewDetailLoading((current) => current === key ? '' : current)
+    }
+  }
+
+  async function invalidateReviewDetails() {
+    const activeKey = expanded
+    setReviewDetails({})
+    setReviewDetailErrors({})
+    if (!activeKey) return
+    const separator = activeKey.indexOf(':')
+    const type = separator > 0 ? activeKey.slice(0, separator) : ''
+    const externalId = separator > 0 ? activeKey.slice(separator + 1) : ''
+    if (!['teaching', 'question', 'audio'].includes(type) || !externalId) {
+      setExpanded(null)
+      return
+    }
+    setReviewDetailLoading(activeKey)
+    try {
+      const detail = await fetchReviewDetail(type as Exclude<Tab, 'packs'>, externalId)
+      setReviewDetails({ [activeKey]: detail })
+    } catch (cause) {
+      setReviewDetailErrors({ [activeKey]: cause instanceof Error ? cause.message : '审核记录加载失败' })
+    } finally {
+      setReviewDetailLoading((current) => current === activeKey ? '' : current)
+    }
+  }
+
+  async function editLinkedTeaching(sourceId: string) {
+    setError('')
+    setBusyId(`edit:${sourceId}`)
+    try {
+      const detail = await fetchReviewDetail('teaching', sourceId)
+      startEdit(detail.item)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '关联教学内容加载失败')
+    } finally {
+      setBusyId((current) => current === `edit:${sourceId}` ? '' : current)
+    }
+  }
 
   useEffect(() => { void loadPacks() }, [loadPacks])
   useEffect(() => { void loadReviewItems() }, [loadReviewItems])
@@ -188,6 +303,7 @@ export function CantoneseAdminReviewCenter() {
     try {
       if (action === 'generate-audio') {
         await readResponse(await fetch(`/api/admin/cantonese/audio/${encodeURIComponent(item.externalId)}/generate`, { method: 'POST' }))
+        await invalidateReviewDetails()
         setNotice('标准音频已生成或复用；审核状态仍需单独处理。')
         await loadReviewItems()
         return
@@ -197,6 +313,7 @@ export function CantoneseAdminReviewCenter() {
       }))
       setRejectItem(null)
       setRejectReason('')
+      await invalidateReviewDetails()
       setNotice(action === 'approve' ? '审核通过。' : action === 'reject' ? '已退回并记录原因。' : action === 'verify-jyutping' ? '粤拼已确认并记录审核人和时间。' : action === 'revoke-jyutping' ? '粤拼确认已撤销。' : '操作完成。')
       await loadReviewItems()
     } catch (cause) { setError(cause instanceof Error ? cause.message : '审核操作失败') }
@@ -214,20 +331,18 @@ export function CantoneseAdminReviewCenter() {
 
   async function saveEdit() {
     if (!editItem) return
+    const payload = buildCantoneseTeachingEditPayload(editItem, editValues)
+    if (!hasCantoneseTeachingEditChanges(payload)) {
+      setEditItem(null)
+      setNotice('未检测到修改。')
+      return
+    }
     setBusyId(editItem.externalId)
     try {
-      const payload = {
-        action: 'edit', title: editValues.title, body: editValues.body, displayText: editValues.displayText || null,
-        jyutping: editValues.jyutping || null, translation: editValues.translation || null,
-        explanation: editValues.explanation || null, usageNote: editValues.usageNote || null,
-        lessonId: editItem.lessonId, stageId: editItem.stageId, stepId: editItem.stepId,
-        contentType: editItem.contentType, requiresAudio: editItem.requiresAudio === true, requiresSpeaking: editItem.requiresSpeaking === true,
-        section: editItem.section, tone: editItem.tone, sortOrder: editItem.sortOrder, examples: editItem.examples,
-        sourceReference: editItem.sourceReference, dialogueId: editItem.dialogueId, speaker: editItem.speaker,
-      }
       await readResponse(await fetch(`/api/admin/cantonese/review/teaching/${encodeURIComponent(editItem.externalId)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       }))
+      await invalidateReviewDetails()
       setEditItem(null)
       setNotice('修改已保存，并重新进入待审核。')
       await loadReviewItems()
@@ -297,14 +412,14 @@ export function CantoneseAdminReviewCenter() {
           <button onClick={() => void loadReviewItems()} className="h-9 rounded-md border border-slate-300 px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50">搜索 / 刷新</button>
         </div>
         <div className="flex items-center justify-between text-sm text-slate-600"><span>{heading} · {reviewTotal} 条</span><span>{reviewLoading ? '正在加载…' : ''}</span></div>
-        {reviewItems.length === 0 && !reviewLoading ? <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-600">暂无{heading}。课程候选可从“课程候选”标签预览。</div> : <div className="space-y-2">{reviewItems.map((item) => <ReviewCard key={item.externalId} tab={tab} item={item} expanded={expanded === item.externalId} busy={busyId === item.externalId} onToggle={() => setExpanded(expanded === item.externalId ? null : item.externalId)} onAction={(action) => action === 'reject' ? setRejectItem(item) : void reviewAction(item, action)} onEdit={() => startEdit(item)} />)}</div>}
+        {reviewItems.length === 0 && !reviewLoading ? <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-600">暂无{heading}。课程候选可从“课程候选”标签预览。</div> : <div className="space-y-2">{reviewItems.map((item) => { const detailKey = reviewDetailKey(tab, item.externalId); return <ReviewCard key={item.externalId} tab={tab} item={item} detail={reviewDetails[detailKey]} detailLoading={reviewDetailLoading === detailKey} detailError={reviewDetailErrors[detailKey]} expanded={expanded === detailKey} busy={busyId === item.externalId} onToggle={() => void toggleReviewItem(item)} onAction={(action) => action === 'reject' ? setRejectItem(item) : void reviewAction(item, action)} onEdit={() => startEdit(item)} onEditTeaching={(sourceId) => void editLinkedTeaching(sourceId)} /> })}</div>}
         <div className="flex justify-end gap-2"><button disabled={reviewPage <= 1} onClick={() => setReviewPage((page) => page - 1)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40">上一页</button><span className="px-2 py-1.5 text-sm text-slate-600">第 {reviewPage} 页</span><button disabled={reviewItems.length < 30} onClick={() => setReviewPage((page) => page + 1)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40">下一页</button></div>
       </section>}
 
       {showImportConfirm && <ConfirmDialog title="确认导入候选课程" onCancel={() => setShowImportConfirm(false)} onConfirm={() => void runImport()} busy={busyId === 'import'} confirmLabel="确认导入待审核候选"><p>导入仅创建新增候选，{importMode === 'new-and-pending-updates' ? '并更新未批准的候选内容' : '不会更新现有候选'}。</p><p className="mt-2 font-semibold">不会自动批准内容，也不会生成标准音频。已批准内容始终受保护。</p></ConfirmDialog>}
       {showAdoptConfirm && <ConfirmDialog title="采纳已批准内容的新版本？" onCancel={() => setShowAdoptConfirm(null)} onConfirm={() => void adoptCandidate(showAdoptConfirm)} busy={busyId === showAdoptConfirm.id} confirmLabel="采纳并重新审核"><p>采纳后，该条内容会退回 CONTENT_REVIEW_REQUIRED；不会自动批准。</p><p className="mt-2 break-all text-xs text-slate-500">{showAdoptConfirm.id}</p></ConfirmDialog>}
       {rejectItem && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-5 shadow-xl"><h3 className="text-lg font-bold">退回内容</h3><p className="mt-1 text-sm text-slate-600">退回必须填写原因。</p><textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} className="mt-3 min-h-28 w-full rounded-md border border-slate-300 p-3 text-sm" placeholder="填写修改意见" /><div className="mt-4 flex justify-end gap-2"><button onClick={() => setRejectItem(null)} className="rounded-md border px-3 py-2 text-sm">取消</button><button disabled={!rejectReason.trim() || busyId === rejectItem.externalId} onClick={() => void reviewAction(rejectItem, 'reject', rejectReason)} className="rounded-md bg-rose-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">确认退回</button></div></div></div>}
-      {editItem && <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/40 p-4"><div role="dialog" aria-modal="true" className="mx-auto my-8 w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-5 shadow-xl"><div className="flex items-start justify-between"><div><h3 className="text-lg font-bold">编辑教学内容</h3><p className="mt-1 text-xs text-slate-500">保存后会重新进入待审核；粤拼改动会使原确认失效。</p></div><button onClick={() => setEditItem(null)} aria-label="关闭">✕</button></div><div className="mt-4 grid gap-3 sm:grid-cols-2">{[['title', '标题'], ['displayText', '显示文本'], ['jyutping', '粤拼候选'], ['translation', '中文意思'], ['explanation', '教学说明'], ['usageNote', '用法说明']].map(([key, label]) => <label key={key} className="space-y-1 text-xs font-semibold text-slate-600">{label}<textarea rows={key === 'explanation' ? 3 : 2} value={editValues[key] || ''} onChange={(event) => setEditValues((values) => ({ ...values, [key]: event.target.value }))} className="block w-full rounded-md border border-slate-300 p-2 text-sm font-normal text-slate-900" /></label>)}</div><label className="mt-3 block space-y-1 text-xs font-semibold text-slate-600">正文<textarea rows={3} value={editValues.body || ''} onChange={(event) => setEditValues((values) => ({ ...values, body: event.target.value }))} className="block w-full rounded-md border border-slate-300 p-2 text-sm font-normal text-slate-900" /></label><div className="mt-4 flex justify-end gap-2"><button onClick={() => setEditItem(null)} className="rounded-md border px-3 py-2 text-sm">取消</button><button onClick={() => void saveEdit()} disabled={!editValues.title.trim() || !editValues.body.trim() || busyId === editItem.externalId} className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">保存并重新提交审核</button></div></div></div>}
+      {editItem && <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/40 p-4"><div role="dialog" aria-modal="true" className="mx-auto my-8 w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-5 shadow-xl"><div className="flex items-start justify-between"><div><h3 className="text-lg font-bold">编辑教学内容</h3><p className="mt-1 text-xs text-slate-500">保存后会重新进入待审核；粤拼改动会使原确认失效。</p></div><button onClick={() => setEditItem(null)} aria-label="关闭">✕</button></div><div className="mt-4 grid gap-3 sm:grid-cols-2">{editFields.map(([key, label]) => <label key={key} className="space-y-1 text-xs font-semibold text-slate-600">{label}<textarea rows={key === 'explanation' ? 3 : 2} value={editValues[key]} onChange={(event) => setEditValues((values) => ({ ...values, [key]: event.target.value }))} className="block w-full rounded-md border border-slate-300 p-2 text-sm font-normal text-slate-900" /></label>)}</div><label className="mt-3 block space-y-1 text-xs font-semibold text-slate-600">正文<textarea rows={3} value={editValues.body} onChange={(event) => setEditValues((values) => ({ ...values, body: event.target.value }))} className="block w-full rounded-md border border-slate-300 p-2 text-sm font-normal text-slate-900" /></label><div className="mt-4 flex justify-end gap-2"><button onClick={() => setEditItem(null)} className="rounded-md border px-3 py-2 text-sm">取消</button><button onClick={() => void saveEdit()} disabled={!editValues.title.trim() || !editValues.body.trim() || busyId === editItem.externalId} className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">保存并重新提交审核</button></div></div></div>}
       {importResult && <div role="status" className="fixed bottom-4 right-4 z-40 max-w-lg rounded-lg border border-slate-300 bg-white p-4 shadow-xl"><div className="flex items-center justify-between gap-4"><h3 className="font-bold">导入结果</h3><button onClick={() => setImportResult(null)} aria-label="关闭">✕</button></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><Count label="CREATED" value={Number((importResult.result as Record<string, unknown> | undefined)?.created || 0)} /><Count label="UPDATED" value={Number((importResult.result as Record<string, unknown> | undefined)?.updated || 0)} /><Count label="SKIPPED_ALREADY_APPROVED" value={Number((importResult.result as Record<string, unknown> | undefined)?.skippedAlreadyApproved || 0)} /><Count label="UNCHANGED" value={Number((importResult.result as Record<string, unknown> | undefined)?.unchanged || 0)} /><Count label="BLOCKED" value={Number((importResult.result as Record<string, unknown> | undefined)?.blocked || 0)} /><Count label="FAILED" value={Number((importResult.result as Record<string, unknown> | undefined)?.failed || 0)} /></div><details className="mt-3"><summary className="cursor-pointer text-xs text-slate-600">展开逐类型结果</summary><pre className="mt-2 max-h-52 overflow-auto rounded bg-slate-50 p-2 text-xs">{JSON.stringify(importResult, null, 2)}</pre></details></div>}
     </main>
   )
@@ -360,30 +475,43 @@ function PreviewAudioRow({ line, onAdopt, busy }: { line: PreviewLine; onAdopt: 
 
 function Field({ label, value }: { label: string; value: string }) { return <p className="break-words"><strong className="text-slate-700">{label}：</strong><span className="text-slate-600">{value}</span></p> }
 
-function ReviewCard({ tab, item, expanded, busy, onToggle, onAction, onEdit }: { tab: Tab; item: ReviewItem; expanded: boolean; busy: boolean; onToggle: () => void; onAction: (action: string) => void; onEdit: () => void }) {
-  const display = tab === 'teaching' ? text(item.displayText, text(item.title)) : tab === 'question' ? text(item.prompt) : text(item.text)
-  const needsJpt = tab === 'audio' || (tab === 'teaching' && (item.requiresAudio === true || item.requiresSpeaking === true))
-  const jyutpingState = text(item.jyutpingReviewStatus, item.jyutping ? 'JYUTPING_REVIEW_REQUIRED' : 'MISSING')
-  const audioReady = item.audioReady === true || item.assetStatus === 'READY' && item.status === 'APPROVED'
-  const approvalBlocked = (needsJpt && jyutpingState !== 'VERIFIED') || (tab === 'audio' && item.assetStatus !== 'READY') || ((item.requiresAudio === true || item.questionType === 'LISTENING' || item.questionType === 'SPEAKING') && !audioReady)
-  const options = Array.isArray(item.options) ? item.options as Array<{ id?: string; text?: string }> : []
-  const answers = Array.isArray(item.correctAnswer) ? item.correctAnswer.map(String) : []
-  return <article className="rounded-lg border border-slate-200 bg-white p-3"><button onClick={onToggle} className="block w-full text-left"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-slate-900">{display}</p><span className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px]">{item.status}</span></div><p className="mt-1 break-all font-mono text-[11px] text-slate-500">{item.externalId} · {text(item.lessonId)}</p></button>
+function ReviewCard({ tab, item, detail, detailLoading, detailError, expanded, busy, onToggle, onAction, onEdit, onEditTeaching }: { tab: Tab; item: ReviewItem; detail?: ReviewDetail; detailLoading: boolean; detailError?: string; expanded: boolean; busy: boolean; onToggle: () => void; onAction: (action: string) => void; onEdit: () => void; onEditTeaching: (sourceId: string) => void }) {
+  const currentItem = detail?.item || item
+  const display = tab === 'teaching' ? text(currentItem.displayText, text(currentItem.title)) : tab === 'question' ? text(currentItem.prompt) : text(currentItem.text)
+  const needsJpt = tab === 'audio' || (tab === 'teaching' && (currentItem.requiresAudio === true || currentItem.requiresSpeaking === true))
+  const jyutpingState = text(currentItem.jyutpingReviewStatus, currentItem.jyutping ? 'JYUTPING_REVIEW_REQUIRED' : 'MISSING')
+  const audioReady = currentItem.audioReady === false || currentItem.serverSupported === false ? false : currentItem.audioReady === true || currentItem.assetStatus === 'READY' && currentItem.status === 'APPROVED'
+  const jyutpingSourceId = tab === 'audio' && typeof currentItem.jyutpingSourceId === 'string' ? currentItem.jyutpingSourceId.trim() : ''
+  const linkedAudio = Boolean(jyutpingSourceId)
+  const pronunciationSyncBlocked = tab === 'audio' && (currentItem.pronunciationSnapshotMatches === false || currentItem.pronunciationSourceValid === false)
+  const approvalBlocked = (needsJpt && jyutpingState !== 'VERIFIED') || (tab === 'audio' && (currentItem.assetStatus !== 'READY' || !audioReady || pronunciationSyncBlocked)) || ((currentItem.requiresAudio === true || currentItem.questionType === 'LISTENING' || currentItem.questionType === 'SPEAKING') && !audioReady)
+  const options = Array.isArray(currentItem.options) ? currentItem.options as Array<{ id?: string; text?: string }> : []
+  const answers = Array.isArray(currentItem.correctAnswer) ? currentItem.correctAnswer.map(String) : []
+  return <article className="rounded-lg border border-slate-200 bg-white p-3"><button onClick={onToggle} className="block w-full text-left"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold text-slate-900">{display}</p><span className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px]">{currentItem.status}</span></div><p className="mt-1 break-all font-mono text-[11px] text-slate-500">{currentItem.externalId} · {text(currentItem.lessonId)}</p></button>
     {expanded && <div className="mt-3 border-t border-slate-100 pt-3 text-sm">
-      {tab === 'teaching' && <div className="grid gap-2 sm:grid-cols-2"><Field label="粤拼" value={text(item.jyutping, '缺失')} /><Field label="解释" value={text(item.translation, text(item.explanation))} /><Field label="类型 / 小节" value={`${text(item.contentType)} / ${text(item.section)}`} /><Field label="跟读 / 音频" value={`${pretty(item.requiresSpeaking)} / ${pretty(item.requiresAudio)}`} /></div>}
-      {tab === 'question' && <div className="space-y-2"><Field label="题型" value={text(item.questionType)} />{item.questionType === 'MULTI_SELECT' && <strong>（多选）</strong>}<ol className="list-decimal pl-5">{options.map((option) => <li key={option.id}>{text(option.text)}{option.id && answers.includes(option.id) ? <strong className="ml-2 text-emerald-800">正确</strong> : null}</li>)}</ol><Field label="解析" value={text(item.explanation)} /><Field label="前置教学" value={pretty(item.prerequisiteContentIds)} /><Field label="Audio reference" value={text(item.audioId)} />{item.questionType === 'SPEAKING' && <p className="rounded bg-slate-50 p-2">口语题不评分。</p>}</div>}
-      {tab === 'audio' && <div className="grid gap-2 sm:grid-cols-2"><Field label="音频状态" value={text(item.assetStatus)} /><Field label="粤拼" value={text(item.jyutping, '缺失')} /><Field label="来源内容" value={text(item.contentId)} /><Field label="COS 状态" value={item.serverSupported === true ? 'READY' : '未就绪'} /><audio controls preload="none" className="mt-2 w-full sm:col-span-2" src={`/api/admin/cantonese/review/audio/${encodeURIComponent(item.externalId)}/preview`} /></div>}
+      {tab === 'teaching' && <div className="grid gap-2 sm:grid-cols-2"><Field label="粤拼" value={text(currentItem.jyutping, '缺失')} /><Field label="解释" value={text(currentItem.translation, text(currentItem.explanation))} /><Field label="类型 / 小节" value={`${text(currentItem.contentType)} / ${text(currentItem.section)}`} /><Field label="跟读 / 音频" value={`${pretty(currentItem.requiresSpeaking)} / ${pretty(currentItem.requiresAudio)}`} /></div>}
+      {tab === 'question' && <div className="space-y-2"><Field label="题型" value={text(currentItem.questionType)} />{currentItem.questionType === 'MULTI_SELECT' && <strong>（多选）</strong>}<ol className="list-decimal pl-5">{options.map((option) => <li key={option.id}>{text(option.text)}{option.id && answers.includes(option.id) ? <strong className="ml-2 text-emerald-800">正确</strong> : null}</li>)}</ol><Field label="解析" value={text(currentItem.explanation)} /><Field label="前置教学" value={pretty(currentItem.prerequisiteContentIds)} /><Field label="Audio reference" value={text(currentItem.audioId)} />{currentItem.questionType === 'SPEAKING' && <p className="rounded bg-slate-50 p-2">口语题不评分。</p>}</div>}
+      {tab === 'audio' && <div className="grid gap-2 sm:grid-cols-2"><Field label="音频状态" value={text(currentItem.assetStatus)} /><Field label="粤拼" value={text(currentItem.jyutping, '缺失')} /><Field label="来源内容" value={text(currentItem.contentId)} /><Field label="COS 状态" value={currentItem.serverSupported === true ? 'READY' : '未就绪'} /><audio controls preload="none" className="mt-2 w-full sm:col-span-2" src={`/api/admin/cantonese/review/audio/${encodeURIComponent(currentItem.externalId)}/preview`} /></div>}
+      {linkedAudio && <p className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900">粤拼审核来源：关联教学内容 {jyutpingSourceId}。教学内容的确认已作为音频依据，音频无需再次确认。</p>}
       {needsJpt && <div className={`mt-3 rounded-md px-3 py-2 text-xs font-semibold ${jyutpingState === 'VERIFIED' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>粤拼状态：{jyutpingState === 'VERIFIED' ? '已确认' : jyutpingState === 'MISSING' ? '缺失' : '待人工核对'}</div>}
-      {approvalBlocked && item.status !== 'APPROVED' && <p className="mt-2 text-xs font-semibold text-rose-800">{needsJpt && jyutpingState !== 'VERIFIED' ? '请先确认粤拼，当前不能通过。' : '标准音尚未就绪，当前不能通过。'}</p>}
+      {approvalBlocked && currentItem.status !== 'APPROVED' && <p className="mt-2 text-xs font-semibold text-rose-800">{pronunciationSyncBlocked ? '音频与当前教学内容粤拼不同步，请重新生成后再审核。' : needsJpt && jyutpingState !== 'VERIFIED' ? linkedAudio ? '请先在关联教学内容确认粤拼，当前不能通过。' : '请先确认粤拼，当前不能通过。' : '标准音尚未就绪，当前不能通过。'}</p>}
+      {detailLoading && <p className="mt-3 text-xs text-slate-500">正在加载正式审核记录…</p>}
+      {detailError && <p role="alert" className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{detailError}</p>}
+      {detail && <ReviewLogList logs={detail.logs} />}
       <div className="mt-3 flex flex-wrap gap-2">
-        {needsJpt && Boolean(item.jyutping) && <button disabled={busy} onClick={() => onAction(jyutpingState === 'VERIFIED' ? 'revoke-jyutping' : 'verify-jyutping')} className="rounded-md border border-amber-300 px-3 py-1.5 text-xs font-semibold disabled:opacity-40">{jyutpingState === 'VERIFIED' ? '撤销粤拼确认' : '确认粤拼'}</button>}
+        {needsJpt && !linkedAudio && Boolean(currentItem.jyutping) && <button disabled={busy} onClick={() => onAction(jyutpingState === 'VERIFIED' ? 'revoke-jyutping' : 'verify-jyutping')} className="rounded-md border border-amber-300 px-3 py-1.5 text-xs font-semibold disabled:opacity-40">{jyutpingState === 'VERIFIED' ? '撤销粤拼确认' : '确认粤拼'}</button>}
+        {linkedAudio && <button disabled={busy} onClick={() => onEditTeaching(jyutpingSourceId)} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold">编辑来源教学内容</button>}
         {tab === 'teaching' && <button disabled={busy} onClick={onEdit} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold">编辑</button>}
         {tab === 'audio' && <button disabled={busy || jyutpingState !== 'VERIFIED'} onClick={() => onAction('generate-audio')} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold disabled:opacity-40">生成标准音频</button>}
-        <button disabled={busy || approvalBlocked || item.status === 'APPROVED'} onClick={() => onAction('approve')} className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">通过</button>
-        <button disabled={busy || item.status === 'REJECTED'} onClick={() => onAction('reject')} className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-800 disabled:opacity-40">退回</button>
+        <button disabled={busy || approvalBlocked || currentItem.status === 'APPROVED'} onClick={() => onAction('approve')} className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">通过</button>
+        <button disabled={busy || currentItem.status === 'REJECTED'} onClick={() => onAction('reject')} className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-800 disabled:opacity-40">退回</button>
       </div>
     </div>}
   </article>
+}
+
+function ReviewLogList({ logs }: { logs: ReviewLog[] }) {
+  return <section className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3"><h4 className="text-xs font-bold uppercase tracking-wide text-slate-700">正式审核记录</h4>{logs.length === 0 ? <p className="mt-2 text-xs text-slate-500">暂无正式审核记录。</p> : <ol className="mt-2 space-y-2">{logs.map((log, index) => { const reviewer = log.reviewer?.nickname?.trim() || '未知审核人'; const action = reviewLogAction(log); return <li key={log.id || `${action}-${log.createdAt || index}`} className="border-t border-slate-200 pt-2 text-xs text-slate-600 first:border-t-0 first:pt-0"><p><strong className="text-slate-800">{action}</strong><span className="mx-1">·</span>{reviewer}<span className="mx-1">·</span><time dateTime={log.createdAt || undefined}>{reviewLogDate(log.createdAt)}</time></p><p className="mt-1">最终粤拼：<strong className="text-slate-800">{reviewLogJyutpingDisplay(log)}</strong></p></li> })}</ol>}</section>
 }
 
 function ConfirmDialog({ title, children, onCancel, onConfirm, busy, confirmLabel }: { title: string; children: React.ReactNode; onCancel: () => void; onConfirm: () => void; busy: boolean; confirmLabel: string }) {

@@ -45,7 +45,7 @@ export async function POST(request: Request) {
           if (action === 'approve') {
             const digest = cantoneseJyutpingReviewDigest(current.displayText, current.jyutping)
             const verificationLogs = digest && (current.requiresAudio || current.requiresSpeaking)
-              ? await tx.cantoneseReviewLog.findMany({ where: { targetType: 'TEACHING', targetId: id, action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] }, reason: digest }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { action: true, reason: true, createdAt: true } })
+              ? await tx.cantoneseReviewLog.findMany({ where: { targetType: 'TEACHING', targetId: id, action: { in: [CANTONESE_JYUTPING_REVIEW_ACTION, CANTONESE_JYUTPING_REVOKE_ACTION] } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { action: true, reason: true, createdAt: true } })
               : []
             if ((current.requiresAudio || current.requiresSpeaking) && !isLatestJyutpingVerification(verificationLogs, digest)) { blocked.push(id); continue }
             const audio = current.audioId && current.requiresAudio
