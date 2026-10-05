@@ -29,7 +29,7 @@ export async function GET(request: Request) {
   const and: Prisma.ActivityWhereInput[] = []
   if (query) and.push({ OR: [{ title: { contains: query } }, { subtitle: { contains: query } }, { description: { contains: query } }] })
   if (['DRAFT', 'PUBLISHED', 'CANCELLED'].includes(status)) and.push({ status: status as 'DRAFT' | 'PUBLISHED' | 'CANCELLED' })
-  if (status === 'ENDED') and.push({ status: 'PUBLISHED', endsAt: { lte: new Date() } })
+  if (status === 'ENDED') and.push({ status: 'PUBLISHED', endsAt: { lt: new Date() } })
   if (activityTypeValues.includes(type as ActivityTypeValue)) and.push({ type: type as ActivityTypeValue })
   const where = and.length ? { AND: and } : undefined
 

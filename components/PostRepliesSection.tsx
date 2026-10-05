@@ -260,10 +260,10 @@ export function PostRepliesSection({
   }, [myReplies, replies])
   const tree = useMemo(() => buildReplyTree(allReplies), [allReplies])
   const replyMap = useMemo(() => buildReplyMap(allReplies), [allReplies])
-  const rootReplies = useMemo(() => tree.get(null) || [], [tree])
+  const pageRootReplies = useMemo(() => buildReplyTree(replies).get(null) || [], [replies])
   const { my: myRootReplies, visible: visibleRootReplies } = useMemo(
-    () => splitViewerPostReplyRoots(rootReplies, myReplies),
-    [myReplies, rootReplies],
+    () => splitViewerPostReplyRoots(pageRootReplies, myReplies),
+    [myReplies, pageRootReplies],
   )
 
   function buildCommentHref(nextSort: PostReplySort, nextDirection: PostReplyDirection, nextPage: number) {
@@ -311,8 +311,16 @@ export function PostRepliesSection({
   async function reviewTopicSubmission(reply: ReplyItem, status: 'APPROVED' | 'REJECTED') {
     const submission = reply.topicActivitySubmission
     if (!canReviewTopicActivity || !submission || reviewingSubmissionId) return
-    if (status === 'APPROVED' && submission.alreadyCounted && !window.confirm('该用户已计入本活动参与；本次通过不会重复累计活动次数或重复获得奖励。仍要通过这条评论吗？')) return
-    const rejectReason = status === 'REJECTED' ? window.prompt('可选：填写拒绝原因')?.trim() || '' : ''
+    let rejectReason = ''
+    if (status === 'APPROVED') {
+      const confirmation = submission.alreadyCounted
+        ? '该用户已计入本次活动。本次通过不会重复累计参与次数或重复获得活动奖励。仍要通过这条参与内容吗？'
+        : '确认通过这条参与内容？通过后，该用户将计入本次活动参与；如活动设置为立即发奖，奖励将立即发放。'
+      if (!window.confirm(confirmation)) return
+    } else {
+      rejectReason = window.prompt('可选：填写拒绝原因')?.trim() || ''
+      if (!window.confirm(`确认拒绝这条参与内容吗？${rejectReason ? `\n拒绝原因：${rejectReason}` : ''}`)) return
+    }
     setReviewingSubmissionId(submission.id)
     try {
       const response = await fetch(`/api/admin/topic-activity-submissions/${encodeURIComponent(submission.id)}`, {
@@ -397,11 +405,12 @@ export function PostRepliesSection({
   }
 
   function scrollToMyComments() {
-    const target = document.getElementById(`post-my-comments-${postId}`)
-    if (!target) return
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    target.classList.add('notification-focus-target')
-    window.setTimeout(() => target.classList.remove('notification-focus-target'), 2000)
+    const firstComment = myRootReplies[0]
+    if (!firstComment) return
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('commentId', firstComment.id)
+    const query = params.toString()
+    router.push(`${pathname}${query ? `?${query}` : ''}`, { scroll: false })
   }
 
   useEffect(() => {
@@ -572,7 +581,7 @@ export function PostRepliesSection({
                 </button>
               ) : null}
               {canDelete ? (
-                <DeleteReplyButton replyId={reply.id} label="删除" variant="text" onDeleted={(result) => removeReply(reply.id, result)} />
+              <DeleteReplyButton replyId={reply.id} label="删除" variant="text" confirmDescription={reply.topicActivitySubmission ? '这条评论属于话题活动参与内容。删除后该条参与将撤回；若用户还有其他已通过内容，活动参与仍有效。已发奖励不会自动追回。' : undefined} onDeleted={(result) => removeReply(reply.id, result)} />
               ) : null}
             </div>
             <LikeAvatars
@@ -655,7 +664,7 @@ export function PostRepliesSection({
               </button>
             ) : null}
             {canDelete ? (
-              <DeleteReplyButton replyId={reply.id} onDeleted={(result) => removeReply(reply.id, result)} />
+              <DeleteReplyButton replyId={reply.id} confirmDescription={reply.topicActivitySubmission ? '这条评论属于话题活动参与内容。删除后该条参与将撤回；若用户还有其他已通过内容，活动参与仍有效。已发奖励不会自动追回。' : undefined} onDeleted={(result) => removeReply(reply.id, result)} />
             ) : null}
             {topicActivityId && reply.topicActivitySubmission ? (
               <>
@@ -744,21 +753,9 @@ export function PostRepliesSection({
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
       ) : null}
 
-      {myRootReplies.length ? (
-        <section
-          id={`post-my-comments-${postId}`}
-          aria-labelledby={`post-my-comments-title-${postId}`}
-          className="post-replies-my-comments scroll-mt-20 space-y-3 rounded-xl border border-sky-100 bg-sky-50/40 p-3 sm:p-4"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 id={`post-my-comments-title-${postId}`} className="text-base font-black text-brand-950">我的评论（{myRootReplies.length}）</h3>
-            <button type="button" onClick={scrollToMyComments} className="text-xs font-black text-brand-700">查看我的评论</button>
-          </div>
-          <div className="space-y-3">
-            {myRootReplies.map((reply) => renderReply(reply))}
-          </div>
-        </section>
-      ) : null}
+      {myRootReplies.length ? <div id={`post-my-comments-${postId}`} className="post-replies-my-comments">
+        <button type="button" onClick={scrollToMyComments} className="text-left text-xs font-black text-brand-700">我的评论（{myRootReplies.length}） · 查看我的评论</button>
+      </div> : null}
 
       <div ref={commentsTopRef} className="post-replies-top">
         <h2 className="text-2xl font-black text-brand-950">回复 {replyCount}</h2>

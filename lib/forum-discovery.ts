@@ -94,6 +94,7 @@ export type ForumDiscoveryPost = {
     rewardGrantAt: string | null
     rewardPoints: number | null
     rewardBadgeCount: number
+    coverUrl?: string | null
   } | null
   createdAt: string
   updatedAt: string

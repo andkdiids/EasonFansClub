@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { normalizeTopicActivityConfig } from '@/lib/topic-activity-config'
 import { resolveTopicSubmissionStatus } from '@/lib/topic-activity'
+import { getActivityDisplayStatus } from '@/lib/activity'
 
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
@@ -54,6 +55,31 @@ test('评论提交流程只绑定活动主帖的一级评论并在服务端事�
   assert.match(service, /startsAt: \{ lte: input\.now \}/)
   assert.match(service, /endsAt: \{ gte: input\.now \}/)
   assert.match(route, /isAdmin: isActivityAdmin/)
+  assert.doesNotMatch(service, /if \(input\.isAdmin\) return null/)
+})
+
+test('活动结束与主动取消语义分离，结束边界严格为 now > endAt，取消只软删除帖子', () => {
+  const now = new Date('2026-10-06T00:00:00.000Z')
+  assert.equal(getActivityDisplayStatus({ status: 'PUBLISHED', endsAt: now }, now), 'ONGOING')
+  assert.equal(getActivityDisplayStatus({ status: 'PUBLISHED', endsAt: now }, new Date(now.getTime() + 1)), 'ENDED')
+  assert.equal(getActivityDisplayStatus({ status: 'CANCELLED', endsAt: new Date(now.getTime() + 1) }, now), 'CANCELLED')
+  const service = read('lib/topic-activity.ts')
+  const route = read('app/api/admin/activities/[activityId]/route.ts')
+  assert.match(service, /activity\.status === 'CANCELLED' && activity\.type === 'TOPIC_ACTIVITY'[\s\S]*isDeleted: true, deletedAt: now, activityPinned: false/)
+  assert.match(route, /topicActivityRewardGrant\.updateMany\([\s\S]*status: 'CANCELLED'/)
+  assert.match(route, /alreadyCancelled: true/)
+  assert.match(service, /endsAt: \{ lt: now \}/)
+})
+
+test('历史参与评论修复仅由管理员显式触发，批次补建按 commentId 幂等', () => {
+  const service = read('lib/topic-activity.ts')
+  const route = read('app/api/admin/activities/[activityId]/reconcile-topic-submissions/route.ts')
+  assert.match(route, /requireAdmin\('activity_manage'\)/)
+  assert.match(route, /reconcileTopicActivityCommentSubmissions/)
+  assert.match(service, /TopicActivitySubmission: \{ is: null \}/)
+  assert.match(service, /createdAt: \{ gte: activity\.startsAt, lte: activity\.endsAt \}/)
+  assert.match(service, /createMany\([\s\S]*skipDuplicates: true/)
+  assert.match(service, /FOR UPDATE/)
 })
 
 test('审核事务以活动行锁串行化，日志、聚合、单次奖励资格和回滚保护均在服务端', () => {
@@ -83,6 +109,55 @@ test('累计话题活动勋章按首次有效参与发放且不因审核回滚�
   const rule = rules.match(/TOPIC_ACTIVITY_PARTICIPATION_COUNT:\s*\{([\s\S]*?)\n  \},/)?.[1] || ''
   assert.match(rule, /supportsRetentionWhileEligible:\s*false/)
   assert.match(rule, /TOPIC_ACTIVITY_PARTICIPATION_CREATED/)
+  for (const path of ['lib/badge-metrics.ts', 'lib/badge-rule-engine.ts', 'lib/badge-historical.ts']) {
+    assert.match(read(path), /Activity: \{ type: 'TOPIC_ACTIVITY', status: \{ not: 'CANCELLED' \} \}/)
+  }
+})
+
+test('审核确认包含首次/重复参与提示，驳回和删除均需二次确认', () => {
+  const section = read('components/PostRepliesSection.tsx')
+  const deleteButton = read('components/DeleteCommentButton.tsx')
+  assert.match(section, /确认通过这条参与内容/)
+  assert.match(section, /该用户已计入本次活动/)
+  assert.match(section, /确认拒绝这条参与内容吗/)
+  assert.match(section, /已撤回/)
+  assert.match(section, /confirmDescription=\{reply\.topicActivitySubmission/)
+  assert.match(deleteButton, /确认删除评论/)
+  assert.match(deleteButton, /confirmDescription \|\| '删除后将无法恢复/)
+})
+
+test('活动帖子封面优先使用 Activity.cover，推荐和最新置顶共享到期清理', () => {
+  const forum = read('app/api/forum/discover/route.ts')
+  const posts = read('app/api/posts/route.ts')
+  const manager = read('app/admin/activities/ActivityAdminManager.tsx')
+  const badgeRoute = read('app/api/admin/activities/badges/route.ts')
+  assert.match(forum, /activityCover \|\| contentImages\[0\]/)
+  assert.match(forum, /coverUrl: true/)
+  assert.match(forum, /await expireTopicActivityPins\(new Date\(\)\)/)
+  assert.match(forum, /activePinWhere:[\s\S]*\{ isPinned: true \}, \{ activityPinned: true \}/)
+  assert.match(forum, /skip: pinOffset/)
+  assert.match(forum, /activePinCount > nextPinOffset/)
+  assert.match(forum, /for \(const row of pinRows\)/)
+  assert.match(forum, /\.filter\(\(row\) => !row\.isPinned && !row\.activityPinned\)/)
+  assert.match(forum, /orderBy: \[\{ isPinned: 'desc' \}, \{ activityPinned: 'desc' \}/)
+  assert.match(posts, /activityCover \|\| postImageCover/)
+  assert.match(posts, /coverUrl,/)
+  assert.match(badgeRoute, /Series: \{ select: \{ name: true \} \}/)
+  assert.match(manager, /badgeSearch/)
+  assert.doesNotMatch(manager, /badge\.name \} · \{badge\.code\}/)
+})
+
+test('奖励通知只在真实 GRANTED 时写到账金额，定时 job 发放后有幂等到账通知', () => {
+  const reviewRoute = read('app/api/admin/topic-activity-submissions/[submissionId]/route.ts')
+  const service = read('lib/topic-activity.ts')
+  assert.match(reviewRoute, /grant\.status === 'GRANTED'/)
+  assert.match(reviewRoute, /预计发放/)
+  assert.match(reviewRoute, /不会重复累计或发放/)
+  assert.match(reviewRoute, /activityId: result\.submission\.activityId/)
+  assert.match(service, /where: \{ id: \{ in: ids \}, rewardStatus: 'GRANTED' \}/)
+  assert.match(service, /title: '话题活动奖励已发放'/)
+  assert.match(service, /key: `topic-activity-reward:\$\{participation\.id\}`/)
+  assert.match(service, /notifyCompletedTopicActivityRewards\(rows\.map\(\(row\) => row\.participationId\)\)/)
 })
 
 test('活动广场置顶与管理员普通置顶分字段；到期与现有任务入口并存', () => {

@@ -228,7 +228,7 @@ test('只有普通分页和排序会滚到评论顶部，目标评论/回复定�
   assert.equal(shouldScrollToPostRepliesTop(null, false), false)
 })
 
-test('当前用户的一级评论单独置顶，真实置顶不变且不会重复展示', () => {
+test('我的评论快捷入口不从正常楼层流移除本人一级评论', () => {
   const pinned = { id: 'pinned', parentId: null, isPinned: true }
   const normal = { id: 'normal', parentId: null, isPinned: false }
   const myLatest = { id: 'my-latest', parentId: null, isPinned: false }
@@ -237,10 +237,11 @@ test('当前用户的一级评论单独置顶，真实置顶不变且不会重�
 
   const result = splitViewerPostReplyRoots([pinned, myPinned, normal], [myLatest, myPinned, myNested, myLatest])
   assert.deepEqual(result.my.map((reply) => reply.id), ['my-latest', 'my-pinned'])
-  assert.deepEqual(result.visible.map((reply) => reply.id), ['pinned', 'normal'])
-  assert.deepEqual(result.pinned.map((reply) => reply.id), ['pinned'])
+  assert.deepEqual(result.visible.map((reply) => reply.id), ['pinned', 'my-pinned', 'normal'])
+  assert.deepEqual(result.pinned.map((reply) => reply.id), ['pinned', 'my-pinned'])
   assert.deepEqual(result.normal.map((reply) => reply.id), ['normal'])
-  assert.equal(result.visible.some((reply) => reply.id === 'my-pinned'), false)
+  assert.equal(result.visible.some((reply) => reply.id === 'my-latest'), false)
+  assert.equal(result.visible.some((reply) => reply.id === 'my-pinned'), true)
 })
 
 test('我的评论使用独立查询，不改变普通评论分页，未登录不查询', () => {
@@ -264,7 +265,8 @@ test('我的评论使用独立查询，不改变普通评论分页，未登录�
   assert.ok(replySection.includes('initialMyReplies?: ReplyItem[]'))
   assert.ok(replySection.includes('你已经评论过这个帖子 · 查看我的评论'))
   assert.ok(replySection.includes('post-my-comments-${postId}'))
-  assert.ok(replySection.includes('splitViewerPostReplyRoots(rootReplies, myReplies)'))
+  assert.ok(replySection.includes('splitViewerPostReplyRoots(pageRootReplies, myReplies)'))
+  assert.match(detailPage, /\.\.\.\(viewerId \? \[\{ authorId: viewerId \}\] : \[\]\)/)
   assert.ok(replySection.includes('setMyReplies((current) => current.filter'))
   assert.equal(splitViewerPostReplyRoots([pinnedReplyFixture()], []).my.length, 0)
   assert.equal(getPostReplyTotalPages(41, 20), 3)

@@ -96,7 +96,7 @@ const BADGE_RULE_METRIC_LOADERS: Partial<Record<SupportedBadgeRuleType, BadgeMet
   // check-in source/time window, not on a scalar user counter.
   ACTIVITY_PARTICIPATION: async () => 0,
   TOPIC_ACTIVITY_PARTICIPATION_COUNT: (userId) => prisma.topicActivityParticipation.count({
-    where: { userId, approvedSubmissionCount: { gt: 0 } },
+    where: { userId, approvedSubmissionCount: { gt: 0 }, Activity: { type: 'TOPIC_ACTIVITY', status: { not: 'CANCELLED' } } },
   }),
   // Ownership rules use a config-aware, active UserBadge query rather than a
   // scalar metric. The rule engine calls that evaluator directly.

@@ -43,12 +43,8 @@ export function shouldScrollToPostRepliesTop(reason: PostReplyNavigationReason, 
 }
 
 /**
- * Split the root replies visible to the current viewer without changing the
- * persisted pin state or the server-side pagination order.
- *
- * `viewerRoots` is intentionally supplied separately: it can contain replies
- * from a different page, so a viewer can see their own root replies at the
- * top without loading every paginated root into the normal list.
+ * Keep the server page as the authoritative floor flow. The separate viewer
+ * list is only a shortcut and must never remove a comment from that flow.
  */
 export function splitViewerPostReplyRoots<
   T extends { id: string; parentId: string | null; isPinned: boolean },
@@ -59,7 +55,7 @@ export function splitViewerPostReplyRoots<
     viewerRootIds.add(reply.id)
     return true
   })
-  const visible = visibleRoots.filter((reply) => !viewerRootIds.has(reply.id))
+  const visible = [...visibleRoots]
 
   return {
     my,

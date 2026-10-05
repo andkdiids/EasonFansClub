@@ -23,17 +23,36 @@ export async function PATCH(request: Request, context: { params: Promise<{ submi
   try {
     const result = await reviewTopicActivitySubmission({ submissionId, reviewerId: guard.user.id, status: body.status, rejectReason })
     if (result.changed) {
-      const activity = await prisma.activity.findUnique({ where: { id: result.submission.activityId }, select: { title: true, activityPostId: true } })
+      const activity = await prisma.activity.findUnique({ where: { id: result.submission.activityId }, select: { title: true, activityPostId: true, rewardGrantMode: true, rewardGrantAt: true } })
       const approved = body.status === 'APPROVED'
+      const rewardGrants = result.participation
+        ? await prisma.topicActivityRewardGrant.findMany({ where: { participationId: result.participation.id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { kind: true, points: true, status: true, Badge: { select: { name: true } } } })
+        : []
+      const rewardLabel = (grant: typeof rewardGrants[number]) => grant.kind === 'POINTS' && grant.points
+        ? `${grant.points} 挂号费`
+        : grant.Badge?.name ? `「${grant.Badge.name}」勋章` : null
+      const configuredRewards = rewardGrants.map(rewardLabel).filter((item): item is string => Boolean(item))
+      const grantedRewards = rewardGrants.filter((grant) => grant.status === 'GRANTED').map(rewardLabel).filter((item): item is string => Boolean(item))
+      const allRewardGrantsCompleted = rewardGrants.length > 0 && rewardGrants.every((grant) => grant.status === 'GRANTED')
+      const approvalContent = !result.firstParticipationCreated
+        ? `你在「${activity?.title || '话题活动'}」中的另一条参与评论已通过审核。本活动参与次数与奖励按首次有效通过记录计算，不会重复累计或发放。`
+        : activity?.rewardGrantMode === 'SCHEDULED' && configuredRewards.length
+            ? `你在「${activity.title || '话题活动'}」中的参与评论已通过审核。活动奖励：${configuredRewards.join('、')}。预计发放：${activity.rewardGrantAt ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(activity.rewardGrantAt) : '以活动页面安排为准'}。`
+          : allRewardGrantsCompleted
+            ? `你在「${activity?.title || '话题活动'}」中的参与评论已通过审核，已获得：${grantedRewards.join('、')}。`
+            : rewardGrants.some((grant) => grant.status === 'FAILED')
+              ? `你在「${activity?.title || '话题活动'}」中的参与评论已通过审核。${grantedRewards.length ? `已到账：${grantedRewards.join('、')}。` : ''}其余奖励发放遇到问题，管理员将核查。`
+              : `你在「${activity?.title || '话题活动'}」中的一条参与评论已通过审核`
       await safeNotificationWrite(() => createManyNotifications({
         data: [{
           recipientId: result.submission.userId,
           actorId: guard.user.id,
           type: 'ACTIVITY',
-          title: approved ? '话题活动评论已通过' : '话题活动评论未通过',
-          content: approved ? `你在「${activity?.title || '话题活动'}」中的一条参与评论已通过审核` : `你在「${activity?.title || '话题活动'}」中的一条参与评论未通过审核${rejectReason ? `：${rejectReason}` : ''}`,
+          title: approved ? '话题活动审核已通过' : '话题活动评论未通过',
+          content: approved ? approvalContent : `你在「${activity?.title || '话题活动'}」中的一条参与评论未通过审核${rejectReason ? `：${rejectReason}` : ''}`,
           link: activity?.activityPostId ? `/posts/${activity.activityPostId}?focus=${result.submission.commentId || ''}` : '/activities',
-          key: `topic-activity-review:${result.submission.id}:${body.status}`,
+          activityId: result.submission.activityId,
+          key: `topic-activity-review:${result.submission.id}:${body.status}:${result.submission.reviewedAt?.getTime() || Date.now()}`,
         }],
         skipDuplicates: true,
       }), { operation: 'topic-activity-review-notification', userId: result.submission.userId, notificationType: 'ACTIVITY' })

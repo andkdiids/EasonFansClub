@@ -121,7 +121,7 @@ export function getActivityDisplayStatus(
   const startsAt = timestamp(activity.startsAt)
   const endsAt = timestamp(activity.endsAt)
   if (startsAt !== null && nowTimestamp < startsAt) return 'UPCOMING'
-  if (endsAt !== null && nowTimestamp >= endsAt) return 'ENDED'
+  if (endsAt !== null && nowTimestamp > endsAt) return 'ENDED'
   return 'ONGOING'
 }
 

@@ -79,6 +79,25 @@ async function assertLotterySchedulesFitActivityEnd(tx: Prisma.TransactionClient
   if (conflictingLottery) throw new ActivityConfigurationError('活动结束时间必须晚于已有抽奖开奖时间，请先调整抽奖时间。')
 }
 
+async function cancelPendingTopicActivityRewards(tx: Prisma.TransactionClient, activityId: string) {
+  await tx.topicActivityRewardGrant.updateMany({
+    where: { activityId, status: { in: ['PENDING', 'FAILED', 'PROCESSING'] } },
+    data: { status: 'CANCELLED', errorMessage: '活动已取消' },
+  })
+  const affectedParticipations = await tx.topicActivityParticipation.findMany({
+    where: { activityId, rewardStatus: { in: ['PENDING', 'FAILED', 'PARTIAL', 'PROCESSING'] } },
+    select: { id: true, RewardGrants: { select: { status: true } } },
+  })
+  for (const participation of affectedParticipations) {
+    const grants = participation.RewardGrants.map((grant) => grant.status)
+    const grantedCount = grants.filter((status) => status === 'GRANTED').length
+    const rewardStatus = grantedCount === grants.length && grants.length > 0
+      ? 'GRANTED'
+      : grantedCount > 0 ? 'PARTIAL' : 'CANCELLED'
+    await tx.topicActivityParticipation.update({ where: { id: participation.id }, data: { rewardStatus } })
+  }
+}
+
 export async function GET(_request: Request, { params }: { params: Promise<{ activityId: string }> }) {
   const guard = await requireAdmin('activity_manage')
   if (!guard.user) return guard.response
@@ -172,6 +191,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       if (lockedCurrent.status === 'CANCELLED' && normalized.value.status !== 'CANCELLED') {
         throw new ActivityRegistrationError('ACTIVITY_CANCELLED', '已取消的活动不能恢复或重新发布', 409)
       }
+      if (lockedCurrent.status === 'CANCELLED' && normalized.value.status === 'CANCELLED') {
+        if (lockedCurrent.type === 'TOPIC_ACTIVITY') {
+          await syncActivityPostInTransaction(tx, activityId, now)
+          await cancelPendingTopicActivityRewards(tx, activityId)
+        }
+        return {
+          activity: await tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: activitySelect }),
+          cancellation: null,
+          alreadyCancelled: true,
+        }
+      }
       if (rewardConfigChanged && lockedCurrent.type === 'TOPIC_ACTIVITY') {
         const lockedParticipationCount = await tx.topicActivityParticipation.count({ where: { activityId } })
         if (lockedParticipationCount > 0) throw new ActivityRegistrationError('TOPIC_REWARD_LOCKED', '已有用户获得话题活动参与资格，奖励定义暂不能修改', 409)
@@ -194,9 +224,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       const cancellation = updated.status === 'CANCELLED'
         ? await cancelActivityInTransaction(tx, { activityId: updated.id, adminId: guard.user.id, now })
         : null
-      if (updated.status === 'CANCELLED') {
-        await tx.topicActivityRewardGrant.updateMany({ where: { activityId: updated.id, status: { in: ['PENDING', 'FAILED'] } }, data: { status: 'CANCELLED', errorMessage: '活动已取消' } })
-        await tx.topicActivityParticipation.updateMany({ where: { activityId: updated.id, rewardStatus: { in: ['PENDING', 'FAILED', 'PARTIAL'] } }, data: { rewardStatus: 'CANCELLED' } })
+      if (updated.status === 'CANCELLED' && updated.type === 'TOPIC_ACTIVITY') {
+        await cancelPendingTopicActivityRewards(tx, updated.id)
       }
       if (topicConfig.value.rewardBadgeIds.length) {
         const availableBadges = await tx.badge.count({ where: { id: { in: topicConfig.value.rewardBadgeIds }, isEnabled: true, isActive: true } })
@@ -232,7 +261,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
         targetTitle: updated.title,
         metadata: { activityId: updated.id, activityReward: input.activityReward as Prisma.InputJsonValue } as Prisma.InputJsonValue,
       })
-      return { activity: await tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: activitySelect }), cancellation }
+      return { activity: await tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: activitySelect }), cancellation, alreadyCancelled: false }
     })
     if (transactionResult.activity.status !== 'CANCELLED') {
       try {
@@ -255,6 +284,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       activityId,
       activity: serializeActivityRow(transactionResult.activity, new Date(), true),
       cancellation,
+      alreadyCancelled: transactionResult.alreadyCancelled,
       ...(cancellation || {}),
     })
   } catch (error) {

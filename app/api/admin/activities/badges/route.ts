@@ -11,8 +11,8 @@ export async function GET() {
   const badges = await prisma.badge.findMany({
     where: { isEnabled: true, isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    select: { id: true, name: true, code: true, iconUrl: true },
+    select: { id: true, name: true, iconUrl: true, Series: { select: { name: true } } },
     take: 500,
   })
-  return NextResponse.json({ badges: badges.map((badge) => ({ ...badge, iconUrl: toPublicMediaUrl(badge.iconUrl) })) }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
+  return NextResponse.json({ badges: badges.map(({ Series, ...badge }) => ({ ...badge, seriesName: Series?.name || null, iconUrl: toPublicMediaUrl(badge.iconUrl) })) }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' } })
 }

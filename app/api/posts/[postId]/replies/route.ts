@@ -131,7 +131,12 @@ export async function GET(request: Request, { params }: Params) {
     isPinned: false,
     isDeleted: false,
     User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
-    ...(topicActivity && requestedTopicStatus ? { TopicActivitySubmission: { is: { activityId: topicActivity.id, status: requestedTopicStatus as 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' } } } : {}),
+    ...(topicActivity && requestedTopicStatus ? {
+      OR: [
+        { TopicActivitySubmission: { is: { activityId: topicActivity.id, status: requestedTopicStatus as 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' } } },
+        ...(viewer ? [{ authorId: viewer.id }] : []),
+      ],
+    } : {}),
   }
   const total = await prisma.reply.count({ where: rootWhere })
   const totalPages = getPostReplyTotalPages(total, pageSize)

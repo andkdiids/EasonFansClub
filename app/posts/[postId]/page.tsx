@@ -557,7 +557,12 @@ async function loadPostReplies(
 ) {
   return prisma.$transaction(async (tx) => {
     const topicSubmissionFilter = topicActivityId && topicStatus
-      ? { TopicActivitySubmission: { is: { activityId: topicActivityId, status: topicStatus } } }
+      ? {
+          OR: [
+            { TopicActivitySubmission: { is: { activityId: topicActivityId, status: topicStatus } } },
+            ...(viewerId ? [{ authorId: viewerId }] : []),
+          ],
+        }
       : {}
     const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
       tx.reply.findFirst({

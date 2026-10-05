@@ -137,7 +137,7 @@ export async function getBatchHistoricalBadgeMetrics(
     case 'TOPIC_ACTIVITY_PARTICIPATION_COUNT': {
       const rows = await prisma.topicActivityParticipation.groupBy({
         by: ['userId'],
-        where: { userId: { in: userIds }, approvedSubmissionCount: { gt: 0 }, firstApprovedAt: createdAt },
+        where: { userId: { in: userIds }, approvedSubmissionCount: { gt: 0 }, firstApprovedAt: createdAt, Activity: { type: 'TOPIC_ACTIVITY', status: { not: 'CANCELLED' } } },
         _count: { _all: true },
       })
       rows.forEach((row) => metrics.set(row.userId, row._count._all))
