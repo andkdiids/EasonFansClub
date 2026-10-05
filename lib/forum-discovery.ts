@@ -82,7 +82,19 @@ export type ForumDiscoveryPost = {
   favoriteCount: number
   replyCount: number
   isPinned: boolean
+  activityPinned?: boolean
   isFeatured: boolean
+  activity?: {
+    id: string
+    type: string
+    title: string
+    startsAt: string | null
+    endsAt: string | null
+    rewardGrantMode: 'IMMEDIATE' | 'SCHEDULED'
+    rewardGrantAt: string | null
+    rewardPoints: number | null
+    rewardBadgeCount: number
+  } | null
   createdAt: string
   updatedAt: string
   expiresAt: string | null

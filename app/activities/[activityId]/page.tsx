@@ -12,6 +12,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getPublicActivityLotteries } from '@/lib/activity-lottery'
+import { resolveTopicSubmissionStatus } from '@/lib/topic-activity'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,19 +96,46 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
       // A missing creator profile must not prevent the public activity page or poster from rendering.
     }
   }
-  const [registration, questions] = await Promise.all([
+  const [registration, questions, topicStatusGroups, topicFormStatusGroups, topicParticipationRecord] = await Promise.all([
     viewer
       ? await prisma.activityRegistration.findUnique({ where: { activityId_userId: { activityId: view.id, userId: viewer.id } }, select: activityRegistrationSelect })
       : Promise.resolve(null),
     getActivityRegistrationQuestions(prisma, view.id),
+    viewer && view.type === 'TOPIC_ACTIVITY'
+      ? prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: view.id, userId: viewer.id, commentDeletedAt: null }, _count: { _all: true } })
+      : Promise.resolve([]),
+    viewer && view.type === 'TOPIC_ACTIVITY'
+      ? prisma.topicActivityFormSubmission.groupBy({ by: ['status'], where: { activityId: view.id, userId: viewer.id }, _count: { _all: true } })
+      : Promise.resolve([]),
+    viewer && view.type === 'TOPIC_ACTIVITY'
+      ? prisma.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId: view.id, userId: viewer.id } }, select: { approvedSubmissionCount: true, rewardStatus: true, rewardEligibleAt: true, rewardGrantedAt: true } })
+      : Promise.resolve(null),
   ])
+  const topicCounts = { total: 0, pending: 0, approved: 0, rejected: 0 }
+  for (const row of [...topicStatusGroups, ...topicFormStatusGroups]) {
+    topicCounts.total += row._count._all
+    if (row.status === 'PENDING') topicCounts.pending += row._count._all
+    if (row.status === 'APPROVED') topicCounts.approved += row._count._all
+    if (row.status === 'REJECTED') topicCounts.rejected += row._count._all
+  }
+  const topicStatus = view.type === 'TOPIC_ACTIVITY' && viewer ? {
+    status: resolveTopicSubmissionStatus(topicCounts),
+    submissionCount: topicCounts.total,
+    approvedSubmissionCount: topicCounts.approved,
+    pendingSubmissionCount: topicCounts.pending,
+    rejectedSubmissionCount: topicCounts.rejected,
+    countedInActivity: Boolean(topicParticipationRecord?.approvedSubmissionCount),
+    rewardStatus: topicParticipationRecord?.rewardStatus || 'NOT_ELIGIBLE',
+    rewardEligibleAt: topicParticipationRecord?.rewardEligibleAt?.toISOString() || null,
+    rewardGrantedAt: topicParticipationRecord?.rewardGrantedAt?.toISOString() || null,
+  } : null
   const lotteries = await getPublicActivityLotteries(view.id, viewer?.id)
   const availability = getActivityRegistrationState(view, view.signupCount)
   const activityMaterialAvailable = !view.linkedMaterial || (view.linkedMaterial.status === 'PUBLISHED' && view.linkedMaterial.stockRemaining > 0)
 
   return (
     <main className="site-page-main flat-page mx-auto w-full max-w-[1440px] space-y-5 px-4 py-6 sm:px-5 sm:py-8" style={{ maxWidth: '1440px' }}>
-      <ActivityDetailView activity={view} shareAuthor={shareAuthor} isAuthenticated={Boolean(viewer)} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && activityMaterialAvailable && Boolean(viewer) && registration?.status !== 'ACTIVE' && registration?.status !== 'CANCELLED'} lotteries={lotteries} />
+      <ActivityDetailView activity={view} shareAuthor={shareAuthor} isAuthenticated={Boolean(viewer)} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && activityMaterialAvailable && Boolean(viewer) && registration?.status !== 'ACTIVE' && registration?.status !== 'CANCELLED'} initialTopicParticipation={topicStatus} lotteries={lotteries} />
       <p className="text-right text-xs font-bold text-[var(--foreground-muted)]"><ActivityViewCounter activityId={view.id} initialCount={view.viewCount} /></p>
     </main>
   )

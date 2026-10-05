@@ -69,3 +69,43 @@ export async function uploadSiteImage(params: { key: string; body: Buffer; conte
 
   return buildPublicMediaUrl(key)
 }
+
+/** Upload an object with an explicit private ACL. Used for form/review images
+ * whose visibility is restricted by application-level authorization. */
+export async function uploadPrivateSiteImage(params: { key: string; body: Buffer; contentType?: string }) {
+  const config = getConfig()
+  const key = params.key.trim().replace(/^\/+/, '')
+  if (!key || key.includes('..')) throw new SiteMediaStorageError('图片对象路径无效')
+  const client = new COS({
+    SecretId: config.secretId,
+    SecretKey: config.secretKey,
+    ...(config.sessionToken ? { SecurityToken: config.sessionToken } : {}),
+  })
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      client.putObject({
+        Bucket: config.bucket,
+        Region: config.region,
+        Key: key,
+        Body: params.body,
+        ContentLength: params.body.byteLength,
+        ContentType: params.contentType?.trim() || 'image/webp',
+        CacheControl: 'private, no-store, max-age=0',
+        ACL: 'private',
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('COS_UPLOAD_TIMEOUT')), COS_UPLOAD_TIMEOUT_MS)
+      }),
+    ])
+    return key
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 300) : String(error || 'UNKNOWN_ERROR').slice(0, 300)
+    console.error('[site-media.cos.private]', { code: error && typeof error === 'object' && 'code' in error ? error.code : undefined, message: detail })
+    throw new SiteMediaStorageError(error instanceof Error && error.message === 'COS_UPLOAD_TIMEOUT'
+      ? '上传腾讯云 COS 超时，请稍后重试'
+      : '图片上传至腾讯云 COS 失败，请稍后重试', detail)
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}

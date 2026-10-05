@@ -71,6 +71,16 @@ model Activity {
   contactInfo                  String?                        @db.VarChar(500)
   isFeatured                   Boolean                        @default(false)
   isPinned                     Boolean                        @default(false)
+  pinToPlaza                   Boolean                        @default(false)
+  activityPostId               String?                        @unique
+  participationRule            String?                        @db.Text
+  participationMode            TopicActivityParticipationMode @default(COMMENT)
+  allowImageAttachments        Boolean                        @default(false)
+  formSchema                   Json?
+  rewardGrantMode              TopicActivityRewardGrantMode   @default(IMMEDIATE)
+  rewardGrantAt                DateTime?
+  rewardPoints                 Int?
+  rewardBadgeIds               Json?
   sortOrder                    Int                            @default(0)
   viewCount                    Int                            @default(0)
   publishedAt                  DateTime?
@@ -90,9 +100,18 @@ model Activity {
   MaterialRedemptionOrders     MaterialRedemptionOrder[]      @relation("MaterialOrderLinkedActivity")
   Lottery                      Lottery[]
   Topics                       Topic[]                        @relation("ActivityTopics")
+  ActivityPost                 Post?                          @relation("ActivityPost", fields: [activityPostId], references: [id], onDelete: SetNull)
+  TopicActivitySubmission      TopicActivitySubmission[]
+  TopicActivityFormSubmission  TopicActivityFormSubmission[]
+  TopicActivityParticipation   TopicActivityParticipation[]
+  TopicActivityReviewLog       TopicActivityReviewLog[]
+  TopicActivityFormReviewLog   TopicActivityFormReviewLog[]
+  TopicActivityImageAsset      TopicActivityImageAsset[]
+  TopicActivityRewardGrant     TopicActivityRewardGrant[]
 
   @@index([status, createdAt])
   @@index([status, startsAt])
+  @@index([pinToPlaza, endsAt, status])
   @@index([type])
   @@index([isPinned, sortOrder, startsAt])
   @@index([isFeatured])
@@ -609,11 +628,12 @@ enum BadgeRuleType {
   RATING_COUNT
   BADGE_SERIES_COMPLETE
   ACTIVITY_PARTICIPATION
+  TOPIC_ACTIVITY_PARTICIPATION_COUNT
   BIRTHDAY_ZODIAC
   BIRTHDAY_TODAY
+  CHECKIN_ON_DATE
   BADGE_OWNERSHIP
   CLINIC_CONSULTATION_STREAK
-  CHECKIN_ON_DATE
 }
 
 enum BadgeRuleOperator {
@@ -705,6 +725,7 @@ model Badge {
   BadgeRule                         BadgeRule?
   PharmacyPrize                     PharmacyPrize[]
   PharmacyCampaignCollectionRewards PharmacyCampaign[]           @relation("PharmacyCampaignCollectionReward")
+  TopicActivityRewardGrant          TopicActivityRewardGrant[]
   PharmacyDuplicateSourceBadge      PharmacyDuplicateInventory[] @relation("PharmacyDuplicateSourceBadge")
   EquippedByUsers                   User[]                       @relation("UserEquippedBadge")
 
@@ -3722,6 +3743,7 @@ model Post {
   replyCount            Int                     @default(0)
   lastCommentFloor      Int                     @default(0)
   isPinned              Boolean                 @default(false)
+  activityPinned        Boolean                 @default(false)
   profilePinnedAt       DateTime?
   isFeatured            Boolean                 @default(false)
   isDeleted             Boolean                 @default(false)
@@ -3764,6 +3786,7 @@ model Post {
   Report                Report[]
   stickerId             String?
   sticker               Sticker?                @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  TopicActivity         Activity?               @relation("ActivityPost")
 
   @@index([authorId, createdAt])
   @@index([authorId, userPostGroupId, createdAt])
@@ -3777,6 +3800,7 @@ model Post {
   @@index([isDeleted])
   @@index([isFeatured, createdAt])
   @@index([isPinned, createdAt])
+  @@index([activityPinned, createdAt])
   @@index([stickerId])
   @@index([isRecommended, createdAt])
   @@index([likeCount])
@@ -4153,32 +4177,33 @@ model RateLimitLog {
 }
 
 model Reply {
-  id                 String                  @id @default(cuid())
-  content            String                  @db.Text
-  ipRegion           String?
-  stickerId          String?
-  sticker            Sticker?                @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
-  isDeleted          Boolean                 @default(false)
-  moderationStatus   ContentModerationStatus @default(NORMAL)
-  moderationReason   String?
-  matchedBannedWords String?                 @db.Text
-  isPinned           Boolean                 @default(false)
-  deletedAt          DateTime?
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
-  postId             String
-  authorId           String
-  parentId           String?
-  floorNumber        Int?
-  likeCount          Int                     @default(0)
-  AdminAction        AdminAction[]
-  User               User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  Reply              Reply?                  @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
-  other_Reply        Reply[]                 @relation("ReplyToReply")
-  Post               Post                    @relation(fields: [postId], references: [id], onDelete: Cascade)
-  ReplyLike          ReplyLike[]
-  ReplyMention       ReplyMention[]
-  Report             Report[]
+  id                      String                   @id @default(cuid())
+  content                 String                   @db.Text
+  ipRegion                String?
+  stickerId               String?
+  sticker                 Sticker?                 @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  isDeleted               Boolean                  @default(false)
+  moderationStatus        ContentModerationStatus  @default(NORMAL)
+  moderationReason        String?
+  matchedBannedWords      String?                  @db.Text
+  isPinned                Boolean                  @default(false)
+  deletedAt               DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  postId                  String
+  authorId                String
+  parentId                String?
+  floorNumber             Int?
+  likeCount               Int                      @default(0)
+  AdminAction             AdminAction[]
+  User                    User                     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  Reply                   Reply?                   @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
+  other_Reply             Reply[]                  @relation("ReplyToReply")
+  Post                    Post                     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  ReplyLike               ReplyLike[]
+  ReplyMention            ReplyMention[]
+  Report                  Report[]
+  TopicActivitySubmission TopicActivitySubmission?
 
   @@unique([postId, floorNumber], map: "Reply_postId_floorNumber_key")
   @@index([authorId, createdAt])
@@ -4731,6 +4756,18 @@ model User {
   ActivityRegistrationVerifiedBy                         ActivityRegistration[]             @relation("ActivityRegistrationVerifiedBy")
   ActivityCreatedBy                                      Activity[]                         @relation("ActivityCreatedBy")
   ActivityUpdatedBy                                      Activity[]                         @relation("ActivityUpdatedBy")
+  TopicActivitySubmissions                               TopicActivitySubmission[]          @relation("TopicActivitySubmitter")
+  TopicActivityFormSubmissions                           TopicActivityFormSubmission[]      @relation("TopicActivityFormSubmitter")
+  TopicActivityParticipations                            TopicActivityParticipation[]       @relation("TopicActivityParticipant")
+  TopicActivityReviewedSubmissions                       TopicActivitySubmission[]          @relation("TopicActivityReviewer")
+  TopicActivityFormReviewedSubmissions                   TopicActivityFormSubmission[]      @relation("TopicActivityFormReviewer")
+  TopicActivityReviewSubjects                            TopicActivityReviewLog[]           @relation("TopicActivityReviewSubject")
+  TopicActivityReviewActors                              TopicActivityReviewLog[]           @relation("TopicActivityReviewActor")
+  TopicActivityFormReviewSubjects                        TopicActivityFormReviewLog[]       @relation("TopicActivityFormReviewSubject")
+  TopicActivityFormReviewActors                          TopicActivityFormReviewLog[]       @relation("TopicActivityFormReviewActor")
+  TopicActivitySubmissionReplySenders                    TopicActivitySubmissionReply[]     @relation("TopicActivitySubmissionReplySender")
+  TopicActivityImageUploaders                            TopicActivityImageAsset[]          @relation("TopicActivityImageUploader")
+  TopicActivityRewardRecipients                          TopicActivityRewardGrant[]         @relation("TopicActivityRewardRecipient")
   LotteryCreatedBy                                       Lottery[]                          @relation("LotteryCreatedBy")
   LotteryEntryRedeemedByAdmin                            LotteryEntry[]                     @relation("LotteryEntryRedeemedByAdmin")
   AlbumReview                                            AlbumReview[]
@@ -5211,6 +5248,7 @@ enum ActivityType {
   COMMUNITY
   BENEFIT
   OTHER
+  TOPIC_ACTIVITY
 }
 
 enum AdminActionType {
@@ -5658,6 +5696,7 @@ enum PointActionType {
   GROWTH_REWARD
   GROWTH_REWARD_REVERSAL
   GLOBAL_POINTS_GRANT
+  TOPIC_ACTIVITY_REWARD
 }
 
 enum PharmacyCampaignStatus {
@@ -6112,4 +6151,240 @@ enum SocialSyncLogStatus {
   BLOCKED
   RATE_LIMITED
   CHALLENGE_REQUIRED
+}
+
+enum TopicActivityRewardGrantMode {
+  IMMEDIATE
+  SCHEDULED
+}
+
+enum TopicActivityParticipationMode {
+  COMMENT
+  FORM
+  BOTH
+}
+
+enum TopicActivityFormFieldType {
+  TEXT
+  TEXTAREA
+  SINGLE_SELECT
+  MULTI_SELECT
+  IMAGE
+}
+
+enum TopicActivityAssetPurpose {
+  FORM_ANSWER
+  ADMIN_REPLY
+}
+
+enum TopicActivityReplySenderRole {
+  ADMIN
+}
+
+enum TopicActivitySubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum TopicActivityRewardStatus {
+  NOT_ELIGIBLE
+  PENDING
+  PROCESSING
+  GRANTED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum TopicActivityRewardKind {
+  POINTS
+  BADGE
+}
+
+enum TopicActivityRewardGrantItemStatus {
+  PENDING
+  PROCESSING
+  GRANTED
+  FAILED
+  CANCELLED
+}
+
+model TopicActivitySubmission {
+  id               String                        @id @default(cuid())
+  activityId       String
+  userId           String
+  commentId        String?                       @unique
+  status           TopicActivitySubmissionStatus @default(PENDING)
+  submittedAt      DateTime                      @default(now())
+  reviewedAt       DateTime?
+  reviewedById     String?
+  rejectReason     String?                       @db.Text
+  commentDeletedAt DateTime?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  Activity         Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User             User                          @relation("TopicActivitySubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  Comment          Reply?                        @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  ReviewedBy       User?                         @relation("TopicActivityReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  ReviewLog        TopicActivityReviewLog[]
+
+  @@index([activityId, status, submittedAt])
+  @@index([userId, activityId, status])
+  @@index([reviewedById, reviewedAt])
+}
+
+model TopicActivityParticipation {
+  id                        String                     @id @default(cuid())
+  activityId                String
+  userId                    String
+  firstApprovedSubmissionId String?
+  firstApprovedAt           DateTime?
+  approvedSubmissionCount   Int                        @default(0)
+  rewardStatus              TopicActivityRewardStatus  @default(NOT_ELIGIBLE)
+  rewardEligibleAt          DateTime?
+  rewardGrantedAt           DateTime?
+  reviewReversedAfterReward Boolean                    @default(false)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  Activity                  Activity                   @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User                      User                       @relation("TopicActivityParticipant", fields: [userId], references: [id], onDelete: Cascade)
+  RewardGrants              TopicActivityRewardGrant[]
+
+  @@unique([activityId, userId])
+  @@index([userId, approvedSubmissionCount, firstApprovedAt], map: "TopicActPart_user_approved_first_idx")
+  @@index([activityId, rewardStatus])
+}
+
+model TopicActivityReviewLog {
+  id           String                        @id @default(cuid())
+  submissionId String
+  activityId   String
+  userId       String
+  commentId    String?
+  fromStatus   TopicActivitySubmissionStatus
+  toStatus     TopicActivitySubmissionStatus
+  reviewedById String?
+  reason       String?                       @db.Text
+  reviewedAt   DateTime                      @default(now())
+  Submission   TopicActivitySubmission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  Activity     Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User         User                          @relation("TopicActivityReviewSubject", fields: [userId], references: [id], onDelete: Cascade)
+  ReviewedBy   User?                         @relation("TopicActivityReviewActor", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([submissionId, reviewedAt])
+  @@index([activityId, reviewedAt])
+  @@index([userId, reviewedAt])
+}
+
+model TopicActivityFormSubmission {
+  id                 String                         @id @default(cuid())
+  activityId         String
+  userId             String
+  formSchemaSnapshot Json
+  answersSnapshot    Json
+  status             TopicActivitySubmissionStatus  @default(PENDING)
+  submittedAt        DateTime                       @default(now())
+  reviewedAt         DateTime?
+  reviewedById       String?
+  rejectReason       String?                        @db.Text
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  Activity           Activity                       @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User               User                           @relation("TopicActivityFormSubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  ReviewedBy         User?                          @relation("TopicActivityFormReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  ReviewLog          TopicActivityFormReviewLog[]
+  Replies            TopicActivitySubmissionReply[]
+  ImageAssets        TopicActivityImageAsset[]
+
+  @@index([activityId, status, submittedAt])
+  @@index([userId, activityId, status])
+  @@index([reviewedById, reviewedAt])
+}
+
+model TopicActivityFormReviewLog {
+  id           String                        @id @default(cuid())
+  submissionId String
+  activityId   String
+  userId       String
+  fromStatus   TopicActivitySubmissionStatus
+  toStatus     TopicActivitySubmissionStatus
+  reviewedById String?
+  reason       String?                       @db.Text
+  reviewedAt   DateTime                      @default(now())
+  Submission   TopicActivityFormSubmission   @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  Activity     Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User         User                          @relation("TopicActivityFormReviewSubject", fields: [userId], references: [id], onDelete: Cascade)
+  ReviewedBy   User?                         @relation("TopicActivityFormReviewActor", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([submissionId, reviewedAt])
+  @@index([activityId, reviewedAt])
+  @@index([userId, reviewedAt])
+}
+
+model TopicActivitySubmissionReply {
+  id           String                       @id @default(cuid())
+  submissionId String
+  senderUserId String
+  senderRole   TopicActivityReplySenderRole @default(ADMIN)
+  content      String?                      @db.Text
+  createdAt    DateTime                     @default(now())
+  updatedAt    DateTime                     @updatedAt
+  Submission   TopicActivityFormSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  Sender       User                         @relation("TopicActivitySubmissionReplySender", fields: [senderUserId], references: [id], onDelete: Cascade)
+  ImageAssets  TopicActivityImageAsset[]
+
+  @@index([submissionId, createdAt, id])
+  @@index([senderUserId, createdAt])
+}
+
+model TopicActivityImageAsset {
+  id               String                        @id @default(cuid())
+  activityId       String
+  uploadedByUserId String
+  purpose          TopicActivityAssetPurpose
+  storageKey       String                        @unique @db.VarChar(500)
+  mimeType         String                        @db.VarChar(80)
+  width            Int
+  height           Int
+  size             Int
+  formSubmissionId String?
+  replyId          String?
+  createdAt        DateTime                      @default(now())
+  Activity         Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  UploadedBy       User                          @relation("TopicActivityImageUploader", fields: [uploadedByUserId], references: [id], onDelete: Cascade)
+  FormSubmission   TopicActivityFormSubmission?  @relation(fields: [formSubmissionId], references: [id], onDelete: SetNull)
+  Reply            TopicActivitySubmissionReply? @relation(fields: [replyId], references: [id], onDelete: SetNull)
+
+  @@index([activityId, purpose, createdAt])
+  @@index([uploadedByUserId, activityId, purpose])
+  @@index([formSubmissionId])
+  @@index([replyId])
+}
+
+model TopicActivityRewardGrant {
+  id              String                             @id @default(cuid())
+  participationId String
+  activityId      String
+  userId          String
+  kind            TopicActivityRewardKind
+  badgeId         String?
+  points          Int?
+  status          TopicActivityRewardGrantItemStatus @default(PENDING)
+  grantKey        String                             @unique @db.VarChar(191)
+  errorMessage    String?                            @db.VarChar(500)
+  grantedAt       DateTime?
+  createdAt       DateTime                           @default(now())
+  updatedAt       DateTime                           @updatedAt
+  Participation   TopicActivityParticipation         @relation(fields: [participationId], references: [id], onDelete: Cascade)
+  Activity        Activity                           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User            User                               @relation("TopicActivityRewardRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  Badge           Badge?                             @relation(fields: [badgeId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([activityId, status])
+  @@index([participationId, status])
+  @@index([badgeId])
+  @@index([userId, createdAt])
 }

@@ -11,6 +11,8 @@ import { ActivityMaterialConfigurationError, syncActivityLinkedMaterial } from '
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
 import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
+import { normalizeTopicActivityConfig } from '@/lib/topic-activity-config'
+import { syncActivityPostInTransaction } from '@/lib/topic-activity'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +45,7 @@ export async function GET(request: Request) {
   ])
 
   return NextResponse.json({
-    activities: rows.map((row) => serializeActivityRow(row)),
+    activities: rows.map((row) => serializeActivityRow(row, new Date(), true)),
     pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }
@@ -60,6 +62,10 @@ export async function POST(request: Request) {
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
   const normalized = normalizeActivityInput(body)
   if (!normalized.valid) return NextResponse.json({ message: normalized.message }, { status: 400 })
+  const topicConfig = normalizeTopicActivityConfig(input, normalized.value.type)
+  if (!topicConfig.valid) return NextResponse.json({ message: topicConfig.message }, { status: 400 })
+  if (normalized.value.type === 'TOPIC_ACTIVITY' && normalized.value.status === 'PUBLISHED' && !topicConfig.value.participationRule) return NextResponse.json({ message: '请填写话题活动参与方式' }, { status: 400 })
+  if (topicConfig.value.participationRule && (await checkBannedWords(topicConfig.value.participationRule)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   if ((await checkBannedWords(moderationText(normalized))).blocked) {
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
@@ -71,6 +77,7 @@ export async function POST(request: Request) {
       const created = await tx.activity.create({
         data: {
           ...activityData,
+          ...topicConfig.value,
           publishedAt: normalized.value.status === 'PUBLISHED' ? now : null,
           createdById: guard.user.id,
           updatedById: guard.user.id,
@@ -80,6 +87,11 @@ export async function POST(request: Request) {
       await syncActivityLinkedMaterial(tx, { activityId: created.id, linkedMaterialId, startsAt: created.startsAt, endsAt: created.endsAt })
       if (Object.prototype.hasOwnProperty.call(input, 'registrationQuestions')) await syncActivityRegistrationQuestions(tx, created.id, input.registrationQuestions)
       if (Object.prototype.hasOwnProperty.call(input, 'activityReward')) await syncActivityReward(tx, created.id, input.activityReward, normalized.value.verificationMode)
+      if (topicConfig.value.rewardBadgeIds.length) {
+        const availableBadges = await tx.badge.count({ where: { id: { in: topicConfig.value.rewardBadgeIds }, isEnabled: true, isActive: true } })
+        if (availableBadges !== topicConfig.value.rewardBadgeIds.length) throw new ActivityConfigurationError('奖励勋章中包含不存在或已停用的勋章')
+      }
+      await syncActivityPostInTransaction(tx, created.id, now)
       await createAdminActionAudit(tx, {
         operatorId: guard.user.id,
         action: 'CREATE_ACTIVITY',
@@ -109,7 +121,7 @@ export async function POST(request: Request) {
     }
     revalidatePath('/activities')
     revalidatePath('/')
-    return NextResponse.json({ activity: serializeActivityRow(activity) }, { status: 201 })
+    return NextResponse.json({ activity: serializeActivityRow(activity, new Date(), true) }, { status: 201 })
   } catch (error) {
     if (error instanceof ActivityConfigurationError || error instanceof ActivityMaterialConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
     console.error('[admin.activities.create]', error instanceof Error ? error.message : error)

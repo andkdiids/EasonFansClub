@@ -37,6 +37,7 @@ import {
   writePostReplyDraft,
 } from '@/lib/post-reply-drafts'
 
+type TopicSubmissionStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
 type ReplyItem = {
   id: string
   content: string
@@ -51,6 +52,7 @@ type ReplyItem = {
   stickerId?: string | null
   stickerUrl?: string | null
   mentions: ReplyMentionView[]
+  topicActivitySubmission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null; alreadyCounted: boolean }
   author: {
     id: string
     uid: number
@@ -91,6 +93,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
     stickerId: typeof reply.stickerId === 'string' ? reply.stickerId : null,
     stickerUrl: typeof reply.stickerUrl === 'string' ? toPublicMediaUrl(reply.stickerUrl) : null,
     mentions: Array.isArray(reply.mentions) ? reply.mentions : [],
+    topicActivitySubmission: reply.topicActivitySubmission && typeof reply.topicActivitySubmission === 'object' ? reply.topicActivitySubmission : undefined,
     author: {
       ...unavailableAuthor,
       ...sourceAuthor,
@@ -130,6 +133,9 @@ export function PostRepliesSection({
   pagination,
   hotReplyIds,
   commentsLoadError,
+  topicActivityId,
+  canReviewTopicActivity = false,
+  topicReviewFilter = 'ALL',
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
@@ -145,6 +151,9 @@ export function PostRepliesSection({
   pagination: PostReplyPagination
   hotReplyIds?: string[]
   commentsLoadError?: boolean
+  topicActivityId?: string
+  canReviewTopicActivity?: boolean
+  topicReviewFilter?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
 }>) {
   const router = useRouter()
   const pathname = usePathname()
@@ -156,6 +165,7 @@ export function PostRepliesSection({
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [mobileReplySheetOpen, setMobileReplySheetOpen] = useState(false)
   const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
+  const [reviewingSubmissionId, setReviewingSubmissionId] = useState<string | null>(null)
   const activeReplyId = replyTo?.id
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const commentsTopRef = useRef<HTMLDivElement | null>(null)
@@ -285,6 +295,43 @@ export function PostRepliesSection({
     if (nextPage === pagination.page) return
     navigationReasonRef.current = 'pagination'
     router.push(buildCommentHref(sort, direction, nextPage), { scroll: false })
+  }
+
+  function changeTopicReviewFilter(nextFilter: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN') {
+    if (!topicActivityId || !canReviewTopicActivity || nextFilter === topicReviewFilter) return
+    const params = new URLSearchParams(searchParams.toString())
+    if (nextFilter === 'ALL') params.delete('topicStatus')
+    else params.set('topicStatus', nextFilter)
+    params.delete('commentPage')
+    const query = params.toString()
+    navigationReasonRef.current = 'pagination'
+    router.push(`${pathname}${query ? `?${query}` : ''}`, { scroll: false })
+  }
+
+  async function reviewTopicSubmission(reply: ReplyItem, status: 'APPROVED' | 'REJECTED') {
+    const submission = reply.topicActivitySubmission
+    if (!canReviewTopicActivity || !submission || reviewingSubmissionId) return
+    if (status === 'APPROVED' && submission.alreadyCounted && !window.confirm('该用户已计入本活动参与；本次通过不会重复累计活动次数或重复获得奖励。仍要通过这条评论吗？')) return
+    const rejectReason = status === 'REJECTED' ? window.prompt('可选：填写拒绝原因')?.trim() || '' : ''
+    setReviewingSubmissionId(submission.id)
+    try {
+      const response = await fetch(`/api/admin/topic-activity-submissions/${encodeURIComponent(submission.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, ...(rejectReason ? { rejectReason } : {}) }),
+      })
+      const data = await response.json().catch(() => ({})) as { message?: string; submission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null }; alreadyCounted?: boolean }
+      if (!response.ok || !data.submission) throw new Error(data.message || '审核操作失败，请稍后重试')
+      const update = (items: ReplyItem[]) => items.map((item) => item.topicActivitySubmission?.id === submission.id
+        ? { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, status: data.submission!.status, rejectReason: data.submission!.rejectReason || null, alreadyCounted: Boolean(data.alreadyCounted) } }
+        : item)
+      setReplies(update)
+      setMyReplies(update)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '审核操作失败，请稍后重试')
+    } finally {
+      setReviewingSubmissionId(null)
+    }
   }
 
   async function toggleLike(replyId: string) {
@@ -610,6 +657,16 @@ export function PostRepliesSection({
             {canDelete ? (
               <DeleteReplyButton replyId={reply.id} onDeleted={(result) => removeReply(reply.id, result)} />
             ) : null}
+            {topicActivityId && reply.topicActivitySubmission ? (
+              <>
+                {reply.topicActivitySubmission.status === 'PENDING' && canReviewTopicActivity ? <>
+                  <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => void reviewTopicSubmission(reply, 'APPROVED')} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 disabled:opacity-50">{reviewingSubmissionId === reply.topicActivitySubmission.id ? '处理中…' : '通过'}</button>
+                  <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => void reviewTopicSubmission(reply, 'REJECTED')} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 disabled:opacity-50">拒绝</button>
+                </> : <span className={`rounded-full px-3 py-1 text-xs font-black ${reply.topicActivitySubmission.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' : reply.topicActivitySubmission.status === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{reply.topicActivitySubmission.status === 'APPROVED' ? '已通过' : reply.topicActivitySubmission.status === 'REJECTED' ? '未通过' : reply.topicActivitySubmission.status === 'WITHDRAWN' ? '已撤回' : '待审核'}</span>}
+                {canReviewTopicActivity && reply.topicActivitySubmission.alreadyCounted && reply.topicActivitySubmission.status === 'PENDING' ? <span className="text-xs font-bold text-slate-500">已计入本活动</span> : null}
+                {reply.topicActivitySubmission.status === 'REJECTED' && reply.topicActivitySubmission.rejectReason ? <span className="basis-full text-xs text-rose-700">拒绝原因：{reply.topicActivitySubmission.rejectReason}</span> : null}
+              </>
+            ) : null}
           </div>
           <LikeAvatars
             likers={reply.likers || []}
@@ -733,6 +790,9 @@ export function PostRepliesSection({
           </button>
         </div>
       </div>
+      {topicActivityId && canReviewTopicActivity ? <div role="tablist" aria-label="话题活动评论审核筛选" className="flex flex-wrap gap-2">
+        {([['ALL', '全部'], ['PENDING', '待审核'], ['APPROVED', '已通过'], ['REJECTED', '已拒绝'], ['WITHDRAWN', '已撤回']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={topicReviewFilter === value} onClick={() => changeTopicReviewFilter(value)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicReviewFilter === value ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{label}</button>)}
+      </div> : null}
       {hotReplyIds?.length ? (
         <div className="post-replies-hot-list p-4">
           <h3 className="font-black text-brand-950">热门评论</h3>

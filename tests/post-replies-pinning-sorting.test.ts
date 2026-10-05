@@ -18,7 +18,7 @@ import {
   readPersistedCommentFloor,
 } from '../lib/post-comment-floor'
 
-const read = (path: string) => readFileSync(path, 'utf8')
+const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n?/g, '\n')
 const pinRoute = read('app/api/replies/[replyId]/pin/route.ts')
 const deleteRoute = read('app/api/replies/[replyId]/route.ts')
 const detailPage = read('app/posts/[postId]/page.tsx')
@@ -250,7 +250,14 @@ test('我的评论使用独立查询，不改变普通评论分页，未登录�
   assert.ok(detailPage.includes('const childRootIds = Array.from(new Set([...rootIds, ...viewerRootIds]))'))
   assert.ok(detailPage.includes('const includedRootIds = new Set(rootIds)'))
   assert.ok(detailPage.includes('myRows:'))
-  assert.ok(detailPage.includes('loadPostReplies(postId, commentSort, commentDirection, requestedCommentPage, user?.id)'))
+  const loadCallStart = detailPage.indexOf('const loadedReplies = await loadPostReplies(')
+  const loadCallEnd = detailPage.indexOf('\n    )', loadCallStart)
+  const loadCall = detailPage.slice(loadCallStart, loadCallEnd)
+  assert.ok(loadCallStart >= 0 && loadCallEnd > loadCallStart)
+  assert.match(loadCall, /user\?\.id/)
+  assert.match(loadCall, /postCore\.TopicActivity\?\.type === 'TOPIC_ACTIVITY'/)
+  assert.match(loadCall, /topicStatus/)
+  assert.match(loadCall, /viewerCanReviewTopicActivity/)
   assert.ok(detailPage.includes('initialMyReplies={myReplyRows}'))
   assert.ok(detailPage.includes('direction={commentDirection}'))
   assert.ok(detailPage.includes('pagination={commentPagination}'))

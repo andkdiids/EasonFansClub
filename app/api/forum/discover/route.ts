@@ -42,6 +42,7 @@ type RecommendationCursor = {
 
 type HotCursor = {
   isPinned: boolean
+  activityPinned: boolean
   likeCount: number
   replyCount: number
   date: Date
@@ -99,6 +100,11 @@ function recommendationScore(row: DiscoveryRow, seed: DiscoveryFeedSeed) {
 function parseCursor(value: unknown) {
   if (typeof value !== 'string' || !value) return null
   const parts = value.split('|')
+  if (parts.length === 5 && parts[0] === 'p') {
+    const date = new Date(parts[3])
+    if ((parts[1] !== '0' && parts[1] !== '1') || (parts[2] !== '0' && parts[2] !== '1') || !parts[4] || Number.isNaN(date.getTime())) return null
+    return { date, id: parts[4].slice(0, 80), isPinned: parts[1] === '1', activityPinned: parts[2] === '1' }
+  }
   const hasLegacyPinAwareFields = parts.length >= 4
   const hasPinAwareFields = parts.length >= 3 && (parts[0] === '0' || parts[0] === '1')
   const dateValue = hasLegacyPinAwareFields ? parts[2] : hasPinAwareFields ? parts[1] : parts[0]
@@ -109,31 +115,36 @@ function parseCursor(value: unknown) {
     date,
     id: id.slice(0, 80),
     isPinned: hasLegacyPinAwareFields || hasPinAwareFields ? parts[0] === '1' : undefined,
+    activityPinned: false,
   }
 }
 
-function buildCursor(row: Pick<DiscoveryRow, 'isPinned' | 'createdAt' | 'id'>) {
-  return `${row.isPinned ? '1' : '0'}|${row.createdAt.toISOString()}|${row.id}`
+function buildCursor(row: Pick<DiscoveryRow, 'isPinned' | 'activityPinned' | 'createdAt' | 'id'>) {
+  return `p|${row.isPinned ? '1' : '0'}|${row.activityPinned ? '1' : '0'}|${row.createdAt.toISOString()}|${row.id}`
 }
 
 function parseHotCursor(value: unknown): HotCursor | null {
   if (typeof value !== 'string' || !value) return null
   const parts = value.split('|')
+  const isActivityPinFormat = parts.length === 7
   const isCurrentFormat = parts.length === 6
-  const [prefix, pinnedValue, likeValue, replyValue, dateValue, id] = isCurrentFormat
+  const [prefix, pinnedValue, activityPinnedValue, likeValue, replyValue, dateValue, id] = isActivityPinFormat
     ? parts
-    : [parts[0], '0', parts[1], parts[2], parts[3], parts[4]]
+    : isCurrentFormat
+      ? [parts[0], parts[1], '0', parts[2], parts[3], parts[4], parts[5]]
+      : [parts[0], '0', '0', parts[1], parts[2], parts[3], parts[4]]
   const likeCount = Number.parseInt(likeValue || '', 10)
   const replyCount = Number.parseInt(replyValue || '', 10)
   const date = new Date(dateValue || '')
   if (prefix !== 'h' || !Number.isSafeInteger(likeCount) || likeCount < 0 || !Number.isSafeInteger(replyCount) || replyCount < 0) return null
   if (Number.isNaN(date.getTime()) || !id || id.length > 80) return null
   if (pinnedValue !== '0' && pinnedValue !== '1') return null
-  return { isPinned: pinnedValue === '1', likeCount, replyCount, date, id }
+  if (activityPinnedValue !== '0' && activityPinnedValue !== '1') return null
+  return { isPinned: pinnedValue === '1', activityPinned: activityPinnedValue === '1', likeCount, replyCount, date, id }
 }
 
-function buildHotCursor(row: Pick<DiscoveryRow, 'isPinned' | 'likeCount' | 'replyCount' | 'createdAt' | 'id'>) {
-  return `h|${row.isPinned ? '1' : '0'}|${row.likeCount}|${row.replyCount}|${row.createdAt.toISOString()}|${row.id}`
+function buildHotCursor(row: Pick<DiscoveryRow, 'isPinned' | 'activityPinned' | 'likeCount' | 'replyCount' | 'createdAt' | 'id'>) {
+  return `h|${row.isPinned ? '1' : '0'}|${row.activityPinned ? '1' : '0'}|${row.likeCount}|${row.replyCount}|${row.createdAt.toISOString()}|${row.id}`
 }
 
 function isGifUrl(value: string | null | undefined) {
@@ -183,7 +194,20 @@ function serializePost(row: DiscoveryRow) {
     favoriteCount: row.favoriteCount,
     replyCount: row.replyCount,
     isPinned: row.isPinned,
+    activityPinned: row.activityPinned,
     isFeatured: row.isFeatured,
+    activity: row.TopicActivity ? {
+      id: row.TopicActivity.id,
+      type: row.TopicActivity.type,
+      title: row.TopicActivity.title,
+      startsAt: row.TopicActivity.startsAt?.toISOString() || null,
+      endsAt: row.TopicActivity.endsAt?.toISOString() || null,
+      participationRule: row.TopicActivity.participationRule,
+      rewardGrantMode: row.TopicActivity.rewardGrantMode,
+      rewardGrantAt: row.TopicActivity.rewardGrantAt?.toISOString() || null,
+      rewardPoints: row.TopicActivity.rewardPoints,
+      rewardBadgeCount: Array.isArray(row.TopicActivity.rewardBadgeIds) ? row.TopicActivity.rewardBadgeIds.length : 0,
+    } : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
@@ -217,6 +241,7 @@ const discoverySelect = {
   favoriteCount: true,
   replyCount: true,
   isPinned: true,
+  activityPinned: true,
   isFeatured: true,
   isRecommended: true,
   createdAt: true,
@@ -244,6 +269,7 @@ const discoverySelect = {
     select: { id: true, type: true, url: true, thumbnail: true, width: true, height: true, sortOrder: true },
   },
   sticker: { select: { url: true, type: true } },
+  TopicActivity: { select: { id: true, type: true, title: true, startsAt: true, endsAt: true, participationRule: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true } },
 } satisfies Prisma.PostSelect
 
 type DiscoveryRow = Prisma.PostGetPayload<{ select: typeof discoverySelect }>
@@ -373,6 +399,8 @@ export async function POST(request: Request) {
         .sort((left, right) => {
           const pinnedDelta = Number(right.isPinned) - Number(left.isPinned)
           if (pinnedDelta !== 0) return pinnedDelta
+          const activityPinnedDelta = Number(right.activityPinned) - Number(left.activityPinned)
+          if (activityPinnedDelta !== 0) return activityPinnedDelta
           const scoreDelta = recommendationScore(right, feedSeed!) - recommendationScore(left, feedSeed!)
           if (scoreDelta !== 0) return scoreDelta
           const dateDelta = right.createdAt.getTime() - left.createdAt.getTime()
@@ -395,7 +423,7 @@ export async function POST(request: Request) {
     for (let window = 0; window < DISCOVERY_MAX_RECOMMEND_WINDOWS && selectedRows.length < limit; window += 1) {
       const candidates = await prisma.post.findMany({
         where: recommendWhere,
-        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ isPinned: 'desc' }, { activityPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         skip: (startWindow + window) * candidateSize,
         take: candidateSize,
         select: {
@@ -416,7 +444,7 @@ export async function POST(request: Request) {
     if (selectedRows.length === 0) {
       const fallbackCandidates = await prisma.post.findMany({
         where: { AND: [recommendWhere, { id: { notIn: [...remainingPostIds] } }] },
-        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ isPinned: 'desc' }, { activityPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         select: {
           ...discoverySelect,
@@ -437,10 +465,11 @@ export async function POST(request: Request) {
     const cursorConditions: Prisma.PostWhereInput[] = hotCursor
       ? [
           ...(hotCursor.isPinned ? [{ isPinned: false }] : []),
-          { isPinned: hotCursor.isPinned, likeCount: { lt: hotCursor.likeCount } },
-          { isPinned: hotCursor.isPinned, likeCount: hotCursor.likeCount, replyCount: { lt: hotCursor.replyCount } },
-          { isPinned: hotCursor.isPinned, likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: { lt: hotCursor.date } },
-          { isPinned: hotCursor.isPinned, likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: hotCursor.date, id: { lt: hotCursor.id } },
+          ...(hotCursor.activityPinned ? [{ isPinned: hotCursor.isPinned, activityPinned: false }] : []),
+          { isPinned: hotCursor.isPinned, activityPinned: hotCursor.activityPinned, likeCount: { lt: hotCursor.likeCount } },
+          { isPinned: hotCursor.isPinned, activityPinned: hotCursor.activityPinned, likeCount: hotCursor.likeCount, replyCount: { lt: hotCursor.replyCount } },
+          { isPinned: hotCursor.isPinned, activityPinned: hotCursor.activityPinned, likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: { lt: hotCursor.date } },
+          { isPinned: hotCursor.isPinned, activityPinned: hotCursor.activityPinned, likeCount: hotCursor.likeCount, replyCount: hotCursor.replyCount, createdAt: hotCursor.date, id: { lt: hotCursor.id } },
         ]
       : []
     const hotWhere: Prisma.PostWhereInput = hotCursor
@@ -448,7 +477,7 @@ export async function POST(request: Request) {
       : where
     const pageRows = await prisma.post.findMany({
       where: hotWhere,
-      orderBy: [{ isPinned: 'desc' }, { likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ isPinned: 'desc' }, { activityPinned: 'desc' }, { likeCount: 'desc' }, { replyCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {
         ...discoverySelect,
@@ -465,8 +494,9 @@ export async function POST(request: Request) {
     const cursorConditions: Prisma.PostWhereInput[] = cursor && pinAwareOrder && typeof cursor.isPinned === 'boolean'
       ? [
           ...(cursor.isPinned ? [{ isPinned: false }] : []),
-          { isPinned: cursor.isPinned, createdAt: { lt: cursor.date } },
-          { isPinned: cursor.isPinned, createdAt: cursor.date, id: { lt: cursor.id } },
+          ...(cursor.activityPinned ? [{ isPinned: cursor.isPinned, activityPinned: false }] : []),
+          { isPinned: cursor.isPinned, activityPinned: cursor.activityPinned, createdAt: { lt: cursor.date } },
+          { isPinned: cursor.isPinned, activityPinned: cursor.activityPinned, createdAt: cursor.date, id: { lt: cursor.id } },
         ]
       : cursor
         ? [
@@ -480,7 +510,7 @@ export async function POST(request: Request) {
     const pageRows = await prisma.post.findMany({
       where: latestWhere,
       orderBy: pinAwareOrder
-        ? [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+        ? [{ isPinned: 'desc' }, { activityPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
         : [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {
