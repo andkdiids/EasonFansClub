@@ -10,8 +10,9 @@ import { canonicalShareUrl, type ShareCardData } from '@/lib/share-card'
 import { normalizeActionUrl } from '@/lib/url-safety'
 import { ActivityLotteryPanel } from '@/components/activities/ActivityLotteryPanel'
 import type { ActivityLotteryPublicView } from '@/lib/activity-lottery'
+import { TopicActivityFormParticipation } from '@/components/activities/TopicActivityFormParticipation'
 
-export function ActivityDetailView({ activity, preview = false, isAuthenticated = false, initialRegistration = null, initialQuestions = [], initialRegistrationState, initialCanRegister, shareAuthor, lotteries = [] }: Readonly<{
+export function ActivityDetailView({ activity, preview = false, isAuthenticated = false, initialRegistration = null, initialQuestions = [], initialRegistrationState, initialCanRegister, initialTopicParticipation = null, shareAuthor, lotteries = [] }: Readonly<{
   activity: ActivityView
   preview?: boolean
   isAuthenticated?: boolean
@@ -19,10 +20,22 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
   initialQuestions?: ActivityRegistrationQuestionView[]
   initialRegistrationState?: ActivityRegistrationState
   initialCanRegister?: boolean
+  initialTopicParticipation?: Readonly<{
+    status: 'NOT_PARTICIPATED' | 'PENDING' | 'APPROVED' | 'REJECTED'
+    submissionCount: number
+    approvedSubmissionCount: number
+    pendingSubmissionCount: number
+    rejectedSubmissionCount: number
+    countedInActivity: boolean
+    rewardStatus: string
+    rewardEligibleAt: string | null
+    rewardGrantedAt: string | null
+  }> | null
   shareAuthor?: Readonly<{ name: string; avatarUrl: string | null }>
   lotteries?: ActivityLotteryPublicView[]
 }>) {
   const cover = publicImageVariantUrl(activity.bannerUrl || activity.coverUrl, 'large')
+  const isTopicActivity = activity.type === 'TOPIC_ACTIVITY'
   const onlineUrl = activity.onlineUrl ? normalizeActionUrl(activity.onlineUrl) : null
   const shareTime = activity.startsAt ? `${activityDateLabel(activity.startsAt)}${activity.endsAt ? ` — ${activityDateLabel(activity.endsAt)}` : ''}` : ''
   const shareLocation = [activity.locationName, activity.locationAddress].filter(Boolean).join('，')
@@ -75,9 +88,10 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
             {activity.contactInfo ? <p>联系方式：{activity.contactInfo}</p> : null}
           </div>
           </div>
-          {!preview ? <aside className="activity-detail-aside min-w-0 self-start h-auto border-t border-[var(--border)] bg-[var(--surface-subtle)] p-4 sm:p-7 lg:border-l lg:border-t-0 lg:p-6 lg:[&>section]:mt-0"><ActivityRegistrationButton activity={activity} isAuthenticated={isAuthenticated} initialRegistration={initialRegistration} questions={initialQuestions} initialRegistrationCount={activity.signupCount} initialRegistrationState={initialRegistrationState} initialCanRegister={initialCanRegister} /></aside> : null}
+          {!preview ? <aside className="activity-detail-aside min-w-0 self-start h-auto border-t border-[var(--border)] bg-[var(--surface-subtle)] p-4 sm:p-7 lg:border-l lg:border-t-0 lg:p-6 lg:[&>section]:mt-0">{isTopicActivity ? <section className="space-y-4"><div><p className="text-xs font-black tracking-[0.16em] text-[var(--primary)]">话题活动</p><h2 className="mt-1 text-xl font-black">参与方式</h2><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-[var(--foreground-muted)]">{activity.participationRule || '在活动主帖下发布一级评论参与。'}</p></div><div className="border-t border-[var(--border)] pt-4"><p className="text-sm font-black">活动奖励</p><p className="mt-2 text-sm leading-6 text-[var(--foreground-muted)]">{[activity.rewardPoints ? `${activity.rewardPoints} 挂号费` : null, activity.rewardBadgeCount ? `${activity.rewardBadgeCount} 枚指定勋章` : null].filter(Boolean).join('、') || '本活动暂无额外奖励'}</p><p className="mt-1 text-xs text-[var(--foreground-muted)]">{activity.rewardGrantMode === 'SCHEDULED' ? `统一发放：${activity.rewardGrantAt ? activityDateLabel(activity.rewardGrantAt) : '待定'}` : '审核通过后发放'}</p></div>{activity.participationMode === 'FORM' ? <p className="text-sm font-bold text-[var(--foreground-muted)]">请使用下方参与表单提交内容。</p> : <Link href={activity.activityPostId ? `/posts/${activity.activityPostId}` : '#'} aria-disabled={!activity.activityPostId} className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-[var(--primary)] px-4 text-sm font-black text-[var(--primary-foreground)] aria-disabled:pointer-events-none aria-disabled:opacity-50">{activity.participationMode === 'BOTH' ? '去活动讨论' : '去参与'}</Link>}</section> : <ActivityRegistrationButton activity={activity} isAuthenticated={isAuthenticated} initialRegistration={initialRegistration} questions={initialQuestions} initialRegistrationCount={activity.signupCount} initialRegistrationState={initialRegistrationState} initialCanRegister={initialCanRegister} />}</aside> : null}
+          {isTopicActivity && activity.participationMode !== 'COMMENT' && !preview ? <TopicActivityFormParticipation activityId={activity.id} isAuthenticated={isAuthenticated} /> : null}
           <div className={`${lowerClass} activity-detail-lower`}>
-          <section aria-labelledby={`activity-registration-info-${activity.id}`} className="rounded-xl border border-[color-mix(in_srgb,var(--success)_40%,var(--border))] bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] p-4 text-sm text-[var(--foreground)] sm:p-5">
+          {!isTopicActivity ? <section aria-labelledby={`activity-registration-info-${activity.id}`} className="rounded-xl border border-[color-mix(in_srgb,var(--success)_40%,var(--border))] bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] p-4 text-sm text-[var(--foreground)] sm:p-5">
             <p className="text-xs font-black tracking-[0.16em] text-[var(--success)]">报名说明 / 报名福利</p>
             <h2 id={`activity-registration-info-${activity.id}`} className="mt-1 text-xl font-black text-[var(--foreground)]">报名信息</h2>
             <div className="mt-4">
@@ -88,7 +102,8 @@ export function ActivityDetailView({ activity, preview = false, isAuthenticated 
             </div>
             {activity.linkedMaterial ? <div className="mt-4 border-t-[color-mix(in_srgb,var(--success)_40%,var(--border))] pt-4"><p className="font-black">报名福利</p><div className="mt-2 flex min-w-0 items-center gap-3"><div className="size-14 shrink-0 overflow-hidden rounded-lg bg-white/70 dark:bg-slate-900/60">{activity.linkedMaterial.coverImageUrl ? <img src={activity.linkedMaterial.coverImageUrl} alt="" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-2xl">🎁</div>}</div><p className="min-w-0 break-words font-black">{activity.linkedMaterial.title} ×1</p></div><p className="mt-2 font-bold leading-6">报名成功后自动兑换；现场活动签到时将同步完成物料核销，无需重复扫码。</p>{activity.linkedMaterial.stockRemaining < 1 || activity.linkedMaterial.status !== 'PUBLISHED' ? <p className="mt-2 font-black text-[var(--danger)]">{activity.linkedMaterial.stockRemaining < 1 ? '活动物料已兑换完' : '活动物料暂不可用'}，暂时无法报名。</p> : null}</div> : null}
             {!preview && activity.status !== 'CANCELLED' && lotteries.length ? <ActivityLotteryPanel lotteries={lotteries} isRegistered={initialRegistration?.status === 'ACTIVE'} embedded /> : null}
-          </section>
+          </section> : <section aria-labelledby={`activity-topic-info-${activity.id}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5"><h2 id={`activity-topic-info-${activity.id}`} className="text-lg font-black">参与与奖励</h2><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-[var(--foreground-muted)]">{activity.participationRule || '在活动主帖下发布一级评论参与。'}</p><p className="mt-3 text-sm font-bold">{[activity.rewardPoints ? `${activity.rewardPoints} 挂号费` : null, activity.rewardBadgeCount ? `${activity.rewardBadgeCount} 枚指定勋章` : null].filter(Boolean).join('、') || '本活动暂无额外奖励'}</p><p className="mt-1 text-xs text-[var(--foreground-muted)]">{activity.rewardGrantMode === 'SCHEDULED' ? `统一发放：${activity.rewardGrantAt ? activityDateLabel(activity.rewardGrantAt) : '待定'}` : '审核通过后发放'}</p>{activity.activityPostId ? <Link href={`/posts/${activity.activityPostId}`} className="mt-4 inline-flex min-h-10 items-center rounded-lg bg-[var(--navigation-active)] px-4 text-sm font-black text-[var(--primary)]">查看活动讨论</Link> : null}</section>}
+          {isTopicActivity && initialTopicParticipation ? <section aria-labelledby={`activity-topic-participation-${activity.id}`} className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5"><h2 id={`activity-topic-participation-${activity.id}`} className="text-lg font-black">我的参与</h2><p className="mt-2 text-sm font-bold">{initialTopicParticipation.status === 'APPROVED' ? '已通过' : initialTopicParticipation.status === 'PENDING' ? '待审核' : initialTopicParticipation.status === 'REJECTED' ? '未通过' : '尚未参与'}</p><p className="mt-1 text-xs text-[var(--foreground-muted)]">提交 {initialTopicParticipation.submissionCount} 条 · 通过 {initialTopicParticipation.approvedSubmissionCount} 条{initialTopicParticipation.countedInActivity ? ' · 活动累计已计 1 次' : ''}</p><p className="mt-1 text-xs text-[var(--foreground-muted)]">奖励：{initialTopicParticipation.rewardStatus === 'GRANTED' ? '已发放' : initialTopicParticipation.rewardStatus === 'PENDING' ? '待发放' : initialTopicParticipation.rewardStatus === 'FAILED' || initialTopicParticipation.rewardStatus === 'PARTIAL' ? '发放处理中' : initialTopicParticipation.rewardStatus === 'CANCELLED' ? '已取消' : initialTopicParticipation.rewardStatus === 'NOT_ELIGIBLE' ? '无奖励资格' : '尚未获得奖励资格'}</p></section> : null}
           <section aria-labelledby={`activity-description-${activity.id}`} className="mt-7 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
             <h2 id={`activity-description-${activity.id}`} className="text-xl font-black text-[var(--foreground)]">活动详情</h2>
             <div className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-8 text-[var(--foreground)]">{activity.description || '暂无活动说明。'}</div>

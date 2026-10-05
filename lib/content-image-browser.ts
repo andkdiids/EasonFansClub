@@ -182,6 +182,7 @@ async function compressImageFile(file: File) {
 export async function prepareContentImageFile(
   file: File,
   onPhase?: (phase: ContentImageProcessingPhase) => void,
+  options: { allowServerHeicDecode?: boolean } = {},
 ) {
   const validation = validateContentImageFileMetadata(file)
   if (!validation.ok) throw clientError(validation.code)
@@ -199,6 +200,10 @@ export async function prepareContentImageFile(
   try {
     return await compressImageFile(file)
   } catch {
+    // Topic-activity uploads are decoded by the server's Sharp/libheif path.
+    // Preserve the validated original only when browser HEIC decoding fails;
+    // every other upload path keeps its established browser conversion rule.
+    if (heic && options.allowServerHeicDecode) return file
     throw clientError(heic ? 'HEIC_CONVERSION_FAILED' : 'IMAGE_PROCESSING_FAILED')
   }
 }
@@ -349,4 +354,40 @@ export async function uploadContentImage(
     url: data.url,
     mimeType: typeof data.mimeType === 'string' ? data.mimeType : undefined,
   }
+}
+
+export type TopicActivityUploadedAsset = {
+  assetId: string
+  storageKey: string
+  mimeType: string
+  width: number
+  height: number
+  size: number
+  url: string
+  thumbnailUrl: string
+}
+
+/** Uses the same metadata checks, HEIC-capable preparation, and 5MB→4MB
+ * compression policy as post/reply images, but stores a private activity asset. */
+export async function uploadTopicActivityImage(file: File, input: { activityId: string; purpose: 'FORM_ANSWER' | 'ADMIN_REPLY' }, onPhase?: (phase: ContentImageUploadPhase) => void) {
+  onPhase?.('processing')
+  const preparedFile = await prepareContentImageFile(file, (phase) => onPhase?.(phase), { allowServerHeicDecode: true })
+  onPhase?.('uploading')
+  const form = new FormData()
+  form.set('file', preparedFile)
+  form.set('activityId', input.activityId)
+  form.set('purpose', input.purpose)
+  let response: Response
+  try {
+    response = await fetch('/api/uploads/topic-activity-image', { method: 'POST', body: form, cache: 'no-store' })
+  } catch {
+    throw new ContentImageClientError('NETWORK_UPLOAD_FAILED', CONTENT_IMAGE_ERROR_MESSAGES.NETWORK_UPLOAD_FAILED)
+  }
+  const payload = await response.json().catch(() => null) as { asset?: Partial<TopicActivityUploadedAsset>; code?: unknown; message?: unknown } | null
+  if (!response.ok) throw uploadErrorFromResponse(payload, response)
+  const asset = payload?.asset
+  if (!asset || typeof asset.assetId !== 'string' || typeof asset.url !== 'string' || typeof asset.thumbnailUrl !== 'string' || typeof asset.storageKey !== 'string' || typeof asset.mimeType !== 'string' || typeof asset.width !== 'number' || typeof asset.height !== 'number' || typeof asset.size !== 'number') {
+    throw new ContentImageClientError('UPLOAD_RESPONSE_INVALID', CONTENT_IMAGE_ERROR_MESSAGES.UPLOAD_RESPONSE_INVALID)
+  }
+  return asset as TopicActivityUploadedAsset
 }

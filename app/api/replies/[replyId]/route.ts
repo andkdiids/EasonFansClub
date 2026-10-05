@@ -117,6 +117,22 @@ export async function DELETE(_request: Request, context: RouteContext) {
       })
       if (!deleted.count) throw new Error('REPLY_ALREADY_DELETED')
 
+      const topicSubmissions = await tx.topicActivitySubmission.findMany({
+        where: { commentId: { in: deleteIds } },
+        select: { id: true, activityId: true, userId: true, commentId: true, status: true },
+      })
+      const deletedAt = new Date()
+      for (const submission of topicSubmissions) {
+        if (submission.status === 'PENDING') {
+          await tx.topicActivitySubmission.update({ where: { id: submission.id }, data: { status: 'WITHDRAWN', commentDeletedAt: deletedAt, reviewedAt: deletedAt, rejectReason: null } })
+          await tx.topicActivityReviewLog.create({
+            data: { submissionId: submission.id, activityId: submission.activityId, userId: submission.userId, commentId: submission.commentId, fromStatus: 'PENDING', toStatus: 'WITHDRAWN', reason: '评论已删除，参与申请自动撤回', reviewedAt: deletedAt },
+          })
+        } else {
+          await tx.topicActivitySubmission.update({ where: { id: submission.id }, data: { commentDeletedAt: deletedAt } })
+        }
+      }
+
       const replyCount = await tx.reply.count({
         where: { postId: reply.postId, isDeleted: false },
       })

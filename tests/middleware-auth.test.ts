@@ -132,6 +132,33 @@ test('Ecenter 偏好 GET/PATCH 支持 Bearer 与 Web Cookie，匿名及其他受
   assert.equal(unrelated.status, 401, 'Bearer is not opened for unrelated protected routes')
 })
 
+test('话题活动表单 schema 可公开读取；表单提交、历史、附件与管理员操作保持 Bearer/Cookie 双认证', async () => {
+  const publicSchema = '/api/activities/topic-test/form'
+  assert.equal((await middleware(new NextRequest(`https://ecfc.fans${publicSchema}`))).status, 200)
+
+  const protectedRoutes: Array<[string, string]> = [
+    ['/api/activities/topic-test/form-submissions', 'POST'],
+    ['/api/activities/topic-test/my-form-submissions', 'GET'],
+    ['/api/topic-activity-form-submissions/submission-test', 'GET'],
+    ['/api/admin/activities/topic-test/form-submissions', 'GET'],
+    ['/api/uploads/topic-activity-image', 'POST'],
+    ['/api/admin/topic-activity-form-submissions/submission-test/review', 'PATCH'],
+    ['/api/admin/topic-activity-form-submissions/submission-test/replies', 'POST'],
+  ]
+  const validCookie = await createToken({ role: 'ADMIN' })
+  for (const [path, method] of protectedRoutes) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${method} ${path} lets the canonical route guard validate Bearer`)
+    const cookie = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookie.status, 200, `${method} ${path} keeps Web Cookie auth`)
+    const anonymous = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymous.status, 401, `${method} ${path} remains blocked anonymously`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'form Bearer allowlist does not open unrelated protected routes')
+})
+
 test('Mobile Growth and direct-message routes pass Bearer to route guards, preserve Cookie auth, and keep anonymous blocked', async () => {
   const routes: Array<[string, string]> = [
     ['/api/growth', 'GET'],

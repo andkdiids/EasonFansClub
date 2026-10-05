@@ -9,6 +9,9 @@ import { ActivityStatusBadge } from '@/components/activities/ActivityCard'
 import { ActivityLotteryEntry } from '@/components/activities/ActivityLotteryEntry'
 import { ActivityRegistrationFormDesigner, type ActivityQuestionDraft } from '@/components/activities/ActivityRegistrationFormDesigner'
 import { ActivityRegistrationManager } from '@/components/activities/ActivityRegistrationManager'
+import { TopicActivityFormDesigner } from '@/components/activities/TopicActivityFormDesigner'
+import { TopicActivityFormSubmissionManager } from './TopicActivityFormSubmissionManager'
+import { TOPIC_ACTIVITY_FORM_VERSION, type TopicActivityFormSchema } from '@/lib/topic-activity-form'
 import { ActivityTargetedNotificationPanel } from './ActivityTargetedNotificationPanel'
 import { activityDisplayStatusLabels, activityTypeLabels, activityTypeValues, getActivityDisplayStatus, type ActivityStatusValue, type ActivityTypeValue, type ActivityVerificationModeValue, type ActivityView } from '@/lib/activity'
 import { formatBeijingDateTimeInput } from '@/lib/registration-availability'
@@ -36,6 +39,15 @@ type ActivityForm = {
   contactInfo: string
   isFeatured: boolean
   isPinned: boolean
+  pinToPlaza: boolean
+  participationRule: string
+  participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+  allowImageAttachments: boolean
+  formSchema: TopicActivityFormSchema
+  rewardGrantMode: 'IMMEDIATE' | 'SCHEDULED'
+  rewardGrantAt: string
+  rewardPoints: string
+  rewardBadgeIds: string[]
   sortOrder: string
 }
 
@@ -68,7 +80,7 @@ type ActivityManagementSection = 'registrations' | 'notifications'
 
 const emptyForm: ActivityForm = {
   title: '', subtitle: '', description: '', type: 'OTHER', coverUrl: null, bannerUrl: null, locationName: '', locationAddress: '', onlineUrl: '',
-  startsAt: '', endsAt: '', registrationStartAt: '', registrationEndAt: '', registrationFee: '0', feeDescription: '', linkedMaterialId: '', verificationMode: 'NONE', signupLimit: '', organizer: '', contactInfo: '', isFeatured: false, isPinned: false, sortOrder: '0',
+  startsAt: '', endsAt: '', registrationStartAt: '', registrationEndAt: '', registrationFee: '0', feeDescription: '', linkedMaterialId: '', verificationMode: 'NONE', signupLimit: '', organizer: '', contactInfo: '', isFeatured: false, isPinned: false, pinToPlaza: false, participationRule: '', participationMode: 'COMMENT', allowImageAttachments: false, formSchema: { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [] }, rewardGrantMode: 'IMMEDIATE', rewardGrantAt: '', rewardPoints: '', rewardBadgeIds: [], sortOrder: '0',
 }
 const emptySelection: ActivityImageSelection = { file: null, removed: false }
 
@@ -106,6 +118,15 @@ function formFromActivity(activity: ActivityView): ActivityForm {
     contactInfo: activity.contactInfo || '',
     isFeatured: activity.isFeatured,
     isPinned: activity.isPinned,
+    pinToPlaza: activity.pinToPlaza,
+    participationRule: activity.participationRule || '',
+    participationMode: activity.participationMode || 'COMMENT',
+    allowImageAttachments: activity.allowImageAttachments || false,
+    formSchema: { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [] },
+    rewardGrantMode: activity.rewardGrantMode,
+    rewardGrantAt: dateInput(activity.rewardGrantAt),
+    rewardPoints: activity.rewardPoints === null ? '' : String(activity.rewardPoints),
+    rewardBadgeIds: activity.rewardBadgeIds || [],
     sortOrder: String(activity.sortOrder),
   }
 }
@@ -120,6 +141,12 @@ function publishValidationMessage(form: ActivityForm) {
   if (!form.startsAt) return '请选择活动开始时间'
   if (!form.endsAt) return '请选择活动结束时间'
   if (!form.description.trim()) return '请填写活动说明'
+  if (form.type === 'TOPIC_ACTIVITY') {
+    if (!form.participationRule.trim()) return '请填写话题活动参与方式'
+    if ((form.participationMode === 'FORM' || form.participationMode === 'BOTH') && form.formSchema.fields.length === 0) return '表单参与至少需要配置一个字段'
+    if (form.rewardGrantMode === 'SCHEDULED' && !form.rewardGrantAt) return '请设置统一发奖时间'
+    if (form.rewardPoints && (!Number.isSafeInteger(Number(form.rewardPoints)) || Number(form.rewardPoints) < 1)) return '挂号费奖励必须是正整数'
+  }
   return ''
 }
 
@@ -135,6 +162,7 @@ function toPreview(form: ActivityForm, id: string | null, status: ActivityStatus
     registrationEndAt: form.registrationEndAt ? new Date(`${form.registrationEndAt}:00+08:00`).toISOString() : null,
     verificationMode: form.verificationMode,
     organizer: form.organizer || null, contactInfo: form.contactInfo || null, isFeatured: form.isFeatured, isPinned: form.isPinned,
+    pinToPlaza: form.pinToPlaza, activityPostId: null, participationRule: form.participationRule || null, participationMode: form.participationMode, allowImageAttachments: form.allowImageAttachments, rewardGrantMode: form.rewardGrantMode, rewardGrantAt: dateToBeijingIso(form.rewardGrantAt), rewardPoints: form.rewardPoints ? Number(form.rewardPoints) : null, rewardBadgeCount: form.rewardBadgeIds.length, rewardBadgeIds: form.rewardBadgeIds,
     sortOrder: Number(form.sortOrder) || 0, viewCount: 0, publishedAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   }
 }
@@ -164,6 +192,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const [registrationRefreshSignal, setRegistrationRefreshSignal] = useState(0)
   const [registrationActivityId, setRegistrationActivityId] = useState<string | null>(null)
   const [notificationActivityId, setNotificationActivityId] = useState<string | null>(null)
+  const [formSubmissionActivityId, setFormSubmissionActivityId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | ActivityStatusValue | 'ENDED'>('ALL')
@@ -227,7 +256,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       setFocusManagementSection(null)
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [focusManagementSection, registrationActivityId, notificationActivityId])
+  }, [focusManagementSection, registrationActivityId, notificationActivityId, formSubmissionActivityId])
 
   const editingActivity = editingId ? activities.find((item) => item.id === editingId) || null : null
   const visibleActivities = useMemo(() => {
@@ -276,6 +305,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       const badgeData = await badgeResponse.json().catch(() => null)
       if (activityResponse.ok) {
         setRegistrationQuestions(Array.isArray(detail?.registrationQuestions) ? detail.registrationQuestions.map((question: ActivityQuestionDraft) => ({ ...question, placeholder: question.placeholder || '', options: Array.isArray(question.options) ? question.options : [] })) : [])
+        setForm((current) => ({ ...current, participationMode: ['COMMENT', 'FORM', 'BOTH'].includes(detail?.activity?.participationMode) ? detail.activity.participationMode : current.participationMode, allowImageAttachments: detail?.activity?.allowImageAttachments === true, formSchema: detail?.formSchema && Array.isArray(detail.formSchema.fields) ? detail.formSchema as TopicActivityFormSchema : { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [] } }))
         setRewardBadgeId(typeof detail?.activityReward?.badgeId === 'string' ? detail.activityReward.badgeId : '')
         setBadgeGrantAt(dateInput(typeof detail?.activityReward?.badgeGrantAt === 'string' ? detail.activityReward.badgeGrantAt : null))
       }
@@ -492,16 +522,30 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">副标题<input maxLength={300} value={form.subtitle} onChange={(event) => changeForm('subtitle', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <label className="text-sm font-black text-slate-700 dark:text-slate-200">活动类型<select aria-required="true" value={form.type} onChange={(event) => changeForm('type', event.target.value as ActivityTypeValue)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{activityTypeValues.map((item) => <option key={item} value={item}>{activityTypeLabels[item]}</option>)}</select></label>
+          <label className="text-sm font-black text-slate-700 dark:text-slate-200">活动类型<select aria-required="true" value={form.type} onChange={(event) => { const type = event.target.value as ActivityTypeValue; if (!editingId) setForm((current) => ({ ...current, type, pinToPlaza: type === 'TOPIC_ACTIVITY' })); else changeForm('type', type) }} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{activityTypeValues.map((item) => <option key={item} value={item}>{activityTypeLabels[item]}</option>)}</select></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">开始时间<input aria-required="true" type="datetime-local" value={form.startsAt} onChange={(event) => changeForm('startsAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">结束时间<input aria-required="true" type="datetime-local" value={form.endsAt} onChange={(event) => changeForm('endsAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
         <label className="mt-4 block text-sm font-black text-slate-700 dark:text-slate-200">活动说明<textarea aria-required="true" rows={7} maxLength={20000} value={form.description} onChange={(event) => changeForm('description', event.target.value)} className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-3 font-bold leading-6 text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+        {form.type === 'TOPIC_ACTIVITY' ? <section className="mt-4 space-y-4 rounded-2xl border border-sky-100 p-4 dark:border-slate-700" aria-label="话题活动设置">
+          <h3 className="font-black text-brand-950 dark:text-slate-100">话题活动设置</h3>
+          <label className="block text-sm font-black text-slate-700 dark:text-slate-200">参与说明<textarea rows={3} maxLength={2000} value={form.participationRule} onChange={(event) => changeForm('participationRule', event.target.value)} placeholder="说明参与者需要在活动主帖下提交什么内容" className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 font-bold leading-6 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="block text-sm font-black text-slate-700 dark:text-slate-200">参与方式<select value={form.participationMode} onChange={(event) => changeForm('participationMode', event.target.value as ActivityForm['participationMode'])} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="COMMENT">活动帖评论参与</option><option value="FORM">填写表单参与</option><option value="BOTH">评论或表单均可参与</option></select></label>
+          {form.participationMode !== 'COMMENT' ? <TopicActivityFormDesigner schema={form.formSchema} allowImages={form.allowImageAttachments} onSchemaChange={(formSchema) => changeForm('formSchema', formSchema)} onAllowImagesChange={(allowImageAttachments) => changeForm('allowImageAttachments', allowImageAttachments)} /> : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="text-sm font-black text-slate-700 dark:text-slate-200">奖励挂号费<input type="number" min="1" step="1" value={form.rewardPoints} onChange={(event) => changeForm('rewardPoints', event.target.value)} placeholder="可选" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+            <label className="text-sm font-black text-slate-700 dark:text-slate-200">奖励勋章（可多选）<select multiple value={form.rewardBadgeIds} onChange={(event) => changeForm('rewardBadgeIds', Array.from(event.currentTarget.selectedOptions, (option) => option.value))} className="mt-1 min-h-24 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{badgeOptions.map((badge) => <option key={badge.id} value={badge.id}>{badge.name} · {badge.code}</option>)}</select></label>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="text-sm font-black text-slate-700 dark:text-slate-200">奖励发放方式<select value={form.rewardGrantMode} onChange={(event) => changeForm('rewardGrantMode', event.target.value as ActivityForm['rewardGrantMode'])} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="IMMEDIATE">审核通过后立即发放</option><option value="SCHEDULED">指定时间统一发放</option></select></label>
+            {form.rewardGrantMode === 'SCHEDULED' ? <label className="text-sm font-black text-slate-700 dark:text-slate-200">统一发奖时间（北京时间）<input type="datetime-local" value={form.rewardGrantAt} onChange={(event) => changeForm('rewardGrantAt', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label> : null}
+          </div>
+        </section> : null}
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <ActivityImageUploader label="卡片封面" initialUrl={form.coverUrl} disabled={saving} status={coverStatus} onSelectionChange={(selection) => handleImageSelection('cover', selection)} />
           <ActivityImageUploader label="详情横幅（可选）" initialUrl={form.bannerUrl} disabled={saving} status={bannerStatus} onSelectionChange={(selection) => handleImageSelection('banner', selection)} />
         </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {form.type !== 'TOPIC_ACTIVITY' ? <><div className="mt-4 grid gap-4 md:grid-cols-2">
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">活动地点<input value={form.locationName} onChange={(event) => changeForm('locationName', event.target.value)} placeholder="可选" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">详细地址<input value={form.locationAddress} onChange={(event) => changeForm('locationAddress', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
           <label className="text-sm font-black text-slate-700 dark:text-slate-200">线上活动链接<input type="url" value={form.onlineUrl} onChange={(event) => changeForm('onlineUrl', event.target.value)} placeholder="可选，仅作为活动资料" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
@@ -527,9 +571,11 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
            }
           return Boolean(await save('DRAFT', undefined, { keepEditing: true }))
         }} /></div>
+        </> : null}
         <div className="mt-4 flex flex-wrap items-center gap-5 rounded-xl bg-sky-50/70 p-3 dark:bg-slate-800/70">
           <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.isFeatured} onChange={(event) => changeForm('isFeatured', event.target.checked)} />精选</label>
           <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.isPinned} onChange={(event) => changeForm('isPinned', event.target.checked)} />置顶</label>
+          <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.pinToPlaza} onChange={(event) => changeForm('pinToPlaza', event.target.checked)} />置顶到 E院广场</label>
           <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200">排序值<input type="number" value={form.sortOrder} onChange={(event) => changeForm('sortOrder', event.target.value)} className="min-h-9 w-24 rounded-lg border border-sky-100 bg-white px-2 dark:border-slate-600 dark:bg-slate-950" /></label>
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
@@ -546,12 +592,14 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
         <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-black tracking-[0.18em] text-sky-700 dark:text-sky-300">活动列表</p><h2 className="mt-1 text-2xl font-black text-brand-950 dark:text-slate-100">全部活动</h2></div><span className="text-sm font-black text-slate-500">共 {visibleActivities.length} 条</span></div>
         <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_11rem]"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索活动" className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 text-sm font-bold dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'ALL' | ActivityStatusValue | 'ENDED')} className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 text-sm font-bold dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="ALL">全部状态</option><option value="DRAFT">草稿</option><option value="PUBLISHED">已发布</option><option value="ENDED">已结束</option><option value="CANCELLED">已取消</option></select><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as 'ALL' | ActivityTypeValue)} className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 text-sm font-bold dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="ALL">全部类型</option>{activityTypeValues.map((item) => <option key={item} value={item}>{activityTypeLabels[item]}</option>)}</select></div>
         <div className="mt-5 divide-y divide-sky-100 dark:divide-slate-700">
-          {visibleActivities.map((activity) => <article key={activity.id} className="grid gap-4 py-5 md:grid-cols-[minmax(0,1fr)_auto]"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><ActivityStatusBadge activity={activity} /><span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700 dark:bg-slate-800 dark:text-sky-200">{statusLabel(activity.status)}</span><span className="text-xs font-bold text-slate-400">{activityTypeLabels[activity.type]}</span></div><h3 className="mt-3 break-words text-xl font-black text-brand-950 dark:text-slate-100">{activity.title || '未命名活动'}</h3>{activity.subtitle ? <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">{activity.subtitle}</p> : null}<p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{activity.description || '暂无说明'}</p><p className="mt-2 text-xs font-bold text-slate-400">浏览 {activity.viewCount} 次{activity.startsAt ? ` · ${dateInput(activity.startsAt).replace('T', ' ')}` : ''}</p></div><div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-start"><button type="button" onClick={() => void edit(activity)} disabled={saving || actionLoading} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">编辑</button><button type="button" onClick={() => openManagementSection(activity.id, 'registrations')} disabled={saving || actionLoading} className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-black text-emerald-700 disabled:opacity-50 dark:text-emerald-300">报名管理</button><button type="button" onClick={() => openManagementSection(activity.id, 'notifications')} disabled={saving || actionLoading} className="rounded-full border border-violet-700 px-4 py-2 text-sm font-black text-violet-700 disabled:opacity-50 dark:text-violet-300">发送通知</button>{activity.status !== 'DRAFT' ? <Link href={`/activities/${activity.id}`} target="_blank" className="rounded-full border border-sky-100 px-4 py-2 text-center text-sm font-black text-slate-600 dark:border-slate-600 dark:text-slate-300">查看前台</Link> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => void updateStatus(activity.id, 'PUBLISHED')} disabled={saving || actionLoading} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">发布</button> : null}{activity.status === 'PUBLISHED' ? <button type="button" onClick={() => void updateStatus(activity.id, 'DRAFT')} disabled={saving || actionLoading} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">撤下</button> : null}{activity.status !== 'CANCELLED' ? <button type="button" onClick={() => setConfirmAction({ kind: 'cancel', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">取消活动</button> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => setConfirmAction({ kind: 'delete', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">删除</button> : null}</div></article>)}
+          {visibleActivities.map((activity) => <article key={activity.id} className="grid gap-4 py-5 md:grid-cols-[minmax(0,1fr)_auto]"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><ActivityStatusBadge activity={activity} /><span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700 dark:bg-slate-800 dark:text-sky-200">{statusLabel(activity.status)}</span><span className="text-xs font-bold text-slate-400">{activityTypeLabels[activity.type]}</span></div><h3 className="mt-3 break-words text-xl font-black text-brand-950 dark:text-slate-100">{activity.title || '未命名活动'}</h3>{activity.subtitle ? <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">{activity.subtitle}</p> : null}<p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{activity.description || '暂无说明'}</p><p className="mt-2 text-xs font-bold text-slate-400">浏览 {activity.viewCount} 次{activity.startsAt ? ` · ${dateInput(activity.startsAt).replace('T', ' ')}` : ''}</p></div><div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-start"><button type="button" onClick={() => void edit(activity)} disabled={saving || actionLoading} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">编辑</button>{activity.type === 'TOPIC_ACTIVITY' ? (activity.activityPostId ? <Link href={`/posts/${activity.activityPostId}?topicStatus=PENDING`} target="_blank" className="rounded-full border border-emerald-700 px-4 py-2 text-center text-sm font-black text-emerald-700 dark:text-emerald-300">审核参与评论</Link> : <span className="px-3 py-2 text-xs font-bold text-slate-400">活动主帖待创建</span>) : <button type="button" onClick={() => openManagementSection(activity.id, 'registrations')} disabled={saving || actionLoading} className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-black text-emerald-700 disabled:opacity-50 dark:text-emerald-300">报名管理</button>}<button type="button" onClick={() => openManagementSection(activity.id, 'notifications')} disabled={saving || actionLoading} className="rounded-full border border-violet-700 px-4 py-2 text-sm font-black text-violet-700 disabled:opacity-50 dark:text-violet-300">发送通知</button>{activity.status !== 'DRAFT' ? <Link href={`/activities/${activity.id}`} target="_blank" className="rounded-full border border-sky-100 px-4 py-2 text-center text-sm font-black text-slate-600 dark:border-slate-600 dark:text-slate-300">查看前台</Link> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => void updateStatus(activity.id, 'PUBLISHED')} disabled={saving || actionLoading} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">发布</button> : null}{activity.status === 'PUBLISHED' ? <button type="button" onClick={() => void updateStatus(activity.id, 'DRAFT')} disabled={saving || actionLoading} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">撤下</button> : null}{activity.status !== 'CANCELLED' ? <button type="button" onClick={() => setConfirmAction({ kind: 'cancel', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">取消活动</button> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => setConfirmAction({ kind: 'delete', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">删除</button> : null}</div></article>)}
           {!visibleActivities.length ? <p className="py-8 text-center text-sm font-bold text-slate-500">暂无符合条件的活动。</p> : null}
         </div>
       </section>
+      {visibleActivities.some((activity) => activity.type === 'TOPIC_ACTIVITY') ? <section className="rounded-2xl border border-emerald-100 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"><h2 className="font-black text-slate-900 dark:text-slate-100">话题活动参与提交</h2><div className="mt-3 flex flex-wrap gap-2">{visibleActivities.filter((activity) => activity.type === 'TOPIC_ACTIVITY').map((activity) => <button key={activity.id} type="button" onClick={() => setFormSubmissionActivityId((current) => current === activity.id ? null : activity.id)} className="rounded-full border border-emerald-200 px-3 py-2 text-sm font-bold text-emerald-800 dark:border-slate-600 dark:text-emerald-200">{activity.title} · 参与提交</button>)}</div></section> : null}
       {registrationActivityId ? <div ref={(node) => { managementSectionRefs.current[`${registrationActivityId}:registrations`] = node }} className="scroll-mt-24"><ActivityRegistrationManager activityId={registrationActivityId} activityTitle={activities.find((activity) => activity.id === registrationActivityId)?.title || '活动报名'} verificationMode={activities.find((activity) => activity.id === registrationActivityId)?.verificationMode || 'NONE'} refreshSignal={registrationRefreshSignal} onClose={() => setRegistrationActivityId(null)} /></div> : null}
       {notificationActivityId ? <div ref={(node) => { managementSectionRefs.current[`${notificationActivityId}:notifications`] = node }} className="scroll-mt-24"><ActivityTargetedNotificationPanel activityId={notificationActivityId} activityTitle={activities.find((activity) => activity.id === notificationActivityId)?.title || '活动通知'} onClose={() => setNotificationActivityId(null)} /></div> : null}
+      {formSubmissionActivityId ? <TopicActivityFormSubmissionManager activityId={formSubmissionActivityId} onClose={() => setFormSubmissionActivityId(null)} /> : null}
       <ConfirmDialog open={Boolean(confirmAction)} title={confirmAction?.kind === 'delete' ? '删除活动？' : '确认取消活动？'} description={confirmAction?.kind === 'delete' ? '删除后将无法恢复。只有没有发布、报名或其他关联数据的草稿可以删除。' : cancelDescription} confirmLabel={confirmAction?.kind === 'delete' ? '确认删除' : '确认取消活动'} loading={actionLoading || (confirmAction?.kind === 'cancel' && cancelSummaryLoading)} confirmDisabled={confirmAction?.kind === 'cancel' && !cancelSummary} onConfirm={() => void confirmActionNow()} onCancel={() => { if (!actionLoading && !cancelSummaryLoading) setConfirmAction(null) }} />
     </>
   )

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import test from 'node:test'
 
-const read = (path: string) => readFileSync(path, 'utf8')
+const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n?/g, '\n')
 const appRoot = 'app'
 
 function sourceFiles(directory: string): string[] {
@@ -54,14 +54,17 @@ test('login, check-in and non-forum comment flows do not update User.ipRegion', 
 test('forum reply attributes IP only after a committed, non-duplicate reply and never blocks it', () => {
   const route = read('app/api/posts/[postId]/replies/route.ts')
   const postStart = route.indexOf('export async function POST')
-  const created = route.indexOf('const { createdReply, floorNumber')
+  const created = route.indexOf('const createdReply = await tx.reply.create')
+  const duplicateCheck = route.indexOf('const duplicateReply = await tx.reply.findFirst')
   const unavailableGuard = route.indexOf("if ('unavailable' in reply)")
   const duplicateGuard = route.indexOf("if ('duplicateReplyId' in reply)")
   const attribution = route.indexOf('const ipLocation = await resolveIpLocation(request).catch(() => null)')
 
   assert.ok(unavailableGuard >= 0)
   assert.ok(duplicateGuard > unavailableGuard)
-  assert.ok(created > duplicateGuard)
+  assert.ok(duplicateCheck > postStart)
+  assert.ok(created > duplicateCheck)
+  assert.ok(duplicateGuard > created)
   assert.ok(attribution > duplicateGuard)
   assert.ok(attribution > created)
   assert.match(route.slice(attribution), /const ipRegion = ipLocation \? await updateUserIpRegion\(user\.id, ipLocation\) : null/)

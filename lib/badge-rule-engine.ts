@@ -884,6 +884,15 @@ export async function getBatchBadgeMetrics(users: BadgeMetricUser[], ruleType: S
       rows.forEach((row) => metrics.set(row.userId, row._count._all))
       return metrics
     }
+    case 'TOPIC_ACTIVITY_PARTICIPATION_COUNT': {
+      const rows = await prisma.topicActivityParticipation.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, approvedSubmissionCount: { gt: 0 } },
+        _count: { _all: true },
+      })
+      rows.forEach((row) => metrics.set(row.userId, row._count._all))
+      return metrics
+    }
     case 'BADGE_SERIES_COMPLETE':
     case 'ACTIVITY_PARTICIPATION':
     case 'BADGE_OWNERSHIP':

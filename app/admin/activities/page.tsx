@@ -18,7 +18,7 @@ export default async function AdminActivitiesPage() {
         <h1 className="text-3xl font-black text-brand-950 dark:text-slate-100 sm:text-4xl">活动中心管理</h1>
         <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-600 dark:text-slate-300">创建、编辑、预览、发布和取消活动。活动结束状态根据时间动态计算，不需要定时任务；已取消活动会保留历史页面。</p>
       </section>
-      <ActivityAdminManager initialActivities={activities.map((activity) => serializeActivityRow(activity))} />
+      <ActivityAdminManager initialActivities={activities.map((activity) => serializeActivityRow(activity, new Date(), true))} />
     </main>
   )
 }

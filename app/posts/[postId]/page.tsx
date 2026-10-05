@@ -239,6 +239,7 @@ const postCoreSelect = {
   expiresAt: true,
   rejectionReason: true,
   stickerId: true,
+  TopicActivity: { select: { id: true, type: true } },
 } satisfies Prisma.PostSelect
 
 type PostCore = Prisma.PostGetPayload<{ select: typeof postCoreSelect }>
@@ -434,7 +435,7 @@ async function loadPostSupport(post: PostCore, userId?: string | null): Promise<
 
 async function loadPostAdminPermission(
   user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>,
-  permissionKey: 'post_manage' | 'reply_manage',
+  permissionKey: 'post_manage' | 'reply_manage' | 'activity_manage',
   postId: string,
 ) {
   const permissionStartedAt = Date.now()
@@ -513,6 +514,7 @@ const replyDetailSelect = {
       Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
     },
   },
+  TopicActivitySubmission: { select: { id: true, activityId: true, userId: true, status: true, rejectReason: true } },
 } satisfies Prisma.ReplySelect
 
 async function loadVisibleReplyDescendants(tx: Prisma.TransactionClient, postId: string, rootIds: string[]) {
@@ -549,15 +551,21 @@ async function loadPostReplies(
   direction: PostReplyDirection,
   requestedPage: number,
   viewerId?: string | null,
+  topicActivityId?: string | null,
+  topicStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | null,
+  canReviewTopicActivity = false,
 ) {
   return prisma.$transaction(async (tx) => {
+    const topicSubmissionFilter = topicActivityId && topicStatus
+      ? { TopicActivitySubmission: { is: { activityId: topicActivityId, status: topicStatus } } }
+      : {}
     const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
       tx.reply.findFirst({
-        where: { postId, isDeleted: false, parentId: null, isPinned: true },
+        where: { postId, isDeleted: false, parentId: null, isPinned: true, ...topicSubmissionFilter },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: replyDetailSelect,
       }),
-      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false } }),
+      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter } }),
       viewerId
         ? tx.reply.findMany({
             where: { postId, authorId: viewerId, isDeleted: false, parentId: null },
@@ -569,7 +577,7 @@ async function loadPostReplies(
     const totalPages = getPostReplyTotalPages(normalTotal)
     const page = clampPostReplyPage(requestedPage, totalPages)
     const normalRoots = await tx.reply.findMany({
-      where: { postId, isDeleted: false, parentId: null, isPinned: false },
+      where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter },
       orderBy: getPostReplyOrderBy(sort, direction),
       skip: getPostReplyOffset(page),
       take: POST_REPLY_PAGE_SIZE,
@@ -604,16 +612,35 @@ async function loadPostReplies(
       floorNumber: reply.parentId === null ? reply.floorNumber : null,
     })
 
-    return {
-      rows: [
+    const rows = [
         ...(pinnedReply ? [pinnedReply] : []),
         ...normalRoots,
         ...childRows.filter((reply) => includedRootIds.has(reply.id)),
-      ].map(withFloorNumber),
-      myRows: [
+      ].map(withFloorNumber)
+    const myRows = [
         ...myRootReplies,
         ...childRows.filter((reply) => includedViewerRootIds.has(reply.id)),
-      ].map(withFloorNumber),
+      ].map(withFloorNumber)
+    const visibleRows = [...rows, ...myRows]
+    const submissions = visibleRows.flatMap((reply) => reply.TopicActivitySubmission && reply.TopicActivitySubmission.activityId === topicActivityId ? [reply.TopicActivitySubmission] : [])
+    const countedUsers = topicActivityId && submissions.length
+      ? new Set((await tx.topicActivityParticipation.findMany({
+          where: { activityId: topicActivityId, userId: { in: [...new Set(submissions.map((item) => item.userId))] }, approvedSubmissionCount: { gt: 0 } },
+          select: { userId: true },
+        })).map((item) => item.userId))
+      : new Set<string>()
+    const decorate = <T extends (typeof visibleRows)[number]>(reply: T) => {
+      const submission = reply.TopicActivitySubmission
+      const visible = submission && submission.activityId === topicActivityId && (viewerId === reply.User.id || canReviewTopicActivity)
+      const { TopicActivitySubmission: _submission, ...serialized } = reply
+      return {
+        ...serialized,
+        ...(visible ? { topicActivitySubmission: { id: submission.id, status: submission.status, rejectReason: submission.rejectReason, alreadyCounted: countedUsers.has(submission.userId) } } : {}),
+      }
+    }
+    return {
+      rows: rows.map(decorate),
+      myRows: myRows.map(decorate),
       pagination: {
         page,
         pageSize: POST_REPLY_PAGE_SIZE,
@@ -748,7 +775,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string; returnTo?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string; topicStatus?: string; returnTo?: string }> }>) {
   const { postId } = await params
   const query = await searchParams
   const returnTo = normalizePostReturnTo(query.returnTo)
@@ -757,6 +784,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const commentSort = parsePostReplySort(rawCommentSort)
   const commentDirection = parsePostReplyDirection(query.direction, rawCommentSort)
   const requestedCommentPage = Math.max(1, Number.parseInt(query.commentPage || '1', 10) || 1)
+  const topicStatus = ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'].includes(query.topicStatus || '')
+    ? query.topicStatus as 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
+    : null
   let postCore: Awaited<ReturnType<typeof loadPost>>
   const postLoadStartedAt = Date.now()
   try {
@@ -793,6 +823,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     })
   }
   const viewerIsAdmin = Boolean(user && await loadPostAdminPermission(user, 'post_manage', postId))
+  const viewerCanReviewTopicActivity = Boolean(postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' && user && await loadPostAdminPermission(user, 'activity_manage', postId))
   const viewerIsAuthor = Boolean(user && user.id === postCore.authorId)
   if (postCore.isDeleted || postCore.status !== 'PUBLISHED') {
     return <PostUnavailableFallback reason="POST" returnTo={returnTo} />
@@ -851,7 +882,16 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   }
   const commentsStartedAt = Date.now()
   try {
-    const loadedReplies = await loadPostReplies(postId, commentSort, commentDirection, requestedCommentPage, user?.id)
+    const loadedReplies = await loadPostReplies(
+      postId,
+      commentSort,
+      commentDirection,
+      requestedCommentPage,
+      user?.id,
+      postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity.id : null,
+      topicStatus,
+      viewerCanReviewTopicActivity,
+    )
     postReplies = loadedReplies.rows
     myPostReplies = loadedReplies.myRows
     commentPagination = loadedReplies.pagination
@@ -1273,6 +1313,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             pagination={commentPagination}
             hotReplyIds={hotReplyIds}
             commentsLoadError={commentsLoadError}
+            topicActivityId={postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity.id : undefined}
+            canReviewTopicActivity={viewerCanReviewTopicActivity}
+            topicReviewFilter={topicStatus || 'ALL'}
           />
         </CommentSectionBoundary>
       </main>

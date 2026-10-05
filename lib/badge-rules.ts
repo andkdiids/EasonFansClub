@@ -20,6 +20,7 @@ export const BADGE_EVALUATION_EVENTS = [
   'USER_ACTIVE',
   'USER_BIRTHDAY_UPDATED',
   'CLINIC_CONSULTATION_CHANGED',
+  'TOPIC_ACTIVITY_PARTICIPATION_CREATED',
 ] as const
 
 export type BadgeEvaluationEvent = typeof BADGE_EVALUATION_EVENTS[number]
@@ -280,6 +281,19 @@ export const BADGE_RULE_REGISTRY = {
     supportsRetentionWhileEligible: true,
     historicalBasis: '按指定活动中有效人工或二维码现场核销记录判断；活动结束自动核销不计入',
     defaultAcquisitionDescription: () => '参加指定活动后获得',
+  },
+  TOPIC_ACTIVITY_PARTICIPATION_COUNT: {
+    group: '活动', unit: '个话题活动',
+    label: '话题活动参与次数',
+    dataDescription: '用户至少有一条审核通过的提交时，按不同话题活动去重计数；同一活动多条评论只计 1 次',
+    metricLoader: 'TOPIC_ACTIVITY_PARTICIPATION_COUNT',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: ['TOPIC_ACTIVITY_PARTICIPATION_CREATED'],
+    threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: false,
+    historicalBasis: '按限定期内首次获得审核通过的不同话题活动数量重算',
+    defaultAcquisitionDescription: (threshold: number | null) => `累计通过 ${displayThreshold(threshold || 1)} 个不同话题活动后获得`,
   },
   BIRTHDAY_ZODIAC: {
     group: '账号',

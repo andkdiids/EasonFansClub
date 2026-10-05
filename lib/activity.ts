@@ -1,6 +1,6 @@
 import { formatBeijingDateTimeDisplay, parseBeijingDateTime } from '@/lib/registration-availability'
 
-export const activityTypeValues = ['OFFLINE', 'ONLINE', 'CONCERT', 'COMMUNITY', 'BENEFIT', 'OTHER'] as const
+export const activityTypeValues = ['OFFLINE', 'ONLINE', 'CONCERT', 'COMMUNITY', 'BENEFIT', 'OTHER', 'TOPIC_ACTIVITY'] as const
 export type ActivityTypeValue = (typeof activityTypeValues)[number]
 
 export const activityStatusValues = ['DRAFT', 'PUBLISHED', 'CANCELLED'] as const
@@ -15,6 +15,7 @@ export const activityTypeLabels: Record<ActivityTypeValue, string> = {
   COMMUNITY: '粉丝社群',
   BENEFIT: '福利活动',
   OTHER: '其他活动',
+  TOPIC_ACTIVITY: '话题活动',
 }
 
 export const activityDisplayStatusLabels = {
@@ -55,6 +56,16 @@ export type ActivityView = {
   contactInfo: string | null
   isFeatured: boolean
   isPinned: boolean
+  pinToPlaza: boolean
+  activityPostId: string | null
+  participationRule: string | null
+  participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+  allowImageAttachments: boolean
+  rewardGrantMode: 'IMMEDIATE' | 'SCHEDULED'
+  rewardGrantAt: string | null
+  rewardPoints: number | null
+  rewardBadgeCount: number
+  rewardBadgeIds?: string[]
   sortOrder: number
   viewCount: number
   publishedAt: string | null
@@ -180,13 +191,25 @@ export function serializeActivity(activity: {
   contactInfo?: string | null
   isFeatured?: boolean
   isPinned?: boolean
+  pinToPlaza?: boolean
+  activityPostId?: string | null
+  participationRule?: string | null
+  participationMode?: 'COMMENT' | 'FORM' | 'BOTH'
+  allowImageAttachments?: boolean
+  rewardGrantMode?: 'IMMEDIATE' | 'SCHEDULED'
+  rewardGrantAt?: ActivityDateValue
+  rewardPoints?: number | null
+  rewardBadgeIds?: unknown
   sortOrder?: number
   viewCount?: number
   publishedAt?: ActivityDateValue
   createdAt: ActivityDateValue
   updatedAt: ActivityDateValue
   topics?: Array<{ id: string; name: string }>
-}, now: Date = new Date()): ActivityView {
+}, now: Date = new Date(), includeRewardBadgeIds = false): ActivityView {
+  const rewardBadgeIds = Array.isArray(activity.rewardBadgeIds)
+    ? activity.rewardBadgeIds.filter((id): id is string => typeof id === 'string')
+    : []
   return {
     id: activity.id,
     title: activity.title,
@@ -227,7 +250,17 @@ export function serializeActivity(activity: {
     organizer: activity.organizer ?? null,
     contactInfo: activity.contactInfo ?? null,
     isFeatured: activity.isFeatured ?? false,
-    isPinned: activity.isPinned ?? false,
+  isPinned: activity.isPinned ?? false,
+    pinToPlaza: activity.pinToPlaza ?? false,
+    activityPostId: activity.activityPostId ?? null,
+    participationRule: activity.participationRule ?? null,
+    participationMode: activity.participationMode ?? 'COMMENT',
+    allowImageAttachments: activity.allowImageAttachments ?? false,
+    rewardGrantMode: activity.rewardGrantMode ?? 'IMMEDIATE',
+    rewardGrantAt: iso(activity.rewardGrantAt),
+    rewardPoints: activity.rewardPoints ?? null,
+    rewardBadgeCount: rewardBadgeIds.length,
+    ...(includeRewardBadgeIds ? { rewardBadgeIds } : {}),
     sortOrder: activity.sortOrder ?? 0,
     viewCount: activity.viewCount ?? 0,
     publishedAt: iso(activity.publishedAt),
