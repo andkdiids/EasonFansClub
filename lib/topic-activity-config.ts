@@ -1,16 +1,20 @@
 import { parseActivityDateInput, type ActivityTypeValue } from '@/lib/activity'
 import { sanitizeText } from '@/lib/security'
+import { normalizeTopicActivityFormSchema, type TopicActivityFormSchema } from '@/lib/topic-activity-form'
 
 export type TopicActivityConfig = {
   pinToPlaza: boolean
   participationRule: string | null
+  participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+  allowImageAttachments: boolean
+  formSchema: TopicActivityFormSchema
   rewardGrantMode: 'IMMEDIATE' | 'SCHEDULED'
   rewardGrantAt: Date | null
   rewardPoints: number | null
   rewardBadgeIds: string[]
 }
 
-type ExistingConfig = Partial<TopicActivityConfig> | null | undefined
+type ExistingConfig = (Partial<Omit<TopicActivityConfig, 'formSchema'>> & { formSchema?: unknown }) | null | undefined
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -26,10 +30,16 @@ export function normalizeTopicActivityConfig(inputValue: unknown, type: Activity
   const pinToPlaza = pinValue === undefined ? type === 'TOPIC_ACTIVITY' : pinValue === true || pinValue === 'true' || pinValue === 1
 
   if (type !== 'TOPIC_ACTIVITY') {
-    return { valid: true, value: { pinToPlaza, participationRule: null, rewardGrantMode: 'IMMEDIATE', rewardGrantAt: null, rewardPoints: null, rewardBadgeIds: [] } }
+    return { valid: true, value: { pinToPlaza, participationRule: null, participationMode: 'COMMENT', allowImageAttachments: false, formSchema: { version: 1, fields: [] }, rewardGrantMode: 'IMMEDIATE', rewardGrantAt: null, rewardPoints: null, rewardBadgeIds: [] } }
   }
 
   const participationRule = sanitizeText(read(input, 'participationRule', existing), 2_000) || null
+  const rawParticipationMode = read(input, 'participationMode', existing) ?? 'COMMENT'
+  if (rawParticipationMode !== 'COMMENT' && rawParticipationMode !== 'FORM' && rawParticipationMode !== 'BOTH') return { valid: false, message: '活动参与方式不正确' }
+  const allowImageAttachments = read(input, 'allowImageAttachments', existing) === true
+  const normalizedForm = normalizeTopicActivityFormSchema(read(input, 'formSchema', existing) ?? { version: 1, fields: [] }, allowImageAttachments)
+  if (!normalizedForm.valid) return normalizedForm
+  if ((rawParticipationMode === 'FORM' || rawParticipationMode === 'BOTH') && normalizedForm.value.fields.length === 0) return { valid: false, message: '表单参与模式至少需要设置一个字段' }
   const rawMode = read(input, 'rewardGrantMode', existing) ?? 'IMMEDIATE'
   if (rawMode !== 'IMMEDIATE' && rawMode !== 'SCHEDULED') return { valid: false, message: '奖励发放方式不正确' }
 
@@ -54,5 +64,5 @@ export function normalizeTopicActivityConfig(inputValue: unknown, type: Activity
   const rewardBadgeIds = [...new Set((Array.isArray(rawBadges) ? rawBadges : []).filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter((id) => id.length > 0))]
   if (rewardBadgeIds.length > 10 || rewardBadgeIds.some((id) => id.length > 191)) return { valid: false, message: '最多选择 10 枚奖励勋章' }
 
-  return { valid: true, value: { pinToPlaza, participationRule, rewardGrantMode: rawMode, rewardGrantAt, rewardPoints, rewardBadgeIds } }
+  return { valid: true, value: { pinToPlaza, participationRule, participationMode: rawParticipationMode, allowImageAttachments, formSchema: normalizedForm.value, rewardGrantMode: rawMode, rewardGrantAt, rewardPoints, rewardBadgeIds } }
 }

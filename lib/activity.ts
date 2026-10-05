@@ -59,6 +59,8 @@ export type ActivityView = {
   pinToPlaza: boolean
   activityPostId: string | null
   participationRule: string | null
+  participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+  allowImageAttachments: boolean
   rewardGrantMode: 'IMMEDIATE' | 'SCHEDULED'
   rewardGrantAt: string | null
   rewardPoints: number | null
@@ -192,6 +194,8 @@ export function serializeActivity(activity: {
   pinToPlaza?: boolean
   activityPostId?: string | null
   participationRule?: string | null
+  participationMode?: 'COMMENT' | 'FORM' | 'BOTH'
+  allowImageAttachments?: boolean
   rewardGrantMode?: 'IMMEDIATE' | 'SCHEDULED'
   rewardGrantAt?: ActivityDateValue
   rewardPoints?: number | null
@@ -250,6 +254,8 @@ export function serializeActivity(activity: {
     pinToPlaza: activity.pinToPlaza ?? false,
     activityPostId: activity.activityPostId ?? null,
     participationRule: activity.participationRule ?? null,
+    participationMode: activity.participationMode ?? 'COMMENT',
+    allowImageAttachments: activity.allowImageAttachments ?? false,
     rewardGrantMode: activity.rewardGrantMode ?? 'IMMEDIATE',
     rewardGrantAt: iso(activity.rewardGrantAt),
     rewardPoints: activity.rewardPoints ?? null,

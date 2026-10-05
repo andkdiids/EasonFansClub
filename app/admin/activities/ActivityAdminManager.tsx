@@ -9,6 +9,9 @@ import { ActivityStatusBadge } from '@/components/activities/ActivityCard'
 import { ActivityLotteryEntry } from '@/components/activities/ActivityLotteryEntry'
 import { ActivityRegistrationFormDesigner, type ActivityQuestionDraft } from '@/components/activities/ActivityRegistrationFormDesigner'
 import { ActivityRegistrationManager } from '@/components/activities/ActivityRegistrationManager'
+import { TopicActivityFormDesigner } from '@/components/activities/TopicActivityFormDesigner'
+import { TopicActivityFormSubmissionManager } from './TopicActivityFormSubmissionManager'
+import { TOPIC_ACTIVITY_FORM_VERSION, type TopicActivityFormSchema } from '@/lib/topic-activity-form'
 import { ActivityTargetedNotificationPanel } from './ActivityTargetedNotificationPanel'
 import { activityDisplayStatusLabels, activityTypeLabels, activityTypeValues, getActivityDisplayStatus, type ActivityStatusValue, type ActivityTypeValue, type ActivityVerificationModeValue, type ActivityView } from '@/lib/activity'
 import { formatBeijingDateTimeInput } from '@/lib/registration-availability'
@@ -38,6 +41,9 @@ type ActivityForm = {
   isPinned: boolean
   pinToPlaza: boolean
   participationRule: string
+  participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+  allowImageAttachments: boolean
+  formSchema: TopicActivityFormSchema
   rewardGrantMode: 'IMMEDIATE' | 'SCHEDULED'
   rewardGrantAt: string
   rewardPoints: string
@@ -74,7 +80,7 @@ type ActivityManagementSection = 'registrations' | 'notifications'
 
 const emptyForm: ActivityForm = {
   title: '', subtitle: '', description: '', type: 'OTHER', coverUrl: null, bannerUrl: null, locationName: '', locationAddress: '', onlineUrl: '',
-  startsAt: '', endsAt: '', registrationStartAt: '', registrationEndAt: '', registrationFee: '0', feeDescription: '', linkedMaterialId: '', verificationMode: 'NONE', signupLimit: '', organizer: '', contactInfo: '', isFeatured: false, isPinned: false, pinToPlaza: false, participationRule: '', rewardGrantMode: 'IMMEDIATE', rewardGrantAt: '', rewardPoints: '', rewardBadgeIds: [], sortOrder: '0',
+  startsAt: '', endsAt: '', registrationStartAt: '', registrationEndAt: '', registrationFee: '0', feeDescription: '', linkedMaterialId: '', verificationMode: 'NONE', signupLimit: '', organizer: '', contactInfo: '', isFeatured: false, isPinned: false, pinToPlaza: false, participationRule: '', participationMode: 'COMMENT', allowImageAttachments: false, formSchema: { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [] }, rewardGrantMode: 'IMMEDIATE', rewardGrantAt: '', rewardPoints: '', rewardBadgeIds: [], sortOrder: '0',
 }
 const emptySelection: ActivityImageSelection = { file: null, removed: false }
 
@@ -114,6 +120,9 @@ function formFromActivity(activity: ActivityView): ActivityForm {
     isPinned: activity.isPinned,
     pinToPlaza: activity.pinToPlaza,
     participationRule: activity.participationRule || '',
+    participationMode: activity.participationMode || 'COMMENT',
+    allowImageAttachments: activity.allowImageAttachments || false,
+    formSchema: { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [] },
     rewardGrantMode: activity.rewardGrantMode,
     rewardGrantAt: dateInput(activity.rewardGrantAt),
     rewardPoints: activity.rewardPoints === null ? '' : String(activity.rewardPoints),
@@ -134,6 +143,7 @@ function publishValidationMessage(form: ActivityForm) {
   if (!form.description.trim()) return '请填写活动说明'
   if (form.type === 'TOPIC_ACTIVITY') {
     if (!form.participationRule.trim()) return '请填写话题活动参与方式'
+    if ((form.participationMode === 'FORM' || form.participationMode === 'BOTH') && form.formSchema.fields.length === 0) return '表单参与至少需要配置一个字段'
     if (form.rewardGrantMode === 'SCHEDULED' && !form.rewardGrantAt) return '请设置统一发奖时间'
     if (form.rewardPoints && (!Number.isSafeInteger(Number(form.rewardPoints)) || Number(form.rewardPoints) < 1)) return '挂号费奖励必须是正整数'
   }
@@ -152,7 +162,7 @@ function toPreview(form: ActivityForm, id: string | null, status: ActivityStatus
     registrationEndAt: form.registrationEndAt ? new Date(`${form.registrationEndAt}:00+08:00`).toISOString() : null,
     verificationMode: form.verificationMode,
     organizer: form.organizer || null, contactInfo: form.contactInfo || null, isFeatured: form.isFeatured, isPinned: form.isPinned,
-    pinToPlaza: form.pinToPlaza, activityPostId: null, participationRule: form.participationRule || null, rewardGrantMode: form.rewardGrantMode, rewardGrantAt: dateToBeijingIso(form.rewardGrantAt), rewardPoints: form.rewardPoints ? Number(form.rewardPoints) : null, rewardBadgeCount: form.rewardBadgeIds.length, rewardBadgeIds: form.rewardBadgeIds,
+    pinToPlaza: form.pinToPlaza, activityPostId: null, participationRule: form.participationRule || null, participationMode: form.participationMode, allowImageAttachments: form.allowImageAttachments, rewardGrantMode: form.rewardGrantMode, rewardGrantAt: dateToBeijingIso(form.rewardGrantAt), rewardPoints: form.rewardPoints ? Number(form.rewardPoints) : null, rewardBadgeCount: form.rewardBadgeIds.length, rewardBadgeIds: form.rewardBadgeIds,
     sortOrder: Number(form.sortOrder) || 0, viewCount: 0, publishedAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   }
 }
@@ -182,6 +192,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const [registrationRefreshSignal, setRegistrationRefreshSignal] = useState(0)
   const [registrationActivityId, setRegistrationActivityId] = useState<string | null>(null)
   const [notificationActivityId, setNotificationActivityId] = useState<string | null>(null)
+  const [formSubmissionActivityId, setFormSubmissionActivityId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | ActivityStatusValue | 'ENDED'>('ALL')
@@ -245,7 +256,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       setFocusManagementSection(null)
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [focusManagementSection, registrationActivityId, notificationActivityId])
+  }, [focusManagementSection, registrationActivityId, notificationActivityId, formSubmissionActivityId])
 
   const editingActivity = editingId ? activities.find((item) => item.id === editingId) || null : null
   const visibleActivities = useMemo(() => {
@@ -294,6 +305,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       const badgeData = await badgeResponse.json().catch(() => null)
       if (activityResponse.ok) {
         setRegistrationQuestions(Array.isArray(detail?.registrationQuestions) ? detail.registrationQuestions.map((question: ActivityQuestionDraft) => ({ ...question, placeholder: question.placeholder || '', options: Array.isArray(question.options) ? question.options : [] })) : [])
+        setForm((current) => ({ ...current, participationMode: ['COMMENT', 'FORM', 'BOTH'].includes(detail?.activity?.participationMode) ? detail.activity.participationMode : current.participationMode, allowImageAttachments: detail?.activity?.allowImageAttachments === true, formSchema: detail?.formSchema && Array.isArray(detail.formSchema.fields) ? detail.formSchema as TopicActivityFormSchema : { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [] } }))
         setRewardBadgeId(typeof detail?.activityReward?.badgeId === 'string' ? detail.activityReward.badgeId : '')
         setBadgeGrantAt(dateInput(typeof detail?.activityReward?.badgeGrantAt === 'string' ? detail.activityReward.badgeGrantAt : null))
       }
@@ -517,7 +529,9 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
         <label className="mt-4 block text-sm font-black text-slate-700 dark:text-slate-200">活动说明<textarea aria-required="true" rows={7} maxLength={20000} value={form.description} onChange={(event) => changeForm('description', event.target.value)} className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-3 font-bold leading-6 text-slate-800 outline-none focus:border-sky-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         {form.type === 'TOPIC_ACTIVITY' ? <section className="mt-4 space-y-4 rounded-2xl border border-sky-100 p-4 dark:border-slate-700" aria-label="话题活动设置">
           <h3 className="font-black text-brand-950 dark:text-slate-100">话题活动设置</h3>
-          <label className="block text-sm font-black text-slate-700 dark:text-slate-200">参与方式<textarea rows={3} maxLength={2000} value={form.participationRule} onChange={(event) => changeForm('participationRule', event.target.value)} placeholder="说明参与者需要在活动主帖下提交什么内容" className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 font-bold leading-6 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="block text-sm font-black text-slate-700 dark:text-slate-200">参与说明<textarea rows={3} maxLength={2000} value={form.participationRule} onChange={(event) => changeForm('participationRule', event.target.value)} placeholder="说明参与者需要在活动主帖下提交什么内容" className="mt-1 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 font-bold leading-6 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
+          <label className="block text-sm font-black text-slate-700 dark:text-slate-200">参与方式<select value={form.participationMode} onChange={(event) => changeForm('participationMode', event.target.value as ActivityForm['participationMode'])} className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="COMMENT">活动帖评论参与</option><option value="FORM">填写表单参与</option><option value="BOTH">评论或表单均可参与</option></select></label>
+          {form.participationMode !== 'COMMENT' ? <TopicActivityFormDesigner schema={form.formSchema} allowImages={form.allowImageAttachments} onSchemaChange={(formSchema) => changeForm('formSchema', formSchema)} onAllowImagesChange={(allowImageAttachments) => changeForm('allowImageAttachments', allowImageAttachments)} /> : null}
           <div className="grid gap-4 md:grid-cols-2">
             <label className="text-sm font-black text-slate-700 dark:text-slate-200">奖励挂号费<input type="number" min="1" step="1" value={form.rewardPoints} onChange={(event) => changeForm('rewardPoints', event.target.value)} placeholder="可选" className="mt-1 min-h-11 w-full rounded-xl border border-sky-100 bg-white px-3 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
             <label className="text-sm font-black text-slate-700 dark:text-slate-200">奖励勋章（可多选）<select multiple value={form.rewardBadgeIds} onChange={(event) => changeForm('rewardBadgeIds', Array.from(event.currentTarget.selectedOptions, (option) => option.value))} className="mt-1 min-h-24 w-full rounded-xl border border-sky-100 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">{badgeOptions.map((badge) => <option key={badge.id} value={badge.id}>{badge.name} · {badge.code}</option>)}</select></label>
@@ -582,8 +596,10 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           {!visibleActivities.length ? <p className="py-8 text-center text-sm font-bold text-slate-500">暂无符合条件的活动。</p> : null}
         </div>
       </section>
+      {visibleActivities.some((activity) => activity.type === 'TOPIC_ACTIVITY') ? <section className="rounded-2xl border border-emerald-100 bg-white p-4 dark:border-slate-700 dark:bg-slate-900"><h2 className="font-black text-slate-900 dark:text-slate-100">话题活动参与提交</h2><div className="mt-3 flex flex-wrap gap-2">{visibleActivities.filter((activity) => activity.type === 'TOPIC_ACTIVITY').map((activity) => <button key={activity.id} type="button" onClick={() => setFormSubmissionActivityId((current) => current === activity.id ? null : activity.id)} className="rounded-full border border-emerald-200 px-3 py-2 text-sm font-bold text-emerald-800 dark:border-slate-600 dark:text-emerald-200">{activity.title} · 参与提交</button>)}</div></section> : null}
       {registrationActivityId ? <div ref={(node) => { managementSectionRefs.current[`${registrationActivityId}:registrations`] = node }} className="scroll-mt-24"><ActivityRegistrationManager activityId={registrationActivityId} activityTitle={activities.find((activity) => activity.id === registrationActivityId)?.title || '活动报名'} verificationMode={activities.find((activity) => activity.id === registrationActivityId)?.verificationMode || 'NONE'} refreshSignal={registrationRefreshSignal} onClose={() => setRegistrationActivityId(null)} /></div> : null}
       {notificationActivityId ? <div ref={(node) => { managementSectionRefs.current[`${notificationActivityId}:notifications`] = node }} className="scroll-mt-24"><ActivityTargetedNotificationPanel activityId={notificationActivityId} activityTitle={activities.find((activity) => activity.id === notificationActivityId)?.title || '活动通知'} onClose={() => setNotificationActivityId(null)} /></div> : null}
+      {formSubmissionActivityId ? <TopicActivityFormSubmissionManager activityId={formSubmissionActivityId} onClose={() => setFormSubmissionActivityId(null)} /> : null}
       <ConfirmDialog open={Boolean(confirmAction)} title={confirmAction?.kind === 'delete' ? '删除活动？' : '确认取消活动？'} description={confirmAction?.kind === 'delete' ? '删除后将无法恢复。只有没有发布、报名或其他关联数据的草稿可以删除。' : cancelDescription} confirmLabel={confirmAction?.kind === 'delete' ? '确认删除' : '确认取消活动'} loading={actionLoading || (confirmAction?.kind === 'cancel' && cancelSummaryLoading)} confirmDisabled={confirmAction?.kind === 'cancel' && !cancelSummary} onConfirm={() => void confirmActionNow()} onCancel={() => { if (!actionLoading && !cancelSummaryLoading) setConfirmAction(null) }} />
     </>
   )

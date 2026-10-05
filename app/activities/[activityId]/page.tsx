@@ -96,24 +96,27 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
       // A missing creator profile must not prevent the public activity page or poster from rendering.
     }
   }
-  const [registration, questions, topicStatusGroups, topicParticipationRecord] = await Promise.all([
+  const [registration, questions, topicStatusGroups, topicFormStatusGroups, topicParticipationRecord] = await Promise.all([
     viewer
       ? await prisma.activityRegistration.findUnique({ where: { activityId_userId: { activityId: view.id, userId: viewer.id } }, select: activityRegistrationSelect })
       : Promise.resolve(null),
     getActivityRegistrationQuestions(prisma, view.id),
     viewer && view.type === 'TOPIC_ACTIVITY'
-      ? prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: view.id, userId: viewer.id }, _count: { _all: true } })
+      ? prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: view.id, userId: viewer.id, commentDeletedAt: null }, _count: { _all: true } })
+      : Promise.resolve([]),
+    viewer && view.type === 'TOPIC_ACTIVITY'
+      ? prisma.topicActivityFormSubmission.groupBy({ by: ['status'], where: { activityId: view.id, userId: viewer.id }, _count: { _all: true } })
       : Promise.resolve([]),
     viewer && view.type === 'TOPIC_ACTIVITY'
       ? prisma.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId: view.id, userId: viewer.id } }, select: { approvedSubmissionCount: true, rewardStatus: true, rewardEligibleAt: true, rewardGrantedAt: true } })
       : Promise.resolve(null),
   ])
   const topicCounts = { total: 0, pending: 0, approved: 0, rejected: 0 }
-  for (const row of topicStatusGroups) {
+  for (const row of [...topicStatusGroups, ...topicFormStatusGroups]) {
     topicCounts.total += row._count._all
-    if (row.status === 'PENDING') topicCounts.pending = row._count._all
-    if (row.status === 'APPROVED') topicCounts.approved = row._count._all
-    if (row.status === 'REJECTED') topicCounts.rejected = row._count._all
+    if (row.status === 'PENDING') topicCounts.pending += row._count._all
+    if (row.status === 'APPROVED') topicCounts.approved += row._count._all
+    if (row.status === 'REJECTED') topicCounts.rejected += row._count._all
   }
   const topicStatus = view.type === 'TOPIC_ACTIVITY' && viewer ? {
     status: resolveTopicSubmissionStatus(topicCounts),

@@ -45,7 +45,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ submi
     return NextResponse.json({
       submission: { id: result.submission.id, activityId: result.submission.activityId, userId: result.submission.userId, commentId: result.submission.commentId, status: result.submission.status, rejectReason: result.submission.rejectReason, reviewedAt: result.submission.reviewedAt?.toISOString() || null },
       participation: result.participation ? { approvedSubmissionCount: result.participation.approvedSubmissionCount, countedInActivity: result.participation.approvedSubmissionCount > 0, rewardStatus: result.participation.rewardStatus, rewardEligibleAt: result.participation.rewardEligibleAt?.toISOString() || null, rewardGrantedAt: result.participation.rewardGrantedAt?.toISOString() || null } : null,
-      alreadyCounted: Boolean(result.participation && result.participation.approvedSubmissionCount > 0),
+      alreadyCounted: body.status === 'APPROVED' && !result.firstParticipationCreated && Boolean(result.participation && result.participation.approvedSubmissionCount > 0),
       changed: result.changed,
     }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
   } catch (error) {

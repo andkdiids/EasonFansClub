@@ -5,6 +5,7 @@ import { activityRegistrationSelect, getActivityRegistrationQuestions, serialize
 import { prisma } from '@/lib/prisma'
 import { getPublicActivityLotteries } from '@/lib/activity-lottery'
 import { resolveRequestAuth } from '@/lib/security'
+import { hasAdminPermission } from '@/lib/admin-permissions'
 import { resolveTopicSubmissionStatus } from '@/lib/topic-activity'
 
 export const dynamic = 'force-dynamic'
@@ -24,24 +25,26 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
   if (!activity) return NextResponse.json({ message: '活动不存在' }, { status: 404 })
 
   const view = serializeActivityRow(activity)
+  const canManageTopicForms = Boolean(viewer && view.type === 'TOPIC_ACTIVITY' && await hasAdminPermission(viewer, 'activity_manage'))
   const [registration, questions] = await Promise.all([
     viewer
       ? prisma.activityRegistration.findUnique({ where: { activityId_userId: { activityId, userId: viewer.id } }, select: activityRegistrationSelect })
       : Promise.resolve(null),
     getActivityRegistrationQuestions(prisma, activityId),
   ])
-  const [topicStatusGroups, topicParticipation] = view.type === 'TOPIC_ACTIVITY' && viewer
+  const [topicStatusGroups, formStatusGroups, topicParticipation] = view.type === 'TOPIC_ACTIVITY' && viewer
     ? await Promise.all([
-        prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId, userId: viewer.id }, _count: { _all: true } }),
+        prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId, userId: viewer.id, commentDeletedAt: null }, _count: { _all: true } }),
+        prisma.topicActivityFormSubmission.groupBy({ by: ['status'], where: { activityId, userId: viewer.id }, _count: { _all: true } }),
         prisma.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId, userId: viewer.id } }, select: { approvedSubmissionCount: true, rewardStatus: true, rewardEligibleAt: true, rewardGrantedAt: true } }),
       ])
-    : [[], null] as const
+    : [[], [], null] as const
   const topicCounts = { total: 0, pending: 0, approved: 0, rejected: 0 }
-  for (const row of topicStatusGroups) {
+  for (const row of [...topicStatusGroups, ...formStatusGroups]) {
     topicCounts.total += row._count._all
-    if (row.status === 'PENDING') topicCounts.pending = row._count._all
-    if (row.status === 'APPROVED') topicCounts.approved = row._count._all
-    if (row.status === 'REJECTED') topicCounts.rejected = row._count._all
+    if (row.status === 'PENDING') topicCounts.pending += row._count._all
+    if (row.status === 'APPROVED') topicCounts.approved += row._count._all
+    if (row.status === 'REJECTED') topicCounts.rejected += row._count._all
   }
   const availability = getActivityRegistrationState(view, view.signupCount)
   const lotteries = await getPublicActivityLotteries(activityId, viewer?.id)
@@ -53,6 +56,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
   const activityMaterialAvailable = !view.linkedMaterial || (view.linkedMaterial.status === 'PUBLISHED' && view.linkedMaterial.stockRemaining > 0)
   return NextResponse.json({
     activity: view,
+    canManageTopicForms,
     questions,
     registration: registration ? serializeActivityRegistration(registration) : null,
     registrationCount: view.signupCount,

@@ -90,7 +90,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ act
     getActivityRegistrationQuestions(prisma, activityId),
     prisma.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { badgeId: true, enabled: true, badgeGrantAt: true, Badge: { select: { id: true, name: true, code: true } } } }),
   ])
-  return NextResponse.json({ activity: serializeActivityRow(activity, new Date(), true), registrationQuestions: questions, activityReward: reward ? { badgeId: reward.badgeId, enabled: reward.enabled, badgeGrantAt: reward.badgeGrantAt?.toISOString() || null, badge: reward.Badge } : null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  return NextResponse.json({ activity: serializeActivityRow(activity, new Date(), true), registrationQuestions: questions, formSchema: activity.formSchema, activityReward: reward ? { badgeId: reward.badgeId, enabled: reward.enabled, badgeGrantAt: reward.badgeGrantAt?.toISOString() || null, badge: reward.Badge } : null }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
@@ -110,6 +110,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
   const existingTopicConfig = {
     pinToPlaza: current.pinToPlaza,
     participationRule: current.participationRule,
+    participationMode: current.participationMode,
+    allowImageAttachments: current.allowImageAttachments,
+    formSchema: current.formSchema,
     rewardGrantMode: current.rewardGrantMode,
     rewardGrantAt: current.rewardGrantAt,
     rewardPoints: current.rewardPoints,
@@ -135,6 +138,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     ...changedFields(editableActivity(current), normalized.value),
     ...(current.pinToPlaza !== topicConfig.value.pinToPlaza ? ['pinToPlaza'] : []),
     ...(current.participationRule !== topicConfig.value.participationRule ? ['participationRule'] : []),
+    ...(current.participationMode !== topicConfig.value.participationMode ? ['participationMode'] : []),
+    ...(current.allowImageAttachments !== topicConfig.value.allowImageAttachments ? ['allowImageAttachments'] : []),
+    ...(JSON.stringify(current.formSchema ?? null) !== JSON.stringify(topicConfig.value.formSchema) ? ['formSchema'] : []),
     ...(current.rewardGrantMode !== topicConfig.value.rewardGrantMode ? ['rewardGrantMode'] : []),
     ...(current.rewardGrantAt?.getTime() !== topicConfig.value.rewardGrantAt?.getTime() ? ['rewardGrantAt'] : []),
     ...(current.rewardPoints !== topicConfig.value.rewardPoints ? ['rewardPoints'] : []),

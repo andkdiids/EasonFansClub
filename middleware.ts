@@ -121,6 +121,9 @@ function normalizeHost(value: string) {
 function isPublicPath(pathname: string) {
   if (publicExactPaths.has(pathname)) return true
   if (pathname === '/api/auth') return true
+  // The published activity's form schema contains no user submissions or
+  // private data, so anonymous visitors may render the login-gated form UI.
+  if (/^\/api\/activities\/[^/]+\/form$/.test(pathname)) return true
   if (publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))) return true
   if (/^\/api\/(?:posts|activities)\/[^/]+\/share-card$/.test(pathname)) return true
   if (/^\/api\/salon\/posts\/[^/]+\/share-card$/.test(pathname)) return true
@@ -149,7 +152,10 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
     return pathname === '/api/admin/cantonese/review'
       || pathname === '/api/activities'
       || /^\/api\/activities\/[^/]+$/.test(pathname)
+      || /^\/api\/activities\/[^/]+\/(?:form|my-form-submissions)$/.test(pathname)
       || pathname === '/api/activities/me/topic-participations'
+      || /^\/api\/topic-activity-form-submissions\/[^/]+$/.test(pathname)
+      || /^\/api\/admin\/activities\/[^/]+\/form-submissions$/.test(pathname)
       || pathname === '/api/admin/cantonese/courses'
       || pathname === '/api/learning/cantonese/course'
       || pathname === '/api/learning/cantonese/speaking'
@@ -223,6 +229,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/users/me/badge/equip'
       || pathname === '/api/posts'
       || pathname === '/api/uploads/content-image'
+      || pathname === '/api/uploads/topic-activity-image'
+      || /^\/api\/activities\/[^/]+\/form-submissions$/.test(pathname)
+      || /^\/api\/admin\/topic-activity-form-submissions\/[^/]+\/replies$/.test(pathname)
       || pathname === '/api/friends/requests'
       || /^\/api\/friends\/requests\/[^/]+\/(?:accept|reject)$/.test(pathname)
       || pathname === '/api/friend-groups'
@@ -235,6 +244,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'PUT' || request.method === 'PATCH') {
     return (request.method === 'PATCH' && pathname === '/api/admin/review')
       || (request.method === 'PATCH' && /^\/api\/admin\/topic-activity-submissions\/[^/]+$/.test(pathname))
+      || (request.method === 'PATCH' && /^\/api\/admin\/topic-activity-form-submissions\/[^/]+\/review$/.test(pathname))
       || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/courses\/lesson-\d{2,3}$/.test(pathname))
       || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname))
       || pathname === '/api/posts/draft'
