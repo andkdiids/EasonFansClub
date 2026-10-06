@@ -25,7 +25,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ submi
       await safeNotificationWrite(() => createManyNotifications({
         data: [{
           recipientId: result.submission.userId,
-          actorId: guard.user.id,
+          actorId: null,
           type: 'ACTIVITY',
           title: approved ? '话题活动表单已通过' : '话题活动表单未通过',
           content: approved ? `你提交的「${activity?.title || '话题活动'}」参与表单已通过审核` : `你提交的「${activity?.title || '话题活动'}」参与表单未通过审核${rejectReason ? `：${rejectReason}` : ''}`,

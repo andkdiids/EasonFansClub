@@ -9,6 +9,17 @@
   font-style: normal;
 }
 
+/* Topic activity form builder: keep editor controls readable in both themes. */
+.topic-activity-form-builder { color:var(--foreground); background:var(--surface-subtle); }
+.topic-activity-form-field { border-color:var(--border); color:var(--foreground); background:var(--surface); }
+.topic-activity-form-builder :where(input:not([type="checkbox"]),textarea,select) { border-color:var(--border-strong); color:var(--foreground); background:var(--surface-elevated); }
+.topic-activity-form-builder :where(input:not([type="checkbox"]),textarea,select)::placeholder { color:var(--foreground-muted); opacity:1; }
+.topic-activity-form-builder :where(input:not([type="checkbox"]),textarea,select):focus-visible { outline:2px solid var(--primary); outline-offset:2px; border-color:var(--primary); }
+.topic-activity-form-builder option { color:var(--foreground); background:var(--surface-elevated); }
+.topic-activity-participation-form { box-sizing:border-box; }
+.topic-activity-participation-form :where(input:not([type="checkbox"]),textarea,select) { max-width:100%; box-sizing:border-box; }
+.topic-activity-participation-form :where(input:not([type="checkbox"]),textarea,select)::placeholder { color:var(--foreground-muted); opacity:1; }
+
 /* 想听：沿用娱乐天空的平面、直角信息布局，不初始化任何音频资源。 */
 .want-listen-page,.want-listen-game,.undercover-star-page {
   --background:#07101d; --surface:#0d1828; --surface-subtle:#0b1726; --surface-elevated:#111f32;

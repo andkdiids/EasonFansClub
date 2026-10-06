@@ -45,7 +45,7 @@ export async function POST(request: Request, context: { params: Promise<{ submis
   await safeNotificationWrite(() => createManyNotifications({
     data: [{
       recipientId: submission.userId,
-      actorId: guard.user!.id,
+      actorId: null,
       type: 'ACTIVITY',
       title: '你参与的话题活动收到了一条管理员回复',
       content: '你参与的话题活动收到了一条管理员回复',

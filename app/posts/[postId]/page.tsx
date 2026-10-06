@@ -9,6 +9,8 @@ import { RichPostContent, type PostMusicReferenceDisplay } from '@/components/po
 import { PostMediaCarousel } from '@/components/PostMediaCarousel'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
+import { TopicActivityFormParticipation } from '@/components/activities/TopicActivityFormParticipation'
+import { TopicActivityFormSubmissionEntry } from '@/app/admin/activities/TopicActivityFormSubmissionManager'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ForumDiscoveryActionBar } from '@/components/ForumDiscoveryActionBar'
@@ -239,7 +241,22 @@ const postCoreSelect = {
   expiresAt: true,
   rejectionReason: true,
   stickerId: true,
-  TopicActivity: { select: { id: true, type: true } },
+  TopicActivity: { select: {
+    id: true,
+    type: true,
+    title: true,
+    coverUrl: true,
+    status: true,
+    participationMode: true,
+    participationRule: true,
+    startsAt: true,
+    endsAt: true,
+    rewardPoints: true,
+    rewardGrantMode: true,
+    rewardGrantAt: true,
+    rewardBadgeIds: true,
+    _count: { select: { TopicActivityFormSubmission: true } },
+  } },
 } satisfies Prisma.PostSelect
 
 type PostCore = Prisma.PostGetPayload<{ select: typeof postCoreSelect }>
@@ -858,6 +875,13 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     PostMedia: support.media,
     PostTopic: support.topics,
   }
+  const topicActivity = postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity : null
+  const topicActivityMode = topicActivity?.participationMode
+  const topicActivityHasForm = Boolean(topicActivity && (topicActivityMode === 'FORM' || topicActivityMode === 'BOTH'))
+  const topicActivityCoverUrl = topicActivity
+    ? publicImageUrl(topicActivity.coverUrl)
+      || publicImageUrl(post.PostMedia[0]?.url || null)
+    : null
   const authorLoadFailed = support.authorLoadFailed
   const canInteractWithPost = isPublicPostModerationStatus(post.moderationStatus) && !isPostExpired(post.expiresAt)
 
@@ -1242,6 +1266,16 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             {post.expiresAt && !isPostExpired(post.expiresAt) ? <span className="text-amber-700">限时 · {formatPostExpiry(post.expiresAt)}</span> : null}
           </div>
           {post.PostTopic.length ? <nav aria-label="帖子话题" className="mt-4 flex flex-wrap gap-3 text-sm font-black">{post.PostTopic.map((topic) => <Link key={topic.id} href={`/topics/${encodeURIComponent(topic.id)}`} className="text-brand-700 underline underline-offset-2">#{topic.name}</Link>)}</nav> : null}
+          {topicActivity ? <section aria-label="话题活动信息" className="mt-6 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)]">
+            {topicActivityCoverUrl ? <img src={publicImageVariantUrl(topicActivityCoverUrl, 'large') || topicActivityCoverUrl} alt={`${topicActivity.title}活动封面`} className="aspect-[16/9] max-h-[520px] w-full object-cover" /> : null}
+            <div className="space-y-3 p-4 sm:p-5">
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-[var(--navigation-active)] px-3 py-1 text-xs font-black text-[var(--primary)]">话题活动</span><span className="text-sm font-black">参与方式：{topicActivityMode === 'FORM' ? '表单参与' : topicActivityMode === 'BOTH' ? '评论或表单均可参与' : '评论参与'}</span></div>
+              {topicActivity.participationRule ? <p className="whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground-muted)]">参与说明：{topicActivity.participationRule}</p> : null}
+              {topicActivity.startsAt || topicActivity.endsAt ? <p className="text-sm text-[var(--foreground-muted)]">活动时间：{topicActivity.startsAt ? formatDate(topicActivity.startsAt) : '即日起'}{topicActivity.endsAt ? ` — ${formatDate(topicActivity.endsAt)}` : ''}</p> : null}
+              <p className="text-sm text-[var(--foreground-muted)]">活动奖励：{[topicActivity.rewardPoints ? `${topicActivity.rewardPoints} 挂号费` : null, Array.isArray(topicActivity.rewardBadgeIds) && topicActivity.rewardBadgeIds.length ? `${topicActivity.rewardBadgeIds.length} 枚指定勋章` : null].filter(Boolean).join('、') || '按活动说明为准'}{topicActivity.rewardGrantMode === 'SCHEDULED' ? ` · 统一发放${topicActivity.rewardGrantAt ? `：${formatDate(topicActivity.rewardGrantAt)}` : ''}` : ' · 审核通过后发放'}</p>
+              {topicActivityHasForm ? <Link href={`#topic-activity-form-${topicActivity.id}`} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--primary)] px-4 text-sm font-black text-[var(--primary-foreground)]">填写参与表单</Link> : null}
+            </div>
+          </section> : null}
           <RichPostContent
             richContent={renderedRichContent}
             fallbackContent={publicPostContentSource}
@@ -1257,9 +1291,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
         <img src={publicImageVariantUrl(post.sticker.url, 'thumb-md') || post.sticker.url} alt={publicModerationText(post.sticker.name, post.sticker.moderationStatus) || '表情'} className="h-auto max-h-72 w-auto max-w-full rounded-xl bg-white object-contain" loading="lazy" />
             </div>
           ) : null}
-          {post.PostMedia.length ? (
+          {post.PostMedia.some((item) => !(topicActivity && topicActivityCoverUrl && publicImageUrl(item.url) === topicActivityCoverUrl)) ? (
             <PostMediaCarousel
-              items={post.PostMedia.map((item) => ({
+              items={post.PostMedia.filter((item) => !(topicActivity && topicActivityCoverUrl && publicImageUrl(item.url) === topicActivityCoverUrl)).map((item) => ({
                 id: item.id,
                 url: publicImageUrl(item.url) || item.url,
                 broken: isSupabaseStorageUrl(item.url),
@@ -1301,6 +1335,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             className="mt-3 post-detail-like-avatars"
           />
         </article>
+
+        {topicActivityHasForm && topicActivity ? <TopicActivityFormParticipation activityId={topicActivity.id} isAuthenticated={Boolean(user)} /> : null}
+        {viewerCanReviewTopicActivity && topicActivity ? <TopicActivityFormSubmissionEntry activityId={topicActivity.id} count={topicActivity._count.TopicActivityFormSubmission} /> : null}
 
         <CommentSectionBoundary>
           <PostRepliesSection
