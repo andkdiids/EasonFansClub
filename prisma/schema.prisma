@@ -2737,6 +2737,21 @@ model CantonesePronunciationAssessment {
   @@index([contentId, createdAt])
 }
 
+model CantoneseLessonProgress {
+  id                     String   @id @default(cuid())
+  userId                 String
+  lessonId               String   @db.VarChar(32)
+  startedAt              DateTime?
+  teachingCompletedAt    DateTime?
+  questionsCompletedAt   DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+}
+
 model MusicAlbum {
   id                  String                 @id @default(cuid())
   name                String
@@ -4952,6 +4967,7 @@ model User {
   CantoneseAudioAssetReviewed                            CantoneseAudioAsset[]              @relation("CantoneseAudioReviewer")
   CantoneseReviewLogs                                    CantoneseReviewLog[]               @relation("CantoneseReviewActor")
   CantoneseSpeechAssessments                             CantonesePronunciationAssessment[] @relation("CantoneseSpeechAssessmentUser")
+  CantoneseLessonProgress                                CantoneseLessonProgress[]
 
   @@index([createdAt])
   @@index([email])
