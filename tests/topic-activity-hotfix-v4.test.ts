@@ -81,7 +81,21 @@ test('Topic Activity 自动审核/回复通知使用系统身份，普通社交�
   assert.match(formReply, /senderUserId: guard\.user!\.id/)
 })
 
-test('V4 只扩页面和样式，本轮不包含 Prisma schema 或 migration 修改', () => {
-  const migrations = execFileSync('git', ['diff', '--name-only', 'HEAD', '--', 'prisma/schema.prisma', 'prisma/migrations'], { cwd: root, encoding: 'utf8' })
+test('Topic Activity UI 回归保护既有活动模型和 migration，允许其他模块的 additive migration', () => {
+  // A worktree-wide Prisma prohibition falsely rejects unrelated, legitimate
+  // additions such as Cantonese progress. Keep the guard on Topic's own data.
+  const gitOptions = { cwd: root, encoding: 'utf8' as const }
+  const migrations = execFileSync('git', ['diff', '--name-only', 'HEAD', '--',
+    'prisma/migrations/20261005120000_add_topic_activity_system',
+    'prisma/migrations/20261005150000_add_topic_activity_forms_replies',
+  ], gitOptions)
   assert.equal(migrations.trim(), '')
+  const before = execFileSync('git', ['show', 'HEAD:prisma/schema.prisma'], gitOptions)
+  const after = read('prisma/schema.prisma')
+  const topicSchema = (schema: string) => ({
+    modelsAndEnums: [...schema.matchAll(/^(?:model|enum) (?:TopicActivity\w*|Activity\w*) \{[\s\S]*?^\}/gm)].map((match) => match[0]),
+    relations: schema.split(/\r?\n/).filter((line) => /TopicActivity/.test(line)),
+  })
+  assert.ok(topicSchema(before).modelsAndEnums.length > 0)
+  assert.deepEqual(topicSchema(after), topicSchema(before))
 })
