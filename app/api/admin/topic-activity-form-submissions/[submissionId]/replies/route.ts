@@ -18,7 +18,7 @@ export async function POST(request: Request, context: { params: Promise<{ submis
   const assetIds = Array.isArray(body?.assetIds) ? body.assetIds.filter((value): value is string => typeof value === 'string') : []
   if (assetIds.length > 9 || new Set(assetIds).size !== assetIds.length) return NextResponse.json({ message: '每次回复最多选择 9 张不同图片' }, { status: 400 })
   if (!content && !assetIds.length) return NextResponse.json({ message: '请填写回复内容或添加图片' }, { status: 400 })
-  const submission = await prisma.topicActivityFormSubmission.findUnique({ where: { id: submissionId }, select: { id: true, activityId: true, userId: true } })
+  const submission = await prisma.topicActivityFormSubmission.findUnique({ where: { id: submissionId }, select: { id: true, activityId: true, userId: true, Activity: { select: { title: true } } } })
   if (!submission) return NextResponse.json({ message: '表单提交不存在' }, { status: 404 })
 
   let replyId = ''
@@ -47,8 +47,8 @@ export async function POST(request: Request, context: { params: Promise<{ submis
       recipientId: submission.userId,
       actorId: null,
       type: 'ACTIVITY',
-      title: '你参与的话题活动收到了一条管理员回复',
-      content: '你参与的话题活动收到了一条管理员回复',
+      title: '话题活动有新回复',
+      content: `你在「${submission.Activity.title}」提交的表单收到管理员回复。`,
       link: `/activities/${submission.activityId}?submissionId=${encodeURIComponent(submission.id)}`,
       key: `topic-activity-form-reply:${replyId}`,
     }], skipDuplicates: true,

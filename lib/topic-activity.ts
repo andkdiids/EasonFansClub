@@ -132,7 +132,7 @@ export async function createTopicSubmissionForCommentInTransaction(tx: Prisma.Tr
     },
     select: { id: true, participationMode: true },
   })
-  if (!activity || (activity.participationMode !== 'COMMENT' && activity.participationMode !== 'BOTH')) return null
+  if (!activity) return null
   return tx.topicActivitySubmission.create({
     data: { activityId: activity.id, userId: input.userId, commentId: input.commentId, submittedAt: input.now },
     select: { id: true, activityId: true, status: true },
@@ -150,7 +150,6 @@ export async function reconcileTopicActivityCommentSubmissions(activityId: strin
     if (!activity || activity.type !== 'TOPIC_ACTIVITY') throw new Error('TOPIC_ACTIVITY_NOT_FOUND')
     if (activity.status === 'CANCELLED') throw new Error('TOPIC_ACTIVITY_CANCELLED')
     if (activity.status !== 'PUBLISHED' || !activity.activityPostId) throw new Error('TOPIC_ACTIVITY_POST_UNAVAILABLE')
-    if (activity.participationMode === 'FORM') return { scanned: 0, created: 0, hasMore: false }
     if (!activity.startsAt || !activity.endsAt) throw new Error('TOPIC_ACTIVITY_WINDOW_UNAVAILABLE')
     const post = await tx.post.findUnique({ where: { id: activity.activityPostId }, select: { isDeleted: true } })
     if (!post || post.isDeleted) throw new Error('TOPIC_ACTIVITY_POST_UNAVAILABLE')
@@ -208,9 +207,9 @@ type ReviewActivitySnapshot = {
 }
 
 /**
- * Keep comment and form approvals in one user/activity aggregate. Callers lock
- * the Activity row before changing a submission, so cross-source reviews are
- * serialized and the count is derived from both authoritative submission sets.
+ * Only approved, undeleted root comments establish participation. Forms are
+ * information collection, including legacy forms with a review status.
+ * Callers lock Activity before reviews; reward keys remain user/activity scoped.
  */
 async function syncTopicActivityParticipationForUser(tx: Prisma.TransactionClient, input: {
   activity: ReviewActivitySnapshot
@@ -218,13 +217,11 @@ async function syncTopicActivityParticipationForUser(tx: Prisma.TransactionClien
   submissionId: string
   now: Date
 }) {
-  const [approvedComments, approvedForms] = await Promise.all([
-    tx.topicActivitySubmission.count({ where: { activityId: input.activity.id, userId: input.userId, status: 'APPROVED', commentDeletedAt: null } }),
-    tx.topicActivityFormSubmission.count({ where: { activityId: input.activity.id, userId: input.userId, status: 'APPROVED' } }),
-  ])
-  const nextCount = approvedComments + approvedForms
+  const nextCount = await tx.topicActivitySubmission.count({ where: { activityId: input.activity.id, userId: input.userId, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } } } })
   let participation = await tx.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId: input.activity.id, userId: input.userId } } })
-  const previousCount = participation?.approvedSubmissionCount || 0
+  // A legacy aggregate may have been formed entirely by form reviews. Do not
+  // treat that cached count as an earlier approved comment.
+  const previousCount = await tx.topicActivitySubmission.count({ where: { activityId: input.activity.id, userId: input.userId, id: { not: input.submissionId }, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } } } })
   let rewardIds: string[] = []
 
   if (nextCount > 0) {
@@ -308,14 +305,18 @@ export async function reviewTopicActivitySubmission(input: {
     const submission = await tx.topicActivitySubmission.findUnique({
       where: { id: input.submissionId },
       include: {
-        Activity: { select: { id: true, type: true, activityPostId: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true, status: true } },
-        Comment: { select: { postId: true } },
+        Activity: { select: { id: true, type: true, activityPostId: true, participationMode: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true, status: true } },
+        Comment: { select: { postId: true, parentId: true, isDeleted: true } },
       },
     })
-    if (!submission || submission.Activity.type !== 'TOPIC_ACTIVITY' || !submission.Comment || submission.commentDeletedAt) throw new Error('TOPIC_SUBMISSION_COMMENT_UNAVAILABLE')
+    if (!submission || submission.Activity.type !== 'TOPIC_ACTIVITY' || !submission.Comment || submission.commentDeletedAt || submission.Comment.isDeleted || submission.Comment.parentId) throw new Error('TOPIC_SUBMISSION_COMMENT_UNAVAILABLE')
     if (submission.Activity.activityPostId !== submission.Comment.postId || submission.activityId !== submission.Activity.id) throw new Error('TOPIC_SUBMISSION_RELATION_INVALID')
     if (submission.status === input.status) return { submission, participation: await tx.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId: submission.activityId, userId: submission.userId } } }), rewardIds: [] as string[], changed: false, firstParticipationCreated: false }
     if (submission.status === 'WITHDRAWN') throw new Error('TOPIC_SUBMISSION_WITHDRAWN')
+    if (input.status === 'APPROVED' && submission.Activity.participationMode === 'FORM') {
+      const form = await tx.topicActivityFormSubmission.findFirst({ where: { activityId: submission.activityId, userId: submission.userId }, select: { id: true } })
+      if (!form) throw new Error('FORM_REQUIRED_BEFORE_APPROVAL')
+    }
     const fromStatus = submission.status
     const updated = await tx.topicActivitySubmission.update({
       where: { id: submission.id },
@@ -330,49 +331,6 @@ export async function reviewTopicActivitySubmission(input: {
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
   if (result.changed && input.status === 'APPROVED') {
-    const participation = result.participation
-    if (participation && result.rewardIds.length && (await prisma.activity.findUnique({ where: { id: participation.activityId }, select: { rewardGrantMode: true } }))?.rewardGrantMode === 'IMMEDIATE') {
-      await grantTopicActivityRewardItems(result.rewardIds, now)
-    }
-  }
-  const freshParticipation = result.participation
-    ? await prisma.topicActivityParticipation.findUnique({ where: { id: result.participation.id } })
-    : null
-  return { ...result, participation: freshParticipation }
-}
-
-export async function reviewTopicActivityFormSubmission(input: {
-  submissionId: string
-  reviewerId: string
-  status: 'APPROVED' | 'REJECTED'
-  rejectReason?: string | null
-  now?: Date
-}) {
-  const now = input.now || new Date()
-  const result = await prisma.$transaction(async (tx) => {
-    const initial = await tx.topicActivityFormSubmission.findUnique({ where: { id: input.submissionId }, select: { activityId: true } })
-    if (!initial) throw new Error('TOPIC_FORM_SUBMISSION_NOT_FOUND')
-    await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${initial.activityId} FOR UPDATE`
-    const submission = await tx.topicActivityFormSubmission.findUnique({
-      where: { id: input.submissionId },
-      include: { Activity: { select: { id: true, type: true, activityPostId: true, status: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true } } },
-    })
-    if (!submission || submission.Activity.type !== 'TOPIC_ACTIVITY' || submission.activityId !== submission.Activity.id) throw new Error('TOPIC_FORM_SUBMISSION_NOT_FOUND')
-    if (submission.status === input.status) return { submission, participation: await tx.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId: submission.activityId, userId: submission.userId } } }), rewardIds: [] as string[], changed: false, firstParticipationCreated: false }
-    const fromStatus = submission.status
-    const rejectReason = input.status === 'REJECTED' ? (input.rejectReason?.trim().slice(0, 2_000) || null) : null
-    const updated = await tx.topicActivityFormSubmission.update({
-      where: { id: submission.id },
-      data: { status: input.status, reviewedAt: now, reviewedById: input.reviewerId, rejectReason },
-    })
-    await tx.topicActivityFormReviewLog.create({
-      data: { submissionId: submission.id, activityId: submission.activityId, userId: submission.userId, fromStatus, toStatus: input.status, reviewedById: input.reviewerId, reason: rejectReason, reviewedAt: now },
-    })
-    const aggregate = await syncTopicActivityParticipationForUser(tx, { activity: submission.Activity, userId: submission.userId, submissionId: submission.id, now })
-    return { submission: updated, ...aggregate, changed: true }
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-
-  if (result.changed && result.submission.status === 'APPROVED') {
     const participation = result.participation
     if (participation && result.rewardIds.length && (await prisma.activity.findUnique({ where: { id: participation.activityId }, select: { rewardGrantMode: true } }))?.rewardGrantMode === 'IMMEDIATE') {
       await grantTopicActivityRewardItems(result.rewardIds, now)
@@ -414,7 +372,8 @@ async function grantTopicActivityRewardItem(rewardId: string, now: Date) {
     await tx.$queryRaw`SELECT \`id\` FROM \`TopicActivityRewardGrant\` WHERE \`id\` = ${rewardId} FOR UPDATE`
     const grant = await tx.topicActivityRewardGrant.findUnique({ where: { id: rewardId }, include: { Participation: true, Activity: { select: { title: true, status: true, rewardGrantMode: true, rewardGrantAt: true } } } })
     if (!grant || grant.status === 'GRANTED' || grant.status === 'CANCELLED') return null
-    if (grant.Participation.approvedSubmissionCount <= 0 || grant.Activity.status === 'CANCELLED') {
+    const approvedComments = await tx.topicActivitySubmission.count({ where: { activityId: grant.activityId, userId: grant.userId, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } } } })
+    if (approvedComments <= 0 || grant.Activity.status === 'CANCELLED') {
       await tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'CANCELLED', errorMessage: '活动参与资格已取消' } })
       await refreshParticipationRewardStatus(tx, grant.participationId, now)
       return null

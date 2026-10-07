@@ -157,3 +157,14 @@ export function validateTopicActivityFormAnswers(
   if (new Set(assetIds).size !== assetIds.length) return { valid: false, message: '同一张图片不能重复用于多个字段' }
   return { valid: true, value: { answers, assetIds } }
 }
+
+/** Global attachments are separate from IMAGE fields, with shared asset rules. */
+export function validateTopicActivityFormAttachments(raw: unknown, allowed: boolean, fieldAssetIds: readonly string[] = []): Normalized<string[]> {
+  if (raw === undefined) return { valid: true, value: [] }
+  if (!Array.isArray(raw) || raw.some((id) => !validId(id))) return { valid: false, message: '附件图片信息无效' }
+  if (!allowed && raw.length) return { valid: false, message: '该活动未开启图片附件' }
+  if (raw.length > TOPIC_ACTIVITY_FORM_MAX_IMAGES) return { valid: false, message: `附件最多上传 ${TOPIC_ACTIVITY_FORM_MAX_IMAGES} 张图片` }
+  const ids = raw as string[]
+  if (new Set([...fieldAssetIds, ...ids]).size !== fieldAssetIds.length + ids.length) return { valid: false, message: '同一张图片不能重复用于字段或附件' }
+  return { valid: true, value: ids }
+}

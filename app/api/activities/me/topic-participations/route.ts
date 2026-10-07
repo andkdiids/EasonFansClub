@@ -22,15 +22,15 @@ export async function GET(request: Request) {
   const activityIds = groups.map((row) => row.activityId)
   if (!activityIds.length) return NextResponse.json({ participations: [], page, pageSize, total, hasMore: false }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
 
-  const [activities, statuses, formStatuses, participationRows] = await Promise.all([
+  const [activities, statuses, formCounts, participationRows] = await Promise.all([
     prisma.activity.findMany({ where: { id: { in: activityIds } }, select: activitySelect }),
-    prisma.topicActivitySubmission.groupBy({ by: ['activityId', 'status'], where: { userId: guard.user.id, activityId: { in: activityIds }, commentDeletedAt: null }, _count: { _all: true } }),
-    prisma.topicActivityFormSubmission.groupBy({ by: ['activityId', 'status'], where: { userId: guard.user.id, activityId: { in: activityIds } }, _count: { _all: true } }),
+    prisma.topicActivitySubmission.groupBy({ by: ['activityId', 'status'], where: { userId: guard.user.id, activityId: { in: activityIds }, commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } } }, _count: { _all: true } }),
+    prisma.topicActivityFormSubmission.groupBy({ by: ['activityId'], where: { userId: guard.user.id, activityId: { in: activityIds } }, _count: { _all: true } }),
     prisma.topicActivityParticipation.findMany({ where: { userId: guard.user.id, activityId: { in: activityIds } }, select: { activityId: true, approvedSubmissionCount: true, rewardStatus: true, rewardEligibleAt: true, rewardGrantedAt: true } }),
   ])
   const activityById = new Map(activities.map((row) => [row.id, serializeActivityRow(row)]))
   const counts = new Map<string, { total: number; pending: number; approved: number; rejected: number }>()
-  for (const row of [...statuses, ...formStatuses]) {
+  for (const row of statuses) {
     const value = counts.get(row.activityId) || { total: 0, pending: 0, approved: 0, rejected: 0 }
     value.total += row._count._all
     if (row.status === 'PENDING') value.pending += row._count._all
@@ -39,6 +39,7 @@ export async function GET(request: Request) {
     counts.set(row.activityId, value)
   }
   const participationByActivity = new Map(participationRows.map((row) => [row.activityId, row]))
+  const formsByActivity = new Map(formCounts.map((row) => [row.activityId, row._count._all]))
   const participations = activityIds.flatMap((activityId) => {
     const activity = activityById.get(activityId)
     if (!activity) return []
@@ -47,12 +48,13 @@ export async function GET(request: Request) {
     return [{
       activity,
       submissionCount: reviewCounts.total,
+      formSubmissionCount: formsByActivity.get(activityId) || 0,
       approvedSubmissionCount: reviewCounts.approved,
       pendingSubmissionCount: reviewCounts.pending,
       rejectedSubmissionCount: reviewCounts.rejected,
       status: resolveTopicSubmissionStatus(reviewCounts),
-      countedInActivity: Boolean(participation?.approvedSubmissionCount),
-      rewardStatus: participation?.rewardStatus || 'NOT_ELIGIBLE',
+      countedInActivity: reviewCounts.approved > 0 && activity.status !== 'CANCELLED',
+      rewardStatus: reviewCounts.approved > 0 || participation?.rewardGrantedAt ? participation?.rewardStatus || 'NOT_ELIGIBLE' : activity.status === 'CANCELLED' ? 'CANCELLED' : 'NOT_ELIGIBLE',
       rewardEligibleAt: participation?.rewardEligibleAt?.toISOString() || null,
       rewardGrantedAt: participation?.rewardGrantedAt?.toISOString() || null,
     }]

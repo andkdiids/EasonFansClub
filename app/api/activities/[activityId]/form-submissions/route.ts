@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { requireRequestUser, enforceApiRateLimit } from '@/lib/security'
-import { normalizeTopicActivityFormSchema, validateTopicActivityFormAnswers } from '@/lib/topic-activity-form'
+import { normalizeTopicActivityFormSchema, validateTopicActivityFormAnswers, validateTopicActivityFormAttachments } from '@/lib/topic-activity-form'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -12,25 +12,30 @@ export async function POST(request: Request, context: { params: Promise<{ activi
   const { activityId } = await context.params
   const limited = await enforceApiRateLimit(request, guard.user.id, { endpoint: '/api/activities/form-submissions', ip: { limit: 30, windowSeconds: 3600 }, user: { limit: 12, windowSeconds: 3600 } }, '提交过于频繁，请稍后再试')
   if (limited) return limited
-  const body = await request.json().catch(() => null) as { answers?: unknown } | null
+  const body = await request.json().catch(() => null) as { answers?: unknown; attachmentAssetIds?: unknown } | null
   if (!body || !body.answers || typeof body.answers !== 'object') return NextResponse.json({ message: '表单内容无效' }, { status: 400 })
 
   const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
     const activity = await tx.activity.findUnique({ where: { id: activityId }, select: { id: true, type: true, status: true, startsAt: true, endsAt: true, participationMode: true, allowImageAttachments: true, formSchema: true } })
     if (!activity || activity.type !== 'TOPIC_ACTIVITY') return { error: 'NOT_FOUND' as const }
-    if (activity.status !== 'PUBLISHED' || (activity.startsAt && activity.startsAt > new Date()) || (activity.endsAt && activity.endsAt < new Date())) return { error: 'CLOSED' as const }
+    if (activity.status === 'CANCELLED') return { error: 'ACTIVITY_CANCELLED' as const }
+    if (activity.endsAt && activity.endsAt < new Date()) return { error: 'ACTIVITY_ENDED' as const }
+    if (activity.status !== 'PUBLISHED' || (activity.startsAt && activity.startsAt > new Date())) return { error: 'CLOSED' as const }
     if (!['FORM', 'BOTH'].includes(activity.participationMode)) return { error: 'MODE_DISABLED' as const }
     const normalized = normalizeTopicActivityFormSchema(activity.formSchema, activity.allowImageAttachments)
     if (!normalized.valid) return { error: 'INVALID_SCHEMA' as const }
     const validated = validateTopicActivityFormAnswers(normalized.value, body.answers)
     if (!validated.valid) return { error: validated.message }
+    const attachments = validateTopicActivityFormAttachments(body.attachmentAssetIds, activity.allowImageAttachments, validated.value.assetIds)
+    if (!attachments.valid) return { error: attachments.message }
+    const allAssetIds = [...validated.value.assetIds, ...attachments.value]
 
-    const assets = validated.value.assetIds.length ? await tx.topicActivityImageAsset.findMany({
-      where: { id: { in: validated.value.assetIds }, activityId, uploadedByUserId: guard.user.id, purpose: 'FORM_ANSWER', formSubmissionId: null, replyId: null },
+    const assets = allAssetIds.length ? await tx.topicActivityImageAsset.findMany({
+      where: { id: { in: allAssetIds }, activityId, uploadedByUserId: guard.user.id, purpose: 'FORM_ANSWER', formSubmissionId: null, replyId: null },
       select: { id: true, storageKey: true, mimeType: true, width: true, height: true, size: true },
     }) : []
-    if (assets.length !== validated.value.assetIds.length) return { error: 'INVALID_ASSET' as const }
+    if (assets.length !== allAssetIds.length) return { error: 'INVALID_ASSET' as const }
     const assetMap = new Map(assets.map((asset) => [asset.id, asset]))
     const answers = validated.value.answers.map((answer) => answer.type === 'IMAGE'
       ? { ...answer, value: ((answer.value as { assetIds: string[] }).assetIds).flatMap((id) => {
@@ -56,9 +61,9 @@ export async function POST(request: Request, context: { params: Promise<{ activi
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
   if ('error' in result) {
-    const status = result.error === 'NOT_FOUND' ? 404 : result.error === 'CLOSED' || result.error === 'MODE_DISABLED' ? 409 : result.error === 'INVALID_ASSET' ? 403 : 400
-    const message = result.error === 'CLOSED' ? '活动当前未开放或已截止' : result.error === 'MODE_DISABLED' ? '该活动暂不开放表单参与' : result.error === 'INVALID_SCHEMA' ? '活动表单暂时不可用' : result.error === 'INVALID_ASSET' ? '请重新选择未使用的图片附件' : result.error === 'NOT_FOUND' ? '话题活动不存在' : result.error
-    return NextResponse.json({ message }, { status })
+    const status = result.error === 'NOT_FOUND' ? 404 : ['CLOSED', 'ACTIVITY_ENDED', 'ACTIVITY_CANCELLED', 'MODE_DISABLED'].includes(result.error || '') ? 409 : result.error === 'INVALID_ASSET' ? 403 : 400
+    const message = result.error === 'ACTIVITY_ENDED' ? '活动已结束，不能再提交表单' : result.error === 'ACTIVITY_CANCELLED' ? '活动已取消，不能再提交表单' : result.error === 'CLOSED' ? '活动当前未开放' : result.error === 'MODE_DISABLED' ? '该活动暂不开放表单' : result.error === 'INVALID_SCHEMA' ? '活动表单暂时不可用' : result.error === 'INVALID_ASSET' ? '请重新选择未使用的图片附件' : result.error === 'NOT_FOUND' ? '话题活动不存在' : result.error
+    return NextResponse.json({ code: result.error, message }, { status })
   }
-  return NextResponse.json({ success: true, submission: result.submission }, { status: 201, headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
+  return NextResponse.json({ success: true, submission: { ...result.submission, status: 'SUBMITTED' } }, { status: 201, headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
 }

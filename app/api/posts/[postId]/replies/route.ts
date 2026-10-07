@@ -188,16 +188,20 @@ export async function GET(request: Request, { params }: Params) {
     : []
   const topicSubmissionByComment = new Map(topicSubmissions.filter((submission) => submission.commentId).map((submission) => [submission.commentId!, submission]))
   const topicParticipants = topicActivity && topicSubmissions.length
-    ? await prisma.topicActivityParticipation.findMany({ where: { activityId: topicActivity.id, userId: { in: [...new Set(topicSubmissions.map((submission) => submission.userId))] } }, select: { userId: true, approvedSubmissionCount: true } })
+    ? await prisma.topicActivitySubmission.groupBy({ by: ['userId'], where: { activityId: topicActivity.id, userId: { in: [...new Set(topicSubmissions.map((submission) => submission.userId))] }, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } } }, _count: { _all: true } })
     : []
-  const approvedCountByUser = new Map(topicParticipants.map((participant) => [participant.userId, participant.approvedSubmissionCount]))
+  const approvedCountByUser = new Map(topicParticipants.map((participant) => [participant.userId, participant._count._all]))
+  const formCounts = topicActivity && canReviewTopicActivity && topicSubmissions.length
+    ? await prisma.topicActivityFormSubmission.groupBy({ by: ['userId'], where: { activityId: topicActivity.id, userId: { in: [...new Set(topicSubmissions.map((submission) => submission.userId))] } }, _count: { _all: true } })
+    : []
+  const formCountByUser = new Map(formCounts.map((row) => [row.userId, row._count._all]))
   const serializeRoot = (reply: ReplyRecord) => {
     const serialized = serializeReply(reply, likedIds)
     const submission = topicSubmissionByComment.get(reply.id)
     const visibleToViewer = submission && (viewer?.id === reply.authorId || canReviewTopicActivity)
     return {
       ...serialized,
-      ...(visibleToViewer ? { topicActivitySubmission: { id: submission.id, status: submission.status, rejectReason: submission.rejectReason, alreadyCounted: (approvedCountByUser.get(submission.userId) || 0) > 0 } } : {}),
+      ...(visibleToViewer ? { topicActivitySubmission: { id: submission.id, status: submission.status, rejectReason: submission.rejectReason, alreadyCounted: (approvedCountByUser.get(submission.userId) || 0) > 0, ...(canReviewTopicActivity ? { formSubmissionCount: formCountByUser.get(submission.userId) || 0 } : {}) } } : {}),
       replies: childrenByParent.get(reply.id) || [],
     }
   }

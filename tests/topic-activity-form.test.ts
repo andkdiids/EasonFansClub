@@ -51,10 +51,10 @@ test('答案校验执行必填、选项范围、图片 ID 和多图配置约束'
   if (valid.valid) assert.deepEqual(valid.value.assetIds, ['asset-1', 'asset-2'])
 })
 
-test('评论与表单审核共用 Activity+User 聚合，并按两种 submission source 重算通过数', () => {
+test('只有评论审核建立 Activity+User 聚合，表单旧审核值不计入通过数', () => {
   const service = read('lib/topic-activity.ts')
   assert.match(service, /topicActivitySubmission\.count\([\s\S]*status: 'APPROVED'[\s\S]*commentDeletedAt: null/)
-  assert.match(service, /topicActivityFormSubmission\.count\([\s\S]*status: 'APPROVED'/)
+  assert.doesNotMatch(service, /approvedForms|reviewTopicActivityFormSubmission/)
   assert.match(service, /approvedSubmissionCount: nextCount/)
   assert.match(service, /firstParticipationCreated: previousCount === 0/)
   const participation = read('prisma/schema.prisma').match(/model TopicActivityParticipation \{([\s\S]*?)\n\}/)?.[1] || ''
@@ -74,7 +74,7 @@ test('表单可重复提交，提交答案采用版本快照，图片资产仅�
   assert.match(route, /endsAt && activity\.endsAt < new Date\(\)/)
 })
 
-test('表单所有权、管理员权限、审核通知和 Mobile Bearer 路由均在服务端验证', () => {
+test('表单所有权、管理员回复权限和 Mobile Bearer 路由均在服务端验证，旧审核入口关闭', () => {
   const detail = read('app/api/topic-activity-form-submissions/[submissionId]/route.ts')
   const review = read('app/api/admin/topic-activity-form-submissions/[submissionId]/review/route.ts')
   const reply = read('app/api/admin/topic-activity-form-submissions/[submissionId]/replies/route.ts')
@@ -83,7 +83,8 @@ test('表单所有权、管理员权限、审核通知和 Mobile Bearer 路由�
   assert.match(detail, /hasAdminPermission\(auth\.user, 'activity_manage'\)/)
   assert.match(review, /requireRequestAdmin\(request, 'activity_manage'\)/)
   assert.match(reply, /requireRequestAdmin\(request, 'activity_manage'\)/)
-  assert.match(review, /TOPIC_ACTIVITY_PARTICIPATION_CREATED/)
+  assert.match(review, /FORM_REVIEW_DISABLED/)
+  assert.doesNotMatch(review, /TOPIC_ACTIVITY_PARTICIPATION_CREATED/)
   assert.match(reply, /topic-activity-form-reply/)
   assert.ok(middleware.includes('form|my-form-submissions'))
   assert.ok(middleware.includes('topic-activity-form-submissions'))
@@ -136,13 +137,13 @@ test('Web 表单与管理员回复使用上传控件，不收集用户手填图�
   assert.doesNotMatch(form + admin, /图片 URL|Image URL/i)
 })
 
-test('审核通过的 already-counted 提示只针对重复用户参与，select 答案按表单快照提供展示文案', () => {
+test('already-counted 只针对评论参与，表单仅展示资料和回复，select 按快照显示', () => {
   const commentReview = read('app/api/admin/topic-activity-submissions/[submissionId]/route.ts')
   const formReview = read('app/api/admin/topic-activity-form-submissions/[submissionId]/review/route.ts')
   const view = read('lib/topic-activity-form-view.ts')
   const adminList = read('app/api/admin/activities/[activityId]/form-submissions/route.ts')
   assert.match(commentReview, /body\.status === 'APPROVED' && !result\.firstParticipationCreated/)
-  assert.match(formReview, /body\.status === 'APPROVED' && !result\.firstParticipationCreated/)
+  assert.match(formReview, /status: 410/)
   assert.match(view, /displayValue: labels\.join\('、'\)/)
-  assert.match(adminList, /topicActivityParticipation\.count\(\{ where: \{ activityId, approvedSubmissionCount: \{ gt: 0 \} \} \}\)/)
+  assert.match(adminList, /topicActivitySubmission\.groupBy\(\{ by: \['userId'\]/)
 })

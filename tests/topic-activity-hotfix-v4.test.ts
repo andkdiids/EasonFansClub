@@ -29,7 +29,7 @@ test('同一个全宽表单组件用于活动详情和活动主帖，字段按�
   assert.match(activityDetail, /lg:col-span-3/)
   assert.match(postDetail, /<TopicActivityFormParticipation activityId=\{topicActivity\.id\}/)
   assert.match(postDetail, /topicActivityMode === 'FORM' \|\| topicActivityMode === 'BOTH'/)
-  assert.match(postDetail, /#topic-activity-form-\$\{topicActivity\.id\}/)
+  assert.doesNotMatch(postDetail, /href=\{`#topic-activity-form-/)
 })
 
 test('活动主帖优先展示规范化活动封面，再回退首张帖子图片，普通帖子不渲染占位', () => {
@@ -39,15 +39,15 @@ test('活动主帖优先展示规范化活动封面，再回退首张帖子图�
   assert.match(post, /topicActivity \? <section aria-label="话题活动信息"/)
   assert.match(post, /topicActivityCoverUrl \? <img/)
   assert.match(post, /topicActivity\.participationRule/)
-  assert.match(post, /topicActivityMode === 'BOTH' \? '评论或表单均可参与'/)
+  assert.match(post, /topicActivityMode === 'BOTH'/)
 })
 
 test('帖子管理员表单入口显示数量并复用 Activity Admin 的同一管理器', () => {
   const post = read('app/posts/[postId]/page.tsx')
   const manager = read('app/admin/activities/TopicActivityFormSubmissionManager.tsx')
   const admin = read('app/admin/activities/ActivityAdminManager.tsx')
-  assert.match(post, /TopicActivityFormSubmissionEntry activityId=\{topicActivity\.id\} count=\{topicActivity\._count\.TopicActivityFormSubmission\}/)
-  assert.match(manager, /表单提交（\{count\}）/)
+  assert.match(post, /TopicActivityFormSubmissionEntry activityId=\{topicActivity\.id\} count=\{topicActivity\.formSubmissionCount \?\? topicActivity\._count\.TopicActivityFormSubmission\}/)
+  assert.match(manager, /表单提交（\{[a-zA-Z]+\}）/)
   assert.match(manager, /<TopicActivityFormSubmissionManager activityId=\{activityId\}/)
   assert.match(admin, /TopicActivityFormSubmissionManager activityId=\{formSubmissionActivityId\}/)
   assert.match(admin, /表单提交管理/)
@@ -55,17 +55,16 @@ test('帖子管理员表单入口显示数量并复用 Activity Admin 的同一�
   assert.match(manager, /TopicActivityImagePicker[\s\S]*ADMIN_REPLY/)
 })
 
-test('表单审核需要二次确认，支持撤回筛选且确认期间避免重复点击', () => {
+test('V5表单只查看回复，筛选按回复状态，评论审核确认保留', () => {
   const manager = read('app/admin/activities/TopicActivityFormSubmissionManager.tsx')
   const route = read('app/api/admin/activities/[activityId]/form-submissions/route.ts')
-  assert.match(manager, /role="alertdialog"/)
-  assert.match(manager, /确认通过这份参与表单/)
-  assert.match(manager, /确认拒绝这份参与表单/)
-  assert.match(manager, /disabled=\{busy\}/)
-  assert.match(manager, /\['WITHDRAWN','已撤回'\]/)
+  assert.doesNotMatch(manager, /确认通过这份参与表单|确认拒绝这份参与表单|pendingReview/)
+  assert.match(manager, /REPLIED/)
+  assert.match(manager, /UNREPLIED/)
   assert.doesNotMatch(manager, /window\.prompt/)
-  assert.match(route, /'WITHDRAWN'/)
-  assert.match(route, /withdrawnForms/)
+  assert.match(route, /repliedForms/)
+  assert.match(route, /unrepliedForms/)
+  assert.match(read('components/PostRepliesSection.tsx'), /确认通过这条参与内容/)
 })
 
 test('Topic Activity 自动审核/回复通知使用系统身份，普通社交通知不变', () => {
@@ -74,7 +73,8 @@ test('Topic Activity 自动审核/回复通知使用系统身份，普通社交�
   const formReply = read('app/api/admin/topic-activity-form-submissions/[submissionId]/replies/route.ts')
   const notificationUi = read('app/notifications/NotificationsClient.tsx')
   assert.match(commentReview, /actorId: null/)
-  assert.match(formReview, /actorId: null/)
+  assert.match(formReview, /FORM_REVIEW_DISABLED/)
+  assert.doesNotMatch(formReview, /createManyNotifications/)
   assert.match(formReply, /actorId: null/)
   assert.match(notificationUi, /item\.actorUid === null/)
   assert.match(notificationUi, /siteLogoUrl/)

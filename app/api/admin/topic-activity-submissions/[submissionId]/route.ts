@@ -69,8 +69,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ submi
     }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
   } catch (error) {
     const code = error instanceof Error ? error.message : 'TOPIC_REVIEW_FAILED'
-    const status = code === 'TOPIC_SUBMISSION_NOT_FOUND' ? 404 : code === 'TOPIC_SUBMISSION_COMMENT_UNAVAILABLE' || code === 'TOPIC_SUBMISSION_WITHDRAWN' ? 409 : code === 'TOPIC_SUBMISSION_RELATION_INVALID' ? 403 : 500
+    const status = code === 'TOPIC_SUBMISSION_NOT_FOUND' ? 404 : code === 'FORM_REQUIRED_BEFORE_APPROVAL' || code === 'TOPIC_SUBMISSION_COMMENT_UNAVAILABLE' || code === 'TOPIC_SUBMISSION_WITHDRAWN' ? 409 : code === 'TOPIC_SUBMISSION_RELATION_INVALID' ? 403 : 500
     if (status === 500) console.error('[topic-activity.review.failed]', { submissionId, reviewerId: guard.user.id, code })
-    return NextResponse.json({ code, message: status === 500 ? '审核操作失败，请稍后重试' : code === 'TOPIC_SUBMISSION_COMMENT_UNAVAILABLE' ? '原评论已删除，不能通过审核' : '参与评论不可用' }, { status })
+    return NextResponse.json({ code, message: code === 'FORM_REQUIRED_BEFORE_APPROVAL' ? '该用户尚未填写表单，请先完成表单再审核评论' : status === 500 ? '审核操作失败，请稍后重试' : code === 'TOPIC_SUBMISSION_COMMENT_UNAVAILABLE' ? '原评论已删除，不能通过审核' : '参与评论不可用' }, { status })
   }
 }

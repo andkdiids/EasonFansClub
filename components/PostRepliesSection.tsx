@@ -52,7 +52,7 @@ type ReplyItem = {
   stickerId?: string | null
   stickerUrl?: string | null
   mentions: ReplyMentionView[]
-  topicActivitySubmission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null; alreadyCounted: boolean }
+  topicActivitySubmission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null; alreadyCounted: boolean; formSubmissionCount?: number }
   author: {
     id: string
     uid: number
@@ -673,6 +673,7 @@ export function PostRepliesSection({
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => void reviewTopicSubmission(reply, 'REJECTED')} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 disabled:opacity-50">拒绝</button>
                 </> : <span className={`rounded-full px-3 py-1 text-xs font-black ${reply.topicActivitySubmission.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' : reply.topicActivitySubmission.status === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{reply.topicActivitySubmission.status === 'APPROVED' ? '已通过' : reply.topicActivitySubmission.status === 'REJECTED' ? '未通过' : reply.topicActivitySubmission.status === 'WITHDRAWN' ? '已撤回' : '待审核'}</span>}
                 {canReviewTopicActivity && reply.topicActivitySubmission.alreadyCounted && reply.topicActivitySubmission.status === 'PENDING' ? <span className="text-xs font-bold text-slate-500">已计入本活动</span> : null}
+                {canReviewTopicActivity && typeof reply.topicActivitySubmission.formSubmissionCount === 'number' ? reply.topicActivitySubmission.formSubmissionCount > 0 ? <a href={`/posts/${postId}?formUserId=${encodeURIComponent(reply.author.id)}#topic-activity-admin-forms-${topicActivityId}`} className="text-xs font-bold text-[var(--primary)]">已提交表单（{reply.topicActivitySubmission.formSubmissionCount}） · 查看资料</a> : <span className="text-xs text-[var(--foreground-muted)]">尚未填写表单</span> : null}
                 {reply.topicActivitySubmission.status === 'REJECTED' && reply.topicActivitySubmission.rejectReason ? <span className="basis-full text-xs text-rose-700">拒绝原因：{reply.topicActivitySubmission.rejectReason}</span> : null}
               </>
             ) : null}

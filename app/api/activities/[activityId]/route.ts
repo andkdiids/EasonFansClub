@@ -32,15 +32,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
       : Promise.resolve(null),
     getActivityRegistrationQuestions(prisma, activityId),
   ])
-  const [topicStatusGroups, formStatusGroups, topicParticipation] = view.type === 'TOPIC_ACTIVITY' && viewer
+  const [topicStatusGroups, formSubmissionCount, topicParticipation] = view.type === 'TOPIC_ACTIVITY' && viewer
     ? await Promise.all([
-        prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId, userId: viewer.id, commentDeletedAt: null }, _count: { _all: true } }),
-        prisma.topicActivityFormSubmission.groupBy({ by: ['status'], where: { activityId, userId: viewer.id }, _count: { _all: true } }),
+        prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId, userId: viewer.id, commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } } }, _count: { _all: true } }),
+        prisma.topicActivityFormSubmission.count({ where: { activityId, userId: viewer.id } }),
         prisma.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId, userId: viewer.id } }, select: { approvedSubmissionCount: true, rewardStatus: true, rewardEligibleAt: true, rewardGrantedAt: true } }),
       ])
-    : [[], [], null] as const
+    : [[], 0, null] as const
   const topicCounts = { total: 0, pending: 0, approved: 0, rejected: 0 }
-  for (const row of [...topicStatusGroups, ...formStatusGroups]) {
+  for (const row of topicStatusGroups) {
     topicCounts.total += row._count._all
     if (row.status === 'PENDING') topicCounts.pending += row._count._all
     if (row.status === 'APPROVED') topicCounts.approved += row._count._all
@@ -68,11 +68,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ acti
     topicParticipation: view.type === 'TOPIC_ACTIVITY' ? {
       status: resolveTopicSubmissionStatus(topicCounts),
       submissionCount: topicCounts.total,
+      formSubmissionCount,
       approvedSubmissionCount: topicCounts.approved,
       pendingSubmissionCount: topicCounts.pending,
       rejectedSubmissionCount: topicCounts.rejected,
-      countedInActivity: Boolean(topicParticipation?.approvedSubmissionCount),
-      rewardStatus: topicParticipation?.rewardStatus || 'NOT_ELIGIBLE',
+      countedInActivity: topicCounts.approved > 0 && view.status !== 'CANCELLED',
+      rewardStatus: topicCounts.approved > 0 || topicParticipation?.rewardGrantedAt ? topicParticipation?.rewardStatus || 'NOT_ELIGIBLE' : view.status === 'CANCELLED' ? 'CANCELLED' : 'NOT_ELIGIBLE',
       rewardEligibleAt: topicParticipation?.rewardEligibleAt?.toISOString() || null,
       rewardGrantedAt: topicParticipation?.rewardGrantedAt?.toISOString() || null,
     } : null,

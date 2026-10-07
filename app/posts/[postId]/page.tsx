@@ -56,6 +56,10 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+function topicActivityParticipationLabel(mode: 'COMMENT' | 'FORM' | 'BOTH' | null | undefined) {
+  return mode === 'COMMENT' ? '评论审核' : mode === 'FORM' ? '先填表单后发评论审核' : '选填表单，评论为最终凭证'
+}
+
 const postMetadataSelect = {
   title: true,
   content: true,
@@ -645,19 +649,41 @@ async function loadPostReplies(
       ].map(withFloorNumber)
     const visibleRows = [...rows, ...myRows]
     const submissions = visibleRows.flatMap((reply) => reply.TopicActivitySubmission && reply.TopicActivitySubmission.activityId === topicActivityId ? [reply.TopicActivitySubmission] : [])
-    const countedUsers = topicActivityId && submissions.length
-      ? new Set((await tx.topicActivityParticipation.findMany({
-          where: { activityId: topicActivityId, userId: { in: [...new Set(submissions.map((item) => item.userId))] }, approvedSubmissionCount: { gt: 0 } },
+    const submissionUserIds = [...new Set(submissions.map((item) => item.userId))]
+    const countedUsers = topicActivityId && submissionUserIds.length
+      ? new Set((await tx.topicActivitySubmission.findMany({
+          where: {
+            activityId: topicActivityId,
+            userId: { in: submissionUserIds },
+            status: 'APPROVED',
+            commentDeletedAt: null,
+            Comment: { is: { parentId: null, isDeleted: false } },
+          },
           select: { userId: true },
         })).map((item) => item.userId))
       : new Set<string>()
+    const formSubmissionCountByUser = canReviewTopicActivity && topicActivityId && submissionUserIds.length
+      ? new Map((await tx.topicActivityFormSubmission.groupBy({
+          by: ['activityId', 'userId'],
+          where: { activityId: topicActivityId, userId: { in: submissionUserIds } },
+          _count: { _all: true },
+        })).map((item) => [item.userId, item._count._all] as const))
+      : new Map<string, number>()
     const decorate = <T extends (typeof visibleRows)[number]>(reply: T) => {
       const submission = reply.TopicActivitySubmission
       const visible = submission && submission.activityId === topicActivityId && (viewerId === reply.User.id || canReviewTopicActivity)
       const { TopicActivitySubmission: _submission, ...serialized } = reply
       return {
         ...serialized,
-        ...(visible ? { topicActivitySubmission: { id: submission.id, status: submission.status, rejectReason: submission.rejectReason, alreadyCounted: countedUsers.has(submission.userId) } } : {}),
+        ...(visible ? {
+          topicActivitySubmission: {
+            id: submission.id,
+            status: submission.status,
+            rejectReason: submission.rejectReason,
+            alreadyCounted: countedUsers.has(submission.userId),
+            ...(canReviewTopicActivity ? { formSubmissionCount: formSubmissionCountByUser.get(submission.userId) ?? 0 } : {}),
+          },
+        } : {}),
       }
     }
     return {
@@ -797,11 +823,12 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string; topicStatus?: string; returnTo?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string; topicStatus?: string; formUserId?: string; returnTo?: string }> }>) {
   const { postId } = await params
   const query = await searchParams
   const returnTo = normalizePostReturnTo(query.returnTo)
   const focusId = (query.focus ?? query.replyId ?? query.commentId ?? query.reply)?.slice(0, 80)
+  const formUserId = query.formUserId?.slice(0, 80) || null
   const rawCommentSort = query.commentSort ?? query.sort
   const commentSort = parsePostReplySort(rawCommentSort)
   const commentDirection = parsePostReplyDirection(query.direction, rawCommentSort)
@@ -875,7 +902,29 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     PostMedia: support.media,
     PostTopic: support.topics,
   }
-  const topicActivity = postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity : null
+  const topicActivityBase = postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity : null
+  let topicActivityFormSubmissionCount: number | undefined
+  if (viewerCanReviewTopicActivity && topicActivityBase && formUserId) {
+    try {
+      const grouped = await readPostDetailQuery(
+        postId,
+        'topicActivityFormSubmission.groupBy',
+        () => prisma.topicActivityFormSubmission.groupBy({
+          by: ['activityId', 'userId'],
+          where: { activityId: topicActivityBase.id, userId: { in: [formUserId] } },
+          _count: { _all: true },
+        }),
+        'detail',
+        user?.id,
+      )
+      topicActivityFormSubmissionCount = grouped.find((item) => item.userId === formUserId)?._count._all ?? 0
+    } catch {
+      topicActivityFormSubmissionCount = undefined
+    }
+  }
+  const topicActivity = topicActivityBase
+    ? { ...topicActivityBase, formSubmissionCount: viewerCanReviewTopicActivity ? topicActivityFormSubmissionCount : undefined }
+    : null
   const topicActivityMode = topicActivity?.participationMode
   const topicActivityHasForm = Boolean(topicActivity && (topicActivityMode === 'FORM' || topicActivityMode === 'BOTH'))
   const topicActivityCoverUrl = topicActivity
@@ -1269,11 +1318,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           {topicActivity ? <section aria-label="话题活动信息" className="mt-6 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)]">
             {topicActivityCoverUrl ? <img src={publicImageVariantUrl(topicActivityCoverUrl, 'large') || topicActivityCoverUrl} alt={`${topicActivity.title}活动封面`} className="aspect-[16/9] max-h-[520px] w-full object-cover" /> : null}
             <div className="space-y-3 p-4 sm:p-5">
-              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-[var(--navigation-active)] px-3 py-1 text-xs font-black text-[var(--primary)]">话题活动</span><span className="text-sm font-black">参与方式：{topicActivityMode === 'FORM' ? '表单参与' : topicActivityMode === 'BOTH' ? '评论或表单均可参与' : '评论参与'}</span></div>
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-[var(--navigation-active)] px-3 py-1 text-xs font-black text-[var(--primary)]">话题活动</span><span className="text-sm font-black">参与方式：{topicActivityParticipationLabel(topicActivityMode)}</span></div>
               {topicActivity.participationRule ? <p className="whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground-muted)]">参与说明：{topicActivity.participationRule}</p> : null}
               {topicActivity.startsAt || topicActivity.endsAt ? <p className="text-sm text-[var(--foreground-muted)]">活动时间：{topicActivity.startsAt ? formatDate(topicActivity.startsAt) : '即日起'}{topicActivity.endsAt ? ` — ${formatDate(topicActivity.endsAt)}` : ''}</p> : null}
               <p className="text-sm text-[var(--foreground-muted)]">活动奖励：{[topicActivity.rewardPoints ? `${topicActivity.rewardPoints} 挂号费` : null, Array.isArray(topicActivity.rewardBadgeIds) && topicActivity.rewardBadgeIds.length ? `${topicActivity.rewardBadgeIds.length} 枚指定勋章` : null].filter(Boolean).join('、') || '按活动说明为准'}{topicActivity.rewardGrantMode === 'SCHEDULED' ? ` · 统一发放${topicActivity.rewardGrantAt ? `：${formatDate(topicActivity.rewardGrantAt)}` : ''}` : ' · 审核通过后发放'}</p>
-              {topicActivityHasForm ? <Link href={`#topic-activity-form-${topicActivity.id}`} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--primary)] px-4 text-sm font-black text-[var(--primary-foreground)]">填写参与表单</Link> : null}
             </div>
           </section> : null}
           <RichPostContent
@@ -1336,8 +1384,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           />
         </article>
 
-        {topicActivityHasForm && topicActivity ? <TopicActivityFormParticipation activityId={topicActivity.id} isAuthenticated={Boolean(user)} /> : null}
-        {viewerCanReviewTopicActivity && topicActivity ? <TopicActivityFormSubmissionEntry activityId={topicActivity.id} count={topicActivity._count.TopicActivityFormSubmission} /> : null}
+        {topicActivityHasForm && topicActivity ? <TopicActivityFormParticipation activityId={topicActivity.id} activityPostId={post.id} isAuthenticated={Boolean(user)} /> : null}
+        {viewerCanReviewTopicActivity && topicActivity ? <TopicActivityFormSubmissionEntry activityId={topicActivity.id} count={topicActivity.formSubmissionCount ?? topicActivity._count.TopicActivityFormSubmission} userId={formUserId} /> : null}
 
         <CommentSectionBoundary>
           <PostRepliesSection

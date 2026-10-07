@@ -135,12 +135,13 @@ export async function getBatchHistoricalBadgeMetrics(
       return metrics
     }
     case 'TOPIC_ACTIVITY_PARTICIPATION_COUNT': {
-      const rows = await prisma.topicActivityParticipation.groupBy({
-        by: ['userId'],
-        where: { userId: { in: userIds }, approvedSubmissionCount: { gt: 0 }, firstApprovedAt: createdAt, Activity: { type: 'TOPIC_ACTIVITY', status: { not: 'CANCELLED' } } },
-        _count: { _all: true },
+      const rows = await prisma.topicActivitySubmission.groupBy({
+        by: ['userId', 'activityId'],
+        where: { userId: { in: userIds }, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } }, Activity: { type: 'TOPIC_ACTIVITY', status: { not: 'CANCELLED' } } },
+        _min: { reviewedAt: true },
+        having: { reviewedAt: { _min: createdAt } },
       })
-      rows.forEach((row) => metrics.set(row.userId, row._count._all))
+      rows.forEach((row) => metrics.set(row.userId, (metrics.get(row.userId) || 0) + 1))
       return metrics
     }
     case 'FEATURED_POST_COUNT':

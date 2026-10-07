@@ -53,6 +53,10 @@ export async function serializeTopicActivityFormSubmission(row: Submission) {
       return asset ? [asset] : []
     }) }
   })
+  const fieldImageIds = new Set(asArray(row.answersSnapshot).flatMap((raw) => {
+    const answer = asRecord(raw)
+    return answer.type === 'IMAGE' ? asArray(answer.value).map((item) => String(asRecord(item).assetId || '')) : []
+  }))
   const replies = await Promise.all(row.Replies.map(async (reply) => ({
     id: reply.id,
     content: reply.content,
@@ -64,13 +68,14 @@ export async function serializeTopicActivityFormSubmission(row: Submission) {
     id: row.id,
     activityId: row.activityId,
     userId: row.userId,
-    status: row.status,
+    status: row.Replies.length ? 'REPLIED' : 'SUBMITTED',
     formSchemaSnapshot: row.formSchemaSnapshot,
     answersSnapshot: answers,
     submittedAt: row.submittedAt.toISOString(),
-    reviewedAt: row.reviewedAt?.toISOString() || null,
-    rejectReason: row.rejectReason,
+    reviewedAt: null,
+    rejectReason: null,
     ...(row.User ? { user: row.User } : {}),
     replies,
+    attachments: assets.filter((asset) => !fieldImageIds.has(asset.assetId)),
   }
 }
