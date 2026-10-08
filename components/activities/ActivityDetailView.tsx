@@ -13,7 +13,7 @@ import type { ActivityLotteryPublicView } from '@/lib/activity-lottery'
 import { TopicActivityFormParticipation } from '@/components/activities/TopicActivityFormParticipation'
 
 function topicActivityParticipationLabel(mode: ActivityView['participationMode']) {
-  return mode === 'COMMENT' ? '评论审核' : mode === 'FORM' ? '先填表单后发评论审核' : '选填表单，评论为最终凭证'
+  return mode === 'COMMENT' ? '评论审核' : mode === 'FORM' ? '先填表单后发评论审核' : '表单与评论，评论为最终凭证'
 }
 
 export function ActivityDetailView({ activity, preview = false, isAuthenticated = false, initialRegistration = null, initialQuestions = [], initialRegistrationState, initialCanRegister, initialTopicParticipation = null, shareAuthor, lotteries = [] }: Readonly<{

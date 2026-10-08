@@ -91,21 +91,25 @@ test('表单所有权、管理员回复权限和 Mobile Bearer 路由均在服�
   assert.ok(middleware.includes('topic-activity-image'))
 })
 
-test('话题附件使用内容图通道的尺寸规则，服务器按真实解码格式并存入私有 COS', () => {
+test('V6 话题附件保留原图，论坛原压缩策略不变，真实格式验证和私有 COS 保持', () => {
   const upload = read('app/api/uploads/topic-activity-image/route.ts')
   const storage = read('lib/site-media-storage.ts')
   const browser = read('lib/content-image-browser.ts')
+  const original = read('lib/topic-activity-image-original.ts')
   assert.match(upload, /validateContentImageFileMetadata/)
   assert.match(upload, /content-length/)
-  assert.match(upload, /failOn: 'error'/)
-  assert.match(upload, /metadata\.format/)
+  assert.match(original, /failOn: 'error'/)
+  assert.match(original, /metadata\.format/)
   assert.match(upload, /uploadPrivateSiteImage/)
   assert.match(storage, /ACL: 'private'/)
   assert.match(browser, /CONTENT_IMAGE_COMPRESSION_THRESHOLD/)
   assert.match(browser, /CONTENT_IMAGE_COMPRESSION_TARGET/)
-  assert.match(browser, /allowServerHeicDecode: true/)
-  assert.match(browser, /options\.allowServerHeicDecode/)
-  assert.match(upload, /topic-activity\/\$\{activity\.id\}\/\$\{folder\}/)
+  const topicUploader = browser.slice(browser.indexOf('export async function uploadTopicActivityImage'))
+  assert.doesNotMatch(topicUploader, /prepareContentImageFile|compress/)
+  assert.match(topicUploader, /form\.set\('file', file\)/)
+  assert.match(upload, /body: original/)
+  assert.match(upload, /size: original\.byteLength/)
+  assert.match(original, /topic-activity\/\$\{safeKeyPart\(input\.activityId, 'activity'\)\}\/\$\{folder\}/)
 })
 
 test('当前 Sharp 运行时可解码 HEIF，伪装为 JPEG 的可执行字节在 magic-byte 解码处被拒绝', async () => {
@@ -113,7 +117,7 @@ test('当前 Sharp 运行时可解码 HEIF，伪装为 JPEG 的可执行字节�
   const invalidBytes = Buffer.from('MZ\x00\x00not-an-image')
   assert.equal(validateContentImageFileMetadata({ name: 'fake.jpg', type: 'image/jpeg', size: invalidBytes.byteLength }).ok, true)
   await assert.rejects(() => sharp(invalidBytes, { failOn: 'error' }).metadata())
-  assert.match(read('app/api/uploads/topic-activity-image/route.ts'), /sharp\(original, \{ animated: true, failOn: 'error', limitInputPixels: 100_000_000 \}\)/)
+  assert.match(read('lib/topic-activity-image-original.ts'), /sharp\(input, \{ animated: true, failOn: 'error', limitInputPixels: 100_000_000 \}\)/)
 })
 
 test('统一图片元数据校验允许 JPEG、PNG、WEBP、GIF、HEIC、HEIF 并拒绝超限文件', () => {

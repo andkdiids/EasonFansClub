@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { rejectInvalidRequestOrigin, requireRequestAdmin } from '@/lib/security'
 import { createManyNotifications } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { serializeTopicActivityFormSubmission } from '@/lib/topic-activity-form-view'
+import { withTopicActivityAdminReplyUnlock } from '@/lib/topic-activity-comment-policy'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
@@ -24,6 +26,12 @@ export async function POST(request: Request, context: { params: Promise<{ submis
   let replyId = ''
   try {
     await prisma.$transaction(async (tx) => {
+      // Keep the same Activity -> submission lock order as lifecycle edits so
+      // the durable unlock cannot race a cancellation or schema update.
+      await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${submission.activityId} FOR UPDATE`
+      await tx.$queryRaw`SELECT \`id\` FROM \`TopicActivityFormSubmission\` WHERE \`id\` = ${submissionId} FOR UPDATE`
+      const lockedSubmission = await tx.topicActivityFormSubmission.findUnique({ where: { id: submissionId }, select: { formSchemaSnapshot: true } })
+      if (!lockedSubmission) throw new Error('TOPIC_FORM_SUBMISSION_NOT_FOUND')
       const assets = assetIds.length ? await tx.topicActivityImageAsset.findMany({
         where: { id: { in: assetIds }, activityId: submission.activityId, uploadedByUserId: guard.user!.id, purpose: 'ADMIN_REPLY', formSubmissionId: null, replyId: null },
         select: { id: true },
@@ -35,6 +43,19 @@ export async function POST(request: Request, context: { params: Promise<{ submis
         const linked = await tx.topicActivityImageAsset.updateMany({ where: { id: { in: assets.map((asset) => asset.id) }, uploadedByUserId: guard.user!.id, purpose: 'ADMIN_REPLY', activityId: submission.activityId, formSubmissionId: null, replyId: null }, data: { replyId: reply.id } })
         if (linked.count !== assets.length) throw new Error('TOPIC_REPLY_ASSET_INVALID')
       }
+      // The marker lives in the immutable form snapshot. It survives reply
+      // deletion, so a user who was once unlocked is never re-locked.
+      await tx.topicActivityFormSubmission.update({
+        where: { id: submissionId },
+        data: {
+          formSchemaSnapshot: withTopicActivityAdminReplyUnlock(lockedSubmission.formSchemaSnapshot, {
+            unlocked: true,
+            unlockedAt: new Date().toISOString(),
+            replyId: reply.id,
+            senderUserId: guard.user!.id,
+          }) as Prisma.InputJsonValue,
+        },
+      })
     }, { isolationLevel: 'Serializable' })
   } catch (error) {
     if (error instanceof Error && error.message === 'TOPIC_REPLY_ASSET_INVALID') return NextResponse.json({ message: '图片附件无效或已使用，请重新上传' }, { status: 403 })
@@ -48,7 +69,7 @@ export async function POST(request: Request, context: { params: Promise<{ submis
       actorId: null,
       type: 'ACTIVITY',
       title: '话题活动有新回复',
-      content: `你在「${submission.Activity.title}」提交的表单收到管理员回复。`,
+      content: `你在「${submission.Activity.title}」提交的表单收到管理员回复。${assetIds.length ? '管理员已上传新的图片回复。' : ''}`,
       link: `/activities/${submission.activityId}?submissionId=${encodeURIComponent(submission.id)}`,
       key: `topic-activity-form-reply:${replyId}`,
     }], skipDuplicates: true,

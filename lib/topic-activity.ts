@@ -4,8 +4,67 @@ import { formatBeijingDateTimeDisplay } from '@/lib/registration-availability'
 import { createManyNotifications } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { prisma } from '@/lib/prisma'
+import {
+  hasTopicActivityAdminReplyUnlock,
+  resolveTopicActivityCommentEligibility,
+  resolveTopicActivityCommentPolicy,
+  type TopicActivityCommentEligibility,
+} from '@/lib/topic-activity-comment-policy'
 
 const ACTIVE_REWARD_ITEM_STATUSES: TopicActivityRewardGrantItemStatus[] = ['PENDING', 'FAILED']
+
+type TopicActivityCommentActivity = {
+  id: string
+  type: string
+  status: string
+  activityPostId: string | null
+  startsAt: Date | null
+  endsAt: Date | null
+  participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+  formSchema: Prisma.JsonValue | null
+}
+
+export function isTopicActivityFormRequired(activity: Pick<TopicActivityCommentActivity, 'participationMode'>) {
+  return activity.participationMode === 'FORM' || activity.participationMode === 'BOTH'
+}
+
+export async function resolveTopicActivityCommentEligibilityInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { activity: TopicActivityCommentActivity; userId: string; now: Date },
+): Promise<TopicActivityCommentEligibility> {
+  const requiresForm = isTopicActivityFormRequired(input.activity)
+  const policy = resolveTopicActivityCommentPolicy(input.activity.formSchema)
+  const formSubmissions = requiresForm
+    ? await tx.topicActivityFormSubmission.findMany({
+        where: { activityId: input.activity.id, userId: input.userId },
+        select: { formSchemaSnapshot: true, Replies: { select: { id: true, content: true, ImageAssets: { select: { id: true } } } } },
+      })
+    : []
+  const hasFormSubmission = formSubmissions.length > 0
+  const hasAdminReply = formSubmissions.some((submission) => hasTopicActivityAdminReplyUnlock(submission.formSchemaSnapshot) || submission.Replies.some((reply) => Boolean(reply.content?.trim()) || reply.ImageAssets.length > 0))
+  const hasUsedSingleComment = policy.commentLimit === 'SINGLE'
+    ? Boolean(await tx.topicActivitySubmission.findFirst({
+        // A submission is the lifetime-use ledger. Do not filter by commentId,
+        // status, or commentDeletedAt: hard-deleted/withdrawn comments still
+        // consume the one participation opportunity.
+        where: { activityId: input.activity.id, userId: input.userId },
+        select: { id: true },
+      }))
+    : false
+  const lifecycle = input.activity.status === 'CANCELLED'
+    ? 'CANCELLED'
+    : input.activity.status !== 'PUBLISHED' || (input.activity.startsAt && input.activity.startsAt > input.now)
+      ? 'NOT_STARTED'
+    : input.activity.endsAt && input.activity.endsAt < input.now
+      ? 'ENDED'
+      : 'ACTIVE'
+  return resolveTopicActivityCommentEligibility({ requiresForm, policy, hasFormSubmission, hasAdminReply, hasUsedSingleComment, lifecycle })
+}
+
+export function topicActivityCommentGateErrorCode(reason: TopicActivityCommentEligibility['blockReason']) {
+  if (reason === 'COMMENT_LIMIT_REACHED') return 'TOPIC_ACTIVITY_COMMENT_LIMIT_REACHED'
+  return reason
+}
 
 export type TopicSubmissionResolvedStatus = 'NOT_PARTICIPATED' | 'PENDING' | 'APPROVED' | 'REJECTED'
 

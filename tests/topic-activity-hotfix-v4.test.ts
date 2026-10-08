@@ -64,7 +64,8 @@ test('V5表单只查看回复，筛选按回复状态，评论审核确认保留
   assert.doesNotMatch(manager, /window\.prompt/)
   assert.match(route, /repliedForms/)
   assert.match(route, /unrepliedForms/)
-  assert.match(read('components/PostRepliesSection.tsx'), /确认通过这条参与内容/)
+  assert.match(read('components/activities/ReviewConfirmDialog.tsx'), /确认通过这条参与内容/)
+  assert.match(read('components/PostRepliesSection.tsx'), /ReviewConfirmDialog/)
 })
 
 test('Topic Activity 自动审核/回复通知使用系统身份，普通社交通知不变', () => {

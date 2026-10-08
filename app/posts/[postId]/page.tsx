@@ -57,7 +57,7 @@ import {
 export const dynamic = 'force-dynamic'
 
 function topicActivityParticipationLabel(mode: 'COMMENT' | 'FORM' | 'BOTH' | null | undefined) {
-  return mode === 'COMMENT' ? '评论审核' : mode === 'FORM' ? '先填表单后发评论审核' : '选填表单，评论为最终凭证'
+  return mode === 'COMMENT' ? '评论审核' : mode === 'FORM' ? '先填表单后发评论审核' : '表单与评论，评论为最终凭证'
 }
 
 const postMetadataSelect = {

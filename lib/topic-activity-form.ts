@@ -1,3 +1,5 @@
+import { normalizeTopicActivityCommentPolicy, type TopicActivityCommentPolicy } from '@/lib/topic-activity-comment-policy'
+
 export const TOPIC_ACTIVITY_FORM_VERSION = 1
 export const TOPIC_ACTIVITY_FORM_MAX_FIELDS = 30
 export const TOPIC_ACTIVITY_FORM_MAX_IMAGES = 9
@@ -20,6 +22,8 @@ export type TopicActivityFormField = Readonly<{
 export type TopicActivityFormSchema = Readonly<{
   version: typeof TOPIC_ACTIVITY_FORM_VERSION
   fields: TopicActivityFormField[]
+  /** V6 policy is optional so pre-V6 Activity.formSchema JSON remains valid. */
+  commentPolicy?: TopicActivityCommentPolicy
 }>
 
 export type TopicActivityRawAnswer = string | string[]
@@ -62,6 +66,13 @@ export function normalizeTopicActivityFormSchema(value: unknown, allowImages: bo
 
   const ids = new Set<string>()
   const fields: TopicActivityFormField[] = []
+  const hasCommentPolicy = Boolean(root && Object.prototype.hasOwnProperty.call(root, 'commentPolicy'))
+  let commentPolicy: TopicActivityCommentPolicy | undefined
+  if (hasCommentPolicy) {
+    const normalizedPolicy = normalizeTopicActivityCommentPolicy(root?.commentPolicy)
+    if (!normalizedPolicy.valid) return normalizedPolicy
+    commentPolicy = normalizedPolicy.value
+  }
   for (let index = 0; index < rawFields.length; index += 1) {
     const raw = record(rawFields[index])
     if (!raw) return { valid: false, message: `第 ${index + 1} 个表单字段无效` }
@@ -107,7 +118,7 @@ export function normalizeTopicActivityFormSchema(value: unknown, allowImages: bo
     })
   }
 
-  return { valid: true, value: { version: TOPIC_ACTIVITY_FORM_VERSION, fields } }
+  return { valid: true, value: { version: TOPIC_ACTIVITY_FORM_VERSION, fields, ...(commentPolicy ? { commentPolicy } : {}) } }
 }
 
 export function validateTopicActivityFormAnswers(
