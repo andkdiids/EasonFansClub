@@ -107,8 +107,10 @@ test('V5 browser: collapsed shared form, global image, submit, live admin count 
     await expect(page.getByText('资料已收到').last()).toBeVisible()
     allowImages = false
     await page.reload()
-    await page.getByRole('button', { name: /^填写(参与)?表单$|^再次填写$/ }).first().click()
-    await expect(page.locator('form input[type=file]')).toHaveCount(0)
+    await page.getByRole('button', { name: '查看已提交表单', exact: true }).click()
+    await expect(page.locator('form')).toHaveCount(0)
+    assert.equal(await page.getByRole('button', { name: /再次填写|再填一次/ }).count(), 0)
+    await expect(page.getByText('资料已收到').first()).toBeVisible()
   } finally {
     await browser?.close()
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))

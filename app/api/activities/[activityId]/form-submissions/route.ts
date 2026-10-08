@@ -23,6 +23,14 @@ export async function POST(request: Request, context: { params: Promise<{ activi
     if (activity.endsAt && activity.endsAt < new Date()) return { error: 'ACTIVITY_ENDED' as const }
     if (activity.status !== 'PUBLISHED' || (activity.startsAt && activity.startsAt > new Date())) return { error: 'CLOSED' as const }
     if (!['FORM', 'BOTH'].includes(activity.participationMode)) return { error: 'MODE_DISABLED' as const }
+    // All form creators acquire the Activity row lock before this lookup. Keep
+    // the existence check and create in this same transaction: concurrent
+    // submissions cannot both pass, without rewriting historical duplicates.
+    const existingSubmission = await tx.topicActivityFormSubmission.findFirst({
+      where: { activityId, userId: guard.user.id },
+      select: { id: true },
+    })
+    if (existingSubmission) return { error: 'FORM_ALREADY_SUBMITTED' as const }
     const normalized = normalizeTopicActivityFormSchema(activity.formSchema, activity.allowImageAttachments)
     if (!normalized.valid) return { error: 'INVALID_SCHEMA' as const }
     const validated = validateTopicActivityFormAnswers(normalized.value, body.answers)
@@ -61,8 +69,8 @@ export async function POST(request: Request, context: { params: Promise<{ activi
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
   if ('error' in result) {
-    const status = result.error === 'NOT_FOUND' ? 404 : ['CLOSED', 'ACTIVITY_ENDED', 'ACTIVITY_CANCELLED', 'MODE_DISABLED'].includes(result.error || '') ? 409 : result.error === 'INVALID_ASSET' ? 403 : 400
-    const message = result.error === 'ACTIVITY_ENDED' ? '活动已结束，不能再提交表单' : result.error === 'ACTIVITY_CANCELLED' ? '活动已取消，不能再提交表单' : result.error === 'CLOSED' ? '活动当前未开放' : result.error === 'MODE_DISABLED' ? '该活动暂不开放表单' : result.error === 'INVALID_SCHEMA' ? '活动表单暂时不可用' : result.error === 'INVALID_ASSET' ? '请重新选择未使用的图片附件' : result.error === 'NOT_FOUND' ? '话题活动不存在' : result.error
+    const status = result.error === 'NOT_FOUND' ? 404 : ['CLOSED', 'ACTIVITY_ENDED', 'ACTIVITY_CANCELLED', 'MODE_DISABLED', 'FORM_ALREADY_SUBMITTED'].includes(result.error || '') ? 409 : result.error === 'INVALID_ASSET' ? 403 : 400
+    const message = result.error === 'FORM_ALREADY_SUBMITTED' ? '你已提交过此活动表单，请查看已提交表单' : result.error === 'ACTIVITY_ENDED' ? '活动已结束，不能再提交表单' : result.error === 'ACTIVITY_CANCELLED' ? '活动已取消，不能再提交表单' : result.error === 'CLOSED' ? '活动当前未开放' : result.error === 'MODE_DISABLED' ? '该活动暂不开放表单' : result.error === 'INVALID_SCHEMA' ? '活动表单暂时不可用' : result.error === 'INVALID_ASSET' ? '请重新选择未使用的图片附件' : result.error === 'NOT_FOUND' ? '话题活动不存在' : result.error
     return NextResponse.json({ code: result.error, message }, { status })
   }
   return NextResponse.json({ success: true, submission: { ...result.submission, status: 'SUBMITTED' } }, { status: 201, headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })

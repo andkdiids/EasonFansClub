@@ -61,13 +61,14 @@ test('只有评论审核建立 Activity+User 聚合，表单旧审核值不计�
   assert.match(participation, /@@unique\(\[activityId, userId\]\)/)
 })
 
-test('表单可重复提交，提交答案采用版本快照，图片资产仅绑定本人未使用附件', () => {
+test('表单提交采用版本快照，历史重复记录保留，行锁内限制本人只能提交一次', () => {
   const schemaText = read('prisma/schema.prisma')
   const model = schemaText.match(/model TopicActivityFormSubmission \{([\s\S]*?)\n\}/)?.[1] || ''
   assert.match(model, /formSchemaSnapshot\s+Json/)
   assert.match(model, /answersSnapshot\s+Json/)
   assert.doesNotMatch(model, /@@unique\(\[activityId, userId\]\)/)
   const route = read('app/api/activities/[activityId]/form-submissions/route.ts')
+  assert.match(route, /FOR UPDATE[\s\S]*topicActivityFormSubmission\.findFirst[\s\S]*FORM_ALREADY_SUBMITTED[\s\S]*topicActivityFormSubmission\.create/)
   assert.match(route, /uploadedByUserId: guard\.user\.id/)
   assert.match(route, /formSubmissionId: null, replyId: null/)
   assert.match(route, /startsAt && activity\.startsAt > new Date\(\)/)

@@ -270,8 +270,12 @@ const txStub = {
     },
   },
   topicActivitySubmissionReply: {
-    create: async (args: { data: { submissionId: string; senderUserId: string; content: string | null } }) => {
-      const id = `admin-reply-${state.formSubmission.replies.length + 1}`
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      const row = state.formSubmission.replies.find((reply) => reply.id === where.id)
+      return row ? { ...row, submissionId: state.formSubmission.id, senderUserId: 'admin-1', ImageAssets: state.adminAssets.filter((asset) => asset.replyId === row.id).map((asset) => ({ id: asset.id })) } : null
+    },
+    create: async (args: { data: { id?: string; submissionId: string; senderUserId: string; content: string | null } }) => {
+      const id = args.data.id || `admin-reply-${state.formSubmission.replies.length + 1}`
       state.formSubmission.replies.push({ id, content: args.data.content, imageIds: [] })
       const current = state.forms.find((form) => form.id === args.data.submissionId)
       if (current && current !== state.formSubmission) current.replies = state.formSubmission.replies
@@ -485,4 +489,25 @@ test('direct admin text/image replies persist durable unlock and deletion does n
   state.forms[0]!.replies = []
   result = await postJson({ content: '图片回复后参与' })
   assert.equal(result.response.status, 201)
+})
+
+test('V6.1 admin reply retry and concurrent replay reuse the same reply, including already-linked images', async () => {
+  resetFixture({ gateMode: 'AFTER_ADMIN_REPLY' })
+  addForm()
+  state.adminAssets.push({ id: 'asset-1', activityId: state.activity.id, uploadedByUserId: 'admin-1', storageKey: 'private/a.png', mimeType: 'image/png', width: 100, height: 100, size: 100, replyId: null })
+  const body = { content: '收到资料', assetIds: ['asset-1'], requestId: 'fixture-request-1' }
+  const responses = await Promise.all(Array.from({ length: 8 }, () => adminRepliesRoute.POST(makeAdminReplyRequest(body), adminReplyContext())))
+  assert.deepEqual(responses.map((response) => response.status), Array(8).fill(201))
+  assert.equal(state.formSubmission.replies.length, 1)
+  assert.equal(state.adminAssets[0].replyId, state.formSubmission.replies[0].id)
+  assert.match(state.formSubmission.replies[0].id, /^tr_[a-f0-9]{64}$/)
+  assert.equal(state.formSubmission.formSchemaSnapshot.adminReplyRequests, undefined)
+  assert.equal(formSnapshotWithUnlock(), true)
+  const replies = await Promise.all(responses.map((response) => response.json()))
+  assert.equal(new Set(replies.map((value) => value.reply.id)).size, 1)
+  assert.equal((await adminRepliesRoute.POST(makeAdminReplyRequest({ ...body, content: '不同内容' }), adminReplyContext())).status, 409)
+  assert.equal(state.formSubmission.replies.length, 1)
+  assert.equal((await adminRepliesRoute.POST(makeAdminReplyRequest({ content: '第二次独立说明', requestId: 'fixture-request-2' }), adminReplyContext())).status, 201)
+  assert.equal(state.formSubmission.replies.length, 2)
+  assert.deepEqual(state.sideEffects.communityRewards, 0)
 })

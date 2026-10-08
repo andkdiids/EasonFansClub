@@ -42,5 +42,5 @@ export async function GET(request: Request, context: RouteContext) {
   const isAdmin = await hasAdminPermission(guard.user, 'activity_manage').catch(() => false)
   if (!isOwner && !isAdmin) return denied()
 
-  return downloadTopicActivityOriginal(asset, `${activityId}-${submissionId}`, { activityId, submissionId, assetId })
+  return downloadTopicActivityOriginal(asset, `${activityId}-${submissionId}`, { activityId, submissionId, assetId }, new URL(request.url).searchParams.get('view') === '1' ? 'inline' : 'attachment')
 }

@@ -43,6 +43,7 @@ export async function downloadTopicActivityOriginal(
   asset: TopicActivityOriginalDownloadAsset,
   fallbackFilename: string,
   logContext?: TopicActivityOriginalDownloadLogContext,
+  disposition: 'attachment' | 'inline' = 'attachment',
 ) {
   let body: Buffer
   try {
@@ -70,7 +71,7 @@ export async function downloadTopicActivityOriginal(
     headers: {
       'Content-Type': mimeType,
       'Content-Length': String(body.byteLength),
-      'Content-Disposition': `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename(filename)}`,
+      'Content-Disposition': `${disposition}; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename(filename)}`,
       'Cache-Control': 'private, no-store, max-age=0',
       'X-Content-Type-Options': 'nosniff',
       Vary: 'Cookie, Authorization',

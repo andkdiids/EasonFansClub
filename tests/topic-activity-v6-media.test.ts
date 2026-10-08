@@ -134,15 +134,34 @@ beforeEach(() => {
   sourceAssetOverride = null
 })
 
-function download(path: { activityId?: string; submissionId?: string; replyId?: string; assetId?: string } = {}) {
+function download(path: { activityId?: string; submissionId?: string; replyId?: string; assetId?: string } = {}, view = false) {
   const params = { activityId: ACTIVITY_ID, submissionId: SUBMISSION_ID, replyId: REPLY_ID, assetId: ASSET_ID, ...path }
-  return downloadRoute.GET(new Request('https://ecfc.fans/api/topic-activity/original'), { params: Promise.resolve(params) })
+  return downloadRoute.GET(new Request('https://ecfc.fans/api/topic-activity/original' + (view ? '?view=1' : '')), { params: Promise.resolve(params) })
 }
 
-function sourceDownload(path: { activityId?: string; submissionId?: string; assetId?: string } = {}) {
+function sourceDownload(path: { activityId?: string; submissionId?: string; assetId?: string } = {}, view = false) {
   const params = { activityId: ACTIVITY_ID, submissionId: SUBMISSION_ID, assetId: SOURCE_ASSET_ID, ...path }
-  return sourceDownloadRoute.GET(new Request('https://ecfc.fans/api/topic-activity/source-original'), { params: Promise.resolve(params) })
+  return sourceDownloadRoute.GET(new Request('https://ecfc.fans/api/topic-activity/source-original' + (view ? '?view=1' : '')), { params: Promise.resolve(params) })
 }
+
+test('inline preview preserves original bytes, private headers and all IDOR guards', async () => {
+  for (const request of [download, sourceDownload]) {
+    const response = await request({}, true)
+    assert.equal(response.status, 200)
+    assert.match(response.headers.get('content-disposition') || '', /^inline;/)
+    assert.match(response.headers.get('cache-control') || '', /private, no-store/)
+    assert.match(response.headers.get('vary') || '', /Cookie, Authorization/)
+    assert.equal(digest(Buffer.from(await response.arrayBuffer())), digest(ORIGINAL_BYTES))
+    const reads = cosReads
+    currentUser = null
+    assert.equal((await request({}, true)).status, 401)
+    currentUser = { id: 'other-user', role: 'USER' }
+    assert.equal((await request({}, true)).status, 404)
+    currentUser = { id: 'owner-user', role: 'USER' }
+    assert.equal((await request({ activityId: 'guessed-activity' }, true)).status, 404)
+    assert.equal(cosReads, reads)
+  }
+})
 
 test('authenticated original download streams byte-identical owner/admin data', async () => {
   const ownerResponse = await download()
@@ -356,5 +375,6 @@ test('topic media path keeps supported HEIF originals and never exposes a public
   assert.match(sourceEndpoint, /submission\.userId === guard\.user\.id/)
   assert.match(downloadService, /body\.byteLength !== asset\.size/)
   assert.match(assets, /purpose: 'FORM_ANSWER'/)
-  assert.match(manager, /下载原图/)
+  assert.match(manager, /TopicActivityOriginalImage/)
+  assert.match(read('components/activities/TopicActivityOriginalImage.tsx'), /下载原图/)
 })
