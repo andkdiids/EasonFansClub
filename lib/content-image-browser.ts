@@ -365,16 +365,32 @@ export type TopicActivityUploadedAsset = {
   size: number
   url: string
   thumbnailUrl: string
+  /** Added after the submission/reply is persisted; never a public COS URL. */
+  originalDownloadUrl?: string
 }
 
-/** Uses the same metadata checks, HEIC-capable preparation, and 5MB→4MB
- * compression policy as post/reply images, but stores a private activity asset. */
+/**
+ * Upload a topic-activity source without passing it through the forum image
+ * compressor.  The API stores the selected bytes as the private original and
+ * may create an independent display preview.  Keeping this branch separate is
+ * important: the ordinary content-image path intentionally retains its
+ * existing 5MB→4MB compression policy.
+ */
 export async function uploadTopicActivityImage(file: File, input: { activityId: string; purpose: 'FORM_ANSWER' | 'ADMIN_REPLY' }, onPhase?: (phase: ContentImageUploadPhase) => void) {
+  const validation = validateContentImageFileMetadata(file)
+  if (!validation.ok) {
+    if (validation.code === 'FILE_TOO_LARGE') {
+      throw new ContentImageClientError('FILE_TOO_LARGE', '图片过大，请选择较小原图')
+    }
+    throw clientError(validation.code)
+  }
   onPhase?.('processing')
-  const preparedFile = await prepareContentImageFile(file, (phase) => onPhase?.(phase), { allowServerHeicDecode: true })
   onPhase?.('uploading')
   const form = new FormData()
-  form.set('file', preparedFile)
+  // Keep the original File object (including its name and bytes).  Preview
+  // rendering belongs to the server-side derivative and must not replace the
+  // source sent to the private original object.
+  form.set('file', file)
   form.set('activityId', input.activityId)
   form.set('purpose', input.purpose)
   let response: Response

@@ -21,7 +21,8 @@ import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 import { completeTask, resolveAndGrantWeeklyMilestonesInTransaction } from '@/lib/growth-tasks/service'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { createTopicSubmissionForCommentInTransaction } from '@/lib/topic-activity'
+import { createTopicSubmissionForCommentInTransaction, isTopicActivityFormRequired, resolveTopicActivityCommentEligibilityInTransaction, topicActivityCommentGateErrorCode } from '@/lib/topic-activity'
+import { hasTopicActivityAdminReplyUnlock, resolveTopicActivityCommentEligibility, resolveTopicActivityCommentPolicy } from '@/lib/topic-activity-comment-policy'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -118,7 +119,7 @@ export async function GET(request: Request, { params }: Params) {
 
   const topicActivity = await prisma.activity.findFirst({
     where: { activityPostId: postId, type: 'TOPIC_ACTIVITY' },
-    select: { id: true, title: true, startsAt: true, endsAt: true, participationRule: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true },
+    select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, participationRule: true, participationMode: true, formSchema: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true },
   })
   const canReviewTopicActivity = Boolean(topicActivity && viewer && await hasAdminPermission(viewer, 'activity_manage'))
   const requestedTopicStatus = searchParams.get('topicStatus')
@@ -195,6 +196,28 @@ export async function GET(request: Request, { params }: Params) {
     ? await prisma.topicActivityFormSubmission.groupBy({ by: ['userId'], where: { activityId: topicActivity.id, userId: { in: [...new Set(topicSubmissions.map((submission) => submission.userId))] } }, _count: { _all: true } })
     : []
   const formCountByUser = new Map(formCounts.map((row) => [row.userId, row._count._all]))
+  const commentPolicy = topicActivity ? resolveTopicActivityCommentPolicy(topicActivity.formSchema) : null
+  const currentUserEligibility = topicActivity && viewer
+    ? await (async () => {
+        const requiresForm = isTopicActivityFormRequired(topicActivity)
+        const formSubmissions = requiresForm
+          ? await prisma.topicActivityFormSubmission.findMany({ where: { activityId: topicActivity.id, userId: viewer.id }, select: { formSchemaSnapshot: true, Replies: { select: { id: true, content: true, ImageAssets: { select: { id: true } } } } } })
+          : []
+        const hasFormSubmission = formSubmissions.length > 0
+        const hasAdminReply = formSubmissions.some((submission) => hasTopicActivityAdminReplyUnlock(submission.formSchemaSnapshot) || submission.Replies.some((reply) => Boolean(reply.content?.trim()) || reply.ImageAssets.length > 0))
+        const hasUsedSingleComment = commentPolicy?.commentLimit === 'SINGLE'
+          ? Boolean(await prisma.topicActivitySubmission.findFirst({ where: { activityId: topicActivity.id, userId: viewer.id }, select: { id: true } }))
+          : false
+        const lifecycle = topicActivity.status === 'CANCELLED'
+          ? 'CANCELLED' as const
+          : topicActivity.status !== 'PUBLISHED' || (topicActivity.startsAt && topicActivity.startsAt > new Date())
+            ? 'NOT_STARTED' as const
+          : topicActivity.endsAt && topicActivity.endsAt < new Date()
+            ? 'ENDED' as const
+            : 'ACTIVE' as const
+        return resolveTopicActivityCommentEligibility({ requiresForm, policy: commentPolicy, hasFormSubmission, hasAdminReply, hasUsedSingleComment, lifecycle })
+      })()
+    : null
   const serializeRoot = (reply: ReplyRecord) => {
     const serialized = serializeReply(reply, likedIds)
     const submission = topicSubmissionByComment.get(reply.id)
@@ -216,7 +239,7 @@ export async function GET(request: Request, { params }: Params) {
     hasMore: safePage < totalPages,
     sort,
     direction,
-    topicActivity: topicActivity ? { id: topicActivity.id, title: topicActivity.title, startsAt: topicActivity.startsAt, endsAt: topicActivity.endsAt, participationRule: topicActivity.participationRule, rewardGrantMode: topicActivity.rewardGrantMode, rewardGrantAt: topicActivity.rewardGrantAt, rewardPoints: topicActivity.rewardPoints, rewardBadgeCount: Array.isArray(topicActivity.rewardBadgeIds) ? topicActivity.rewardBadgeIds.length : 0, canReview: canReviewTopicActivity } : null,
+    topicActivity: topicActivity ? { id: topicActivity.id, title: topicActivity.title, startsAt: topicActivity.startsAt, endsAt: topicActivity.endsAt, participationRule: topicActivity.participationRule, rewardGrantMode: topicActivity.rewardGrantMode, rewardGrantAt: topicActivity.rewardGrantAt, rewardPoints: topicActivity.rewardPoints, rewardBadgeCount: Array.isArray(topicActivity.rewardBadgeIds) ? topicActivity.rewardBadgeIds.length : 0, commentPolicy, currentUserEligibility, canReview: canReviewTopicActivity } : null,
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
 }
 
@@ -248,6 +271,15 @@ export async function POST(request: Request, { params }: Params) {
   if ('error' in parsedMentions) return NextResponse.json({ message: parsedMentions.error }, { status: 400 })
   const requestedMentions = parsedMentions.mentions
   if (textLength.actualLength < 2 && imageUrls.length === 0 && !stickerId) return NextResponse.json({ message: '回复内容至少需要 2 个字符', errors: { content: '回复太短了' } }, { status: 400 })
+
+  // Read the canonical Activity before the public-post filter so a cancelled
+  // activity returns its controlled lifecycle code instead of an ambiguous
+  // ordinary 404. The transaction below re-reads it under an Activity lock.
+  const topicActivityCandidate = await prisma.activity.findFirst({
+    where: { activityPostId: postId, type: 'TOPIC_ACTIVITY' },
+    select: { id: true, status: true },
+  })
+  if (topicActivityCandidate?.status === 'CANCELLED') return NextResponse.json({ code: 'ACTIVITY_CANCELLED', message: '活动已取消，不能发表活动评论' }, { status: 409 })
 
   const post = await prisma.post.findFirst({
     where: { ...publicPostWhere(), id: postId, isLocked: false, Board: { isActive: true } },
@@ -290,11 +322,35 @@ export async function POST(request: Request, { params }: Params) {
   const replyRecipientId = parentReply?.authorId || post.authorId
   const now = new Date()
   const reply = await prisma.$transaction(async (tx) => {
+    // Activity edits/cancellation lock Activity before touching its post. Use
+    // the same order here, then lock Post and User before evaluating a gate.
+    let lockedTopicActivity: {
+      id: string
+      type: 'TOPIC_ACTIVITY' | string
+      status: string
+      activityPostId: string | null
+      startsAt: Date | null
+      endsAt: Date | null
+      participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+      formSchema: Prisma.JsonValue | null
+    } | null = null
+    if (topicActivityCandidate) {
+      await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${topicActivityCandidate.id} FOR UPDATE`
+      lockedTopicActivity = await tx.activity.findUnique({
+        where: { id: topicActivityCandidate.id },
+        select: { id: true, type: true, status: true, activityPostId: true, startsAt: true, endsAt: true, participationMode: true, formSchema: true },
+      })
+    }
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+    if (lockedTopicActivity?.status === 'CANCELLED') return { gateError: 'ACTIVITY_CANCELLED' as const }
     const currentPost = await tx.post.findFirst({ where: { ...publicPostWhere(), id: postId, isLocked: false, Board: { isActive: true } }, select: { id: true, authorId: true } })
     if (!currentPost) return { unavailable: true as const }
     for (const userId of [...new Set([user.id, post.authorId])].sort()) await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
     await tx.user.findFirstOrThrow({ where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } }, select: { id: true } })
+    if (!parentId && lockedTopicActivity?.type === 'TOPIC_ACTIVITY' && lockedTopicActivity.activityPostId === currentPost.id) {
+      const eligibility = await resolveTopicActivityCommentEligibilityInTransaction(tx, { activity: lockedTopicActivity, userId: user.id, now })
+      if (!eligibility.canComment) return { gateError: topicActivityCommentGateErrorCode(eligibility.blockReason)! as string }
+    }
     const duplicateReply = await tx.reply.findFirst({ where: { postId, authorId: user.id, parentId: parentId || null, content, stickerId: stickerId || null, isDeleted: false, createdAt: { gte: new Date(Date.now() - 8_000) } }, select: { id: true } })
     if (duplicateReply) return { duplicateReplyId: duplicateReply.id }
     const floorNumber = parentId ? null : await allocatePostCommentFloor(tx, postId)
@@ -318,6 +374,18 @@ export async function POST(request: Request, { params }: Params) {
     return { createdReply, topicSubmission, floorNumber, rewardPoints: communityReward.commenterRewardPoints, weeklyMilestoneRewards: weeklyMilestones.rewards, points: weeklyMilestones.balance, notificationRecipientIds: [...requestedMentions.map((mention) => mention.userId), ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : [])] }
   }, { timeout: 15_000, maxWait: 5_000 })
 
+  if ('gateError' in reply) {
+    const messages: Record<string, string> = {
+      FORM_REQUIRED_BEFORE_COMMENT: '请先填写活动表单后再发表评论',
+      ADMIN_REPLY_REQUIRED: '表单已提交，等待管理员回复后即可发表评论',
+      TOPIC_ACTIVITY_COMMENT_LIMIT_REACHED: '本活动每位用户仅可发表一次参与评论',
+      ACTIVITY_ENDED: '活动已结束，不能发表活动评论',
+      ACTIVITY_CANCELLED: '活动已取消，不能发表活动评论',
+      ACTIVITY_NOT_STARTED: '活动尚未开放，暂不能发表评论',
+    }
+    const gateCode = reply.gateError || 'ACTIVITY_NOT_STARTED'
+    return NextResponse.json({ code: gateCode, message: messages[gateCode] || '当前暂不能发表评论' }, { status: 409 })
+  }
   if ('unavailable' in reply) return NextResponse.json({ message: '帖子不存在或当前不允许回复' }, { status: 404 })
   if ('duplicateReplyId' in reply) return NextResponse.json({ message: '相同回复正在处理中，请勿重复提交', replyId: reply.duplicateReplyId }, { status: 409 })
 

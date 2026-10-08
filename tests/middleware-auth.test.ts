@@ -140,6 +140,8 @@ test('话题活动表单 schema 可公开读取；表单提交、历史、附件
     ['/api/activities/topic-test/form-submissions', 'POST'],
     ['/api/activities/topic-test/my-form-submissions', 'GET'],
     ['/api/topic-activity-form-submissions/submission-test', 'GET'],
+    ['/api/activities/topic-test/form-submissions/submission-test/replies/reply-test/assets/asset-test/original', 'GET'],
+    ['/api/activities/topic-test/form-submissions/submission-test/assets/asset-test/original', 'GET'],
     ['/api/admin/activities/topic-test/form-submissions', 'GET'],
     ['/api/uploads/topic-activity-image', 'POST'],
     ['/api/admin/topic-activity-form-submissions/submission-test/review', 'PATCH'],

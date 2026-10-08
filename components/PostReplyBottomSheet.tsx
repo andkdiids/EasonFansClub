@@ -13,6 +13,7 @@ export function PostReplyBottomSheet({
   draftContent,
   onDraftChange,
   onDraftClear,
+  beforeSubmit,
 }: Readonly<{
   open: boolean
   postId: string
@@ -22,6 +23,7 @@ export function PostReplyBottomSheet({
   draftContent: string
   onDraftChange: (content: string) => void
   onDraftClear: () => void
+  beforeSubmit?: () => boolean | Promise<boolean>
 }>) {
   const [mounted, setMounted] = useState(false)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
@@ -167,6 +169,7 @@ export function PostReplyBottomSheet({
           draftContent={draftContent}
           onDraftChange={onDraftChange}
           onDraftClear={onDraftClear}
+          beforeSubmit={beforeSubmit}
         />
       </section>
     </>,

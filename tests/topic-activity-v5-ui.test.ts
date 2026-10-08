@@ -44,7 +44,7 @@ test('V5 活动详情和后台使用新的参与方式语义，并区分表单�
   const detail = read('components/activities/ActivityDetailView.tsx')
   const admin = read('app/admin/activities/ActivityAdminManager.tsx')
 
-  for (const label of ['评论审核', '先填表单后发评论审核', '选填表单，评论为最终凭证']) {
+  for (const label of ['评论审核', '先填表单后发评论审核', '表单与评论，评论为最终凭证']) {
     assert.ok(detail.includes(label), `活动详情缺少参与方式文案：${label}`)
     assert.ok(admin.includes(label), `活动后台缺少参与方式文案：${label}`)
   }

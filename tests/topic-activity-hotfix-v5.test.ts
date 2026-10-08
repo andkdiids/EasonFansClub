@@ -127,7 +127,7 @@ test('form then multiple approved comments: one participation, one 7-point grant
   assert.equal(f.reviews.length, 2)
 })
 
-test('optional form in BOTH is not a prerequisite; scheduled comment approval waits for grant time', async () => {
+test('legacy BOTH comments preserve V5 review compatibility; scheduled approval waits for grant time', async () => {
   const f = fixture('BOTH', 0, true)
   await withFixture(f, async () => { await reviewTopicActivitySubmission({ submissionId: 'a', reviewerId: 'admin-1', status: 'APPROVED', now }) })
   assert.equal(f.participation()?.approvedSubmissionCount, 1)

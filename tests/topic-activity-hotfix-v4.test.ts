@@ -64,7 +64,8 @@ test('V5表单只查看回复，筛选按回复状态，评论审核确认保留
   assert.doesNotMatch(manager, /window\.prompt/)
   assert.match(route, /repliedForms/)
   assert.match(route, /unrepliedForms/)
-  assert.match(read('components/PostRepliesSection.tsx'), /确认通过这条参与内容/)
+  assert.match(read('components/activities/ReviewConfirmDialog.tsx'), /确认通过这条参与内容/)
+  assert.match(read('components/PostRepliesSection.tsx'), /ReviewConfirmDialog/)
 })
 
 test('Topic Activity 自动审核/回复通知使用系统身份，普通社交通知不变', () => {
@@ -92,10 +93,15 @@ test('Topic Activity UI 回归保护既有活动模型和 migration，允许其�
   assert.equal(migrations.trim(), '')
   const before = execFileSync('git', ['show', 'HEAD:prisma/schema.prisma'], gitOptions)
   const after = read('prisma/schema.prisma')
-  const topicSchema = (schema: string) => ({
-    modelsAndEnums: [...schema.matchAll(/^(?:model|enum) (?:TopicActivity\w*|Activity\w*) \{[\s\S]*?^\}/gm)].map((match) => match[0]),
-    relations: schema.split(/\r?\n/).filter((line) => /TopicActivity/.test(line)),
-  })
+  const topicSchema = (schema: string) => {
+    // Git blobs use LF while a Windows checkout can use CRLF. Compare the
+    // exact schema content after normalizing only this transport difference.
+    const normalized = schema.replace(/\r\n/g, '\n')
+    return {
+      modelsAndEnums: [...normalized.matchAll(/^(?:model|enum) (?:TopicActivity\w*|Activity\w*) \{[\s\S]*?^\}/gm)].map((match) => match[0]),
+      relations: normalized.split('\n').filter((line) => /TopicActivity/.test(line)),
+    }
+  }
   assert.ok(topicSchema(before).modelsAndEnums.length > 0)
   assert.deepEqual(topicSchema(after), topicSchema(before))
 })

@@ -18,6 +18,7 @@ export function ReplyForm({
   draftContent,
   onDraftChange,
   onDraftClear,
+  beforeSubmit,
   autoFocus = false,
   className = '',
 }: Readonly<{
@@ -28,6 +29,7 @@ export function ReplyForm({
   draftContent?: string
   onDraftChange?: (content: string) => void
   onDraftClear?: () => void
+  beforeSubmit?: () => boolean | Promise<boolean>
   autoFocus?: boolean
   className?: string
 }>) {
@@ -87,6 +89,7 @@ export function ReplyForm({
     setSuccess('')
     setIsSubmitting(true)
     try {
+      if (beforeSubmit && !(await beforeSubmit())) return
       const response = await fetch(`/api/posts/${postId}/replies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
