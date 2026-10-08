@@ -35,7 +35,8 @@ export function TopicActivityImagePicker({ activityId, purpose, assets, onChange
     if (!files?.length || disabled || uploadingRef.current) return
     const remaining = Math.max(0, maxImages - assets.length)
     if (!remaining) { setError(`最多选择 ${maxImages} 张图片`); return }
-    const selected = Array.from(files).slice(0, remaining)
+    if (files.length > remaining) { setError(`最多选择 ${maxImages} 张图片`); if (inputRef.current) inputRef.current.value = ''; return }
+    const selected = Array.from(files)
     setError('')
     uploadingRef.current = true
     onUploadingChange?.(true)

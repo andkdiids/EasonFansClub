@@ -7,7 +7,7 @@ import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentio
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
+import { getReplyLengthMetrics, replyMinimumContentError, replyTooLongMessage } from '@/lib/reply-length'
 import { getReplyErrorMessage } from '@/lib/reply-errors'
 
 export function ReplyForm({
@@ -19,6 +19,8 @@ export function ReplyForm({
   onDraftChange,
   onDraftClear,
   beforeSubmit,
+  allowImageAttachments = true,
+  isTopicRootComment = false,
   autoFocus = false,
   className = '',
 }: Readonly<{
@@ -30,12 +32,16 @@ export function ReplyForm({
   onDraftChange?: (content: string) => void
   onDraftClear?: () => void
   beforeSubmit?: () => boolean | Promise<boolean>
+  allowImageAttachments?: boolean
+  isTopicRootComment?: boolean
   autoFocus?: boolean
   className?: string
 }>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const submittingRef = useRef(false)
+  const mountedRef = useRef(false)
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   const [localContent, setLocalContent] = useState('')
   const [mentions, setMentions] = useState<MentionDraft[]>([])
   const [imageUrls, setImageUrls] = useState<string[]>([])
@@ -80,8 +86,13 @@ export function ReplyForm({
       setError(replyTooLongMessage(contentLength))
       return
     }
-    if (!content.trim() && imageUrls.length === 0 && !pendingSticker) {
-      setError('回复内容不能为空')
+    if (!allowImageAttachments && imageUrls.length) {
+      setError('该活动不允许评论图片附件，请移除已选择的图片')
+      return
+    }
+    const minimumError = replyMinimumContentError(content, imageUrls.length, Boolean(pendingSticker), isTopicRootComment && !replyTo ? '参与评论' : '回复内容')
+    if (minimumError) {
+      setError(minimumError)
       return
     }
     submittingRef.current = true
@@ -90,6 +101,7 @@ export function ReplyForm({
     setIsSubmitting(true)
     try {
       if (beforeSubmit && !(await beforeSubmit())) return
+      if (!mountedRef.current) return
       const response = await fetch(`/api/posts/${postId}/replies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -169,7 +181,7 @@ export function ReplyForm({
           canSubmitShortcut={!isSubmitting && !isOverLimit && (content.trim().length >= 2 || imageUrls.length > 0 || Boolean(pendingSticker))}
         />
       </label>
-      <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
+      {allowImageAttachments ? <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div> : imageUrls.length ? <button type="button" onClick={() => setImageUrls([])}>移除已选择的图片</button> : null}
       <div className="relative mt-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
@@ -199,7 +211,7 @@ export function ReplyForm({
           variant="reply"
         />
       </div>
-      {error ? <p className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
+      {error ? <p role="alert" className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
       {success ? <p className="mt-2 text-sm font-black text-emerald-600">{success}</p> : null}
     </form>
   )

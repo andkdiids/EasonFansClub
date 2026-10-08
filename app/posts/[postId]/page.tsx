@@ -9,6 +9,7 @@ import { RichPostContent, type PostMusicReferenceDisplay } from '@/components/po
 import { PostMediaCarousel } from '@/components/PostMediaCarousel'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
+import { topicReviewFilter, topicReviewCountsFromGroups, topicVisibleReplyAuthor, type TopicReviewCounts } from '@/lib/topic-review-filter'
 import { TopicActivityFormParticipation } from '@/components/activities/TopicActivityFormParticipation'
 import { TopicActivityFormSubmissionEntry } from '@/app/admin/activities/TopicActivityFormSubmissionManager'
 import { PostViewCounter } from '@/components/PostViewCounter'
@@ -252,6 +253,7 @@ const postCoreSelect = {
     coverUrl: true,
     status: true,
     participationMode: true,
+    allowImageAttachments: true,
     participationRule: true,
     startsAt: true,
     endsAt: true,
@@ -577,24 +579,22 @@ async function loadPostReplies(
   canReviewTopicActivity = false,
 ) {
   return prisma.$transaction(async (tx) => {
-    const topicSubmissionFilter = topicActivityId && topicStatus
-      ? {
-          OR: [
-            { TopicActivitySubmission: { is: { activityId: topicActivityId, status: topicStatus } } },
-            ...(viewerId ? [{ authorId: viewerId }] : []),
-          ],
-        }
-      : {}
+    const topicSubmissionFilter = topicReviewFilter(topicActivityId, canReviewTopicActivity ? topicStatus : null)
+    const topicAuthorFilter = topicActivityId ? topicVisibleReplyAuthor : {}
+    const reviewGroups = canReviewTopicActivity && topicActivityId
+      ? await tx.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: topicActivityId, Comment: { is: { postId, parentId: null, isDeleted: false, ...topicAuthorFilter } } }, _count: { _all: true } })
+      : null
+    const reviewCounts = reviewGroups ? topicReviewCountsFromGroups(reviewGroups, await tx.reply.count({ where: { postId, parentId: null, isDeleted: false, ...topicAuthorFilter } })) : null
     const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
       tx.reply.findFirst({
-        where: { postId, isDeleted: false, parentId: null, isPinned: true, ...topicSubmissionFilter },
+        where: { postId, isDeleted: false, parentId: null, isPinned: true, ...topicSubmissionFilter, ...topicAuthorFilter },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: replyDetailSelect,
       }),
-      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter } }),
+      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicAuthorFilter } }),
       viewerId
         ? tx.reply.findMany({
-            where: { postId, authorId: viewerId, isDeleted: false, parentId: null },
+            where: { postId, authorId: viewerId, isDeleted: false, parentId: null, ...topicAuthorFilter },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             select: replyDetailSelect,
           })
@@ -603,7 +603,7 @@ async function loadPostReplies(
     const totalPages = getPostReplyTotalPages(normalTotal)
     const page = clampPostReplyPage(requestedPage, totalPages)
     const normalRoots = await tx.reply.findMany({
-      where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter },
+      where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicAuthorFilter },
       orderBy: getPostReplyOrderBy(sort, direction),
       skip: getPostReplyOffset(page),
       take: POST_REPLY_PAGE_SIZE,
@@ -689,6 +689,7 @@ async function loadPostReplies(
     return {
       rows: rows.map(decorate),
       myRows: myRows.map(decorate),
+      reviewCounts,
       pagination: {
         page,
         pageSize: POST_REPLY_PAGE_SIZE,
@@ -952,6 +953,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   let commentsLoadError = false
   let postReplies: Awaited<ReturnType<typeof loadPostReplies>>['rows'] = []
   let myPostReplies: Awaited<ReturnType<typeof loadPostReplies>>['myRows'] = []
+  let topicReviewCounts: TopicReviewCounts | null = null
   let commentPagination: PostReplyPagination = {
     page: 1,
     pageSize: POST_REPLY_PAGE_SIZE,
@@ -973,6 +975,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     postReplies = loadedReplies.rows
     myPostReplies = loadedReplies.myRows
     commentPagination = loadedReplies.pagination
+    topicReviewCounts = loadedReplies.reviewCounts
   } catch (error) {
     commentsLoadError = true
     logPostDetailReadError({
@@ -1406,6 +1409,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             topicActivityId={postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity.id : undefined}
             canReviewTopicActivity={viewerCanReviewTopicActivity}
             topicReviewFilter={topicStatus || 'ALL'}
+            initialTopicReviewCounts={topicReviewCounts}
+            topicAllowImageAttachments={postCore.TopicActivity?.allowImageAttachments ?? true}
           />
         </CommentSectionBoundary>
       </main>

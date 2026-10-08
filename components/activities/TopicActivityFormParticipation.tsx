@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEv
 import { TopicActivityImagePicker } from '@/components/activities/TopicActivityImagePicker'
 import { TopicActivityOriginalImage } from '@/components/activities/TopicActivityOriginalImage'
 import type { TopicActivityUploadedAsset } from '@/lib/content-image-browser'
-import type { TopicActivityFormField, TopicActivityFormSchema } from '@/lib/topic-activity-form'
+import { validateTopicActivityFormAnswers, type TopicActivityFormField, type TopicActivityFormSchema } from '@/lib/topic-activity-form'
 
 export const TOPIC_ACTIVITY_FORM_SUBMITTED_EVENT = 'ecfc:topic-activity-form-submitted'
 export const TOPIC_ACTIVITY_OPEN_FORM_EVENT = 'ecfc:topic-activity-open-form'
@@ -187,6 +187,8 @@ export function TopicActivityFormParticipation({ activityId, isAuthenticated, ac
       return Array.isArray(value) ? value.length === 0 : typeof value !== 'string' || !value.trim()
     })
     if (missing) { setFormError(`请完成必填项：${missing.label}`); return }
+    const validated = validateTopicActivityFormAnswers(schema, values)
+    if (!validated.valid) { setFormError(validated.message); return }
     submitLockRef.current = true
     setBusy(true); setFormError(''); setHistoryError(''); setMessage('')
     const attachmentAssetIds = attachmentAssets.map((asset) => asset.assetId)

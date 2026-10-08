@@ -3,6 +3,8 @@ import Module from 'node:module'
 import test, { before, beforeEach } from 'node:test'
 
 const schema = { version: 1, fields: [{ id: 'name', label: '姓名', type: 'TEXT', required: true }] }
+let currentSchema: unknown = schema
+let allowImageAttachments = true
 type StoredForm = { id: string; activityId: string; userId: string; status: string }
 let forms: StoredForm[] = []
 let status = 'PUBLISHED'
@@ -32,7 +34,7 @@ const prisma = {
       },
       activity: { findUnique: async () => {
         assert.equal(locked, true)
-        return { id: 'activity-1', type: 'TOPIC_ACTIVITY', status, startsAt, endsAt, participationMode: mode, allowImageAttachments: true, formSchema: schema }
+        return { id: 'activity-1', type: 'TOPIC_ACTIVITY', status, startsAt, endsAt, participationMode: mode, allowImageAttachments, formSchema: currentSchema }
       } },
       topicActivityFormSubmission: {
         findFirst: async ({ where }: { where: { activityId: string; userId: string } }) => {
@@ -47,7 +49,15 @@ const prisma = {
           return { ...form, submittedAt: new Date() }
         },
       },
-      topicActivityImageAsset: { findMany: async () => [] },
+      topicActivityImageAsset: {
+        findMany: async ({ where }: { where: { id: { in: string[] }; activityId: string; uploadedByUserId: string; purpose: string } }) => {
+          assert.equal(where.activityId, 'activity-1')
+          assert.equal(where.uploadedByUserId, 'user-1')
+          assert.equal(where.purpose, 'FORM_ANSWER')
+          return where.id.in.filter((id) => ['asset-1', 'asset-2', 'asset-3'].includes(id)).map((id) => ({ id, storageKey: `fixture/${id}.png`, mimeType: 'image/png', width: 1, height: 1, size: 100 }))
+        },
+        updateMany: async ({ where }: { where: { id: { in: string[] } } }) => ({ count: where.id.in.length }),
+      },
     }
     try { return await work(tx) } finally { release?.() }
   },
@@ -72,7 +82,7 @@ before(async () => {
   finally { (Module as unknown as { _load: typeof original })._load = original }
 })
 
-beforeEach(() => { forms = []; status = 'PUBLISHED'; endsAt = null; startsAt = null; mode = 'BOTH'; commits = 0; lockTail = Promise.resolve() })
+beforeEach(() => { forms = []; status = 'PUBLISHED'; endsAt = null; startsAt = null; mode = 'BOTH'; commits = 0; lockTail = Promise.resolve(); currentSchema = schema; allowImageAttachments = true })
 
 function submit(headers: HeadersInit = { authorization: 'Bearer fixture-valid' }, body: unknown = { answers: { name: '资料' }, userId: 'spoofed-user' }) {
   return route.POST(new Request('https://fixture.test/api/activities/activity-1/form-submissions', {
@@ -125,4 +135,20 @@ test('invalid or another user asset cannot create a partial submission', async (
   const response = await submit(undefined, { answers: { name: '资料' }, attachmentAssetIds: ['foreign-asset'] })
   assert.equal(response.status, 403)
   assert.equal(forms.length, 0)
+})
+
+test('V6.1.1 real form POST rejects forged excess images and accepts independent field limits with attachments off/on', async () => {
+  for (const flag of [false, true]) {
+    forms = []; allowImageAttachments = flag
+    currentSchema = { version: 1, fields: [{ id: 'photo', label: '单图凭证', type: 'IMAGE', required: true, multiple: false, maxImages: 1 }] }
+    const exceeded = await submit(undefined, { answers: { photo: ['asset-1', 'asset-2'] } })
+    assert.equal(exceeded.status, 400)
+    assert.match((await exceeded.json()).message, /最多上传 1 张/)
+    assert.equal(forms.length, 0)
+    assert.equal((await submit(undefined, { answers: { photo: ['asset-1'] } })).status, 201)
+  }
+  forms = []; allowImageAttachments = false
+  currentSchema = { version: 1, fields: [{ id: 'photos', label: '历史三图字段', type: 'IMAGE', multiple: true, maxImages: 3 }] }
+  assert.equal((await submit(undefined, { answers: { photos: ['asset-1', 'asset-2', 'asset-3'] } })).status, 201)
+  assert.equal(commits, 3)
 })

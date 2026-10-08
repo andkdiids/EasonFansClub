@@ -38,6 +38,7 @@ type FixtureActivity = {
   endsAt: Date | null
   participationMode: ParticipationMode
   formSchema: Record<string, unknown>
+  allowImageAttachments: boolean
 }
 
 type FixtureReply = {
@@ -103,6 +104,7 @@ function resetFixture(input: Partial<{
       startsAt: input.startsAt === undefined ? new Date(now().getTime() - 86_400_000) : input.startsAt,
       endsAt: input.endsAt === undefined ? new Date(now().getTime() + 86_400_000) : input.endsAt,
       participationMode: input.mode || 'BOTH',
+      allowImageAttachments: true,
       formSchema: {
         version: 1,
         fields: [{ id: 'name', label: '姓名', type: 'TEXT' }],
@@ -285,6 +287,14 @@ const txStub = {
 }
 
 let transactionTail = Promise.resolve()
+function matchingReplies(where: Record<string, unknown>) {
+  assert.equal(where.OR, undefined, 'own author must not bypass administrative status filtering')
+  const status = (where.TopicActivitySubmission as { is?: { status?: string } } | undefined)?.is?.status
+  return state.replies.filter((reply) => reply.postId === where.postId && !reply.isDeleted
+    && (where.parentId === null ? reply.parentId === null : true)
+    && (typeof where.isPinned === 'boolean' ? reply.isPinned === where.isPinned : true)
+    && (!status || state.submissions.some((submission) => submission.commentId === reply.id && submission.status === status)))
+}
 const prismaStub = {
   activity: {
     findFirst: async () => state.activity,
@@ -297,9 +307,31 @@ const prismaStub = {
   block: { findMany: async () => [] },
   reply: {
     findFirst: async (args: { where: Record<string, unknown> }) => txStub.reply.findFirst(args),
+    count: async ({ where }: { where: Record<string, unknown> }) => matchingReplies(where).length,
+    findMany: async ({ where, skip = 0, take }: { where: Record<string, unknown>; skip?: number; take?: number }) => {
+      if (typeof where.parentId === 'object' && where.parentId !== null) return []
+      return matchingReplies(where).slice(skip, take === undefined ? undefined : skip + take)
+    },
     updateMany: async () => ({ count: 1 }),
   },
+  replyLike: { findMany: async () => [] },
+  topicActivitySubmission: {
+    findFirst: async () => state.submissions[0] || null,
+    findMany: async ({ where }: { where: { commentId: { in: string[] } } }) => state.submissions.filter((submission) => submission.commentId && where.commentId.in.includes(submission.commentId)),
+    groupBy: async ({ by }: { by: string[] }) => {
+      const grouped = new Map<string, number>()
+      for (const submission of state.submissions) {
+        if (!state.replies.some((reply) => reply.id === submission.commentId && !reply.isDeleted && !reply.parentId)) continue
+        if (by[0] === 'userId' && submission.status !== 'APPROVED') continue
+        const key = by[0] === 'status' ? submission.status : submission.userId
+        grouped.set(key, (grouped.get(key) || 0) + 1)
+      }
+      return [...grouped].map(([key, count]) => ({ [by[0]]: key, _count: { _all: count } }))
+    },
+  },
   topicActivityFormSubmission: {
+    findMany: async () => state.forms.map((form) => ({ ...form, Replies: form.replies.map((reply) => ({ ...reply, ImageAssets: reply.imageIds.map((id) => ({ id })) })) })),
+    groupBy: async () => [],
     findUnique: async () => ({ id: state.formSubmission.id, activityId: state.formSubmission.activityId, userId: state.formSubmission.userId, Activity: { title: state.activity.title }, formSchemaSnapshot: state.formSubmission.formSchemaSnapshot, ImageAssets: [], Replies: state.formSubmission.replies.map((reply) => ({ id: reply.id, content: reply.content, Sender: { id: 'admin-1', nickname: '管理员' }, ImageAssets: reply.imageIds.map((id) => ({ id })) })) }),
   },
   $transaction: async <T>(operation: (tx: typeof txStub) => Promise<T>) => {
@@ -341,10 +373,10 @@ before(async () => {
     if (request === '@/lib/prisma') return { prisma: prismaStub }
     if (request === '@/lib/security') return securityStub
     if (request === '@/lib/topic-activity') return topicActivityStub
-    if (request === '@/lib/admin-permissions') return { hasAdminPermission: async () => false }
+    if (request === '@/lib/admin-permissions') return { hasAdminPermission: async () => state.currentUser.role !== 'USER' }
     if (request === '@/lib/friend-remarks') return { getPublicUserDisplayName: (user: { nickname: string }) => user.nickname }
     if (request === '@/lib/community-rewards') return { awardCommunityCommentRewards: async () => { state.sideEffects.communityRewards += 1; return { commenterRewardPoints: 0 } } }
-    if (request === '@/lib/content-images') return { publicContentImageMarkers: (value: string) => value, appendContentImages: (value: string) => value, parseContentImageUrls: () => [] }
+    if (request === '@/lib/content-images') return { publicContentImageMarkers: (value: string) => value, appendContentImages: (value: string) => value, parseContentImageUrls: (value: unknown) => Array.isArray(value) ? value : [] }
     if (request === '@/lib/images') return { publicImageUrl: (value: string | null) => value }
     if (request === '@/lib/post-replies') return { parsePostReplyDirection: () => 'asc', parsePostReplySort: () => 'floor', getPostReplyOrderBy: () => [], getPostReplyOffset: () => 0, getPostReplyTotalPages: (value: number) => Math.max(1, value), POST_REPLY_PAGE_SIZE: 20 }
     if (request === '@/lib/post-moderation') return { buildPublicPostWhere: () => ({ isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } }) }
@@ -355,7 +387,6 @@ before(async () => {
     if (request === '@/lib/notification-transaction') return { safeNotificationWrite: async (operation: () => Promise<unknown>) => { state.sideEffects.notifications += 1; return operation() } }
     if (request === '@/lib/notification-write') return { createManyNotifications: async () => ({ count: 1 }) }
     if (request === '@/lib/post-comment-floor') return { allocatePostCommentFloor: async () => state.nextFloor++ }
-    if (request === '@/lib/reply-length') return { getReplyLengthMetrics: (value: unknown) => { const content = typeof value === 'string' ? value.trim() : ''; return { content, actualLength: content.length, exceededBy: 0 } }, replyTooLongPayload: () => ({}) }
     if (request === '@/lib/growth-tasks/service') return { completeTask: async () => undefined, resolveAndGrantWeeklyMilestonesInTransaction: async () => { state.sideEffects.tasks += 1; return { rewards: [], balance: 0 } } }
     if (request === '@/lib/checkin') return { getShanghaiDateKey: () => '2026-10-08' }
     if (request === '@/lib/topic-activity-form-view') return { serializeTopicActivityFormSubmission: async (row: { Replies: Array<{ id: string; content: string | null }> }) => ({ replies: row.Replies.map((reply) => ({ id: reply.id, content: reply.content, images: [] })) }) }
@@ -377,6 +408,31 @@ async function postJson(body: Record<string, unknown>) {
   const response = await post(body)
   return { response, body: await response.json() as Record<string, unknown> }
 }
+
+test('V6.1.1 real GET strictly filters admin own approved/rejected roots and exposes private live counts', async () => {
+  resetFixture({ role: 'ADMIN', mode: 'COMMENT' })
+  for (const [index, status] of (['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'] as const).entries()) {
+    const reply = createdReply(`review-${index}`, state.post.id, state.currentUser.id, '参与内容', null, index + 1)
+    state.replies.push(reply)
+    addSubmission({ commentId: reply.id, status })
+  }
+  state.replies.push(createdReply('legacy-ordinary-root', state.post.id, state.currentUser.id, '历史普通评论', null, 5))
+  for (const status of ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN']) {
+    const response = await repliesRoute.GET(new Request(`https://ecfc.invalid/api/posts/post-1/replies?topicStatus=${status}`), postContext())
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.deepEqual(body.replies.map((reply: { topicActivitySubmission: { status: string } }) => reply.topicActivitySubmission.status), [status])
+    assert.deepEqual(body.topicActivity.reviewCounts, { PENDING: 1, APPROVED: 1, REJECTED: 1, WITHDRAWN: 1, ALL: 5 })
+    assert.equal(body.total, 1)
+    assert.match(response.headers.get('cache-control') || '', /private, no-store/)
+  }
+  assert.deepEqual(state.sideEffects, { communityRewards: 0, tasks: 0, friends: 0, notifications: 0 })
+  state.currentUser = participant('USER')
+  const response = await repliesRoute.GET(new Request('https://ecfc.invalid/api/posts/post-1/replies?topicStatus=PENDING'), postContext())
+  const body = await response.json()
+  assert.equal(body.replies.length, 5, 'ordinary viewers cannot activate private admin filtering')
+  assert.equal(body.topicActivity.reviewCounts, undefined, 'private counts are admin-only')
+})
 
 test('direct POST gate matrix enforces form, admin reply, activity lifecycle, and admin participant rules', async () => {
   resetFixture({ gateMode: 'AFTER_FORM_SUBMIT', mode: 'BOTH' })
@@ -466,6 +522,37 @@ test('direct SINGLE POST uses lifetime submission history and remains concurrenc
   assert.deepEqual(concurrent.map((item) => item.response.status).sort(), [201, 409])
   assert.equal(state.replies.length, 1)
   assert.equal(state.submissions.length, 1)
+})
+
+test('V6.1.1 comment attachments obey the locked Activity flag on roots and replies; form IMAGE remains unrelated', async () => {
+  resetFixture({ mode: 'COMMENT' })
+  state.activity.allowImageAttachments = false
+  state.activity.formSchema.fields = [{ id: 'photo', label: '凭证', type: 'IMAGE', maxImages: 1 }]
+  let result = await postJson({ content: '图片凭证', imageUrls: ['fixture-image'] })
+  assert.equal(result.response.status, 403)
+  assert.equal(result.body.code, 'TOPIC_COMMENT_ATTACHMENTS_DISABLED')
+  assert.equal(state.replies.length, 0)
+  state.replies.push({ ...createdReply('root-1', 'post-1', 'post-owner', '历史根评论', null, 1), createdAt: now(), updatedAt: now() })
+  result = await postJson({ content: '图片回复', parentId: 'root-1', imageUrls: ['fixture-image'] })
+  assert.equal(result.response.status, 403)
+  result = await postJson({ content: '[[content-image:https://fixture.invalid/image.png]]' })
+  assert.equal(result.response.status, 403, 'raw content marker cannot bypass attachment permission')
+  result = await postJson({ content: '正常文字评论' })
+  assert.equal(result.response.status, 201)
+  state.activity.allowImageAttachments = true
+  result = await postJson({ content: '', imageUrls: ['fixture-image'] })
+  assert.equal(result.response.status, 201, 'existing image-only rule is preserved')
+})
+
+test('V6.1.1 server rejects one grapheme and whitespace but preserves sticker-only validity', async () => {
+  resetFixture({ mode: 'COMMENT' })
+  for (const content of ['字', '  \n\t ', '👨‍👩‍👧‍👦']) {
+    const result = await postJson({ content })
+    assert.equal(result.response.status, 400)
+    assert.match(String(result.body.message), /至少需要 2 个字符/)
+  }
+  assert.equal(state.submissions.length, 0)
+  assert.equal((await postJson({ content: '', stickerId: 'sticker-fixture' })).response.status, 201)
 })
 
 test('direct admin text/image replies persist durable unlock and deletion does not re-lock', async () => {

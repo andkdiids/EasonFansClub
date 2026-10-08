@@ -33,6 +33,7 @@ import type { EquippedBadgeView } from '@/lib/badge-types'
 import { ReviewConfirmDialog, type ReviewConfirmAction } from '@/components/activities/ReviewConfirmDialog'
 import { SingleCommentConfirmDialog } from '@/components/activities/SingleCommentConfirmDialog'
 import { parseTopicCommentEligibility, topicCommentBlockMessage, type TopicCommentEligibility } from '@/lib/topic-comment-ui'
+import { matchesTopicReviewFilter, topicReviewCountForFilter, type TopicReviewCounts } from '@/lib/topic-review-filter'
 import {
   clearPostReplyDrafts,
   getPostReplyDraftKey,
@@ -139,6 +140,8 @@ export function PostRepliesSection({
   topicActivityId,
   canReviewTopicActivity = false,
   topicReviewFilter = 'ALL',
+  initialTopicReviewCounts = null,
+  topicAllowImageAttachments = true,
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
@@ -157,6 +160,8 @@ export function PostRepliesSection({
   topicActivityId?: string
   canReviewTopicActivity?: boolean
   topicReviewFilter?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
+  initialTopicReviewCounts?: TopicReviewCounts | null
+  topicAllowImageAttachments?: boolean
 }>) {
   const router = useRouter()
   const pathname = usePathname()
@@ -174,6 +179,10 @@ export function PostRepliesSection({
   const [reviewError, setReviewError] = useState('')
   const [reviewLoading, setReviewLoading] = useState(false)
   const reviewLoadingRef = useRef(false)
+  const [topicReviewCounts, setTopicReviewCounts] = useState(initialTopicReviewCounts)
+  const [topicReviewSyncError, setTopicReviewSyncError] = useState('')
+  const reviewSyncRequestRef = useRef(0)
+  const [viewPagination, setViewPagination] = useState(pagination)
   const [topicEligibility, setTopicEligibility] = useState<TopicCommentEligibility | null>(null)
   const [topicEligibilityLoading, setTopicEligibilityLoading] = useState(Boolean(topicActivityId && currentUserId && canInteract))
   const [topicEligibilityError, setTopicEligibilityError] = useState('')
@@ -352,6 +361,9 @@ export function PostRepliesSection({
     setMyReplies((initialMyReplies || []).map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
     setReplyCount(Math.max(initialReplyCount, 0))
   }, [initialReplies, initialMyReplies, initialReplyCount])
+  useEffect(() => { setTopicReviewCounts(initialTopicReviewCounts) }, [initialTopicReviewCounts])
+  useEffect(() => { setViewPagination(pagination); reviewSyncRequestRef.current += 1 }, [pagination, topicReviewFilter, sort, direction])
+  useEffect(() => () => { reviewSyncRequestRef.current += 1 }, [postId])
   useEffect(() => {
     const previous = previousCommentViewRef.current
     const current = { page: pagination.page, sort, direction }
@@ -386,6 +398,44 @@ export function PostRepliesSection({
     () => splitViewerPostReplyRoots(pageRootReplies, myReplies),
     [myReplies, pageRootReplies],
   )
+  const filteredRootReplies = useMemo(() => canReviewTopicActivity
+    ? visibleRootReplies.filter((reply) => matchesTopicReviewFilter(reply, topicReviewFilter))
+    : visibleRootReplies, [canReviewTopicActivity, topicReviewFilter, visibleRootReplies])
+
+  async function syncReviewCounts() {
+    const requestId = ++reviewSyncRequestRef.current
+    try {
+      const query = new URLSearchParams({ page: String(viewPagination.page), pageSize: String(viewPagination.pageSize), sort, direction })
+      if (topicReviewFilter !== 'ALL') query.set('topicStatus', topicReviewFilter)
+      const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/replies?${query}`, { credentials: 'same-origin', cache: 'no-store' })
+      const data = await response.json()
+      if (requestId !== reviewSyncRequestRef.current) return
+      if (!response.ok || !data?.topicActivity?.reviewCounts || !Array.isArray(data.replies)) throw new Error('review sync failed')
+      setTopicReviewCounts(data.topicActivity.reviewCounts)
+      const flatten = (rows: unknown[]): ReplyItem[] => rows.flatMap((row) => {
+        const reply = normalizeReply(row)
+        if (!reply) return []
+        const children = (row as { replies?: unknown[] }).replies
+        return [reply, ...flatten(Array.isArray(children) ? children : [])]
+      })
+      const refreshed = flatten([...(data.pinned ? [data.pinned] : []), ...data.replies])
+      setReplies((current) => {
+        const currentById = new Map(current.map((reply) => [reply.id, reply]))
+        const roots = new Set(refreshed.filter((reply) => !reply.parentId).map((reply) => reply.id))
+        // Keep existing nested branches and visual author metadata when their
+        // root is still on this page. Only replace the authoritative status.
+        const kept = new Set(roots)
+        let changed = true
+        while (changed) { changed = false; for (const reply of current) if (reply.parentId && kept.has(reply.parentId) && !kept.has(reply.id)) { kept.add(reply.id); changed = true } }
+        const freshIds = new Set(refreshed.map((reply) => reply.id))
+        return [...refreshed.map((reply) => currentById.has(reply.id) ? { ...currentById.get(reply.id)!, topicActivitySubmission: reply.topicActivitySubmission } : reply), ...current.filter((reply) => reply.parentId && kept.has(reply.id) && !freshIds.has(reply.id))]
+      })
+      if (Number.isInteger(data.page) && Number.isInteger(data.totalPages)) setViewPagination({ page: data.page, total: data.total, totalPages: data.totalPages, pageSize: data.pageSize })
+      setTopicReviewSyncError('')
+    } catch {
+      if (requestId === reviewSyncRequestRef.current) setTopicReviewSyncError('评论已更新，审核列表同步失败，请重试同步')
+    }
+  }
 
   function buildCommentHref(nextSort: PostReplySort, nextDirection: PostReplyDirection, nextPage: number) {
     const params = new URLSearchParams(searchParams.toString())
@@ -413,7 +463,7 @@ export function PostRepliesSection({
   }
 
   function changeCommentPage(nextPage: number) {
-    if (nextPage === pagination.page) return
+    if (nextPage === viewPagination.page) return
     navigationReasonRef.current = 'pagination'
     router.push(buildCommentHref(sort, direction, nextPage), { scroll: false })
   }
@@ -441,6 +491,7 @@ export function PostRepliesSection({
     const submission = target?.reply.topicActivitySubmission
     if (!canReviewTopicActivity || !target || !submission || reviewLoadingRef.current) return
     reviewLoadingRef.current = true
+    reviewSyncRequestRef.current += 1
     setReviewLoading(true)
     setReviewingSubmissionId(submission.id)
     setReviewError('')
@@ -452,16 +503,24 @@ export function PostRepliesSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, ...(rejectReason ? { rejectReason } : {}) }),
       })
-      const data = await response.json().catch(() => ({})) as { message?: string; submission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null }; alreadyCounted?: boolean }
+      const data = await response.json().catch(() => ({})) as { message?: string; submission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null }; alreadyCounted?: boolean; participation?: { countedInActivity?: boolean } }
       if (!response.ok || !data.submission) throw new Error(data.message || '审核操作失败，请稍后重试')
-      const update = (items: ReplyItem[]) => items.map((item) => item.topicActivitySubmission?.id === submission.id
-        ? { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, status: data.submission!.status, rejectReason: data.submission!.rejectReason || null, alreadyCounted: Boolean(data.alreadyCounted) } }
-        : item)
+      const update = (items: ReplyItem[]) => items.map((item) => {
+        if (!item.topicActivitySubmission || item.author.id !== target.reply.author.id) return item
+        const alreadyCounted = data.participation?.countedInActivity ?? (data.submission!.status === 'APPROVED' || items.some((other) => other.author.id === item.author.id && other.topicActivitySubmission?.id !== submission.id && other.topicActivitySubmission?.status === 'APPROVED'))
+        return { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, alreadyCounted, ...(item.topicActivitySubmission.id === submission.id ? { status: data.submission!.status, rejectReason: data.submission!.rejectReason || null } : {}) } }
+      })
       setReplies(update)
       setMyReplies(update)
+      // Preserve rows, children, expansion and route; filter the new status.
+      setTopicReviewCounts((counts) => counts && submission.status !== data.submission!.status ? {
+        ...counts,
+        [submission.status]: Math.max(0, counts[submission.status] - 1),
+        [data.submission!.status]: counts[data.submission!.status] + 1,
+      } : counts)
       setReviewDialog(null)
       setReviewRejectReason('')
-      router.refresh()
+      void syncReviewCounts()
     } catch (error) {
       setReviewError(error instanceof Error ? error.message : '审核操作失败，请稍后重试')
     } finally {
@@ -640,7 +699,8 @@ export function PostRepliesSection({
         : current)
     }
     window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: nextReplyCount } }))
-    if (!window.matchMedia('(max-width: 767px)').matches) router.refresh()
+    if (topicActivityId && canReviewTopicActivity && !created.parentId) void syncReviewCounts()
+    else if (!window.matchMedia('(max-width: 767px)').matches) router.refresh()
   }
 
   function removeReply(replyId: string, result: DeleteCommentResult) {
@@ -654,6 +714,7 @@ export function PostRepliesSection({
       : Math.max(replyCount - removeIds.size, 0)
     setReplyCount(nextReplyCount)
     window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: nextReplyCount } }))
+    if (topicActivityId && canReviewTopicActivity && !replyMap.get(replyId)?.parentId) void syncReviewCounts()
   }
 
   function collectThreadReplies(rootId: string) {
@@ -728,6 +789,8 @@ export function PostRepliesSection({
               <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
                 <ReplyForm
                   postId={postId}
+                  allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
+                  isTopicRootComment={Boolean(topicActivityId)}
                   replyTo={replyTo}
                   onReplyCancel={() => setReplyTo(null)}
                   onReplyCreated={addReply}
@@ -823,6 +886,7 @@ export function PostRepliesSection({
           <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
             <ReplyForm
               postId={postId}
+                allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
               replyTo={replyTo}
               onReplyCancel={() => setReplyTo(null)}
               onReplyCreated={addReply}
@@ -867,6 +931,8 @@ export function PostRepliesSection({
                 <ReplyForm
                   postId={postId}
                   onReplyCancel={() => setReplyTo(null)}
+                  allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
+                  isTopicRootComment={Boolean(topicActivityId)}
                   onReplyCreated={addReply}
                   beforeSubmit={topicActivityId && topicEligibility?.commentLimit === 'SINGLE' ? beforeSingleCommentSubmit : undefined}
                   draftContent={replyDrafts[replyDraftKey(null)] || ''}
@@ -934,8 +1000,9 @@ export function PostRepliesSection({
         </div>
       </div>
       {topicActivityId && canReviewTopicActivity ? <div role="tablist" aria-label="话题活动评论审核筛选" className="flex flex-wrap gap-2">
-        {([['ALL', '全部'], ['PENDING', '待审核'], ['APPROVED', '已通过'], ['REJECTED', '已拒绝'], ['WITHDRAWN', '已撤回']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={topicReviewFilter === value} onClick={() => changeTopicReviewFilter(value)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicReviewFilter === value ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{label}</button>)}
+        {([['ALL', '全部'], ['PENDING', '待审核'], ['APPROVED', '已通过'], ['REJECTED', '已拒绝'], ['WITHDRAWN', '已撤回']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={topicReviewFilter === value} onClick={() => changeTopicReviewFilter(value)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicReviewFilter === value ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{label}{topicReviewCounts ? `（${topicReviewCountForFilter(topicReviewCounts, value)}）` : ''}</button>)}
       </div> : null}
+      {topicReviewSyncError ? <p role="alert">{topicReviewSyncError}<button type="button" onClick={() => void syncReviewCounts()}>重试同步</button></p> : null}
       {hotReplyIds?.length ? (
         <div className="post-replies-hot-list p-4">
           <h3 className="font-black text-brand-950">热门评论</h3>
@@ -950,17 +1017,17 @@ export function PostRepliesSection({
         </div>
       ) : null}
       {focusId && !replyMap.has(focusId) ? <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">该内容已被删除或无法查看</p> : null}
-      {visibleRootReplies.length === 0 && myRootReplies.length === 0 ? (
+      {filteredRootReplies.length === 0 ? (
         <div className="post-replies-empty rounded-xl border-dashed p-8 text-center text-slate-500">还没有回复。</div>
-      ) : visibleRootReplies.length ? (
+      ) : filteredRootReplies.length ? (
         <div className="space-y-3">
-          {visibleRootReplies.map((reply) => renderReply(reply))}
+          {filteredRootReplies.map((reply) => renderReply(reply))}
         </div>
       ) : null}
-      {pagination.totalPages > 1 ? (
+      {viewPagination.totalPages > 1 ? (
         <Pagination
-          currentPage={pagination.page}
-          totalPages={pagination.totalPages}
+          currentPage={viewPagination.page}
+          totalPages={viewPagination.totalPages}
           onPageChange={changeCommentPage}
           ariaLabel="评论分页"
           className="post-replies-pagination"
@@ -976,6 +1043,10 @@ export function PostRepliesSection({
         onClose={closeMobileReplySheet}
         onReplyCreated={addReply}
         beforeSubmit={topicActivityId && topicEligibility?.commentLimit === 'SINGLE' && !replyTo ? beforeSingleCommentSubmit : undefined}
+        confirmationOpen={singleCommentConfirmOpen}
+        onConfirmationCancel={cancelSingleComment}
+        allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
+        isTopicRootComment={Boolean(topicActivityId) && !replyTo}
         draftContent={replyDrafts[replyDraftKey(replyTo)] || ''}
         onDraftChange={(content) => updateReplyDraft(replyDraftKey(replyTo), content)}
         onDraftClear={() => clearReplyDraft(replyDraftKey(replyTo))}

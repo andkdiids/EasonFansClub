@@ -58,7 +58,9 @@ function validId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value)
 }
 
-export function normalizeTopicActivityFormSchema(value: unknown, allowImages: boolean): Normalized<TopicActivityFormSchema> {
+export function normalizeTopicActivityFormSchema(value: unknown, _legacyAllowAttachments?: boolean): Normalized<TopicActivityFormSchema> {
+  // Keep the old call signature compatible; IMAGE fields own their limits.
+  void _legacyAllowAttachments
   const root = record(value)
   const rawFields = Array.isArray(value) ? value : root?.fields
   if (!Array.isArray(rawFields)) return { valid: false, message: '参与表单字段格式不正确' }
@@ -84,7 +86,6 @@ export function normalizeTopicActivityFormSchema(value: unknown, allowImages: bo
     if (!id || ids.has(id)) return { valid: false, message: `第 ${index + 1} 个字段标识无效或重复` }
     if (!label) return { valid: false, message: `第 ${index + 1} 个字段标题不能为空` }
     if (!type) return { valid: false, message: `第 ${index + 1} 个字段类型不支持` }
-    if (type === 'IMAGE' && !allowImages) return { valid: false, message: '请先开启表单图片附件' }
     ids.add(id)
 
     const rawOptions = Array.isArray(raw.options) ? raw.options : []

@@ -13,6 +13,7 @@ import {
   TOPIC_ACTIVITY_IMAGE_TOO_LARGE_MESSAGE,
 } from '@/lib/topic-activity-image-original'
 import { prisma } from '@/lib/prisma'
+import { normalizeTopicActivityFormSchema } from '@/lib/topic-activity-form'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -56,10 +57,12 @@ export async function POST(request: Request) {
   if (!metadataValidation.ok) return jsonError(metadataValidation.code, metadataValidation.code === 'FILE_TOO_LARGE' ? TOPIC_ACTIVITY_IMAGE_TOO_LARGE_MESSAGE : metadataValidation.message, metadataValidation.code === 'FILE_TOO_LARGE' ? 413 : 400)
   if (file.size > TOPIC_ACTIVITY_IMAGE_MAX_FILE_SIZE) return jsonError('FILE_TOO_LARGE', TOPIC_ACTIVITY_IMAGE_TOO_LARGE_MESSAGE, 413)
 
-  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, type: true, status: true, startsAt: true, endsAt: true, participationMode: true, allowImageAttachments: true } })
+  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, type: true, status: true, startsAt: true, endsAt: true, participationMode: true, allowImageAttachments: true, formSchema: true } })
   if (!activity || activity.type !== 'TOPIC_ACTIVITY') return jsonError('ACTIVITY_NOT_FOUND', '话题活动不存在', 404)
   if (purpose === 'FORM_ANSWER') {
-    if (!activity.allowImageAttachments || !['FORM', 'BOTH'].includes(activity.participationMode)) return jsonError('IMAGES_DISABLED', '该活动暂不接受表单图片', 403)
+    const schema = normalizeTopicActivityFormSchema(activity.formSchema)
+    const hasImageField = schema.valid && schema.value.fields.some((field) => field.type === 'IMAGE')
+    if ((!activity.allowImageAttachments && !hasImageField) || !['FORM', 'BOTH'].includes(activity.participationMode)) return jsonError('IMAGES_DISABLED', '该活动暂不接受表单图片', 403)
     const now = new Date()
     if (activity.status !== 'PUBLISHED' || (activity.startsAt && activity.startsAt > now) || (activity.endsAt && activity.endsAt < now)) return jsonError('FORM_CLOSED', '当前不在表单参与时间内', 409)
   } else {

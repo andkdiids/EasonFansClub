@@ -28,14 +28,14 @@ test('表单活动配置支持 COMMENT / FORM / BOTH，FORM 模式需要有稳�
   assert.equal(normalizeTopicActivityConfig({ participationMode: 'FORM' }, 'TOPIC_ACTIVITY').valid, false)
 })
 
-test('schema 允许受限字段类型和最多 9 张图片，并拒绝重复 ID、非法字段、未开启图片', () => {
+test('schema 图片字段独立于附件开关，限制最多 9 张并拒绝重复 ID、非法字段', () => {
   const normalized = normalizeTopicActivityFormSchema(schema, true)
   assert.equal(normalized.valid, true)
   if (normalized.valid) assert.equal(normalized.value.fields[2]?.maxImages, 3)
   const imageSchema = normalizeTopicActivityFormSchema({ fields: [{ id: 'image', label: '照片', type: 'IMAGE', multiple: true, maxImages: 99 }] }, true)
   assert.equal(imageSchema.valid, true)
   if (imageSchema.valid) assert.equal(imageSchema.value.fields[0]?.maxImages, 9)
-  assert.equal(normalizeTopicActivityFormSchema(schema, false).valid, false)
+  assert.equal(normalizeTopicActivityFormSchema(schema, false).valid, true)
   assert.equal(normalizeTopicActivityFormSchema({ fields: [{ id: 'same', label: 'A', type: 'TEXT' }, { id: 'same', label: 'B', type: 'TEXT' }] }, true).valid, false)
 })
 

@@ -35,6 +35,8 @@ const uploadedObjects: Array<{ key: string; body: Buffer; contentType?: string }
 const createdAssetRows: Array<Record<string, unknown>> = []
 const storedObjects = new Map<string, Buffer>()
 let replyAssetOverride: Record<string, unknown> | null = null
+let formUploadEnabled = true
+let uploadFormSchema: unknown = { version: 1, fields: [] }
 let sourceAssetOverride: Record<string, unknown> | null = null
 let serializeAsset: typeof import('@/lib/topic-activity-assets').serializeTopicActivityAsset
 
@@ -90,7 +92,7 @@ before(async () => {
   ;(Module as unknown as { _load: typeof originalLoad })._load = function (request, parent, isMain) {
     if (request === '@/lib/prisma') return {
       prisma: {
-        activity: { findUnique: async () => ({ id: ACTIVITY_ID, type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', startsAt: null, endsAt: null, participationMode: 'BOTH', allowImageAttachments: true }) },
+        activity: { findUnique: async () => ({ id: ACTIVITY_ID, type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', startsAt: null, endsAt: null, participationMode: 'BOTH', allowImageAttachments: formUploadEnabled, formSchema: uploadFormSchema }) },
         topicActivityImageAsset: {
           create: async ({ data }: { data: Record<string, unknown> }) => { createdAssetRows.push(data); return { id: ASSET_ID, ...data } },
         },
@@ -132,6 +134,27 @@ beforeEach(() => {
   storedObjects.clear()
   replyAssetOverride = null
   sourceAssetOverride = null
+  formUploadEnabled = true
+  uploadFormSchema = { version: 1, fields: [] }
+})
+
+test('V6.1.1 FORM_ANSWER upload accepts an independent IMAGE field with attachments off; no field/no flag is denied', async () => {
+  const bytes = await sharp({ create: { width: 10, height: 10, channels: 3, background: '#123456' } }).png().toBuffer()
+  const request = () => {
+    const form = new FormData()
+    form.set('activityId', ACTIVITY_ID)
+    form.set('purpose', 'FORM_ANSWER')
+    form.set('file', new File([new Uint8Array(bytes)], 'proof.png', { type: 'image/png' }))
+    return new Request('https://ecfc.fans/api/uploads/topic-activity-image', { method: 'POST', body: form })
+  }
+  formUploadEnabled = false
+  assert.equal((await uploadRoute.POST(request())).status, 403)
+  assert.equal(uploadedObjects.length, 0)
+  uploadFormSchema = { version: 1, fields: [{ id: 'photo', label: '截图', type: 'IMAGE', multiple: false, maxImages: 1 }] }
+  assert.equal((await uploadRoute.POST(request())).status, 201)
+  assert.equal(createdAssetRows.length, 1)
+  formUploadEnabled = true
+  assert.equal((await uploadRoute.POST(request())).status, 201)
 })
 
 function download(path: { activityId?: string; submissionId?: string; replyId?: string; assetId?: string } = {}, view = false) {

@@ -14,6 +14,10 @@ export function PostReplyBottomSheet({
   onDraftChange,
   onDraftClear,
   beforeSubmit,
+  confirmationOpen = false,
+  onConfirmationCancel,
+  allowImageAttachments = true,
+  isTopicRootComment = false,
 }: Readonly<{
   open: boolean
   postId: string
@@ -24,6 +28,10 @@ export function PostReplyBottomSheet({
   onDraftChange: (content: string) => void
   onDraftClear: () => void
   beforeSubmit?: () => boolean | Promise<boolean>
+  confirmationOpen?: boolean
+  onConfirmationCancel?: () => void
+  allowImageAttachments?: boolean
+  isTopicRootComment?: boolean
 }>) {
   const [mounted, setMounted] = useState(false)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
@@ -31,10 +39,15 @@ export function PostReplyBottomSheet({
   const historyPushedRef = useRef(false)
   const previousHistoryStateRef = useRef<unknown>(null)
   const savedScrollYRef = useRef<number | null>(null)
+  const confirmationOpenRef = useRef(confirmationOpen)
+  confirmationOpenRef.current = confirmationOpen
+  const confirmationCancelRef = useRef(onConfirmationCancel)
+  confirmationCancelRef.current = onConfirmationCancel
 
   useEffect(() => setMounted(true), [])
 
   const requestClose = useCallback(() => {
+    if (confirmationOpenRef.current) return
     const shouldPopHistory = historyPushedRef.current
     const historyState = window.history.state as { ecfcPostReplySheet?: boolean; friendMentionPicker?: boolean } | null
     const historySteps = historyState?.friendMentionPicker ? 2 : 1
@@ -97,6 +110,13 @@ export function PostReplyBottomSheet({
       // FriendMentionInput owns a nested history entry. Let its own listener
       // close the suggestion list before the sheet handles the back action.
       if (window.history.state?.ecfcPostReplySheet) return
+      if (confirmationOpenRef.current) {
+        // Android/browser Back dismisses the top confirmation, not its
+        // underlying composer. Restore the sheet's single history entry.
+        window.history.pushState({ ...(window.history.state || {}), ecfcPostReplySheet: true }, '')
+        confirmationCancelRef.current?.()
+        return
+      }
       historyPushedRef.current = false
       onClose()
     }
@@ -147,6 +167,7 @@ export function PostReplyBottomSheet({
         className="post-reply-bottom-sheet-backdrop"
         aria-label="关闭回复面板"
         onClick={requestClose}
+        disabled={confirmationOpen}
       />
       <section
         className="post-reply-bottom-sheet"
@@ -154,6 +175,7 @@ export function PostReplyBottomSheet({
         role="dialog"
         aria-modal="true"
         aria-label="回复帖子"
+        inert={confirmationOpen || undefined}
       >
         <header className="post-reply-bottom-sheet-header">
           <span>回复帖子</span>
@@ -170,6 +192,8 @@ export function PostReplyBottomSheet({
           onDraftChange={onDraftChange}
           onDraftClear={onDraftClear}
           beforeSubmit={beforeSubmit}
+          allowImageAttachments={allowImageAttachments}
+          isTopicRootComment={isTopicRootComment}
         />
       </section>
     </>,
