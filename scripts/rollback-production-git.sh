@@ -187,4 +187,3 @@ if ! printf '%s\n' "$EXPECTED_SHA" > "${active_target}/.deploy-failed"; then
 fi
 echo "ROLLBACK_RESULT=RESTORED"
 echo "ROLLBACK_VERIFIED_SHA=${rollback_sha}"
-
