@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { TopicActivityAssetImage } from '@/components/activities/TopicActivityAssetImage'
 import { TopicActivityImagePicker } from '@/components/activities/TopicActivityImagePicker'
 import { TopicActivityOriginalImage } from '@/components/activities/TopicActivityOriginalImage'
 import type { TopicActivityUploadedAsset } from '@/lib/content-image-browser'
@@ -40,9 +41,14 @@ type FormSubmission = {
 
 type FormActivityMetadata = { startsAt: string | null; endsAt: string | null; activityPostId: string | null }
 
+type TopicActivityAssetWithAccessUrls = TopicActivityUploadedAsset & { previewAccessUrl?: string; thumbnailAccessUrl?: string }
+
 function statusLabel(status: FormSubmission['status']) { return status === 'REPLIED' ? '管理员已回复' : '已提交' }
 
-function assetUrl(asset: TopicActivityUploadedAsset) { return asset.thumbnailUrl || asset.url }
+function assetUrl(asset: TopicActivityUploadedAsset) {
+  const withAccessUrls = asset as TopicActivityAssetWithAccessUrls
+  return withAccessUrls.thumbnailAccessUrl || withAccessUrls.previewAccessUrl || asset.thumbnailUrl || asset.url
+}
 
 export function TopicActivityFormParticipation({ activityId, isAuthenticated, activityPostId = null }: { activityId: string; isAuthenticated: boolean; activityPostId?: string | null }) {
   const [schema, setSchema] = useState<TopicActivityFormSchema | null>(null)
@@ -234,7 +240,7 @@ export function TopicActivityFormParticipation({ activityId, isAuthenticated, ac
 
   function renderAttachments(assets: TopicActivityUploadedAsset[], alt: string, className = 'size-20') {
     if (!assets.length) return null
-    return <div className="mt-2 flex flex-wrap gap-2">{assets.map((asset) => <img key={asset.assetId} src={assetUrl(asset)} alt={alt} className={`${className} rounded object-cover`} />)}</div>
+    return <div className="mt-2 flex flex-wrap gap-2">{assets.map((asset) => <TopicActivityAssetImage key={asset.assetId} src={assetUrl(asset)} alt={alt} className={`${className} rounded object-cover`} />)}</div>
   }
 
   function renderReplyAttachments(reply: FormReply) {
@@ -242,7 +248,7 @@ export function TopicActivityFormParticipation({ activityId, isAuthenticated, ac
     if (!assets.length) return null
     return <div className="mt-2 flex flex-wrap gap-3">{assets.map((asset) => {
       const originalUrl = asset.originalDownloadUrl || reply.originalDownloadBaseUrl?.replace('__ASSET_ID__', encodeURIComponent(asset.assetId))
-      return <div key={asset.assetId} className="space-y-1"><img src={assetUrl(asset)} alt="管理员回复附件" className="size-20 rounded object-cover" />{originalUrl ? <TopicActivityOriginalImage originalUrl={originalUrl} /> : null}</div>
+      return <div key={asset.assetId} className="space-y-1"><TopicActivityAssetImage src={assetUrl(asset)} alt="管理员回复附件" className="size-20 rounded object-cover" />{originalUrl ? <TopicActivityOriginalImage originalUrl={originalUrl} /> : null}</div>
     })}</div>
   }
 

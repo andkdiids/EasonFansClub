@@ -27,13 +27,13 @@ test('V6.1 browser: original preview/download and non-resetting admin reply queu
   type Reply = { id: string; content: string; createdAt: string; images: never[] }
   type Row = { id: string; status: 'SUBMITTED' | 'REPLIED'; submittedAt: string; replies: Reply[]; answersSnapshot: never[]; user: { id: string; nickname: string; avatarUrl: null } }
   let rows: Row[] = []
-  let failReply = false, failNext = false, failOriginal = false
+  let failReply = false, failNext = false, failOriginal = false, failPage = false
   const listQueries: URLSearchParams[] = []
   const replyBodies: Array<{ requestId: string; content: string }> = []
   const originalQueries: string[] = []
   const reset = () => {
     rows = Array.from({ length: 23 }, (_, index) => ({ id: 'form-' + String(23 - index).padStart(2, '0'), status: 'SUBMITTED', submittedAt: new Date(Date.UTC(2026, 9, 8, 0, 0, 23 - index)).toISOString(), replies: [], answersSnapshot: [], user: { id: 'user-' + index, nickname: '用户 ' + (23 - index), avatarUrl: null } }))
-    listQueries.length = 0; replyBodies.length = 0; failReply = false; failNext = false
+    listQueries.length = 0; replyBodies.length = 0; failReply = false; failNext = false; failPage = false
   }
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://127.0.0.1')
@@ -49,11 +49,14 @@ test('V6.1 browser: original preview/download and non-resetting admin reply queu
       const size = Number(url.searchParams.get('pageSize')) || 20
       if (size === 1 && failNext) { res.statusCode = 500; json({ message: '下一份 fixture 失败' }); return }
       const status = url.searchParams.get('replyStatus')
-      const filtered = rows.filter((row) => status === 'UNREPLIED' ? !row.replies.length : status === 'REPLIED' ? !!row.replies.length : true)
+      const oldest = url.searchParams.get('sort') !== 'NEWEST'
+      const filtered = rows.filter((row) => status === 'UNREPLIED' ? !row.replies.length : status === 'REPLIED' ? !!row.replies.length : true).sort((a, b) => (oldest ? 1 : -1) * a.id.localeCompare(b.id))
       const cursor = url.searchParams.get('cursor')
-      const afterCursor = cursor ? filtered.filter((row) => row.id < cursor) : filtered
+      if (cursor && failPage) { res.statusCode = 503; json({ message: '分页 fixture 网络中断' }); return }
+      if (cursor) await new Promise((resolve) => setTimeout(resolve, 100))
+      const afterCursor = cursor ? filtered.filter((row) => oldest ? row.id > cursor : row.id < cursor) : filtered
       const resultRows = afterCursor.slice(0, size)
-      json({ submissions: resultRows, nextCursor: resultRows.at(-1)?.id || null, page: Number(url.searchParams.get('page')) || 1, hasMore: afterCursor.length > size, counts: { formSubmissions: rows.length, repliedForms: rows.filter((row) => row.replies.length).length, unrepliedForms: rows.filter((row) => !row.replies.length).length, commentSubmissions: 0, approvedUsers: 0 } }); return
+      json({ submissions: resultRows, total: filtered.length, nextCursor: resultRows.at(-1)?.id || null, page: Number(url.searchParams.get('page')) || 1, hasMore: afterCursor.length > size, counts: { formSubmissions: rows.length, repliedForms: rows.filter((row) => row.replies.length).length, unrepliedForms: rows.filter((row) => !row.replies.length).length, commentSubmissions: 0, approvedUsers: 0 } }); return
     }
     if (req.method === 'POST' && url.pathname.endsWith('/replies')) {
       let text = ''; for await (const chunk of req) text += chunk
@@ -115,7 +118,9 @@ test('V6.1 browser: original preview/download and non-resetting admin reply queu
       page.on('request', (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents += 1 })
       await page.goto(origin + '/admin')
       await until(async () => await page.locator('article').count() === 20, 'first 20')
-      await page.getByRole('button', { name: '加载更多', exact: true }).click()
+      await page.getByRole('combobox', { name: '提交排序' }).selectOption('NEWEST')
+      await until(async () => listQueries.at(-1)?.get('sort') === 'NEWEST' && await page.locator('article').count() === 20, 'newest loaded')
+      await page.getByRole('button', { name: /^加载全部剩余/ }).click()
       await until(async () => await page.locator('article').count() === 23, 'load more appends')
       assert.equal(listQueries.at(-1)?.get('cursor'), 'form-04')
       const listPageReads = listQueries.filter((query) => query.get('pageSize') === '20').length
@@ -157,6 +162,7 @@ test('V6.1 browser: original preview/download and non-resetting admin reply queu
       const page = await browser!.newPage()
       await page.goto(origin + '/admin')
       await until(async () => await page.locator('article').count() === 20, 'loaded')
+      await page.getByRole('combobox', { name: '提交排序' }).selectOption('NEWEST')
       await page.getByRole('button', { name: '未回复', exact: true }).click()
       await until(async () => listQueries.at(-1)?.get('replyStatus') === 'UNREPLIED' && await page.locator('article').count() === 20, 'filter loaded')
       await page.locator('#admin-form-form-23').getByRole('button', { name: '查看详情 / 回复' }).click()
@@ -166,7 +172,7 @@ test('V6.1 browser: original preview/download and non-resetting admin reply queu
       assert.equal(await page.locator('#admin-form-form-23').count(), 0)
       await page.evaluate(() => window.scrollTo(0, 100))
       const scrollBefore = await page.evaluate(() => window.scrollY)
-      await page.getByRole('button', { name: '加载更多', exact: true }).evaluate((button: HTMLButtonElement) => button.click())
+      await page.getByRole('button', { name: /^加载全部剩余/ }).evaluate((button: HTMLButtonElement) => button.click())
       await until(async () => await page.locator('article').count() === 22, 'all remaining rows appended without skip')
       assert.equal(listQueries.at(-1)?.get('cursor'), 'form-04')
       assert.equal(listQueries.at(-1)?.get('replyStatus'), 'UNREPLIED')
@@ -183,6 +189,7 @@ test('V6.1 browser: original preview/download and non-resetting admin reply queu
       const page = await browser!.newPage()
       await page.goto(origin + '/admin')
       await until(async () => await page.locator('article').count() === 20, 'initial loaded')
+      await page.getByRole('combobox', { name: '提交排序' }).selectOption('NEWEST')
       await page.getByRole('button', { name: '已回复', exact: true }).click()
       await until(async () => await page.locator('article').count() === 1, 'replied filter loaded')
       await page.locator('#admin-form-form-23').getByRole('button', { name: '查看详情 / 回复' }).click()
@@ -192,6 +199,56 @@ test('V6.1 browser: original preview/download and non-resetting admin reply queu
       assert.match(await page.locator('#admin-form-form-22').innerText(), /下一份待回复.*列表仍按已回复筛选/)
       assert.equal(listQueries.filter((query) => query.get('pageSize') === '20').at(-1)?.get('replyStatus'), 'REPLIED')
       assert.equal(await page.locator('#admin-form-form-23').count(), 1, 'filtered page retained')
+      await page.close()
+    })
+    await t.test('V612 oldest default, one-click bounded pages, progress, partial failure and resume; sort/filter reset', async () => {
+      reset()
+      rows = Array.from({ length: 65 }, (_, index) => ({ ...rows[0], id: 'form-' + String(index + 1).padStart(3, '0'), replies: [], status: 'SUBMITTED' as const }))
+      const page = await browser!.newPage({ viewport: { width: 390, height: 844 } })
+      await page.goto(origin + '/admin')
+      await until(async () => await page.locator('article').count() === 20, 'first bounded page')
+      assert.equal(await page.locator('article').first().getAttribute('id'), 'admin-form-form-001')
+      assert.equal(listQueries.at(-1)?.get('sort'), 'OLDEST')
+      assert.ok(await page.getByRole('button', { name: '加载全部剩余（45）', exact: true }).isVisible())
+      failPage = true
+      await page.getByRole('button', { name: /^加载全部剩余/ }).click()
+      await until(() => page.getByRole('alert').isVisible(), 'page failure visible')
+      assert.equal(await page.locator('article').count(), 20)
+      assert.equal(replyBodies.length, 0)
+      failPage = false
+      await page.getByRole('button', { name: /^加载全部剩余/ }).click()
+      await until(() => page.getByText(/正在加载 \d+ \/ 65/).isVisible(), 'progress visible')
+      await until(async () => await page.locator('article').count() === 65, 'single click drains remaining bounded pages')
+      const ids = await page.locator('article').evaluateAll((elements) => elements.map((element) => element.id))
+      assert.equal(new Set(ids).size, 65)
+      assert.equal(listQueries.filter((query) => query.has('cursor')).at(0)?.get('cursor'), 'form-020')
+      assert.ok(listQueries.every((query) => Number(query.get('pageSize')) <= 20))
+      assert.equal(replyBodies.length, 0, 'reads have no reply/reward side effects')
+      await page.getByRole('button', { name: '未回复', exact: true }).click()
+      await until(async () => await page.locator('article').count() === 20, 'filter resets pages')
+      await page.getByRole('combobox', { name: '提交排序' }).selectOption('NEWEST')
+      await until(async () => await page.locator('article').first().getAttribute('id') === 'admin-form-form-065', 'sort newest resets cursor')
+      assert.equal(listQueries.at(-1)?.get('replyStatus'), 'UNREPLIED')
+      assert.equal(listQueries.at(-1)?.has('cursor'), false)
+      await page.close()
+    })
+    await t.test('V612 large queue yields bounded requests and stops at explicit 1000-row safety cap', async () => {
+      reset()
+      rows = Array.from({ length: 1020 }, (_, index) => ({ ...rows[0], id: 'form-' + String(index + 1).padStart(4, '0'), replies: [], status: 'SUBMITTED' as const }))
+      const page = await browser!.newPage()
+      await page.goto(origin + '/admin')
+      await until(async () => await page.locator('article').count() === 20, 'bounded first page')
+      await page.getByRole('button', { name: /^加载全部剩余/ }).click()
+      await until(() => page.getByText('为保持页面流畅，最多加载 1000 份；请用回复状态筛选缩小范围', { exact: true }).isVisible(), 'safety cap message')
+      assert.equal(await page.locator('article').count(), 1000)
+      assert.ok(await page.getByRole('button', { name: '加载全部剩余（20）', exact: true }).isDisabled())
+      assert.equal(listQueries.length, 50)
+      assert.equal(replyBodies.length, 0)
+      const ids = await page.locator('article').evaluateAll((elements) => elements.map((element) => element.id))
+      assert.equal(new Set(ids).size, 1000)
+      assert.equal(await page.locator('article').first().evaluate((element) => element.style.contentVisibility), 'auto')
+      await page.getByRole('combobox', { name: '提交排序' }).selectOption('NEWEST')
+      await until(async () => await page.locator('article').count() === 20 && await page.locator('article').first().getAttribute('id') === 'admin-form-form-1020', 'cap allows new ordered/filter scope')
       await page.close()
     })
   } finally {

@@ -35,7 +35,7 @@ test('发布和编辑表单都把剪贴板图片交给同一个附件上传器',
 test('附件上传器复用 addFiles 队列并在失败时不占用 9 张名额', () => {
   assert.match(uploader, /export type ContentImageUploaderHandle/u)
   assert.match(uploader, /addFiles: \(files: File\[\]\) => void/u)
-  assert.match(uploader, /useImperativeHandle\(ref, \(\) => \(\{ addFiles \}\)\)/u)
+  assert.match(uploader, /useImperativeHandle\(ref, \(\) => \(\{ addFiles, getUploadState \}\)\)/u)
   assert.match(uploader, /const pendingCount = pendingUploadsRef\.current\.filter\(\(item\) => isBusyPhase\(item\.phase\)\)\.length/u)
   assert.match(uploader, /最多只能添加 \$\{MAX_CONTENT_IMAGES\} 张图片。/u)
   assert.match(uploader, /readClipboardImageFiles\(\)/u)

@@ -1,7 +1,8 @@
-type FormCursor = { submittedAt: Date; id: string }
+export type TopicActivityFormSort = 'OLDEST' | 'NEWEST'
+type FormCursor = { submittedAt: Date; id: string; sort?: TopicActivityFormSort }
 
-export function encodeTopicActivityFormCursor(row: { submittedAt: Date; id: string }) {
-  return Buffer.from(JSON.stringify({ submittedAt: row.submittedAt.toISOString(), id: row.id })).toString('base64url')
+export function encodeTopicActivityFormCursor(row: { submittedAt: Date; id: string }, sort?: TopicActivityFormSort) {
+  return Buffer.from(JSON.stringify({ submittedAt: row.submittedAt.toISOString(), id: row.id, ...(sort ? { sort } : {}) })).toString('base64url')
 }
 
 export function decodeTopicActivityFormCursor(value: string): FormCursor | null {
@@ -11,6 +12,7 @@ export function decodeTopicActivityFormCursor(value: string): FormCursor | null 
     if (!row || typeof row.id !== 'string' || !/^[A-Za-z0-9_-]{1,191}$/.test(row.id) || typeof row.submittedAt !== 'string') return null
     const submittedAt = new Date(row.submittedAt)
     if (!Number.isFinite(submittedAt.getTime()) || submittedAt.toISOString() !== row.submittedAt) return null
-    return { id: row.id, submittedAt }
+    if (row.sort !== undefined && row.sort !== 'OLDEST' && row.sort !== 'NEWEST') return null
+    return { id: row.id, submittedAt, ...(row.sort ? { sort: row.sort } : {}) }
   } catch { return null }
 }

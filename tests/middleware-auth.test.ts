@@ -142,6 +142,7 @@ test('话题活动表单 schema 可公开读取；表单提交、历史、附件
     ['/api/topic-activity-form-submissions/submission-test', 'GET'],
     ['/api/activities/topic-test/form-submissions/submission-test/replies/reply-test/assets/asset-test/original', 'GET'],
     ['/api/activities/topic-test/form-submissions/submission-test/assets/asset-test/original', 'GET'],
+    ['/api/activities/topic-test/assets/asset-test/preview', 'GET'],
     ['/api/admin/activities/topic-test/form-submissions', 'GET'],
     ['/api/uploads/topic-activity-image', 'POST'],
     ['/api/admin/topic-activity-form-submissions/submission-test/review', 'PATCH'],
@@ -159,6 +160,8 @@ test('话题活动表单 schema 可公开读取；表单提交、历史、附件
 
   const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
   assert.equal(unrelated.status, 401, 'form Bearer allowlist does not open unrelated protected routes')
+  const forbiddenPreviewMutation = await middleware(makeMutationRequest('/api/activities/topic-test/assets/asset-test/preview', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(forbiddenPreviewMutation.status, 401, 'preview Bearer permission is GET-only')
 })
 
 test('Mobile Growth and direct-message routes pass Bearer to route guards, preserve Cookie auth, and keep anonymous blocked', async () => {

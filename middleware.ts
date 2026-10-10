@@ -157,6 +157,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/topic-activity-form-submissions\/[^/]+$/.test(pathname)
       || /^\/api\/activities\/[^/]+\/form-submissions\/[^/]+\/replies\/[^/]+\/assets\/[^/]+\/original$/.test(pathname)
       || /^\/api\/activities\/[^/]+\/form-submissions\/[^/]+\/assets\/[^/]+\/original$/.test(pathname)
+      || /^\/api\/activities\/[^/]+\/assets\/[^/]+\/preview$/.test(pathname)
       || /^\/api\/admin\/activities\/[^/]+\/form-submissions$/.test(pathname)
       || pathname === '/api/admin/cantonese/courses'
       || pathname === '/api/learning/cantonese/course'

@@ -4,7 +4,7 @@ import test, { before } from 'node:test'
 import { decodeTopicActivityFormCursor, encodeTopicActivityFormCursor } from '@/lib/topic-activity-form-cursor'
 
 type Row = { id: string; activityId: string; userId: string; submittedAt: Date; replies: unknown[] }
-type Where = { activityId?: string; userId?: string; Replies?: { some?: unknown; none?: unknown }; OR?: Array<{ submittedAt: Date | { lt: Date }; id?: { lt: string } }> }
+type Where = { activityId?: string; userId?: string; Replies?: { some?: unknown; none?: unknown }; OR?: Array<{ submittedAt: Date | { lt?: Date; gt?: Date }; id?: { lt?: string; gt?: string } }> }
 let rows: Row[] = []
 let calls = 0
 let route: typeof import('../app/api/admin/activities/[activityId]/form-submissions/route')
@@ -13,8 +13,8 @@ function matching(where: Where) {
     && (!where.userId || row.userId === where.userId)
     && (!where.Replies || (where.Replies.some ? row.replies.length > 0 : row.replies.length === 0))
     && (!where.OR || where.OR.some((clause) => clause.submittedAt instanceof Date
-      ? row.submittedAt.getTime() === clause.submittedAt.getTime() && row.id < (clause.id?.lt || '')
-      : row.submittedAt < clause.submittedAt.lt)))
+      ? row.submittedAt.getTime() === clause.submittedAt.getTime() && (clause.id?.gt ? row.id > clause.id.gt : row.id < (clause.id?.lt || ''))
+      : clause.submittedAt.gt ? row.submittedAt > clause.submittedAt.gt : row.submittedAt < clause.submittedAt.lt!)))
 }
 before(async () => {
   const original = (Module as unknown as { _load: (request: string, parent?: unknown, isMain?: boolean) => unknown })._load
@@ -23,9 +23,11 @@ before(async () => {
       activity: { findFirst: async () => { calls += 1; return { id: 'activity-1' } } },
       topicActivityFormSubmission: {
         count: async ({ where }: { where: Where }) => matching(where).length,
-        findMany: async ({ where, skip = 0, take, orderBy }: { where: Where; skip?: number; take: number; orderBy: unknown }) => {
-          assert.deepEqual(orderBy, [{ submittedAt: 'desc' }, { id: 'desc' }])
-          return matching(where).sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime() || b.id.localeCompare(a.id)).slice(skip, skip + take)
+        findMany: async ({ where, skip = 0, take, orderBy }: { where: Where; skip?: number; take: number; orderBy: Array<{ submittedAt?: string; id?: string }> }) => {
+          const direction = orderBy[0].submittedAt
+          assert.deepEqual(orderBy, [{ submittedAt: direction }, { id: direction }])
+          assert.ok(direction === 'asc' || direction === 'desc')
+          return matching(where).sort((a, b) => (direction === 'asc' ? 1 : -1) * (a.submittedAt.getTime() - b.submittedAt.getTime() || a.id.localeCompare(b.id))).slice(skip, skip + take)
         },
       },
       topicActivitySubmission: { count: async () => 0, groupBy: async () => [] },
@@ -57,14 +59,14 @@ test('cursor is bounded and rejects malformed IDs/dates without trusting a suppl
 
 test('actual admin cursor route appends without skipping rows when unreplied membership shrinks', async () => {
   reset()
-  let response = await request('replyStatus=UNREPLIED&pageSize=2&userId=user-1')
+  let response = await request('sort=NEWEST&replyStatus=UNREPLIED&pageSize=2&userId=user-1')
   assert.equal(response.status, 200)
   let data = await response.json()
   assert.deepEqual(data.submissions.map((row: Row) => row.id), ['form-6', 'form-5'])
   assert.equal(data.hasMore, true)
   rows[0].replies.push({ id: 'reply-1' })
   rows.unshift({ id: 'form-9', activityId: 'other-activity', userId: 'user-1', submittedAt: new Date('2027-01-01'), replies: [] })
-  response = await request('replyStatus=UNREPLIED&pageSize=2&page=2&userId=user-1&cursor=' + data.nextCursor)
+  response = await request('sort=NEWEST&replyStatus=UNREPLIED&pageSize=2&page=2&userId=user-1&cursor=' + data.nextCursor)
   data = await response.json()
   assert.deepEqual(data.submissions.map((row: Row) => row.id), ['form-4', 'form-3'])
   assert.equal(data.hasMore, false)
@@ -75,11 +77,41 @@ test('actual admin cursor route appends without skipping rows when unreplied mem
 
 test('offset clients stay compatible; invalid cursor rejects; Cookie/Bearer admin auth and anonymous denial retained', async () => {
   reset()
-  const data = await (await request('page=2&pageSize=2', { cookie: 'session=fixture-admin' })).json()
+  const data = await (await request('sort=NEWEST&page=2&pageSize=2', { cookie: 'session=fixture-admin' })).json()
   assert.deepEqual(data.submissions.map((row: Row) => row.id), ['form-4', 'form-3'])
   assert.equal((await request('cursor=not-json')).status, 400)
   const reads = calls
   assert.equal((await request('', {})).status, 401)
   assert.equal((await request('', { authorization: 'Bearer ordinary-user' })).status, 403)
   assert.equal(calls, reads)
+})
+
+test('V612 default oldest and explicit newest paginate equal timestamps without duplicates or missing rows', async () => {
+  for (const sort of ['OLDEST', 'NEWEST']) {
+    reset()
+    rows[0].submittedAt = new Date('2026-10-09T00:00:00.000Z')
+    let cursor: string | null = null
+    const ids: string[] = []
+    for (let page = 1; page <= 4; page += 1) {
+      const data = await (await request(`${sort === 'OLDEST' ? '' : 'sort=NEWEST&'}pageSize=2${cursor ? '&cursor=' + cursor : ''}`)).json()
+      assert.equal(data.sort, sort)
+      ids.push(...data.submissions.map((row: Row) => row.id))
+      cursor = data.nextCursor
+      if (!data.hasMore) break
+    }
+    assert.deepEqual(ids, sort === 'OLDEST' ? ['form-1', 'form-2', 'form-3', 'form-4', 'form-5', 'form-6'] : ['form-6', 'form-5', 'form-4', 'form-3', 'form-2', 'form-1'])
+    assert.equal(new Set(ids).size, 6)
+  }
+})
+
+test('V612 cursor is order-bound; reply filter/user scope still applied to oldest pagination', async () => {
+  reset()
+  rows.find((row) => row.id === 'form-4')!.replies.push({ id: 'reply-existing' })
+  const data = await (await request('replyStatus=UNREPLIED&userId=user-1&pageSize=2')).json()
+  assert.deepEqual(data.submissions.map((row: Row) => row.id), ['form-3', 'form-5'])
+  assert.equal((await request('sort=NEWEST&cursor=' + data.nextCursor)).status, 400)
+  assert.equal((await request('sort=INVALID')).status, 400)
+  const next = await (await request('replyStatus=UNREPLIED&userId=user-1&pageSize=2&cursor=' + data.nextCursor)).json()
+  assert.deepEqual(next.submissions.map((row: Row) => row.id), ['form-6'])
+  assert.equal(next.total, 3)
 })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import Module from 'node:module'
-import { before, test } from 'node:test'
+import { after, before, mock, test } from 'node:test'
 import {
   resolveTopicActivityCommentEligibility,
   resolveTopicActivityCommentPolicy,
@@ -368,6 +368,9 @@ const securityStub = {
 const originalLoad = (Module as unknown as { _load: (request: string, parent?: unknown, isMain?: boolean) => unknown })._load
 
 before(async () => {
+  // The fixture window is fixed; freeze the route clock too so these tests
+  // keep exercising active/SINGLE submissions after the fixture end date.
+  mock.timers.enable({ apis: ['Date'], now: now().getTime() })
   resetFixture()
   ;(Module as unknown as { _load: typeof originalLoad })._load = function (request, parent, isMain) {
     if (request === '@/lib/prisma') return { prisma: prismaStub }
@@ -399,6 +402,7 @@ before(async () => {
     ;(Module as unknown as { _load: typeof originalLoad })._load = originalLoad
   }
 })
+after(() => mock.timers.reset())
 
 async function post(body: Record<string, unknown>) {
   return repliesRoute.POST(makeRequest(body), postContext())

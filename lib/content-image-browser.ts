@@ -4,6 +4,7 @@ import {
   CONTENT_IMAGE_COMPRESSION_TARGET,
   CONTENT_IMAGE_COMPRESSION_THRESHOLD,
   CONTENT_IMAGE_ERROR_MESSAGES,
+  CONTENT_IMAGE_UPLOAD_TIMEOUT_MS,
   contentImageKind,
   isContentImageHeic,
   isContentImageMimeType,
@@ -15,7 +16,11 @@ const MAX_COMPRESSION_DIMENSION = 4096
 const MAX_COMPRESSION_PASSES = 7
 
 export type ContentImageProcessingPhase = 'processing' | 'compressing'
-export type ContentImageUploadPhase = ContentImageProcessingPhase | 'uploading'
+export type ContentImageUploadPhase = ContentImageProcessingPhase | 'queued' | 'uploading'
+export type ContentImageUploadOptions = Readonly<{
+  signal?: AbortSignal
+  timeoutMs?: number
+}>
 
 export type ClipboardImageReadErrorCode = 'UNSUPPORTED' | 'PERMISSION'
 
@@ -44,6 +49,67 @@ function clientError(code: ContentImageUploadErrorCode) {
   return new ContentImageClientError(code, CONTENT_IMAGE_ERROR_MESSAGES[code])
 }
 
+function createAbortError() {
+  const error = new Error('CONTENT_IMAGE_UPLOAD_ABORTED')
+  error.name = 'AbortError'
+  return error
+}
+
+export function isContentImageAbortError(error: unknown) {
+  return error instanceof Error && (error.name === 'AbortError' || error.message === 'CONTENT_IMAGE_UPLOAD_ABORTED')
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw createAbortError()
+}
+
+function abortablePromise<T>(promise: Promise<T>, signal?: AbortSignal) {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(createAbortError())
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort)
+      reject(createAbortError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
+function createUploadDeadline(options: ContentImageUploadOptions = {}) {
+  const controller = new AbortController()
+  const timeoutMs = Number.isFinite(options.timeoutMs)
+    ? Math.min(Math.max(Number(options.timeoutMs), 1), CONTENT_IMAGE_UPLOAD_TIMEOUT_MS)
+    : CONTENT_IMAGE_UPLOAD_TIMEOUT_MS
+  let timedOut = false
+  const abortFromCaller = () => controller.abort()
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort()
+    else options.signal.addEventListener('abort', abortFromCaller, { once: true })
+  }
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abortFromCaller)
+    },
+  }
+}
+
 function fileBaseName(name: string) {
   const normalized = name.replace(/\\/g, '/').split('/').pop() || 'image'
   const dot = normalized.lastIndexOf('.')
@@ -60,12 +126,23 @@ function compressionOutputExtension(contentType: string) {
   return contentType === 'image/webp' ? 'webp' : 'jpg'
 }
 
-async function decodeImage(file: File): Promise<DecodedImage> {
+async function decodeImage(file: File, signal?: AbortSignal): Promise<DecodedImage> {
+  throwIfAborted(signal)
   const objectUrl = URL.createObjectURL(file)
 
   if (typeof createImageBitmap === 'function') {
     try {
-      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+      const bitmapPromise = createImageBitmap(file, { imageOrientation: 'from-image' }).then((bitmap) => {
+        // AbortSignal cannot cancel createImageBitmap itself. If it resolves after
+        // cancellation, close the late bitmap before surfacing the abort.
+        if (signal?.aborted) {
+          bitmap.close()
+          throw createAbortError()
+        }
+        return bitmap
+      })
+      const bitmap = await abortablePromise(bitmapPromise, signal)
+      throwIfAborted(signal)
       URL.revokeObjectURL(objectUrl)
       return {
         source: bitmap,
@@ -73,18 +150,52 @@ async function decodeImage(file: File): Promise<DecodedImage> {
         height: bitmap.height,
         cleanup: () => bitmap.close(),
       }
-    } catch {
+    } catch (error) {
+      if (isContentImageAbortError(error)) {
+        URL.revokeObjectURL(objectUrl)
+        throw error
+      }
       // Some Safari/WebView versions cannot create an ImageBitmap for HEIC;
       // the HTMLImageElement path below still works where native decoding does.
     }
   }
 
+  throwIfAborted(signal)
+
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
       const element = new Image()
+      let settled = false
+      const cleanup = () => {
+        signal?.removeEventListener('abort', onAbort)
+        element.onload = null
+        element.onerror = null
+      }
+      const onAbort = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        element.src = ''
+        reject(createAbortError())
+      }
       element.decoding = 'async'
-      element.onload = () => resolve(element)
-      element.onerror = () => reject(new Error('IMAGE_DECODE_FAILED'))
+      element.onload = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(element)
+      }
+      element.onerror = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(new Error('IMAGE_DECODE_FAILED'))
+      }
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
       element.src = objectUrl
     })
     return {
@@ -110,24 +221,50 @@ function scaledDimensions(width: number, height: number, scale: number) {
   }
 }
 
-function canvasBlob(canvas: HTMLCanvasElement, contentType: string, quality: number) {
-  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, contentType, quality))
+function canvasBlob(canvas: HTMLCanvasElement, contentType: string, quality: number, signal?: AbortSignal) {
+  throwIfAborted(signal)
+  return new Promise<Blob | null>((resolve, reject) => {
+    let settled = false
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(createAbortError())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    try {
+      canvas.toBlob((blob) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(blob)
+      }, contentType, quality)
+    } catch (error) {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+  })
 }
 
 async function encodeAtQuality(
   canvas: HTMLCanvasElement,
   preferredType: string,
   quality: number,
+  signal?: AbortSignal,
 ) {
-  const preferred = await canvasBlob(canvas, preferredType, quality)
+  const preferred = await canvasBlob(canvas, preferredType, quality, signal)
   if (preferred && preferred.size > 0) return preferred
   if (preferredType === 'image/jpeg') return null
-  return canvasBlob(canvas, 'image/jpeg', quality)
+  return canvasBlob(canvas, 'image/jpeg', quality, signal)
 }
 
-async function compressImageFile(file: File) {
-  const decoded = await decodeImage(file)
+async function compressImageFile(file: File, signal?: AbortSignal) {
+  const decoded = await decodeImage(file, signal)
   try {
+    throwIfAborted(signal)
     if (!decoded.width || !decoded.height) throw new Error('IMAGE_DIMENSIONS_INVALID')
     const canvas = document.createElement('canvas')
     const contentType = compressionOutputType(file)
@@ -135,6 +272,7 @@ async function compressImageFile(file: File) {
     let best: Blob | null = null
 
     for (let pass = 0; pass < MAX_COMPRESSION_PASSES; pass += 1) {
+      throwIfAborted(signal)
       const dimensions = scaledDimensions(decoded.width, decoded.height, scale)
       canvas.width = dimensions.width
       canvas.height = dimensions.height
@@ -144,7 +282,8 @@ async function compressImageFile(file: File) {
       context.drawImage(decoded.source, 0, 0, dimensions.width, dimensions.height)
 
       for (const quality of [0.84, 0.74, 0.64, 0.54, 0.44]) {
-        const blob = await encodeAtQuality(canvas, contentType, quality)
+        throwIfAborted(signal)
+        const blob = await encodeAtQuality(canvas, contentType, quality, signal)
         if (!blob) continue
         if (!best || blob.size < best.size) best = blob
         if (blob.size <= CONTENT_IMAGE_COMPRESSION_TARGET) {
@@ -182,8 +321,9 @@ async function compressImageFile(file: File) {
 export async function prepareContentImageFile(
   file: File,
   onPhase?: (phase: ContentImageProcessingPhase) => void,
-  options: { allowServerHeicDecode?: boolean } = {},
+  options: { allowServerHeicDecode?: boolean; signal?: AbortSignal } = {},
 ) {
+  throwIfAborted(options.signal)
   const validation = validateContentImageFileMetadata(file)
   if (!validation.ok) throw clientError(validation.code)
 
@@ -196,10 +336,12 @@ export async function prepareContentImageFile(
   if (!heic && !shouldCompress) return file
   if (!heic && (kind === 'gif')) return file
 
+  throwIfAborted(options.signal)
   onPhase?.('compressing')
   try {
-    return await compressImageFile(file)
-  } catch {
+    return await compressImageFile(file, options.signal)
+  } catch (error) {
+    if (isContentImageAbortError(error)) throw error
     // Topic-activity uploads are decoded by the server's Sharp/libheif path.
     // Preserve the validated original only when browser HEIC decoding fails;
     // every other upload path keeps its established browser conversion rule.
@@ -293,12 +435,22 @@ const KNOWN_CONTENT_IMAGE_ERROR_CODES = new Set<ContentImageUploadErrorCode>([
   'HEIC_CONVERSION_FAILED',
   'IMAGE_PROCESSING_FAILED',
   'NETWORK_UPLOAD_FAILED',
+  'UPLOAD_TIMEOUT',
   'UPLOAD_FAILED',
   'UPLOAD_RESPONSE_INVALID',
 ])
 
 function isKnownContentImageErrorCode(value: unknown): value is ContentImageUploadErrorCode {
   return typeof value === 'string' && KNOWN_CONTENT_IMAGE_ERROR_CODES.has(value as ContentImageUploadErrorCode)
+}
+
+function safeServerUploadMessage(value: unknown, code: ContentImageUploadErrorCode) {
+  if (typeof value !== 'string') return CONTENT_IMAGE_ERROR_MESSAGES[code]
+  const message = value.trim().replace(/\s+/g, ' ')
+  if (!message || message.length > 240 || /(?:https?:\/\/|bearer\s|token=|[A-Za-z]:\\|\/Users\/|\/home\/|\/var\/|\/tmp\/)/iu.test(message)) {
+    return CONTENT_IMAGE_ERROR_MESSAGES[code]
+  }
+  return message
 }
 
 function uploadErrorFromResponse(data: unknown, response: Response) {
@@ -308,9 +460,7 @@ function uploadErrorFromResponse(data: unknown, response: Response) {
     : response.status === 413
       ? 'FILE_TOO_LARGE'
       : 'UPLOAD_FAILED'
-  const message = typeof payload.message === 'string' && payload.message.trim()
-    ? payload.message
-    : CONTENT_IMAGE_ERROR_MESSAGES[code]
+  const message = safeServerUploadMessage(payload.message, code)
   return new ContentImageClientError(code, message)
 }
 
@@ -323,36 +473,50 @@ function uploadErrorFromResponse(data: unknown, response: Response) {
 export async function uploadContentImage(
   file: File,
   onPhase?: (phase: ContentImageUploadPhase) => void,
+  options: ContentImageUploadOptions = {},
 ) {
-  onPhase?.('processing')
-  const preparedFile = await prepareContentImageFile(file, (phase) => onPhase?.(phase))
-  onPhase?.('uploading')
-
-  const form = new FormData()
-  // Do not set Content-Type manually: the browser must add the multipart
-  // boundary, which is especially important in mobile WebViews.
-  form.set('file', preparedFile)
-
-  let response: Response
+  const deadline = createUploadDeadline(options)
+  const signal = deadline.signal
   try {
-    response = await fetch('/api/uploads/content-image', {
+    throwIfAborted(signal)
+    onPhase?.('processing')
+    const preparedFile = await prepareContentImageFile(file, (phase) => onPhase?.(phase), {
+      allowServerHeicDecode: true,
+      signal,
+    })
+    throwIfAborted(signal)
+    onPhase?.('uploading')
+
+    const form = new FormData()
+    // Do not set Content-Type manually: the browser must add the multipart
+    // boundary, which is especially important in mobile WebViews.
+    form.set('file', preparedFile)
+
+    const response = await fetch('/api/uploads/content-image', {
       method: 'POST',
       body: form,
       cache: 'no-store',
+      signal,
     })
-  } catch {
-    throw new ContentImageClientError('NETWORK_UPLOAD_FAILED', CONTENT_IMAGE_ERROR_MESSAGES.NETWORK_UPLOAD_FAILED)
-  }
 
-  const data = await response.json().catch(() => null) as { url?: unknown; mimeType?: unknown; code?: unknown; message?: unknown } | null
-  if (!response.ok) throw uploadErrorFromResponse(data, response)
-  if (!data || typeof data.url !== 'string' || !data.url.trim()) {
-    throw new ContentImageClientError('UPLOAD_RESPONSE_INVALID', CONTENT_IMAGE_ERROR_MESSAGES.UPLOAD_RESPONSE_INVALID)
-  }
+    const data = await response.json().catch(() => null) as { url?: unknown; mimeType?: unknown; code?: unknown; message?: unknown } | null
+    throwIfAborted(signal)
+    if (!response.ok) throw uploadErrorFromResponse(data, response)
+    if (!data || typeof data.url !== 'string' || !data.url.trim()) {
+      throw new ContentImageClientError('UPLOAD_RESPONSE_INVALID', CONTENT_IMAGE_ERROR_MESSAGES.UPLOAD_RESPONSE_INVALID)
+    }
 
-  return {
-    url: data.url,
-    mimeType: typeof data.mimeType === 'string' ? data.mimeType : undefined,
+    return {
+      url: data.url,
+      mimeType: typeof data.mimeType === 'string' ? data.mimeType : undefined,
+    }
+  } catch (reason) {
+    if (deadline.didTimeout()) throw clientError('UPLOAD_TIMEOUT')
+    if (isContentImageAbortError(reason)) throw reason
+    if (reason instanceof ContentImageClientError) throw reason
+    throw clientError('NETWORK_UPLOAD_FAILED')
+  } finally {
+    deadline.dispose()
   }
 }
 
@@ -367,6 +531,10 @@ export type TopicActivityUploadedAsset = {
   thumbnailUrl: string
   /** Added after the submission/reply is persisted; never a public COS URL. */
   originalDownloadUrl?: string
+  /** Optional authenticated asset-ID endpoint for Web; not a COS signature. */
+  previewAccessUrl?: string
+  /** Optional authenticated asset-ID endpoint for Web thumbnails. */
+  thumbnailAccessUrl?: string
 }
 
 /**

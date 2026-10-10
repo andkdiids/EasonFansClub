@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { TopicActivityAssetImage } from '@/components/activities/TopicActivityAssetImage'
 import { uploadTopicActivityImage, type TopicActivityUploadedAsset, type ContentImageUploadPhase } from '@/lib/content-image-browser'
 
 const TOPIC_ACTIVITY_IMAGE_ACCEPT = [
@@ -9,6 +10,13 @@ const TOPIC_ACTIVITY_IMAGE_ACCEPT = [
 ].join(',')
 
 type LocalFileDetails = { name: string; size: number }
+
+type TopicActivityAssetWithAccessUrls = TopicActivityUploadedAsset & { previewAccessUrl?: string; thumbnailAccessUrl?: string }
+
+function assetUrl(asset: TopicActivityUploadedAsset) {
+  const withAccessUrls = asset as TopicActivityAssetWithAccessUrls
+  return withAccessUrls.thumbnailAccessUrl || withAccessUrls.previewAccessUrl || asset.thumbnailUrl || asset.url
+}
 
 function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`
@@ -60,7 +68,7 @@ export function TopicActivityImagePicker({ activityId, purpose, assets, onChange
     }
   }
   return <div className="space-y-2">
-    {assets.length ? <div className="flex flex-wrap gap-2">{assets.map((asset) => { const details = fileDetails[asset.assetId]; return <div key={asset.assetId} className="relative w-28 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"><img src={asset.thumbnailUrl || asset.url} alt="已选择的图片附件" className="h-20 w-full object-cover" /><div className="space-y-0.5 p-1 text-[10px] leading-4 text-slate-600 dark:text-slate-300"><p className="truncate" title={details?.name}>{details?.name || '原图附件'}</p><p>{asset.width} × {asset.height} · {formatFileSize(details?.size || asset.size)}</p></div><button type="button" onClick={() => { setFileDetails((current) => { const next = { ...current }; delete next[asset.assetId]; return next }); onChange(assets.filter((item) => item.assetId !== asset.assetId)) }} disabled={disabled || uploading > 0} aria-label="移除图片" className="absolute right-1 top-1 rounded-full bg-black/70 px-2 py-1 text-xs text-white">×</button></div> })}</div> : null}
+    {assets.length ? <div className="flex flex-wrap gap-2">{assets.map((asset) => { const details = fileDetails[asset.assetId]; return <div key={asset.assetId} className="relative w-28 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"><TopicActivityAssetImage src={assetUrl(asset)} alt="已选择的图片附件" className="h-20 w-full object-cover" /><div className="space-y-0.5 p-1 text-[10px] leading-4 text-slate-600 dark:text-slate-300"><p className="truncate" title={details?.name}>{details?.name || '原图附件'}</p><p>{asset.width} × {asset.height} · {formatFileSize(details?.size || asset.size)}</p></div><button type="button" onClick={() => { setFileDetails((current) => { const next = { ...current }; delete next[asset.assetId]; return next }); onChange(assets.filter((item) => item.assetId !== asset.assetId)) }} disabled={disabled || uploading > 0} aria-label="移除图片" className="absolute right-1 top-1 rounded-full bg-black/70 px-2 py-1 text-xs text-white">×</button></div> })}</div> : null}
     <input ref={inputRef} type="file" accept={TOPIC_ACTIVITY_IMAGE_ACCEPT} multiple={maxImages > 1} disabled={disabled || uploading > 0 || uploadingRef.current || assets.length >= maxImages} onChange={(event) => { const files = event.currentTarget.files; if (files) void selectFiles(files) }} className="sr-only" />
     <p className="text-xs leading-5 text-[var(--foreground-muted)]">将按原图上传，不压缩。</p>
     <button type="button" onClick={() => inputRef.current?.click()} disabled={disabled || uploading > 0 || uploadingRef.current || assets.length >= maxImages} className="min-h-9 rounded-lg border border-dashed border-slate-400 px-3 text-sm font-bold text-slate-700 disabled:opacity-40 dark:border-slate-600 dark:text-slate-200">{uploading ? `图片上传中（${phase === 'uploading' ? '上传' : '读取'}）…` : '上传图片'}</button>

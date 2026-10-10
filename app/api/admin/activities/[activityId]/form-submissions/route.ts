@@ -19,19 +19,24 @@ export async function GET(request: Request, context: { params: Promise<{ activit
   const params = new URL(request.url).searchParams
   const replyStatus = params.get('replyStatus')?.toUpperCase() || 'ALL'
   const userId = params.get('userId') || undefined
+  const sort = params.get('sort')?.toUpperCase() || 'OLDEST'
+  if (sort !== 'OLDEST' && sort !== 'NEWEST') return NextResponse.json({ message: '排序方式无效' }, { status: 400 })
+  const direction = sort === 'OLDEST' ? 'asc' as const : 'desc' as const
   const page = Math.max(1, Number.parseInt(params.get('page') || '1', 10) || 1)
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(params.get('pageSize') || '20', 10) || 20))
   const cursorValue = params.get('cursor')
   const cursor = cursorValue ? decodeTopicActivityFormCursor(cursorValue) : null
   if (cursorValue !== null && !cursor) return NextResponse.json({ message: '分页游标无效' }, { status: 400 })
+  if (cursor?.sort && cursor.sort !== sort) return NextResponse.json({ message: '排序已变化，请重新加载第一页' }, { status: 400 })
   const activity = await prisma.activity.findFirst({ where: { id: activityId, type: 'TOPIC_ACTIVITY' }, select: { id: true } })
   if (!activity) return NextResponse.json({ message: '话题活动不存在' }, { status: 404 })
   const scope = { activityId, ...(userId ? { userId } : {}) }
   const where: Prisma.TopicActivityFormSubmissionWhereInput = { ...scope, ...(replyStatus === 'REPLIED' ? { Replies: { some: {} } } : replyStatus === 'UNREPLIED' ? { Replies: { none: {} } } : {}) }
-  const pageWhere = cursor ? { ...where, OR: [{ submittedAt: { lt: cursor.submittedAt } }, { submittedAt: cursor.submittedAt, id: { lt: cursor.id } }] } : where
+  const comparison = sort === 'OLDEST' ? 'gt' : 'lt'
+  const pageWhere = cursor ? { ...where, OR: [{ submittedAt: { [comparison]: cursor.submittedAt } }, { submittedAt: cursor.submittedAt, id: { [comparison]: cursor.id } }] } : where
   const [total, rows, formSubmissions, repliedForms, commentSubmissionCount, approvedUserRows] = await Promise.all([
     prisma.topicActivityFormSubmission.count({ where }),
-    prisma.topicActivityFormSubmission.findMany({ where: pageWhere, include: relations, orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }], take: pageSize + 1, ...(cursor ? {} : { skip: (page - 1) * pageSize }) }),
+    prisma.topicActivityFormSubmission.findMany({ where: pageWhere, include: relations, orderBy: [{ submittedAt: direction }, { id: direction }], take: pageSize + 1, ...(cursor ? {} : { skip: (page - 1) * pageSize }) }),
     prisma.topicActivityFormSubmission.count({ where: scope }),
     prisma.topicActivityFormSubmission.count({ where: { ...scope, Replies: { some: {} } } }),
     prisma.topicActivitySubmission.count({ where: { activityId } }),
@@ -41,7 +46,7 @@ export async function GET(request: Request, context: { params: Promise<{ activit
   const lastRow = visibleRows.at(-1)
   return NextResponse.json({
     submissions: await Promise.all(visibleRows.map(serializeTopicActivityFormSubmission)), page, pageSize, total, hasMore: rows.length > pageSize,
-    nextCursor: lastRow ? encodeTopicActivityFormCursor(lastRow) : null,
+    sort, nextCursor: lastRow ? encodeTopicActivityFormCursor(lastRow, sort) : null,
     counts: { commentSubmissions: commentSubmissionCount, formSubmissions, repliedForms, unrepliedForms: formSubmissions - repliedForms, approvedUsers: approvedUserRows.length },
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
 }
