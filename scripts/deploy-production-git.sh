@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if ! declare -F deploy_atomic_switch >/dev/null 2>&1; then
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  source "${script_dir}/deploy-safety.sh"
+fi
+
 umask 027
 export GIT_TERMINAL_PROMPT=0
 
@@ -37,7 +42,8 @@ fetch_exact_deploy_commit() {
 
   for attempt in 1 2 3; do
     echo "FETCH_ATTEMPT=${attempt}/3"
-    if git -C "${repo_dir}" fetch --no-tags --prune origin "${DEPLOY_SHA}"; then
+    if timeout --foreground --signal=TERM --kill-after=30s 2m \
+      git -C "${repo_dir}" fetch --no-tags --prune origin "${DEPLOY_SHA}"; then
       resolved_sha="$(git -C "${repo_dir}" rev-parse "${DEPLOY_SHA}^{commit}" 2>/dev/null || true)"
       if [ "${resolved_sha}" = "${DEPLOY_SHA}" ]; then
         echo "SERVER_GIT_FETCH=OK"
@@ -70,6 +76,9 @@ if [[ "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then :; else
 fi
 if [[ "${PM2_APP_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then :; else
   die "PM2_APP_NAME contains unexpected characters."
+fi
+if [ "${PM2_APP_NAME}" != "easonfansclub" ]; then
+  die "Refusing to target a PM2 process other than easonfansclub."
 fi
 if [[ "${GITHUB_REPOSITORY}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then :; else
   die "GITHUB_REPOSITORY has an unexpected format."
@@ -112,7 +121,7 @@ assert_release_valid() {
 }
 
 remove_release() {
-  local release_path="$1" release_name active_target resolved_path
+  local release_path="$1" release_name active_target resolved_path in_use_status
   case "${release_path}" in
     "${releases_dir}/"*) ;;
     *)
@@ -138,6 +147,16 @@ remove_release() {
     echo "Refusing to remove the active release: ${release_path}" >&2
     return 1
   fi
+  if release_is_referenced_by_pm2 "${release_path}"; then
+    echo "Refusing to remove a release referenced by a live PM2 process: ${release_path}" >&2
+    return 1
+  else
+    in_use_status=$?
+  fi
+  if [ "${in_use_status}" -ne 1 ]; then
+    echo "Unable to verify PM2 release references; preserving ${release_path}." >&2
+    return 1
+  fi
   if [ -d "${repo_dir}" ] &&
      [ "$(git -C "${repo_dir}" rev-parse --is-inside-work-tree 2>/dev/null || true)" = true ]; then
     git -C "${repo_dir}" worktree remove --force "${release_path}" >/dev/null 2>&1 || true
@@ -154,6 +173,10 @@ cleanup_failed_release() {
     remove_release "${release_dir}" || true
   fi
   prune_worktrees
+}
+
+release_is_referenced_by_pm2() {
+  deploy_release_is_in_use "$1"
 }
 
 recover_abandoned_releases() {
@@ -179,13 +202,41 @@ recover_abandoned_releases() {
 
 on_exit() {
   local status=$?
-  if [ "${deployment_succeeded}" != true ] && [ -d "${release_dir}" ]; then
-    printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
+  local active_target expected_target preserve_release=false
+  trap - EXIT HUP INT TERM
+  trap '' HUP INT TERM
+
+  if [ "${deployment_succeeded}" != true ] && [ -n "${release_dir}" ]; then
+    active_target="$(deploy_current_target "${current_link}")"
+    expected_target="$(deploy_normalize_path "${release_dir}")"
+    if [ -n "$expected_target" ] && [ "$active_target" = "$expected_target" ]; then
+      if declare -F rollback_release >/dev/null 2>&1 && rollback_release; then
+        echo "Interrupted deployment rolled back to ${previous_target}." >&2
+      else
+        echo "Automatic rollback did not complete; preserving candidate release ${release_dir} for recovery." >&2
+        preserve_release=true
+      fi
+    fi
+
+    if [ -d "${release_dir}" ]; then
+      printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
+    fi
+    if [ "$preserve_release" != true ]; then
+      cleanup_failed_release || true
+    fi
   fi
-  cleanup_failed_release || true
   return "${status}"
 }
+
+handle_signal() {
+  local signal_name="$1" exit_status="$2"
+  echo "Received ${signal_name}; attempting safe rollback before exit." >&2
+  exit "$exit_status"
+}
 trap on_exit EXIT
+trap 'handle_signal HUP 129' HUP
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
 
 log_step "1/8" "Load runtime and validate the stable release layout"
 export NVM_DIR="${HOME}/.nvm"
@@ -199,10 +250,12 @@ command -v pm2 >/dev/null 2>&1 || die "pm2 is not installed on the deployment ho
 command -v curl >/dev/null 2>&1 || die "curl is not installed on the deployment host."
 command -v readlink >/dev/null 2>&1 || die "readlink is not installed on the deployment host."
 command -v flock >/dev/null 2>&1 || die "flock is not installed on the deployment host."
+command -v timeout >/dev/null 2>&1 || die "timeout is not installed on the deployment host."
 
 test -d "${APP_DIR}" || die "Application directory does not exist: ${APP_DIR}"
 test -w "${APP_DIR}" || die "Application directory is not writable: ${APP_DIR}"
-exec 9>"${APP_DIR}/.deploy.lock"
+test -f "${APP_DIR}/.deploy.lock" || die "Deployment lock file is missing; refusing to create production state implicitly."
+exec 9<>"${APP_DIR}/.deploy.lock"
 flock -n 9 || die "Another production deployment is already in progress."
 deploy_lock_acquired=true
 
@@ -263,6 +316,7 @@ while [ -e "${releases_dir}/${release_id}" ] || [ -L "${releases_dir}/${release_
   release_id="${release_id_base}-${release_counter}"
 done
 release_dir="${releases_dir}/${release_id}"
+echo "DEPLOY_CANDIDATE_RELEASE=${release_dir}"
 
 echo "Node: $(node --version)"
 echo "PM2: $(pm2 --version)"
@@ -273,10 +327,18 @@ log_step "2/8" "Fetch the exact GitHub commit into the server-side cache"
 fetch_exact_deploy_commit || die "Exact deployment commit fetch failed."
 
 log_step "3/8" "Create an isolated release worktree"
-git -C "${repo_dir}" worktree add --detach "${release_dir}" "${DEPLOY_SHA}"
+timeout --foreground --signal=TERM --kill-after=30s 2m \
+  git -C "${repo_dir}" worktree add --detach "${release_dir}" "${DEPLOY_SHA}"
 touch "${release_dir}/.deploy-in-progress"
 release_head="$(git -C "${release_dir}" rev-parse HEAD 2>/dev/null || true)"
 [ "${release_head}" = "${DEPLOY_SHA}" ] || die "Release worktree HEAD does not match DEPLOY_SHA."
+# Persist this deployment's exact immediate rollback target before current can
+# ever switch. The shared previous-release pointer is only finalized on success
+# and may otherwise refer to an older release after an interrupted deployment.
+rollback_record_tmp="${release_dir}/.rollback-target.tmp"
+printf '%s\n%s\n' "${previous_target}" "${previous_sha}" > "${rollback_record_tmp}"
+mv -Tf -- "${rollback_record_tmp}" "${release_dir}/.rollback-target"
+rollback_target="${previous_target}"
 if [ -e "${release_dir}/.env" ] || [ -L "${release_dir}/.env" ]; then
   die "Release source unexpectedly contains .env; refusing to overwrite it."
 fi
@@ -328,7 +390,13 @@ pnpm_run() {
   "${PNPM_CMD[@]}" "$@"
 }
 
-if ! actual_pnpm_version="$(pnpm_run --version)"; then
+pnpm_with_timeout() {
+  local duration="$1"
+  shift
+  timeout --foreground --signal=TERM --kill-after=30s "${duration}" "${PNPM_CMD[@]}" "$@"
+}
+
+if ! actual_pnpm_version="$(pnpm_with_timeout 2m --version)"; then
   die "Unable to activate pnpm ${expected_pnpm_version} through ${PNPM_CMD[*]}."
 fi
 [ "${actual_pnpm_version}" = "${expected_pnpm_version}" ] || die "pnpm ${expected_pnpm_version} is required by package.json; found ${actual_pnpm_version}."
@@ -339,44 +407,43 @@ fi
 echo "pnpm: ${actual_pnpm_version} (runner: ${PNPM_CMD[*]})"
 echo "pnpm store: ${pnpm_store_dir}"
 install_started="$(date +%s)"
-pnpm_run install --frozen-lockfile --prefer-offline --store-dir "${pnpm_store_dir}"
+pnpm_with_timeout 12m install --frozen-lockfile --prefer-offline --store-dir "${pnpm_store_dir}"
 test -d node_modules
 echo "Dependency install completed in $(( $(date +%s) - install_started ))s."
-pnpm_run prisma generate
+pnpm_with_timeout 3m prisma generate
 
 log_step "5/8" "Build the release before touching current"
 build_started="$(date +%s)"
 build_node_options="${BUILD_NODE_OPTIONS:---max-old-space-size=4096}"
 echo "Node build options: ${build_node_options}"
 export NODE_OPTIONS="${build_node_options}"
-pnpm_run build
+pnpm_with_timeout 20m build
 test -s "${release_dir}/.next/BUILD_ID"
 test -d "${release_dir}/.next/static"
 test -d "${release_dir}/public"
 echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
-log_step "6/8" "Apply production migrations and verify notification data before current switch"
-pnpm_run migration:check:mysql
-pnpm_run prisma migrate deploy
-pnpm_run notification:integrity
+log_step "6/8" "Run read-only migration status and verify notification data before current switch"
+pnpm_with_timeout 1m migration:check:mysql
+if ! migration_status_output="$(pnpm_with_timeout 2m prisma migrate status 2>&1)"; then
+  printf '%s\n' "${migration_status_output}" \
+    | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
+  die "Read-only Prisma migration status failed; no migration was applied."
+fi
+if ! deploy_migration_status_is_up_to_date "${migration_status_output}"; then
+  printf '%s\n' "${migration_status_output}" \
+    | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
+  die "Production migrations are not explicitly up to date; automatic migration writes are disabled in this deploy path."
+fi
+echo "Prisma migration status is up to date; skipping migrate deploy (no production schema write)."
+pnpm_with_timeout 2m notification:integrity
 
 atomic_switch() {
-  local target="$1"
-  local temporary_link="${APP_DIR}/.current-${release_id}-${RANDOM}"
-  case "${target}" in
-    "${releases_dir}/"*) ;;
-    *)
-      echo "Refusing to point current outside releases/: ${target}" >&2
-      return 1
-      ;;
-  esac
-  rm -f -- "${temporary_link}"
-  ln -s -- "${target}" "${temporary_link}"
-  mv -Tf -- "${temporary_link}" "${current_link}"
+  deploy_atomic_switch "$1" "${current_link}" "${releases_dir}"
 }
 
 read_pm2_snapshot() {
-  local pm2_json pm2_snapshot
+  local app_name="$1" pm2_json pm2_snapshot
   if ! pm2_json="$(pm2 jlist)"; then
     echo "Unable to read PM2 process list." >&2
     return 1
@@ -394,22 +461,28 @@ read_pm2_snapshot() {
           cwd: env.pm_cwd || "",
           script: env.pm_exec_path || "",
           args: Array.isArray(env.args) ? env.args.join(" ") : String(env.args || ""),
+          status: env.status || "",
+          pid: Number(app.pid || env.pid || 0),
+          deploySha: env.DEPLOY_SHA || "",
         }));
       } catch {
         process.exit(2);
       }
     });
-  ' "${PM2_APP_NAME}")"; then
-    echo "PM2 app ${PM2_APP_NAME} is not present in the process list." >&2
+  ' "${app_name}")"; then
+    echo "PM2 app ${app_name} is not present in the process list." >&2
     return 1
   fi
   pm2_cwd="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).cwd)' "${pm2_snapshot}")"
   pm2_script="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).script)' "${pm2_snapshot}")"
   pm2_args="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).args)' "${pm2_snapshot}")"
+  pm2_status="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).status)' "${pm2_snapshot}")"
+  pm2_pid="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).pid))' "${pm2_snapshot}")"
+  pm2_deploy_sha="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).deploySha)' "${pm2_snapshot}")"
 }
 
 pm2_app_exists() {
-  local pm2_json pm2_status
+  local app_name="$1" pm2_json pm2_status
   if ! pm2_json="$(pm2 jlist)"; then
     return 2
   fi
@@ -424,7 +497,7 @@ pm2_app_exists() {
         process.exit(2);
       }
     });
-  ' "${PM2_APP_NAME}"; then
+  ' "${app_name}"; then
     return 0
   else
     pm2_status=$?
@@ -441,13 +514,38 @@ pm2_script_is_npm() {
 }
 
 pm2_is_current_release() {
+  local app_name="$1" release_sha="$2" active_target actual_cwd
   [ "${pm2_cwd}" = "${current_link}" ] || return 1
-  pm2_script_is_npm "${pm2_script}" || return 1
-  [ "${pm2_args}" = "run start" ]
+  [ "${pm2_status}" = "online" ] || return 1
+  [ "${pm2_pid}" -gt 0 ] || return 1
+  [ "${pm2_deploy_sha}" = "${release_sha}" ] || return 1
+  active_target="$(deploy_current_target "${current_link}")"
+  actual_cwd="$(readlink "/proc/${pm2_pid}/cwd" 2>/dev/null || true)"
+  actual_cwd="${actual_cwd% (deleted)}"
+  [ "$(deploy_normalize_path "${actual_cwd}")" = "${active_target}" ] || return 1
+
+  case "${app_name}" in
+    "${PM2_APP_NAME}")
+      pm2_script_is_npm "${pm2_script}" || return 1
+      [ "${pm2_args}" = "run start" ]
+      ;;
+    instagram-sync-worker)
+      case "${pm2_script}" in
+        */node_modules/tsx/dist/cli.mjs|node_modules/tsx/dist/cli.mjs) ;;
+        *) return 1 ;;
+      esac
+      [ "${pm2_args}" = "scripts/instagram-sync-worker.ts" ]
+      ;;
+    *) return 1 ;;
+  esac
 }
 
 reload_pm2() {
-  local release_sha="$1" pm2_status
+  local app_name="$1" release_sha="$2" exists_status attempt
+  [ "${app_name}" = "${PM2_APP_NAME}" ] || {
+    echo "Refusing to reload ${app_name}; only the web process is eligible for automatic deployment." >&2
+    return 78
+  }
   export NODE_ENV=production
   export DEPLOY_SHA="${release_sha}"
   export PORT="${APP_PORT}"
@@ -455,24 +553,32 @@ reload_pm2() {
   test -f ecosystem.config.js
   test -r .env
   test -s .env
-  if pm2_app_exists; then
-    echo "Reloading existing PM2 app ${PM2_APP_NAME}."
-    pm2 reload "${PM2_APP_NAME}" --update-env
+  if pm2_app_exists "${app_name}"; then
+    echo "Reloading only PM2 app ${app_name} from the selected release configuration."
+    deploy_run_pm2_reload "${app_name}" 2m pm2 reload ecosystem.config.js --only "${app_name}" --update-env || return $?
   else
-    pm2_status=$?
-    if [ "${pm2_status}" -ne 1 ]; then
+    exists_status=$?
+    if [ "${exists_status}" -ne 1 ] || [ "${app_name}" != "${PM2_APP_NAME}" ]; then
       echo "PM2 process list is invalid; refusing to create a duplicate process." >&2
       return 1
     fi
-    echo "Starting missing PM2 app ${PM2_APP_NAME} from ecosystem.config.js."
-    pm2 start ecosystem.config.js --only "${PM2_APP_NAME}" --update-env
+    echo "Starting missing PM2 app ${app_name} from ecosystem.config.js."
+    deploy_run_pm2_reload "${app_name}" 2m pm2 start ecosystem.config.js --only "${app_name}" --update-env || return $?
   fi
-  pm2 save || true
-  sleep 10
-  if ! read_pm2_snapshot || ! pm2_is_current_release; then
-    echo "PM2 configuration does not point through current." >&2
-    return 1
-  fi
+  for attempt in $(seq 1 30); do
+    if read_pm2_snapshot "${app_name}" && pm2_is_current_release "${app_name}" "${release_sha}"; then return 0; fi
+    sleep 1
+  done
+  echo "PM2 app ${app_name} did not become healthy on the selected release." >&2
+  return 1
+}
+
+reload_release_processes() {
+  local release_sha="$1" app_name
+  # These are the only PM2 services in the ECFC release. Never use `reload all`.
+  while IFS= read -r app_name; do
+    reload_pm2 "${app_name}" "${release_sha}" || return 1
+  done < <(deploy_release_pm2_names "${PM2_APP_NAME}")
 }
 
 print_health_diagnostics() {
@@ -481,34 +587,59 @@ print_health_diagnostics() {
   readlink -f -- "${current_link}" >&2 || true
   echo "Deployed SHA:" >&2
   cat "${current_link}/.deployed-sha" >&2 || true
-  echo "PM2 description:" >&2
-  pm2 describe "${PM2_APP_NAME}" >&2 || true
+  echo "PM2 application snapshots (no environment values):" >&2
+  for app_name in "${PM2_APP_NAME}" instagram-sync-worker; do
+    if read_pm2_snapshot "${app_name}"; then
+      echo "${app_name}: status=${pm2_status}, pid=${pm2_pid}, configured_cwd=${pm2_cwd}" >&2
+      echo "${app_name}: actual_cwd=$(readlink "/proc/${pm2_pid}/cwd" 2>/dev/null || echo UNKNOWN)" >&2
+    else
+      echo "${app_name}: unavailable" >&2
+    fi
+  done
   echo "Listening port:" >&2
   ss -lntp 2>/dev/null | grep "${APP_PORT}" >&2 || true
-  echo "Local HTTP headers:" >&2
-  curl -I --max-time 10 "http://127.0.0.1:${APP_PORT}" >&2 || true
-  echo "PM2 error log (last 200 lines):" >&2
-  tail -200 -- "${HOME}/.pm2/logs/${PM2_APP_NAME}-error.log" >&2 || true
+  echo "Local liveness HTTP status:" >&2
+  curl --silent --output /dev/null --write-out 'HTTP=%{http_code}\n' --max-time 10 \
+    "http://127.0.0.1:${APP_PORT}/api/health/live" >&2 || true
 }
 
 check_health() {
-  local health_response active_target pm2_ready
+  local expected_target="$1" expected_sha="$2" health_response active_target pm2_ready
   for attempt in $(seq 1 10); do
     health_response="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${APP_PORT}/api/health/live" || true)"
     active_target="$(readlink -f -- "${current_link}" 2>/dev/null || true)"
-    pm2_ready=false
-    if read_pm2_snapshot 2>/dev/null && pm2_is_current_release; then
-      pm2_ready=true
-    fi
-    if [ "${active_target}" = "${release_dir}" ] &&
-       printf '%s' "${health_response}" | grep -Fq "\"release\":\"${DEPLOY_SHA}\"" &&
+    pm2_ready=true
+    while IFS= read -r app_name; do
+      if ! read_pm2_snapshot "${app_name}" 2>/dev/null || ! pm2_is_current_release "${app_name}" "${expected_sha}"; then
+        pm2_ready=false
+        break
+      fi
+    done < <(deploy_release_pm2_names "${PM2_APP_NAME}")
+    if [ "${active_target}" = "${expected_target}" ] &&
+       printf '%s' "${health_response}" | node -e '
+         let raw = "";
+         process.stdin.on("data", (chunk) => { raw += chunk; });
+         process.stdin.on("end", () => {
+           try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+           catch { process.exit(1); }
+         });
+       ' "${expected_sha}" &&
        [ "${pm2_ready}" = true ]; then
       return 0
     fi
-    echo "Health attempt ${attempt}/10 did not confirm release ${DEPLOY_SHA} (pm2_ready=${pm2_ready})."
+    echo "Health attempt ${attempt}/10 did not confirm release ${expected_sha} (pm2_ready=${pm2_ready})."
     sleep 3
   done
   return 1
+}
+
+verify_restored_release() {
+  local target="$1" release_sha="$2"
+  export NODE_ENV=production
+  export DEPLOY_SHA="${release_sha}"
+  export PORT="${APP_PORT}"
+  reload_release_processes "${release_sha}" || return 1
+  check_health "${target}" "${release_sha}"
 }
 
 rollback_release() {
@@ -517,27 +648,24 @@ rollback_release() {
     echo "Previous release is no longer a valid rollback target: ${previous_target}" >&2
     return 1
   }
-  previous_sha="$(tr -d '[:space:]' < "${previous_target}/.deployed-sha")"
   printf '%s\n' "${DEPLOY_SHA}" > "${release_dir}/.deploy-failed" || true
   echo "Restoring previous release atomically: ${previous_target}" >&2
-  atomic_switch "${previous_target}"
-  if ! reload_pm2 "${previous_sha}"; then
-    echo "PM2 reload failed while restoring the previous release." >&2
-    return 1
-  fi
-  pm2 logs "${PM2_APP_NAME}" --lines 80 --nostream || true
+  previous_sha="$(tr -d '[:space:]' < "${previous_target}/.deployed-sha")"
+  deploy_rollback_if_owned \
+    "${release_dir}" "${previous_target}" "${current_link}" "${releases_dir}" \
+    "${previous_sha}" verify_restored_release
 }
 
 log_step "7/8" "Atomically switch current and reload PM2"
 atomic_switch "${release_dir}"
-if ! reload_pm2 "${DEPLOY_SHA}"; then
+if ! reload_release_processes "${DEPLOY_SHA}"; then
   print_health_diagnostics
   rollback_release || die "PM2 reload failed and automatic rollback also failed."
   die "PM2 reload failed; previous release was restored."
 fi
 
 log_step "8/8" "Verify health and retain rollback releases"
-if ! check_health; then
+if ! check_health "${release_dir}" "${DEPLOY_SHA}"; then
   print_health_diagnostics
   rollback_release || die "Health check failed and automatic rollback also failed."
   die "Health check failed; previous release was restored."
@@ -578,6 +706,16 @@ while IFS= read -r release_entry; do
   esac
   [ "${release_path}" = "${release_dir}" ] && continue
   [ "${release_path}" = "${previous_target}" ] && continue
+  if release_is_referenced_by_pm2 "${release_path}"; then
+    echo "Keeping release referenced by a live PM2 process: ${release_path}"
+    continue
+  else
+    pm2_reference_status=$?
+    if [ "${pm2_reference_status}" -ne 1 ]; then
+      echo "Keeping release because PM2 references could not be verified: ${release_path}"
+      continue
+    fi
+  fi
   [ -f "${release_path}/.deploy-failed" ] && continue
   [ -s "${release_path}/.deployed-sha" ] || continue
   kept_successful=$((kept_successful + 1))
@@ -588,7 +726,6 @@ while IFS= read -r release_entry; do
 done < <(find "${releases_dir}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr)
 prune_worktrees
 
-pm2 describe "${PM2_APP_NAME}" || true
 echo "Current release: $(readlink -f -- "${current_link}")"
 echo "Previous release: ${previous_target}"
 echo "Deployment health check passed for ${DEPLOY_SHA}."

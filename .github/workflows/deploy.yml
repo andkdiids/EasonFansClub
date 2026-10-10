@@ -11,20 +11,30 @@ permissions:
 
 concurrency:
   group: production-deploy
-  cancel-in-progress: true
+  # A newer push must wait; cancelling a deployment after current was switched
+  # can otherwise strand PM2 on a release that the workflow reports as failed.
+  cancel-in-progress: false
+  # Keep multiple queued release candidates instead of replacing the older
+  # pending run in this concurrency group.
+  queue: max
 
 env:
   APP_DIR: /home/apps/easonfansclub
   APP_PORT: "3000"
+  PRODUCTION_DOMAIN: ecfc.fans
 
 jobs:
   deploy:
+    # Deployment must always use a reviewed main-branch commit. The
+    # workflow_dispatch trigger is intentionally not an escape hatch for an
+    # arbitrary release or feature branch.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      !contains(github.event.head_commit.message, '[infra-only]')
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      !contains(github.event.head_commit.message, '[infra-only]'))
     name: Deploy production
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Validate deployment secrets
@@ -70,14 +80,20 @@ jobs:
               echo 'flock is not installed on the deployment host.' >&2
               exit 1
             fi
-            exec 9>"${APP_DIR}/.deploy.lock"
+            if ! command -v timeout >/dev/null 2>&1; then
+              echo 'GNU timeout is not installed on the deployment host.' >&2
+              exit 1
+            fi
+            test -f "${APP_DIR}/.deploy.lock"
+            exec 9<>"${APP_DIR}/.deploy.lock"
             if ! flock -n 9; then
               echo 'Another production deployment is already in progress.' >&2
               exit 1
             fi
 
-            mkdir -p "${APP_DIR}/releases" "${APP_DIR}/shared"
+            test -d "${APP_DIR}/releases"
             test -w "${APP_DIR}/releases"
+            test -d "${APP_DIR}/shared"
             test -w "${APP_DIR}/shared"
 
             if [[ ! "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -104,12 +120,8 @@ jobs:
             fi
 
             if [ ! -e "${APP_DIR}/shared/.env" ] && [ ! -L "${APP_DIR}/shared/.env" ]; then
-              if [ ! -s "${APP_DIR}/.env" ]; then
-                echo 'Neither shared/.env nor the legacy APP_DIR/.env exists.' >&2
-                exit 1
-              fi
-              cp -p -- "${APP_DIR}/.env" "${APP_DIR}/shared/.env"
-              echo 'Copied the legacy .env into shared/.env.'
+              echo 'shared/.env is missing; refusing to copy or create production configuration during preflight.' >&2
+              exit 1
             fi
 
             if [ ! -L "${APP_DIR}/current" ]; then
@@ -173,7 +185,8 @@ jobs:
           chmod 600 "${HOME}/.ssh/known_hosts"
 
       - name: Deploy exact commit from server Git
-        timeout-minutes: 35
+        id: deploy
+        timeout-minutes: 45
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
@@ -205,33 +218,116 @@ jobs:
           echo "===== [deploy] Deploy exact SHA from the server-side Git cache ====="
           echo "Deploy SHA: ${DEPLOY_SHA}"
           echo "This path transfers only the deployment script over SSH; source and dependencies stay on the server."
-          timeout --foreground 35m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
-            bash -s -- "${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}" \
-            < scripts/deploy-production-git.sh
+          set +e
+          deploy_output="$(cat scripts/deploy-safety.sh scripts/deploy-production-git.sh \
+            | timeout --foreground --signal=TERM --kill-after=7m 35m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+              bash -s -- "${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}")"
+          deploy_status=$?
+          set -e
+          printf '%s\n' "${deploy_output}"
+          candidate_release="$(printf '%s\n' "${deploy_output}" | sed -n 's/^DEPLOY_CANDIDATE_RELEASE=//p' | tail -n 1)"
+          if [[ "${candidate_release}" =~ ^/home/apps/easonfansclub/releases/[^/]+$ ]]; then
+            echo "candidate_release=${candidate_release}" >> "${GITHUB_OUTPUT}"
+          fi
+          exit "${deploy_status}"
 
       - name: Verify public website
+        id: public_health
+        timeout-minutes: 5
         env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          PRODUCTION_DOMAIN: ${{ env.PRODUCTION_DOMAIN }}
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          for public_url in \
-            "https://${SERVER_HOST}/login" \
-            "http://${SERVER_HOST}/login"; do
-            if curl --insecure \
-              --fail \
-              --location \
-              --silent \
-              --show-error \
-              --retry 5 \
-              --retry-delay 3 \
-              --connect-timeout 10 \
-              --max-time 20 \
-              "${public_url}" > /dev/null; then
-              echo "Public website health check passed: ${public_url}"
+          public_url="https://${PRODUCTION_DOMAIN}/api/health/live"
+          for attempt in 1 2 3 4 5; do
+            response="$(curl --fail --location --silent --show-error \
+              --connect-timeout 10 --max-time 20 "${public_url}" 2>/dev/null || true)"
+            if printf '%s' "${response}" | node -e '
+              let raw = "";
+              process.stdin.on("data", chunk => raw += chunk);
+              process.stdin.on("end", () => {
+                try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+                catch { process.exit(1); }
+              });
+            ' "${DEPLOY_SHA}"; then
+              echo "Public health check verified release ${DEPLOY_SHA} at ${public_url}."
               exit 0
             fi
+            sleep 3
           done
 
-          echo "::error::The public website did not respond successfully over HTTPS or HTTP."
+          echo "::error::Public health did not serve the exact candidate SHA ${DEPLOY_SHA} over HTTPS or HTTP."
+          exit 1
+
+      - name: Guarded rollback after deploy or public-health failure
+        id: rollback
+        if: ${{ always() && steps.deploy.outcome != 'skipped' && steps.deploy.outputs.candidate_release != '' && (steps.deploy.outcome != 'success' || steps.public_health.outcome != 'success') }}
+        timeout-minutes: 16
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          APP_DIR: ${{ env.APP_DIR }}
+          APP_PORT: ${{ env.APP_PORT }}
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_CANDIDATE_RELEASE: ${{ steps.deploy.outputs.candidate_release }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PM2_APP_NAME: easonfansclub
+        run: |
+          set -euo pipefail
+
+          REMOTE_HOST="${SERVER_USER}@${SERVER_HOST}"
+          SSH_OPTIONS=(
+            -i "${RUNNER_TEMP}/easonfansclub_deploy_key"
+            -p "${SERVER_PORT}"
+            -o BatchMode=yes
+            -o ConnectTimeout=30
+            -o ConnectionAttempts=3
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=20
+            -o TCPKeepAlive=yes
+            -o StrictHostKeyChecking=yes
+          )
+
+          rollback_output="$(cat scripts/deploy-safety.sh scripts/rollback-production-git.sh \
+            | timeout --foreground --signal=TERM --kill-after=60s 14m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+              bash -s -- "${APP_DIR}" "${DEPLOY_SHA}" "${DEPLOY_CANDIDATE_RELEASE}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}" "${APP_PORT}")"
+          printf '%s\n' "${rollback_output}"
+          verified_sha="$(printf '%s\n' "${rollback_output}" | sed -n 's/^ROLLBACK_VERIFIED_SHA=//p' | tail -n 1)"
+          rollback_result="$(printf '%s\n' "${rollback_output}" | sed -n 's/^ROLLBACK_RESULT=//p' | tail -n 1)"
+          if [[ ! "${verified_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Rollback did not return a verifiable active SHA."
+            exit 1
+          fi
+          echo "verified_sha=${verified_sha}" >> "${GITHUB_OUTPUT}"
+          echo "result=${rollback_result}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify public SHA after guarded rollback
+        if: ${{ always() && steps.rollback.outcome == 'success' }}
+        timeout-minutes: 5
+        env:
+          PRODUCTION_DOMAIN: ${{ env.PRODUCTION_DOMAIN }}
+          DEPLOY_SHA: ${{ steps.rollback.outputs.verified_sha }}
+        run: |
+          set -euo pipefail
+          public_url="https://${PRODUCTION_DOMAIN}/api/health/live"
+          for attempt in 1 2 3 4 5; do
+            response="$(curl --fail --location --silent --show-error \
+              --connect-timeout 10 --max-time 20 "${public_url}" 2>/dev/null || true)"
+            if printf '%s' "${response}" | node -e '
+              let raw = "";
+              process.stdin.on("data", chunk => raw += chunk);
+              process.stdin.on("end", () => {
+                try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+                catch { process.exit(1); }
+              });
+            ' "${DEPLOY_SHA}"; then
+              echo "Public endpoint now serves verified active SHA ${DEPLOY_SHA}."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Public endpoint does not serve rollback SHA ${DEPLOY_SHA}."
           exit 1
