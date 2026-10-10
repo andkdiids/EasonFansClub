@@ -386,14 +386,14 @@ else
   die "pnpm ${expected_pnpm_version} is unavailable and corepack is not installed."
 fi
 
-pnpm_run() {
-  "${PNPM_CMD[@]}" "$@"
-}
-
 pnpm_with_timeout() {
   local duration="$1"
   shift
   timeout --foreground --signal=TERM --kill-after=30s "${duration}" "${PNPM_CMD[@]}" "$@"
+}
+
+pnpm_run() {
+  pnpm_with_timeout 20m "$@"
 }
 
 if ! actual_pnpm_version="$(pnpm_with_timeout 2m --version)"; then
@@ -417,26 +417,27 @@ build_started="$(date +%s)"
 build_node_options="${BUILD_NODE_OPTIONS:---max-old-space-size=4096}"
 echo "Node build options: ${build_node_options}"
 export NODE_OPTIONS="${build_node_options}"
-pnpm_with_timeout 20m build
+pnpm_run build
 test -s "${release_dir}/.next/BUILD_ID"
 test -d "${release_dir}/.next/static"
 test -d "${release_dir}/public"
 echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
-log_step "6/8" "Run read-only migration status and verify notification data before current switch"
+log_step "6/8" "Apply migrations and verify database state before current switch"
 pnpm_with_timeout 1m migration:check:mysql
+pnpm_run prisma migrate deploy
+pnpm_run notification:integrity
 if ! migration_status_output="$(pnpm_with_timeout 2m prisma migrate status 2>&1)"; then
   printf '%s\n' "${migration_status_output}" \
     | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
-  die "Read-only Prisma migration status failed; no migration was applied."
+  die "Read-only Prisma migration status failed after the bounded migration step."
 fi
 if ! deploy_migration_status_is_up_to_date "${migration_status_output}"; then
   printf '%s\n' "${migration_status_output}" \
     | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
-  die "Production migrations are not explicitly up to date; automatic migration writes are disabled in this deploy path."
+  die "Production migrations are not explicitly up to date after the migration step."
 fi
-echo "Prisma migration status is up to date; skipping migrate deploy (no production schema write)."
-pnpm_with_timeout 2m notification:integrity
+echo "Prisma migration status is up to date."
 
 atomic_switch() {
   deploy_atomic_switch "$1" "${current_link}" "${releases_dir}"
