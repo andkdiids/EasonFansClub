@@ -26,7 +26,7 @@ test('production WebSocket entry uses the custom Next HTTP + upgrade server', ()
 
   assert.match(ecosystem, /name:\s*["']easonfansclub["'][\s\S]*?script:\s*["']npm["'][\s\S]*?args:\s*["']run start["']/)
   assert.match(deployScript, /\[ "\$\{pm2_args\}" = "run start" \]/)
-  assert.match(deployWorkflow, /< scripts\/deploy-production-git\.sh/)
+  assert.match(deployWorkflow, /cat scripts\/deploy-safety\.sh scripts\/deploy-production-git\.sh/)
 
   assert.ok(server.indexOf("import 'next/dist/server/node-environment'") < server.indexOf("import next from 'next'"))
   assert.match(server, /const server = createServer\(/)

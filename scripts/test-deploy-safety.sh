@@ -216,7 +216,15 @@ workflow_file="${script_dir}/../.github/workflows/deploy.yml"
 grep -Fq 'prisma migrate status' "$deploy_script" || fail "read-only migration status gate is missing"
 deploy_migration_status_is_up_to_date 'Database schema is up to date!' || fail "up-to-date migration status rejected"
 deploy_migration_status_is_up_to_date 'Database schema is not up to date' && fail "pending migration status accepted"
-if grep -Eq 'prisma migrate deploy' "$deploy_script"; then fail "automatic production migration command remains"; fi
+grep -Fq 'pnpm_with_timeout 20m "$@"' "$deploy_script" || fail "default package-manager command timeout is missing"
+build_line="$(grep -n -F 'pnpm_run build' "$deploy_script" | cut -d: -f1)"
+migration_line="$(grep -n -F 'pnpm_run prisma migrate deploy' "$deploy_script" | cut -d: -f1)"
+integrity_line="$(grep -n -F 'pnpm_run notification:integrity' "$deploy_script" | cut -d: -f1)"
+switch_line="$(grep -n -F 'atomic_switch "${release_dir}"' "$deploy_script" | cut -d: -f1)"
+[ -n "$build_line" ] && [ -n "$migration_line" ] && [ -n "$integrity_line" ] && [ -n "$switch_line" ] \
+  || fail "bounded build, migration, integrity, and switch steps must all exist"
+[ "$build_line" -lt "$migration_line" ] && [ "$migration_line" -lt "$integrity_line" ] && [ "$integrity_line" -lt "$switch_line" ] \
+  || fail "migration and notification checks must complete before current switches"
 grep -Fq 'cancel-in-progress: false' "$workflow_file" || fail "workflow cancellation protection is missing"
 grep -Fq 'queue: max' "$workflow_file" || fail "workflow pending deployment queue is not preserved"
 grep -Fq "github.ref == 'refs/heads/main'" "$workflow_file" || fail "manual dispatch is not restricted to main"
@@ -226,7 +234,7 @@ if grep -Eq 'pm2 (reload|restart|stop|delete) all|pm2 save' "$deploy_script" "${
   fail "unrelated/global PM2 operation detected"
 fi
 grep -Fq 'PRODUCTION_DOMAIN: ecfc.fans' "$workflow_file" || fail "public health canonical domain is missing"
-pass "deployment performs no automatic migration write and does not cancel a running deployment"
+pass "deployment keeps migration bounded and ordered before switch without cancelling a running deployment"
 
 if command -v flock >/dev/null 2>&1; then
   lock_file="${tmp_root}/deploy.lock"

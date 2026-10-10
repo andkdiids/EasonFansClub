@@ -40,6 +40,15 @@ FETCH_RESULTS='${fetchResultsLiteral}'
 RESOLVE_SHA='${resolveSha ? 'yes' : 'no'}'
 FETCH_COUNT=0
 
+# Git Bash on Windows may resolve timeout to the Windows console command. The
+# production host uses GNU timeout; emulate its argument forwarding here so
+# these source/behavior tests exercise the fetch logic on every host.
+timeout() {
+  while [[ "$1" == --* ]]; do shift; done
+  shift
+  "$@"
+}
+
 git() {
   printf 'GIT_CALL=%s\\n' "$*" >&2
   case "${'${3:-}'}" in
