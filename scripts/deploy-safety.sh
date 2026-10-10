@@ -156,4 +156,3 @@ deploy_rollback_if_owned() {
   deploy_atomic_switch "$rollback_target" "$current_link" "$releases_dir" || return 1
   "$verifier" "$rollback_target" "$rollback_sha"
 }
-
