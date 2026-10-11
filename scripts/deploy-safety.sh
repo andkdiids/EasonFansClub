@@ -41,6 +41,29 @@ deploy_current_target() {
   readlink -f -- "$1" 2>/dev/null || true
 }
 
+# Call only after acquiring the deployment lock, and retain that lock through
+# build, switch, verification and recovery. This is not a preflight snapshot.
+deploy_require_expected_production_sha() {
+  local current_link="$1" releases_dir="$2" expected_sha="$3" target actual_sha
+  [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "EXPECTED_PRODUCTION_SHA must be a full lowercase Git SHA." >&2
+    return 1
+  }
+  target="$(deploy_current_target "$current_link")"
+  deploy_is_release_child "$target" "$releases_dir" || {
+    echo "Current release is not a valid direct release directory." >&2
+    return 1
+  }
+  [ -s "$target/.deployed-sha" ] || return 1
+  actual_sha="$(cat -- "$target/.deployed-sha")"
+  actual_sha="${actual_sha%$'\r'}"
+  [[ "$actual_sha" =~ ^[0-9a-f]{40}$ ]] && [ "$actual_sha" = "$expected_sha" ] || {
+    echo "PRODUCTION_SHA_CHANGED: locked current does not match EXPECTED_PRODUCTION_SHA; no deployment changes allowed." >&2
+    return 1
+  }
+  printf '%s\n' "$target"
+}
+
 deploy_release_pm2_names() {
   # Instagram sync has no cancellation primitive for an in-flight provider
   # request. Keep deployments scoped to the web process until the worker has a

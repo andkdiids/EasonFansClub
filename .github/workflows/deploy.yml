@@ -14,9 +14,7 @@ concurrency:
   # A newer push must wait; cancelling a deployment after current was switched
   # can otherwise strand PM2 on a release that the workflow reports as failed.
   cancel-in-progress: false
-  # Keep multiple queued release candidates instead of replacing the older
-  # pending run in this concurrency group.
-  queue: max
+  # GitHub's standard single-pending queue; never cancel the active deployment.
 
 env:
   APP_DIR: /home/apps/easonfansclub
@@ -218,10 +216,13 @@ jobs:
           echo "===== [deploy] Deploy exact SHA from the server-side Git cache ====="
           echo "Deploy SHA: ${DEPLOY_SHA}"
           echo "This path transfers only the deployment script over SSH; source and dependencies stay on the server."
+          expected_production_sha="$(timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+            'set -eu; target=$(readlink -f -- /home/apps/easonfansclub/current); cat -- "$target/.deployed-sha"')"
+          [[ "$expected_production_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid current production SHA." >&2; exit 1; }
           set +e
           deploy_output="$(cat scripts/deploy-safety.sh scripts/deploy-production-git.sh \
             | timeout --foreground --signal=TERM --kill-after=7m 35m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
-              bash -s -- "${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}")"
+              bash -s -- "${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}" "$expected_production_sha")"
           deploy_status=$?
           set -e
           printf '%s\n' "${deploy_output}"

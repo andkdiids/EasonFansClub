@@ -9,8 +9,8 @@ fi
 umask 027
 export GIT_TERMINAL_PROMPT=0
 
-if [ "$#" -ne 5 ]; then
-  echo "Usage: $0 APP_DIR APP_PORT DEPLOY_SHA PM2_APP_NAME GITHUB_REPOSITORY" >&2
+if [ "$#" -ne 6 ]; then
+  echo "Usage: $0 APP_DIR APP_PORT DEPLOY_SHA PM2_APP_NAME GITHUB_REPOSITORY EXPECTED_PRODUCTION_SHA" >&2
   exit 2
 fi
 
@@ -19,6 +19,7 @@ APP_PORT="$2"
 DEPLOY_SHA="$3"
 PM2_APP_NAME="$4"
 GITHUB_REPOSITORY="$5"
+EXPECTED_PRODUCTION_SHA="$6"
 
 die() {
   echo "ERROR: $*" >&2
@@ -73,6 +74,9 @@ if [[ "${APP_PORT}" =~ ^[0-9]+$ ]]; then :; else
 fi
 if [[ "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then :; else
   die "DEPLOY_SHA is not a 40-character hexadecimal Git SHA."
+fi
+if [[ "${EXPECTED_PRODUCTION_SHA}" =~ ^[0-9a-f]{40}$ ]]; then :; else
+  die "EXPECTED_PRODUCTION_SHA is not a full lowercase Git SHA."
 fi
 if [[ "${PM2_APP_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then :; else
   die "PM2_APP_NAME contains unexpected characters."
@@ -259,6 +263,13 @@ exec 9<>"${APP_DIR}/.deploy.lock"
 flock -n 9 || die "Another production deployment is already in progress."
 deploy_lock_acquired=true
 
+# The read and every later mutation share descriptor 9's exclusive flock.
+# Do not fetch, prune, create a release, migrate, or reload before this gate.
+test -L "${current_link}" || die "Production current must be a symlink into releases/."
+previous_target="$(deploy_require_expected_production_sha "${current_link}" "${releases_dir}" "${EXPECTED_PRODUCTION_SHA}")" \
+  || die "Locked production SHA guard rejected this deployment."
+echo "LOCKED_PRODUCTION_SHA=${EXPECTED_PRODUCTION_SHA}"
+
 test -d "${releases_dir}" || die "Release directory does not exist: ${releases_dir}"
 test -w "${releases_dir}" || die "Release directory is not writable: ${releases_dir}"
 test -d "${shared_dir}" || die "Shared directory does not exist: ${shared_dir}"
@@ -270,7 +281,6 @@ test -n "${shared_env_real}" || die "Production shared/.env does not resolve to 
 test -f "${shared_env_real}" || die "Production shared/.env target is not a regular file."
 test -L "${current_link}" || die "Production current must be a symlink into releases/."
 
-previous_target="$(readlink -f -- "${current_link}" 2>/dev/null || true)"
 case "${previous_target}" in
   "${releases_dir}/"*) ;;
   *) die "Current target is outside the release root: ${previous_target}" ;;

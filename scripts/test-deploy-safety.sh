@@ -226,7 +226,7 @@ switch_line="$(grep -n -F 'atomic_switch "${release_dir}"' "$deploy_script" | cu
 [ "$build_line" -lt "$migration_line" ] && [ "$migration_line" -lt "$integrity_line" ] && [ "$integrity_line" -lt "$switch_line" ] \
   || fail "migration and notification checks must complete before current switches"
 grep -Fq 'cancel-in-progress: false' "$workflow_file" || fail "workflow cancellation protection is missing"
-grep -Fq 'queue: max' "$workflow_file" || fail "workflow pending deployment queue is not preserved"
+if grep -Fq 'queue: max' "$workflow_file"; then fail "actionlint-incompatible concurrency queue key retained"; fi
 grep -Fq "github.ref == 'refs/heads/main'" "$workflow_file" || fail "manual dispatch is not restricted to main"
 grep -Fq 'flock -n 9' "$deploy_script" || fail "server-side deploy lock is missing"
 grep -Fq 'flock -w 360 9' "${script_dir}/rollback-production-git.sh" || fail "rollback lock wait is missing"
