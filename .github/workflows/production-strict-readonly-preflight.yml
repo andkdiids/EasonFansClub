@@ -1,0 +1,202 @@
+name: Strict Read-only Production Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_sha:
+        description: Exact approved RC SHA from the installed release policy
+        required: true
+        type: string
+        default: '47396d19842755491e9634605a7d535c163b4495'
+      expected_production_sha:
+        description: Expected running production SHA, not a measured runtime value
+        required: true
+        type: string
+        default: '635ae4a0e1d8eae9d93420517a17f4b29794896f'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-strict-readonly-preflight
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    outputs:
+      payload: ${{ steps.manifest.outputs.payload }}
+    steps:
+      - name: Require main manual dispatch before any production credentials
+        env:
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]] || exit 1
+          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate installed exact release policy and remote RC
+        env:
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="$(node -p 'JSON.parse(require("fs").readFileSync(".github/release-policies/production-topic-activity-v612.json","utf8")).approved_rc_branch')"
+          # Ephemeral runner-only auth, never persisted in .git/config.
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            bash .github/release/approved-release-guard.sh validate "$APPROVED_SHA" "$EXPECTED_SHA" "$branch"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
+        with:
+          ref: ${{ inputs.approved_sha }}
+          path: migration-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build a non-secret migration checksum manifest in runner memory
+        id: manifest
+        env:
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          import { createHash } from 'node:crypto'
+          import { validateManifest, APP } from './.github/release/strict-readonly-preflight.mjs'
+          const root = 'migration-source/prisma/migrations'
+          const migrations = fs.readdirSync(root).sort().map(name => {
+            const dir = root + '/' + name
+            if (!fs.lstatSync(dir).isDirectory()) return null
+            const file = dir + '/migration.sql'
+            if (!fs.lstatSync(file).isFile()) throw new Error('regular migration SQL required')
+            return { name, checksum: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }
+          }).filter(Boolean)
+          const manifest = validateManifest({ app: APP, expectedSha: process.env.EXPECTED_SHA, approvedSha: process.env.APPROVED_SHA, migrations })
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'payload=' + Buffer.from(JSON.stringify(manifest)).toString('base64') + '\n')
+          NODE
+
+  inspect:
+    needs: validate
+    if: needs.validate.result == 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    environment:
+      name: Production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Observe concurrent deployment workflows without dispatch or cancellation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const protectedPaths = new Set(['.github/workflows/deploy.yml', '.github/workflows/configure-production-entry.yml', '.github/workflows/production-release-approved.yml'])
+          async function main() {
+            let count = 0
+            for (const status of ['queued', 'in_progress', 'waiting', 'requested', 'pending']) {
+              let done = false
+              for (let page = 1; page <= 20; page++) {
+                const response = await fetch(`${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}/actions/runs?status=${status}&per_page=100&page=${page}`, {
+                  headers: { authorization: 'Bearer ' + process.env.GH_TOKEN, accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) })
+                if (!response.ok) throw new Error('queue unavailable')
+                const rows = (await response.json()).workflow_runs || []
+                count += rows.filter(row => protectedPaths.has(String(row.path || '').split('@', 1)[0])).length
+                if (rows.length < 100) { done = true; break }
+              }
+              if (!done) throw new Error('queue pagination incomplete')
+            }
+            console.log('CONCURRENT_DEPLOYMENTS=' + count)
+          }
+          main().catch(() => { console.log('CONCURRENT_DEPLOYMENTS=UNKNOWN'); process.exitCode = 1 })
+          NODE
+
+      - name: Prepare credentials and pinned host key on the runner only
+        id: ssh
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ && "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || exit 1
+          (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || exit 1
+          [[ -n "$SSH_KEY" && -n "$PINNED_HOSTS" && "$PINNED_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]]
+          key="$RUNNER_TEMP/ecfc-strict-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          hosts="$RUNNER_TEMP/ecfc-strict-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.hosts"
+          umask 077
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          # Require one literal host entry, not a matching fingerprint for an
+          # unrelated host alongside additional, unverified trusted keys.
+          HOSTS_FILE="$hosts" node <<'NODE'
+          const fs = require('node:fs')
+          const rows = fs.readFileSync(process.env.HOSTS_FILE, 'utf8').trim().split(/\r?\n/)
+          const host = process.env.SSH_PORT === '22' ? process.env.SSH_HOST : `[${process.env.SSH_HOST}]:${process.env.SSH_PORT}`
+          const fields = rows.length === 1 ? rows[0].split(/\s+/) : []
+          if (fields.length !== 3 || fields[0] !== host || !/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$/.test(fields[1]) || !/^[A-Za-z0-9+/]+={0,2}$/.test(fields[2])) process.exit(1)
+          NODE
+          actual_fingerprint="$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')"
+          [[ "$actual_fingerprint" == "$PINNED_FINGERPRINT" ]]
+          printf 'key=%s\nhosts=%s\n' "$key" "$hosts" >> "$GITHUB_OUTPUT"
+
+      - name: Stream audited Node source over SSH stdin without a remote file
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts }}
+          PREFLIGHT_PAYLOAD: ${{ needs.validate.outputs.payload }}
+        run: |
+          set -euo pipefail
+          [[ "$PREFLIGHT_PAYLOAD" =~ ^[A-Za-z0-9+/=]+$ ]] || exit 1
+          (( ${#PREFLIGHT_PAYLOAD} <= 65536 )) || exit 1
+          # No remote redirect, SCP, mkdir, lock operation or file cleanup.
+          # Preserve the existing home only for reading an existing login path;
+          # clear compile-cache/coverage/options and every credential variable.
+          remote_command='test -f /usr/bin/node && test ! -L /usr/bin/node || exit 1; node_meta=$(/usr/bin/stat -c "%u:%a" /usr/bin/node) || exit 1; case "$node_meta" in 0:555|0:755) ;; *) exit 1;; esac; exec /usr/bin/env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C /usr/bin/node --input-type=module - '
+          remote_command+="'$PREFLIGHT_PAYLOAD'"
+          timeout --foreground --signal=TERM 120s ssh -T \
+            -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            "$SSH_USER@$SSH_HOST" "$remote_command" < .github/release/strict-readonly-preflight.mjs
+
+      - name: Observe public HTTPS runtime health without bypassing certificate checks
+        run: |
+          set -euo pipefail
+          if response="$(curl --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 20 \
+            -H 'Cache-Control: no-cache' 'https://ecfc.fans/api/health/live')"; then
+            printf '%s' "$response" | node -e '
+              let text="";
+              process.stdin.on("data", chunk => { text += chunk; if(text.length > 16384) process.exit(1) });
+              process.stdin.on("end", () => { try { const d=JSON.parse(text); console.log("PUBLIC_HEALTH_SHA=" + (d.ok === true && /^[0-9a-f]{40}$/.test(d.release) ? d.release : "UNKNOWN")) } catch { console.log("PUBLIC_HEALTH_SHA=UNKNOWN") } });
+            '
+          else
+            echo 'PUBLIC_HEALTH_SHA=UNKNOWN'
+          fi
+
+      - name: Remove temporary credential files on the runner only
+        if: always()
+        run: |
+          rm -f -- "$RUNNER_TEMP/ecfc-strict-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key" \
+            "$RUNNER_TEMP/ecfc-strict-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.hosts"
