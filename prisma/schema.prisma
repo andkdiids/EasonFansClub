@@ -81,6 +81,7 @@ model Activity {
   rewardGrantAt                DateTime?
   rewardPoints                 Int?
   rewardBadgeIds               Json?
+  topicProgram                 Json?
   sortOrder                    Int                            @default(0)
   viewCount                    Int                            @default(0)
   publishedAt                  DateTime?
@@ -108,6 +109,9 @@ model Activity {
   TopicActivityFormReviewLog   TopicActivityFormReviewLog[]
   TopicActivityImageAsset      TopicActivityImageAsset[]
   TopicActivityRewardGrant     TopicActivityRewardGrant[]
+  TopicActivityRewardEntry     TopicActivityRewardEntry[]
+  TopicActivityPollVote        TopicActivityPollVote[]
+  TopicActivityTestAttempt     TopicActivityTestAttempt[]
 
   @@index([status, createdAt])
   @@index([status, startsAt])
@@ -4774,6 +4778,8 @@ model User {
   TopicActivitySubmissions                               TopicActivitySubmission[]          @relation("TopicActivitySubmitter")
   TopicActivityFormSubmissions                           TopicActivityFormSubmission[]      @relation("TopicActivityFormSubmitter")
   TopicActivityParticipations                            TopicActivityParticipation[]       @relation("TopicActivityParticipant")
+  TopicActivityPollVotes                                 TopicActivityPollVote[]            @relation("TopicPollVoter")
+  TopicActivityTestAttempts                              TopicActivityTestAttempt[]         @relation("TopicTestParticipant")
   TopicActivityReviewedSubmissions                       TopicActivitySubmission[]          @relation("TopicActivityReviewer")
   TopicActivityFormReviewedSubmissions                   TopicActivityFormSubmission[]      @relation("TopicActivityFormReviewer")
   TopicActivityReviewSubjects                            TopicActivityReviewLog[]           @relation("TopicActivityReviewSubject")
@@ -6232,6 +6238,8 @@ model TopicActivitySubmission {
   activityId       String
   userId           String
   commentId        String?                       @unique
+  rewardEntryId    String?
+  rewardSnapshot   Json?
   status           TopicActivitySubmissionStatus @default(PENDING)
   submittedAt      DateTime                      @default(now())
   reviewedAt       DateTime?
@@ -6245,10 +6253,13 @@ model TopicActivitySubmission {
   Comment          Reply?                        @relation(fields: [commentId], references: [id], onDelete: SetNull)
   ReviewedBy       User?                         @relation("TopicActivityReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   ReviewLog        TopicActivityReviewLog[]
+  RewardEntry      TopicActivityRewardEntry?     @relation(fields: [rewardEntryId], references: [id], onDelete: Restrict)
+  TaskImageAssets  TopicActivityImageAsset[]     @relation("TopicTaskImages")
 
   @@index([activityId, status, submittedAt])
   @@index([userId, activityId, status])
   @@index([reviewedById, reviewedAt])
+  @@index([activityId, rewardEntryId, userId])
 }
 
 model TopicActivityParticipation {
@@ -6367,16 +6378,19 @@ model TopicActivityImageAsset {
   size             Int
   formSubmissionId String?
   replyId          String?
+  taskSubmissionId String?
   createdAt        DateTime                      @default(now())
   Activity         Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
   UploadedBy       User                          @relation("TopicActivityImageUploader", fields: [uploadedByUserId], references: [id], onDelete: Cascade)
   FormSubmission   TopicActivityFormSubmission?  @relation(fields: [formSubmissionId], references: [id], onDelete: SetNull)
   Reply            TopicActivitySubmissionReply? @relation(fields: [replyId], references: [id], onDelete: SetNull)
+  TaskSubmission   TopicActivitySubmission?      @relation("TopicTaskImages", fields: [taskSubmissionId], references: [id], onDelete: SetNull)
 
   @@index([activityId, purpose, createdAt])
   @@index([uploadedByUserId, activityId, purpose])
   @@index([formSubmissionId])
   @@index([replyId])
+  @@index([taskSubmissionId])
 }
 
 model TopicActivityRewardGrant {
@@ -6384,6 +6398,9 @@ model TopicActivityRewardGrant {
   participationId String
   activityId      String
   userId          String
+  rewardEntryId   String?
+  rewardSnapshot  Json?
+  origin          String                             @default("LEGACY") @db.VarChar(16)
   kind            TopicActivityRewardKind
   badgeId         String?
   points          Int?
@@ -6397,10 +6414,61 @@ model TopicActivityRewardGrant {
   Activity        Activity                           @relation(fields: [activityId], references: [id], onDelete: Cascade)
   User            User                               @relation("TopicActivityRewardRecipient", fields: [userId], references: [id], onDelete: Cascade)
   Badge           Badge?                             @relation(fields: [badgeId], references: [id], onDelete: Restrict)
+  RewardEntry     TopicActivityRewardEntry?          @relation(fields: [rewardEntryId], references: [id], onDelete: Restrict)
 
+  @@unique([activityId, rewardEntryId, userId], map: "TopicReward_activity_entry_user_key")
   @@index([status, createdAt])
   @@index([activityId, status])
   @@index([participationId, status])
   @@index([badgeId])
   @@index([userId, createdAt])
+}
+
+model TopicActivityRewardEntry {
+  id           String                     @id @default(cuid())
+  activityId   String
+  platformKey  String                     @db.VarChar(64)
+  config       Json
+  enabled      Boolean                    @default(true)
+  sortOrder    Int                        @default(0)
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  Activity     Activity                   @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Submissions  TopicActivitySubmission[]
+  RewardGrants TopicActivityRewardGrant[]
+
+  @@index([activityId, enabled, sortOrder])
+}
+
+model TopicActivityPollVote {
+  id            String   @id @default(cuid())
+  activityId    String
+  pollId        String   @db.VarChar(64)
+  userId        String
+  configVersion Int
+  choices       Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  Activity      Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  User          User     @relation("TopicPollVoter", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, pollId, userId], map: "TopicPoll_activity_poll_user_key")
+}
+
+model TopicActivityTestAttempt {
+  id             String   @id @default(cuid())
+  activityId     String
+  testId         String   @db.VarChar(64)
+  userId         String
+  requestKey     String   @db.VarChar(64)
+  configVersion  Int
+  answers        Json
+  resultId       String   @db.VarChar(64)
+  resultSnapshot Json
+  completedAt    DateTime @default(now())
+  Activity       Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  User           User     @relation("TopicTestParticipant", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, userId, requestKey], map: "TopicTest_activity_user_request_key")
+  @@index([activityId, testId, userId, completedAt])
 }

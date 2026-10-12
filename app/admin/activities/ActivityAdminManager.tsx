@@ -10,6 +10,7 @@ import { ActivityLotteryEntry } from '@/components/activities/ActivityLotteryEnt
 import { ActivityRegistrationFormDesigner, type ActivityQuestionDraft } from '@/components/activities/ActivityRegistrationFormDesigner'
 import { ActivityRegistrationManager } from '@/components/activities/ActivityRegistrationManager'
 import { TopicActivityFormDesigner } from '@/components/activities/TopicActivityFormDesigner'
+import { TopicActivityV2Editor } from '@/components/activities/TopicActivityV2Editor'
 import { TopicActivityFormSubmissionManager } from './TopicActivityFormSubmissionManager'
 import { TOPIC_ACTIVITY_FORM_VERSION, type TopicActivityFormSchema } from '@/lib/topic-activity-form'
 import { ActivityTargetedNotificationPanel } from './ActivityTargetedNotificationPanel'
@@ -602,6 +603,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           return Boolean(await save('DRAFT', undefined, { keepEditing: true }))
         }} /></div>
         </> : null}
+        {form.type === 'TOPIC_ACTIVITY' && editingId ? <TopicActivityV2Editor activityId={editingId} disabled={saving || loadingActivityConfig} /> : null}
         <div className="mt-4 flex flex-wrap items-center gap-5 rounded-xl bg-sky-50/70 p-3 dark:bg-slate-800/70">
           <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.isFeatured} onChange={(event) => changeForm('isFeatured', event.target.checked)} />精选</label>
           <label className="flex items-center gap-2 text-sm font-black text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.isPinned} onChange={(event) => changeForm('isPinned', event.target.checked)} />置顶</label>

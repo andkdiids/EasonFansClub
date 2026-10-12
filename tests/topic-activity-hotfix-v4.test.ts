@@ -82,7 +82,7 @@ test('Topic Activity 自动审核/回复通知使用系统身份，普通社交�
   assert.match(formReply, /senderUserId: guard\.user!\.id/)
 })
 
-test('Topic Activity UI 回归保护既有活动模型和 migration，允许其他模块的 additive migration', () => {
+test('Topic Activity V2 additive schema preserves every existing activity field and historical migration', () => {
   // A worktree-wide Prisma prohibition falsely rejects unrelated, legitimate
   // additions such as Cantonese progress. Keep the guard on Topic's own data.
   const gitOptions = { cwd: root, encoding: 'utf8' as const }
@@ -93,15 +93,14 @@ test('Topic Activity UI 回归保护既有活动模型和 migration，允许其�
   assert.equal(migrations.trim(), '')
   const before = execFileSync('git', ['show', 'HEAD:prisma/schema.prisma'], gitOptions)
   const after = read('prisma/schema.prisma')
-  const topicSchema = (schema: string) => {
-    // Git blobs use LF while a Windows checkout can use CRLF. Compare the
-    // exact schema content after normalizing only this transport difference.
-    const normalized = schema.replace(/\r\n/g, '\n')
-    return {
-      modelsAndEnums: [...normalized.matchAll(/^(?:model|enum) (?:TopicActivity\w*|Activity\w*) \{[\s\S]*?^\}/gm)].map((match) => match[0]),
-      relations: normalized.split('\n').filter((line) => /TopicActivity/.test(line)),
-    }
+  const blocks = (schema: string) => new Map([...schema.replace(/\r\n/g, '\n').matchAll(/^(?:model|enum) (\w+) \{([\s\S]*?)^\}/gm)].map((match) => [match[1], match[2].split('\n').map((line) => line.trim().replace(/\s+/g, ' ')).filter(Boolean)]))
+  const oldBlocks = blocks(before), newBlocks = blocks(after)
+  for (const [name, fields] of oldBlocks) {
+    assert.ok(newBlocks.has(name), `existing model/enum ${name} retained`)
+    for (const field of fields) assert.ok(newBlocks.get(name)!.includes(field), `existing field/index unchanged: ${name}.${field}`)
   }
-  assert.ok(topicSchema(before).modelsAndEnums.length > 0)
-  assert.deepEqual(topicSchema(after), topicSchema(before))
+  assert.deepEqual([...newBlocks.keys()].filter((name) => !oldBlocks.has(name)).sort(), ['TopicActivityPollVote', 'TopicActivityRewardEntry', 'TopicActivityTestAttempt'])
+  const additive = read('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql')
+  assert.doesNotMatch(additive, /\b(?:DROP|RENAME|TRUNCATE|DELETE|UPDATE)\s+(?:TABLE|COLUMN|FROM|`)/i)
+  assert.match(additive, /TopicReward_activity_entry_user_key/)
 })

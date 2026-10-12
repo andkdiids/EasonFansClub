@@ -124,6 +124,8 @@ function isPublicPath(pathname: string) {
   // The published activity's form schema contains no user submissions or
   // private data, so anonymous visitors may render the login-gated form UI.
   if (/^\/api\/activities\/[^/]+\/form$/.test(pathname)) return true
+  if (/^\/api\/activities\/[^/]+\/v2$/.test(pathname)) return true
+  if (/^\/api\/activities\/[^/]+\/v2\/(?:poll|test)$/.test(pathname)) return true
   if (publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))) return true
   if (/^\/api\/(?:posts|activities)\/[^/]+\/share-card$/.test(pathname)) return true
   if (/^\/api\/salon\/posts\/[^/]+\/share-card$/.test(pathname)) return true
@@ -148,6 +150,9 @@ function isImmutablePublicPath(pathname: string) {
 
 function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
+  // V2 route handlers authenticate each user/admin action again; this only
+  // lets the established Mobile bearer session reach the shared business API.
+  if (['GET', 'POST', 'PATCH'].includes(request.method) && /^\/api\/(?:admin\/)?activities\/[^/]+\/v2(?:\/.*)?$/.test(pathname)) return true
   if (request.method === 'GET') {
     return pathname === '/api/admin/cantonese/review'
       || pathname === '/api/activities'

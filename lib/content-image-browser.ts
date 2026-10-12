@@ -544,7 +544,7 @@ export type TopicActivityUploadedAsset = {
  * important: the ordinary content-image path intentionally retains its
  * existing 5MB→4MB compression policy.
  */
-export async function uploadTopicActivityImage(file: File, input: { activityId: string; purpose: 'FORM_ANSWER' | 'ADMIN_REPLY' }, onPhase?: (phase: ContentImageUploadPhase) => void) {
+export async function uploadTopicActivityImage(file: File, input: { activityId: string; purpose: 'FORM_ANSWER' | 'ADMIN_REPLY'; rewardEntryId?: string }, onPhase?: (phase: ContentImageUploadPhase) => void) {
   const validation = validateContentImageFileMetadata(file)
   if (!validation.ok) {
     if (validation.code === 'FILE_TOO_LARGE') {
@@ -561,6 +561,7 @@ export async function uploadTopicActivityImage(file: File, input: { activityId: 
   form.set('file', file)
   form.set('activityId', input.activityId)
   form.set('purpose', input.purpose)
+  if (input.rewardEntryId) form.set('rewardEntryId', input.rewardEntryId)
   let response: Response
   try {
     response = await fetch('/api/uploads/topic-activity-image', { method: 'POST', body: form, cache: 'no-store' })

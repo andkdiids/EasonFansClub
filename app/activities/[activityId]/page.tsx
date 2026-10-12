@@ -13,6 +13,7 @@ import { profileImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { getPublicActivityLotteries } from '@/lib/activity-lottery'
 import { resolveTopicSubmissionStatus } from '@/lib/topic-activity'
+import { readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,16 +73,17 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
   const [publishedActivity, viewer] = await Promise.all([
     prisma.activity.findFirst({
       where: { id: activityId, status: 'PUBLISHED' },
-      select: activitySelect,
+      select: { ...activitySelect, topicProgram: true },
     }),
     getCurrentUser(),
   ])
   const activity = publishedActivity || await prisma.activity.findFirst({
     where: { id: activityId, status: 'CANCELLED' },
-    select: activitySelect,
+    select: { ...activitySelect, topicProgram: true },
   })
   if (!activity) notFound()
   const view = serializeActivityRow(activity)
+  const topicV2Enabled = view.type === 'TOPIC_ACTIVITY' && Boolean(readTopicActivityV2Program(activity.topicProgram)?.enabled)
   let shareAuthor = { name: view.organizer || '私家E院', avatarUrl: null as string | null }
   if (activity.createdById) {
     try {
@@ -136,7 +138,7 @@ export default async function ActivityDetailPage({ params }: Readonly<{ params: 
 
   return (
     <main className="site-page-main flat-page mx-auto w-full max-w-[1440px] space-y-5 px-4 py-6 sm:px-5 sm:py-8" style={{ maxWidth: '1440px' }}>
-      <ActivityDetailView activity={view} shareAuthor={shareAuthor} isAuthenticated={Boolean(viewer)} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && activityMaterialAvailable && Boolean(viewer) && registration?.status !== 'ACTIVE' && registration?.status !== 'CANCELLED'} initialTopicParticipation={topicStatus} lotteries={lotteries} />
+      <ActivityDetailView activity={view} shareAuthor={shareAuthor} isAuthenticated={Boolean(viewer)} currentUserId={viewer?.id} topicV2Enabled={topicV2Enabled} initialRegistration={registration ? serializeActivityRegistration(registration) : null} initialQuestions={questions} initialRegistrationState={availability.state} initialCanRegister={availability.canRegister && activityMaterialAvailable && Boolean(viewer) && registration?.status !== 'ACTIVE' && registration?.status !== 'CANCELLED'} initialTopicParticipation={topicStatus} lotteries={lotteries} />
       <p className="text-right text-xs font-bold text-[var(--foreground-muted)]"><ActivityViewCounter activityId={view.id} initialCount={view.viewCount} /></p>
     </main>
   )

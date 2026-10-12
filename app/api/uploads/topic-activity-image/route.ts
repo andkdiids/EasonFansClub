@@ -14,6 +14,7 @@ import {
 } from '@/lib/topic-activity-image-original'
 import { prisma } from '@/lib/prisma'
 import { normalizeTopicActivityFormSchema } from '@/lib/topic-activity-form'
+import { readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -47,6 +48,7 @@ export async function POST(request: Request) {
   try { form = await request.formData() } catch { return jsonError('INVALID_MULTIPART', '图片上传请求无效') }
   const activityId = String(form.get('activityId') || '').trim()
   const purpose = String(form.get('purpose') || '')
+  const rewardEntryId = String(form.get('rewardEntryId') || '').trim()
   const file = form.get('file')
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(activityId)) return jsonError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
   if (purpose !== 'FORM_ANSWER' && purpose !== 'ADMIN_REPLY') return jsonError('INVALID_PURPOSE', '图片用途无效')
@@ -57,12 +59,18 @@ export async function POST(request: Request) {
   if (!metadataValidation.ok) return jsonError(metadataValidation.code, metadataValidation.code === 'FILE_TOO_LARGE' ? TOPIC_ACTIVITY_IMAGE_TOO_LARGE_MESSAGE : metadataValidation.message, metadataValidation.code === 'FILE_TOO_LARGE' ? 413 : 400)
   if (file.size > TOPIC_ACTIVITY_IMAGE_MAX_FILE_SIZE) return jsonError('FILE_TOO_LARGE', TOPIC_ACTIVITY_IMAGE_TOO_LARGE_MESSAGE, 413)
 
-  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, type: true, status: true, startsAt: true, endsAt: true, participationMode: true, allowImageAttachments: true, formSchema: true } })
+  const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, type: true, status: true, startsAt: true, endsAt: true, participationMode: true, allowImageAttachments: true, formSchema: true, topicProgram: true } })
   if (!activity || activity.type !== 'TOPIC_ACTIVITY') return jsonError('ACTIVITY_NOT_FOUND', '话题活动不存在', 404)
   if (purpose === 'FORM_ANSWER') {
     const schema = normalizeTopicActivityFormSchema(activity.formSchema)
     const hasImageField = schema.valid && schema.value.fields.some((field) => field.type === 'IMAGE')
-    if ((!activity.allowImageAttachments && !hasImageField) || !['FORM', 'BOTH'].includes(activity.participationMode)) return jsonError('IMAGES_DISABLED', '该活动暂不接受表单图片', 403)
+    if (rewardEntryId) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(rewardEntryId)) return jsonError('REWARD_ENTRY_NOT_FOUND', '奖励任务不存在', 404)
+      const program = readTopicActivityV2Program(activity.topicProgram)
+      if (!activity.allowImageAttachments) return jsonError('IMAGES_DISABLED', '活动未启用图片附件', 403)
+      const entry = await prisma.topicActivityRewardEntry.findFirst({ where: { id: rewardEntryId, activityId, enabled: true }, select: { id: true } })
+      if (!program?.enabled || !program.platformRewards.enabled || !entry) return jsonError('REWARD_ENTRY_NOT_FOUND', '奖励任务未开放', 404)
+    } else if ((!activity.allowImageAttachments && !hasImageField) || !['FORM', 'BOTH'].includes(activity.participationMode)) return jsonError('IMAGES_DISABLED', '该活动暂不接受表单图片', 403)
     const now = new Date()
     if (activity.status !== 'PUBLISHED' || (activity.startsAt && activity.startsAt > now) || (activity.endsAt && activity.endsAt < now)) return jsonError('FORM_CLOSED', '当前不在表单参与时间内', 409)
   } else {

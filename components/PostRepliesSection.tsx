@@ -31,6 +31,8 @@ import { Pagination } from '@/components/ui/Pagination'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { ReviewConfirmDialog, type ReviewConfirmAction } from '@/components/activities/ReviewConfirmDialog'
+import { TopicActivityV2TaskReview } from '@/components/activities/TopicActivityV2TaskReview'
+import type { TopicActivityV2TaskAsset, TopicActivityV2TaskSubmission } from '@/components/activities/topic-activity-v2-types'
 import { SingleCommentConfirmDialog } from '@/components/activities/SingleCommentConfirmDialog'
 import { parseTopicCommentEligibility, topicCommentBlockMessage, type TopicCommentEligibility } from '@/lib/topic-comment-ui'
 import { matchesTopicReviewFilter, topicReviewCountForFilter, type TopicReviewCounts } from '@/lib/topic-review-filter'
@@ -56,7 +58,7 @@ type ReplyItem = {
   stickerId?: string | null
   stickerUrl?: string | null
   mentions: ReplyMentionView[]
-  topicActivitySubmission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null; alreadyCounted: boolean; formSubmissionCount?: number }
+  topicActivitySubmission?: TopicActivityV2TaskSubmission & { alreadyCounted: boolean; formSubmissionCount?: number }
   author: {
     id: string
     uid: number
@@ -83,6 +85,43 @@ function normalizeReply(value: unknown): ReplyItem | null {
   const reply = value as Partial<ReplyItem>
   if (typeof reply.id !== 'string' || typeof reply.content !== 'string') return null
   const sourceAuthor = reply.author && typeof reply.author === 'object' ? reply.author : unavailableAuthor
+  const rawSubmission = reply.topicActivitySubmission && typeof reply.topicActivitySubmission === 'object' ? reply.topicActivitySubmission as Record<string, unknown> : null
+  const rewardSnapshotRaw = rawSubmission?.rewardSnapshotSafe && typeof rawSubmission.rewardSnapshotSafe === 'object' ? rawSubmission.rewardSnapshotSafe as Record<string, unknown> : null
+  const rawAssets = Array.isArray(rawSubmission?.taskAssets) ? rawSubmission.taskAssets : []
+  const taskAssets: TopicActivityV2TaskAsset[] = rawAssets.flatMap((asset) => {
+    if (!asset || typeof asset !== 'object') return []
+    const source = asset as Record<string, unknown>
+    if (typeof source.assetId !== 'string') return []
+    return [{
+      assetId: source.assetId,
+      previewAccessUrl: typeof source.previewAccessUrl === 'string' ? source.previewAccessUrl : null,
+      thumbnailAccessUrl: typeof source.thumbnailAccessUrl === 'string' ? source.thumbnailAccessUrl : null,
+      originalDownloadUrl: typeof source.originalDownloadUrl === 'string' ? source.originalDownloadUrl : null,
+      url: typeof source.url === 'string' ? source.url : null,
+      thumbnailUrl: typeof source.thumbnailUrl === 'string' ? source.thumbnailUrl : null,
+      mimeType: typeof source.mimeType === 'string' ? source.mimeType : null,
+      width: typeof source.width === 'number' ? source.width : null,
+      height: typeof source.height === 'number' ? source.height : null,
+      size: typeof source.size === 'number' ? source.size : null,
+    }]
+  })
+  const topicActivitySubmission = rawSubmission && typeof rawSubmission.id === 'string' && (rawSubmission.status === 'PENDING' || rawSubmission.status === 'APPROVED' || rawSubmission.status === 'REJECTED' || rawSubmission.status === 'WITHDRAWN')
+    ? {
+        id: rawSubmission.id,
+        status: rawSubmission.status as TopicSubmissionStatus,
+        rejectReason: typeof rawSubmission.rejectReason === 'string' ? rawSubmission.rejectReason : null,
+        alreadyCounted: Boolean(rawSubmission.alreadyCounted),
+        formSubmissionCount: typeof rawSubmission.formSubmissionCount === 'number' ? rawSubmission.formSubmissionCount : undefined,
+        rewardEntryId: typeof rawSubmission.rewardEntryId === 'string' ? rawSubmission.rewardEntryId : null,
+        rewardSnapshotSafe: rewardSnapshotRaw ? {
+          platformName: typeof rewardSnapshotRaw.platformName === 'string' ? rewardSnapshotRaw.platformName : null,
+          title: typeof rewardSnapshotRaw.title === 'string' ? rewardSnapshotRaw.title : null,
+          points: typeof rewardSnapshotRaw.points === 'number' ? rewardSnapshotRaw.points : null,
+          instructions: typeof rewardSnapshotRaw.instructions === 'string' ? rewardSnapshotRaw.instructions : null,
+        } : null,
+        taskAssets,
+        granted: Boolean(rawSubmission.granted),
+      } : undefined
   return {
     id: reply.id,
     content: reply.content,
@@ -97,7 +136,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
     stickerId: typeof reply.stickerId === 'string' ? reply.stickerId : null,
     stickerUrl: typeof reply.stickerUrl === 'string' ? toPublicMediaUrl(reply.stickerUrl) : null,
     mentions: Array.isArray(reply.mentions) ? reply.mentions : [],
-    topicActivitySubmission: reply.topicActivitySubmission && typeof reply.topicActivitySubmission === 'object' ? reply.topicActivitySubmission : undefined,
+    topicActivitySubmission,
     author: {
       ...unavailableAuthor,
       ...sourceAuthor,
@@ -864,7 +903,19 @@ export function PostRepliesSection({
               <DeleteReplyButton replyId={reply.id} confirmDescription={reply.topicActivitySubmission ? '这条评论属于话题活动参与内容。删除后该条参与将撤回；若用户还有其他已通过内容，活动参与仍有效。已发奖励不会自动追回。' : undefined} onDeleted={(result) => removeReply(reply.id, result)} />
             ) : null}
             {topicActivityId && reply.topicActivitySubmission ? (
-              <>
+              reply.topicActivitySubmission.rewardEntryId ? <TopicActivityV2TaskReview
+                activityId={topicActivityId}
+                canReview={canReviewTopicActivity}
+                submission={reply.topicActivitySubmission}
+                onReviewed={(status) => {
+                  const update = (items: ReplyItem[]) => items.map((item) => item.id === reply.id && item.topicActivitySubmission
+                    ? { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, status } }
+                    : item)
+                  setReplies(update)
+                  setMyReplies(update)
+                  void syncReviewCounts()
+                }}
+              /> : <>
                 {reply.topicActivitySubmission.status === 'PENDING' && canReviewTopicActivity ? <>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'APPROVED')} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 disabled:opacity-50">{reviewingSubmissionId === reply.topicActivitySubmission.id ? '处理中…' : '通过'}</button>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'REJECTED')} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 disabled:opacity-50">拒绝</button>

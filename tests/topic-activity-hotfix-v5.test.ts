@@ -63,7 +63,12 @@ function fixture(mode: 'FORM' | 'BOTH' | 'COMMENT', forms: number, scheduled = f
   const reviews: unknown[] = []
   let points = 100
   const tx = {
-    $queryRaw: async () => [],
+    $queryRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => {
+      const query = sql.join('?')
+      if (query.includes('FROM `User`')) return [{ id: 'user-1', points }]
+      if (query.includes('FROM `PointLog`')) return logs.filter((log) => log.businessKey === values[0]).map((_, index) => ({ id: `log-${index}` }))
+      return []
+    },
     topicActivitySubmission: {
       findUnique: async ({ where }: { where: { id: string } }) => submissions.find((row) => row.id === where.id),
       count: async ({ where }: { where: { id?: { not: string } } }) => submissions.filter((row) => row.status === 'APPROVED' && row.id !== where.id?.not && !row.Comment.isDeleted).length,

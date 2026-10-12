@@ -24,9 +24,10 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function TopicActivityImagePicker({ activityId, purpose, assets, onChange, onUploadingChange, maxImages = 9, disabled = false }: {
+export function TopicActivityImagePicker({ activityId, purpose, rewardEntryId, assets, onChange, onUploadingChange, maxImages = 9, disabled = false }: {
   activityId: string
   purpose: 'FORM_ANSWER' | 'ADMIN_REPLY'
+  rewardEntryId?: string
   assets: TopicActivityUploadedAsset[]
   onChange: (assets: TopicActivityUploadedAsset[]) => void
   onUploadingChange?: (uploading: boolean) => void
@@ -52,7 +53,7 @@ export function TopicActivityImagePicker({ activityId, purpose, assets, onChange
     const uploaded: TopicActivityUploadedAsset[] = []
     try {
       for (const file of selected) {
-        const asset = await uploadTopicActivityImage(file, { activityId, purpose }, setPhase)
+        const asset = await uploadTopicActivityImage(file, { activityId, purpose, rewardEntryId }, setPhase)
         uploaded.push(asset)
         setFileDetails((current) => ({ ...current, [asset.assetId]: { name: file.name || '未命名图片', size: file.size } }))
         onChange([...assets, ...uploaded])
