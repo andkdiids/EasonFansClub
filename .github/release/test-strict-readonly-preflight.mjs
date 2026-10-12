@@ -115,6 +115,16 @@ test('secrets are bound to Production after the main-only validation job', () =>
   assert.equal(workflow.jobs.inspect.if, "needs.validate.result == 'success'")
   assert.doesNotMatch(JSON.stringify(workflow.jobs.validate), /secrets\./)
   assert.equal(workflow.jobs.validate.steps[0], guardStep)
+  const expectedSecrets = { SSH_HOST: '${{ secrets.SERVER_HOST }}', SSH_USER: '${{ secrets.SERVER_USER }}',
+    SSH_PORT: '${{ secrets.SERVER_PORT }}', SSH_KEY: '${{ secrets.SERVER_SSH_KEY }}' }
+  for (const [name, reference] of Object.entries(expectedSecrets)) assert.equal(credentialsStep.env[name], reference)
+  for (const name of ['SSH_HOST', 'SSH_USER', 'SSH_PORT']) assert.equal(sshStep.env[name], expectedSecrets[name])
+  assert.equal(credentialsStep.env.PINNED_HOSTS, '${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}')
+  assert.equal(credentialsStep.env.PINNED_FINGERPRINT, '${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}')
+  assert.doesNotMatch(workflowText, /secrets\.PRODUCTION_SSH_/)
+  // Reusing the existing principal changes no command capabilities: no sudo,
+  // alternate SSH user, deployment script or environment secret fallback.
+  assert.doesNotMatch(credentialsStep.run + sshStep.run, /\bsudo\b|PRODUCTION_SSH_USER|SERVER_ROOT|SERVER_ADMIN/)
 })
 test('main dispatch accepted locally', () => assert.equal(bashRun(guardStep.run).status, 0))
 for (const [name, env] of Object.entries({ push: { GITHUB_EVENT_NAME: 'push' }, branch: { GITHUB_REF: 'refs/heads/feature' },
@@ -179,9 +189,23 @@ for (const port of ['invalid', '0', '65536']) {
     assert.equal(result.status, 1)
   })
 }
-test('pinned host refuses missing fingerprint before writing runner credentials', () => {
-  const result = bashRun(credentialsStep.run, { SSH_KEY: 'fixture-not-a-secret', PINNED_HOSTS: 'example.invalid ssh-ed25519 QUJD', PINNED_FINGERPRINT: '' })
-  assert.equal(result.status, 1)
+test('all six missing SSH settings stop before runner credential writes or SSH', () => {
+  const fixtureSettings = { SSH_HOST: 'example.invalid', SSH_USER: 'reader', SSH_PORT: '22', SSH_KEY: 'fixture-not-a-secret',
+    PINNED_HOSTS: 'example.invalid ssh-ed25519 QUJD', PINNED_FINGERPRINT: 'SHA256:QUJD' }
+  for (const name of Object.keys(fixtureSettings)) {
+    const fixtureId = 'missing-' + name
+    const result = bashRun('ssh-keygen() { exit 99; }; ssh() { exit 99; };\n' + credentialsStep.run, {
+      ...fixtureSettings, [name]: '', RUNNER_TEMP: temp.replaceAll('\\', '/'), GITHUB_RUN_ID: fixtureId,
+      GITHUB_RUN_ATTEMPT: '1', GITHUB_OUTPUT: path.join(temp, fixtureId + '-output').replaceAll('\\', '/'),
+    })
+    assert.equal(result.status, 1, name)
+    assert.equal(fs.existsSync(path.join(temp, `ecfc-strict-${fixtureId}-1.key`)), false, name + ' key not written')
+    assert.equal(fs.existsSync(path.join(temp, `ecfc-strict-${fixtureId}-1.hosts`)), false, name + ' hosts not written')
+    assert.equal(fs.existsSync(path.join(temp, fixtureId + '-output')), false, name + ' no output file')
+    assert.doesNotMatch(result.stdout + result.stderr, /fixture-not-a-secret/)
+  }
+  const allMissing = Object.fromEntries(Object.keys(fixtureSettings).map(name => [name, '']))
+  assert.equal(bashRun('ssh-keygen() { exit 99; }; ssh() { exit 99; };\n' + credentialsStep.run, allMissing).status, 1)
 })
 for (const [label, hosts] of Object.entries({ extraKey: 'example.invalid ssh-ed25519 QUJD\nother.invalid ssh-ed25519 QUJD',
   wrongHost: 'other.invalid ssh-ed25519 QUJD', wildcard: '*.invalid ssh-ed25519 QUJD', ca: '@cert-authority example.invalid ssh-ed25519 QUJD' })) {
@@ -199,6 +223,27 @@ test('single pinned host/fingerprint accepted with runner-only mocked key checks
     SSH_KEY: 'fixture-not-a-secret', PINNED_HOSTS: 'example.invalid ssh-ed25519 QUJD', PINNED_FINGERPRINT: 'SHA256:QUJD',
   })
   assert.equal(result.status, 0, result.stderr)
+})
+test('configured IPv4 pin rejects a different SERVER_HOST or SERVER_PORT before credential output', () => {
+  // Only the user-confirmed public address is reused; the key and fingerprint
+  // are synthetic fixtures, not production values. No SSH connection occurs.
+  const host = '43.138.254.68'
+  const fixtures = [
+    { id: 'different-ip', SSH_HOST: '192.0.2.10', SSH_PORT: '22' },
+    { id: 'different-hostname', SSH_HOST: 'fixture.example.invalid', SSH_PORT: '22' },
+    { id: 'different-port', SSH_HOST: host, SSH_PORT: '2222' },
+  ]
+  for (const fixture of fixtures) {
+    const output = path.join(temp, 'address-mismatch-' + fixture.id)
+    const result = bashRun('ssh-keygen() { exit 99; }; ssh() { exit 99; };\n' + credentialsStep.run, {
+      ...fixture, RUNNER_TEMP: temp.replaceAll('\\', '/'), GITHUB_RUN_ID: 'address-' + fixture.id,
+      GITHUB_RUN_ATTEMPT: '1', GITHUB_OUTPUT: output.replaceAll('\\', '/'),
+      SSH_KEY: 'fixture-not-a-secret', PINNED_HOSTS: host + ' ssh-ed25519 QUJD', PINNED_FINGERPRINT: 'SHA256:QUJD',
+    })
+    assert.equal(result.status, 1, fixture.id)
+    assert.equal(fs.existsSync(output), false, fixture.id + ' must not authorize the later SSH step')
+    assert.doesNotMatch(result.stdout + result.stderr, /fixture-not-a-secret/)
+  }
 })
 test('Bash syntax check of every workflow run block', () => {
   for (const step of steps.filter(step => step.run)) {

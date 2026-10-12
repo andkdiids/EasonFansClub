@@ -129,10 +129,10 @@ jobs:
       - name: Prepare credentials and pinned host key on the runner only
         id: ssh
         env:
-          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
-          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
-          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
-          SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
           PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
           PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
         run: |
@@ -161,9 +161,9 @@ jobs:
 
       - name: Stream audited Node source over SSH stdin without a remote file
         env:
-          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
-          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
-          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
           KEY_FILE: ${{ steps.ssh.outputs.key }}
           HOSTS_FILE: ${{ steps.ssh.outputs.hosts }}
           PREFLIGHT_PAYLOAD: ${{ needs.validate.outputs.payload }}
