@@ -1,0 +1,104 @@
+name: Manual MySQL Client Metadata Only
+
+# No arbitrary inputs, automatic events, reusable-workflow or deployment entry.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# Serialize only this diagnostic. Never join a deployment/other diagnostic group:
+# cancel-in-progress:false alone does not protect existing pending runs.
+# API observations below are fail-closed checks, NOT a cross-workflow lock.
+concurrency:
+  group: production-mysql-client-metadata-only
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'andkdiids/EasonFansClub'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout this exact manual main revision without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check invocation and byte-identical approved metadata source
+        run: node .github/release/mysql-client-metadata-runner.mjs guard
+      - name: Install pinned test parsers on this disposable runner only
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/ecfc-metadata-parsers-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --ignore-scripts --no-audit --no-fund --no-package-lock acorn@8.17.0 yaml@2.9.0
+      - name: Run all mock tests without production credentials or SSH
+        run: |
+          set -euo pipefail
+          export PREFLIGHT_PARSER_ROOT="$RUNNER_TEMP/ecfc-metadata-parsers-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/node_modules"
+          bash -n .github/release/mysql-client-metadata-check.sh
+          node --check .github/release/mysql-client-metadata-runner.mjs
+          node .github/release/test-mysql-client-metadata.mjs
+          node --test .github/release/test-mysql-client-metadata-workflow.mjs
+      - name: Reject conflicting production deployments and diagnostics before inspection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/release/mysql-client-metadata-runner.mjs queue
+
+  inspect:
+    needs: validate
+    if: needs.validate.result == 'success' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'andkdiids/EasonFansClub'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    environment:
+      name: Production
+    # No shared scheduler group or server lock is acquired here. A new external
+    # run can start after an API observation; never claim atomic exclusion.
+    steps:
+      - name: Checkout only the exact tested main SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Recheck all known production runs before secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/release/mysql-client-metadata-runner.mjs queue
+      - name: Create private credentials on the runner only
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          node .github/release/mysql-client-metadata-runner.mjs prepare
+      - name: Final queue check immediately before metadata-only SSH
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/release/mysql-client-metadata-runner.mjs queue
+      - name: Stream fixed metadata checks through SSH standard input
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          set +x
+          node .github/release/mysql-client-metadata-runner.mjs guard
+          export KEY_FILE="$RUNNER_TEMP/ecfc-mysql-metadata-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          export HOSTS_FILE="$RUNNER_TEMP/ecfc-mysql-metadata-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.hosts"
+          bash .github/release/mysql-client-metadata-check.sh
+      - name: Always remove only this run's runner-local credential files
+        if: always()
+        run: node .github/release/mysql-client-metadata-runner.mjs cleanup
