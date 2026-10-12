@@ -1,11 +1,6 @@
 name: Configure production entry
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/configure-production-entry.yml
   workflow_dispatch:
 
 permissions:

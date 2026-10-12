@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    # Installing or updating release-control workflows/policies must not
+    # trigger the application deployment. A mixed commit containing app files
+    # still runs because at least one changed path is not ignored.
+    paths-ignore:
+      - '.github/**'
   workflow_dispatch:
 
 permissions:
@@ -11,7 +16,8 @@ permissions:
 
 concurrency:
   group: production-deploy
-  cancel-in-progress: true
+  # Do not cancel a deployment after its atomic current switch has begun.
+  cancel-in-progress: false
 
 env:
   APP_DIR: /home/apps/easonfansclub
@@ -20,8 +26,9 @@ env:
 jobs:
   deploy:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      !contains(github.event.head_commit.message, '[infra-only]')
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      !contains(github.event.head_commit.message, '[infra-only]'))
     name: Deploy production
     runs-on: ubuntu-22.04
     timeout-minutes: 60
