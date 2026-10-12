@@ -8,7 +8,8 @@ import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { APP, SELECT_MIGRATIONS, validateManifest, migrationState, lockObservation, envSubset,
-  databaseTarget, mysqlArgs, migrationRead, releaseSnapshot, rollbackSnapshot, processSnapshots, inspect } from './strict-readonly-preflight.mjs'
+  databaseTarget, mysqlArgs, migrationRead, mysqlFailure, releaseSnapshot, rollbackSnapshot,
+  processStartTicks, processSnapshots, sampleConsistency, inspect } from './strict-readonly-preflight.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 // Reuse existing parser dependencies read-only; never install into the checkout.
@@ -35,19 +36,21 @@ const normalStat = (overrides = {}) => ({ uid: 1000, mode: 0o100600, size: 16, d
   isFile: () => true, isSymbolicLink: () => false, ...overrides })
 const lockStat = normalStat()
 const heldLock = '1: FLOCK ADVISORY WRITE 900 08:01:77 0 EOF\n'
+const procStat = (pid, ticks = '12345') => `${pid} (fixture worker (name)) S ${Array(18).fill('0').join(' ')} ${ticks} 0 0`
 function fixture() {
   const calls = []
   const state = { current: release, marker: sha, locks: '', sql: completeTsv, version: 'mysql Ver 8.0.44 for Linux',
     sqlStatus: 0, login: true, binary: true, healthSha: sha, pids: ['100', '200'], readsDenied: new Set(),
-    files: new Map(), cwd: { 100: release, 200: release }, changedCurrent: false }
+    files: new Map(), cwd: { 100: release, 200: release }, startTicks: { 100: '12345', 200: '23456' }, changedCurrent: false }
   const io = {
     home: '/home/read-only', uid: 1000,
+    now: () => '2026-10-12T00:00:00.000Z',
     stat(value) {
       calls.push(['stat', value])
       if (value === APP + '/current') return normalStat({ isFile: () => false, isSymbolicLink: () => true })
       if (state.files.has(value)) return state.files.get(value)
-      if (value === '/usr/bin/mysql') { if (!state.binary) throw new Error('missing'); return normalStat({ uid: 0, mode: 0o100755 }) }
-      if (value === io.home + '/.mylogin.cnf' && !state.login) throw new Error('missing')
+      if (value === '/usr/bin/mysql') { if (!state.binary) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return normalStat({ uid: 0, mode: 0o100755 }) }
+      if (value === io.home + '/.mylogin.cnf' && !state.login) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
       return normalStat()
     },
     real(value) {
@@ -63,6 +66,7 @@ function fixture() {
       if (state.readsDenied.has(value)) throw new Error('DENIED fakeSensitiveValue')
       if (value.endsWith('/.deployed-sha')) return state.marker
       if (value === '/proc/locks') return state.locks
+      if (value.endsWith('/stat')) return procStat(value.split('/')[2], state.startTicks[value.split('/')[2]])
       if (value.endsWith('/environ')) {
         const name = value.includes('/100/') ? 'easonfansclub' : 'instagram-sync-worker'
         return `name=${name}\0pm_id=1\0pm_cwd=${APP}/current\0DEPLOY_SHA=${sha}\0TOKEN=fakeSensitiveValue\0`
@@ -406,3 +410,317 @@ test('sensitive credential scan contains no real tokens, keys or passwords', () 
 test('source/workflow have no trailing whitespace', () => {
   for (const text of [source, workflowText]) assert.ok(text.split(/\r?\n/).every(line => !/[ \t]+$/.test(line)))
 })
+
+for (const [stage, path, code, reason] of [
+  ['binary', '/usr/bin/mysql', 'ENOENT', 'MYSQL_CLIENT_NOT_FOUND'],
+  ['binary', '/usr/bin/mysql', 'EACCES', 'MYSQL_CLIENT_ACCESS_DENIED'],
+  ['binary', '/usr/bin/mysql', 'EIO', 'MYSQL_CLIENT_UNAVAILABLE'],
+  ['login', '/home/read-only/.mylogin.cnf', 'ENOENT', 'MYSQL_LOGIN_CONFIG_NOT_FOUND'],
+  ['login', '/home/read-only/.mylogin.cnf', 'EPERM', 'MYSQL_LOGIN_CONFIG_ACCESS_DENIED'],
+  ['login', '/home/read-only/.mylogin.cnf', 'EIO', 'MYSQL_LOGIN_CONFIG_UNAVAILABLE'],
+]) {
+  test('granular sanitized metadata failure: ' + stage + ' ' + code, () => {
+    const { io, calls } = fixture(), stat = io.stat
+    io.stat = value => { if (value === path) throw Object.assign(new Error('fakeSensitiveValue'), { code }); return stat(value) }
+    const result = migrationRead(target, manifest.migrations, io)
+    assert.equal(result.reason, reason); assert.equal(result.status, 'UNKNOWN')
+    assert.equal(calls.filter(row => row[0] === 'run').length, 0)
+    assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue|db\.example|\.mylogin/)
+  })
+}
+for (const version of ['mysql Ver 5.7.44', 'mysql Ver 15.1 Distrib 10.11 MariaDB', 'unrecognized fakeSensitiveValue']) {
+  test('unsupported version has precise reason: ' + version.split(' ')[0], () => {
+    const { io, state, calls } = fixture(); state.version = version
+    assert.equal(migrationRead(target, manifest.migrations, io).reason, 'MYSQL_CLIENT_VERSION_UNSUPPORTED')
+    assert.equal(calls.filter(row => row[0] === 'run').length, 1)
+  })
+}
+for (const [code, reason] of [
+  ['2002', 'DATABASE_CONNECTION_FAILED'], ['2003', 'DATABASE_CONNECTION_FAILED'],
+  ['2005', 'DATABASE_CONNECTION_FAILED'], ['2006', 'DATABASE_CONNECTION_FAILED'], ['2013', 'DATABASE_CONNECTION_FAILED'],
+  ['2026', 'DATABASE_TLS_FAILED'], ['1045', 'DATABASE_AUTH_FAILED'], ['1044', 'DATABASE_ACCESS_DENIED'],
+  ['1049', 'FIXED_SELECT_FAILED'], ['1054', 'FIXED_SELECT_FAILED'], ['1064', 'FIXED_SELECT_FAILED'],
+  ['1142', 'FIXED_SELECT_FAILED'], ['1146', 'FIXED_SELECT_FAILED'], ['9999', 'DATABASE_QUERY_FAILURE_UNCLASSIFIED'],
+]) {
+  test('client numeric error redaction: ' + code, () => {
+    const { io } = fixture(), run = io.run
+    io.run = (binary, args, options) => args.includes('--version') ? run(binary, args, options) :
+      { status: 1, stderr: `ERROR ${code} (HY000): fakeSensitiveValue mysql://private\n`, stdout: 'fakeSensitiveValue' }
+    const result = migrationRead(target, manifest.migrations, io)
+    assert.equal(result.reason, reason); assert.equal(result.status, 'UNKNOWN')
+    assert.equal(result.loginPathConfigured, 'UNKNOWN')
+    assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue|mysql:\/\/|HY000/)
+  })
+}
+test('arbitrary client text cannot be mistaken for TLS or missing named login path', () => {
+  for (const stderr of ['password TLS failure fakeSensitiveValue', 'login path ecfc_readonly_preflight missing', 'ERROR 2026not-an-error']) {
+    assert.equal(mysqlFailure({ status: 1, stderr }, 'FIXED_SELECT'), 'DATABASE_QUERY_FAILURE_UNCLASSIFIED')
+  }
+})
+for (const [stage, code, reason] of [
+  ['version', 'ETIMEDOUT', 'MYSQL_VERSION_TIMEOUT'], ['version', 'ENOENT', 'MYSQL_VERSION_EXECUTION_UNAVAILABLE'],
+  ['query', 'ETIMEDOUT', 'FIXED_SELECT_TIMEOUT'], ['query', 'EACCES', 'FIXED_SELECT_EXECUTION_UNAVAILABLE'],
+]) {
+  test('spawn failure is safe and stage-specific: ' + stage + ' ' + code, () => {
+    const { io } = fixture(), run = io.run
+    io.run = (binary, args, options) => (args.includes('--version') === (stage === 'version')) ?
+      { status: null, error: Object.assign(new Error('fakeSensitiveValue'), { code }), stderr: 'fakeSensitiveValue' } : run(binary, args, options)
+    assert.equal(migrationRead(target, manifest.migrations, io).reason, reason)
+  })
+}
+test('unsafe login owner, symlink or unreadable mode skipped, never reconfigured', () => {
+  for (const value of [normalStat({ uid: 0 }), normalStat({ isSymbolicLink: () => true }), normalStat({ mode: 0o100000 })]) {
+    const { io, state, calls } = fixture(); state.files.set(io.home + '/.mylogin.cnf', value)
+    assert.equal(migrationRead(target, manifest.migrations, io).reason, 'MYSQL_LOGIN_PERMISSIONS_UNSAFE')
+    assert.equal(calls.filter(row => row[0] === 'run').length, 0)
+  }
+})
+test('unavailable or unsafe HOME cannot select another login configuration', () => {
+  for (const home of ['', '../private', '/home with spaces']) {
+    const { io, calls } = fixture(); io.home = home
+    assert.equal(migrationRead(target, manifest.migrations, io).reason, 'MYSQL_LOGIN_LOCATION_UNKNOWN')
+    assert.equal(calls.filter(row => row[0] === 'run').length, 0)
+  }
+})
+test('successful exit with malformed fixed SELECT never reports migration success', () => {
+  const { io, state } = fixture(); state.sql = 'fakeSensitiveValue'
+  assert.deepEqual(migrationRead(target, manifest.migrations, io), { status: 'UNKNOWN', reason: 'MIGRATION_RESPONSE_INVALID' })
+})
+test('DB gating explains lock, rollback and configuration unavailability independently', async () => {
+  const locked = fixture(); locked.state.locks = heldLock
+  assert.equal((await inspect(manifest, locked.io)).migrations.reason, 'DATABASE_CHECK_SKIPPED_LOCK_NOT_CLEAR')
+  const incomplete = fixture(); incomplete.state.files.set(release + '/.next/BUILD_ID', normalStat({ size: 0 }))
+  assert.equal((await inspect(manifest, incomplete.io)).migrations.reason, 'DATABASE_CHECK_SKIPPED_ROLLBACK_UNVERIFIED')
+  const unavailable = fixture(); unavailable.state.readsDenied.add(APP + '/shared/.env')
+  assert.equal((await inspect(manifest, unavailable.io)).migrations.reason, 'DATABASE_CONFIGURATION_UNAVAILABLE')
+})
+
+test('stat parser handles parenthesized command name and preserves integer precision', () => {
+  assert.equal(processStartTicks(procStat('100', '90071992547409933'), '100'), '90071992547409933')
+  for (const raw of ['200 (other) S 0', procStat('100', 'secret'), '100 malformed']) assert.equal(processStartTicks(raw, '100'), 'UNKNOWN')
+})
+test('PID reuse within one process sample cannot be called stable', async () => {
+  const { io } = fixture(), read = io.read; let reads = 0
+  io.read = value => value === '/proc/100/stat' ? procStat('100', (++reads % 2) ? '123' : '456') : read(value)
+  const result = await inspect(manifest, io)
+  assert.equal(result.consistency.state, 'UNSTABLE')
+  assert.ok(result.consistency.changed.includes('PROCESS_IDENTITY_WITHIN_SAMPLE'))
+  assert.equal(result.webCwdMatch, 'UNKNOWN')
+})
+test('unreadable start time means unknown identity, not an invented timestamp', async () => {
+  const { io, state } = fixture(); state.readsDenied.add('/proc/200/stat')
+  const result = await inspect(manifest, io)
+  assert.equal(result.processes.rows[1].startTicks, 'UNKNOWN')
+  assert.equal(result.consistency.state, 'UNKNOWN'); assert.equal(result.snapshotStable, 'UNKNOWN')
+})
+test('same endpoint samples have explicit window and are never atomic/continuous', async () => {
+  const { io } = fixture(); let times = 0
+  io.now = () => ++times === 1 ? '2026-10-12T00:00:00.000Z' : '2026-10-12T00:00:05.000Z'
+  const result = await inspect(manifest, io)
+  assert.equal(result.consistency.state, 'REPEATED_SAMPLES_MATCH')
+  assert.equal(result.consistency.durationMs, 5000)
+  assert.equal(result.consistency.scope, 'ENDPOINT_SAMPLES_NOT_CONTINUOUS')
+  assert.equal(result.consistency.atomic, false); assert.equal(result.snapshotAtomic, false)
+})
+for (const [name, mutate, reason] of [
+  ['PID disappearance', state => { state.pids = ['100'] }, 'OBSERVED_PROCESSES'],
+  ['PID start ticks', state => { state.startTicks[100] = '98765' }, 'OBSERVED_PROCESSES'],
+  ['cwd', state => { state.cwd[200] = APP + '/releases/old' }, 'OBSERVED_PROCESSES'],
+  ['health SHA', state => { state.healthSha = 'a'.repeat(40) }, 'HEALTH_SHA'],
+  ['lock holder', state => { state.locks = heldLock }, 'DEPLOY_LOCK'],
+  ['release SHA', state => { state.marker = 'b'.repeat(40) }, 'CURRENT_RELEASE'],
+]) {
+  test('window detects change: ' + name, async () => {
+    const { io, state } = fixture(), run = io.run
+    io.run = (binary, args, options) => { const result = run(binary, args, options); if (!args.includes('--version')) mutate(state); return result }
+    const result = await inspect(manifest, io)
+    assert.equal(result.consistency.state, 'UNSTABLE'); assert.ok(result.consistency.changed.includes(reason))
+    assert.equal(result.snapshotStable, false); assert.match(result.releaseDecision, /^NO_GO/)
+  })
+}
+test('lock replacement with no holders is still a changed observation', async () => {
+  const { io, state } = fixture(), run = io.run
+  io.run = (binary, args, options) => { const result = run(binary, args, options); if (!args.includes('--version')) state.files.set(APP + '/.deploy.lock', normalStat({ ino: 78 })); return result }
+  assert.ok((await inspect(manifest, io)).consistency.changed.includes('DEPLOY_LOCK'))
+})
+test('unknown or backward check clock is not stable', async () => {
+  const absent = fixture(); delete absent.io.now
+  assert.equal((await inspect(manifest, absent.io)).consistency.state, 'UNKNOWN')
+  const backward = fixture(); let count = 0
+  backward.io.now = () => ++count === 1 ? '2026-10-12T00:00:05.000Z' : '2026-10-12T00:00:00.000Z'
+  assert.ok((await inspect(manifest, backward.io)).consistency.changed.includes('CLOCK_MOVED_BACKWARDS'))
+})
+test('health is sampled twice and untrusted health payload is redacted', async () => {
+  const { io } = fixture(); let count = 0
+  io.health = async () => ++count === 1 ? sha : 'fakeSensitiveValue'
+  const result = await inspect(manifest, io)
+  assert.equal(count, 2); assert.equal(result.endSample.healthSha, 'UNKNOWN')
+  assert.equal(result.consistency.state, 'UNKNOWN'); assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue/)
+})
+test('partial process visibility cannot establish whole-snapshot stability', async () => {
+  const { io, state } = fixture(); state.readsDenied.add('/proc/200/environ')
+  const result = await inspect(manifest, io)
+  assert.equal(result.consistency.state, 'UNKNOWN'); assert.equal(result.webCwdMatch, 'UNKNOWN')
+  assert.equal(result.markerHealthMatch, true) // independently observed matching SHA, not PM2 health
+})
+test('PM2 socket/version and actual Worker task state remain unproven, never safe to reload', async () => {
+  const { io, calls } = fixture(), result = await inspect(manifest, io)
+  assert.equal(result.pm2WebStatus, 'UNKNOWN'); assert.equal(result.pm2WorkerStatus, 'UNKNOWN')
+  assert.equal(result.workerActiveTasks, 'UNKNOWN'); assert.equal(result.workerSafeToReload, 'UNKNOWN')
+  assert.equal(result.workerObservability.lease, 'NOT_QUERIED'); assert.equal(result.workerObservability.runningLogs, 'NOT_QUERIED')
+  assert.ok(calls.filter(row => row[0] === 'run').every(row => row[1] === '/usr/bin/mysql'))
+  assert.doesNotMatch(source, /import.+(?:pm2|net|instagram|prisma)|connect\s*\(|SAFE_TO_RELOAD.*YES/)
+})
+test('per-process diagnostic row uses explicit field whitelist, not PM2 env or arbitrary stat', () => {
+  const { io } = fixture(), row = processSnapshots(io, { target: release, sha }).rows[0]
+  assert.deepEqual(Object.keys(row).sort(), ['name', 'pid', 'pmId', 'cwd', 'deleted', 'startTicks', 'identityStable',
+    'currentRelease', 'olderRelease', 'deploySha', 'configuredCwd', 'configuredCwdMatchesCurrent', 'evidence'].sort())
+  assert.doesNotMatch(JSON.stringify(row), /fakeSensitiveValue|fixture worker/)
+})
+test('nonzero version command cannot proceed to SELECT or leak its output', () => {
+  const { io, calls } = fixture()
+  io.run = () => { calls.push(['mock-version']); return { status: 1, stdout: 'fakeSensitiveValue', stderr: 'fakeSensitiveValue' } }
+  const result = migrationRead(target, manifest.migrations, io)
+  assert.equal(result.reason, 'MYSQL_CLIENT_VERSION_UNAVAILABLE')
+  assert.equal(calls.filter(row => row[0] === 'mock-version').length, 1)
+  assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue/)
+})
+test('thrown client execution error is sanitized without fallback commands', () => {
+  const { io } = fixture(); let count = 0
+  io.run = () => { count++; throw new Error('fakeSensitiveValue') }
+  const result = migrationRead(target, manifest.migrations, io)
+  assert.equal(result.reason, 'MYSQL_CLIENT_EXECUTION_UNAVAILABLE'); assert.equal(count, 1)
+  assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue/)
+})
+test('changed process environment identity is sampled, never exported wholesale', async () => {
+  const { io } = fixture(), read = io.read; let count = 0
+  io.read = value => { const raw = read(value); return value === '/proc/100/environ' && ++count === 2 ? raw.replace('pm_id=1', 'pm_id=2') : raw }
+  const result = await inspect(manifest, io)
+  assert.ok(result.consistency.changed.includes('OBSERVED_PROCESSES'))
+  assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue/)
+})
+test('supported MySQL 8.4 keeps the existing fixed read-only SELECT contract', () => {
+  const { io, state, calls } = fixture(); state.version = 'mysql Ver 8.4.6 for Linux'
+  assert.equal(migrationRead(target, manifest.migrations, io).status, 'UP_TO_DATE')
+  assert.equal(calls.filter(row => row[0] === 'run').at(-1)[2].at(-1), '--execute=' + SELECT_MIGRATIONS)
+})
+test('invalid clock output is not exported and cannot imply a stable window', async () => {
+  const { io } = fixture(); io.now = () => 'fakeSensitiveValue'
+  const result = await inspect(manifest, io)
+  assert.equal(result.consistency.startedAt, 'UNKNOWN'); assert.equal(result.consistency.endedAt, 'UNKNOWN')
+  assert.equal(result.consistency.state, 'UNKNOWN'); assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue/)
+})
+
+function matchingBoundarySamples() {
+  const { io } = fixture()
+  const first = { current: { target: release, sha }, healthSha: sha,
+    lock: lockObservation(lockStat, ''), processes: processSnapshots(io, { target: release, sha }) }
+  return [first, copy(first)]
+}
+const boundaryConsistency = (first, last) => sampleConsistency(first, last,
+  '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:01.000Z')
+for (const [label, value] of Object.entries({ unknown: 'UNKNOWN', missing: undefined, null: null,
+  empty: '', outside: '/tmp/private', parent: APP + '/releases/..', nested: release + '/child' })) {
+  test('Phase1 boundary CURRENT_RELEASE rejects target: ' + label, () => {
+    for (const sides of [[0], [1], [0, 1]]) {
+      const samples = matchingBoundarySamples()
+      for (const side of sides) samples[side].current.target = value
+      const result = boundaryConsistency(...samples)
+      assert.equal(result.state, 'UNKNOWN'); assert.ok(result.unknown.includes('CURRENT_RELEASE'))
+      assert.equal(result.atomic, false); assert.equal(result.scope, 'ENDPOINT_SAMPLES_NOT_CONTINUOUS')
+    }
+  })
+}
+for (const [label, value] of Object.entries({ unknown: 'UNKNOWN', missing: undefined, null: null,
+  empty: '', short: '635ae4a0', uppercase: sha.toUpperCase(), arbitrary: 'fakeSensitiveValue' })) {
+  test('Phase1 boundary CURRENT_RELEASE rejects SHA: ' + label, () => {
+    for (const sides of [[0], [1], [0, 1]]) {
+      const samples = matchingBoundarySamples()
+      for (const side of sides) samples[side].current.sha = value
+      const result = boundaryConsistency(...samples)
+      assert.equal(result.state, 'UNKNOWN'); assert.ok(result.unknown.includes('CURRENT_RELEASE'))
+    }
+  })
+}
+for (const [label, value] of Object.entries({ missing: undefined, null: null, empty: {},
+  missingDevice: { inode: '77' }, missingInode: { device: '2049' },
+  unknownDevice: { device: 'UNKNOWN', inode: '77' }, unknownInode: { device: '2049', inode: 'UNKNOWN' },
+  negativeDevice: { device: '-1', inode: '77' }, zeroInode: { device: '2049', inode: '0' },
+  fractional: { device: '2049', inode: '77.5' }, numeric: { device: 2049, inode: 77 },
+  noncanonical: { device: '02049', inode: '077' } })) {
+  test('Phase1 boundary DEPLOY_LOCK rejects identity: ' + label, () => {
+    for (const sides of [[0], [1], [0, 1]]) {
+      const samples = matchingBoundarySamples()
+      for (const side of sides) samples[side].lock.identity = value
+      const result = boundaryConsistency(...samples)
+      assert.equal(result.state, 'UNKNOWN'); assert.ok(result.unknown.includes('DEPLOY_LOCK'))
+      assert.equal(result.atomic, false)
+    }
+  })
+}
+test('Phase1 boundary known release and canonical lock identity still match', () => {
+  const result = boundaryConsistency(...matchingBoundarySamples())
+  assert.equal(result.state, 'REPEATED_SAMPLES_MATCH'); assert.deepEqual(result.unknown, [])
+  assert.equal(result.atomic, false); assert.equal(result.scope, 'ENDPOINT_SAMPLES_NOT_CONTINUOUS')
+})
+test('Phase1 boundary invalid lock status is not evidence despite valid identity', () => {
+  const samples = matchingBoundarySamples(); samples.forEach(s => { s.lock.state = 'UNVERIFIED' })
+  assert.ok(boundaryConsistency(...samples).unknown.includes('DEPLOY_LOCK'))
+})
+test('Phase1 boundary lock metadata rejects negative device and invalid inode', () => {
+  for (const identity of [{ dev: -1 }, { ino: 0 }, { ino: -1 }]) {
+    assert.equal(lockObservation(normalStat(identity), '').state, 'UNKNOWN')
+  }
+})
+test('Phase1 boundary full inspect remains NO_GO even when all endpoint samples match', async () => {
+  const { io } = fixture(), result = await inspect(manifest, io)
+  assert.equal(result.consistency.state, 'REPEATED_SAMPLES_MATCH')
+  assert.equal(result.snapshotAtomic, false)
+  assert.equal(result.releaseDecision, 'NO_GO_UNTIL_UNKNOWN_PM2_AND_OTHER_CRITICAL_CHECKS_RESOLVED')
+})
+
+const privateDbFixture = 'mysql' + '://fixture_user:fakeSensitiveValue@db.example.invalid:3306/ecfc'
+for (const scenario of ['binaryMetadata', 'loginMetadata', 'metadataMethod', 'configurationRead', 'configurationParse',
+  'versionThrow', 'versionNonzero', 'versionUnsupported', 'queryThrow', 'queryNonzero', 'queryError',
+  'queryNull', 'queryKilled', 'queryStderrConversion', 'queryMalformedRows', 'queryNonStringRows']) {
+  test('Phase1 DB exception output contains only sanitized codes: ' + scenario, async () => {
+    const { io } = fixture(), stat = io.stat, read = io.read, run = io.run
+    io.stat = value => {
+      if ((scenario === 'binaryMetadata' && value === '/usr/bin/mysql') ||
+        (scenario === 'loginMetadata' && value === io.home + '/.mylogin.cnf')) {
+        throw Object.assign(new Error(privateDbFixture), { code: privateDbFixture })
+      }
+      if (scenario === 'metadataMethod' && value === '/usr/bin/mysql') return normalStat({ isFile() { throw new Error(privateDbFixture) } })
+      return stat(value)
+    }
+    io.read = value => {
+      if (value === APP + '/shared/.env') {
+        if (scenario === 'configurationRead') throw new Error(privateDbFixture)
+        if (scenario === 'configurationParse') return 'DATABASE_URL="' + privateDbFixture + '%ZZ"'
+      }
+      return read(value)
+    }
+    io.run = (binary, args, options) => {
+      if (args.includes('--version')) {
+        if (scenario === 'versionThrow') throw new Error(privateDbFixture)
+        if (scenario === 'versionNonzero') return { status: 1, stderr: privateDbFixture, stdout: privateDbFixture }
+        if (scenario === 'versionUnsupported') return { status: 0, stdout: privateDbFixture }
+      } else {
+        if (scenario === 'queryThrow') throw new Error(privateDbFixture)
+        if (scenario === 'queryNonzero') return { status: 1, stderr: 'ERROR 2026 (HY000): ' + privateDbFixture }
+        if (scenario === 'queryError') return { status: null, error: Object.assign(new Error(privateDbFixture), { code: privateDbFixture }) }
+        if (scenario === 'queryNull') return null
+        if (scenario === 'queryKilled') return { status: null, signal: privateDbFixture, stderr: privateDbFixture }
+        if (scenario === 'queryStderrConversion') return { status: 1, stderr: { toString() { throw new Error(privateDbFixture) } } }
+        if (scenario === 'queryMalformedRows') return { status: 0, stdout: privateDbFixture, stderr: privateDbFixture }
+        if (scenario === 'queryNonStringRows') return { status: 0, stdout: { privateDbFixture }, stderr: privateDbFixture }
+      }
+      return run(binary, args, options)
+    }
+    const result = await inspect(manifest, io)
+    assert.equal(result.migrations.status, 'UNKNOWN')
+    assert.match(result.migrations.reason, /^[A-Z][A-Z_]+$/)
+    assert.doesNotMatch(JSON.stringify(result), /fakeSensitiveValue|fixture_user|db\.example\.invalid|mysql:\/\//)
+    assert.equal(result.releaseDecision, 'NO_GO_UNTIL_UNKNOWN_PM2_AND_OTHER_CRITICAL_CHECKS_RESOLVED')
+  })
+}
