@@ -1,0 +1,622 @@
+name: Manual SHA-Pinned Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_sha:
+        description: Exact full SHA listed in the protected release policy
+        required: true
+        type: string
+      expected_production_sha:
+        description: Exact live production SHA the release is allowed to replace
+        required: true
+        type: string
+      approved_rc_branch:
+        description: Exact release branch listed in the protected release policy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+# Share the same group as deploy.yml. Never cancel a running production run;
+# use the standard pending queue. The server-side flock remains the final lock.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  APP_DIR: /home/apps/easonfansclub
+  APP_PORT: "3000"
+  PRODUCTION_DOMAIN: ecfc.fans
+
+jobs:
+  validate:
+    name: Validate the immutable release request
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      approved_sha: ${{ steps.inputs.outputs.approved_sha }}
+      expected_production_sha: ${{ steps.inputs.outputs.expected_production_sha }}
+      approved_rc_branch: ${{ steps.inputs.outputs.approved_rc_branch }}
+      expected_migration_count: ${{ steps.policy.outputs.expected_migration_count }}
+    steps:
+      - name: Require manual dispatch from the default branch and validate input shape
+        id: inputs
+        shell: bash
+        env:
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          APPROVED_RC_BRANCH: ${{ inputs.approved_rc_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || { echo "::error::Manual dispatch only."; exit 1; }
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Run this release workflow from main only."; exit 1; }
+          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::approved_sha must be a full lowercase 40-character SHA."; exit 1; }
+          [[ "$EXPECTED_PRODUCTION_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::expected_production_sha must be a full lowercase 40-character SHA."; exit 1; }
+          [[ "$APPROVED_RC_BRANCH" =~ ^release/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "::error::approved_rc_branch is not an allowed release branch name."; exit 1; }
+          {
+            printf 'approved_sha=%s\n' "$APPROVED_SHA"
+            printf 'expected_production_sha=%s\n' "$EXPECTED_PRODUCTION_SHA"
+            printf 'approved_rc_branch=%s\n' "$APPROVED_RC_BRANCH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the workflow and release policy from main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Require the Production environment to allow only the main branch
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const api = process.env.GITHUB_API_URL
+          const repository = process.env.GITHUB_REPOSITORY
+          const token = process.env.GITHUB_TOKEN
+          const headers = {
+            accept: 'application/vnd.github+json',
+            authorization: 'Bearer ' + token,
+            'x-github-api-version': '2022-11-28',
+          }
+          async function get(path) {
+            const response = await fetch(api + path, { headers })
+            if (!response.ok) throw new Error('environment protection configuration unavailable')
+            return response.json()
+          }
+          async function main() {
+            const environment = await get('/repos/' + repository + '/environments/Production')
+            // Single-maintainer policy: dispatch permission is the human gate.
+            // Reviewers, wait timers and self-review settings are not required.
+            if (!environment.deployment_branch_policy || environment.deployment_branch_policy.custom_branch_policies !== true) {
+              throw new Error('Production environment must restrict deployment branches to main')
+            }
+            const policies = await get('/repos/' + repository + '/environments/Production/deployment-branch-policies')
+            const branches = policies.branch_policies || []
+            if (branches.length !== 1 || branches[0].name !== 'main' || branches[0].type !== 'branch') {
+              throw new Error('Production environment deployment policy must allow only main')
+            }
+            console.log('REQUIRED_REVIEWERS=NOT_REQUIRED_SINGLE_MAINTAINER')
+            console.log('ENVIRONMENT_BRANCH_POLICY=main')
+          }
+          main().catch(error => {
+            console.error('::error::' + error.message)
+            process.exitCode = 1
+          })
+          NODE
+
+      - name: Verify the remote RC head, ancestry, exact file allowlist, and no-migration policy
+        id: policy
+        shell: bash
+        env:
+          APPROVED_SHA: ${{ steps.inputs.outputs.approved_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ steps.inputs.outputs.expected_production_sha }}
+          APPROVED_RC_BRANCH: ${{ steps.inputs.outputs.approved_rc_branch }}
+        run: |
+          set -euo pipefail
+          guard_output="$(bash .github/release/approved-release-guard.sh validate \
+            "$APPROVED_SHA" "$EXPECTED_PRODUCTION_SHA" "$APPROVED_RC_BRANCH")"
+          printf '%s\n' "$guard_output"
+          migration_count="$(printf '%s\n' "$guard_output" | sed -n 's/^MIGRATION_REPO_COUNT=//p' | tail -n 1)"
+          [[ "$migration_count" =~ ^[0-9]+$ ]] || { echo "::error::Migration count was not verified."; exit 1; }
+          printf 'expected_migration_count=%s\n' "$migration_count" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse another queued or running production deployment
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const api = process.env.GITHUB_API_URL
+          const repository = process.env.GITHUB_REPOSITORY
+          const token = process.env.GITHUB_TOKEN
+          const currentRun = String(process.env.GITHUB_RUN_ID)
+          const protectedPaths = new Set([
+            '.github/workflows/deploy.yml',
+            '.github/workflows/production-release-approved.yml',
+            '.github/workflows/configure-production-entry.yml',
+          ])
+          async function main() {
+            const conflicts = []
+            for (const status of ['in_progress', 'queued', 'waiting', 'requested']) {
+              for (let page = 1; page <= 10; page++) {
+                const url = new URL(api + '/repos/' + repository + '/actions/runs')
+                url.searchParams.set('status', status)
+                url.searchParams.set('per_page', '100')
+                url.searchParams.set('page', String(page))
+                const response = await fetch(url, {
+                  headers: {
+                    accept: 'application/vnd.github+json',
+                    authorization: 'Bearer ' + token,
+                    'x-github-api-version': '2022-11-28',
+                  },
+                })
+                if (!response.ok) throw new Error('active workflow status could not be verified')
+                const result = await response.json()
+                const runs = result.workflow_runs || []
+                for (const run of runs) {
+                  if (String(run.id) === currentRun) continue
+                  const workflowPath = String(run.path || '').split('@', 1)[0]
+                  if (protectedPaths.has(workflowPath)) conflicts.push({ id: run.id, path: run.path, status: run.status })
+                }
+                if (runs.length < 100) break
+              }
+            }
+            if (conflicts.length) throw new Error('another production deployment is queued or running')
+            console.log('OTHER_PRODUCTION_DEPLOYMENTS=NONE')
+          }
+          main().catch(error => {
+            console.error('::error::' + error.message)
+            process.exitCode = 1
+          })
+          NODE
+
+  release:
+    name: Release the approved SHA to Production
+    needs: validate
+    if: needs.validate.result == 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      actions: read
+      deployments: write
+    environment:
+      name: Production
+      url: https://ecfc.fans
+    steps:
+      - name: Checkout the approved release-control workflow and policy
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Checkout the exact approved RC commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.approved_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Recheck RC HEAD and immutable release policy immediately before production checks
+        shell: bash
+        env:
+          APPROVED_SHA: ${{ needs.validate.outputs.approved_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ needs.validate.outputs.expected_production_sha }}
+          APPROVED_RC_BRANCH: ${{ needs.validate.outputs.approved_rc_branch }}
+          RELEASE_REPO_DIR: ${{ github.workspace }}/candidate
+          APPROVED_RELEASE_POLICY: ${{ github.workspace }}/.github/release-policies/production-topic-activity-v612.json
+        run: |
+          set -euo pipefail
+          bash .github/release/approved-release-guard.sh validate \
+            "$APPROVED_SHA" "$EXPECTED_PRODUCTION_SHA" "$APPROVED_RC_BRANCH"
+
+      - name: Prepare pinned production SSH identity
+        id: ssh
+        shell: bash
+        env:
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PRODUCTION_SSH_HOST_KEY_SHA256: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          for value in "$PRODUCTION_SSH_HOST" "$PRODUCTION_SSH_USER" "$PRODUCTION_SSH_PORT" "$PRODUCTION_SSH_KEY" "$PRODUCTION_SSH_KNOWN_HOSTS" "$PRODUCTION_SSH_HOST_KEY_SHA256"; do
+            [[ -n "$value" ]] || { echo "::error::Production environment SSH configuration is incomplete."; exit 1; }
+          done
+          [[ "$PRODUCTION_SSH_HOST" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Unsupported production SSH host format."; exit 1; }
+          [[ "$PRODUCTION_SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::Unsupported production SSH user format."; exit 1; }
+          [[ "$PRODUCTION_SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$PRODUCTION_SSH_PORT >= 1 && 10#$PRODUCTION_SSH_PORT <= 65535 )) || { echo "::error::Unsupported production SSH port."; exit 1; }
+          [[ "$PRODUCTION_SSH_HOST_KEY_SHA256" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]] || { echo "::error::Pinned SSH host fingerprint is invalid."; exit 1; }
+          install -d -m 700 "$HOME/.ssh"
+          key_file="$RUNNER_TEMP/ecfc-production-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          known_hosts="$RUNNER_TEMP/ecfc-production-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.known_hosts"
+          printf '%s\n' "$PRODUCTION_SSH_KEY" | tr -d '\r' > "$key_file"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$known_hosts"
+          chmod 600 "$key_file" "$known_hosts"
+          ssh-keygen -lf "$known_hosts" -E sha256 | awk '{print $2}' | grep -Fx -- "$PRODUCTION_SSH_HOST_KEY_SHA256" >/dev/null || {
+            echo "::error::Configured SSH known-host key does not match the pinned SHA256 fingerprint."
+            exit 1
+          }
+          printf 'key_file=%s\nknown_hosts=%s\n' "$key_file" "$known_hosts" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm current public HTTPS health still serves the expected production SHA
+        shell: bash
+        env:
+          EXPECTED_PRODUCTION_SHA: ${{ needs.validate.outputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          url="https://${PRODUCTION_DOMAIN}/api/health/live"
+          response="$(curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error \
+            --connect-timeout 10 --max-time 20 "$url")"
+          printf '%s' "$response" | node -e '
+            let raw = "";
+            process.stdin.on("data", chunk => raw += chunk);
+            process.stdin.on("end", () => {
+              try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+              catch { process.exit(1); }
+            });
+          ' "$EXPECTED_PRODUCTION_SHA" || { echo "::error::Public health SHA does not match expected production."; exit 1; }
+          echo "PUBLIC_HEALTH_SHA_MATCH=YES"
+
+      - name: Read-only server, PM2, worker lease, and migration preflight
+        id: live_preflight
+        timeout-minutes: 12
+        shell: bash
+        env:
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          EXPECTED_PRODUCTION_SHA: ${{ needs.validate.outputs.expected_production_sha }}
+          EXPECTED_MIGRATION_COUNT: ${{ needs.validate.outputs.expected_migration_count }}
+        run: |
+          set -euo pipefail
+          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
+          ssh_options=(
+            -i "$KEY_FILE" -p "$PRODUCTION_SSH_PORT"
+            -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=2
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          set +e
+          output="$(timeout --foreground --signal=TERM --kill-after=15s 10m \
+            ssh "${ssh_options[@]}" "$remote" bash -s -- \
+              "$APP_DIR" "$EXPECTED_PRODUCTION_SHA" "$EXPECTED_MIGRATION_COUNT" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          expected_sha="$2"
+          expected_migration_count="$3"
+          fail() { printf 'PREFLIGHT=NOT_READY\nREASON=%s\n' "$1"; exit 1; }
+          [[ "$app_dir" == /home/apps/easonfansclub ]] || fail APP_PATH_MISMATCH
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || fail EXPECTED_SHA_INVALID
+          [[ "$expected_migration_count" =~ ^[0-9]+$ ]] || fail MIGRATION_COUNT_INVALID
+          command -v flock >/dev/null 2>&1 || fail FLOCK_UNAVAILABLE
+          command -v pm2 >/dev/null 2>&1 || fail PM2_UNAVAILABLE
+          [[ -f "$app_dir/.deploy.lock" && ! -L "$app_dir/.deploy.lock" ]] || fail DEPLOY_LOCK_UNAVAILABLE
+          exec 8< "$app_dir/.deploy.lock" || fail DEPLOY_LOCK_UNAVAILABLE
+          flock -s -n 8 || fail DEPLOYMENT_IN_PROGRESS
+          current_link="$app_dir/current"
+          [[ -L "$current_link" ]] || fail CURRENT_NOT_SYMLINK
+          current_target="$(readlink -f -- "$current_link" 2>/dev/null || true)"
+          [[ "$current_target" == "$app_dir"/releases/* && -d "$current_target" ]] || fail CURRENT_RELEASE_UNAVAILABLE
+          live_sha="$(tr -d '[:space:]' < "$current_target/.deployed-sha" 2>/dev/null || true)"
+          [[ "$live_sha" == "$expected_sha" ]] || fail LIVE_SHA_MISMATCH
+          printf 'CURRENT_RELEASE=%s\nPRODUCTION_SHA=%s\n' "$current_target" "$live_sha"
+          # The currently running baseline is the exact rollback target for
+          # this deployment, not an unrelated older shared/previous-release.
+          for required_file in package.json ecosystem.config.js .next/BUILD_ID .env; do
+            [[ -r "$current_target/$required_file" && -s "$current_target/$required_file" ]] || fail ROLLBACK_RELEASE_INCOMPLETE
+          done
+          [[ -d "$current_target/node_modules" ]] || fail ROLLBACK_DEPENDENCIES_UNAVAILABLE
+          printf 'ROLLBACK_RELEASE=%s\nROLLBACK_SHA=%s\n' "$current_target" "$live_sha"
+
+          pm2_json="$(pm2 jlist 2>/dev/null)" || fail PM2_STATUS_UNAVAILABLE
+          for app_name in easonfansclub instagram-sync-worker; do
+            snapshot="$(printf '%s' "$pm2_json" | node -e '
+              let raw = "";
+              process.stdin.on("data", chunk => raw += chunk);
+              process.stdin.on("end", () => {
+                try {
+                  const app = JSON.parse(raw).find(row => row.name === process.argv[1]);
+                  if (!app) process.exit(2);
+                  const env = app.pm2_env || {};
+                  process.stdout.write(JSON.stringify({
+                    status: env.status || "",
+                    pid: Number(app.pid || env.pid || 0),
+                    cwd: env.pm_cwd || "",
+                  }));
+                } catch { process.exit(2); }
+              });
+            ' "$app_name")" || fail PM2_PROCESS_STATE_UNKNOWN
+            status="$(printf '%s' "$snapshot" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>process.stdout.write(JSON.parse(d).status))')"
+            pid="$(printf '%s' "$snapshot" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>process.stdout.write(String(JSON.parse(d).pid)))')"
+            configured_cwd="$(printf '%s' "$snapshot" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>process.stdout.write(JSON.parse(d).cwd))')"
+            [[ "$status" == online && "$pid" =~ ^[1-9][0-9]* && "$configured_cwd" == "$current_link" ]] || fail PM2_PROCESS_NOT_HEALTHY
+            process_cwd="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
+            process_cwd="${process_cwd% (deleted)}"
+            [[ -n "$process_cwd" && -d "$process_cwd" ]] || fail PM2_PROCESS_CWD_UNAVAILABLE
+            if [[ "$app_name" == easonfansclub ]]; then
+              [[ "$(readlink -f -- "$process_cwd")" == "$current_target" ]] || fail WEB_PM2_CWD_MISMATCH
+              printf 'PM2_WEB=ONLINE\nPM2_WEB_PID=%s\nPM2_WEB_CWD=%s\n' "$pid" "$process_cwd"
+            else
+              case "$process_cwd" in "$app_dir"/releases/*) ;; *) fail WORKER_CWD_OUTSIDE_RELEASES ;; esac
+              printf 'WORKER=ONLINE\nWORKER_PID=%s\nWORKER_ACTUAL_CWD=%s\nWORKER_RELOAD=NO\n' "$pid" "$process_cwd"
+            fi
+          done
+
+          node - "$current_target" "$expected_migration_count" <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const { spawnSync } = require('node:child_process')
+          const release = process.argv[2]
+          const expectedCount = Number(process.argv[3])
+          const output = (key, value) => console.log(key + '=' + value)
+          const fail = reason => { output('PREFLIGHT', 'NOT_READY'); output('REASON', reason); process.exit(1) }
+          async function main() {
+            let databaseUrl
+            try {
+              const dotenv = require(path.join(release, 'node_modules', 'dotenv'))
+              const parsed = dotenv.parse(fs.readFileSync(path.join(release, '.env'), 'utf8'))
+              databaseUrl = parsed.DATABASE_URL
+            } catch { fail('DATABASE_CONFIGURATION_UNAVAILABLE') }
+            if (!databaseUrl) fail('DATABASE_CONFIGURATION_UNAVAILABLE')
+            process.env.DATABASE_URL = databaseUrl
+            let PrismaClient
+            try { ({ PrismaClient } = require(path.join(release, 'node_modules', '@prisma', 'client'))) }
+            catch { fail('PRISMA_CLIENT_UNAVAILABLE') }
+            const cli = spawnSync(path.join(release, 'node_modules', '.bin', 'prisma'),
+              ['migrate', 'status', '--schema', path.join(release, 'prisma', 'schema.prisma')],
+              { cwd: release, env: { ...process.env, DATABASE_URL: databaseUrl, CI: '1', NO_COLOR: '1' }, encoding: 'utf8', timeout: 120000, maxBuffer: 1024 * 1024 })
+            const statusText = (cli.stdout || '') + '\n' + (cli.stderr || '')
+            const statusOkay = !cli.error && cli.status === 0 && /database schema is up to date|all migrations have been successfully applied/i.test(statusText)
+            if (!statusOkay) fail('DATABASE_MIGRATION_STATUS_NOT_UP_TO_DATE')
+            const migrationsDir = path.join(release, 'prisma', 'migrations')
+            const repoMigrations = fs.readdirSync(migrationsDir, { withFileTypes: true })
+              .filter(entry => entry.isDirectory() && fs.existsSync(path.join(migrationsDir, entry.name, 'migration.sql')))
+              .map(entry => entry.name)
+            if (repoMigrations.length !== expectedCount) fail('PRODUCTION_MIGRATION_TREE_COUNT_MISMATCH')
+            const db = new PrismaClient({ log: [] })
+            try {
+              const rows = await db.$queryRaw`SELECT migration_name AS migrationName, finished_at AS finishedAt, rolled_back_at AS rolledBackAt FROM _prisma_migrations`
+              const applied = new Set(rows.filter(row => row.finishedAt && !row.rolledBackAt).map(row => String(row.migrationName)))
+              const failed = rows.filter(row => !row.finishedAt && !row.rolledBackAt).length
+              const pending = repoMigrations.filter(name => !applied.has(name)).length
+              const repoSet = new Set(repoMigrations)
+              const divergence = [...applied].filter(name => !repoSet.has(name)).length
+              if (failed || pending || divergence || applied.size !== expectedCount) fail('DATABASE_MIGRATION_COUNTS_NOT_CLEAN')
+              output('MIGRATION_STATUS', 'UP_TO_DATE')
+              output('MIGRATION_REPO_COUNT', repoMigrations.length)
+              output('MIGRATION_APPLIED_COUNT', applied.size)
+              output('MIGRATION_PENDING_COUNT', pending)
+              output('MIGRATION_FAILED', 'NO')
+              output('MIGRATION_DIVERGENCE', 'NO')
+              const states = await db.socialSyncState.findMany({
+                where: { platform: 'INSTAGRAM' },
+                select: { lockUntil: true },
+              })
+              if (!states.length) fail('WORKER_LEASE_STATE_UNKNOWN')
+              const activeLeases = states.filter(state => state.lockUntil && state.lockUntil > new Date()).length
+              output('WORKER_ACTIVE_LEASES', activeLeases)
+              output('WORKER_LEASE_STATE', 'KNOWN')
+            } catch (error) {
+              if (error && error.message && error.message.startsWith('WORKER_')) fail(error.message)
+              fail('DATABASE_READ_ONLY_DIAGNOSTIC_FAILED')
+            } finally {
+              await db.$disconnect().catch(() => {})
+            }
+          }
+          main().catch(() => fail('READ_ONLY_DIAGNOSTIC_FAILED'))
+          NODE
+          printf 'READ_ONLY_PREFLIGHT=PASS\n'
+          REMOTE
+          )"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          exit "$status"
+
+      - name: Recheck RC head, production health, and deployment serialization immediately before deploy
+        shell: bash
+        env:
+          APPROVED_SHA: ${{ needs.validate.outputs.approved_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ needs.validate.outputs.expected_production_sha }}
+          APPROVED_RC_BRANCH: ${{ needs.validate.outputs.approved_rc_branch }}
+          RELEASE_REPO_DIR: ${{ github.workspace }}/candidate
+          APPROVED_RELEASE_POLICY: ${{ github.workspace }}/.github/release-policies/production-topic-activity-v612.json
+          GITHUB_TOKEN: ${{ github.token }}
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+        run: |
+          set -euo pipefail
+          bash .github/release/approved-release-guard.sh validate \
+            "$APPROVED_SHA" "$EXPECTED_PRODUCTION_SHA" "$APPROVED_RC_BRANCH"
+          node <<'NODE'
+          const api = process.env.GITHUB_API_URL
+          const repository = process.env.GITHUB_REPOSITORY
+          const token = process.env.GITHUB_TOKEN
+          const currentRun = String(process.env.GITHUB_RUN_ID)
+          const protectedPaths = new Set([
+            '.github/workflows/deploy.yml',
+            '.github/workflows/production-release-approved.yml',
+            '.github/workflows/configure-production-entry.yml',
+          ])
+          async function main() {
+            for (const status of ['in_progress', 'queued', 'waiting', 'requested']) {
+              for (let page = 1; page <= 10; page++) {
+                const url = new URL(api + '/repos/' + repository + '/actions/runs')
+                url.searchParams.set('status', status)
+                url.searchParams.set('per_page', '100')
+                url.searchParams.set('page', String(page))
+                const response = await fetch(url, { headers: {
+                  accept: 'application/vnd.github+json',
+                  authorization: 'Bearer ' + token,
+                  'x-github-api-version': '2022-11-28',
+                } })
+                if (!response.ok) throw new Error('deployment queue could not be verified')
+                const runs = (await response.json()).workflow_runs || []
+                for (const run of runs) {
+                  const workflowPath = String(run.path || '').split('@', 1)[0]
+                  if (String(run.id) !== currentRun && protectedPaths.has(workflowPath)) {
+                    throw new Error('another production workflow is queued or running')
+                  }
+                }
+                if (runs.length < 100) break
+              }
+            }
+            console.log('LAST_MOMENT_DEPLOYMENT_QUEUE=EMPTY')
+          }
+          main().catch(error => {
+            console.error('::error::' + error.message)
+            process.exitCode = 1
+          })
+          NODE
+          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
+          ssh -i "$KEY_FILE" -p "$PRODUCTION_SSH_PORT" -o BatchMode=yes \
+            -o ConnectTimeout=20 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS" \
+            "$remote" bash -s -- "$APP_DIR" "$EXPECTED_PRODUCTION_SHA" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          expected_sha="$2"
+          [[ "$app_dir" == /home/apps/easonfansclub && "$expected_sha" =~ ^[0-9a-f]{40}$ ]]
+          target="$(readlink -f -- "$app_dir/current" 2>/dev/null || true)"
+          [[ "$target" == "$app_dir"/releases/* && -d "$target" ]]
+          [[ "$(tr -d '[:space:]' < "$target/.deployed-sha" 2>/dev/null || true)" == "$expected_sha" ]]
+          REMOTE
+
+      - name: Deploy only the approved SHA using scripts from that exact commit
+        id: deploy
+        timeout-minutes: 45
+        shell: bash
+        env:
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          DEPLOY_SHA: ${{ needs.validate.outputs.approved_sha }}
+          EXPECTED_PRODUCTION_SHA: ${{ needs.validate.outputs.expected_production_sha }}
+          APPROVED_RC_BRANCH: ${{ needs.validate.outputs.approved_rc_branch }}
+        run: |
+          set -euo pipefail
+          bash .github/release/approved-release-guard.sh validate \
+            "$DEPLOY_SHA" "$EXPECTED_PRODUCTION_SHA" "$APPROVED_RC_BRANCH"
+          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
+          ssh_options=(
+            -i "$KEY_FILE" -p "$PRODUCTION_SSH_PORT"
+            -o BatchMode=yes -o ConnectTimeout=30 -o ConnectionAttempts=3
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          set +e
+          deploy_output="$(cat candidate/scripts/deploy-safety.sh candidate/scripts/deploy-production-git.sh \
+            | timeout --foreground --signal=TERM --kill-after=7m 35m \
+              ssh "${ssh_options[@]}" "$remote" bash -s -- \
+                "$APP_DIR" "$APP_PORT" "$DEPLOY_SHA" easonfansclub "$GITHUB_REPOSITORY" "$EXPECTED_PRODUCTION_SHA")"
+          deploy_status=$?
+          set -e
+          printf '%s\n' "$deploy_output"
+          candidate_release="$(printf '%s\n' "$deploy_output" | sed -n 's/^DEPLOY_CANDIDATE_RELEASE=//p' | tail -n 1)"
+          if [[ "$candidate_release" =~ ^/home/apps/easonfansclub/releases/[^/]+$ ]]; then
+            printf 'candidate_release=%s\n' "$candidate_release" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$deploy_status"
+
+      - name: Verify public HTTPS serves the exact approved SHA
+        id: public_health
+        timeout-minutes: 5
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ needs.validate.outputs.approved_sha }}
+        run: |
+          set -euo pipefail
+          url="https://${PRODUCTION_DOMAIN}/api/health/live"
+          for attempt in 1 2 3 4 5; do
+            response="$(curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error \
+              --connect-timeout 10 --max-time 20 "$url" 2>/dev/null || true)"
+            if printf '%s' "$response" | node -e '
+              let raw = "";
+              process.stdin.on("data", chunk => raw += chunk);
+              process.stdin.on("end", () => {
+                try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+                catch { process.exit(1); }
+              });
+            ' "$DEPLOY_SHA"; then
+              echo "PUBLIC_HEALTH_SHA=$DEPLOY_SHA"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Public HTTPS did not serve the exact approved SHA."
+          exit 1
+
+      - name: Guarded rollback after deploy or public-health failure
+        id: rollback
+        if: ${{ always() && steps.deploy.outcome != 'skipped' && steps.deploy.outputs.candidate_release != '' && (steps.deploy.outcome != 'success' || steps.public_health.outcome != 'success') }}
+        timeout-minutes: 16
+        shell: bash
+        env:
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          DEPLOY_SHA: ${{ needs.validate.outputs.approved_sha }}
+          DEPLOY_CANDIDATE_RELEASE: ${{ steps.deploy.outputs.candidate_release }}
+        run: |
+          set -euo pipefail
+          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
+          output="$(cat candidate/scripts/deploy-safety.sh candidate/scripts/rollback-production-git.sh \
+            | timeout --foreground --signal=TERM --kill-after=60s 14m \
+              ssh -i "$KEY_FILE" -p "$PRODUCTION_SSH_PORT" \
+                -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile="$KNOWN_HOSTS" "$remote" bash -s -- \
+                  "$APP_DIR" "$DEPLOY_SHA" "$DEPLOY_CANDIDATE_RELEASE" easonfansclub "$GITHUB_REPOSITORY" "$APP_PORT")"
+          printf '%s\n' "$output"
+          verified_sha="$(printf '%s\n' "$output" | sed -n 's/^ROLLBACK_VERIFIED_SHA=//p' | tail -n 1)"
+          [[ "$verified_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Rollback SHA could not be verified."; exit 1; }
+          printf 'verified_sha=%s\n' "$verified_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify public HTTPS serves the verified rollback SHA
+        if: ${{ always() && steps.rollback.outcome == 'success' }}
+        timeout-minutes: 5
+        shell: bash
+        env:
+          ROLLBACK_SHA: ${{ steps.rollback.outputs.verified_sha }}
+        run: |
+          set -euo pipefail
+          url="https://${PRODUCTION_DOMAIN}/api/health/live"
+          for attempt in 1 2 3 4 5; do
+            response="$(curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error \
+              --connect-timeout 10 --max-time 20 "$url" 2>/dev/null || true)"
+            if printf '%s' "$response" | node -e '
+              let raw = "";
+              process.stdin.on("data", chunk => raw += chunk);
+              process.stdin.on("end", () => {
+                try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+                catch { process.exit(1); }
+              });
+            ' "$ROLLBACK_SHA"; then
+              echo "ROLLBACK_PUBLIC_HEALTH_SHA=$ROLLBACK_SHA"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Public HTTPS did not serve the verified rollback SHA."
+          exit 1
