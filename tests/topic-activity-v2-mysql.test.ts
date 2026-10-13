@@ -51,6 +51,8 @@ test('V2 real MySQL: additive migration, legacy compatibility and concurrent led
       const oldLog = await prisma.$queryRawUnsafe('SELECT * FROM PointLog ORDER BY id')
       const sql = await readFile('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql', 'utf8')
       for (const statement of sql.split(';').map((part) => part.replace(/^--[^\n]*\n/gmu, '').trim()).filter(Boolean)) await prisma.$executeRawUnsafe(statement)
+      const lotterySql = await readFile('prisma/migrations/20261013120000_add_topic_activity_v2_lottery/migration.sql', 'utf8')
+      for (const statement of lotterySql.split(';').map((part) => part.replace(/^--[^\n]*\n/gmu, '').trim()).filter(Boolean)) await prisma.$executeRawUnsafe(statement)
       assert.deepEqual(await snap(), before)
       assert.deepEqual(await prisma.$queryRawUnsafe('SELECT * FROM PointLog ORDER BY id'), oldLog)
       const old = await prisma.topicActivityRewardGrant.findUniqueOrThrow({ where: { id: 'v2qa-old-grant' } })

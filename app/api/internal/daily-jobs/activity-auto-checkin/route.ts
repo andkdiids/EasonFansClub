@@ -6,6 +6,8 @@ import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 import { expireUserBadges } from '@/lib/badge-expiration'
 import { scanSustainedBadgeQualifications } from '@/lib/aspirin-badge'
 import { dispatchDueTopicActivityRewards, expireTopicActivityPins } from '@/lib/topic-activity'
+import { drawDueTopicLotteries } from '@/lib/topic-activity-v2-lottery'
+import { deliverTopicLotteryNotices, purgeExpiredTopicLotteryPII } from '@/lib/topic-activity-v2-lottery-fulfillment'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,7 +34,7 @@ export async function POST(request: Request) {
   const batchSize = requestedBatchSize === undefined ? undefined : Math.min(Math.max(Math.trunc(requestedBatchSize), 1), 500)
   const startedAt = Date.now()
   try {
-    const [expirationResult, checkInResult, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicPinResult] = await Promise.all([
+    const [expirationResult, checkInResult, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicPinResult, topicLotteryResult] = await Promise.all([
       expireUserBadges(),
       autoCheckInEndedActivityRegistrations({ activityId, batchSize }),
       drawDueActivityLotteries({ activityId, batchSize: batchSize ? Math.min(batchSize, 200) : undefined }),
@@ -40,8 +42,10 @@ export async function POST(request: Request) {
       scanSustainedBadgeQualifications(),
       dispatchDueTopicActivityRewards({ batchSize }),
       expireTopicActivityPins(),
+      drawDueTopicLotteries({ activityId, batchSize }),
     ])
-    const result = { ...checkInResult, lottery: lotteryResult, activityBadgeRewards: badgeRewardResult, badgeExpiration: expirationResult, sustainedBadgeQualifications: sustainedQualificationResult, topicActivityRewards: topicRewardResult, topicActivityPins: topicPinResult }
+    const [topicLotteryNotices, topicLotteryPii] = await Promise.all([deliverTopicLotteryNotices({ activityId, batchSize }), purgeExpiredTopicLotteryPII({ batchSize })])
+    const result = { ...checkInResult, lottery: lotteryResult, activityBadgeRewards: badgeRewardResult, badgeExpiration: expirationResult, sustainedBadgeQualifications: sustainedQualificationResult, topicActivityRewards: topicRewardResult, topicActivityPins: topicPinResult, topicLottery: topicLotteryResult, topicLotteryNotices, topicLotteryPii }
     console.info('[daily-job.activity-auto-checkin.completed]', {
       event: 'daily_job.completed',
       jobKey: 'activity-auto-checkin',

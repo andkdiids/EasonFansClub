@@ -9,6 +9,7 @@ export const adminPermissionGroups = [
   { key: 'checkin_manage', label: '每日挂号管理', description: '查看签到记录、补签和重置签到。' },
   { key: 'daily_message_manage', label: '病友留言管理', description: '删除、精选和管理留言互动。' },
   { key: 'activity_manage', label: '活动中心管理', description: '创建、编辑、发布、取消和删除活动。' },
+  { key: 'activity_lottery_shipping', label: '活动抽奖收件/发货', description: '查看实物抽奖收件信息并更新发货状态。' },
   { key: 'material_redemption_manage', label: '物料兑换管理', description: '维护限时物料、库存、兑换订单、核销与退款。' },
   { key: 'music_manage', label: 'EasMusic 管理', description: '维护音乐专辑、歌曲资料和播放来源预留信息。' },
   { key: 'rating_manage', label: '歌·颂管理', description: '查看评分统计并删除违规歌·颂评价。' },

@@ -61,6 +61,7 @@ export function fixture(entries = [rewardEntry('weibo')]) {
     topicActivityRewardEntry: table('entries'), topicActivityImageAsset: table('assets'), topicActivityFormSubmission: table('forms'),
     topicActivityReviewLog: table('reviews'), adminActionLog: table('audits'), pointLog: table('logs'),
     topicActivityPollVote: table('votes'), topicActivityTestAttempt: table('attempts'), badge: { findUnique: async () => ({ isEnabled: true, isActive: true }) },
+    topicActivityLottery: { findUnique: async () => null },
   }
   function submission(id: string, entry = entries[0]) {
     const row = { id, activityId: activity.id, userId: 'user-one', commentId: 'comment-' + id, rewardEntryId: entry.id, rewardSnapshot: structuredClone(entry), submittedAt: instant,

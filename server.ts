@@ -342,15 +342,17 @@ async function start() {
     if (activityAutoCheckInRunning) return
     activityAutoCheckInRunning = true
     try {
-      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }, { expireUserBadges }, { scanSustainedBadgeQualifications }, { dispatchDueTopicActivityRewards, expireTopicActivityPins }] = await Promise.all([
+      const [{ autoCheckInEndedActivityRegistrations }, { drawDueActivityLotteries }, { grantEligibleActivityBadges }, { expireUserBadges }, { scanSustainedBadgeQualifications }, { dispatchDueTopicActivityRewards, expireTopicActivityPins }, { drawDueTopicLotteries }, { deliverTopicLotteryNotices, purgeExpiredTopicLotteryPII }] = await Promise.all([
         import('./lib/activity-registration'),
         import('./lib/activity-lottery'),
         import('./lib/activity-badge-rewards'),
         import('./lib/badge-expiration'),
         import('./lib/aspirin-badge'),
         import('./lib/topic-activity'),
+        import('./lib/topic-activity-v2-lottery'),
+        import('./lib/topic-activity-v2-lottery-fulfillment'),
       ])
-      const [expirationResult, result, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicPinResult] = await Promise.all([
+      const [expirationResult, result, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicPinResult, topicLotteryResult] = await Promise.all([
         expireUserBadges(),
         autoCheckInEndedActivityRegistrations({ batchSize: 100 }),
         drawDueActivityLotteries({ batchSize: 200 }),
@@ -358,8 +360,12 @@ async function start() {
         scanSustainedBadgeQualifications(),
         dispatchDueTopicActivityRewards({ batchSize: 200 }),
         expireTopicActivityPins(),
+        drawDueTopicLotteries({ batchSize: 50 }),
       ])
-      if (expirationResult.expiredCount || expirationResult.clearedEquippedCount || result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed || sustainedQualificationResult.evaluated || sustainedQualificationResult.granted || sustainedQualificationResult.restored || sustainedQualificationResult.grayed || sustainedQualificationResult.revoked || sustainedQualificationResult.failed || topicRewardResult.processed || topicPinResult.unpinned) {
+      // Results commit before notices; retryable outbox and retention use the
+      // existing heartbeat, without a new worker/service/workflow.
+      const [topicLotteryNotices, topicLotteryPii] = await Promise.all([deliverTopicLotteryNotices({ batchSize: 100 }), purgeExpiredTopicLotteryPII({ batchSize: 100 })])
+      if (expirationResult.expiredCount || expirationResult.clearedEquippedCount || result.scanned || result.failed || lotteryResult.scanned || lotteryResult.failed || badgeRewardResult.scannedActivities || badgeRewardResult.granted || badgeRewardResult.failed || sustainedQualificationResult.evaluated || sustainedQualificationResult.granted || sustainedQualificationResult.restored || sustainedQualificationResult.grayed || sustainedQualificationResult.revoked || sustainedQualificationResult.failed || topicRewardResult.processed || topicPinResult.unpinned || topicLotteryResult.scanned || topicLotteryNotices.scanned || topicLotteryPii.scanned) {
         console.info('[activities.auto-check-in.completed]', {
           event: 'activities.auto_check_in.completed',
           badgeExpiration: expirationResult,
@@ -371,6 +377,9 @@ async function start() {
           sustainedBadgeQualifications: sustainedQualificationResult,
           topicActivityRewards: topicRewardResult,
           topicActivityPins: topicPinResult,
+          topicLottery: topicLotteryResult,
+          topicLotteryNotices,
+          topicLotteryPii,
         })
       }
     } catch (error) {

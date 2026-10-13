@@ -46,62 +46,62 @@ model Achievement {
 }
 
 model Activity {
-  id                           String                         @id @default(cuid())
+  id                           String                            @id @default(cuid())
   title                        String
-  subtitle                     String?                        @db.VarChar(300)
-  description                  String                         @db.Text
-  type                         ActivityType                   @default(OTHER)
-  status                       ActivityStatus                 @default(DRAFT)
+  subtitle                     String?                           @db.VarChar(300)
+  description                  String                            @db.Text
+  type                         ActivityType                      @default(OTHER)
+  status                       ActivityStatus                    @default(DRAFT)
   coverUrl                     String?
   bannerUrl                    String?
-  locationName                 String?                        @db.VarChar(300)
-  locationAddress              String?                        @db.VarChar(500)
-  onlineUrl                    String?                        @db.VarChar(500)
+  locationName                 String?                           @db.VarChar(300)
+  locationAddress              String?                           @db.VarChar(500)
+  onlineUrl                    String?                           @db.VarChar(500)
   pointsReward                 Int?
-  registrationFee              Int                            @default(0)
-  feeDescription               String?                        @db.Text
+  registrationFee              Int                               @default(0)
+  feeDescription               String?                           @db.Text
   signupLimit                  Int?
-  signupCount                  Int                            @default(0)
+  signupCount                  Int                               @default(0)
   startsAt                     DateTime?
   endsAt                       DateTime?
   registrationStartAt          DateTime?
   registrationEndAt            DateTime?
-  verificationMode             ActivityVerificationMode       @default(NONE)
-  organizer                    String?                        @db.VarChar(160)
-  contactInfo                  String?                        @db.VarChar(500)
-  isFeatured                   Boolean                        @default(false)
-  isPinned                     Boolean                        @default(false)
-  pinToPlaza                   Boolean                        @default(false)
-  activityPostId               String?                        @unique
-  participationRule            String?                        @db.Text
-  participationMode            TopicActivityParticipationMode @default(COMMENT)
-  allowImageAttachments        Boolean                        @default(false)
+  verificationMode             ActivityVerificationMode          @default(NONE)
+  organizer                    String?                           @db.VarChar(160)
+  contactInfo                  String?                           @db.VarChar(500)
+  isFeatured                   Boolean                           @default(false)
+  isPinned                     Boolean                           @default(false)
+  pinToPlaza                   Boolean                           @default(false)
+  activityPostId               String?                           @unique
+  participationRule            String?                           @db.Text
+  participationMode            TopicActivityParticipationMode    @default(COMMENT)
+  allowImageAttachments        Boolean                           @default(false)
   formSchema                   Json?
-  rewardGrantMode              TopicActivityRewardGrantMode   @default(IMMEDIATE)
+  rewardGrantMode              TopicActivityRewardGrantMode      @default(IMMEDIATE)
   rewardGrantAt                DateTime?
   rewardPoints                 Int?
   rewardBadgeIds               Json?
   topicProgram                 Json?
-  sortOrder                    Int                            @default(0)
-  viewCount                    Int                            @default(0)
+  sortOrder                    Int                               @default(0)
+  viewCount                    Int                               @default(0)
   publishedAt                  DateTime?
   createdById                  String?
   updatedById                  String?
-  createdAt                    DateTime                       @default(now())
-  updatedAt                    DateTime                       @updatedAt
-  CreatedBy                    User?                          @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  UpdatedBy                    User?                          @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt                    DateTime                          @default(now())
+  updatedAt                    DateTime                          @updatedAt
+  CreatedBy                    User?                             @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  UpdatedBy                    User?                             @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   ActivityFavorite             ActivityFavorite[]
   ActivityRegistration         ActivityRegistration[]
-  ActivityNotificationBatches  ActivityNotificationBatch[]    @relation("ActivityNotificationBatches")
-  Notifications                Notification[]                 @relation("ActivityNotifications")
+  ActivityNotificationBatches  ActivityNotificationBatch[]       @relation("ActivityNotificationBatches")
+  Notifications                Notification[]                    @relation("ActivityNotifications")
   ActivityRegistrationQuestion ActivityRegistrationQuestion[]
   ActivityReward               ActivityReward[]
-  linkedMaterial               MaterialRedemption?            @relation("ActivityMaterialLink")
-  MaterialRedemptionOrders     MaterialRedemptionOrder[]      @relation("MaterialOrderLinkedActivity")
+  linkedMaterial               MaterialRedemption?               @relation("ActivityMaterialLink")
+  MaterialRedemptionOrders     MaterialRedemptionOrder[]         @relation("MaterialOrderLinkedActivity")
   Lottery                      Lottery[]
-  Topics                       Topic[]                        @relation("ActivityTopics")
-  ActivityPost                 Post?                          @relation("ActivityPost", fields: [activityPostId], references: [id], onDelete: SetNull)
+  Topics                       Topic[]                           @relation("ActivityTopics")
+  ActivityPost                 Post?                             @relation("ActivityPost", fields: [activityPostId], references: [id], onDelete: SetNull)
   TopicActivitySubmission      TopicActivitySubmission[]
   TopicActivityFormSubmission  TopicActivityFormSubmission[]
   TopicActivityParticipation   TopicActivityParticipation[]
@@ -112,6 +112,10 @@ model Activity {
   TopicActivityRewardEntry     TopicActivityRewardEntry[]
   TopicActivityPollVote        TopicActivityPollVote[]
   TopicActivityTestAttempt     TopicActivityTestAttempt[]
+  TopicLottery                 TopicActivityLottery?
+  TopicLotteryEligibility      TopicActivityLotteryEligibility[]
+  TopicLotteryDraw             TopicActivityLotteryDraw?
+  TopicLotteryAudit            TopicActivityLotteryAudit[]
 
   @@index([status, createdAt])
   @@index([status, startsAt])
@@ -2423,6 +2427,7 @@ model Lottery {
   LotteryEntry       LotteryEntry[]
   LotteryPrize       LotteryPrize[]
   CandidateSnapshots ActivityLotteryCandidateSnapshot[]
+  TopicLottery       TopicActivityLottery?
 
   @@index([activityId])
   @@index([activityId, status, drawAt])
@@ -2449,6 +2454,10 @@ model LotteryEntry {
   User              User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
   Registration      ActivityRegistration?            @relation(fields: [registrationId], references: [id], onDelete: SetNull)
   RedeemedByAdmin   User?                            @relation("LotteryEntryRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
+  topicSlotId       String?                          @unique(map: "TopicLotteryWinner_slot_key")
+  TopicSlot         TopicActivityLotterySlot?        @relation(fields: [topicSlotId], references: [id], onDelete: Restrict, map: "TopicLotteryWinner_slot_fk")
+  TopicShipping     TopicActivityLotteryShipping?
+  TopicNotice       TopicActivityLotteryNotice?
 
   @@unique([lotteryId, userId])
   @@index([lotteryId, createdAt])
@@ -2496,6 +2505,7 @@ model LotteryPrize {
   LotteryEntry          LotteryEntry[]
   Lottery               Lottery                          @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
   Badge                 Badge?                           @relation(fields: [badgeId], references: [id], onDelete: Restrict)
+  TopicSlots            TopicActivityLotterySlot[]
 
   @@index([lotteryId, sortOrder, id])
   @@index([badgeId])
@@ -4780,6 +4790,8 @@ model User {
   TopicActivityParticipations                            TopicActivityParticipation[]       @relation("TopicActivityParticipant")
   TopicActivityPollVotes                                 TopicActivityPollVote[]            @relation("TopicPollVoter")
   TopicActivityTestAttempts                              TopicActivityTestAttempt[]         @relation("TopicTestParticipant")
+  TopicLotteryEligibility                                TopicActivityLotteryEligibility[]
+  TopicLotteryAudit                                      TopicActivityLotteryAudit[]        @relation("TopicLotteryAuditActor")
   TopicActivityReviewedSubmissions                       TopicActivitySubmission[]          @relation("TopicActivityReviewer")
   TopicActivityFormReviewedSubmissions                   TopicActivityFormSubmission[]      @relation("TopicActivityFormReviewer")
   TopicActivityReviewSubjects                            TopicActivityReviewLog[]           @relation("TopicActivityReviewSubject")
@@ -6234,27 +6246,28 @@ enum TopicActivityRewardGrantItemStatus {
 }
 
 model TopicActivitySubmission {
-  id               String                        @id @default(cuid())
-  activityId       String
-  userId           String
-  commentId        String?                       @unique
-  rewardEntryId    String?
-  rewardSnapshot   Json?
-  status           TopicActivitySubmissionStatus @default(PENDING)
-  submittedAt      DateTime                      @default(now())
-  reviewedAt       DateTime?
-  reviewedById     String?
-  rejectReason     String?                       @db.Text
-  commentDeletedAt DateTime?
-  createdAt        DateTime                      @default(now())
-  updatedAt        DateTime                      @updatedAt
-  Activity         Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  User             User                          @relation("TopicActivitySubmitter", fields: [userId], references: [id], onDelete: Cascade)
-  Comment          Reply?                        @relation(fields: [commentId], references: [id], onDelete: SetNull)
-  ReviewedBy       User?                         @relation("TopicActivityReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  ReviewLog        TopicActivityReviewLog[]
-  RewardEntry      TopicActivityRewardEntry?     @relation(fields: [rewardEntryId], references: [id], onDelete: Restrict)
-  TaskImageAssets  TopicActivityImageAsset[]     @relation("TopicTaskImages")
+  id                      String                            @id @default(cuid())
+  activityId              String
+  userId                  String
+  commentId               String?                           @unique
+  rewardEntryId           String?
+  rewardSnapshot          Json?
+  status                  TopicActivitySubmissionStatus     @default(PENDING)
+  submittedAt             DateTime                          @default(now())
+  reviewedAt              DateTime?
+  reviewedById            String?
+  rejectReason            String?                           @db.Text
+  commentDeletedAt        DateTime?
+  createdAt               DateTime                          @default(now())
+  updatedAt               DateTime                          @updatedAt
+  Activity                Activity                          @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User                    User                              @relation("TopicActivitySubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  Comment                 Reply?                            @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  ReviewedBy              User?                             @relation("TopicActivityReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  ReviewLog               TopicActivityReviewLog[]
+  RewardEntry             TopicActivityRewardEntry?         @relation(fields: [rewardEntryId], references: [id], onDelete: Restrict)
+  TaskImageAssets         TopicActivityImageAsset[]         @relation("TopicTaskImages")
+  TopicLotteryEligibility TopicActivityLotteryEligibility[]
 
   @@index([activityId, status, submittedAt])
   @@index([userId, activityId, status])
@@ -6471,4 +6484,131 @@ model TopicActivityTestAttempt {
 
   @@unique([activityId, userId, requestKey], map: "TopicTest_activity_user_request_key")
   @@index([activityId, testId, userId, completedAt])
+}
+
+/// Optional Topic V2 wrapper; existing registration lotteries stay unchanged.
+model TopicActivityLottery {
+  id               String                            @id @default(cuid())
+  activityId       String                            @unique(map: "TopicLottery_activity_key")
+  lotteryId        String                            @unique(map: "TopicLottery_lottery_key")
+  enabled          Boolean                           @default(false)
+  config           Json
+  state            String                            @default("COLLECTING") @db.VarChar(32)
+  drawAt           DateTime?
+  fairnessLockedAt DateTime?
+  createdAt        DateTime                          @default(now())
+  updatedAt        DateTime                          @updatedAt
+  Activity         Activity                          @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Lottery          Lottery                           @relation(fields: [lotteryId], references: [id], onDelete: Restrict)
+  Eligibility      TopicActivityLotteryEligibility[]
+  Draw             TopicActivityLotteryDraw?
+  Audit            TopicActivityLotteryAudit[]
+
+  @@index([enabled, state, drawAt], map: "TopicLottery_due_idx")
+}
+
+model TopicActivityLotteryEligibility {
+  id                 String                   @id @default(cuid())
+  activityId         String
+  lotteryConfigId    String
+  userId             String
+  sourceSubmissionId String?
+  sourceSnapshot     Json
+  valid              Boolean                  @default(true)
+  qualifiedAt        DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  Activity           Activity                 @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Config             TopicActivityLottery     @relation(fields: [lotteryConfigId], references: [id], onDelete: Restrict)
+  User               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  SourceSubmission   TopicActivitySubmission? @relation(fields: [sourceSubmissionId], references: [id], onDelete: SetNull)
+
+  @@unique([activityId, userId], map: "TopicLotteryEligibility_activity_user_key")
+  @@index([lotteryConfigId, valid, qualifiedAt], map: "TopicLotteryEligibility_valid_idx")
+}
+
+/// Frozen roster and persisted allocation survive retries without rerandomizing.
+model TopicActivityLotteryDraw {
+  id                String               @id @default(cuid())
+  activityId        String               @unique(map: "TopicLotteryDraw_activity_key")
+  lotteryConfigId   String               @unique(map: "TopicLotteryDraw_config_key")
+  state             String               @default("FROZEN") @db.VarChar(32)
+  frozenAt          DateTime             @default(now())
+  frozenById        String?
+  candidateCount    Int
+  candidateSnapshot Json
+  candidateHash     String               @db.VarChar(64)
+  prizeSnapshot     Json
+  allocation        Json?
+  allocationHash    String?              @db.VarChar(64)
+  winnerCount       Int                  @default(0)
+  startedAt         DateTime?
+  drawnAt           DateTime?
+  errorCode         String?              @db.VarChar(100)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  Activity          Activity             @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Config            TopicActivityLottery @relation(fields: [lotteryConfigId], references: [id], onDelete: Restrict)
+}
+
+/// Exactly quantity slots are created under the Activity lock; one winner per slot.
+model TopicActivityLotterySlot {
+  id         String        @id @default(cuid())
+  prizeId    String
+  slotNumber Int
+  createdAt  DateTime      @default(now())
+  Prize      LotteryPrize  @relation(fields: [prizeId], references: [id], onDelete: Restrict)
+  Winner     LotteryEntry?
+
+  @@unique([prizeId, slotNumber], map: "TopicLotterySlot_prize_number_key")
+}
+
+/// PII exists only in authenticated encrypted envelopes, never public metadata.
+model TopicActivityLotteryShipping {
+  id                 String       @id @default(cuid())
+  winnerId           String       @unique(map: "TopicLotteryShipping_winner_key")
+  addressCiphertext  String?      @db.LongText
+  shipmentCiphertext String?      @db.LongText
+  addressDeadline    DateTime
+  retainUntil        DateTime
+  addressUpdatedAt   DateTime?
+  consentAt          DateTime?
+  shippingStatus     String       @default("WAITING_ADDRESS") @db.VarChar(32)
+  shippedAt          DateTime?
+  completedAt        DateTime?
+  deletedAt          DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  Winner             LotteryEntry @relation(fields: [winnerId], references: [id], onDelete: Cascade)
+
+  @@index([retainUntil, deletedAt], map: "TopicLotteryShipping_retention_idx")
+}
+
+model TopicActivityLotteryNotice {
+  id        String       @id @default(cuid())
+  winnerId  String       @unique(map: "TopicLotteryNotice_winner_key")
+  state     String       @default("PENDING") @db.VarChar(16)
+  attempts  Int          @default(0)
+  errorCode String?      @db.VarChar(100)
+  sentAt    DateTime?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  Winner    LotteryEntry @relation(fields: [winnerId], references: [id], onDelete: Cascade)
+
+  @@index([state, createdAt], map: "TopicLotteryNotice_pending_idx")
+}
+
+model TopicActivityLotteryAudit {
+  id              String               @id @default(cuid())
+  activityId      String
+  lotteryConfigId String
+  actorId         String?
+  action          String               @db.VarChar(64)
+  entityId        String?
+  detail          Json?
+  createdAt       DateTime             @default(now())
+  Activity        Activity             @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Config          TopicActivityLottery @relation(fields: [lotteryConfigId], references: [id], onDelete: Restrict)
+  Actor           User?                @relation("TopicLotteryAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([lotteryConfigId, createdAt], map: "TopicLotteryAudit_config_time_idx")
 }

@@ -99,13 +99,20 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
     assert.ok(newBlocks.has(name), `existing model/enum ${name} retained`)
     for (const field of fields) assert.ok(newBlocks.get(name)!.includes(field), `existing field/index unchanged: ${name}.${field}`)
   }
-  const v2Models = ['TopicActivityPollVote', 'TopicActivityRewardEntry', 'TopicActivityTestAttempt']
+  const v2Models = ['TopicActivityPollVote', 'TopicActivityRewardEntry', 'TopicActivityTestAttempt',
+    'TopicActivityLottery', 'TopicActivityLotteryEligibility', 'TopicActivityLotteryDraw', 'TopicActivityLotterySlot',
+    'TopicActivityLotteryShipping', 'TopicActivityLotteryNotice', 'TopicActivityLotteryAudit']
   // HEAD includes these tables after checkpoint. The guard must work both
   // before committing the additive change and on the resulting clean branch.
   const additions = [...newBlocks.keys()].filter((name) => !oldBlocks.has(name))
-  assert.ok(additions.every((name) => v2Models.includes(name)), 'only the approved V2 tables are added')
+  assert.ok(additions.every((name) => v2Models.includes(name)), 'only the approved V2 and optional physical-lottery tables are added')
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)
   const additive = read('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql')
   assert.doesNotMatch(additive, /\b(?:DROP|RENAME|TRUNCATE|DELETE|UPDATE)\s+(?:TABLE|COLUMN|FROM|`)/i)
   assert.match(additive, /TopicReward_activity_entry_user_key/)
+  const lottery = read('prisma/migrations/20261013120000_add_topic_activity_v2_lottery/migration.sql')
+  assert.doesNotMatch(lottery, /\b(?:DROP|RENAME|TRUNCATE|DELETE|UPDATE)\s+(?:TABLE|COLUMN|FROM|`)/i)
+  assert.match(lottery, /TopicLotteryEligibility_activity_user_key/)
+  assert.match(lottery, /TopicLotteryDraw_activity_key/)
+  assert.match(lottery, /TopicLotteryWinner_slot_key/)
 })

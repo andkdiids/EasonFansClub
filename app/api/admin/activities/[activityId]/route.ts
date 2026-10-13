@@ -12,6 +12,8 @@ import { rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
 import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 import { normalizeTopicActivityConfig } from '@/lib/topic-activity-config'
 import { syncActivityPostInTransaction } from '@/lib/topic-activity'
+import { assertTopicLotteryActivityWindow } from '@/lib/topic-activity-v2-lottery'
+import { TopicLotteryError } from '@/lib/topic-activity-v2-lottery-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -188,6 +190,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${activityId} FOR UPDATE`
       const lockedCurrent = await tx.activity.findUnique({ where: { id: activityId }, select: { status: true, type: true } })
       if (!lockedCurrent) throw new ActivityRegistrationError('ACTIVITY_NOT_FOUND', '活动不存在', 404)
+      await assertTopicLotteryActivityWindow(tx, activityId, { ...normalized.value, ...topicConfig.value })
       if (lockedCurrent.status === 'CANCELLED' && normalized.value.status !== 'CANCELLED') {
         throw new ActivityRegistrationError('ACTIVITY_CANCELLED', '已取消的活动不能恢复或重新发布', 409)
       }
@@ -288,6 +291,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
       ...(cancellation || {}),
     })
   } catch (error) {
+    if (error instanceof TopicLotteryError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status })
     if (error instanceof ActivityConfigurationError || error instanceof ActivityMaterialConfigurationError) return NextResponse.json({ message: error.message }, { status: 400 })
     if (error instanceof ActivityRegistrationError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status })
     console.error('[admin.activities.update]', error instanceof Error ? error.message : error)

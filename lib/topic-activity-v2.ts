@@ -8,6 +8,7 @@ import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
 import { resolveTopicActivityCommentEligibilityInTransaction } from '@/lib/topic-activity'
 import { resolveTopicActivityCommentPolicy } from '@/lib/topic-activity-comment-policy'
 import { isTopicActivityOriginalObjectKey } from '@/lib/topic-activity-image-original'
+import { assertTopicLotterySourceRules, lockTopicLotteryRulesForSubmission, syncTopicLotteryEligibilityInTransaction } from '@/lib/topic-activity-v2-lottery'
 import {
   createDefaultTopicActivityV2Program, normalizeTopicActivityV2Program,
   publicTopicActivityV2Program, readTopicActivityV2Program,
@@ -186,6 +187,7 @@ export async function saveTopicActivityV2Program(activityId: string, actorId: st
   return withTopicV2Transaction(async (tx) => {
     const activity = await lockTopicV2Activity(tx, activityId)
     const program = normalized.value
+    await assertTopicLotterySourceRules(tx, activity, program)
     if (program.enabled && program.platformRewards.enabled) {
       if (!activity.allowImageAttachments && program.entries.some((entry) => entry.enabled && entry.maxImages > 0)) fail('TOPIC_V2_IMAGES_DISABLED', '请先在活动基础设置开启图片附件')
       if (resolveTopicActivityCommentPolicy(activity.formSchema).commentLimit === 'SINGLE' && (program.entries.filter((entry) => entry.enabled).length > 1 || program.entries.some((entry) => entry.allowResubmit))) {
@@ -270,6 +272,7 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
       const bound = await tx.topicActivityImageAsset.updateMany({ where: { id: { in: ids }, uploadedByUserId: input.userId, taskSubmissionId: null, formSubmissionId: null, replyId: null }, data: { taskSubmissionId: submission.id } })
       if (bound.count !== ids.length) fail('TOPIC_V2_ASSET_NOT_AUTHORIZED', '截图已被其他提交绑定', 409)
     }
+    await lockTopicLotteryRulesForSubmission(tx, activity, input.userId, now)
     await tx.post.update({ where: { id: post.id }, data: { replyCount: { increment: 1 } } })
     return { submission, commentId: comment.id, replyId: comment.id, postAuthorId: post.authorId }
   })
@@ -325,6 +328,7 @@ export async function reviewTopicActivityV2Submission(input: { activityId?: stri
       userId: submission.userId, event: entry ? 'PLATFORM' : 'APPROVED_COMMENT', effectiveAt: submission.submittedAt, now,
     })
     participation = await refreshParticipation(tx, participation.id, now)
+    await syncTopicLotteryEligibilityInTransaction(tx, activity, submission.userId, now)
     return { submission: updated, participation, changed: true, firstParticipationCreated: input.status === 'APPROVED' && !current?.approvedSubmissionCount, rewardIds: [] as string[] }
   })
 }
