@@ -3,7 +3,32 @@ import test from 'node:test'
 import { fixture, instant, rewardEntry } from './fixtures/topic-v2-transaction'
 import { claimTopicActivityV2FixedReward, getTopicActivityV2View, getTopicActivityV2Statistics, grantTopicActivityV2MedalForEventInTransaction, reviewTopicActivityV2Submission, saveTopicActivityV2Program, submitTopicActivityV2Task, topicV2EntryGrantKey } from '@/lib/topic-activity-v2'
 import { grantTopicActivityPointsInTransaction } from '@/lib/topic-activity-points'
+import { prisma } from '@/lib/prisma'
+import { withTopicV2Transaction } from '@/lib/topic-activity-v2'
 const approve = (submissionId: string) => reviewTopicActivityV2Submission({ submissionId, reviewerId: 'admin-one', status: 'APPROVED', now: instant })
+
+test('raw MySQL lock conflicts retry after rollback, but unrelated raw query failures do not retry', async () => {
+  const original = prisma.$transaction
+  try {
+    for (const engineCode of ['1213', '1205']) {
+      let calls = 0
+      Reflect.set(prisma, '$transaction', async (operation: (tx: object) => Promise<unknown>) => {
+        if (++calls < 3) throw { code: 'P2010', meta: { code: engineCode } }
+        return operation({})
+      })
+      assert.equal(await withTopicV2Transaction(async () => 'committed'), 'committed')
+      assert.equal(calls, 3)
+    }
+    let calls = 0
+    Reflect.set(prisma, '$transaction', async () => { calls++; throw { code: 'P2010', meta: { code: '1064' } } })
+    await assert.rejects(withTopicV2Transaction(async () => 'not reached'), { code: 'P2010' })
+    assert.equal(calls, 1)
+    calls = 0
+    Reflect.set(prisma, '$transaction', async () => { calls++; throw { code: 'P2010', meta: { code: '1213' } } })
+    await assert.rejects(withTopicV2Transaction(async () => 'not reached'), { code: 'P2010' })
+    assert.equal(calls, 3)
+  } finally { Reflect.set(prisma, '$transaction', original) }
+})
 test('same entry concurrent approvals use one ledger and one balance change (serialized transaction double)', async () => {
   const f = fixture(); f.submission('one'); f.submission('two')
   await f.run(async () => { await Promise.all([approve('one'), approve('one'), approve('two')]) })

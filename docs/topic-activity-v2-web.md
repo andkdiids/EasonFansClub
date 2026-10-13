@@ -76,6 +76,108 @@ Fresh base full suite: 3787 PASS / 16 FAIL / 6 SKIP. Candidate failure sets must
 - Full candidate: 3832 PASS, 16 FAIL, 7 SKIP; the 16 failure names exactly match the fresh base, NEW FAILURES = 0.
 - Actual V2 and V6 browser suites: 2/2 PASS. Additional V5/V6.1/V6.1.1/V6.1.2 browser regression: 15/15 PASS.
 - TypeScript, Prisma validate/generate/format check, production build, diff check and sensitive scan PASS. Lint: 0 errors, 130 warnings (including intended native-image previews and existing repo warnings).
-- Pure Prisma schema diff matches the additive migration; existing 171 migration files and baseline snapshot are unchanged. No migration was applied to any database.
+- Pure Prisma schema diff matches the additive migration; existing 171 migration files and baseline snapshot are unchanged. No production migration was executed.
 - All browser endpoints and financial records in automated tests were local fixtures, not production. PRODUCTION WRITE = 0, DEPLOY = NO, APK = NO.
-- Real isolated MySQL migration/legacy fixture/concurrent award testing and physical WeChat/iOS QA remain blockers before release approval. This development verification does not change the NO-GO release decision.
+- Physical WeChat/iOS QA and current-production integration remain blockers before release approval. This development verification does not change the NO-GO release decision.
+
+## Acceptance follow-up (2026-10-13, before optional lottery increment)
+
+Fresh verification at `5eb259da` reproduced directed 160 PASS, browser 17 PASS,
+and full candidate 3832 PASS / 16 FAIL / 7 SKIP. Real MySQL then exposed a
+Serializable lock cycle: review read Submission before acquiring Activity.
+Review now resolves only its lock target outside the transaction, then locks
+Activity and rereads the authoritative Submission. Raw MySQL 1213/1205 errors
+wrapped as Prisma P2010 get bounded retries after rollback; unrelated raw
+errors do not retry. No authorization or financial semantics were relaxed.
+
+Final directed regression: 161 PASS / 0 FAIL / 7 opt-in SKIP. Fresh full base:
+3787 PASS / 16 FAIL / 6 SKIP; final candidate: 3833 PASS / identical 16 FAIL /
+8 SKIP. NEW FAILURES = 0. Real database/browser suites are separately enabled.
+
+### Real isolated MySQL evidence
+
+MySQL Community Server 8.4.11 runs only on loopback port 33307, from an
+ephemeral ASCII-path directory, without installation as a service or loading
+machine defaults. Only explicit disposable test databases are used; the test
+rejects other hosts, ports, database names and URL overrides before importing
+the application Prisma client. It never inherits a production DATABASE_URL.
+
+`tests/topic-activity-v2-mysql.test.ts`: **21 PASS, 0 FAIL**, including its
+parent suite (20 behavioral cases). The locked pre-V2 schema was bootstrapped
+in an empty isolated database. Legacy rows were inserted before the unchanged
+V2 SQL was actually executed. Existing statuses, values, PointLogs and balance
+were preserved; LEGACY origin and nullable new fields behaved correctly.
+
+Coverage includes 20 simultaneous approvals, concurrent duplicate root-comment
+submission, rejection/resubmission, same-platform multiple entries, platform
+and entry caps, real unique/FK violations, reward snapshots, deliberate
+PointLog constraint failure with full transactional rollback, independent fixed
+points, real badge service across concurrent event types, manual claim replay,
+Form/admin-reply eligibility, poll replay, persisted knowledge/personality
+results across disconnect/another client, ownership denial and valid PNG bytes.
+
+Separately, the Prisma migration engine successfully applied a **test-only
+locked-schema bootstrap** followed by the byte-identical
+`20261013100000_add_topic_activity_v2_web`, into a second fresh local database.
+This verifies the new migration on the prior schema, not a replay of all 171
+historical migrations. Historical migrations/baseline files were not altered.
+
+Run the opt-in suite only after bootstrapping the pre-V2 schema into a new
+`ecfc_topic_v2_acceptance_20261013` database on 127.0.0.1:33307:
+`TOPIC_V2_MYSQL_QA=1`, explicit `TOPIC_V2_MYSQL_URL`, then
+`pnpm exec tsx --test tests/topic-activity-v2-mysql.test.ts`.
+It refuses an already migrated database rather than resetting data implicitly.
+
+Final browser suites: **17 PASS, 0 FAIL**. Actual production components/CSS run
+at desktop and 360/390/430 widths. Knowledge and personality flows, read-only
+history restoration, valid downloaded PNG bytes, unsupported-share fallback,
+file-share contract, review failure/double clicks and task confirmation pass.
+Endpoints are local fixtures; OS share-sheet handling is a contract stub, not
+physical device verification. Authenticated staging end-to-end, iPhone Safari
+and real WeChat save/share remain **PENDING**.
+
+### Existing 16 failures: impact audit
+
+Thirteen are CRLF-sensitive source-contract assertions, not absent behavior.
+A temporary read-only source-line normalization preload reproduced **87 PASS /
+3 FAIL** for the 90 tests in the affected files on both base and candidate.
+It changed no checkout bytes and was not used to claim the raw full suite green.
+
+| Existing failing area | Count | V2 dependency / impact |
+| --- | ---: | --- |
+| badge glow, badge display cap | 2 | Shared badge presentation and comment display; implementation present; source newline assertion |
+| notification names, avatar propagation, profile relationship states | 3 | Shared notification/profile UI; implementation present; source newline assertion |
+| birthday partial form | 1 | Unrelated profile flow; source newline assertion |
+| mobile forum action ordering | 1 | Other detail UI; source newline assertion |
+| chat sticker focus | 2 | Unrelated chat; source newline assertion |
+| friend list restoration | 3 | Unrelated friends; source newline assertion |
+| want-listen transaction client | 1 | Unrelated game; source newline assertion |
+| Anywhere Door incremental SQL fixture | 3 | Missing `tmp/PRODUCTION_INCREMENTAL_CANDIDATE.sql`; historical migration validation gap |
+
+No failure directly targets new V2 code. Shared-path risks are not dismissed
+solely because baseline also fails: real badge service, comments/review and
+browser regressions run separately. The three missing-fixture release checks
+remain unresolved; they require an independently reviewed reproducible fixture
+or explicit release-gate disposition. No fabricated fixture or test skipping
+was committed to turn the release gate green.
+
+### Safe integration plan / NO-GO
+
+Remote main is `a9a48fad74afb6aff4bdd742438533c430cc82a4` (163 migrations),
+locked V6.1.2 is `47396d19` (171), V2 is its descendant (172). Remote main
+is not proof of the actual deployed SHA. A fresh approved production read-only
+diagnostic is required in a separate release task; none was invoked here.
+
+Read-only merge-tree simulation found three conflicts: `deploy.yml`,
+`middleware.ts`, `tests/ecenter-features.test.ts`. Retain RC deployment safety,
+exact-SHA/health/rollback checks and add main's paths-ignore behavior; retain
+Cantonese/V2 Bearer/public-route guards and add main's home/share routes; retain
+request-user Ecenter tests. Do not cherry-pick only V2 onto main: that would
+omit RC's Topic/Cantonese schema, APIs and eight prerequisite migrations.
+
+The existing locked-RC production policy still allows only SHA `47396d19`, 171
+migrations and its existing path list; it cannot authorize V2's new schema and
+paths. Prepare an isolated integration RC, resolve/reverify these conflicts,
+preserve all Cantonese progress, approve a new SHA/migration policy, resolve the
+remaining validation gaps and complete physical QA before release approval.
+No merge, policy weakening, locked-RC edit or production operation occurred.

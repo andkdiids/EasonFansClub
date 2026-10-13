@@ -47,7 +47,13 @@ export async function withTopicV2Transaction<T>(operation: (tx: Prisma.Transacti
     }
     catch (error) {
       const code = record(error).code
-      if (attempt >= 2 || (code !== 'P2034' && code !== 'P2002')) throw error
+      // MySQL deadlocks from a raw FOR UPDATE query surface as P2010,
+      // rather than Prisma's model-query P2034. Retry only known transient
+      // engine codes after the failed callback transaction has rolled back.
+      const mysqlCode = record(record(error).meta).code
+      const rawLockConflict = code === 'P2010' && ['1213', '1205'].includes(String(mysqlCode))
+      if (attempt >= 2 || (code !== 'P2034' && code !== 'P2002' && !rawLockConflict)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)))
     }
   }
 }
@@ -271,9 +277,12 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
 
 export async function reviewTopicActivityV2Submission(input: { activityId?: string; submissionId: string; reviewerId: string; status: 'APPROVED' | 'REJECTED'; rejectReason?: string | null; now?: Date }) {
   const now = input.now || new Date()
+  // Resolve the lock target without a Serializable shared row lock. Taking
+  // Submission first in concurrent reviews caused an Activity/Submission
+  // lock cycle. The authoritative submission is read again after Activity.
+  const identity = await prisma.topicActivitySubmission.findUnique({ where: { id: input.submissionId }, select: { activityId: true } })
+  if (!identity || (input.activityId && input.activityId !== identity.activityId)) fail('TOPIC_V2_SUBMISSION_NOT_FOUND', '提交记录不存在', 404)
   return withTopicV2Transaction(async (tx) => {
-    const identity = await tx.topicActivitySubmission.findUnique({ where: { id: input.submissionId }, select: { activityId: true } })
-    if (!identity || (input.activityId && input.activityId !== identity.activityId)) fail('TOPIC_V2_SUBMISSION_NOT_FOUND', '提交记录不存在', 404)
     const activity = await lockTopicV2Activity(tx, identity.activityId)
     const program = requireTopicV2Program(activity)
     const submission = await tx.topicActivitySubmission.findUnique({ where: { id: input.submissionId }, include: { Comment: { select: { postId: true, parentId: true, isDeleted: true } } } })

@@ -8,6 +8,7 @@ import { chromium } from 'playwright'
 import { fixture } from './fixtures/topic-v2-transaction'
 import { publicTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
+import { calculateTopicV2Test } from '@/lib/topic-activity-v2-interactive'
 
 test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop and mobile widths', { skip: process.env.TOPIC_V2_BROWSER_QA !== '1' }, async () => {
   const require = createRequire(join(process.cwd(), 'package.json'))
@@ -28,6 +29,18 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   const css = (await postcss([tailwind({ ...require('./tailwind.config.ts').default, content: [{ raw: build.outputFiles[0].text, extension: 'js' }] })]).process(readFileSync('app/globals.css', 'utf8'), { from: join(process.cwd(), 'app/globals.css') })).css
   let votes: string[] = [], voteWrites = 0, testWrites = 0, reviewWrites = 0, configWrites = 0, taskWrites = 0
   const attempts: Array<Record<string, unknown>> = []
+  let personality = false
+  const programForTest = () => {
+    const program = structuredClone(f.program)
+    program.test.results[1].title = '服务端真实结果'
+    if (personality) {
+      program.test.mode = 'PERSONALITY'
+      program.test.results = [{ id: 'first', title: '趣味测试结果', description: '偏好甲' }, { id: 'second', title: '另一种偏好', description: '偏好乙' }]
+      program.test.questions = program.test.questions.map((question) => ({ ...question, correctOptionId: undefined,
+        options: question.options.map((option, index) => ({ ...option, weights: { [index === 0 ? 'first' : 'second']: index === 0 ? 2 : 1 } })) }))
+    }
+    return program
+  }
   const png = await renderTopicV2Poster({ title: '本地结果', description: '已完成测试', poster: { width: 360, height: 640 } }, 'activity-one')
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://127.0.0.1')
@@ -45,9 +58,11 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
     if (url.pathname.endsWith('/v2/test')) {
       if (req.method === 'POST') {
         const input = await body(); assert.equal('score' in input, false); assert.equal('resultId' in input, false); assert.deepEqual(input.answers, { q1: 'yes', q2: 'a2' }); testWrites++
-        const attempt = { id: 'attempt-one', resultSnapshot: { title: '服务端真实结果', description: '结果说明', score: 2, maxScore: 2, testTitle: '知识测试' }, completedAt: new Date().toISOString() }; attempts.push(attempt); return send({ attempt })
+        const computed = calculateTopicV2Test(programForTest().test, input.answers)
+        const attempt = { id: personality ? 'attempt-two' : 'attempt-one', resultSnapshot: { title: computed.result.title, description: computed.result.description,
+          score: computed.score, maxScore: computed.maxScore, testTitle: personality ? '趣味测试' : '知识测试' }, completedAt: new Date().toISOString() }; attempts.push(attempt); return send({ attempt })
       }
-      return send({ activity: { title: '本地活动' }, test: publicTopicActivityV2Program(f.program).test })
+      return send({ activity: { title: '本地活动' }, test: publicTopicActivityV2Program(programForTest()).test })
     }
     if (url.pathname.endsWith('/v2/attempts')) return send({ attempts })
     if (url.pathname.endsWith('/v2/submissions/submission-one')) {
@@ -69,6 +84,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   try {
     for (const width of [1024, 360, 390, 430]) {
       votes = []; voteWrites = 0; testWrites = 0; reviewWrites = 0; configWrites = 0; taskWrites = 0; attempts.length = 0
+      personality = false
       const context = await browser.newContext({ viewport: { width, height: 844 }, ...(width < 500 ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 MicroMessenger/8.0' } : {}) })
       const page = await context.newPage(); const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
       const open = (mode: string) => page.goto('http://127.0.0.1:' + port + '/?mode=' + mode)
@@ -82,8 +98,34 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByRole('heading', { name: '服务端真实结果' }).waitFor(); assert.equal(testWrites, 1)
       await page.getByRole('button', { name: '生成结果海报' }).click(); await page.getByAltText('我的测试结果海报').waitFor()
       assert.ok(await page.getByAltText('我的测试结果海报').evaluate((element) => (element as HTMLImageElement).naturalWidth > 0))
-      const downloadWait = page.waitForEvent('download'); await page.getByRole('link', { name: '保存 PNG' }).click(); assert.equal((await downloadWait).suggestedFilename(), 'ecfc-activity-result.png')
+      const downloadWait = page.waitForEvent('download'); await page.getByRole('link', { name: '保存 PNG' }).click()
+      const download = await downloadWait; assert.equal(download.suggestedFilename(), 'ecfc-activity-result.png')
+      assert.equal(readFileSync((await download.path())!).subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
       await page.getByText('微信内可长按图片保存。').waitFor()
+      await page.evaluate("Object.defineProperty(navigator, 'canShare', { configurable: true, value: function () { return false } })")
+      await page.getByRole('button', { name: '分享结果图片' }).click()
+      await page.getByRole('alert').filter({ hasText: '当前浏览器请长按海报或点击保存 PNG' }).waitFor()
+      // Browser-contract stub only, not a physical OS share-sheet acceptance.
+      await page.evaluate(`
+        Object.defineProperty(navigator, 'canShare', { configurable: true, value: function (value) { return value.files?.[0]?.type === 'image/png' } })
+        Object.defineProperty(navigator, 'share', { configurable: true, value: async function (value) {
+          const file = value.files?.[0]
+          if (!file || file.type !== 'image/png' || file.size <= 0) throw new Error('invalid share file')
+          document.documentElement.dataset.sharedPng = file.name
+        } })
+      `)
+      await page.getByRole('button', { name: '分享结果图片' }).click()
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.sharedPng), 'ecfc-activity-result.png')
+      personality = true
+      await open('test'); await page.getByRole('radio', { name: '正确', exact: true }).check(); await page.getByRole('button', { name: '下一题' }).click()
+      await page.getByRole('radio', { name: '第二题选项A' }).check(); await page.getByRole('button', { name: '提交测试' }).click()
+      await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
+      assert.equal(await page.getByText('得分：', { exact: false }).count(), 0, 'personality result is not a knowledge score')
+      await page.reload(); await page.getByRole('heading', { name: '我的历史结果', exact: true }).waitFor()
+      await page.getByRole('button', { name: /趣味测试结果 ·/ }).click()
+      await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
+      assert.equal(testWrites, 2, 'restoring history is read-only')
+      personality = false
       await open('review'); await page.getByRole('button', { name: '通过任务' }).click(); await page.getByRole('button', { name: '取消', exact: true }).click(); assert.equal(reviewWrites, 0)
       await page.getByRole('button', { name: '拒绝任务' }).click(); await page.getByRole('dialog').locator('textarea').fill('本地拒绝原因')
       await page.getByRole('button', { name: '确认拒绝' }).evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click() })
