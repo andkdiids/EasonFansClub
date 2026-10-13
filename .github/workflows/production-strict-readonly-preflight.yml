@@ -105,25 +105,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const protectedPaths = new Set(['.github/workflows/deploy.yml', '.github/workflows/configure-production-entry.yml', '.github/workflows/production-release-approved.yml'])
-          async function main() {
-            let count = 0
-            for (const status of ['queued', 'in_progress', 'waiting', 'requested', 'pending']) {
-              let done = false
-              for (let page = 1; page <= 20; page++) {
-                const response = await fetch(`${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}/actions/runs?status=${status}&per_page=100&page=${page}`, {
-                  headers: { authorization: 'Bearer ' + process.env.GH_TOKEN, accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) })
-                if (!response.ok) throw new Error('queue unavailable')
-                const rows = (await response.json()).workflow_runs || []
-                count += rows.filter(row => protectedPaths.has(String(row.path || '').split('@', 1)[0])).length
-                if (rows.length < 100) { done = true; break }
-              }
-              if (!done) throw new Error('queue pagination incomplete')
-            }
-            console.log('CONCURRENT_DEPLOYMENTS=' + count)
+          node --input-type=module <<'NODE'
+          import { deploymentsClear } from './.github/release/mysql-client-metadata-runner.mjs'
+          try {
+            const result = await deploymentsClear(process.env, fetch, '.github/workflows/production-strict-readonly-preflight.yml')
+            console.log('CONCURRENT_DEPLOYMENTS=' + result.conflictingProductionRuns)
+            console.log('CONCURRENCY_OBSERVATION=NON_ATOMIC')
+          } catch {
+            console.log('CONCURRENT_DEPLOYMENTS=UNKNOWN')
+            process.exitCode = 1
           }
-          main().catch(() => { console.log('CONCURRENT_DEPLOYMENTS=UNKNOWN'); process.exitCode = 1 })
           NODE
 
       - name: Prepare credentials and pinned host key on the runner only

@@ -126,6 +126,183 @@ export function migrationRead(target, manifest, io) {
   } catch { return unknown('MYSQL_CLIENT_EXECUTION_UNAVAILABLE') }
 }
 
+// Only a generated release Client, never the app singleton, CLI, dotenv loader,
+// adapter or Prisma extension. Credentials remain inside the isolated child.
+export function prismaDatabaseUrl(raw) {
+  const lines = raw.split(/\r?\n/).filter(line => /^\s*DATABASE_URL\s*=/.test(line))
+  if (lines.length !== 1) throw new Error('PRISMA_CONFIGURATION_INVALID')
+  let value = lines[0].slice(lines[0].indexOf('=') + 1).trim()
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1)
+  const url = new URL(value)
+  if (url.protocol !== 'mysql:' || !/^[A-Za-z0-9._-]+$/.test(url.hostname) ||
+    !/^[A-Za-z0-9_]+$/.test(decodeURIComponent(url.pathname.slice(1))) || !url.username || !url.password ||
+    url.hash || (url.port && (Number(url.port) < 1 || Number(url.port) > 65535))) throw new Error('PRISMA_CONFIGURATION_INVALID')
+  const allowed = new Set(['sslaccept', 'sslcert', 'connect_timeout', 'pool_timeout', 'socket_timeout',
+    'connection_limit', 'statement_cache_size', 'prefer_socket'])
+  const seen = new Set()
+  for (const [key, v] of url.searchParams) {
+    if (!allowed.has(key) || seen.has(key)) throw new Error('PRISMA_CONFIGURATION_UNSUPPORTED')
+    seen.add(key)
+    if (!['sslaccept', 'sslcert', 'prefer_socket'].includes(key) && !/^[0-9]+$/.test(v)) throw new Error('PRISMA_CONFIGURATION_INVALID')
+  }
+  const ca = url.searchParams.get('sslcert')
+  if (ca && !['/etc/ssl/certs/ca-certificates.crt', '/home/apps/easonfansclub/shared/database-ca.pem'].includes(ca)) throw new Error('PRISMA_CA_LOCATION_UNAPPROVED')
+  // Strengthen this connection only. Never persist or inherit insecure options.
+  // Audited Prisma 6.19 native MySQL: strict enables TLS + cert/domain validation.
+  url.searchParams.set('sslaccept', 'strict')
+  url.searchParams.set('prefer_socket', 'false')
+  url.searchParams.set('connection_limit', '1')
+  url.searchParams.set('connect_timeout', '5')
+  url.searchParams.set('pool_timeout', '5')
+  url.searchParams.set('socket_timeout', '10')
+  url.searchParams.set('statement_cache_size', '0')
+  return { url: url.toString(), ca }
+}
+
+export function prismaFailure(error) {
+  // Do not serialize error messages, metadata, stack, stdout or stderr.
+  const codes = { P1000: 'AUTH_FAILED', P1001: 'CONNECTION_FAILED', P1002: 'TIMEOUT',
+    P1011: 'TLS_FAILED', P2024: 'TIMEOUT', P2010: 'FIXED_SELECT_FAILED' }
+  return 'PRISMA_' + (codes[error?.code] || 'QUERY_UNAVAILABLE')
+}
+
+export function trustedParents(file, io) {
+  let dir = '/'
+  for (const segment of path.posix.dirname(file).split('/').filter(Boolean)) {
+    dir = path.posix.join(dir, segment)
+    const s = io.stat(dir)
+    if (!s.isDirectory() || s.isSymbolicLink() || ![0, io.uid].includes(s.uid) || (s.mode & 0o022)) throw new Error('UNTRUSTED_PARENT')
+  }
+}
+
+export function prismaRowsToTsv(rows) {
+  if (!Array.isArray(rows) || rows.length > 5000) throw new Error('PRISMA_RESPONSE_INVALID')
+  return rows.map(row => {
+    if (!row || !NAME.test(row.migration_name) || !HASH.test(row.checksum)) throw new Error('PRISMA_RESPONSE_INVALID')
+    const flags = ['finished', 'rolled_back', 'started'].map(key => {
+      const v = row[key]
+      if (![0, 1, 0n, 1n, false, true].includes(v)) throw new Error('PRISMA_RESPONSE_INVALID')
+      return Number(v)
+    })
+    return [row.migration_name, row.checksum, ...flags].join('\t')
+  }).join('\n')
+}
+
+export async function queryReleaseLedger(release, io, loadClient) {
+  let db
+  let stage = 'PRISMA_RELEASE_METADATA_UNAVAILABLE'
+  const unknown = reason => ({ status: 'UNKNOWN', reason })
+  try {
+    if (!/^\/home\/apps\/easonfansclub\/releases\/[A-Za-z0-9._-]+$/.test(release) ||
+      ['.', '..'].includes(path.posix.basename(release))) return unknown('PRISMA_RELEASE_INVALID')
+    const safe = (file, privateFile = false) => {
+      trustedParents(file, io)
+      const s = io.stat(file)
+      if (!s.isFile() || s.isSymbolicLink() || ![0, io.uid].includes(s.uid) ||
+        (s.mode & (privateFile ? 0o077 : 0o022)) || !(s.mode & 0o400) || s.size <= 0) throw new Error('UNSAFE')
+    }
+    // .env is the already existing shared file; no config initialization.
+    stage = 'PRISMA_ENV_METADATA_UNSAFE_OR_UNAVAILABLE'
+    trustedParents(release + '/.env', io)
+    trustedParents(APP + '/shared/.env', io)
+    const envFile = io.real(release + '/.env')
+    if (envFile !== APP + '/shared/.env') return unknown('PRISMA_ENV_LOCATION_UNAPPROVED')
+    safe(envFile, true)
+    stage = 'PRISMA_CONFIGURATION_UNAVAILABLE_OR_UNSUPPORTED'
+    const config = prismaDatabaseUrl(io.read(envFile))
+    stage = 'PRISMA_CA_METADATA_UNSAFE_OR_UNAVAILABLE'
+    if (config.ca) { if (io.real(config.ca) !== config.ca) return unknown('PRISMA_CA_UNSAFE'); safe(config.ca) }
+    stage = 'PRISMA_CLIENT_METADATA_UNSAFE_OR_UNAVAILABLE'
+    const packageFile = io.real(release + '/node_modules/@prisma/client/package.json')
+    if (!packageFile.startsWith(release + '/node_modules/')) return unknown('PRISMA_CLIENT_OUTSIDE_RELEASE')
+    safe(packageFile)
+    const pkg = JSON.parse(io.read(packageFile))
+    if (pkg.name !== '@prisma/client' || pkg.version !== '6.19.3') return unknown('PRISMA_CLIENT_VERSION_UNAUDITED')
+    stage = 'PRISMA_CLIENT_LOAD_UNAVAILABLE'
+    const client = loadClient(release)
+    if (client.Prisma?.prismaVersion?.client !== '6.19.3' || client.Prisma?.prismaVersion?.engine !== 'c2990dca591cba766e3b7ef5d9e8a84796e47ab7') return unknown('PRISMA_GENERATED_CLIENT_UNAUDITED')
+    stage = 'PRISMA_CLIENT_INITIALIZATION_UNAVAILABLE'
+    db = new client.PrismaClient({ log: [], errorFormat: 'minimal', datasources: { db: { url: config.url } } })
+    // Exactly one fixed application SELECT. No transaction/SET/DDL/DML API.
+    stage = 'PRISMA_FIXED_SELECT_UNAVAILABLE'
+    const rows = await db.$queryRaw`SELECT migration_name, checksum, (finished_at IS NOT NULL) AS finished, (rolled_back_at IS NOT NULL) AS rolled_back, (started_at IS NOT NULL) AS started FROM _prisma_migrations ORDER BY migration_name, id LIMIT 5001`
+    stage = 'PRISMA_RESPONSE_INVALID'
+    return { status: 'READ', tsv: prismaRowsToTsv(rows), backend: 'EXISTING_PRISMA_CLIENT', tls: 'STRICT_CERT_AND_DOMAIN' }
+  } catch (error) {
+    const reason = prismaFailure(error)
+    return unknown(reason === 'PRISMA_QUERY_UNAVAILABLE' ? stage : reason)
+  } finally {
+    if (db) { try { await db.$disconnect() } catch { /* never emit engine errors */ } }
+  }
+}
+
+// stdin-only child source: bounded lifetime, clean environment and all engine
+// logs captured/discarded. No password in argv, process environment or output.
+export function prismaChildSource() {
+  return `import fs from 'node:fs'; import path from 'node:path'; import { createRequire } from 'node:module';
+const APP=${JSON.stringify(APP)}, NAME=${NAME}, HASH=${HASH};
+${prismaDatabaseUrl.toString()}
+${prismaFailure.toString()}
+${trustedParents.toString()}
+${prismaRowsToTsv.toString()}
+${queryReleaseLedger.toString()}
+const io={uid:process.getuid(),stat:p=>fs.lstatSync(p),real:p=>fs.realpathSync(p),read:p=>{const s=fs.lstatSync(p);if(s.size>1048576)throw Error('LIMIT');return fs.readFileSync(p,'utf8')}};
+const result=await queryReleaseLedger(process.argv[2],io,p=>createRequire(p+'/package.json')(p+'/node_modules/@prisma/client'));
+process.stdout.write('PRISMA_LEDGER='+JSON.stringify(result)+'\\n');`
+}
+
+export function prismaMigrationRead(release, manifest, io) {
+  const unknown = reason => ({ status: 'UNKNOWN', reason, backend: 'EXISTING_PRISMA_CLIENT' })
+  try {
+    const result = io.run('/usr/bin/node', ['--input-type=module', '-', release], {
+      input: prismaChildSource(), encoding: 'utf8', timeout: 25000, maxBuffer: 1024 * 1024, shell: false,
+      env: { HOME: io.home, PATH: '/usr/bin:/bin', LANG: 'C', NODE_ENV: 'production', PRISMA_HIDE_UPDATE_MESSAGE: '1' },
+    })
+    if (result?.error?.code === 'ETIMEDOUT') return unknown('PRISMA_CHILD_TIMEOUT')
+    if (result?.error || result?.status !== 0) return unknown('PRISMA_CHILD_UNAVAILABLE')
+    const lines = String(result.stdout).trim().split(/\r?\n/)
+    if (lines.length !== 1 || !lines[0].startsWith('PRISMA_LEDGER=')) return unknown('PRISMA_CHILD_OUTPUT_INVALID')
+    const value = JSON.parse(lines[0].slice(14))
+    if (value.status === 'UNKNOWN' && /^PRISMA_[A-Z_]+$/.test(value.reason)) return unknown(value.reason)
+    if (value.status !== 'READ' || typeof value.tsv !== 'string' || value.backend !== 'EXISTING_PRISMA_CLIENT' || value.tls !== 'STRICT_CERT_AND_DOMAIN') return unknown('PRISMA_CHILD_OUTPUT_INVALID')
+    return { ...migrationState(manifest, value.tsv), backend: value.backend, tls: value.tls,
+      applicationSql: 'FIXED_SELECT_ONLY', sessionSideEffects: 'CONNECTION_AND_DRIVER_INITIALIZATION_NOT_ZERO_SYSTEM_EFFECTS' }
+  } catch { return unknown('PRISMA_CHILD_OUTPUT_INVALID') }
+}
+
+export function targetProcessEvidence(first, last) {
+  const names = ['easonfansclub', 'instagram-sync-worker']
+  return Object.fromEntries(names.map(name => {
+    const a = first.processes.rows.filter(row => row.name === name)
+    const b = last.processes.rows.filter(row => row.name === name)
+    const valid = rows => rows.length > 0 && rows.every(r => r.identityStable === true && !r.deleted &&
+      /^[0-9]+$/.test(r.startTicks) && r.cwd !== 'UNKNOWN')
+    const view = rows => rows.map(r => [r.pid, r.startTicks, r.cwd]).sort((x,y) => x[0]-y[0])
+    return [name, { state: !valid(a) || !valid(b) ? 'UNKNOWN' :
+      JSON.stringify(view(a)) === JSON.stringify(view(b)) ? 'TARGET_ENDPOINTS_MATCH' : 'UNSTABLE',
+      scope: 'OBSERVED_LABELLED_PROCESSES_ONLY_NOT_GLOBAL_COVERAGE_OR_PM2_STATUS', atomic: false, continuous: false }]
+  }))
+}
+
+export function pm2DaemonEvidence(io) {
+  // Metadata only. No PM2 require/connect/CLI/RPC: these may start a daemon.
+  // A live daemon is still not evidence that either application is ONLINE.
+  try {
+    if (!/^\/home\/[A-Za-z0-9._/-]+$/.test(io.home) || io.home.includes('/../')) throw new Error('HOME')
+    const base = io.home + '/.pm2'
+    trustedParents(base + '/pm2.pid', io)
+    const pidFile = io.stat(base + '/pm2.pid'), socket = io.stat(base + '/rpc.sock')
+    if (!pidFile.isFile() || pidFile.isSymbolicLink() || pidFile.uid !== io.uid || (pidFile.mode & 0o022) ||
+      !socket.isSocket() || socket.isSymbolicLink() || socket.uid !== io.uid || (socket.mode & 0o022)) throw new Error('METADATA')
+    const pid = io.read(base + '/pm2.pid').trim()
+    if (!/^[1-9][0-9]{0,8}$/.test(pid)) throw new Error('PID')
+    const ticks = processStartTicks(io.read('/proc/' + pid + '/stat'), pid)
+    return { state: ticks === 'UNKNOWN' ? 'UNKNOWN' : 'EXISTING_DAEMON_METADATA', pid: Number(pid), startTicks: ticks,
+      applicationStatus: 'UNKNOWN', rpcAttempted: false, reason: 'EXACT_PM2_RPC_IMPLEMENTATION_NOT_PINNED_OR_AUDITED' }
+  } catch { return { state: 'UNKNOWN', applicationStatus: 'UNKNOWN', rpcAttempted: false,
+    reason: 'PM2_DAEMON_METADATA_UNAVAILABLE_NO_AUTO_START' } }
+}
+
 export function makeReadIO() {
   return {
     stat: value => fs.lstatSync(value, { bigint: false }),
@@ -141,6 +318,7 @@ export function makeReadIO() {
     },
     run: (binary, args, options) => spawnSync(binary, args, options),
     now: () => new Date().toISOString(),
+    databaseBackend: 'PRISMA',
     home: process.env.HOME || '', uid: process.getuid?.() ?? -1,
     health: async () => {
       const response = await fetch('http://127.0.0.1:3000/api/health/live', { redirect: 'error', signal: AbortSignal.timeout(10000) })
@@ -278,9 +456,17 @@ export async function inspect(manifest, io) {
   const { current: start, lock, processes, healthSha } = first
   const rollback = rollbackSnapshot(io, start)
   let migrations = { status: 'UNKNOWN', reason: rollback.state !== 'PRESENT' ? 'DATABASE_CHECK_SKIPPED_ROLLBACK_UNVERIFIED' : 'DATABASE_CHECK_SKIPPED_LOCK_NOT_CLEAR' }
+  if (io.databaseBackend === 'PRISMA' && rollback.state === 'PRESENT' && lock.state === 'NO_LOCK_OBSERVED' &&
+    (start.sha !== manifest.expectedSha || healthSha !== start.sha)) {
+    migrations.reason = 'DATABASE_CHECK_SKIPPED_RUNTIME_IDENTITY_UNVERIFIED'
+  }
   try {
-    if (rollback.state === 'PRESENT' && lock.state === 'NO_LOCK_OBSERVED') {
-      migrations = migrationRead(databaseTarget(io.read(io.real(start.target + '/.env'))), manifest.migrations, io)
+    if (rollback.state === 'PRESENT' && lock.state === 'NO_LOCK_OBSERVED' &&
+      (io.databaseBackend !== 'PRISMA' || (start.sha === manifest.expectedSha && healthSha === start.sha))) {
+      // Existing mock/legacy CLI capability remains testable. Production IO
+      // explicitly chooses the generated Client, never silently installs CLI.
+      migrations = io.databaseBackend === 'PRISMA' ? prismaMigrationRead(start.target, manifest.migrations, io) :
+        migrationRead(databaseTarget(io.read(io.real(start.target + '/.env'))), manifest.migrations, io)
     }
   } catch { migrations = { status: 'UNKNOWN', reason: 'DATABASE_CONFIGURATION_UNAVAILABLE' } }
   const last = await sample(io)
@@ -297,6 +483,8 @@ export async function inspect(manifest, io) {
     webCwdMatch: stable && processes.inaccessible === 0 && web.length > 0 ? webCwdMatch : 'UNKNOWN',
     snapshotStable: consistency.state === 'UNKNOWN' ? 'UNKNOWN' : stable, snapshotAtomic: false, consistency,
     pm2WebStatus: 'UNKNOWN', pm2WorkerStatus: 'UNKNOWN', pm2Reason: 'PM2_CLI_AND_UNAUDITED_RPC_NOT_IN_READONLY_ALLOWLIST',
+    targetProcessEvidence: targetProcessEvidence(first, last),
+    pm2DaemonEvidence: pm2DaemonEvidence(io),
     processes, workerActiveTasks: 'UNKNOWN', workerSafeToReload: 'UNKNOWN',
     workerObservability: { lease: 'NOT_QUERIED', runningLogs: 'NOT_QUERIED',
       reason: 'LEASE_AND_RUNNING_LOGS_DO_NOT_PROVE_ACTUAL_INFLIGHT_TASKS' },

@@ -35,8 +35,10 @@ export function sourceGuard(bytes) {
   requireThat(createHash('sha256').update(bytes).digest('hex') === SOURCE_SHA256, 'SOURCE_HASH_MISMATCH')
 }
 
-export async function deploymentsClear(env, request = fetch) {
+export async function deploymentsClear(env, request = fetch, currentWorkflow = METADATA_WORKFLOW) {
   invocation(env)
+  requireThat([METADATA_WORKFLOW, '.github/workflows/production-strict-readonly-preflight.yml',
+    '.github/workflows/production-release-approved.yml'].includes(currentWorkflow), 'CURRENT_WORKFLOW_INVALID')
   requireThat(typeof env.GH_TOKEN === 'string' && env.GH_TOKEN.length > 0, 'ACTIONS_READ_UNAVAILABLE')
   async function get(endpoint) {
     const response = await request('https://api.github.com/repos/' + REPOSITORY + endpoint, {
@@ -77,7 +79,7 @@ export async function deploymentsClear(env, request = fetch) {
         // Only this exact run, revision and attempt may be excluded. Other
         // metadata runs and strictly-readonly diagnostics still conflict.
         if (String(row.id) === env.GITHUB_RUN_ID) {
-          requireThat(workflow === METADATA_WORKFLOW && row.head_sha === env.GITHUB_SHA &&
+          requireThat(workflow === currentWorkflow && row.head_sha === env.GITHUB_SHA &&
             Number.isSafeInteger(row.run_attempt) && String(row.run_attempt) === env.GITHUB_RUN_ATTEMPT,
           'CURRENT_RUN_IDENTITY_INVALID')
         } else {

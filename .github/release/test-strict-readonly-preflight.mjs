@@ -7,6 +7,7 @@ import vm from 'node:vm'
 import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { deploymentsClear } from './mysql-client-metadata-runner.mjs'
 import { APP, SELECT_MIGRATIONS, validateManifest, migrationState, lockObservation, envSubset,
   databaseTarget, mysqlArgs, migrationRead, mysqlFailure, releaseSnapshot, rollbackSnapshot,
   processStartTicks, processSnapshots, sampleConsistency, inspect } from './strict-readonly-preflight.mjs'
@@ -255,25 +256,20 @@ test('Bash syntax check of every workflow run block', () => {
     assert.equal(result.status, 0, step.name + ': ' + result.stderr)
   }
 })
-test('GitHub queue mock uses GET only and reports matching running deployments', async () => {
-  const code = queueStep.run.split("node <<'NODE'\n")[1].split('\nNODE')[0]
-  const output = [], queries = [], processMock = { env: { GITHUB_API_URL: 'https://api.example.invalid', GITHUB_REPOSITORY: 'owner/repo', GH_TOKEN: 'fakeToken' } }
-  await vm.runInNewContext(code, { process: processMock, console: { log: value => output.push(value) }, AbortSignal,
-    fetch: async (url, options) => {
-      queries.push({ url, method: options.method })
-      return { ok: true, json: async () => ({ workflow_runs: url.includes('status=in_progress') ? [{ path: '.github/workflows/deploy.yml' }, { path: '.github/workflows/unrelated.yml' }] : [] }) }
-    },
-  })
-  assert.equal(output[0], 'CONCURRENT_DEPLOYMENTS=1')
-  assert.ok(queries.every(row => row.method === undefined))
-  assert.equal(queries.length, 5)
+test('GitHub queue guard is reused and stops on a conflicting deployment', async () => {
+  assert.match(queueStep.run, /deploymentsClear\(process.env, fetch, '.github\/workflows\/production-strict-readonly-preflight.yml'\)/)
+  const env = { GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',GITHUB_REPOSITORY:'andkdiids/EasonFansClub',GITHUB_API_URL:'https://api.github.com',GITHUB_SHA:sha,GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',GH_TOKEN:'fixture' }
+  const queries=[]
+  await assert.rejects(deploymentsClear(env, async (url,options) => {
+    queries.push(options.method)
+    return {ok:true,status:200,json:async()=>url.includes('/git/ref/') ? {object:{sha}} :
+      url.includes('status=in_progress') ? {total_count:1,workflow_runs:[{id:456,path:'.github/workflows/deploy.yml',status:'in_progress'}]} : {total_count:0,workflow_runs:[]} }
+  },'.github/workflows/production-strict-readonly-preflight.yml'),/PRODUCTION_WORKFLOW_CONFLICT/)
+  assert.ok(queries.every(method=>method==='GET'))
 })
 test('failed GitHub queue observation reports UNKNOWN, not no concurrent deploys', async () => {
-  const code = queueStep.run.split("node <<'NODE'\n")[1].split('\nNODE')[0]
-  const output = [], processMock = { env: { GITHUB_API_URL: 'https://api.example.invalid', GITHUB_REPOSITORY: 'o/r' } }
-  await vm.runInNewContext(code, { process: processMock, console: { log: value => output.push(value) }, AbortSignal, fetch: async () => ({ ok: false }) })
-  assert.equal(output[0], 'CONCURRENT_DEPLOYMENTS=UNKNOWN')
-  assert.equal(processMock.exitCode, 1)
+  assert.match(queueStep.run, /CONCURRENT_DEPLOYMENTS=UNKNOWN/)
+  assert.match(queueStep.run, /process.exitCode = 1/)
 })
 
 test('valid exact 171-row manifest accepted', () => assert.equal(validateManifest(manifest), manifest))
@@ -382,6 +378,13 @@ test('lock observed twice; new holder reported at end without interrupting it', 
   const result = await inspect(manifest, io); assert.equal(result.lock.state, 'NO_LOCK_OBSERVED'); assert.equal(result.lockEnd.state, 'OCCUPIED')
 })
 test('no safe DB capability reports UNKNOWN while other observations remain', async () => { const { io, state } = fixture(); state.login = false; const result = await inspect(manifest, io); assert.equal(result.migrations.status, 'UNKNOWN'); assert.equal(result.current.sha, sha) })
+test('Prisma runtime identity mismatch skips credential/query child with accurate reason', async () => {
+  const {io,state,calls}=fixture(); io.databaseBackend='PRISMA'; state.marker='a'.repeat(40)
+  const result=await inspect(manifest,io)
+  assert.equal(result.migrations.reason,'DATABASE_CHECK_SKIPPED_RUNTIME_IDENTITY_UNVERIFIED')
+  assert.equal(calls.some(c=>c[0]==='run'),false)
+})
+
 test('AST production filesystem/child-process API allowlist has no writers', () => {
   const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' }), allowedFS = new Set(['lstatSync', 'realpathSync', 'readlinkSync', 'readdirSync', 'readFileSync'])
   const fsCalls = [], imports = []
@@ -395,8 +398,9 @@ test('AST production filesystem/child-process API allowlist has no writers', () 
   visit(ast); assert.ok(fsCalls.length > 0); assert.deepEqual(imports.sort(), ['node:child_process', 'node:fs', 'node:path'])
   assert.doesNotMatch(source, /\b(?:execSync|execFile|writeFile|appendFile|mkdir|unlink|rename|chmod|flock|mysql_config_editor|pm2)\s*\(/)
 })
-test('real adapter only invokes client via two validated literal call sites', () => {
-  assert.equal((source.match(/io\.run\(/g) || []).length, 2)
+test('real adapter only invokes CLI or isolated Node via three validated literal call sites', () => {
+  assert.equal((source.match(/io\.run\(/g) || []).length, 3)
+  assert.match(source, /io\.run\('\/usr\/bin\/node', \['--input-type=module', '-', release\]/)
   assert.match(source, /io\.run\('\/usr\/bin\/mysql', \['--no-defaults', '--version'\]/)
   assert.match(source, /io\.run\('\/usr\/bin\/mysql', mysqlArgs\(target\), options\)/)
   assert.match(source, /fetch\('http:\/\/127\.0\.0\.1:3000\/api\/health\/live'/)
@@ -569,7 +573,7 @@ test('PM2 socket/version and actual Worker task state remain unproven, never saf
   assert.equal(result.workerActiveTasks, 'UNKNOWN'); assert.equal(result.workerSafeToReload, 'UNKNOWN')
   assert.equal(result.workerObservability.lease, 'NOT_QUERIED'); assert.equal(result.workerObservability.runningLogs, 'NOT_QUERIED')
   assert.ok(calls.filter(row => row[0] === 'run').every(row => row[1] === '/usr/bin/mysql'))
-  assert.doesNotMatch(source, /import.+(?:pm2|net|instagram|prisma)|connect\s*\(|SAFE_TO_RELOAD.*YES/)
+  assert.doesNotMatch(source, /import.+(?:pm2|net|instagram)|\bconnect\s*\(|SAFE_TO_RELOAD.*YES/)
 })
 test('per-process diagnostic row uses explicit field whitelist, not PM2 env or arbitrary stat', () => {
   const { io } = fixture(), row = processSnapshots(io, { target: release, sha }).rows[0]
