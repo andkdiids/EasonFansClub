@@ -13,6 +13,14 @@ on:
         required: true
         type: string
         default: '635ae4a0e1d8eae9d93420517a17f4b29794896f'
+      diagnostic_mode:
+        description: Select full preflight or isolated .env metadata-only inspection
+        required: true
+        type: choice
+        options:
+          - full
+          - env_metadata_only
+        default: full
 
 permissions:
   contents: read
@@ -28,15 +36,18 @@ jobs:
     timeout-minutes: 15
     outputs:
       payload: ${{ steps.manifest.outputs.payload }}
+      diagnostic_mode: ${{ steps.manifest.outputs.diagnostic_mode }}
     steps:
       - name: Require main manual dispatch before any production credentials
         env:
           APPROVED_SHA: ${{ inputs.approved_sha }}
           EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+          DIAGNOSTIC_MODE: ${{ inputs.diagnostic_mode }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]] || exit 1
           [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$DIAGNOSTIC_MODE" == full || "$DIAGNOSTIC_MODE" == env_metadata_only ]] || exit 1
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified v4
         with:
@@ -69,6 +80,7 @@ jobs:
         env:
           APPROVED_SHA: ${{ inputs.approved_sha }}
           EXPECTED_SHA: ${{ inputs.expected_production_sha }}
+          DIAGNOSTIC_MODE: ${{ inputs.diagnostic_mode }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
@@ -85,6 +97,8 @@ jobs:
           }).filter(Boolean)
           const manifest = validateManifest({ app: APP, expectedSha: process.env.EXPECTED_SHA, approvedSha: process.env.APPROVED_SHA, migrations })
           fs.appendFileSync(process.env.GITHUB_OUTPUT, 'payload=' + Buffer.from(JSON.stringify(manifest)).toString('base64') + '\n')
+          if (!['full', 'env_metadata_only'].includes(process.env.DIAGNOSTIC_MODE)) process.exit(1)
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'diagnostic_mode=' + process.env.DIAGNOSTIC_MODE + '\n')
           NODE
 
   inspect:
@@ -158,21 +172,25 @@ jobs:
           KEY_FILE: ${{ steps.ssh.outputs.key }}
           HOSTS_FILE: ${{ steps.ssh.outputs.hosts }}
           PREFLIGHT_PAYLOAD: ${{ needs.validate.outputs.payload }}
+          DIAGNOSTIC_MODE: ${{ needs.validate.outputs.diagnostic_mode }}
         run: |
           set -euo pipefail
           [[ "$PREFLIGHT_PAYLOAD" =~ ^[A-Za-z0-9+/=]+$ ]] || exit 1
           (( ${#PREFLIGHT_PAYLOAD} <= 65536 )) || exit 1
+          [[ "$DIAGNOSTIC_MODE" == full || "$DIAGNOSTIC_MODE" == env_metadata_only ]] || exit 1
           # No remote redirect, SCP, mkdir, lock operation or file cleanup.
           # Preserve the existing home only for reading an existing login path;
           # clear compile-cache/coverage/options and every credential variable.
           remote_command='test -f /usr/bin/node && test ! -L /usr/bin/node || exit 1; node_meta=$(/usr/bin/stat -c "%u:%a" /usr/bin/node) || exit 1; case "$node_meta" in 0:555|0:755) ;; *) exit 1;; esac; exec /usr/bin/env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C /usr/bin/node --input-type=module - '
           remote_command+="'$PREFLIGHT_PAYLOAD'"
+          remote_command+=" '$DIAGNOSTIC_MODE'"
           timeout --foreground --signal=TERM 120s ssh -T \
             -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
             "$SSH_USER@$SSH_HOST" "$remote_command" < .github/release/strict-readonly-preflight.mjs
 
       - name: Observe public HTTPS runtime health without bypassing certificate checks
+        if: needs.validate.outputs.diagnostic_mode == 'full'
         run: |
           set -euo pipefail
           if response="$(curl --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 20 \

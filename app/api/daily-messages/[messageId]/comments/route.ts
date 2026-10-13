@@ -8,7 +8,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { enforceApiRateLimit, requireUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
 import { formatBeijingDate } from '@/lib/checkin'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation } from '@/lib/ip-region'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
@@ -114,7 +114,6 @@ export async function POST(request: Request, context: RouteContext) {
 
   const ipLocation = await resolveIpLocation(request)
   const ipRegion = ipLocation?.label || null
-  void updateUserIpRegion(guard.user.id, ipLocation)
   const { messageId } = await context.params
   const body = await request.json().catch(() => null)
   const contentLength = getReplyLengthMetrics(body?.content)

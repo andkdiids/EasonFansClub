@@ -43,6 +43,7 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
     items: [
       { href: '/admin/home', title: '首页内容', desc: '管理首页 Hero、文案、排序和启用状态。' },
       { href: '/admin/review?type=post', title: '审核中心', desc: '统一审核帖子、沙龙、创作平台、表情包、演唱会投稿和今日内容。' },
+      { href: '/admin/cantonese', title: '粤语课程审核', desc: '预览候选课程包，审核粤语教学内容、题目和标准音频。' },
       { href: '/admin/clinic', title: '阿士匹灵门诊部', desc: '处理匿名病历、会诊和举报；后台可核对真实用户身份。' },
       { href: '/admin/today', title: '今日内容管理', desc: '管理历史上的今天内容；审核入口进入统一审核中心。' },
       { href: '/admin/registration-messages', title: '挂号页留言管理', desc: '管理挂号页留言、公告和活动提醒。' },

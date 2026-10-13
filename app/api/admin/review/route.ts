@@ -14,9 +14,9 @@ import { getForumBoardDisplayName, mergeForumBoardOptions } from '@/lib/boards'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { postContentPlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl } from '@/lib/images'
 import { getSalonEditReviewPostIds } from '@/lib/salon-review-notifications'
-import { requireAdmin, sanitizeText } from '@/lib/security'
+import { requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
 import {
   canApplyReviewDecision,
   parseReviewStatus,
@@ -49,11 +49,12 @@ function summary(value: unknown, max = 240) {
   return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized
 }
 
-function author(input: { id?: string | null; uid?: number | null; nickname?: string | null; displayName?: string | null }) {
+function author(input: { id?: string | null; uid?: number | null; nickname?: string | null; displayName?: string | null; avatarUrl?: string | null }) {
   return {
     id: input.id || null,
     uid: typeof input.uid === 'number' ? input.uid : null,
     name: text(input.displayName) || text(input.nickname) || 'E院用户',
+    avatarUrl: profileImageUrl(input.avatarUrl),
   }
 }
 
@@ -214,7 +215,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
     }))
     return rows.map((row) => buildItem({
       id: row.id, sourceType: 'POST', sourceId: row.id, title: row.title,
-      author: author({ id: row.User.id, uid: row.User.uid, nickname: row.User.nickname, displayName: row.User.Profile?.displayName }), authorId: row.User.id,
+      author: author({ id: row.User.id, uid: row.User.uid, nickname: row.User.nickname, displayName: row.User.Profile?.displayName, avatarUrl: row.User.Profile?.avatarUrl }), authorId: row.User.id,
       createdAt: row.createdAt.toISOString(), status: row.moderationStatus as ReviewStatus,
       cover: publicImageUrl(row.PostMedia[0]?.thumbnail || row.PostMedia[0]?.url),
       media: row.PostMedia.flatMap((media, index) => {
@@ -229,7 +230,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
           ? boardOptions
           : [{ id: row.boardId, name: getForumBoardDisplayName(row.Board), slug: row.Board.slug }, ...boardOptions],
       },
-      summary: summary(postContentPlainText(row.content, row.richContent) || row.summary), category: getForumBoardDisplayName(row.Board) || null, relatedEntity: '社区帖子',
+      summary: summary(postContentPlainText(row.content, row.richContent) || row.summary), body: postContentPlainText(row.content, row.richContent) || row.summary || '', category: getForumBoardDisplayName(row.Board) || null, relatedEntity: '社区帖子',
       reviewer: row.ReviewedBy ? author({ id: row.ReviewedBy.id, uid: row.ReviewedBy.uid, nickname: row.ReviewedBy.nickname }) : null, reviewedAt: asIso(row.reviewedAt), rejectReason: row.rejectionReason,
     }))
   }
@@ -326,7 +327,7 @@ async function accessibleDefinitions(user: Parameters<typeof hasAdminPermission>
 }
 
 export async function GET(request: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireRequestAdmin(request)
   if (!guard.user) return guard.response
   const params = new URL(request.url).searchParams
   const sourceType = parseReviewSourceType(params.get('type'))
@@ -373,6 +374,7 @@ export async function GET(request: Request) {
     targetId,
     targetFound: targetId ? Boolean(targetItem) : undefined,
     targetStatus: targetItem?.status,
+    targetItem,
     type: sourceType,
     status,
     keyword,
@@ -388,7 +390,7 @@ export async function GET(request: Request) {
 
 function delegatedRequest(request: Request, body: Record<string, unknown>, method = 'PATCH') {
   const headers = new Headers()
-  for (const key of ['cookie', 'origin', 'referer', 'user-agent', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto']) {
+  for (const key of ['authorization', 'cookie', 'origin', 'referer', 'user-agent', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto']) {
     const value = request.headers.get(key)
     if (value) headers.set(key, value)
   }
@@ -423,7 +425,7 @@ async function performConcertDecision(sourceId: string, decision: ReviewDecision
 }
 
 export async function PATCH(request: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireRequestAdmin(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   const sourceType = parseReviewSourceType(body?.sourceType)

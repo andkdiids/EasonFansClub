@@ -30,6 +30,12 @@ import {
 import { Pagination } from '@/components/ui/Pagination'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
+import { ReviewConfirmDialog, type ReviewConfirmAction } from '@/components/activities/ReviewConfirmDialog'
+import { TopicActivityV2TaskReview } from '@/components/activities/TopicActivityV2TaskReview'
+import type { TopicActivityV2TaskAsset, TopicActivityV2TaskSubmission } from '@/components/activities/topic-activity-v2-types'
+import { SingleCommentConfirmDialog } from '@/components/activities/SingleCommentConfirmDialog'
+import { parseTopicCommentEligibility, topicCommentBlockMessage, type TopicCommentEligibility } from '@/lib/topic-comment-ui'
+import { matchesTopicReviewFilter, topicReviewCountForFilter, type TopicReviewCounts } from '@/lib/topic-review-filter'
 import {
   clearPostReplyDrafts,
   getPostReplyDraftKey,
@@ -37,6 +43,7 @@ import {
   writePostReplyDraft,
 } from '@/lib/post-reply-drafts'
 
+type TopicSubmissionStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
 type ReplyItem = {
   id: string
   content: string
@@ -51,6 +58,7 @@ type ReplyItem = {
   stickerId?: string | null
   stickerUrl?: string | null
   mentions: ReplyMentionView[]
+  topicActivitySubmission?: TopicActivityV2TaskSubmission & { alreadyCounted: boolean; formSubmissionCount?: number }
   author: {
     id: string
     uid: number
@@ -77,6 +85,43 @@ function normalizeReply(value: unknown): ReplyItem | null {
   const reply = value as Partial<ReplyItem>
   if (typeof reply.id !== 'string' || typeof reply.content !== 'string') return null
   const sourceAuthor = reply.author && typeof reply.author === 'object' ? reply.author : unavailableAuthor
+  const rawSubmission = reply.topicActivitySubmission && typeof reply.topicActivitySubmission === 'object' ? reply.topicActivitySubmission as Record<string, unknown> : null
+  const rewardSnapshotRaw = rawSubmission?.rewardSnapshotSafe && typeof rawSubmission.rewardSnapshotSafe === 'object' ? rawSubmission.rewardSnapshotSafe as Record<string, unknown> : null
+  const rawAssets = Array.isArray(rawSubmission?.taskAssets) ? rawSubmission.taskAssets : []
+  const taskAssets: TopicActivityV2TaskAsset[] = rawAssets.flatMap((asset) => {
+    if (!asset || typeof asset !== 'object') return []
+    const source = asset as Record<string, unknown>
+    if (typeof source.assetId !== 'string') return []
+    return [{
+      assetId: source.assetId,
+      previewAccessUrl: typeof source.previewAccessUrl === 'string' ? source.previewAccessUrl : null,
+      thumbnailAccessUrl: typeof source.thumbnailAccessUrl === 'string' ? source.thumbnailAccessUrl : null,
+      originalDownloadUrl: typeof source.originalDownloadUrl === 'string' ? source.originalDownloadUrl : null,
+      url: typeof source.url === 'string' ? source.url : null,
+      thumbnailUrl: typeof source.thumbnailUrl === 'string' ? source.thumbnailUrl : null,
+      mimeType: typeof source.mimeType === 'string' ? source.mimeType : null,
+      width: typeof source.width === 'number' ? source.width : null,
+      height: typeof source.height === 'number' ? source.height : null,
+      size: typeof source.size === 'number' ? source.size : null,
+    }]
+  })
+  const topicActivitySubmission = rawSubmission && typeof rawSubmission.id === 'string' && (rawSubmission.status === 'PENDING' || rawSubmission.status === 'APPROVED' || rawSubmission.status === 'REJECTED' || rawSubmission.status === 'WITHDRAWN')
+    ? {
+        id: rawSubmission.id,
+        status: rawSubmission.status as TopicSubmissionStatus,
+        rejectReason: typeof rawSubmission.rejectReason === 'string' ? rawSubmission.rejectReason : null,
+        alreadyCounted: Boolean(rawSubmission.alreadyCounted),
+        formSubmissionCount: typeof rawSubmission.formSubmissionCount === 'number' ? rawSubmission.formSubmissionCount : undefined,
+        rewardEntryId: typeof rawSubmission.rewardEntryId === 'string' ? rawSubmission.rewardEntryId : null,
+        rewardSnapshotSafe: rewardSnapshotRaw ? {
+          platformName: typeof rewardSnapshotRaw.platformName === 'string' ? rewardSnapshotRaw.platformName : null,
+          title: typeof rewardSnapshotRaw.title === 'string' ? rewardSnapshotRaw.title : null,
+          points: typeof rewardSnapshotRaw.points === 'number' ? rewardSnapshotRaw.points : null,
+          instructions: typeof rewardSnapshotRaw.instructions === 'string' ? rewardSnapshotRaw.instructions : null,
+        } : null,
+        taskAssets,
+        granted: Boolean(rawSubmission.granted),
+      } : undefined
   return {
     id: reply.id,
     content: reply.content,
@@ -91,6 +136,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
     stickerId: typeof reply.stickerId === 'string' ? reply.stickerId : null,
     stickerUrl: typeof reply.stickerUrl === 'string' ? toPublicMediaUrl(reply.stickerUrl) : null,
     mentions: Array.isArray(reply.mentions) ? reply.mentions : [],
+    topicActivitySubmission,
     author: {
       ...unavailableAuthor,
       ...sourceAuthor,
@@ -130,6 +176,11 @@ export function PostRepliesSection({
   pagination,
   hotReplyIds,
   commentsLoadError,
+  topicActivityId,
+  canReviewTopicActivity = false,
+  topicReviewFilter = 'ALL',
+  initialTopicReviewCounts = null,
+  topicAllowImageAttachments = true,
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
@@ -145,6 +196,11 @@ export function PostRepliesSection({
   pagination: PostReplyPagination
   hotReplyIds?: string[]
   commentsLoadError?: boolean
+  topicActivityId?: string
+  canReviewTopicActivity?: boolean
+  topicReviewFilter?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
+  initialTopicReviewCounts?: TopicReviewCounts | null
+  topicAllowImageAttachments?: boolean
 }>) {
   const router = useRouter()
   const pathname = usePathname()
@@ -156,6 +212,26 @@ export function PostRepliesSection({
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [mobileReplySheetOpen, setMobileReplySheetOpen] = useState(false)
   const [pinningReplyId, setPinningReplyId] = useState<string | null>(null)
+  const [reviewingSubmissionId, setReviewingSubmissionId] = useState<string | null>(null)
+  const [reviewDialog, setReviewDialog] = useState<{ reply: ReplyItem; action: ReviewConfirmAction } | null>(null)
+  const [reviewRejectReason, setReviewRejectReason] = useState('')
+  const [reviewError, setReviewError] = useState('')
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const reviewLoadingRef = useRef(false)
+  const [topicReviewCounts, setTopicReviewCounts] = useState(initialTopicReviewCounts)
+  const [topicReviewSyncError, setTopicReviewSyncError] = useState('')
+  const reviewSyncRequestRef = useRef(0)
+  const [viewPagination, setViewPagination] = useState(pagination)
+  const [topicEligibility, setTopicEligibility] = useState<TopicCommentEligibility | null>(null)
+  const [topicEligibilityLoading, setTopicEligibilityLoading] = useState(Boolean(topicActivityId && currentUserId && canInteract))
+  const [topicEligibilityError, setTopicEligibilityError] = useState('')
+  const topicEligibilityKey = topicActivityId && currentUserId && canInteract
+    ? `${postId}:${topicActivityId}:${currentUserId}`
+    : ''
+  const [topicEligibilityLoadedKey, setTopicEligibilityLoadedKey] = useState('')
+  const topicEligibilityRequestRef = useRef(0)
+  const [singleCommentConfirmOpen, setSingleCommentConfirmOpen] = useState(false)
+  const singleCommentDecisionRef = useRef<((allowed: boolean) => void) | null>(null)
   const activeReplyId = replyTo?.id
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
   const commentsTopRef = useRef<HTMLDivElement | null>(null)
@@ -192,6 +268,109 @@ export function PostRepliesSection({
     setMobileReplySheetOpen(false)
     setReplyTo(null)
   }, [])
+  const loadTopicEligibility = useCallback(async () => {
+    if (!topicActivityId || !currentUserId || !canInteract) {
+      setTopicEligibility(null)
+      setTopicEligibilityError('')
+      setTopicEligibilityLoading(false)
+      setTopicEligibilityLoadedKey('')
+      return
+    }
+    const requestId = ++topicEligibilityRequestRef.current
+    setTopicEligibilityLoading(true)
+    setTopicEligibilityError('')
+    setTopicEligibilityLoadedKey('')
+    try {
+      const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/replies`, { credentials: 'same-origin', cache: 'no-store' })
+      const data = await response.json().catch(() => null)
+      const parsed = response.ok ? parseTopicCommentEligibility(data) : null
+      if (!parsed) throw new Error(response.ok ? '评论资格信息暂时无法加载' : data?.message || '评论资格信息暂时无法加载')
+      if (requestId !== topicEligibilityRequestRef.current) return
+      setTopicEligibility(parsed.eligibility)
+      setTopicEligibilityLoadedKey(topicEligibilityKey)
+    } catch (error) {
+      if (requestId !== topicEligibilityRequestRef.current) return
+      setTopicEligibility(null)
+      setTopicEligibilityError(error instanceof Error ? error.message : '评论资格信息暂时无法加载')
+    } finally {
+      if (requestId === topicEligibilityRequestRef.current) setTopicEligibilityLoading(false)
+    }
+  }, [canInteract, currentUserId, postId, topicActivityId, topicEligibilityKey])
+
+  useEffect(() => {
+    if (!topicActivityId || !currentUserId || !canInteract) {
+      setTopicEligibility(null)
+      setTopicEligibilityError('')
+      setTopicEligibilityLoading(false)
+      setTopicEligibilityLoadedKey('')
+      return
+    }
+    void loadTopicEligibility()
+    const refreshForActivity = (event?: Event) => {
+      const detail = (event as CustomEvent<{ activityId?: string }> | undefined)?.detail
+      if (detail?.activityId && detail.activityId !== topicActivityId) return
+      void loadTopicEligibility()
+    }
+    window.addEventListener('focus', refreshForActivity)
+    window.addEventListener('pageshow', refreshForActivity)
+    window.addEventListener('ecfc:topic-activity-form-submitted', refreshForActivity)
+    window.addEventListener('ecfc:topic-activity-admin-replied', refreshForActivity)
+    window.addEventListener('ecfc:topic-activity-form-replied', refreshForActivity)
+    return () => {
+      window.removeEventListener('focus', refreshForActivity)
+      window.removeEventListener('pageshow', refreshForActivity)
+      window.removeEventListener('ecfc:topic-activity-form-submitted', refreshForActivity)
+      window.removeEventListener('ecfc:topic-activity-admin-replied', refreshForActivity)
+      window.removeEventListener('ecfc:topic-activity-form-replied', refreshForActivity)
+    }
+  }, [canInteract, currentUserId, loadTopicEligibility, topicActivityId])
+
+  function openTopicActivityForm() {
+    if (!topicActivityId) return
+    window.dispatchEvent(new CustomEvent('ecfc:topic-activity-open-form', { detail: { activityId: topicActivityId } }))
+  }
+
+  function beforeSingleCommentSubmit() {
+    if (!topicActivityId || !currentUserId || !canInteract || topicEligibilityLoadedKey !== topicEligibilityKey || topicEligibilityLoading || topicEligibilityError || topicEligibility?.commentLimit !== 'SINGLE' || !topicEligibility.canComment) return Promise.resolve(false)
+    if (singleCommentDecisionRef.current) return Promise.resolve(false)
+    setSingleCommentConfirmOpen(true)
+    return new Promise<boolean>((resolve) => {
+      singleCommentDecisionRef.current = resolve
+    })
+  }
+
+  useEffect(() => () => {
+    const resolve = singleCommentDecisionRef.current
+    singleCommentDecisionRef.current = null
+    resolve?.(false)
+  }, [pathname, postId, topicActivityId])
+
+  function cancelSingleComment() {
+    setSingleCommentConfirmOpen(false)
+    const resolve = singleCommentDecisionRef.current
+    singleCommentDecisionRef.current = null
+    resolve?.(false)
+  }
+
+  function confirmSingleComment() {
+    setSingleCommentConfirmOpen(false)
+    const resolve = singleCommentDecisionRef.current
+    singleCommentDecisionRef.current = null
+    resolve?.(true)
+  }
+
+  useEffect(() => {
+    if (!singleCommentConfirmOpen) return
+    if (!topicActivityId || topicEligibilityLoading || topicEligibilityError || topicEligibility?.commentLimit !== 'SINGLE' || !topicEligibility.canComment) cancelSingleComment()
+  }, [singleCommentConfirmOpen, topicActivityId, topicEligibility, topicEligibilityError, topicEligibilityLoading])
+
+  const topicRootComposerUnlocked = !topicActivityId || Boolean(
+    currentUserId
+      && !topicEligibilityLoading
+      && !topicEligibilityError
+      && topicEligibilityLoadedKey === topicEligibilityKey
+      && topicEligibility?.canComment,
+  )
   useEffect(() => {
     setReplyDrafts(readPostReplyDrafts(postId))
   }, [postId])
@@ -221,6 +400,9 @@ export function PostRepliesSection({
     setMyReplies((initialMyReplies || []).map(normalizeReply).filter((reply): reply is ReplyItem => Boolean(reply)))
     setReplyCount(Math.max(initialReplyCount, 0))
   }, [initialReplies, initialMyReplies, initialReplyCount])
+  useEffect(() => { setTopicReviewCounts(initialTopicReviewCounts) }, [initialTopicReviewCounts])
+  useEffect(() => { setViewPagination(pagination); reviewSyncRequestRef.current += 1 }, [pagination, topicReviewFilter, sort, direction])
+  useEffect(() => () => { reviewSyncRequestRef.current += 1 }, [postId])
   useEffect(() => {
     const previous = previousCommentViewRef.current
     const current = { page: pagination.page, sort, direction }
@@ -250,11 +432,49 @@ export function PostRepliesSection({
   }, [myReplies, replies])
   const tree = useMemo(() => buildReplyTree(allReplies), [allReplies])
   const replyMap = useMemo(() => buildReplyMap(allReplies), [allReplies])
-  const rootReplies = useMemo(() => tree.get(null) || [], [tree])
+  const pageRootReplies = useMemo(() => buildReplyTree(replies).get(null) || [], [replies])
   const { my: myRootReplies, visible: visibleRootReplies } = useMemo(
-    () => splitViewerPostReplyRoots(rootReplies, myReplies),
-    [myReplies, rootReplies],
+    () => splitViewerPostReplyRoots(pageRootReplies, myReplies),
+    [myReplies, pageRootReplies],
   )
+  const filteredRootReplies = useMemo(() => canReviewTopicActivity
+    ? visibleRootReplies.filter((reply) => matchesTopicReviewFilter(reply, topicReviewFilter))
+    : visibleRootReplies, [canReviewTopicActivity, topicReviewFilter, visibleRootReplies])
+
+  async function syncReviewCounts() {
+    const requestId = ++reviewSyncRequestRef.current
+    try {
+      const query = new URLSearchParams({ page: String(viewPagination.page), pageSize: String(viewPagination.pageSize), sort, direction })
+      if (topicReviewFilter !== 'ALL') query.set('topicStatus', topicReviewFilter)
+      const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/replies?${query}`, { credentials: 'same-origin', cache: 'no-store' })
+      const data = await response.json()
+      if (requestId !== reviewSyncRequestRef.current) return
+      if (!response.ok || !data?.topicActivity?.reviewCounts || !Array.isArray(data.replies)) throw new Error('review sync failed')
+      setTopicReviewCounts(data.topicActivity.reviewCounts)
+      const flatten = (rows: unknown[]): ReplyItem[] => rows.flatMap((row) => {
+        const reply = normalizeReply(row)
+        if (!reply) return []
+        const children = (row as { replies?: unknown[] }).replies
+        return [reply, ...flatten(Array.isArray(children) ? children : [])]
+      })
+      const refreshed = flatten([...(data.pinned ? [data.pinned] : []), ...data.replies])
+      setReplies((current) => {
+        const currentById = new Map(current.map((reply) => [reply.id, reply]))
+        const roots = new Set(refreshed.filter((reply) => !reply.parentId).map((reply) => reply.id))
+        // Keep existing nested branches and visual author metadata when their
+        // root is still on this page. Only replace the authoritative status.
+        const kept = new Set(roots)
+        let changed = true
+        while (changed) { changed = false; for (const reply of current) if (reply.parentId && kept.has(reply.parentId) && !kept.has(reply.id)) { kept.add(reply.id); changed = true } }
+        const freshIds = new Set(refreshed.map((reply) => reply.id))
+        return [...refreshed.map((reply) => currentById.has(reply.id) ? { ...currentById.get(reply.id)!, topicActivitySubmission: reply.topicActivitySubmission } : reply), ...current.filter((reply) => reply.parentId && kept.has(reply.id) && !freshIds.has(reply.id))]
+      })
+      if (Number.isInteger(data.page) && Number.isInteger(data.totalPages)) setViewPagination({ page: data.page, total: data.total, totalPages: data.totalPages, pageSize: data.pageSize })
+      setTopicReviewSyncError('')
+    } catch {
+      if (requestId === reviewSyncRequestRef.current) setTopicReviewSyncError('评论已更新，审核列表同步失败，请重试同步')
+    }
+  }
 
   function buildCommentHref(nextSort: PostReplySort, nextDirection: PostReplyDirection, nextPage: number) {
     const params = new URLSearchParams(searchParams.toString())
@@ -282,9 +502,71 @@ export function PostRepliesSection({
   }
 
   function changeCommentPage(nextPage: number) {
-    if (nextPage === pagination.page) return
+    if (nextPage === viewPagination.page) return
     navigationReasonRef.current = 'pagination'
     router.push(buildCommentHref(sort, direction, nextPage), { scroll: false })
+  }
+
+  function changeTopicReviewFilter(nextFilter: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN') {
+    if (!topicActivityId || !canReviewTopicActivity || nextFilter === topicReviewFilter) return
+    const params = new URLSearchParams(searchParams.toString())
+    if (nextFilter === 'ALL') params.delete('topicStatus')
+    else params.set('topicStatus', nextFilter)
+    params.delete('commentPage')
+    const query = params.toString()
+    navigationReasonRef.current = 'pagination'
+    router.push(`${pathname}${query ? `?${query}` : ''}`, { scroll: false })
+  }
+
+  function openReviewDialog(reply: ReplyItem, action: ReviewConfirmAction) {
+    if (!canReviewTopicActivity || !reply.topicActivitySubmission || reviewingSubmissionId || reviewLoadingRef.current) return
+    setReviewError('')
+    setReviewRejectReason('')
+    setReviewDialog({ reply, action })
+  }
+
+  async function confirmReview() {
+    const target = reviewDialog
+    const submission = target?.reply.topicActivitySubmission
+    if (!canReviewTopicActivity || !target || !submission || reviewLoadingRef.current) return
+    reviewLoadingRef.current = true
+    reviewSyncRequestRef.current += 1
+    setReviewLoading(true)
+    setReviewingSubmissionId(submission.id)
+    setReviewError('')
+    const status = target.action
+    const rejectReason = reviewRejectReason.trim()
+    try {
+      const response = await fetch(`/api/admin/topic-activity-submissions/${encodeURIComponent(submission.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, ...(rejectReason ? { rejectReason } : {}) }),
+      })
+      const data = await response.json().catch(() => ({})) as { message?: string; submission?: { id: string; status: TopicSubmissionStatus; rejectReason?: string | null }; alreadyCounted?: boolean; participation?: { countedInActivity?: boolean } }
+      if (!response.ok || !data.submission) throw new Error(data.message || '审核操作失败，请稍后重试')
+      const update = (items: ReplyItem[]) => items.map((item) => {
+        if (!item.topicActivitySubmission || item.author.id !== target.reply.author.id) return item
+        const alreadyCounted = data.participation?.countedInActivity ?? (data.submission!.status === 'APPROVED' || items.some((other) => other.author.id === item.author.id && other.topicActivitySubmission?.id !== submission.id && other.topicActivitySubmission?.status === 'APPROVED'))
+        return { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, alreadyCounted, ...(item.topicActivitySubmission.id === submission.id ? { status: data.submission!.status, rejectReason: data.submission!.rejectReason || null } : {}) } }
+      })
+      setReplies(update)
+      setMyReplies(update)
+      // Preserve rows, children, expansion and route; filter the new status.
+      setTopicReviewCounts((counts) => counts && submission.status !== data.submission!.status ? {
+        ...counts,
+        [submission.status]: Math.max(0, counts[submission.status] - 1),
+        [data.submission!.status]: counts[data.submission!.status] + 1,
+      } : counts)
+      setReviewDialog(null)
+      setReviewRejectReason('')
+      void syncReviewCounts()
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : '审核操作失败，请稍后重试')
+    } finally {
+      reviewLoadingRef.current = false
+      setReviewLoading(false)
+      setReviewingSubmissionId(null)
+    }
   }
 
   async function toggleLike(replyId: string) {
@@ -350,11 +632,12 @@ export function PostRepliesSection({
   }
 
   function scrollToMyComments() {
-    const target = document.getElementById(`post-my-comments-${postId}`)
-    if (!target) return
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    target.classList.add('notification-focus-target')
-    window.setTimeout(() => target.classList.remove('notification-focus-target'), 2000)
+    const firstComment = myRootReplies[0]
+    if (!firstComment) return
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('commentId', firstComment.id)
+    const query = params.toString()
+    router.push(`${pathname}${query ? `?${query}` : ''}`, { scroll: false })
   }
 
   useEffect(() => {
@@ -449,8 +732,14 @@ export function PostRepliesSection({
     setReplyCount(nextReplyCount)
     const rootId = created.parentId ? findRootReplyId(created.parentId) : null
     if (rootId) setExpandedReplies((current) => ({ ...current, [rootId]: true }))
+    if (topicActivityId && !created.parentId && topicEligibility?.commentLimit === 'SINGLE') {
+      setTopicEligibility((current) => current
+        ? { ...current, canComment: false, hasUsedSingleComment: true, blockReason: 'COMMENT_LIMIT_REACHED' }
+        : current)
+    }
     window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: nextReplyCount } }))
-    if (!window.matchMedia('(max-width: 767px)').matches) router.refresh()
+    if (topicActivityId && canReviewTopicActivity && !created.parentId) void syncReviewCounts()
+    else if (!window.matchMedia('(max-width: 767px)').matches) router.refresh()
   }
 
   function removeReply(replyId: string, result: DeleteCommentResult) {
@@ -464,6 +753,7 @@ export function PostRepliesSection({
       : Math.max(replyCount - removeIds.size, 0)
     setReplyCount(nextReplyCount)
     window.dispatchEvent(new CustomEvent('ecfc:post-reply-count', { detail: { postId, count: nextReplyCount } }))
+    if (topicActivityId && canReviewTopicActivity && !replyMap.get(replyId)?.parentId) void syncReviewCounts()
   }
 
   function collectThreadReplies(rootId: string) {
@@ -525,7 +815,7 @@ export function PostRepliesSection({
                 </button>
               ) : null}
               {canDelete ? (
-                <DeleteReplyButton replyId={reply.id} label="删除" variant="text" onDeleted={(result) => removeReply(reply.id, result)} />
+              <DeleteReplyButton replyId={reply.id} label="删除" variant="text" confirmDescription={reply.topicActivitySubmission ? '这条评论属于话题活动参与内容。删除后该条参与将撤回；若用户还有其他已通过内容，活动参与仍有效。已发奖励不会自动追回。' : undefined} onDeleted={(result) => removeReply(reply.id, result)} />
               ) : null}
             </div>
             <LikeAvatars
@@ -538,6 +828,8 @@ export function PostRepliesSection({
               <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
                 <ReplyForm
                   postId={postId}
+                  allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
+                  isTopicRootComment={Boolean(topicActivityId)}
                   replyTo={replyTo}
                   onReplyCancel={() => setReplyTo(null)}
                   onReplyCreated={addReply}
@@ -608,7 +900,30 @@ export function PostRepliesSection({
               </button>
             ) : null}
             {canDelete ? (
-              <DeleteReplyButton replyId={reply.id} onDeleted={(result) => removeReply(reply.id, result)} />
+              <DeleteReplyButton replyId={reply.id} confirmDescription={reply.topicActivitySubmission ? '这条评论属于话题活动参与内容。删除后该条参与将撤回；若用户还有其他已通过内容，活动参与仍有效。已发奖励不会自动追回。' : undefined} onDeleted={(result) => removeReply(reply.id, result)} />
+            ) : null}
+            {topicActivityId && reply.topicActivitySubmission ? (
+              reply.topicActivitySubmission.rewardEntryId ? <TopicActivityV2TaskReview
+                activityId={topicActivityId}
+                canReview={canReviewTopicActivity}
+                submission={reply.topicActivitySubmission}
+                onReviewed={(status) => {
+                  const update = (items: ReplyItem[]) => items.map((item) => item.id === reply.id && item.topicActivitySubmission
+                    ? { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, status } }
+                    : item)
+                  setReplies(update)
+                  setMyReplies(update)
+                  void syncReviewCounts()
+                }}
+              /> : <>
+                {reply.topicActivitySubmission.status === 'PENDING' && canReviewTopicActivity ? <>
+                  <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'APPROVED')} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 disabled:opacity-50">{reviewingSubmissionId === reply.topicActivitySubmission.id ? '处理中…' : '通过'}</button>
+                  <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'REJECTED')} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 disabled:opacity-50">拒绝</button>
+                </> : <span className={`rounded-full px-3 py-1 text-xs font-black ${reply.topicActivitySubmission.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' : reply.topicActivitySubmission.status === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{reply.topicActivitySubmission.status === 'APPROVED' ? '已通过' : reply.topicActivitySubmission.status === 'REJECTED' ? '未通过' : reply.topicActivitySubmission.status === 'WITHDRAWN' ? '已撤回' : '待审核'}</span>}
+                {canReviewTopicActivity && reply.topicActivitySubmission.alreadyCounted && reply.topicActivitySubmission.status === 'PENDING' ? <span className="text-xs font-bold text-slate-500">已计入本活动</span> : null}
+                {canReviewTopicActivity && typeof reply.topicActivitySubmission.formSubmissionCount === 'number' ? reply.topicActivitySubmission.formSubmissionCount > 0 ? <a href={`/posts/${postId}?formUserId=${encodeURIComponent(reply.author.id)}#topic-activity-admin-forms-${topicActivityId}`} className="text-xs font-bold text-[var(--primary)]">已提交表单（{reply.topicActivitySubmission.formSubmissionCount}） · 查看资料</a> : <span className="text-xs text-[var(--foreground-muted)]">尚未填写表单</span> : null}
+                {reply.topicActivitySubmission.status === 'REJECTED' && reply.topicActivitySubmission.rejectReason ? <span className="basis-full text-xs text-rose-700">拒绝原因：{reply.topicActivitySubmission.rejectReason}</span> : null}
+              </>
             ) : null}
           </div>
           <LikeAvatars
@@ -622,6 +937,7 @@ export function PostRepliesSection({
           <div id={`reply-form-${reply.id}`} className="post-reply-inline-composer mt-3">
             <ReplyForm
               postId={postId}
+                allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
               replyTo={replyTo}
               onReplyCancel={() => setReplyTo(null)}
               onReplyCreated={addReply}
@@ -654,25 +970,38 @@ export function PostRepliesSection({
     <section id={`post-comments-${postId}`} className="post-replies-section scroll-mt-16 space-y-3">
       {currentUserId && canInteract && !replyTo ? (
         <div id={`post-primary-composer-${postId}`} data-post-primary-composer={postId}>
-          <div className="post-replies-desktop-composer">
-            <ReplyForm
-              postId={postId}
-              onReplyCancel={() => setReplyTo(null)}
-              onReplyCreated={addReply}
-              draftContent={replyDrafts[replyDraftKey(null)] || ''}
-              onDraftChange={(content) => updateReplyDraft(replyDraftKey(null), content)}
-              onDraftClear={() => clearReplyDraft(replyDraftKey(null))}
-            />
-          </div>
-          <div className="post-replies-mobile-composer-trigger">
-            <button
-              type="button"
-              onClick={() => setMobileReplySheetOpen(true)}
-              aria-label={'\u6253\u5f00\u56de\u590d\u7f16\u8f91\u5668'}
-            >
-              {'\u5199\u4e0b\u4f60\u7684\u56de\u590d\uff0c\u8f93\u5165 @ \u63d0\u53ca\u597d\u53cb\u2026'}
-            </button>
-          </div>
+          {!topicRootComposerUnlocked ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-black text-amber-800">
+              <p>{topicEligibilityLoading ? '正在检查评论资格…' : topicEligibilityError ? '评论资格加载失败，请重试。' : topicCommentBlockMessage(topicEligibility?.blockReason || null)}</p>
+              {topicEligibilityError ? <button type="button" onClick={() => void loadTopicEligibility()} className="mt-3 min-h-10 rounded-sm border border-amber-300 bg-white px-3 text-sm font-black text-amber-800">重试</button> : null}
+              {!topicEligibilityLoading && !topicEligibilityError && topicEligibility?.blockReason === 'FORM_REQUIRED_BEFORE_COMMENT' ? <button type="button" onClick={openTopicActivityForm} className="mt-3 min-h-10 rounded-sm bg-brand-700 px-3 text-sm font-black text-white">填写表单</button> : null}
+            </div>
+          ) : (
+            <div>
+              <div className="post-replies-desktop-composer">
+                <ReplyForm
+                  postId={postId}
+                  onReplyCancel={() => setReplyTo(null)}
+                  allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
+                  isTopicRootComment={Boolean(topicActivityId)}
+                  onReplyCreated={addReply}
+                  beforeSubmit={topicActivityId && topicEligibility?.commentLimit === 'SINGLE' ? beforeSingleCommentSubmit : undefined}
+                  draftContent={replyDrafts[replyDraftKey(null)] || ''}
+                  onDraftChange={(content) => updateReplyDraft(replyDraftKey(null), content)}
+                  onDraftClear={() => clearReplyDraft(replyDraftKey(null))}
+                />
+              </div>
+              <div className="post-replies-mobile-composer-trigger">
+                <button
+                  type="button"
+                  onClick={() => setMobileReplySheetOpen(true)}
+                  aria-label={'\u6253\u5f00\u56de\u590d\u7f16\u8f91\u5668'}
+                >
+                  {'\u5199\u4e0b\u4f60\u7684\u56de\u590d\uff0c\u8f93\u5165 @ \u63d0\u53ca\u597d\u53cb\u2026'}
+                </button>
+              </div>
+            </div>
+          )}
           {myRootReplies.length ? (
             <button
               type="button"
@@ -687,21 +1016,9 @@ export function PostRepliesSection({
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
       ) : null}
 
-      {myRootReplies.length ? (
-        <section
-          id={`post-my-comments-${postId}`}
-          aria-labelledby={`post-my-comments-title-${postId}`}
-          className="post-replies-my-comments scroll-mt-20 space-y-3 rounded-xl border border-sky-100 bg-sky-50/40 p-3 sm:p-4"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 id={`post-my-comments-title-${postId}`} className="text-base font-black text-brand-950">我的评论（{myRootReplies.length}）</h3>
-            <button type="button" onClick={scrollToMyComments} className="text-xs font-black text-brand-700">查看我的评论</button>
-          </div>
-          <div className="space-y-3">
-            {myRootReplies.map((reply) => renderReply(reply))}
-          </div>
-        </section>
-      ) : null}
+      {myRootReplies.length ? <div id={`post-my-comments-${postId}`} className="post-replies-my-comments">
+        <button type="button" onClick={scrollToMyComments} className="text-left text-xs font-black text-brand-700">我的评论（{myRootReplies.length}） · 查看我的评论</button>
+      </div> : null}
 
       <div ref={commentsTopRef} className="post-replies-top">
         <h2 className="text-2xl font-black text-brand-950">回复 {replyCount}</h2>
@@ -733,6 +1050,10 @@ export function PostRepliesSection({
           </button>
         </div>
       </div>
+      {topicActivityId && canReviewTopicActivity ? <div role="tablist" aria-label="话题活动评论审核筛选" className="flex flex-wrap gap-2">
+        {([['ALL', '全部'], ['PENDING', '待审核'], ['APPROVED', '已通过'], ['REJECTED', '已拒绝'], ['WITHDRAWN', '已撤回']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={topicReviewFilter === value} onClick={() => changeTopicReviewFilter(value)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicReviewFilter === value ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{label}{topicReviewCounts ? `（${topicReviewCountForFilter(topicReviewCounts, value)}）` : ''}</button>)}
+      </div> : null}
+      {topicReviewSyncError ? <p role="alert">{topicReviewSyncError}<button type="button" onClick={() => void syncReviewCounts()}>重试同步</button></p> : null}
       {hotReplyIds?.length ? (
         <div className="post-replies-hot-list p-4">
           <h3 className="font-black text-brand-950">热门评论</h3>
@@ -747,17 +1068,17 @@ export function PostRepliesSection({
         </div>
       ) : null}
       {focusId && !replyMap.has(focusId) ? <p className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-800">该内容已被删除或无法查看</p> : null}
-      {visibleRootReplies.length === 0 && myRootReplies.length === 0 ? (
+      {filteredRootReplies.length === 0 ? (
         <div className="post-replies-empty rounded-xl border-dashed p-8 text-center text-slate-500">还没有回复。</div>
-      ) : visibleRootReplies.length ? (
+      ) : filteredRootReplies.length ? (
         <div className="space-y-3">
-          {visibleRootReplies.map((reply) => renderReply(reply))}
+          {filteredRootReplies.map((reply) => renderReply(reply))}
         </div>
       ) : null}
-      {pagination.totalPages > 1 ? (
+      {viewPagination.totalPages > 1 ? (
         <Pagination
-          currentPage={pagination.page}
-          totalPages={pagination.totalPages}
+          currentPage={viewPagination.page}
+          totalPages={viewPagination.totalPages}
           onPageChange={changeCommentPage}
           ariaLabel="评论分页"
           className="post-replies-pagination"
@@ -765,18 +1086,43 @@ export function PostRepliesSection({
       ) : null}
 
     </section>
-    {currentUserId && canInteract ? (
+    {currentUserId && canInteract && (topicRootComposerUnlocked || Boolean(replyTo)) ? (
       <PostReplyBottomSheet
         open={mobileReplySheetOpen}
         postId={postId}
         replyTo={replyTo}
         onClose={closeMobileReplySheet}
         onReplyCreated={addReply}
+        beforeSubmit={topicActivityId && topicEligibility?.commentLimit === 'SINGLE' && !replyTo ? beforeSingleCommentSubmit : undefined}
+        confirmationOpen={singleCommentConfirmOpen}
+        onConfirmationCancel={cancelSingleComment}
+        allowImageAttachments={!topicActivityId || topicAllowImageAttachments}
+        isTopicRootComment={Boolean(topicActivityId) && !replyTo}
         draftContent={replyDrafts[replyDraftKey(replyTo)] || ''}
         onDraftChange={(content) => updateReplyDraft(replyDraftKey(replyTo), content)}
         onDraftClear={() => clearReplyDraft(replyDraftKey(replyTo))}
       />
     ) : null}
+    <SingleCommentConfirmDialog
+      open={singleCommentConfirmOpen}
+      onConfirm={confirmSingleComment}
+      onCancel={cancelSingleComment}
+    />
+    <ReviewConfirmDialog
+      open={Boolean(reviewDialog)}
+      action={reviewDialog?.action || 'APPROVED'}
+      alreadyCounted={Boolean(reviewDialog?.reply.topicActivitySubmission?.alreadyCounted)}
+      rejectReason={reviewRejectReason}
+      onRejectReasonChange={setReviewRejectReason}
+      loading={reviewLoading}
+      error={reviewError}
+      onConfirm={() => void confirmReview()}
+      onCancel={() => {
+        if (reviewLoadingRef.current) return
+        setReviewError('')
+        setReviewDialog(null)
+      }}
+    />
     </>
   )
 }

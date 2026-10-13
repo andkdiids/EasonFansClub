@@ -137,9 +137,11 @@ test('Nginx 接收100MB音频并为转码保留超时时间', () => {
 })
 
 test('私信 API 始终返回结构化成功或失败代码', () => {
-  for (const code of ['UNAUTHENTICATED', 'INVALID_CONTENT', 'NOT_PARTICIPANT', 'NOT_FRIEND', 'INVALID_CLIENT_MESSAGE_ID', 'DUPLICATE_MESSAGE', 'DATABASE_ERROR']) {
+  for (const code of ['INVALID_CONTENT', 'NOT_PARTICIPANT', 'NOT_FRIEND', 'INVALID_CLIENT_MESSAGE_ID', 'DUPLICATE_MESSAGE', 'DATABASE_ERROR']) {
     assert.match(messagesRoute, new RegExp(`'${code}'`))
   }
+  assert.match(messagesRoute, /requireRequestUser\(request\)/)
+  assert.match(readFileSync('lib/security.ts', 'utf8'), /code: 'UNAUTHENTICATED'/)
   assert.match(messagesRoute, /\{ success: false, error, code, message: error \}/)
   assert.match(messagesRoute, /success: true/)
 })

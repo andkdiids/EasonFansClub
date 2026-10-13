@@ -7,7 +7,7 @@ import { publicImageUrl } from '@/lib/images'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { sanitizeText, unauthenticatedResponse } from '@/lib/security'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords, publicModerationText } from '@/lib/content-moderation'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import type { EquippedBadgeView } from '@/lib/badge-types'
@@ -298,7 +298,6 @@ export async function POST(request: Request) {
 
   const ipLocation = await resolveIpLocation(request)
   const ipRegion = ipLocation?.label || null
-  void updateUserIpRegion(viewer.id, ipLocation)
   const body = await request.json().catch(() => null)
   const receiverUid = Number(body?.receiverUid)
   const parentId = sanitizeText(body?.parentId, 80) || null

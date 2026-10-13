@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation'
-import { headers } from 'next/headers'
 import { ProfilePageSurface } from '@/components/ProfilePageSurface'
 import { getCurrentUser } from '@/lib/auth'
 import { ensureBirthdayBadge } from '@/lib/birthday'
@@ -11,7 +10,7 @@ import { loadProfileRecentMessagesPage } from '@/lib/profile-page'
 import { prisma } from '@/lib/prisma'
 import { getDefaultAvatarOptions } from '@/lib/default-avatars'
 import { locationFromProfile } from '@/lib/user-location'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { publicProfileIpRegion } from '@/lib/ip-region'
 import { getBadgeProfileSummary, getEquippedBadgesForUser } from '@/lib/badge-service'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { getProfileVisibility } from '@/lib/user-privacy'
@@ -35,11 +34,6 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
   const query = await searchParams
-  const requestHeaders = await headers()
-  const request = new Request('http://profile.internal/current', { headers: new Headers(requestHeaders) })
-  const ipLocation = await resolveIpLocation(request)
-  const resolvedIpRegion = await updateUserIpRegion(user.id, ipLocation)
-
   const profile = await prisma.user.findFirst({
     where: { id: user.id, isDeleted: false, status: 'ACTIVE', Profile: { isNot: null } },
     select: {
@@ -148,7 +142,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           gender: profile.gender,
           customGender: profile.customGender,
           location: locationFromProfile(profile.Profile),
-          ipRegion: resolvedIpRegion,
+          ipRegion: publicProfileIpRegion(profile.ipRegion),
           avatarUrl: avatar,
           backgroundUrl: background,
           backgroundDesktopTransform,

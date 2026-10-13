@@ -272,7 +272,8 @@ test('移动端小臣书帖子详情底栏：DOM=最终顺序（说点什么→�
   assert.match(triggerMarkup, /说点什么/)
   assert.match(countMarkup, /评论 \{replyCount\}/)
 
-  const css = readFileSync('app/globals.css', 'utf8')
+  // Source assertions compare logical lines, independent of Git checkout EOLs.
+  const css = readFileSync('app/globals.css', 'utf8').replace(/\r\n/g, '\n')
   const mobileRegionStart = css.indexOf('  body:has(.forum-discovery-detail-shell) .app-topbar,\n  body:has(.forum-discovery-detail-shell) .app-mobile-nav')
   assert.ok(mobileRegionStart >= 0)
   const mobileRegion = css.slice(mobileRegionStart)

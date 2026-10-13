@@ -21,7 +21,7 @@ export async function reconcileCheckInDerivedState(input: { userId: string; date
 
   const checkIn = await prisma.checkIn.findUnique({
     where: { userId_checkinDateKey: { userId: input.userId, checkinDateKey: input.dateKey } },
-    select: { id: true },
+    select: { id: true, type: true, isMakeUp: true },
   })
   if (!checkIn) return { userId: input.userId, dateKey: input.dateKey, checkInFound: false, dailyTaskProgressPresent: false, applied: false }
 
@@ -50,7 +50,8 @@ export async function reconcileCheckInDerivedState(input: { userId: string; date
     })
   }
   await syncUserAchievements(input.userId, ['CHECKIN_STREAK', 'CHECKIN_TOTAL'])
-  const badgeSummary = await evaluateBadgesForEvent(input.userId, 'CHECKIN_CREATED', checkIn.id)
+  const eventId = checkIn.type === 'NORMAL' && !checkIn.isMakeUp ? `normal:${checkIn.id}` : checkIn.id
+  const badgeSummary = await evaluateBadgesForEvent(input.userId, 'CHECKIN_CREATED', eventId, 'HISTORICAL_RECONCILE')
   if (badgeSummary.failed > 0) throw new Error(`BADGE_RECONCILIATION_FAILED:${badgeSummary.failed}`)
 
   return {

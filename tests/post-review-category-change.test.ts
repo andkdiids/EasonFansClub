@@ -11,9 +11,9 @@ const patch = reviewRoute.slice(reviewRoute.indexOf('export async function PATCH
 const transaction = reviewRoute.slice(reviewRoute.indexOf('prisma.$transaction'), reviewRoute.indexOf('const current = result.current'))
 
 test('CASE 7/10 只有拥有 post_manage 的管理员能审核/调整发布分区（服务端权限复检）', () => {
-  assert.match(reviewRoute, /const guard = await requireAdmin\('post_manage'\)/)
-  const guards = (reviewRoute.match(/await requireAdmin\('post_manage'\)/g) || []).length
-  assert.ok(guards >= 2, `expected GET+PATCH 都做权限校验, got ${guards}`)
+  const get = reviewRoute.slice(reviewRoute.indexOf('export async function GET'), reviewRoute.indexOf('export async function PATCH'))
+  assert.match(get, /const guard = await requireAdmin\('post_manage'\)/)
+  assert.match(patch, /const guard = await requireRequestAdmin\(request, 'post_manage'\)/)
 })
 
 test('CASE 7 发布分区只从真实分区数据源解析，配置分区落库为真实 Board，杜绝硬编码', () => {

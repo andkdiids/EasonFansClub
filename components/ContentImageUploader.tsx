@@ -5,6 +5,7 @@ import { ImageEditor } from '@/components/ImageEditor'
 import {
   ClipboardImageReadError,
   ContentImageClientError,
+  isContentImageAbortError,
   readClipboardImageFiles,
   uploadContentImage,
   type ContentImageUploadPhase,
@@ -12,7 +13,9 @@ import {
 import {
   CONTENT_IMAGE_ACCEPT,
   CONTENT_IMAGE_ERROR_MESSAGES,
+  CONTENT_IMAGE_MAX_RETRIES,
 } from '@/lib/content-image-upload'
+import type { ContentImageUploadErrorCode } from '@/lib/content-image-upload'
 import { MAX_CONTENT_IMAGES, reorderContentImageUrls } from '@/lib/content-images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 
@@ -30,6 +33,8 @@ type PendingUpload = {
   previewUrl: string
   phase: PendingUploadPhase
   error?: string
+  errorCode?: ContentImageUploadErrorCode
+  retryCount: number
   previewFailed?: boolean
 }
 
@@ -57,17 +62,28 @@ function isBusyPhase(phase: PendingUploadPhase) {
 function busyLabel(items: readonly PendingUpload[]) {
   if (items.some((item) => item.phase === 'uploading')) return '上传中…'
   if (items.some((item) => item.phase === 'compressing')) return '正在压缩…'
+  if (items.some((item) => item.phase === 'queued')) return '排队中…'
   return '处理中…'
 }
 
+function failureCode(reason: unknown): ContentImageUploadErrorCode {
+  return reason instanceof ContentImageClientError ? reason.code : 'UPLOAD_FAILED'
+}
+
 function failureMessage(reason: unknown) {
-  if (reason instanceof ContentImageClientError) return reason.message
-  if (reason instanceof Error && reason.message.trim()) return reason.message
+  if (reason instanceof ContentImageClientError && CONTENT_IMAGE_ERROR_MESSAGES[reason.code]) return CONTENT_IMAGE_ERROR_MESSAGES[reason.code]
   return CONTENT_IMAGE_ERROR_MESSAGES.UPLOAD_FAILED
 }
 
+export type ContentImageUploadState = Readonly<{
+  pendingCount: number
+  failedCount: number
+  blocked: boolean
+}>
+
 export type ContentImageUploaderHandle = {
   addFiles: (files: File[]) => void
+  getUploadState: () => ContentImageUploadState
 }
 
 type ContentImageUploaderProps = Readonly<{
@@ -75,6 +91,7 @@ type ContentImageUploaderProps = Readonly<{
   onChange: (urls: string[]) => void
   existingCount?: number
   onBusyChange?: (busy: boolean) => void
+  onUploadStateChange?: (state: ContentImageUploadState) => void
 }>
 
 export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, ContentImageUploaderProps>(function ContentImageUploader({
@@ -82,6 +99,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   onChange,
   existingCount = 0,
   onBusyChange,
+  onUploadStateChange,
 }, ref) {
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
   const [error, setError] = useState('')
@@ -92,6 +110,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
   const onBusyChangeRef = useRef(onBusyChange)
+  const onUploadStateChangeRef = useRef(onUploadStateChange)
   const pendingUploadsRef = useRef(pendingUploads)
   const clipboardReadingRef = useRef(false)
   const draggingUrlRef = useRef<string | null>(null)
@@ -99,6 +118,16 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   const itemRefs = useRef(new Map<string, HTMLDivElement>())
   const localUploadedFilesRef = useRef(new Map<string, LocalUploadedFile>())
   const editingImageRef = useRef<EditingImage | null>(null)
+  const replacingUrlRef = useRef(replacingUrl)
+  const uploadControllersRef = useRef(new Map<string, AbortController>())
+  const disposedRef = useRef(false)
+
+  function getUploadState(): ContentImageUploadState {
+    const pendingCount = pendingUploadsRef.current.filter((item) => isBusyPhase(item.phase)).length
+    const failedCount = pendingUploadsRef.current.filter((item) => item.phase === 'failed').length
+    const blocked = pendingCount > 0 || failedCount > 0 || Boolean(editingImageRef.current) || Boolean(replacingUrlRef.current)
+    return { pendingCount, failedCount, blocked }
+  }
 
   useEffect(() => {
     valueRef.current = value
@@ -107,12 +136,15 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   useEffect(() => {
     onChangeRef.current = onChange
     onBusyChangeRef.current = onBusyChange
-  }, [onBusyChange, onChange])
+    onUploadStateChangeRef.current = onUploadStateChange
+  }, [onBusyChange, onChange, onUploadStateChange])
 
   useEffect(() => {
     pendingUploadsRef.current = pendingUploads
     editingImageRef.current = editingImage
+    replacingUrlRef.current = replacingUrl
     onBusyChangeRef.current?.(pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl))
+    onUploadStateChangeRef.current?.(getUploadState())
   }, [editingImage, pendingUploads, replacingUrl])
 
   useEffect(() => {
@@ -125,18 +157,27 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     }
   }, [value])
 
-  useEffect(() => () => {
-    pendingUploadsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
-    localUploadedFilesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
+  useEffect(() => {
+    disposedRef.current = false
+    return () => {
+      disposedRef.current = true
+      uploadControllersRef.current.forEach((controller) => controller.abort())
+      uploadControllersRef.current.clear()
+      pendingUploadsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
+      localUploadedFilesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl))
+    }
   }, [])
 
   function updatePendingUpload(id: string, update: Partial<PendingUpload>) {
+    if (disposedRef.current) return
     const next = pendingUploadsRef.current.map((item) => item.id === id ? { ...item, ...update } : item)
     pendingUploadsRef.current = next
     setPendingUploads(next)
   }
 
   function removePendingUpload(id: string) {
+    uploadControllersRef.current.get(id)?.abort()
+    uploadControllersRef.current.delete(id)
     const target = pendingUploadsRef.current.find((item) => item.id === id)
     if (target) URL.revokeObjectURL(target.previewUrl)
     const next = pendingUploadsRef.current.filter((item) => item.id !== id)
@@ -148,6 +189,8 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     const next = pendingUploadsRef.current.filter((current) => current.id !== item.id)
     pendingUploadsRef.current = next
     setPendingUploads(next)
+    const previous = localUploadedFilesRef.current.get(url)
+    if (previous && previous.previewUrl !== item.previewUrl) URL.revokeObjectURL(previous.previewUrl)
     localUploadedFilesRef.current.set(url, { file: item.file, previewUrl: item.previewUrl })
     const editing = editingImageRef.current
     if (editing?.kind === 'pending' && editing.id === item.id) {
@@ -164,6 +207,8 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   }
 
   function removeUploadedUrl(url: string) {
+    uploadControllersRef.current.get(`replace:${url}`)?.abort()
+    uploadControllersRef.current.delete(`replace:${url}`)
     const local = localUploadedFilesRef.current.get(url)
     if (local) {
       URL.revokeObjectURL(local.previewUrl)
@@ -175,19 +220,41 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   }
 
   async function uploadItem(item: PendingUpload) {
-    updatePendingUpload(item.id, { phase: 'processing', error: undefined })
+    if (uploadControllersRef.current.has(item.id)) return
+    const current = pendingUploadsRef.current.find((candidate) => candidate.id === item.id)
+    if (!current || disposedRef.current) return
+    const pendingCount = pendingUploadsRef.current.filter((candidate) => isBusyPhase(candidate.phase)).length
+    const capacityFull = existingCount + valueRef.current.length + pendingCount >= MAX_CONTENT_IMAGES
+    if (current.phase === 'failed' && capacityFull) {
+      updatePendingUpload(item.id, { error: `已达到 ${MAX_CONTENT_IMAGES} 张图片上限，请先删除图片后再重试` })
+      setError(`已达到 ${MAX_CONTENT_IMAGES} 张图片上限，请先删除图片后再重试`)
+      return
+    }
+    if (current.phase === 'failed' && current.retryCount >= CONTENT_IMAGE_MAX_RETRIES) {
+      updatePendingUpload(item.id, { error: `重试次数已达上限（${CONTENT_IMAGE_MAX_RETRIES} 次），请删除后重新选择图片` })
+      return
+    }
+    const retryCount = current.phase === 'failed' ? current.retryCount + 1 : current.retryCount
+    const runItem = { ...current, phase: 'processing' as const, error: undefined, errorCode: undefined, retryCount }
+    updatePendingUpload(item.id, runItem)
+    const controller = new AbortController()
+    uploadControllersRef.current.set(item.id, controller)
     try {
       // uploadContentImage uses the existing form.set('file', file) contract.
       const { url } = await uploadContentImage(item.file, (phase) => {
         updatePendingUpload(item.id, { phase })
-      })
+      }, { signal: controller.signal })
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
 
       appendUploadedUrl(url)
-      completePendingUpload(item, url)
+      const completed = pendingUploadsRef.current.find((current) => current.id === item.id)
+      if (completed) completePendingUpload(completed, url)
     } catch (reason) {
       if (!pendingUploadsRef.current.some((current) => current.id === item.id)) return
-      updatePendingUpload(item.id, { phase: 'failed', error: failureMessage(reason) })
+      if (isContentImageAbortError(reason)) return
+      updatePendingUpload(item.id, { phase: 'failed', error: failureMessage(reason), errorCode: failureCode(reason) })
+    } finally {
+      if (uploadControllersRef.current.get(item.id) === controller) uploadControllersRef.current.delete(item.id)
     }
   }
 
@@ -198,6 +265,8 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       if (editing?.kind === 'uploaded' && editing.url) void completeUploadedEdit(editing.url, editedFile)
       return
     }
+    uploadControllersRef.current.get(id)?.abort()
+    uploadControllersRef.current.delete(id)
     const previewUrl = URL.createObjectURL(editedFile)
     URL.revokeObjectURL(current.previewUrl)
     const replacement: PendingUpload = { ...current, file: editedFile, previewUrl, phase: 'processing', error: undefined }
@@ -209,13 +278,16 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
   async function completeUploadedEdit(url: string, editedFile: File) {
     const current = localUploadedFilesRef.current.get(url)
     if (!current) return
-    const previewUrl = URL.createObjectURL(editedFile)
-    localUploadedFilesRef.current.set(url, { file: editedFile, previewUrl })
     setEditingImage(null)
+    replacingUrlRef.current = url
     setReplacingUrl(url)
     setError('')
+    const controller = new AbortController()
+    uploadControllersRef.current.set(`replace:${url}`, controller)
     try {
-      const { url: nextUrl } = await uploadContentImage(editedFile, () => undefined)
+      const { url: nextUrl } = await uploadContentImage(editedFile, () => undefined, { signal: controller.signal })
+      if (disposedRef.current) return
+      const previewUrl = URL.createObjectURL(editedFile)
       if (nextUrl === url) {
         URL.revokeObjectURL(current.previewUrl)
         localUploadedFilesRef.current.set(url, { file: editedFile, previewUrl })
@@ -229,10 +301,11 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       localUploadedFilesRef.current.set(nextUrl, { file: editedFile, previewUrl })
     } catch (reason) {
       localUploadedFilesRef.current.set(url, current)
-      URL.revokeObjectURL(previewUrl)
-      setError(failureMessage(reason))
+      if (!isContentImageAbortError(reason) && !disposedRef.current) setError(failureMessage(reason))
     } finally {
-      setReplacingUrl(null)
+      if (uploadControllersRef.current.get(`replace:${url}`) === controller) uploadControllersRef.current.delete(`replace:${url}`)
+      replacingUrlRef.current = null
+      if (!disposedRef.current) setReplacingUrl(null)
     }
   }
 
@@ -255,7 +328,8 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       file,
       // Local preview is created before any compression/network work starts.
       previewUrl: URL.createObjectURL(file),
-      phase: 'processing',
+      phase: 'queued',
+      retryCount: 0,
     }))
     const nextPending = [...pendingUploadsRef.current, ...newItems]
     pendingUploadsRef.current = nextPending
@@ -271,7 +345,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
     })()
   }
 
-  useImperativeHandle(ref, () => ({ addFiles }))
+  useImperativeHandle(ref, () => ({ addFiles, getUploadState }))
 
   function selectFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || [])
@@ -391,8 +465,10 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
 
   const busy = pendingUploads.some((item) => isBusyPhase(item.phase)) || Boolean(editingImage) || Boolean(replacingUrl)
   const pendingCount = pendingUploads.filter((item) => isBusyPhase(item.phase)).length
+  const failedCount = pendingUploads.filter((item) => item.phase === 'failed').length
   const totalCount = existingCount + value.length + pendingCount
   const canAddMore = totalCount < MAX_CONTENT_IMAGES
+  const retryCapacityFull = totalCount >= MAX_CONTENT_IMAGES
 
   return (
     <div className="post-content-image-uploader w-full min-w-0 max-w-full space-y-2">
@@ -436,16 +512,17 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
                     onError={() => markPreviewFailed(item.id)}
                   />
                 )}
-                {isBusyPhase(item.phase) ? <span className="absolute inset-x-1 bottom-1 rounded bg-slate-950/70 px-1 py-0.5 text-center text-[11px] font-black text-white">{item.phase === 'compressing' ? '正在压缩…' : item.phase === 'uploading' ? '上传中…' : '处理中…'}</span> : null}
+                {isBusyPhase(item.phase) ? <span className="absolute inset-x-1 bottom-1 rounded bg-slate-950/70 px-1 py-0.5 text-center text-[11px] font-black text-white">{item.phase === 'queued' ? '排队中…' : item.phase === 'compressing' ? '正在压缩…' : item.phase === 'uploading' ? '上传中…' : '处理中…'}</span> : null}
               </div>
               <div className="space-y-1 p-2 text-xs font-bold">
                 <p className={item.phase === 'failed' ? 'text-red-600' : 'text-sky-700'} role="status">
-                  {item.phase === 'failed' ? '上传失败' : item.phase === 'compressing' ? '正在压缩…' : item.phase === 'uploading' ? '上传中…' : '处理中…'}
+                  {item.phase === 'failed' ? `上传失败（${item.retryCount}/${CONTENT_IMAGE_MAX_RETRIES} 次重试）` : item.phase === 'queued' ? '排队中…' : item.phase === 'compressing' ? '正在压缩…' : item.phase === 'uploading' ? '上传中…' : '处理中…'}
                 </p>
                 {item.phase === 'failed' && item.error ? <p className="break-words text-red-600">{item.error}</p> : null}
+                {item.phase === 'failed' && retryCapacityFull ? <p className="break-words text-amber-700">已达到图片数量上限，请先删除图片后再重试。</p> : null}
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setEditingImage({ kind: 'pending', id: item.id, file: item.file })} disabled={isBusyPhase(item.phase)} className="text-brand-700 disabled:opacity-40">编辑</button>
-                  {item.phase === 'failed' ? <button type="button" onClick={() => void uploadItem(item)} className="text-brand-700">重试</button> : null}
+                  {item.phase === 'failed' ? <button type="button" disabled={item.retryCount >= CONTENT_IMAGE_MAX_RETRIES || retryCapacityFull} onClick={() => void uploadItem(item)} className="text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">{item.retryCount >= CONTENT_IMAGE_MAX_RETRIES ? '重试次数已达上限' : retryCapacityFull ? '请先删除图片' : '重试'}</button> : null}
                   <button type="button" onClick={() => removePendingUpload(item.id)} className="text-red-600">删除</button>
                 </div>
               </div>
@@ -484,6 +561,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={local?.previewUrl || publicImageVariantUrl(url, 'thumb-md') || url} alt="已上传内容，拖拽可调整顺序" className="pointer-events-none h-24 w-full rounded-xl object-cover" loading="lazy" />
+              <span className="absolute inset-x-1 bottom-1 rounded bg-emerald-700/85 px-1 py-0.5 text-center text-[11px] font-black text-white" role="status">上传成功</span>
               {local ? <button
                 type="button"
                 disabled={replacingUrl === url}
@@ -505,6 +583,7 @@ export const ContentImageUploader = forwardRef<ContentImageUploaderHandle, Conte
       ) : null}
       {error ? <p className="text-sm font-bold text-red-600" role="alert">{error}</p> : null}
       {busy ? <p className="text-xs font-bold text-slate-500" role="status">图片处理完成后才能发布帖子。</p> : null}
+      {failedCount ? <p className="text-xs font-bold text-red-600" role="alert">有图片上传失败，请重试或删除失败图片后再发布。</p> : null}
       {editingImage ? <ImageEditor file={editingImage.file} onCancel={() => setEditingImage(null)} onComplete={(editedFile) => editingImage.kind === 'pending' ? completePendingEdit(editingImage.id, editedFile) : void completeUploadedEdit(editingImage.url!, editedFile)} /> : null}
     </div>
   )

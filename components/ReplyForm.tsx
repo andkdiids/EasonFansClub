@@ -2,12 +2,12 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { ContentImageUploader } from '@/components/ContentImageUploader'
+import { ContentImageUploader, type ContentImageUploadState, type ContentImageUploaderHandle } from '@/components/ContentImageUploader'
 import { FriendMentionInput, type MentionDraft } from '@/components/FriendMentionInput'
 import { StickerPicker, type PickerSticker } from '@/components/StickerPicker'
 import { ReplyLengthCounter } from '@/components/ReplyLengthCounter'
 import { publicImageVariantUrl } from '@/lib/image-variants'
-import { getReplyLengthMetrics, replyTooLongMessage } from '@/lib/reply-length'
+import { getReplyLengthMetrics, replyMinimumContentError, replyTooLongMessage } from '@/lib/reply-length'
 import { getReplyErrorMessage } from '@/lib/reply-errors'
 
 export function ReplyForm({
@@ -18,6 +18,9 @@ export function ReplyForm({
   draftContent,
   onDraftChange,
   onDraftClear,
+  beforeSubmit,
+  allowImageAttachments = true,
+  isTopicRootComment = false,
   autoFocus = false,
   className = '',
 }: Readonly<{
@@ -28,15 +31,22 @@ export function ReplyForm({
   draftContent?: string
   onDraftChange?: (content: string) => void
   onDraftClear?: () => void
+  beforeSubmit?: () => boolean | Promise<boolean>
+  allowImageAttachments?: boolean
+  isTopicRootComment?: boolean
   autoFocus?: boolean
   className?: string
 }>) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const imageUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const submittingRef = useRef(false)
+  const mountedRef = useRef(false)
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   const [localContent, setLocalContent] = useState('')
   const [mentions, setMentions] = useState<MentionDraft[]>([])
   const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [imageUploadState, setImageUploadState] = useState<ContentImageUploadState>({ pendingCount: 0, failedCount: 0, blocked: false })
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState('')
@@ -74,12 +84,24 @@ export function ReplyForm({
   async function submitReply(event?: React.FormEvent<HTMLFormElement>) {
     event?.preventDefault()
     if (submittingRef.current) return
+    const currentImageUploadState = imageUploaderRef.current?.getUploadState() || imageUploadState
+    if (currentImageUploadState.blocked) {
+      setError(currentImageUploadState.failedCount > 0
+        ? '图片上传失败，请重试或删除失败图片后再发布。'
+        : '图片尚未上传完成。')
+      return
+    }
     if (isOverLimit) {
       setError(replyTooLongMessage(contentLength))
       return
     }
-    if (!content.trim() && imageUrls.length === 0 && !pendingSticker) {
-      setError('回复内容不能为空')
+    if (!allowImageAttachments && imageUrls.length) {
+      setError('该活动不允许评论图片附件，请移除已选择的图片')
+      return
+    }
+    const minimumError = replyMinimumContentError(content, imageUrls.length, Boolean(pendingSticker), isTopicRootComment && !replyTo ? '参与评论' : '回复内容')
+    if (minimumError) {
+      setError(minimumError)
       return
     }
     submittingRef.current = true
@@ -87,6 +109,15 @@ export function ReplyForm({
     setSuccess('')
     setIsSubmitting(true)
     try {
+      if (beforeSubmit && !(await beforeSubmit())) return
+      if (!mountedRef.current) return
+      const latestImageUploadState = imageUploaderRef.current?.getUploadState() || imageUploadState
+      if (latestImageUploadState.blocked) {
+        setError(latestImageUploadState.failedCount > 0
+          ? '图片上传失败，请重试或删除失败图片后再发布。'
+          : '图片尚未上传完成。')
+        return
+      }
       const response = await fetch(`/api/posts/${postId}/replies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -163,10 +194,11 @@ export function ReplyForm({
           onChange={setContent}
           onMentionsChange={setMentions}
           onSubmitShortcut={() => void submitReply()}
-          canSubmitShortcut={!isSubmitting && !isOverLimit && (content.trim().length >= 2 || imageUrls.length > 0 || Boolean(pendingSticker))}
+          canSubmitShortcut={!isSubmitting && !isOverLimit && !imageUploadState.blocked && (content.trim().length >= 2 || imageUrls.length > 0 || Boolean(pendingSticker))}
         />
       </label>
-      <div className="mt-3"><ContentImageUploader value={imageUrls} onChange={setImageUrls} /></div>
+      {allowImageAttachments ? <div className="mt-3"><ContentImageUploader ref={imageUploaderRef} value={imageUrls} onChange={setImageUrls} onUploadStateChange={setImageUploadState} /></div> : imageUrls.length ? <button type="button" onClick={() => setImageUrls([])}>移除已选择的图片</button> : null}
+      {imageUploadState.blocked ? <p role="status" className="mt-2 text-sm font-bold text-amber-700">{imageUploadState.failedCount > 0 ? '图片上传失败，请重试或删除失败图片后再发布。' : '图片尚未上传完成。'}</p> : null}
       <div className="relative mt-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
@@ -181,8 +213,8 @@ export function ReplyForm({
           </button>
           <ReplyLengthCounter value={content} />
         </div>
-        <button type="submit" disabled={isSubmitting || isOverLimit} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
-          {isSubmitting ? '发布中...' : '发布回复'}
+        <button type="submit" disabled={isSubmitting || isOverLimit || imageUploadState.blocked} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
+          {isSubmitting ? '发布中...' : imageUploadState.failedCount > 0 ? '请处理失败图片' : imageUploadState.blocked ? '图片处理中…' : '发布回复'}
         </button>
         <StickerPicker
           open={pickerOpen}
@@ -196,7 +228,7 @@ export function ReplyForm({
           variant="reply"
         />
       </div>
-      {error ? <p className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
+      {error ? <p role="alert" className="mt-2 text-sm font-bold text-red-600">{error}</p> : null}
       {success ? <p className="mt-2 text-sm font-black text-emerald-600">{success}</p> : null}
     </form>
   )

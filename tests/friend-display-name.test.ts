@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { getFriendDisplayName } from '../lib/friend-display-name'
 
-const read = (file: string) => readFileSync(file, 'utf8')
+// Source assertions compare logical lines, independent of Git checkout EOLs.
+const read = (file: string) => readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
 
 test('好友展示 helper 只在好友语境使用非空备注，空格备注回退昵称', () => {
   assert.equal(getFriendDisplayName({ nickname: '神仙鱼Flynn', friendRemark: ' 老陈 ', isFriendContext: true }), '老陈')

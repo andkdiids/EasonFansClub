@@ -67,6 +67,7 @@ test('production start uses the custom server while development remains unchange
   const packageJson = JSON.parse(source('package.json')) as { scripts: Record<string, string> }
   const deployWorkflow = source('.github/workflows/deploy.yml')
   const deployScript = source('scripts/deploy-production-git.sh')
+  const deploySafety = source('scripts/deploy-safety.sh')
   const configureWorkflow = source('.github/workflows/configure-production-entry.yml')
   const client = source('components/games/GuessSongDuel.tsx')
 
@@ -74,10 +75,10 @@ test('production start uses the custom server while development remains unchange
   assert.equal(packageJson.scripts.dev, 'next dev')
   // The workflow transfers the deployment script; release switching and PM2
   // safety checks therefore belong to that script rather than the YAML body.
-  assert.match(deployWorkflow, /< scripts\/deploy-production-git\.sh/)
+  assert.match(deployWorkflow, /cat scripts\/deploy-safety\.sh scripts\/deploy-production-git\.sh/)
   assert.match(deployScript, /releases_dir=.*\/releases/)
-  assert.match(deployScript, /mv -Tf -- "\$\{temporary_link\}" "\$\{current_link\}"/)
-  assert.match(deployScript, /pm2 start ecosystem\.config\.js --only "\$\{PM2_APP_NAME\}" --update-env/)
+  assert.match(deploySafety, /mv -Tf -- "\$temporary_link" "\$current_link"/)
+  assert.match(deployScript, /pm2 start ecosystem\.config\.js --only "\$\{app_name\}" --update-env/)
   assert.doesNotMatch(deployScript, /pm2 start ecosystem\.config\.js --update-env/)
   assert.doesNotMatch(deployWorkflow, /prisma migrate deploy|prisma db push|migrate resolve/)
   assert.match(deployScript, /\/api\/health\/live/)

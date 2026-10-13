@@ -46,53 +46,80 @@ model Achievement {
 }
 
 model Activity {
-  id                           String                         @id @default(cuid())
+  id                           String                            @id @default(cuid())
   title                        String
-  subtitle                     String?                        @db.VarChar(300)
-  description                  String                         @db.Text
-  type                         ActivityType                   @default(OTHER)
-  status                       ActivityStatus                 @default(DRAFT)
+  subtitle                     String?                           @db.VarChar(300)
+  description                  String                            @db.Text
+  type                         ActivityType                      @default(OTHER)
+  status                       ActivityStatus                    @default(DRAFT)
   coverUrl                     String?
   bannerUrl                    String?
-  locationName                 String?                        @db.VarChar(300)
-  locationAddress              String?                        @db.VarChar(500)
-  onlineUrl                    String?                        @db.VarChar(500)
+  locationName                 String?                           @db.VarChar(300)
+  locationAddress              String?                           @db.VarChar(500)
+  onlineUrl                    String?                           @db.VarChar(500)
   pointsReward                 Int?
-  registrationFee              Int                            @default(0)
-  feeDescription               String?                        @db.Text
+  registrationFee              Int                               @default(0)
+  feeDescription               String?                           @db.Text
   signupLimit                  Int?
-  signupCount                  Int                            @default(0)
+  signupCount                  Int                               @default(0)
   startsAt                     DateTime?
   endsAt                       DateTime?
   registrationStartAt          DateTime?
   registrationEndAt            DateTime?
-  verificationMode             ActivityVerificationMode       @default(NONE)
-  organizer                    String?                        @db.VarChar(160)
-  contactInfo                  String?                        @db.VarChar(500)
-  isFeatured                   Boolean                        @default(false)
-  isPinned                     Boolean                        @default(false)
-  sortOrder                    Int                            @default(0)
-  viewCount                    Int                            @default(0)
+  verificationMode             ActivityVerificationMode          @default(NONE)
+  organizer                    String?                           @db.VarChar(160)
+  contactInfo                  String?                           @db.VarChar(500)
+  isFeatured                   Boolean                           @default(false)
+  isPinned                     Boolean                           @default(false)
+  pinToPlaza                   Boolean                           @default(false)
+  activityPostId               String?                           @unique
+  participationRule            String?                           @db.Text
+  participationMode            TopicActivityParticipationMode    @default(COMMENT)
+  allowImageAttachments        Boolean                           @default(false)
+  formSchema                   Json?
+  rewardGrantMode              TopicActivityRewardGrantMode      @default(IMMEDIATE)
+  rewardGrantAt                DateTime?
+  rewardPoints                 Int?
+  rewardBadgeIds               Json?
+  topicProgram                 Json?
+  sortOrder                    Int                               @default(0)
+  viewCount                    Int                               @default(0)
   publishedAt                  DateTime?
   createdById                  String?
   updatedById                  String?
-  createdAt                    DateTime                       @default(now())
-  updatedAt                    DateTime                       @updatedAt
-  CreatedBy                    User?                          @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  UpdatedBy                    User?                          @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt                    DateTime                          @default(now())
+  updatedAt                    DateTime                          @updatedAt
+  CreatedBy                    User?                             @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  UpdatedBy                    User?                             @relation("ActivityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   ActivityFavorite             ActivityFavorite[]
   ActivityRegistration         ActivityRegistration[]
-  ActivityNotificationBatches  ActivityNotificationBatch[]    @relation("ActivityNotificationBatches")
-  Notifications                Notification[]                 @relation("ActivityNotifications")
+  ActivityNotificationBatches  ActivityNotificationBatch[]       @relation("ActivityNotificationBatches")
+  Notifications                Notification[]                    @relation("ActivityNotifications")
   ActivityRegistrationQuestion ActivityRegistrationQuestion[]
   ActivityReward               ActivityReward[]
-  linkedMaterial               MaterialRedemption?            @relation("ActivityMaterialLink")
-  MaterialRedemptionOrders     MaterialRedemptionOrder[]      @relation("MaterialOrderLinkedActivity")
+  linkedMaterial               MaterialRedemption?               @relation("ActivityMaterialLink")
+  MaterialRedemptionOrders     MaterialRedemptionOrder[]         @relation("MaterialOrderLinkedActivity")
   Lottery                      Lottery[]
-  Topics                       Topic[]                        @relation("ActivityTopics")
+  Topics                       Topic[]                           @relation("ActivityTopics")
+  ActivityPost                 Post?                             @relation("ActivityPost", fields: [activityPostId], references: [id], onDelete: SetNull)
+  TopicActivitySubmission      TopicActivitySubmission[]
+  TopicActivityFormSubmission  TopicActivityFormSubmission[]
+  TopicActivityParticipation   TopicActivityParticipation[]
+  TopicActivityReviewLog       TopicActivityReviewLog[]
+  TopicActivityFormReviewLog   TopicActivityFormReviewLog[]
+  TopicActivityImageAsset      TopicActivityImageAsset[]
+  TopicActivityRewardGrant     TopicActivityRewardGrant[]
+  TopicActivityRewardEntry     TopicActivityRewardEntry[]
+  TopicActivityPollVote        TopicActivityPollVote[]
+  TopicActivityTestAttempt     TopicActivityTestAttempt[]
+  TopicLottery                 TopicActivityLottery?
+  TopicLotteryEligibility      TopicActivityLotteryEligibility[]
+  TopicLotteryDraw             TopicActivityLotteryDraw?
+  TopicLotteryAudit            TopicActivityLotteryAudit[]
 
   @@index([status, createdAt])
   @@index([status, startsAt])
+  @@index([pinToPlaza, endsAt, status])
   @@index([type])
   @@index([isPinned, sortOrder, startsAt])
   @@index([isFeatured])
@@ -609,8 +636,10 @@ enum BadgeRuleType {
   RATING_COUNT
   BADGE_SERIES_COMPLETE
   ACTIVITY_PARTICIPATION
+  TOPIC_ACTIVITY_PARTICIPATION_COUNT
   BIRTHDAY_ZODIAC
   BIRTHDAY_TODAY
+  CHECKIN_ON_DATE
   BADGE_OWNERSHIP
   CLINIC_CONSULTATION_STREAK
 }
@@ -704,6 +733,7 @@ model Badge {
   BadgeRule                         BadgeRule?
   PharmacyPrize                     PharmacyPrize[]
   PharmacyCampaignCollectionRewards PharmacyCampaign[]           @relation("PharmacyCampaignCollectionReward")
+  TopicActivityRewardGrant          TopicActivityRewardGrant[]
   PharmacyDuplicateSourceBadge      PharmacyDuplicateInventory[] @relation("PharmacyDuplicateSourceBadge")
   EquippedByUsers                   User[]                       @relation("UserEquippedBadge")
 
@@ -2397,6 +2427,7 @@ model Lottery {
   LotteryEntry       LotteryEntry[]
   LotteryPrize       LotteryPrize[]
   CandidateSnapshots ActivityLotteryCandidateSnapshot[]
+  TopicLottery       TopicActivityLottery?
 
   @@index([activityId])
   @@index([activityId, status, drawAt])
@@ -2423,6 +2454,10 @@ model LotteryEntry {
   User              User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
   Registration      ActivityRegistration?            @relation(fields: [registrationId], references: [id], onDelete: SetNull)
   RedeemedByAdmin   User?                            @relation("LotteryEntryRedeemedByAdmin", fields: [redeemedByAdminId], references: [id], onDelete: SetNull)
+  topicSlotId       String?                          @unique(map: "TopicLotteryWinner_slot_key")
+  TopicSlot         TopicActivityLotterySlot?        @relation(fields: [topicSlotId], references: [id], onDelete: Restrict, map: "TopicLotteryWinner_slot_fk")
+  TopicShipping     TopicActivityLotteryShipping?
+  TopicNotice       TopicActivityLotteryNotice?
 
   @@unique([lotteryId, userId])
   @@index([lotteryId, createdAt])
@@ -2470,6 +2505,7 @@ model LotteryPrize {
   LotteryEntry          LotteryEntry[]
   Lottery               Lottery                          @relation(fields: [lotteryId], references: [id], onDelete: Cascade)
   Badge                 Badge?                           @relation(fields: [badgeId], references: [id], onDelete: Restrict)
+  TopicSlots            TopicActivityLotterySlot[]
 
   @@index([lotteryId, sortOrder, id])
   @@index([badgeId])
@@ -2546,9 +2582,188 @@ model LyricPrescription {
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime                 @updatedAt
   EntertainmentDailyDraw EntertainmentDailyDraw[]
+  CantoneseQuestion      CantoneseQuestion[]
 
   @@index([displayCount])
   @@index([enabled, createdAt])
+}
+
+model CantoneseCourseDefinition {
+  id                   String                @id @default(cuid())
+  lessonId             String                @unique @db.VarChar(32)
+  lessonNumber         Int                   @unique
+  title                String                @db.VarChar(255)
+  subtitle             String?               @db.VarChar(255)
+  description          String                @db.Text
+  sortOrder            Int
+  prerequisiteLessonId String?               @db.VarChar(32)
+  status               CantoneseCourseStatus @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById         String?
+  reviewedAt           DateTime?
+  reviewNote           String?               @db.Text
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([status, sortOrder])
+}
+
+model CantoneseLessonContent {
+  id               String                @id @default(cuid())
+  externalId       String                @unique @db.VarChar(191)
+  lessonId         String                @db.VarChar(32)
+  stageId          String                @db.VarChar(64)
+  stepId           String                @db.VarChar(100)
+  title            String                @db.VarChar(255)
+  body             String                @db.LongText
+  displayText      String?               @db.Text
+  jyutping         String?               @db.VarChar(255)
+  tone             String?               @db.VarChar(64)
+  examples         Json?
+  audioId          String?               @db.VarChar(191)
+  contentType      String                @default("CONCEPT") @db.VarChar(32)
+  translation      String?               @db.Text
+  explanation      String?               @db.Text
+  section          String?               @db.VarChar(100)
+  usageNote        String?               @db.Text
+  sourceReference  String?               @db.Text
+  dialogueId       String?               @db.VarChar(100)
+  speaker          String?               @db.VarChar(16)
+  contentVersion   Int                   @default(1)
+  sortOrder        Int                   @default(0)
+  requiresAudio    Boolean               @default(false)
+  requiresSpeaking Boolean               @default(false)
+  status           CantoneseReviewStatus @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById     String?
+  reviewedAt       DateTime?
+  reviewNote       String?               @db.Text
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  reviewer         User?                 @relation("CantoneseLessonContentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([lessonId, stageId, stepId])
+  @@index([lessonId, stageId, stepId, sortOrder])
+  @@index([status, updatedAt])
+}
+
+model CantoneseQuestion {
+  id                     String                @id @default(cuid())
+  externalId             String                @unique @db.VarChar(191)
+  lessonId               String                @db.VarChar(32)
+  stageId                String                @db.VarChar(64)
+  questionType           String                @db.VarChar(40)
+  prompt                 String                @db.LongText
+  options                Json
+  correctAnswer          Json
+  explanation            String                @db.LongText
+  sourceReference        String?               @db.Text
+  contentVersion         Int                   @default(1)
+  prerequisiteContentIds Json
+  audioId                String?               @db.VarChar(191)
+  speakingReferenceId    String?               @db.VarChar(191)
+  lyricPrescriptionId    String?
+  sortOrder              Int                   @default(0)
+  status                 CantoneseReviewStatus @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById           String?
+  reviewedAt             DateTime?
+  reviewNote             String?               @db.Text
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  reviewer               User?                 @relation("CantoneseQuestionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  LyricPrescription      LyricPrescription?    @relation(fields: [lyricPrescriptionId], references: [id], onDelete: SetNull)
+
+  @@index([lessonId, stageId, questionType])
+  @@index([lessonId, stageId, questionType, sortOrder])
+  @@index([status, updatedAt])
+  @@index([lyricPrescriptionId])
+}
+
+model CantoneseAudioAsset {
+  id           String                    @id @default(cuid())
+  externalId   String                    @unique @db.VarChar(191)
+  text         String                    @db.Text
+  jyutping     String?                   @db.VarChar(255)
+  lessonId     String?                   @db.VarChar(32)
+  contentId    String?                   @db.VarChar(191)
+  audioKey     String?                   @unique @db.VarChar(512)
+  cosKey       String?                   @db.VarChar(512)
+  audioVersion String                    @default("v1") @db.VarChar(32)
+  voiceProfile String                    @default("101019") @db.VarChar(64)
+  speed        Float?
+  sampleRate   Int                       @default(16000)
+  codec        String                    @default("mp3") @db.VarChar(16)
+  notes        String?                   @db.Text
+  checksum     String?                   @db.Char(64)
+  fileSize     Int?
+  assetStatus  CantoneseAudioAssetStatus @default(NOT_GENERATED)
+  status       CantoneseReviewStatus     @default(CONTENT_REVIEW_REQUIRED)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?                   @db.Text
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  reviewer     User?                     @relation("CantoneseAudioReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([lessonId, contentId])
+  @@index([assetStatus, status])
+  @@index([status, updatedAt])
+}
+
+model CantoneseReviewLog {
+  id         String                 @id @default(cuid())
+  reviewerId String?
+  targetType String                 @db.VarChar(32)
+  targetId   String                 @db.VarChar(191)
+  action     String                 @db.VarChar(40)
+  oldStatus  CantoneseReviewStatus?
+  newStatus  CantoneseReviewStatus
+  reason     String?                @db.Text
+  createdAt  DateTime               @default(now())
+  reviewer   User?                  @relation("CantoneseReviewActor", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([targetType, targetId, createdAt])
+  @@index([reviewerId, createdAt])
+}
+
+model CantonesePronunciationAssessment {
+  id                  String   @id @default(cuid())
+  userId              String
+  contentId           String   @db.VarChar(191)
+  assessmentMode      String   @db.VarChar(32)
+  provider            String   @db.VarChar(64)
+  providerVersion     String   @db.VarChar(64)
+  assessmentVersion   String   @db.VarChar(64)
+  expectedText        String   @db.Text
+  recognizedText      String?  @db.Text
+  overallScore        Float?
+  pronunciationScore  Float?
+  toneScore           Float?
+  fluencyScore        Float?
+  completenessScore   Float?
+  confidence          Float?
+  wordResults         Json?
+  syllableResults     Json?
+  feedback            Json?
+  recordingDurationMs Int
+  createdAt           DateTime @default(now())
+  user                User     @relation("CantoneseSpeechAssessmentUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([contentId, createdAt])
+}
+
+model CantoneseLessonProgress {
+  id                   String    @id @default(cuid())
+  userId               String
+  lessonId             String    @db.VarChar(32)
+  startedAt            DateTime?
+  teachingCompletedAt  DateTime?
+  questionsCompletedAt DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
 }
 
 model MusicAlbum {
@@ -3557,6 +3772,7 @@ model Post {
   replyCount            Int                     @default(0)
   lastCommentFloor      Int                     @default(0)
   isPinned              Boolean                 @default(false)
+  activityPinned        Boolean                 @default(false)
   profilePinnedAt       DateTime?
   isFeatured            Boolean                 @default(false)
   isDeleted             Boolean                 @default(false)
@@ -3599,6 +3815,7 @@ model Post {
   Report                Report[]
   stickerId             String?
   sticker               Sticker?                @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  TopicActivity         Activity?               @relation("ActivityPost")
 
   @@index([authorId, createdAt])
   @@index([authorId, userPostGroupId, createdAt])
@@ -3612,6 +3829,7 @@ model Post {
   @@index([isDeleted])
   @@index([isFeatured, createdAt])
   @@index([isPinned, createdAt])
+  @@index([activityPinned, createdAt])
   @@index([stickerId])
   @@index([isRecommended, createdAt])
   @@index([likeCount])
@@ -3988,32 +4206,33 @@ model RateLimitLog {
 }
 
 model Reply {
-  id                 String                  @id @default(cuid())
-  content            String                  @db.Text
-  ipRegion           String?
-  stickerId          String?
-  sticker            Sticker?                @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
-  isDeleted          Boolean                 @default(false)
-  moderationStatus   ContentModerationStatus @default(NORMAL)
-  moderationReason   String?
-  matchedBannedWords String?                 @db.Text
-  isPinned           Boolean                 @default(false)
-  deletedAt          DateTime?
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
-  postId             String
-  authorId           String
-  parentId           String?
-  floorNumber        Int?
-  likeCount          Int                     @default(0)
-  AdminAction        AdminAction[]
-  User               User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  Reply              Reply?                  @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
-  other_Reply        Reply[]                 @relation("ReplyToReply")
-  Post               Post                    @relation(fields: [postId], references: [id], onDelete: Cascade)
-  ReplyLike          ReplyLike[]
-  ReplyMention       ReplyMention[]
-  Report             Report[]
+  id                      String                   @id @default(cuid())
+  content                 String                   @db.Text
+  ipRegion                String?
+  stickerId               String?
+  sticker                 Sticker?                 @relation("ReplySticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  isDeleted               Boolean                  @default(false)
+  moderationStatus        ContentModerationStatus  @default(NORMAL)
+  moderationReason        String?
+  matchedBannedWords      String?                  @db.Text
+  isPinned                Boolean                  @default(false)
+  deletedAt               DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  postId                  String
+  authorId                String
+  parentId                String?
+  floorNumber             Int?
+  likeCount               Int                      @default(0)
+  AdminAction             AdminAction[]
+  User                    User                     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  Reply                   Reply?                   @relation("ReplyToReply", fields: [parentId], references: [id], onDelete: NoAction)
+  other_Reply             Reply[]                  @relation("ReplyToReply")
+  Post                    Post                     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  ReplyLike               ReplyLike[]
+  ReplyMention            ReplyMention[]
+  Report                  Report[]
+  TopicActivitySubmission TopicActivitySubmission?
 
   @@unique([postId, floorNumber], map: "Reply_postId_floorNumber_key")
   @@index([authorId, createdAt])
@@ -4566,6 +4785,22 @@ model User {
   ActivityRegistrationVerifiedBy                         ActivityRegistration[]             @relation("ActivityRegistrationVerifiedBy")
   ActivityCreatedBy                                      Activity[]                         @relation("ActivityCreatedBy")
   ActivityUpdatedBy                                      Activity[]                         @relation("ActivityUpdatedBy")
+  TopicActivitySubmissions                               TopicActivitySubmission[]          @relation("TopicActivitySubmitter")
+  TopicActivityFormSubmissions                           TopicActivityFormSubmission[]      @relation("TopicActivityFormSubmitter")
+  TopicActivityParticipations                            TopicActivityParticipation[]       @relation("TopicActivityParticipant")
+  TopicActivityPollVotes                                 TopicActivityPollVote[]            @relation("TopicPollVoter")
+  TopicActivityTestAttempts                              TopicActivityTestAttempt[]         @relation("TopicTestParticipant")
+  TopicLotteryEligibility                                TopicActivityLotteryEligibility[]
+  TopicLotteryAudit                                      TopicActivityLotteryAudit[]        @relation("TopicLotteryAuditActor")
+  TopicActivityReviewedSubmissions                       TopicActivitySubmission[]          @relation("TopicActivityReviewer")
+  TopicActivityFormReviewedSubmissions                   TopicActivityFormSubmission[]      @relation("TopicActivityFormReviewer")
+  TopicActivityReviewSubjects                            TopicActivityReviewLog[]           @relation("TopicActivityReviewSubject")
+  TopicActivityReviewActors                              TopicActivityReviewLog[]           @relation("TopicActivityReviewActor")
+  TopicActivityFormReviewSubjects                        TopicActivityFormReviewLog[]       @relation("TopicActivityFormReviewSubject")
+  TopicActivityFormReviewActors                          TopicActivityFormReviewLog[]       @relation("TopicActivityFormReviewActor")
+  TopicActivitySubmissionReplySenders                    TopicActivitySubmissionReply[]     @relation("TopicActivitySubmissionReplySender")
+  TopicActivityImageUploaders                            TopicActivityImageAsset[]          @relation("TopicActivityImageUploader")
+  TopicActivityRewardRecipients                          TopicActivityRewardGrant[]         @relation("TopicActivityRewardRecipient")
   LotteryCreatedBy                                       Lottery[]                          @relation("LotteryCreatedBy")
   LotteryEntryRedeemedByAdmin                            LotteryEntry[]                     @relation("LotteryEntryRedeemedByAdmin")
   AlbumReview                                            AlbumReview[]
@@ -4745,6 +4980,12 @@ model User {
   StudioProjectFavorite                                  StudioProjectFavorite[]
   stickerReports                                         StickerReport[]
   StudioProject                                          StudioProject[]
+  CantoneseLessonContentReviewed                         CantoneseLessonContent[]           @relation("CantoneseLessonContentReviewer")
+  CantoneseQuestionReviewed                              CantoneseQuestion[]                @relation("CantoneseQuestionReviewer")
+  CantoneseAudioAssetReviewed                            CantoneseAudioAsset[]              @relation("CantoneseAudioReviewer")
+  CantoneseReviewLogs                                    CantoneseReviewLog[]               @relation("CantoneseReviewActor")
+  CantoneseSpeechAssessments                             CantonesePronunciationAssessment[] @relation("CantoneseSpeechAssessmentUser")
+  CantoneseLessonProgress                                CantoneseLessonProgress[]
 
   @@index([createdAt])
   @@index([email])
@@ -5041,6 +5282,7 @@ enum ActivityType {
   COMMUNITY
   BENEFIT
   OTHER
+  TOPIC_ACTIVITY
 }
 
 enum AdminActionType {
@@ -5308,6 +5550,28 @@ enum MusicPublicationStatus {
   PUBLISHED
 }
 
+enum CantoneseReviewStatus {
+  DRAFT
+  CONTENT_REVIEW_REQUIRED
+  APPROVED
+  REJECTED
+}
+
+enum CantoneseCourseStatus {
+  DRAFT
+  CONTENT_REVIEW_REQUIRED
+  APPROVED
+  ARCHIVED
+}
+
+enum CantoneseAudioAssetStatus {
+  NOT_GENERATED
+  GENERATING
+  READY
+  FAILED
+  NEEDS_REGENERATION
+}
+
 enum RatingTargetType {
   SONG
   ALBUM
@@ -5466,6 +5730,7 @@ enum PointActionType {
   GROWTH_REWARD
   GROWTH_REWARD_REVERSAL
   GLOBAL_POINTS_GRANT
+  TOPIC_ACTIVITY_REWARD
 }
 
 enum PharmacyCampaignStatus {
@@ -5920,4 +6185,430 @@ enum SocialSyncLogStatus {
   BLOCKED
   RATE_LIMITED
   CHALLENGE_REQUIRED
+}
+
+enum TopicActivityRewardGrantMode {
+  IMMEDIATE
+  SCHEDULED
+}
+
+enum TopicActivityParticipationMode {
+  COMMENT
+  FORM
+  BOTH
+}
+
+enum TopicActivityFormFieldType {
+  TEXT
+  TEXTAREA
+  SINGLE_SELECT
+  MULTI_SELECT
+  IMAGE
+}
+
+enum TopicActivityAssetPurpose {
+  FORM_ANSWER
+  ADMIN_REPLY
+}
+
+enum TopicActivityReplySenderRole {
+  ADMIN
+}
+
+enum TopicActivitySubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum TopicActivityRewardStatus {
+  NOT_ELIGIBLE
+  PENDING
+  PROCESSING
+  GRANTED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum TopicActivityRewardKind {
+  POINTS
+  BADGE
+}
+
+enum TopicActivityRewardGrantItemStatus {
+  PENDING
+  PROCESSING
+  GRANTED
+  FAILED
+  CANCELLED
+}
+
+model TopicActivitySubmission {
+  id                      String                            @id @default(cuid())
+  activityId              String
+  userId                  String
+  commentId               String?                           @unique
+  rewardEntryId           String?
+  rewardSnapshot          Json?
+  status                  TopicActivitySubmissionStatus     @default(PENDING)
+  submittedAt             DateTime                          @default(now())
+  reviewedAt              DateTime?
+  reviewedById            String?
+  rejectReason            String?                           @db.Text
+  commentDeletedAt        DateTime?
+  createdAt               DateTime                          @default(now())
+  updatedAt               DateTime                          @updatedAt
+  Activity                Activity                          @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User                    User                              @relation("TopicActivitySubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  Comment                 Reply?                            @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  ReviewedBy              User?                             @relation("TopicActivityReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  ReviewLog               TopicActivityReviewLog[]
+  RewardEntry             TopicActivityRewardEntry?         @relation(fields: [rewardEntryId], references: [id], onDelete: Restrict)
+  TaskImageAssets         TopicActivityImageAsset[]         @relation("TopicTaskImages")
+  TopicLotteryEligibility TopicActivityLotteryEligibility[]
+
+  @@index([activityId, status, submittedAt])
+  @@index([userId, activityId, status])
+  @@index([reviewedById, reviewedAt])
+  @@index([activityId, rewardEntryId, userId])
+}
+
+model TopicActivityParticipation {
+  id                        String                     @id @default(cuid())
+  activityId                String
+  userId                    String
+  firstApprovedSubmissionId String?
+  firstApprovedAt           DateTime?
+  approvedSubmissionCount   Int                        @default(0)
+  rewardStatus              TopicActivityRewardStatus  @default(NOT_ELIGIBLE)
+  rewardEligibleAt          DateTime?
+  rewardGrantedAt           DateTime?
+  reviewReversedAfterReward Boolean                    @default(false)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  Activity                  Activity                   @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User                      User                       @relation("TopicActivityParticipant", fields: [userId], references: [id], onDelete: Cascade)
+  RewardGrants              TopicActivityRewardGrant[]
+
+  @@unique([activityId, userId])
+  @@index([userId, approvedSubmissionCount, firstApprovedAt], map: "TopicActPart_user_approved_first_idx")
+  @@index([activityId, rewardStatus])
+}
+
+model TopicActivityReviewLog {
+  id           String                        @id @default(cuid())
+  submissionId String
+  activityId   String
+  userId       String
+  commentId    String?
+  fromStatus   TopicActivitySubmissionStatus
+  toStatus     TopicActivitySubmissionStatus
+  reviewedById String?
+  reason       String?                       @db.Text
+  reviewedAt   DateTime                      @default(now())
+  Submission   TopicActivitySubmission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  Activity     Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User         User                          @relation("TopicActivityReviewSubject", fields: [userId], references: [id], onDelete: Cascade)
+  ReviewedBy   User?                         @relation("TopicActivityReviewActor", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([submissionId, reviewedAt])
+  @@index([activityId, reviewedAt])
+  @@index([userId, reviewedAt])
+}
+
+model TopicActivityFormSubmission {
+  id                 String                         @id @default(cuid())
+  activityId         String
+  userId             String
+  formSchemaSnapshot Json
+  answersSnapshot    Json
+  status             TopicActivitySubmissionStatus  @default(PENDING)
+  submittedAt        DateTime                       @default(now())
+  reviewedAt         DateTime?
+  reviewedById       String?
+  rejectReason       String?                        @db.Text
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  Activity           Activity                       @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User               User                           @relation("TopicActivityFormSubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  ReviewedBy         User?                          @relation("TopicActivityFormReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  ReviewLog          TopicActivityFormReviewLog[]
+  Replies            TopicActivitySubmissionReply[]
+  ImageAssets        TopicActivityImageAsset[]
+
+  @@index([activityId, status, submittedAt])
+  @@index([userId, activityId, status])
+  @@index([reviewedById, reviewedAt])
+}
+
+model TopicActivityFormReviewLog {
+  id           String                        @id @default(cuid())
+  submissionId String
+  activityId   String
+  userId       String
+  fromStatus   TopicActivitySubmissionStatus
+  toStatus     TopicActivitySubmissionStatus
+  reviewedById String?
+  reason       String?                       @db.Text
+  reviewedAt   DateTime                      @default(now())
+  Submission   TopicActivityFormSubmission   @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  Activity     Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User         User                          @relation("TopicActivityFormReviewSubject", fields: [userId], references: [id], onDelete: Cascade)
+  ReviewedBy   User?                         @relation("TopicActivityFormReviewActor", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([submissionId, reviewedAt])
+  @@index([activityId, reviewedAt])
+  @@index([userId, reviewedAt])
+}
+
+model TopicActivitySubmissionReply {
+  id           String                       @id @default(cuid())
+  submissionId String
+  senderUserId String
+  senderRole   TopicActivityReplySenderRole @default(ADMIN)
+  content      String?                      @db.Text
+  createdAt    DateTime                     @default(now())
+  updatedAt    DateTime                     @updatedAt
+  Submission   TopicActivityFormSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  Sender       User                         @relation("TopicActivitySubmissionReplySender", fields: [senderUserId], references: [id], onDelete: Cascade)
+  ImageAssets  TopicActivityImageAsset[]
+
+  @@index([submissionId, createdAt, id])
+  @@index([senderUserId, createdAt])
+}
+
+model TopicActivityImageAsset {
+  id               String                        @id @default(cuid())
+  activityId       String
+  uploadedByUserId String
+  purpose          TopicActivityAssetPurpose
+  storageKey       String                        @unique @db.VarChar(500)
+  mimeType         String                        @db.VarChar(80)
+  width            Int
+  height           Int
+  size             Int
+  formSubmissionId String?
+  replyId          String?
+  taskSubmissionId String?
+  createdAt        DateTime                      @default(now())
+  Activity         Activity                      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  UploadedBy       User                          @relation("TopicActivityImageUploader", fields: [uploadedByUserId], references: [id], onDelete: Cascade)
+  FormSubmission   TopicActivityFormSubmission?  @relation(fields: [formSubmissionId], references: [id], onDelete: SetNull)
+  Reply            TopicActivitySubmissionReply? @relation(fields: [replyId], references: [id], onDelete: SetNull)
+  TaskSubmission   TopicActivitySubmission?      @relation("TopicTaskImages", fields: [taskSubmissionId], references: [id], onDelete: SetNull)
+
+  @@index([activityId, purpose, createdAt])
+  @@index([uploadedByUserId, activityId, purpose])
+  @@index([formSubmissionId])
+  @@index([replyId])
+  @@index([taskSubmissionId])
+}
+
+model TopicActivityRewardGrant {
+  id              String                             @id @default(cuid())
+  participationId String
+  activityId      String
+  userId          String
+  rewardEntryId   String?
+  rewardSnapshot  Json?
+  origin          String                             @default("LEGACY") @db.VarChar(16)
+  kind            TopicActivityRewardKind
+  badgeId         String?
+  points          Int?
+  status          TopicActivityRewardGrantItemStatus @default(PENDING)
+  grantKey        String                             @unique @db.VarChar(191)
+  errorMessage    String?                            @db.VarChar(500)
+  grantedAt       DateTime?
+  createdAt       DateTime                           @default(now())
+  updatedAt       DateTime                           @updatedAt
+  Participation   TopicActivityParticipation         @relation(fields: [participationId], references: [id], onDelete: Cascade)
+  Activity        Activity                           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  User            User                               @relation("TopicActivityRewardRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  Badge           Badge?                             @relation(fields: [badgeId], references: [id], onDelete: Restrict)
+  RewardEntry     TopicActivityRewardEntry?          @relation(fields: [rewardEntryId], references: [id], onDelete: Restrict)
+
+  @@unique([activityId, rewardEntryId, userId], map: "TopicReward_activity_entry_user_key")
+  @@index([status, createdAt])
+  @@index([activityId, status])
+  @@index([participationId, status])
+  @@index([badgeId])
+  @@index([userId, createdAt])
+}
+
+model TopicActivityRewardEntry {
+  id           String                     @id @default(cuid())
+  activityId   String
+  platformKey  String                     @db.VarChar(64)
+  config       Json
+  enabled      Boolean                    @default(true)
+  sortOrder    Int                        @default(0)
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  Activity     Activity                   @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Submissions  TopicActivitySubmission[]
+  RewardGrants TopicActivityRewardGrant[]
+
+  @@index([activityId, enabled, sortOrder])
+}
+
+model TopicActivityPollVote {
+  id            String   @id @default(cuid())
+  activityId    String
+  pollId        String   @db.VarChar(64)
+  userId        String
+  configVersion Int
+  choices       Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  Activity      Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  User          User     @relation("TopicPollVoter", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, pollId, userId], map: "TopicPoll_activity_poll_user_key")
+}
+
+model TopicActivityTestAttempt {
+  id             String   @id @default(cuid())
+  activityId     String
+  testId         String   @db.VarChar(64)
+  userId         String
+  requestKey     String   @db.VarChar(64)
+  configVersion  Int
+  answers        Json
+  resultId       String   @db.VarChar(64)
+  resultSnapshot Json
+  completedAt    DateTime @default(now())
+  Activity       Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  User           User     @relation("TopicTestParticipant", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, userId, requestKey], map: "TopicTest_activity_user_request_key")
+  @@index([activityId, testId, userId, completedAt])
+}
+
+/// Optional Topic V2 wrapper; existing registration lotteries stay unchanged.
+model TopicActivityLottery {
+  id               String                            @id @default(cuid())
+  activityId       String                            @unique(map: "TopicLottery_activity_key")
+  lotteryId        String                            @unique(map: "TopicLottery_lottery_key")
+  enabled          Boolean                           @default(false)
+  config           Json
+  state            String                            @default("COLLECTING") @db.VarChar(32)
+  drawAt           DateTime?
+  fairnessLockedAt DateTime?
+  createdAt        DateTime                          @default(now())
+  updatedAt        DateTime                          @updatedAt
+  Activity         Activity                          @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Lottery          Lottery                           @relation(fields: [lotteryId], references: [id], onDelete: Restrict)
+  Eligibility      TopicActivityLotteryEligibility[]
+  Draw             TopicActivityLotteryDraw?
+  Audit            TopicActivityLotteryAudit[]
+
+  @@index([enabled, state, drawAt], map: "TopicLottery_due_idx")
+}
+
+model TopicActivityLotteryEligibility {
+  id                 String                   @id @default(cuid())
+  activityId         String
+  lotteryConfigId    String
+  userId             String
+  sourceSubmissionId String?
+  sourceSnapshot     Json
+  valid              Boolean                  @default(true)
+  qualifiedAt        DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  Activity           Activity                 @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Config             TopicActivityLottery     @relation(fields: [lotteryConfigId], references: [id], onDelete: Restrict)
+  User               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  SourceSubmission   TopicActivitySubmission? @relation(fields: [sourceSubmissionId], references: [id], onDelete: SetNull)
+
+  @@unique([activityId, userId], map: "TopicLotteryEligibility_activity_user_key")
+  @@index([lotteryConfigId, valid, qualifiedAt], map: "TopicLotteryEligibility_valid_idx")
+}
+
+/// Frozen roster and persisted allocation survive retries without rerandomizing.
+model TopicActivityLotteryDraw {
+  id                String               @id @default(cuid())
+  activityId        String               @unique(map: "TopicLotteryDraw_activity_key")
+  lotteryConfigId   String               @unique(map: "TopicLotteryDraw_config_key")
+  state             String               @default("FROZEN") @db.VarChar(32)
+  frozenAt          DateTime             @default(now())
+  frozenById        String?
+  candidateCount    Int
+  candidateSnapshot Json
+  candidateHash     String               @db.VarChar(64)
+  prizeSnapshot     Json
+  allocation        Json?
+  allocationHash    String?              @db.VarChar(64)
+  winnerCount       Int                  @default(0)
+  startedAt         DateTime?
+  drawnAt           DateTime?
+  errorCode         String?              @db.VarChar(100)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  Activity          Activity             @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Config            TopicActivityLottery @relation(fields: [lotteryConfigId], references: [id], onDelete: Restrict)
+}
+
+/// Exactly quantity slots are created under the Activity lock; one winner per slot.
+model TopicActivityLotterySlot {
+  id         String        @id @default(cuid())
+  prizeId    String
+  slotNumber Int
+  createdAt  DateTime      @default(now())
+  Prize      LotteryPrize  @relation(fields: [prizeId], references: [id], onDelete: Restrict)
+  Winner     LotteryEntry?
+
+  @@unique([prizeId, slotNumber], map: "TopicLotterySlot_prize_number_key")
+}
+
+/// PII exists only in authenticated encrypted envelopes, never public metadata.
+model TopicActivityLotteryShipping {
+  id                 String       @id @default(cuid())
+  winnerId           String       @unique(map: "TopicLotteryShipping_winner_key")
+  addressCiphertext  String?      @db.LongText
+  shipmentCiphertext String?      @db.LongText
+  addressDeadline    DateTime
+  retainUntil        DateTime
+  addressUpdatedAt   DateTime?
+  consentAt          DateTime?
+  shippingStatus     String       @default("WAITING_ADDRESS") @db.VarChar(32)
+  shippedAt          DateTime?
+  completedAt        DateTime?
+  deletedAt          DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  Winner             LotteryEntry @relation(fields: [winnerId], references: [id], onDelete: Cascade)
+
+  @@index([retainUntil, deletedAt], map: "TopicLotteryShipping_retention_idx")
+}
+
+model TopicActivityLotteryNotice {
+  id        String       @id @default(cuid())
+  winnerId  String       @unique(map: "TopicLotteryNotice_winner_key")
+  state     String       @default("PENDING") @db.VarChar(16)
+  attempts  Int          @default(0)
+  errorCode String?      @db.VarChar(100)
+  sentAt    DateTime?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  Winner    LotteryEntry @relation(fields: [winnerId], references: [id], onDelete: Cascade)
+
+  @@index([state, createdAt], map: "TopicLotteryNotice_pending_idx")
+}
+
+model TopicActivityLotteryAudit {
+  id              String               @id @default(cuid())
+  activityId      String
+  lotteryConfigId String
+  actorId         String?
+  action          String               @db.VarChar(64)
+  entityId        String?
+  detail          Json?
+  createdAt       DateTime             @default(now())
+  Activity        Activity             @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  Config          TopicActivityLottery @relation(fields: [lotteryConfigId], references: [id], onDelete: Restrict)
+  Actor           User?                @relation("TopicLotteryAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([lotteryConfigId, createdAt], map: "TopicLotteryAudit_config_time_idx")
 }

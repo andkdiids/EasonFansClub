@@ -175,6 +175,158 @@ export function trustedParents(file, io) {
   }
 }
 
+export const ENV_METADATA_REASON_CODES = Object.freeze([
+  'ENV_PARENT_MISSING', 'ENV_PARENT_ACCESS_DENIED', 'ENV_PARENT_SYMLINK',
+  'ENV_PARENT_UNSAFE_OWNER', 'ENV_PARENT_UNSAFE_MODE', 'ENV_PARENT_NOT_DIRECTORY',
+  'ENV_REALPATH_FAILED', 'ENV_TARGET_LOCATION_UNAPPROVED', 'ENV_FILE_MISSING',
+  'ENV_FILE_ACCESS_DENIED', 'ENV_FILE_NOT_REGULAR', 'ENV_FILE_UNSAFE_OWNER',
+  'ENV_FILE_UNSAFE_MODE', 'ENV_FILE_EMPTY', 'ENV_CURRENT_LINK_MISSING',
+  'ENV_METADATA_UNCLASSIFIED',
+])
+
+function metadataFsFailure(error, missing, denied) {
+  if (error?.code === 'ENOENT') return missing
+  if (error?.code === 'ENOTDIR') return 'ENV_PARENT_NOT_DIRECTORY'
+  if (['EACCES', 'EPERM'].includes(error?.code)) return denied
+  return 'ENV_METADATA_UNCLASSIFIED'
+}
+
+function metadataParentFailure(file, io) {
+  try {
+    if (!Number.isSafeInteger(io.uid) || io.uid < 0) return 'ENV_METADATA_UNCLASSIFIED'
+    let dir = '/'
+    for (const segment of path.posix.dirname(file).split('/').filter(Boolean)) {
+      dir = path.posix.join(dir, segment)
+      let stat
+      try { stat = io.stat(dir) } catch (error) {
+        return metadataFsFailure(error, 'ENV_PARENT_MISSING', 'ENV_PARENT_ACCESS_DENIED')
+      }
+      if (stat.isSymbolicLink()) return 'ENV_PARENT_SYMLINK'
+      if (!stat.isDirectory()) return 'ENV_PARENT_NOT_DIRECTORY'
+      if (![0, io.uid].includes(stat.uid)) return 'ENV_PARENT_UNSAFE_OWNER'
+      if (!Number.isSafeInteger(stat.mode) || (stat.mode & 0o022)) return 'ENV_PARENT_UNSAFE_MODE'
+    }
+    return null
+  } catch {
+    return 'ENV_METADATA_UNCLASSIFIED'
+  }
+}
+
+function envFileFailure(file, io) {
+  let stat
+  try { stat = io.stat(file) } catch (error) {
+    return metadataFsFailure(error, 'ENV_FILE_MISSING', 'ENV_FILE_ACCESS_DENIED')
+  }
+  try {
+    if (stat.isSymbolicLink() || !stat.isFile()) return 'ENV_FILE_NOT_REGULAR'
+    if (![0, io.uid].includes(stat.uid)) return 'ENV_FILE_UNSAFE_OWNER'
+    if (!Number.isSafeInteger(stat.mode) || (stat.mode & 0o077) || !(stat.mode & 0o400)) return 'ENV_FILE_UNSAFE_MODE'
+    if (!Number.isSafeInteger(stat.size) || stat.size <= 0) return 'ENV_FILE_EMPTY'
+    return null
+  } catch {
+    return 'ENV_METADATA_UNCLASSIFIED'
+  }
+}
+
+// Metadata-only inspection deliberately has a narrower IO contract than the
+// full preflight: lstat, readlink and realpath only. It never reads file bytes.
+export function inspectEnvMetadata(release, io) {
+  const unknown = reason => ({ status: 'UNKNOWN', reason })
+  try {
+    if (typeof release !== 'string' || !/^\/home\/apps\/easonfansclub\/releases\/[A-Za-z0-9._-]+$/.test(release) ||
+      ['.', '..'].includes(path.posix.basename(release))) return unknown('ENV_TARGET_LOCATION_UNAPPROVED')
+
+    const releaseEnv = release + '/.env'
+    const sharedEnv = APP + '/shared/.env'
+    let parentError = metadataParentFailure(releaseEnv, io)
+    if (parentError) return unknown(parentError)
+
+    let linkStat
+    try { linkStat = io.stat(releaseEnv) } catch (error) {
+      return unknown(metadataFsFailure(error, 'ENV_FILE_MISSING', 'ENV_FILE_ACCESS_DENIED'))
+    }
+    if (!linkStat.isSymbolicLink()) return unknown('ENV_TARGET_LOCATION_UNAPPROVED')
+    let linkTarget
+    try { linkTarget = io.link(releaseEnv) } catch { return unknown('ENV_METADATA_UNCLASSIFIED') }
+    // Do not resolve an arbitrary link target. Accept only the deployed
+    // absolute link or its exact canonical relative equivalent before realpath.
+    if (![sharedEnv, '../../shared/.env'].includes(linkTarget)) return unknown('ENV_TARGET_LOCATION_UNAPPROVED')
+
+    parentError = metadataParentFailure(sharedEnv, io)
+    if (parentError) return unknown(parentError)
+    const fileError = envFileFailure(sharedEnv, io)
+    if (fileError) return unknown(fileError)
+
+    let canonicalTarget
+    try { canonicalTarget = io.real(releaseEnv) } catch { return unknown('ENV_REALPATH_FAILED') }
+    if (canonicalTarget !== sharedEnv) return unknown('ENV_TARGET_LOCATION_UNAPPROVED')
+
+    // Recheck link identity and text after canonicalization. The observation
+    // remains non-atomic, but an observed replacement fails closed.
+    let afterStat, afterTarget
+    try {
+      afterStat = io.stat(releaseEnv)
+      afterTarget = io.link(releaseEnv)
+    } catch { return unknown('ENV_METADATA_UNCLASSIFIED') }
+    if (!afterStat.isSymbolicLink() || afterTarget !== linkTarget ||
+      (Number.isSafeInteger(linkStat.dev) && afterStat.dev !== linkStat.dev) ||
+      (Number.isSafeInteger(linkStat.ino) && afterStat.ino !== linkStat.ino)) return unknown('ENV_METADATA_UNCLASSIFIED')
+    return { status: 'PASS', reason: 'ENV_METADATA_SAFE' }
+  } catch {
+    return unknown('ENV_METADATA_UNCLASSIFIED')
+  }
+}
+
+// Resolve only the pre-approved current link text; never follow an arbitrary
+// current target. The resulting release must still pass the same parent and
+// shared-env metadata checks above.
+export function envMetadataOnly(io) {
+  const unknown = reason => ({ diagnostic: 'ENV_METADATA_ONLY', status: 'UNKNOWN', reason,
+    databaseAccess: 'NOT_ATTEMPTED', envContentRead: false, prismaInitialized: false,
+    sqlExecuted: false, pm2Access: 'NOT_ATTEMPTED', productionWrite: 'NONE',
+    atomic: false, continuous: false, scope: 'METADATA_ENDPOINT_OBSERVATIONS' })
+  try {
+    const current = APP + '/current'
+    const parentError = metadataParentFailure(current, io)
+    if (parentError) return unknown(parentError)
+    let currentStat
+    try { currentStat = io.stat(current) } catch (error) {
+      return unknown(metadataFsFailure(error, 'ENV_CURRENT_LINK_MISSING', 'ENV_METADATA_UNCLASSIFIED'))
+    }
+    if (!currentStat.isSymbolicLink()) return unknown('ENV_TARGET_LOCATION_UNAPPROVED')
+    let target
+    try { target = io.link(current) } catch { return unknown('ENV_METADATA_UNCLASSIFIED') }
+    const absolute = /^\/home\/apps\/easonfansclub\/releases\/[A-Za-z0-9._-]+$/.test(target)
+    const relative = /^releases\/[A-Za-z0-9._-]+$/.test(target)
+    if (!absolute && !relative) return unknown('ENV_TARGET_LOCATION_UNAPPROVED')
+    const release = absolute ? target : APP + '/' + target
+    const result = inspectEnvMetadata(release, io)
+    let currentAfter, targetAfter
+    try {
+      currentAfter = io.stat(current)
+      targetAfter = io.link(current)
+    } catch { return unknown('ENV_METADATA_UNCLASSIFIED') }
+    if (!currentAfter.isSymbolicLink() || targetAfter !== target ||
+      (Number.isSafeInteger(currentStat.dev) && currentAfter.dev !== currentStat.dev) ||
+      (Number.isSafeInteger(currentStat.ino) && currentAfter.ino !== currentStat.ino)) return unknown('ENV_METADATA_UNCLASSIFIED')
+    return { diagnostic: 'ENV_METADATA_ONLY', ...result,
+      databaseAccess: 'NOT_ATTEMPTED', envContentRead: false, prismaInitialized: false,
+      sqlExecuted: false, pm2Access: 'NOT_ATTEMPTED', productionWrite: 'NONE',
+      atomic: false, continuous: false, scope: 'METADATA_ENDPOINT_OBSERVATIONS' }
+  } catch {
+    return unknown('ENV_METADATA_UNCLASSIFIED')
+  }
+}
+
+export function makeMetadataIO() {
+  return Object.freeze({
+    uid: process.getuid?.() ?? -1,
+    stat: value => fs.lstatSync(value, { bigint: false }),
+    real: value => fs.realpathSync(value),
+    link: value => fs.readlinkSync(value),
+  })
+}
+
 export function prismaRowsToTsv(rows) {
   if (!Array.isArray(rows) || rows.length > 5000) throw new Error('PRISMA_RESPONSE_INVALID')
   return rows.map(row => {
@@ -203,11 +355,9 @@ export async function queryReleaseLedger(release, io, loadClient) {
     }
     // .env is the already existing shared file; no config initialization.
     stage = 'PRISMA_ENV_METADATA_UNSAFE_OR_UNAVAILABLE'
-    trustedParents(release + '/.env', io)
-    trustedParents(APP + '/shared/.env', io)
-    const envFile = io.real(release + '/.env')
-    if (envFile !== APP + '/shared/.env') return unknown('PRISMA_ENV_LOCATION_UNAPPROVED')
-    safe(envFile, true)
+    const envMetadata = inspectEnvMetadata(release, io)
+    if (envMetadata.status !== 'PASS') return unknown(envMetadata.reason)
+    const envFile = APP + '/shared/.env'
     stage = 'PRISMA_CONFIGURATION_UNAVAILABLE_OR_UNSUPPORTED'
     const config = prismaDatabaseUrl(io.read(envFile))
     stage = 'PRISMA_CA_METADATA_UNSAFE_OR_UNAVAILABLE'
@@ -244,9 +394,13 @@ const APP=${JSON.stringify(APP)}, NAME=${NAME}, HASH=${HASH};
 ${prismaDatabaseUrl.toString()}
 ${prismaFailure.toString()}
 ${trustedParents.toString()}
+${metadataFsFailure.toString()}
+${metadataParentFailure.toString()}
+${envFileFailure.toString()}
+${inspectEnvMetadata.toString()}
 ${prismaRowsToTsv.toString()}
 ${queryReleaseLedger.toString()}
-const io={uid:process.getuid(),stat:p=>fs.lstatSync(p),real:p=>fs.realpathSync(p),read:p=>{const s=fs.lstatSync(p);if(s.size>1048576)throw Error('LIMIT');return fs.readFileSync(p,'utf8')}};
+const io={uid:process.getuid(),stat:p=>fs.lstatSync(p),real:p=>fs.realpathSync(p),link:p=>fs.readlinkSync(p),read:p=>{const s=fs.lstatSync(p);if(s.size>1048576)throw Error('LIMIT');return fs.readFileSync(p,'utf8')}};
 const result=await queryReleaseLedger(process.argv[2],io,p=>createRequire(p+'/package.json')(p+'/node_modules/@prisma/client'));
 process.stdout.write('PRISMA_LEDGER='+JSON.stringify(result)+'\\n');`
 }
@@ -263,7 +417,7 @@ export function prismaMigrationRead(release, manifest, io) {
     const lines = String(result.stdout).trim().split(/\r?\n/)
     if (lines.length !== 1 || !lines[0].startsWith('PRISMA_LEDGER=')) return unknown('PRISMA_CHILD_OUTPUT_INVALID')
     const value = JSON.parse(lines[0].slice(14))
-    if (value.status === 'UNKNOWN' && /^PRISMA_[A-Z_]+$/.test(value.reason)) return unknown(value.reason)
+    if (value.status === 'UNKNOWN' && (/^PRISMA_[A-Z_]+$/.test(value.reason) || ENV_METADATA_REASON_CODES.includes(value.reason))) return unknown(value.reason)
     if (value.status !== 'READ' || typeof value.tsv !== 'string' || value.backend !== 'EXISTING_PRISMA_CLIENT' || value.tls !== 'STRICT_CERT_AND_DOMAIN') return unknown('PRISMA_CHILD_OUTPUT_INVALID')
     return { ...migrationState(manifest, value.tsv), backend: value.backend, tls: value.tls,
       applicationSql: 'FIXED_SELECT_ONLY', sessionSideEffects: 'CONNECTION_AND_DRIVER_INITIALIZATION_NOT_ZERO_SYSTEM_EFFECTS' }
@@ -499,8 +653,15 @@ if (process.argv[1] === '-' && process.argv[2]) {
     const encoded = process.argv[2]
     if (!/^[A-Za-z0-9+/=]{1,65536}$/.test(encoded)) throw new Error('MANIFEST_INVALID')
     const manifest = validateManifest(JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')))
-    const result = await inspect(manifest, makeReadIO())
-    console.log('STRICT_PREFLIGHT=' + JSON.stringify(result))
+    const mode = process.argv[3] || 'full'
+    if (mode === 'env_metadata_only') {
+      console.log('ENV_METADATA_ONLY=' + JSON.stringify(envMetadataOnly(makeMetadataIO())))
+    } else if (mode === 'full') {
+      const result = await inspect(manifest, makeReadIO())
+      console.log('STRICT_PREFLIGHT=' + JSON.stringify(result))
+    } else {
+      throw new Error('DIAGNOSTIC_MODE_INVALID')
+    }
   } catch {
     console.log('STRICT_PREFLIGHT={"diagnostic":"UNKNOWN","reason":"SANITIZED_DIAGNOSTIC_FAILURE"}')
     process.exitCode = 1

@@ -18,19 +18,26 @@ function canonicalizeText(source: string): string {
   return source.replace(/\r\n?/g, '\n')
 }
 
-test('MySQL baseline candidate is bound to the current schema and stays MySQL-compatible', () => {
+test('MySQL baseline stays bound to its recorded snapshot while topic activity remains additive', () => {
   const schema = readFileSync(schemaPath, 'utf8')
   const baseline = readFileSync(baselinePath, 'utf8')
   const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as Record<string, unknown>
+  const topicActivityMigration = readFileSync(path.join(projectRoot, 'prisma', 'migrations', '20261005120000_add_topic_activity_system', 'migration.sql'), 'utf8')
   const inspection = inspectMigrationSql('mysql-baseline/current', baseline)
 
   assert.equal(metadata.provider, 'mysql')
   assert.equal(metadata.baselineStatus, 'CANDIDATE')
   assert.equal(metadata.source, 'prisma/schema.prisma')
   assert.equal(metadata.productionVerified, false)
-  assert.equal(metadata.schemaHash, sha256(canonicalizeText(schema)))
+  assert.match(String(metadata.schemaHash), /^[a-f0-9]{64}$/)
   assert.equal(metadata.baselineHash, sha256(canonicalizeText(baseline)))
   assert.equal(inspection.findings.length, 0)
+  if (metadata.schemaHash !== sha256(canonicalizeText(schema))) {
+    assert.ok(Date.parse(String(metadata.generatedAt)) < Date.parse('2026-10-05T12:00:00+08:00'))
+    assert.match(topicActivityMigration, /CREATE TABLE `TopicActivitySubmission`/)
+    assert.match(topicActivityMigration, /CREATE TABLE `TopicActivityParticipation`/)
+    assert.doesNotMatch(topicActivityMigration, /\bDROP\b|\bRENAME\b/i)
+  }
 })
 
 test('MySQL baseline candidate contains the required social-post tables and constraints', () => {

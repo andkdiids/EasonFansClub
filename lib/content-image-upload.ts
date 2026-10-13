@@ -10,6 +10,12 @@
 export const CONTENT_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024
 export const CONTENT_IMAGE_COMPRESSION_THRESHOLD = 5 * 1024 * 1024
 export const CONTENT_IMAGE_COMPRESSION_TARGET = 4 * 1024 * 1024
+// The browser uploader owns the overall preparation + request deadline. Keep
+// this finite so a WebView decode, canvas callback, or network body cannot
+// leave a comment blocked forever.
+export const CONTENT_IMAGE_UPLOAD_TIMEOUT_MS = 60_000
+// Initial selection is attempt zero; this is the number of explicit retries.
+export const CONTENT_IMAGE_MAX_RETRIES = 3
 
 export const CONTENT_IMAGE_ALLOWED_MIME_TYPES = [
   'image/jpeg',
@@ -51,6 +57,7 @@ export type ContentImageUploadErrorCode =
   | 'HEIC_CONVERSION_FAILED'
   | 'IMAGE_PROCESSING_FAILED'
   | 'NETWORK_UPLOAD_FAILED'
+  | 'UPLOAD_TIMEOUT'
   | 'UPLOAD_FAILED'
   | 'UPLOAD_RESPONSE_INVALID'
 
@@ -58,11 +65,12 @@ export const CONTENT_IMAGE_ERROR_MESSAGES: Record<ContentImageUploadErrorCode, s
   FILE_REQUIRED: '未收到图片文件',
   EMPTY_FILE: '请选择图片',
   FILE_TOO_LARGE: '图片过大，单张图片不能超过 20MB',
-  UNSUPPORTED_FORMAT: '不支持该图片格式，请上传 JPG、PNG、WebP 或 HEIC 图片',
+  UNSUPPORTED_FORMAT: '不支持该图片格式，请上传 JPG、PNG、WebP、GIF、HEIC/HEIF 或 AVIF 图片',
   INVALID_FILE: '图片上传异常，请重新选择图片',
   HEIC_CONVERSION_FAILED: '照片格式转换失败，请尝试重新选择或上传 JPG 图片',
   IMAGE_PROCESSING_FAILED: '图片处理失败，请重新选择图片',
   NETWORK_UPLOAD_FAILED: '图片上传失败，请检查网络后重试',
+  UPLOAD_TIMEOUT: '图片处理或上传超时，请检查网络后重试',
   UPLOAD_FAILED: '图片上传失败，请稍后重试',
   UPLOAD_RESPONSE_INVALID: '图片上传异常，请重新选择图片',
 }

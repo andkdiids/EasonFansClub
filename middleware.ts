@@ -27,6 +27,7 @@ const publicExactPaths = new Set([
   '/salon',
   '/activities',
   '/api/clinic',
+  '/api/mobile/home-hero',
   '/api/mobile/config',
   '/api/salon/posts',
   '/api/salon/options',
@@ -120,6 +121,11 @@ function normalizeHost(value: string) {
 function isPublicPath(pathname: string) {
   if (publicExactPaths.has(pathname)) return true
   if (pathname === '/api/auth') return true
+  // The published activity's form schema contains no user submissions or
+  // private data, so anonymous visitors may render the login-gated form UI.
+  if (/^\/api\/activities\/[^/]+\/form$/.test(pathname)) return true
+  if (/^\/api\/activities\/[^/]+\/v2$/.test(pathname)) return true
+  if (/^\/api\/activities\/[^/]+\/v2\/(?:poll|test)$/.test(pathname)) return true
   if (publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))) return true
   if (/^\/api\/(?:posts|activities)\/[^/]+\/share-card$/.test(pathname)) return true
   if (/^\/api\/salon\/posts\/[^/]+\/share-card$/.test(pathname)) return true
@@ -144,9 +150,33 @@ function isImmutablePublicPath(pathname: string) {
 
 function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
+  // V2 route handlers authenticate each user/admin action again; this only
+  // lets the established Mobile bearer session reach the shared business API.
+  if (['GET', 'POST', 'PATCH'].includes(request.method) && /^\/api\/(?:admin\/)?activities\/[^/]+\/v2(?:\/.*)?$/.test(pathname)) return true
   if (request.method === 'GET') {
-    return pathname === '/api/home'
+    return pathname === '/api/admin/cantonese/review'
+      || pathname === '/api/home'
+      || pathname === '/api/activities'
+      || /^\/api\/activities\/[^/]+$/.test(pathname)
+      || /^\/api\/activities\/[^/]+\/(?:form|my-form-submissions)$/.test(pathname)
+      || pathname === '/api/activities/me/topic-participations'
+      || /^\/api\/topic-activity-form-submissions\/[^/]+$/.test(pathname)
+      || /^\/api\/activities\/[^/]+\/form-submissions\/[^/]+\/replies\/[^/]+\/assets\/[^/]+\/original$/.test(pathname)
+      || /^\/api\/activities\/[^/]+\/form-submissions\/[^/]+\/assets\/[^/]+\/original$/.test(pathname)
+      || /^\/api\/activities\/[^/]+\/assets\/[^/]+\/preview$/.test(pathname)
+      || /^\/api\/admin\/activities\/[^/]+\/form-submissions$/.test(pathname)
+      || pathname === '/api/admin/cantonese/courses'
+      || pathname === '/api/learning/cantonese/course'
+      || pathname === '/api/learning/cantonese/speaking'
+      || pathname === '/api/learning/cantonese/progress'
+      || /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname)
+      || /^\/api\/admin\/cantonese\/review\/audio\/[^/]+\/preview$/.test(pathname)
+      || pathname === '/api/admin/review'
+      || pathname === '/api/growth'
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/messages$/.test(pathname)
       || pathname === '/api/posts'
+      || pathname === '/api/users/me/e-center-preferences'
       || pathname === '/api/checkin'
       || pathname === '/api/checkin/history'
       || /^\/api\/checkin\/history\/[^/]+$/.test(pathname)
@@ -157,6 +187,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/entertainment/guess-song/sessions'
       || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+$/.test(pathname)
       || /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/audio$/.test(pathname)
+      || /^\/api\/learning\/cantonese\/audio\/[^/]+$/.test(pathname)
       || pathname === '/api/entertainment/guess-song/search'
       || pathname === '/api/entertainment/guess-song/leaderboard'
       || pathname === '/api/entertainment/leaderboard'
@@ -185,12 +216,26 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/friends/requests/received'
       || pathname === '/api/friends/requests/sent'
       || pathname === '/api/friend-groups'
+      || pathname === '/api/learning/cantonese/speech/history'
   }
   if (request.method === 'POST') {
-    return pathname === '/api/forum/discover'
-      || pathname === '/api/growth/refresh'
+    return pathname === '/api/admin/cantonese/content'
+      || pathname === '/api/admin/cantonese/assist'
+      || pathname === '/api/admin/cantonese/review/import/preview'
+      || pathname === '/api/admin/cantonese/questions'
+      || pathname === '/api/admin/cantonese/audio'
+      || /^\/api\/admin\/cantonese\/audio\/[^/]+\/generate$/.test(pathname)
+      || pathname === '/api/learning/cantonese/speech/assess'
+      || /^\/api\/learning\/cantonese\/progress\/lesson-\d{2,3}$/.test(pathname)
+      || pathname === '/api/admin/cantonese/review/batch'
+      || pathname === '/api/admin/cantonese/review/import'
+      || pathname === '/api/admin/cantonese/review/import/adopt'
+      || pathname === '/api/forum/discover'
       || pathname === '/api/growth/claim'
+      || pathname === '/api/growth/refresh'
       || pathname === '/api/growth/actions/share'
+      || pathname === '/api/direct-conversations'
+      || /^\/api\/direct-conversations\/[^/]+\/(?:messages|read)$/.test(pathname)
       || pathname === '/api/checkin'
       || pathname === '/api/entertainment/daily-draw'
       || pathname === '/api/entertainment/guess-song/sessions'
@@ -198,6 +243,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/users/me/badge/equip'
       || pathname === '/api/posts'
       || pathname === '/api/uploads/content-image'
+      || pathname === '/api/uploads/topic-activity-image'
+      || /^\/api\/activities\/[^/]+\/form-submissions$/.test(pathname)
+      || /^\/api\/admin\/topic-activity-form-submissions\/[^/]+\/replies$/.test(pathname)
       || pathname === '/api/friends/requests'
       || /^\/api\/friends\/requests\/[^/]+\/(?:accept|reject)$/.test(pathname)
       || pathname === '/api/friend-groups'
@@ -208,7 +256,13 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/notifications\/[^/]+\/read$/.test(pathname)
   }
   if (request.method === 'PUT' || request.method === 'PATCH') {
-    return pathname === '/api/posts/draft'
+    return (request.method === 'PATCH' && pathname === '/api/admin/review')
+      || (request.method === 'PUT' && /^\/api\/activities\/[^/]+\/v2\/lottery\/winners\/[^/]+\/address$/.test(pathname))
+      || (request.method === 'PATCH' && /^\/api\/admin\/topic-activity-submissions\/[^/]+$/.test(pathname))
+      || (request.method === 'PATCH' && /^\/api\/admin\/topic-activity-form-submissions\/[^/]+\/review$/.test(pathname))
+      || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/courses\/lesson-\d{2,3}$/.test(pathname))
+      || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname))
+      || pathname === '/api/posts/draft'
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
       || (request.method === 'PATCH' && pathname === '/api/users/me/e-center-preferences')
       || pathname === '/api/users/me'
@@ -222,6 +276,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
   }

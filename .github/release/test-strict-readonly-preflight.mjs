@@ -8,9 +8,10 @@ import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { deploymentsClear } from './mysql-client-metadata-runner.mjs'
-import { APP, SELECT_MIGRATIONS, validateManifest, migrationState, lockObservation, envSubset,
+import { APP, SELECT_MIGRATIONS, ENV_METADATA_REASON_CODES, validateManifest, migrationState, lockObservation, envSubset,
   databaseTarget, mysqlArgs, migrationRead, mysqlFailure, releaseSnapshot, rollbackSnapshot,
-  processStartTicks, processSnapshots, sampleConsistency, inspect } from './strict-readonly-preflight.mjs'
+  processStartTicks, processSnapshots, sampleConsistency, inspect, inspectEnvMetadata,
+  envMetadataOnly, makeMetadataIO, queryReleaseLedger, prismaChildSource, prismaMigrationRead } from './strict-readonly-preflight.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 // Reuse existing parser dependencies read-only; never install into the checkout.
@@ -85,6 +86,45 @@ function fixture() {
   }
   return { io, state, calls }
 }
+
+const metadataDirectory = (overrides = {}) => ({ uid: 0, mode: 0o40755, size: 0,
+  isFile: () => false, isSymbolicLink: () => false, isDirectory: () => true, ...overrides })
+const metadataSymlink = (ino, overrides = {}) => ({ uid: 1000, mode: 0o120777, size: 32, dev: 2049, ino,
+  isFile: () => false, isSymbolicLink: () => true, isDirectory: () => false, ...overrides })
+function metadataFixture() {
+  const calls = [], sharedEnv = APP + '/shared/.env', releaseEnv = release + '/.env', current = APP + '/current'
+  const directories = new Set(['/home', '/home/apps', APP, APP + '/releases', release, APP + '/shared'])
+  const state = { errors: new Map(), stats: new Map(), envLink: sharedEnv, currentLink: release,
+    realTarget: sharedEnv, realError: null }
+  const io = {
+    uid: 1000,
+    stat(value) {
+      calls.push(['stat', value])
+      if (state.errors.has(value)) throw state.errors.get(value)
+      if (state.stats.has(value)) return state.stats.get(value)
+      if (directories.has(value)) return metadataDirectory()
+      if (value === current) return metadataSymlink(20)
+      if (value === releaseEnv) return metadataSymlink(10)
+      if (value === sharedEnv) return normalStat({ uid: 1000, mode: 0o100600, size: 24 })
+      throw Object.assign(new Error('sensitive fixture path'), { code: 'ENOENT' })
+    },
+    link(value) {
+      calls.push(['link', value])
+      if (value === current) return state.currentLink
+      if (value === releaseEnv) return state.envLink
+      throw Object.assign(new Error('sensitive link'), { code: 'EIO' })
+    },
+    real(value) {
+      calls.push(['real', value])
+      if (state.realError) throw state.realError
+      if (value === sharedEnv || value === releaseEnv) return state.realTarget
+      throw Object.assign(new Error('sensitive realpath'), { code: 'EIO' })
+    },
+    read() { calls.push(['read']); throw new Error('CONTENT_READ_FORBIDDEN') },
+    run() { calls.push(['run']); throw new Error('PROCESS_EXEC_FORBIDDEN') },
+  }
+  return { io, state, calls, sharedEnv, releaseEnv, current, directories }
+}
 const target = { host: 'db.example.invalid', port: '3306', database: 'ecfc' }
 const steps = Object.values(workflow.jobs).flatMap(job => job.steps)
 const stepNamed = prefix => steps.find(step => step.name?.startsWith(prefix))
@@ -98,6 +138,7 @@ const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' 
 function bashRun(script, extra = {}) {
   const env = { ...process.env, PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH,
     GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', APPROVED_SHA: rc, EXPECTED_SHA: sha,
+    DIAGNOSTIC_MODE: 'full',
     SSH_HOST: 'example.invalid', SSH_USER: 'reader', SSH_PORT: '22', KEY_FILE: '/runner/key', HOSTS_FILE: '/runner/hosts',
     PREFLIGHT_PAYLOAD: Buffer.from(JSON.stringify(manifest)).toString('base64'), ...extra }
   return spawnSync(bash, ['--noprofile', '--norc', '-c', script], { cwd: root, env, encoding: 'utf8', timeout: 10000 })
@@ -109,6 +150,15 @@ ssh() { printf '%s\\n' "$@" > "$SIM_ARGS"; cat > "$SIM_STREAM"; }
 
 test('YAML has no parse errors or duplicate keys', () => assert.deepEqual(doc.errors, []))
 test('manual-only trigger, no push/pull_request/schedule', () => assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']))
+test('diagnostic mode is a closed manual choice with full mode preserved as default', () => {
+  const input = workflow.on.workflow_dispatch.inputs.diagnostic_mode
+  assert.equal(input.type, 'choice'); assert.equal(input.required, true); assert.equal(input.default, 'full')
+  assert.deepEqual(input.options, ['full', 'env_metadata_only'])
+  assert.equal(workflow.jobs.validate.outputs.diagnostic_mode, '${{ steps.manifest.outputs.diagnostic_mode }}')
+  assert.equal(stepNamed('Require main').env.DIAGNOSTIC_MODE, '${{ inputs.diagnostic_mode }}')
+  assert.equal(sshStep.env.DIAGNOSTIC_MODE, '${{ needs.validate.outputs.diagnostic_mode }}')
+  assert.equal(stepNamed('Observe public HTTPS').if, "needs.validate.outputs.diagnostic_mode == 'full'")
+})
 test('only contents/actions read; no deployment writes', () => assert.deepEqual(workflow.permissions, { contents: 'read', actions: 'read' }))
 test('diagnostic concurrency never cancels deployment or another diagnostic', () => {
   assert.equal(workflow.concurrency['cancel-in-progress'], false)
@@ -133,7 +183,8 @@ test('secrets are bound to Production after the main-only validation job', () =>
 })
 test('main dispatch accepted locally', () => assert.equal(bashRun(guardStep.run).status, 0))
 for (const [name, env] of Object.entries({ push: { GITHUB_EVENT_NAME: 'push' }, branch: { GITHUB_REF: 'refs/heads/feature' },
-  shortSHA: { APPROVED_SHA: '47396d1' }, shellInjection: { APPROVED_SHA: '$(touch forbidden)' }, uppercase: { EXPECTED_SHA: sha.toUpperCase() } })) {
+  shortSHA: { APPROVED_SHA: '47396d1' }, shellInjection: { APPROVED_SHA: '$(touch forbidden)' },
+  uppercase: { EXPECTED_SHA: sha.toUpperCase() }, diagnosticMode: { DIAGNOSTIC_MODE: 'shell;command' } })) {
   test('reject trigger/SHA: ' + name, () => assert.notEqual(bashRun(guardStep.run, env).status, 0))
 }
 test('checks installed policy/RC using existing non-deploying guard', () => {
@@ -160,6 +211,111 @@ test('no invocation of deployment, PM2, package manager or database tooling in w
   assert.match(cleanup, /\$RUNNER_TEMP\/ecfc-strict-/)
   assert.doesNotMatch(cleanup, /\bssh\b/)
 })
+test('metadata-only path exposes only fixed sanitized environment failure codes', () => {
+  const required = ['ENV_PARENT_MISSING', 'ENV_PARENT_ACCESS_DENIED', 'ENV_PARENT_SYMLINK',
+    'ENV_PARENT_UNSAFE_OWNER', 'ENV_PARENT_UNSAFE_MODE', 'ENV_REALPATH_FAILED',
+    'ENV_TARGET_LOCATION_UNAPPROVED', 'ENV_FILE_MISSING', 'ENV_FILE_NOT_REGULAR',
+    'ENV_FILE_UNSAFE_OWNER', 'ENV_FILE_UNSAFE_MODE', 'ENV_FILE_EMPTY', 'ENV_METADATA_UNCLASSIFIED']
+  for (const code of required) assert.ok(ENV_METADATA_REASON_CODES.includes(code), code)
+  for (const code of ENV_METADATA_REASON_CODES) assert.match(code, /^ENV_[A-Z_]+$/)
+})
+for (const [name, mutate, expected] of [
+  ['parent missing', f => f.state.errors.set(APP + '/releases', Object.assign(new Error('secret path'), { code: 'ENOENT' })), 'ENV_PARENT_MISSING'],
+  ['parent access denied', f => f.state.errors.set(APP, Object.assign(new Error('secret uid/path'), { code: 'EACCES' })), 'ENV_PARENT_ACCESS_DENIED'],
+  ['parent symlink', f => f.state.stats.set(APP + '/releases', metadataDirectory({ isSymbolicLink: () => true })), 'ENV_PARENT_SYMLINK'],
+  ['parent unsafe owner', f => f.state.stats.set(APP + '/releases', metadataDirectory({ uid: 1001 })), 'ENV_PARENT_UNSAFE_OWNER'],
+  ['parent unsafe mode', f => f.state.stats.set(APP + '/releases', metadataDirectory({ mode: 0o40777 })), 'ENV_PARENT_UNSAFE_MODE'],
+  ['parent not directory', f => f.state.stats.set(APP + '/releases', metadataDirectory({ isDirectory: () => false })), 'ENV_PARENT_NOT_DIRECTORY'],
+  ['broken env link target', f => f.state.errors.set(APP + '/shared/.env', Object.assign(new Error('private path'), { code: 'ENOENT' })), 'ENV_FILE_MISSING'],
+  ['missing env link', f => f.state.errors.set(release + '/.env', Object.assign(new Error('private path'), { code: 'ENOENT' })), 'ENV_FILE_MISSING'],
+  ['env target access denied', f => f.state.errors.set(APP + '/shared/.env', Object.assign(new Error('private path'), { code: 'EACCES' })), 'ENV_FILE_ACCESS_DENIED'],
+  ['realpath failure', f => { f.state.realError = Object.assign(new Error('mysql://private-secret'), { code: 'EIO' }) }, 'ENV_REALPATH_FAILED'],
+  ['unapproved target location', f => { f.state.envLink = '/tmp/private/.env' }, 'ENV_TARGET_LOCATION_UNAPPROVED'],
+  ['canonical target location mismatch', f => { f.state.realTarget = '/tmp/private/.env' }, 'ENV_TARGET_LOCATION_UNAPPROVED'],
+  ['final target not regular', f => f.state.stats.set(APP + '/shared/.env', metadataDirectory()), 'ENV_FILE_NOT_REGULAR'],
+  ['final target symlink', f => f.state.stats.set(APP + '/shared/.env', metadataSymlink(40)), 'ENV_FILE_NOT_REGULAR'],
+  ['file unsafe owner', f => f.state.stats.set(APP + '/shared/.env', normalStat({ uid: 1001, mode: 0o100600 })), 'ENV_FILE_UNSAFE_OWNER'],
+  ['file unsafe mode', f => f.state.stats.set(APP + '/shared/.env', normalStat({ mode: 0o100644 })), 'ENV_FILE_UNSAFE_MODE'],
+  ['empty file', f => f.state.stats.set(APP + '/shared/.env', normalStat({ size: 0 })), 'ENV_FILE_EMPTY'],
+  ['unclassified IO exception', f => f.state.errors.set(APP + '/releases', Object.assign(new Error('mysql://private-secret'), { code: 'EIO' })), 'ENV_METADATA_UNCLASSIFIED'],
+]) {
+  test('metadata classification is precise and sanitized: ' + name, () => {
+    const f = metadataFixture(); mutate(f)
+    const result = inspectEnvMetadata(release, f.io)
+    assert.deepEqual(result, { status: 'UNKNOWN', reason: expected })
+    assert.doesNotMatch(JSON.stringify(result), /private-secret|mysql:\/\/|secret path|secret uid|\/tmp\/private/)
+  })
+}
+test('unapproved release input is rejected without inspecting any path', () => {
+  const f = metadataFixture()
+  assert.deepEqual(inspectEnvMetadata('/tmp/private-release', f.io), { status: 'UNKNOWN', reason: 'ENV_TARGET_LOCATION_UNAPPROVED' })
+  assert.deepEqual(f.calls, [])
+})
+test('valid env metadata path keeps parent-before-target inspection ordering', () => {
+  const f = metadataFixture()
+  assert.deepEqual(inspectEnvMetadata(release, f.io), { status: 'PASS', reason: 'ENV_METADATA_SAFE' })
+  const releaseFileIndex = f.calls.findIndex(row => row[0] === 'stat' && row[1] === f.releaseEnv)
+  const releaseParentIndex = f.calls.findIndex(row => row[0] === 'stat' && row[1] === release)
+  const sharedFileIndex = f.calls.findIndex(row => row[0] === 'stat' && row[1] === f.sharedEnv)
+  const sharedParentIndex = f.calls.findIndex(row => row[0] === 'stat' && row[1] === APP + '/shared')
+  assert.ok(releaseParentIndex >= 0 && releaseParentIndex < releaseFileIndex)
+  assert.ok(sharedParentIndex >= 0 && sharedParentIndex < sharedFileIndex)
+  assert.ok(f.calls.some(row => row[0] === 'real' && row[1] === f.releaseEnv))
+})
+test('exact relative deployment link to the same fixed shared env remains accepted', () => {
+  const f = metadataFixture(); f.state.envLink = '../../shared/.env'
+  assert.deepEqual(inspectEnvMetadata(release, f.io), { status: 'PASS', reason: 'ENV_METADATA_SAFE' })
+})
+test('metadata-only mode passes using metadata capabilities only and proves no DB/PM2/file-content path', () => {
+  const f = metadataFixture(), result = envMetadataOnly(f.io)
+  assert.deepEqual(result, { diagnostic: 'ENV_METADATA_ONLY', status: 'PASS', reason: 'ENV_METADATA_SAFE',
+    databaseAccess: 'NOT_ATTEMPTED', envContentRead: false, prismaInitialized: false,
+    sqlExecuted: false, pm2Access: 'NOT_ATTEMPTED', productionWrite: 'NONE',
+    atomic: false, continuous: false, scope: 'METADATA_ENDPOINT_OBSERVATIONS' })
+  assert.ok(f.calls.every(row => ['stat', 'link', 'real'].includes(row[0])))
+  assert.equal(f.calls.some(row => row[0] === 'read' || row[0] === 'run'), false)
+  const metadataIO = makeMetadataIO()
+  assert.deepEqual(Object.keys(metadataIO).sort(), ['link', 'real', 'stat', 'uid'])
+  assert.doesNotMatch(envMetadataOnly.toString(), /io\.read|io\.run|spawnSync|prismaMigrationRead|queryReleaseLedger|makeReadIO|PrismaClient|queryRaw|pm2DaemonEvidence/i)
+  assert.doesNotMatch(makeMetadataIO.toString(), /readFile|writeFile|spawn|fetch|Prisma|pm2/i)
+  const branch = source.slice(source.indexOf("if (mode === 'env_metadata_only')"), source.indexOf("} else if (mode === 'full')"))
+  assert.match(branch, /envMetadataOnly\(makeMetadataIO\(\)\)/)
+  assert.doesNotMatch(branch, /inspect\(|prismaMigrationRead|makeReadIO|queryReleaseLedger/)
+})
+test('metadata-only current link rejects arbitrary targets and checks fixed current location', () => {
+  const f = metadataFixture(); f.state.currentLink = '/tmp/private-release'
+  const result = envMetadataOnly(f.io)
+  assert.equal(result.status, 'UNKNOWN'); assert.equal(result.reason, 'ENV_TARGET_LOCATION_UNAPPROVED')
+  assert.doesNotMatch(JSON.stringify(result), /tmp|private-release/)
+  assert.equal(f.calls.some(row => row[1] === f.releaseEnv || row[1] === f.sharedEnv), false)
+})
+test('full Prisma diagnostic returns granular env reason before content read or client load', async () => {
+  const f = metadataFixture(); f.state.errors.set(APP + '/releases', Object.assign(new Error('private config'), { code: 'EACCES' }))
+  let loads = 0
+  const result = await queryReleaseLedger(release, f.io, () => { loads++; throw new Error('client must not load') })
+  assert.deepEqual(result, { status: 'UNKNOWN', reason: 'ENV_PARENT_ACCESS_DENIED' })
+  assert.equal(loads, 0); assert.equal(f.calls.some(row => row[0] === 'read' || row[0] === 'run'), false)
+})
+test('Prisma child source serializes metadata classifiers and remains syntactically valid', () => {
+  const child = prismaChildSource()
+  assert.match(child, /function inspectEnvMetadata/)
+  assert.match(child, /function metadataParentFailure/)
+  assert.match(child, /link:p=>fs\.readlinkSync\(p\)/)
+  assert.doesNotMatch(child, /ENV_METADATA_ONLY|envMetadataOnly\(makeMetadataIO/)
+  assert.deepEqual(parse(child, { ecmaVersion: 'latest', sourceType: 'module' }).type, 'Program')
+})
+test('Prisma child preserves only allowlisted granular env metadata codes', () => {
+  const result = prismaMigrationRead(release, manifest.migrations, {
+    home: '/home/reader',
+    run: () => ({ status: 0, stdout: 'PRISMA_LEDGER=' + JSON.stringify({ status: 'UNKNOWN', reason: 'ENV_PARENT_MISSING' }) }),
+  })
+  assert.deepEqual(result, { status: 'UNKNOWN', reason: 'ENV_PARENT_MISSING', backend: 'EXISTING_PRISMA_CLIENT' })
+  const unlisted = prismaMigrationRead(release, manifest.migrations, {
+    home: '/home/reader',
+    run: () => ({ status: 0, stdout: 'PRISMA_LEDGER=' + JSON.stringify({ status: 'UNKNOWN', reason: 'ENV_secret_path' }) }),
+  })
+  assert.equal(unlisted.reason, 'PRISMA_CHILD_OUTPUT_INVALID')
+})
 test('SSH mock receives exact source through stdin; no remote redirects', () => {
   const args = path.join(temp, 'ssh-args.txt'), stream = path.join(temp, 'ssh-stdin.mjs')
   const result = bashRun(shellMocks + sshStep.run, { SIM_ARGS: args, SIM_STREAM: stream })
@@ -170,10 +326,23 @@ test('SSH mock receives exact source through stdin; no remote redirects', () => 
   assert.ok(lines.includes('StrictHostKeyChecking=yes'))
   const remote = lines.at(-1)
   assert.match(remote, /exec \/usr\/bin\/env -i PATH=\/usr\/bin:\/bin HOME="\$HOME" LANG=C/)
-  assert.match(remote, /--input-type=module - '[A-Za-z0-9+/=]+'$/)
+  assert.match(remote, /--input-type=module - '[A-Za-z0-9+/=]+' 'full'$/)
   assert.doesNotMatch(remote, /[<>]|\b(?:mkdir|rm|tee|touch|scp|flock|pm2)\b/)
   assert.match(remote, /node_meta.*stat -c/)
   assert.match(remote, /0:555\|0:755/)
+})
+test('metadata-only mode is passed as a closed value over the existing SSH stream', () => {
+  const args = path.join(temp, 'ssh-metadata-args.txt'), stream = path.join(temp, 'ssh-metadata-stdin.mjs')
+  const result = bashRun(shellMocks + sshStep.run, { DIAGNOSTIC_MODE: 'env_metadata_only', SIM_ARGS: args, SIM_STREAM: stream })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(fs.readFileSync(stream, 'utf8'), source)
+  const remote = fs.readFileSync(args, 'utf8').trim().split(/\r?\n/).at(-1)
+  assert.match(remote, /--input-type=module - '[A-Za-z0-9+/=]+' 'env_metadata_only'$/)
+  assert.doesNotMatch(remote, /[<>]|\b(?:mkdir|rm|tee|touch|scp|flock|pm2|prisma|migrate)\b/)
+})
+test('unknown diagnostic mode stops before SSH', () => {
+  const result = bashRun('ssh() { exit 99; }; timeout() { exit 99; };\n' + sshStep.run, { DIAGNOSTIC_MODE: 'custom-command' })
+  assert.equal(result.status, 1)
 })
 test('invalid streaming payload stops before SSH mock', () => {
   const result = bashRun('ssh() { exit 99; }\ntimeout() { exit 99; }\n' + sshStep.run, { PREFLIGHT_PAYLOAD: "' ; bad" })

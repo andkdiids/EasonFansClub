@@ -39,3 +39,10 @@ export function replyTooLongPayload(metrics: ReplyLengthMetrics, label = '回复
 export function replyTooLongMessage(metrics: ReplyLengthMetrics, label = '回复') {
   return replyTooLongPayload(metrics, label).message
 }
+
+/** Same text normalization/grapheme count and media exceptions on both sides. */
+export function replyMinimumContentError(value: unknown, imageCount: number, hasSticker: boolean, label = '回复内容') {
+  return getReplyLengthMetrics(value).actualLength < 2 && imageCount === 0 && !hasSticker
+    ? `${label}至少需要 2 个字符`
+    : null
+}

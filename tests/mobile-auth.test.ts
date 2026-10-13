@@ -227,6 +227,7 @@ test('Phase 4 routes use the shared request resolver and never trust body identi
     'app/api/uploads/content-image/route.ts',
     'app/api/search/route.ts',
     'app/api/users/me/route.ts',
+    'app/api/users/me/e-center-preferences/route.ts',
     'app/api/users/[userId]/public-modules/route.ts',
     'app/api/users/[userId]/badges/route.ts',
     'app/api/users/[userId]/post-groups/route.ts',
@@ -260,7 +261,7 @@ test('Phase 4 Bearer middleware matrix covers every native method family', () =>
   }
 
   const get = block('GET')
-  for (const path of ['/api/posts/draft', '/api/boards', '/api/search', '/api/users/me', '/api/friends/list', '/api/friend-groups']) {
+  for (const path of ['/api/posts/draft', '/api/boards', '/api/search', '/api/users/me', '/api/users/me/e-center-preferences', '/api/friends/list', '/api/friend-groups']) {
     assert.match(get, new RegExp(path.replaceAll('/', '\\/')))
   }
   for (const pattern of ['public-modules', 'badges', 'post-groups', 'friends/requests/received', 'friends/requests/sent']) {
@@ -278,13 +279,16 @@ test('Phase 4 Bearer middleware matrix covers every native method family', () =>
   const updateEnd = middleware.indexOf("\n  if (request.method === 'DELETE')", updateStart + 1)
   const update = middleware.slice(updateStart, updateEnd === -1 ? middleware.length : updateEnd)
   assert.match(update, /request\.method === 'PATCH'/)
-  for (const path of ['/api/posts/draft', '/api/users/me', 'friends', 'friend-groups']) {
+  for (const path of ['/api/posts/draft', '/api/users/me', '/api/users/me/e-center-preferences', 'friends', 'friend-groups']) {
     assert.match(update, new RegExp(path.replaceAll('/', '\\/')))
   }
   const remove = block('DELETE')
   for (const path of ['/api/posts/draft', 'friends', 'friend-groups']) {
     assert.match(remove, new RegExp(path.replaceAll('/', '\\/')))
   }
+  const postLikeRule = String.raw`/^\/api\/posts\/[^/]+\/like$/.test(pathname)`
+  assert.ok(post.includes(postLikeRule))
+  assert.ok(remove.includes(postLikeRule))
 })
 
 test('Bearer identity wins over Cookie identity and invalid Bearer never falls back', () => {

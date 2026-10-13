@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { startOfLocalDay } from '@/lib/checkin'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin, sanitizeText } from '@/lib/security'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export async function GET() {
@@ -48,7 +48,6 @@ export async function POST(request: Request) {
   const today = startOfLocalDay()
   const ipLocation = await resolveIpLocation(request)
   const ipRegion = ipLocation?.label || null
-  void updateUserIpRegion(guard.user.id, ipLocation)
 
   try {
     const created = await prisma.dailyMessage.create({
