@@ -11,6 +11,7 @@ import { ActivityRegistrationFormDesigner, type ActivityQuestionDraft } from '@/
 import { ActivityRegistrationManager } from '@/components/activities/ActivityRegistrationManager'
 import { TopicActivityFormDesigner } from '@/components/activities/TopicActivityFormDesigner'
 import { TopicActivityV2Editor } from '@/components/activities/TopicActivityV2Editor'
+import { TopicActivityWizard } from '@/components/activities/TopicActivityWizard'
 import { TopicActivityFormSubmissionManager } from './TopicActivityFormSubmissionManager'
 import { TOPIC_ACTIVITY_FORM_VERSION, type TopicActivityFormSchema } from '@/lib/topic-activity-form'
 import { ActivityTargetedNotificationPanel } from './ActivityTargetedNotificationPanel'
@@ -172,6 +173,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const [activities, setActivities] = useState(initialActivities)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [createFormOpen, setCreateFormOpen] = useState(false)
+  const [topicWizardOpen, setTopicWizardOpen] = useState(false)
   const [form, setForm] = useState<ActivityForm>(emptyForm)
   const [registrationQuestions, setRegistrationQuestions] = useState<ActivityQuestionDraft[]>([])
   const [rewardBadgeId, setRewardBadgeId] = useState('')
@@ -323,6 +325,15 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       setLoadingActivityConfig(false)
     }
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  async function openWizardEditor(activityId: string) {
+    const response = await fetch(`/api/admin/activities/${encodeURIComponent(activityId)}`, { credentials: 'same-origin', cache: 'no-store' })
+    const detail = await response.json().catch(() => null)
+    if (!response.ok || detail?.activity?.id !== activityId || detail.activity.type !== 'TOPIC_ACTIVITY' || detail.activity.status !== 'PUBLISHED') throw new Error('活动编辑入口核验失败')
+    const activity = detail.activity as ActivityView
+    setActivities((current) => current.some((item) => item.id === activityId) ? current.map((item) => item.id === activityId ? activity : item) : [activity, ...current])
+    await edit(activity)
+    setTopicWizardOpen(false)
   }
 
   function toggleCreateForm() {
@@ -530,10 +541,15 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           <p className="text-xs font-black tracking-[0.18em] text-sky-700 dark:text-sky-300">活动管理操作</p>
           <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">先查看活动列表，需要时再打开创建或编辑表单。</p>
         </div>
-        <button type="button" onClick={toggleCreateForm} disabled={saving || Boolean(editingId)} aria-expanded={createFormOpen || Boolean(editingId)} aria-controls="activity-admin-form" className="min-h-11 rounded-full bg-brand-700 px-5 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
+        <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => setTopicWizardOpen(true)} disabled={saving || Boolean(editingId) || createFormOpen} aria-expanded={topicWizardOpen} aria-controls="topic-activity-wizard" className="min-h-11 rounded-sm border border-brand-700 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">创建话题活动</button>
+        <button type="button" onClick={toggleCreateForm} disabled={saving || Boolean(editingId) || topicWizardOpen} aria-expanded={createFormOpen || Boolean(editingId)} aria-controls="activity-admin-form" className="min-h-11 rounded-full bg-brand-700 px-5 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
           {editingId ? '编辑中' : createFormOpen ? '收起创建' : '创建活动'}
         </button>
+        </div>
       </div>
+
+      <div id="topic-activity-wizard"><TopicActivityWizard open={topicWizardOpen} onClose={() => setTopicWizardOpen(false)} badgeOptions={badgeOptions} onOpenEditor={openWizardEditor} /></div>
 
       {createFormOpen || editingId ? <form ref={activityFormRef} id="activity-admin-form" noValidate onSubmit={(event) => void save(editingActivity?.status || 'DRAFT', event)} className="scroll-mt-24 rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3">
