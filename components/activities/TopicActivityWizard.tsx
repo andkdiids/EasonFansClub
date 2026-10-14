@@ -27,7 +27,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 // Object URLs stay on the device and are revoked on replacement/unmount.
-function LocalImage({ label, file, onChange }: { label: string; file?: File; onChange: (file?: File) => void }) {
+function LocalImage({ label, file, onChange, clearLabel }: { label: string; file?: File; onChange: (file?: File) => void; clearLabel?: string }) {
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
   const input = useRef<HTMLInputElement>(null)
@@ -47,7 +47,7 @@ function LocalImage({ label, file, onChange }: { label: string; file?: File; onC
       setError(''); onChange(selected)
     }} /></Field>
     {file && url ? <img src={url} alt={`${label}本地预览`} className="h-28 max-w-full rounded-sm object-contain" /> : null}
-    {file ? <div className="flex items-center gap-2 text-xs"><span className="min-w-0 break-all">{file.name}</span><button type="button" className={buttonClass} onClick={() => { onChange(); setError(''); if (input.current) input.current.value = '' }}>移除{label}</button></div> : null}
+    {file ? <div className="flex items-center gap-2 text-xs"><span className="min-w-0 break-all">{file.name}</span><button type="button" className={buttonClass} onClick={() => { onChange(); setError(''); if (input.current) input.current.value = '' }}>{clearLabel ?? `移除${label}`}</button></div> : null}
     {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
     <p className="text-xs text-[var(--foreground-muted)]">仅本地预览，不上传图片。</p>
   </div>
@@ -249,7 +249,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     <ConfirmDialog open={publishConfirmation} title={publishLocked ? '核验发布状态？' : '确认发布话题活动？'}
       description={publishLocked ? '原发布请求已发送，本次仅 GET 核验，不重复 PATCH。' : '将重新核验活动、V2、抽奖资格来源、奖池及实物收件加密配置，然后发布本向导活动。不会调用开奖、中奖或发货接口。'}
       confirmLabel={publishLocked ? '确认核验发布' : '确认发布活动'} loading={saveBusy} onCancel={() => { if (!saveBusy) setPublishConfirmation(false) }} onConfirm={() => void publish()} />
-    <ConfirmDialog open={restoreConfirm} title="恢复本地快照？" description="将替换当前页面输入。快照不保存图片文件，未上传图片需重新选择。不会写入服务器。"
+    <ConfirmDialog open={restoreConfirm} title="恢复本地快照？" description="将替换当前页面输入。快照不会保存本地预览图片；恢复后可重新选择，也可不设置封面。不会写入服务器。"
       confirmLabel="确认恢复快照" onCancel={() => setRestoreConfirm(false)} onConfirm={restoreLocalSnapshot} />
     <ConfirmDialog open={closeConfirm} title="收起向导？" description="输入会暂留在当前页面，重新打开可继续；刷新或离开页面后会丢失。"
       confirmLabel="收起并保留本地输入" onCancel={() => setCloseConfirm(false)} onConfirm={() => { setCloseConfirm(false); onClose() }} />
@@ -266,8 +266,16 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
 
     {step === 0 ? <div className="space-y-4">
       <Field label="活动名称"><input className={inputClass} autoComplete="off" maxLength={160} value={draft.activity.title} onChange={(event) => activity({ title: event.target.value })} placeholder="例如：天使的礼物" /></Field>
-      <LocalImage label="活动封面" file={media.cover.file || undefined} onChange={(file) => updateMedia((current) => ({ ...current, cover: selectWizardImage(file) }))} />
-      {media.cover.status === 'NEEDS_RESELECT' ? <p className="text-sm">封面文件未保存在快照中，请重新选择。</p> : null}
+      <LocalImage label="活动封面" clearLabel="取消选择" file={media.cover.file || undefined} onChange={(file) => updateMedia((current) => ({ ...current, cover: selectWizardImage(file) }))} />
+      <p role="note" className="text-xs text-[var(--foreground-muted)]">{media.cover.status === 'UPLOADED'
+        ? '活动封面已上传。'
+        : media.cover.file
+          ? '已选择本地图片（仅预览，尚未上传）。'
+          : media.cover.status === 'NEEDS_RESELECT'
+            ? '快照中的本地封面需重新选择；此项可留空。'
+            : media.cover.status === 'UPLOADING'
+              ? '活动封面正在上传。'
+              : '未选择封面（可选）。'}</p>
       <Field label="活动介绍"><textarea className={inputClass} rows={4} maxLength={20000} value={draft.activity.description} onChange={(event) => activity({ description: event.target.value })} /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="活动开始（北京时间）"><input className={inputClass} type="datetime-local" value={draft.activity.startsAt || ''} onChange={(event) => activity({ startsAt: event.target.value || null })} /></Field>

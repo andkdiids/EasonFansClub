@@ -5,7 +5,7 @@ import { createDefaultTopicActivityV2Program } from '../lib/topic-activity-v2-co
 import { defaultTopicLotteryConfig } from '../lib/topic-activity-v2-lottery-config'
 import { createTopicWizardDraft, toggleTopicWizardPlatform } from '../components/activities/TopicActivityWizardState'
 import { createWizardId } from '../components/activities/TopicActivityWizardIds'
-import { createWizardMedia } from '../components/activities/TopicActivityWizardMedia'
+import { createWizardMedia, selectWizardImage } from '../components/activities/TopicActivityWizardMedia'
 import { createWizardSnapshot, WizardSaveSessionController } from '../components/activities/TopicActivityWizardSession'
 import { prepareWizardActivityPayload, prepareWizardProgramPayload, prepareWizardLotteryPayload } from '../components/activities/TopicActivityWizardPayload'
 import { saveWizardActivityDraft } from '../components/activities/TopicActivityWizardActivitySave'
@@ -15,8 +15,9 @@ import { publishWizardActivity } from '../components/activities/TopicActivityWiz
 
 const id = 'wizard-publish-activity'
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
-async function fixture(lottery = false, saveLottery = true) {
+async function fixture(lottery = false, saveLottery = true, localCover = false) {
   const draft = toggleTopicWizardPlatform(createTopicWizardDraft(), 'weibo'), media = createWizardMedia()
+  if (localCover) media.cover = selectWizardImage(new File(['local-only'], 'cover.png', { type: 'image/png' }))
   Object.assign(draft.activity, { title: '发布测试', description: '活动介绍', participationRule: '提交截图并审核', startsAt: '2030-10-01T09:00', endsAt: '2030-10-10T18:00' })
   if (lottery) Object.assign(draft.lottery, { enabled: true, drawAt: '2030-10-11T18:00', addressDeadline: '2030-10-18T18:00', prizes: [{ id: createWizardId('prize'), name: '礼物', description: '', imageUrl: null, quantity: 3, sortOrder: 0 }] })
   const snapshot = createWizardSnapshot(draft, media, 3), controller = new WizardSaveSessionController(snapshot.draftId, 'API')
@@ -63,6 +64,14 @@ for (const lottery of [false, true]) test(`publish succeeds with lottery ${lotte
   assert.equal(await saveWizardProgram(value.controller, value.snapshot, { transport: transportFor(value, calls) }), 'BLOCKED')
   assert.equal(await saveWizardLottery(value.controller, value.snapshot, { transport: transportFor(value, calls) }), 'BLOCKED')
   assert.equal(calls.filter((call) => call.startsWith('PATCH')).length, 1)
+})
+test('local cover preview does not block publish validation and is excluded from server payload', async () => {
+  const value = await fixture(false, true, true), calls: string[] = []
+  assert.equal(value.media.cover.status, 'SELECTED')
+  assert.equal(value.activity.coverUrl, null)
+  assert.equal(await publishWizardActivity(value.controller, value.snapshot, { transport: transportFor(value, calls) }), 'CONFIRMED')
+  assert.ok(calls.every((call) => !/cover\.png|blob:|upload/.test(call)))
+  assert.equal(value.controller.getState().stages.PUBLISH, 'SUCCEEDED')
 })
 test('lottery on without saved/confirmed config blocks before any request', async () => {
   const value = await fixture(true, false)

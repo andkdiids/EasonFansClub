@@ -137,12 +137,28 @@ test('activity adapter white-lists current contract and excludes future V2/lotte
     return json({ activity: { ...payload, id } }, init.method === 'POST' ? 201 : 200)
   } })
 })
-test('pending cover blocks before any POST; prize-only images remain local', async () => {
+test('draft creation succeeds with no cover selected', async () => {
+  const { snapshot, controller } = fixture(), calls: string[] = []
+  assert.equal(prepareWizardActivityPayload(snapshot).coverUrl, null)
+  assert.equal(await saveWizardActivityDraft(controller, snapshot, { transport: successTransport(snapshot, calls) }), 'CONFIRMED')
+  assert.deepEqual(calls, ['POST /api/admin/activities', `GET /api/admin/activities/${id}`])
+})
+test('draft creation succeeds with a local cover preview and excludes its file from payload', async () => {
   const { draft, controller } = fixture(), media = createWizardMedia()
   media.cover = selectWizardImage(new File(['fixture'], 'cover.png', { type: 'image/png' }))
-  let calls = 0
-  await assert.rejects(saveWizardActivityDraft(controller, createWizardSnapshot(draft, media, 3), { transport: async () => { calls++; return json({}) } }), /封面尚未上传/)
-  assert.equal(calls, 0); assert.equal(controller.getState().requestLock, null)
+  const snapshot = createWizardSnapshot(draft, media, 3), calls: string[] = []
+  const posted: { payload?: Record<string, unknown> } = {}
+  assert.equal(prepareWizardActivityPayload(snapshot).coverUrl, null)
+  assert.equal(await saveWizardActivityDraft(controller, snapshot, { transport: async (path, init) => {
+    calls.push(`${init.method} ${path}`)
+    if (init.method === 'POST') posted.payload = JSON.parse(init.body as string)
+    return json({ activity: { ...prepareWizardActivityPayload(snapshot), id } }, init.method === 'POST' ? 201 : 200)
+  } }), 'CONFIRMED')
+  assert.deepEqual(calls, ['POST /api/admin/activities', `GET /api/admin/activities/${id}`])
+  assert.equal(posted.payload?.coverUrl, null)
+  assert.doesNotMatch(JSON.stringify(posted.payload), /cover\.png|blob:|data:image|selectionId|fileInfo/)
+  assert.equal(controller.getState().stages.ACTIVITY, 'SUCCEEDED')
+  // Prize image behavior is unchanged: those files are still local-only and are not part of this phase.
   media.cover = createWizardMedia().cover; media.prizes.local = selectWizardImage(new File(['fixture'], 'prize.png', { type: 'image/png' }))
   assert.equal(prepareWizardActivityPayload(createWizardSnapshot(draft, media, 3)).status, 'DRAFT')
 })

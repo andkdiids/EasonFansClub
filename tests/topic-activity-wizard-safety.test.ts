@@ -190,12 +190,14 @@ test('adapter payloads satisfy unchanged Activity/V2/Lottery validators and expl
   assert.equal('identity' in payloads.activity, false)
   assert.equal('requestLock' in payloads.program, false)
 })
-test('adapter cannot submit selected files and never leaks File or blob values', () => {
+test('local cover stays preview-only, remains optional and never leaks File or blob values', () => {
   const draft = validDraft(), media = createWizardMedia()
   media.cover = selectWizardImage(file())
   const prepared = prepareWizardPayloads(createWizardSnapshot(draft, media, 3))
-  assert.equal(prepared.kind, 'BLOCKED')
-  assert.throws(() => requireReadyWizardPayloads(prepared))
+  assert.equal(prepared.kind, 'READY')
+  if (prepared.kind !== 'READY') return
+  assert.equal(prepared.payloads.activity.coverUrl, null)
+  assert.doesNotMatch(JSON.stringify(prepared.payloads), /selectionId|fileInfo|uploadRequestId|blob:|data:/)
   assert.doesNotMatch(JSON.stringify(prepared), /selectionId|fileInfo|uploadRequestId|blob:/)
 })
 test('adapter maps existing uploader media URL to each target image contract', () => {
