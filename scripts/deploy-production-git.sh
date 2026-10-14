@@ -566,7 +566,7 @@ pm2_is_current_release() {
 }
 
 reload_pm2() {
-  local app_name="$1" release_sha="$2" exists_status attempt
+  local app_name="$1" release_sha="$2" exists_status attempt pm2_action pm2_config pm2_exit
   [ "${app_name}" = "${PM2_APP_NAME}" ] || {
     echo "Refusing to reload ${app_name}; only the web process is eligible for automatic deployment." >&2
     return 78
@@ -580,7 +580,7 @@ reload_pm2() {
   test -s .env
   if pm2_app_exists "${app_name}"; then
     echo "Reloading only PM2 app ${app_name} from the selected release configuration."
-    deploy_run_pm2_reload "${app_name}" 2m pm2 reload ecosystem.config.js --only "${app_name}" --update-env || return $?
+    pm2_action=reload
   else
     exists_status=$?
     if [ "${exists_status}" -ne 1 ] || [ "${app_name}" != "${PM2_APP_NAME}" ]; then
@@ -588,8 +588,41 @@ reload_pm2() {
       return 1
     fi
     echo "Starting missing PM2 app ${app_name} from ecosystem.config.js."
-    deploy_run_pm2_reload "${app_name}" 2m pm2 start ecosystem.config.js --only "${app_name}" --update-env || return $?
+    pm2_action=start
   fi
+  # Make the release identity explicit in the selected app's ecosystem env.
+  # Do not rely on PM2 merging shell exports into an existing ecosystem app.
+  pm2_config="$(mktemp "${current_link}/.pm2-release-env.XXXXXX.json")" || return 1
+  if ! node - "${app_name}" "${release_sha}" "${APP_PORT}" "${pm2_config}" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+try {
+  const [appName, releaseSha, port, output] = process.argv.slice(2);
+  if (!/^[0-9a-f]{40}$/.test(releaseSha) || !/^[0-9]+$/.test(port)) throw new Error();
+  const config = require(path.resolve('ecosystem.config.js'));
+  const matches = Array.isArray(config.apps) ? config.apps.filter(app => app.name === appName) : [];
+  if (matches.length !== 1) throw new Error();
+  const app = matches[0];
+  fs.writeFileSync(output, JSON.stringify({ apps: [{
+    ...app,
+    env: { ...app.env, NODE_ENV: 'production', PORT: port, DEPLOY_SHA: releaseSha },
+  }] }), { mode: 0o600 });
+} catch {
+  process.stderr.write('Unable to prepare selected PM2 app environment.\n');
+  process.exitCode = 1;
+}
+NODE
+  then
+    rm -f -- "${pm2_config}"
+    return 1
+  fi
+  if deploy_run_pm2_reload "${app_name}" 2m pm2 "${pm2_action}" "${pm2_config}" --only "${app_name}" --update-env; then
+    pm2_exit=0
+  else
+    pm2_exit=$?
+  fi
+  rm -f -- "${pm2_config}" || return 1
+  [ "${pm2_exit}" -eq 0 ] || return "${pm2_exit}"
   for attempt in $(seq 1 30); do
     if read_pm2_snapshot "${app_name}" && pm2_is_current_release "${app_name}" "${release_sha}"; then return 0; fi
     sleep 1
