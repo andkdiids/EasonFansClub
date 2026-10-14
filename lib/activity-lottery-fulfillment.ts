@@ -77,8 +77,9 @@ async function fulfillInTransaction(
   // badge/ledger write.
   const initial = await tx.lotteryEntry.findUnique({ where: { id: winnerId }, select: { lotteryId: true } })
   if (!initial) throw new ActivityLotteryFulfillmentError('WINNER_NOT_FOUND', '中奖记录不存在', 404)
-  const linkedLottery = await tx.lottery.findUnique({ where: { id: initial.lotteryId }, select: { activityId: true } })
+  const linkedLottery = await tx.lottery.findUnique({ where: { id: initial.lotteryId }, select: { activityId: true, TopicLottery: { select: { id: true } } } })
   if (!linkedLottery) throw new ActivityLotteryFulfillmentError('WINNER_NOT_FOUND', '中奖记录所属抽奖不存在', 404)
+  if (linkedLottery.TopicLottery) throw new ActivityLotteryFulfillmentError('FULFILLMENT_BLOCKED', '平台任务实物中奖须使用独立收件及发货流程', 409)
   if (linkedLottery.activityId) {
     const activityLocked = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${linkedLottery.activityId} FOR UPDATE`
     if (!activityLocked.length) throw new ActivityLotteryFulfillmentError('WINNER_NOT_FOUND', '中奖记录所属活动不存在', 404)

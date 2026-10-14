@@ -2,6 +2,7 @@ import { GUESS_SONG_RISK_THRESHOLD } from '@/lib/guess-song-constants'
 import { calculateCheckinStreaks } from '@/lib/checkin'
 import { accountAgeDays, VALID_POST_WHERE } from '@/lib/badge-metrics'
 import { BADGE_RULE_REGISTRY, type SupportedBadgeRuleType } from '@/lib/badge-rules'
+import { normalizeCheckinOnDateRuleConfig } from '@/lib/checkin-specific-date'
 import { prisma } from '@/lib/prisma'
 
 export type HistoricalQualificationWindow = {
@@ -85,6 +86,16 @@ export async function getBatchHistoricalBadgeMetrics(
       users.forEach((user) => metrics.set(user.id, calculateCheckinStreaks(dates.get(user.id) || [], window.until).longestStreak))
       return metrics
     }
+    case 'CHECKIN_ON_DATE': {
+      const config = normalizeCheckinOnDateRuleConfig(configJson)
+      if (!config) return metrics
+      const rows = await prisma.checkIn.findMany({
+        where: { userId: { in: userIds }, checkDate: createdAt, type: 'NORMAL', isMakeUp: false, checkinDateKey: { in: config.dates } },
+        select: { userId: true },
+      })
+      rows.forEach((row) => metrics.set(row.userId, 1))
+      return metrics
+    }
     case 'ACCOUNT_AGE_DAYS':
       users.forEach((user) => metrics.set(user.id, accountAgeDays(user.createdAt, window.until)))
       return metrics
@@ -121,6 +132,16 @@ export async function getBatchHistoricalBadgeMetrics(
     case 'RATING_COUNT': {
       const rows = await prisma.rating.groupBy({ by: ['userId'], where: { userId: { in: userIds }, createdAt }, _count: { _all: true } })
       rows.forEach((row) => metrics.set(row.userId, row._count._all))
+      return metrics
+    }
+    case 'TOPIC_ACTIVITY_PARTICIPATION_COUNT': {
+      const rows = await prisma.topicActivitySubmission.groupBy({
+        by: ['userId', 'activityId'],
+        where: { userId: { in: userIds }, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } }, Activity: { type: 'TOPIC_ACTIVITY', status: { not: 'CANCELLED' } } },
+        _min: { reviewedAt: true },
+        having: { reviewedAt: { _min: createdAt } },
+      })
+      rows.forEach((row) => metrics.set(row.userId, (metrics.get(row.userId) || 0) + 1))
       return metrics
     }
     case 'FEATURED_POST_COUNT':

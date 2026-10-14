@@ -64,14 +64,18 @@ test('发放时间编辑、启动补偿和签到后触发都走全局扫描', ()
   assert.match(activityAdmin, /badgeGrantAt/)
 })
 
-test('公开活动 DTO 不包含勋章奖励配置，管理端单独读取奖励时间', () => {
+test('公开活动 DTO 只暴露话题勋章奖励数量，原始勋章 ID 只进入管理端 DTO', () => {
   const data = read('lib/activity-data.ts')
+  const serializer = read('lib/activity.ts')
   const publicRoute = read('app/api/activities/[activityId]/route.ts')
   const detail = read('app/activities/[activityId]/page.tsx')
   const adminRoute = read('app/api/admin/activities/[activityId]/route.ts')
-  assert.doesNotMatch(data, /ActivityReward|badgeGrantAt|rewardBadgeId/)
-  assert.doesNotMatch(publicRoute, /ActivityReward|badgeGrantAt|rewardBadgeId/)
-  assert.doesNotMatch(detail, /ActivityReward|badgeGrantAt|rewardBadgeId/)
+  assert.match(data, /serializeActivity\([\s\S]*includeRewardBadgeIds/)
+  assert.match(serializer, /rewardBadgeCount: rewardBadgeIds\.length/)
+  assert.match(serializer, /includeRewardBadgeIds \? \{ rewardBadgeIds \}/)
+  assert.doesNotMatch(publicRoute, /includeRewardBadgeIds|rewardBadgeIds/)
+  assert.doesNotMatch(detail, /includeRewardBadgeIds|rewardBadgeIds/)
+  assert.match(read('app/api/admin/activities/route.ts'), /serializeActivityRow\(row, new Date\(\), true\)/)
   assert.match(adminRoute, /badgeGrantAt/)
 })
 

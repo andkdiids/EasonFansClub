@@ -8,7 +8,6 @@ import { prisma } from '@/lib/prisma'
 import { ensureSecurityQuestionNotification } from '@/lib/account-security'
 import { ensureBirthdayBadge, sendBirthdayGreeting } from '@/lib/birthday'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { updateUserIpRegion } from '@/lib/ip-region'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationUserName } from '@/lib/content-moderation'
 import { getClientIp, rateLimitResponse } from '@/lib/security'
@@ -85,8 +84,6 @@ export async function POST(request: Request) {
     }
 
     const { user, passwordResult } = authentication
-
-    void updateUserIpRegion(user.id, request)
 
     const sessionUser = {
       id: user.id,

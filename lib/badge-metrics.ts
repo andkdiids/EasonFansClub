@@ -38,6 +38,10 @@ const BADGE_RULE_METRIC_LOADERS: Partial<Record<SupportedBadgeRuleType, BadgeMet
     const rows = await prisma.checkIn.findMany({ where: { userId }, select: { checkinDateKey: true } })
     return calculateCheckinStreaks(rows.map((row) => row.checkinDateKey)).currentStreak
   },
+  // Specific-date check-ins require rule configJson and are evaluated by the
+  // event-aware/batch resolvers. Keep a guarded inert loader so generic metric
+  // consumers never turn a missing config into a runtime error.
+  CHECKIN_ON_DATE: async () => 0,
   ACCOUNT_AGE_DAYS: async (userId) => {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { createdAt: true } })
     return user ? accountAgeDays(user.createdAt) : 0
@@ -91,6 +95,10 @@ const BADGE_RULE_METRIC_LOADERS: Partial<Record<SupportedBadgeRuleType, BadgeMet
   // service because its metric depends on a configured activityId and the
   // check-in source/time window, not on a scalar user counter.
   ACTIVITY_PARTICIPATION: async () => 0,
+  TOPIC_ACTIVITY_PARTICIPATION_COUNT: async (userId) => (await prisma.topicActivitySubmission.groupBy({
+    by: ['activityId'],
+    where: { userId, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } }, Activity: { type: 'TOPIC_ACTIVITY', status: { not: 'CANCELLED' } } },
+  })).length,
   // Ownership rules use a config-aware, active UserBadge query rather than a
   // scalar metric. The rule engine calls that evaluator directly.
   BADGE_OWNERSHIP: async () => 0,

@@ -10,7 +10,7 @@ import { normalizeLoginAccount, validateLoginAccountValue, validateNicknameValue
 import { getUsernameChangeAvailability } from '@/lib/username-change'
 import { DEFAULT_PHONE_COUNTRY, getPhoneLookupVariants, isSupportedPhoneCountry, normalizePhoneNumber } from '@/lib/phone-number'
 import { locationFromProfile, normalizeUserLocationInput } from '@/lib/user-location'
-import { updateUserIpRegion } from '@/lib/ip-region'
+import { publicProfileIpRegion } from '@/lib/ip-region'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, USERNAME_BANNED_WORD_MESSAGE, USERNAME_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { computeNicknameCooldownDays, generateUniqueViolationNickname } from '@/lib/nickname-violation'
 import { getNicknameChangeAvailability, serializeNicknameChange } from '@/lib/nickname-change'
@@ -135,7 +135,7 @@ function birthdayMutationErrorResponse(error: unknown) {
   return null
 }
 
-async function updateUsername(userId: string, rawUsername: unknown, request: Request) {
+async function updateUsername(userId: string, rawUsername: unknown) {
   const validation = validateLoginAccountValue(rawUsername)
   if (validation.error) {
     return NextResponse.json({ message: validation.error, code: 'USERNAME_INVALID' }, { status: 400 })
@@ -186,7 +186,6 @@ async function updateUsername(userId: string, rawUsername: unknown, request: Req
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
     invalidateCurrentUserCache(userId)
-    void updateUserIpRegion(userId, request)
     return NextResponse.json(result)
   } catch (error) {
     if (error instanceof UsernameChangeError) return usernameChangeErrorResponse(error)
@@ -234,6 +233,7 @@ export async function GET(request: Request) {
       avatarUrl: true,
       backgroundUrl: true,
       bio: true,
+      ipRegion: true,
       gender: true,
       customGender: true,
       emailVerifiedAt: true,
@@ -316,6 +316,7 @@ export async function GET(request: Request) {
       avatarUrl: publicImageUrl(profile.avatarUrl),
       backgroundUrl: publicImageUrl(profile.backgroundUrl),
       bio: profile.bio,
+      ipRegion: publicProfileIpRegion(profile.ipRegion),
       gender: profile.gender,
       customGender: profile.customGender,
       birthMonth: profile.birthMonth,
@@ -388,7 +389,7 @@ export async function PATCH(request: Request) {
 
   const body = await request.json().catch(() => null)
   if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'newUsername')) {
-    return updateUsername(guard.user.id, body.newUsername, request)
+    return updateUsername(guard.user.id, body.newUsername)
   }
 
   const hasBodyField = (field: string) => Boolean(
@@ -1014,7 +1015,6 @@ export async function PATCH(request: Request) {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
   invalidateCurrentUserCache(guard.user.id)
-  void updateUserIpRegion(guard.user.id, request)
   if (genderUpdate) {
     await refreshProfileCompletion(guard.user.id, now).catch((error) => {
       console.error('[users.me.profile-completion]', { userId: guard.user.id, error })

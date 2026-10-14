@@ -12,11 +12,12 @@ export type DeleteCommentResult = {
 type DeleteCommentButtonProps = Readonly<{
   endpoint: string
   label?: string
+  confirmDescription?: string
   onDeleted?: (result: DeleteCommentResult) => void
   variant?: 'pill' | 'text'
 }>
 
-export function DeleteCommentButton({ endpoint, label = '删除', onDeleted, variant = 'pill' }: DeleteCommentButtonProps) {
+export function DeleteCommentButton({ endpoint, label = '删除', confirmDescription, onDeleted, variant = 'pill' }: DeleteCommentButtonProps) {
   const router = useRouter()
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -65,7 +66,7 @@ export function DeleteCommentButton({ endpoint, label = '删除', onDeleted, var
         <span className="fixed inset-0 z-50 grid place-items-center bg-slate-950/25 px-4 backdrop-blur-sm">
           <span className="block w-full max-w-sm rounded-[24px] border border-sky-100 bg-white p-6 text-left shadow-2xl shadow-sky-900/15">
             <strong className="block text-xl font-black text-brand-950">确认删除评论</strong>
-            <span className="mt-3 block text-sm font-bold leading-7 text-slate-600">删除后将无法恢复，确定继续？</span>
+            <span className="mt-3 block text-sm font-bold leading-7 text-slate-600">{confirmDescription || '删除后将无法恢复，确定继续？'}</span>
             <span className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
@@ -97,11 +98,13 @@ export function DeleteCommentButton({ endpoint, label = '删除', onDeleted, var
 export function DeleteReplyButton({
   replyId,
   label,
+  confirmDescription,
   onDeleted,
   variant,
 }: Readonly<{
   replyId: string
   label?: string
+  confirmDescription?: string
   onDeleted?: (result: DeleteCommentResult) => void
   variant?: 'pill' | 'text'
 }>) {
@@ -109,6 +112,7 @@ export function DeleteReplyButton({
     <DeleteCommentButton
       endpoint={`/api/replies/${encodeURIComponent(replyId)}`}
       label={label}
+      confirmDescription={confirmDescription}
       onDeleted={onDeleted}
       variant={variant}
     />

@@ -5,7 +5,7 @@ import { decodePostLikeCursor, encodePostLikeCursor, POST_LIKE_PAGE_SIZE } from 
 import { getLikeAvatarPreview, mergeLikeAvatarUsers } from '@/lib/like-avatar-utils'
 
 function read(path: string) {
-  return readFileSync(path, 'utf8')
+  return readFileSync(path, 'utf8').replace(/\r\n?/g, '\n')
 }
 
 function likers(count: number) {

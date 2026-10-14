@@ -12,7 +12,7 @@ test('生产部署在切换 current 前强制执行 migration 和通知完整性
   const integrityStart = deployScript.indexOf('pnpm_run notification:integrity')
   const switchStep = deployScript.indexOf('log_step "7/8" "Atomically switch current and reload PM2"')
   const switchCall = deployScript.indexOf('atomic_switch "${release_dir}"', switchStep)
-  const reloadCall = deployScript.indexOf('if ! reload_pm2 "${DEPLOY_SHA}"', switchStep)
+  const reloadCall = deployScript.indexOf('if ! reload_release_processes "${DEPLOY_SHA}"', switchStep)
   const healthStep = deployScript.indexOf('log_step "8/8" "Verify health and retain rollback releases"')
   const deployedShaWrite = deployScript.indexOf('mv -Tf -- "${deployed_sha_tmp}" "${release_dir}/.deployed-sha"')
 
@@ -36,7 +36,7 @@ test('迁移失败时部署脚本不会在迁移前切换 current 或 reload PM2
   assert.ok(migrationLine)
   assert.doesNotMatch(deployScript.slice(0, migrationLine!.index), /atomic_switch "\$\{release_dir\}"/)
   assert.doesNotMatch(deployScript.slice(0, migrationLine!.index), /pm2 (reload|start)/)
-  assert.match(deployWorkflow, /< scripts\/deploy-production-git\.sh/)
+  assert.match(deployWorkflow, /cat scripts\/deploy-safety\.sh scripts\/deploy-production-git\.sh/)
   assert.doesNotMatch(deployWorkflow, /bootstrap_release|\.bootstrap-release/)
   assert.match(deployWorkflow, /refusing pre-migration bootstrap/)
 })

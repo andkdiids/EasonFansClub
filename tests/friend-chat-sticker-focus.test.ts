@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const read = (path: string) => readFileSync(path, 'utf8')
+// Source assertions compare logical lines, independent of Git checkout EOLs.
+const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
 const dock = read('components/FriendDock.tsx')
 const picker = read('components/StickerPicker.tsx')
 const css = read('app/globals.css')

@@ -90,7 +90,7 @@ test('后台报名管理严格鉴权，前台只返回本人报名，核销重�
   assert.match(verify, /verificationMethod: input\.method/)
 })
 
-test('限定奖励只在核销事务内复用统一勋章服务，前台不返回奖励配置', () => {
+test('普通活动限定奖励只在核销事务内授予，话题活动奖励仅在话题类型详情显示', () => {
   const service = read('lib/activity-registration.ts')
   const detail = read('components/activities/ActivityDetailView.tsx')
   const grant = read('lib/badge-service.ts')
@@ -100,7 +100,8 @@ test('限定奖励只在核销事务内复用统一勋章服务，前台不返�
   assert.match(service, /registrationId: current\.id, rewardId/)
   assert.match(grant, /activeUserBadgeWhere/)
   assert.match(service, /grantKey: `activity-registration:\$\{current\.id\}/)
-  assert.doesNotMatch(detail, /ActivityReward|限定勋章|rewardBadge/)
+  assert.match(detail, /isTopicActivity \? <section[\s\S]*: <ActivityRegistrationButton/)
+  assert.match(detail, /isTopicActivity \? <section[\s\S]*activity\.rewardBadgeCount/)
 })
 
 test('取消后永久禁止再次报名并且不回填已取消记录的旧答案', () => {

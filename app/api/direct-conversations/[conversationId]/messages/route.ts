@@ -1,11 +1,10 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { normalizeFriendPair } from '@/lib/friends'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { enforceApiRateLimit, sanitizeText, unauthenticatedResponse } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { publicModerationText } from '@/lib/content-moderation'
@@ -40,8 +39,9 @@ async function getConversation(userId: string, conversationId: string) {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse('请先登录', privateHeaders)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
+  const user = guard.user
   const rateLimited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/direct-conversations/messages',
     ip: { limit: 240, windowSeconds: 60 },
@@ -111,8 +111,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
   let idempotencyKey = ''
   let normalizedContent = ''
   try {
-    const user = await getCurrentUser()
-    if (!user) return messageFailure(401, 'UNAUTHENTICATED', '请先登录')
+    const guard = await requireRequestUser(request)
+    if (!guard.user) return guard.response
+    const user = guard.user
     senderId = user.id
     const limited = await enforceApiRateLimit(request, user.id, {
       endpoint: '/api/direct-conversations/messages',

@@ -8,7 +8,7 @@ import { parsePostReplyDirection, parsePostReplySort, getPostReplyOrderBy, getPo
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
-import { enforceApiRateLimit, requireRequestUser, resolveRequestAuth, sanitizeText } from '@/lib/security'
+import { enforceApiRateLimit, isAdminRole, requireRequestUser, resolveRequestAuth, sanitizeText } from '@/lib/security'
 import { publicModerationText } from '@/lib/content-moderation'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { appendContentImages, parseContentImageUrls } from '@/lib/content-images'
@@ -17,9 +17,15 @@ import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
 import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
-import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
+import { getReplyLengthMetrics, replyMinimumContentError, replyTooLongPayload } from '@/lib/reply-length'
 import { completeTask, resolveAndGrantWeeklyMilestonesInTransaction } from '@/lib/growth-tasks/service'
 import { getShanghaiDateKey } from '@/lib/checkin'
+import { hasAdminPermission } from '@/lib/admin-permissions'
+import { topicReviewFilter, topicReviewCountsFromGroups, topicVisibleReplyAuthor, type TopicReviewStatus } from '@/lib/topic-review-filter'
+import { createTopicSubmissionForCommentInTransaction, isTopicActivityFormRequired, resolveTopicActivityCommentEligibilityInTransaction, topicActivityCommentGateErrorCode } from '@/lib/topic-activity'
+import { hasTopicActivityAdminReplyUnlock, resolveTopicActivityCommentEligibility, resolveTopicActivityCommentPolicy } from '@/lib/topic-activity-comment-policy'
+import { topicV2SafeRewardSnapshot } from '@/lib/topic-activity-v2-view'
+import { readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 
 type Params = { params: Promise<{ postId: string }> }
 type MentionInput = { userId: string; startIndex: number; endIndex: number; displayText: string }
@@ -46,6 +52,7 @@ function parseMentions(value: unknown, content: string, currentUserId: string) {
 const replyAuthorSelect = {
   id: true,
   uid: true,
+  level: true,
   nickname: true,
   usernameModerationStatus: true,
   nicknameModerationStatus: true,
@@ -65,6 +72,7 @@ const replySelect = {
   postId: true,
   authorId: true,
   parentId: true,
+  floorNumber: true,
   likeCount: true,
   User: { select: replyAuthorSelect },
   sticker: { select: { url: true } },
@@ -80,6 +88,7 @@ function serializeReply(reply: ReplyRecord, likedIds: Set<string>) {
     createdAt: reply.createdAt,
     updatedAt: reply.updatedAt,
     parentId: reply.parentId,
+    floorNumber: reply.floorNumber,
     isPinned: reply.isPinned,
     likeCount: reply.likeCount,
     liked: likedIds.has(reply.id),
@@ -114,14 +123,28 @@ export async function GET(request: Request, { params }: Params) {
   })
   if (!post) return NextResponse.json({ message: '帖子不存在' }, { status: 404 })
 
-  const rootWhere = {
+  const topicActivity = await prisma.activity.findFirst({
+    where: { activityPostId: postId, type: 'TOPIC_ACTIVITY' },
+    select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, participationRule: true, participationMode: true, formSchema: true, allowImageAttachments: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true },
+  })
+  const canReviewTopicActivity = Boolean(topicActivity && viewer && await hasAdminPermission(viewer, 'activity_manage'))
+  const requestedTopicStatus = searchParams.get('topicStatus')
+  const topicStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN']
+  if (requestedTopicStatus && (!topicActivity || !topicStatuses.includes(requestedTopicStatus))) return NextResponse.json({ message: '话题审核筛选状态不正确' }, { status: 400 })
+
+  const rootWhere: Prisma.ReplyWhereInput = {
     postId,
     parentId: null,
     isPinned: false,
     isDeleted: false,
-    User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } },
+    ...topicVisibleReplyAuthor,
+    ...topicReviewFilter(topicActivity?.id, canReviewTopicActivity ? requestedTopicStatus as TopicReviewStatus | null : null),
   }
   const total = await prisma.reply.count({ where: rootWhere })
+  const reviewGroups = canReviewTopicActivity && topicActivity
+    ? await prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: topicActivity.id, Comment: { is: { postId, parentId: null, isDeleted: false, ...topicVisibleReplyAuthor } } }, _count: { _all: true } })
+    : null
+  const reviewCounts = reviewGroups ? topicReviewCountsFromGroups(reviewGroups, await prisma.reply.count({ where: { postId, parentId: null, isDeleted: false, ...topicVisibleReplyAuthor } })) : null
   const totalPages = getPostReplyTotalPages(total, pageSize)
   const safePage = Math.min(page, totalPages)
   const [pinned, roots] = await Promise.all([
@@ -163,10 +186,72 @@ export async function GET(request: Request, { params }: Params) {
     list.push(serializeReply(child, likedIds))
     childrenByParent.set(child.parentId || '', list)
   }
-  const serializeRoot = (reply: ReplyRecord) => ({
-    ...serializeReply(reply, likedIds),
-    replies: childrenByParent.get(reply.id) || [],
-  })
+  const topicSubmissions = topicActivity && allReplies.length
+    ? await prisma.topicActivitySubmission.findMany({
+        where: { activityId: topicActivity.id, commentId: { in: allReplies.map((reply) => reply.id) } },
+        select: { id: true, userId: true, commentId: true, status: true, rejectReason: true, rewardEntryId: true, rewardSnapshot: true,
+          TaskImageAssets: { select: { id: true, width: true, height: true, size: true } } },
+      })
+    : []
+  const topicSubmissionByComment = new Map(topicSubmissions.filter((submission) => submission.commentId).map((submission) => [submission.commentId!, submission]))
+  const tasks = topicSubmissions.filter((submission) => submission.rewardEntryId)
+  const taskGrants = topicActivity && tasks.length ? await prisma.topicActivityRewardGrant.findMany({
+    where: { activityId: topicActivity.id, status: 'GRANTED', userId: { in: [...new Set(tasks.map((item) => item.userId))] }, rewardEntryId: { in: tasks.map((item) => item.rewardEntryId!) } },
+    select: { userId: true, rewardEntryId: true },
+  }) : []
+  const grantedTaskKeys = new Set(taskGrants.map((grant) => `${grant.userId}:${grant.rewardEntryId}`))
+  const topicParticipants = topicActivity && topicSubmissions.length
+    ? await prisma.topicActivitySubmission.groupBy({ by: ['userId'], where: { activityId: topicActivity.id, userId: { in: [...new Set(topicSubmissions.map((submission) => submission.userId))] }, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { parentId: null, isDeleted: false } } }, _count: { _all: true } })
+    : []
+  const approvedCountByUser = new Map(topicParticipants.map((participant) => [participant.userId, participant._count._all]))
+  const formCounts = topicActivity && canReviewTopicActivity && topicSubmissions.length
+    ? await prisma.topicActivityFormSubmission.groupBy({ by: ['userId'], where: { activityId: topicActivity.id, userId: { in: [...new Set(topicSubmissions.map((submission) => submission.userId))] } }, _count: { _all: true } })
+    : []
+  const formCountByUser = new Map(formCounts.map((row) => [row.userId, row._count._all]))
+  const commentPolicy = topicActivity ? resolveTopicActivityCommentPolicy(topicActivity.formSchema) : null
+  const currentUserEligibility = topicActivity && viewer
+    ? await (async () => {
+        const requiresForm = isTopicActivityFormRequired(topicActivity)
+        const formSubmissions = requiresForm
+          ? await prisma.topicActivityFormSubmission.findMany({ where: { activityId: topicActivity.id, userId: viewer.id }, select: { formSchemaSnapshot: true, Replies: { select: { id: true, content: true, ImageAssets: { select: { id: true } } } } } })
+          : []
+        const hasFormSubmission = formSubmissions.length > 0
+        const hasAdminReply = formSubmissions.some((submission) => hasTopicActivityAdminReplyUnlock(submission.formSchemaSnapshot) || submission.Replies.some((reply) => Boolean(reply.content?.trim()) || reply.ImageAssets.length > 0))
+        const hasUsedSingleComment = commentPolicy?.commentLimit === 'SINGLE'
+          ? Boolean(await prisma.topicActivitySubmission.findFirst({ where: { activityId: topicActivity.id, userId: viewer.id }, select: { id: true } }))
+          : false
+        const lifecycle = topicActivity.status === 'CANCELLED'
+          ? 'CANCELLED' as const
+          : topicActivity.status !== 'PUBLISHED' || (topicActivity.startsAt && topicActivity.startsAt > new Date())
+            ? 'NOT_STARTED' as const
+          : topicActivity.endsAt && topicActivity.endsAt < new Date()
+            ? 'ENDED' as const
+            : 'ACTIVE' as const
+        return resolveTopicActivityCommentEligibility({ requiresForm, policy: commentPolicy, hasFormSubmission, hasAdminReply, hasUsedSingleComment, lifecycle })
+      })()
+    : null
+  const serializeRoot = (reply: ReplyRecord) => {
+    const serialized = serializeReply(reply, likedIds)
+    const submission = topicSubmissionByComment.get(reply.id)
+    const canViewPrivate = viewer?.id === reply.authorId || canReviewTopicActivity
+    const visibleToViewer = submission && (canViewPrivate || Boolean(submission.rewardEntryId))
+    return {
+      ...serialized,
+      ...(visibleToViewer ? { topicActivitySubmission: {
+        id: submission.id, status: submission.status, rejectReason: canViewPrivate ? submission.rejectReason : null,
+        alreadyCounted: (approvedCountByUser.get(submission.userId) || 0) > 0,
+        ...(submission.rewardEntryId ? {
+          rewardEntryId: submission.rewardEntryId, rewardSnapshotSafe: topicV2SafeRewardSnapshot(submission.rewardSnapshot), canViewPrivate,
+          granted: grantedTaskKeys.has(`${submission.userId}:${submission.rewardEntryId}`),
+          taskAssets: canViewPrivate ? submission.TaskImageAssets.map((asset) => ({ assetId: asset.id, width: asset.width, height: asset.height, size: asset.size,
+            previewAccessUrl: `/api/activities/${topicActivity!.id}/assets/${asset.id}/preview`,
+            originalDownloadUrl: `/api/activities/${topicActivity!.id}/v2/submissions/${submission.id}/assets/${asset.id}/original` })) : [],
+        } : {}),
+        ...(canReviewTopicActivity ? { formSubmissionCount: formCountByUser.get(submission.userId) || 0 } : {}),
+      } } : {}),
+      replies: childrenByParent.get(reply.id) || [],
+    }
+  }
 
   return NextResponse.json({
     replies: roots.map(serializeRoot),
@@ -178,6 +263,7 @@ export async function GET(request: Request, { params }: Params) {
     hasMore: safePage < totalPages,
     sort,
     direction,
+    topicActivity: topicActivity ? { id: topicActivity.id, title: topicActivity.title, startsAt: topicActivity.startsAt, endsAt: topicActivity.endsAt, participationRule: topicActivity.participationRule, rewardGrantMode: topicActivity.rewardGrantMode, rewardGrantAt: topicActivity.rewardGrantAt, rewardPoints: topicActivity.rewardPoints, rewardBadgeCount: Array.isArray(topicActivity.rewardBadgeIds) ? topicActivity.rewardBadgeIds.length : 0, commentPolicy, currentUserEligibility, allowImageAttachments: topicActivity.allowImageAttachments, ...(reviewCounts ? { reviewCounts } : {}), canReview: canReviewTopicActivity } : null,
   }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
 }
 
@@ -185,6 +271,7 @@ export async function POST(request: Request, { params }: Params) {
   const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const user = guard.user
+  const isActivityAdmin = isAdminRole(user.role) || await hasAdminPermission(user, 'activity_manage')
   const limited = await enforceApiRateLimit(request, user.id, {
     endpoint: '/api/posts/replies',
     ip: { limit: 120, windowSeconds: 10 * 60 },
@@ -192,9 +279,6 @@ export async function POST(request: Request, { params }: Params) {
   }, '评论过于频繁，请稍后再试')
   if (limited) return limited
 
-  const ipLocation = await resolveIpLocation(request)
-  const ipRegion = ipLocation?.label || null
-  void updateUserIpRegion(user.id, ipLocation)
   const { postId } = await params
   const body = await request.json().catch(() => null)
   const stickerId = body?.stickerId ? String(body.stickerId).trim() : ''
@@ -210,7 +294,17 @@ export async function POST(request: Request, { params }: Params) {
   const parsedMentions = parseMentions(body?.mentions, textContent, user.id)
   if ('error' in parsedMentions) return NextResponse.json({ message: parsedMentions.error }, { status: 400 })
   const requestedMentions = parsedMentions.mentions
-  if (textLength.actualLength < 2 && imageUrls.length === 0 && !stickerId) return NextResponse.json({ message: '回复内容至少需要 2 个字符', errors: { content: '回复太短了' } }, { status: 400 })
+  const minimumError = replyMinimumContentError(textContent, imageUrls.length, Boolean(stickerId))
+  if (minimumError) return NextResponse.json({ message: minimumError, errors: { content: '回复太短了' } }, { status: 400 })
+
+  // Read the canonical Activity before the public-post filter so a cancelled
+  // activity returns its controlled lifecycle code instead of an ambiguous
+  // ordinary 404. The transaction below re-reads it under an Activity lock.
+  const topicActivityCandidate = await prisma.activity.findFirst({
+    where: { activityPostId: postId, type: 'TOPIC_ACTIVITY' },
+    select: { id: true, status: true },
+  })
+  if (topicActivityCandidate?.status === 'CANCELLED') return NextResponse.json({ code: 'ACTIVITY_CANCELLED', message: '活动已取消，不能发表活动评论' }, { status: 409 })
 
   const post = await prisma.post.findFirst({
     where: { ...publicPostWhere(), id: postId, isLocked: false, Board: { isActive: true } },
@@ -253,18 +347,54 @@ export async function POST(request: Request, { params }: Params) {
   const replyRecipientId = parentReply?.authorId || post.authorId
   const now = new Date()
   const reply = await prisma.$transaction(async (tx) => {
+    // Activity edits/cancellation lock Activity before touching its post. Use
+    // the same order here, then lock Post and User before evaluating a gate.
+    let lockedTopicActivity: {
+      id: string
+      type: 'TOPIC_ACTIVITY' | string
+      status: string
+      activityPostId: string | null
+      startsAt: Date | null
+      endsAt: Date | null
+      participationMode: 'COMMENT' | 'FORM' | 'BOTH'
+      formSchema: Prisma.JsonValue | null
+      allowImageAttachments: boolean
+      topicProgram: Prisma.JsonValue | null
+    } | null = null
+    if (topicActivityCandidate) {
+      await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${topicActivityCandidate.id} FOR UPDATE`
+      lockedTopicActivity = await tx.activity.findUnique({
+        where: { id: topicActivityCandidate.id },
+        select: { id: true, type: true, status: true, activityPostId: true, startsAt: true, endsAt: true, participationMode: true, formSchema: true, allowImageAttachments: true, topicProgram: true },
+      })
+    }
     await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+    if (lockedTopicActivity?.status === 'CANCELLED') return { gateError: 'ACTIVITY_CANCELLED' as const }
+    const program = readTopicActivityV2Program(lockedTopicActivity?.topicProgram)
+    if (program?.enabled && !program.discussionEnabled) return { gateError: 'ACTIVITY_DISCUSSION_DISABLED' as const }
     const currentPost = await tx.post.findFirst({ where: { ...publicPostWhere(), id: postId, isLocked: false, Board: { isActive: true } }, select: { id: true, authorId: true } })
     if (!currentPost) return { unavailable: true as const }
+    // Re-read under the Activity lock; applies to roots and replies on its
+    // canonical post, independently of any IMAGE fields in the form schema.
+    if (lockedTopicActivity && lockedTopicActivity.allowImageAttachments === false && (imageUrls.length > 0 || textContent.includes('[[content-image:'))) {
+      return { attachmentsDisabled: true as const }
+    }
     for (const userId of [...new Set([user.id, post.authorId])].sort()) await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${userId} FOR UPDATE`
     await tx.user.findFirstOrThrow({ where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } }, select: { id: true } })
+    if (!parentId && lockedTopicActivity?.type === 'TOPIC_ACTIVITY' && lockedTopicActivity.activityPostId === currentPost.id) {
+      const eligibility = await resolveTopicActivityCommentEligibilityInTransaction(tx, { activity: lockedTopicActivity, userId: user.id, now })
+      if (!eligibility.canComment) return { gateError: topicActivityCommentGateErrorCode(eligibility.blockReason)! as string }
+    }
     const duplicateReply = await tx.reply.findFirst({ where: { postId, authorId: user.id, parentId: parentId || null, content, stickerId: stickerId || null, isDeleted: false, createdAt: { gte: new Date(Date.now() - 8_000) } }, select: { id: true } })
     if (duplicateReply) return { duplicateReplyId: duplicateReply.id }
     const floorNumber = parentId ? null : await allocatePostCommentFloor(tx, postId)
     const createdReply = await tx.reply.create({
-      data: { postId, authorId: user.id, content, ipRegion, stickerId: stickerId || null, parentId: parentId || null, floorNumber },
+      data: { postId, authorId: user.id, content, stickerId: stickerId || null, parentId: parentId || null, floorNumber },
       include: { User: { select: { id: true, uid: true, nickname: true, usernameModerationStatus: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, level: true, avatarUrl: true, Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } } }, }, sticker: { select: { url: true } } },
     })
+    const topicSubmission = !parentId
+      ? await createTopicSubmissionForCommentInTransaction(tx, { postId, commentId: createdReply.id, userId: user.id, isAdmin: isActivityAdmin, now })
+      : null
     if (requestedMentions.length) await tx.replyMention.createMany({ data: requestedMentions.map((mention) => ({ replyId: createdReply.id, mentionerId: user.id, mentionedUserId: mention.userId, startIndex: mention.startIndex, endIndex: mention.endIndex, displayText: mention.displayText })) })
     await tx.post.update({ where: { id: postId }, data: { replyCount: { increment: 1 } }, select: { id: true } })
     await tx.friendActivity.create({ data: { actorId: user.id, type: 'COMMENT', content: stickerId ? '[表情]' : textContent, targetUrl: `/posts/${postId}?focus=${createdReply.id}` } })
@@ -275,13 +405,35 @@ export async function POST(request: Request, { params }: Params) {
       await completeTask(tx, { userId: user.id, taskCode: 'FIRST_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
       await completeTask(tx, { userId: post.authorId, taskCode: 'FIRST_RECEIVED_COMMENT', periodKey: 'ALL', sourceEventId: createdReply.id })
     }
-    return { createdReply, floorNumber, rewardPoints: communityReward.commenterRewardPoints, weeklyMilestoneRewards: weeklyMilestones.rewards, points: weeklyMilestones.balance, notificationRecipientIds: [...requestedMentions.map((mention) => mention.userId), ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : [])] }
+    return { createdReply, topicSubmission, floorNumber, rewardPoints: communityReward.commenterRewardPoints, weeklyMilestoneRewards: weeklyMilestones.rewards, points: weeklyMilestones.balance, notificationRecipientIds: [...requestedMentions.map((mention) => mention.userId), ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [replyRecipientId] : [])] }
   }, { timeout: 15_000, maxWait: 5_000 })
 
+  if ('gateError' in reply) {
+    const messages: Record<string, string> = {
+      FORM_REQUIRED_BEFORE_COMMENT: '请先填写活动表单后再发表评论',
+      ADMIN_REPLY_REQUIRED: '表单已提交，等待管理员回复后即可发表评论',
+      TOPIC_ACTIVITY_COMMENT_LIMIT_REACHED: '本活动每位用户仅可发表一次参与评论',
+      ACTIVITY_DISCUSSION_DISABLED: '本活动未开放普通讨论，请通过活动任务入口参与',
+      ACTIVITY_ENDED: '活动已结束，不能发表活动评论',
+      ACTIVITY_CANCELLED: '活动已取消，不能发表活动评论',
+      ACTIVITY_NOT_STARTED: '活动尚未开放，暂不能发表评论',
+    }
+    const gateCode = reply.gateError || 'ACTIVITY_NOT_STARTED'
+    return NextResponse.json({ code: gateCode, message: messages[gateCode] || '当前暂不能发表评论' }, { status: 409 })
+  }
   if ('unavailable' in reply) return NextResponse.json({ message: '帖子不存在或当前不允许回复' }, { status: 404 })
+  if ('attachmentsDisabled' in reply) return NextResponse.json({ code: 'TOPIC_COMMENT_ATTACHMENTS_DISABLED', message: '该活动不允许评论图片附件' }, { status: 403 })
   if ('duplicateReplyId' in reply) return NextResponse.json({ message: '相同回复正在处理中，请勿重复提交', replyId: reply.duplicateReplyId }, { status: 409 })
 
-  const { createdReply, floorNumber, rewardPoints, weeklyMilestoneRewards, points } = reply
+  const { createdReply, topicSubmission, floorNumber, rewardPoints, weeklyMilestoneRewards, points } = reply
+  // The comment transaction has committed. Region resolution and attribution
+  // are best-effort secondary work and cannot change the comment result.
+  const ipLocation = await resolveIpLocation(request).catch(() => null)
+  const ipRegion = ipLocation ? await updateUserIpRegion(user.id, ipLocation) : null
+  if (ipRegion) {
+    await prisma.reply.updateMany({ where: { id: createdReply.id }, data: { ipRegion } }).catch(() => undefined)
+  }
+
   const notificationData = [
     ...requestedMentions.map((mention) => ({ recipientId: mention.userId, actorId: user.id, type: 'REPLY' as const, title: `${user.nickname}在回复中提到了你`, content: `${user.nickname}在回复中提到了你`, link: `/posts/${postId}?focus=${createdReply.id}`, key: `reply-mention:${createdReply.id}:${mention.userId}` })),
     ...(replyRecipientId !== user.id && !allowedMentionIds.has(replyRecipientId) ? [{ recipientId: replyRecipientId, actorId: user.id, type: 'REPLY' as const, title: parentReply ? '有人回复了你的评论' : '你的帖子有新回复', content: parentReply ? `${user.nickname} 回复了你的评论` : `${user.nickname} 回复了你的帖子`, link: `/posts/${postId}?focus=${createdReply.id}` }] : []),
@@ -308,6 +460,7 @@ export async function POST(request: Request, { params }: Params) {
         if (!friend) return []
         return [{ id: `${createdReply.id}:${friend.id}`, startIndex: mention.startIndex, endIndex: mention.endIndex, user: { id: friend.id, uid: friend.uid, name: getPublicUserDisplayName(friend) } }]
       }),
+      ...(topicSubmission ? { topicActivitySubmission: topicSubmission } : {}),
     },
     rewardPoints,
     weeklyMilestoneRewards,

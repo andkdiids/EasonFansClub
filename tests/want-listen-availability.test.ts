@@ -10,7 +10,8 @@ import { settleOptionalWantListenRead } from '../lib/want-listen-summary'
 const root = join(process.cwd())
 
 function source(relativePath: string) {
-  return readFileSync(join(root, relativePath), 'utf8')
+  // Source assertions compare logical lines, independent of Git checkout EOLs.
+  return readFileSync(join(root, relativePath), 'utf8').replace(/\r\n/g, '\n')
 }
 
 function healthSong(index: number): WantListenSongCandidate {

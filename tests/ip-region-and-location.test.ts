@@ -5,8 +5,10 @@ import {
   clearIpLocationCacheForTests,
   normalizeIpLocationProviderResponse,
   normalizeIpRegionFromGeo,
+  publicProfileIpRegion,
   resolveIpLocation,
   setCloudflareGeoContextReaderForTests,
+  updateUserIpRegion,
 } from '../lib/ip-region'
 import {
   getClientIp,
@@ -254,14 +256,17 @@ test('个人档案与所有主要公开评论链路区分显示两个地区概�
   assert.match(profileSurface, /formatUserLocation\(profile\.location\) \|\|/)
   assert.match(profileSurface, /profile\.ipRegion \|\|/)
   assert.doesNotMatch(profileSurface, /profile\.location\s*\?\s*profile\.ipRegion/)
-  assert.match(profilePage, /updateUserIpRegion/)
+  assert.doesNotMatch(profilePage, /updateUserIpRegion|resolveIpLocation/)
+  assert.match(profilePage, /publicProfileIpRegion\(profile\.ipRegion\)/)
 })
 
 test('帖子保存发表时的独立省级 IP 属地并在广场、发现页和详情展示', () => {
   assert.match(postCreateApi, /resolveIpLocation\(request\)/)
   assert.match(postCreateApi, /content: input\.content,[\s\S]*ipRegion,\s*summary:/)
   assert.match(replyCreateApi, /resolveIpLocation\(request\)/)
-  assert.match(replyCreateApi, /content,\s*ipRegion,[\s\S]*parentId:/)
+  assert.match(replyCreateApi, /data: \{ postId, authorId: user\.id, content, stickerId/)
+  assert.match(replyCreateApi, /const ipLocation = await resolveIpLocation\(request\)\.catch\(\(\) => null\)/)
+  assert.match(replyCreateApi, /prisma\.reply\.updateMany\(\{ where: \{ id: createdReply\.id \}, data: \{ ipRegion \} \}\)/)
   assert.match(postDetailPage, /IpRegionLabel ipRegion=\{post\.ipRegion\}/)
   assert.match(forumFeed, /ipRegion: true/)
   assert.match(forumDiscovery, /ipRegion: true/)
@@ -659,10 +664,62 @@ test('requires an explicit target IP in the configured GeoIP URL', async () => {
   }
 })
 
-test('unknown IP regions are visible as unknown and do not reuse a stale user region', () => {
-  assert.doesNotMatch(ipRegionLabel, /return null/)
+test('unknown stored IP regions fail closed in public Profile presentation', () => {
   assert.match(ipRegionLabel, /IP属地：/)
-  assert.match(ipResolver, /where: \{ id: userId \}/)
-  assert.match(ipResolver, /data: \{ ipRegion: region, ipRegionUpdatedAt: new Date\(\) \}/)
-  assert.doesNotMatch(ipResolver, /if \(!region\) return null/)
+  assert.equal(publicProfileIpRegion('广东'), '广东')
+  assert.equal(publicProfileIpRegion('123.123.123.123'), null)
+  assert.equal(publicProfileIpRegion('广东深圳'), null)
+  assert.equal(publicProfileIpRegion(null), null)
+})
+
+test('only valid coarse regions update User.ipRegion; empty lookup preserves prior attribution', async () => {
+  const persisted: Array<{ userId: string; region: string; updatedAt: Date }> = []
+  const persist = async (userId: string, region: string, updatedAt: Date) => {
+    persisted.push({ userId, region, updatedAt })
+  }
+  const valid = await updateUserIpRegion('user-1', {
+    countryCode: 'CN',
+    province: '广东',
+    isp: null,
+    label: '广东',
+  }, { persist })
+  assert.equal(valid, '广东')
+  assert.equal(persisted.length, 1)
+  assert.equal(persisted[0].userId, 'user-1')
+  assert.equal(persisted[0].region, '广东')
+  assert.ok(persisted[0].updatedAt instanceof Date)
+
+  assert.equal(await updateUserIpRegion('user-1', null, { persist }), null)
+  assert.equal(persisted.length, 1)
+  assert.equal(await updateUserIpRegion('user-1', {
+    countryCode: 'CN', province: '广东深圳', isp: null, label: '广东深圳',
+  }, { persist }), null)
+  assert.equal(persisted.length, 1)
+})
+
+test('IP lookup or persistence failure is best effort and never becomes a clearing write', async () => {
+  let persistCalls = 0
+  let warnings = 0
+  const originalWarn = console.warn
+  console.warn = () => { warnings += 1 }
+  try {
+    const request = new Request('https://ecfc.fans/api/posts/replies')
+    assert.equal(await updateUserIpRegion('user-1', request, {
+      resolve: async () => null,
+      persist: async () => { persistCalls += 1 },
+    }), null)
+    assert.equal(await updateUserIpRegion('user-1', request, {
+      resolve: async () => { throw new Error('provider failed') },
+      persist: async () => { persistCalls += 1 },
+    }), null)
+    assert.equal(await updateUserIpRegion('user-1', {
+      countryCode: 'CN', province: '广东', isp: null, label: '广东',
+    }, {
+      persist: async () => { persistCalls += 1; throw new Error('write failed') },
+    }), null)
+  } finally {
+    console.warn = originalWarn
+  }
+  assert.equal(persistCalls, 1)
+  assert.equal(warnings, 2)
 })

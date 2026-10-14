@@ -13,9 +13,11 @@ import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { enforceApiRateLimit, resolveRequestAuth, sanitizeText, unauthenticatedResponse } from '@/lib/security'
 import { hasTooManyContentImages, MAX_CONTENT_IMAGES, parseContentImageUrls } from '@/lib/content-images'
 import { publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
+import { splitContentImages } from '@/lib/content-images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
 import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
-import { resolveIpLocation, updateUserIpRegion } from '@/lib/ip-region'
+import { resolveIpLocation } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
 import { buildReviewCenterUrl } from '@/lib/review-center'
@@ -37,6 +39,7 @@ import { summarizePlainText } from '@/lib/share-metadata'
 import { calculatePostExpiresAt, parsePostExpiryType } from '@/lib/post-lifecycle'
 import { collectPostTopicNames, PostTopicInputError, syncPostTopics } from '@/lib/post-topics'
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
+import { expireTopicActivityPins } from '@/lib/topic-activity'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -122,6 +125,7 @@ async function runPostCreateSideEffect(
 export async function GET(request: Request) {
   const auth = await resolveRequestAuth(request)
   if (auth.response) return auth.response
+  await expireTopicActivityPins(new Date())
   const viewer = auth.user
   const limited = await enforceApiRateLimit(request, viewer?.id, {
     endpoint: '/api/posts',
@@ -144,7 +148,7 @@ export async function GET(request: Request) {
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
       },
-      orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ isPinned: 'desc' }, { activityPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       skip,
       take: take + 1,
       select: {
@@ -159,6 +163,7 @@ export async function GET(request: Request) {
         replyCount: true,
         viewCount: true,
         isPinned: true,
+        activityPinned: true,
         isFeatured: true,
         createdAt: true,
         expiresAt: true,
@@ -177,14 +182,23 @@ export async function GET(request: Request) {
           },
         },
         Board: { select: { name: true, slug: true } },
+        TopicActivity: { select: { id: true, type: true, title: true, endsAt: true, rewardPoints: true, rewardBadgeIds: true, coverUrl: true } },
+        PostMedia: { where: { type: 'IMAGE' }, orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true, thumbnail: true } },
         sticker: { select: { url: true } },
       },
     })
     const hasMore = rows.length > take
     const pageRows = hasMore ? rows.slice(0, take) : rows
     const equippedBadges = await getEquippedBadgesForUsers(pageRows.map((row) => row.User.id), new Date(), viewer?.id)
-    const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, PostTopic, ...post }) => ({
+    const posts = pageRows.map(({ summary, content, moderationStatus, User, Board, sticker, PostTopic, TopicActivity, PostMedia, ...post }) => {
+      const activityCover = TopicActivity?.type === 'TOPIC_ACTIVITY' && TopicActivity.coverUrl ? publicImageUrl(TopicActivity.coverUrl) || TopicActivity.coverUrl : null
+      const postImageCover = splitContentImages(content).images[0] || PostMedia[0]?.thumbnail || PostMedia[0]?.url || null
+      const coverSource = activityCover || postImageCover || publicImageUrl(sticker?.url)
+      const coverUrl = coverSource ? publicImageVariantUrl(coverSource, 'card') || publicImageUrl(coverSource) || coverSource : null
+      return ({
       ...post,
+      coverUrl,
+      activity: TopicActivity ? { id: TopicActivity.id, type: TopicActivity.type, title: TopicActivity.title, endsAt: TopicActivity.endsAt, rewardPoints: TopicActivity.rewardPoints, rewardBadgeCount: Array.isArray(TopicActivity.rewardBadgeIds) ? TopicActivity.rewardBadgeIds.length : 0, coverUrl: publicImageUrl(TopicActivity.coverUrl) || TopicActivity.coverUrl } : null,
       topics: PostTopic.map(({ Topic }) => Topic),
       title: publicModerationText(post.title, moderationStatus),
       author: {
@@ -202,7 +216,8 @@ export async function GET(request: Request) {
       board: withForumBoardDisplayName(Board),
       content: publicModerationText(summarizePlainText(summary || content), moderationStatus),
       stickerUrl: publicImageUrl(sticker?.url),
-    }))
+    })
+    })
 
     return NextResponse.json(
       { posts, page, hasMore },
@@ -504,7 +519,6 @@ export async function POST(request: Request) {
       rawStickerId
         ? runPostCreateSideEffect('sticker-usage', () => recordStickerUsage(user.id, rawStickerId), user.id, board.id)
         : Promise.resolve(),
-      runPostCreateSideEffect('ip-region', () => updateUserIpRegion(user.id, ipLocation), user.id, board.id),
       moderationStatus === 'PENDING'
         ? runPostCreateSideEffect('admin-realtime', () => emitRealtimeToAdmins('notification'), user.id, board.id)
         : Promise.resolve(),

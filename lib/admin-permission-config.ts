@@ -9,6 +9,7 @@ export const adminPermissionGroups = [
   { key: 'checkin_manage', label: '每日挂号管理', description: '查看签到记录、补签和重置签到。' },
   { key: 'daily_message_manage', label: '病友留言管理', description: '删除、精选和管理留言互动。' },
   { key: 'activity_manage', label: '活动中心管理', description: '创建、编辑、发布、取消和删除活动。' },
+  { key: 'activity_lottery_shipping', label: '活动抽奖收件/发货', description: '查看实物抽奖收件信息并更新发货状态。' },
   { key: 'material_redemption_manage', label: '物料兑换管理', description: '维护限时物料、库存、兑换订单、核销与退款。' },
   { key: 'music_manage', label: 'EasMusic 管理', description: '维护音乐专辑、歌曲资料和播放来源预留信息。' },
   { key: 'rating_manage', label: '歌·颂管理', description: '查看评分统计并删除违规歌·颂评价。' },
@@ -33,6 +34,7 @@ export const adminPermissionGroups = [
   { key: 'sticker_manage', label: '表情包管理', description: '审核用户提交的表情包合集，预览、通过或拒绝。' },
   { key: 'banned_word_manage', label: '违禁词管理', description: '维护违禁词、启停匹配规则并重新扫描历史用户内容。' },
   { key: 'beta_access_manage', label: 'Android 内测准入管理', description: '开启或关闭 Android 内测准入，并生成、撤销动态内测码与设备资格。' },
+  { key: 'cantonese_review', label: '粤语课程审核', description: '审核移动端粤语教学内容、练习题和音频。' },
 ] as const
 
 export type AdminPermissionKey = (typeof adminPermissionGroups)[number]['key']
@@ -98,4 +100,5 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/anywhere-door': 'social_manage',
   '/admin/salon': 'post_manage',
   '/admin/beta-access': 'beta_access_manage',
+  '/admin/cantonese': 'cantonese_review',
 }

@@ -7,6 +7,7 @@ import { getForumDiscoveryCoverFit, type ForumDiscoveryPost } from '@/lib/forum-
 import { postDetailHref } from '@/lib/post-navigation'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
+import { activityDateLabel } from '@/lib/activity'
 
 function DiscoveryCover({ post, priority }: Readonly<{ post: ForumDiscoveryPost; priority: boolean }>) {
   const [fit, setFit] = useState<'cover' | 'contain'>(getForumDiscoveryCoverFit(post.cover?.width, post.cover?.height))
@@ -52,11 +53,17 @@ export function ForumDiscoveryCard({ post, priority = false, returnTo = null, on
         <div className="forum-discovery-card-body">
           <div className="forum-discovery-card-badges" aria-label="帖子标签">
             {post.isPinned ? <span>置顶</span> : null}
+            {post.activityPinned ? <span>活动置顶</span> : null}
+            {post.activity?.type === 'TOPIC_ACTIVITY' ? <span>话题活动</span> : null}
             {post.isFeatured ? <span>精华</span> : null}
             {post.board.name ? <span>{post.board.name}</span> : null}
             {post.expiresAt && !isPostExpired(post.expiresAt) ? <span>限时 · {formatPostExpiry(post.expiresAt)}</span> : null}
           </div>
           <h2>{post.title}</h2>
+          {post.activity?.type === 'TOPIC_ACTIVITY' ? <div className="mt-1 space-y-0.5 text-[10px] font-bold text-[var(--foreground-muted)]" aria-label="话题活动信息">
+            {post.activity.endsAt ? <p>截止 {activityDateLabel(post.activity.endsAt)}</p> : null}
+            <p>奖励：{[post.activity.rewardPoints ? `${post.activity.rewardPoints} 挂号费` : null, post.activity.rewardBadgeCount ? `${post.activity.rewardBadgeCount} 枚勋章` : null].filter(Boolean).join(' · ') || '参与讨论'}</p>
+          </div> : null}
         </div>
       </Link>
       <div className="forum-discovery-card-meta">

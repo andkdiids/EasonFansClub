@@ -42,6 +42,13 @@ function makeRequest(path: string, token?: string | string[], host = 'ecfc.fans'
     : undefined)
 }
 
+function makeMutationRequest(path: string, method: string, auth: { cookie?: string; bearer?: string } = {}) {
+  const headers = new Headers()
+  if (auth.cookie) headers.set('cookie', `${authCookieName}=${auth.cookie}`)
+  if (auth.bearer) headers.set('authorization', `Bearer ${auth.bearer}`)
+  return new NextRequest(`https://ecfc.fans${path}`, { method, headers })
+}
+
 function getRedirect(response: Response) {
   assert.ok(response.status === 307 || response.status === 308)
   const location = response.headers.get('location')
@@ -74,6 +81,145 @@ test('未登录敏感 API 返回 JSON 401，不重定向 HTML', async () => {
   await expectUnauthorizedApi('/api/notifications/unread-summary')
   await expectUnauthorizedApi('/api/posts')
   await expectUnauthorizedApi('/api/checkin')
+})
+
+test('Post Like 的 POST/DELETE 支持 Bearer，同时保留 Cookie 与匿名保护', async () => {
+  const path = '/api/posts/test-post/like'
+  for (const method of ['POST', 'DELETE']) {
+    const bearerResponse = await middleware(makeMutationRequest(path, method, { bearer: 'middleware-test-bearer' }))
+    assert.equal(bearerResponse.status, 200, `${method} Bearer reaches the route guard`)
+  }
+
+  const anonymousResponse = await middleware(makeMutationRequest(path, 'DELETE'))
+  assert.equal(anonymousResponse.status, 401, 'anonymous DELETE remains blocked')
+
+  const validCookie = await createToken()
+  for (const method of ['POST', 'DELETE']) {
+    const cookieResponse = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookieResponse.status, 200, `Web Cookie ${method} remains authenticated`)
+  }
+
+  const unrelatedResponse = await middleware(makeMutationRequest('/api/admin/users', 'DELETE', { bearer: 'middleware-test-bearer' }))
+  assert.equal(unrelatedResponse.status, 401, 'Bearer is not opened for unrelated protected DELETE routes')
+
+  const route = readFileSync('app/api/posts/[postId]/like/route.ts', 'utf8')
+  assert.match(route, /export async function DELETE[\s\S]*?requireRequestUser\(request\)/)
+  assert.match(route, /where: \{ postId, userId: user\.id \}/)
+})
+
+test('Ecenter 偏好 GET/PATCH 支持 Bearer 与 Web Cookie，匿名及其他受保护路由仍拒绝', async () => {
+  const path = '/api/users/me/e-center-preferences'
+  const bearerGet = await middleware(new NextRequest(`https://ecfc.fans${path}`, {
+    headers: { authorization: 'Bearer valid-mobile-access-token' },
+  }))
+  assert.equal(bearerGet.status, 200, 'GET Bearer reaches the request-aware route guard')
+
+  const bearerPatch = await middleware(makeMutationRequest(path, 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(bearerPatch.status, 200, 'PATCH Bearer reaches the request-aware route guard')
+
+  const validCookie = await createToken()
+  const cookieGet = await middleware(makeRequest(path, validCookie))
+  assert.equal(cookieGet.status, 200, 'GET Web Cookie remains authenticated')
+  const cookiePatch = await middleware(makeMutationRequest(path, 'PATCH', { cookie: validCookie }))
+  assert.equal(cookiePatch.status, 200, 'PATCH Web Cookie remains authenticated')
+
+  for (const method of ['GET', 'PATCH']) {
+    const anonymous = await middleware(new NextRequest(`https://ecfc.fans${path}`, { method }))
+    assert.equal(anonymous.status, 401, `anonymous ${method} remains rejected`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'Bearer is not opened for unrelated protected routes')
+})
+
+test('话题活动表单 schema 可公开读取；表单提交、历史、附件与管理员操作保持 Bearer/Cookie 双认证', async () => {
+  const publicSchema = '/api/activities/topic-test/form'
+  assert.equal((await middleware(new NextRequest(`https://ecfc.fans${publicSchema}`))).status, 200)
+
+  const protectedRoutes: Array<[string, string]> = [
+    ['/api/activities/topic-test/form-submissions', 'POST'],
+    ['/api/activities/topic-test/my-form-submissions', 'GET'],
+    ['/api/topic-activity-form-submissions/submission-test', 'GET'],
+    ['/api/activities/topic-test/form-submissions/submission-test/replies/reply-test/assets/asset-test/original', 'GET'],
+    ['/api/activities/topic-test/form-submissions/submission-test/assets/asset-test/original', 'GET'],
+    ['/api/activities/topic-test/assets/asset-test/preview', 'GET'],
+    ['/api/admin/activities/topic-test/form-submissions', 'GET'],
+    ['/api/uploads/topic-activity-image', 'POST'],
+    ['/api/admin/topic-activity-form-submissions/submission-test/review', 'PATCH'],
+    ['/api/admin/topic-activity-form-submissions/submission-test/replies', 'POST'],
+  ]
+  const validCookie = await createToken({ role: 'ADMIN' })
+  for (const [path, method] of protectedRoutes) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${method} ${path} lets the canonical route guard validate Bearer`)
+    const cookie = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookie.status, 200, `${method} ${path} keeps Web Cookie auth`)
+    const anonymous = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymous.status, 401, `${method} ${path} remains blocked anonymously`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'form Bearer allowlist does not open unrelated protected routes')
+  const forbiddenPreviewMutation = await middleware(makeMutationRequest('/api/activities/topic-test/assets/asset-test/preview', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(forbiddenPreviewMutation.status, 401, 'preview Bearer permission is GET-only')
+})
+
+test('Mobile Growth and direct-message routes pass Bearer to route guards, preserve Cookie auth, and keep anonymous blocked', async () => {
+  const routes: Array<[string, string]> = [
+    ['/api/growth', 'GET'],
+    ['/api/growth/claim', 'POST'],
+    ['/api/growth/refresh', 'POST'],
+    ['/api/direct-conversations', 'GET'],
+    ['/api/direct-conversations', 'POST'],
+    ['/api/direct-conversations/conversation-1/messages', 'GET'],
+    ['/api/direct-conversations/conversation-1/messages', 'POST'],
+    ['/api/direct-conversations/conversation-1/read', 'POST'],
+  ]
+  const validCookie = await createToken()
+  for (const [path, method] of routes) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${method} ${path} lets the protected route guard validate Bearer`)
+    const cookie = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookie.status, 200, `${method} ${path} keeps Web Cookie auth`)
+    const anonymous = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymous.status, 401, `${method} ${path} remains blocked anonymously`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/direct-conversations/conversation-1/clear', 'POST', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'Bearer is not opened for unsupported conversation mutations')
+})
+
+test('审核中心 GET/PATCH 的 Bearer 仅通过 middleware，Cookie 保持可用，匿名与其他 admin 路由仍拒绝', async () => {
+  const path = '/api/admin/review'
+  for (const method of ['GET', 'PATCH']) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${method} Bearer reaches the route permission guard`)
+    const anonymous = await middleware(new NextRequest(`https://ecfc.fans${path}`, { method }))
+    assert.equal(anonymous.status, 401, `anonymous ${method} remains blocked`)
+  }
+
+  const validCookie = await createToken({ role: 'ADMIN' })
+  const cookieGet = await middleware(makeRequest(path, validCookie))
+  assert.equal(cookieGet.status, 200, 'Web Cookie GET remains authenticated')
+  const cookiePatch = await middleware(makeMutationRequest(path, 'PATCH', { cookie: validCookie }))
+  assert.equal(cookiePatch.status, 200, 'Web Cookie PATCH remains authenticated')
+
+  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'Bearer does not open other admin routes')
+})
+
+test('Mobile Home Hero GET is public for anonymous and authenticated users', async () => {
+  const path = '/api/mobile/home-hero'
+  const anonymous = await middleware(new NextRequest(`https://ecfc.fans${path}`))
+  assert.equal(anonymous.status, 200)
+
+  const validCookie = await createToken()
+  const authenticated = await middleware(makeRequest(path, validCookie))
+  assert.equal(authenticated.status, 200)
+
+  const route = readFileSync('app/api/mobile/home-hero/route.ts', 'utf8')
+  assert.match(route, /export async function GET\(\)/)
+  assert.doesNotMatch(route, /export async function (POST|PATCH|PUT|DELETE)/)
 })
 
 test('有效 JWT 可以访问 EasMusic，JWT 必须包含有效 user id', async () => {

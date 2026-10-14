@@ -9,7 +9,8 @@ import {
   parseFriendListReturnState,
 } from '../lib/friend-list-return-state'
 
-const read = (path: string) => readFileSync(path, 'utf8')
+// Source assertions compare logical lines, independent of Git checkout EOLs.
+const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
 const friendDock = read('components/FriendDock.tsx')
 
 test('return state records the friend anchor, inner list scroll and viewport context', () => {

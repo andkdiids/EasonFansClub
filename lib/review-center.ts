@@ -116,12 +116,13 @@ export type ReviewItem = {
   sourceId: string
   reviewKind?: 'CREATE' | 'EDIT'
   title: string
-  author: { id: string | null; uid: number | null; name: string }
+  author: { id: string | null; uid: number | null; name: string; avatarUrl: string | null }
   authorId: string | null
   createdAt: string
   status: ReviewStatus
   cover: string | null
   summary: string
+  body?: string
   category: string | null
   relatedEntity: string | null
   reviewer: { id?: string | null; uid?: number | null; name: string } | null

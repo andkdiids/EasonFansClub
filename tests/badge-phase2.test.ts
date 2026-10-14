@@ -231,8 +231,8 @@ test('changing a rule does not revoke historical UserBadge records', () => {
 test('automatic evaluation keeps failures out of the primary request', () => {
   const engine = read('lib/badge-rule-engine.ts')
   const checkinRoute = read('app/api/checkin/route.ts')
-  assert.match(engine, /export function triggerBadgeEvaluation\(userId: string, eventType: BadgeEvaluationEvent, eventId\?: string \| null\)/)
-  assert.match(engine, /const task = evaluateBadgesForEvent\(userId, eventType, eventId\)/)
+  assert.match(engine, /export function triggerBadgeEvaluation\(userId: string, eventType: BadgeEvaluationEvent, eventId\?: string \| null, evaluationSource: BadgeEvaluationSource = 'OTHER'\)/)
+  assert.match(engine, /const task = evaluateBadgesForEvent\(userId, eventType, eventId, evaluationSource\)/)
   assert.match(engine, /\.catch\(\(error\) => \{/)
   assert.match(engine, /void task/)
   assert.match(engine, /return task/)

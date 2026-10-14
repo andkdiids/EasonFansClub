@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { decideBirthdaySave, daysForBirthdayMonth, resetInvalidBirthdayDay } from '@/lib/birthday-profile-flow'
 
-const read = (path: string) => readFileSync(path, 'utf8')
+// Source assertions compare logical lines, independent of Git checkout EOLs.
+const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
 const blank = { birthMonth: null, birthDay: null, birthdaySetAt: null }
 
 test('CASE 1: month-only draft does not qualify as a birthday save', () => {

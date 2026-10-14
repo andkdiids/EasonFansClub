@@ -429,7 +429,7 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date(), riskByUse
 export async function getAdminActivityLotteries(activityId: string): Promise<ActivityLotteryAdminListView | null> {
   const [activity, lotteries, activeParticipantCount] = await Promise.all([
     prisma.activity.findUnique({ where: { id: activityId }, select: { id: true, title: true, status: true, startsAt: true, endsAt: true, registrationEndAt: true, signupLimit: true } }),
-    prisma.lottery.findMany({ where: { activityId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: adminLotterySelect }),
+    prisma.lottery.findMany({ where: { activityId, TopicLottery: { is: null } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: adminLotterySelect }),
     prisma.activityRegistration.count({ where: { activityId, status: 'ACTIVE', User: { status: 'ACTIVE', isDeleted: false } } }),
   ])
   if (!activity) return null
@@ -509,7 +509,7 @@ export type ActivityLotteryPublicView = {
 
 export async function getPublicActivityLotteries(activityId: string, viewerId?: string | null): Promise<ActivityLotteryPublicView[]> {
   const lotteries = await prisma.lottery.findMany({
-    where: { activityId, status: { in: ['SCHEDULED', 'DRAWN'] }, Activity: { status: 'PUBLISHED' } },
+    where: { activityId, TopicLottery: { is: null }, status: { in: ['SCHEDULED', 'DRAWN'] }, Activity: { status: 'PUBLISHED' } },
     orderBy: [{ drawAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
@@ -713,7 +713,7 @@ export async function updateActivityLottery(activityId: string, lotteryId: strin
   return prisma.$transaction(async (tx) => {
     const activity = await lockActivity(tx, activityId)
     if (activity.status === 'CANCELLED') throw new ActivityLotteryError('LOTTERY_CANCELLED', '已取消的活动不能编辑抽奖')
-    const lottery = await tx.lottery.findFirst({ where: { id: lotteryId, activityId }, select: { id: true, status: true, title: true } })
+    const lottery = await tx.lottery.findFirst({ where: { id: lotteryId, activityId, TopicLottery: { is: null } }, select: { id: true, status: true, title: true } })
     if (!lottery) throw new ActivityLotteryError('LOTTERY_NOT_FOUND', '抽奖不存在', 404)
     if (lottery.status === 'DRAWN') throw new ActivityLotteryError('LOTTERY_LOCKED', '抽奖已经开奖，不能修改')
     if (lottery.status === 'CANCELLED') throw new ActivityLotteryError('LOTTERY_CANCELLED', '已取消的抽奖不能修改')
@@ -739,7 +739,7 @@ export async function updateActivityLottery(activityId: string, lotteryId: strin
 export async function cancelActivityLottery(activityId: string, lotteryId: string, adminId: string) {
   return prisma.$transaction(async (tx) => {
     await lockActivity(tx, activityId)
-    const current = await tx.lottery.findFirst({ where: { id: lotteryId, activityId }, select: { id: true, title: true, status: true } })
+    const current = await tx.lottery.findFirst({ where: { id: lotteryId, activityId, TopicLottery: { is: null } }, select: { id: true, title: true, status: true } })
     if (!current) throw new ActivityLotteryError('LOTTERY_NOT_FOUND', '抽奖不存在', 404)
     if (current.status === 'DRAWN') throw new ActivityLotteryError('LOTTERY_LOCKED', '抽奖已经开奖，不能取消')
     if (current.status === 'CANCELLED') return { alreadyCancelled: true }
@@ -824,8 +824,9 @@ function activityLotteryResultNotificationData(input: {
 
 export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionClient, lotteryId: string, options: DrawOptions = { trigger: 'SCHEDULED' }): Promise<ActivityLotteryDrawResult> {
   const now = options.now || new Date()
-  const initial = await tx.lottery.findUnique({ where: { id: lotteryId }, select: { activityId: true } })
+  const initial = await tx.lottery.findUnique({ where: { id: lotteryId }, select: { activityId: true, TopicLottery: { select: { id: true } } } })
   if (!initial) throw new ActivityLotteryError('LOTTERY_NOT_FOUND', '抽奖不存在', 404)
+  if (initial.TopicLottery) throw new ActivityLotteryError('LOTTERY_LOCKED', '平台任务抽奖须使用其专用冻结开奖流程')
   // Registration cancellation and activity cancellation both lock the Activity
   // row before inspecting lotteries. Keep the same order here so the final
   // eligible-registration snapshot cannot race a cancellation or draw.
@@ -982,7 +983,7 @@ export async function drawDueActivityLotteries(options: { activityId?: string; b
   const now = options.now || new Date()
   const batchSize = Math.min(Math.max(options.batchSize || 50, 1), 200)
   const due = await prisma.lottery.findMany({
-    where: { ...(options.activityId ? { activityId: options.activityId } : {}), status: 'SCHEDULED', drawAt: { lte: now }, Activity: { status: { not: 'CANCELLED' }, endsAt: { gt: now } } },
+    where: { ...(options.activityId ? { activityId: options.activityId } : {}), TopicLottery: { is: null }, status: 'SCHEDULED', drawAt: { lte: now }, Activity: { status: { not: 'CANCELLED' }, endsAt: { gt: now } } },
     orderBy: [{ drawAt: 'asc' }, { id: 'asc' }],
     take: batchSize,
     select: { id: true },

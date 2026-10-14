@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { isZodiacSign, ZODIAC_LABELS, type ZodiacSign } from '@/lib/zodiac'
 import { describeBadgeOwnershipRule, normalizeBadgeOwnershipRuleConfig } from '@/lib/badge-ownership-config'
 import { describeAspirinRule, getAspirinRuleConfig, validateSustainedQualificationSettings } from '@/lib/aspirin-badge-config'
+import { formatCheckinOnDateRuleDescription, normalizeCheckinOnDateRuleConfig } from '@/lib/checkin-specific-date'
 
 export const BADGE_EVALUATION_EVENTS = [
   'POST_CREATED',
@@ -19,6 +20,7 @@ export const BADGE_EVALUATION_EVENTS = [
   'USER_ACTIVE',
   'USER_BIRTHDAY_UPDATED',
   'CLINIC_CONSULTATION_CHANGED',
+  'TOPIC_ACTIVITY_PARTICIPATION_CREATED',
 ] as const
 
 export type BadgeEvaluationEvent = typeof BADGE_EVALUATION_EVENTS[number]
@@ -120,6 +122,19 @@ export const BADGE_RULE_REGISTRY = {
     supportsRetentionWhileEligible: true,
     historicalBasis: '按限定窗口内的签到日期重算最长连续天数',
     defaultAcquisitionDescription: (threshold: number | null) => `连续挂号 ${displayThreshold(threshold || 1)} 天后获得`,
+  },
+  CHECKIN_ON_DATE: {
+    group: '挂号',
+    label: '指定日期挂号',
+    dataDescription: '用户在任一指定上海时区自然日完成正常挂号后自动获得；免费补签、付费补签和管理员补签不计入',
+    metricLoader: 'CHECKIN_ON_DATE',
+    supportedOperators: ['GTE'],
+    events: ['CHECKIN_CREATED'],
+    threshold: null,
+    supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: false,
+    historicalBasis: '按指定日期键筛选正常挂号记录；默认不会因新增规则自动扫描历史用户，只有管理员显式执行补发时才使用',
+    defaultAcquisitionDescription: (_threshold: number | null, configJson?: unknown) => formatCheckinOnDateRuleDescription(normalizeCheckinOnDateRuleConfig(configJson)),
   },
   ACCOUNT_AGE_DAYS: {
     group: '账号', unit: '天',
@@ -267,6 +282,19 @@ export const BADGE_RULE_REGISTRY = {
     historicalBasis: '按指定活动中有效人工或二维码现场核销记录判断；活动结束自动核销不计入',
     defaultAcquisitionDescription: () => '参加指定活动后获得',
   },
+  TOPIC_ACTIVITY_PARTICIPATION_COUNT: {
+    group: '活动', unit: '个话题活动',
+    label: '话题活动参与次数',
+    dataDescription: '用户至少有一条审核通过的提交时，按不同话题活动去重计数；同一活动多条评论只计 1 次',
+    metricLoader: 'TOPIC_ACTIVITY_PARTICIPATION_COUNT',
+    supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
+    events: ['TOPIC_ACTIVITY_PARTICIPATION_CREATED'],
+    threshold: BADGE_RULE_THRESHOLD_LIMITS,
+    supportsHistoricalBackfill: true,
+    supportsRetentionWhileEligible: false,
+    historicalBasis: '按限定期内首次获得审核通过的不同话题活动数量重算',
+    defaultAcquisitionDescription: (threshold: number | null) => `累计通过 ${displayThreshold(threshold || 1)} 个不同话题活动后获得`,
+  },
   BIRTHDAY_ZODIAC: {
     group: '账号',
     label: '星座',
@@ -409,7 +437,7 @@ export function getDefaultBadgeRetentionPolicy(ruleType: SupportedBadgeRuleType)
 
 /** BIRTHDAY_TODAY is a one-day acquisition window with permanent ownership. */
 export function isAcquisitionOnlyBadgeRule(ruleType: SupportedBadgeRuleType) {
-  return ruleType === 'BIRTHDAY_TODAY'
+  return ruleType === 'BIRTHDAY_TODAY' || ruleType === 'CHECKIN_ON_DATE'
 }
 
 /**
@@ -495,7 +523,7 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
   const retention = normalizeBadgeRetentionPolicy(body.retentionPolicy, ruleTypeValue as SupportedBadgeRuleType)
   if (retention.error) return { error: retention.error }
   const retentionPolicy = retention.policy ?? null
-  const sustained = ruleTypeValue === 'BIRTHDAY_TODAY'
+  const sustained = ruleTypeValue === 'BIRTHDAY_TODAY' || ruleTypeValue === 'CHECKIN_ON_DATE'
     ? { sustainedQualification: false as const, inactiveAfterDays: null, revokeAfterDays: null }
     : validateSustainedQualificationSettings(body)
   if ('error' in sustained) return { error: sustained.error }
@@ -584,6 +612,26 @@ export function parseBadgeRuleInput(value: unknown): { rule?: ParsedBadgeRule | 
         threshold: null,
         secondaryThreshold: null,
         configJson: ownershipConfig.config,
+        isEnabled: body.isEnabled !== false,
+        retentionPolicy,
+        ...sustainedFields,
+      },
+    }
+  }
+
+  if (ruleTypeValue === 'CHECKIN_ON_DATE') {
+    if (body.threshold !== undefined && body.threshold !== null && body.threshold !== '') return { error: '指定日期挂号规则不需要数值阈值' }
+    if (body.secondaryThreshold !== undefined && body.secondaryThreshold !== null && body.secondaryThreshold !== '') return { error: '指定日期挂号规则不需要次级阈值' }
+    if (body.isEnabled !== undefined && typeof body.isEnabled !== 'boolean') return { error: '自动规则启用标记无效' }
+    const config = normalizeCheckinOnDateRuleConfig(body.configJson)
+    if (!config) return { error: '请至少指定一个有效日期（YYYY-MM-DD）' }
+    return {
+      rule: {
+        ruleType: ruleTypeValue as SupportedBadgeRuleType,
+        operator: 'GTE',
+        threshold: null,
+        secondaryThreshold: null,
+        configJson: config,
         isEnabled: body.isEnabled !== false,
         retentionPolicy,
         ...sustainedFields,

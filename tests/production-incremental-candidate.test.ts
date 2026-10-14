@@ -4,13 +4,26 @@ import path from 'node:path'
 import test from 'node:test'
 import { inspectMigrationSql } from '../scripts/check-migrations-mysql'
 
-const candidatePath = path.resolve(__dirname, '..', 'tmp', 'PRODUCTION_INCREMENTAL_CANDIDATE.sql')
 const socialPostsMigrationPath = path.resolve(__dirname, '..', 'prisma', 'migrations', '20260826100000_add_anywhere_door_social_posts', 'migration.sql')
 const safetyStateMigrationPath = path.resolve(__dirname, '..', 'prisma', 'migrations', '20260827100000_add_anywhere_door_safety_state', 'migration.sql')
 
 function readCandidate() {
-  return readFileSync(candidatePath, 'utf8')
+  // Reproducible test fixture, not a recovered production deployment artifact.
+  // Keep the tracked migrations unchanged and in their migration-chain order.
+  // The old ignored tmp SQL file is unavailable on a clean checkout.
+  return [socialPostsMigrationPath, safetyStateMigrationPath]
+    .map((migrationPath) => readFileSync(migrationPath, 'utf8').replace(/\r\n/g, '\n').trimEnd())
+    .join('\n\n') + '\n'
 }
+
+test('incremental candidate fixture follows the tracked migration order without an ignored artifact', () => {
+  const sql = readCandidate()
+  assert.deepEqual(inspectMigrationSql('20260827100000_reproducible_candidate_fixture', sql).findings, [])
+  const createLog = sql.indexOf('CREATE TABLE `SocialSyncLog`')
+  const extendLog = sql.indexOf('ALTER TABLE `SocialSyncLog`')
+  const createState = sql.indexOf('CREATE TABLE `SocialSyncState`')
+  assert.ok(createLog >= 0 && extendLog > createLog && createState > extendLog)
+})
 
 test('Anywhere Door migrations are MySQL-safe and include the persistent safety state', () => {
   const socialPostsMigration = readFileSync(socialPostsMigrationPath, 'utf8')
@@ -58,9 +71,9 @@ test('production incremental candidate includes current safety state and log fie
   ]) {
     assert.match(sql, new RegExp('`' + column + '`'))
   }
-  assert.match(sql, /UNIQUE INDEX `SocialSyncState_platform_target_key`\(`platform`, `target`\)/)
-  assert.match(sql, /INDEX `SocialSyncState_nextAllowedSyncAt_idx`\(`nextAllowedSyncAt`\)/)
-  assert.match(sql, /INDEX `SocialSyncState_lastSuccessfulSyncAt_idx`\(`lastSuccessfulSyncAt`\)/)
+  assert.match(sql, /UNIQUE INDEX `SocialSyncState_platform_target_key`\s*\(`platform`,\s*`target`\)/)
+  assert.match(sql, /INDEX `SocialSyncState_nextAllowedSyncAt_idx`\s*\(`nextAllowedSyncAt`\)/)
+  assert.match(sql, /INDEX `SocialSyncState_lastSuccessfulSyncAt_idx`\s*\(`lastSuccessfulSyncAt`\)/)
 })
 
 test('production incremental candidate preserves MySQL and User FK compatibility', () => {

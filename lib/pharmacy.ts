@@ -16,6 +16,7 @@ import { awardRegistrationFee, consumeRegistrationFee } from '@/lib/registration
 import { parseBeijingDateTime } from '@/lib/registration-availability'
 import { resolveVisibleAngelGiftCollection, type AngelGiftVisibleBadge } from '@/lib/angel-gift-collection'
 import { advancePharmacyPityCount, parsePharmacyDrawCount, selectPharmacyPityCandidates, shouldUsePharmacyPity, type PharmacyDrawCount } from '@/lib/pharmacy-pity'
+import { planPharmacyRecycleAll } from '@/lib/pharmacy-recycle'
 
 export const ANGEL_GIFT_MODULE_NAME = '天使的礼物'
 export const ANGEL_GIFT_SUBTITLE = '有些药，不写在处方上。'
@@ -695,27 +696,21 @@ export async function recyclePharmacyDuplicates(input: { userId: string; campaig
     const rewardAmount = campaign.duplicateRecycleReward
     if (!requiredCount || !rewardAmount) throw new PharmacyError('RECYCLE_DISABLED', '当前主题未配置余药回收规则')
 
-    const inventory = await tx.pharmacyDuplicateInventory.findMany({ where: { userId: input.userId, campaignId: campaign.id, quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
-    const beforeQuantity = inventory.reduce((total, row) => total + row.quantity, 0)
-    if (beforeQuantity < requiredCount) throw new PharmacyError('DUPLICATE_INSUFFICIENT', `还差 ${requiredCount - beforeQuantity} 份余药`, 409, { current: beforeQuantity, required: requiredCount })
-    const afterQuantity = beforeQuantity - requiredCount
+    const inventory = await tx.pharmacyDuplicateInventory.findMany({ where: { userId: input.userId, campaignId: campaign.id, quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, sourceBadgeId: true, quantity: true } })
+    const plan = planPharmacyRecycleAll(inventory, requiredCount, rewardAmount, 1)
+    if (plan.recyclableCount < requiredCount) throw new PharmacyError('DUPLICATE_INSUFFICIENT', `还差 ${requiredCount - plan.totalQuantity} 份余药`, 409, { current: plan.totalQuantity, required: requiredCount })
     const recycleId = randomUUID()
-    let remaining = requiredCount
-    for (const row of inventory) {
-      if (remaining <= 0) break
-      const take = Math.min(row.quantity, remaining)
-      const changed = await tx.pharmacyDuplicateInventory.updateMany({ where: { id: row.id, quantity: { gte: take } }, data: { quantity: { decrement: take } } })
+    for (const allocation of plan.allocations) {
+      const changed = await tx.pharmacyDuplicateInventory.updateMany({ where: { id: allocation.inventoryId, userId: input.userId, campaignId: campaign.id, quantity: { gte: allocation.quantity } }, data: { quantity: { decrement: allocation.quantity } } })
       if (changed.count !== 1) throw new PharmacyError('DUPLICATE_INSUFFICIENT', '余药库存已发生变化，请刷新后重试', 409)
-      remaining -= take
     }
-    if (remaining !== 0) throw new PharmacyError('DUPLICATE_INSUFFICIENT', '余药库存已发生变化，请刷新后重试', 409)
 
     await tx.pharmacyRecycleLog.create({
-      data: { id: recycleId, userId: input.userId, campaignId: campaign.id, idempotencyKey, campaignTitle: campaign.title, requiredCount, rewardAmount, beforeQuantity, afterQuantity, balanceBefore: lockedUser.points, balanceAfter: lockedUser.points + rewardAmount, createdAt: now },
+      data: { id: recycleId, userId: input.userId, campaignId: campaign.id, idempotencyKey, campaignTitle: campaign.title, requiredCount: plan.recyclableCount, rewardAmount: plan.rewardAmount, beforeQuantity: plan.totalQuantity, afterQuantity: plan.remainingQuantity, balanceBefore: lockedUser.points, balanceAfter: lockedUser.points + plan.rewardAmount, createdAt: now },
     })
     const awarded = await awardRegistrationFee(tx, {
       userId: input.userId,
-      requestedAmount: rewardAmount,
+      requestedAmount: plan.rewardAmount,
       action: 'PHARMACY_DUPLICATE_RECYCLE',
       reason: `「${campaign.title}」药房已回收 ${requiredCount} 份余药`,
       businessKey: `pharmacy:recycle:${recycleId}:reward`,
@@ -734,6 +729,111 @@ export async function recyclePharmacyDuplicates(input: { userId: string; campaig
     duplicateTotal,
     duplicateRequired: outcome.existing.requiredCount,
   }
+}
+
+export type PharmacyRecycleAllResult = {
+  ok: true
+  duplicateRequest: boolean
+  campaignId: string
+  recycledCount: number
+  recycledTypeCount: number | null
+  rewardAmount: number
+  balance: number
+  duplicateTotal: number
+}
+
+/** Recycle every complete reward bundle available in the current campaign. */
+export async function recycleAllPharmacyDuplicates(input: { userId: string; idempotencyKey: string; now?: Date }): Promise<PharmacyRecycleAllResult> {
+  const rawIdempotencyKey = input.idempotencyKey.trim()
+  const idempotencyKey = `all:${rawIdempotencyKey}`
+  if (!rawIdempotencyKey || idempotencyKey.length > 191) throw new PharmacyError('IDEMPOTENCY_KEY_INVALID', '回收请求标识不正确')
+  const now = input.now || new Date()
+
+  const outcome = await prisma.$transaction(async (tx) => {
+    // Draw, single-recycle and batch-recycle paths all lock this row first.
+    // That serializes inventory changes for one user across tabs and retries.
+    const lockedUser = await lockUser(tx, input.userId)
+    const existing = await tx.pharmacyRecycleLog.findUnique({ where: { userId_idempotencyKey: { userId: input.userId, idempotencyKey } } })
+    if (existing) {
+      return {
+        campaignId: existing.campaignId,
+        duplicateRequest: true,
+        recycledCount: existing.requiredCount,
+        recycledTypeCount: null,
+        rewardAmount: existing.rewardAmount,
+        balance: existing.balanceAfter,
+      }
+    }
+
+    const activeCampaignId = await findActivePharmacyCampaignId(tx, now)
+    if (!activeCampaignId) throw new PharmacyError('CAMPAIGN_NOT_ACTIVE', '当前没有可回收的本期药柜', 409)
+    await lockCampaign(tx, activeCampaignId)
+    const campaign = await tx.pharmacyCampaign.findUnique({ where: { id: activeCampaignId } })
+    if (!campaign) throw new PharmacyError('CAMPAIGN_NOT_FOUND', '当前主题不存在', 404)
+    assertCampaignAllowsRecycle(campaign, now)
+    assertCampaignIsCurrent(campaign.id, await findActivePharmacyCampaignId(tx, now))
+
+    const requiredCount = campaign.duplicateRecycleRequired
+    const rewardPerBatch = campaign.duplicateRecycleReward
+    if (!requiredCount || !rewardPerBatch) throw new PharmacyError('RECYCLE_DISABLED', '当前主题未配置余药回收规则')
+
+    const inventory = await tx.pharmacyDuplicateInventory.findMany({
+      where: { userId: input.userId, campaignId: campaign.id, quantity: { gt: 0 } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, sourceBadgeId: true, quantity: true },
+    })
+    const plan = planPharmacyRecycleAll(inventory, requiredCount, rewardPerBatch)
+    if (plan.recyclableCount === 0) {
+      return { campaignId: campaign.id, duplicateRequest: false, recycledCount: 0, recycledTypeCount: 0, rewardAmount: 0, balance: lockedUser.points }
+    }
+
+    for (const allocation of plan.allocations) {
+      const changed = await tx.pharmacyDuplicateInventory.updateMany({
+        where: { id: allocation.inventoryId, userId: input.userId, campaignId: campaign.id, quantity: { gte: allocation.quantity } },
+        data: { quantity: { decrement: allocation.quantity } },
+      })
+      if (changed.count !== 1) throw new PharmacyError('DUPLICATE_INSUFFICIENT', '余药库存已发生变化，请刷新后重试', 409)
+    }
+
+    const recycleId = randomUUID()
+    await tx.pharmacyRecycleLog.create({
+      data: {
+        id: recycleId,
+        userId: input.userId,
+        campaignId: campaign.id,
+        idempotencyKey,
+        campaignTitle: campaign.title,
+        requiredCount: plan.recyclableCount,
+        rewardAmount: plan.rewardAmount,
+        beforeQuantity: plan.totalQuantity,
+        afterQuantity: plan.remainingQuantity,
+        balanceBefore: lockedUser.points,
+        balanceAfter: lockedUser.points + plan.rewardAmount,
+        createdAt: now,
+      },
+    })
+    const awarded = await awardRegistrationFee(tx, {
+      userId: input.userId,
+      requestedAmount: plan.rewardAmount,
+      action: 'PHARMACY_DUPLICATE_RECYCLE',
+      reason: `「${campaign.title}」药房一键回收 ${plan.recyclableCount} 份余药`,
+      businessKey: `pharmacy:recycle:${recycleId}:reward`,
+      pharmacyRecycleLogId: recycleId,
+      now,
+    })
+    const updated = await tx.pharmacyRecycleLog.update({ where: { id: recycleId }, data: { balanceAfter: awarded.totalPoints } })
+    return {
+      campaignId: campaign.id,
+      duplicateRequest: false,
+      recycledCount: updated.requiredCount,
+      recycledTypeCount: plan.recyclableTypeCount,
+      rewardAmount: updated.rewardAmount,
+      balance: awarded.totalPoints,
+    }
+  }, { timeout: 30000 })
+
+  const duplicateTotal = await getDuplicateTotal(input.userId, outcome.campaignId)
+  return { ok: true, ...outcome, duplicateTotal }
 }
 
 type PublicCampaignRow = Prisma.PharmacyCampaignGetPayload<{
@@ -777,7 +877,7 @@ export type PharmacyPageData = {
     }
   } | null
   upcomingCampaign: PharmacyUpcomingCampaign | null
-  duplicate: { total: number; required: number | null; byBadge: Array<{ badgeId: string; badgeName: string; imageUrl: string | null; quantity: number }> }
+  duplicate: { total: number; required: number | null; recyclableCount: number; recyclableReward: number; recyclableTypeCount: number; byBadge: Array<{ badgeId: string; badgeName: string; imageUrl: string | null; quantity: number }> }
   history: PharmacyHistoryItem[]
   historyHasMore: boolean
 }
@@ -853,16 +953,18 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
   ])
   const campaign = selection.activeCampaign
   const upcomingCampaign = serializeUpcomingCampaign(selection.upcomingCampaign)
-  if (!campaign) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, upcomingCampaign, duplicate: { total: 0, required: null, byBadge: [] }, history: [], historyHasMore: false }
+  if (!campaign) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
   const now = new Date()
   const effectiveStatus = effectivePharmacyCampaignStatus(campaign, now)
   const collection = await resolveVisibleAngelGiftCollection({ userId, campaignId: campaign.id, now })
-  if (!collection) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, upcomingCampaign, duplicate: { total: 0, required: null, byBadge: [] }, history: [], historyHasMore: false }
+  if (!collection) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
   const enabledPrizeRows = campaign.PharmacyPrize.filter((prize) => prize.enabled)
   const prizePoolValid = enabledPrizeRows.length > 0 && enabledPrizeRows.every((prize) => prize.weight > 0 && (prize.type === 'BADGE' ? usableBadge(prize) : prize.type === 'POINTS' && Boolean(prize.rewardAmount && prize.rewardAmount > 0)))
-  const [inventoryRows, history] = await Promise.all([
-    userId ? prisma.pharmacyDuplicateInventory.findMany({ where: { userId, campaignId: campaign.id, quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { sourceBadgeId: true, quantity: true, SourceBadge: { select: { id: true, name: true, iconUrl: true } } } }) : Promise.resolve([]),
+  const [inventoryRows, history, todayCount, totalCount] = await Promise.all([
+    userId ? prisma.pharmacyDuplicateInventory.findMany({ where: { userId, campaignId: campaign.id, quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, sourceBadgeId: true, quantity: true, SourceBadge: { select: { id: true, name: true, iconUrl: true } } } }) : Promise.resolve([]),
     userId ? getPharmacyHistoryPage(userId, campaign.id) : Promise.resolve({ items: [] as PharmacyHistoryItem[], hasMore: false, page: 1, pageSize: PHARMACY_HISTORY_PAGE_SIZE }),
+    userId && campaign.dailyDrawLimit !== null ? prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id, drawAt: { gte: getShanghaiDayRange(now).start, lt: getShanghaiDayRange(now).end } } }) : Promise.resolve(0),
+    userId ? prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id } }) : Promise.resolve(0),
   ])
   const { totalWeight } = campaign.PharmacyPrize.reduce((state, prize) => ({ totalWeight: state.totalWeight + (prize.enabled && prize.weight > 0 ? prize.weight : 0) }), { totalWeight: 0 })
   const visibleCollectionBadgeIds = new Set(collection.visibleBadges.map((badge) => badge.id))
@@ -879,14 +981,19 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
   })
   const cabinet = sortCabinetItems(collection.visibleBadges.map((badge) => ({ id: badge.id, name: badge.name, imageUrl: badge.imageUrl, rarity: badge.rarity, obtainedAt: badge.obtainedAt, locked: false, sortOrder: badge.sortOrder })))
   const duplicateTotal = inventoryRows.reduce((total, row) => total + row.quantity, 0)
+  const recyclePlan = planPharmacyRecycleAll(
+    inventoryRows,
+    campaign.duplicateRecycleEnabled ? campaign.duplicateRecycleRequired : null,
+    campaign.duplicateRecycleEnabled ? campaign.duplicateRecycleReward : null,
+  )
   return {
     moduleName: ANGEL_GIFT_MODULE_NAME,
     moduleSubtitle: ANGEL_GIFT_SUBTITLE,
     isAuthenticated: Boolean(userId),
-    user: userId ? { balance: userRow?.points ?? 0, todayCount: campaign.dailyDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id, drawAt: { gte: getShanghaiDayRange(now).start, lt: getShanghaiDayRange(now).end } } }), totalCount: campaign.totalDrawLimit === null ? 0 : await prisma.pharmacyDraw.count({ where: { userId, campaignId: campaign.id } }) } : null,
+    user: userId ? { balance: userRow?.points ?? 0, todayCount, totalCount } : null,
     campaign: { id: campaign.id, title: campaign.title, subtitle: campaign.subtitle, description: campaign.description, status: effectiveStatus, startsAt: campaign.startsAt?.toISOString() || null, endsAt: campaign.endsAt?.toISOString() || null, drawCost: campaign.drawCost, duplicateRecycleEnabled: campaign.duplicateRecycleEnabled, duplicateRecycleRequired: campaign.duplicateRecycleRequired, duplicateRecycleReward: campaign.duplicateRecycleReward, recycleAfterEndEnabled: campaign.recycleAfterEndEnabled, probabilityPublic: campaign.probabilityPublic, dailyDrawLimit: campaign.dailyDrawLimit, totalDrawLimit: campaign.totalDrawLimit, visualUrl: publicImageUrl(campaign.visualUrl), prizePoolValid, prizes, cabinet, collection: { visibleBadges: collection.visibleBadges, visibleOwnedCount: collection.visibleOwnedCount, visibleTotalCount: collection.visibleTotalCount, collectionComplete: collection.collectionComplete, hiddenRevealedCount: collection.hiddenRevealedCount, collectionRewardRevealed: collection.collectionRewardRevealed } },
     upcomingCampaign,
-    duplicate: { total: duplicateTotal, required: campaign.duplicateRecycleEnabled ? campaign.duplicateRecycleRequired : null, byBadge: inventoryRows.map((row) => ({ badgeId: row.sourceBadgeId, badgeName: row.SourceBadge.name, imageUrl: publicImageUrl(row.SourceBadge.iconUrl), quantity: row.quantity })) },
+    duplicate: { total: duplicateTotal, required: campaign.duplicateRecycleEnabled ? campaign.duplicateRecycleRequired : null, recyclableCount: recyclePlan.recyclableCount, recyclableReward: recyclePlan.rewardAmount, recyclableTypeCount: recyclePlan.recyclableTypeCount, byBadge: inventoryRows.map((row) => ({ badgeId: row.sourceBadgeId, badgeName: row.SourceBadge.name, imageUrl: publicImageUrl(row.SourceBadge.iconUrl), quantity: row.quantity })) },
     history: history.items,
     historyHasMore: history.hasMore,
   }
