@@ -73,6 +73,9 @@ async function assertLotterySchedulesFitActivityEnd(tx: Prisma.TransactionClient
   const conflictingLottery = await tx.lottery.findFirst({
     where: {
       activityId,
+      // V2 uses an evidence cutoff followed by a later draw; its own window
+      // and fairness guards apply above. Keep this legacy constraint for legacy lotteries only.
+      TopicLottery: { is: null },
       status: { in: ['DRAFT', 'SCHEDULED'] },
       drawAt: activityEndAt ? { gte: activityEndAt } : { not: null },
     },
