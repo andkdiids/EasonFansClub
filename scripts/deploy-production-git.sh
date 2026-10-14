@@ -342,6 +342,12 @@ timeout --foreground --signal=TERM --kill-after=30s 2m \
 touch "${release_dir}/.deploy-in-progress"
 release_head="$(git -C "${release_dir}" rev-parse HEAD 2>/dev/null || true)"
 [ "${release_head}" = "${DEPLOY_SHA}" ] || die "Release worktree HEAD does not match DEPLOY_SHA."
+# Persist candidate identity before current/PM2 health probes need the marker.
+# .deploy-in-progress still marks this release as unfinished until verification.
+candidate_sha_tmp="${release_dir}/.deployed-sha.tmp"
+printf '%s\n' "${DEPLOY_SHA}" > "${candidate_sha_tmp}"
+mv -Tf -- "${candidate_sha_tmp}" "${release_dir}/.deployed-sha"
+test -s "${release_dir}/.deployed-sha"
 # Persist this deployment's exact immediate rollback target before current can
 # ever switch. The shared previous-release pointer is only finalized on success
 # and may otherwise refer to an older release after an interrupted deployment.
