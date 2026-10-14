@@ -94,6 +94,10 @@ echo 'AFTER_FETCH_GATE=CONTINUED'
   }
 }
 
+test('exact SHA fetch 单次等待十分钟且保留 TERM 和强制结束预算', () => {
+  assert.match(fetchFunction!, /timeout --foreground --signal=TERM --kill-after=30s 10m/)
+})
+
 test('完整缓存命中时不执行网络 fetch', () => {
   const result = runFetch({ cacheHit: true })
   assert.equal(result.status, 0, result.stderr)

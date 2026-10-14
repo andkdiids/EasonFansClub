@@ -43,7 +43,7 @@ fetch_exact_deploy_commit() {
 
   for attempt in 1 2 3; do
     echo "FETCH_ATTEMPT=${attempt}/3"
-    if timeout --foreground --signal=TERM --kill-after=30s 2m \
+    if timeout --foreground --signal=TERM --kill-after=30s 10m \
       git -C "${repo_dir}" fetch --no-tags --prune origin "${DEPLOY_SHA}"; then
       resolved_sha="$(git -C "${repo_dir}" rev-parse "${DEPLOY_SHA}^{commit}" 2>/dev/null || true)"
       if [ "${resolved_sha}" = "${DEPLOY_SHA}" ]; then
