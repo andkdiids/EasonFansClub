@@ -199,8 +199,18 @@ jobs:
           DEPLOY_SHA: ${{ github.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PM2_APP_NAME: easonfansclub
+          TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE: ${{ vars.TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE }}
         run: |
           set -euo pipefail
+
+          # Only forward a server-side path; approval contents stay on the host.
+          # Restrict shell metacharacters because SSH joins remote arguments.
+          if [[ -n "${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}" ]] &&
+             [[ ! "${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}" =~ ^/[A-Za-z0-9._/-]+\.json$ ||
+                "/${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}/" == *"/../"* ]]; then
+            echo "::error::Lottery approval path must be a safe absolute .json path."
+            exit 1
+          fi
 
           REMOTE_HOST="${SERVER_USER}@${SERVER_HOST}"
           SSH_OPTIONS=(
@@ -227,6 +237,7 @@ jobs:
           set +e
           deploy_output="$(cat scripts/deploy-safety.sh scripts/deploy-production-git.sh \
             | timeout --foreground --signal=TERM --kill-after=7m 35m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
+              env "TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE=${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}" \
               bash -s -- "${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}" "$expected_production_sha")"
           deploy_status=$?
           set -e
