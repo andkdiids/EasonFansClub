@@ -31,7 +31,7 @@ export function prepareWizardProgramPayload(snapshot: WizardSnapshot): WizardPay
   return { program: normalized.value }
 }
 
-/** Lottery-only whitelist. Local files must be explicitly removed or already uploaded; never silently omitted. */
+/** Lottery-only whitelist. Local prize files must be uploaded before they can enter the lottery payload. */
 export function prepareWizardLotteryPayload(snapshot: WizardSnapshot): WizardPayloads['lottery'] {
   const { draft } = restoreWizardSnapshot(snapshot)
   if (!draft.lottery.enabled) return null
@@ -66,12 +66,14 @@ export function prepareWizardActivityPayload(snapshot: WizardSnapshot): WizardAc
   const errors = [...topicWizardErrors(draft, 0), ...topicWizardErrors(draft, 1)]
   if (errors.length) throw new Error(errors.join('；'))
   const cover = snapshot.media.cover
-  if (cover.status !== 'EMPTY' && (cover.status !== 'UPLOADED' || !cover.url || /[?#]/.test(cover.url) || !storedActivityImageUrl(cover.url))) {
-    throw new Error('封面尚未上传；本阶段不接入上传，请移除本地封面后创建草稿')
-  }
+  const uploadedCoverUrl = cover.status === 'UPLOADED' && cover.url && !/[?#]/.test(cover.url)
+    ? storedActivityImageUrl(cover.url)
+    : null
+  if (cover.status === 'UPLOADED' && !uploadedCoverUrl) throw new Error('已上传活动封面地址无效')
   return {
     type: 'TOPIC_ACTIVITY', status: 'DRAFT', title: draft.activity.title.trim(), description: draft.activity.description.trim(),
-    coverUrl: cover.status === 'UPLOADED' ? storedActivityImageUrl(cover.url) : null,
+    // No upload flow is wired in the wizard yet. Local selection is preview-only and cover is optional.
+    coverUrl: uploadedCoverUrl,
     startsAt: iso(draft.activity.startsAt), endsAt: iso(draft.activity.endsAt), participationRule: draft.activity.participationRule?.trim() || null,
     participationMode: 'COMMENT', allowImageAttachments: draft.activity.allowImageAttachments,
     formSchema: { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [], commentPolicy: { gateMode: 'AFTER_FORM_SUBMIT', commentLimit: 'MULTIPLE' } },
@@ -89,7 +91,12 @@ export function prepareWizardPayloads(snapshot: WizardSnapshot): WizardPayloadPr
   const blockers: string[] = []
   function imageUrl(image: WizardImageSnapshot | undefined, label: string, target: 'cover' | 'prize'): string | null {
     if (!image || image.status === 'EMPTY') return null
-    if (image.status !== 'UPLOADED' || !image.url) { blockers.push(`${label}尚未上传或需重新选择`); return null }
+    if (image.status !== 'UPLOADED' || !image.url) {
+      // An activity cover is optional until a real upload flow exists. Prize images remain required
+      // by their current lottery payload contract and are still blocked when only locally selected.
+      if (target !== 'cover' || image.status === 'UPLOADED') blockers.push(`${label}尚未上传或需重新选择`)
+      return null
+    }
     if (/[?#]/.test(image.url) || /^(?:blob|data):/i.test(image.url)) { blockers.push(`${label}不能使用预览或签名地址`); return null }
     if (target === 'cover') {
       const stored = storedActivityImageUrl(image.url)

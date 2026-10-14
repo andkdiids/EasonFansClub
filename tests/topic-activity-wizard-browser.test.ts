@@ -23,6 +23,7 @@ test('wizard actual React UI: draft + V2 + lottery + publish fixture transport a
   })]).process('@tailwind base;@tailwind components;@tailwind utilities;', { from: undefined })).css as string
   const apiRequests: string[] = []
   let savedActivity: Record<string, unknown> | null = null
+  let postedActivity: Record<string, unknown> | null = null
   let savedProgram = createDefaultTopicActivityV2Program()
   let savedLottery = defaultTopicLotteryConfig()
   const server = createServer((req, res) => {
@@ -31,7 +32,8 @@ test('wizard actual React UI: draft + V2 + lottery + publish fixture transport a
       res.setHeader('Content-Type', 'application/json')
       if (req.method === 'POST' && req.url === '/api/admin/activities') {
         let body = ''; req.on('data', (chunk) => { body += chunk }); req.on('end', () => {
-          savedActivity = { ...JSON.parse(body), id: 'fixture-activity-001' }
+          postedActivity = JSON.parse(body)
+          savedActivity = { ...postedActivity, id: 'fixture-activity-001' }
           savedProgram = createDefaultTopicActivityV2Program()
           savedLottery = defaultTopicLotteryConfig()
           setTimeout(() => { res.statusCode = 201; res.end(JSON.stringify({ activity: savedActivity })) }, 100)
@@ -124,13 +126,11 @@ test('wizard actual React UI: draft + V2 + lottery + publish fixture transport a
       assert.equal(await page.getByRole('button', { name: '保存话题 V2 配置', exact: true }).isDisabled(), true)
       assert.equal(await page.getByRole('button', { name: '保存抽奖配置', exact: true }).isDisabled(), true)
       assert.equal(await page.getByRole('button', { name: '发布话题活动', exact: true }).isDisabled(), true)
+      assert.ok((await page.getByRole('region', { name: '话题活动创建向导' }).innerText()).includes('已选择本地图片（仅预览，尚未上传）'))
+      assert.equal(await page.getByRole('button', { name: '创建话题活动草稿', exact: true }).isDisabled(), false)
       await page.getByRole('button', { name: '创建话题活动草稿', exact: true }).click()
-      assert.ok((await page.getByRole('alert').innerText()).includes('封面尚未上传'))
-      assert.deepEqual(apiRequests, [])
-      for (let i = 0; i < 3; i++) await page.getByRole('button', { name: '上一步', exact: true }).click()
-      await page.getByRole('button', { name: '移除活动封面', exact: true }).click()
-      for (let i = 0; i < 3; i++) await page.getByRole('button', { name: '下一步', exact: true }).click()
-      await page.getByRole('button', { name: '创建话题活动草稿', exact: true }).click()
+      assert.equal(await page.getByRole('button', { name: '确认创建草稿', exact: true }).count(), 1)
+      assert.equal(await page.getByRole('button', { name: '取消选择', exact: true }).count(), 1)
       await page.getByRole('button', { name: '取消', exact: true }).click()
       assert.deepEqual(apiRequests, [])
       await page.getByRole('button', { name: '创建话题活动草稿', exact: true }).click()
@@ -138,6 +138,8 @@ test('wizard actual React UI: draft + V2 + lottery + publish fixture transport a
       await page.getByRole('status').filter({ hasText: '活动草稿已创建并回读确认' }).waitFor()
       assert.deepEqual(apiRequests, ['POST /api/admin/activities', 'GET /api/admin/activities/fixture-activity-001'])
       assert.equal(savedActivity?.status, 'DRAFT')
+      assert.equal(postedActivity?.coverUrl, null)
+      assert.doesNotMatch(JSON.stringify(postedActivity), /cover\.png|blob:|data:image|selectionId|fileInfo/)
       assert.equal('program' in savedActivity!, false); assert.equal('lottery' in savedActivity!, false)
       assert.equal(await page.getByRole('button', { name: '恢复本地快照' }).isDisabled(), true)
       await page.getByRole('button', { name: '重新回读草稿', exact: true }).click()
