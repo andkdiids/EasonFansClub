@@ -1,0 +1,190 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { createDefaultTopicActivityV2Program } from '../lib/topic-activity-v2-config'
+import { defaultTopicLotteryConfig } from '../lib/topic-activity-v2-lottery-config'
+import { topicWizardEditInitialState, getTopicWizardEditChanges, saveTopicWizardEdits } from '../components/activities/TopicActivityWizardEdit'
+import type { TopicActivityV2Program } from '../lib/topic-activity-v2-config'
+import type { TopicLotteryConfig } from '../lib/topic-activity-v2-lottery-config'
+
+const activityId = 'activity-edit-fixture'
+const activityRow = () => ({ id: activityId, type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', title: '原活动', description: '原介绍',
+  coverUrl: 'https://ecfc-1306412725.cos.ap-guangzhou.myqcloud.com/activities/fixture/source.webp',
+  startsAt: '2030-10-01T01:00:00.000Z', endsAt: '2030-10-10T10:00:00.000Z', participationRule: '原参与规则',
+  participationMode: 'COMMENT', allowImageAttachments: true })
+
+function fixture(testParticipants = 0) {
+  const program = createDefaultTopicActivityV2Program()
+  program.enabled = true
+  const lottery = defaultTopicLotteryConfig()
+  const activity = activityRow()
+  const initial = topicWizardEditInitialState({ activity }, { activity, program, statistics: { testParticipants } },
+    { config: lottery, configLocked: false, addressEncryptionReady: true }, activityId)
+  return { ...initial, activity, program: initial.baseline.program, lottery: initial.baseline.lottery }
+}
+
+function response(value: unknown, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
+}
+
+function memoryTransport(state: { activity: Record<string, unknown>; program: TopicActivityV2Program; lottery: TopicLotteryConfig }, calls: string[], options: {
+  onGet?: (path: string) => unknown | undefined
+  beforePatch?: (path: string, body: unknown) => Response | Error | undefined
+} = {}) {
+  return async (path: string, init: RequestInit) => {
+    const method = init.method || 'GET'
+    calls.push(`${method} ${path}`)
+    if (method === 'GET') {
+      const override = options.onGet?.(path)
+      if (override !== undefined) return response(override)
+      if (path === `/api/admin/activities/${activityId}`) return response({ activity: state.activity })
+      if (path.endsWith('/v2/lottery')) return response({ config: state.lottery, configLocked: false, addressEncryptionReady: true, draw: null, winners: [] })
+      if (path.endsWith('/v2')) return response({ activity: state.activity, program: state.program, statistics: { testParticipants: 0 } })
+      return response({}, 404)
+    }
+    const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
+    const interception = options.beforePatch?.(path, body)
+    if (interception instanceof Error) throw interception
+    if (interception) return interception
+    if (path === `/api/admin/activities/${activityId}`) {
+      state.activity = { ...state.activity, ...body }
+      return response({ activity: state.activity })
+    }
+    if (path.endsWith('/v2/lottery')) {
+      state.lottery = body.config as TopicLotteryConfig
+      return response({ config: state.lottery })
+    }
+    if (path.endsWith('/v2')) {
+      state.program = body.program as TopicActivityV2Program
+      return response({ program: state.program })
+    }
+    return response({}, 404)
+  }
+}
+
+test('EDIT hydrates server activity, V2 test, lottery and existing cover without losing IDs', () => {
+  const value = fixture()
+  value.program.entries = [{ id: 'stable-task-id', platformKey: 'weibo', platformName: '微博', title: '分享', instructions: '发布', materialRequirement: '',
+    minImages: 1, maxImages: 2, points: 7, enabled: true, sortOrder: 4, startsAt: null, endsAt: null, allowResubmit: true }]
+  const next = topicWizardEditInitialState({ activity: value.activity }, { activity: value.activity, program: value.program, statistics: { testParticipants: 0 } },
+    { config: value.lottery, configLocked: false, addressEncryptionReady: true }, activityId)
+  assert.equal(next.draft.activity.title, '原活动')
+  assert.equal(next.draft.activity.startsAt, '2030-10-01T09:00')
+  assert.equal(next.media.cover.status, 'UPLOADED')
+  assert.equal(next.draft.program.entries[0].id, 'stable-task-id')
+  assert.equal(next.draft.identity.platformTaskIds.weibo, 'stable-task-id')
+})
+
+test('unchanged EDIT submits no write and does not normalize existing fields', () => {
+  const value = fixture()
+  const changes = getTopicWizardEditChanges(value.baseline, value.draft, value.media)
+  assert.deepEqual(changes.activityPatch, {})
+  assert.equal(changes.programChanged, false)
+  assert.equal(changes.lotteryChanged, false)
+  const calls: string[] = []
+  return saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    transport: memoryTransport({ activity: value.activity, program: value.program, lottery: value.lottery }, calls) }).then((result) => {
+      assert.equal(result.status, 'NO_CHANGES')
+      assert.deepEqual(calls, [])
+    })
+})
+
+test('EDIT patches only changed activity fields, preserves status and unrelated concurrent data', async () => {
+  const value = fixture()
+  value.draft.activity.description = '新介绍'
+  const state = { activity: { ...value.activity, title: '另一管理员的标题' }, program: value.program, lottery: value.lottery }
+  const calls: string[] = []
+  const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    transport: memoryTransport(state, calls) })
+  assert.equal(result.status, 'SAVED')
+  assert.deepEqual(calls, [
+    `GET /api/admin/activities/${activityId}`,
+    `PATCH /api/admin/activities/${activityId}`,
+    `GET /api/admin/activities/${activityId}`,
+  ])
+  assert.equal(state.activity.description, '新介绍')
+  assert.equal(state.activity.title, '另一管理员的标题')
+  assert.equal(state.activity.status, 'PUBLISHED')
+  assert.equal(result.baseline.activity.title, '另一管理员的标题')
+})
+
+test('same-field concurrent activity edit conflicts before PATCH', async () => {
+  const value = fixture()
+  value.draft.activity.title = '我的标题'
+  const state = { activity: { ...value.activity, title: '并发新标题' }, program: value.program, lottery: value.lottery }
+  const calls: string[] = []
+  const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    transport: memoryTransport(state, calls) })
+  assert.equal(result.status, 'CONFLICT')
+  assert.equal(calls.some((call) => call.startsWith('PATCH ')), false)
+})
+
+test('program-only EDIT preserves test identifiers and does not PATCH activity or lottery', async () => {
+  const value = fixture()
+  value.draft.program.test.title = '新测试标题'
+  const state = { activity: value.activity, program: value.program, lottery: value.lottery }
+  const calls: string[] = []
+  const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    transport: memoryTransport(state, calls) })
+  assert.equal(result.status, 'SAVED')
+  assert.equal(state.program.test.id, value.baseline.program.test.id)
+  assert.equal(calls.filter((call) => call.startsWith('PATCH ')).length, 1)
+  assert.ok(calls.every((call) => !call.startsWith(`PATCH /api/admin/activities/${activityId}`) || call.includes('/v2')))
+  assert.equal(calls.some((call) => call.includes('/v2/lottery')), false)
+})
+
+test('lottery-only EDIT checks live lock/encryption and stops when lock appeared after initial read', async () => {
+  const value = fixture()
+  value.draft.lottery.description = '更新说明'
+  const calls: string[] = []
+  const transport = memoryTransport({ activity: value.activity, program: value.program, lottery: value.lottery }, calls, {
+    onGet(path) { return path.endsWith('/v2/lottery') ? { config: value.lottery, configLocked: true, addressEncryptionReady: true, draw: null, winners: [] } : undefined },
+  })
+  const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media, transport })
+  assert.equal(result.status, 'BLOCKED')
+  assert.equal(calls.some((call) => call.startsWith('PATCH ')), false)
+})
+
+test('existing test records require a higher version before changing question content', async () => {
+  const value = fixture(3)
+  const testConfig = value.draft.program.test
+  testConfig.enabled = true; testConfig.title = '知识测试'
+  testConfig.results = [{ id: 'result-stable', title: '正确', description: '结果', scoreMin: 0, scoreMax: 1 }]
+  testConfig.questions = [{ id: 'question-stable', prompt: '原题', points: 1, correctOptionId: 'option-a', options: [{ id: 'option-a', label: 'A' }, { id: 'option-b', label: 'B' }] }]
+  value.draft.program.test = structuredClone(testConfig)
+  value.baseline.program.test = structuredClone(testConfig)
+  value.draft.program.test.questions[0].prompt = '改题'
+  const calls: string[] = []
+  const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    transport: memoryTransport({ activity: value.activity, program: value.program, lottery: value.lottery }, calls) })
+  assert.equal(result.status, 'BLOCKED')
+  assert.match(result.message, /递增版本/)
+  assert.equal(calls.length, 0)
+})
+
+test('unknown PATCH result is read-only on retry and never resubmits', async () => {
+  const value = fixture()
+  value.draft.activity.title = '新标题'
+  const state = { activity: value.activity, program: value.program, lottery: value.lottery }
+  const calls: string[] = []
+  const transport = memoryTransport(state, calls, { beforePatch: () => new Error('connection lost after request') })
+  const first = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media, transport })
+  assert.equal(first.status, 'UNKNOWN')
+  assert.ok(first.pendingVerification)
+  const beforeRetry = calls.filter((call) => call.startsWith('PATCH')).length
+  const second = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    pendingVerification: first.pendingVerification, transport })
+  assert.equal(second.status, 'UNKNOWN')
+  assert.equal(calls.filter((call) => call.startsWith('PATCH')).length, beforeRetry)
+})
+
+test('wrong activity ID and cancelled activity are blocked without transport', async () => {
+  const value = fixture()
+  const calls: string[] = []
+  const transport = memoryTransport({ activity: value.activity, program: value.program, lottery: value.lottery }, calls)
+  const wrong = await saveTopicWizardEdits({ activityId: 'other-activity', baseline: value.baseline, draft: value.draft, media: value.media, transport })
+  assert.equal(wrong.status, 'BLOCKED')
+  const cancelled = { ...value.baseline, activity: { ...value.baseline.activity, status: 'CANCELLED' } }
+  const result = await saveTopicWizardEdits({ activityId, baseline: cancelled, draft: value.draft, media: value.media, transport })
+  assert.equal(result.status, 'BLOCKED')
+  assert.deepEqual(calls, [])
+})

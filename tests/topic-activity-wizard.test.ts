@@ -84,34 +84,34 @@ test('wizard unknown or deselected source cannot pass final checks', () => {
 for (const count of [0, -1, 1.5, 1001, Number.NaN]) test(`wizard rejects invalid prize quantity ${count}`, () => {
   const draft = validDraft()
   draft.lottery.prizes[0].quantity = count
-  assert.ok(topicWizardErrors(draft, 2).some((error) => error.includes('奖品数量')))
+  assert.ok(topicWizardErrors(draft, 3).some((error) => error.includes('奖品数量')))
 })
 test('wizard total inventory limit preserved', () => {
   const draft = validDraft()
   draft.lottery.prizes[0].quantity = 1000
   draft.lottery.prizes.push({ ...draft.lottery.prizes[0], id: 'two', quantity: 1 })
-  assert.ok(topicWizardErrors(draft, 2).includes('奖品总数不能超过 1000 件'))
+  assert.ok(topicWizardErrors(draft, 3).includes('奖品总数不能超过 1000 件'))
 })
 test('wizard rejects wrong activity, draw and address time relationships', () => {
   const draft = validDraft()
   draft.activity.startsAt = '2030-10-12T09:00'
   draft.lottery.drawAt = '2030-10-09T18:00'
   draft.lottery.addressDeadline = '2030-10-09T18:00'
-  assert.equal(topicWizardErrors(draft, 3).filter((error) => error.includes('时间') || error.includes('截止')).length, 3)
+  assert.equal(topicWizardErrors(draft, 4).filter((error) => error.includes('时间') || error.includes('截止')).length, 3)
 })
 test('wizard screenshot bounds and whole-number point rewards checked', () => {
   const draft = validDraft()
   draft.program.entries[0].maxImages = 0
   draft.program.entries[0].points = -1
-  assert.equal(topicWizardErrors(draft, 3).length, 2)
+  assert.equal(topicWizardErrors(draft, 4).length, 2)
 })
 test('wizard guards missing required fields and badge selection', () => {
   const draft = createTopicWizardDraft()
   draft.program.medal.enabled = true
-  assert.equal(topicWizardErrors(draft, 3).length, 5)
+  assert.equal(topicWizardErrors(draft, 4).length, 5)
 })
-test('wizard delegates base draft transport, with no publish or upload entry point', () => {
-  for (const name of ['TopicActivityWizard.tsx', 'TopicActivityWizardSummary.tsx', 'TopicActivityWizardState.ts']) {
+test('wizard separates UI state from authenticated API and existing upload transport', () => {
+  for (const name of ['TopicActivityWizardSummary.tsx', 'TopicActivityWizardState.ts']) {
     const source = readFileSync(`components/activities/${name}`, 'utf8')
     assert.doesNotMatch(source, /\bfetch\s*\(|XMLHttpRequest|uploadActivityImage|localStorage|sessionStorage|prisma|\/api\//)
   }
@@ -119,9 +119,15 @@ test('wizard delegates base draft transport, with no publish or upload entry poi
   assert.ok(manager.includes('创建话题活动'))
   assert.ok(manager.includes('<TopicActivityWizard'))
   const wizard = readFileSync('components/activities/TopicActivityWizard.tsx', 'utf8')
+  const editor = readFileSync('components/activities/TopicActivityWizardEdit.ts', 'utf8')
   assert.ok(wizard.includes('saveWizardActivityDraft'))
   assert.ok(wizard.includes('创建话题活动草稿'))
-  assert.ok(wizard.includes('刷新会丢失页面会话'))
+  assert.match(wizard, /mode\?:\s*'CREATE'\s*\|\s*'EDIT'/)
+  assert.ok(wizard.includes("const steps = ['活动信息', '参与规则', '测试题', '奖励与抽奖', '检查并保存']"))
+  assert.ok(wizard.includes('uploadActivityImage'))
+  assert.ok(editor.includes("credentials: 'same-origin'"))
+  assert.ok(editor.includes('pendingVerification'))
+  assert.doesNotMatch(editor, /prisma|localStorage|sessionStorage/)
   assert.doesNotMatch(wizard, /模拟发布检查|simulateSave/)
-  assert.doesNotMatch(wizard, /分享抽奖活动|测试版本|海报宽度/)
+  assert.doesNotMatch(wizard, /分享抽奖活动/)
 })

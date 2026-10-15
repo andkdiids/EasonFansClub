@@ -183,5 +183,7 @@ test('publication transport sends only one status PATCH, no config saves or draw
   assert.doesNotMatch(source, /method: '(POST|DELETE|PUT)'|\/draw|\/winners|\/shipment|\/address|uploadActivityImage/)
   const manager = readFileSync('app/admin/activities/ActivityAdminManager.tsx', 'utf8')
   assert.match(manager, /onOpenEditor=\{openWizardEditor\}/)
-  assert.match(manager, /await edit\(activity\)/)
+  assert.match(manager, /setTopicWizardActivityId\(activityId\); setTopicWizardOpen\(true\)/)
+  assert.match(manager, /高级设置/)
+  assert.match(manager, /onClick=\{\(\) => void edit\(activity\)\}/)
 })
