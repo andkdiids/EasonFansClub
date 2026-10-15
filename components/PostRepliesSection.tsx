@@ -181,6 +181,9 @@ export function PostRepliesSection({
   topicReviewFilter = 'ALL',
   initialTopicReviewCounts = null,
   topicAllowImageAttachments = true,
+  topicPlatformTabs = [],
+  topicCommentTab = 'ALL',
+  topicPlatformFilter,
 }: Readonly<{
   postId: string
   initialReplies: ReplyItem[]
@@ -201,6 +204,9 @@ export function PostRepliesSection({
   topicReviewFilter?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
   initialTopicReviewCounts?: TopicReviewCounts | null
   topicAllowImageAttachments?: boolean
+  topicPlatformTabs?: Array<{ platformKey: string; platformName: string }>
+  topicCommentTab?: 'ALL' | 'DISCUSSION' | 'PLATFORM'
+  topicPlatformFilter?: string
 }>) {
   const router = useRouter()
   const pathname = usePathname()
@@ -401,7 +407,7 @@ export function PostRepliesSection({
     setReplyCount(Math.max(initialReplyCount, 0))
   }, [initialReplies, initialMyReplies, initialReplyCount])
   useEffect(() => { setTopicReviewCounts(initialTopicReviewCounts) }, [initialTopicReviewCounts])
-  useEffect(() => { setViewPagination(pagination); reviewSyncRequestRef.current += 1 }, [pagination, topicReviewFilter, sort, direction])
+  useEffect(() => { setViewPagination(pagination); reviewSyncRequestRef.current += 1 }, [pagination, topicReviewFilter, topicCommentTab, topicPlatformFilter, sort, direction])
   useEffect(() => () => { reviewSyncRequestRef.current += 1 }, [postId])
   useEffect(() => {
     const previous = previousCommentViewRef.current
@@ -446,6 +452,8 @@ export function PostRepliesSection({
     try {
       const query = new URLSearchParams({ page: String(viewPagination.page), pageSize: String(viewPagination.pageSize), sort, direction })
       if (topicReviewFilter !== 'ALL') query.set('topicStatus', topicReviewFilter)
+      if (topicCommentTab === 'DISCUSSION') query.set('topicTab', 'discussion')
+      else if (topicCommentTab === 'PLATFORM' && topicPlatformFilter) query.set('topicPlatform', topicPlatformFilter)
       const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/replies?${query}`, { credentials: 'same-origin', cache: 'no-store' })
       const data = await response.json()
       if (requestId !== reviewSyncRequestRef.current) return
@@ -458,18 +466,20 @@ export function PostRepliesSection({
         return [reply, ...flatten(Array.isArray(children) ? children : [])]
       })
       const refreshed = flatten([...(data.pinned ? [data.pinned] : []), ...data.replies])
-      setReplies((current) => {
-        const currentById = new Map(current.map((reply) => [reply.id, reply]))
-        const roots = new Set(refreshed.filter((reply) => !reply.parentId).map((reply) => reply.id))
-        // Keep existing nested branches and visual author metadata when their
-        // root is still on this page. Only replace the authoritative status.
-        const kept = new Set(roots)
-        let changed = true
-        while (changed) { changed = false; for (const reply of current) if (reply.parentId && kept.has(reply.parentId) && !kept.has(reply.id)) { kept.add(reply.id); changed = true } }
-        const freshIds = new Set(refreshed.map((reply) => reply.id))
-        return [...refreshed.map((reply) => currentById.has(reply.id) ? { ...currentById.get(reply.id)!, topicActivitySubmission: reply.topicActivitySubmission } : reply), ...current.filter((reply) => reply.parentId && kept.has(reply.id) && !freshIds.has(reply.id))]
-      })
-      if (Number.isInteger(data.page) && Number.isInteger(data.totalPages)) setViewPagination({ page: data.page, total: data.total, totalPages: data.totalPages, pageSize: data.pageSize })
+      if (topicCommentTab === 'ALL') {
+        setReplies((current) => {
+          const currentById = new Map(current.map((reply) => [reply.id, reply]))
+          const roots = new Set(refreshed.filter((reply) => !reply.parentId).map((reply) => reply.id))
+          // Keep existing nested branches and visual author metadata when their
+          // root is still on this page. Only replace the authoritative status.
+          const kept = new Set(roots)
+          let changed = true
+          while (changed) { changed = false; for (const reply of current) if (reply.parentId && kept.has(reply.parentId) && !kept.has(reply.id)) { kept.add(reply.id); changed = true } }
+          const freshIds = new Set(refreshed.map((reply) => reply.id))
+          return [...refreshed.map((reply) => currentById.has(reply.id) ? { ...currentById.get(reply.id)!, topicActivitySubmission: reply.topicActivitySubmission } : reply), ...current.filter((reply) => reply.parentId && kept.has(reply.id) && !freshIds.has(reply.id))]
+        })
+        if (Number.isInteger(data.page) && Number.isInteger(data.totalPages)) setViewPagination({ page: data.page, total: data.total, totalPages: data.totalPages, pageSize: data.pageSize })
+      }
       setTopicReviewSyncError('')
     } catch {
       if (requestId === reviewSyncRequestRef.current) setTopicReviewSyncError('评论已更新，审核列表同步失败，请重试同步')
@@ -513,6 +523,21 @@ export function PostRepliesSection({
     if (nextFilter === 'ALL') params.delete('topicStatus')
     else params.set('topicStatus', nextFilter)
     params.delete('commentPage')
+    const query = params.toString()
+    navigationReasonRef.current = 'pagination'
+    router.push(`${pathname}${query ? `?${query}` : ''}`, { scroll: false })
+  }
+
+  function changeTopicCommentTab(nextTab: 'ALL' | 'DISCUSSION' | 'PLATFORM', platformKey?: string) {
+    if (!topicActivityId) return
+    if (nextTab === 'PLATFORM' && !topicPlatformTabs.some((tab) => tab.platformKey === platformKey)) return
+    if (nextTab === topicCommentTab && (nextTab !== 'PLATFORM' || platformKey === topicPlatformFilter)) return
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('commentPage')
+    params.delete('topicTab')
+    params.delete('topicPlatform')
+    if (nextTab === 'DISCUSSION') params.set('topicTab', 'discussion')
+    if (nextTab === 'PLATFORM' && platformKey) params.set('topicPlatform', platformKey)
     const query = params.toString()
     navigationReasonRef.current = 'pagination'
     router.push(`${pathname}${query ? `?${query}` : ''}`, { scroll: false })
@@ -1052,6 +1077,13 @@ export function PostRepliesSection({
       </div>
       {topicActivityId && canReviewTopicActivity ? <div role="tablist" aria-label="话题活动评论审核筛选" className="flex flex-wrap gap-2">
         {([['ALL', '全部'], ['PENDING', '待审核'], ['APPROVED', '已通过'], ['REJECTED', '已拒绝'], ['WITHDRAWN', '已撤回']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={topicReviewFilter === value} onClick={() => changeTopicReviewFilter(value)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicReviewFilter === value ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{label}{topicReviewCounts ? `（${topicReviewCountForFilter(topicReviewCounts, value)}）` : ''}</button>)}
+      </div> : null}
+      {topicActivityId ? <div className="overflow-x-auto pb-1">
+        <div role="tablist" aria-label="话题活动评论分区" className="flex min-w-max gap-2">
+          <button type="button" role="tab" aria-selected={topicCommentTab === 'ALL'} onClick={() => changeTopicCommentTab('ALL')} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicCommentTab === 'ALL' ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>全部</button>
+          <button type="button" role="tab" aria-selected={topicCommentTab === 'DISCUSSION'} onClick={() => changeTopicCommentTab('DISCUSSION')} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicCommentTab === 'DISCUSSION' ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>活动讨论</button>
+          {topicPlatformTabs.map((tab) => <button key={tab.platformKey} type="button" role="tab" aria-selected={topicCommentTab === 'PLATFORM' && topicPlatformFilter === tab.platformKey} onClick={() => changeTopicCommentTab('PLATFORM', tab.platformKey)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${topicCommentTab === 'PLATFORM' && topicPlatformFilter === tab.platformKey ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{tab.platformName}</button>)}
+        </div>
       </div> : null}
       {topicReviewSyncError ? <p role="alert">{topicReviewSyncError}<button type="button" onClick={() => void syncReviewCounts()}>重试同步</button></p> : null}
       {hotReplyIds?.length ? (

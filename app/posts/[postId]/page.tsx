@@ -12,6 +12,9 @@ import { PostRepliesSection } from '@/components/PostRepliesSection'
 import { topicReviewFilter, topicReviewCountsFromGroups, topicVisibleReplyAuthor, type TopicReviewCounts } from '@/lib/topic-review-filter'
 import { TopicActivityFormParticipation } from '@/components/activities/TopicActivityFormParticipation'
 import { TopicActivityFormSubmissionEntry } from '@/app/admin/activities/TopicActivityFormSubmissionManager'
+import { TopicActivityV2Panel } from '@/components/activities/TopicActivityV2Panel'
+import { topicActivityPlatformReplyWhere, topicActivityPlatformTabs } from '@/lib/topic-activity-comment-platform'
+import { topicV2SafeRewardSnapshot } from '@/lib/topic-activity-v2-view'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ForumDiscoveryActionBar } from '@/components/ForumDiscoveryActionBar'
@@ -261,6 +264,7 @@ const postCoreSelect = {
     rewardGrantMode: true,
     rewardGrantAt: true,
     rewardBadgeIds: true,
+    topicProgram: true,
     _count: { select: { TopicActivityFormSubmission: true } },
   } },
 } satisfies Prisma.PostSelect
@@ -537,7 +541,8 @@ const replyDetailSelect = {
       Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true } },
     },
   },
-  TopicActivitySubmission: { select: { id: true, activityId: true, userId: true, status: true, rejectReason: true } },
+  TopicActivitySubmission: { select: { id: true, activityId: true, userId: true, status: true, rejectReason: true, rewardEntryId: true, rewardSnapshot: true,
+    TaskImageAssets: { select: { id: true, width: true, height: true, size: true } } } },
 } satisfies Prisma.ReplySelect
 
 async function loadVisibleReplyDescendants(tx: Prisma.TransactionClient, postId: string, rootIds: string[]) {
@@ -575,11 +580,14 @@ async function loadPostReplies(
   requestedPage: number,
   viewerId?: string | null,
   topicActivityId?: string | null,
+  topicPlatformKey?: string | null,
+  topicDiscussionOnly = false,
   topicStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | null,
   canReviewTopicActivity = false,
 ) {
   return prisma.$transaction(async (tx) => {
     const topicSubmissionFilter = topicReviewFilter(topicActivityId, canReviewTopicActivity ? topicStatus : null)
+    const topicPlatformFilter = topicActivityPlatformReplyWhere(topicActivityId, topicPlatformKey, topicDiscussionOnly)
     const topicAuthorFilter = topicActivityId ? topicVisibleReplyAuthor : {}
     const reviewGroups = canReviewTopicActivity && topicActivityId
       ? await tx.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: topicActivityId, Comment: { is: { postId, parentId: null, isDeleted: false, ...topicAuthorFilter } } }, _count: { _all: true } })
@@ -587,14 +595,14 @@ async function loadPostReplies(
     const reviewCounts = reviewGroups ? topicReviewCountsFromGroups(reviewGroups, await tx.reply.count({ where: { postId, parentId: null, isDeleted: false, ...topicAuthorFilter } })) : null
     const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
       tx.reply.findFirst({
-        where: { postId, isDeleted: false, parentId: null, isPinned: true, ...topicSubmissionFilter, ...topicAuthorFilter },
+        where: { postId, isDeleted: false, parentId: null, isPinned: true, ...topicSubmissionFilter, ...topicPlatformFilter, ...topicAuthorFilter },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: replyDetailSelect,
       }),
-      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicAuthorFilter } }),
+      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicPlatformFilter, ...topicAuthorFilter } }),
       viewerId
         ? tx.reply.findMany({
-            where: { postId, authorId: viewerId, isDeleted: false, parentId: null, ...topicAuthorFilter },
+            where: { postId, authorId: viewerId, isDeleted: false, parentId: null, ...topicPlatformFilter, ...topicAuthorFilter },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             select: replyDetailSelect,
           })
@@ -603,7 +611,7 @@ async function loadPostReplies(
     const totalPages = getPostReplyTotalPages(normalTotal)
     const page = clampPostReplyPage(requestedPage, totalPages)
     const normalRoots = await tx.reply.findMany({
-      where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicAuthorFilter },
+      where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicPlatformFilter, ...topicAuthorFilter },
       orderBy: getPostReplyOrderBy(sort, direction),
       skip: getPostReplyOffset(page),
       take: POST_REPLY_PAGE_SIZE,
@@ -671,16 +679,24 @@ async function loadPostReplies(
       : new Map<string, number>()
     const decorate = <T extends (typeof visibleRows)[number]>(reply: T) => {
       const submission = reply.TopicActivitySubmission
-      const visible = submission && submission.activityId === topicActivityId && (viewerId === reply.User.id || canReviewTopicActivity)
+      const canViewPrivate = viewerId === reply.User.id || canReviewTopicActivity
+      const visible = submission && submission.activityId === topicActivityId && (canViewPrivate || Boolean(submission.rewardEntryId))
       const { TopicActivitySubmission: _submission, ...serialized } = reply
+      void _submission
       return {
         ...serialized,
         ...(visible ? {
           topicActivitySubmission: {
             id: submission.id,
             status: submission.status,
-            rejectReason: submission.rejectReason,
+            rejectReason: canViewPrivate ? submission.rejectReason : null,
             alreadyCounted: countedUsers.has(submission.userId),
+            ...(submission.rewardEntryId ? { rewardEntryId: submission.rewardEntryId, rewardSnapshotSafe: topicV2SafeRewardSnapshot(submission.rewardSnapshot) } : {}),
+            ...(canViewPrivate && submission.rewardEntryId && topicActivityId ? { taskAssets: submission.TaskImageAssets.map((asset) => ({
+              assetId: asset.id, width: asset.width, height: asset.height, size: asset.size,
+              previewAccessUrl: `/api/activities/${encodeURIComponent(topicActivityId)}/assets/${encodeURIComponent(asset.id)}/preview`,
+              originalDownloadUrl: `/api/activities/${encodeURIComponent(topicActivityId)}/v2/submissions/${encodeURIComponent(submission.id)}/assets/${encodeURIComponent(asset.id)}/original`,
+            })) } : {}),
             ...(canReviewTopicActivity ? { formSubmissionCount: formSubmissionCountByUser.get(submission.userId) ?? 0 } : {}),
           },
         } : {}),
@@ -824,7 +840,7 @@ async function loadFocusedReplyChain(postId: string, focusId: string) {
   return chain
 }
 
-export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string; topicStatus?: string; formUserId?: string; returnTo?: string }> }>) {
+export default async function PostDetailPage({ params, searchParams }: Readonly<{ params: Promise<{ postId: string }>; searchParams: Promise<{ focus?: string; commentId?: string; replyId?: string; reply?: string; commentSort?: string; direction?: string; sort?: string; commentPage?: string; topicStatus?: string; topicTab?: string; topicPlatform?: string; formUserId?: string; returnTo?: string }> }>) {
   const { postId } = await params
   const query = await searchParams
   const returnTo = normalizePostReturnTo(query.returnTo)
@@ -926,6 +942,12 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const topicActivity = topicActivityBase
     ? { ...topicActivityBase, formSubmissionCount: viewerCanReviewTopicActivity ? topicActivityFormSubmissionCount : undefined }
     : null
+  const topicActivityCommentTabs = topicActivityBase ? topicActivityPlatformTabs(topicActivityBase.topicProgram) : []
+  const topicDiscussionFilter = query.topicTab === 'discussion'
+  const requestedTopicPlatform = query.topicPlatform?.slice(0, 64) || null
+  const topicPlatformFilter = topicDiscussionFilter
+    ? null
+    : topicActivityCommentTabs.some((tab) => tab.platformKey === requestedTopicPlatform) ? requestedTopicPlatform : null
   const topicActivityMode = topicActivity?.participationMode
   const topicActivityHasForm = Boolean(topicActivity && (topicActivityMode === 'FORM' || topicActivityMode === 'BOTH'))
   const topicActivityCoverUrl = topicActivity
@@ -969,6 +991,8 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       requestedCommentPage,
       user?.id,
       postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity.id : null,
+      topicPlatformFilter,
+      topicDiscussionFilter,
       topicStatus,
       viewerCanReviewTopicActivity,
     )
@@ -1387,8 +1411,11 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           />
         </article>
 
-        {topicActivityHasForm && topicActivity ? <TopicActivityFormParticipation activityId={topicActivity.id} activityPostId={post.id} isAuthenticated={Boolean(user)} /> : null}
-        {viewerCanReviewTopicActivity && topicActivity ? <TopicActivityFormSubmissionEntry activityId={topicActivity.id} count={topicActivity.formSubmissionCount ?? topicActivity._count.TopicActivityFormSubmission} userId={formUserId} /> : null}
+        {topicActivity ? <>
+          {topicActivityHasForm ? <TopicActivityFormParticipation activityId={topicActivity.id} activityPostId={post.id} isAuthenticated={Boolean(user)} /> : null}
+          <TopicActivityV2Panel activityId={topicActivity.id} isAuthenticated={Boolean(user)} currentUserId={user?.id} showComments={false} />
+          {viewerCanReviewTopicActivity ? <TopicActivityFormSubmissionEntry activityId={topicActivity.id} count={topicActivity.formSubmissionCount ?? topicActivity._count.TopicActivityFormSubmission} userId={formUserId} /> : null}
+        </> : null}
 
         <CommentSectionBoundary>
           <PostRepliesSection
@@ -1411,6 +1438,9 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             topicReviewFilter={topicStatus || 'ALL'}
             initialTopicReviewCounts={topicReviewCounts}
             topicAllowImageAttachments={postCore.TopicActivity?.allowImageAttachments ?? true}
+            topicPlatformTabs={topicActivityCommentTabs}
+            topicCommentTab={topicDiscussionFilter ? 'DISCUSSION' : topicPlatformFilter ? 'PLATFORM' : 'ALL'}
+            topicPlatformFilter={topicPlatformFilter || undefined}
           />
         </CommentSectionBoundary>
       </main>

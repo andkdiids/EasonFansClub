@@ -1,18 +1,84 @@
 import sharp, { type OverlayOptions } from 'sharp'
 import QRCode from 'qrcode'
-import { readFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { getCosObject } from '@/lib/tencent-cos'
 import { TopicActivityV2Error } from '@/lib/topic-activity-v2'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function escaped(value: unknown) { return String(value || '').replace(/[<>&"']/gu, (character) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[character]!)) }
+const POSTER_WIDTH = 1080
+const POSTER_HEIGHT = 1920
+const POSTER_MARGIN = 96
+let posterFontConfig: Promise<void> | null = null
+
 function wrap(value: unknown, count: number, maximum: number) {
-  const text = Array.from(String(value || '').replace(/\r/gu, ''))
+  const paragraphs = String(value || '').replace(/\r/gu, '').split('\n')
   const result: string[] = []
-  for (let position = 0; position < text.length && result.length < maximum; position += count) result.push(text.slice(position, position + count).join(''))
-  if (text.length > count * maximum) result[result.length - 1] += '…'
+  let truncated = false
+  for (const paragraph of paragraphs) {
+    const text = Array.from(paragraph)
+    if (!text.length && result.length < maximum) { result.push(''); continue }
+    for (let position = 0; position < text.length; position += count) {
+      if (result.length >= maximum) { truncated = true; break }
+      result.push(text.slice(position, position + count).join(''))
+    }
+    if (truncated) break
+  }
+  if (truncated && result.length) result[result.length - 1] += '…'
   return result
+}
+
+function escapeXml(value: string) {
+  return value.replace(/[<>&"']/gu, (character) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[character]!))
+}
+
+async function ensurePosterFontConfig() {
+  if (!posterFontConfig) {
+    posterFontConfig = (async () => {
+      const fontDirectory = path.resolve(process.cwd(), 'public/fonts')
+      const fontFile = path.join(fontDirectory, 'NotoSansSC-VF.ttf')
+      await access(fontFile)
+
+      const configDirectory = path.join(os.tmpdir(), `ecfc-topic-poster-fontconfig-${process.pid}`)
+      const cacheDirectory = path.join(configDirectory, 'cache')
+      await mkdir(cacheDirectory, { recursive: true })
+      const configFile = path.join(configDirectory, 'fonts.conf')
+      const includeCandidates = [
+        process.env.FONTCONFIG_FILE,
+        process.env.FONTCONFIG_PATH ? path.join(process.env.FONTCONFIG_PATH, 'fonts.conf') : null,
+        process.platform === 'win32' ? null : '/etc/fonts/fonts.conf',
+      ].filter((value): value is string => Boolean(value) && path.resolve(value!) !== path.resolve(configFile))
+      const includes: string[] = []
+      for (const candidate of includeCandidates) {
+        try {
+          await access(candidate)
+          if (!includes.includes(path.resolve(candidate))) includes.push(path.resolve(candidate))
+        } catch { /* keep only configuration files that exist on this host */ }
+      }
+      const fontDirectories = [fontDirectory]
+      if (process.platform === 'win32') fontDirectories.push(path.join(process.env.WINDIR || 'C:/Windows', 'Fonts'))
+      else fontDirectories.push('/usr/share/fonts', '/usr/local/share/fonts', path.join(os.homedir(), '.local/share/fonts'))
+      const xml = [
+        '<?xml version="1.0"?>',
+        '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">',
+        '<fontconfig>',
+        ...includes.map((file) => `<include>${escapeXml(file.replace(/\\/gu, '/'))}</include>`),
+        ...fontDirectories.map((directory) => `<dir>${escapeXml(path.resolve(directory).replace(/\\/gu, '/'))}</dir>`),
+        `<cachedir>${escapeXml(cacheDirectory.replace(/\\/gu, '/'))}</cachedir>`,
+        '</fontconfig>',
+      ].join('\n')
+      await writeFile(configFile, xml, 'utf8')
+      process.env.FONTCONFIG_PATH = configDirectory
+      process.env.FONTCONFIG_FILE = configFile
+    })()
+  }
+  return posterFontConfig
+}
+
+function renderLines(lines: string[], x: number, firstBaseline: number, fontSize: number, lineHeight: number, weight: number) {
+  return lines.map((line, index) => `<text x="${x}" y="${firstBaseline + index * lineHeight}" font-size="${fontSize}" font-weight="${weight}">${escaped(line)}</text>`).join('')
 }
 /** Fixed storage namespaces only: no arbitrary HTTP fetch, cookies, or private API calls. */
 async function backgroundBytes(value: string) {
@@ -29,25 +95,41 @@ async function backgroundBytes(value: string) {
 }
 export async function renderTopicV2Poster(snapshotValue: unknown, activityId: string, suppliedBackground?: Buffer) {
   const snapshot = record(snapshotValue), config = record(snapshot.poster)
-  const width = typeof config.width === 'number' ? config.width : 1080
-  const height = typeof config.height === 'number' ? config.height : 1920
-  if (![width, height].every((size) => Number.isInteger(size) && size >= 256 && size <= 4096)) throw new TopicActivityV2Error('POSTER_SIZE_INVALID', '海报尺寸无效', 400)
-  const scale = Math.min(width, height * 0.7)
-  const margin = Math.round(width * 0.08), headingSize = Math.max(12, Math.round(scale * 0.055)), bodySize = Math.max(8, Math.round(scale * 0.03))
-  const headingLines = Math.max(1, Math.min(3, Math.floor(height * 0.15 / (headingSize * 1.5))))
-  const bodyLines = Math.max(1, Math.min(14, Math.floor(height * 0.3 / (bodySize * 1.65))))
-  const heading = wrap(snapshot.title, Math.max(8, Math.floor((width - margin * 2) / headingSize)), headingLines).map((line, index) => '<text x="' + margin + '" y="' + (height * 0.28 + index * headingSize * 1.5) + '" font-size="' + headingSize + '" font-weight="700">' + escaped(line) + '</text>').join('')
-  const body = wrap(snapshot.description, Math.max(10, Math.floor((width - margin * 2) / bodySize)), bodyLines).map((line, index) => '<text x="' + margin + '" y="' + (height * 0.46 + index * bodySize * 1.65) + '" font-size="' + bodySize + '">' + escaped(line) + '</text>').join('')
-  const label = typeof snapshot.score === 'number' ? '得分 ' + snapshot.score + ' / ' + snapshot.maxScore : '我的测试结果'
-  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><rect x="' + margin / 2 + '" y="' + height * 0.12 + '" width="' + (width - margin) + '" height="' + height * 0.75 + '" fill="white" opacity=".92"/><g fill="#142c44" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif"><text x="' + margin + '" y="' + height * 0.19 + '" font-size="' + bodySize + '">' + escaped(snapshot.activityTitle) + '</text>' + heading + body + '<text x="' + margin + '" y="' + height * 0.82 + '" font-size="' + bodySize + '">' + escaped(label) + '</text><text x="' + margin + '" y="' + height * 0.92 + '" font-size="' + bodySize + '">' + escaped(config.showNickname ? snapshot.nickname : '私家E院') + '</text></g></svg>')
+  const width = POSTER_WIDTH, height = POSTER_HEIGHT, margin = POSTER_MARGIN
   const background = suppliedBackground || (typeof config.backgroundUrl === 'string' ? await backgroundBytes(config.backgroundUrl) : typeof snapshot.imageUrl === 'string' ? await backgroundBytes(snapshot.imageUrl) : null)
   if (background && background.length > 20 * 1024 * 1024) throw new TopicActivityV2Error('POSTER_BACKGROUND_TOO_LARGE', '背景图片过大', 400)
-  const canvas = background ? sharp(background, { limitInputPixels: 20_000_000 }).resize(width, height, { fit: 'cover' }) : sharp({ create: { width, height, channels: 4, background: '#e9eff4' } })
+  await ensurePosterFontConfig().catch(() => { throw new TopicActivityV2Error('POSTER_FONT_UNAVAILABLE', '海报中文字体暂不可用，请稍后重试', 503) })
+  const heading = wrap(snapshot.title || '测试结果', 12, 2)
+  const body = wrap(snapshot.description, 22, 9)
+  const activityTitle = wrap(snapshot.activityTitle || snapshot.testTitle || '私家E院话题活动', 22, 2)
+  const score = typeof snapshot.score === 'number' && Number.isFinite(snapshot.score)
+    ? `得分 ${snapshot.score}${typeof snapshot.maxScore === 'number' && Number.isFinite(snapshot.maxScore) ? ` / ${snapshot.maxScore}` : ''}`
+    : ''
+  const showNickname = config.showNickname !== false
+  const nickname = showNickname ? String(snapshot.nickname || '私家E院会员').slice(0, 32) : ''
+  const showQrCode = config.showQrCode === true
+  const footerWidth = showQrCode ? 600 : width - margin * 2
+  const activityTitleBaseline = 210
+  const headingBaseline = activityTitleBaseline + activityTitle.length * 54 + 80
+  const bodyBaseline = headingBaseline + heading.length * 94 + 80
+  const scoreBaseline = bodyBaseline + body.length * 62 + 64
+  const activityTitleSvg = renderLines(activityTitle, margin, activityTitleBaseline, 40, 54, 550)
+  const bodySvg = renderLines(body, margin, bodyBaseline, 40, 62, 450)
+  const svgText = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g font-family="Noto Sans SC, sans-serif" fill="#fff" stroke="#071624" stroke-opacity=".56" stroke-width="4" stroke-linejoin="round" paint-order="stroke">${activityTitleSvg}${renderLines(heading, margin, headingBaseline, 72, 94, 750)}${bodySvg}${score ? `<text x="${margin}" y="${scoreBaseline}" font-size="48" font-weight="650">${escaped(score)}</text>` : ''}${nickname ? `<text x="${margin}" y="1665" font-size="40" font-weight="600" textLength="${footerWidth}" lengthAdjust="spacingAndGlyphs">${escaped(nickname)}</text>` : ''}<text x="${margin}" y="1820" font-size="34" font-weight="600">私家E院 · ECFC</text></g></svg>`
+  const svg = Buffer.from(svgText)
+  const canvas = background
+    ? sharp(background, { limitInputPixels: 20_000_000 }).resize(width, height, { fit: 'cover', position: 'centre' })
+    : sharp({ create: { width, height, channels: 4, background: '#102c48' } })
   const layers: OverlayOptions[] = [{ input: svg, top: 0, left: 0 }]
-  if (config.showQrCode) {
-    const qrSize = Math.round(Math.min(width * 0.14, height * 0.14))
-    const qr = await QRCode.toBuffer('https://ecfc.fans/activities/' + encodeURIComponent(activityId), { width: qrSize, margin: 1 })
-    layers.push({ input: qr, left: width - margin - qrSize, top: Math.round(height * 0.84) })
+  if (showQrCode) {
+    const qrSize = 216
+    const qrPlatePadding = 12
+    const qr = await QRCode.toBuffer('https://ecfc.fans/activities/' + encodeURIComponent(activityId), { width: qrSize, margin: 4, errorCorrectionLevel: 'H' })
+    const plateSize = qrSize + qrPlatePadding * 2
+    const left = width - margin - plateSize
+    const top = 1545
+    layers.push({ input: { create: { width: plateSize, height: plateSize, channels: 4, background: '#ffffff' } }, left, top })
+    layers.push({ input: qr, left: left + qrPlatePadding, top: top + qrPlatePadding })
   }
   return canvas.composite(layers).png().toBuffer()
 }

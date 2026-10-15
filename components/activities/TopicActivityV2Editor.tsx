@@ -5,6 +5,7 @@ import { createDefaultTopicActivityV2Program, readTopicActivityV2Program, type T
 import { TopicActivityV2FixedRewardReview } from '@/components/activities/TopicActivityV2FixedRewardReview'
 import { TopicActivityV2Statistics } from '@/components/activities/TopicActivityV2Statistics'
 import { TopicActivityV2LotteryAdmin } from '@/components/activities/TopicActivityV2LotteryAdmin'
+import { TopicActivityPosterBackgroundUploader } from '@/components/activities/TopicActivityPosterBackgroundUploader'
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-2 text-sm'
 const buttonClass = 'min-h-9 rounded-sm border border-[var(--border)] px-3 text-sm font-bold disabled:opacity-40'
@@ -33,6 +34,7 @@ export function TopicActivityV2Editor({ activityId, disabled = false, onSaved }:
   const [error, setError] = useState(''), [message, setMessage] = useState('')
   const [badges, setBadges] = useState<Array<{ id: string; name: string; iconUrl: string | null }>>([])
   const [postId, setPostId] = useState<string | null>(null)
+  const [posterUploading, setPosterUploading] = useState(false)
   const busy = useRef(false)
   useEffect(() => {
     if (!open) return
@@ -57,7 +59,7 @@ export function TopicActivityV2Editor({ activityId, disabled = false, onSaved }:
     setProgram((current) => ({ ...current, test: { ...current.test, questions: current.test.questions.map((question, position) => position === index ? { ...question, ...value } : question) } }))
   }
   async function save() {
-    if (busy.current || disabled) return
+    if (busy.current || disabled || posterUploading) return
     busy.current = true; setSaving(true); setError(''); setMessage('')
     try {
       const response = await fetch('/api/admin/activities/' + encodeURIComponent(activityId) + '/v2', { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ program }) })
@@ -88,9 +90,9 @@ export function TopicActivityV2Editor({ activityId, disabled = false, onSaved }:
         <button type="button" className={buttonClass} onClick={() => test({ results: [...program.test.results, { id: uid('result'), title: '', description: '', scoreMin: 0, scoreMax: 0 }] })}>+ 添加结果</button><p className="text-xs">知识测试分数区间必须覆盖全部分值且不重叠。趣味测试按权重求和，平分时使用配置中靠前的结果。</p>
         <details className="text-xs"><summary>测试版本</summary><p>{program.test.id} · 版本 {program.test.version}</p><button type="button" className={buttonClass} onClick={() => test({ version: program.test.version + 1 })}>递增版本，保留历史结果</button></details>
       </Group>
-      <Group title="结果海报"><div className="grid gap-2 sm:grid-cols-2"><Field label="宽度" type="number" value={program.test.poster.width} onChange={(value) => test({ poster: { ...program.test.poster, width: Number(value) } })} /><Field label="高度" type="number" value={program.test.poster.height} onChange={(value) => test({ poster: { ...program.test.poster, height: Number(value) } })} /></div><Field label="背景图片（现有公开资源路径）" value={program.test.poster.backgroundUrl || ''} onChange={(value) => test({ poster: { ...program.test.poster, backgroundUrl: value || null } })} /><Toggle label="显示昵称" value={program.test.poster.showNickname} onChange={(value) => test({ poster: { ...program.test.poster, showNickname: value } })} /><Toggle label="显示活动二维码" value={program.test.poster.showQrCode} onChange={(value) => test({ poster: { ...program.test.poster, showQrCode: value } })} /></Group>
+      <Group title="结果海报"><p className="text-sm">PNG 尺寸固定为 1080 × 1920（9:16），网页预览会按比例缩小。</p><TopicActivityPosterBackgroundUploader value={program.test.poster.backgroundUrl} disabled={disabled || saving || loading} onChange={(backgroundUrl) => test({ poster: { ...program.test.poster, backgroundUrl } })} onUploadingChange={setPosterUploading} /><Toggle label="显示昵称" value={program.test.poster.showNickname} onChange={(value) => test({ poster: { ...program.test.poster, showNickname: value } })} /><Toggle label="显示活动二维码" value={program.test.poster.showQrCode} onChange={(value) => test({ poster: { ...program.test.poster, showQrCode: value } })} /></Group>
       {postId ? <a href={'/posts/' + encodeURIComponent(postId) + '?topicStatus=PENDING'} className="inline-block text-sm underline">前往活动主帖评论旁审核任务</a> : <p className="text-sm">活动发布后将沿用现有流程创建关联主帖。</p>}
-      <button type="button" className={buttonClass} onClick={() => void save()} disabled={saving || loading}>{saving ? '保存中…' : '保存活动模块配置'}</button>
+      <button type="button" className={buttonClass} onClick={() => void save()} disabled={saving || loading || posterUploading}>{posterUploading ? '背景上传中…' : saving ? '保存中…' : '保存活动模块配置'}</button>
     </fieldset><TopicActivityV2LotteryAdmin activityId={activityId} disabled={disabled || saving || loading} entries={program.entries.map((entry) => ({ id: entry.id, platformName: entry.platformName, title: entry.title, enabled: entry.enabled, maxImages: entry.maxImages }))} /></>}{error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}{message ? <p role="status" className="text-sm">{message}</p> : null}
       {!loading ? <><TopicActivityV2FixedRewardReview activityId={activityId} disabled={disabled || saving} /><TopicActivityV2Statistics activityId={activityId} /></> : null}
     </div> : null}

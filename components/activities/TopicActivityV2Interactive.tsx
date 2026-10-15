@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TopicActivityV2Poll, TopicActivityV2PublicProgram } from '@/lib/topic-activity-v2-config'
 
@@ -53,6 +54,8 @@ export function TopicActivityV2PollPanel({ activityId, isAuthenticated }: { acti
 }
 
 export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { activityId: string; isAuthenticated: boolean }) {
+  const searchParams = useSearchParams()
+  const requestedAttemptId = searchParams.get('attemptId')
   const [test, setTest] = useState<PublicTest | null>(null)
   const [activityTitle, setActivityTitle] = useState('')
   const [answers, setAnswers] = useState<Record<string, string>>({})
@@ -69,9 +72,14 @@ export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { act
     try {
       const value = await requestJson<{ activity: { title: string }; test: PublicTest }>(base + '/test')
       setTest(value.test); setActivityTitle(value.activity.title); setError('')
-      if (isAuthenticated) setHistory((await requestJson<{ attempts: Attempt[] }>(base + '/attempts')).attempts)
+      if (isAuthenticated) {
+        const attempts = (await requestJson<{ attempts: Attempt[] }>(base + '/attempts')).attempts
+        setHistory(attempts)
+        const selected = requestedAttemptId ? attempts.find((item) => item.id === requestedAttemptId) : null
+        if (selected) { setAttempt(selected); setPosterUrl(null); setPosterBlob(null); requestKey.current = null }
+      }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '测试加载失败') }
-  }, [base, isAuthenticated])
+  }, [base, isAuthenticated, requestedAttemptId])
   useEffect(() => { void load() }, [load])
   useEffect(() => () => { if (posterUrl) URL.revokeObjectURL(posterUrl) }, [posterUrl])
   function showAttempt(value: Attempt | null) { setAttempt(value); setPosterUrl(null); setPosterBlob(null) }
@@ -111,7 +119,7 @@ export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { act
     {!test && !error ? <p>正在加载测试…</p> : null}
     {attempt ? <section className="space-y-4 border border-[var(--border)] p-4"><h2 className="text-xl font-bold">{attempt.resultSnapshot.title}</h2><p className="whitespace-pre-wrap">{attempt.resultSnapshot.description}</p>{typeof attempt.resultSnapshot.score === 'number' ? <p>得分：{attempt.resultSnapshot.score} / {attempt.resultSnapshot.maxScore}</p> : null}
       <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void poster()} disabled={pending} className={buttonClass}>{pending ? '生成中…' : '生成结果海报'}</button>{posterUrl ? <><a href={posterUrl} download="ecfc-activity-result.png" className={buttonClass}>保存 PNG</a><button type="button" onClick={() => void share()} className={buttonClass}>分享结果图片</button></> : null}{test?.allowRetake ? <button type="button" onClick={() => { showAttempt(null); setAnswers({}); setIndex(0); requestKey.current = null }} className={buttonClass}>重新测试</button> : null}</div>
-      {posterUrl ? <div className="space-y-2"><p className="text-sm">微信内可长按图片保存。</p>{/* Blob is an authenticated generated PNG; native img enables WeChat long-press saving. */}<img src={posterUrl} alt="我的测试结果海报" className="h-auto w-full max-w-md" /></div> : null}
+      {posterUrl ? <div className="space-y-2"><p className="text-sm">微信内可长按图片保存。</p>{/* Blob is an authenticated generated PNG; native img enables WeChat long-press saving. */}<img src={posterUrl} alt="我的测试结果海报" className="aspect-[9/16] h-auto w-full max-w-md object-contain" /></div> : null}
       <p className="text-sm">保存海报后，可返回活动选择平台任务，主动分享并提交截图。</p>
     </section> : question ? <section className="space-y-4 border border-[var(--border)] p-4"><p>第 {index + 1} / {test!.questions.length} 题</p><progress max={test!.questions.length} value={index + 1} className="w-full" /><h2 className="text-lg font-bold">{question.prompt}</h2>{question.options.map((option) => <label key={option.id} className="flex min-h-12 items-center gap-3 border border-[var(--border)] p-3"><input type="radio" name={question.id} checked={answers[question.id] === option.id} disabled={pending || !isAuthenticated} onChange={() => setAnswers({ ...answers, [question.id]: option.id })} />{option.label}</label>)}<div className="flex gap-2"><button type="button" onClick={() => setIndex(index - 1)} disabled={index === 0 || pending} className={buttonClass}>上一题</button>{index < test!.questions.length - 1 ? <button type="button" onClick={() => setIndex(index + 1)} disabled={!answers[question.id] || pending} className={buttonClass}>下一题</button> : <button type="button" onClick={() => void submit()} disabled={!isAuthenticated || pending || test!.questions.some((item) => !answers[item.id])} className={buttonClass}>{pending ? '提交中…' : '提交测试'}</button>}</div>{!isAuthenticated ? <Link href="/login" className="underline">请先登录后测试</Link> : null}</section> : null}
     {history.length ? <section className="space-y-2 border-t border-[var(--border)] pt-4"><h2 className="font-bold">我的历史结果</h2>{history.map((item) => <button type="button" key={item.id} onClick={() => showAttempt(item)} className="block text-left text-sm underline">{item.resultSnapshot.title} · {new Date(item.completedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</button>)}</section> : null}
