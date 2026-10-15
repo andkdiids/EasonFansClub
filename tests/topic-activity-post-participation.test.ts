@@ -71,4 +71,3 @@ test('existing activity API continues to expose only the current user result att
   assert.match(runner, /requestedAttemptId\s*\?\s*attempts\.find/u)
   assert.match(runner, /setAttempt\(selected\)/u)
 })
-
