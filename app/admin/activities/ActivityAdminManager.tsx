@@ -174,6 +174,7 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const [editingId, setEditingId] = useState<string | null>(null)
   const [createFormOpen, setCreateFormOpen] = useState(false)
   const [topicWizardOpen, setTopicWizardOpen] = useState(false)
+  const [topicWizardActivityId, setTopicWizardActivityId] = useState<string | null>(null)
   const [form, setForm] = useState<ActivityForm>(emptyForm)
   const [registrationQuestions, setRegistrationQuestions] = useState<ActivityQuestionDraft[]>([])
   const [rewardBadgeId, setRewardBadgeId] = useState('')
@@ -207,7 +208,15 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   const activityFormRef = useRef<HTMLFormElement>(null)
   const activityTitleInputRef = useRef<HTMLInputElement>(null)
   const activityListRef = useRef<HTMLElement>(null)
+  const topicWizardOpenerRef = useRef<HTMLElement | null>(null)
   const managementSectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  useEffect(() => {
+    if (topicWizardOpen) return
+    const opener = topicWizardOpenerRef.current
+    topicWizardOpenerRef.current = null
+    if (opener?.isConnected) opener.focus({ preventScroll: true })
+  }, [topicWizardOpen])
 
   useEffect(() => {
     void fetch('/api/admin/activities/badges', { credentials: 'same-origin', cache: 'no-store' })
@@ -291,7 +300,13 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
     setPreviewOpen(false)
   }
 
+  function rememberTopicWizardOpener() {
+    if (topicWizardOpen) return
+    topicWizardOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  }
+
   async function edit(activity: ActivityView) {
+    rememberTopicWizardOpener()
     setEditingId(activity.id)
     setCreateFormOpen(true)
     setForm(formFromActivity(activity))
@@ -329,11 +344,37 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
   async function openWizardEditor(activityId: string) {
     const response = await fetch(`/api/admin/activities/${encodeURIComponent(activityId)}`, { credentials: 'same-origin', cache: 'no-store' })
     const detail = await response.json().catch(() => null)
-    if (!response.ok || detail?.activity?.id !== activityId || detail.activity.type !== 'TOPIC_ACTIVITY' || detail.activity.status !== 'PUBLISHED') throw new Error('活动编辑入口核验失败')
+    if (!response.ok || detail?.activity?.id !== activityId || detail.activity.type !== 'TOPIC_ACTIVITY' || !['DRAFT', 'PUBLISHED'].includes(detail.activity.status)) throw new Error('活动编辑入口核验失败')
     const activity = detail.activity as ActivityView
     setActivities((current) => current.some((item) => item.id === activityId) ? current.map((item) => item.id === activityId ? activity : item) : [activity, ...current])
-    await edit(activity)
+    setEditingId(null); setCreateFormOpen(false); setTopicWizardActivityId(activityId); setTopicWizardOpen(true)
+  }
+
+  async function refreshWizardActivity(activityId: string) {
+    const response = await fetch(`/api/admin/activities/${encodeURIComponent(activityId)}`, { credentials: 'same-origin', cache: 'no-store' })
+    const detail = await response.json().catch(() => null)
+    if (!response.ok || detail?.activity?.id !== activityId || detail.activity.type !== 'TOPIC_ACTIVITY') throw new Error('活动列表回读失败')
+    const activity = detail.activity as ActivityView
+    setActivities((current) => current.some((item) => item.id === activityId) ? current.map((item) => item.id === activityId ? activity : item) : [activity, ...current])
+  }
+
+  function openSimpleTopicEditor(activity: ActivityView) {
+    if (saving || actionLoading || editingId || createFormOpen) return
+    rememberTopicWizardOpener()
+    setTopicWizardActivityId(activity.id)
+    setTopicWizardOpen(true)
+  }
+
+  function openTopicCreator() {
+    if (saving || editingId || createFormOpen) return
+    rememberTopicWizardOpener()
+    setTopicWizardActivityId(null)
+    setTopicWizardOpen(true)
+  }
+
+  function closeTopicWizard() {
     setTopicWizardOpen(false)
+    setTopicWizardActivityId(null)
   }
 
   function toggleCreateForm() {
@@ -542,14 +583,14 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
           <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">先查看活动列表，需要时再打开创建或编辑表单。</p>
         </div>
         <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => setTopicWizardOpen(true)} disabled={saving || Boolean(editingId) || createFormOpen} aria-expanded={topicWizardOpen} aria-controls="topic-activity-wizard" className="min-h-11 rounded-sm border border-brand-700 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">创建话题活动</button>
+        <button type="button" onClick={openTopicCreator} disabled={saving || Boolean(editingId) || createFormOpen} aria-expanded={topicWizardOpen} aria-controls="topic-activity-wizard" className="min-h-11 rounded-sm border border-brand-700 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50">创建话题活动</button>
         <button type="button" onClick={toggleCreateForm} disabled={saving || Boolean(editingId) || topicWizardOpen} aria-expanded={createFormOpen || Boolean(editingId)} aria-controls="activity-admin-form" className="min-h-11 rounded-full bg-brand-700 px-5 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
           {editingId ? '编辑中' : createFormOpen ? '收起创建' : '创建活动'}
         </button>
         </div>
       </div>
 
-      <div id="topic-activity-wizard"><TopicActivityWizard open={topicWizardOpen} onClose={() => setTopicWizardOpen(false)} badgeOptions={badgeOptions} onOpenEditor={openWizardEditor} /></div>
+      <div id="topic-activity-wizard"><TopicActivityWizard key={topicWizardActivityId || 'create'} open={topicWizardOpen} mode={topicWizardActivityId ? 'EDIT' : 'CREATE'} activityId={topicWizardActivityId} onClose={closeTopicWizard} badgeOptions={badgeOptions} onOpenEditor={openWizardEditor} onActivitySaved={refreshWizardActivity} /></div>
 
       {createFormOpen || editingId ? <form ref={activityFormRef} id="activity-admin-form" noValidate onSubmit={(event) => void save(editingActivity?.status || 'DRAFT', event)} className="scroll-mt-24 rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -636,11 +677,11 @@ export function ActivityAdminManager({ initialActivities }: Readonly<{ initialAc
       {message ? <p role="status" className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">{message}</p> : null}
       {error ? <p role="alert" className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-black text-red-700 dark:bg-red-950/40 dark:text-red-200">{error}</p> : null}
 
-      <section ref={activityListRef} id="activity-list" className="scroll-mt-24 rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7">
+      <section ref={activityListRef} id="activity-list" inert={topicWizardOpen} className={`scroll-mt-24 rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90 sm:p-7 ${topicWizardOpen ? 'opacity-60' : ''}`}>
         <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-black tracking-[0.18em] text-sky-700 dark:text-sky-300">活动列表</p><h2 className="mt-1 text-2xl font-black text-brand-950 dark:text-slate-100">全部活动</h2></div><span className="text-sm font-black text-slate-500">共 {visibleActivities.length} 条</span></div>
         <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_11rem]"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索活动" className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 text-sm font-bold dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'ALL' | ActivityStatusValue | 'ENDED')} className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 text-sm font-bold dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="ALL">全部状态</option><option value="DRAFT">草稿</option><option value="PUBLISHED">已发布</option><option value="ENDED">已结束</option><option value="CANCELLED">已取消</option></select><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as 'ALL' | ActivityTypeValue)} className="min-h-11 rounded-xl border border-sky-100 bg-white px-3 text-sm font-bold dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="ALL">全部类型</option>{activityTypeValues.map((item) => <option key={item} value={item}>{activityTypeLabels[item]}</option>)}</select></div>
         <div className="mt-5 divide-y divide-sky-100 dark:divide-slate-700">
-          {visibleActivities.map((activity) => <article key={activity.id} className="grid gap-4 py-5 md:grid-cols-[minmax(0,1fr)_auto]"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><ActivityStatusBadge activity={activity} /><span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700 dark:bg-slate-800 dark:text-sky-200">{statusLabel(activity.status)}</span><span className="text-xs font-bold text-slate-400">{activityTypeLabels[activity.type]}</span></div><h3 className="mt-3 break-words text-xl font-black text-brand-950 dark:text-slate-100">{activity.title || '未命名活动'}</h3>{activity.subtitle ? <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">{activity.subtitle}</p> : null}<p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{activity.description || '暂无说明'}</p><p className="mt-2 text-xs font-bold text-slate-400">浏览 {activity.viewCount} 次{activity.startsAt ? ` · ${dateInput(activity.startsAt).replace('T', ' ')}` : ''}</p></div><div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-start"><button type="button" onClick={() => void edit(activity)} disabled={saving || actionLoading} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">编辑</button>{activity.type === 'TOPIC_ACTIVITY' ? <>{activity.activityPostId ? <Link href={`/posts/${activity.activityPostId}?topicStatus=PENDING`} target="_blank" className="rounded-full border border-emerald-700 px-4 py-2 text-center text-sm font-black text-emerald-700 dark:text-emerald-300">审核参与评论</Link> : <span className="px-3 py-2 text-xs font-bold text-slate-400">活动主帖待创建</span>}{activity.status !== 'CANCELLED' ? <button type="button" onClick={() => setConfirmAction({ kind: 'reconcile', id: activity.id })} disabled={saving || actionLoading} className="rounded-full border border-amber-600 px-4 py-2 text-sm font-black text-amber-700 disabled:opacity-50 dark:text-amber-300">修复历史参与记录</button> : null}</> : <button type="button" onClick={() => openManagementSection(activity.id, 'registrations')} disabled={saving || actionLoading} className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-black text-emerald-700 disabled:opacity-50 dark:text-emerald-300">报名管理</button>}<button type="button" onClick={() => openManagementSection(activity.id, 'notifications')} disabled={saving || actionLoading} className="rounded-full border border-violet-700 px-4 py-2 text-sm font-black text-violet-700 disabled:opacity-50 dark:text-violet-300">发送通知</button>{activity.status !== 'DRAFT' ? <Link href={`/activities/${activity.id}`} target="_blank" className="rounded-full border border-sky-100 px-4 py-2 text-center text-sm font-black text-slate-600 dark:border-slate-600 dark:text-slate-300">查看前台</Link> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => void updateStatus(activity.id, 'PUBLISHED')} disabled={saving || actionLoading} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">发布</button> : null}{activity.status === 'PUBLISHED' ? <button type="button" onClick={() => void updateStatus(activity.id, 'DRAFT')} disabled={saving || actionLoading} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">撤下</button> : null}{activity.status !== 'CANCELLED' ? <button type="button" onClick={() => setConfirmAction({ kind: 'cancel', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">取消活动</button> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => setConfirmAction({ kind: 'delete', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">删除</button> : null}</div></article>)}
+          {visibleActivities.map((activity) => <article key={activity.id} className="grid gap-4 py-5 md:grid-cols-[minmax(0,1fr)_auto]"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><ActivityStatusBadge activity={activity} /><span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700 dark:bg-slate-800 dark:text-sky-200">{statusLabel(activity.status)}</span><span className="text-xs font-bold text-slate-400">{activityTypeLabels[activity.type]}</span></div><h3 className="mt-3 break-words text-xl font-black text-brand-950 dark:text-slate-100">{activity.title || '未命名活动'}</h3>{activity.subtitle ? <p className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">{activity.subtitle}</p> : null}<p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">{activity.description || '暂无说明'}</p><p className="mt-2 text-xs font-bold text-slate-400">浏览 {activity.viewCount} 次{activity.startsAt ? ` · ${dateInput(activity.startsAt).replace('T', ' ')}` : ''}</p></div><div className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:items-start"><button type="button" onClick={() => activity.type === 'TOPIC_ACTIVITY' ? openSimpleTopicEditor(activity) : void edit(activity)} disabled={saving || actionLoading || Boolean(editingId) || createFormOpen} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">编辑</button>{activity.type === 'TOPIC_ACTIVITY' ? <><button type="button" onClick={() => void edit(activity)} disabled={saving || actionLoading || Boolean(editingId) || createFormOpen} className="rounded-full border border-slate-300 px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300">高级设置</button>{activity.activityPostId ? <Link href={`/posts/${activity.activityPostId}?topicStatus=PENDING`} target="_blank" className="rounded-full border border-emerald-700 px-4 py-2 text-center text-sm font-black text-emerald-700 dark:text-emerald-300">审核参与评论</Link> : <span className="px-3 py-2 text-xs font-bold text-slate-400">活动主帖待创建</span>}{activity.status !== 'CANCELLED' ? <button type="button" onClick={() => setConfirmAction({ kind: 'reconcile', id: activity.id })} disabled={saving || actionLoading} className="rounded-full border border-amber-600 px-4 py-2 text-sm font-black text-amber-700 disabled:opacity-50 dark:text-amber-300">修复历史参与记录</button> : null}</> : <button type="button" onClick={() => openManagementSection(activity.id, 'registrations')} disabled={saving || actionLoading} className="rounded-full border border-emerald-700 px-4 py-2 text-sm font-black text-emerald-700 disabled:opacity-50 dark:text-emerald-300">报名管理</button>}<button type="button" onClick={() => openManagementSection(activity.id, 'notifications')} disabled={saving || actionLoading} className="rounded-full border border-violet-700 px-4 py-2 text-sm font-black text-violet-700 disabled:opacity-50 dark:text-violet-300">发送通知</button>{activity.status !== 'DRAFT' ? <Link href={`/activities/${activity.id}`} target="_blank" className="rounded-full border border-sky-100 px-4 py-2 text-center text-sm font-black text-slate-600 dark:border-slate-600 dark:text-slate-300">查看前台</Link> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => void updateStatus(activity.id, 'PUBLISHED')} disabled={saving || actionLoading} className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">发布</button> : null}{activity.status === 'PUBLISHED' ? <button type="button" onClick={() => void updateStatus(activity.id, 'DRAFT')} disabled={saving || actionLoading} className="rounded-full bg-sky-50 px-4 py-2 text-sm font-black text-brand-700 disabled:opacity-50 dark:bg-slate-800 dark:text-sky-200">撤下</button> : null}{activity.status !== 'CANCELLED' ? <button type="button" onClick={() => setConfirmAction({ kind: 'cancel', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">取消活动</button> : null}{activity.status === 'DRAFT' ? <button type="button" onClick={() => setConfirmAction({ kind: 'delete', id: activity.id })} disabled={saving || actionLoading} className="rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50 dark:bg-red-950/40 dark:text-red-200">删除</button> : null}</div></article>)}
           {!visibleActivities.length ? <p className="py-8 text-center text-sm font-bold text-slate-500">暂无符合条件的活动。</p> : null}
         </div>
       </section>

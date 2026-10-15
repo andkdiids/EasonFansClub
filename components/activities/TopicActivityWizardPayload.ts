@@ -25,7 +25,7 @@ const iso = (value: string | null) => value ? parseActivityDateInput(value)?.toI
 /** Program-only contract adapter. Lottery and image state never enter the V2 request. */
 export function prepareWizardProgramPayload(snapshot: WizardSnapshot): WizardPayloads['program'] {
   const { draft } = restoreWizardSnapshot(snapshot)
-  if (draft.activity.type !== 'TOPIC_ACTIVITY' || draft.activity.participationMode !== 'COMMENT') throw new Error('仅支持话题活动的 V2 配置')
+  if (draft.activity.type !== 'TOPIC_ACTIVITY') throw new Error('仅支持话题活动的 V2 配置')
   const normalized = normalizeTopicActivityV2Program(draft.program)
   if (!normalized.valid) throw new Error(normalized.message)
   return { program: normalized.value }
@@ -72,7 +72,7 @@ export function prepareWizardActivityPayload(snapshot: WizardSnapshot): WizardAc
   if (cover.status === 'UPLOADED' && !uploadedCoverUrl) throw new Error('已上传活动封面地址无效')
   return {
     type: 'TOPIC_ACTIVITY', status: 'DRAFT', title: draft.activity.title.trim(), description: draft.activity.description.trim(),
-    // No upload flow is wired in the wizard yet. Local selection is preview-only and cover is optional.
+    // Only a URL returned by the existing upload flow is persisted; local previews remain optional UI state.
     coverUrl: uploadedCoverUrl,
     startsAt: iso(draft.activity.startsAt), endsAt: iso(draft.activity.endsAt), participationRule: draft.activity.participationRule?.trim() || null,
     participationMode: 'COMMENT', allowImageAttachments: draft.activity.allowImageAttachments,
@@ -86,7 +86,7 @@ export function prepareWizardPayloads(snapshot: WizardSnapshot): WizardPayloadPr
   const { draft } = restoreWizardSnapshot(snapshot)
   if (draft.activity.type !== 'TOPIC_ACTIVITY' || draft.activity.participationMode !== 'COMMENT') throw new Error('该向导仅支持创建评论审核型话题活动')
   if (draft.lottery.enabled && !draft.program.enabled) throw new Error('必须先启用话题模块，抽奖不能独立于话题参与')
-  const errors = topicWizardErrors(draft, 3)
+  const errors = topicWizardErrors(draft, 4)
   if (errors.length) throw new Error(errors.join('；'))
   const blockers: string[] = []
   function imageUrl(image: WizardImageSnapshot | undefined, label: string, target: 'cover' | 'prize'): string | null {

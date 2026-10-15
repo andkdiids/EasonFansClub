@@ -17,7 +17,7 @@ export function createWizardSnapshot(draft: TopicActivityWizardDraft, media: Wiz
     draft: structuredClone(draft), media: snapshotWizardMedia(media), step })
 }
 export function restoreWizardSnapshot(snapshot: WizardSnapshot) {
-  if (snapshot.version !== 1 || snapshot.draftId !== snapshot.draft.identity.draftId || !Number.isInteger(snapshot.step) || snapshot.step < 0 || snapshot.step > 3) throw new Error('快照不属于有效的向导草稿')
+  if (snapshot.version !== 1 || snapshot.draftId !== snapshot.draft.identity.draftId || !Number.isInteger(snapshot.step) || snapshot.step < 0 || snapshot.step > 4) throw new Error('快照不属于有效的向导草稿')
   return { draft: structuredClone(snapshot.draft), media: restoreWizardMedia(snapshot.media), step: snapshot.step }
 }
 
