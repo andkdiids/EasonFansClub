@@ -25,6 +25,8 @@ export type TopicActivityV2EntryProgress = {
   rewardEntryId: string
   status: TopicActivityV2EntryStatus
   submissionId?: string | null
+  commentId?: string | null
+  rejectReason?: string | null
   granted?: boolean
   submittedAt?: string | null
   reviewedAt?: string | null
@@ -116,7 +118,7 @@ export function normalizeTopicActivityV2Progress(value: unknown): TopicActivityV
     if (!rewardEntryId) continue
     const rawStatus = typeof row.status === 'string' ? row.status : 'NOT_STARTED'
     const status: TopicActivityV2EntryStatus = ['NOT_STARTED', 'PENDING', 'APPROVED', 'REJECTED', 'GRANTED', 'UNAVAILABLE'].includes(rawStatus) ? rawStatus as TopicActivityV2EntryStatus : 'NOT_STARTED'
-    if (!latestByEntry.has(rewardEntryId)) latestByEntry.set(rewardEntryId, { rewardEntryId, status, submissionId: typeof row.id === 'string' ? row.id : null, submittedAt: typeof row.submittedAt === 'string' ? row.submittedAt : null, reviewedAt: typeof row.reviewedAt === 'string' ? row.reviewedAt : null, granted: status === 'GRANTED' })
+    if (!latestByEntry.has(rewardEntryId)) latestByEntry.set(rewardEntryId, { rewardEntryId, status, submissionId: typeof row.id === 'string' ? row.id : null, commentId: typeof row.commentId === 'string' ? row.commentId : null, rejectReason: typeof row.rejectReason === 'string' ? row.rejectReason : null, submittedAt: typeof row.submittedAt === 'string' ? row.submittedAt : null, reviewedAt: typeof row.reviewedAt === 'string' ? row.reviewedAt : null, granted: status === 'GRANTED' })
   }
   const grants = Array.isArray(source.grants) ? source.grants : []
   for (const item of grants) {

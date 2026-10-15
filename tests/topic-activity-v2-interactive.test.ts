@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import test from 'node:test'
 import sharp from 'sharp'
 import { fixture, instant } from './fixtures/topic-v2-transaction'
@@ -83,10 +85,50 @@ test('config cannot rewrite same-version ballots/test with completed records', a
 test('PNG poster is valid bounded image with escaped text and QR', async () => {
   const bytes = await renderTopicV2Poster({ title: '<script>unsafe</script>', description: '真实测试结果，包含中文和长文。'.repeat(20), activityTitle: '本地活动', score: 2, maxScore: 2, nickname: '测试用户', poster: { width: 360, height: 640, showNickname: true, showQrCode: true } }, 'activity-one')
   const metadata = await sharp(bytes).metadata()
-  assert.equal(metadata.format, 'png'); assert.equal(metadata.width, 360); assert.equal(metadata.height, 640); assert.ok(bytes.length > 0)
+  assert.equal(metadata.format, 'png'); assert.equal(metadata.width, 1080); assert.equal(metadata.height, 1920); assert.ok(bytes.length > 0)
 })
-test('poster rejects oversized canvas, private namespace and arbitrary URL', async () => {
-  await assert.rejects(renderTopicV2Poster({ poster: { width: 9999, height: 640 } }, 'a'), { code: 'POSTER_SIZE_INVALID' })
+test('poster uses a fixed 9:16 canvas and crops supplied background without distortion', async () => {
+  const background = await sharp({ create: { width: 900, height: 900, channels: 3, background: '#123456' } }).png().toBuffer()
+  const bytes = await renderTopicV2Poster({ title: '中文结果', description: '说明', poster: { width: 480, height: 480, showNickname: false, showQrCode: false } }, 'activity-one', background)
+  const metadata = await sharp(bytes).metadata()
+  assert.equal(metadata.width, 1080)
+  assert.equal(metadata.height, 1920)
+  assert.equal(metadata.width! / metadata.height!, 9 / 16)
+})
+test('poster places wrapped Chinese result text in a compact vertical layout', async () => {
+  const bytes = await renderTopicV2Poster({
+    activityTitle: '天使的礼物活动',
+    title: '结果标题需要完整换行测试海报布局',
+    description: '这是一段用于检查海报文字间距的中文说明。',
+    poster: { showNickname: false, showQrCode: false },
+  }, 'activity-one')
+  const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const textRows: number[] = []
+  for (let y = 120; y < 1200; y += 1) {
+    let brightPixels = 0
+    for (let x = 0; x < 900; x += 1) {
+      const offset = (y * info.width + x) * info.channels
+      if (data[offset] > 180 && data[offset + 1] > 180 && data[offset + 2] > 180) brightPixels += 1
+    }
+    if (brightPixels >= 4) textRows.push(y)
+  }
+  const bands: Array<{ start: number; end: number }> = []
+  for (const row of textRows) {
+    const last = bands[bands.length - 1]
+    if (last && row - last.end <= 8) last.end = row
+    else bands.push({ start: row, end: row })
+  }
+  assert.ok(bands.length >= 4, `expected activity, wrapped result title, and description text bands; got ${JSON.stringify(bands)}`)
+  assert.ok(bands[1].start - bands[0].end < 180, 'the result title should follow the activity title without a large blank gap')
+})
+test('poster config uses the bundled Noto CJK font through fontconfig, not unsupported embedded SVG fonts', () => {
+  const source = readFileSync(join(process.cwd(), 'lib/topic-activity-v2-poster.ts'), 'utf8')
+  assert.match(source, /NotoSansSC-VF\.ttf/)
+  assert.match(source, /FONTCONFIG_PATH/)
+  assert.match(source, /font-family="Noto Sans SC, sans-serif"/)
+  assert.doesNotMatch(source, /@font-face|data:font\/ttf;base64/)
+})
+test('poster rejects private namespace and arbitrary background URL', async () => {
   for (const backgroundUrl of ['https://evil.invalid/a.png', '/cos/topic-activity/private/source.png', '/uploads/../secret.png', '/uploads/%2e%2e/secret.png']) {
     await assert.rejects(renderTopicV2Poster({ poster: { width: 360, height: 640, backgroundUrl } }, 'a'), { code: 'POSTER_BACKGROUND_INVALID' })
   }
