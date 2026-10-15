@@ -113,13 +113,15 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   const [editConfirmation, setEditConfirmation] = useState(false)
   const [mediaPreparing, setMediaPreparing] = useState(false)
   const [mediaStatus, setMediaStatus] = useState('')
+  const [testImageUploading, setTestImageUploading] = useState(false)
+  const testImageUploadLock = useRef(false)
   const [editReloadCounter, setEditReloadCounter] = useState(0)
   const operationLock = useRef(false)
   const isEdit = mode === 'EDIT' && Boolean(activityId)
   const [dirty, setDirty] = useState(false)
   const titleRef = useRef<HTMLHeadingElement>(null)
   const mounted = useRef(true)
-  const saveBusy = saveSession.requestLock !== null || editSaving || editLoading || mediaPreparing
+  const saveBusy = saveSession.requestLock !== null || editSaving || editLoading || mediaPreparing || testImageUploading
   const submitted = saveSession.activityId !== null || saveSession.stages.ACTIVITY === 'UNKNOWN'
   const programFrozen = saveSession.programSave.writeAttempted || ['SUCCEEDED', 'UNKNOWN'].includes(saveSession.stages.PROGRAM)
   const lotteryFrozen = saveSession.lotterySave.writeAttempted || ['SUCCEEDED', 'UNKNOWN'].includes(saveSession.stages.LOTTERY)
@@ -184,6 +186,10 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   }
   function commitMedia(next: WizardMedia) { mediaRef.current = next; setMedia(next) }
   function commitDraft(next: TopicActivityWizardDraft) { draftRef.current = next; setDraft(next) }
+  function testImageUploadChanged(uploading: boolean) {
+    testImageUploadLock.current = uploading
+    setTestImageUploading(uploading)
+  }
   async function uploadImage(target: 'cover' | 'prize', prizeId?: string) {
     const image = target === 'cover' ? mediaRef.current.cover : prizeId ? mediaRef.current.prizes[prizeId] : undefined
     if (!image || image.status === 'EMPTY' || image.status === 'UPLOADED') return
@@ -242,7 +248,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     setMessage('本地快照已恢复。未上传的图片需重新选择；未进行任何服务器操作。')
   }
   async function saveDraft() {
-    if (!confirmation || controller.current.getState().requestLock || operationLock.current) return
+    if (!confirmation || controller.current.getState().requestLock || operationLock.current || testImageUploadLock.current) return
     setMessage(''); setErrors([])
     try {
       await prepareSelectedImages(!saveSession.activityId, false)
@@ -259,7 +265,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     }
   }
   async function saveProgram() {
-    if (!programConfirmation || controller.current.getState().requestLock || operationLock.current) return
+    if (!programConfirmation || controller.current.getState().requestLock || operationLock.current || testImageUploadLock.current) return
     operationLock.current = true; setEditSaving(true)
     setErrors([]); setMessage('')
     try {
@@ -274,14 +280,14 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   }
   function requestProgram() {
     const state = controller.current.getState()
-    if (state.requestLock || !state.activityId || state.stages.ACTIVITY !== 'SUCCEEDED' || state.stages.READBACK !== 'SUCCEEDED') return
+    if (testImageUploadLock.current || state.requestLock || !state.activityId || state.stages.ACTIVITY !== 'SUCCEEDED' || state.stages.READBACK !== 'SUCCEEDED') return
     try {
       prepareWizardProgramPayload(programFrozen ? state.programSave.snapshot! : createWizardSnapshot(draftRef.current, mediaRef.current, step))
       setErrors([]); setProgramConfirmation(true)
     } catch (cause) { setErrors([cause instanceof Error ? cause.message : '请检查 V2 配置']) }
   }
   async function saveLottery() {
-    if (!lotteryConfirmation || controller.current.getState().requestLock || operationLock.current) return
+    if (!lotteryConfirmation || controller.current.getState().requestLock || operationLock.current || testImageUploadLock.current) return
     setErrors([]); setMessage('')
     try {
       if (draftRef.current.lottery.enabled) await prepareSelectedImages(false, true)
@@ -297,7 +303,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   }
   function requestLottery() {
     const state = controller.current.getState()
-    if (state.requestLock || !programConfirmed || !state.activityId) return
+    if (testImageUploadLock.current || state.requestLock || !programConfirmed || !state.activityId) return
     try {
       if (!draft.lottery.enabled) { setErrors([]); setLotteryConfirmation(true); return }
       prepareWizardProgramPayload(createWizardSnapshot(draftRef.current, mediaRef.current, step))
@@ -307,7 +313,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     } catch (cause) { setErrors([cause instanceof Error ? cause.message : '请检查抽奖配置']) }
   }
   async function publish() {
-    if (!publishConfirmation || controller.current.getState().requestLock || operationLock.current) return
+    if (!publishConfirmation || controller.current.getState().requestLock || operationLock.current || testImageUploadLock.current) return
     operationLock.current = true; setEditSaving(true)
     setErrors([]); setMessage('')
     try {
@@ -322,14 +328,14 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   }
   function requestPublish() {
     const state = controller.current.getState()
-    if (state.requestLock || state.confirmedPublish || !canPublish) return
+    if (testImageUploadLock.current || state.requestLock || state.confirmedPublish || !canPublish) return
     try {
       prepareWizardPublishGate(state.publishSave.writeAttempted ? state.publishSave.snapshot! : createWizardSnapshot(draftRef.current, mediaRef.current, step), state)
       setErrors([]); setPublishConfirmation(true)
     } catch (cause) { setErrors([cause instanceof Error ? cause.message : '请检查发布配置']) }
   }
   function requestEditSave() {
-    if (!editBaseline || !activityId || editLoading || editSaving || operationLock.current) return
+    if (!editBaseline || !activityId || editLoading || editSaving || operationLock.current || testImageUploadLock.current) return
     if (editPending) { setEditConfirmation(true); return }
     try {
       const validation = topicWizardErrors(draftRef.current, 4)
@@ -347,7 +353,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     }
   }
   async function saveEdits() {
-    if (!editConfirmation || !editBaseline || !activityId || operationLock.current || editSaving) return
+    if (!editConfirmation || !editBaseline || !activityId || operationLock.current || editSaving || testImageUploadLock.current) return
     setErrors([]); setMessage(''); setEditSaving(true)
     try {
       await prepareSelectedImages(true, true)
@@ -385,13 +391,14 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     update((current) => ({ ...current, lottery: { ...current.lottery, ...value } }))
   }
   function requestDraft() {
-    if (controller.current.getState().requestLock || operationLock.current || (saveSession.stages.ACTIVITY === 'UNKNOWN' && !saveSession.activityId)) return
+    if (testImageUploadLock.current || controller.current.getState().requestLock || operationLock.current || (saveSession.stages.ACTIVITY === 'UNKNOWN' && !saveSession.activityId)) return
     try {
       prepareWizardActivityPayload(saveSession.activityId ? saveSession.snapshot! : createWizardSnapshot(draftRef.current, mediaRef.current, step))
       setErrors([]); setConfirmation(true)
     } catch (cause) { setErrors([cause instanceof Error ? cause.message : '请检查活动配置']) }
   }
   function next() {
+    if (testImageUploadLock.current) return
     const problems = topicWizardErrors(draft, step)
     setErrors(problems)
     if (!problems.length) setStep((current) => Math.min(4, current + 1))
@@ -477,7 +484,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
       </fieldset>
     </div> : null}
 
-    {step === 2 ? <TopicActivityWizardTestEditor value={draft.program.test} disabled={saveBusy || (!isEdit && programFrozen)} requiresVersionBump={isEdit && (editBaseline?.testParticipants || 0) > 0} onChange={(test) => update((current) => ({ ...current, program: { ...current.program, enabled: current.program.enabled || test.enabled || current.program.entries.some((entry) => entry.enabled) || current.program.fixedReward.enabled || current.program.medal.enabled || current.program.poll.enabled, test } }))} /> : null}
+    {step === 2 ? <TopicActivityWizardTestEditor value={draft.program.test} disabled={saveBusy || (!isEdit && programFrozen)} onUploadingChange={testImageUploadChanged} requiresVersionBump={isEdit && (editBaseline?.testParticipants || 0) > 0} onChange={(test) => update((current) => ({ ...current, program: { ...current.program, enabled: current.program.enabled || test.enabled || current.program.entries.some((entry) => entry.enabled) || current.program.fixedReward.enabled || current.program.medal.enabled || current.program.poll.enabled, test } }))} /> : null}
 
     {step === 3 ? <div className="space-y-5">
       <fieldset disabled={programFrozen} className="space-y-3 border border-[var(--border)] p-3"><legend className="px-1 font-bold">A. 参与奖励</legend>

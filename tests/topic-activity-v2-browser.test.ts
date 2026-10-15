@@ -100,7 +100,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
     if (url.pathname.endsWith('/v2/fixed-reward')) return send({ claims: [] })
     if (url.pathname.endsWith('/activities/badges')) return send({ badges: [] })
     if (url.pathname === '/api/admin/activities/activity-one/v2') {
-      if (req.method === 'PATCH') { const input = await body(); assert.equal(input.program.entries.length, 1); assert.equal(input.program.test.poster.backgroundUrl, '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp'); configWrites++; return send({ program: input.program }) }
+      if (req.method === 'PATCH') { const input = await body(); assert.equal(input.program.entries.length, 1); assert.equal(input.program.test.poster.backgroundUrl, '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp'); Object.assign(f.program, input.program); configWrites++; return send({ program: f.program }) }
       return send({ program: f.program, activity: { activityPostId: 'post-one' }, statistics: { pollResults: [], entries: [], platforms: [] } })
     }
     res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"><div id="root"></div><script src="/bundle.js"></script>')
@@ -114,6 +114,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
     for (const width of [1024, 360, 390, 430]) {
       votes = []; voteWrites = 0; testWrites = 0; reviewWrites = 0; configWrites = 0; taskWrites = 0; uploadRequests = 0; uploadShouldFail = true; attempts.length = 0
       personality = false
+      f.program.test.poster.backgroundUrl = '/uploads/old-poster.webp'
       const context = await browser.newContext({ viewport: { width, height: 844 }, ...(width < 500 ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 MicroMessenger/8.0' } : {}) })
       const page = await context.newPage(); const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
       const open = (mode: string) => page.goto('http://127.0.0.1:' + port + '/?mode=' + mode)
@@ -178,11 +179,11 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       const posterBackground = page.getByAltText('结果海报背景图预览')
       await posterBackground.waitFor()
       assert.match(await posterBackground.getAttribute('src') || '', /old-poster\.webp/u)
-      await page.locator('input[type="file"]').setInputFiles({ name: 'failed-background.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
+      await page.getByLabel('结果海报背景图上传文件').setInputFiles({ name: 'failed-background.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
       await page.getByRole('alert').filter({ hasText: '未替换当前背景图' }).waitFor()
       assert.match(await posterBackground.getAttribute('src') || '', /old-poster\.webp/u, 'failed uploads keep and restore the saved background preview')
       uploadShouldFail = false
-      await page.locator('input[type="file"]').setInputFiles({ name: 'new-background.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
+      await page.getByLabel('结果海报背景图上传文件').setInputFiles({ name: 'new-background.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
       try { await page.getByText('上传成功', { exact: true }).waitFor({ timeout: 15000 }) } catch {
         const statuses = await page.getByRole('status').allTextContents()
         const alerts = await page.getByRole('alert').allTextContents()
@@ -191,7 +192,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       }
       await page.getByLabel('入口标题', { exact: true }).fill('更新入口标题')
       await page.getByRole('button', { name: '保存活动模块配置', exact: true }).evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click() })
-      await page.getByText('活动模块配置已保存。', { exact: true }).waitFor(); assert.equal(configWrites, 1)
+      await page.getByText('活动模块配置已保存并回读确认。', { exact: true }).waitFor(); assert.equal(configWrites, 1)
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no horizontal overflow at width ' + width)
       if (process.env.TOPIC_V2_QA_ARTIFACTS && width === 390) await page.screenshot({ path: join(process.env.TOPIC_V2_QA_ARTIFACTS, 'v2-admin-390.png'), fullPage: true })
       assert.deepEqual(errors, [], 'actual components should not crash at width ' + width)

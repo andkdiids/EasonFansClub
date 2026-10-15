@@ -66,6 +66,7 @@ export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { act
   const [pending, setPending] = useState(false)
   const [posterUrl, setPosterUrl] = useState<string | null>(null)
   const [posterBlob, setPosterBlob] = useState<Blob | null>(null)
+  const posterRequest = useRef(0)
   const busy = useRef(false), requestKey = useRef<string | null>(null)
   const base = '/api/activities/' + encodeURIComponent(activityId) + '/v2'
   const load = useCallback(async () => {
@@ -76,13 +77,13 @@ export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { act
         const attempts = (await requestJson<{ attempts: Attempt[] }>(base + '/attempts')).attempts
         setHistory(attempts)
         const selected = requestedAttemptId ? attempts.find((item) => item.id === requestedAttemptId) : null
-        if (selected) { setAttempt(selected); setPosterUrl(null); setPosterBlob(null); requestKey.current = null }
+        if (selected) { posterRequest.current++; setAttempt(selected); setPosterUrl(null); setPosterBlob(null); requestKey.current = null }
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '测试加载失败') }
   }, [base, isAuthenticated, requestedAttemptId])
   useEffect(() => { void load() }, [load])
   useEffect(() => () => { if (posterUrl) URL.revokeObjectURL(posterUrl) }, [posterUrl])
-  function showAttempt(value: Attempt | null) { setAttempt(value); setPosterUrl(null); setPosterBlob(null) }
+  function showAttempt(value: Attempt | null) { posterRequest.current++; setAttempt(value); setPosterUrl(null); setPosterBlob(null) }
   async function submit() {
     if (busy.current || !test || test.questions.some((question) => !answers[question.id])) return
     busy.current = true; setPending(true); setError('')
@@ -96,12 +97,14 @@ export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { act
   }
   async function poster() {
     if (!attempt || busy.current) return
+    const currentRequest = ++posterRequest.current
     busy.current = true; setPending(true); setError('')
     try {
       const response = await fetch(base + '/attempts/' + encodeURIComponent(attempt.id) + '/poster', { cache: 'no-store', credentials: 'same-origin' })
       if (!response.ok || !response.headers.get('content-type')?.startsWith('image/png')) { const value = await response.json().catch(() => null); throw new Error(value?.message || '海报生成失败，请重试') }
-      const blob = await response.blob(); setPosterBlob(blob); setPosterUrl(URL.createObjectURL(blob))
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '海报生成失败') }
+      const blob = await response.blob()
+      if (currentRequest === posterRequest.current) { setPosterBlob(blob); setPosterUrl(URL.createObjectURL(blob)) }
+    } catch (cause) { if (currentRequest === posterRequest.current) setError(cause instanceof Error ? cause.message : '海报生成失败') }
     finally { busy.current = false; setPending(false) }
   }
   async function share() {
