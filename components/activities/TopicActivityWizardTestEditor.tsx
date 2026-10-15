@@ -1,7 +1,9 @@
 'use client'
 
+import { useRef, useState } from 'react'
 import type { TopicActivityV2Test, TopicActivityV2TestQuestion, TopicActivityV2TestResult } from '@/lib/topic-activity-v2-config'
 import { createWizardId } from './TopicActivityWizardIds'
+import { TopicActivityEditorImageUploader, TopicActivityPosterBackgroundUploader } from './TopicActivityPosterBackgroundUploader'
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm'
 const buttonClass = 'min-h-10 rounded-sm border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-40'
@@ -14,12 +16,22 @@ function move<T>(items: T[], index: number, direction: -1 | 1) {
   return next
 }
 
-export function TopicActivityWizardTestEditor({ value, onChange, disabled = false, requiresVersionBump = false }: Readonly<{
+export function TopicActivityWizardTestEditor({ value, onChange, disabled = false, requiresVersionBump = false, onUploadingChange }: Readonly<{
   value: TopicActivityV2Test
   onChange: (value: TopicActivityV2Test) => void
   disabled?: boolean
   requiresVersionBump?: boolean
+  onUploadingChange?: (uploading: boolean) => void
 }>) {
+  const uploads = useRef(new Set<string>())
+  const [imageUploading, setImageUploading] = useState(false)
+  function uploadingChanged(id: string, uploading: boolean) {
+    if (uploading) uploads.current.add(id)
+    else uploads.current.delete(id)
+    const active = uploads.current.size > 0
+    setImageUploading(active)
+    onUploadingChange?.(active)
+  }
   function patch(partial: Partial<TopicActivityV2Test>) { onChange({ ...value, ...partial }) }
   function question(index: number, partial: Partial<TopicActivityV2TestQuestion>) {
     patch({ questions: value.questions.map((item, position) => position === index ? { ...item, ...partial } : item) })
@@ -54,7 +66,7 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
       options: item.options.map((option) => ({ ...option, ...(value.mode === 'PERSONALITY' ? { weights: { ...option.weights, [nextResult.id]: 0 } } : {}) })) })) })
   }
 
-  return <div className="space-y-5">
+  return <fieldset disabled={disabled || imageUploading} className="space-y-5">
     <fieldset disabled={disabled} className="space-y-4 border border-[var(--border)] p-3">
       <legend className="px-1 font-bold">测试题设置（可选）</legend>
       <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={value.enabled} onChange={(event) => patch({ enabled: event.target.checked })} />启用测试题</label>
@@ -100,13 +112,14 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
               const weights = { ...option.weights }; delete weights[row.id]; return { ...option, weights }
             }) })) })
           }}>删除结果</button></div>
-          <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">结果标题<input className={inputClass} value={row.title} onChange={(event) => result(index, { title: event.target.value })} /></label><label className="text-sm">结果说明<input className={inputClass} value={row.description} onChange={(event) => result(index, { description: event.target.value })} /></label><label className="text-sm">结果图片地址（可选）<input className={inputClass} value={row.imageUrl || ''} onChange={(event) => result(index, { imageUrl: event.target.value || undefined })} /></label></div>
+          <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">结果标题<input className={inputClass} value={row.title} onChange={(event) => result(index, { title: event.target.value })} /></label><label className="text-sm">结果说明<input className={inputClass} value={row.description} onChange={(event) => result(index, { description: event.target.value })} /></label></div>
+          <div role="group" aria-label={`结果 ${index + 1} 图片`}><TopicActivityEditorImageUploader value={row.imageUrl || null} disabled={disabled || imageUploading} onUploadingChange={(uploading) => uploadingChanged(row.id, uploading)} onChange={(imageUrl) => patch({ results: value.results.map((item) => item.id === row.id ? { ...item, imageUrl: imageUrl || undefined } : item) })} /></div>
           {value.mode === 'KNOWLEDGE' ? <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">最低分（包含）<input className={inputClass} type="number" min={0} value={row.scoreMin ?? ''} onChange={(event) => result(index, { scoreMin: event.target.value === '' ? undefined : Number(event.target.value) })} /></label><label className="text-sm">最高分（包含）<input className={inputClass} type="number" min={0} value={row.scoreMax ?? ''} onChange={(event) => result(index, { scoreMax: event.target.value === '' ? undefined : Number(event.target.value) })} /></label></div> : null}
         </article>)}
         {value.mode === 'KNOWLEDGE' ? <p className="text-xs text-[var(--foreground-muted)]">知识测试结果分数区间必须连续、无重叠，并完整覆盖 0 到题目总分。</p> : null}
       </section>
 
-      <details className="border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-semibold">高级结果海报设置</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label>宽度<input className={inputClass} type="number" value={value.poster.width} onChange={(event) => patch({ poster: { ...value.poster, width: Number(event.target.value) } })} /></label><label>高度<input className={inputClass} type="number" value={value.poster.height} onChange={(event) => patch({ poster: { ...value.poster, height: Number(event.target.value) } })} /></label><label className="sm:col-span-2">背景图片公开路径<input className={inputClass} value={value.poster.backgroundUrl || ''} onChange={(event) => patch({ poster: { ...value.poster, backgroundUrl: event.target.value || null } })} /></label><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showNickname} onChange={(event) => patch({ poster: { ...value.poster, showNickname: event.target.checked } })} />显示昵称</label><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showQrCode} onChange={(event) => patch({ poster: { ...value.poster, showQrCode: event.target.checked } })} />显示活动二维码</label></div></details>
+      <details className="border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-semibold">高级结果海报设置</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label>宽度<input className={inputClass} type="number" value={value.poster.width} onChange={(event) => patch({ poster: { ...value.poster, width: Number(event.target.value) } })} /></label><label>高度<input className={inputClass} type="number" value={value.poster.height} onChange={(event) => patch({ poster: { ...value.poster, height: Number(event.target.value) } })} /></label><div className="sm:col-span-2"><TopicActivityPosterBackgroundUploader value={value.poster.backgroundUrl} disabled={disabled || imageUploading} onUploadingChange={(uploading) => uploadingChanged('poster-background', uploading)} onChange={(backgroundUrl) => patch({ poster: { ...value.poster, backgroundUrl } })} /></div><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showNickname} onChange={(event) => patch({ poster: { ...value.poster, showNickname: event.target.checked } })} />显示昵称</label><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showQrCode} onChange={(event) => patch({ poster: { ...value.poster, showQrCode: event.target.checked } })} />显示活动二维码</label></div></details>
     </> : null}
-  </div>
+  </fieldset>
 }
