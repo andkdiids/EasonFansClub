@@ -5,30 +5,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { getCosObject } from '@/lib/tencent-cos'
 import { TopicActivityV2Error } from '@/lib/topic-activity-v2'
+import { getMediaPublicBaseUrl, PUBLIC_COS_HOST } from '@/lib/media-url'
+import { profileImageUrl } from '@/lib/images'
+import { TOPIC_POSTER_AVATAR, TOPIC_POSTER_QR, TOPIC_POSTER_SIZE, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
-function escaped(value: unknown) { return String(value || '').replace(/[<>&"']/gu, (character) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[character]!)) }
-const POSTER_WIDTH = 1080
-const POSTER_HEIGHT = 1920
-const POSTER_MARGIN = 96
 let posterFontConfig: Promise<void> | null = null
-
-function wrap(value: unknown, count: number, maximum: number) {
-  const paragraphs = String(value || '').replace(/\r/gu, '').split('\n')
-  const result: string[] = []
-  let truncated = false
-  for (const paragraph of paragraphs) {
-    const text = Array.from(paragraph)
-    if (!text.length && result.length < maximum) { result.push(''); continue }
-    for (let position = 0; position < text.length; position += count) {
-      if (result.length >= maximum) { truncated = true; break }
-      result.push(text.slice(position, position + count).join(''))
-    }
-    if (truncated) break
-  }
-  if (truncated && result.length) result[result.length - 1] += '…'
-  return result
-}
 
 function escapeXml(value: string) {
   return value.replace(/[<>&"']/gu, (character) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[character]!))
@@ -77,9 +59,6 @@ async function ensurePosterFontConfig() {
   return posterFontConfig
 }
 
-function renderLines(lines: string[], x: number, firstBaseline: number, fontSize: number, lineHeight: number, weight: number) {
-  return lines.map((line, index) => `<text x="${x}" y="${firstBaseline + index * lineHeight}" font-size="${fontSize}" font-weight="${weight}">${escaped(line)}</text>`).join('')
-}
 /** Fixed storage namespaces only: no arbitrary HTTP fetch, cookies, or private API calls. */
 async function backgroundBytes(value: string) {
   let decoded: string
@@ -108,46 +87,50 @@ async function posterImage(value: unknown, kind: 'BACKGROUND' | 'RESULT_IMAGE') 
 
 export async function renderTopicV2Poster(snapshotValue: unknown, activityId: string, suppliedBackground?: Buffer) {
   const snapshot = record(snapshotValue), config = record(snapshot.poster)
-  const width = POSTER_WIDTH, height = POSTER_HEIGHT, margin = POSTER_MARGIN
+  const { width, height } = TOPIC_POSTER_SIZE
   // Stored attempts keep their own immutable image and options; never read today's test config here.
   // A result poster is the complete visual, with the old global background retained only as fallback.
   const resultImage = await posterImage(snapshot.imageUrl, 'RESULT_IMAGE')
   const background = resultImage || suppliedBackground || await posterImage(config.backgroundUrl, 'BACKGROUND')
   if (background && background.length > 20 * 1024 * 1024) throw new TopicActivityV2Error('POSTER_BACKGROUND_TOO_LARGE', '背景图片过大', 400)
   await ensurePosterFontConfig().catch(() => { throw new TopicActivityV2Error('POSTER_FONT_UNAVAILABLE', '海报中文字体暂不可用，请稍后重试', 503) })
-  const heading = wrap(snapshot.title || '测试结果', 12, 2)
-  const body = String(snapshot.description || '').trim() ? wrap(snapshot.description, 22, 9) : []
-  const activityTitle = wrap(snapshot.activityTitle || snapshot.testTitle || '私家E院话题活动', 22, 2)
-  const score = typeof snapshot.score === 'number' && Number.isFinite(snapshot.score)
-    ? `得分 ${snapshot.score}${typeof snapshot.maxScore === 'number' && Number.isFinite(snapshot.maxScore) ? ` / ${snapshot.maxScore}` : ''}`
-    : ''
-  const showNickname = config.showNickname !== false
-  const showQrCode = config.showQrCode === true
-  const nicknameCharacters = Array.from(String(snapshot.nickname || '私家E院会员'))
-  const nicknameLimit = showQrCode ? 14 : 22
-  const nickname = showNickname ? nicknameCharacters.slice(0, nicknameCharacters.length > nicknameLimit ? nicknameLimit - 1 : nicknameLimit).join('') + (nicknameCharacters.length > nicknameLimit ? '…' : '') : ''
-  const activityTitleBaseline = 210
-  const headingBaseline = activityTitleBaseline + activityTitle.length * 54 + 80
-  const bodyBaseline = headingBaseline + heading.length * 94 + 80
-  const bodyBottom = body.length ? bodyBaseline + (body.length - 1) * 62 + 12 : bodyBaseline - 40
-  const scoreBaseline = bodyBottom + 72
-  const activityTitleSvg = background ? '' : renderLines(activityTitle, margin, activityTitleBaseline, 40, 54, 550)
-  const bodySvg = renderLines(body, margin, bodyBaseline, 40, 62, 450)
-  const svgText = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g font-family="Noto Sans SC, sans-serif" fill="#fff" stroke="#071624" stroke-opacity=".56" stroke-width="4" stroke-linejoin="round" paint-order="stroke">${activityTitleSvg}${renderLines(heading, margin, headingBaseline, 72, 94, 750)}${bodySvg}${score ? `<text x="${margin}" y="${scoreBaseline}" font-size="48" font-weight="650">${escaped(score)}</text>` : ''}${nickname ? `<text x="${margin}" y="1665" font-size="40" font-weight="600">${escaped(nickname)}</text>` : ''}${background ? '' : `<text x="${margin}" y="1820" font-size="34" font-weight="600">私家E院 · ECFC</text>`}</g></svg>`
-  const svg = Buffer.from(svgText)
+  const svg = Buffer.from(topicPosterLayout(snapshot))
   const canvas = background
     ? sharp(background, { limitInputPixels: 20_000_000 }).rotate().resize(width, height, { fit: 'cover', position: 'centre' })
     : sharp({ create: { width, height, channels: 4, background: '#102c48' } })
   const layers: OverlayOptions[] = [{ input: svg, top: 0, left: 0 }]
-  if (showQrCode) {
-    const qrSize = 216
-    const qrPlatePadding = 12
+  if (config.showNickname !== false) {
+    const avatar = await posterAvatar(snapshot.avatarUrl)
+    if (avatar) layers.push({ input: avatar, left: TOPIC_POSTER_AVATAR.left, top: TOPIC_POSTER_AVATAR.top })
+  }
+  if (config.showQrCode === true) {
+    const qrPlatePadding = 12, qrSize = TOPIC_POSTER_QR.size - qrPlatePadding * 2
     const qr = await QRCode.toBuffer('https://ecfc.fans/activities/' + encodeURIComponent(activityId), { width: qrSize, margin: 4, errorCorrectionLevel: 'H' })
     const plateSize = qrSize + qrPlatePadding * 2
-    const left = width - margin - plateSize
-    const top = 1545
+    const { left, top } = TOPIC_POSTER_QR
     layers.push({ input: { create: { width: plateSize, height: plateSize, channels: 4, background: '#ffffff' } }, left, top })
     layers.push({ input: qr, left: left + qrPlatePadding, top: top + qrPlatePadding })
   }
   return canvas.composite(layers).png().toBuffer()
+}
+
+/** Only resolve existing public media; an avatar must never become an SSRF fetch. */
+async function posterAvatar(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    let stored = profileImageUrl(value)
+    if (!stored) return null
+    if (/^https?:/iu.test(stored)) {
+      const url = new URL(stored), media = new URL(getMediaPublicBaseUrl())
+      if (url.username || url.password || url.search || url.hash) return null
+      if (url.origin === media.origin && url.pathname.startsWith(media.pathname.replace(/\/$/u, '') + '/')) stored = '/cos/' + url.pathname.slice(media.pathname.replace(/\/$/u, '').length + 1)
+      else if (url.protocol === 'https:' && url.hostname === PUBLIC_COS_HOST && !url.port) stored = '/cos' + url.pathname
+      else return null
+    }
+    const bytes = await backgroundBytes(stored)
+    if (bytes.length > 4 * 1024 * 1024) return null
+    const { size } = TOPIC_POSTER_AVATAR
+    const mask = Buffer.from(`<svg width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="white"/></svg>`)
+    return await sharp(bytes, { limitInputPixels: 4_000_000 }).rotate().resize(size, size, { fit: 'cover' }).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer()
+  } catch { return null /* missing/legacy avatars keep the local initial placeholder */ }
 }

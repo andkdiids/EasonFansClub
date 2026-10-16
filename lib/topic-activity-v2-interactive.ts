@@ -118,3 +118,17 @@ export async function getTopicV2Attempt(activityId: string, attemptId: string, u
   if (!attempt) fail('TEST_RESULT_NOT_FOUND', '测试结果不存在', 404)
   return attempt
 }
+
+/** Poster-only enrichment for pre-V4 attempts. Never mutate or replace historical test/results. */
+export async function getTopicV2PosterSnapshot(activityId: string, attemptId: string, userId: string): Promise<Record<string, unknown>> {
+  const attempt = await prisma.topicActivityTestAttempt.findFirst({ where: { id: attemptId, activityId, userId },
+    select: { resultSnapshot: true, Activity: { select: { startsAt: true, endsAt: true } },
+      User: { select: { avatarUrl: true, Profile: { select: { avatarUrl: true } } } } } })
+  if (!attempt) fail('TEST_RESULT_NOT_FOUND', '测试结果不存在', 404)
+  const snapshot = data(attempt.resultSnapshot)
+  // Missing properties alone fall back; explicit nulls in new snapshots stay frozen.
+  return { ...snapshot,
+    activityStartsAt: Object.hasOwn(snapshot, 'activityStartsAt') ? snapshot.activityStartsAt : attempt.Activity.startsAt?.toISOString() || null,
+    activityEndsAt: Object.hasOwn(snapshot, 'activityEndsAt') ? snapshot.activityEndsAt : attempt.Activity.endsAt?.toISOString() || null,
+    avatarUrl: Object.hasOwn(snapshot, 'avatarUrl') ? snapshot.avatarUrl : attempt.User.Profile?.avatarUrl || attempt.User.avatarUrl || null }
+}

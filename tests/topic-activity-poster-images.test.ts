@@ -71,7 +71,7 @@ test('configured background reads real stored bytes and uses centred cover cropp
 test('result poster fills the full canvas, never a central thumbnail', async () => {
   const png = await renderTopicV2Poster(snapshot(firstImageUrl), 'activity-images')
   const bounds = await colorBounds(png, [227, 32, 48])
-  assert.ok(bounds.count > 1_500_000)
+  assert.ok(bounds.count > 900_000, 'paper typography overlays do not turn the full-canvas image into a thumbnail')
   assert.deepEqual([bounds.left, bounds.right, bounds.top, bounds.bottom], [0, 1079, 0, 1919])
   assert.deepEqual(await pixel(png, 0, 0), [227, 32, 48])
 })
@@ -82,7 +82,7 @@ test('each result poster takes precedence over legacy background without mixing'
   assert.ok((await colorBounds(first, [227, 32, 48])).count > 10_000)
   assert.equal((await colorBounds(first, [32, 48, 227])).count, 0)
   const secondBounds = await colorBounds(second, [32, 48, 227])
-  assert.ok(secondBounds.count > 1_500_000)
+  assert.ok(secondBounds.count > 900_000)
   assert.deepEqual([secondBounds.left, secondBounds.top, secondBounds.right, secondBounds.bottom], [0, 0, 1079, 1919])
   assert.equal((await colorBounds(second, [227, 32, 48])).count, 0)
   assert.deepEqual(await pixel(first, 0, 0), [227, 32, 48])
@@ -117,12 +117,12 @@ test('QR enabled is decodable from the actual PNG and points to the exact activi
   assert.deepEqual(await pixel(off, 750, 1550), [227, 32, 48], 'QR disabled leaves no white placeholder')
 })
 
-test('exact 9:16 result image preserves all corners without a frame, crop or duplicate footer brand', async () => {
+test('exact 9:16 result image preserves all corners and has the V4 brand footer', async () => {
   const png = await renderTopicV2Poster({ ...snapshot(exactPosterUrl), poster: { backgroundUrl: null, showNickname: false, showQrCode: false } }, 'activity-images')
   assert.deepEqual(await pixel(png, 0, 0), [238, 34, 51])
   assert.deepEqual(await pixel(png, 1079, 1919), [34, 68, 238])
   const footer = await sharp(png).extract({ left: 90, top: 1780, width: 800, height: 70 }).png().toBuffer()
-  assert.deepEqual(await sharp(footer).stats().then((stats) => stats.channels.map((channel) => channel.stdev)), [0, 0, 0, 0])
+  assert.ok((await sharp(footer).stats()).channels.some((channel) => channel.stdev > 0), 'V4 footer is rendered even with a supplied background')
 })
 
 test('a valid result poster does not read or fail because of a stale legacy global path', async () => {
