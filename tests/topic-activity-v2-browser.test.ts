@@ -131,9 +131,12 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByRole('button', { name: '生成结果海报' }).click(); await page.getByAltText('我的测试结果海报').waitFor()
       assert.ok(await page.getByAltText('我的测试结果海报').evaluate((element) => (element as HTMLImageElement).naturalWidth > 0))
       assert.deepEqual(await page.getByAltText('我的测试结果海报').evaluate((element) => [(element as HTMLImageElement).naturalWidth, (element as HTMLImageElement).naturalHeight]), [1080, 1920])
+      const previewBytes = await page.getByAltText('我的测试结果海报').evaluate(async (element) => Array.from(new Uint8Array(await (await fetch((element as HTMLImageElement).src)).arrayBuffer())))
+      assert.deepEqual(Buffer.from(previewBytes), png, 'preview uses the exact server PNG bytes')
       assert.ok(await page.getByAltText('我的测试结果海报').evaluate((element) => Math.abs((element as HTMLImageElement).getBoundingClientRect().width / (element as HTMLImageElement).getBoundingClientRect().height - 9 / 16) < 0.01))
       const downloadWait = page.waitForEvent('download'); await page.getByRole('link', { name: '保存 PNG' }).click()
       const download = await downloadWait; assert.equal(download.suggestedFilename(), 'ecfc-activity-result.png')
+      assert.deepEqual(readFileSync((await download.path())!), png, 'download is the same PNG, not a second render')
       assert.equal(readFileSync((await download.path())!).subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
       await page.getByText('微信内可长按图片保存。').waitFor()
       await page.evaluate("Object.defineProperty(navigator, 'canShare', { configurable: true, value: function () { return false } })")
@@ -146,10 +149,12 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
           const file = value.files?.[0]
           if (!file || file.type !== 'image/png' || file.size <= 0) throw new Error('invalid share file')
           document.documentElement.dataset.sharedPng = file.name
+          document.documentElement.dataset.sharedBytes = JSON.stringify(Array.from(new Uint8Array(await file.arrayBuffer())))
         } })
       `)
       await page.getByRole('button', { name: '分享结果图片' }).click()
       assert.equal(await page.evaluate(() => document.documentElement.dataset.sharedPng), 'ecfc-activity-result.png')
+      assert.deepEqual(Buffer.from(JSON.parse((await page.evaluate(() => document.documentElement.dataset.sharedBytes))!)), png, 'share uses the exact preview/download PNG')
       personality = true
       await open('test'); await page.getByRole('radio', { name: '正确', exact: true }).check(); await page.getByRole('button', { name: '下一题' }).click()
       await page.getByRole('radio', { name: '第二题选项A' }).check(); await page.getByRole('button', { name: '提交测试' }).click()

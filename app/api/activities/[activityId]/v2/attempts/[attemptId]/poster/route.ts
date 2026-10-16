@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireRequestUser } from '@/lib/security'
-import { getTopicV2Attempt } from '@/lib/topic-activity-v2-interactive'
+import { getTopicV2PosterSnapshot } from '@/lib/topic-activity-v2-interactive'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
 import { topicV2ErrorResponse, topicV2Headers } from '@/lib/topic-activity-v2-http'
 
@@ -11,8 +11,8 @@ export async function GET(request: Request, context: { params: Promise<{ activit
   if (!guard.user) return guard.response
   const { activityId, attemptId } = await context.params
   try {
-    const attempt = await getTopicV2Attempt(activityId, attemptId, guard.user.id)
-    const png = await renderTopicV2Poster(attempt.resultSnapshot, activityId)
+    const snapshot = await getTopicV2PosterSnapshot(activityId, attemptId, guard.user.id)
+    const png = await renderTopicV2Poster(snapshot, activityId)
     return new NextResponse(png as unknown as BodyInit, { headers: { ...topicV2Headers, 'Content-Type': 'image/png', 'Content-Length': String(png.length),
       'Content-Disposition': 'inline; filename="activity-result.png"', 'X-Content-Type-Options': 'nosniff' } })
   } catch (error) { return topicV2ErrorResponse(error) }

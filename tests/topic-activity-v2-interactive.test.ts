@@ -6,6 +6,7 @@ import sharp from 'sharp'
 import { fixture, instant } from './fixtures/topic-v2-transaction'
 import { calculateTopicV2Test, castTopicV2Vote, getTopicV2Attempt, getTopicV2Poll, getTopicV2Test, submitTopicV2Test } from '@/lib/topic-activity-v2-interactive'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
+import { topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
 import { saveTopicActivityV2Program } from '@/lib/topic-activity-v2'
 
 test('knowledge scoring rejects foreign/incomplete answers and computes result server-side', () => {
@@ -95,37 +96,26 @@ test('poster uses a fixed 9:16 canvas and crops supplied background without dist
   assert.equal(metadata.height, 1920)
   assert.equal(metadata.width! / metadata.height!, 9 / 16)
 })
-test('poster places wrapped Chinese result text in a compact vertical layout', async () => {
-  const bytes = await renderTopicV2Poster({
+test('poster places wrapped Chinese result text in a bounded paper group', async () => {
+  const value = {
     activityTitle: '天使的礼物活动',
     title: '结果标题需要完整换行测试海报布局',
     description: '这是一段用于检查海报文字间距的中文说明。',
     poster: { showNickname: false, showQrCode: false },
-  }, 'activity-one')
-  const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
-  const textRows: number[] = []
-  for (let y = 120; y < 1200; y += 1) {
-    let brightPixels = 0
-    for (let x = 0; x < 900; x += 1) {
-      const offset = (y * info.width + x) * info.channels
-      if (data[offset] > 180 && data[offset + 1] > 180 && data[offset + 2] > 180) brightPixels += 1
-    }
-    if (brightPixels >= 4) textRows.push(y)
   }
-  const bands: Array<{ start: number; end: number }> = []
-  for (const row of textRows) {
-    const last = bands[bands.length - 1]
-    if (last && row - last.end <= 8) last.end = row
-    else bands.push({ start: row, end: row })
-  }
-  assert.ok(bands.length >= 4, `expected activity, wrapped result title, and description text bands; got ${JSON.stringify(bands)}`)
-  assert.ok(bands[1].start - bands[0].end < 180, 'the result title should follow the activity title without a large blank gap')
+  const svg = topicPosterLayout(value)
+  const result = svg.split('data-poster-group="result"')[1].split('data-poster-group="identity"')[0]
+  const baselines = [...result.matchAll(/<text x="118" y="(\d+)"/gu)].map((match) => Number(match[1]))
+  assert.ok(baselines.length >= 3, 'title wraps into two lines before the description')
+  assert.ok(baselines.every((y) => y >= 850 && y < 1400))
+  assert.ok(baselines[2] - baselines[1] < 180, 'description stays close to its title')
+  assert.equal((await sharp(await renderTopicV2Poster(value, 'activity-one')).metadata()).width, 1080)
 })
 test('poster config uses the bundled Noto CJK font through fontconfig, not unsupported embedded SVG fonts', () => {
-  const source = readFileSync(join(process.cwd(), 'lib/topic-activity-v2-poster.ts'), 'utf8')
+  const source = readFileSync(join(process.cwd(), 'lib/topic-activity-v2-poster.ts'), 'utf8') + readFileSync(join(process.cwd(), 'lib/topic-activity-v2-poster-layout.ts'), 'utf8')
   assert.match(source, /NotoSansSC-VF\.ttf/)
   assert.match(source, /FONTCONFIG_PATH/)
-  assert.match(source, /font-family="Noto Sans SC, sans-serif"/)
+  assert.match(source, /Noto Sans SC, Noto Sans CJK SC, sans-serif/)
   assert.doesNotMatch(source, /@font-face|data:font\/ttf;base64/)
 })
 test('poster rejects private namespace and arbitrary background URL', async () => {
