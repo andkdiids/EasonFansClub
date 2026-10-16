@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+const source = (path: string) => readFileSync(path, 'utf8')
+test('V3 platform records branch before the ordinary comment card; discussion keeps its existing actions', () => {
+  const text = source('components/PostRepliesSection.tsx')
+  const branch = text.indexOf('if (topicActivityId && reply.topicActivitySubmission?.rewardEntryId)')
+  const ordinary = text.indexOf('className="post-reply-card', branch)
+  assert.ok(branch > 0 && ordinary > branch)
+  assert.match(text.slice(branch, ordinary), /TopicActivityPlatformSubmissionCard/)
+  assert.match(text.slice(ordinary), /replyLikeButton\(reply\)/)
+  assert.match(text.slice(ordinary), /openReplyComposer/)
+  assert.match(text.slice(ordinary), /canPinPostReply/)
+  assert.match(text.slice(ordinary), /DeleteReplyButton/)
+  assert.match(text.slice(ordinary), /renderCompactReply/)
+  assert.match(text, /topicCommentTab !== 'PLATFORM' && currentUserId && canInteract && !replyTo/)
+})
+test('V3 submission card never renders comment actions or task definitions', () => {
+  const card = source('components/activities/TopicActivityPlatformSubmissionCard.tsx')
+  for (const forbidden of ['replyLikeButton', 'openReplyComposer', 'DeleteReplyButton', 'instructions}', 'entry.title', 'entry.points']) assert.equal(card.includes(forbidden), false, forbidden)
+  assert.match(card, /submission\.canViewPrivate !== false/)
+  assert.match(card, /const assets = canViewPrivate \?/)
+  assert.match(card, /originalUrl=/)
+  assert.match(card, /progress\.submissionId === submission\.id/)
+  assert.match(card, /entry\.allowResubmit/)
+})
+test('V3 task rejection is required, trimmed and bounded; history is real privileged GET only', () => {
+  const text = source('components/activities/TopicActivityV2TaskReview.tsx')
+  assert.match(text, /rejectReason\.trim\(\)\.length < 2/)
+  assert.match(text, /rejectReason\.trim\(\)\.length > 200/)
+  assert.match(text, /rejectReasonRequired/)
+  assert.match(text, /if \(!canReview\) return/)
+  assert.match(text, /cache: 'no-store', credentials: 'same-origin'/)
+  assert.match(text, /historyOpen && history/)
+  assert.match(text, /if \(!action \|\| busy\.current \|\| !canReview \|\| !isPending\) return/)
+  assert.match(text, /window\.dispatchEvent\(new Event\('topic-activity-v2-changed'\)\)/)
+})
+test('V3 activity details tabs pass real platform keys to the server, not names', () => {
+  const text = source('components/activities/TopicActivityV2Comments.tsx')
+  assert.match(text, /params\.get\('topicPlatform'\)/)
+  assert.match(text, /query\.set\('topicPlatform', platform\)/)
+  assert.match(text, /topicPlatformTabs=\{platformTabs\}/)
+  assert.match(text, /topicCommentTab=\{tab\}/)
+})

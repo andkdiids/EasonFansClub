@@ -118,7 +118,7 @@ test('活动报名复用既有唯一模型，事务锁住活动并幂等写入�
   assert.match(detailApi, /canRegister/)
 })
 
-test('活动列表和首页一次带回真实报名数量，卡片封面固定为竖版 3:4', () => {
+test('活动列表和首页一次带回真实报名数量，紧凑卡片封面完整显示', () => {
   const data = read('lib/activity-data.ts')
   const home = read('lib/home-data.ts')
   const card = read('components/activities/ActivityCard.tsx')
@@ -126,8 +126,10 @@ test('活动列表和首页一次带回真实报名数量，卡片封面固定�
   assert.match(data, /signupCount: _count\.ActivityRegistration/)
   assert.match(home, /_count: \{ select: \{ ActivityRegistration: \{ where: \{ status: \{ in: \['ACTIVE'\] \} \} \} \} \}/)
   assert.match(home, /signupCount: _count\.ActivityRegistration/)
-  assert.match(card, /aspect-\[3\/4\]/)
-  assert.match(card, /object-cover/)
+  assert.match(card, /w-\[112px\]/)
+  assert.match(card, /sm:w-\[156px\]/)
+  assert.match(card, /object-contain/)
+  assert.doesNotMatch(card, /object-cover/)
   assert.match(card, /报名：\$\{activity\.signupCount\}人/)
 })
 

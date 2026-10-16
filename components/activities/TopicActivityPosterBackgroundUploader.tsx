@@ -61,7 +61,7 @@ export function TopicActivityEditorImageUploader({ value, disabled = false, kind
     }).catch((cause) => {
       if (currentId !== requestId.current) return
       const detail = cause instanceof Error ? cause.message : '图片上传失败'
-      setError(`${detail}，未替换当前${background ? '背景图' : '结果图片'}`)
+      setError(`${detail}，未替换当前${background ? '背景图' : '结果海报图'}`)
       setStatus('error')
       setResetSignal((value) => value + 1)
     }).finally(() => {
@@ -74,19 +74,19 @@ export function TopicActivityEditorImageUploader({ value, disabled = false, kind
 
   return <div className="space-y-2">
     <ActivityImageUploader
-      label={background ? '结果海报背景图' : '结果图片'}
+      label={background ? '结果海报背景图' : '结果海报图'}
       initialUrl={value}
       resetSignal={resetSignal}
       disabled={disabled || status === 'uploading'}
       status={status}
-      uploadLabel={background ? '上传背景图' : '上传图片'}
-      replaceLabel={background ? '替换背景' : '替换图片'}
-      removeLabel={background ? '移除背景' : '移除图片'}
-      previewClassName={background ? 'h-64 w-36 max-w-full object-cover rounded-sm' : 'max-h-64 w-full object-contain rounded-sm'}
+      uploadLabel={background ? '上传背景图' : '上传海报图'}
+      replaceLabel={background ? '替换背景' : '替换海报图'}
+      removeLabel={background ? '移除背景' : '移除海报图'}
+      previewClassName="h-64 w-36 max-w-full object-contain rounded-sm"
       errorMessage={error}
       onSelectionChange={select}
     />
-    <p className="text-xs text-[var(--foreground-muted)]">{background ? '建议使用 1080 × 1920 竖图；未上传时使用默认背景。' : '可选；未上传时不会预留图片空位。'}上传后点击保存才会写入活动配置；替换失败会保留原图。</p>
+    <p className="text-xs text-[var(--foreground-muted)]">建议使用 1080 × 1920（9:16）完整海报；图片将铺满分享画布，非 9:16 图片会居中裁切。未上传时兼容原有背景或默认海报。上传后点击保存才会写入活动配置；替换失败会保留原图。</p>
   </div>
 }
 

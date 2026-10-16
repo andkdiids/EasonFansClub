@@ -938,6 +938,7 @@ export function NotificationsClient({
     const actorCardFriend = !systemLike ? getNotificationActorCardFriend(item) : null
     const isBirthday = isBirthdayNotification(item)
     const isUserReward = item.key?.startsWith('user-reward:') === true || item.key?.startsWith('global-points-grant:') === true
+    const isTopicTaskReview = item.key?.startsWith('topic-v2-review:') === true
     const isGlobalPointsGrant = item.key?.startsWith('global-points-grant:') === true
     const isReplyNotification = item.type === 'REPLY' || item.category === 'feedback'
     const replyPreview = item.replyPreview?.trim() || null
@@ -1040,7 +1041,7 @@ export function NotificationsClient({
                 {displayReplyPreview}
               </p>
             ) : !isReplyNotification && fallbackContent ? (
-              <p className={`mt-0.5 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600 ${isUserReward ? '' : 'line-clamp-2'}`}>{fallbackContent}</p>
+              <p className={`mt-0.5 whitespace-pre-wrap break-words text-xs font-bold leading-4 text-slate-600 ${isUserReward || isTopicTaskReview ? '' : 'line-clamp-2'}`}>{fallbackContent}</p>
             ) : null}
             {item.activityTitle ? <p className="mt-1 text-xs font-black text-violet-700">活动：{item.activityTitle}</p> : null}
             {item.imageUrl ? <div className="mt-2 max-w-full" onClick={(event) => event.stopPropagation()}><ImageViewer src={item.imageUrl} alt={`${isGlobalPointsGrant ? '挂号费发放' : item.activityTitle || '活动'}通知图片`} imageClassName="max-h-40 w-full rounded-lg object-contain" buttonClassName="block max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-slate-50 text-left" /></div> : null}

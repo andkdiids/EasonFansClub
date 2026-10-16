@@ -123,9 +123,13 @@ export async function syncActivityPostInTransaction(tx: Prisma.TransactionClient
   const shouldHavePost = activity.type === 'TOPIC_ACTIVITY' || activity.pinToPlaza || Boolean(activity.activityPostId)
   const shouldPublishPost = activity.status === 'PUBLISHED'
   const pinned = shouldPublishPost && activity.pinToPlaza && (!activity.endsAt || activity.endsAt >= now)
-  const ids = badgeIds(activity.rewardBadgeIds)
+  const ids = activity.type === 'TOPIC_ACTIVITY' ? [] : badgeIds(activity.rewardBadgeIds)
   const badges = ids.length ? await tx.badge.findMany({ where: { id: { in: ids } }, select: { name: true } }) : []
-  const content = buildTopicActivityPostContent(activity, badges.map((badge) => badge.name))
+  // Activity metadata is rendered by the structured info card. Seed only the
+  // administrator's actual description into a new topic post, not a second template.
+  const content = activity.type === 'TOPIC_ACTIVITY'
+    ? activity.description.trim()
+    : buildTopicActivityPostContent(activity, badges.map((badge) => badge.name))
 
   if (!activity.activityPostId) {
     if (!shouldHavePost || !shouldPublishPost) return null
@@ -165,7 +169,9 @@ export async function syncActivityPostInTransaction(tx: Prisma.TransactionClient
     where: { id: activity.activityPostId },
     data: {
       title: activity.title,
-      content,
+      // Existing topic bodies may have been hand-edited and have no provenance
+      // marker. Do not rewrite or clean them during an activity settings update.
+      ...(activity.type === 'TOPIC_ACTIVITY' ? {} : { content }),
       activityPinned: pinned,
       isLocked: activity.status === 'CANCELLED',
       status: activity.status === 'DRAFT' ? 'DRAFT' : 'PUBLISHED',

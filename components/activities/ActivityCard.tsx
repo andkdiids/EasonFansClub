@@ -11,7 +11,7 @@ const statusClasses = {
 } as const
 
 export function ActivityStatusBadge({ activity }: Readonly<{ activity: Pick<ActivityView, 'displayStatus'> }>) {
-  return <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-black ${statusClasses[activity.displayStatus]}`}>{activityStatusLabel(activity.displayStatus)}</span>
+  return <span className={`inline-flex shrink-0 items-center rounded-sm border px-2 py-0.5 text-xs font-bold ${statusClasses[activity.displayStatus]}`}>{activityStatusLabel(activity.displayStatus)}</span>
 }
 
 export function ActivityCard({ activity, href = `/activities/${activity.id}`, participation }: Readonly<{
@@ -21,29 +21,28 @@ export function ActivityCard({ activity, href = `/activities/${activity.id}`, pa
 }>) {
   const cover = publicImageVariantUrl(activity.coverUrl || activity.bannerUrl, 'card')
   const isTopicActivity = activity.type === 'TOPIC_ACTIVITY'
-  const rewards = [activity.rewardPoints ? `${activity.rewardPoints} 挂号费` : null, activity.rewardBadgeCount ? `${activity.rewardBadgeCount} 枚勋章` : null].filter(Boolean).join(' + ')
   const participationLabel = participation?.status === 'APPROVED' ? '已通过' : participation?.status === 'PENDING' ? '待审核' : participation?.status === 'REJECTED' ? '未通过' : null
   const rewardLabel = participation?.rewardStatus === 'GRANTED' ? '奖励已发放' : participation?.rewardStatus === 'PENDING' ? '奖励待发放' : null
   return (
-    <Link href={href} className="group block min-w-0 overflow-hidden rounded-2xl border border-sky-100 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-900/85 dark:hover:border-sky-700">
-      <div className="relative aspect-[3/4] w-full overflow-hidden bg-sky-50 dark:bg-slate-950">
+    <Link href={href} className="group flex min-w-0 overflow-hidden rounded-sm border border-[var(--border)] bg-[var(--surface)] transition hover:border-[var(--primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--primary)]">
+      <div className="relative w-[112px] shrink-0 self-stretch overflow-hidden bg-[var(--surface-subtle)] sm:w-[156px]">
         {cover ? <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={cover} alt={`${activity.title}活动封面`} className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" loading="lazy" />
-        </> : <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-sky-100 via-white to-indigo-100 text-4xl font-black text-brand-700/55 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800">E</div>}
+          <img src={cover} alt={`${activity.title}活动封面`} className="absolute inset-0 h-full w-full object-contain" loading="lazy" />
+        </> : <div className="absolute inset-0 flex items-center justify-center text-3xl font-black text-[var(--foreground-muted)]">E</div>}
       </div>
-      <div className="min-w-0 p-3 sm:p-5">
+      <div className="min-w-0 flex-1 p-3 sm:p-4">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5"><ActivityStatusBadge activity={activity} /><span className="truncate text-[11px] font-black text-[var(--foreground-muted)]">{activityTypeLabels[activity.type]}</span>{activity.isFeatured ? <span className="text-[11px] font-black text-[var(--warning)]">精选</span> : null}{activity.pinToPlaza && activity.displayStatus !== 'ENDED' && activity.displayStatus !== 'CANCELLED' ? <span className="text-[11px] font-black text-[var(--primary)]">广场置顶</span> : null}</div>
-        <h2 className="mt-2 line-clamp-2 break-words text-base font-black text-[var(--foreground)] sm:mt-3 sm:text-xl">{activity.title}</h2>
-        <div className="mt-3 space-y-1 text-[11px] font-bold leading-5 text-[var(--foreground-muted)] sm:mt-4 sm:text-xs">
+        <h2 className="mt-2 line-clamp-2 break-words text-base font-black text-[var(--foreground)] sm:text-lg">{activity.title}</h2>
+        {activity.subtitle ? <p className="mt-1 line-clamp-1 text-xs text-[var(--foreground-muted)]">{activity.subtitle}</p> : null}
+        <div className="mt-2 space-y-1 text-[11px] leading-5 text-[var(--foreground-muted)] sm:text-xs">
           {activity.startsAt ? <p className="truncate">时间：{activityDateLabel(activity.startsAt)}{activity.endsAt ? ` — ${activityDateLabel(activity.endsAt)}` : ''}</p> : null}
           {activity.locationName ? <p className="truncate">地点：{activity.locationName}</p> : null}
           {isTopicActivity ? <>
-            {rewards ? <p>奖励：{rewards}</p> : null}
-            <p>{activity.rewardGrantMode === 'SCHEDULED' ? `定时发放${activity.rewardGrantAt ? `：${activityDateLabel(activity.rewardGrantAt)}` : ''}` : '审核通过后发放'}</p>
             {participationLabel ? <p>{participationLabel}{rewardLabel ? ` · ${rewardLabel}` : ''}</p> : null}
           </> : <p>{activity.signupLimit !== null && activity.signupLimit > 0 ? `报名：${activity.signupCount}/${activity.signupLimit}` : `报名：${activity.signupCount}人`}</p>}
         </div>
+        <span className="mt-2 block text-right text-xs font-bold text-[var(--primary)]">查看 →</span>
       </div>
     </Link>
   )

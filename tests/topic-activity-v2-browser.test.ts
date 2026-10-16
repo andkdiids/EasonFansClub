@@ -21,6 +21,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   const esbuild = createRequire(require.resolve('tsx/package.json'))('esbuild') as { build: (options: Record<string, unknown>) => Promise<{ outputFiles: Array<{ text: string }> }> }
   const f = fixture()
   f.program.test.poster.backgroundUrl = '/uploads/old-poster.webp'
+  f.program.test.results[0].imageUrl = '/uploads/old-poster.webp'
   f.program.test.questions.push({ id: 'q2', prompt: '第二题', points: 0, options: [{ id: 'a2', label: '第二题选项A' }, { id: 'b2', label: '第二题选项B' }], correctOptionId: 'a2' })
   const build = await esbuild.build({
     stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {TopicActivityV2PollPanel,TopicActivityV2TestRunner} from './components/activities/TopicActivityV2Interactive'; import {TopicActivityV2TaskReview} from './components/activities/TopicActivityV2TaskReview'; import {TopicActivityV2Editor} from './components/activities/TopicActivityV2Editor'; import {TopicActivityV2Panel} from './components/activities/TopicActivityV2Panel'; const mode=new URLSearchParams(location.search).get('mode'); createRoot(document.getElementById('root')).render(mode==='panel'?<TopicActivityV2Panel activityId="activity-one" isAuthenticated={true} currentUserId="user-one"/>:mode==='test'?<TopicActivityV2TestRunner activityId="activity-one" isAuthenticated={true}/>:mode==='review'?<TopicActivityV2TaskReview activityId="activity-one" canReview={true} submission={{id:'submission-one',status:'PENDING',rewardEntryId:'weibo',rewardSnapshotSafe:{platformName:'微博',title:'分享任务',points:96,instructions:'提交截图'}}}/>:mode==='editor'?<TopicActivityV2Editor activityId="activity-one"/>:<TopicActivityV2PollPanel activityId="activity-one" isAuthenticated={true}/>);`, resolveDir: process.cwd(), loader: 'tsx' },
@@ -100,7 +101,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
     if (url.pathname.endsWith('/v2/fixed-reward')) return send({ claims: [] })
     if (url.pathname.endsWith('/activities/badges')) return send({ badges: [] })
     if (url.pathname === '/api/admin/activities/activity-one/v2') {
-      if (req.method === 'PATCH') { const input = await body(); assert.equal(input.program.entries.length, 1); assert.equal(input.program.test.poster.backgroundUrl, '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp'); Object.assign(f.program, input.program); configWrites++; return send({ program: f.program }) }
+      if (req.method === 'PATCH') { const input = await body(); assert.equal(input.program.entries.length, 1); assert.equal(input.program.test.poster.backgroundUrl, '/uploads/old-poster.webp'); assert.equal(input.program.test.results[0].imageUrl, '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp'); Object.assign(f.program, input.program); configWrites++; return send({ program: f.program }) }
       return send({ program: f.program, activity: { activityPostId: 'post-one' }, statistics: { pollResults: [], entries: [], platforms: [] } })
     }
     res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"><div id="root"></div><script src="/bundle.js"></script>')
@@ -115,6 +116,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       votes = []; voteWrites = 0; testWrites = 0; reviewWrites = 0; configWrites = 0; taskWrites = 0; uploadRequests = 0; uploadShouldFail = true; attempts.length = 0
       personality = false
       f.program.test.poster.backgroundUrl = '/uploads/old-poster.webp'
+      f.program.test.results[0].imageUrl = '/uploads/old-poster.webp'
       const context = await browser.newContext({ viewport: { width, height: 844 }, ...(width < 500 ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 MicroMessenger/8.0' } : {}) })
       const page = await context.newPage(); const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
       const open = (mode: string) => page.goto('http://127.0.0.1:' + port + '/?mode=' + mode)
@@ -158,15 +160,15 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
       assert.equal(testWrites, 2, 'restoring history is read-only')
       personality = false
-      await open('review'); await page.getByRole('button', { name: '通过任务' }).click(); await page.getByRole('button', { name: '取消', exact: true }).click(); assert.equal(reviewWrites, 0)
-      await page.getByRole('button', { name: '拒绝任务' }).click(); await page.getByRole('dialog').locator('textarea').fill('本地拒绝原因')
+      await open('review'); await page.getByRole('button', { name: '通过', exact: true }).click(); await page.getByRole('button', { name: '取消', exact: true }).click(); assert.equal(reviewWrites, 0)
+      await page.getByRole('button', { name: '拒绝', exact: true }).click(); await page.getByRole('dialog').locator('textarea').fill('本地拒绝原因')
       await page.getByRole('button', { name: '确认拒绝' }).evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click() })
       await page.getByRole('alert').waitFor(); assert.equal(reviewWrites, 1); assert.equal(await page.getByRole('dialog').count(), 1)
       assert.equal(await page.getByRole('dialog').locator('textarea').inputValue(), '本地拒绝原因'); await page.getByRole('button', { name: '取消', exact: true }).click()
-      await page.getByRole('button', { name: '查看审核历史' }).click(); await page.getByText('测试管理员', { exact: false }).waitFor()
-      await open('panel'); await page.getByRole('button', { name: '提交weibo截图' }).click()
-      await page.getByRole('button', { name: '确认提交待审核' }).click(); await page.getByRole('button', { name: '取消', exact: true }).click(); assert.equal(taskWrites, 0)
-      await page.getByRole('button', { name: '确认提交待审核' }).click()
+      await page.getByRole('button', { name: '审核记录' }).click(); await page.getByText('测试管理员', { exact: false }).waitFor()
+      await open('panel'); await page.getByRole('button', { name: /weibo.*尚未提交/ }).click()
+      await page.getByRole('button', { name: '提交审核', exact: true }).click(); await page.getByRole('button', { name: '取消', exact: true }).click(); assert.equal(taskWrites, 0)
+      await page.getByRole('button', { name: '提交审核', exact: true }).click()
       await page.getByRole('button', { name: '确认提交', exact: true }).evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click() })
       await page.getByText('任务已提交，等待管理员审核。', { exact: true }).waitFor(); assert.equal(taskWrites, 1)
       const resultLink = page.getByRole('link', { name: '查看测试结果 / 再次测试' })
@@ -176,14 +178,15 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
       await open('editor'); await page.getByRole('button', { name: /配置/ }).click(); await page.getByText('平台奖励', { exact: true }).waitFor()
       assert.equal(await page.locator('textarea').count() > 0, true); assert.equal(configWrites, 0)
-      const posterBackground = page.getByAltText('结果海报背景图预览')
-      await posterBackground.waitFor()
-      assert.match(await posterBackground.getAttribute('src') || '', /old-poster\.webp/u)
-      await page.getByLabel('结果海报背景图上传文件').setInputFiles({ name: 'failed-background.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
-      await page.getByRole('alert').filter({ hasText: '未替换当前背景图' }).waitFor()
-      assert.match(await posterBackground.getAttribute('src') || '', /old-poster\.webp/u, 'failed uploads keep and restore the saved background preview')
+      const resultPoster = page.getByAltText('结果海报图预览').first()
+      await resultPoster.waitFor()
+      assert.match(await resultPoster.getAttribute('src') || '', /old-poster\.webp/u)
+      assert.equal(await page.getByLabel('结果海报背景图上传文件').count(), 0)
+      await page.getByLabel('结果海报图上传文件').first().setInputFiles({ name: 'failed-poster.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
+      await page.getByRole('alert').filter({ hasText: '未替换当前结果海报图' }).waitFor()
+      assert.match(await resultPoster.getAttribute('src') || '', /old-poster\.webp/u, 'failed uploads keep and restore the saved result poster preview')
       uploadShouldFail = false
-      await page.getByLabel('结果海报背景图上传文件').setInputFiles({ name: 'new-background.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
+      await page.getByLabel('结果海报图上传文件').first().setInputFiles({ name: 'new-poster.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
       try { await page.getByText('上传成功', { exact: true }).waitFor({ timeout: 15000 }) } catch {
         const statuses = await page.getByRole('status').allTextContents()
         const alerts = await page.getByRole('alert').allTextContents()

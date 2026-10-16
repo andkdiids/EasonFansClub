@@ -1343,7 +1343,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           </div>
           {post.PostTopic.length ? <nav aria-label="帖子话题" className="mt-4 flex flex-wrap gap-3 text-sm font-black">{post.PostTopic.map((topic) => <Link key={topic.id} href={`/topics/${encodeURIComponent(topic.id)}`} className="text-brand-700 underline underline-offset-2">#{topic.name}</Link>)}</nav> : null}
           {topicActivity ? <section aria-label="话题活动信息" className="mt-6 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)]">
-            {topicActivityCoverUrl ? <img src={publicImageVariantUrl(topicActivityCoverUrl, 'large') || topicActivityCoverUrl} alt={`${topicActivity.title}活动封面`} className="aspect-[16/9] max-h-[520px] w-full object-cover" /> : null}
+            {topicActivityCoverUrl ? <img src={publicImageVariantUrl(topicActivityCoverUrl, 'large') || topicActivityCoverUrl} alt={`${topicActivity.title}活动封面`} className="mx-auto h-auto max-h-[min(75vh,640px)] w-auto max-w-full object-contain" /> : null}
             <div className="space-y-3 p-4 sm:p-5">
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-[var(--navigation-active)] px-3 py-1 text-xs font-black text-[var(--primary)]">话题活动</span><span className="text-sm font-black">参与方式：{topicActivityParticipationLabel(topicActivityMode)}</span></div>
               {topicActivity.participationRule ? <p className="whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground-muted)]">参与说明：{topicActivity.participationRule}</p> : null}

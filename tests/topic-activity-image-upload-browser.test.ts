@@ -14,7 +14,7 @@ import { defaultTopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-confi
 
 // Local transport/storage doubles only. The admin manager, both editors, test
 // submission snapshot, PNG renderer and user preview/download/share are real.
-test('actual admin image uploads persist, refresh and render independently into the same user PNG', {
+test('unified result poster uploads persist, refresh and fill the same preview/download/share PNG', {
   skip: process.env.TOPIC_IMAGE_BROWSER_QA !== '1', timeout: 240_000,
 }, async (t) => {
   const require = createRequire(join(process.cwd(), 'package.json'))
@@ -139,7 +139,6 @@ test('actual admin image uploads persist, refresh and render independently into 
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
   const red = await sharp({ create: { width: 240, height: 160, channels: 4, background: '#f12436' } }).png().toBuffer()
   const green = await sharp({ create: { width: 160, height: 240, channels: 4, background: '#22dc58' } }).png().toBuffer()
-  const yellow = await sharp({ create: { width: 200, height: 100, channels: 4, background: '#eebf20' } }).png().toBuffer()
   async function upload(input: Locator, bytes: Buffer, scope: Locator, name: string) {
     const response = input.page().waitForResponse((response) => response.url().endsWith('/api/uploads/activity-image') && response.request().method() === 'POST')
     await input.setInputFiles({ name, mimeType: 'image/png', buffer: bytes })
@@ -178,31 +177,23 @@ test('actual admin image uploads persist, refresh and render independently into 
       await openAdvanced(page)
       const result1 = page.getByRole('group', { name: '结果 1', exact: true })
       const result2 = page.getByRole('group', { name: '结果 2', exact: true })
-      const background = page.getByRole('group', { name: '结果海报', exact: true })
-      const oldResult = await result1.getByAltText('结果图片预览').getAttribute('src')
-      const oldBackground = await background.getByAltText('结果海报背景图预览').getAttribute('src')
-      await result1.getByAltText('结果图片预览').evaluate((image) => (image as HTMLImageElement).decode())
-      await background.getByAltText('结果海报背景图预览').evaluate((image) => (image as HTMLImageElement).decode())
+      const settings = page.getByRole('group', { name: '分享海报设置', exact: true })
+      const oldResult = await result1.getByAltText('结果海报图预览').getAttribute('src')
+      const oldBackground = f.program.test.poster.backgroundUrl
+      assert.equal(await page.getByLabel('结果海报背景图上传文件').count(), 0, 'global background is no longer a second editable image concept')
+      await result1.getByAltText('结果海报图预览').evaluate((image) => (image as HTMLImageElement).decode())
       failUpload = true
-      await result1.getByLabel('结果图片上传文件').setInputFiles({ name: 'fail.png', mimeType: 'image/png', buffer: red })
-      await result1.getByRole('alert').filter({ hasText: '未替换当前结果图片' }).waitFor()
-      assert.equal(await result1.getByAltText('结果图片预览').getAttribute('src'), oldResult)
-      await background.getByLabel('结果海报背景图上传文件').setInputFiles({ name: 'fail.png', mimeType: 'image/png', buffer: yellow })
-      await background.getByRole('alert').filter({ hasText: '未替换当前背景图' }).waitFor()
-      assert.equal(await background.getByAltText('结果海报背景图预览').getAttribute('src'), oldBackground)
+      await result1.getByLabel('结果海报图上传文件').setInputFiles({ name: 'fail.png', mimeType: 'image/png', buffer: red })
+      await result1.getByRole('alert').filter({ hasText: '未替换当前结果海报图' }).waitFor()
+      assert.equal(await result1.getByAltText('结果海报图预览').getAttribute('src'), oldResult)
       failUpload = false
-      await upload(result1.getByLabel('结果图片上传文件'), red, result1, 'result-one.png')
-      await upload(result2.getByLabel('结果图片上传文件'), green, result2, 'result-two.png')
-      await upload(background.getByLabel('结果海报背景图上传文件'), yellow, background, 'background.png')
-      assert.equal(await result1.getByRole('button', { name: '替换图片', exact: true }).count(), 1)
-      await result1.getByRole('button', { name: '移除图片', exact: true }).click()
-      assert.equal(await result1.getByAltText('结果图片预览').count(), 0)
-      assert.ok(await result1.getByRole('button', { name: '上传图片', exact: true }).isVisible())
-      await upload(result1.getByLabel('结果图片上传文件'), red, result1, 'result-one-replaced.png')
-      await background.getByRole('button', { name: '移除背景', exact: true }).click()
-      assert.equal(await background.getByAltText('结果海报背景图预览').count(), 0)
-      assert.ok(await background.getByRole('button', { name: '上传背景图', exact: true }).isVisible())
-      await upload(background.getByLabel('结果海报背景图上传文件'), yellow, background, 'background-replaced.png')
+      await upload(result1.getByLabel('结果海报图上传文件'), red, result1, 'result-one.png')
+      await upload(result2.getByLabel('结果海报图上传文件'), green, result2, 'result-two.png')
+      assert.equal(await result1.getByRole('button', { name: '替换海报图', exact: true }).count(), 1)
+      await result1.getByRole('button', { name: '移除海报图', exact: true }).click()
+      assert.equal(await result1.getByAltText('结果海报图预览').count(), 0)
+      assert.ok(await result1.getByRole('button', { name: '上传海报图', exact: true }).isVisible())
+      await upload(result1.getByLabel('结果海报图上传文件'), red, result1, 'result-one-replaced.png')
       await page.getByLabel('显示昵称', { exact: true }).check()
       await page.getByLabel('显示活动二维码', { exact: true }).check()
       const beforeWrite = configWrites
@@ -211,20 +202,19 @@ test('actual admin image uploads persist, refresh and render independently into 
       if (artifacts) {
         await page.screenshot({ path: join(artifacts, `admin-advanced-${width}.png`) })
         await result1.screenshot({ path: join(artifacts, `admin-result-image-${width}.png`) })
-        await background.screenshot({ path: join(artifacts, `admin-background-${width}.png`) })
+        await settings.screenshot({ path: join(artifacts, `admin-share-settings-${width}.png`) })
       }
       assert.equal(configWrites, beforeWrite + 1)
       assert.equal(calls.at(-1), 'GET /api/admin/activities/activity-one/v2')
       const savedImages = f.program.test.results.map((row) => row.imageUrl)
-      let savedBackground = f.program.test.poster.backgroundUrl
+      const savedBackground = f.program.test.poster.backgroundUrl
+      assert.equal(savedBackground, oldBackground, 'legacy fallback is preserved, not cleared by hidden UI')
       assert.notEqual(savedImages[0], savedImages[1]); assert.notEqual(savedImages[0], savedBackground)
       await openAdvanced(page)
-      assert.match(await result1.getByAltText('结果图片预览').getAttribute('src') || '', new RegExp(savedImages[0]!.split('/')[3]))
-      assert.match(await result2.getByAltText('结果图片预览').getAttribute('src') || '', new RegExp(savedImages[1]!.split('/')[3]))
-      assert.match(await background.getByAltText('结果海报背景图预览').getAttribute('src') || '', new RegExp(savedBackground!.split('/')[3]))
-      await result1.getByAltText('结果图片预览').evaluate((image) => (image as HTMLImageElement).decode())
-      await result2.getByAltText('结果图片预览').evaluate((image) => (image as HTMLImageElement).decode())
-      await background.getByAltText('结果海报背景图预览').evaluate((image) => (image as HTMLImageElement).decode())
+      assert.match(await result1.getByAltText('结果海报图预览').getAttribute('src') || '', new RegExp(savedImages[0]!.split('/')[3]))
+      assert.match(await result2.getByAltText('结果海报图预览').getAttribute('src') || '', new RegExp(savedImages[1]!.split('/')[3]))
+      await result1.getByAltText('结果海报图预览').evaluate((image) => (image as HTMLImageElement).decode())
+      await result2.getByAltText('结果海报图预览').evaluate((image) => (image as HTMLImageElement).decode())
 
       // Exercise the second real entry: ActivityAdminManager -> simple EDIT.
       await page.goto(origin + '/admin/activities')
@@ -234,25 +224,25 @@ test('actual admin image uploads persist, refresh and render independently into 
       await page.getByRole('button', { name: '下一步', exact: true }).click()
       await page.getByRole('button', { name: '下一步', exact: true }).click()
       const wizardResult = page.getByRole('group', { name: '结果 2 图片', exact: true })
-      await wizardResult.getByAltText('结果图片预览').waitFor()
+      await wizardResult.getByAltText('结果海报图预览').waitFor()
       assert.equal(await page.getByText('结果图片地址（可选）', { exact: true }).count(), 0)
       assert.equal(await page.getByText('背景图片公开路径', { exact: true }).count(), 0)
-      await upload(wizardResult.getByLabel('结果图片上传文件'), green, wizardResult, 'wizard-result-two.png')
-      await page.getByText('高级结果海报设置', { exact: true }).click()
-      const wizardBackground = page.locator('details').filter({ has: page.getByText('高级结果海报设置', { exact: true }) })
-      await wizardBackground.getByAltText('结果海报背景图预览').waitFor()
-      assert.equal(await wizardBackground.getByRole('button', { name: '替换背景', exact: true }).count(), 1)
-      await upload(wizardBackground.getByLabel('结果海报背景图上传文件'), yellow, wizardBackground, 'wizard-background.png')
+      await upload(wizardResult.getByLabel('结果海报图上传文件'), green, wizardResult, 'wizard-result-two.png')
+      await page.getByText('分享海报设置', { exact: true }).click()
+      const wizardSettings = page.locator('details').filter({ has: page.getByText('分享海报设置', { exact: true }) })
+      assert.equal(await page.getByLabel('结果海报背景图上传文件').count(), 0)
+      assert.equal(await page.getByText('宽度', { exact: true }).count(), 0)
+      assert.equal(await page.getByText('高度', { exact: true }).count(), 0)
+      await wizardSettings.getByLabel('显示活动二维码').check()
       await page.getByRole('button', { name: '保存修改', exact: true }).click()
       await page.getByRole('button', { name: '确认保存修改', exact: true }).click()
       await page.getByRole('status').filter({ hasText: '修改已保存并回读确认' }).waitFor()
       if (artifacts) {
         await wizardResult.screenshot({ path: join(artifacts, `admin-simple-result-${width}.png`) })
-        await wizardBackground.screenshot({ path: join(artifacts, `admin-simple-background-${width}.png`) })
+        await wizardSettings.screenshot({ path: join(artifacts, `admin-simple-share-settings-${width}.png`) })
       }
       assert.equal(f.program.test.results[0].imageUrl, savedImages[0], 'wizard result2 must preserve result1')
-      assert.notEqual(f.program.test.poster.backgroundUrl, savedBackground, 'the real simple editor must save its uploaded background too')
-      savedBackground = f.program.test.poster.backgroundUrl
+      assert.equal(f.program.test.poster.backgroundUrl, savedBackground, 'simple editor must preserve hidden legacy background')
 
       // Two real user completions must use two independently persisted images.
       for (const [answer, resultTitle, color] of [['no', '结果一', 'red'], ['yes', '结果二', 'green']] as const) {
@@ -268,7 +258,8 @@ test('actual admin image uploads persist, refresh and render independently into 
         assert.ok(await preview.evaluate((image) => { const r = image.getBoundingClientRect(); return Math.abs(r.width / r.height - 9 / 16) < .01 }))
         const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
         const pixel = (x: number, y: number) => [...data.subarray((y * info.width + x) * 4, (y * info.width + x) * 4 + 3)]
-        const corner = pixel(20, 20); assert.ok(corner[0] > 200 && corner[1] > 150 && corner[2] < 70, 'actual uploaded yellow background appears in exported PNG')
+        const corner = pixel(20, 20)
+        assert.ok(color === 'red' ? corner[0] > 200 && corner[1] < 90 && corner[2] < 110 : corner[0] < 90 && corner[1] > 170 && corner[2] < 130, 'matched result poster itself fills the canvas, never legacy background plus a thumbnail')
         let redPixels = 0, greenPixels = 0
         for (let i = 0; i < data.length; i += 4) {
           if (data[i] > 200 && data[i + 1] < 90 && data[i + 2] < 110) redPixels++
@@ -305,7 +296,7 @@ test('actual admin image uploads persist, refresh and render independently into 
         await page.waitForFunction(() => Boolean(document.documentElement.dataset.shared))
         assert.deepEqual(Buffer.from(await page.evaluate(() => document.documentElement.dataset.shared!), 'base64'), png, 'share must reuse the exact preview/download PNG')
         assert.ok(reads.includes(attempt.resultSnapshot.imageUrl.slice('/cos/'.length)))
-        assert.ok(reads.includes(savedBackground!.slice('/cos/'.length)))
+        assert.equal(reads.includes(savedBackground!.slice('/cos/'.length)), false, 'result poster takes precedence without reading the legacy image')
       }
       const older = f.state.attempts.at(-2)
       const later = f.state.attempts.at(-1)
