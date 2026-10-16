@@ -7,6 +7,7 @@ import { grantTopicActivityPointsInTransaction } from '@/lib/topic-activity-poin
 import { allocatePostCommentFloor } from '@/lib/post-comment-floor'
 import { resolveTopicActivityCommentEligibilityInTransaction } from '@/lib/topic-activity'
 import { resolveTopicActivityCommentPolicy } from '@/lib/topic-activity-comment-policy'
+import { topicActivityTestDirty } from '@/lib/topic-activity-test-presentation'
 import { isTopicActivityOriginalObjectKey } from '@/lib/topic-activity-image-original'
 import { assertTopicLotterySourceRules, lockTopicLotteryRulesForSubmission, syncTopicLotteryEligibilityInTransaction } from '@/lib/topic-activity-v2-lottery'
 import {
@@ -203,7 +204,7 @@ export async function saveTopicActivityV2Program(activityId: string, actorId: st
       const ballots = await tx.topicActivityPollVote.count({ where: { activityId, pollId: previous.poll.id } })
       if (ballots && program.poll.id === previous.poll.id && JSON.stringify(program.poll) !== JSON.stringify(previous.poll)) fail('TOPIC_V2_POLL_VERSION_LOCKED', '已有投票记录，请使用新的投票 ID 保留历史')
       const attempts = await tx.topicActivityTestAttempt.count({ where: { activityId, testId: previous.test.id, configVersion: previous.test.version } })
-      if (attempts && program.test.id === previous.test.id && (program.test.version < previous.test.version || (program.test.version === previous.test.version && JSON.stringify(program.test) !== JSON.stringify(previous.test)))) {
+      if (attempts && program.test.id === previous.test.id && (program.test.version < previous.test.version || (program.test.version === previous.test.version && topicActivityTestDirty(previous.test, program.test).TEST_STRUCTURE_DIRTY))) {
         fail('TOPIC_V2_TEST_VERSION_LOCKED', '已有测试记录，请递增配置版本或使用新测试 ID')
       }
     }

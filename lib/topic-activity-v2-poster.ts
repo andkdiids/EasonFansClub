@@ -109,14 +109,14 @@ async function posterImage(value: unknown, kind: 'BACKGROUND' | 'RESULT_IMAGE') 
 export async function renderTopicV2Poster(snapshotValue: unknown, activityId: string, suppliedBackground?: Buffer) {
   const snapshot = record(snapshotValue), config = record(snapshot.poster)
   const width = POSTER_WIDTH, height = POSTER_HEIGHT, margin = POSTER_MARGIN
-  const [background, resultImage] = await Promise.all([
-    suppliedBackground ? Promise.resolve(suppliedBackground) : posterImage(config.backgroundUrl, 'BACKGROUND'),
-    posterImage(snapshot.imageUrl, 'RESULT_IMAGE'),
-  ])
+  // Stored attempts keep their own immutable image and options; never read today's test config here.
+  // A result poster is the complete visual, with the old global background retained only as fallback.
+  const resultImage = await posterImage(snapshot.imageUrl, 'RESULT_IMAGE')
+  const background = resultImage || suppliedBackground || await posterImage(config.backgroundUrl, 'BACKGROUND')
   if (background && background.length > 20 * 1024 * 1024) throw new TopicActivityV2Error('POSTER_BACKGROUND_TOO_LARGE', '背景图片过大', 400)
   await ensurePosterFontConfig().catch(() => { throw new TopicActivityV2Error('POSTER_FONT_UNAVAILABLE', '海报中文字体暂不可用，请稍后重试', 503) })
   const heading = wrap(snapshot.title || '测试结果', 12, 2)
-  const body = String(snapshot.description || '').trim() ? wrap(snapshot.description, 22, resultImage ? 6 : 9) : []
+  const body = String(snapshot.description || '').trim() ? wrap(snapshot.description, 22, 9) : []
   const activityTitle = wrap(snapshot.activityTitle || snapshot.testTitle || '私家E院话题活动', 22, 2)
   const score = typeof snapshot.score === 'number' && Number.isFinite(snapshot.score)
     ? `得分 ${snapshot.score}${typeof snapshot.maxScore === 'number' && Number.isFinite(snapshot.maxScore) ? ` / ${snapshot.maxScore}` : ''}`
@@ -130,24 +130,15 @@ export async function renderTopicV2Poster(snapshotValue: unknown, activityId: st
   const headingBaseline = activityTitleBaseline + activityTitle.length * 54 + 80
   const bodyBaseline = headingBaseline + heading.length * 94 + 80
   const bodyBottom = body.length ? bodyBaseline + (body.length - 1) * 62 + 12 : bodyBaseline - 40
-  let scoreBaseline = bodyBottom + 72
-  const imageLayers: OverlayOptions[] = []
-  if (resultImage) {
-    const imageTop = Math.ceil(bodyBottom + 48)
-    const imageHeight = Math.max(1, Math.min(600, 1460 - imageTop - (score ? 100 : 0)))
-    const image = await sharp(resultImage, { limitInputPixels: 20_000_000 })
-      .rotate().resize(width - margin * 2, imageHeight, { fit: 'inside' }).png().toBuffer({ resolveWithObject: true })
-    imageLayers.push({ input: image.data, top: imageTop, left: Math.round((width - image.info.width) / 2) })
-    scoreBaseline = imageTop + image.info.height + 80
-  }
-  const activityTitleSvg = renderLines(activityTitle, margin, activityTitleBaseline, 40, 54, 550)
+  const scoreBaseline = bodyBottom + 72
+  const activityTitleSvg = background ? '' : renderLines(activityTitle, margin, activityTitleBaseline, 40, 54, 550)
   const bodySvg = renderLines(body, margin, bodyBaseline, 40, 62, 450)
-  const svgText = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g font-family="Noto Sans SC, sans-serif" fill="#fff" stroke="#071624" stroke-opacity=".56" stroke-width="4" stroke-linejoin="round" paint-order="stroke">${activityTitleSvg}${renderLines(heading, margin, headingBaseline, 72, 94, 750)}${bodySvg}${score ? `<text x="${margin}" y="${scoreBaseline}" font-size="48" font-weight="650">${escaped(score)}</text>` : ''}${nickname ? `<text x="${margin}" y="1665" font-size="40" font-weight="600">${escaped(nickname)}</text>` : ''}<text x="${margin}" y="1820" font-size="34" font-weight="600">私家E院 · ECFC</text></g></svg>`
+  const svgText = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g font-family="Noto Sans SC, sans-serif" fill="#fff" stroke="#071624" stroke-opacity=".56" stroke-width="4" stroke-linejoin="round" paint-order="stroke">${activityTitleSvg}${renderLines(heading, margin, headingBaseline, 72, 94, 750)}${bodySvg}${score ? `<text x="${margin}" y="${scoreBaseline}" font-size="48" font-weight="650">${escaped(score)}</text>` : ''}${nickname ? `<text x="${margin}" y="1665" font-size="40" font-weight="600">${escaped(nickname)}</text>` : ''}${background ? '' : `<text x="${margin}" y="1820" font-size="34" font-weight="600">私家E院 · ECFC</text>`}</g></svg>`
   const svg = Buffer.from(svgText)
   const canvas = background
     ? sharp(background, { limitInputPixels: 20_000_000 }).rotate().resize(width, height, { fit: 'cover', position: 'centre' })
     : sharp({ create: { width, height, channels: 4, background: '#102c48' } })
-  const layers: OverlayOptions[] = [...imageLayers, { input: svg, top: 0, left: 0 }]
+  const layers: OverlayOptions[] = [{ input: svg, top: 0, left: 0 }]
   if (showQrCode) {
     const qrSize = 216
     const qrPlatePadding = 12

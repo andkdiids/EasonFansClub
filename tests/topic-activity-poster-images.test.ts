@@ -11,6 +11,7 @@ let backgroundUrl = ''
 let firstImageUrl = ''
 let secondImageUrl = ''
 let transparentImageUrl = ''
+let exactPosterUrl = ''
 
 before(async () => {
   const uploads = join(process.cwd(), 'public', 'uploads')
@@ -24,6 +25,7 @@ before(async () => {
   firstImageUrl = await save('first.png', await sharp({ create: { width: 240, height: 120, channels: 4, background: '#e32030' } }).png().toBuffer())
   secondImageUrl = await save('second.png', await sharp({ create: { width: 120, height: 240, channels: 4, background: '#2030e3' } }).png().toBuffer())
   transparentImageUrl = await save('transparent.png', await sharp(Buffer.from('<svg width="200" height="200"><rect x="60" y="60" width="80" height="80" fill="#ee22dd"/></svg>')).png().toBuffer())
+  exactPosterUrl = await save('exact-poster.png', await sharp(Buffer.from('<svg width="1080" height="1920"><rect width="1080" height="1920" fill="#112233"/><rect width="60" height="60" fill="#ee2233"/><rect x="1020" y="1860" width="60" height="60" fill="#2244ee"/></svg>')).png().toBuffer())
 })
 
 after(async () => { if (directory) await rm(directory, { recursive: true, force: true }) })
@@ -66,33 +68,33 @@ test('configured background reads real stored bytes and uses centred cover cropp
   }
 })
 
-test('result image is an independent contained layer, never a replacement background', async () => {
+test('result poster fills the full canvas, never a central thumbnail', async () => {
   const png = await renderTopicV2Poster(snapshot(firstImageUrl), 'activity-images')
   const bounds = await colorBounds(png, [227, 32, 48])
-  assert.ok(bounds.count > 100_000)
-  assert.ok(Math.abs(bounds.width / bounds.height - 2) < 0.02, 'result aspect ratio is preserved')
-  assert.ok(bounds.left >= 96 && bounds.right < 984 && bounds.top > 400 && bounds.bottom < 1460)
-  assert.deepEqual(await pixel(png, 0, 0), [16, 44, 72], 'no background was configured')
+  assert.ok(bounds.count > 1_500_000)
+  assert.deepEqual([bounds.left, bounds.right, bounds.top, bounds.bottom], [0, 1079, 0, 1919])
+  assert.deepEqual(await pixel(png, 0, 0), [227, 32, 48])
 })
 
-test('custom background and Result 1/Result 2 images coexist without mixing', async () => {
+test('each result poster takes precedence over legacy background without mixing', async () => {
   const first = await renderTopicV2Poster(snapshot(firstImageUrl, backgroundUrl), 'activity-images')
   const second = await renderTopicV2Poster(snapshot(secondImageUrl, backgroundUrl), 'activity-images')
   assert.ok((await colorBounds(first, [227, 32, 48])).count > 10_000)
   assert.equal((await colorBounds(first, [32, 48, 227])).count, 0)
   const secondBounds = await colorBounds(second, [32, 48, 227])
-  assert.ok(secondBounds.count > 10_000)
-  assert.ok(Math.abs(secondBounds.width / secondBounds.height - 0.5) < 0.02)
+  assert.ok(secondBounds.count > 1_500_000)
+  assert.deepEqual([secondBounds.left, secondBounds.top, secondBounds.right, secondBounds.bottom], [0, 0, 1079, 1919])
   assert.equal((await colorBounds(second, [227, 32, 48])).count, 0)
-  assert.deepEqual(await pixel(first, 0, 0), [34, 136, 68])
-  assert.deepEqual(await pixel(second, 0, 0), [34, 136, 68])
+  assert.deepEqual(await pixel(first, 0, 0), [227, 32, 48])
+  assert.deepEqual(await pixel(second, 0, 0), [32, 48, 227])
 })
 
-test('transparent result images preserve the background around their artwork', async () => {
+test('transparent result posters do not cause the legacy background to be composited', async () => {
   const png = await renderTopicV2Poster(snapshot(transparentImageUrl, backgroundUrl), 'activity-images')
   const bounds = await colorBounds(png, [238, 34, 221])
   assert.ok(bounds.count > 10_000)
-  assert.deepEqual(await pixel(png, bounds.left - 30, bounds.top + 20), [34, 136, 68])
+  const rgba = await sharp(png).extract({ left: 0, top: 0, width: 1, height: 1 }).ensureAlpha().raw().toBuffer()
+  assert.equal(rgba[3], 0)
 })
 
 test('nickname toggle changes only footer content and supports bounded long names', async () => {
@@ -112,7 +114,20 @@ test('QR enabled is decodable from the actual PNG and points to the exact activi
   const bitmap = new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(new Uint8ClampedArray(data), info.width, info.height)))
   assert.equal(new QRCodeReader().decode(bitmap).getText(), 'https://ecfc.fans/activities/activity%20with%20spaces')
   const off = await renderTopicV2Poster(value, 'activity with spaces')
-  assert.deepEqual(await pixel(off, 750, 1550), [34, 136, 68], 'QR disabled leaves no white placeholder')
+  assert.deepEqual(await pixel(off, 750, 1550), [227, 32, 48], 'QR disabled leaves no white placeholder')
+})
+
+test('exact 9:16 result image preserves all corners without a frame, crop or duplicate footer brand', async () => {
+  const png = await renderTopicV2Poster({ ...snapshot(exactPosterUrl), poster: { backgroundUrl: null, showNickname: false, showQrCode: false } }, 'activity-images')
+  assert.deepEqual(await pixel(png, 0, 0), [238, 34, 51])
+  assert.deepEqual(await pixel(png, 1079, 1919), [34, 68, 238])
+  const footer = await sharp(png).extract({ left: 90, top: 1780, width: 800, height: 70 }).png().toBuffer()
+  assert.deepEqual(await sharp(footer).stats().then((stats) => stats.channels.map((channel) => channel.stdev)), [0, 0, 0, 0])
+})
+
+test('a valid result poster does not read or fail because of a stale legacy global path', async () => {
+  const png = await renderTopicV2Poster(snapshot(firstImageUrl, '/uploads/legacy-image-no-longer-exists.png'), 'activity-images')
+  assert.deepEqual(await pixel(png, 0, 0), [227, 32, 48])
 })
 
 test('result assets reject external, private and temporary URLs without fetching them', async () => {

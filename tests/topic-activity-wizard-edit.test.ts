@@ -161,6 +161,26 @@ test('existing test records require a higher version before changing question co
   assert.equal(calls.length, 0)
 })
 
+test('existing test attempts allow result poster and QR saves without version bump or question changes', async () => {
+  const value = fixture(3)
+  value.draft.program.test.results = [{ id: 'poster-result', title: '结果', description: '说明' }]
+  value.baseline.program.test = structuredClone(value.draft.program.test)
+  value.program.test = structuredClone(value.draft.program.test)
+  value.draft.program.test.results[0].imageUrl = '/uploads/new-result.png'
+  value.draft.program.test.poster.showQrCode = true
+  const changes = getTopicWizardEditChanges(value.baseline, value.draft, value.media)
+  assert.deepEqual(changes.testDirty, { TEST_STRUCTURE_DIRTY: false, RESULT_PRESENTATION_DIRTY: true, SHARE_SETTINGS_DIRTY: true })
+  const state = { activity: value.activity, program: value.program, lottery: value.lottery }
+  const calls: string[] = []
+  const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    transport: memoryTransport(state, calls, { onGet: (path) => path.endsWith('/v2') ? { activity: state.activity, program: state.program, statistics: { testParticipants: 3 } } : undefined }) })
+  assert.equal(result.status, 'SAVED')
+  assert.equal(calls.filter((call) => call.startsWith('PATCH')).length, 1)
+  assert.deepEqual(state.program.test.questions, value.baseline.program.test.questions)
+  assert.equal(state.program.test.version, value.baseline.program.test.version)
+  assert.equal(state.program.test.poster.backgroundUrl, value.baseline.program.test.poster.backgroundUrl)
+})
+
 test('unknown PATCH result is read-only on retry and never resubmits', async () => {
   const value = fixture()
   value.draft.activity.title = '新标题'

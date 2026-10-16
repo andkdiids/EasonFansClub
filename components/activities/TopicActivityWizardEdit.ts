@@ -6,6 +6,7 @@ import { storedActivityImageUrl } from '@/lib/activity-image-url'
 import { createTopicWizardDraft, type TopicActivityWizardDraft } from './TopicActivityWizardState'
 import { createWizardMedia, type WizardMedia, type WizardImage } from './TopicActivityWizardMedia'
 import { canonicalWizardValue } from './TopicActivityWizardProgramSave'
+import { topicActivityTestDirty } from '@/lib/topic-activity-test-presentation'
 
 export type WizardEditActivitySnapshot = {
   id: string
@@ -112,6 +113,7 @@ export type WizardEditChanges = {
   lottery: TopicLotteryConfig
   programChanged: boolean
   lotteryChanged: boolean
+  testDirty: ReturnType<typeof topicActivityTestDirty>
 }
 
 export function getTopicWizardEditChanges(baseline: TopicWizardEditBaseline, draft: TopicActivityWizardDraft, media: WizardMedia): WizardEditChanges {
@@ -151,6 +153,7 @@ export function getTopicWizardEditChanges(baseline: TopicWizardEditBaseline, dra
     lottery: lotteryConfig,
     programChanged: canonical(programResult.value) !== canonical(baseline.program),
     lotteryChanged: canonical(lotteryConfig) !== canonical(baseline.lottery),
+    testDirty: topicActivityTestDirty(baseline.program.test, programResult.value.test),
   }
 }
 
@@ -237,7 +240,7 @@ export async function saveTopicWizardEdits(input: {
   const stages: Array<{ stage: EditStage; changed: boolean; changedFields?: string[]; body?: unknown; expected?: WizardEditActivitySnapshot | TopicActivityV2Program | TopicLotteryConfig }> = []
   if (Object.keys(changes.activityPatch).length) stages.push({ stage: 'ACTIVITY', changed: true, changedFields: Object.keys(changes.activityPatch), body: changes.activityPatch, expected: expectedActivity(baseline.activity, changes.activityPatch) })
   if (changes.programChanged) {
-    const testChanged = canonical(changes.program.test) !== canonical(baseline.program.test)
+    const testChanged = changes.testDirty.TEST_STRUCTURE_DIRTY
     if (testChanged && baseline.testParticipants > 0 && changes.program.test.id === baseline.program.test.id && changes.program.test.version <= baseline.program.test.version) {
       return { status: 'BLOCKED', baseline, completed, message: '已有测试答题记录；修改同一测试 ID 的题目必须递增版本，历史结果会保留。' }
     }
@@ -275,7 +278,7 @@ export async function saveTopicWizardEdits(input: {
     if (item.stage === 'PROGRAM') {
       const stats = record(currentBody)?.statistics
       const testParticipants = Number(record(stats)?.testParticipants)
-      const testChanged = canonical(changes.program.test) !== canonical(baseline.program.test)
+      const testChanged = changes.testDirty.TEST_STRUCTURE_DIRTY
       if (testChanged && Number.isSafeInteger(testParticipants) && testParticipants > 0
         && changes.program.test.id === baseline.program.test.id
         && changes.program.test.version <= baseline.program.test.version) {

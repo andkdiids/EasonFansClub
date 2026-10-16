@@ -14,6 +14,8 @@ export function ReviewConfirmDialog({
   error = '',
   onConfirm,
   onCancel,
+  rejectReasonRequired = false,
+  titleOverride,
 }: Readonly<{
   open: boolean
   action: ReviewConfirmAction
@@ -24,6 +26,8 @@ export function ReviewConfirmDialog({
   error?: string
   onConfirm: () => void
   onCancel: () => void
+  rejectReasonRequired?: boolean
+  titleOverride?: string
 }>) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
@@ -64,12 +68,12 @@ export function ReviewConfirmDialog({
   if (!open) return null
 
   const isApprove = action === 'APPROVED'
-  const title = isApprove ? '确认通过这条参与内容？' : '确认拒绝这条参与内容？'
+  const title = titleOverride || (isApprove ? '确认通过这条参与内容？' : '确认拒绝这条参与内容？')
   const description = isApprove
     ? alreadyCounted
       ? '该用户已计入本次活动。本次通过不会重复累计参与次数或重复获得活动奖励。仍要通过这条参与内容吗？'
       : '通过后，该用户将计入本次活动参与；如活动设置为立即发奖，奖励将按规则发放。'
-    : '确认拒绝后，这条参与内容不会计入本次活动。拒绝原因可选。'
+    : rejectReasonRequired ? '请填写 2–200 字拒绝原因，提交者将收到此原因。' : '确认拒绝后，这条参与内容不会计入本次活动。拒绝原因可选。'
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4" onClick={() => { if (!loading) onCancel() }}>
@@ -78,8 +82,8 @@ export function ReviewConfirmDialog({
         <p className="mt-2 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-500">{description}</p>
         {!isApprove ? (
           <label className="mt-4 block text-sm font-black text-slate-700">
-            拒绝原因（可选）
-            <textarea value={rejectReason} onChange={(event) => onRejectReasonChange(event.target.value)} rows={3} maxLength={1000} disabled={loading} className="mt-2 block w-full rounded-sm border border-sky-100 bg-white p-3 text-sm font-bold text-slate-700 outline-none focus:border-sky-400 disabled:opacity-60" />
+            {rejectReasonRequired ? '拒绝原因 *' : '拒绝原因（可选）'}
+            <textarea required={rejectReasonRequired} value={rejectReason} onChange={(event) => onRejectReasonChange(event.target.value)} rows={3} maxLength={rejectReasonRequired ? 200 : 1000} disabled={loading} className="mt-2 block w-full rounded-sm border border-sky-100 bg-white p-3 text-sm font-bold text-slate-700 outline-none focus:border-sky-400 disabled:opacity-60" />
           </label>
         ) : null}
         {error ? <p role="alert" className="mt-3 text-sm font-bold leading-6 text-red-600">{error}</p> : null}

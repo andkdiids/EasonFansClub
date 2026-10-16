@@ -417,6 +417,7 @@ test('ActivityAdminManager makes the background list keyboard-inert while the wi
       page.on('pageerror', (error: Error) => pageErrors.push(error.message))
       await page.addScriptTag({ content: bundle.outputFiles[0].text })
       const list = page.locator('#activity-list')
+      await list.getByRole('tab', { name: '草稿', exact: true }).click()
       const edit = list.getByRole('button', { name: '编辑', exact: true })
       await page.waitForTimeout(100)
       assert.equal(await list.count(), 1, `manager fixture did not render its list; root=${await page.locator('#root').innerHTML()}; pageErrors=${pageErrors.join('; ')}`)

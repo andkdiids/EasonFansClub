@@ -31,7 +31,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { UserDisplayName } from '@/components/UserDisplayName'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { ReviewConfirmDialog, type ReviewConfirmAction } from '@/components/activities/ReviewConfirmDialog'
-import { TopicActivityV2TaskReview } from '@/components/activities/TopicActivityV2TaskReview'
+import { TopicActivityPlatformSubmissionCard } from '@/components/activities/TopicActivityPlatformSubmissionCard'
 import type { TopicActivityV2TaskAsset, TopicActivityV2TaskSubmission } from '@/components/activities/topic-activity-v2-types'
 import { SingleCommentConfirmDialog } from '@/components/activities/SingleCommentConfirmDialog'
 import { parseTopicCommentEligibility, topicCommentBlockMessage, type TopicCommentEligibility } from '@/lib/topic-comment-ui'
@@ -58,7 +58,7 @@ type ReplyItem = {
   stickerId?: string | null
   stickerUrl?: string | null
   mentions: ReplyMentionView[]
-  topicActivitySubmission?: TopicActivityV2TaskSubmission & { alreadyCounted: boolean; formSubmissionCount?: number }
+  topicActivitySubmission?: TopicActivityV2TaskSubmission & { alreadyCounted: boolean; formSubmissionCount?: number; canViewPrivate?: boolean }
   author: {
     id: string
     uid: number
@@ -121,6 +121,7 @@ function normalizeReply(value: unknown): ReplyItem | null {
         } : null,
         taskAssets,
         granted: Boolean(rawSubmission.granted),
+        canViewPrivate: typeof rawSubmission.canViewPrivate === 'boolean' ? rawSubmission.canViewPrivate : undefined,
       } : undefined
   return {
     id: reply.id,
@@ -479,7 +480,9 @@ export function PostRepliesSection({
           return [...refreshed.map((reply) => currentById.has(reply.id) ? { ...currentById.get(reply.id)!, topicActivitySubmission: reply.topicActivitySubmission } : reply), ...current.filter((reply) => reply.parentId && kept.has(reply.id) && !freshIds.has(reply.id))]
         })
         if (Number.isInteger(data.page) && Number.isInteger(data.totalPages)) setViewPagination({ page: data.page, total: data.total, totalPages: data.totalPages, pageSize: data.pageSize })
-      }
+      } else setReplies(refreshed)
+      const freshById = new Map(refreshed.map((reply) => [reply.id, reply]))
+      setMyReplies((current) => current.map((reply) => freshById.get(reply.id) || reply))
       setTopicReviewSyncError('')
     } catch {
       if (requestId === reviewSyncRequestRef.current) setTopicReviewSyncError('评论已更新，审核列表同步失败，请重试同步')
@@ -871,6 +874,15 @@ export function PostRepliesSection({
   }
 
   function renderReply(reply: ReplyItem) {
+    if (topicActivityId && reply.topicActivitySubmission?.rewardEntryId) return <TopicActivityPlatformSubmissionCard
+      key={reply.id} activityId={topicActivityId} commentId={reply.id} submission={reply.topicActivitySubmission}
+      author={reply.author} createdAt={reply.createdAt} currentUserId={currentUserId} canReview={canReviewTopicActivity}
+      onReviewed={(status) => {
+        const update = (items: ReplyItem[]) => items.map((item) => item.id === reply.id && item.topicActivitySubmission
+          ? { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, status } } : item)
+        setReplies(update); setMyReplies(update)
+        void syncReviewCounts()
+      }} />
     const name = reply.author.nickname || 'E院用户'
     const avatar = profileImageUrl(reply.author.profile?.avatarUrl || reply.author.avatarUrl)
     const children = collectThreadReplies(reply.id)
@@ -928,19 +940,7 @@ export function PostRepliesSection({
               <DeleteReplyButton replyId={reply.id} confirmDescription={reply.topicActivitySubmission ? '这条评论属于话题活动参与内容。删除后该条参与将撤回；若用户还有其他已通过内容，活动参与仍有效。已发奖励不会自动追回。' : undefined} onDeleted={(result) => removeReply(reply.id, result)} />
             ) : null}
             {topicActivityId && reply.topicActivitySubmission ? (
-              reply.topicActivitySubmission.rewardEntryId ? <TopicActivityV2TaskReview
-                activityId={topicActivityId}
-                canReview={canReviewTopicActivity}
-                submission={reply.topicActivitySubmission}
-                onReviewed={(status) => {
-                  const update = (items: ReplyItem[]) => items.map((item) => item.id === reply.id && item.topicActivitySubmission
-                    ? { ...item, topicActivitySubmission: { ...item.topicActivitySubmission, status } }
-                    : item)
-                  setReplies(update)
-                  setMyReplies(update)
-                  void syncReviewCounts()
-                }}
-              /> : <>
+              <>
                 {reply.topicActivitySubmission.status === 'PENDING' && canReviewTopicActivity ? <>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'APPROVED')} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 disabled:opacity-50">{reviewingSubmissionId === reply.topicActivitySubmission.id ? '处理中…' : '通过'}</button>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'REJECTED')} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 disabled:opacity-50">拒绝</button>
@@ -993,7 +993,7 @@ export function PostRepliesSection({
   return (
     <>
     <section id={`post-comments-${postId}`} className="post-replies-section scroll-mt-16 space-y-3">
-      {currentUserId && canInteract && !replyTo ? (
+      {topicCommentTab !== 'PLATFORM' && currentUserId && canInteract && !replyTo ? (
         <div id={`post-primary-composer-${postId}`} data-post-primary-composer={postId}>
           {!topicRootComposerUnlocked ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-black text-amber-800">
@@ -1037,7 +1037,7 @@ export function PostRepliesSection({
             </button>
           ) : null}
         </div>
-      ) : !currentUserId ? (
+      ) : topicCommentTab !== 'PLATFORM' && !currentUserId ? (
         <div className="post-replies-login rounded-xl p-5 text-center font-bold text-slate-600">请先登录后再回复。</div>
       ) : null}
 
@@ -1118,7 +1118,7 @@ export function PostRepliesSection({
       ) : null}
 
     </section>
-    {currentUserId && canInteract && (topicRootComposerUnlocked || Boolean(replyTo)) ? (
+    {topicCommentTab !== 'PLATFORM' && currentUserId && canInteract && (topicRootComposerUnlocked || Boolean(replyTo)) ? (
       <PostReplyBottomSheet
         open={mobileReplySheetOpen}
         postId={postId}
