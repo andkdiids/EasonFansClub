@@ -37,7 +37,18 @@ export const TOPIC_POSTER_PANELS = {
   titleTextWidth: 820,
   descriptionTextWidth: 800,
   testTextWidth: 590,
-  identityQrWidth: 500,
+} as const
+export const TOPIC_POSTER_IDENTITY = {
+  left: 260,
+  top: 1120,
+  height: 132,
+  qrWidth: 540,
+  noQrWidth: 750,
+  textLeft: 292,
+  textRightPadding: 36,
+  nicknameSize: 46,
+  nicknameMinSize: 36,
+  nicknameLineHeightRatio: 1.12,
 } as const
 export const TOPIC_POSTER_BRAND = { left: 350, top: 1324, width: 380, height: 54 } as const
 export const TOPIC_POSTER_AVATAR = { left: 100, top: USER_ZONE_START + 20, size: 144 } as const
@@ -217,12 +228,12 @@ function lines(values: string[], x: number, y: number, size: number, height: num
 }
 
 // Deterministic paper edges: no filters, remote fonts, or additional image slots.
-function paper(x: number, y: number, width: number, height: number, fill: string, opacity = 1) {
+function paper(x: number, y: number, width: number, height: number, fill: string, opacity = 1, panel?: string) {
   const points = [[8, 5], [width * .22, 0], [width * .24, 5], [width * .55, 2], [width * .57, 6], [width - 5, 3],
     [width - 9, height * .25], [width, height * .38], [width - 6, height * .67], [width - 2, height * .8], [width - 9, height - 3],
     [width * .76, height], [width * .74, height - 4], [width * .42, height + 1], [width * .4, height - 3], [5, height],
     [9, height * .76], [1, height * .64], [6, height * .35], [0, height * .23]]
-  return `<polygon points="${points.map(([dx, dy]) => `${x + dx},${y + dy}`).join(' ')}" fill="${fill}" fill-opacity="${opacity}"/>`
+  return `<polygon${panel ? ` data-poster-panel="${panel}"` : ''} points="${points.map(([dx, dy]) => `${x + dx},${y + dy}`).join(' ')}" fill="${fill}" fill-opacity="${opacity}"/>`
 }
 
 export function topicPosterLayout(snapshot: Record<string, unknown>) {
@@ -246,19 +257,32 @@ export function topicPosterLayout(snapshot: Record<string, unknown>) {
   const descriptionBottom = description.lines.length
     ? descriptionTop + (description.lines.length - 1) * description.lineHeight + Math.ceil(description.fontSize * 1.15)
     : descriptionTop
+  const descriptionHighlightHeight = description.lines.length
+    ? 40 + (description.lines.length - 1) * description.lineHeight
+    : 0
   const scoreBaseline = descriptionTop + description.lines.length * description.lineHeight + 22
   const bottom = Math.min(resultBottomLimit, Math.max(result.minBottom,
     Math.ceil(descriptionBottom + (score ? 58 : 24))))
   const timeText = time.lines[0] || ''
+  const identityWidth = config.showQrCode === true ? TOPIC_POSTER_IDENTITY.qrWidth : TOPIC_POSTER_IDENTITY.noQrWidth
+  const nicknameRight = TOPIC_POSTER_IDENTITY.left + identityWidth - TOPIC_POSTER_IDENTITY.textRightPadding
   const nickname = config.showNickname === true
-    ? fitPosterText(text(snapshot.nickname) || '私家E院会员', config.showQrCode === true ? 420 : 610, 34, 25, 2, 1.12)
-    : { lines: [], fontSize: 34, lineHeight: 38, truncated: false }
+    ? fitPosterText(text(snapshot.nickname) || '私家E院会员', nicknameRight - TOPIC_POSTER_IDENTITY.textLeft,
+      TOPIC_POSTER_IDENTITY.nicknameSize, TOPIC_POSTER_IDENTITY.nicknameMinSize, 2, TOPIC_POSTER_IDENTITY.nicknameLineHeightRatio)
+    : { lines: [], fontSize: TOPIC_POSTER_IDENTITY.nicknameSize, lineHeight: 52, truncated: false }
+  const nicknameTextHeight = nickname.lines.length
+    ? nickname.fontSize + (nickname.lines.length - 1) * nickname.lineHeight
+    : 0
+  const nicknameBaseline = Math.round(TOPIC_POSTER_IDENTITY.top +
+    (TOPIC_POSTER_IDENTITY.height - nicknameTextHeight) / 2 + nickname.fontSize * .84)
   const brand = topicPosterFooter(config)
+  const titleLeft = 86
+  const titleCenter = titleLeft + TOPIC_POSTER_PANELS.titleWidth / 2
 
-  const identity = nickname.lines.length ? `${paper(260, 1120, config.showQrCode === true ? TOPIC_POSTER_PANELS.identityQrWidth : 720, 132, '#fffdf7', .96)}
+  const identity = nickname.lines.length ? `${paper(TOPIC_POSTER_IDENTITY.left, TOPIC_POSTER_IDENTITY.top, identityWidth, TOPIC_POSTER_IDENTITY.height, '#fffdf7', .96, 'identity')}
     <circle cx="172" cy="1192" r="76" fill="#fffdf7"/><circle cx="172" cy="1192" r="70" fill="#ffdc52"/>
     ${lines([graphemes(nickname.lines[0])[0] || 'E'], 150, 1212, 52, 52, 850)}
-    ${lines(nickname.lines, 292, 1182, nickname.fontSize, nickname.lineHeight, 800)}<path d="M292 1240 Q460 1228 638 1238" fill="none" stroke="#ffcf22" stroke-width="7"/>` : ''
+    ${lines(nickname.lines, TOPIC_POSTER_IDENTITY.textLeft, nicknameBaseline, nickname.fontSize, nickname.lineHeight, 800)}<path d="M${TOPIC_POSTER_IDENTITY.textLeft} 1240 Q${Math.round((TOPIC_POSTER_IDENTITY.textLeft + nicknameRight) / 2)} 1228 ${nicknameRight} 1238" fill="none" stroke="#ffcf22" stroke-width="7"/>` : ''
 
   const { width, height } = TOPIC_POSTER_SIZE
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
@@ -273,8 +297,8 @@ export function topicPosterLayout(snapshot: Record<string, unknown>) {
       </g>
       <g data-poster-group="result">
         ${paper(74, result.top, TOPIC_POSTER_PANELS.resultWidth, bottom - result.top, '#fffdf7', .94)}
-        <g transform="rotate(-1.2 530 ${result.top + 78})">${paper(86, result.top + 18, TOPIC_POSTER_PANELS.titleWidth, title.lines.length * titleLineHeight + 24, '#f59ac8')}${lines(title.lines, 118, result.titleBaseline, title.fontSize, titleLineHeight, 900)}</g>
-        ${description.lines.length ? paper(104, descriptionTop - 29, TOPIC_POSTER_PANELS.descriptionWidth, 40, '#ffe259', .94) : ''}
+        <g transform="rotate(-1.2 ${titleCenter} ${result.top + 78})">${paper(titleLeft, result.top + 18, TOPIC_POSTER_PANELS.titleWidth, title.lines.length * titleLineHeight + 24, '#f59ac8', 1, 'result-title')}${lines(title.lines, titleCenter, result.titleBaseline, title.fontSize, titleLineHeight, 900, 'middle')}</g>
+        ${descriptionHighlightHeight ? paper(104, descriptionTop - 29, TOPIC_POSTER_PANELS.descriptionWidth, descriptionHighlightHeight, '#ffe259', .94, 'description-highlight') : ''}
         ${lines(description.lines, 118, descriptionTop, description.fontSize, description.lineHeight, 650)}
         ${score ? lines([score], 118, scoreBaseline, 28, 36, 750) : ''}
       </g>
