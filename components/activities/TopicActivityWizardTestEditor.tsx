@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react'
 import type { TopicActivityV2Test, TopicActivityV2TestQuestion, TopicActivityV2TestResult } from '@/lib/topic-activity-v2-config'
 import { createWizardId } from './TopicActivityWizardIds'
-import { TopicActivityEditorImageUploader } from './TopicActivityPosterBackgroundUploader'
+import { TopicActivityPosterBackgroundUploader } from './TopicActivityPosterBackgroundUploader'
 import { TopicActivityPosterPreview } from './TopicActivityPosterPreview'
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm'
@@ -114,13 +114,12 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
             }) })) })
           }}>删除结果</button></div>
           <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">结果标题<input className={inputClass} value={row.title} onChange={(event) => result(index, { title: event.target.value })} /></label><label className="text-sm">结果说明<input className={inputClass} value={row.description} onChange={(event) => result(index, { description: event.target.value })} /></label></div>
-          <div role="group" aria-label={`结果 ${index + 1} 图片`}><TopicActivityEditorImageUploader value={row.imageUrl || null} disabled={disabled || imageUploading} onUploadingChange={(uploading) => uploadingChanged(row.id, uploading)} onChange={(imageUrl) => patch({ results: value.results.map((item) => item.id === row.id ? { ...item, imageUrl: imageUrl || undefined } : item) })} /></div>
           {value.mode === 'KNOWLEDGE' ? <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">最低分（包含）<input className={inputClass} type="number" min={0} value={row.scoreMin ?? ''} onChange={(event) => result(index, { scoreMin: event.target.value === '' ? undefined : Number(event.target.value) })} /></label><label className="text-sm">最高分（包含）<input className={inputClass} type="number" min={0} value={row.scoreMax ?? ''} onChange={(event) => result(index, { scoreMax: event.target.value === '' ? undefined : Number(event.target.value) })} /></label></div> : null}
         </article>)}
         {value.mode === 'KNOWLEDGE' ? <p className="text-xs text-[var(--foreground-muted)]">知识测试结果分数区间必须连续、无重叠，并完整覆盖 0 到题目总分。</p> : null}
       </section>
 
-      <details className="border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-semibold">分享海报设置</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showNickname} onChange={(event) => patch({ poster: { ...value.poster, showNickname: event.target.checked } })} />显示昵称</label><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showQrCode} onChange={(event) => patch({ poster: { ...value.poster, showQrCode: event.target.checked } })} />显示活动二维码</label></div><TopicActivityPosterPreview test={value} /></details>
+      <details className="border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-semibold">分享海报设置</summary><div className="mt-3 space-y-3"><TopicActivityPosterBackgroundUploader value={value.poster.backgroundUrl} disabled={disabled || imageUploading} onUploadingChange={(uploading) => uploadingChanged('poster-background', uploading)} onChange={(backgroundUrl) => patch({ poster: { ...value.poster, backgroundUrl } })} /><p className="text-xs text-[var(--foreground-muted)]">旧活动未设置统一背景时，预览会暂用最早一张历史结果海报图；上传并保存统一背景后，所有结果都将使用这张图。</p><div className="grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showNickname} onChange={(event) => patch({ poster: { ...value.poster, showNickname: event.target.checked } })} />显示昵称</label><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showQrCode} onChange={(event) => patch({ poster: { ...value.poster, showQrCode: event.target.checked } })} />显示活动二维码</label></div></div><TopicActivityPosterPreview test={value} /></details>
     </> : null}
   </fieldset>
 }

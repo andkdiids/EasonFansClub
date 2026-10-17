@@ -11,7 +11,7 @@ import { createDefaultTopicActivityV2Program, publicTopicActivityV2Program } fro
 import { defaultTopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
 
-test('real edit wizard saves uploaded non-first result background with legacy nullable fields and real PNG preview/download/share', { skip: process.env.TOPIC_V2_BROWSER_QA !== '1' }, async (t) => {
+test('real edit wizard saves one shared 3:4 poster background and preserves legacy result images', { skip: process.env.TOPIC_V2_BROWSER_QA !== '1' }, async (t) => {
   const require = createRequire(join(process.cwd(), 'package.json'))
   const esbuild = createRequire(require.resolve('tsx/package.json'))('esbuild') as {
     build: (options: Record<string, unknown>) => Promise<{ outputFiles: Array<{ text: string }> }>
@@ -51,7 +51,7 @@ test('real edit wizard saves uploaded non-first result background with legacy nu
     content: [{ raw: bundle.outputFiles[0].text, extension: 'js' }],
   })]).process(readFileSync('app/globals.css', 'utf8'), { from: join(process.cwd(), 'app/globals.css') })).css as string
   const uploadedPath = '/cos/activities/00000000-0000-4000-8000-000000000001/source.webp'
-  const background = await sharp({ create: { width: 1080, height: 1920, channels: 4, background: '#3bd38b' } }).png().toBuffer()
+  const background = await sharp({ create: { width: 1080, height: 1440, channels: 4, background: '#3bd38b' } }).png().toBuffer()
   // Exercise the real COS path resolver while replacing only the SDK's network boundary.
   const envNames = ['TENCENT_COS_SECRET_ID', 'TENCENT_COS_SECRET_KEY', 'TENCENT_COS_BUCKET', 'TENCENT_COS_REGION'] as const
   const oldEnv = envNames.map((name) => process.env[name])
@@ -72,8 +72,8 @@ test('real edit wizard saves uploaded non-first result background with legacy nu
   program.enabled = true
   program.test = { ...program.test, enabled: true, id: 'existing-test', title: '原有测试', version: 7, mode: 'KNOWLEDGE',
     questions: [{ id: 'existing-question', prompt: '原有题目', points: 2, correctOptionId: 'correct', options: [{ id: 'correct', label: '正确' }, { id: 'other', label: '其他' }] }],
-    results: [{ id: 'result-one', title: '结果一', description: '第一结果', scoreMin: 0, scoreMax: 1 },
-      { id: 'result-two', title: '结果二', description: '第二结果', scoreMin: 2, scoreMax: 2 }],
+    results: [{ id: 'result-one', title: '结果一', description: '第一结果', scoreMin: 0, scoreMax: 1, imageUrl: '/uploads/legacy-result-one.webp' },
+      { id: 'result-two', title: '结果二', description: '第二结果', scoreMin: 2, scoreMax: 2, imageUrl: '/uploads/legacy-result-two.webp' }],
     poster: { ...program.test.poster, showNickname: true, showQrCode: true } }
   const questionsBefore = structuredClone(program.test.questions)
   const initialProgram = structuredClone(program)
@@ -120,11 +120,11 @@ test('real edit wizard saves uploaded non-first result background with legacy nu
       if (url.pathname.endsWith('/v2/attempts')) return send({ attempts: [frozenAttempt] })
       if (url.pathname.endsWith('/poster')) {
         posterRequests++
-        const currentResult = program.test.results.find((row) => row.id === frozenAttempt.resultId)
-        assert.equal(currentResult?.imageUrl, uploadedPath)
-        // The real renderer reads the saved COS reference; only its SDK network operation is mocked.
-        // Current presentation resolution itself is independently covered by the service tests.
-        servedPng = await renderTopicV2Poster({ ...frozenAttempt.resultSnapshot, imageUrl: currentResult?.imageUrl, poster: program.test.poster }, activity.id)
+        assert.equal(program.test.poster.backgroundUrl, uploadedPath)
+        assert.equal(program.test.results[0].imageUrl, '/uploads/legacy-result-one.webp')
+        assert.equal(program.test.results[1].imageUrl, '/uploads/legacy-result-two.webp')
+        // The real renderer reads the saved shared COS reference; only its SDK network operation is mocked.
+        servedPng = await renderTopicV2Poster({ ...frozenAttempt.resultSnapshot, poster: program.test.poster }, activity.id)
         res.setHeader('Content-Type', 'image/png'); res.end(servedPng); return
       }
       if (url.pathname.startsWith('/api/')) return send({ message: 'Unexpected local fixture request' }, 400)
@@ -161,12 +161,12 @@ test('real edit wizard saves uploaded non-first result background with legacy nu
       page.on('pageerror', (error) => errors.push(error.message))
       await page.goto(base)
       await goToTestStep(page)
-      await page.getByRole('group', { name: '结果 2 图片' }).getByLabel('结果海报图上传文件').setInputFiles({ name: 'result-background.png', mimeType: 'image/png', buffer: background })
-      await page.getByText('上传成功', { exact: true }).waitFor()
       await page.getByText('分享海报设置', { exact: true }).click()
+      await page.getByLabel('统一结果海报背景上传文件').setInputFiles({ name: 'shared-poster-background.png', mimeType: 'image/png', buffer: background })
+      await page.getByText('上传成功', { exact: true }).waitFor()
       await page.getByLabel('预览测试结果', { exact: true }).selectOption('result-two')
       const preview = page.getByRole('region', { name: '结果海报布局预览' })
-      const bg = preview.getByAltText('结果海报背景预览')
+      const bg = preview.getByAltText('结果海报背景预览', { exact: true })
       await bg.waitFor()
       assert.equal(await bg.getAttribute('src'), uploadedPath)
       await bg.evaluate((element) => (element as HTMLImageElement).decode())
@@ -190,7 +190,9 @@ test('real edit wizard saves uploaded non-first result background with legacy nu
       const before = writes
       await save(page)
       assert.equal(writes, before + 1)
-      assert.equal(program.test.results[1].imageUrl, uploadedPath)
+      assert.equal(program.test.poster.backgroundUrl, uploadedPath)
+      assert.equal(program.test.results[0].imageUrl, '/uploads/legacy-result-one.webp')
+      assert.equal(program.test.results[1].imageUrl, '/uploads/legacy-result-two.webp')
       assert.equal(program.test.version, 7, 'image-only presentation save needs no scoring version bump')
       assert.deepEqual(program.test.questions, questionsBefore)
       assert.equal(program.test.poster.showNickname, false); assert.equal(program.test.poster.showQrCode, false)
@@ -199,12 +201,13 @@ test('real edit wizard saves uploaded non-first result background with legacy nu
       await page.getByLabel('预览测试结果', { exact: true }).selectOption('result-two')
       assert.equal(await page.getByLabel('显示昵称', { exact: true }).isChecked(), false)
       assert.equal(await page.getByLabel('显示活动二维码', { exact: true }).isChecked(), false)
-      assert.equal(await page.getByAltText('结果海报背景预览').getAttribute('src'), uploadedPath)
+      assert.equal(await page.getByAltText('结果海报背景预览', { exact: true }).getAttribute('src'), uploadedPath)
       // Result descriptions belong to the protected test structure; only presentation preferences change.
       await page.getByLabel('显示昵称', { exact: true }).check()
       await save(page)
       assert.equal(writes, before + 2, 'reload and a second presentation save succeeds')
-      assert.equal(program.test.results[1].imageUrl, uploadedPath)
+      assert.equal(program.test.poster.backgroundUrl, uploadedPath)
+      assert.equal(program.test.results[1].imageUrl, '/uploads/legacy-result-two.webp')
       assert.equal(program.test.poster.showNickname, true); assert.equal(program.test.poster.showQrCode, false)
       assert.deepEqual(frozenAttempt, frozenBefore, 'historical attempt remains unchanged')
 
@@ -216,9 +219,10 @@ test('real edit wizard saves uploaded non-first result background with legacy nu
       await image.waitFor(); await image.evaluate((element) => (element as HTMLImageElement).decode())
       const bytes = await image.evaluate(async (element) => Array.from(new Uint8Array(await (await fetch((element as HTMLImageElement).src)).arrayBuffer())))
       assert.deepEqual(Buffer.from(bytes), servedPng)
-      const hero = await sharp(servedPng).extract({ left: 0, top: 0, width: 1080, height: 620 }).raw().toBuffer()
-      const expected = await sharp(background).extract({ left: 0, top: 0, width: 1080, height: 620 }).raw().toBuffer()
-      assert.deepEqual(hero, expected, 'uploaded 9:16 background survives the actual PNG overlay byte-for-byte')
+      assert.deepEqual(await sharp(servedPng).metadata().then((metadata) => [metadata.width, metadata.height]), [1080, 1440])
+      const hero = await sharp(servedPng).extract({ left: 0, top: 0, width: 1080, height: 350 }).raw().toBuffer()
+      const expected = await sharp(background).extract({ left: 0, top: 0, width: 1080, height: 350 }).raw().toBuffer()
+      assert.deepEqual(hero, expected, 'uploaded 3:4 background survives the transparent hero overlay byte-for-byte')
       const downloadPromise = page.waitForEvent('download')
       await page.getByRole('link', { name: '保存 PNG', exact: true }).click()
       assert.deepEqual(readFileSync((await (await downloadPromise).path())!), servedPng)

@@ -14,16 +14,15 @@ export function topicActivityEditorImagesMatch(expected: TopicActivityV2Test, ac
     })
 }
 
-export async function uploadTopicActivityEditorImage(file: File) {
+export async function uploadTopicActivityPosterBackground(file: File) {
   const path = topicActivityPosterBackgroundPath(await uploadActivityImage(file))
   if (!path) throw new Error('图片上传结果路径无效')
   return path
 }
 
-export function TopicActivityEditorImageUploader({ value, disabled = false, kind = 'result', onChange, onUploadingChange }: Readonly<{
+export function TopicActivityPosterBackgroundUploader({ value, disabled = false, onChange, onUploadingChange }: Readonly<{
   value: string | null
   disabled?: boolean
-  kind?: 'result' | 'background'
   onChange: (url: string | null) => void
   onUploadingChange?: (uploading: boolean) => void
 }>) {
@@ -34,7 +33,6 @@ export function TopicActivityEditorImageUploader({ value, disabled = false, kind
   const [status, setStatus] = useState<ActivityImageUploadStatus>('idle')
   const [error, setError] = useState('')
   const [resetSignal, setResetSignal] = useState(0)
-  const background = kind === 'background'
   useEffect(() => () => {
     requestId.current++
     if (uploading.current) callbacks.current.onUploadingChange?.(false)
@@ -54,14 +52,14 @@ export function TopicActivityEditorImageUploader({ value, disabled = false, kind
     uploading.current = true
     setStatus('uploading')
     callbacks.current.onUploadingChange?.(true)
-    void uploadTopicActivityEditorImage(selection.file).then((path) => {
+    void uploadTopicActivityPosterBackground(selection.file).then((path) => {
       if (currentId !== requestId.current) return
       callbacks.current.onChange(path)
       setStatus('success')
     }).catch((cause) => {
       if (currentId !== requestId.current) return
       const detail = cause instanceof Error ? cause.message : '图片上传失败'
-      setError(`${detail}，未替换当前${background ? '背景图' : '结果海报图'}`)
+      setError(`${detail}，未替换当前统一海报背景`)
       setStatus('error')
       setResetSignal((value) => value + 1)
     }).finally(() => {
@@ -74,22 +72,18 @@ export function TopicActivityEditorImageUploader({ value, disabled = false, kind
 
   return <div className="space-y-2">
     <ActivityImageUploader
-      label={background ? '结果海报背景图' : '结果海报图'}
+      label="统一结果海报背景"
       initialUrl={value}
       resetSignal={resetSignal}
       disabled={disabled || status === 'uploading'}
       status={status}
-      uploadLabel={background ? '上传背景图' : '上传海报图'}
-      replaceLabel={background ? '替换背景' : '替换海报图'}
-      removeLabel={background ? '移除背景' : '移除海报图'}
+      uploadLabel="上传背景图"
+      replaceLabel="替换背景"
+      removeLabel="移除背景"
       previewClassName="h-64 w-36 max-w-full object-contain rounded-sm"
       errorMessage={error}
       onSelectionChange={select}
     />
-    <p className="text-xs text-[var(--foreground-muted)]">建议使用 1080 × 1920（9:16）完整海报；图片将铺满分享画布，非 9:16 图片会居中裁切。未上传时兼容原有背景或默认海报。上传后点击保存才会写入活动配置；替换失败会保留原图。</p>
+    <p className="text-xs text-[var(--foreground-muted)]">建议尺寸：1080 × 1440，比例 3:4。此背景将用于该测试的所有结果海报；非 3:4 图片会按比例铺满并居中裁切。未上传时兼容旧结果图片或默认背景。上传后保存才会写入活动配置；替换失败会保留原图。</p>
   </div>
-}
-
-export function TopicActivityPosterBackgroundUploader(props: Omit<Parameters<typeof TopicActivityEditorImageUploader>[0], 'kind'>) {
-  return <TopicActivityEditorImageUploader {...props} kind="background" />
 }

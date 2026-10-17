@@ -21,7 +21,8 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   const esbuild = createRequire(require.resolve('tsx/package.json'))('esbuild') as { build: (options: Record<string, unknown>) => Promise<{ outputFiles: Array<{ text: string }> }> }
   const f = fixture()
   f.program.test.poster.backgroundUrl = '/uploads/old-poster.webp'
-  f.program.test.results[0].imageUrl = '/uploads/old-poster.webp'
+  f.program.test.results[0].imageUrl = '/uploads/legacy-result-one.webp'
+  f.program.test.results[1].imageUrl = '/uploads/legacy-result-two.webp'
   f.program.test.questions.push({ id: 'q2', prompt: '第二题', points: 0, options: [{ id: 'a2', label: '第二题选项A' }, { id: 'b2', label: '第二题选项B' }], correctOptionId: 'a2' })
   const build = await esbuild.build({
     stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {TopicActivityV2PollPanel,TopicActivityV2TestRunner} from './components/activities/TopicActivityV2Interactive'; import {TopicActivityV2TaskReview} from './components/activities/TopicActivityV2TaskReview'; import {TopicActivityV2Editor} from './components/activities/TopicActivityV2Editor'; import {TopicActivityV2Panel} from './components/activities/TopicActivityV2Panel'; const mode=new URLSearchParams(location.search).get('mode'); createRoot(document.getElementById('root')).render(mode==='panel'?<TopicActivityV2Panel activityId="activity-one" isAuthenticated={true} currentUserId="user-one"/>:mode==='test'?<TopicActivityV2TestRunner activityId="activity-one" isAuthenticated={true}/>:mode==='review'?<TopicActivityV2TaskReview activityId="activity-one" canReview={true} submission={{id:'submission-one',status:'PENDING',rewardEntryId:'weibo',rewardSnapshotSafe:{platformName:'微博',title:'分享任务',points:96,instructions:'提交截图'}}}/>:mode==='editor'?<TopicActivityV2Editor activityId="activity-one"/>:<TopicActivityV2PollPanel activityId="activity-one" isAuthenticated={true}/>);`, resolveDir: process.cwd(), loader: 'tsx' },
@@ -101,22 +102,24 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
     if (url.pathname.endsWith('/v2/fixed-reward')) return send({ claims: [] })
     if (url.pathname.endsWith('/activities/badges')) return send({ badges: [] })
     if (url.pathname === '/api/admin/activities/activity-one/v2') {
-      if (req.method === 'PATCH') { const input = await body(); assert.equal(input.program.entries.length, 1); assert.equal(input.program.test.poster.backgroundUrl, '/uploads/old-poster.webp'); assert.equal(input.program.test.results[0].imageUrl, '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp'); Object.assign(f.program, input.program); configWrites++; return send({ program: f.program }) }
+      if (req.method === 'PATCH') { const input = await body(); assert.equal(input.program.entries.length, 1); assert.equal(input.program.test.poster.backgroundUrl, '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp'); assert.equal(input.program.test.results[0].imageUrl, '/uploads/legacy-result-one.webp'); assert.equal(input.program.test.results[1].imageUrl, '/uploads/legacy-result-two.webp'); Object.assign(f.program, input.program); configWrites++; return send({ program: f.program }) }
       return send({ program: f.program, activity: { activityPostId: 'post-one' }, statistics: { pollResults: [], entries: [], platforms: [] } })
     }
     res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"><div id="root"></div><script src="/bundle.js"></script>')
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as { port: number }).port
+  const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
   const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null
   try {
-    browser = await chromium.launch({ headless: true, ...(existsSync(edge) ? { executablePath: edge } : {}) })
+    browser = await chromium.launch({ headless: true, ...(existsSync(chrome) ? { executablePath: chrome } : existsSync(edge) ? { executablePath: edge } : {}) })
     for (const width of [1024, 360, 390, 430]) {
       votes = []; voteWrites = 0; testWrites = 0; reviewWrites = 0; configWrites = 0; taskWrites = 0; uploadRequests = 0; uploadShouldFail = true; attempts.length = 0
       personality = false
       f.program.test.poster.backgroundUrl = '/uploads/old-poster.webp'
-      f.program.test.results[0].imageUrl = '/uploads/old-poster.webp'
+      f.program.test.results[0].imageUrl = '/uploads/legacy-result-one.webp'
+      f.program.test.results[1].imageUrl = '/uploads/legacy-result-two.webp'
       const context = await browser.newContext({ viewport: { width, height: 844 }, ...(width < 500 ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 MicroMessenger/8.0' } : {}) })
       const page = await context.newPage(); const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
       const open = (mode: string) => page.goto('http://127.0.0.1:' + port + '/?mode=' + mode)
@@ -130,10 +133,10 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByRole('heading', { name: '服务端真实结果' }).waitFor(); assert.equal(testWrites, 1)
       await page.getByRole('button', { name: '生成结果海报' }).click(); await page.getByAltText('我的测试结果海报').waitFor()
       assert.ok(await page.getByAltText('我的测试结果海报').evaluate((element) => (element as HTMLImageElement).naturalWidth > 0))
-      assert.deepEqual(await page.getByAltText('我的测试结果海报').evaluate((element) => [(element as HTMLImageElement).naturalWidth, (element as HTMLImageElement).naturalHeight]), [1080, 1920])
+      assert.deepEqual(await page.getByAltText('我的测试结果海报').evaluate((element) => [(element as HTMLImageElement).naturalWidth, (element as HTMLImageElement).naturalHeight]), [1080, 1440])
       const previewBytes = await page.getByAltText('我的测试结果海报').evaluate(async (element) => Array.from(new Uint8Array(await (await fetch((element as HTMLImageElement).src)).arrayBuffer())))
       assert.deepEqual(Buffer.from(previewBytes), png, 'preview uses the exact server PNG bytes')
-      assert.ok(await page.getByAltText('我的测试结果海报').evaluate((element) => Math.abs((element as HTMLImageElement).getBoundingClientRect().width / (element as HTMLImageElement).getBoundingClientRect().height - 9 / 16) < 0.01))
+      assert.ok(await page.getByAltText('我的测试结果海报').evaluate((element) => Math.abs((element as HTMLImageElement).getBoundingClientRect().width / (element as HTMLImageElement).getBoundingClientRect().height - 3 / 4) < 0.01))
       const downloadWait = page.waitForEvent('download'); await page.getByRole('link', { name: '保存 PNG' }).click()
       const download = await downloadWait; assert.equal(download.suggestedFilename(), 'ecfc-activity-result.png')
       assert.deepEqual(readFileSync((await download.path())!), png, 'download is the same PNG, not a second render')
@@ -183,16 +186,26 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
       await open('editor'); await page.getByRole('button', { name: /配置/ }).click(); await page.getByText('平台奖励', { exact: true }).waitFor()
       assert.equal(await page.locator('textarea').count() > 0, true); assert.equal(configWrites, 0)
-      const resultPoster = page.getByAltText('结果海报图预览').first()
+      const resultPoster = page.getByAltText('结果海报背景预览')
       await resultPoster.waitFor()
       assert.match(await resultPoster.getAttribute('src') || '', /old-poster\.webp/u)
-      assert.equal(await page.getByLabel('结果海报背景图上传文件').count(), 0)
-      await page.getByLabel('结果海报图上传文件').first().setInputFiles({ name: 'failed-poster.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
-      await page.getByRole('alert').filter({ hasText: '未替换当前结果海报图' }).waitFor()
-      assert.match(await resultPoster.getAttribute('src') || '', /old-poster\.webp/u, 'failed uploads keep and restore the saved result poster preview')
+      assert.equal(await page.getByLabel('统一结果海报背景上传文件').count(), 1)
+      assert.equal(await page.getByRole('group', { name: /^结果 \d+ 图片$/u }).count(), 0, 'there is no result-level poster uploader')
+      const previewCanvas = page.getByLabel('结果海报布局预览').locator('[data-preview-result-id]')
+      assert.equal(await previewCanvas.getAttribute('data-preview-background'), '/uploads/old-poster.webp', 'global background takes precedence over legacy result images')
+      await page.getByLabel('预览测试结果').selectOption('second')
+      assert.equal(await previewCanvas.getAttribute('data-preview-result-id'), 'second', 'result selector changes the displayed result text')
+      assert.equal(await previewCanvas.getAttribute('data-preview-background'), '/uploads/old-poster.webp', 'all result previews retain the same global background')
+      await page.getByLabel('统一结果海报背景上传文件').setInputFiles({ name: 'failed-poster.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
+      await page.getByRole('alert').filter({ hasText: '未替换当前统一海报背景' }).waitFor()
+      assert.match(await resultPoster.getAttribute('src') || '', /old-poster\.webp/u, 'failed uploads keep and restore the saved shared background preview')
       uploadShouldFail = false
-      await page.getByLabel('结果海报图上传文件').first().setInputFiles({ name: 'new-poster.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
-      try { await page.getByText('上传成功', { exact: true }).waitFor({ timeout: 15000 }) } catch {
+      await page.getByLabel('统一结果海报背景上传文件').setInputFiles({ name: 'new-poster.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
+      try {
+        await page.getByText('上传成功', { exact: true }).waitFor({ timeout: 15000 })
+        await page.waitForFunction(() => document.querySelector('[data-preview-result-id]')?.getAttribute('data-preview-background') === '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp')
+        assert.equal(await previewCanvas.getAttribute('data-preview-result-id'), 'second', 'uploading the shared background does not reset the selected result')
+      } catch {
         const statuses = await page.getByRole('status').allTextContents()
         const alerts = await page.getByRole('alert').allTextContents()
         const bodyText = (await page.locator('body').innerText()).slice(-1600)

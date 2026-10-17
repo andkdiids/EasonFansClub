@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { publicTopicActivityV2Program, type TopicActivityV2Test } from '@/lib/topic-activity-v2-config'
+import { publicTopicActivityV2Program, topicActivityV2PosterBackground, type TopicActivityV2Test } from '@/lib/topic-activity-v2-config'
 import { grantTopicActivityV2MedalForEventInTransaction, lockTopicV2Activity, requireTopicV2Active, requireTopicV2Program, TopicActivityV2Error, withTopicV2Transaction } from '@/lib/topic-activity-v2'
 
 function fail(code: string, message: string, status = 409): never { throw new TopicActivityV2Error(code, message, status) }
@@ -127,18 +127,18 @@ export async function getTopicV2PosterSnapshot(activityId: string, attemptId: st
   if (!attempt) fail('TEST_RESULT_NOT_FOUND', '测试结果不存在', 404)
   const snapshot = data(attempt.resultSnapshot)
   // Presentation may be corrected without changing answers or the earned result.
-  // Match stable result ID AND test/version; never borrow another result's image.
   const currentTest = data(data(attempt.Activity.topicProgram).test)
   const currentPoster = data(currentTest.poster)
-  const sameTest = typeof attempt.testId === 'string' && currentTest.id === attempt.testId && currentTest.version === attempt.configVersion
-  const currentResult = sameTest && Array.isArray(currentTest.results)
-    ? currentTest.results.map(data).find((result) => result.id === attempt.resultId) : undefined
   const poster = data(snapshot.poster)
-  // Old/retired versions retain their own artwork. Explicit current removals stay removed.
+  // Resolve one shared activity background for every result. For legacy configs,
+  // the first configured result image is the shared fallback; an old attempt's
+  // frozen artwork is used only when the current test has no shared image.
+  const sharedBackground = topicActivityV2PosterBackground(currentTest)
+  const historicalBackground = typeof poster.backgroundUrl === 'string' && poster.backgroundUrl.trim()
+    ? poster.backgroundUrl : typeof snapshot.imageUrl === 'string' && snapshot.imageUrl.trim() ? snapshot.imageUrl : null
   // Date/avatar nulls remain frozen; only missing date/avatar properties fall back.
   return { ...snapshot,
-    imageUrl: currentResult ? currentResult.imageUrl || null : snapshot.imageUrl,
-    poster: { ...poster, ...(currentResult ? { backgroundUrl: currentPoster.backgroundUrl || null } : {}), showNickname: currentPoster.showNickname === true, showQrCode: currentPoster.showQrCode === true },
+    poster: { ...poster, backgroundUrl: sharedBackground || historicalBackground, showNickname: currentPoster.showNickname === true, showQrCode: currentPoster.showQrCode === true },
     nickname: currentPoster.showNickname === true ? snapshot.nickname ?? attempt.User.nickname ?? null : null,
     activityStartsAt: Object.hasOwn(snapshot, 'activityStartsAt') ? snapshot.activityStartsAt : attempt.Activity.startsAt?.toISOString() || null,
     activityEndsAt: Object.hasOwn(snapshot, 'activityEndsAt') ? snapshot.activityEndsAt : attempt.Activity.endsAt?.toISOString() || null,
