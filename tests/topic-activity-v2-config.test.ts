@@ -5,6 +5,8 @@ import {
   normalizeTopicActivityV2Program,
   publicTopicActivityV2Program,
   readTopicActivityV2Program,
+  topicActivityV2PosterBackground,
+  TOPIC_ACTIVITY_V2_POSTER_SIZE,
 } from '@/lib/topic-activity-v2-config'
 
 function knowledgeProgram(overrides: Record<string, unknown> = {}) {
@@ -32,7 +34,33 @@ test('V2 default config is disabled and read(null) does not invent activity conf
   assert.deepEqual(readTopicActivityV2Program(null), null)
   const normalized = normalizeTopicActivityV2Program(undefined)
   assert.equal(normalized.valid, true)
-  if (normalized.valid) assert.equal(normalized.value.enabled, false)
+  if (normalized.valid) {
+    assert.equal(normalized.value.enabled, false)
+    assert.deepEqual([normalized.value.test.poster.width, normalized.value.test.poster.height], [1080, 1440])
+  }
+})
+
+test('V5 poster dimensions normalize legacy 9:16 values and resolve one global or legacy background', () => {
+  assert.deepEqual(TOPIC_ACTIVITY_V2_POSTER_SIZE, { width: 1080, height: 1440 })
+  const legacy = knowledgeProgram({ test: {
+    ...knowledgeProgram().test as object,
+    results: [
+      { id: 'result-0', title: '结果一', description: '结果说明', scoreMin: 0, scoreMax: 0, imageUrl: null },
+      { id: 'result-1', title: '结果二', description: '结果说明', scoreMin: 1, scoreMax: 1, imageUrl: '/uploads/topic/legacy-second.png' },
+    ],
+    poster: { width: 1080, height: 1920, backgroundUrl: null, showNickname: false, showQrCode: false },
+  } })
+  const normalized = normalizeTopicActivityV2Program(legacy)
+  assert.equal(normalized.valid, true)
+  if (normalized.valid) {
+    assert.deepEqual([normalized.value.test.poster.width, normalized.value.test.poster.height], [1080, 1440])
+    assert.equal(normalized.value.test.results[1].imageUrl, '/uploads/topic/legacy-second.png', 'legacy result assets remain intact')
+    assert.equal(topicActivityV2PosterBackground(normalized.value.test), '/uploads/topic/legacy-second.png')
+  }
+  const shared = structuredClone(legacy) as { test: { poster: { backgroundUrl: string | null }; results: Array<{ imageUrl?: string | null }> } }
+  shared.test.poster.backgroundUrl = '/uploads/topic/shared.png'
+  assert.equal(topicActivityV2PosterBackground(shared.test), '/uploads/topic/shared.png', 'shared background overrides all legacy images')
+  assert.equal(topicActivityV2PosterBackground({ poster: { backgroundUrl: '' }, results: [] }), null)
 })
 
 test('V2 config normalizes Beijing datetime-local input to ISO instants', () => {

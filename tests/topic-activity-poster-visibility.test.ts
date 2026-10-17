@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { createDefaultTopicActivityV2Program, readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 import { getTopicV2PosterSnapshot } from '@/lib/topic-activity-v2-interactive'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
-import { TOPIC_POSTER_QR, topicPosterFooter, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
+import { TOPIC_POSTER_QR, TOPIC_POSTER_SIZE, topicPosterFooter, topicPosterLayout, topicPosterQr } from '@/lib/topic-activity-v2-poster-layout'
 import { fixture } from './fixtures/topic-v2-transaction'
 
 test('poster defaults and legacy missing flags are false; explicit saved booleans round-trip unchanged', () => {
@@ -25,8 +25,8 @@ test('poster defaults and legacy missing flags are false; explicit saved boolean
 })
 
 const target = 'https://ecfc.fans/activities/visibility-qa'
-async function decode(png: Buffer) {
-  const { left, top, size } = TOPIC_POSTER_QR
+async function decode(png: Buffer, poster: { showNickname: boolean; showQrCode: boolean }) {
+  const { left, top, size } = topicPosterQr(poster)
   const { data, info } = await sharp(png).extract({ left, top, width: size, height: size }).greyscale().raw().toBuffer({ resolveWithObject: true })
   return new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(new Uint8ClampedArray(data), info.width, info.height)))).getText()
 }
@@ -39,21 +39,18 @@ for (const showNickname of [false, true]) for (const showQrCode of [false, true]
     assert.equal(svg.includes('私人昵称'), showNickname)
     assert.equal(svg.includes('data-poster-group="identity"'), showNickname, 'no empty identity group, avatar or name placeholder when private')
     const brand = topicPosterFooter(poster)
-    assert.ok(brand.top >= 1460 && brand.top + brand.height < 1810)
-    if (!showQrCode) assert.ok(brand.width > 420, 'brand reflows into the unused QR width')
-    if (!showNickname || !showQrCode) {
-      assert.equal(brand.textLeft, brand.left + brand.width / 2)
-      assert.match(svg, /text-anchor="middle"/, 'rebalanced brand text stays centred')
-    }
-    if (!showNickname && showQrCode) assert.ok(brand.left + brand.width < TOPIC_POSTER_QR.left, 'brand fills the old identity region without overlapping QR')
+    assert.ok(brand.top >= 1200 && brand.top + brand.height < TOPIC_POSTER_SIZE.height - 48)
+    assert.equal(brand.textLeft, brand.left + brand.width / 2)
+    assert.match(svg, /text-anchor="middle"/, 'brand text stays centred in every visibility mode')
+    if (showQrCode) assert.ok(brand.top >= topicPosterQr(poster).top + TOPIC_POSTER_QR.size, 'brand sits below QR with a clear gap')
     const png = await renderTopicV2Poster(value, 'visibility-qa')
-    assert.deepEqual(await sharp(png).metadata().then((metadata) => [metadata.width, metadata.height]), [1080, 1920])
-    for (const region of [{ left: 0, top: 0, width: 1080, height: 750 }, { left: 960, top: 0, width: 120, height: 1920 }, { left: 0, top: 1810, width: 1080, height: 110 }]) {
+    assert.deepEqual(await sharp(png).metadata().then((metadata) => [metadata.width, metadata.height]), [1080, 1440])
+    for (const region of [{ left: 0, top: 0, width: 1080, height: 350 }, { left: 1020, top: 0, width: 60, height: 1440 }, { left: 0, top: 1392, width: 1080, height: 48 }]) {
       const raw = await sharp(png).extract(region).removeAlpha().raw().toBuffer()
       for (let offset = 0; offset < raw.length; offset += 3) assert.ok(raw[offset] === 16 && raw[offset + 1] === 44 && raw[offset + 2] === 72)
     }
-    if (showQrCode) assert.equal(await decode(png), target)
-    else await assert.rejects(decode(png), 'hidden QR has no decodable QR left behind')
+    if (showQrCode) assert.equal(await decode(png, poster), target)
+    else await assert.rejects(decode(png, poster), 'hidden QR has no decodable QR left behind')
     if (!showNickname) {
       const other = await renderTopicV2Poster({ ...value, nickname: '另一个用户', avatarUrl: 'https://invalid.example/private.png' }, 'visibility-qa')
       assert.deepEqual(png, other, 'hidden nickname/avatar cannot affect any output byte')

@@ -7,7 +7,7 @@ import { getCosObject } from '@/lib/tencent-cos'
 import { TopicActivityV2Error } from '@/lib/topic-activity-v2'
 import { getMediaPublicBaseUrl, PUBLIC_COS_HOST } from '@/lib/media-url'
 import { profileImageUrl } from '@/lib/images'
-import { TOPIC_POSTER_AVATAR, TOPIC_POSTER_QR, TOPIC_POSTER_QR_BRAND, TOPIC_POSTER_SIZE, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
+import { TOPIC_POSTER_AVATAR, TOPIC_POSTER_QR_BRAND, TOPIC_POSTER_SIZE, topicPosterLayout, topicPosterQr } from '@/lib/topic-activity-v2-poster-layout'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 let posterFontConfig: Promise<void> | null = null
@@ -88,10 +88,10 @@ async function posterImage(value: unknown, kind: 'BACKGROUND' | 'RESULT_IMAGE') 
 export async function renderTopicV2Poster(snapshotValue: unknown, activityId: string, suppliedBackground?: Buffer) {
   const snapshot = record(snapshotValue), config = record(snapshot.poster)
   const { width, height } = TOPIC_POSTER_SIZE
-  // Render one resolved snapshot: frozen result content plus current visibility preferences.
-  // A result poster is the complete visual, with the old global background retained only as fallback.
-  const resultImage = await posterImage(snapshot.imageUrl, 'RESULT_IMAGE')
-  const background = resultImage || suppliedBackground || await posterImage(config.backgroundUrl, 'BACKGROUND')
+  // The activity poster background is shared across all results. Older snapshots can
+  // still carry a result image, so read that only when no shared background exists.
+  const configuredBackground = await posterImage(config.backgroundUrl, 'BACKGROUND')
+  const background = configuredBackground || suppliedBackground || await posterImage(snapshot.imageUrl, 'RESULT_IMAGE')
   if (background && background.length > 20 * 1024 * 1024) throw new TopicActivityV2Error('POSTER_BACKGROUND_TOO_LARGE', '背景图片过大', 400)
   await ensurePosterFontConfig().catch(() => { throw new TopicActivityV2Error('POSTER_FONT_UNAVAILABLE', '海报中文字体暂不可用，请稍后重试', 503) })
   const svg = Buffer.from(topicPosterLayout(snapshot))
@@ -104,10 +104,11 @@ export async function renderTopicV2Poster(snapshotValue: unknown, activityId: st
     if (avatar) layers.push({ input: avatar, left: TOPIC_POSTER_AVATAR.left, top: TOPIC_POSTER_AVATAR.top })
   }
   if (config.showQrCode === true) {
-    const qrPlatePadding = TOPIC_POSTER_QR_BRAND.padding, qrSize = TOPIC_POSTER_QR.size - qrPlatePadding * 2
+    const qrPosition = topicPosterQr(config)
+    const qrPlatePadding = TOPIC_POSTER_QR_BRAND.padding, qrSize = qrPosition.size - qrPlatePadding * 2
     const qr = await QRCode.toBuffer('https://ecfc.fans/activities/' + encodeURIComponent(activityId), { width: qrSize, margin: 4, errorCorrectionLevel: 'H' })
     const plateSize = qrSize + qrPlatePadding * 2
-    const { left, top } = TOPIC_POSTER_QR
+    const { left, top } = qrPosition
     layers.push({ input: { create: { width: plateSize, height: plateSize, channels: 4, background: '#ffffff' } }, left, top })
     layers.push({ input: qr, left: left + qrPlatePadding, top: top + qrPlatePadding })
     // Reuse the official PWA brand asset; only the QR centre is covered.

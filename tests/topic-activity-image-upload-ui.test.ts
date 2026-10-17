@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { topicActivityEditorImagesMatch, uploadTopicActivityEditorImage } from '@/components/activities/TopicActivityPosterBackgroundUploader'
+import { topicActivityEditorImagesMatch, uploadTopicActivityPosterBackground } from '@/components/activities/TopicActivityPosterBackgroundUploader'
 import { createDefaultTopicActivityV2Program, type TopicActivityV2Test } from '@/lib/topic-activity-v2-config'
 
 const source = 'https://media.ecfc.fans/media/activities/22222222-2222-4222-8222-222222222222/source.webp'
@@ -16,7 +16,7 @@ function fixture(): TopicActivityV2Test {
   }
 }
 
-test('editor image upload reuses authenticated activity upload and stores controlled proxy URL', async (t) => {
+test('shared poster background upload reuses authenticated activity upload and stores controlled proxy URL', async (t) => {
   let requests = 0
   t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
     requests++
@@ -24,16 +24,16 @@ test('editor image upload reuses authenticated activity upload and stores contro
     assert.equal(init?.method, 'POST')
     assert.equal(init?.credentials, 'same-origin')
     assert.ok(init?.body instanceof FormData)
-    assert.equal((init.body.get('file') as File).name, 'result.png')
+    assert.equal((init.body.get('file') as File).name, 'poster-background.png')
     return Response.json({ url: source })
   })
-  assert.equal(await uploadTopicActivityEditorImage(new File(['png'], 'result.png', { type: 'image/png' })), proxy)
+  assert.equal(await uploadTopicActivityPosterBackground(new File(['png'], 'poster-background.png', { type: 'image/png' })), proxy)
   assert.equal(requests, 1)
 })
 
 test('failed activity upload rejects without returning a replacement URL', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => Response.json({ message: '上传失败测试' }, { status: 503 }))
-  await assert.rejects(uploadTopicActivityEditorImage(new File(['png'], 'result.png')), /上传失败测试/)
+  await assert.rejects(uploadTopicActivityPosterBackground(new File(['png'], 'poster-background.png')), /上传失败测试/)
 })
 
 test('temporary or foreign upload URLs cannot enter editor image fields', async (t) => {
@@ -41,7 +41,7 @@ test('temporary or foreign upload URLs cannot enter editor image fields', async 
   t.mock.method(globalThis, 'fetch', async () => Response.json({ url }))
   for (const invalid of ['blob:https://ecfc.fans/local', 'file:///C:/local.png', 'http://localhost:8000/image.png', 'C:\\images\\local.png', 'https://example.com/photo.png']) {
     url = invalid
-    await assert.rejects(uploadTopicActivityEditorImage(new File(['png'], 'result.png')), /路径无效/)
+    await assert.rejects(uploadTopicActivityPosterBackground(new File(['png'], 'poster-background.png')), /路径无效/)
   }
 })
 

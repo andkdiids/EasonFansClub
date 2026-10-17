@@ -86,15 +86,15 @@ test('config cannot rewrite same-version ballots/test with completed records', a
 test('PNG poster is valid bounded image with escaped text and QR', async () => {
   const bytes = await renderTopicV2Poster({ title: '<script>unsafe</script>', description: '真实测试结果，包含中文和长文。'.repeat(20), activityTitle: '本地活动', score: 2, maxScore: 2, nickname: '测试用户', poster: { width: 360, height: 640, showNickname: true, showQrCode: true } }, 'activity-one')
   const metadata = await sharp(bytes).metadata()
-  assert.equal(metadata.format, 'png'); assert.equal(metadata.width, 1080); assert.equal(metadata.height, 1920); assert.ok(bytes.length > 0)
+  assert.equal(metadata.format, 'png'); assert.equal(metadata.width, 1080); assert.equal(metadata.height, 1440); assert.ok(bytes.length > 0)
 })
-test('poster uses a fixed 9:16 canvas and crops supplied background without distortion', async () => {
+test('poster uses a fixed 3:4 canvas and crops supplied background without distortion', async () => {
   const background = await sharp({ create: { width: 900, height: 900, channels: 3, background: '#123456' } }).png().toBuffer()
   const bytes = await renderTopicV2Poster({ title: '中文结果', description: '说明', poster: { width: 480, height: 480, showNickname: false, showQrCode: false } }, 'activity-one', background)
   const metadata = await sharp(bytes).metadata()
   assert.equal(metadata.width, 1080)
-  assert.equal(metadata.height, 1920)
-  assert.equal(metadata.width! / metadata.height!, 9 / 16)
+  assert.equal(metadata.height, 1440)
+  assert.equal(metadata.width! / metadata.height!, 3 / 4)
 })
 test('poster places wrapped Chinese result text in a bounded paper group', async () => {
   const value = {
@@ -107,9 +107,11 @@ test('poster places wrapped Chinese result text in a bounded paper group', async
   const result = svg.split('data-poster-group="result"')[1].split('data-poster-group="identity"')[0]
   const baselines = [...result.matchAll(/<text x="118" y="(\d+)"/gu)].map((match) => Number(match[1]))
   assert.ok(baselines.length >= 3, 'title wraps into two lines before the description')
-  assert.ok(baselines.every((y) => y >= 850 && y < 1400))
+  assert.ok(baselines.every((y) => y >= 620 && y < 1080))
   assert.ok(baselines[2] - baselines[1] < 180, 'description stays close to its title')
-  assert.equal((await sharp(await renderTopicV2Poster(value, 'activity-one')).metadata()).width, 1080)
+  const metadata = await sharp(await renderTopicV2Poster(value, 'activity-one')).metadata()
+  assert.equal(metadata.width, 1080)
+  assert.equal(metadata.height, 1440)
 })
 test('poster config uses the bundled Noto CJK font through fontconfig, not unsupported embedded SVG fonts', () => {
   const source = readFileSync(join(process.cwd(), 'lib/topic-activity-v2-poster.ts'), 'utf8') + readFileSync(join(process.cwd(), 'lib/topic-activity-v2-poster-layout.ts'), 'utf8')

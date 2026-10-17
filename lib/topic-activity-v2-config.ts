@@ -157,6 +157,9 @@ export type TopicActivityV2PublicTestQuestion = Omit<TopicActivityV2TestQuestion
 export type TopicActivityV2PublicTest = Omit<TopicActivityV2Test, 'questions'> & {
   questions: TopicActivityV2PublicTestQuestion[]
 }
+
+/** The shared result poster has one fixed output size across preview, PNG and share. */
+export const TOPIC_ACTIVITY_V2_POSTER_SIZE = Object.freeze({ width: 1080, height: 1440 })
 export type TopicActivityV2PublicProgram = Omit<TopicActivityV2Program, 'test'> & {
   test: TopicActivityV2PublicTest
 }
@@ -222,8 +225,8 @@ export const DEFAULT_TOPIC_ACTIVITY_V2_PROGRAM: TopicActivityV2Program = Object.
     questions: [],
     results: [],
     poster: {
-      width: 1080,
-      height: 1920,
+      width: TOPIC_ACTIVITY_V2_POSTER_SIZE.width,
+      height: TOPIC_ACTIVITY_V2_POSTER_SIZE.height,
       backgroundUrl: null,
       showNickname: false,
       showQrCode: false,
@@ -233,6 +236,20 @@ export const DEFAULT_TOPIC_ACTIVITY_V2_PROGRAM: TopicActivityV2Program = Object.
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+/** Prefer the new shared poster background; read the first old result image for legacy activities. */
+export function topicActivityV2PosterBackground(testValue: unknown): string | null {
+  const test = record(testValue)
+  const poster = record(test?.poster)
+  const shared = typeof poster?.backgroundUrl === 'string' ? poster.backgroundUrl.trim() : ''
+  if (shared) return shared
+  if (!Array.isArray(test?.results)) return null
+  for (const value of test.results) {
+    const imageUrl = record(value)?.imageUrl
+    if (typeof imageUrl === 'string' && imageUrl.trim()) return imageUrl.trim()
+  }
+  return null
 }
 
 function has(input: Record<string, unknown>, key: string) {
@@ -553,7 +570,10 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
   if (startsAt === undefined || endsAt === undefined) return 'test时间格式不正确'
   const rangeError = range(startsAt, endsAt, 'test')
   if (rangeError) return rangeError
-  return { enabled, id, version, title, description, mode, allowRetake, questions, results, poster: { width, height, backgroundUrl, showNickname, showQrCode } }
+  // Accept legacy stored dimensions for backwards compatibility, but normalize output to V5 3:4.
+  return { enabled, id, version, title, description, mode, allowRetake, questions, results, poster: {
+    width: TOPIC_ACTIVITY_V2_POSTER_SIZE.width, height: TOPIC_ACTIVITY_V2_POSTER_SIZE.height, backgroundUrl, showNickname, showQrCode,
+  } }
 }
 
 function normalizeFixedReward(value: unknown): TopicActivityV2FixedReward | string {
