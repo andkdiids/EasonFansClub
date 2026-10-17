@@ -9,7 +9,7 @@ import QRCode from 'qrcode'
 import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from '@zxing/library'
 import { prisma } from '@/lib/prisma'
 import { getTopicV2PosterSnapshot, submitTopicV2Test } from '@/lib/topic-activity-v2-interactive'
-import { fitPosterText, fitPosterTextInHeight, posterTextLines, RESULT_USER_GAP, TOPIC_POSTER_ACTIVITY_INFO, TOPIC_POSTER_AVATAR, TOPIC_POSTER_BRAND, TOPIC_POSTER_QR, TOPIC_POSTER_QR_BRAND, TOPIC_POSTER_RESULT, TOPIC_POSTER_SIZE, TOP_VISUAL_SAFE_ZONE, USER_ZONE_START, topicPosterLayout, topicPosterQr, topicPosterTimeRange } from '@/lib/topic-activity-v2-poster-layout'
+import { fitPosterText, fitPosterTextInHeight, posterTextLines, RESULT_USER_GAP, TOPIC_POSTER_ACTIVITY_INFO, TOPIC_POSTER_AVATAR, TOPIC_POSTER_BRAND, TOPIC_POSTER_IDENTITY, TOPIC_POSTER_QR, TOPIC_POSTER_QR_BRAND, TOPIC_POSTER_RESULT, TOPIC_POSTER_SIZE, TOP_VISUAL_SAFE_ZONE, USER_ZONE_START, topicPosterLayout, topicPosterQr, topicPosterTimeRange } from '@/lib/topic-activity-v2-poster-layout'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
 import { fixture, instant } from './fixtures/topic-v2-transaction'
 
@@ -19,6 +19,48 @@ test('V4 has four paper groups, real test title priority, no second image slot o
   assert.match(svg, /真实测试名称/); assert.doesNotMatch(svg, /活动名字|KEEP YOUR|CHIN UP|结果图片区域|<image|<filter/)
   assert.match(svg, /私家E院 · ECFC/)
   assert.match(topicPosterLayout({ activityTitle: '回退活动名' }), /回退活动名/)
+})
+
+test('result title is centered in its pink strip and a single yellow panel covers every visible description line', () => {
+  const svg = topicPosterLayout({
+    title: '长标题结果'.repeat(18),
+    description: '多行说明文字需要完整落在黄色高亮背景之内。'.repeat(30),
+  })
+  const result = svg.slice(svg.indexOf('data-poster-group="result"'), svg.indexOf('data-poster-group="brand"'))
+  const titleLines = [...result.matchAll(/<text x="536" y="\d+" font-size="\d+" font-weight="900" text-anchor="middle">([^<]*)<\/text>/gu)]
+  assert.ok(titleLines.length > 1, 'long title wraps to multiple lines')
+  assert.match(result, /<polygon data-poster-panel="result-title"[^>]*fill="#f59ac8"/u)
+
+  const descriptionLines = [...result.matchAll(/<text x="118" y="(\d+)" font-size="(\d+)" font-weight="650">([^<]*)<\/text>/gu)]
+  assert.ok(descriptionLines.length > 1, 'long description wraps to multiple visible lines')
+  const highlight = result.match(/<polygon data-poster-panel="description-highlight" points="([^"]+)"/u)
+  assert.ok(highlight, 'description has one continuous yellow highlight panel')
+  const ys = [...highlight[1].matchAll(/[\d.]+,([\d.]+)/gu)].map((match) => Number(match[1]))
+  const firstBaseline = Number(descriptionLines[0][1])
+  const lastBaseline = Number(descriptionLines.at(-1)![1])
+  assert.ok(Math.min(...ys) <= firstBaseline - 29)
+  assert.ok(Math.max(...ys) >= lastBaseline + 10, 'highlight continues behind the final wrapped line')
+})
+
+test('nickname is larger and vertically centered; identity card and underline use the available width with or without QR', () => {
+  for (const showQrCode of [false, true]) {
+    const svg = topicPosterLayout({ nickname: 'Andkdiids', poster: { showNickname: true, showQrCode } })
+    const identity = svg.slice(svg.indexOf('data-poster-group="identity"'), svg.indexOf('data-poster-group="brand"'))
+    const nickname = identity.match(/<text x="292" y="(\d+)" font-size="(\d+)" font-weight="800">Andkdiids<\/text>/u)
+    assert.ok(nickname)
+    assert.ok(Number(nickname[2]) >= TOPIC_POSTER_IDENTITY.nicknameSize, 'short display name uses the larger poster font')
+    const cardWidth = showQrCode ? TOPIC_POSTER_IDENTITY.qrWidth : TOPIC_POSTER_IDENTITY.noQrWidth
+    const cardRight = TOPIC_POSTER_IDENTITY.left + cardWidth
+    const textRight = cardRight - TOPIC_POSTER_IDENTITY.textRightPadding
+    const card = identity.match(/<polygon data-poster-panel="identity" points="([^"]+)"/u)
+    assert.ok(card, 'identity card renders alongside the avatar')
+    const cardXs = [...card[1].matchAll(/([\d.]+),[\d.]+/gu)].map((match) => Number(match[1]))
+    assert.equal(Math.max(...cardXs), cardRight, 'identity card uses the expected QR-aware width')
+    assert.match(identity, new RegExp(`M${TOPIC_POSTER_IDENTITY.textLeft} 1240 Q\\d+ 1228 ${textRight} 1238`))
+    const baseline = Number(nickname[1])
+    assert.ok(baseline >= TOPIC_POSTER_IDENTITY.top + 68 && baseline <= TOPIC_POSTER_IDENTITY.top + 98,
+      'single-line nickname baseline is vertically centered in the identity card')
+  }
 })
 
 test('dates use Beijing minute precision, independently of host time zone, with safe old-result fallback', () => {
