@@ -10,6 +10,69 @@ import COS from 'cos-nodejs-sdk-v5'
 import { createDefaultTopicActivityV2Program, publicTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 import { defaultTopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
+import { ACTIVITY_INFO_GAP, ACTIVITY_INFO_HEIGHT, FOOTER_SAFE_BOTTOM, HERO_ACTIVITY_GAP, HERO_SAFE_BOTTOM, RESULT_MAX_BOTTOM, TOPIC_POSTER_SIZE, USER_ZONE_START } from '@/lib/topic-activity-v2-poster-layout'
+
+type PreviewRegion = {
+  locator(selector: string): PreviewRegion
+  count(): Promise<number>
+  evaluate<Result>(callback: (element: Element) => Result | Promise<Result>): Promise<Result>
+}
+
+async function readPreviewGeometry(page: Page, preview: PreviewRegion, svg: string) {
+  const boxes = await page.evaluate((source: string) => {
+    const parsed = new DOMParser().parseFromString(source, 'image/svg+xml')
+    const imported = document.importNode(parsed.documentElement, true)
+    if (!(imported instanceof SVGSVGElement)) throw new Error('Poster layout preview must be an SVG root')
+    const root = imported
+    root.style.cssText = 'position:fixed;left:-2000px;top:0;opacity:0;pointer-events:none'
+    document.body.append(root)
+    try {
+      const activityElement = root.querySelector<SVGGElement>('[data-poster-group="activity"]')
+      const activityBox = activityElement?.getBBox()
+      const resultElement = root.querySelector<SVGGElement>('[data-poster-group="result"]')
+      const resultBox = resultElement?.getBBox()
+      const identityElement = root.querySelector<SVGGElement>('[data-poster-group="identity"]')
+      const identityBox = identityElement?.getBBox()
+      const brandElement = root.querySelector<SVGGElement>('[data-poster-group="brand"]')
+      const brandBox = brandElement?.getBBox()
+      return {
+        activity: activityBox ? { x: activityBox.x, y: activityBox.y, width: activityBox.width, height: activityBox.height } : null,
+        result: resultBox ? { x: resultBox.x, y: resultBox.y, width: resultBox.width, height: resultBox.height } : null,
+        identity: identityBox ? { x: identityBox.x, y: identityBox.y, width: identityBox.width, height: identityBox.height } : null,
+        brand: brandBox ? { x: brandBox.x, y: brandBox.y, width: brandBox.width, height: brandBox.height } : null,
+      }
+    } finally { root.remove() }
+  }, svg)
+  const qrLocator = preview.locator('img[alt="活动二维码预览"]')
+  const qr = await qrLocator.count() ? await qrLocator.evaluate((element: Element) => {
+    const frame = element.closest<HTMLElement>('[data-preview-result-id]')!
+    const frameBox = frame.getBoundingClientRect(), qrBox = element.parentElement!.getBoundingClientRect()
+    const scale = 1080 / frameBox.width
+    return { x: (qrBox.left - frameBox.left) * scale, y: (qrBox.top - frameBox.top) * scale,
+      width: qrBox.width * scale, height: qrBox.height * scale }
+  }) : null
+  const frame = await preview.locator('[data-preview-result-id]').evaluate((element: Element) => {
+    const { width, height } = element.getBoundingClientRect()
+    return { width, height, ratio: width / height, overflow: element.scrollWidth > element.clientWidth }
+  })
+  return { ...boxes, qr, frame }
+}
+
+function assertPreviewGeometry(geometry: Awaited<ReturnType<typeof readPreviewGeometry>>) {
+  const { activity, result, identity, qr, brand, frame } = geometry
+  assert.ok(activity && result && brand, 'preview has activity, result and brand layers')
+  assert.ok(Math.abs(frame.ratio - 3 / 4) < 0.001, 'preview maintains 1080x1440 3:4 ratio')
+  assert.equal(frame.overflow, false, 'preview has no horizontal overflow')
+  assert.ok(activity.y >= HERO_SAFE_BOTTOM + HERO_ACTIVITY_GAP, 'activity card starts below the background hero safe zone')
+  assert.ok(result.y >= activity.y + ACTIVITY_INFO_HEIGHT + ACTIVITY_INFO_GAP - 1,
+    `result card follows the activity card with the configured gap: ${JSON.stringify({ activity, result })}`)
+  assert.ok(result.y + result.height <= RESULT_MAX_BOTTOM + 2, 'result content ends before the identity/QR user zone')
+  assert.ok(result.y + result.height < USER_ZONE_START, 'result content never enters the user zone')
+  if (identity) assert.ok(identity.y >= USER_ZONE_START, 'identity remains in the reserved lower band')
+  if (qr) assert.ok(qr.y >= USER_ZONE_START, 'QR remains in the reserved lower band')
+  if (identity && qr) assert.ok(qr.y + qr.height < brand.y, 'QR and brand do not overlap')
+  assert.ok(brand.y + brand.height <= TOPIC_POSTER_SIZE.height - FOOTER_SAFE_BOTTOM + 2, 'brand respects footer safe area')
+}
 
 test('real edit wizard saves one shared 3:4 poster background and preserves legacy result images', { skip: process.env.TOPIC_V2_BROWSER_QA !== '1' }, async (t) => {
   const require = createRequire(join(process.cwd(), 'package.json'))
@@ -68,17 +131,18 @@ test('real edit wizard saves one shared 3:4 poster background and preserves lega
   const requests: string[] = []
   const activity = { id: 'background-edit', type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', title: '现有活动', description: '现有介绍',
     startsAt: null, endsAt: null, participationRule: null, participationMode: 'COMMENT', allowImageAttachments: true, coverUrl: null }
+  const longResultDescription = '长说明内容，需要自动换行并在预留安全区内截断，不能覆盖头像、二维码或底部品牌。'.repeat(80)
   let program = createDefaultTopicActivityV2Program()
   program.enabled = true
   program.test = { ...program.test, enabled: true, id: 'existing-test', title: '原有测试', version: 7, mode: 'KNOWLEDGE',
     questions: [{ id: 'existing-question', prompt: '原有题目', points: 2, correctOptionId: 'correct', options: [{ id: 'correct', label: '正确' }, { id: 'other', label: '其他' }] }],
     results: [{ id: 'result-one', title: '结果一', description: '第一结果', scoreMin: 0, scoreMax: 1, imageUrl: '/uploads/legacy-result-one.webp' },
-      { id: 'result-two', title: '结果二', description: '第二结果', scoreMin: 2, scoreMax: 2, imageUrl: '/uploads/legacy-result-two.webp' }],
+      { id: 'result-two', title: '结果二', description: longResultDescription, scoreMin: 2, scoreMax: 2, imageUrl: '/uploads/legacy-result-two.webp' }],
     poster: { ...program.test.poster, showNickname: true, showQrCode: true } }
   const questionsBefore = structuredClone(program.test.questions)
   const initialProgram = structuredClone(program)
   const frozenAttempt = { id: 'historical-attempt', testId: 'existing-test', configVersion: 7, resultId: 'result-two', completedAt: '2026-10-17T00:00:00Z',
-    resultSnapshot: { resultId: 'result-two', title: '结果二', description: '第二结果', imageUrl: null, nickname: '历史昵称', testTitle: '原有测试',
+    resultSnapshot: { resultId: 'result-two', title: '结果二', description: longResultDescription, imageUrl: null, nickname: '历史昵称', testTitle: '原有测试',
       poster: { showNickname: true, showQrCode: true } } }
   const frozenBefore = structuredClone(frozenAttempt)
   let writes = 0, posterRequests = 0
@@ -174,6 +238,7 @@ test('real edit wizard saves one shared 3:4 poster background and preserves lega
       const layoutImage = preview.getByAltText('结果海报布局预览')
       await layoutImage.evaluate((element) => (element as HTMLImageElement).decode())
       const svg = decodeURIComponent((await layoutImage.getAttribute('src'))!.split(',').slice(1).join(','))
+      assertPreviewGeometry(await readPreviewGeometry(page, preview, svg))
       assert.doesNotMatch(svg, /<rect[^>]*width="1080"[^>]*fill="#102c48"/, 'overlay contains no opaque full-canvas fallback')
       // Inspect the browser's composed CSS image, not merely separate image sources.
       const canvasScreenshot = await bg.locator('..').screenshot()
@@ -184,6 +249,7 @@ test('real edit wizard saves one shared 3:4 poster background and preserves lega
       await page.getByLabel('显示昵称', { exact: true }).uncheck()
       await page.getByLabel('显示活动二维码', { exact: true }).uncheck()
       const privateSource = decodeURIComponent((await preview.getByAltText('结果海报布局预览').getAttribute('src'))!.split(',').slice(1).join(','))
+      assertPreviewGeometry(await readPreviewGeometry(page, preview, privateSource))
       assert.doesNotMatch(privateSource, /示例昵称/)
       assert.equal(await preview.getByAltText('活动二维码预览').count(), 0)
       assert.equal(await preview.getByAltText('ECFC 标志').count(), 0)
@@ -220,8 +286,8 @@ test('real edit wizard saves one shared 3:4 poster background and preserves lega
       const bytes = await image.evaluate(async (element) => Array.from(new Uint8Array(await (await fetch((element as HTMLImageElement).src)).arrayBuffer())))
       assert.deepEqual(Buffer.from(bytes), servedPng)
       assert.deepEqual(await sharp(servedPng).metadata().then((metadata) => [metadata.width, metadata.height]), [1080, 1440])
-      const hero = await sharp(servedPng).extract({ left: 0, top: 0, width: 1080, height: 350 }).raw().toBuffer()
-      const expected = await sharp(background).extract({ left: 0, top: 0, width: 1080, height: 350 }).raw().toBuffer()
+      const hero = await sharp(servedPng).extract({ left: 0, top: 0, width: 1080, height: HERO_SAFE_BOTTOM }).raw().toBuffer()
+      const expected = await sharp(background).extract({ left: 0, top: 0, width: 1080, height: HERO_SAFE_BOTTOM }).raw().toBuffer()
       assert.deepEqual(hero, expected, 'uploaded 3:4 background survives the transparent hero overlay byte-for-byte')
       const downloadPromise = page.waitForEvent('download')
       await page.getByRole('link', { name: '保存 PNG', exact: true }).click()

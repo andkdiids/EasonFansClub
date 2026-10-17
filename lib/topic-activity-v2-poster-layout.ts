@@ -2,20 +2,32 @@ import { formatBeijingDateTimeMinute } from '@/lib/beijing-time'
 import { TOPIC_ACTIVITY_V2_POSTER_SIZE } from '@/lib/topic-activity-v2-config'
 
 export const TOPIC_POSTER_SIZE = TOPIC_ACTIVITY_V2_POSTER_SIZE
-// The uploaded artwork owns this entire band; dynamic information starts below it.
-export const TOP_VISUAL_SAFE_ZONE = 350
-export const TOPIC_POSTER_ACTIVITY_INFO = { top: 390, height: 158 } as const
+// Keep the complete title/ribbon of the shared 9:16 artwork clear after its centered 3:4 crop.
+export const HERO_SAFE_BOTTOM = 510
+export const TOP_VISUAL_SAFE_ZONE = HERO_SAFE_BOTTOM
+export const ACTIVITY_INFO_START_Y = 560
+export const ACTIVITY_INFO_HEIGHT = 158
+export const ACTIVITY_INFO_GAP = 52
+export const HERO_ACTIVITY_GAP = ACTIVITY_INFO_START_Y - HERO_SAFE_BOTTOM
+export const USER_ZONE_START = 1100
+export const RESULT_USER_GAP = 28
+// The tilted result strip extends slightly above its card's unrotated top edge.
+export const RESULT_TOP_VISUAL_CLEARANCE = 6
+export const RESULT_START_Y = ACTIVITY_INFO_START_Y + ACTIVITY_INFO_HEIGHT + ACTIVITY_INFO_GAP + RESULT_TOP_VISUAL_CLEARANCE
+export const RESULT_MAX_BOTTOM = USER_ZONE_START - RESULT_USER_GAP
+export const FOOTER_SAFE_BOTTOM = 62
+export const TOPIC_POSTER_ACTIVITY_INFO = { top: ACTIVITY_INFO_START_Y, height: ACTIVITY_INFO_HEIGHT } as const
 export const TOPIC_POSTER_RESULT = {
-  top: 596,
-  titleBaseline: 670,
+  top: RESULT_START_Y,
+  titleBaseline: RESULT_START_Y + 74,
   titleSize: 60,
   titleMinSize: 38,
   titleLineHeight: 66,
   descriptionSize: 30,
   descriptionMinSize: 22,
   descriptionLineHeight: 36,
-  minBottom: 792,
-  maxBottom: 1052,
+  minBottom: RESULT_START_Y + 196,
+  maxBottom: RESULT_MAX_BOTTOM,
 } as const
 export const TOPIC_POSTER_PANELS = {
   activityWidth: 940,
@@ -28,9 +40,9 @@ export const TOPIC_POSTER_PANELS = {
   identityQrWidth: 500,
 } as const
 export const TOPIC_POSTER_BRAND = { left: 350, top: 1324, width: 380, height: 54 } as const
-export const TOPIC_POSTER_AVATAR = { left: 100, top: 1120, size: 144 } as const
+export const TOPIC_POSTER_AVATAR = { left: 100, top: USER_ZONE_START + 20, size: 144 } as const
 // Right-side QR when identity is shown; `topicPosterQr` centers it when it is alone.
-export const TOPIC_POSTER_QR = { left: 820, top: 1108, size: 190 } as const
+export const TOPIC_POSTER_QR = { left: 820, top: USER_ZONE_START + 8, size: 190 } as const
 export const TOPIC_POSTER_QR_BRAND = { padding: 12, logoSize: 38, plateSize: 46, radius: 8 } as const
 export const TOPIC_POSTER_FONT = 'Noto Sans SC, Noto Sans CJK SC, sans-serif'
 
@@ -170,15 +182,18 @@ export function fitPosterTextInHeight(
   maxLines = 6,
 ): FittedPosterText {
   const minimum = Math.max(1, Math.min(fontSize, minFontSize))
+  const available = Math.max(0, Math.floor(availableHeight))
   for (let size = fontSize; size >= minimum; size -= 2) {
     const lineHeight = Math.ceil(size * lineHeightRatio)
-    const allowedLines = Math.max(1, Math.min(maxLines, Math.floor(availableHeight / lineHeight)))
+    const allowedLines = Math.min(maxLines, Math.floor(available / lineHeight))
+    if (allowedLines < 1) continue
     const wrapped = wrapPosterText(value, width, size, allowedLines)
     if (!wrapped.overflow) return { lines: wrapped.lines, fontSize: size, lineHeight, truncated: false }
   }
 
   const lineHeight = Math.ceil(minimum * lineHeightRatio)
-  const allowedLines = Math.max(1, Math.min(maxLines, Math.floor(availableHeight / lineHeight)))
+  const allowedLines = Math.min(maxLines, Math.floor(available / lineHeight))
+  if (allowedLines < 1) return { lines: [], fontSize: minimum, lineHeight, truncated: Boolean(text(value)) }
   const wrapped = wrapPosterText(value, width, minimum, allowedLines)
   if (wrapped.overflow && wrapped.lines.length) {
     wrapped.lines[wrapped.lines.length - 1] = appendUnicodeEllipsis(wrapped.lines[wrapped.lines.length - 1], width, minimum)
@@ -224,14 +239,15 @@ export function topicPosterLayout(snapshot: Record<string, unknown>) {
     : ''
   const titleLineHeight = title.lines.length > 0 ? title.lineHeight : result.titleLineHeight
   const descriptionTop = result.titleBaseline + title.lines.length * titleLineHeight + 12
-  const descriptionAllowance = result.maxBottom - descriptionTop - (score ? 84 : 28)
+  const resultBottomLimit = Math.min(result.maxBottom, USER_ZONE_START - RESULT_USER_GAP)
+  const descriptionAllowance = Math.max(0, resultBottomLimit - descriptionTop - (score ? 84 : 28))
   const description = fitPosterTextInHeight(snapshot.description, TOPIC_POSTER_PANELS.descriptionTextWidth,
     result.descriptionSize, result.descriptionMinSize, descriptionAllowance, 1.2, 6)
   const descriptionBottom = description.lines.length
     ? descriptionTop + (description.lines.length - 1) * description.lineHeight + Math.ceil(description.fontSize * 1.15)
     : descriptionTop
   const scoreBaseline = descriptionTop + description.lines.length * description.lineHeight + 22
-  const bottom = Math.min(result.maxBottom, Math.max(result.minBottom,
+  const bottom = Math.min(resultBottomLimit, Math.max(result.minBottom,
     Math.ceil(descriptionBottom + (score ? 58 : 24))))
   const timeText = time.lines[0] || ''
   const nickname = config.showNickname === true

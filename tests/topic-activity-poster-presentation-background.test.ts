@@ -6,7 +6,7 @@ import sharp from 'sharp'
 import { prisma } from '@/lib/prisma'
 import { getTopicV2PosterSnapshot } from '@/lib/topic-activity-v2-interactive'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
-import { topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
+import { HERO_SAFE_BOTTOM, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
 
 let directory = '', currentUrl = '', oldUrl = ''
 before(async () => {
@@ -48,7 +48,7 @@ test('shared poster background wins; first legacy result and frozen snapshot rem
     const png = await renderTopicV2Poster(snapshot, 'activity')
     assert.deepEqual(await sharp(png).metadata().then((metadata) => [metadata.width, metadata.height]), [1080, 1440])
     assert.deepEqual(await pixel(png, 500, 1100), [153, 34, 17], 'legacy artwork stays visible behind transparent layout')
-    const alpha = await sharp(Buffer.from(topicPosterLayout(snapshot))).ensureAlpha().extract({ left: 0, top: 0, width: 1080, height: 350 }).extractChannel(3).raw().toBuffer()
+    const alpha = await sharp(Buffer.from(topicPosterLayout(snapshot))).ensureAlpha().extract({ left: 0, top: 0, width: 1080, height: HERO_SAFE_BOTTOM }).extractChannel(3).raw().toBuffer()
     assert.ok(alpha.every((value) => value === 0), 'information layout is transparent outside its cards')
     for (const key of ['title', 'description', 'score'] as const) assert.equal(snapshot[key], frozen[key])
 

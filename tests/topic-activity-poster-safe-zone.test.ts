@@ -7,7 +7,7 @@ import test from 'node:test'
 import { chromium } from 'playwright'
 import sharp from 'sharp'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
-import { TOPIC_POSTER_SIZE, TOP_VISUAL_SAFE_ZONE, TOPIC_POSTER_ACTIVITY_INFO, TOPIC_POSTER_AVATAR, TOPIC_POSTER_BRAND, TOPIC_POSTER_QR, TOPIC_POSTER_RESULT, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
+import { ACTIVITY_INFO_GAP, ACTIVITY_INFO_START_Y, FOOTER_SAFE_BOTTOM, HERO_ACTIVITY_GAP, HERO_SAFE_BOTTOM, RESULT_MAX_BOTTOM, RESULT_START_Y, RESULT_TOP_VISUAL_CLEARANCE, TOPIC_POSTER_SIZE, TOP_VISUAL_SAFE_ZONE, TOPIC_POSTER_ACTIVITY_INFO, TOPIC_POSTER_AVATAR, TOPIC_POSTER_BRAND, TOPIC_POSTER_QR, TOPIC_POSTER_RESULT, USER_ZONE_START, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
 
 const snapshot = {
   testTitle: '测试', title: '结果 1', description: '请填写结果说明', nickname: '本地验收会员',
@@ -15,19 +15,27 @@ const snapshot = {
   poster: { showNickname: true, showQrCode: true },
 }
 
-test('V5 reserves a hero safe zone and reflows activity, result, avatar and QR on 3:4 canvas', () => {
+test('V5.1 reserves a hero safe zone and moves activity/result blocks without moving the bottom identity, QR or footer', () => {
   assert.deepEqual(TOPIC_POSTER_SIZE, { width: 1080, height: 1440 })
-  assert.equal(TOP_VISUAL_SAFE_ZONE, 350)
-  assert.deepEqual(TOPIC_POSTER_ACTIVITY_INFO, { top: 390, height: 158 })
-  assert.ok(TOPIC_POSTER_ACTIVITY_INFO.top >= TOP_VISUAL_SAFE_ZONE)
+  assert.equal(HERO_SAFE_BOTTOM, 510)
+  assert.equal(TOP_VISUAL_SAFE_ZONE, HERO_SAFE_BOTTOM)
+  assert.equal(ACTIVITY_INFO_START_Y, 560)
+  assert.equal(HERO_ACTIVITY_GAP, 50)
+  assert.deepEqual(TOPIC_POSTER_ACTIVITY_INFO, { top: ACTIVITY_INFO_START_Y, height: 158 })
+  assert.ok(TOPIC_POSTER_ACTIVITY_INFO.top >= HERO_SAFE_BOTTOM + HERO_ACTIVITY_GAP)
   const gap = TOPIC_POSTER_RESULT.top - TOPIC_POSTER_ACTIVITY_INFO.top - TOPIC_POSTER_ACTIVITY_INFO.height
-  assert.ok(gap >= 40 && gap <= 70)
-  assert.equal(TOPIC_POSTER_RESULT.top, 596)
+  assert.equal(gap, ACTIVITY_INFO_GAP + RESULT_TOP_VISUAL_CLEARANCE)
+  assert.equal(TOPIC_POSTER_RESULT.top, RESULT_START_Y)
+  assert.equal(RESULT_TOP_VISUAL_CLEARANCE, 6)
+  assert.equal(RESULT_START_Y, 776)
+  assert.equal(TOPIC_POSTER_RESULT.top, 596 + 180, 'the result block moves down from the previous V5 coordinate; the tilted strip uses a visual clearance')
+  assert.equal(TOPIC_POSTER_RESULT.maxBottom, RESULT_MAX_BOTTOM)
+  assert.ok(RESULT_MAX_BOTTOM < USER_ZONE_START)
   assert.ok(TOPIC_POSTER_RESULT.minBottom > TOPIC_POSTER_RESULT.top)
   assert.ok(TOPIC_POSTER_RESULT.maxBottom < TOPIC_POSTER_AVATAR.top)
   assert.deepEqual(TOPIC_POSTER_AVATAR, { left: 100, top: 1120, size: 144 })
   assert.deepEqual(TOPIC_POSTER_QR, { left: 820, top: 1108, size: 190 })
-  assert.ok(TOPIC_POSTER_BRAND.top + TOPIC_POSTER_BRAND.height <= TOPIC_POSTER_SIZE.height - 48)
+  assert.ok(TOPIC_POSTER_BRAND.top + TOPIC_POSTER_BRAND.height <= TOPIC_POSTER_SIZE.height - FOOTER_SAFE_BOTTOM)
   assert.ok(TOPIC_POSTER_BRAND.left + TOPIC_POSTER_BRAND.width < TOPIC_POSTER_QR.left, 'footer cannot cover the QR quiet zone')
 })
 
@@ -40,6 +48,37 @@ test('all dynamic SVG ink stays out of the hero and bottom decoration for short/
       assert.ok(alpha.every((byte) => byte === 0), `no dynamic ink in protected rows ${region.top}–${region.top + region.height}`)
     }
   }
+})
+
+test('long descriptions shrink and truncate inside the result allowance before the user and footer zones', () => {
+  assert.ok(TOPIC_POSTER_RESULT.maxBottom + 24 <= USER_ZONE_START)
+  assert.ok(TOPIC_POSTER_RESULT.maxBottom < TOPIC_POSTER_QR.top)
+  assert.ok(TOPIC_POSTER_RESULT.maxBottom < TOPIC_POSTER_AVATAR.top)
+  assert.ok(TOPIC_POSTER_BRAND.top + TOPIC_POSTER_BRAND.height <= TOPIC_POSTER_SIZE.height - FOOTER_SAFE_BOTTOM)
+  const shortTitleSvg = topicPosterLayout({
+    testTitle: snapshot.testTitle,
+    title: '结果标题',
+    description: '长说明内容，需要自动换行并在安全区内截断。'.repeat(300),
+    nickname: snapshot.nickname,
+    poster: { showNickname: true, showQrCode: true },
+  })
+  const descriptionLines = [...shortTitleSvg.matchAll(/<text x="118" y="(\d+)" font-size="\d+" font-weight="650">([^<]*)<\/text>/gu)]
+  assert.ok(descriptionLines.length > 0, 'long description is rendered')
+  assert.ok(Number(descriptionLines.at(-1)?.[1]) < TOPIC_POSTER_RESULT.maxBottom)
+  assert.match(descriptionLines.at(-1)?.[2] || '', /…/u, 'the description itself is ellipsized at the safe boundary')
+
+  const crowdedSvg = topicPosterLayout({
+    testTitle: snapshot.testTitle,
+    title: '结果标题'.repeat(40),
+    description: '长说明内容，需要自动换行并在安全区内截断。'.repeat(300),
+    nickname: snapshot.nickname,
+    score: 20,
+    maxScore: 20,
+    poster: { showNickname: true, showQrCode: true },
+  })
+  const baselines = [...crowdedSvg.matchAll(/<text x="118" y="(\d+)"/gu)].map((match) => Number(match[1]))
+  assert.ok(baselines.length > 0)
+  assert.ok(baselines.every((baseline) => baseline < TOPIC_POSTER_RESULT.maxBottom), 'title, description and score remain above the bottom result limit')
 })
 
 test('real KEEP YOUR CHIN UP background hero is pixel-identical in PNG and browser previews', {
@@ -72,17 +111,17 @@ test('real KEEP YOUR CHIN UP background hero is pixel-identical in PNG and brows
       await page.route('**/*', (route) => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort())
       try {
         await page.goto(origin)
-        const checked = await page.evaluate(async () => {
+        const checked = await page.evaluate(async ({ width, safeZone }: { width: number; safeZone: number }) => {
           const poster = document.querySelector<HTMLImageElement>('#poster')!, background = document.querySelector<HTMLImageElement>('#background')!
           await Promise.all([poster.decode(), background.decode()])
           const beforeCanvas = document.createElement('canvas'), afterCanvas = document.createElement('canvas')
-          beforeCanvas.width = afterCanvas.width = TOPIC_POSTER_SIZE.width; beforeCanvas.height = afterCanvas.height = TOP_VISUAL_SAFE_ZONE
+          beforeCanvas.width = afterCanvas.width = width; beforeCanvas.height = afterCanvas.height = safeZone
           const beforeContext = beforeCanvas.getContext('2d')!, afterContext = afterCanvas.getContext('2d')!
           beforeContext.drawImage(background, 0, 0); afterContext.drawImage(poster, 0, 0)
-          const before = beforeContext.getImageData(0, 0, TOPIC_POSTER_SIZE.width, TOP_VISUAL_SAFE_ZONE).data, after = afterContext.getImageData(0, 0, TOPIC_POSTER_SIZE.width, TOP_VISUAL_SAFE_ZONE).data
+          const before = beforeContext.getImageData(0, 0, width, safeZone).data, after = afterContext.getImageData(0, 0, width, safeZone).data
           return { heroClear: before.every((byte, index) => byte === after[index]), width: poster.naturalWidth, height: poster.naturalHeight,
             ratio: poster.getBoundingClientRect().width / poster.getBoundingClientRect().height, overflow: document.documentElement.scrollWidth > innerWidth }
-        })
+        }, { width: TOPIC_POSTER_SIZE.width, safeZone: TOP_VISUAL_SAFE_ZONE })
         assert.equal(checked.heroClear, true, 'BACKGROUND HERO CLEAR: every pixel of the output top safe zone is preserved')
         assert.deepEqual([checked.width, checked.height], [TOPIC_POSTER_SIZE.width, TOPIC_POSTER_SIZE.height]); assert.ok(Math.abs(checked.ratio - 3 / 4) < .001); assert.equal(checked.overflow, false)
         if (output) await page.screenshot({ path: join(output, `browser-${width}.png`), fullPage: true })

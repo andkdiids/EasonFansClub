@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { createDefaultTopicActivityV2Program, readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 import { getTopicV2PosterSnapshot } from '@/lib/topic-activity-v2-interactive'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
-import { TOPIC_POSTER_QR, TOPIC_POSTER_SIZE, topicPosterFooter, topicPosterLayout, topicPosterQr } from '@/lib/topic-activity-v2-poster-layout'
+import { HERO_SAFE_BOTTOM, TOPIC_POSTER_QR, TOPIC_POSTER_SIZE, topicPosterFooter, topicPosterLayout, topicPosterQr } from '@/lib/topic-activity-v2-poster-layout'
 import { fixture } from './fixtures/topic-v2-transaction'
 
 test('poster defaults and legacy missing flags are false; explicit saved booleans round-trip unchanged', () => {
@@ -45,7 +45,7 @@ for (const showNickname of [false, true]) for (const showQrCode of [false, true]
     if (showQrCode) assert.ok(brand.top >= topicPosterQr(poster).top + TOPIC_POSTER_QR.size, 'brand sits below QR with a clear gap')
     const png = await renderTopicV2Poster(value, 'visibility-qa')
     assert.deepEqual(await sharp(png).metadata().then((metadata) => [metadata.width, metadata.height]), [1080, 1440])
-    for (const region of [{ left: 0, top: 0, width: 1080, height: 350 }, { left: 1020, top: 0, width: 60, height: 1440 }, { left: 0, top: 1392, width: 1080, height: 48 }]) {
+    for (const region of [{ left: 0, top: 0, width: 1080, height: HERO_SAFE_BOTTOM }, { left: 1020, top: 0, width: 60, height: 1440 }, { left: 0, top: 1392, width: 1080, height: 48 }]) {
       const raw = await sharp(png).extract(region).removeAlpha().raw().toBuffer()
       for (let offset = 0; offset < raw.length; offset += 3) assert.ok(raw[offset] === 16 && raw[offset + 1] === 44 && raw[offset + 2] === 72)
     }
