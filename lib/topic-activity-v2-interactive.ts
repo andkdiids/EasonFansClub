@@ -119,15 +119,21 @@ export async function getTopicV2Attempt(activityId: string, attemptId: string, u
   return attempt
 }
 
-/** Poster-only enrichment for pre-V4 attempts. Never mutate or replace historical test/results. */
+/** Resolve poster presentation only. Never mutate stored historical test/results. */
 export async function getTopicV2PosterSnapshot(activityId: string, attemptId: string, userId: string): Promise<Record<string, unknown>> {
   const attempt = await prisma.topicActivityTestAttempt.findFirst({ where: { id: attemptId, activityId, userId },
-    select: { resultSnapshot: true, Activity: { select: { startsAt: true, endsAt: true } },
-      User: { select: { avatarUrl: true, Profile: { select: { avatarUrl: true } } } } } })
+    select: { resultSnapshot: true, Activity: { select: { startsAt: true, endsAt: true, topicProgram: true } },
+      User: { select: { nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } } } })
   if (!attempt) fail('TEST_RESULT_NOT_FOUND', '测试结果不存在', 404)
   const snapshot = data(attempt.resultSnapshot)
+  // Visibility is a current privacy/publishing preference, not a historical test result.
+  // Read only these two existing flags; never replace frozen images, scores or text.
+  const currentPoster = data(data(data(attempt.Activity.topicProgram).test).poster)
+  const poster = data(snapshot.poster)
   // Missing properties alone fall back; explicit nulls in new snapshots stay frozen.
   return { ...snapshot,
+    poster: { ...poster, showNickname: currentPoster.showNickname === true, showQrCode: currentPoster.showQrCode === true },
+    nickname: currentPoster.showNickname === true ? snapshot.nickname ?? attempt.User.nickname ?? null : null,
     activityStartsAt: Object.hasOwn(snapshot, 'activityStartsAt') ? snapshot.activityStartsAt : attempt.Activity.startsAt?.toISOString() || null,
     activityEndsAt: Object.hasOwn(snapshot, 'activityEndsAt') ? snapshot.activityEndsAt : attempt.Activity.endsAt?.toISOString() || null,
     avatarUrl: Object.hasOwn(snapshot, 'avatarUrl') ? snapshot.avatarUrl : attempt.User.Profile?.avatarUrl || attempt.User.avatarUrl || null }

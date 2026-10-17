@@ -7,7 +7,7 @@ import { getCosObject } from '@/lib/tencent-cos'
 import { TopicActivityV2Error } from '@/lib/topic-activity-v2'
 import { getMediaPublicBaseUrl, PUBLIC_COS_HOST } from '@/lib/media-url'
 import { profileImageUrl } from '@/lib/images'
-import { TOPIC_POSTER_AVATAR, TOPIC_POSTER_QR, TOPIC_POSTER_SIZE, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
+import { TOPIC_POSTER_AVATAR, TOPIC_POSTER_QR, TOPIC_POSTER_QR_BRAND, TOPIC_POSTER_SIZE, topicPosterLayout } from '@/lib/topic-activity-v2-poster-layout'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 let posterFontConfig: Promise<void> | null = null
@@ -88,7 +88,7 @@ async function posterImage(value: unknown, kind: 'BACKGROUND' | 'RESULT_IMAGE') 
 export async function renderTopicV2Poster(snapshotValue: unknown, activityId: string, suppliedBackground?: Buffer) {
   const snapshot = record(snapshotValue), config = record(snapshot.poster)
   const { width, height } = TOPIC_POSTER_SIZE
-  // Stored attempts keep their own immutable image and options; never read today's test config here.
+  // Render one resolved snapshot: frozen result content plus current visibility preferences.
   // A result poster is the complete visual, with the old global background retained only as fallback.
   const resultImage = await posterImage(snapshot.imageUrl, 'RESULT_IMAGE')
   const background = resultImage || suppliedBackground || await posterImage(config.backgroundUrl, 'BACKGROUND')
@@ -99,17 +99,24 @@ export async function renderTopicV2Poster(snapshotValue: unknown, activityId: st
     ? sharp(background, { limitInputPixels: 20_000_000 }).rotate().resize(width, height, { fit: 'cover', position: 'centre' })
     : sharp({ create: { width, height, channels: 4, background: '#102c48' } })
   const layers: OverlayOptions[] = [{ input: svg, top: 0, left: 0 }]
-  if (config.showNickname !== false) {
+  if (config.showNickname === true) {
     const avatar = await posterAvatar(snapshot.avatarUrl)
     if (avatar) layers.push({ input: avatar, left: TOPIC_POSTER_AVATAR.left, top: TOPIC_POSTER_AVATAR.top })
   }
   if (config.showQrCode === true) {
-    const qrPlatePadding = 12, qrSize = TOPIC_POSTER_QR.size - qrPlatePadding * 2
+    const qrPlatePadding = TOPIC_POSTER_QR_BRAND.padding, qrSize = TOPIC_POSTER_QR.size - qrPlatePadding * 2
     const qr = await QRCode.toBuffer('https://ecfc.fans/activities/' + encodeURIComponent(activityId), { width: qrSize, margin: 4, errorCorrectionLevel: 'H' })
     const plateSize = qrSize + qrPlatePadding * 2
     const { left, top } = TOPIC_POSTER_QR
     layers.push({ input: { create: { width: plateSize, height: plateSize, channels: 4, background: '#ffffff' } }, left, top })
     layers.push({ input: qr, left: left + qrPlatePadding, top: top + qrPlatePadding })
+    // Reuse the official PWA brand asset; only the QR centre is covered.
+    const { logoSize, plateSize: logoPlateSize, radius } = TOPIC_POSTER_QR_BRAND
+    const logo = await sharp(await readFile(path.join(process.cwd(), 'public/icons/icon-512.png')))
+      .resize(logoSize, logoSize, { fit: 'contain', background: '#ffffff' }).flatten({ background: '#ffffff' }).png().toBuffer()
+    const logoPlate = Buffer.from(`<svg width="${logoPlateSize}" height="${logoPlateSize}"><rect width="${logoPlateSize}" height="${logoPlateSize}" rx="${radius}" fill="white"/></svg>`)
+    layers.push({ input: logoPlate, left: left + (plateSize - logoPlateSize) / 2, top: top + (plateSize - logoPlateSize) / 2 })
+    layers.push({ input: logo, left: left + (plateSize - logoSize) / 2, top: top + (plateSize - logoSize) / 2 })
   }
   return canvas.composite(layers).png().toBuffer()
 }

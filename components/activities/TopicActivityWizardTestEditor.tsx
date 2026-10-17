@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import type { TopicActivityV2Test, TopicActivityV2TestQuestion, TopicActivityV2TestResult } from '@/lib/topic-activity-v2-config'
 import { createWizardId } from './TopicActivityWizardIds'
 import { TopicActivityEditorImageUploader } from './TopicActivityPosterBackgroundUploader'
+import { TopicActivityPosterPreview } from './TopicActivityPosterPreview'
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm'
 const buttonClass = 'min-h-10 rounded-sm border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-40'
@@ -119,7 +120,7 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
         {value.mode === 'KNOWLEDGE' ? <p className="text-xs text-[var(--foreground-muted)]">知识测试结果分数区间必须连续、无重叠，并完整覆盖 0 到题目总分。</p> : null}
       </section>
 
-      <details className="border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-semibold">分享海报设置</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showNickname} onChange={(event) => patch({ poster: { ...value.poster, showNickname: event.target.checked } })} />显示昵称</label><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showQrCode} onChange={(event) => patch({ poster: { ...value.poster, showQrCode: event.target.checked } })} />显示活动二维码</label></div></details>
+      <details className="border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-semibold">分享海报设置</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showNickname} onChange={(event) => patch({ poster: { ...value.poster, showNickname: event.target.checked } })} />显示昵称</label><label className="flex items-center gap-2"><input type="checkbox" checked={value.poster.showQrCode} onChange={(event) => patch({ poster: { ...value.poster, showQrCode: event.target.checked } })} />显示活动二维码</label></div><TopicActivityPosterPreview test={value} /></details>
     </> : null}
   </fieldset>
 }
