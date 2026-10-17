@@ -5,15 +5,16 @@ import { createRequire } from 'node:module'
 import { after, before, test } from 'node:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import sharp from 'sharp'
+import QRCode from 'qrcode'
 import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from '@zxing/library'
 import { prisma } from '@/lib/prisma'
 import { getTopicV2PosterSnapshot, submitTopicV2Test } from '@/lib/topic-activity-v2-interactive'
-import { posterTextLines, topicPosterLayout, topicPosterTimeRange } from '@/lib/topic-activity-v2-poster-layout'
+import { posterTextLines, TOPIC_POSTER_QR, TOPIC_POSTER_RESULT, topicPosterLayout, topicPosterTimeRange } from '@/lib/topic-activity-v2-poster-layout'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
 import { fixture, instant } from './fixtures/topic-v2-transaction'
 
 test('V4 has four paper groups, real test title priority, no second image slot or sample copy', () => {
-  const svg = topicPosterLayout({ activityTitle: '活动名字', testTitle: '真实测试名称', title: '真实结果', description: '真实说明' })
+  const svg = topicPosterLayout({ activityTitle: '活动名字', testTitle: '真实测试名称', title: '真实结果', description: '真实说明', poster: { showNickname: true } })
   for (const group of ['activity', 'result', 'identity', 'brand']) assert.match(svg, new RegExp(`data-poster-group="${group}"`))
   assert.match(svg, /真实测试名称/); assert.doesNotMatch(svg, /活动名字|KEEP YOUR|CHIN UP|结果图片区域|<image|<filter/)
   assert.match(svg, /私家E院 · ECFC/)
@@ -65,7 +66,8 @@ test('poster-only historical enrichment is owner-scoped, read-only and preserves
     assert.equal(enriched.activityStartsAt, null)
     assert.equal(enriched.activityEndsAt, instant.toISOString())
     assert.equal(enriched.avatarUrl, '/uploads/profile.png')
-    for (const key of Object.keys(stored)) assert.deepEqual(enriched[key], stored[key as keyof typeof stored])
+    for (const key of Object.keys(stored).filter((key) => key !== 'poster')) assert.deepEqual(enriched[key], stored[key as keyof typeof stored])
+    assert.deepEqual(enriched.poster, { showNickname: false, showQrCode: false }, 'missing current flags are private, without mutating stored preferences')
     assert.equal(Object.hasOwn(stored, 'avatarUrl'), false)
     await assert.rejects(getTopicV2PosterSnapshot('activity-one', 'attempt-one', 'other'), { code: 'TEST_RESULT_NOT_FOUND' })
   } finally { Reflect.set(prisma.topicActivityTestAttempt, 'findFirst', original) }
@@ -100,13 +102,41 @@ test('missing, external, private or malformed avatars degrade to a local initial
 test('repeated fallback renders retain real title ink and a decodable QR, not just paper placeholders', async () => {
   for (let i = 0; i < 2; i++) {
     const png = await renderTopicV2Poster({ title: '新演唱会肯定有票！', nickname: '会员', poster: { showNickname: true, showQrCode: true } }, 'local-preview-only')
-    const { data, info } = await sharp(png).extract({ left: 744, top: 1545, width: 240, height: 240 }).greyscale().raw().toBuffer({ resolveWithObject: true })
+    const { left, top, size } = TOPIC_POSTER_QR
+    const { data, info } = await sharp(png).extract({ left, top, width: size, height: size }).greyscale().raw().toBuffer({ resolveWithObject: true })
     const bitmap = new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(new Uint8ClampedArray(data), info.width, info.height)))
     assert.equal(new QRCodeReader().decode(bitmap).getText(), 'https://ecfc.fans/activities/local-preview-only')
-    const ink = await sharp(png).extract({ left: 118, top: 830, width: 820, height: 80 }).removeAlpha().raw().toBuffer()
+    const ink = await sharp(png).extract({ left: 118, top: TOPIC_POSTER_RESULT.top + 25, width: 820, height: 80 }).removeAlpha().raw().toBuffer()
     let dark = 0
     for (let p = 0; p < ink.length; p += 3) if (ink[p] < 80 && ink[p + 1] < 80 && ink[p + 2] < 80) dark++
     assert.ok(dark > 1000, 'result title must visibly render')
+  }
+})
+
+test('official ECFC logo is centred on white; H modules and quiet zone outside its small plate remain unchanged', async () => {
+  const target = 'https://ecfc.fans/activities/local-qr-brand-qa'
+  const png = await renderTopicV2Poster({ title: '品牌验收', poster: { showQrCode: true } }, 'local-qr-brand-qa')
+  const { left, top, size } = TOPIC_POSTER_QR
+  const qr = await sharp(png).extract({ left, top, width: size, height: size }).ensureAlpha().raw().toBuffer()
+  const plain = await sharp({ create: { width: size, height: size, channels: 4, background: '#ffffff' } })
+    .composite([{ input: await QRCode.toBuffer(target, { width: size - 24, margin: 4, errorCorrectionLevel: 'H' }), left: 12, top: 12 }])
+    .raw().toBuffer()
+  const plateStart = (size - 52) / 2, plateEnd = plateStart + 52
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    if (x >= plateStart && x < plateEnd && y >= plateStart && y < plateEnd) continue
+    const offset = (y * size + x) * 4
+    assert.ok(qr.subarray(offset, offset + 4).equals(plain.subarray(offset, offset + 4)), 'all H modules and quiet zone outside the centre are preserved')
+  }
+  const official = await sharp(readFileSync(join(process.cwd(), 'public/icons/icon-512.png')))
+    .resize(44, 44, { fit: 'contain', background: '#ffffff' }).flatten({ background: '#ffffff' }).ensureAlpha().raw().toBuffer()
+  const centre = await sharp(png).extract({ left: left + (size - 44) / 2, top: top + (size - 44) / 2, width: 44, height: 44 }).ensureAlpha().raw().toBuffer()
+  assert.deepEqual(centre, official, 'actual pixels must be the official logo, not a text placeholder')
+  assert.ok(44 / size <= .20, 'logo subject occupies about 18%, no more than 20%')
+  assert.notDeepEqual(qr, plain)
+  for (const bytes of [qr, plain]) {
+    const grey = await sharp(bytes, { raw: { width: size, height: size, channels: 4 } }).greyscale().removeAlpha().raw().toBuffer()
+    const bitmap = new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(new Uint8ClampedArray(grey), size, size)))
+    assert.equal(new QRCodeReader().decode(bitmap).getText(), target, 'before and after logo decode to the same activity')
   }
 })
 

@@ -225,7 +225,7 @@ export const DEFAULT_TOPIC_ACTIVITY_V2_PROGRAM: TopicActivityV2Program = Object.
       width: 1080,
       height: 1920,
       backgroundUrl: null,
-      showNickname: true,
+      showNickname: false,
       showQrCode: false,
     },
   },
@@ -541,7 +541,7 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
   const height = integer(posterInput, 'height', DEFAULT_TOPIC_ACTIVITY_V2_PROGRAM.test.poster.height, 256, MAX_POSTER_EDGE)
   const backgroundRaw = has(posterInput, 'backgroundUrl') ? posterInput.backgroundUrl : DEFAULT_TOPIC_ACTIVITY_V2_PROGRAM.test.poster.backgroundUrl
   const backgroundUrl = backgroundRaw === null || backgroundRaw === '' ? null : text(posterInput, 'backgroundUrl', '', 2_048, true)
-  const showNickname = bool(posterInput, 'showNickname', true)
+  const showNickname = bool(posterInput, 'showNickname', false)
   const showQrCode = bool(posterInput, 'showQrCode', false)
   if (width === null || height === null || backgroundUrl === undefined || showNickname === null || showQrCode === null) {
     if (backgroundUrl === null && backgroundRaw !== null && backgroundRaw !== '') return 'test.poster.backgroundUrl格式不正确'

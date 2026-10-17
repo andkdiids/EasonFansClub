@@ -6,6 +6,7 @@ import { TopicActivityV2FixedRewardReview } from '@/components/activities/TopicA
 import { TopicActivityV2Statistics } from '@/components/activities/TopicActivityV2Statistics'
 import { TopicActivityV2LotteryAdmin } from '@/components/activities/TopicActivityV2LotteryAdmin'
 import { TopicActivityEditorImageUploader, topicActivityEditorImagesMatch } from '@/components/activities/TopicActivityPosterBackgroundUploader'
+import { TopicActivityPosterPreview } from '@/components/activities/TopicActivityPosterPreview'
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-2 text-sm'
 const buttonClass = 'min-h-9 rounded-sm border border-[var(--border)] px-3 text-sm font-bold disabled:opacity-40'
@@ -76,6 +77,7 @@ export function TopicActivityV2Editor({ activityId, disabled = false, onSaved }:
       if (!readback.ok) throw new Error(confirmed?.message || '配置已提交，但回读失败；输入已保留，请核对后继续。')
       const value = readTopicActivityV2Program(confirmed?.program)
       if (!value || !topicActivityEditorImagesMatch(program.test, value.test)) throw new Error('配置已提交，但图片回读不一致；输入已保留，请核对后继续。')
+      if (value.test.poster.showNickname !== program.test.poster.showNickname || value.test.poster.showQrCode !== program.test.poster.showQrCode) throw new Error('配置已提交，但海报显示开关回读不一致；输入已保留，请核对后继续。')
       setProgram(value); setMessage('活动模块配置已保存并回读确认。'); onSaved?.(value)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败') }
     finally { busy.current = false; setSaving(false) }
@@ -101,7 +103,7 @@ export function TopicActivityV2Editor({ activityId, disabled = false, onSaved }:
         <button type="button" className={buttonClass} onClick={() => test({ results: [...program.test.results, { id: uid('result'), title: '', description: '', scoreMin: 0, scoreMax: 0 }] })}>+ 添加结果</button><p className="text-xs">知识测试分数区间必须覆盖全部分值且不重叠。趣味测试按权重求和，平分时使用配置中靠前的结果。</p>
         <details className="text-xs"><summary>测试版本</summary><p>{program.test.id} · 版本 {program.test.version}</p><button type="button" className={buttonClass} onClick={() => test({ version: program.test.version + 1 })}>递增版本，保留历史结果</button></details>
       </Group>
-      <Group title="分享海报设置"><Toggle label="显示昵称" value={program.test.poster.showNickname} onChange={(value) => test({ poster: { ...program.test.poster, showNickname: value } })} /><Toggle label="显示活动二维码" value={program.test.poster.showQrCode} onChange={(value) => test({ poster: { ...program.test.poster, showQrCode: value } })} /></Group>
+      <Group title="分享海报设置"><Toggle label="显示昵称" value={program.test.poster.showNickname} onChange={(value) => test({ poster: { ...program.test.poster, showNickname: value } })} /><Toggle label="显示活动二维码" value={program.test.poster.showQrCode} onChange={(value) => test({ poster: { ...program.test.poster, showQrCode: value } })} /><TopicActivityPosterPreview test={program.test} /></Group>
       {postId ? <a href={'/posts/' + encodeURIComponent(postId) + '?topicStatus=PENDING'} className="inline-block text-sm underline">前往活动主帖评论旁审核任务</a> : <p className="text-sm">活动发布后将沿用现有流程创建关联主帖。</p>}
       <button type="button" className={buttonClass} onClick={() => void save()} disabled={saving || loading || posterUploading}>{posterUploading ? '图片上传中…' : saving ? '保存中…' : '保存活动模块配置'}</button>
     </fieldset><TopicActivityV2LotteryAdmin activityId={activityId} disabled={disabled || saving || loading} entries={program.entries.map((entry) => ({ id: entry.id, platformName: entry.platformName, title: entry.title, enabled: entry.enabled, maxImages: entry.maxImages }))} /></>}{error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}{message ? <p role="status" className="text-sm">{message}</p> : null}

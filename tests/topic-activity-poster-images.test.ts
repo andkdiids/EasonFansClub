@@ -5,6 +5,7 @@ import { basename, join } from 'node:path'
 import sharp from 'sharp'
 import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from '@zxing/library'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
+import { TOP_VISUAL_SAFE_ZONE, TOPIC_POSTER_QR, topicPosterFooter } from '@/lib/topic-activity-v2-poster-layout'
 
 let directory = ''
 let backgroundUrl = ''
@@ -58,7 +59,7 @@ test('empty images retain the blue fallback at the real 1080x1920 output size', 
   assert.equal(metadata.format, 'png')
   assert.deepEqual([metadata.width, metadata.height], [1080, 1920])
   assert.deepEqual(await pixel(png, 0, 0), [16, 44, 72])
-  assert.deepEqual(await pixel(png, 540, 1200), [16, 44, 72], 'no empty result frame or panel')
+  assert.deepEqual(await pixel(png, 540, TOP_VISUAL_SAFE_ZONE - 1), [16, 44, 72], 'the protected hero remains the fallback background')
 })
 
 test('configured background reads real stored bytes and uses centred cover cropping', async () => {
@@ -110,18 +111,20 @@ test('nickname toggle changes only footer content and supports bounded long name
 test('QR enabled is decodable from the actual PNG and points to the exact activity', async () => {
   const value = snapshot(firstImageUrl, backgroundUrl)
   const png = await renderTopicV2Poster({ ...value, poster: { ...value.poster, showQrCode: true } }, 'activity with spaces')
-  const { data, info } = await sharp(png).extract({ left: 744, top: 1545, width: 240, height: 240 }).greyscale().raw().toBuffer({ resolveWithObject: true })
+  const { left, top, size } = TOPIC_POSTER_QR
+  const { data, info } = await sharp(png).extract({ left, top, width: size, height: size }).greyscale().raw().toBuffer({ resolveWithObject: true })
   const bitmap = new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(new Uint8ClampedArray(data), info.width, info.height)))
   assert.equal(new QRCodeReader().decode(bitmap).getText(), 'https://ecfc.fans/activities/activity%20with%20spaces')
   const off = await renderTopicV2Poster(value, 'activity with spaces')
-  assert.deepEqual(await pixel(off, 750, 1550), [227, 32, 48], 'QR disabled leaves no white placeholder')
+  assert.deepEqual(await pixel(off, left + 6, top + 5), [227, 32, 48], 'QR disabled leaves no white placeholder')
 })
 
 test('exact 9:16 result image preserves all corners and has the V4 brand footer', async () => {
   const png = await renderTopicV2Poster({ ...snapshot(exactPosterUrl), poster: { backgroundUrl: null, showNickname: false, showQrCode: false } }, 'activity-images')
   assert.deepEqual(await pixel(png, 0, 0), [238, 34, 51])
   assert.deepEqual(await pixel(png, 1079, 1919), [34, 68, 238])
-  const footer = await sharp(png).extract({ left: 90, top: 1780, width: 800, height: 70 }).png().toBuffer()
+  const brand = topicPosterFooter({ showNickname: false, showQrCode: false })
+  const footer = await sharp(png).extract({ left: brand.left, top: brand.top, width: brand.width, height: brand.height }).png().toBuffer()
   assert.ok((await sharp(footer).stats()).channels.some((channel) => channel.stdev > 0), 'V4 footer is rendered even with a supplied background')
 })
 
