@@ -8,7 +8,7 @@ import type { TopicActivityV2Poll, TopicActivityV2PublicProgram } from '@/lib/to
 const buttonClass = 'min-h-10 rounded-sm border border-[var(--border)] px-4 text-sm font-bold disabled:opacity-40'
 type PollPayload = { poll: TopicActivityV2Poll; myChoices: string[]; results: { participantCount: number; options: { id: string; label: string; count: number; percentage: number }[] } | null }
 type ResultSnapshot = { title: string; description: string; score: number | null; maxScore: number | null; testTitle: string }
-type Attempt = { id: string; resultSnapshot: ResultSnapshot; completedAt: string }
+type Attempt = { id: string; testId?: string; resultSnapshot: ResultSnapshot; completedAt: string }
 type PublicTest = TopicActivityV2PublicProgram['test']
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -77,7 +77,17 @@ export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { act
         const attempts = (await requestJson<{ attempts: Attempt[] }>(base + '/attempts')).attempts
         setHistory(attempts)
         const selected = requestedAttemptId ? attempts.find((item) => item.id === requestedAttemptId) : null
-        if (selected) { posterRequest.current++; setAttempt(selected); setPosterUrl(null); setPosterBlob(null); requestKey.current = null }
+        const latestForCurrentTest = attempts
+          .filter((item) => item.testId === value.test.id)
+          .sort((left, right) => {
+            const leftTime = Date.parse(left.completedAt), rightTime = Date.parse(right.completedAt)
+            const safeLeftTime = Number.isFinite(leftTime) ? leftTime : 0
+            const safeRightTime = Number.isFinite(rightTime) ? rightTime : 0
+            return safeRightTime - safeLeftTime || right.id.localeCompare(left.id)
+          })[0]
+        const visibleAttempt = selected || latestForCurrentTest || null
+        if (visibleAttempt) { posterRequest.current++; setAttempt(visibleAttempt); setPosterUrl(null); setPosterBlob(null); requestKey.current = null }
+        else if (!requestedAttemptId) { posterRequest.current++; setAttempt(null); setPosterUrl(null); setPosterBlob(null); requestKey.current = null }
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '测试加载失败') }
   }, [base, isAuthenticated, requestedAttemptId])
@@ -122,7 +132,7 @@ export function TopicActivityV2TestRunner({ activityId, isAuthenticated }: { act
     {!test && !error ? <p>正在加载测试…</p> : null}
     {attempt ? <section className="space-y-4 border border-[var(--border)] p-4"><h2 className="text-xl font-bold">{attempt.resultSnapshot.title}</h2><p className="whitespace-pre-wrap">{attempt.resultSnapshot.description}</p>{typeof attempt.resultSnapshot.score === 'number' ? <p>得分：{attempt.resultSnapshot.score} / {attempt.resultSnapshot.maxScore}</p> : null}
       <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void poster()} disabled={pending} className={buttonClass}>{pending ? '生成中…' : '生成结果海报'}</button>{posterUrl ? <><a href={posterUrl} download="ecfc-activity-result.png" className={buttonClass}>保存 PNG</a><button type="button" onClick={() => void share()} className={buttonClass}>分享结果图片</button></> : null}{test?.allowRetake ? <button type="button" onClick={() => { showAttempt(null); setAnswers({}); setIndex(0); requestKey.current = null }} className={buttonClass}>重新测试</button> : null}</div>
-      {posterUrl ? <div className="space-y-2"><p className="text-sm">微信内可长按图片保存。</p>{/* Blob is an authenticated generated PNG; native img enables WeChat long-press saving. */}<img src={posterUrl} alt="我的测试结果海报" className="aspect-[9/16] h-auto w-full max-w-md object-contain" /></div> : null}
+      {posterUrl ? <div className="space-y-2"><p className="text-sm">微信内可长按图片保存。</p>{/* Blob is an authenticated generated PNG; native img enables WeChat long-press saving. */}<img src={posterUrl} alt="我的测试结果海报" className="aspect-[3/4] h-auto w-full max-w-md object-contain" /></div> : null}
       <p className="text-sm">保存海报后，可返回活动选择平台任务，主动分享并提交截图。</p>
     </section> : question ? <section className="space-y-4 border border-[var(--border)] p-4"><p>第 {index + 1} / {test!.questions.length} 题</p><progress max={test!.questions.length} value={index + 1} className="w-full" /><h2 className="text-lg font-bold">{question.prompt}</h2>{question.options.map((option) => <label key={option.id} className="flex min-h-12 items-center gap-3 border border-[var(--border)] p-3"><input type="radio" name={question.id} checked={answers[question.id] === option.id} disabled={pending || !isAuthenticated} onChange={() => setAnswers({ ...answers, [question.id]: option.id })} />{option.label}</label>)}<div className="flex gap-2"><button type="button" onClick={() => setIndex(index - 1)} disabled={index === 0 || pending} className={buttonClass}>上一题</button>{index < test!.questions.length - 1 ? <button type="button" onClick={() => setIndex(index + 1)} disabled={!answers[question.id] || pending} className={buttonClass}>下一题</button> : <button type="button" onClick={() => void submit()} disabled={!isAuthenticated || pending || test!.questions.some((item) => !answers[item.id])} className={buttonClass}>{pending ? '提交中…' : '提交测试'}</button>}</div>{!isAuthenticated ? <Link href="/login" className="underline">请先登录后测试</Link> : null}</section> : null}
     {history.length ? <section className="space-y-2 border-t border-[var(--border)] pt-4"><h2 className="font-bold">我的历史结果</h2>{history.map((item) => <button type="button" key={item.id} onClick={() => showAttempt(item)} className="block text-left text-sm underline">{item.resultSnapshot.title} · {new Date(item.completedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</button>)}</section> : null}

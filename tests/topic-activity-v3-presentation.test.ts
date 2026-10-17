@@ -31,7 +31,7 @@ test('real server save permits image/nickname/QR changes at the same version wit
   }
 })
 
-test('historical attempts still block questions, answer keys, weights and result score ranges', async () => {
+test('historical attempts are preserved while valid test changes automatically create a new version', async () => {
   for (const change of ['question', 'answer', 'weights', 'range'] as const) {
     const f = fixture()
     if (change === 'weights') {
@@ -42,12 +42,17 @@ test('historical attempts still block questions, answer keys, weights and result
       }
       f.program.test.results.forEach((result) => { delete result.scoreMin; delete result.scoreMax })
     }
-    f.state.attempts.push({ activityId: f.activity.id, testId: f.program.test.id, configVersion: f.program.test.version })
+    const historical = { activityId: f.activity.id, testId: f.program.test.id, configVersion: f.program.test.version,
+      resultId: 'low', resultSnapshot: { title: '旧结果', description: '旧说明', version: f.program.test.version } }
+    f.state.attempts.push(structuredClone(historical))
     const next = structuredClone(f.program)
     if (change === 'question') next.test.questions[0].prompt = '新题目'
     if (change === 'answer') next.test.questions[0].correctOptionId = 'no'
     if (change === 'weights') next.test.questions[0].options[0].weights = { low: 3, high: 1 }
     if (change === 'range') { next.test.results[0].scoreMax = 0; next.test.results[1].scoreMin = 1 }
-    await f.run(() => assert.rejects(saveTopicActivityV2Program(f.activity.id, 'admin-one', next), { code: 'TOPIC_V2_TEST_VERSION_LOCKED' }))
+    const saved = await f.run(() => saveTopicActivityV2Program(f.activity.id, 'admin-one', next))
+    assert.equal(saved.test.id, historical.testId)
+    assert.equal(saved.test.version, historical.configVersion + 1)
+    assert.deepEqual(f.state.attempts[0], historical, `${change} edits must not rewrite historical attempt snapshots`)
   }
 })

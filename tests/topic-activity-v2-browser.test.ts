@@ -24,6 +24,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   f.program.test.results[0].imageUrl = '/uploads/legacy-result-one.webp'
   f.program.test.results[1].imageUrl = '/uploads/legacy-result-two.webp'
   f.program.test.questions.push({ id: 'q2', prompt: '第二题', points: 0, options: [{ id: 'a2', label: '第二题选项A' }, { id: 'b2', label: '第二题选项B' }], correctOptionId: 'a2' })
+  const initialProgram = structuredClone(f.program)
   const build = await esbuild.build({
     stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {TopicActivityV2PollPanel,TopicActivityV2TestRunner} from './components/activities/TopicActivityV2Interactive'; import {TopicActivityV2TaskReview} from './components/activities/TopicActivityV2TaskReview'; import {TopicActivityV2Editor} from './components/activities/TopicActivityV2Editor'; import {TopicActivityV2Panel} from './components/activities/TopicActivityV2Panel'; const mode=new URLSearchParams(location.search).get('mode'); createRoot(document.getElementById('root')).render(mode==='panel'?<TopicActivityV2Panel activityId="activity-one" isAuthenticated={true} currentUserId="user-one"/>:mode==='test'?<TopicActivityV2TestRunner activityId="activity-one" isAuthenticated={true}/>:mode==='review'?<TopicActivityV2TaskReview activityId="activity-one" canReview={true} submission={{id:'submission-one',status:'PENDING',rewardEntryId:'weibo',rewardSnapshotSafe:{platformName:'微博',title:'分享任务',points:96,instructions:'提交截图'}}}/>:mode==='editor'?<TopicActivityV2Editor activityId="activity-one"/>:<TopicActivityV2PollPanel activityId="activity-one" isAuthenticated={true}/>);`, resolveDir: process.cwd(), loader: 'tsx' },
     absWorkingDir: process.cwd(),
@@ -55,9 +56,10 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   const css = (await postcss([tailwind({ ...require('./tailwind.config.ts').default, content: [{ raw: build.outputFiles[0].text, extension: 'js' }] })]).process(readFileSync('app/globals.css', 'utf8'), { from: join(process.cwd(), 'app/globals.css') })).css
   let votes: string[] = [], voteWrites = 0, testWrites = 0, reviewWrites = 0, configWrites = 0, taskWrites = 0, uploadRequests = 0, uploadShouldFail = true
   const attempts: Array<Record<string, unknown>> = []
-  let personality = false
+  let personality = false, retakeAllowed = true
   const programForTest = () => {
     const program = structuredClone(f.program)
+    program.test.allowRetake = retakeAllowed
     program.test.results[1].title = '服务端真实结果'
     if (personality) {
       program.test.mode = 'PERSONALITY'
@@ -94,7 +96,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       }
       return send({ activity: { title: '本地活动' }, test: publicTopicActivityV2Program(programForTest()).test })
     }
-    if (url.pathname.endsWith('/v2/attempts')) return send({ attempts })
+    if (url.pathname.endsWith('/v2/attempts')) return send({ attempts: attempts.slice().sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)) || String(right.id).localeCompare(String(left.id))) })
     if (url.pathname.endsWith('/v2/submissions/submission-one')) {
       if (req.method === 'PATCH') { reviewWrites++; await body(); await new Promise((resolve) => setTimeout(resolve, 100)); return send({ message: '审核失败，页面保留' }, 500) }
       return send({ history: [{ id: 'log-one', fromStatus: 'PENDING', toStatus: 'REJECTED', reason: '本地原因', reviewedAt: new Date().toISOString(), ReviewedBy: { nickname: '测试管理员' } }] })
@@ -112,14 +114,13 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
   const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null
+  const posterAspectRatioFailures: number[] = []
   try {
     browser = await chromium.launch({ headless: true, ...(existsSync(chrome) ? { executablePath: chrome } : existsSync(edge) ? { executablePath: edge } : {}) })
     for (const width of [1024, 360, 390, 430]) {
+      f.program = structuredClone(initialProgram)
       votes = []; voteWrites = 0; testWrites = 0; reviewWrites = 0; configWrites = 0; taskWrites = 0; uploadRequests = 0; uploadShouldFail = true; attempts.length = 0
-      personality = false
-      f.program.test.poster.backgroundUrl = '/uploads/old-poster.webp'
-      f.program.test.results[0].imageUrl = '/uploads/legacy-result-one.webp'
-      f.program.test.results[1].imageUrl = '/uploads/legacy-result-two.webp'
+      personality = false; retakeAllowed = true
       const context = await browser.newContext({ viewport: { width, height: 844 }, ...(width < 500 ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 MicroMessenger/8.0' } : {}) })
       const page = await context.newPage(); const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
       const open = (mode: string) => page.goto('http://127.0.0.1:' + port + '/?mode=' + mode)
@@ -136,7 +137,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       assert.deepEqual(await page.getByAltText('我的测试结果海报').evaluate((element) => [(element as HTMLImageElement).naturalWidth, (element as HTMLImageElement).naturalHeight]), [1080, 1440])
       const previewBytes = await page.getByAltText('我的测试结果海报').evaluate(async (element) => Array.from(new Uint8Array(await (await fetch((element as HTMLImageElement).src)).arrayBuffer())))
       assert.deepEqual(Buffer.from(previewBytes), png, 'preview uses the exact server PNG bytes')
-      assert.ok(await page.getByAltText('我的测试结果海报').evaluate((element) => Math.abs((element as HTMLImageElement).getBoundingClientRect().width / (element as HTMLImageElement).getBoundingClientRect().height - 3 / 4) < 0.01))
+      const posterAspectRatioMatches = await page.getByAltText('我的测试结果海报').evaluate((element) => Math.abs((element as HTMLImageElement).getBoundingClientRect().width / (element as HTMLImageElement).getBoundingClientRect().height - 3 / 4) < 0.01)
       const downloadWait = page.waitForEvent('download'); await page.getByRole('link', { name: '保存 PNG' }).click()
       const download = await downloadWait; assert.equal(download.suggestedFilename(), 'ecfc-activity-result.png')
       assert.deepEqual(readFileSync((await download.path())!), png, 'download is the same PNG, not a second render')
@@ -159,10 +160,21 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       assert.equal(await page.evaluate(() => document.documentElement.dataset.sharedPng), 'ecfc-activity-result.png')
       assert.deepEqual(Buffer.from(JSON.parse((await page.evaluate(() => document.documentElement.dataset.sharedBytes))!)), png, 'share uses the exact preview/download PNG')
       personality = true
-      await open('test'); await page.getByRole('radio', { name: '正确', exact: true }).check(); await page.getByRole('button', { name: '下一题' }).click()
+      await open('test')
+      await page.getByRole('heading', { name: '服务端真实结果', exact: true }).waitFor()
+      await page.getByRole('button', { name: '重新测试', exact: true }).click()
+      await page.getByRole('radio', { name: '正确', exact: true }).check(); await page.getByRole('button', { name: '下一题' }).click()
       await page.getByRole('radio', { name: '第二题选项A' }).check(); await page.getByRole('button', { name: '提交测试' }).click()
       await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
+      assert.equal(attempts.length, 2, 'retake creates a second attempt without replacing the first')
+      assert.equal(attempts[0].id, 'attempt-one')
+      assert.equal(attempts[1].id, 'attempt-two')
       assert.equal(await page.getByText('得分：', { exact: false }).count(), 0, 'personality result is not a knowledge score')
+      retakeAllowed = false
+      await open('test')
+      await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
+      assert.equal(await page.getByRole('button', { name: '重新测试', exact: true }).count(), 0, 'retake disabled shows the latest historical result and no retake action')
+      retakeAllowed = true
       await page.reload(); await page.getByRole('heading', { name: '我的历史结果', exact: true }).waitFor()
       await page.getByRole('button', { name: /趣味测试结果 ·/ }).click()
       await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
@@ -184,17 +196,34 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       assert.match(resultHref || '', /attemptId=attempt-two/u)
       await page.goto('http://127.0.0.1:' + port + '/?mode=test&attemptId=attempt-two')
       await page.getByRole('heading', { name: '趣味测试结果', exact: true }).waitFor()
+      f.program.test.mode = 'PERSONALITY'
+      f.program.test.scoringMode = 'RESULT_WEIGHT_ROLES_V1'
+      f.program.test.results = [
+        { id: 'stable-result-a', title: '甲结果', description: '说明甲', imageUrl: '/uploads/legacy-result-one.webp' },
+        { id: 'stable-result-b', title: '乙结果', description: '说明乙', imageUrl: '/uploads/legacy-result-two.webp' },
+        { id: 'stable-result-c', title: '丙结果', description: '说明丙' },
+      ]
+      f.program.test.questions = [{ id: 'stable-role-question', prompt: '偏好题', points: 0, questionWeight: 1, options: [
+        { id: 'role-option-a', label: '选项甲', weights: { 'stable-result-a': 4, 'stable-result-b': 2, 'stable-result-c': 1 } },
+        { id: 'role-option-b', label: '选项乙', weights: { 'stable-result-b': 4, 'stable-result-a': 2 } },
+      ] }]
       await open('editor'); await page.getByRole('button', { name: /配置/ }).click(); await page.getByText('平台奖励', { exact: true }).waitFor()
       assert.equal(await page.locator('textarea').count() > 0, true); assert.equal(configWrites, 0)
-      const resultPoster = page.getByAltText('结果海报背景预览')
+      assert.equal(await page.getByLabel('结果评分方式').inputValue(), 'RESULT_WEIGHT_ROLES_V1')
+      assert.equal(await page.getByLabel('主要结果 +4').first().inputValue(), 'stable-result-a')
+      await page.getByLabel('结果标题').first().fill('甲结果更新')
+      assert.equal(await page.getByLabel('主要结果 +4').first().inputValue(), 'stable-result-a', 'title edits do not change stable-ID mapping')
+      await page.getByRole('button', { name: '移除此结果', exact: true }).first().click()
+      await page.getByRole('alert').filter({ hasText: '该结果仍被 2 个选项使用，请先调整选项权重。' }).waitFor()
+      const resultPoster = page.getByAltText('结果海报背景预览', { exact: true })
       await resultPoster.waitFor()
       assert.match(await resultPoster.getAttribute('src') || '', /old-poster\.webp/u)
       assert.equal(await page.getByLabel('统一结果海报背景上传文件').count(), 1)
       assert.equal(await page.getByRole('group', { name: /^结果 \d+ 图片$/u }).count(), 0, 'there is no result-level poster uploader')
       const previewCanvas = page.getByLabel('结果海报布局预览').locator('[data-preview-result-id]')
       assert.equal(await previewCanvas.getAttribute('data-preview-background'), '/uploads/old-poster.webp', 'global background takes precedence over legacy result images')
-      await page.getByLabel('预览测试结果').selectOption('second')
-      assert.equal(await previewCanvas.getAttribute('data-preview-result-id'), 'second', 'result selector changes the displayed result text')
+      await page.getByLabel('预览测试结果').selectOption('stable-result-b')
+      assert.equal(await previewCanvas.getAttribute('data-preview-result-id'), 'stable-result-b', 'result selector changes the displayed result text')
       assert.equal(await previewCanvas.getAttribute('data-preview-background'), '/uploads/old-poster.webp', 'all result previews retain the same global background')
       await page.getByLabel('统一结果海报背景上传文件').setInputFiles({ name: 'failed-poster.png', mimeType: 'image/png', buffer: Buffer.from('fixture') })
       await page.getByRole('alert').filter({ hasText: '未替换当前统一海报背景' }).waitFor()
@@ -204,7 +233,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       try {
         await page.getByText('上传成功', { exact: true }).waitFor({ timeout: 15000 })
         await page.waitForFunction(() => document.querySelector('[data-preview-result-id]')?.getAttribute('data-preview-background') === '/cos/activities/22222222-2222-4222-8222-222222222222/source.webp')
-        assert.equal(await previewCanvas.getAttribute('data-preview-result-id'), 'second', 'uploading the shared background does not reset the selected result')
+        assert.equal(await previewCanvas.getAttribute('data-preview-result-id'), 'stable-result-b', 'uploading the shared background does not reset the selected result')
       } catch {
         const statuses = await page.getByRole('status').allTextContents()
         const alerts = await page.getByRole('alert').allTextContents()
@@ -214,11 +243,18 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByLabel('入口标题', { exact: true }).fill('更新入口标题')
       await page.getByRole('button', { name: '保存活动模块配置', exact: true }).evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click() })
       await page.getByText('活动模块配置已保存并回读确认。', { exact: true }).waitFor(); assert.equal(configWrites, 1)
+      assert.equal(f.program.test.results[0].title, '甲结果更新')
+      assert.deepEqual(f.program.test.questions[0].options[0].weights, { 'stable-result-a': 4, 'stable-result-b': 2, 'stable-result-c': 1 })
+      await open('editor'); await page.getByRole('button', { name: /配置/ }).click(); await page.getByText('平台奖励', { exact: true }).waitFor()
+      assert.equal(await page.getByLabel('结果标题').first().inputValue(), '甲结果更新', 'the edited title reloads from saved config')
+      assert.equal(await page.getByLabel('主要结果 +4').first().inputValue(), 'stable-result-a', 'the mapping reloads by stable result ID')
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no horizontal overflow at width ' + width)
       if (process.env.TOPIC_V2_QA_ARTIFACTS && width === 390) await page.screenshot({ path: join(process.env.TOPIC_V2_QA_ARTIFACTS, 'v2-admin-390.png'), fullPage: true })
       assert.deepEqual(errors, [], 'actual components should not crash at width ' + width)
+      if (!posterAspectRatioMatches) posterAspectRatioFailures.push(width)
       await context.close()
     }
+    assert.deepEqual(posterAspectRatioFailures, [], 'the visible poster preview should retain the 3:4 result-image ratio at all viewport widths')
   } finally {
     await browser?.close()
     server.closeAllConnections()

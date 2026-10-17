@@ -145,6 +145,12 @@ export function getTopicWizardEditChanges(baseline: TopicWizardEditBaseline, dra
 
   const programResult = normalizeTopicActivityV2Program(draft.program)
   if (!programResult.valid) throw new Error(programResult.message)
+  const program = programResult.value
+  const testDirty = topicActivityTestDirty(baseline.program.test, program.test)
+  if (baseline.testParticipants > 0 && testDirty.TEST_STRUCTURE_DIRTY
+    && program.test.id === baseline.program.test.id && program.test.version <= baseline.program.test.version) {
+    program.test.version = baseline.program.test.version + 1
+  }
   const lotteryConfig = normalizeTopicLotteryConfig({ ...draft.lottery, prizes: draft.lottery.prizes.map((prize) => {
     const image = media.prizes[prize.id]
     if (image && ['SELECTED', 'UPLOADING', 'FAILED', 'NEEDS_RESELECT'].includes(image.status)) throw new Error(`奖品「${prize.name || '未命名'}」图片尚未上传完成`)
@@ -158,11 +164,11 @@ export function getTopicWizardEditChanges(baseline: TopicWizardEditBaseline, dra
   }) })
   return {
     activityPatch,
-    program: programResult.value,
+    program,
     lottery: lotteryConfig,
-    programChanged: canonical(programResult.value) !== canonical(baseline.program),
+    programChanged: canonical(program) !== canonical(baseline.program),
     lotteryChanged: canonical(lotteryConfig) !== canonical(baseline.lottery),
-    testDirty: topicActivityTestDirty(baseline.program.test, programResult.value.test),
+    testDirty,
   }
 }
 
@@ -249,10 +255,6 @@ export async function saveTopicWizardEdits(input: {
   const stages: Array<{ stage: EditStage; changed: boolean; changedFields?: string[]; body?: unknown; expected?: WizardEditActivitySnapshot | TopicActivityV2Program | TopicLotteryConfig }> = []
   if (Object.keys(changes.activityPatch).length) stages.push({ stage: 'ACTIVITY', changed: true, changedFields: Object.keys(changes.activityPatch), body: changes.activityPatch, expected: expectedActivity(baseline.activity, changes.activityPatch) })
   if (changes.programChanged) {
-    const testChanged = changes.testDirty.TEST_STRUCTURE_DIRTY
-    if (testChanged && baseline.testParticipants > 0 && changes.program.test.id === baseline.program.test.id && changes.program.test.version <= baseline.program.test.version) {
-      return { status: 'BLOCKED', baseline, completed, message: '已有测试答题记录；修改题目、选项、评分或结果文字须递增版本（或使用新测试 ID），历史记录会保留。仅修改海报图片或显示开关无需递增版本。' }
-    }
     stages.push({ stage: 'PROGRAM', changed: true, body: { program: changes.program }, expected: changes.program })
   }
   if (changes.lotteryChanged) {
@@ -291,12 +293,16 @@ export async function saveTopicWizardEdits(input: {
     if (item.stage === 'PROGRAM') {
       const stats = record(currentBody)?.statistics
       const testParticipants = Number(record(stats)?.testParticipants)
-      const testChanged = changes.testDirty.TEST_STRUCTURE_DIRTY
-      if (testChanged && Number.isSafeInteger(testParticipants) && testParticipants > 0
-        && changes.program.test.id === baseline.program.test.id
-        && changes.program.test.version <= baseline.program.test.version) {
-        return { status: completed.length ? 'PARTIAL' : 'BLOCKED', baseline, completed, message: '已有测试答题记录；修改题目、选项、评分或结果文字须递增版本（或使用新测试 ID），历史记录会保留。仅修改海报图片或显示开关无需递增版本。' }
+      const liveProgram = current as TopicActivityV2Program
+      const candidate = (item.body as { program: TopicActivityV2Program }).program
+      const structureChanged = topicActivityTestDirty(liveProgram.test, candidate.test).TEST_STRUCTURE_DIRTY
+      if (Number.isSafeInteger(testParticipants) && testParticipants > 0 && candidate.test.id === liveProgram.test.id) {
+        if (structureChanged && candidate.test.version <= liveProgram.test.version) candidate.test.version = liveProgram.test.version + 1
+        else if (candidate.test.version < liveProgram.test.version) candidate.test.version = liveProgram.test.version
       }
+      item.body = { program: candidate }
+      item.expected = candidate
+      expected = candidate
     }
 
     let response: Response

@@ -89,6 +89,14 @@ export function topicWizardErrors(draft: TopicActivityWizardDraft, step: number)
         if (!question.prompt.trim()) errors.push(`第 ${index + 1} 题：请填写题干`)
         if (question.options.length < 2) errors.push(`第 ${index + 1} 题：至少需要两个选项`)
         if (test.mode === 'KNOWLEDGE' && (!question.correctOptionId || !question.options.some((option) => option.id === question.correctOptionId))) errors.push(`第 ${index + 1} 题：请选择有效正确答案`)
+        if (test.mode === 'PERSONALITY' && test.scoringMode === 'RESULT_WEIGHT_ROLES_V1') {
+          for (const [optionIndex, option] of question.options.entries()) {
+            const roles = Object.values(option.weights || {}).filter((weight) => weight > 0)
+            if (!roles.includes(4) || roles.some((weight) => weight !== 1 && weight !== 2 && weight !== 4) || new Set(roles).size !== roles.length) {
+              errors.push(`第 ${index + 1} 题选项 ${optionIndex + 1}：请配置一个主要结果；次要和弱关联结果可选且不能重复`)
+            }
+          }
+        }
       }
       for (const [index, result] of test.results.entries()) {
         if (!result.title.trim() || !result.description.trim()) errors.push(`测试结果 ${index + 1}：标题和说明不能为空`)

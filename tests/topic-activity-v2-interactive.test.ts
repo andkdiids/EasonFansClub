@@ -72,15 +72,31 @@ test('retake false blocks new attempts; public test and private result hide answ
     assert.ok(!JSON.stringify(first.attempt.resultSnapshot).includes('answers'))
   })
 })
-test('config cannot rewrite same-version ballots/test with completed records', async () => {
+test('test structure edits automatically version forward and preserve immutable attempts; retake follows setting', async () => {
   const f = fixture()
   await f.run(async () => {
     await castTopicV2Vote({ activityId: f.activity.id, userId: 'user-one', choices: ['a'], now: instant })
     await assert.rejects(saveTopicActivityV2Program(f.activity.id, 'admin-one', { ...f.program, poll: { ...f.program.poll, title: '静默改写' } }), { code: 'TOPIC_V2_POLL_VERSION_LOCKED' })
-    await submitTopicV2Test({ activityId: f.activity.id, userId: 'user-one', answers: { q1: 'yes' }, requestKey: 'request-one', now: instant })
-    await assert.rejects(saveTopicActivityV2Program(f.activity.id, 'admin-one', { ...f.program, test: { ...f.program.test, title: '静默改写' } }), { code: 'TOPIC_V2_TEST_VERSION_LOCKED' })
-    const saved = await saveTopicActivityV2Program(f.activity.id, 'admin-one', { ...f.program, test: { ...f.program.test, version: 2, title: '显式新版' } })
-    assert.equal(saved.test.version, 2)
+    const first = await submitTopicV2Test({ activityId: f.activity.id, userId: 'user-one', answers: { q1: 'yes' }, requestKey: 'request-one', now: instant })
+    const originalAttempt = structuredClone(first.attempt)
+    const changed = structuredClone(f.program)
+    changed.test.title = '新版本测试'
+    changed.test.questions[0].prompt = '修改后的问题'
+    changed.test.allowRetake = true
+    const saved = await saveTopicActivityV2Program(f.activity.id, 'admin-one', changed)
+    assert.equal(saved.test.id, f.program.test.id, 'ordinary editing retains the stable test ID')
+    assert.equal(saved.test.version, f.program.test.version + 1, 'server automatically increments the test version')
+    assert.equal(f.state.attempts[0].configVersion, f.program.test.version)
+    assert.deepEqual(f.state.attempts[0].resultSnapshot, originalAttempt.resultSnapshot)
+    const second = await submitTopicV2Test({ activityId: f.activity.id, userId: 'user-one', answers: { q1: 'no' }, requestKey: 'request-two', now: instant })
+    assert.equal(second.changed, true)
+    assert.equal(f.state.attempts.length, 2)
+    assert.equal(f.state.attempts[1].configVersion, saved.test.version)
+    assert.deepEqual(f.state.attempts[0].resultSnapshot, originalAttempt.resultSnapshot)
+    changed.test.allowRetake = false
+    const closed = await saveTopicActivityV2Program(f.activity.id, 'admin-one', changed)
+    assert.equal(closed.test.version, saved.test.version + 1, 'changing retake behavior is also versioned')
+    await assert.rejects(submitTopicV2Test({ activityId: f.activity.id, userId: 'user-one', answers: { q1: 'yes' }, requestKey: 'request-three', now: instant }), { code: 'TEST_RETAKE_NOT_ALLOWED' })
   })
 })
 test('PNG poster is valid bounded image with escaped text and QR', async () => {
@@ -105,7 +121,10 @@ test('poster places wrapped Chinese result text in a bounded paper group', async
   }
   const svg = topicPosterLayout(value)
   const result = svg.split('data-poster-group="result"')[1].split('data-poster-group="identity"')[0]
-  const baselines = [...result.matchAll(/<text x="118" y="(\d+)"/gu)].map((match) => Number(match[1]))
+  const baselines = [
+    ...[...result.matchAll(/<text x="536" y="(\d+)"[^>]*text-anchor="middle"/gu)].map((match) => Number(match[1])),
+    ...[...result.matchAll(/<text x="118" y="(\d+)"/gu)].map((match) => Number(match[1])),
+  ]
   assert.ok(baselines.length >= 3, 'title wraps into two lines before the description')
   assert.ok(baselines.every((y) => y >= 620 && y < 1080))
   assert.ok(baselines[2] - baselines[1] < 180, 'description stays close to its title')

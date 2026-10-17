@@ -14,8 +14,10 @@ export function topicActivityTestStructure(test: TopicActivityV2Test) {
     return value
   }) }
   // Keep the original object intact, including legacy background values and immutable attempt snapshots.
-  const { poster: presentation, ...protectedStructure } = structure
+  // A version marker is not test content. It must not by itself trigger another version bump.
+  const { poster: presentation, version: _version, ...protectedStructure } = structure
   void presentation
+  void _version
   return protectedStructure
 }
 

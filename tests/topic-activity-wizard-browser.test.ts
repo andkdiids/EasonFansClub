@@ -23,12 +23,32 @@ test('wizard actual React UI: five-step CREATE/EDIT, images and publish fixture 
     content: ['./components/activities/TopicActivityWizard*.tsx', './components/ConfirmDialog.tsx'],
   })]).process('@tailwind base;@tailwind components;@tailwind utilities;', { from: undefined })).css as string
   const apiRequests: string[] = []
+  function makeEditProgram() {
+    const program = createDefaultTopicActivityV2Program()
+    program.test.enabled = true
+    program.test.id = 'stable-edit-test-id'
+    program.test.version = 1
+    program.test.title = '已有趣味测试'
+    program.test.mode = 'PERSONALITY'
+    program.test.scoringMode = 'RESULT_WEIGHT_ROLES_V1'
+    program.test.allowRetake = false
+    program.test.results = [
+      { id: 'edit-result-a', title: '历史结果 A', description: '旧说明' },
+      { id: 'edit-result-b', title: '历史结果 B', description: '另一个说明' },
+    ]
+    program.test.questions = [{ id: 'stable-question-id', prompt: '原题目', points: 1, questionWeight: 1, options: [
+      { id: 'stable-option-a', label: '选项 A', weights: { 'edit-result-a': 4 } },
+      { id: 'stable-option-b', label: '选项 B', weights: { 'edit-result-b': 4 } },
+    ] }]
+    return program
+  }
   let savedActivity: Record<string, unknown> | null = null
   let postedActivity: Record<string, unknown> | null = null
   let savedProgram = createDefaultTopicActivityV2Program()
   let savedLottery = defaultTopicLotteryConfig()
   let editActivity: Record<string, unknown> = { id: 'fixture-edit', type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', title: '已发布活动', description: '已存在介绍', coverUrl: null,
     startsAt: '2030-10-01T01:00:00.000Z', endsAt: '2030-10-10T10:00:00.000Z', participationRule: '提交相关内容', participationMode: 'COMMENT', allowImageAttachments: true }
+  let editTestParticipants = 0
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/api/')) apiRequests.push(`${req.method} ${req.url}`)
     if (req.url?.startsWith('/api/')) {
@@ -80,7 +100,7 @@ test('wizard actual React UI: five-step CREATE/EDIT, images and publish fixture 
         }
       }
       if (req.url === '/api/admin/activities/fixture-edit/v2') {
-        if (req.method === 'GET') { res.end(JSON.stringify({ activity: editActivity, canReview: true, program: savedProgram, statistics: { testParticipants: 0 } })); return }
+        if (req.method === 'GET') { res.end(JSON.stringify({ activity: editActivity, canReview: true, program: savedProgram, statistics: { testParticipants: editTestParticipants } })); return }
         if (req.method === 'PATCH') { let body = ''; req.on('data', (chunk) => { body += chunk }); req.on('end', () => { savedProgram = JSON.parse(body).program; res.end(JSON.stringify({ program: savedProgram })) }); return }
       }
       if (req.url === '/api/admin/activities/fixture-edit/v2/lottery') {
@@ -121,9 +141,15 @@ test('wizard actual React UI: five-step CREATE/EDIT, images and publish fixture 
       const errors: string[] = []
       page.on('pageerror', (error) => errors.push(error.message))
       await page.goto(serviceUrl)
+      await page.getByRole('button', { name: /^3\. 测试题/u }).click()
+      await page.getByRole('heading', { name: '创建话题活动 · 测试题', exact: true }).waitFor()
+      await page.getByRole('button', { name: /^5\. 检查并保存/u }).click()
+      await page.getByRole('heading', { name: '创建话题活动 · 检查并保存', exact: true }).waitFor()
+      await page.getByRole('button', { name: /^1\. 活动信息/u }).click()
       await page.getByRole('button', { name: '下一步', exact: true }).click()
-      await page.getByRole('alert').waitFor()
-      assert.ok(await page.getByRole('alert').innerText().then((text) => text.includes('活动名称')))
+      await page.getByRole('heading', { name: '创建话题活动 · 参与规则', exact: true }).waitFor()
+      await page.getByRole('status').filter({ hasText: '本步骤还有未完成内容，可稍后回来补充' }).waitFor()
+      await page.getByRole('button', { name: /^1\. 活动信息/u }).click()
       await page.getByLabel('活动名称', { exact: true }).fill('天使的礼物')
       await page.getByLabel('活动介绍', { exact: true }).fill('发布相关内容参与本活动。')
       await page.getByLabel('活动开始（北京时间）', { exact: true }).fill('2030-10-01T09:00')
@@ -139,7 +165,9 @@ test('wizard actual React UI: five-step CREATE/EDIT, images and publish fixture 
       await page.getByLabel('小红书', { exact: true }).check()
       await page.getByLabel('允许图片附件').uncheck()
       await page.getByRole('button', { name: '下一步', exact: true }).click()
-      assert.ok((await page.getByRole('alert').innerText()).includes('开启图片附件'))
+      await page.getByRole('heading', { name: '创建话题活动 · 测试题', exact: true }).waitFor()
+      await page.getByRole('status').filter({ hasText: '本步骤还有未完成内容，可稍后回来补充' }).waitFor()
+      await page.getByRole('button', { name: /^2\. 参与规则/u }).click()
       await page.getByLabel('允许图片附件').check()
       await page.getByRole('button', { name: '下一步', exact: true }).click()
       assert.equal(await page.getByLabel('启用测试题').isChecked(), false)
@@ -155,7 +183,9 @@ test('wizard actual React UI: five-step CREATE/EDIT, images and publish fixture 
       await page.getByLabel('开奖时间（北京时间）', { exact: true }).fill('2030-10-09T18:00')
       await page.getByLabel('收件截止（北京时间）', { exact: true }).fill('2030-10-18T18:00')
       await page.getByRole('button', { name: '下一步', exact: true }).click()
-      assert.ok((await page.getByRole('alert').innerText()).includes('开奖时间不能早于'))
+      await page.getByRole('heading', { name: '创建话题活动 · 检查并保存', exact: true }).waitFor()
+      await page.getByRole('button', { name: /开奖时间不能早于活动结束/u }).waitFor()
+      await page.getByRole('button', { name: /^4\. 奖励与抽奖/u }).click()
       await page.getByLabel('开奖时间（北京时间）', { exact: true }).fill('2030-10-11T18:00')
       await page.getByRole('button', { name: '下一步', exact: true }).click()
       assert.ok((await page.getByRole('region', { name: '话题活动创建向导' }).innerText()).includes('最多获得一次资格'))
@@ -248,27 +278,53 @@ test('wizard actual React UI: five-step CREATE/EDIT, images and publish fixture 
       assert.deepEqual(errors, [])
       await page.close()
     })
-    await t.test('existing TOPIC_ACTIVITY opens the simple EDIT wizard and PATCHes only changed fields', async () => {
-      apiRequests.length = 0
-      const page = await browser!.newPage({ viewport: { width: 390, height: 900 } })
-      const errors: string[] = []
-      page.on('pageerror', (error) => errors.push(error.message))
-      await page.goto(`http://127.0.0.1:${address.port}`)
-      await page.getByRole('button', { name: '编辑已有活动' }).click()
-      await page.getByRole('region', { name: '话题活动编辑向导' }).waitFor()
-      await page.waitForFunction(() => Array.from(document.querySelectorAll('input')).some((input) => input.value === '已发布活动'))
-      assert.equal(await page.getByLabel('活动名称', { exact: true }).inputValue(), '已发布活动')
-      assert.equal(await page.getByRole('button', { name: '创建话题活动草稿', exact: true }).count(), 0)
-      await page.getByLabel('活动名称', { exact: true }).fill('已发布活动（简易编辑）')
-      await page.getByRole('button', { name: '保存修改', exact: true }).click()
-      await page.getByRole('button', { name: '确认保存修改', exact: true }).click()
-      await page.getByRole('status').filter({ hasText: '修改已保存并回读确认' }).waitFor()
-      assert.equal(editActivity.title, '已发布活动（简易编辑）')
-      assert.equal(editActivity.status, 'PUBLISHED')
-      assert.deepEqual(apiRequests.filter((call) => call.startsWith('PATCH')), ['PATCH /api/admin/activities/fixture-edit'])
-      assert.equal(apiRequests.some((call) => call.startsWith('POST ')), false)
-      assert.deepEqual(errors, [])
-      await page.close()
+    await t.test('existing attempts allow retake toggle, versioned edits, free step navigation and preserve published state at desktop/mobile', async () => {
+      for (const width of [1280, 390]) {
+        apiRequests.length = 0
+        savedProgram = makeEditProgram()
+        editTestParticipants = 3
+        editActivity = { id: 'fixture-edit', type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', title: '已发布活动', description: '', coverUrl: null,
+          startsAt: '2030-10-01T01:00:00.000Z', endsAt: '2030-10-10T10:00:00.000Z', participationRule: '提交相关内容', participationMode: 'COMMENT', allowImageAttachments: true }
+        const previousAttempt = { id: 'old-attempt', testId: 'stable-edit-test-id', configVersion: 1, resultId: 'edit-result-a',
+          resultSnapshot: { title: '历史结果 A', description: '历史说明', version: 1 } }
+        const previousAttemptSnapshot = structuredClone(previousAttempt)
+        const page = await browser!.newPage({ viewport: { width, height: 900 } })
+        const errors: string[] = []
+        page.on('pageerror', (error) => errors.push(error.message))
+        await page.goto(`http://127.0.0.1:${address.port}`)
+        await page.getByRole('button', { name: '编辑已有活动' }).click()
+        const wizard = page.getByRole('region', { name: '话题活动编辑向导' })
+        await wizard.waitFor()
+        await page.waitForFunction(() => Array.from(document.querySelectorAll('input')).some((input) => input.value === '已发布活动'))
+        assert.equal(await page.getByLabel('活动名称', { exact: true }).inputValue(), '已发布活动')
+        assert.equal(await page.getByRole('button', { name: '创建话题活动草稿', exact: true }).count(), 0)
+        await wizard.getByRole('button', { name: /^3\. 测试题/u }).click()
+        await page.getByText('已有用户完成过测试。保存时会自动创建新版本，历史答题和结果保持不变。', { exact: true }).waitFor()
+        assert.equal(await page.getByLabel('允许重新测试', { exact: true }).isDisabled(), false)
+        assert.equal(await page.getByLabel('启用测试题', { exact: true }).isChecked(), true, 'the existing test remains enabled after hydration')
+        await page.getByLabel('允许重新测试', { exact: true }).check()
+        const questionField = wizard.locator('label').filter({ hasText: '题干' }).locator('textarea')
+        const questionFieldCount = await questionField.count()
+        assert.equal(questionFieldCount, 1, `question editor should be present after opening step 3; wizard=${await wizard.innerText()}`)
+        await questionField.fill('修改后的题目')
+        await wizard.getByRole('button', { name: /^5\. 检查并保存/u }).click()
+        await page.getByRole('heading', { name: '编辑话题活动 · 检查并保存', exact: true }).waitFor()
+        await page.getByText(/活动信息：待完善/u).waitFor()
+        assert.equal(await page.getByRole('button', { name: '保存修改', exact: true }).isDisabled(), false, 'incomplete content is a warning, not a save blocker')
+        await page.getByRole('button', { name: '保存修改', exact: true }).click()
+        await page.getByRole('button', { name: '确认保存修改', exact: true }).click()
+        await page.getByRole('status').filter({ hasText: '修改已保存并回读确认' }).waitFor()
+        assert.equal(savedProgram.test.id, 'stable-edit-test-id')
+        assert.equal(savedProgram.test.version, 2)
+        assert.equal(savedProgram.test.questions[0].prompt, '修改后的题目')
+        assert.equal(savedProgram.test.allowRetake, true)
+        assert.equal(editActivity.status, 'PUBLISHED', 'saving an edit never changes published status')
+        assert.deepEqual(previousAttempt, previousAttemptSnapshot, 'historical attempt snapshots remain immutable')
+        assert.deepEqual(apiRequests.filter((call) => call.startsWith('PATCH')), ['PATCH /api/admin/activities/fixture-edit/v2'])
+        assert.equal(apiRequests.some((call) => call.startsWith('POST ')), false)
+        assert.deepEqual(errors, [])
+        await page.close()
+      }
     })
     await t.test('ordinary discussion cannot enable a lottery without screenshot tasks', async () => {
       apiRequests.length = 0
@@ -284,7 +340,8 @@ test('wizard actual React UI: five-step CREATE/EDIT, images and publish fixture 
       await page.getByRole('button', { name: '下一步', exact: true }).click()
       await page.getByLabel('开启本话题活动抽奖').check()
       await page.getByRole('button', { name: '下一步', exact: true }).click()
-      assert.ok((await page.getByRole('alert').innerText()).includes('普通讨论评论'))
+      await page.getByRole('heading', { name: '创建话题活动 · 检查并保存', exact: true }).waitFor()
+      await page.getByRole('button', { name: /开启抽奖须先配置指定平台截图任务；普通讨论评论不是当前抽奖资格来源/u }).waitFor()
       assert.deepEqual(apiRequests, [])
       await page.close()
     })

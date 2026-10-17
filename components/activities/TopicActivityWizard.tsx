@@ -130,6 +130,26 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   const publishLocked = saveSession.publishSave.writeAttempted || published
   const canPublish = programConfirmed && Boolean(saveSession.createdActivity && saveSession.activityId)
     && (!draft.lottery.enabled || Boolean(saveSession.confirmedLottery && saveSession.lotterySave.readback === 'SUCCEEDED'))
+  const editReviewIssue = (() => {
+    if (!isEdit || !editBaseline) return null
+    try { getTopicWizardEditChanges(editBaseline, draft, media); return null }
+    catch (cause) { return cause instanceof Error ? cause.message : '请检查修改内容' }
+  })()
+  function issuesForStep(index: number) {
+    const issues = topicWizardErrors(draft, index)
+    if (!isEdit || !editReviewIssue) return issues
+    const issueStep = /活动名称|活动介绍|活动开始|活动结束|活动.*时间/u.test(editReviewIssue) ? 0
+      : /参与|平台/u.test(editReviewIssue) ? 1
+        : /抽奖|奖品/u.test(editReviewIssue) ? 3 : 2
+    return [...new Set(issueStep === index ? [...issues, editReviewIssue] : issues)]
+  }
+  function allReviewIssues() {
+    return steps.slice(0, 4).flatMap((_, index) => issuesForStep(index).map((message) => ({ step: index, message })))
+  }
+  function selectStep(index: number) {
+    if (testImageUploadLock.current) return
+    setStep(index); setErrors([]); setMessage('')
+  }
   useEffect(() => {
     if (!open || !isEdit || !activityId) return
     let active = true
@@ -397,18 +417,10 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   }
   function next() {
     if (testImageUploadLock.current) return
-    if (isEdit && editBaseline) {
-      try { getTopicWizardEditChanges(editBaseline, draftRef.current, mediaRef.current) }
-      catch (cause) {
-        const message = cause instanceof Error ? cause.message : '请检查修改内容'
-        // Selected cover/prize files are uploaded only after save confirmation.
-        if (!/图片尚未上传完成/.test(message)) { setErrors([message]); return }
-      }
-      setErrors([]); setStep((current) => Math.min(4, current + 1)); return
-    }
-    const problems = topicWizardErrors(draft, step)
-    setErrors(problems)
-    if (!problems.length) setStep((current) => Math.min(4, current + 1))
+    const problems = issuesForStep(step)
+    setErrors([])
+    setMessage(problems.length ? '本步骤还有未完成内容，可稍后回来补充。' : '')
+    setStep((current) => Math.min(4, current + 1))
   }
   if (!open) return null
   return <section aria-label={isEdit ? '话题活动编辑向导' : '话题活动创建向导'} className="min-w-0 space-y-5 rounded-sm border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
@@ -441,9 +453,14 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     {editLoading ? <p role="status" className="border border-[var(--border)] p-3 text-sm">正在读取现有活动配置…</p> : null}
     {editLoadError ? <div role="alert" className="space-y-3 border border-red-400 p-3 text-sm"><p>活动配置读取失败，未执行任何保存：{editLoadError}</p><button type="button" className={buttonClass} onClick={reloadEdit}>重新读取</button></div> : null}
     {isEdit && editBaseline ? <p className="border border-[var(--border)] p-3 text-sm">当前状态：{editBaseline.activity.status === 'PUBLISHED' ? '已发布' : editBaseline.activity.status === 'DRAFT' ? '草稿' : '已取消'}。此处只保存修改，不重新创建活动，也不改变发布状态。</p> : null}
+    <ol aria-label="配置步骤" className="grid grid-cols-1 gap-2 sm:grid-cols-5">{steps.map((label, index) => {
+      const issueCount = index === 4 ? allReviewIssues().length : issuesForStep(index).length
+      return <li key={label} className="min-w-0"><button type="button" aria-current={step === index ? 'step' : undefined} aria-label={`${index + 1}. ${label}，${issueCount ? '未完成' : '已完成'}`}
+        disabled={saveBusy} onClick={() => selectStep(index)} className={`min-h-12 w-full cursor-pointer rounded-sm border p-3 text-left text-sm ${step === index ? 'border-[var(--primary)] font-bold' : 'border-[var(--border)] text-[var(--foreground-muted)]'}`}>
+        <span>{index + 1}. {label}</span><span className="ml-2 text-xs">{issueCount ? '⚠ 未完成' : '✓ 已完成'}</span></button></li>
+    })}</ol>
+
     <fieldset disabled={saveBusy || publishLocked || editLoading || Boolean(editLoadError) || (isEdit && (editBaseline?.activity.status === 'CANCELLED' || Boolean(editPending))) || (!isEdit && ((programFrozen && step === 1) || (lotteryFrozen && step === 3) || (submitted && step === 0)))} className="min-w-0 space-y-5">
-    <ol aria-label="配置步骤" className="grid grid-cols-1 gap-2 sm:grid-cols-5">{steps.map((label, index) => <li key={label} aria-current={step === index ? 'step' : undefined}
-      className={`rounded-sm border p-3 text-sm ${step === index ? 'border-[var(--primary)] font-bold' : 'border-[var(--border)] text-[var(--foreground-muted)]'}`}>{index + 1}. {label}</li>)}</ol>
 
     {step === 0 ? <div className="space-y-4">
       <Field label="活动名称"><input className={inputClass} autoComplete="off" maxLength={160} value={draft.activity.title} onChange={(event) => activity({ title: event.target.value })} placeholder="例如：天使的礼物" /></Field>
@@ -491,7 +508,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
       </fieldset>
     </div> : null}
 
-    {step === 2 ? <TopicActivityWizardTestEditor value={draft.program.test} disabled={saveBusy || (!isEdit && programFrozen)} onUploadingChange={testImageUploadChanged} requiresVersionBump={isEdit && (editBaseline?.testParticipants || 0) > 0} onChange={(test) => update((current) => ({ ...current, program: { ...current.program, enabled: current.program.enabled || test.enabled || current.program.entries.some((entry) => entry.enabled) || current.program.fixedReward.enabled || current.program.medal.enabled || current.program.poll.enabled, test } }))} /> : null}
+    {step === 2 ? <TopicActivityWizardTestEditor value={draft.program.test} disabled={saveBusy || (!isEdit && programFrozen)} onUploadingChange={testImageUploadChanged} hasPreviousAttempts={isEdit && (editBaseline?.testParticipants || 0) > 0} onChange={(test) => update((current) => ({ ...current, program: { ...current.program, enabled: current.program.enabled || test.enabled || current.program.entries.some((entry) => entry.enabled) || current.program.fixedReward.enabled || current.program.medal.enabled || current.program.poll.enabled, test } }))} /> : null}
 
     {step === 3 ? <div className="space-y-5">
       <fieldset disabled={programFrozen} className="space-y-3 border border-[var(--border)] p-3"><legend className="px-1 font-bold">A. 参与奖励</legend>
@@ -530,6 +547,11 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     </div> : null}
 
     {step === 4 ? <><TopicActivityWizardSummary draft={draft} coverName={media.cover.fileInfo?.name} badgeName={badgeOptions.find((badge) => badge.id === draft.program.medal.badgeId)?.name} />
+      <section aria-label="检查结果" className="space-y-2 border border-[var(--border)] p-3"><h3 className="font-bold">配置检查</h3>{steps.slice(0, 4).map((label, index) => {
+        const issues = issuesForStep(index)
+        return <div key={label} className="border-t border-[var(--border)] pt-2"><p className="font-semibold">{issues.length ? '⚠' : '✓'} {label}：{issues.length ? '待完善' : '可保存'}</p>
+          {issues.map((issue) => <button type="button" key={issue} className="block min-h-9 text-left text-sm underline" onClick={() => selectStep(index)}>{issue}（返回此步骤）</button>)}</div>
+      })}</section>
       <p className="text-sm">先保存活动与 V2；开启抽奖时须保存抽奖配置，最后完整核验并确认发布。发布不等于立即开奖。</p></> : null}
     </fieldset>
     {isEdit && editBaseline && editBaseline.activity.status !== 'CANCELLED' ? <div className="flex flex-wrap gap-3">
@@ -544,7 +566,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     {isEdit && editBaseline ? <section aria-label="编辑保存状态" className="space-y-2 border border-[var(--border)] p-3 text-sm"><p>本次修改：{editSavedStages.length ? editSavedStages.map((stage) => ({ ACTIVITY: '活动信息', PROGRAM: '参与规则与测试题', LOTTERY: '抽奖配置' } as Record<string, string>)[stage] || stage).join('、') + '已保存并回读' : '尚未保存'}</p>
       {editPending ? <p role="status">上次写入结果待核验。本次操作只读取，不会重复提交。</p> : null}
       {editBaseline.lotteryMeta.configLocked ? <p>抽奖配置已被参与或开奖记录锁定，服务端将拒绝修改。</p> : null}
-      {editBaseline.testParticipants > 0 ? <p>已有测试答题记录；修改同一测试题时需递增测试版本或改用新测试 ID，历史答题会保留。</p> : null}
+      {editBaseline.testParticipants > 0 ? <><p>已有用户完成过该测试。修改题目、选项、结果或评分配置后，系统会自动创建新的测试版本；历史答题和结果不会受到影响。</p>{editBaseline.program.test.allowRetake ? <p>允许重新测试已开启，用户可创建新的测试记录，历史结果将继续保留。</p> : null}</> : null}
       {editLoadError ? <button type="button" className={buttonClass} onClick={reloadEdit}>重新读取</button> : null}</section> : null}
     {!isEdit ? <section aria-label="活动保存会话" className="space-y-2 border border-[var(--border)] p-3 text-sm"><p>活动草稿：{saveSession.activityId ? '已创建并回读确认' : '尚未创建'} · 请求状态：{saveBusy ? '处理中' : '可操作'}</p>
       <ol className="grid gap-2 sm:grid-cols-3">{wizardSaveStages.map((stage) => <li key={stage}>{saveStageLabels[stage]}：{saveStatusLabels[saveSession.stages[stage]]}</li>)}</ol>

@@ -5,6 +5,8 @@ import type { TopicActivityV2Test, TopicActivityV2TestQuestion, TopicActivityV2T
 import { createWizardId } from './TopicActivityWizardIds'
 import { TopicActivityPosterBackgroundUploader } from './TopicActivityPosterBackgroundUploader'
 import { TopicActivityPosterPreview } from './TopicActivityPosterPreview'
+import { TopicActivityResultWeightRoles } from './TopicActivityResultWeightRoles'
+import { migrateTopicActivityWeightsToRoles, topicActivityResultReferenceCount } from '@/lib/topic-activity-result-weight-roles'
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm'
 const buttonClass = 'min-h-10 rounded-sm border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-40'
@@ -17,15 +19,16 @@ function move<T>(items: T[], index: number, direction: -1 | 1) {
   return next
 }
 
-export function TopicActivityWizardTestEditor({ value, onChange, disabled = false, requiresVersionBump = false, onUploadingChange }: Readonly<{
+export function TopicActivityWizardTestEditor({ value, onChange, disabled = false, hasPreviousAttempts = false, onUploadingChange }: Readonly<{
   value: TopicActivityV2Test
   onChange: (value: TopicActivityV2Test) => void
   disabled?: boolean
-  requiresVersionBump?: boolean
+  hasPreviousAttempts?: boolean
   onUploadingChange?: (uploading: boolean) => void
 }>) {
   const uploads = useRef(new Set<string>())
   const [imageUploading, setImageUploading] = useState(false)
+  const [resultDeleteError, setResultDeleteError] = useState('')
   function uploadingChanged(id: string, uploading: boolean) {
     if (uploading) uploads.current.add(id)
     else uploads.current.delete(id)
@@ -41,6 +44,9 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
     patch({ results: value.results.map((item, position) => position === index ? { ...item, ...partial } : item) })
   }
   function changeMode(mode: TopicActivityV2Test['mode']) {
+    const nextScoringMode = mode === 'PERSONALITY' && value.mode !== 'PERSONALITY'
+      ? 'RESULT_WEIGHT_ROLES_V1'
+      : value.scoringMode || 'LEGACY_WEIGHTED'
     patch({ mode, results: value.results.map((item) => mode === 'KNOWLEDGE'
       ? { ...item, scoreMin: item.scoreMin ?? 0, scoreMax: item.scoreMax ?? 0 }
       : { id: item.id, title: item.title, description: item.description, ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}) }),
@@ -50,12 +56,23 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
         delete withoutWeights.weights
         return withoutWeights
       }) }
-      : { ...item, correctOptionId: undefined, options: item.options.map((option) => ({ ...option, weights: Object.fromEntries(value.results.map((row) => [row.id, option.weights?.[row.id] ?? 0])) })) }) })
+      : { ...item, correctOptionId: undefined, questionWeight: item.questionWeight ?? 1, options: item.options.map((option) => ({ ...option,
+        weights: nextScoringMode === 'RESULT_WEIGHT_ROLES_V1'
+          ? migrateTopicActivityWeightsToRoles(option.weights, value.results)
+          : Object.fromEntries(value.results.map((row) => [row.id, option.weights?.[row.id] ?? 0])) })) }), scoringMode: nextScoringMode })
+  }
+  function changeScoringMode(scoringMode: NonNullable<TopicActivityV2Test['scoringMode']>) {
+    patch({ scoringMode, questions: value.questions.map((item) => ({ ...item, questionWeight: item.questionWeight ?? 1,
+      options: item.options.map((option) => ({ ...option, weights: scoringMode === 'RESULT_WEIGHT_ROLES_V1'
+        ? migrateTopicActivityWeightsToRoles(option.weights, value.results)
+        : Object.fromEntries(value.results.map((row) => [row.id, option.weights?.[row.id] ?? 0])) })) })) })
   }
   function addQuestion() {
     const firstOptionId = createWizardId('option')
     const secondOptionId = createWizardId('option')
-    const options = [firstOptionId, secondOptionId].map((id, index) => ({ id, label: `选项 ${index + 1}`, ...(value.mode === 'PERSONALITY' ? { weights: Object.fromEntries(value.results.map((row) => [row.id, 0])) } : {}) }))
+    const options = [firstOptionId, secondOptionId].map((id, index) => ({ id, label: `选项 ${index + 1}`, ...(value.mode === 'PERSONALITY' ? { weights: value.scoringMode === 'RESULT_WEIGHT_ROLES_V1' && value.results[0]
+      ? { [value.results[0].id]: 4 }
+      : Object.fromEntries(value.results.map((row) => [row.id, 0])) } : {}) }))
     const nextQuestion: TopicActivityV2TestQuestion = { id: createWizardId('test'), prompt: '', points: 1, options,
       ...(value.mode === 'KNOWLEDGE' ? { correctOptionId: firstOptionId } : {}) }
     patch({ questions: [...value.questions, nextQuestion] })
@@ -75,10 +92,11 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-sm">测试标题<input className={inputClass} maxLength={160} value={value.title} onChange={(event) => patch({ title: event.target.value })} /></label>
           <label className="text-sm">测试模式<select className={inputClass} value={value.mode} onChange={(event) => changeMode(event.target.value as TopicActivityV2Test['mode'])}><option value="KNOWLEDGE">知识测试（单选，有正确答案）</option><option value="PERSONALITY">趣味测试（按选项权重匹配结果）</option></select></label>
-          {requiresVersionBump ? <label className="text-sm">测试版本<input className={inputClass} type="number" min={1} step={1} value={value.version} onChange={(event) => patch({ version: Number(event.target.value) })} /><span className="mt-1 block text-xs text-[var(--foreground-muted)]">已有答题记录。若修改题目，请填写高于当前版本的版本号；历史答题会保留。</span></label> : null}
+          {hasPreviousAttempts ? <p role="note" className="self-end text-xs text-[var(--foreground-muted)]">已有用户完成过测试。保存时会自动创建新版本，历史答题和结果保持不变。</p> : null}
         </div>
         <label className="block text-sm">测试说明<textarea className={inputClass} rows={2} maxLength={2000} value={value.description} onChange={(event) => patch({ description: event.target.value })} /></label>
         <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={value.allowRetake} onChange={(event) => patch({ allowRetake: event.target.checked })} />允许重新测试</label>
+        {value.mode === 'PERSONALITY' ? <label className="block text-sm">结果评分方式<select className={inputClass} value={value.scoringMode || 'LEGACY_WEIGHTED'} onChange={(event) => changeScoringMode(event.target.value as NonNullable<TopicActivityV2Test['scoringMode']>)}><option value="RESULT_WEIGHT_ROLES_V1">主要 +4、次要 +2、弱关联 +1（推荐）</option><option value="LEGACY_WEIGHTED">旧版自定义权重（兼容历史活动）</option></select></label> : null}
         <p className="text-xs text-[var(--foreground-muted)]">当前服务端只定义知识单选和趣味权重两种模式；没有多选、判断题、单题时限或答题次数上限字段，本向导不会新增这些规则。</p>
       </> : <p className="text-sm text-[var(--foreground-muted)]">测试关闭时不会要求填写题目，已有配置会保留；关闭仅在保存时提交该开关。</p>}
     </fieldset>
@@ -89,15 +107,21 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
         {value.questions.map((item, index) => <article key={item.id} className="space-y-3 border-t border-[var(--border)] pt-3">
           <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">第 {index + 1} 题</h4><div className="flex gap-2"><button type="button" className={buttonClass} disabled={disabled || index === 0} onClick={() => patch({ questions: move(value.questions, index, -1) })}>上移</button><button type="button" className={buttonClass} disabled={disabled || index === value.questions.length - 1} onClick={() => patch({ questions: move(value.questions, index, 1) })}>下移</button><button type="button" className={buttonClass} disabled={disabled} onClick={() => patch({ questions: value.questions.filter((questionItem) => questionItem.id !== item.id) })}>删除</button></div></div>
           <label className="block text-sm">题干<textarea className={inputClass} rows={2} value={item.prompt} onChange={(event) => question(index, { prompt: event.target.value })} /></label>
-          <label className="block max-w-48 text-sm">题目分值<input className={inputClass} type="number" min={0} value={item.points} onChange={(event) => question(index, { points: Number(event.target.value) })} /></label>
+          {value.mode === 'KNOWLEDGE' ? <label className="block max-w-48 text-sm">答对得分<input className={inputClass} type="number" min={0} value={item.points} onChange={(event) => question(index, { points: Number(event.target.value) })} /></label>
+            : value.scoringMode === 'RESULT_WEIGHT_ROLES_V1' ? <details className="max-w-80 text-sm"><summary className="cursor-pointer">高级设置 · 题目权重 {item.questionWeight ?? 1}</summary><label className="mt-2 block">题目权重<input className={inputClass} type="number" min={1} step={1} value={item.questionWeight ?? 1} onChange={(event) => question(index, { questionWeight: Number(event.target.value) })} /></label><p className="mt-1 text-xs text-[var(--foreground-muted)]">该题所有结果得分将乘以此权重。普通测试建议保持 1。</p></details> : null}
           <div className="space-y-2"><p className="text-sm font-semibold">选项{value.mode === 'KNOWLEDGE' ? '（选择正确答案）' : '（设置各结果权重）'}</p>
             {item.options.map((option, optionIndex) => <div key={option.id} className="grid gap-2 border border-[var(--border)] p-2 sm:grid-cols-[minmax(0,1fr)_auto]">
               <div className="space-y-2"><label className="block text-sm">选项 {optionIndex + 1}<input className={inputClass} value={option.label} onChange={(event) => question(index, { options: item.options.map((current) => current.id === option.id ? { ...current, label: event.target.value } : current) })} /></label>
-                {value.mode === 'PERSONALITY' ? <div className="grid gap-2 sm:grid-cols-2">{value.results.map((row) => <label key={row.id} className="text-xs">{row.title} 权重<input className={inputClass} type="number" value={option.weights?.[row.id] ?? 0} onChange={(event) => question(index, { options: item.options.map((current) => current.id === option.id ? { ...current, weights: { ...current.weights, [row.id]: Number(event.target.value) } } : current) })} /></label>)}</div> : <label className="flex min-h-9 items-center gap-2 text-sm"><input type="radio" name={`correct-${item.id}`} checked={item.correctOptionId === option.id} onChange={() => question(index, { correctOptionId: option.id })} />正确答案</label>}</div>
+                {value.mode === 'PERSONALITY' ? value.scoringMode === 'RESULT_WEIGHT_ROLES_V1'
+                  ? <TopicActivityResultWeightRoles results={value.results} weights={option.weights} onChange={(weights) => question(index, { options: item.options.map((current) => current.id === option.id ? { ...current, weights } : current) })} />
+                  : <div className="grid gap-2 sm:grid-cols-2">{value.results.map((row) => <label key={row.id} className="text-xs">{row.title} 旧版权重<input className={inputClass} type="number" value={option.weights?.[row.id] ?? 0} onChange={(event) => question(index, { options: item.options.map((current) => current.id === option.id ? { ...current, weights: { ...current.weights, [row.id]: Number(event.target.value) } } : current) })} /></label>)}</div>
+                  : <label className="flex min-h-9 items-center gap-2 text-sm"><input type="radio" name={`correct-${item.id}`} checked={item.correctOptionId === option.id} onChange={() => question(index, { correctOptionId: option.id })} />正确答案</label>}</div>
               <div className="flex flex-wrap items-start gap-2"><button type="button" className={buttonClass} disabled={disabled || optionIndex === 0} onClick={() => question(index, { options: move(item.options, optionIndex, -1) })}>上移</button><button type="button" className={buttonClass} disabled={disabled || optionIndex === item.options.length - 1} onClick={() => question(index, { options: move(item.options, optionIndex, 1) })}>下移</button><button type="button" className={buttonClass} disabled={disabled || item.options.length <= 2} onClick={() => question(index, { options: item.options.filter((current) => current.id !== option.id), ...(item.correctOptionId === option.id ? { correctOptionId: undefined } : {}) })}>删除选项</button></div>
             </div>)}
             {value.mode === 'KNOWLEDGE' && (!item.correctOptionId || !item.options.some((option) => option.id === item.correctOptionId)) ? <p role="alert" className="text-sm text-[var(--danger)]">请选择仍存在于本题的正确答案。</p> : null}
-            <button type="button" className={buttonClass} disabled={disabled || item.options.length >= 50} onClick={() => question(index, { options: [...item.options, { id: createWizardId('option'), label: '', ...(value.mode === 'PERSONALITY' ? { weights: Object.fromEntries(value.results.map((row) => [row.id, 0])) } : {}) }] })}>添加选项</button>
+            <button type="button" className={buttonClass} disabled={disabled || item.options.length >= 50} onClick={() => question(index, { options: [...item.options, { id: createWizardId('option'), label: '', ...(value.mode === 'PERSONALITY' ? { weights: value.scoringMode === 'RESULT_WEIGHT_ROLES_V1' && value.results[0]
+              ? { [value.results[0].id]: 4 }
+              : Object.fromEntries(value.results.map((row) => [row.id, 0])) } : {}) }] })}>添加选项</button>
           </div>
           <section className="space-y-1 border border-[var(--border)] bg-[var(--surface-muted)] p-3" aria-label={`第 ${index + 1} 题预览`}><p className="text-xs text-[var(--foreground-muted)]">预览</p><p className="font-semibold">{item.prompt || '题目内容预览'}</p>{item.options.map((option) => <p key={option.id} className="text-sm">○ {option.label || '未填写选项'}</p>)}</section>
         </article>)}
@@ -105,8 +129,13 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
 
       <section className="space-y-3 border border-[var(--border)] p-3" aria-label="测试结果">
         <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">结果</h3><button type="button" className={buttonClass} disabled={disabled || value.results.length >= 100} onClick={addResult}>添加结果</button></div>
+        <p className="text-xs text-[var(--foreground-muted)]">结果用于确定测试最终匹配。请先创建结果，再到每道题的选项中配置对应的结果权重。</p>
+        {resultDeleteError ? <p role="alert" className="text-sm text-[var(--danger)]">{resultDeleteError}</p> : null}
         {value.results.map((row, index) => <article key={row.id} className="space-y-2 border-t border-[var(--border)] pt-3">
           <div className="flex items-center justify-between"><h4 className="font-semibold">结果 {index + 1}</h4><button type="button" className={buttonClass} disabled={disabled || value.results.length <= 1} onClick={() => {
+            const references = topicActivityResultReferenceCount(value.questions, row.id)
+            if (references) { setResultDeleteError(`该结果仍被 ${references} 个选项使用，请先调整选项权重。`); return }
+            setResultDeleteError('')
             const results = value.results.filter((item) => item.id !== row.id)
             patch({ results, questions: value.questions.map((item) => ({ ...item, options: item.options.map((option) => {
               if (!option.weights) return option
