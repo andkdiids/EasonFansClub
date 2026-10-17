@@ -203,9 +203,11 @@ export async function saveTopicActivityV2Program(activityId: string, actorId: st
     if (previous) {
       const ballots = await tx.topicActivityPollVote.count({ where: { activityId, pollId: previous.poll.id } })
       if (ballots && program.poll.id === previous.poll.id && JSON.stringify(program.poll) !== JSON.stringify(previous.poll)) fail('TOPIC_V2_POLL_VERSION_LOCKED', '已有投票记录，请使用新的投票 ID 保留历史')
-      const attempts = await tx.topicActivityTestAttempt.count({ where: { activityId, testId: previous.test.id, configVersion: previous.test.version } })
-      if (attempts && program.test.id === previous.test.id && (program.test.version < previous.test.version || (program.test.version === previous.test.version && topicActivityTestDirty(previous.test, program.test).TEST_STRUCTURE_DIRTY))) {
-        fail('TOPIC_V2_TEST_VERSION_LOCKED', '已有测试记录，请递增配置版本或使用新测试 ID')
+      const attempts = await tx.topicActivityTestAttempt.count({ where: { activityId, testId: previous.test.id } })
+      if (attempts && program.test.id === previous.test.id) {
+        const testContentChanged = topicActivityTestDirty(previous.test, program.test).TEST_STRUCTURE_DIRTY
+        if (testContentChanged) program.test.version = Math.max(program.test.version, previous.test.version + 1)
+        else if (program.test.version < previous.test.version) program.test.version = previous.test.version
       }
     }
     const oldEntries = await tx.topicActivityRewardEntry.findMany({ where: { activityId } })

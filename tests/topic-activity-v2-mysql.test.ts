@@ -257,7 +257,7 @@ test('V2 real MySQL: additive migration, legacy compatibility and concurrent led
       assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
       const metadata = await sharp(png).metadata(); assert.equal(metadata.format, 'png'); assert.ok(metadata.width! >= 256)
     })
-    await t.test('personality server weights persist; published version cannot silently rewrite result', async () => {
+    await t.test('personality server weights persist; editing creates a new version without rewriting prior result', async () => {
       const s = await scenario()
       s.program.test.mode = 'PERSONALITY'
       s.program.test.questions = [{ id: 'q1', prompt: '选择偏好', points: 0, options: [{ id: 'yes', label: '甲', weights: { first: 2 } }, { id: 'no', label: '乙', weights: { second: 3 } }] }]
@@ -267,7 +267,9 @@ test('V2 real MySQL: additive migration, legacy compatibility and concurrent led
       assert.equal(submitted.attempt.resultId, 'second')
       assert.equal((submitted.attempt.resultSnapshot as { score: unknown }).score, null)
       s.program.test.results[1].title = '不允许静默修改'
-      await assert.rejects(services.saveTopicActivityV2Program(s.activityId, adminId, s.program), { code: 'TOPIC_V2_TEST_VERSION_LOCKED' })
+      const saved = await services.saveTopicActivityV2Program(s.activityId, adminId, s.program)
+      assert.equal(saved.test.id, s.program.test.id)
+      assert.equal(saved.test.version, 2)
       assert.equal(((await interactive.getTopicV2Attempt(s.activityId, submitted.attempt.id, userId)).resultSnapshot as { title: string }).title, '乙结果')
     })
     await t.test('global balance equals sum of immutable PointLog deltas with no broken chain', async () => {

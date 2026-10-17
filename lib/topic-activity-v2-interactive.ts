@@ -20,12 +20,23 @@ export function calculateTopicV2Test(test: TopicActivityV2Test, input: unknown) 
   const totals = Object.fromEntries(test.results.map((result) => [result.id, 0]))
   const maxScore = test.questions.reduce((sum, question) => sum + question.points, 0)
   if (test.mode === 'KNOWLEDGE') score = selections.reduce((sum, { question, option }) => sum + (question.correctOptionId === option.id ? question.points : 0), 0)
-  else for (const { option } of selections) for (const [id, weight] of Object.entries(option.weights || {})) totals[id] += weight
+  else for (const { question, option } of selections) for (const [id, weight] of Object.entries(option.weights || {})) {
+    totals[id] += weight * (test.scoringMode === 'RESULT_WEIGHT_ROLES_V1' ? question.questionWeight ?? 1 : 1)
+  }
+  const primaryCounts = Object.fromEntries(test.results.map((result) => [result.id, selections.filter(({ option }) => option.weights?.[result.id] === 4).length]))
+  const recentTotals = Object.fromEntries(test.results.map((result) => [result.id, selections.slice(-3).reduce((sum, { question, option }) => sum + (option.weights?.[result.id] || 0) * (test.scoringMode === 'RESULT_WEIGHT_ROLES_V1' ? question.questionWeight ?? 1 : 1), 0)]))
   const result = test.mode === 'KNOWLEDGE'
     ? test.results.find((item) => score! >= item.scoreMin! && score! <= item.scoreMax!)
-    : test.results.reduce((best, item) => totals[item.id] > totals[best.id] ? item : best, test.results[0])
+    : test.scoringMode === 'RESULT_WEIGHT_ROLES_V1'
+      ? test.results.reduce((best, item) => {
+        if (totals[item.id] !== totals[best.id]) return totals[item.id] > totals[best.id] ? item : best
+        if (primaryCounts[item.id] !== primaryCounts[best.id]) return primaryCounts[item.id] > primaryCounts[best.id] ? item : best
+        if (recentTotals[item.id] !== recentTotals[best.id]) return recentTotals[item.id] > recentTotals[best.id] ? item : best
+        return test.results.indexOf(item) < test.results.indexOf(best) ? item : best
+      }, test.results[0])
+      : test.results.reduce((best, item) => totals[item.id] > totals[best.id] ? item : best, test.results[0])
   if (!result) fail('TEST_RESULT_UNAVAILABLE', '测试结果配置不完整')
-  return { answers: Object.fromEntries(selections.map(({ question, option }) => [question.id, option.id])), result, score, maxScore: test.mode === 'KNOWLEDGE' ? maxScore : null }
+  return { answers: Object.fromEntries(selections.map(({ question, option }) => [question.id, option.id])), result, score, resultScores: totals, maxScore: test.mode === 'KNOWLEDGE' ? maxScore : null }
 }
 
 async function publicActivity(activityId: string) {

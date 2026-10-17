@@ -29,6 +29,7 @@ function response(value: unknown, status = 200) {
 function memoryTransport(state: { activity: Record<string, unknown>; program: TopicActivityV2Program; lottery: TopicLotteryConfig }, calls: string[], options: {
   onGet?: (path: string) => unknown | undefined
   beforePatch?: (path: string, body: unknown) => Response | Error | undefined
+  testParticipants?: number
 } = {}) {
   return async (path: string, init: RequestInit) => {
     const method = init.method || 'GET'
@@ -39,7 +40,7 @@ function memoryTransport(state: { activity: Record<string, unknown>; program: To
       if (path === `/api/admin/activities/${activityId}`) return response({ activity: state.activity })
       if (path.endsWith('/v2/lottery')) return response({ config: state.lottery, configLocked: false, addressEncryptionReady: true, draw: null, winners: [] })
       // Real V2 activity summary deliberately omits type; identity comes from Activity detail.
-      if (path.endsWith('/v2')) return response({ activity: { id: state.activity.id, title: state.activity.title, status: state.activity.status }, program: state.program, statistics: { testParticipants: 0 } })
+      if (path.endsWith('/v2')) return response({ activity: { id: state.activity.id, title: state.activity.title, status: state.activity.status }, program: state.program, statistics: { testParticipants: options.testParticipants ?? 0 } })
       return response({}, 404)
     }
     const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
@@ -145,7 +146,7 @@ test('lottery-only EDIT checks live lock/encryption and stops when lock appeared
   assert.equal(calls.some((call) => call.startsWith('PATCH ')), false)
 })
 
-test('existing test records require a higher version before changing question content', async () => {
+test('existing test attempts are saved under an automatic version bump with the stable test ID', async () => {
   const value = fixture(3)
   const testConfig = value.draft.program.test
   testConfig.enabled = true; testConfig.title = '知识测试'
@@ -153,13 +154,40 @@ test('existing test records require a higher version before changing question co
   testConfig.questions = [{ id: 'question-stable', prompt: '原题', points: 1, correctOptionId: 'option-a', options: [{ id: 'option-a', label: 'A' }, { id: 'option-b', label: 'B' }] }]
   value.draft.program.test = structuredClone(testConfig)
   value.baseline.program.test = structuredClone(testConfig)
+  value.program.test = structuredClone(testConfig)
   value.draft.program.test.questions[0].prompt = '改题'
+  const oldAttempt = { testId: testConfig.id, configVersion: testConfig.version, resultId: 'result-stable', resultSnapshot: { title: '旧标题', description: '旧结果' } }
+  const history = structuredClone(oldAttempt)
+  const calls: string[] = []
+  const state = { activity: value.activity, program: value.program, lottery: value.lottery }
+  const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
+    transport: memoryTransport(state, calls, { testParticipants: 3 }) })
+  assert.equal(result.status, 'SAVED')
+  assert.equal(state.program.test.id, testConfig.id)
+  assert.equal(state.program.test.version, testConfig.version + 1)
+  assert.equal(state.program.test.questions[0].prompt, '改题')
+  assert.equal(state.activity.status, 'PUBLISHED')
+  assert.deepEqual(history, oldAttempt, 'the prior attempt snapshot remains untouched')
+  assert.deepEqual(calls.filter((call) => call.startsWith('PATCH ')), [`PATCH /api/admin/activities/${activityId}/v2`])
+})
+
+test('live attempt count appearing after initial EDIT read still causes a safe version bump before PATCH', async () => {
+  const value = fixture(0)
+  const testConfig = value.draft.program.test
+  testConfig.enabled = true; testConfig.title = '知识测试'
+  testConfig.results = [{ id: 'live-result', title: '结果', description: '说明', scoreMin: 0, scoreMax: 1 }]
+  testConfig.questions = [{ id: 'live-question', prompt: '原题', points: 1, correctOptionId: 'live-a', options: [{ id: 'live-a', label: 'A' }, { id: 'live-b', label: 'B' }] }]
+  value.draft.program.test = structuredClone(testConfig)
+  value.baseline.program.test = structuredClone(testConfig)
+  value.program.test = structuredClone(testConfig)
+  value.draft.program.test.questions[0].prompt = '并发前新增答题后的改题'
+  const state = { activity: value.activity, program: value.program, lottery: value.lottery }
   const calls: string[] = []
   const result = await saveTopicWizardEdits({ activityId, baseline: value.baseline, draft: value.draft, media: value.media,
-    transport: memoryTransport({ activity: value.activity, program: value.program, lottery: value.lottery }, calls) })
-  assert.equal(result.status, 'BLOCKED')
-  assert.match(result.message, /递增版本/)
-  assert.equal(calls.length, 0)
+    transport: memoryTransport(state, calls, { testParticipants: 3 }) })
+  assert.equal(result.status, 'SAVED')
+  assert.equal(state.program.test.version, testConfig.version + 1)
+  assert.equal(state.program.test.id, testConfig.id)
 })
 
 test('existing test attempts allow result poster and QR saves without version bump or question changes', async () => {

@@ -26,6 +26,7 @@ export type TopicActivityV2Condition = 'APPROVED_COMMENT' | 'POLL' | 'TEST' | 'A
 export type TopicActivityV2MedalTrigger = 'PLATFORM' | 'APPROVED_COMMENT' | 'POLL' | 'TEST'
 export type TopicActivityV2PollMode = 'SINGLE' | 'MULTI'
 export type TopicActivityV2TestMode = 'KNOWLEDGE' | 'PERSONALITY'
+export type TopicActivityV2ScoringMode = 'LEGACY_WEIGHTED' | 'RESULT_WEIGHT_ROLES_V1'
 
 export type TopicRewardEntryConfig = {
   id: string
@@ -101,6 +102,8 @@ export type TopicActivityV2TestQuestion = {
   id: string
   prompt: string
   points: number
+  /** Multiplier used by the role-weighted personality scorer only. */
+  questionWeight?: number
   options: TopicActivityV2TestOption[]
   correctOptionId?: string
 }
@@ -129,6 +132,8 @@ export type TopicActivityV2Test = {
   title: string
   description: string
   mode: TopicActivityV2TestMode
+  /** Historical configs without this field continue using the original sum resolver. */
+  scoringMode?: TopicActivityV2ScoringMode
   allowRetake: boolean
   questions: TopicActivityV2TestQuestion[]
   results: TopicActivityV2TestResult[]
@@ -151,10 +156,10 @@ export type TopicActivityV2Program = {
 }
 
 export type TopicActivityV2PublicTestOption = Omit<TopicActivityV2TestOption, 'weights'>
-export type TopicActivityV2PublicTestQuestion = Omit<TopicActivityV2TestQuestion, 'correctOptionId' | 'options'> & {
+export type TopicActivityV2PublicTestQuestion = Omit<TopicActivityV2TestQuestion, 'correctOptionId' | 'options' | 'questionWeight'> & {
   options: TopicActivityV2PublicTestOption[]
 }
-export type TopicActivityV2PublicTest = Omit<TopicActivityV2Test, 'questions'> & {
+export type TopicActivityV2PublicTest = Omit<TopicActivityV2Test, 'questions' | 'scoringMode'> & {
   questions: TopicActivityV2PublicTestQuestion[]
 }
 
@@ -221,6 +226,7 @@ export const DEFAULT_TOPIC_ACTIVITY_V2_PROGRAM: TopicActivityV2Program = Object.
     title: '',
     description: '',
     mode: 'KNOWLEDGE',
+    scoringMode: 'LEGACY_WEIGHTED',
     allowRetake: false,
     questions: [],
     results: [],
@@ -455,8 +461,9 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
   const title = text(input, 'title', '', MAX_TITLE_LENGTH)
   const description = text(input, 'description', '', MAX_DESCRIPTION_LENGTH)
   const mode = has(input, 'mode') ? input.mode : DEFAULT_TOPIC_ACTIVITY_V2_PROGRAM.test.mode
+  const scoringMode = has(input, 'scoringMode') ? input.scoringMode : 'LEGACY_WEIGHTED'
   const allowRetake = bool(input, 'allowRetake', false)
-  if (version === null || title === null || description === null || allowRetake === null || (mode !== 'KNOWLEDGE' && mode !== 'PERSONALITY')) return 'test字段格式不正确'
+  if (version === null || title === null || description === null || allowRetake === null || (mode !== 'KNOWLEDGE' && mode !== 'PERSONALITY') || (scoringMode !== 'LEGACY_WEIGHTED' && scoringMode !== 'RESULT_WEIGHT_ROLES_V1')) return 'test字段格式不正确'
 
   const rawResults = has(input, 'results') ? input.results : []
   if (!Array.isArray(rawResults) || rawResults.length > MAX_LIST_SIZE) return 'test.results数量不正确'
@@ -497,6 +504,10 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
     const prompt = requiredText(question, 'prompt', MAX_DESCRIPTION_LENGTH)
     const points = integer(question, 'points', 0, 0, MAX_POINTS)
     if (!questionId || !prompt || points === null) return `test.questions[${index}]字段不完整`
+    const questionWeight = has(question, 'questionWeight')
+      ? integer(question, 'questionWeight', 1, 1, MAX_POINTS)
+      : scoringMode === 'RESULT_WEIGHT_ROLES_V1' && mode === 'PERSONALITY' ? 1 : undefined
+    if (questionWeight === null) return `test.questions[${index}].questionWeight格式不正确`
     const rawOptions = has(question, 'options') ? question.options : []
     if (!Array.isArray(rawOptions) || rawOptions.length < 2 || rawOptions.length > MAX_OPTIONS) return `test.questions[${index}].options数量不正确`
     const options: TopicActivityV2TestOption[] = []
@@ -513,6 +524,12 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
         if (!hasWeights) return `test.questions[${index}].options[${optionIndex}]缺少权重`
         const weights = normalizeWeights(option.weights, resultIdSet, `test.questions[${index}].options[${optionIndex}].weights`)
         if (typeof weights === 'string') return weights
+        if (scoringMode === 'RESULT_WEIGHT_ROLES_V1') {
+          const assignedRoles = Object.values(weights).filter((weight) => weight > 0)
+          if (assignedRoles.some((weight) => weight !== 1 && weight !== 2 && weight !== 4) || new Set(assignedRoles).size !== assignedRoles.length || !assignedRoles.includes(4)) {
+            return `test.questions[${index}].options[${optionIndex}]必须配置唯一的主要结果（+4），次要（+2）和弱关联（+1）为可选项`
+          }
+        }
         options.push({ id: optionId, label, weights })
       } else {
         if (hasWeights) return `KNOWLEDGE题目不允许配置权重：test.questions[${index}].options[${optionIndex}]`
@@ -525,10 +542,10 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
     const correctOptionId = question.correctOptionId
     if (mode === 'KNOWLEDGE') {
       if (typeof correctOptionId !== 'string' || !optionIds.includes(correctOptionId)) return `test.questions[${index}].correctOptionId无效`
-      questions.push({ id: questionId, prompt, points, options, correctOptionId })
+      questions.push({ id: questionId, prompt, points, ...(questionWeight === undefined ? {} : { questionWeight }), options, correctOptionId })
     } else {
       if (correctOptionId !== undefined && correctOptionId !== null && correctOptionId !== '') return `PERSONALITY题目不能设置标准答案：test.questions[${index}]`
-      questions.push({ id: questionId, prompt, points, options })
+      questions.push({ id: questionId, prompt, points, ...(questionWeight === undefined ? {} : { questionWeight }), options })
     }
     questionIds.push(questionId)
     totalPoints += points
@@ -571,7 +588,7 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
   const rangeError = range(startsAt, endsAt, 'test')
   if (rangeError) return rangeError
   // Accept legacy stored dimensions for backwards compatibility, but normalize output to V5 3:4.
-  return { enabled, id, version, title, description, mode, allowRetake, questions, results, poster: {
+  return { enabled, id, version, title, description, mode, scoringMode, allowRetake, questions, results, poster: {
     width: TOPIC_ACTIVITY_V2_POSTER_SIZE.width, height: TOPIC_ACTIVITY_V2_POSTER_SIZE.height, backgroundUrl, showNickname, showQrCode,
   } }
 }
@@ -675,7 +692,13 @@ export function publicTopicActivityV2Program(config: TopicActivityV2Program): To
     entries: config.entries.map((entry) => ({ ...entry })),
     poll: { ...config.poll, options: config.poll.options.map((option) => ({ ...option })) },
     test: {
-      ...config.test,
+      enabled: config.test.enabled,
+      id: config.test.id,
+      version: config.test.version,
+      title: config.test.title,
+      description: config.test.description,
+      mode: config.test.mode,
+      allowRetake: config.test.allowRetake,
       questions: config.test.questions.map((question) => ({
         id: question.id,
         prompt: question.prompt,
