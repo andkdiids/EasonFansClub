@@ -38,7 +38,8 @@ function memoryTransport(state: { activity: Record<string, unknown>; program: To
       if (override !== undefined) return response(override)
       if (path === `/api/admin/activities/${activityId}`) return response({ activity: state.activity })
       if (path.endsWith('/v2/lottery')) return response({ config: state.lottery, configLocked: false, addressEncryptionReady: true, draw: null, winners: [] })
-      if (path.endsWith('/v2')) return response({ activity: state.activity, program: state.program, statistics: { testParticipants: 0 } })
+      // Real V2 activity summary deliberately omits type; identity comes from Activity detail.
+      if (path.endsWith('/v2')) return response({ activity: { id: state.activity.id, title: state.activity.title, status: state.activity.status }, program: state.program, statistics: { testParticipants: 0 } })
       return response({}, 404)
     }
     const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
@@ -179,6 +180,44 @@ test('existing test attempts allow result poster and QR saves without version bu
   assert.deepEqual(state.program.test.questions, value.baseline.program.test.questions)
   assert.equal(state.program.test.version, value.baseline.program.test.version)
   assert.equal(state.program.test.poster.backgroundUrl, value.baseline.program.test.poster.backgroundUrl)
+})
+
+test('legacy activity with nullable dates/rules saves poster-only changes using the real V2 summary and can save again after reload', async () => {
+  const value = fixture(3)
+  Object.assign(value.activity, { startsAt: null, endsAt: null, participationRule: null, description: '' })
+  value.program.test.results = [{ id: 'stable-result', title: '结果', description: '说明' }]
+  const initial = topicWizardEditInitialState({ activity: value.activity }, { program: value.program, statistics: { testParticipants: 3 } }, { config: value.lottery }, activityId)
+  initial.draft.program.test.results[0].imageUrl = '/uploads/result-background.png'
+  initial.draft.program.test.poster.backgroundUrl = '/uploads/legacy-background.png'
+  initial.draft.program.test.poster.showNickname = false
+  initial.draft.program.test.poster.showQrCode = true
+  const state = { activity: value.activity, program: value.program, lottery: value.lottery }
+  const calls: string[] = []
+  const transport = memoryTransport(state, calls)
+  const saved = await saveTopicWizardEdits({ activityId, ...initial, transport })
+  assert.equal(saved.status, 'SAVED')
+  assert.deepEqual(saved.completed, ['PROGRAM'])
+  assert.ok(calls.includes(`GET /api/admin/activities/${activityId}`), 'identity is checked against canonical detail, not missing V2 type')
+  assert.equal(calls.filter((call) => call.startsWith('PATCH')).length, 1)
+  assert.equal(state.program.test.results[0].imageUrl, '/uploads/result-background.png')
+  assert.equal(state.activity.startsAt, null)
+  const reloaded = topicWizardEditInitialState({ activity: state.activity }, { program: state.program, statistics: { testParticipants: 3 } }, { config: state.lottery }, activityId)
+  assert.equal(reloaded.draft.program.test.poster.backgroundUrl, '/uploads/legacy-background.png')
+  assert.equal(reloaded.draft.program.test.poster.showQrCode, true)
+  reloaded.draft.program.test.poster.showQrCode = false
+  assert.equal((await saveTopicWizardEdits({ activityId, ...reloaded, transport })).status, 'SAVED')
+  assert.equal(state.program.test.poster.showQrCode, false)
+})
+
+test('edit validates changed title/date inputs without requiring untouched nullable legacy fields', () => {
+  const value = fixture()
+  value.draft.activity.title = ' '
+  assert.throws(() => getTopicWizardEditChanges(value.baseline, value.draft, value.media), /活动名称/)
+  value.draft.activity.title = value.baseline.activity.title
+  value.draft.activity.startsAt = 'not-a-date'
+  assert.throws(() => getTopicWizardEditChanges(value.baseline, value.draft, value.media), /开始时间格式/)
+  value.draft.activity.startsAt = '2030-11-01T10:00'
+  assert.throws(() => getTopicWizardEditChanges(value.baseline, value.draft, value.media), /结束时间必须晚于/)
 })
 
 test('unknown PATCH result is read-only on retry and never resubmits', async () => {

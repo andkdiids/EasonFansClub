@@ -338,8 +338,6 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     if (!editBaseline || !activityId || editLoading || editSaving || operationLock.current || testImageUploadLock.current) return
     if (editPending) { setEditConfirmation(true); return }
     try {
-      const validation = topicWizardErrors(draftRef.current, 4)
-      if (validation.length) throw new Error(validation.join('；'))
       const changes = getTopicWizardEditChanges(editBaseline, draftRef.current, mediaRef.current)
       if (!Object.keys(changes.activityPatch).length && !changes.programChanged && !changes.lotteryChanged) {
         setMessage('没有需要保存的修改。'); setErrors([]); return
@@ -399,6 +397,15 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
   }
   function next() {
     if (testImageUploadLock.current) return
+    if (isEdit && editBaseline) {
+      try { getTopicWizardEditChanges(editBaseline, draftRef.current, mediaRef.current) }
+      catch (cause) {
+        const message = cause instanceof Error ? cause.message : '请检查修改内容'
+        // Selected cover/prize files are uploaded only after save confirmation.
+        if (!/图片尚未上传完成/.test(message)) { setErrors([message]); return }
+      }
+      setErrors([]); setStep((current) => Math.min(4, current + 1)); return
+    }
     const problems = topicWizardErrors(draft, step)
     setErrors(problems)
     if (!problems.length) setStep((current) => Math.min(4, current + 1))

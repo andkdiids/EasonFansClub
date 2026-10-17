@@ -122,17 +122,23 @@ export async function getTopicV2Attempt(activityId: string, attemptId: string, u
 /** Resolve poster presentation only. Never mutate stored historical test/results. */
 export async function getTopicV2PosterSnapshot(activityId: string, attemptId: string, userId: string): Promise<Record<string, unknown>> {
   const attempt = await prisma.topicActivityTestAttempt.findFirst({ where: { id: attemptId, activityId, userId },
-    select: { resultSnapshot: true, Activity: { select: { startsAt: true, endsAt: true, topicProgram: true } },
+    select: { resultSnapshot: true, testId: true, configVersion: true, resultId: true, Activity: { select: { startsAt: true, endsAt: true, topicProgram: true } },
       User: { select: { nickname: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } } } })
   if (!attempt) fail('TEST_RESULT_NOT_FOUND', '测试结果不存在', 404)
   const snapshot = data(attempt.resultSnapshot)
-  // Visibility is a current privacy/publishing preference, not a historical test result.
-  // Read only these two existing flags; never replace frozen images, scores or text.
-  const currentPoster = data(data(data(attempt.Activity.topicProgram).test).poster)
+  // Presentation may be corrected without changing answers or the earned result.
+  // Match stable result ID AND test/version; never borrow another result's image.
+  const currentTest = data(data(attempt.Activity.topicProgram).test)
+  const currentPoster = data(currentTest.poster)
+  const sameTest = typeof attempt.testId === 'string' && currentTest.id === attempt.testId && currentTest.version === attempt.configVersion
+  const currentResult = sameTest && Array.isArray(currentTest.results)
+    ? currentTest.results.map(data).find((result) => result.id === attempt.resultId) : undefined
   const poster = data(snapshot.poster)
-  // Missing properties alone fall back; explicit nulls in new snapshots stay frozen.
+  // Old/retired versions retain their own artwork. Explicit current removals stay removed.
+  // Date/avatar nulls remain frozen; only missing date/avatar properties fall back.
   return { ...snapshot,
-    poster: { ...poster, showNickname: currentPoster.showNickname === true, showQrCode: currentPoster.showQrCode === true },
+    imageUrl: currentResult ? currentResult.imageUrl || null : snapshot.imageUrl,
+    poster: { ...poster, ...(currentResult ? { backgroundUrl: currentPoster.backgroundUrl || null } : {}), showNickname: currentPoster.showNickname === true, showQrCode: currentPoster.showQrCode === true },
     nickname: currentPoster.showNickname === true ? snapshot.nickname ?? attempt.User.nickname ?? null : null,
     activityStartsAt: Object.hasOwn(snapshot, 'activityStartsAt') ? snapshot.activityStartsAt : attempt.Activity.startsAt?.toISOString() || null,
     activityEndsAt: Object.hasOwn(snapshot, 'activityEndsAt') ? snapshot.activityEndsAt : attempt.Activity.endsAt?.toISOString() || null,
