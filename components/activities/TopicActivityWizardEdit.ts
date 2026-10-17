@@ -133,6 +133,15 @@ export function getTopicWizardEditChanges(baseline: TopicWizardEditBaseline, dra
     // Compare displayed form values first so untouched legacy whitespace or seconds are never normalized away.
     if (canonical(field.raw) !== canonical(baselineInput)) activityPatch[field.key] = field.value
   }
+  // Editing nullable legacy fields is not creation. Validate only changed inputs.
+  if (Object.hasOwn(activityPatch, 'title') && !draft.activity.title.trim()) throw new Error('请填写活动名称')
+  for (const [key, label] of [['startsAt', '开始'], ['endsAt', '结束']] as const) {
+    if (Object.hasOwn(activityPatch, key) && draft.activity[key] && !parseActivityDateInput(draft.activity[key])) throw new Error(`活动${label}时间格式不正确`)
+  }
+  if (Object.hasOwn(activityPatch, 'startsAt') || Object.hasOwn(activityPatch, 'endsAt')) {
+    const start = parseActivityDateInput(draft.activity.startsAt), end = parseActivityDateInput(draft.activity.endsAt)
+    if (start && end && end <= start) throw new Error('活动结束时间必须晚于开始时间')
+  }
 
   const programResult = normalizeTopicActivityV2Program(draft.program)
   if (!programResult.valid) throw new Error(programResult.message)
@@ -227,7 +236,7 @@ export async function saveTopicWizardEdits(input: {
   if (input.pendingVerification) {
     const pending = input.pendingVerification
     try {
-      if (pending.stage === 'LOTTERY') assertActivityIdentity(await getJson(transport, editPath(id, 'ACTIVITY')), id, baseline)
+      if (pending.stage === 'PROGRAM' || pending.stage === 'LOTTERY') assertActivityIdentity(await getJson(transport, editPath(id, 'ACTIVITY')), id, baseline)
       const actual = moduleValue(await getJson(transport, editPath(id, pending.stage)), pending.stage, id)
       if (!matchesExpected(actual, pending)) return { status: 'UNKNOWN', baseline, completed, message: `${pending.stage} 的上次请求结果仍无法确认；本次只读核对，没有重发写入。`, pendingVerification: pending }
       baseline = readModule(actual, pending.stage, baseline)
@@ -242,7 +251,7 @@ export async function saveTopicWizardEdits(input: {
   if (changes.programChanged) {
     const testChanged = changes.testDirty.TEST_STRUCTURE_DIRTY
     if (testChanged && baseline.testParticipants > 0 && changes.program.test.id === baseline.program.test.id && changes.program.test.version <= baseline.program.test.version) {
-      return { status: 'BLOCKED', baseline, completed, message: '已有测试答题记录；修改同一测试 ID 的题目必须递增版本，历史结果会保留。' }
+      return { status: 'BLOCKED', baseline, completed, message: '已有测试答题记录；修改题目、选项、评分或结果文字须递增版本（或使用新测试 ID），历史记录会保留。仅修改海报图片或显示开关无需递增版本。' }
     }
     stages.push({ stage: 'PROGRAM', changed: true, body: { program: changes.program }, expected: changes.program })
   }
@@ -260,8 +269,12 @@ export async function saveTopicWizardEdits(input: {
     let expected = item.expected
     try {
       currentBody = await getJson(transport, path)
-      if (item.stage === 'LOTTERY') assertActivityIdentity(await getJson(transport, editPath(id, 'ACTIVITY')), id, baseline)
-      else if (item.stage === 'PROGRAM') assertActivityIdentity(currentBody, id, baseline)
+      // The V2 activity summary does not contain type. Use the existing canonical detail route.
+      if (item.stage === 'PROGRAM' || item.stage === 'LOTTERY') assertActivityIdentity(await getJson(transport, editPath(id, 'ACTIVITY')), id, baseline)
+      if (item.stage === 'PROGRAM') {
+        const summary = record(record(currentBody)?.activity)
+        if (summary?.id !== id || summary.status !== baseline.activity.status) throw new Error('话题配置回包的活动身份或状态不匹配；已停止保存。')
+      }
       current = moduleValue(currentBody, item.stage, id)
     }
     catch (error) { return { status: completed.length ? 'PARTIAL' : 'BLOCKED', baseline, completed, message: `${item.stage} 保存前读取失败：${error instanceof Error ? error.message : '读取失败'}` } }
@@ -282,7 +295,7 @@ export async function saveTopicWizardEdits(input: {
       if (testChanged && Number.isSafeInteger(testParticipants) && testParticipants > 0
         && changes.program.test.id === baseline.program.test.id
         && changes.program.test.version <= baseline.program.test.version) {
-        return { status: completed.length ? 'PARTIAL' : 'BLOCKED', baseline, completed, message: '已有测试答题记录；修改同一测试 ID 的题目必须递增版本或使用新 ID，历史结果会保留。' }
+        return { status: completed.length ? 'PARTIAL' : 'BLOCKED', baseline, completed, message: '已有测试答题记录；修改题目、选项、评分或结果文字须递增版本（或使用新测试 ID），历史记录会保留。仅修改海报图片或显示开关无需递增版本。' }
       }
     }
 
