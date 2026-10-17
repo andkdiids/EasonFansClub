@@ -9,7 +9,7 @@ import QRCode from 'qrcode'
 import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from '@zxing/library'
 import { prisma } from '@/lib/prisma'
 import { getTopicV2PosterSnapshot, submitTopicV2Test } from '@/lib/topic-activity-v2-interactive'
-import { fitPosterText, fitPosterTextInHeight, posterTextLines, TOPIC_POSTER_ACTIVITY_INFO, TOPIC_POSTER_AVATAR, TOPIC_POSTER_BRAND, TOPIC_POSTER_QR, TOPIC_POSTER_QR_BRAND, TOPIC_POSTER_RESULT, TOPIC_POSTER_SIZE, TOP_VISUAL_SAFE_ZONE, topicPosterLayout, topicPosterQr, topicPosterTimeRange } from '@/lib/topic-activity-v2-poster-layout'
+import { fitPosterText, fitPosterTextInHeight, posterTextLines, RESULT_USER_GAP, TOPIC_POSTER_ACTIVITY_INFO, TOPIC_POSTER_AVATAR, TOPIC_POSTER_BRAND, TOPIC_POSTER_QR, TOPIC_POSTER_QR_BRAND, TOPIC_POSTER_RESULT, TOPIC_POSTER_SIZE, TOP_VISUAL_SAFE_ZONE, USER_ZONE_START, topicPosterLayout, topicPosterQr, topicPosterTimeRange } from '@/lib/topic-activity-v2-poster-layout'
 import { renderTopicV2Poster } from '@/lib/topic-activity-v2-poster'
 import { fixture, instant } from './fixtures/topic-v2-transaction'
 
@@ -82,7 +82,8 @@ test('all four privacy layouts keep the result card above optional identity and 
     assert.match(svg, /width="1080" height="1440"/)
     assert.equal(svg.includes('data-poster-group="identity"'), showNickname)
     assert.equal(showQrCode ? qr.size : null, showQrCode ? TOPIC_POSTER_QR.size : null)
-    assert.ok(TOPIC_POSTER_RESULT.maxBottom + 40 < (showQrCode ? qr.top : TOPIC_POSTER_BRAND.top))
+    assert.equal(TOPIC_POSTER_RESULT.maxBottom, USER_ZONE_START - RESULT_USER_GAP)
+    assert.ok(TOPIC_POSTER_RESULT.maxBottom < (showQrCode ? qr.top : TOPIC_POSTER_BRAND.top))
     if (showQrCode && !showNickname) assert.equal(qr.left, Math.round((TOPIC_POSTER_SIZE.width - qr.size) / 2))
     if (showQrCode && showNickname) assert.ok(TOPIC_POSTER_AVATAR.left + TOPIC_POSTER_AVATAR.size < qr.left)
   }
