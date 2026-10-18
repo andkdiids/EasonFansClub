@@ -13,7 +13,7 @@ export type WizardActivityPayload = Pick<ActivityEditableValues, 'title' | 'desc
   type: 'TOPIC_ACTIVITY'; status: 'DRAFT'
   startsAt: string | null; endsAt: string | null; participationRule: string | null; participationMode: 'COMMENT'
   allowImageAttachments: boolean; formSchema: TopicActivityFormSchema
-  rewardPoints: null; rewardBadgeIds: string[]; rewardGrantMode: 'IMMEDIATE'; rewardGrantAt: null; verificationMode: 'NONE'
+  rewardPoints: null; rewardBadgeIds: string[]; rewardGrantMode: 'IMMEDIATE' | 'SCHEDULED'; rewardGrantAt: string | null; verificationMode: 'NONE'
 }
 export type WizardPayloads = {
   activity: WizardActivityPayload; program: { program: TopicActivityV2Program }; lottery: { config: TopicLotteryConfig } | null
@@ -66,6 +66,7 @@ export function prepareWizardActivityPayload(snapshot: WizardSnapshot): WizardAc
   const errors = [...topicWizardErrors(draft, 0), ...topicWizardErrors(draft, 1)]
   if (errors.length) throw new Error(errors.join('；'))
   const cover = snapshot.media.cover
+  if (draft.activity.rewardGrantMode === 'SCHEDULED' && !iso(draft.activity.rewardGrantAt || null)) throw new Error('请填写有效的统一发奖时间（北京时间）')
   const uploadedCoverUrl = cover.status === 'UPLOADED' && cover.url && !/[?#]/.test(cover.url)
     ? storedActivityImageUrl(cover.url)
     : null
@@ -77,7 +78,7 @@ export function prepareWizardActivityPayload(snapshot: WizardSnapshot): WizardAc
     startsAt: iso(draft.activity.startsAt), endsAt: iso(draft.activity.endsAt), participationRule: draft.activity.participationRule?.trim() || null,
     participationMode: 'COMMENT', allowImageAttachments: draft.activity.allowImageAttachments,
     formSchema: { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [], commentPolicy: { gateMode: 'AFTER_FORM_SUBMIT', commentLimit: 'MULTIPLE' } },
-    rewardPoints: null, rewardBadgeIds: [], rewardGrantMode: 'IMMEDIATE', rewardGrantAt: null, verificationMode: 'NONE',
+    rewardPoints: null, rewardBadgeIds: [], rewardGrantMode: draft.activity.rewardGrantMode ?? 'IMMEDIATE', rewardGrantAt: draft.activity.rewardGrantMode === 'SCHEDULED' ? iso(draft.activity.rewardGrantAt || null) : null, verificationMode: 'NONE',
   }
 }
 
@@ -118,7 +119,7 @@ export function prepareWizardPayloads(snapshot: WizardSnapshot): WizardPayloadPr
     coverUrl: imageUrl(snapshot.media.cover, '活动封面', 'cover'), startsAt: iso(draft.activity.startsAt), endsAt: iso(draft.activity.endsAt),
     participationRule: draft.activity.participationRule?.trim() || null, participationMode: 'COMMENT', allowImageAttachments: draft.activity.allowImageAttachments,
     formSchema: { version: TOPIC_ACTIVITY_FORM_VERSION, fields: [], commentPolicy: { gateMode: 'AFTER_FORM_SUBMIT', commentLimit: 'MULTIPLE' } },
-    rewardPoints: null, rewardBadgeIds: [], rewardGrantMode: 'IMMEDIATE', rewardGrantAt: null, verificationMode: 'NONE',
+    rewardPoints: null, rewardBadgeIds: [], rewardGrantMode: draft.activity.rewardGrantMode ?? 'IMMEDIATE', rewardGrantAt: draft.activity.rewardGrantMode === 'SCHEDULED' ? iso(draft.activity.rewardGrantAt || null) : null, verificationMode: 'NONE',
   }
   const config = draft.lottery.enabled ? normalizeTopicLotteryConfig({ ...draft.lottery, eligibilityDeadline: activity.endsAt,
     prizes: draft.lottery.prizes.map((prize) => ({ id: prize.id, name: prize.name, description: prize.description,

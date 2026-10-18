@@ -6,6 +6,7 @@ import { createWizardId } from './TopicActivityWizardIds'
 import { TopicActivityPosterBackgroundUploader } from './TopicActivityPosterBackgroundUploader'
 import { TopicActivityPosterPreview } from './TopicActivityPosterPreview'
 import { TopicActivityResultWeightRoles } from './TopicActivityResultWeightRoles'
+import { TopicActivityResultDescriptions } from './TopicActivityResultDescriptions'
 import { migrateTopicActivityWeightsToRoles, topicActivityResultReferenceCount } from '@/lib/topic-activity-result-weight-roles'
 
 const inputClass = 'mt-1 min-h-10 w-full rounded-sm border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm'
@@ -49,7 +50,7 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
       : value.scoringMode || 'LEGACY_WEIGHTED'
     patch({ mode, results: value.results.map((item) => mode === 'KNOWLEDGE'
       ? { ...item, scoreMin: item.scoreMin ?? 0, scoreMax: item.scoreMax ?? 0 }
-      : { id: item.id, title: item.title, description: item.description, ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}) }),
+      : { id: item.id, title: item.title, description: item.description, ...(item.descriptionVariants ? { descriptionVariants: item.descriptionVariants } : {}), ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}) }),
     questions: value.questions.map((item) => mode === 'KNOWLEDGE'
       ? { ...item, correctOptionId: item.correctOptionId && item.options.some((option) => option.id === item.correctOptionId) ? item.correctOptionId : item.options[0]?.id, options: item.options.map((option) => {
         const withoutWeights = { ...option }
@@ -142,7 +143,8 @@ export function TopicActivityWizardTestEditor({ value, onChange, disabled = fals
               const weights = { ...option.weights }; delete weights[row.id]; return { ...option, weights }
             }) })) })
           }}>删除结果</button></div>
-          <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">结果标题<input className={inputClass} value={row.title} onChange={(event) => result(index, { title: event.target.value })} /></label><label className="text-sm">结果说明<input className={inputClass} value={row.description} onChange={(event) => result(index, { description: event.target.value })} /></label></div>
+          <label className="block text-sm">结果标题<input className={inputClass} value={row.title} onChange={(event) => result(index, { title: event.target.value })} /></label>
+          <TopicActivityResultDescriptions result={row} onChange={(value) => result(index, value)} />
           {value.mode === 'KNOWLEDGE' ? <div className="grid gap-2 sm:grid-cols-2"><label className="text-sm">最低分（包含）<input className={inputClass} type="number" min={0} value={row.scoreMin ?? ''} onChange={(event) => result(index, { scoreMin: event.target.value === '' ? undefined : Number(event.target.value) })} /></label><label className="text-sm">最高分（包含）<input className={inputClass} type="number" min={0} value={row.scoreMax ?? ''} onChange={(event) => result(index, { scoreMax: event.target.value === '' ? undefined : Number(event.target.value) })} /></label></div> : null}
         </article>)}
         {value.mode === 'KNOWLEDGE' ? <p className="text-xs text-[var(--foreground-muted)]">知识测试结果分数区间必须连续、无重叠，并完整覆盖 0 到题目总分。</p> : null}

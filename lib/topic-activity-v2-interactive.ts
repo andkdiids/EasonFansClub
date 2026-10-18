@@ -1,12 +1,19 @@
+import { randomInt } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { publicTopicActivityV2Program, topicActivityV2PosterBackground, type TopicActivityV2Test } from '@/lib/topic-activity-v2-config'
+import { publicTopicActivityV2Program, topicActivityV2PosterBackground, topicResultDescriptionVariants, type TopicActivityV2Test, type TopicActivityV2TestResult } from '@/lib/topic-activity-v2-config'
 import { grantTopicActivityV2MedalForEventInTransaction, lockTopicV2Activity, requireTopicV2Active, requireTopicV2Program, TopicActivityV2Error, withTopicV2Transaction } from '@/lib/topic-activity-v2'
 
 function fail(code: string, message: string, status = 409): never { throw new TopicActivityV2Error(code, message, status) }
 function json(value: unknown) { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue }
 function data(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function equalChoices(left: unknown, right: string[]) { return Array.isArray(left) && left.length === right.length && [...left].sort().every((item, index) => item === [...right].sort()[index]) }
+
+export function selectTopicResultDescription(result: TopicActivityV2TestResult, pick: (max: number) => number = randomInt) {
+  const variants = topicResultDescriptionVariants(result)
+  if (!variants.length) fail('TEST_RESULT_UNAVAILABLE', '测试结果说明配置不完整')
+  return variants.length === 1 ? variants[0] : variants[pick(variants.length)]
+}
 
 export function calculateTopicV2Test(test: TopicActivityV2Test, input: unknown) {
   const answers = data(input)
@@ -108,7 +115,8 @@ export async function submitTopicV2Test(input: { activityId: string; userId: str
     if (!user) fail('USER_UNAVAILABLE', '账号不可参与活动', 403)
     if (!test.allowRetake && await tx.topicActivityTestAttempt.count({ where: { activityId: activity.id, testId: test.id, userId: input.userId } })) fail('TEST_RETAKE_NOT_ALLOWED', '本测试仅允许完成一次')
     const computed = calculateTopicV2Test(test, input.answers)
-    const snapshot = { resultId: computed.result.id, title: computed.result.title, description: computed.result.description,
+    const selectedDescription = selectTopicResultDescription(computed.result)
+    const snapshot = { resultId: computed.result.id, title: computed.result.title, description: selectedDescription.text, descriptionVariantId: selectedDescription.id,
       imageUrl: computed.result.imageUrl || null, score: computed.score, maxScore: computed.maxScore, mode: test.mode,
       activityTitle: activity.title, testTitle: test.title, testId: test.id, version: test.version, poster: test.poster,
       nickname: test.poster.showNickname ? user.nickname : null }

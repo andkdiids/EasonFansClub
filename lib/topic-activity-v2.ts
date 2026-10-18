@@ -10,6 +10,7 @@ import { resolveTopicActivityCommentPolicy } from '@/lib/topic-activity-comment-
 import { topicActivityTestDirty } from '@/lib/topic-activity-test-presentation'
 import { isTopicActivityOriginalObjectKey } from '@/lib/topic-activity-image-original'
 import { assertTopicLotterySourceRules, lockTopicLotteryRulesForSubmission, syncTopicLotteryEligibilityInTransaction } from '@/lib/topic-activity-v2-lottery'
+import { topicRewardReleaseDue } from '@/lib/topic-activity-reward-timing'
 import {
   createDefaultTopicActivityV2Program, normalizeTopicActivityV2Program,
   publicTopicActivityV2Program, readTopicActivityV2Program,
@@ -65,6 +66,9 @@ export async function lockTopicV2Activity(tx: Prisma.TransactionClient, activity
   if (!activity || activity.type !== 'TOPIC_ACTIVITY') fail('TOPIC_V2_ACTIVITY_NOT_FOUND', '话题活动不存在', 404)
   return activity
 }
+async function lockTopicV2RewardGrant(tx: Prisma.TransactionClient, rewardId: string) {
+  await tx.$queryRawUnsafe('SELECT id FROM TopicActivityRewardGrant WHERE id = ? FOR UPDATE', rewardId)
+}
 export function requireTopicV2Program(activity: Pick<Activity, 'topicProgram'>) {
   const program = readTopicActivityV2Program(activity.topicProgram)
   if (!program?.enabled) fail('TOPIC_V2_DISABLED', '活动模块尚未开放')
@@ -106,6 +110,21 @@ export function topicV2EntryGrantKey(activityId: string, rewardEntryId: string, 
 }
 function fixedKey(activityId: string, userId: string) { return 'topic-activity:' + activityId + ':' + userId + ':points' }
 function medalKey(activityId: string, userId: string, badgeId: string) { return 'topic-activity:' + activityId + ':' + userId + ':badge:' + badgeId }
+function rewardReleaseDue(activity: Pick<Activity, 'rewardGrantMode' | 'rewardGrantAt'>, now: Date) {
+  return topicRewardReleaseDue(activity, now)
+}
+function snapshotDate(value: unknown) {
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const parsed = new Date(value)
+  return Number.isFinite(parsed.getTime()) ? parsed : null
+}
+function snapshotApprovalStatus(value: unknown) {
+  return record(value).approvalStatus === 'APPROVED' ? 'APPROVED' : record(value).approvalStatus === 'REJECTED' ? 'REJECTED' : 'PENDING'
+}
+function snapshotWithApproval(value: unknown, data: Record<string, unknown>) {
+  return { ...record(value), ...data }
+}
 async function syncParticipation(tx: Prisma.TransactionClient, activityId: string, userId: string, now: Date) {
   const approved = await tx.topicActivitySubmission.findMany({
     where: { activityId, userId, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { isDeleted: false, parentId: null } } },
@@ -149,9 +168,28 @@ async function grantPoints(tx: Prisma.TransactionClient, activity: Pick<Activity
   return tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'GRANTED', grantedAt: now, errorMessage: null } })
 }
 
+async function grantBadgeForGrant(tx: Prisma.TransactionClient, activity: Pick<Activity, 'id' | 'title' | 'startsAt' | 'endsAt'>, grant: TopicActivityRewardGrant, now: Date) {
+  if (grant.status === 'GRANTED' || grant.status === 'CANCELLED') return grant
+  const snapshot = record(grant.rewardSnapshot)
+  const badgeId = typeof snapshot.badgeId === 'string' ? snapshot.badgeId : grant.badgeId
+  const effectiveAt = snapshotDate(snapshot.effectiveAt) || now
+  if (!badgeId) fail('TOPIC_V2_BADGE_INVALID', '活动勋章快照不完整')
+  const badge = await grantBadgeWithTransaction(tx, {
+    userId: grant.userId, badgeId, sourceType: 'TOPIC_ACTIVITY_REWARD', sourceId: activity.id,
+    grantKey: grant.grantKey, obtainedAt: effectiveAt,
+    availabilityMode: 'HISTORICAL_WINDOW',
+    historicalWindow: { from: activity.startsAt || effectiveAt, until: activity.endsAt || effectiveAt },
+    grantReason: '话题活动「' + activity.title + '」限定勋章', deferPhase3Effects: true,
+  })
+  if (badge.skipped) fail('TOPIC_V2_BADGE_UNAVAILABLE', '活动勋章当前不可发放，请管理员核查')
+  const effects = [...(badge.created ? [{ badgeId: badge.badgeId, recordId: badge.recordId }] : []), ...(badge.derivedGrants || [])]
+  if (effects.length) badgeEffects.get(tx)?.push({ userId: grant.userId, grants: effects })
+  return tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'GRANTED', grantedAt: now, errorMessage: null } })
+}
+
 export async function grantTopicActivityV2MedalForEventInTransaction(
   tx: Prisma.TransactionClient, activity: Activity,
-  input: { userId: string; event: 'PLATFORM' | 'APPROVED_COMMENT' | 'POLL' | 'TEST'; effectiveAt: Date; now: Date },
+  input: { userId: string; event: 'PLATFORM' | 'APPROVED_COMMENT' | 'POLL' | 'TEST'; effectiveAt: Date; now: Date; rewardEntryId?: string | null; submissionId?: string | null },
 ) {
   const program = requireTopicV2Program(activity)
   const medal = program.medal
@@ -164,20 +202,23 @@ export async function grantTopicActivityV2MedalForEventInTransaction(
   const grant = await createGrant(tx, {
     participationId: participation.id, activityId: activity.id, userId: input.userId,
     badgeId: medal.badgeId, origin: 'BADGE', grantKey: medalKey(activity.id, input.userId, medal.badgeId),
-    snapshot: { ...medal, event: input.event, effectiveAt: input.effectiveAt.toISOString() },
+    snapshot: {
+      ...medal, event: input.event, effectiveAt: input.effectiveAt.toISOString(), approvalStatus: 'APPROVED', approvedAt: input.now.toISOString(),
+      ...(input.event === 'PLATFORM' ? { rewardEntryId: input.rewardEntryId || null } : {}),
+      ...(input.event === 'APPROVED_COMMENT' ? { submissionId: input.submissionId || null } : {}),
+      ...(input.event === 'POLL' ? { pollId: program.poll.id } : {}),
+      ...(input.event === 'TEST' ? { testId: program.test.id, configVersion: program.test.version } : {}),
+    },
   })
-  if (grant.status === 'GRANTED') return grant
-  const badge = await grantBadgeWithTransaction(tx, {
-    userId: input.userId, badgeId: medal.badgeId, sourceType: 'TOPIC_ACTIVITY_REWARD', sourceId: activity.id,
-    grantKey: grant.grantKey, obtainedAt: input.effectiveAt,
-    availabilityMode: 'HISTORICAL_WINDOW',
-    historicalWindow: { from: activity.startsAt || input.effectiveAt, until: activity.endsAt || input.effectiveAt },
-    grantReason: '话题活动「' + activity.title + '」限定勋章', deferPhase3Effects: true,
-  })
-  if (badge.skipped) fail('TOPIC_V2_BADGE_UNAVAILABLE', '活动勋章当前不可发放，请管理员核查')
-  const effects = [...(badge.created ? [{ badgeId: badge.badgeId, recordId: badge.recordId }] : []), ...(badge.derivedGrants || [])]
-  if (effects.length) badgeEffects.get(tx)?.push({ userId: input.userId, grants: effects })
-  const awarded = await tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'GRANTED', grantedAt: input.now, errorMessage: null } })
+  const activeGrant = grant.status === 'GRANTED'
+    ? grant
+    : await tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'PENDING', errorMessage: null } })
+  if (activeGrant.status === 'GRANTED') return activeGrant
+  if (!rewardReleaseDue(activity, input.now)) {
+    await refreshParticipation(tx, participation.id, input.now)
+    return activeGrant
+  }
+  const awarded = await grantBadgeForGrant(tx, activity, activeGrant, input.now)
   await refreshParticipation(tx, participation.id, input.now)
   return awarded
 }
@@ -300,10 +341,10 @@ export async function reviewTopicActivityV2Submission(input: { activityId?: stri
     let entry: TopicRewardEntryConfig | null = null
     if (submission.rewardEntryId) entry = entryFromSnapshot(submission.rewardSnapshot)
     let entryGrant: TopicActivityRewardGrant | null = null
+    if (entry) entryGrant = await tx.topicActivityRewardGrant.findUnique({ where: { grantKey: topicV2EntryGrantKey(activity.id, entry.id, submission.userId) } })
     if (entry && input.status === 'APPROVED') {
-      entryGrant = await tx.topicActivityRewardGrant.findUnique({ where: { grantKey: topicV2EntryGrantKey(activity.id, entry.id, submission.userId) } })
       if (entryGrant?.status !== 'GRANTED') {
-        const paid = await tx.topicActivityRewardGrant.findMany({ where: { activityId: activity.id, userId: submission.userId, rewardEntryId: { not: null }, status: 'GRANTED' }, select: { rewardEntryId: true, rewardSnapshot: true } })
+        const paid = await tx.topicActivityRewardGrant.findMany({ where: { activityId: activity.id, userId: submission.userId, rewardEntryId: { not: null }, status: { not: 'CANCELLED' } }, select: { rewardEntryId: true, rewardSnapshot: true } })
         const entries = new Set(paid.map((grant) => grant.rewardEntryId))
         const platforms = new Set(paid.map((grant) => platformKey(grant.rewardSnapshot)).filter((key): key is string => Boolean(key)))
         if (program.platformRewards.maxEntries !== null && !entries.has(entry.id) && entries.size >= program.platformRewards.maxEntries) fail('TOPIC_V2_MAX_ENTRIES_REACHED', '已达到可领奖任务数量上限')
@@ -325,10 +366,35 @@ export async function reviewTopicActivityV2Submission(input: { activityId?: stri
     if (entry && input.status === 'APPROVED') {
       entryGrant = entryGrant || await createGrant(tx, { participationId: participation.id, activityId: activity.id, userId: submission.userId,
         rewardEntryId: entry.id, points: entry.points, origin: 'PLATFORM', grantKey: topicV2EntryGrantKey(activity.id, entry.id, submission.userId), snapshot: submission.rewardSnapshot })
-      await grantPoints(tx, activity, entryGrant, now)
+      if (entryGrant.status !== 'GRANTED') entryGrant = await tx.topicActivityRewardGrant.update({ where: { id: entryGrant.id }, data: { status: 'PENDING', errorMessage: null } })
+      const approvedSnapshot = snapshotWithApproval(entryGrant.rewardSnapshot, { approvalStatus: 'APPROVED', approvedAt: now.toISOString(), approvedById: input.reviewerId })
+      entryGrant = await tx.topicActivityRewardGrant.update({ where: { id: entryGrant.id }, data: { rewardSnapshot: json(approvedSnapshot) } })
+      if (rewardReleaseDue(activity, now)) entryGrant = await grantPoints(tx, activity, entryGrant, now)
+    } else if (entry && input.status === 'REJECTED') {
+      const anotherApprovedSubmission = await hasApprovedSubmission(tx, activity, submission.userId, entry.id, submission.id)
+      if (!anotherApprovedSubmission && entryGrant && entryGrant.status !== 'GRANTED' && entryGrant.status !== 'CANCELLED') {
+        entryGrant = await tx.topicActivityRewardGrant.update({ where: { id: entryGrant.id }, data: { status: 'CANCELLED', errorMessage: '平台任务审核未通过' } })
+      }
+      const badgeGrants = await tx.topicActivityRewardGrant.findMany({ where: { activityId: activity.id, userId: submission.userId, origin: 'BADGE', status: { in: ['PENDING', 'PROCESSING', 'FAILED'] } } })
+      for (const badgeGrant of badgeGrants) {
+        const snapshot = record(badgeGrant.rewardSnapshot)
+        if (snapshot.event !== 'PLATFORM') continue
+        if (!await hasApprovedSubmission(tx, activity, submission.userId, null, submission.id, true)) {
+          await tx.topicActivityRewardGrant.update({ where: { id: badgeGrant.id }, data: { status: 'CANCELLED', errorMessage: '对应平台任务审核未通过' } })
+        }
+      }
+    } else if (!entry && input.status === 'REJECTED') {
+      const badgeGrants = await tx.topicActivityRewardGrant.findMany({ where: { activityId: activity.id, userId: submission.userId, origin: 'BADGE', status: { in: ['PENDING', 'PROCESSING', 'FAILED'] } } })
+      for (const badgeGrant of badgeGrants) {
+        const snapshot = record(badgeGrant.rewardSnapshot)
+        if (snapshot.event === 'APPROVED_COMMENT' && !await hasApprovedSubmission(tx, activity, submission.userId, null, submission.id)) {
+          await tx.topicActivityRewardGrant.update({ where: { id: badgeGrant.id }, data: { status: 'CANCELLED', errorMessage: '对应评论审核未通过' } })
+        }
+      }
     }
     if (input.status === 'APPROVED') await grantTopicActivityV2MedalForEventInTransaction(tx, activity, {
       userId: submission.userId, event: entry ? 'PLATFORM' : 'APPROVED_COMMENT', effectiveAt: submission.submittedAt, now,
+      ...(entry ? { rewardEntryId: entry.id } : { submissionId: submission.id }),
     })
     participation = await refreshParticipation(tx, participation.id, now)
     await syncTopicLotteryEligibilityInTransaction(tx, activity, submission.userId, now)
@@ -366,16 +432,30 @@ export async function claimTopicActivityV2FixedReward(input: { activityId: strin
       if (!input.reviewerId || !grant || grant.origin !== 'FIXED') fail('TOPIC_V2_CLAIM_NOT_FOUND', '待审核固定奖励申请不存在', 404)
       if (grant.status === 'CANCELLED') return { grant, changed: false, pendingReview: false }
       const snapshot = record(grant.rewardSnapshot)
+      const priorApprovalStatus = snapshotApprovalStatus(snapshot)
+      if ((input.decision === 'APPROVED' && priorApprovalStatus === 'APPROVED') || (input.decision === 'REJECTED' && priorApprovalStatus === 'REJECTED')) {
+        return { grant, changed: false, pendingReview: false }
+      }
       const claimedAt = new Date(String(snapshot.claimedAt))
       if (!Number.isFinite(claimedAt.getTime())) fail('TOPIC_V2_SNAPSHOT_INVALID', '领取快照不完整')
       requireReviewWindow(activity, new Date(String(snapshot.effectiveAt || snapshot.claimedAt)))
       await tx.adminActionLog.create({ data: { adminId: input.reviewerId, targetUserId: input.userId, action: 'TOPIC_ACTIVITY_V2_FIXED_REWARD_' + input.decision, detail: json({ activityId: activity.id, grantId: grant.id }) } })
-      if (input.decision === 'REJECTED') grant = await tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: { status: 'CANCELLED', errorMessage: '固定奖励申请未通过' } })
-      else grant = await grantPoints(tx, activity, grant, now)
+      if (input.decision === 'REJECTED') {
+        grant = await tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: {
+          status: 'CANCELLED', errorMessage: '固定奖励申请未通过',
+          rewardSnapshot: json(snapshotWithApproval(snapshot, { approvalStatus: 'REJECTED', rejectedAt: now.toISOString(), rejectedById: input.reviewerId })),
+        } })
+      } else {
+        grant = await tx.topicActivityRewardGrant.update({ where: { id: grant.id }, data: {
+          status: 'PENDING', errorMessage: null,
+          rewardSnapshot: json(snapshotWithApproval(snapshot, { approvalStatus: 'APPROVED', approvedAt: now.toISOString(), approvedById: input.reviewerId })),
+        } })
+        if (rewardReleaseDue(activity, now)) grant = await grantPoints(tx, activity, grant, now)
+      }
       await refreshParticipation(tx, grant.participationId, now)
       return { grant, changed: true, pendingReview: false }
     }
-    if (grant) return { grant, changed: false, pendingReview: grant.status === 'PENDING' }
+    if (grant) return { grant, changed: false, pendingReview: grant.status !== 'CANCELLED' && snapshotApprovalStatus(grant.rewardSnapshot) !== 'APPROVED' }
     if (!program.fixedReward.enabled) fail('TOPIC_V2_FIXED_REWARD_DISABLED', '固定奖励未启用')
     if (activity.status !== 'PUBLISHED') fail('ACTIVITY_CLOSED', '活动当前未开放')
     requireWindow(program.fixedReward.startsAt || activity.startsAt?.toISOString() || null, program.fixedReward.endsAt || activity.endsAt?.toISOString() || null, now)
@@ -383,14 +463,175 @@ export async function claimTopicActivityV2FixedReward(input: { activityId: strin
     const evidence = await fixedEvidence(tx, activity, program, input.userId, now)
     if (!evidence || !withinActivity(activity, evidence)) fail('TOPIC_V2_FIXED_REWARD_NOT_ELIGIBLE', '尚未完成指定的站内参与行为')
     const participation = await syncParticipation(tx, activity.id, input.userId, now)
+    const pendingReview = program.fixedReward.requiresReview || program.fixedReward.condition === 'ADMIN_REVIEW'
+    const evidenceSnapshot = program.fixedReward.condition === 'POLL'
+      ? { pollId: program.poll.id }
+      : program.fixedReward.condition === 'TEST'
+        ? { testId: program.test.id, configVersion: program.test.version }
+        : {}
     grant = await createGrant(tx, { participationId: participation.id, activityId: activity.id, userId: input.userId,
       points: program.fixedReward.points, origin: 'FIXED', grantKey: key,
-      snapshot: { ...program.fixedReward, claimedAt: now.toISOString(), effectiveAt: evidence.toISOString() } })
-    const pendingReview = program.fixedReward.requiresReview || program.fixedReward.condition === 'ADMIN_REVIEW'
-    if (!pendingReview) grant = await grantPoints(tx, activity, grant, now)
+      snapshot: { ...program.fixedReward, ...evidenceSnapshot, claimedAt: now.toISOString(), effectiveAt: evidence.toISOString(), approvalStatus: pendingReview ? 'PENDING' : 'APPROVED', ...(pendingReview ? {} : { approvedAt: now.toISOString() }) } })
+    if (!pendingReview && rewardReleaseDue(activity, now)) grant = await grantPoints(tx, activity, grant, now)
     await refreshParticipation(tx, participation.id, now)
     return { grant, changed: true, pendingReview }
   })
+}
+
+async function hasApprovedSubmission(
+  tx: Prisma.TransactionClient,
+  activity: Pick<Activity, 'id' | 'activityPostId'>,
+  userId: string,
+  rewardEntryId?: string | null,
+  excludeSubmissionId?: string,
+  platformOnly = false,
+) {
+  if (!activity.activityPostId) return false
+  return Boolean(await tx.topicActivitySubmission.findFirst({ where: {
+    activityId: activity.id, userId,
+    ...(platformOnly ? { rewardEntryId: { not: null } } : rewardEntryId ? { rewardEntryId } : {}),
+    ...(excludeSubmissionId ? { id: { not: excludeSubmissionId } } : {}), status: 'APPROVED', commentDeletedAt: null,
+    Comment: { is: { postId: activity.activityPostId, isDeleted: false, parentId: null } },
+  }, select: { id: true } }))
+}
+
+async function fixedGrantEvidenceStillValid(tx: Prisma.TransactionClient, activity: Activity, grant: TopicActivityRewardGrant) {
+  const snapshot = record(grant.rewardSnapshot)
+  if (snapshotApprovalStatus(snapshot) !== 'APPROVED') return null
+  const condition = snapshot.condition
+  if (condition === 'ADMIN_REVIEW') return snapshot
+  if (condition === 'APPROVED_COMMENT') return await hasApprovedSubmission(tx, activity, grant.userId) ? snapshot : null
+  if (condition === 'POLL' && typeof snapshot.pollId === 'string') {
+    const vote = await tx.topicActivityPollVote.findUnique({ where: { activityId_pollId_userId: { activityId: activity.id, pollId: snapshot.pollId, userId: grant.userId } }, select: { id: true } })
+    return vote ? snapshot : null
+  }
+  if (condition === 'TEST' && typeof snapshot.testId === 'string' && typeof snapshot.configVersion === 'number') {
+    const attempt = await tx.topicActivityTestAttempt.findFirst({ where: { activityId: activity.id, testId: snapshot.testId, configVersion: snapshot.configVersion, userId: grant.userId }, select: { id: true } })
+    return attempt ? snapshot : null
+  }
+  return null
+}
+
+async function badgeGrantEvidenceStillValid(tx: Prisma.TransactionClient, activity: Activity, grant: TopicActivityRewardGrant) {
+  const snapshot = record(grant.rewardSnapshot)
+  const event = snapshot.event
+  if (event === 'PLATFORM') return await hasApprovedSubmission(tx, activity, grant.userId, null, undefined, true)
+  if (event === 'APPROVED_COMMENT') {
+    if (typeof snapshot.submissionId === 'string') {
+      const current = activity.activityPostId ? await tx.topicActivitySubmission.findFirst({ where: { id: snapshot.submissionId, activityId: activity.id, userId: grant.userId, status: 'APPROVED', commentDeletedAt: null, Comment: { is: { postId: activity.activityPostId, isDeleted: false, parentId: null } } }, select: { id: true } }) : null
+      if (current) return true
+    }
+    return await hasApprovedSubmission(tx, activity, grant.userId)
+  }
+  if (event === 'POLL' && typeof snapshot.pollId === 'string') {
+    return Boolean(await tx.topicActivityPollVote.findUnique({ where: { activityId_pollId_userId: { activityId: activity.id, pollId: snapshot.pollId, userId: grant.userId } }, select: { id: true } }))
+  }
+  if (event === 'TEST' && typeof snapshot.testId === 'string' && typeof snapshot.configVersion === 'number') {
+    return Boolean(await tx.topicActivityTestAttempt.findFirst({ where: { activityId: activity.id, testId: snapshot.testId, configVersion: snapshot.configVersion, userId: grant.userId }, select: { id: true } }))
+  }
+  return false
+}
+
+async function processTopicActivityV2RewardGrant(rewardId: string, now: Date) {
+  return withTopicV2Transaction(async (tx) => {
+    const identity = await tx.topicActivityRewardGrant.findUnique({ where: { id: rewardId }, select: { activityId: true } })
+    if (!identity) return 'MISSING' as const
+    const activity = await lockTopicV2Activity(tx, identity.activityId)
+    await lockTopicV2RewardGrant(tx, rewardId)
+    const grant = await tx.topicActivityRewardGrant.findUnique({ where: { id: rewardId } })
+    if (!grant || grant.status === 'GRANTED' || grant.status === 'CANCELLED') return grant?.status || 'MISSING'
+    if (activity.status === 'CANCELLED') {
+      await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'CANCELLED', errorMessage: '活动已取消' } })
+      await refreshParticipation(tx, grant.participationId, now)
+      return 'CANCELLED' as const
+    }
+    if (!rewardReleaseDue(activity, now)) return 'PENDING' as const
+    await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'PROCESSING', errorMessage: null } })
+    let current = grant
+    if (grant.origin === 'PLATFORM') {
+      if (!(await hasApprovedSubmission(tx, activity, grant.userId, grant.rewardEntryId))) {
+        current = await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'CANCELLED', errorMessage: '活动参与资格已取消' } })
+        await refreshParticipation(tx, grant.participationId, now)
+        return current.status
+      }
+      current = await grantPoints(tx, activity, { ...grant, status: 'PROCESSING' }, now)
+    } else if (grant.origin === 'FIXED') {
+      const snapshot = await fixedGrantEvidenceStillValid(tx, activity, grant)
+      if (snapshotApprovalStatus(grant.rewardSnapshot) !== 'APPROVED') {
+        await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'PENDING', errorMessage: null } })
+        return 'PENDING' as const
+      }
+      if (!snapshot) {
+        current = await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'CANCELLED', errorMessage: '固定奖励参与条件已失效' } })
+        await refreshParticipation(tx, grant.participationId, now)
+        return current.status
+      }
+      current = await grantPoints(tx, activity, { ...grant, status: 'PROCESSING' }, now)
+    } else if (grant.origin === 'BADGE') {
+      if (!(await badgeGrantEvidenceStillValid(tx, activity, grant))) {
+        current = await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'CANCELLED', errorMessage: '勋章对应参与资格已取消' } })
+        await refreshParticipation(tx, grant.participationId, now)
+        return current.status
+      }
+      current = await grantBadgeForGrant(tx, activity, { ...grant, status: 'PROCESSING' }, now)
+    } else {
+      current = await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'CANCELLED', errorMessage: '未知话题奖励来源' } })
+      await refreshParticipation(tx, grant.participationId, now)
+      return current.status
+    }
+    await refreshParticipation(tx, grant.participationId, now)
+    return current.status
+  })
+}
+
+async function markTopicActivityV2RewardFailed(rewardId: string, now: Date, error: unknown) {
+  const message = (error instanceof Error ? error.message : '奖励发放失败').slice(0, 500)
+  try {
+    await withTopicV2Transaction(async (tx) => {
+      const identity = await tx.topicActivityRewardGrant.findUnique({ where: { id: rewardId }, select: { activityId: true } })
+      if (!identity) return
+      await lockTopicV2Activity(tx, identity.activityId)
+      await lockTopicV2RewardGrant(tx, rewardId)
+      const row = await tx.topicActivityRewardGrant.findUnique({ where: { id: rewardId } })
+      if (!row || row.status === 'GRANTED' || row.status === 'CANCELLED') return
+      await tx.topicActivityRewardGrant.update({ where: { id: rewardId }, data: { status: 'FAILED', errorMessage: message } })
+      await refreshParticipation(tx, row.participationId, now)
+    })
+  } catch (markError) {
+    console.error('[topic-v2.reward.failed-mark]', { rewardId, error: markError instanceof Error ? markError.message : String(markError) })
+  }
+}
+
+export async function dispatchDueTopicActivityV2Rewards(input: { now?: Date; batchSize?: number } = {}) {
+  const now = input.now || new Date()
+  const batchSize = Math.min(Math.max(Math.trunc(input.batchSize || 100), 1), 500)
+  const rows = await prisma.topicActivityRewardGrant.findMany({
+    where: {
+      origin: { in: ['PLATFORM', 'FIXED', 'BADGE'] }, status: { in: ['PENDING', 'FAILED'] },
+      Activity: { status: { not: 'CANCELLED' }, OR: [
+        { rewardGrantMode: 'IMMEDIATE' },
+        { rewardGrantMode: 'SCHEDULED', rewardGrantAt: { lte: now } },
+      ] },
+      OR: [
+        { origin: { in: ['PLATFORM', 'BADGE'] } },
+        { origin: 'FIXED', rewardSnapshot: { path: '$.approvalStatus', equals: 'APPROVED' } },
+      ],
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: batchSize, select: { id: true },
+  })
+  let processed = 0
+  let failed = 0
+  for (const row of rows) {
+    try {
+      await processTopicActivityV2RewardGrant(row.id, now)
+      processed++
+    } catch (error) {
+      failed++
+      await markTopicActivityV2RewardFailed(row.id, now, error)
+      console.error('[topic-v2.reward.failed]', { rewardId: row.id, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { processed, failed }
 }
 
 export async function getTopicActivityV2View(activityId: string, userId?: string | null, isAdmin = false) {

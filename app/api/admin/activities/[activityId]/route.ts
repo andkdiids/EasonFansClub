@@ -170,7 +170,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     ...(current.rewardPoints !== topicConfig.value.rewardPoints ? ['rewardPoints'] : []),
     ...(JSON.stringify(currentRewardBadgeIds) !== JSON.stringify(topicConfig.value.rewardBadgeIds) ? ['rewardBadgeIds'] : []),
   ]
-  const rewardConfigChanged = fields.some((field) => ['rewardGrantMode', 'rewardGrantAt', 'rewardPoints', 'rewardBadgeIds'].includes(field))
+  // Existing entitlements remain immutable. Timing changes apply only to unpaid
+  // ledgers; the dispatcher rechecks the current schedule under the Activity lock.
+  const rewardConfigChanged = fields.some((field) => ['rewardPoints', 'rewardBadgeIds'].includes(field))
   if (rewardConfigChanged && current.type === 'TOPIC_ACTIVITY') {
     const existingParticipationCount = await prisma.topicActivityParticipation.count({ where: { activityId } })
     if (existingParticipationCount > 0) return NextResponse.json({ code: 'TOPIC_REWARD_LOCKED', message: '已有用户获得话题活动参与资格，奖励定义暂不能修改' }, { status: 409 })
