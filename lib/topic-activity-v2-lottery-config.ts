@@ -1,4 +1,6 @@
 import { parseActivityDateInput } from '@/lib/activity'
+import { publicImageUrl } from '@/lib/images'
+import { storedActivityImageUrl } from '@/lib/activity-image-url'
 
 export type TopicLotteryPrizeConfig = { id: string; name: string; description: string; imageUrl: string | null; quantity: number; sortOrder: number }
 export type TopicLotteryConfig = {
@@ -39,15 +41,46 @@ function stableId(value: unknown) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u.test(value)) invalid('奖品或入口编号无效')
   return value
 }
-function image(value: unknown) {
+export function normalizeTopicLotteryPrizeImageReference(value: unknown) {
   if (value === undefined || value === null || value === '') return null
   if (typeof value !== 'string' || value.length > 2048 || /[?#\\\x00]/u.test(value)) invalid('请选择公开奖品图片，不得使用私人凭证或签名链接')
+
+  // The existing upload endpoint returns a permanent public media URL. Store
+  // its stable COS object path instead of the host-specific URL so the same
+  // reference can be resolved for admin and anonymous public views.
+  const storedActivityUrl = storedActivityImageUrl(value)
+  if (storedActivityUrl) {
+    const parsed = new URL(storedActivityUrl)
+    if (parsed.search || parsed.hash) invalid('奖品图片不得使用带参数的临时链接')
+    return `/cos${parsed.pathname}`
+  }
+
   let decoded: string
   try { decoded = decodeURIComponent(value) } catch { return invalid('图片路径无效') }
   if (decoded.includes('..') || /[?#\\\x00]/u.test(decoded)) invalid('图片路径无效')
   if (!/^\/(?:images|uploads)\/[A-Za-z0-9_./-]+\.(?:png|jpe?g|webp|gif)$/iu.test(decoded)
     && !/^\/(?:cos|cos-files|media)\/(?:content|uploads|site-media|activities|images)\/[A-Za-z0-9_./-]+\.(?:png|jpe?g|webp|gif)$/iu.test(decoded)) invalid('请选择项目公开图片')
   return value
+}
+
+export function topicLotteryPrizeImageReferenceForRead(value: unknown) {
+  try { return normalizeTopicLotteryPrizeImageReference(value) } catch { return null }
+}
+
+export function resolveTopicLotteryPrizeImageSrc(value: unknown) {
+  const reference = topicLotteryPrizeImageReferenceForRead(value)
+  return reference ? publicImageUrl(reference) : null
+}
+
+export function normalizeTopicLotteryConfigForRead(value: unknown): TopicLotteryConfig {
+  const input = record(value)
+  if (!Array.isArray(input.prizes)) return normalizeTopicLotteryConfig(value)
+  const prizes = input.prizes.map((prize) => {
+    if (!prize || typeof prize !== 'object' || Array.isArray(prize)) return prize
+    const row = prize as Record<string, unknown>
+    return { ...row, imageUrl: topicLotteryPrizeImageReferenceForRead(row.imageUrl) }
+  })
+  return normalizeTopicLotteryConfig({ ...input, prizes })
 }
 export function normalizeTopicLotteryConfig(value: unknown): TopicLotteryConfig {
   const input = record(value), defaults = defaultTopicLotteryConfig()
@@ -60,7 +93,7 @@ export function normalizeTopicLotteryConfig(value: unknown): TopicLotteryConfig 
   if (input.prizes !== undefined && !Array.isArray(input.prizes)) invalid('奖品格式无效')
   const prizes = ((input.prizes ?? []) as unknown[]).map((value, index) => {
     const row = record(value)
-    return { id: stableId(row.id), name: text(row.name, '', 200), description: text(row.description, '', 2000), imageUrl: image(row.imageUrl),
+    return { id: stableId(row.id), name: text(row.name, '', 200), description: text(row.description, '', 2000), imageUrl: normalizeTopicLotteryPrizeImageReference(row.imageUrl),
       quantity: integer(row.quantity, 1, 1, 1000), sortOrder: integer(row.sortOrder, index, 0, 10_000) }
   })
   if (prizes.length > 100 || new Set(prizes.map((item) => item.id)).size !== prizes.length) invalid('奖品重复或过多')

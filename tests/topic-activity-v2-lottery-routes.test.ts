@@ -78,7 +78,9 @@ before(async () => {
     if (requestName === '@/lib/topic-activity-v2-lottery') return {
       getTopicLotteryView: async (activityId: string, viewerId?: string) => {
         calls.publicView.push([activityId, viewerId])
-        return { enabled: true, state: 'DRAWN', myStatus: viewerId ? 'ELIGIBLE' : 'LOGIN_REQUIRED', winners: [{ id: 'public-winner', prizeName: '实物奖', address: 'never-public' }] }
+        const prize = { id: 'prize-one', name: '实物奖', description: '公开奖品', imageUrl: '/cos/activities/asset-one/source.webp', quantity: 1, sortOrder: 0 }
+        return { enabled: true, config: { version: 1, enabled: true, title: '幸运抽奖', prizes: [prize] }, state: 'DRAWN', myStatus: viewerId ? 'ELIGIBLE' : 'LOGIN_REQUIRED',
+          myWinner: { id: 'winner-one', prize, address: 'never-public' }, winners: [{ id: 'public-winner', prizeName: '实物奖', address: 'never-public' }] }
       },
       getAdminTopicLotteryView: async (activityId: string) => {
         calls.adminView.push(activityId)
@@ -149,6 +151,9 @@ test('public lottery GET permits anonymous and optional Bearer viewers without e
   let body = await responseBody(result)
   assert.equal(body.myStatus, 'LOGIN_REQUIRED')
   assert.equal((body.winners as Array<Record<string, unknown>>)[0].address, undefined)
+  assert.equal((((body.config as Record<string, unknown>).prizes as Array<Record<string, unknown>>)[0]).imageUrl, '/cos/activities/asset-one/source.webp', 'anonymous public contract carries stable prize object reference')
+  assert.equal(((body.myWinner as Record<string, unknown>).address), undefined)
+  assert.equal((((body.myWinner as Record<string, unknown>).prize as Record<string, unknown>).imageUrl), '/cos/activities/asset-one/source.webp', 'winner view carries the same stable image reference')
   assert.deepEqual(calls.publicView, [['activity-one', undefined]])
 
   result = await publicLottery.GET(request('GET', undefined, { authorization: 'Bearer owner-token' }), defaultContext)

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { defaultTopicLotteryConfig, normalizeTopicLotteryConfig, type TopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
+import { defaultTopicLotteryConfig, normalizeTopicLotteryConfigForRead, resolveTopicLotteryPrizeImageSrc, type TopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
 import { useTopicActivityV2LotteryVisibleRefresh } from '@/components/activities/TopicActivityV2LotteryPolling'
 import {
   booleanOr,
@@ -16,7 +16,7 @@ const buttonClass = 'min-h-10 rounded-sm border border-[var(--border)] px-3 text
 
 function readConfig(value: unknown): TopicLotteryConfig {
   try {
-    return normalizeTopicLotteryConfig(value)
+    return normalizeTopicLotteryConfigForRead(value)
   } catch {
     return defaultTopicLotteryConfig()
   }
@@ -48,7 +48,7 @@ function readPayload(value: unknown): TopicLotteryPublicPayload | null {
         id: winnerValue.id,
         prize: {
           name: stringOr(prizeValue.name, '中奖奖品'),
-          imageUrl: typeof prizeValue.imageUrl === 'string' ? prizeValue.imageUrl : null,
+          imageUrl: resolveTopicLotteryPrizeImageSrc(prizeValue.imageUrl),
           description: stringOr(prizeValue.description),
         },
         wonAt: typeof winnerValue.wonAt === 'string' ? winnerValue.wonAt : null,
@@ -149,7 +149,7 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
     </div>
     <div className="grid gap-2 text-sm sm:grid-cols-3"><p>资格人数：{payload.candidateCount}</p><p>开奖时间：{dateLabel(config.drawAt)}</p><p>收件截止：{dateLabel(config.addressDeadline)}</p></div>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {config.prizes.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((prize) => <article key={prize.id} className="min-w-0 border border-[var(--border)] p-3"><div className="flex min-w-0 items-start gap-3">{prize.imageUrl ? <img src={prize.imageUrl} alt="" className="size-16 shrink-0 object-cover" loading="lazy" /> : <div aria-hidden="true" className="grid size-16 shrink-0 place-items-center border border-dashed border-[var(--border)] text-xs text-[var(--foreground-muted)]">实物</div>}<div className="min-w-0"><h3 className="break-words font-bold">{prize.name}</h3><p className="mt-1 text-xs text-[var(--foreground-muted)]">数量：{prize.quantity}</p></div></div>{prize.description ? <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-[var(--foreground-muted)]">{prize.description}</p> : null}</article>)}
+      {config.prizes.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((prize) => { const imageSrc = resolveTopicLotteryPrizeImageSrc(prize.imageUrl); return <article key={prize.id} className="min-w-0 border border-[var(--border)] p-3"><div className="flex min-w-0 items-start gap-3">{imageSrc ? <img src={imageSrc} alt="" className="size-16 shrink-0 object-cover" loading="lazy" /> : <div aria-hidden="true" className="grid size-16 shrink-0 place-items-center border border-dashed border-[var(--border)] text-xs text-[var(--foreground-muted)]">实物</div>}<div className="min-w-0"><h3 className="break-words font-bold">{prize.name}</h3><p className="mt-1 text-xs text-[var(--foreground-muted)]">数量：{prize.quantity}</p></div></div>{prize.description ? <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-[var(--foreground-muted)]">{prize.description}</p> : null}</article> })}
     </div>
     <div className="border-t border-[var(--border)] pt-4">
       <h3 className="font-bold">我的抽奖状态</h3>

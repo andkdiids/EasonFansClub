@@ -6,7 +6,9 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useTopicActivityV2LotteryVisibleRefresh } from '@/components/activities/TopicActivityV2LotteryPolling'
 import {
   defaultTopicLotteryConfig,
-  normalizeTopicLotteryConfig,
+  normalizeTopicLotteryConfigForRead,
+  normalizeTopicLotteryPrizeImageReference,
+  resolveTopicLotteryPrizeImageSrc,
   type TopicLotteryConfig,
   type TopicLotteryPrizeConfig,
 } from '@/lib/topic-activity-v2-lottery-config'
@@ -145,18 +147,22 @@ export function TopicActivityV2LotteryAdmin({ activityId, entries, disabled = fa
   const [shipmentLoading, setShipmentLoading] = useState(false)
   const busy = useRef(false)
   const loadBusy = useRef(false)
+  const configDirty = useRef(false)
+  const configRevision = useRef(0)
   const addressBusy = useRef(false)
   const base = '/api/admin/activities/' + encodeURIComponent(activityId) + '/v2/lottery'
-  const locked = disabled || saving
+  const locked = disabled || loading || saving
   const fairRulesLocked = locked || configLocked
   const imageUploading = Object.values(imageStatuses).some((status) => status === 'uploading')
   const sortedEntries = useMemo(() => [...entries].sort((a, b) => a.id.localeCompare(b.id)), [entries])
 
-  const applyPayload = useCallback((payload: TopicLotteryAdminPayload) => {
-    try {
-      setConfig(normalizeTopicLotteryConfig(payload.config))
-    } catch {
-      throw new Error('抽奖配置格式不可用')
+  const applyPayload = useCallback((payload: TopicLotteryAdminPayload, preserveLocalConfig = false) => {
+    if (!preserveLocalConfig) {
+      try {
+        setConfig(normalizeTopicLotteryConfigForRead(payload.config))
+      } catch {
+        throw new Error('抽奖配置格式不可用')
+      }
     }
     setConfigLocked(payload.configLocked)
     setState(payload.state)
@@ -171,6 +177,7 @@ export function TopicActivityV2LotteryAdmin({ activityId, entries, disabled = fa
   const load = useCallback(async () => {
     if (loadBusy.current) return
     loadBusy.current = true
+    const requestConfigRevision = configRevision.current
     setLoading(true)
     setError('')
     try {
@@ -179,7 +186,7 @@ export function TopicActivityV2LotteryAdmin({ activityId, entries, disabled = fa
       if (!response.ok) throw new Error(isRecord(body) && typeof body.message === 'string' ? body.message : '抽奖配置加载失败')
       const payload = readAdminPayload(body)
       if (!payload) throw new Error('抽奖配置格式不可用')
-      applyPayload(payload)
+      applyPayload(payload, configDirty.current || configRevision.current !== requestConfigRevision)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '抽奖配置加载失败')
     } finally {
@@ -193,35 +200,48 @@ export function TopicActivityV2LotteryAdmin({ activityId, entries, disabled = fa
   }, [load, open])
   useTopicActivityV2LotteryVisibleRefresh({ enabled: open && !disabled, state: open ? state : null, onRefresh: load })
 
+  function markConfigDirty() {
+    configRevision.current += 1
+    configDirty.current = true
+  }
+
   function patchConfig(update: Partial<TopicLotteryConfig>) {
+    markConfigDirty()
     setConfig((current) => ({ ...current, ...update }))
   }
 
   function patchPrize(id: string, update: Partial<TopicLotteryPrizeConfig>) {
+    markConfigDirty()
     setConfig((current) => ({ ...current, prizes: current.prizes.map((prize) => prize.id === id ? { ...prize, ...update } : prize) }))
   }
 
   function addPrize() {
+    markConfigDirty()
     setConfig((current) => ({ ...current, prizes: [...current.prizes, { id: uid(), name: '', description: '', imageUrl: null, quantity: 1, sortOrder: current.prizes.length }] }))
   }
 
   function removePrize(id: string) {
+    markConfigDirty()
     setConfig((current) => ({ ...current, prizes: current.prizes.filter((prize) => prize.id !== id).map((prize, index) => ({ ...prize, sortOrder: index })) }))
     setImageStatuses((current) => { const next = { ...current }; delete next[id]; return next })
   }
 
   async function onPrizeImage(id: string, selection: ActivityImageSelection) {
     if (selection.removed) {
+      markConfigDirty()
       patchPrize(id, { imageUrl: null })
       setImageStatuses((current) => { const next = { ...current }; delete next[id]; return next })
       return
     }
     if (!selection.file) return
+    markConfigDirty()
     setImageStatuses((current) => imageMapUpdate(current, id, 'uploading'))
     setError('')
     try {
-      const url = await uploadActivityImage(selection.file)
-      setConfig((current) => current.prizes.some((prize) => prize.id === id) ? { ...current, prizes: current.prizes.map((prize) => prize.id === id ? { ...prize, imageUrl: url } : prize) } : current)
+      const uploadedUrl = await uploadActivityImage(selection.file)
+      const imageUrl = normalizeTopicLotteryPrizeImageReference(uploadedUrl)
+      if (!imageUrl) throw new Error('奖品图片上传结果无效，请重新上传')
+      setConfig((current) => current.prizes.some((prize) => prize.id === id) ? { ...current, prizes: current.prizes.map((prize) => prize.id === id ? { ...prize, imageUrl } : prize) } : current)
       setImageStatuses((current) => imageMapUpdate(current, id, 'success'))
     } catch (cause) {
       setImageStatuses((current) => imageMapUpdate(current, id, 'error'))
@@ -244,8 +264,15 @@ export function TopicActivityV2LotteryAdmin({ activityId, entries, disabled = fa
       const body = await response.json().catch(() => null)
       if (!response.ok) throw new Error(isRecord(body) && typeof body.message === 'string' ? body.message : '抽奖配置保存失败')
       const payload = readAdminPayload(body)
-      if (payload) applyPayload(payload)
-      else if (isRecord(body) && body.config !== undefined) setConfig(normalizeTopicLotteryConfig(body.config))
+      if (payload) {
+        applyPayload(payload)
+        configRevision.current += 1
+        configDirty.current = false
+      } else if (isRecord(body) && body.config !== undefined) {
+        setConfig(normalizeTopicLotteryConfigForRead(body.config))
+        configRevision.current += 1
+        configDirty.current = false
+      }
       setMessage('实物抽奖配置已保存。')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '抽奖配置保存失败')
@@ -328,7 +355,7 @@ export function TopicActivityV2LotteryAdmin({ activityId, entries, disabled = fa
       <fieldset disabled={locked} className="space-y-5">
         <div className="space-y-3 border border-[var(--border)] p-3"><h3 className="font-bold">基础设置</h3><label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={config.enabled} disabled={fairRulesLocked || (!addressEncryptionReady && !config.enabled)} onChange={(event) => patchConfig({ enabled: event.target.checked })} />启用实物抽奖（旧活动默认关闭）</label><label className="block text-sm">抽奖标题<input className={inputClass} value={config.title} onChange={(event) => patchConfig({ title: event.target.value })} /></label><label className="block text-sm">抽奖说明<textarea className={inputClass + ' p-2'} rows={3} value={config.description} onChange={(event) => patchConfig({ description: event.target.value })} /></label><div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm">开奖方式<select className={inputClass} value={config.mode} disabled={fairRulesLocked} onChange={(event) => patchConfig({ mode: event.target.value as TopicLotteryConfig['mode'] })}><option value="MANUAL">管理员确认开奖</option><option value="AUTO">按时间自动开奖</option></select></label><label className="block text-sm">保留天数<input className={inputClass} type="number" min={1} max={365} value={config.retentionDays} onChange={(event) => patchConfig({ retentionDays: Number(event.target.value) })} /></label><label className="block text-sm">资格截止（北京时间）<input className={inputClass} type="datetime-local" disabled={fairRulesLocked} value={localTime(config.eligibilityDeadline)} onChange={(event) => patchConfig({ eligibilityDeadline: event.target.value || null })} /></label><label className="block text-sm">开奖时间（北京时间）<input className={inputClass} type="datetime-local" disabled={fairRulesLocked} value={localTime(config.drawAt)} onChange={(event) => patchConfig({ drawAt: event.target.value || null })} /></label><label className="block text-sm">收件截止（北京时间）<input className={inputClass} type="datetime-local" disabled={fairRulesLocked} value={localTime(config.addressDeadline)} onChange={(event) => patchConfig({ addressDeadline: event.target.value || null })} /></label></div><label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={config.publishWinners} onChange={(event) => patchConfig({ publishWinners: event.target.checked })} />开奖后公开中奖名单（仅昵称、E院ID和奖品）</label>{configLocked ? <p className="text-xs text-amber-700">已有参与资格，公平规则、资格来源和奖品库存不可修改；展示说明与公开名单设置仍可调整。</p> : null}</div>
         <div className="space-y-3 border border-[var(--border)] p-3"><h3 className="font-bold">资格来源</h3><p className="text-xs text-[var(--foreground-muted)]">勾选现有 V2 平台入口作为资格来源；同一用户多个入口只计一次。</p>{sortedEntries.length ? <div className="grid gap-2 sm:grid-cols-2">{sortedEntries.map((entry) => { const screenshotsReady = Number.isFinite(entry.maxImages) && entry.maxImages >= 1; return <label key={entry.id} className="flex min-w-0 items-start gap-2 border border-[var(--border)] p-2 text-sm"><input type="checkbox" className="mt-1" aria-label={`选择资格来源：${entry.platformName} · ${entry.title || '未命名入口'}`} disabled={fairRulesLocked || !entry.enabled || !screenshotsReady} checked={sourceIds.has(entry.id)} onChange={(event) => patchConfig({ sourceEntryIds: event.target.checked ? [...config.sourceEntryIds, entry.id] : config.sourceEntryIds.filter((id) => id !== entry.id) })} /><span className="min-w-0 break-words">{entry.platformName} · {entry.title || '未命名入口'}{!entry.enabled ? <span className="ml-1 text-xs text-[var(--foreground-muted)]">（已停用）</span> : null}{!screenshotsReady ? <span className="ml-1 text-xs text-amber-700">（需至少1张截图，不能作为抽奖资格来源）</span> : null}</span></label> })}</div> : <p className="text-sm text-[var(--foreground-muted)]">当前没有可选择的平台入口，请先配置 V2 平台奖励入口。</p>}{staleSourceIds.length ? <p className="text-xs text-amber-700">已有来源入口不在当前编辑列表中：{staleSourceIds.join('、')}</p> : null}</div>
-        <div className="space-y-3 border border-[var(--border)] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">实物奖品与库存</h3><p className="text-xs text-[var(--foreground-muted)]">奖品编号由界面创建并保持稳定；开奖后不能重抽、取消中奖或修改库存。</p></div><button type="button" className={buttonClass} disabled={fairRulesLocked} onClick={addPrize}>添加奖品</button></div>{config.prizes.length ? <div className="space-y-3">{config.prizes.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((prize, index) => <article key={prize.id} className="space-y-3 border border-[var(--border)] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold">奖品 {index + 1}</h4><button type="button" className={buttonClass} disabled={fairRulesLocked} onClick={() => removePrize(prize.id)}>移除奖品</button></div><div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm">奖品名称<input className={inputClass} disabled={fairRulesLocked} value={prize.name} onChange={(event) => patchPrize(prize.id, { name: event.target.value })} /></label><label className="block text-sm">数量<input className={inputClass} type="number" min={1} max={1000} disabled={fairRulesLocked} value={prize.quantity} onChange={(event) => patchPrize(prize.id, { quantity: Number(event.target.value) })} /></label></div><label className="block text-sm">奖品说明<textarea className={inputClass + ' p-2'} rows={2} disabled={fairRulesLocked} value={prize.description} onChange={(event) => patchPrize(prize.id, { description: event.target.value })} /></label><ActivityImageUploader label="奖品图片（公开资源）" initialUrl={prize.imageUrl} disabled={fairRulesLocked || imageUploading} status={imageStatuses[prize.id] === 'uploading' ? 'uploading' : imageStatuses[prize.id] === 'error' ? 'error' : imageStatuses[prize.id] === 'success' ? 'success' : 'idle'} onSelectionChange={(selection) => void onPrizeImage(prize.id, selection)} /><p className="break-all text-xs text-[var(--foreground-muted)]">奖品编号：{prize.id}</p></article>)}</div> : <p className="text-sm text-[var(--foreground-muted)]">尚未配置奖品。</p>}</div>
+        <div className="space-y-3 border border-[var(--border)] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">实物奖品与库存</h3><p className="text-xs text-[var(--foreground-muted)]">奖品编号由界面创建并保持稳定；开奖后不能重抽、取消中奖或修改库存。</p></div><button type="button" className={buttonClass} disabled={fairRulesLocked} onClick={addPrize}>添加奖品</button></div>{config.prizes.length ? <div className="space-y-3">{config.prizes.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((prize, index) => <article key={prize.id} className="space-y-3 border border-[var(--border)] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold">奖品 {index + 1}</h4><button type="button" className={buttonClass} disabled={fairRulesLocked} onClick={() => removePrize(prize.id)}>移除奖品</button></div><div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm">奖品名称<input className={inputClass} disabled={fairRulesLocked} value={prize.name} onChange={(event) => patchPrize(prize.id, { name: event.target.value })} /></label><label className="block text-sm">数量<input className={inputClass} type="number" min={1} max={1000} disabled={fairRulesLocked} value={prize.quantity} onChange={(event) => patchPrize(prize.id, { quantity: Number(event.target.value) })} /></label></div><label className="block text-sm">奖品说明<textarea className={inputClass + ' p-2'} rows={2} disabled={fairRulesLocked} value={prize.description} onChange={(event) => patchPrize(prize.id, { description: event.target.value })} /></label><ActivityImageUploader label="奖品图片（公开资源）" initialUrl={resolveTopicLotteryPrizeImageSrc(prize.imageUrl)} disabled={fairRulesLocked || imageUploading} status={imageStatuses[prize.id] === 'uploading' ? 'uploading' : imageStatuses[prize.id] === 'error' ? 'error' : imageStatuses[prize.id] === 'success' ? 'success' : 'idle'} onSelectionChange={(selection) => void onPrizeImage(prize.id, selection)} /><p className="break-all text-xs text-[var(--foreground-muted)]">奖品编号：{prize.id}</p></article>)}</div> : <p className="text-sm text-[var(--foreground-muted)]">尚未配置奖品。</p>}</div>
         <button type="button" className={buttonClass} disabled={locked || imageUploading} onClick={() => void save()}>{saving ? '保存中…' : imageUploading ? '图片上传中…' : '保存实物抽奖配置'}</button>
       </fieldset>
       {state !== 'DRAWN' && state !== 'CANCELLED' ? <div className="space-y-2 border-t border-[var(--border)] pt-4"><h3 className="font-bold">开奖操作</h3><p className="text-xs text-[var(--foreground-muted)]">确认开奖会冻结资格快照和奖品库存，系统不会提供重抽或取消中奖。</p><button type="button" className={buttonClass} disabled={disabled || drawLoading || state === 'DRAWING' || state === 'FAILED'} onClick={() => setConfirmDraw(true)}>{drawLoading ? '开奖中…' : '确认开奖'}</button></div> : null}
