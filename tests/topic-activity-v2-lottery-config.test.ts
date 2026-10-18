@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { defaultTopicLotteryConfig, normalizeTopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
+import { defaultTopicLotteryConfig, normalizeTopicLotteryConfig, normalizeTopicLotteryConfigForRead, normalizeTopicLotteryPrizeImageReference, resolveTopicLotteryPrizeImageSrc } from '@/lib/topic-activity-v2-lottery-config'
+import { getMediaPublicBaseUrl } from '@/lib/media-url'
 import { sampleTopicLotteryUsers } from '@/lib/topic-activity-v2-lottery-random'
 
 const valid = () => ({ ...defaultTopicLotteryConfig(), enabled: true, sourceEntryIds: ['platform-one'], drawAt: '2026-10-20T12:00:00+08:00',
@@ -25,8 +26,23 @@ test('quantities are positive integers and total stock bounded; no paid or weigh
   assert.equal('pointsCost' in value, false); assert.equal('extraTickets' in value, false); assert.equal('weight' in value, false)
 })
 test('private originals, signed URLs and arbitrary remote images are not public prize images', () => {
-  for (const imageUrl of ['/cos/topic-activity/private/original-photo.png', 'https://hostile.invalid/a.png', '/images/a.png?secret=value', '/images/%2e%2e/private.png'])
+  for (const imageUrl of ['/cos/topic-activity/private/original-photo.png', 'https://hostile.invalid/a.png', 'https://media.ecfc.fans/media/activities/asset-one/source.webp?signature=secret', '/images/a.png?secret=value', '/images/%2e%2e/private.png', 'blob:https://ecfc.fans/temporary-id'])
     assert.throws(() => normalizeTopicLotteryConfig({ ...valid(), prizes: [{ ...valid().prizes[0], imageUrl }] }), { code: 'LOTTERY_CONFIG_INVALID' })
+})
+test('official activity-image upload response normalizes to a stable COS object reference and resolves publicly', () => {
+  const uploadedUrl = `${getMediaPublicBaseUrl()}/activities/asset-one/source.webp`
+  const reference = normalizeTopicLotteryPrizeImageReference(uploadedUrl)
+  assert.equal(reference, '/cos/activities/asset-one/source.webp')
+  assert.equal(resolveTopicLotteryPrizeImageSrc(reference), uploadedUrl)
+  assert.equal(normalizeTopicLotteryConfig({ ...valid(), prizes: [{ ...valid().prizes[0], imageUrl: uploadedUrl }] }).prizes[0].imageUrl, reference)
+})
+test('legacy malformed or temporary prize image references are hidden safely on read without invalidating the lottery', () => {
+  for (const imageUrl of ['blob:https://ecfc.fans/temporary-id', `${getMediaPublicBaseUrl()}/activities/asset-one/source.webp?signature=secret`]) {
+    const config = normalizeTopicLotteryConfigForRead({ ...valid(), prizes: [{ ...valid().prizes[0], imageUrl }] })
+    assert.equal(config.enabled, true)
+    assert.equal(config.prizes[0].imageUrl, null)
+    assert.equal(resolveTopicLotteryPrizeImageSrc(imageUrl), null)
+  }
 })
 test('retention is explicit bounded 1..365 days', () => {
   assert.equal(normalizeTopicLotteryConfig(valid()).retentionDays, 90)

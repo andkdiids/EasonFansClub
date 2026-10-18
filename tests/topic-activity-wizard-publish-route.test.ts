@@ -30,6 +30,7 @@ let transactionActivity: Activity
 let updateCalls: Array<Record<string, unknown>> = []
 let legacyLotteryQueries: Array<Record<string, unknown>> = []
 let events: string[] = []
+let participationCount = 0
 
 const denied = (status: number) => ({ user: null, response: new Response('{}', { status }) })
 
@@ -150,7 +151,7 @@ before(async () => {
           allowImageAttachments: typeof input.allowImageAttachments === 'boolean' ? input.allowImageAttachments : existing.allowImageAttachments,
           formSchema: Object.prototype.hasOwnProperty.call(input, 'formSchema') ? input.formSchema : existing.formSchema,
           rewardGrantMode: typeof input.rewardGrantMode === 'string' ? input.rewardGrantMode : existing.rewardGrantMode,
-          rewardGrantAt: existing.rewardGrantAt,
+          rewardGrantAt: input.rewardGrantAt ? new Date(String(input.rewardGrantAt)) : input.rewardGrantMode === 'IMMEDIATE' ? null : existing.rewardGrantAt,
           rewardPoints: typeof input.rewardPoints === 'number' ? input.rewardPoints : existing.rewardPoints,
           rewardBadgeIds: Array.isArray(input.rewardBadgeIds) ? input.rewardBadgeIds : existing.rewardBadgeIds,
         },
@@ -185,14 +186,14 @@ before(async () => {
             return null
           },
         },
-        topicActivityParticipation: { count: async () => 0 },
+        topicActivityParticipation: { count: async () => participationCount },
         badge: { count: async () => 0 },
       }
       return {
         prisma: {
           activity: { findUnique: async () => cloneActivity(current) },
           activityReward: { findUnique: async () => null },
-          topicActivityParticipation: { count: async () => 0 },
+          topicActivityParticipation: { count: async () => participationCount },
           $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
         },
       }
@@ -207,6 +208,7 @@ before(async () => {
 })
 
 beforeEach(() => {
+  participationCount = 0
   authenticated = true
   legacyLottery = null
   topicWindowError = null
@@ -271,4 +273,19 @@ test('metadata-only publish retains the existing activity fields', async () => {
   assert.equal(data.type, 'TOPIC_ACTIVITY')
   assert.equal(data.participationRule, '发布活动相关内容并上传截图')
   assert.equal(data.allowImageAttachments, true)
+})
+
+test('existing participants allow timing-only changes while reward amounts remain locked', async () => {
+  participationCount = 2
+  current = makeActivity({ status: 'PUBLISHED', rewardGrantMode: 'SCHEDULED', rewardGrantAt: new Date('2026-11-03T12:00:00Z') })
+  transactionActivity = cloneActivity(current)
+  const response = await route.PATCH(request({ rewardGrantAt: '2026-11-04T12:00:00Z' }), context)
+  assert.equal(response.status, 200)
+  assert.equal(current.rewardGrantMode, 'SCHEDULED')
+  assert.equal((current.rewardGrantAt as Date).toISOString(), '2026-11-04T12:00:00.000Z')
+  assert.equal(current.rewardPoints, null)
+  const amountChange = await route.PATCH(request({ rewardPoints: 999 }), context)
+  assert.equal(amountChange.status, 409)
+  assert.equal((await amountChange.json()).code, 'TOPIC_REWARD_LOCKED')
+  assert.equal(updateCalls.length, 1)
 })

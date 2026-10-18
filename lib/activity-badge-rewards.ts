@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { hasValidActivityParticipation, type ActivityParticipationCheckInSnapshot } from '@/lib/activity-participation'
-import { grantBadge } from '@/lib/badge-service'
+import { grantBadgeWithTransaction, type BadgeOperationResult } from '@/lib/badge-service'
 import { prisma } from '@/lib/prisma'
 import { activeUserBadgeWhere } from '@/lib/badge-validity'
 
@@ -10,6 +10,8 @@ type ActivityBadgeGrantPlan = {
   activityId: string
   activityTitle: string
   activityEndsAt: Date | null
+  activityStatus: string
+  activityVerificationMode: string | null
   badgeId: string
   badgeName: string
   reason: string
@@ -20,6 +22,10 @@ type ActivityBadgeRegistration = ActivityParticipationCheckInSnapshot & {
   activityId: string
   userId: string
 }
+
+type ActivityBadgeGrantOutcome =
+  | { eligible: false }
+  | { eligible: true; result: BadgeOperationResult }
 
 export type GrantEligibleActivityBadgesOptions = {
   activityId?: string
@@ -73,7 +79,7 @@ async function loadActivityBadgePlans(options: GrantEligibleActivityBadgesOption
       select: {
         activityId: true,
         badgeId: true,
-        Activity: { select: { id: true, title: true, endsAt: true } },
+        Activity: { select: { id: true, title: true, status: true, endsAt: true, verificationMode: true } },
         Badge: { select: { id: true, name: true } },
       },
     }),
@@ -106,6 +112,8 @@ async function loadActivityBadgePlans(options: GrantEligibleActivityBadgesOption
       activityId: reward.activityId,
       activityTitle: reward.Activity.title,
       activityEndsAt: reward.Activity.endsAt,
+      activityStatus: reward.Activity.status,
+      activityVerificationMode: reward.Activity.verificationMode,
       badgeId: reward.badgeId,
       badgeName: reward.Badge.name,
       reason: `参加活动「${reward.Activity.title}」后获得`,
@@ -114,7 +122,7 @@ async function loadActivityBadgePlans(options: GrantEligibleActivityBadgesOption
 
   const ruleActivityIds = [...new Set(activityRules.map((rule) => activityIdFromRuleConfig(rule.configJson)).filter((id): id is string => Boolean(id)))]
   const activities = ruleActivityIds.length
-    ? await prisma.activity.findMany({ where: { id: { in: ruleActivityIds }, status: 'PUBLISHED' }, select: { id: true, title: true, endsAt: true } })
+    ? await prisma.activity.findMany({ where: { id: { in: ruleActivityIds }, status: 'PUBLISHED' }, select: { id: true, title: true, status: true, endsAt: true, verificationMode: true } })
     : []
   const activityById = new Map(activities.map((activity) => [activity.id, activity]))
   for (const rule of activityRules) {
@@ -125,6 +133,8 @@ async function loadActivityBadgePlans(options: GrantEligibleActivityBadgesOption
       activityId: activity.id,
       activityTitle: activity.title,
       activityEndsAt: activity.endsAt,
+      activityStatus: activity.status,
+      activityVerificationMode: activity.verificationMode,
       badgeId: rule.badgeId,
       badgeName: rule.Badge.name,
       reason: `参加活动「${activity.title}」后获得「${rule.Badge.name}」`,
@@ -137,34 +147,90 @@ async function loadActivityBadgePlans(options: GrantEligibleActivityBadgesOption
 async function loadValidActivityRegistrations(
   activityId: string,
   activityEndsAt: Date | null,
+  activityVerificationMode: string | null | undefined,
+  activityStatus: string | null | undefined,
   options: GrantEligibleActivityBadgesOptions,
   now: Date,
   batchSize: number,
 ) {
+  // A missing/unknown mode must never become the no-check-in NONE branch.
+  if (activityVerificationMode !== 'NONE' && activityVerificationMode !== 'MANUAL' && activityVerificationMode !== 'QR') return []
+  if (activityVerificationMode === 'NONE' && (!activityEndsAt || !Number.isFinite(activityEndsAt.getTime()) || now < activityEndsAt)) return []
   const rows: ActivityBadgeRegistration[] = []
   let cursor: string | undefined
   while (true) {
+    const where: Prisma.ActivityRegistrationWhereInput = {
+      activityId,
+      status: 'ACTIVE',
+      ...(activityVerificationMode === 'NONE' ? {} : { checkInSource: { in: ['MANUAL', 'QR'] as const }, verifiedAt: { not: null } }),
+      ...(options.registrationId ? { id: options.registrationId } : {}),
+      ...(options.userId ? { userId: options.userId } : {}),
+      ...(cursor ? { id: { gt: cursor } } : {}),
+      User: { status: 'ACTIVE', isDeleted: false },
+    }
     const page = await prisma.activityRegistration.findMany({
-      where: {
-        activityId,
-        status: 'ACTIVE',
-        checkInSource: { in: ['MANUAL', 'QR'] },
-        verifiedAt: { not: null },
-        ...(options.registrationId ? { id: options.registrationId } : {}),
-        ...(options.userId ? { userId: options.userId } : {}),
-        ...(cursor ? { id: { gt: cursor } } : {}),
-        User: { status: 'ACTIVE', isDeleted: false },
-      },
+      where,
       orderBy: { id: 'asc' },
       take: batchSize,
       select: { id: true, activityId: true, userId: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true },
     })
     if (!page.length) break
-    rows.push(...page.filter((row) => hasValidActivityParticipation(row, activityEndsAt, now)))
+    rows.push(...page.filter((row) => hasValidActivityParticipation(row, activityEndsAt, now, activityVerificationMode, activityStatus)))
     cursor = page.at(-1)?.id
     if (page.length < batchSize || options.registrationId) break
   }
   return rows
+}
+
+async function grantActivityBadgeWithEligibilityRecheck(
+  registration: ActivityBadgeRegistration,
+  plan: ActivityBadgeGrantPlan,
+  now: Date,
+): Promise<ActivityBadgeGrantOutcome> {
+  return prisma.$transaction(async (tx): Promise<ActivityBadgeGrantOutcome> => {
+    const activityLock = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${plan.activityId} FOR UPDATE`
+    if (!activityLock.length) return { eligible: false }
+    const registrationLock = await tx.$queryRaw<Array<{ id: string }>>`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registration.id} FOR UPDATE`
+    if (!registrationLock.length) return { eligible: false }
+
+    const activity = await tx.activity.findUnique({
+      where: { id: plan.activityId },
+      select: { id: true, status: true, endsAt: true, verificationMode: true },
+    })
+    const currentRegistration = await tx.activityRegistration.findUnique({
+      where: { id: registration.id },
+      select: { id: true, activityId: true, userId: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true },
+    })
+    if (!activity || !currentRegistration || currentRegistration.activityId !== plan.activityId || currentRegistration.userId !== registration.userId) return { eligible: false }
+    if (!hasValidActivityParticipation(currentRegistration, activity.endsAt, now, activity.verificationMode, activity.status)) return { eligible: false }
+
+    const result = await grantBadgeWithTransaction(tx, {
+      userId: currentRegistration.userId,
+      badgeId: plan.badgeId,
+      sourceType: ACTIVITY_PARTICIPATION_BADGE_SOURCE,
+      sourceId: plan.activityId,
+      grantReason: plan.reason,
+      grantKey: `activity:${plan.activityId}`,
+      obtainedAt: now,
+      availabilityMode: 'CURRENT',
+    })
+    return { eligible: true, result }
+  })
+}
+
+async function processActivityBadgeGrantEffects(result: BadgeOperationResult) {
+  const grants = result.created
+    ? [{ badgeId: result.badgeId, recordId: result.recordId }, ...(result.derivedGrants || [])]
+    : (result.derivedGrants || [])
+  if (!grants.length) return
+  try {
+    const { processBadgeGrantEffects } = await import('@/lib/badge-phase3')
+    await processBadgeGrantEffects({ userId: result.userId, grants })
+  } catch (error) {
+    // The durable badge grant is already committed; this records the
+    // presentation-effect failure without adding a new retry queue.
+    console.error('[activity.badge-reward.phase3]', { userId: result.userId, badgeId: result.badgeId, error })
+  }
 }
 
 /**
@@ -182,22 +248,17 @@ export async function grantEligibleActivityBadges(options: GrantEligibleActivity
   for (const activityId of activityIds) {
     const plans = [...(plansByActivity.get(activityId)?.values() || [])]
     if (!plans.length) continue
-    const registrations = await loadValidActivityRegistrations(activityId, plans[0].activityEndsAt, options, now, batchSize)
+    const registrations = await loadValidActivityRegistrations(activityId, plans[0].activityEndsAt, plans[0].activityVerificationMode, plans[0].activityStatus, options, now, batchSize)
     summary.scannedRegistrations += registrations.length
-    summary.eligibleRegistrations += registrations.length
     for (const registration of registrations) {
+      let activityEligible = false
       for (const plan of plans) {
         try {
-          const result = await grantBadge({
-            userId: registration.userId,
-            badgeId: plan.badgeId,
-            sourceType: ACTIVITY_PARTICIPATION_BADGE_SOURCE,
-            sourceId: activityId,
-            grantReason: plan.reason,
-            grantKey: `activity:${activityId}`,
-            obtainedAt: now,
-            availabilityMode: 'CURRENT',
-          })
+          const outcome = await grantActivityBadgeWithEligibilityRecheck(registration, plan, now)
+          if (!outcome.eligible) continue
+          activityEligible = true
+          const result = outcome.result
+          await processActivityBadgeGrantEffects(result)
           if (result.created) summary.granted += 1
           else summary.alreadyOwned += 1
         } catch (error) {
@@ -206,6 +267,7 @@ export async function grantEligibleActivityBadges(options: GrantEligibleActivity
           console.error('[activity.badge-reward.grant]', { activityId, registrationId: registration.id, userId: registration.userId, badgeId: plan.badgeId, error })
         }
       }
+      if (activityEligible) summary.eligibleRegistrations += 1
     }
   }
   return summary
@@ -214,9 +276,9 @@ export async function grantEligibleActivityBadges(options: GrantEligibleActivity
 /** Read-only statistics for the activity rule preview. */
 export async function getActivityParticipationBadgeStats(input: { badgeId: string; activityId: string; now?: Date }): Promise<ActivityParticipationBadgeStats> {
   const now = input.now || new Date()
-  const activity = await prisma.activity.findUnique({ where: { id: input.activityId }, select: { id: true, status: true, endsAt: true } })
+  const activity = await prisma.activity.findUnique({ where: { id: input.activityId }, select: { id: true, status: true, endsAt: true, verificationMode: true } })
   if (!activity || activity.status !== 'PUBLISHED') return { eligibleCount: 0, ownedCount: 0, pendingCount: 0 }
-  const registrations = await loadValidActivityRegistrations(input.activityId, activity.endsAt, {}, now, 500)
+  const registrations = await loadValidActivityRegistrations(input.activityId, activity.endsAt, activity.verificationMode, activity.status, {}, now, 500)
   const userIds = [...new Set(registrations.map((registration) => registration.userId))]
   if (!userIds.length) return { eligibleCount: 0, ownedCount: 0, pendingCount: 0 }
   const ownedCount = await prisma.userBadge.count({ where: { badgeId: input.badgeId, userId: { in: userIds }, ...activeUserBadgeWhere(now) } })

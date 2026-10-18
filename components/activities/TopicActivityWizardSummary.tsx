@@ -27,6 +27,7 @@ export function TopicActivityWizardSummary({ draft, coverName, badgeName }: {
     </section>
     <section className="space-y-2 border border-[var(--border)] p-4"><h3 className="font-bold">参与奖励</h3>
       <p>平台挂号费按任务独立发放，与抽奖次数无关。</p>
+      <p>发奖安排：{activity.rewardGrantMode === 'SCHEDULED' ? `${displayDate(activity.rewardGrantAt)}（北京时间）统一发放` : '审核通过后立即发放'}</p>
       <p>勋章：{program.medal.enabled ? badgeName || '未选择' : '未开启'}{program.medal.enabled ? ` · ${program.medal.triggers.includes('PLATFORM') ? '平台任务' : '站内参与评论'}审核通过触发` : ''}</p>
       <p>测试题：{program.test.enabled ? `已启用 · ${program.test.mode === 'KNOWLEDGE' ? '知识测试' : '趣味测试'} · ${program.test.questions.length} 道题 · ${program.test.results.length} 个结果` : '未启用'}</p>
       <p>固定奖励与投票：按现有配置保留，不在此步骤修改。</p>

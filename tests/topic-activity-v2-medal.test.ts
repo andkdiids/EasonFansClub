@@ -47,3 +47,18 @@ test('failed parent transaction rolls ledger back and never emits deferred badge
     }), /parent failed/)
   }); assert.equal(effects, 0); assert.equal(f.state.grants.length, 0)
 })
+
+test('scheduled medal waits, preserves earned poll identity, and grants once with after-commit effects', async () => {
+  badgeCalls = 0; effects = 0
+  const f = fixture(), due = new Date(instant.getTime() + 60000)
+  f.activity.rewardGrantMode = 'SCHEDULED'; f.activity.rewardGrantAt = due
+  f.program.medal = { enabled: true, badgeId: 'badge-one', triggers: ['POLL'], description: '', allowLateReview: true }
+  f.state.votes.push({ activityId: f.activity.id, pollId: f.program.poll.id, userId: 'user-one', createdAt: instant })
+  await f.run(async () => {
+    await service.withTopicV2Transaction(() => service.grantTopicActivityV2MedalForEventInTransaction(f.tx, f.activity, { userId: 'user-one', event: 'POLL', effectiveAt: instant, now: instant }))
+    assert.equal(badgeCalls, 0); assert.equal(effects, 0); assert.equal(f.state.grants[0].status, 'PENDING')
+    f.program.poll.id = 'new-poll'; f.program.poll.enabled = false
+    await Promise.all([service.dispatchDueTopicActivityV2Rewards({ now: due }), service.dispatchDueTopicActivityV2Rewards({ now: due })])
+  })
+  assert.equal(badgeCalls, 1); assert.equal(effects, 1); assert.equal(f.state.grants[0].status, 'GRANTED')
+})

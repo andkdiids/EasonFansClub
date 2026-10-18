@@ -1,6 +1,6 @@
 import type { TopicActivityV2PollOption } from '@/lib/topic-activity-v2-config'
 
-export type WizardIdKind = 'draft' | 'task' | 'prize' | 'option' | 'poll' | 'test' | 'snapshot' | 'session' | 'request' | 'image'
+export type WizardIdKind = 'draft' | 'task' | 'prize' | 'option' | 'poll' | 'test' | 'description' | 'snapshot' | 'session' | 'request' | 'image'
 
 /** Generate once at entity creation; never regenerate in an adapter or retry. */
 export function createWizardId(kind: WizardIdKind): string {

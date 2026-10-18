@@ -20,6 +20,8 @@ export type WizardEditActivitySnapshot = {
   participationRule: string | null
   participationMode: string
   allowImageAttachments: boolean
+  rewardGrantMode?: 'IMMEDIATE' | 'SCHEDULED'
+  rewardGrantAt?: string | null
 }
 export type TopicWizardEditBaseline = {
   activity: WizardEditActivitySnapshot
@@ -65,6 +67,7 @@ function activitySnapshot(value: unknown, expectedId: string): WizardEditActivit
     description: typeof row.description === 'string' ? row.description : '', coverUrl: nullableString(row.coverUrl),
     startsAt: nullableString(row.startsAt), endsAt: nullableString(row.endsAt), participationRule: nullableString(row.participationRule),
     participationMode: typeof row.participationMode === 'string' ? row.participationMode : 'COMMENT', allowImageAttachments: row.allowImageAttachments === true,
+    rewardGrantMode: row.rewardGrantMode === 'SCHEDULED' ? 'SCHEDULED' : 'IMMEDIATE', rewardGrantAt: nullableString(row.rewardGrantAt),
   }
 }
 function programValue(value: unknown) {
@@ -97,6 +100,7 @@ export function topicWizardEditInitialState(activityData: unknown, programData: 
     ...draft.activity, type: 'TOPIC_ACTIVITY', title: activity.title, description: activity.description, coverUrl: activity.coverUrl,
     startsAt: dateInput(activity.startsAt), endsAt: dateInput(activity.endsAt), participationRule: activity.participationRule,
     participationMode: activity.participationMode as ActivityView['participationMode'], allowImageAttachments: activity.allowImageAttachments,
+    rewardGrantMode: activity.rewardGrantMode, rewardGrantAt: dateInput(activity.rewardGrantAt),
   }
   draft.program = clone(program)
   draft.lottery = clone(lottery)
@@ -126,15 +130,21 @@ export function getTopicWizardEditChanges(baseline: TopicWizardEditBaseline, dra
     { key: 'endsAt', raw: draft.activity.endsAt, value: isoDate(draft.activity.endsAt) },
     { key: 'participationRule', raw: draft.activity.participationRule ?? '', value: draft.activity.participationRule?.trim() || null },
     { key: 'allowImageAttachments', raw: draft.activity.allowImageAttachments, value: draft.activity.allowImageAttachments },
+    { key: 'rewardGrantMode', raw: draft.activity.rewardGrantMode ?? 'IMMEDIATE', value: draft.activity.rewardGrantMode ?? 'IMMEDIATE' },
+    { key: 'rewardGrantAt', raw: draft.activity.rewardGrantAt ?? null, value: draft.activity.rewardGrantMode === 'SCHEDULED' ? isoDate(draft.activity.rewardGrantAt ?? null) : null },
   ]
   for (const field of activityFields) {
     const before = baseline.activity[field.key]
-    const baselineInput = field.key === 'startsAt' || field.key === 'endsAt' ? dateInput(before) : field.key === 'participationRule' ? before || '' : before
+    const baselineInput = field.key === 'startsAt' || field.key === 'endsAt' || field.key === 'rewardGrantAt' ? dateInput(before) : field.key === 'participationRule' ? before || '' : field.key === 'rewardGrantMode' ? before ?? 'IMMEDIATE' : before
     // Compare displayed form values first so untouched legacy whitespace or seconds are never normalized away.
     if (canonical(field.raw) !== canonical(baselineInput)) activityPatch[field.key] = field.value
   }
   // Editing nullable legacy fields is not creation. Validate only changed inputs.
   if (Object.hasOwn(activityPatch, 'title') && !draft.activity.title.trim()) throw new Error('请填写活动名称')
+  if (Object.hasOwn(activityPatch, 'rewardGrantMode') || Object.hasOwn(activityPatch, 'rewardGrantAt')) {
+    if (draft.activity.rewardGrantMode === 'SCHEDULED' && !parseActivityDateInput(draft.activity.rewardGrantAt)) throw new Error('请填写有效的统一发奖时间（北京时间）')
+    activityPatch.rewardGrantAt = draft.activity.rewardGrantMode === 'SCHEDULED' ? isoDate(draft.activity.rewardGrantAt ?? null) : null
+  }
   for (const [key, label] of [['startsAt', '开始'], ['endsAt', '结束']] as const) {
     if (Object.hasOwn(activityPatch, key) && draft.activity[key] && !parseActivityDateInput(draft.activity[key])) throw new Error(`活动${label}时间格式不正确`)
   }
@@ -199,7 +209,7 @@ function expectedActivity(baseline: WizardEditActivitySnapshot, patch: Record<st
 function matchesExpected(actual: WizardEditActivitySnapshot | TopicActivityV2Program | TopicLotteryConfig, expected: EditPendingVerification) {
   if (expected.stage === 'ACTIVITY') {
     const row = actual as WizardEditActivitySnapshot
-    return ['id', 'type', 'status', 'title', 'description', 'coverUrl', 'startsAt', 'endsAt', 'participationRule', 'participationMode', 'allowImageAttachments']
+    return ['id', 'type', 'status', 'title', 'description', 'coverUrl', 'startsAt', 'endsAt', 'participationRule', 'participationMode', 'allowImageAttachments', 'rewardGrantMode', 'rewardGrantAt']
       .every((key) => canonical((row as unknown as Record<string, unknown>)[key]) === canonical((expected.expected as unknown as Record<string, unknown>)[key]))
   }
   return canonical(actual) === canonical(expected.expected)

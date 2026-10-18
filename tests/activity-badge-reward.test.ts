@@ -13,7 +13,7 @@ const read = (file: string) => readFileSync(join(root, file), 'utf8')
 const now = new Date('2026-09-01T04:00:00.000Z')
 const end = new Date('2026-09-01T05:00:00.000Z')
 
-test('活动勋章参与资格只认有效人工/二维码现场核销', () => {
+test('活动勋章参与资格按核销模式区分现场核销与结束后有效报名', () => {
   const manual = { status: 'ACTIVE', verifiedAt: new Date('2026-09-01T03:00:00.000Z'), checkedInAt: new Date('2026-09-01T03:00:00.000Z'), checkInSource: 'MANUAL' }
   const qr = { ...manual, checkInSource: 'QR' }
   const automatic = { ...manual, checkInSource: 'AUTO_AFTER_ACTIVITY_END' }
@@ -41,10 +41,10 @@ test('活动奖励和参加活动规则共用幂等发放扫描器，并保留�
   assert.match(service, /badgeGrantAt: \{ not: null, lte: now \}/)
   assert.match(service, /ruleType: activityParticipationRuleType/)
   assert.match(service, /hasValidActivityParticipation\(/)
-  assert.match(service, /grantBadge\(/)
+  assert.match(service, /grantBadgeWithTransaction\(/)
   assert.match(service, /sourceType: ACTIVITY_PARTICIPATION_BADGE_SOURCE/)
-  assert.match(service, /sourceId: activityId/)
-  assert.match(registration, /if \(reward && !reward\.badgeGrantAt\)/)
+  assert.match(service, /sourceId: plan\.activityId/)
+  assert.match(registration, /if \(reward && !reward\.badgeGrantAt && activityParticipationEligible\)/)
   assert.match(registration, /必须设置自动发放时间/)
 })
 
