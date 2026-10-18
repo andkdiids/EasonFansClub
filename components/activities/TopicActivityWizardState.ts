@@ -1,12 +1,12 @@
 import { parseActivityDateInput, type ActivityView } from '@/lib/activity'
-import { createDefaultTopicActivityV2Program, type TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
+import { createDefaultTopicActivityV2Program, topicResultDescriptionVariants, type TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 import { defaultTopicLotteryConfig, type TopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
 import { createWizardId } from './TopicActivityWizardIds'
 
 // UI-only draft. No persistence, requests, or new business model.
 export type TopicActivityWizardDraft = {
   identity: { draftId: string; platformTaskIds: Record<string, string> }
-  activity: Pick<ActivityView, 'type' | 'title' | 'description' | 'startsAt' | 'endsAt' | 'participationRule' | 'participationMode' | 'allowImageAttachments' | 'coverUrl'>
+  activity: Pick<ActivityView, 'type' | 'title' | 'description' | 'startsAt' | 'endsAt' | 'participationRule' | 'participationMode' | 'allowImageAttachments' | 'coverUrl'> & Partial<Pick<ActivityView, 'rewardGrantMode' | 'rewardGrantAt'>>
   program: TopicActivityV2Program
   lottery: TopicLotteryConfig
 }
@@ -25,7 +25,7 @@ export function createTopicWizardDraft(): TopicActivityWizardDraft {
   return {
     identity: { draftId: createWizardId('draft'), platformTaskIds: Object.fromEntries(topicWizardPlatforms.map(({ key }) => [key, createWizardId('task')])) },
     activity: { type: 'TOPIC_ACTIVITY', title: '', description: '', coverUrl: null, startsAt: null, endsAt: null,
-      participationRule: '', participationMode: 'COMMENT', allowImageAttachments: true },
+      participationRule: '', participationMode: 'COMMENT', allowImageAttachments: true, rewardGrantMode: 'IMMEDIATE', rewardGrantAt: null },
     program, lottery: defaultTopicLotteryConfig(),
   }
 }
@@ -99,11 +99,12 @@ export function topicWizardErrors(draft: TopicActivityWizardDraft, step: number)
         }
       }
       for (const [index, result] of test.results.entries()) {
-        if (!result.title.trim() || !result.description.trim()) errors.push(`测试结果 ${index + 1}：标题和说明不能为空`)
+        if (!result.title.trim() || !topicResultDescriptionVariants(result).some((variant) => variant.text.trim())) errors.push(`测试结果 ${index + 1}：标题和说明不能为空`)
       }
     }
   }
   if (step === 3 || review) {
+    if (activity.rewardGrantMode === 'SCHEDULED' && !parseActivityDateInput(activity.rewardGrantAt)) errors.push('请填写有效的统一发奖时间（北京时间）')
     const enabledEntries = program.entries.filter((entry) => entry.enabled)
     for (const entry of enabledEntries) {
       if (!Number.isInteger(entry.points) || entry.points < 1 || entry.points > 2_000_000_000) errors.push(`${entry.platformName}：现有平台奖励入口要求正整数挂号费，不能为 0`)

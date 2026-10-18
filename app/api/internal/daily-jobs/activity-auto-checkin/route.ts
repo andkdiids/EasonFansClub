@@ -6,6 +6,7 @@ import { grantEligibleActivityBadges } from '@/lib/activity-badge-rewards'
 import { expireUserBadges } from '@/lib/badge-expiration'
 import { scanSustainedBadgeQualifications } from '@/lib/aspirin-badge'
 import { dispatchDueTopicActivityRewards, expireTopicActivityPins } from '@/lib/topic-activity'
+import { dispatchDueTopicActivityV2Rewards } from '@/lib/topic-activity-v2'
 import { drawDueTopicLotteries } from '@/lib/topic-activity-v2-lottery'
 import { deliverTopicLotteryNotices, purgeExpiredTopicLotteryPII } from '@/lib/topic-activity-v2-lottery-fulfillment'
 
@@ -34,13 +35,14 @@ export async function POST(request: Request) {
   const batchSize = requestedBatchSize === undefined ? undefined : Math.min(Math.max(Math.trunc(requestedBatchSize), 1), 500)
   const startedAt = Date.now()
   try {
-    const [expirationResult, checkInResult, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicPinResult, topicLotteryResult] = await Promise.all([
+    const [expirationResult, checkInResult, lotteryResult, badgeRewardResult, sustainedQualificationResult, topicRewardResult, topicV2RewardResult, topicPinResult, topicLotteryResult] = await Promise.all([
       expireUserBadges(),
       autoCheckInEndedActivityRegistrations({ activityId, batchSize }),
       drawDueActivityLotteries({ activityId, batchSize: batchSize ? Math.min(batchSize, 200) : undefined }),
       grantEligibleActivityBadges({ activityId, batchSize }),
       scanSustainedBadgeQualifications(),
       dispatchDueTopicActivityRewards({ batchSize }),
+      dispatchDueTopicActivityV2Rewards({ batchSize }),
       expireTopicActivityPins(),
       drawDueTopicLotteries({ activityId, batchSize }),
     ])
@@ -50,6 +52,7 @@ export async function POST(request: Request) {
       event: 'daily_job.completed',
       jobKey: 'activity-auto-checkin',
       ...result,
+      topicActivityV2Rewards: topicV2RewardResult,
       durationMs: Date.now() - startedAt,
     })
     return NextResponse.json({ ok: true, jobKey: 'activity-auto-checkin', ...result }, { headers: { 'Cache-Control': 'no-store' } })

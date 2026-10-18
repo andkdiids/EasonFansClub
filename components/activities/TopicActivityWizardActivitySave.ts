@@ -32,6 +32,8 @@ export function verifyWizardActivityReadback(activity: Record<string, unknown> |
     || activity.title !== payload.title || activity.description !== payload.description
     || activity.startsAt !== payload.startsAt || activity.endsAt !== payload.endsAt
     || activity.participationRule !== payload.participationRule || activity.participationMode !== 'COMMENT'
+    || (activity.rewardGrantMode ?? 'IMMEDIATE') !== payload.rewardGrantMode || (activity.rewardGrantAt ?? null) !== payload.rewardGrantAt
+    || (activity.rewardGrantMode ?? 'IMMEDIATE') !== payload.rewardGrantMode || (activity.rewardGrantAt ?? null) !== payload.rewardGrantAt
     || activity.allowImageAttachments !== payload.allowImageAttachments) throw new Error('活动回读内容不一致，请在活动管理中核对；不会重新创建')
 }
 

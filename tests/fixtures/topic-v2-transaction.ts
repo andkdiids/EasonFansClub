@@ -13,18 +13,42 @@ export function fixture(entries = [rewardEntry('weibo')]) {
   program.test = { ...program.test, enabled: true, id: 'test-one', title: '知识测试', mode: 'KNOWLEDGE', allowRetake: true,
     questions: [{ id: 'q1', prompt: '题目', points: 2, options: [{ id: 'yes', label: '正确' }, { id: 'no', label: '错误' }], correctOptionId: 'yes' }],
     results: [{ id: 'low', title: '继续练习', description: '0分', scoreMin: 0, scoreMax: 1 }, { id: 'high', title: '完成', description: '2分', scoreMin: 2, scoreMax: 2 }] }
-  const activity: any = { id: 'activity-one', type: 'TOPIC_ACTIVITY', title: '本地测试活动', status: 'PUBLISHED', startsAt: new Date('2026-10-01T00:00:00Z'), endsAt: new Date('2026-10-31T00:00:00Z'),
+  const activity: any = { id: 'activity-one', type: 'TOPIC_ACTIVITY', title: '本地测试活动', status: 'PUBLISHED', startsAt: new Date('2026-10-01T00:00:00Z'), endsAt: new Date('2026-10-31T00:00:00Z'), rewardGrantMode: 'IMMEDIATE', rewardGrantAt: null,
     participationMode: 'COMMENT', formSchema: null, allowImageAttachments: true, activityPostId: 'post-one', topicProgram: program, ActivityPost: { authorId: 'admin-one' } }
   const state: any = { submissions: [], grants: [], participations: [], reviews: [], audits: [], logs: [], votes: [], attempts: [],
     entries: entries.map((entry) => ({ id: entry.id, activityId: activity.id, platformKey: entry.platformKey, config: structuredClone(entry), enabled: true })), assets: [], forms: [], points: 100, floor: 0 }
   const queries: string[] = []
+  function comparable(value: any) {
+    if (value instanceof Date) return value.getTime()
+    if (typeof value === 'number') return value
+    if (typeof value === 'string') {
+      const parsed = new Date(value).getTime()
+      return Number.isFinite(parsed) ? parsed : value
+    }
+    return value
+  }
   function matches(row: any, where: any = {}): boolean {
     return Object.entries(where).every(([key, value]: [string, any]) => {
+      if (key === 'OR') return value.some((branch: any) => matches(row, branch))
+      if (key === 'AND') return value.every((branch: any) => matches(row, branch))
+      if (key === 'Activity') return matches(activity, value.is || value)
       if (['activityId_userId', 'activityId_pollId_userId', 'activityId_userId_requestKey'].includes(key)) return matches(row, value)
       if (key === 'Comment') return Boolean(row.Comment) && matches(row.Comment, value.is || value)
       if (value && typeof value === 'object' && !(value instanceof Date)) {
+        if (Array.isArray(value.path) || typeof value.path === 'string') {
+          const segments = Array.isArray(value.path)
+            ? value.path
+            : value.path.replace(/^\$\./, '').split('.').filter(Boolean)
+          let actual = row[key]
+          for (const segment of segments) actual = actual && actual[segment]
+          return 'equals' in value ? actual === value.equals : Boolean(actual)
+        }
         if ('not' in value) return row[key] !== value.not
         if ('in' in value) return value.in.includes(row[key])
+        if ('lte' in value) return row[key] != null && value.lte != null && comparable(row[key]) <= comparable(value.lte)
+        if ('lt' in value) return row[key] != null && value.lt != null && comparable(row[key]) < comparable(value.lt)
+        if ('gte' in value) return row[key] != null && value.gte != null && comparable(row[key]) >= comparable(value.gte)
+        if ('gt' in value) return row[key] != null && value.gt != null && comparable(row[key]) > comparable(value.gt)
         return matches(row[key] || {}, value)
       }
       return (row[key] ?? null) === value
@@ -65,7 +89,7 @@ export function fixture(entries = [rewardEntry('weibo')]) {
   }
   function submission(id: string, entry = entries[0]) {
     const row = { id, activityId: activity.id, userId: 'user-one', commentId: 'comment-' + id, rewardEntryId: entry.id, rewardSnapshot: structuredClone(entry), submittedAt: instant,
-      status: 'PENDING', commentDeletedAt: null, Comment: { postId: 'post-one', parentId: null, isDeleted: false } }
+      status: 'PENDING', commentDeletedAt: null, Comment: { postId: 'post-one', parentId: null, isDeleted: false }, Activity: activity }
     state.submissions.push(row); return row
   }
   async function run<T>(work: () => Promise<T>): Promise<T> {

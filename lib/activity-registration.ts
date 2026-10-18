@@ -5,6 +5,7 @@ import { parseActivityDateInput } from '@/lib/activity'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { cancelUndrawnActivityLotteriesInTransaction } from '@/lib/activity-lottery'
 import { grantBadgeWithTransaction } from '@/lib/badge-service'
+import { hasValidActivityParticipation } from '@/lib/activity-participation'
 import { sanitizeText } from '@/lib/security'
 import { ACTIVITY_REGISTRATION_CANCEL_CLOSED, activityRegistrationCancelClosedMessage, activityRegistrationQuestionTypeValues, isActivityRegistrationCancellationOpen } from '@/lib/activity-registration-shared'
 import { awardRegistrationFee } from '@/lib/registration-fee'
@@ -1013,7 +1014,7 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
   await tx.$queryRaw`SELECT \`id\` FROM \`Activity\` WHERE \`id\` = ${initial.activityId} FOR UPDATE`
   await tx.$queryRaw`SELECT \`id\` FROM \`ActivityRegistration\` WHERE \`id\` = ${registrationId} FOR UPDATE`
   const registration = await tx.activityRegistration.findUnique({ where: { id: registrationId }, select: verificationRegistrationSelect })
-  const activity = await tx.activity.findUnique({ where: { id: initial.activityId }, select: { id: true, title: true, status: true, endsAt: true, ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true, badgeGrantAt: true } } } })
+  const activity = await tx.activity.findUnique({ where: { id: initial.activityId }, select: { id: true, title: true, status: true, verificationMode: true, endsAt: true, ActivityReward: { where: { enabled: true }, select: { id: true, type: true, badgeId: true, badgeGrantAt: true } } } })
   if (!registration || !activity) return { processed: false, reason: 'NOT_FOUND' as const }
   if (activity.status === 'CANCELLED') return { processed: false, reason: 'ACTIVITY_CANCELLED' as const }
   if (registration.status === 'CANCELLED') return { processed: false, reason: 'CANCELLED' as const }
@@ -1022,10 +1023,11 @@ export async function autoCheckInActivityRegistrationInTransaction(tx: Prisma.Tr
   const linkedMaterial = await redeemLinkedMaterialInTransaction(tx, registration, '', 'ACTIVITY_AUTO_CHECK_IN', now)
   await tx.activityRegistration.update({ where: { id: registration.id }, data: { verifiedAt: now, checkedInAt: now, verifiedById: null, verificationMethod: null, checkInSource: 'AUTO_AFTER_ACTIVITY_END' }, select: { id: true } })
   const reward = activity.ActivityReward.find((item) => item.type === 'BADGE')
+  const activityParticipationEligible = hasValidActivityParticipation({ ...registration, verifiedAt: now, checkedInAt: now, checkInSource: 'AUTO_AFTER_ACTIVITY_END' }, activity.endsAt, now, activity.verificationMode, activity.status)
   let rewardGranted = false
   let rewardBadgeId: string | null = null
   let badgeGrants: Array<{ badgeId: string; recordId: string }> = []
-  if (reward && !reward.badgeGrantAt) {
+  if (reward && !reward.badgeGrantAt && activityParticipationEligible) {
     rewardBadgeId = reward.badgeId
     const granted = await grantBadgeWithTransaction(tx, {
       userId: registration.userId,

@@ -271,7 +271,7 @@ export const BADGE_RULE_REGISTRY = {
   ACTIVITY_PARTICIPATION: {
     group: '活动',
     label: '参加指定活动',
-    dataDescription: '完成指定活动的有效人工或二维码现场核销；报名和活动结束后的自动核销不计入',
+    dataDescription: '无核销要求的活动在结束后以有效报名计入；需要核销的活动仅计入有效人工或二维码现场核销，活动结束后的自动核销不计入',
     metricLoader: 'ACTIVITY_PARTICIPATION',
     supportedOperators: ADMIN_BADGE_RULE_OPERATORS,
     events: [],
@@ -279,7 +279,7 @@ export const BADGE_RULE_REGISTRY = {
     targetKind: 'ACTIVITY',
     supportsHistoricalBackfill: false,
     supportsRetentionWhileEligible: true,
-    historicalBasis: '按指定活动中有效人工或二维码现场核销记录判断；活动结束自动核销不计入',
+    historicalBasis: '按指定活动的真实资格判断：无核销要求时需活动结束且报名仍为 ACTIVE；需要核销时仅认有效人工或二维码现场核销，活动结束自动核销不计入',
     defaultAcquisitionDescription: () => '参加指定活动后获得',
   },
   TOPIC_ACTIVITY_PARTICIPATION_COUNT: {

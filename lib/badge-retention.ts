@@ -170,7 +170,7 @@ async function isActivityParticipationSatisfied(userId: string, config: Record<s
   if (!activityId) return false
   const activity = await prisma.activity.findUnique({
     where: { id: activityId },
-    select: { id: true, status: true, endsAt: true },
+    select: { id: true, status: true, endsAt: true, verificationMode: true },
   })
   if (!activity || activity.status !== 'PUBLISHED') return false
   const registration = await prisma.activityRegistration.findFirst({
@@ -178,12 +178,11 @@ async function isActivityParticipationSatisfied(userId: string, config: Record<s
       activityId,
       userId,
       status: 'ACTIVE',
-      checkInSource: { in: ['MANUAL', 'QR'] },
-      verifiedAt: { not: null },
+      ...(activity.verificationMode === 'NONE' ? {} : { checkInSource: { in: ['MANUAL', 'QR'] as const }, verifiedAt: { not: null } }),
     },
     select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true },
   })
-  return registration ? hasValidActivityParticipation(registration, activity.endsAt, now) : false
+  return registration ? hasValidActivityParticipation(registration, activity.endsAt, now, activity.verificationMode, activity.status) : false
 }
 
 /** Recompute one rule against live business data. Never reads cached metrics. */

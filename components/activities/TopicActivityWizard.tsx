@@ -14,6 +14,7 @@ import { saveWizardProgram } from './TopicActivityWizardProgramSave'
 import { saveWizardLottery } from './TopicActivityWizardLotterySave'
 import { prepareWizardPublishGate, publishWizardActivity } from './TopicActivityWizardPublish'
 import { topicWizardEditInitialState, getTopicWizardEditChanges, saveTopicWizardEdits, type EditPendingVerification, type TopicWizardEditBaseline } from './TopicActivityWizardEdit'
+import { TopicActivityRewardReleaseEditor } from './TopicActivityRewardReleaseEditor'
 import { uploadActivityImage } from './ActivityImageUploader'
 import { storedActivityImageUrl } from '@/lib/activity-image-url'
 import { formatBeijingDateTimeInput } from '@/lib/registration-availability'
@@ -511,6 +512,7 @@ export function TopicActivityWizard({ open, onClose, badgeOptions = [], onOpenEd
     {step === 2 ? <TopicActivityWizardTestEditor value={draft.program.test} disabled={saveBusy || (!isEdit && programFrozen)} onUploadingChange={testImageUploadChanged} hasPreviousAttempts={isEdit && (editBaseline?.testParticipants || 0) > 0} onChange={(test) => update((current) => ({ ...current, program: { ...current.program, enabled: current.program.enabled || test.enabled || current.program.entries.some((entry) => entry.enabled) || current.program.fixedReward.enabled || current.program.medal.enabled || current.program.poll.enabled, test } }))} /> : null}
 
     {step === 3 ? <div className="space-y-5">
+      <fieldset disabled={!isEdit && submitted}><TopicActivityRewardReleaseEditor value={draft.activity} onChange={(value) => update((current) => ({ ...current, activity: { ...current.activity, ...value } }))} /></fieldset>
       <fieldset disabled={programFrozen} className="space-y-3 border border-[var(--border)] p-3"><legend className="px-1 font-bold">A. 参与奖励</legend>
         <p className="text-xs">平台任务审核通过后按入口独立发放挂号费，现有规则要求每入口至少 1；不会增加抽奖次数。</p>
         {draft.program.entries.filter((entry) => entry.enabled).map((entry) => <Field key={entry.id} label={`${entry.platformName}挂号费奖励`}><input className={inputClass} type="number" min={1} max={2000000000} value={entry.points} onChange={(event) => update((current) => ({ ...current, program: { ...current.program, entries: current.program.entries.map((item) => item.id === entry.id ? { ...item, points: Number(event.target.value) } : item) } }))} /></Field>)}

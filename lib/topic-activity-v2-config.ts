@@ -112,9 +112,15 @@ export type TopicActivityV2TestResult = {
   id: string
   title: string
   description: string
+  descriptionVariants?: Array<{ id: string; text: string }>
   imageUrl?: string
   scoreMin?: number
   scoreMax?: number
+}
+
+/** A legacy identity depends on the stable result ID, never its text or position. */
+export function topicResultDescriptionVariants(result: Pick<TopicActivityV2TestResult, 'id' | 'description' | 'descriptionVariants'>) {
+  return result.descriptionVariants ?? [{ id: `legacy-${result.id}-description`, text: result.description }]
 }
 
 export type TopicActivityV2Poster = {
@@ -474,7 +480,21 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
     if (!result) return `test.results[${index}]格式不正确`
     const resultId = identifier(result.id, `test.results[${index}].id`)
     const resultTitle = requiredText(result, 'title', MAX_TITLE_LENGTH)
-    const resultDescription = requiredText(result, 'description', MAX_DESCRIPTION_LENGTH)
+    let descriptionVariants: TopicActivityV2TestResult['descriptionVariants']
+    if (has(result, 'descriptionVariants')) {
+      if (!Array.isArray(result.descriptionVariants)) return `test.results[${index}].descriptionVariants格式不正确`
+      descriptionVariants = []
+      const variantIds = new Set<string>()
+      for (const raw of result.descriptionVariants) {
+        const variant = record(raw)
+        const id = identifier(variant?.id, 'descriptionVariant.id')
+        if (!variant || !id || variantIds.has(id) || typeof variant.text !== 'string' || variant.text.length > MAX_DESCRIPTION_LENGTH) return `test.results[${index}]结果说明 ID 或文本无效`
+        variantIds.add(id)
+        if (variant.text.trim()) descriptionVariants.push({ id, text: variant.text.trim() })
+      }
+      if (!descriptionVariants.length) return `test.results[${index}]至少保留一条非空结果说明`
+    }
+    const resultDescription = descriptionVariants?.[0].text ?? requiredText(result, 'description', MAX_DESCRIPTION_LENGTH)
     if (!resultId || resultId.length > 64 || !resultTitle || !resultDescription) return `test.results[${index}]字段不完整`
     const imageUrl = has(result, 'imageUrl') && result.imageUrl !== undefined && result.imageUrl !== null ? text(result, 'imageUrl', '', 2_048, true) : undefined
     if (imageUrl === null) return `test.results[${index}].imageUrl格式不正确`
@@ -484,7 +504,7 @@ function normalizeTest(value: unknown, ids: Set<string>): TopicActivityV2Test | 
     if (scoreMin === undefined || scoreMax === undefined) return `test.results[${index}]分数区间格式不正确`
     if (scoreMin !== null && scoreMax !== null && scoreMin > scoreMax) return `test.results[${index}]分数区间无效`
     resultIds.push(resultId)
-    results.push({ id: resultId, title: resultTitle, description: resultDescription, ...(imageUrl === undefined ? {} : { imageUrl }), ...(scoreMin === null ? {} : { scoreMin }), ...(scoreMax === null ? {} : { scoreMax }) })
+    results.push({ id: resultId, title: resultTitle, description: resultDescription, ...(descriptionVariants ? { descriptionVariants } : {}), ...(imageUrl === undefined ? {} : { imageUrl }), ...(scoreMin === null ? {} : { scoreMin }), ...(scoreMax === null ? {} : { scoreMax }) })
   }
   if (!unique(resultIds)) return 'test.results存在重复 ID'
   const resultIdError = addScopedIds(ids, resultIds, 'test.results')
@@ -705,7 +725,7 @@ export function publicTopicActivityV2Program(config: TopicActivityV2Program): To
         points: question.points,
         options: question.options.map((option) => ({ id: option.id, label: option.label })),
       })),
-      results: config.test.results.map((result) => ({ ...result })),
+      results: config.test.results.map(({ descriptionVariants: _variants, ...result }) => { void _variants; return result }),
       poster: { ...config.test.poster },
     },
   }
