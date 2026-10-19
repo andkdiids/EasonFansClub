@@ -5,7 +5,7 @@ import path from 'node:path'
 /** Isolated QA only. No inherited URL/config, no native SQL argv, no production. */
 export function isolatedMysqlInvocation(client: string, database: string, sql: string) {
   assert.ok(path.isAbsolute(client), 'explicit local MySQL executable required')
-  assert.match(database, /^ecfc_(?:topic_v2_acceptance_202610(?:13|14b?)|lottery_integration_[a-z_]+)$/)
+  assert.match(database, /^ecfc_(?:topic_v2_acceptance_202610(?:13|14b?|19)|lottery_integration_[a-z_]+)$/)
   return { client, args: ['--no-defaults','--protocol=TCP','--host=127.0.0.1','--port=33307',
     '--user=root','--default-character-set=utf8mb4','--batch','--raw','--skip-column-names',database],
     input: Buffer.from(sql,'utf8') }
