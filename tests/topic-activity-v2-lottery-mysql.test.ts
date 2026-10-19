@@ -8,9 +8,7 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
   assert.ok(supplied, 'explicit isolated URL required')
   const url = new URL(supplied)
   assert.equal(url.protocol, 'mysql:'); assert.equal(url.hostname, '127.0.0.1'); assert.equal(url.port, '33307')
-  assert.ok(['/ecfc_topic_v2_acceptance_20261013', '/ecfc_topic_v2_acceptance_20261014', '/ecfc_topic_v2_acceptance_20261014b'].includes(url.pathname)); assert.equal(url.search, '')
-  const client = process.env.TOPIC_V2_MYSQL_CLIENT
-  assert.ok(client, 'explicit isolated MySQL CLI required for session-scoped DDL')
+  assert.ok(['/ecfc_topic_v2_acceptance_20261013', '/ecfc_topic_v2_acceptance_20261014', '/ecfc_topic_v2_acceptance_20261014b', '/ecfc_topic_v2_acceptance_20261019'].includes(url.pathname)); assert.equal(url.search, '')
   process.env.DATABASE_URL = supplied
   const oldKeys = process.env.TOPIC_LOTTERY_ADDRESS_KEYS, oldActive = process.env.TOPIC_LOTTERY_ADDRESS_ACTIVE_KEY_ID
   process.env.TOPIC_LOTTERY_ADDRESS_KEYS = JSON.stringify({ qa: Buffer.alloc(32, 7).toString('base64') })
@@ -34,6 +32,8 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
       const before = await prisma.$queryRawUnsafe('SELECT * FROM PointLog ORDER BY id')
       const grants = await prisma.$queryRawUnsafe('SELECT * FROM TopicActivityRewardGrant ORDER BY id')
       if (Number(present[0].count) === 0) {
+        const client = process.env.TOPIC_V2_MYSQL_CLIENT
+        assert.ok(client, 'explicit isolated MySQL CLI required when lottery migrations must be applied')
         for (const { sql } of readTopicLotteryMigrationPhases()) {
           runIsolatedMysqlUtf8(client, url.pathname.slice(1), sql)
         }
@@ -45,7 +45,7 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
     for (const user of [admin, ...users]) await prisma.user.create({ data: { id: user, username: user, usernameNormalized: user, nickname: '隔离测试用户', passwordHash: 'not-a-real-password', role: user === admin ? 'ADMIN' : 'USER',
       Profile: { create: { displayName: '隔离测试用户' } } } })
     const board = await prisma.board.create({ data: { name: id('board'), slug: id('board') } })
-    const scenario = async (options: { quantity?: number; mode?: 'AUTO' | 'MANUAL'; enabled?: boolean } = {}) => {
+  const scenario = async (options: { quantity?: number; mode?: 'AUTO' | 'MANUAL'; enabled?: boolean; sourceCount?: number } = {}) => {
       const activityId = id('activity')
       const post = await prisma.post.create({ data: { authorId: admin, boardId: board.id, title: '隔离抽奖主帖', content: '仅测试' } })
       await prisma.activity.create({ data: { id: activityId, title: '隔离抽奖活动', description: '仅本地', type: 'TOPIC_ACTIVITY', status: 'PUBLISHED', startsAt: new Date('2026-10-01T00:00:00Z'), endsAt: new Date('2026-10-31T00:00:00Z'), activityPostId: post.id, allowImageAttachments: true } })
@@ -54,7 +54,7 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
       program.entries = [0, 1, 2].map((index) => ({ id: id('entry'), platformKey: 'platform-' + index, platformName: '平台' + index, title: '截图任务', instructions: '本地测试截图', materialRequirement: '截图',
         minImages: 1, maxImages: 1, points: 96, enabled: true, sortOrder: index, startsAt: null, endsAt: null, allowResubmit: true }))
       await v2.saveTopicActivityV2Program(activityId, admin, program)
-      const config = { ...defaultTopicLotteryConfig(), enabled: options.enabled ?? true, mode: options.mode || 'MANUAL', sourceEntryIds: program.entries.map((entry) => entry.id),
+    const config = { ...defaultTopicLotteryConfig(), enabled: options.enabled ?? true, mode: options.mode || 'MANUAL', sourceEntryIds: program.entries.slice(0, options.sourceCount ?? program.entries.length).map((entry) => entry.id),
         drawAt: drawAt.toISOString(), eligibilityDeadline: cutoff.toISOString(), addressDeadline: deadline.toISOString(), prizes: [{ id: id('prize'), name: '隔离实物奖品', description: '非生产奖品', imageUrl: null, quantity: options.quantity || 1, sortOrder: 0 }] }
       await core.saveTopicLotteryConfig(activityId, admin, config, at)
       return { activityId, program, config }
@@ -134,12 +134,65 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
       await core.drawDueTopicLotteries({ activityId: s.activityId, now: drawAt })
       assert.equal((await winners(s)).length, 1)
     })
-    await t.test('rules/inventory become immutable after real submitted screenshots', async () => {
-      const s = await scenario(); await submit(s)
-      await assert.rejects(core.saveTopicLotteryConfig(s.activityId, admin, { ...s.config, prizes: [{ ...s.config.prizes[0], quantity: 5 }] }, at), { code: 'LOTTERY_RULES_LOCKED' })
-      assert.equal((await prisma.lotteryPrize.findUniqueOrThrow({ where: { id: s.config.prizes[0].id } })).quantity, 1)
-      const changed = structuredClone(s.program); changed.entries[0].maxImages = 0; changed.entries[0].minImages = 0
-      await assert.rejects(v2.saveTopicActivityV2Program(s.activityId, admin, changed), { code: 'LOTTERY_SOURCE_RULES_LOCKED' })
+    await t.test('participants preserve rules and existing stock while prize presentation/additions remain editable until draw freeze', async () => {
+      const s = await scenario(); const pending = await submit(s)
+      const original = await prisma.lotteryPrize.findUniqueOrThrow({ where: { id: s.config.prizes[0].id } })
+      const originalSlots = await prisma.topicActivityLotterySlot.findMany({ where: { prizeId: original.id }, orderBy: { slotNumber: 'asc' }, select: { id: true, slotNumber: true } })
+      const addedPrize = { id: id('prize-added'), name: 'added test prize', description: 'added after participation without changing existing stock', imageUrl: '/images/og-default.png', quantity: 2, sortOrder: 1 }
+      const updatedConfig = { ...s.config, title: 'updated display title', prizes: [{ ...s.config.prizes[0], name: 'updated prize name', description: 'presentation update only', imageUrl: '/images/og-default.png' }, addedPrize] }
+      const updatedAt = new Date(drawAt.getTime() + 1)
+
+      await core.saveTopicLotteryConfig(s.activityId, admin, updatedConfig, updatedAt)
+      const savedView = await core.getAdminTopicLotteryView(s.activityId, updatedAt)
+      assert.deepEqual(savedView.config, updatedConfig, 'a fresh admin read returns the persisted configuration')
+      assert.equal(savedView.configLocked, true)
+      const updatedPrize = await prisma.lotteryPrize.findUniqueOrThrow({ where: { id: original.id } })
+      assert.equal(updatedPrize.id, original.id, 'the prize identity remains stable for existing references')
+      assert.equal(updatedPrize.name, 'updated prize name')
+      assert.equal(updatedPrize.quantity, original.quantity)
+      assert.equal(updatedPrize.remaining, original.remaining)
+      assert.equal(updatedPrize.sortOrder, original.sortOrder)
+      assert.deepEqual(await prisma.topicActivityLotterySlot.findMany({ where: { prizeId: original.id }, orderBy: { slotNumber: 'asc' }, select: { id: true, slotNumber: true } }), originalSlots, 'existing slot ids and numbering remain unchanged')
+      assert.equal(await prisma.topicActivitySubmission.count({ where: { activityId: s.activityId } }), 1, 'participant evidence is retained')
+
+      const changedBeforeDraw = structuredClone(s.program)
+      changedBeforeDraw.entries[0].minImages = 0; changedBeforeDraw.entries[0].maxImages = 0
+      await assert.rejects(v2.saveTopicActivityV2Program(s.activityId, admin, changedBeforeDraw), { code: 'LOTTERY_SOURCE_RULES_LOCKED' })
+      assert.deepEqual((await prisma.activity.findUniqueOrThrow({ where: { id: s.activityId }, select: { topicProgram: true } })).topicProgram, s.program,
+        'source-rule rejection before draw preserves the saved V2 program')
+
+      const newPrize = await prisma.lotteryPrize.findUniqueOrThrow({ where: { id: addedPrize.id } })
+      assert.equal(newPrize.quantity, 2)
+      assert.equal(await prisma.topicActivityLotterySlot.count({ where: { prizeId: addedPrize.id } }), 2)
+
+      await assert.rejects(core.saveTopicLotteryConfig(s.activityId, admin, { ...updatedConfig, prizes: [{ ...updatedConfig.prizes[0], quantity: 5 }, addedPrize] }, updatedAt), { code: 'LOTTERY_RULES_LOCKED' })
+      await assert.rejects(core.saveTopicLotteryConfig(s.activityId, admin, { ...updatedConfig, prizes: [addedPrize] }, updatedAt), { code: 'LOTTERY_RULES_LOCKED' })
+      await assert.rejects(core.saveTopicLotteryConfig(s.activityId, admin, { ...updatedConfig, sourceEntryIds: [id('different-source')] }, updatedAt), { code: 'LOTTERY_RULES_LOCKED' })
+      assert.deepEqual((await core.getAdminTopicLotteryView(s.activityId, updatedAt)).config, updatedConfig, 'rejected updates leave the saved config unchanged')
+      assert.equal(await prisma.topicActivitySubmission.count({ where: { activityId: s.activityId } }), 1, 'rejected updates retain participation evidence')
+      assert.deepEqual(await prisma.topicActivityLotterySlot.findMany({ where: { prizeId: original.id }, orderBy: { slotNumber: 'asc' }, select: { id: true, slotNumber: true } }), originalSlots)
+
+      await approve(pending.submission.id, updatedAt)
+      await draw(s, updatedAt)
+
+      await assert.rejects(core.saveTopicLotteryConfig(s.activityId, admin, { ...updatedConfig, prizes: [{ ...updatedConfig.prizes[0], name: 'immutable after draw' }, addedPrize] }, updatedAt), { code: 'LOTTERY_DRAW_FROZEN' })
+      assert.equal((await prisma.lotteryPrize.findUniqueOrThrow({ where: { id: original.id } })).name, 'updated prize name', 'frozen winner-facing prize data stays at the snapshot value')
+      assert.equal(await prisma.topicActivitySubmission.count({ where: { activityId: s.activityId } }), 1)
+      const persistedProgram = (await prisma.activity.findUniqueOrThrow({ where: { id: s.activityId }, select: { topicProgram: true } })).topicProgram
+      const afterDrawMutations: Array<(program: typeof s.program) => void> = [
+        (program) => { program.entries[0].maxImages = 0; program.entries[0].minImages = 0 },
+        (program) => { program.entries[0].enabled = false },
+        (program) => { program.entries[0].allowResubmit = false },
+        (program) => { program.entries[0].startsAt = '2026-10-20T00:00:00.000Z' },
+        (program) => { program.entries[0].platformKey = 'different-platform' },
+      ]
+      for (const mutate of afterDrawMutations) {
+        const changed = structuredClone(s.program)
+        mutate(changed)
+        await assert.rejects(v2.saveTopicActivityV2Program(s.activityId, admin, changed), { code: 'LOTTERY_SOURCE_RULES_LOCKED' })
+        assert.deepEqual((await prisma.activity.findUniqueOrThrow({ where: { id: s.activityId }, select: { topicProgram: true } })).topicProgram, persistedProgram,
+          'rejected post-draw source-rule changes preserve the saved V2 program')
+      }
       const activity = await prisma.activity.findUniqueOrThrow({ where: { id: s.activityId } })
       const window = { startsAt: activity.startsAt, endsAt: activity.endsAt, type: activity.type }
       const editWindow = (next: typeof window) => v2.withTopicV2Transaction(async (tx) => {
@@ -151,6 +204,7 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
       await assert.rejects(editWindow({ ...window, startsAt: new Date(at.getTime() + 1) }), { code: 'LOTTERY_ACTIVITY_WINDOW_LOCKED' })
       await assert.rejects(editWindow({ ...window, endsAt: new Date(at.getTime() - 1) }), { code: 'LOTTERY_ACTIVITY_WINDOW_LOCKED' })
       await assert.rejects(editWindow({ ...window, endsAt: new Date('2026-11-30T00:00:00Z') }), { code: 'LOTTERY_ACTIVITY_WINDOW_LOCKED' })
+      // The standard admin activity PATCH uses this same guard for activity-level eligibility rules.
       for (const rule of [{ allowImageAttachments: false }, { participationMode: 'FORM' as const }, { formSchema: { fields: [{ id: 'new-required-field', required: true }] } }]) {
         await assert.rejects(v2.withTopicV2Transaction(async (tx) => {
           await v2.lockTopicV2Activity(tx, s.activityId)
@@ -158,6 +212,16 @@ test('Topic V2 physical lottery: isolated real MySQL eligibility, draw and priva
         }), { code: 'LOTTERY_ACTIVITY_WINDOW_LOCKED' })
       }
       assert.deepEqual((await prisma.activity.findUniqueOrThrow({ where: { id: s.activityId } })).endsAt, activity.endsAt)
+    })
+    await t.test('an entry outside the frozen lottery source remains editable', async () => {
+      const s = await scenario({ sourceCount: 1 })
+      const made = await submit(s, users[0], 0); await approve(made.submission.id)
+      const changed = structuredClone(s.program)
+      changed.entries[1].maxImages = 5
+      await v2.saveTopicActivityV2Program(s.activityId, admin, changed)
+      const saved = await prisma.activity.findUniqueOrThrow({ where: { id: s.activityId }, select: { topicProgram: true } })
+      assert.equal((saved.topicProgram as typeof s.program).entries[0].maxImages, s.program.entries[0].maxImages)
+      assert.equal((saved.topicProgram as typeof s.program).entries[1].maxImages, 5)
     })
     await t.test('database unique qualification and prize slot constraints enforce invariants', async () => {
       const s = await scenario(); const made = await submit(s); await approve(made.submission.id)

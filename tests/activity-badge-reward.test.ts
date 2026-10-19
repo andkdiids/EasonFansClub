@@ -48,6 +48,18 @@ test('活动奖励和参加活动规则共用幂等发放扫描器，并保留�
   assert.match(registration, /必须设置自动发放时间/)
 })
 
+test('无核销活动可配置活动参与勋章，编辑器不清空或禁用该配置', () => {
+  const manager = read('app/admin/activities/ActivityAdminManager.tsx')
+  const registration = read('lib/activity-registration.ts')
+  const route = read('app/api/admin/activities/[activityId]/route.ts')
+  assert.match(manager, /活动参与勋章（可选）/)
+  assert.match(manager, /不启用核销时，活动结束后向有效报名用户发放/)
+  assert.doesNotMatch(manager, /form\.verificationMode === 'NONE'\}\s*className/u)
+  assert.doesNotMatch(manager, /if \(mode === 'NONE'\) \{ setRewardBadgeId/u)
+  assert.doesNotMatch(registration, /配置活动奖励前，请先选择手动核销或扫码核销/u)
+  assert.doesNotMatch(route, /该活动已配置隐藏奖励，请先清除奖励或选择核销方式/u)
+})
+
 test('发放时间编辑、启动补偿和签到后触发都走全局扫描', () => {
   const server = read('server.ts')
   const dailyJob = read('app/api/internal/daily-jobs/activity-auto-checkin/route.ts')

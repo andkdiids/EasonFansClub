@@ -660,7 +660,9 @@ export async function syncActivityRegistrationQuestions(tx: Prisma.TransactionCl
   if (hiddenIds.length) await tx.activityRegistrationQuestion.updateMany({ where: { activityId, id: { in: hiddenIds } }, data: { isActive: false } })
 }
 
-export async function syncActivityReward(tx: Prisma.TransactionClient, activityId: string, rawReward: unknown, verificationMode: ActivityVerificationModeValue) {
+export async function syncActivityReward(tx: Prisma.TransactionClient, activityId: string, rawReward: unknown, _verificationMode: ActivityVerificationModeValue) {
+  // Activity reward configuration is valid even when onsite verification is disabled.
+  void _verificationMode
   if (rawReward === undefined) return
   const rewardRecord = rawReward && typeof rawReward === 'object' && !Array.isArray(rawReward) ? rawReward as Record<string, unknown> : null
   const badgeId = typeof rawReward === 'string' ? rawReward.trim() : typeof rewardRecord?.badgeId === 'string' ? rewardRecord.badgeId.trim() : ''
@@ -669,7 +671,6 @@ export async function syncActivityReward(tx: Prisma.TransactionClient, activityI
     await tx.activityReward.deleteMany({ where: { activityId, type: 'BADGE' } })
     return
   }
-  if (verificationMode === 'NONE') throw new ActivityConfigurationError('配置活动奖励前，请先选择手动核销或扫码核销')
   const existing = await tx.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { id: true, badgeId: true, badgeGrantAt: true } })
   const hasGrantAt = Boolean(rewardRecord && Object.prototype.hasOwnProperty.call(rewardRecord, 'badgeGrantAt'))
   const rawGrantAt = hasGrantAt ? rewardRecord?.badgeGrantAt : undefined

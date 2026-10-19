@@ -103,11 +103,11 @@ test('real result editor/runner and reward settings persist correctly on desktop
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
       const address = server.address(); assert.ok(address && typeof address !== 'string')
       const base = 'http://127.0.0.1:' + address.port
-      const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
+      const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
       let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
       try {
         assert.equal((await fetch(base)).status, 200)
-        browser = await chromium.launch({ headless: true, ...(existsSync(edge) ? { executablePath: edge } : {}) })
+        browser = await chromium.launch({ headless: true, ...(existsSync(chrome) ? { executablePath: chrome } : {}) })
         const page = await browser.newPage({ viewport: { width, height: 900 } })
         // Raw fixture JavaScript avoids tsx helper references in serialized browser callbacks.
         await page.addInitScript({ content: "Object.defineProperty(navigator,'canShare',{configurable:true,value:function(){return true}});Object.defineProperty(navigator,'share',{configurable:true,value:async function(value){const file=value.files[0];window.sharedPng=Array.from(new Uint8Array(await file.arrayBuffer()))}});" })

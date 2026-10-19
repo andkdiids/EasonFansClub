@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import { normalizeActivityInput } from '@/lib/activity-validation'
-import { getActivityRegistrationState, isActivityRegistrationCancellationOpen } from '@/lib/activity-registration'
+import { getActivityRegistrationState, isActivityRegistrationCancellationOpen, syncActivityReward } from '@/lib/activity-registration'
 
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
@@ -37,6 +37,12 @@ test('活动正式发布只要求标题、类型、开始/结束时间和说明'
   assert.equal(result.value.isFeatured, false)
   assert.equal(result.value.isPinned, false)
   assert.equal(result.value.sortOrder, 0)
+})
+
+test('普通活动编辑载荷不能通过 topicProgram 覆盖抽奖资格来源配置', () => {
+  const result = normalizeActivityInput(publishedActivity({ topicProgram: { entries: [{ id: 'replacement-source', maxImages: 0 }] } }))
+  assert.equal(result.valid, true)
+  if (result.valid) assert.equal('topicProgram' in result.value, false)
 })
 
 test('正式发布的必填校验给出逐项提示，可选字段为空不会阻断', () => {
@@ -83,6 +89,24 @@ test('报名状态只处理独立报名窗口和有效名额', () => {
   assert.deepEqual(getActivityRegistrationState({ ...base, signupLimit: 0 }, 999, new Date('2026-08-20T00:00:00.000Z')), { state: 'AVAILABLE', canRegister: true })
   assert.deepEqual(getActivityRegistrationState(base, 0, new Date('2026-09-01T10:00:00.000Z')), { state: 'AVAILABLE', canRegister: true })
   assert.deepEqual(getActivityRegistrationState({ ...base, registrationEndAt: '2026-09-05T00:00:00.000Z' }, 0, new Date('2026-09-05T00:00:00.000Z')), { state: 'CLOSED', canRegister: false })
+})
+
+test('无核销活动允许保存有明确发放时间的活动勋章配置', async () => {
+  const saved: { value: Record<string, unknown> | null } = { value: null }
+  const tx = {
+    activityReward: {
+      findUnique: async () => null,
+      deleteMany: async () => ({ count: 0 }),
+      upsert: async (input: { create: Record<string, unknown> }) => { saved.value = input.create; return input.create },
+    },
+    badge: { findUnique: async () => ({ id: 'badge-participation', isEnabled: true, isActive: true }) },
+  } as unknown as Parameters<typeof syncActivityReward>[0]
+
+  await syncActivityReward(tx, 'activity-without-checkin', { badgeId: 'badge-participation', enabled: true, badgeGrantAt: '2026-10-31T12:30' }, 'NONE')
+  assert.equal(saved.value?.activityId, 'activity-without-checkin')
+  assert.equal(saved.value?.badgeId, 'badge-participation')
+  assert.equal(saved.value?.enabled, true)
+  assert.ok(saved.value?.badgeGrantAt instanceof Date)
 })
 
 test('取消报名严格使用报名结束时间，结束前一秒允许，整点和结束后一秒禁止', () => {

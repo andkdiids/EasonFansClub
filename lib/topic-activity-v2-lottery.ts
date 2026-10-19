@@ -3,7 +3,7 @@ import { Prisma, type Activity, type TopicActivityLottery } from '@prisma/client
 import { prisma } from '@/lib/prisma'
 import { lockTopicV2Activity, requireTopicV2Program, withTopicV2Transaction } from '@/lib/topic-activity-v2'
 import { isTopicActivityOriginalObjectKey } from '@/lib/topic-activity-image-original'
-import { defaultTopicLotteryConfig, normalizeTopicLotteryConfig, normalizeTopicLotteryConfigForRead, topicLotteryPrizeImageReferenceForRead, TopicLotteryError, type TopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
+import { assertTopicLotteryConfigUpdateAllowed, assertTopicLotterySourceProgramRulesUnchanged, defaultTopicLotteryConfig, normalizeTopicLotteryConfig, normalizeTopicLotteryConfigForRead, topicLotteryPrizeImageReferenceForRead, topicLotterySourceRulesLocked, TopicLotteryError, type TopicLotteryConfig } from '@/lib/topic-activity-v2-lottery-config'
 import { sampleTopicLotteryUsers } from '@/lib/topic-activity-v2-lottery-random'
 import { getTopicLotteryPiiConfigStatus } from '@/lib/topic-activity-v2-lottery-private'
 import type { TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
@@ -78,21 +78,31 @@ export async function lockTopicLotteryRulesForSubmission(tx: Prisma.TransactionC
   // Called after screenshot binding. Uploads alone never qualify or lock rules.
   await syncTopicLotteryEligibilityInTransaction(tx, activity, userId, now)
 }
+async function hasTopicLotterySourceRulesLock(tx: Prisma.TransactionClient, lottery: TopicActivityLottery) {
+  if (lottery.fairnessLockedAt || lottery.state === 'DRAWN') return true
+  const config = normalizeTopicLotteryConfigForRead(lottery.config)
+  const [sourceEvidenceCount, eligibilityCount, entryCount, draw] = await Promise.all([
+    config.sourceEntryIds.length
+      ? tx.topicActivitySubmission.count({ where: { activityId: lottery.activityId, rewardEntryId: { in: config.sourceEntryIds } } })
+      : Promise.resolve(0),
+    tx.topicActivityLotteryEligibility.count({ where: { activityId: lottery.activityId } }),
+    tx.lotteryEntry.count({ where: { lotteryId: lottery.lotteryId } }),
+    tx.topicActivityLotteryDraw.findUnique({ where: { activityId: lottery.activityId }, select: { id: true } }),
+  ])
+  return topicLotterySourceRulesLocked({ state: lottery.state, hasFairnessLock: false, hasSourceEvidence: sourceEvidenceCount > 0,
+    hasEligibility: eligibilityCount > 0, hasLotteryEntry: entryCount > 0, hasDrawSnapshot: Boolean(draw) })
+}
 export async function assertTopicLotterySourceRules(tx: Prisma.TransactionClient, activity: Activity, next: TopicActivityV2Program) {
   const lottery = await tx.topicActivityLottery.findUnique({ where: { activityId: activity.id } })
-  if (!lottery?.enabled || !lottery.fairnessLockedAt || lottery.state === 'DRAWN') return
+  if (!lottery || !await hasTopicLotterySourceRulesLock(tx, lottery)) return
   const config = normalizeTopicLotteryConfigForRead(lottery.config), previous = requireTopicV2Program(activity)
-  const rules = (program: TopicActivityV2Program) => ({ enabled: program.enabled && program.platformRewards.enabled, sources: config.sourceEntryIds.map((entryId) => {
-    const entry = program.entries.find((item) => item.id === entryId)
-    return entry ? { id: entry.id, platformKey: entry.platformKey, enabled: entry.enabled, minImages: entry.minImages, maxImages: entry.maxImages, startsAt: entry.startsAt, endsAt: entry.endsAt } : null
-  }) })
-  if (hash(rules(previous)) !== hash(rules(next))) fail('LOTTERY_SOURCE_RULES_LOCKED', '已有截图参与，不能更改抽奖来源、截图要求或关闭资格入口')
+  assertTopicLotterySourceProgramRulesUnchanged(previous, next, config.sourceEntryIds)
 }
 // Caller holds Activity FOR UPDATE. Generic activity editing must not bypass
 // the lottery rule lock by changing the time window used to qualify evidence.
 export async function assertTopicLotteryActivityWindow(tx: Prisma.TransactionClient, activityId: string, next: { startsAt: Date | null; endsAt: Date | null; type: Activity['type']; participationMode?: Activity['participationMode']; formSchema?: unknown; allowImageAttachments?: boolean }) {
-  const lottery = await tx.topicActivityLottery.findUnique({ where: { activityId }, select: { fairnessLockedAt: true } })
-  if (!lottery || (!lottery.fairnessLockedAt && !await tx.topicActivityLotteryDraw.findUnique({ where: { activityId }, select: { id: true } }))) return
+  const lottery = await tx.topicActivityLottery.findUnique({ where: { activityId } })
+  if (!lottery || !await hasTopicLotterySourceRulesLock(tx, lottery)) return
   const current = await tx.activity.findUniqueOrThrow({ where: { id: activityId }, select: { startsAt: true, endsAt: true, type: true, participationMode: true, formSchema: true, allowImageAttachments: true } })
   if (current.startsAt?.getTime() !== next.startsAt?.getTime() || current.endsAt?.getTime() !== next.endsAt?.getTime() || current.type !== next.type
     || next.participationMode !== undefined && next.participationMode !== current.participationMode
@@ -110,13 +120,22 @@ export async function saveTopicLotteryConfig(activityId: string, actorId: string
     if (config.enabled && !program.platformRewards.enabled) fail('LOTTERY_SOURCE_MODULE_DISABLED', '请先开启平台任务，再配置抽奖资格来源', 400)
     if (activity.status === 'CANCELLED') fail('LOTTERY_ACTIVITY_CANCELLED', '活动已取消，不能修改抽奖')
     const existing = await tx.topicActivityLottery.findUnique({ where: { activityId } })
+    let participantsLocked = false
+    let drawFrozen = false
     if (existing) {
-      const existingSources = await sources(tx, activity, normalizeTopicLotteryConfigForRead(existing.config))
-      const drawn = await tx.topicActivityLotteryDraw.findUnique({ where: { activityId }, select: { id: true } })
-      if ((existing.fairnessLockedAt || existingSources.length || drawn) && hash(normalizeTopicLotteryConfigForRead(existing.config)) !== hash(config)) fail('LOTTERY_RULES_LOCKED', '已有参与或名单已冻结，奖品库存和开奖规则不可修改')
-      if (hash(normalizeTopicLotteryConfigForRead(existing.config)) === hash(config)) return config
+      const currentConfig = normalizeTopicLotteryConfigForRead(existing.config)
+      const [existingSources, draw, eligibilityCount, entryCount] = await Promise.all([
+        sources(tx, activity, currentConfig),
+        tx.topicActivityLotteryDraw.findUnique({ where: { activityId }, select: { id: true } }),
+        tx.topicActivityLotteryEligibility.count({ where: { activityId } }),
+        tx.lotteryEntry.count({ where: { lotteryId: existing.lotteryId } }),
+      ])
+      drawFrozen = Boolean(draw || entryCount)
+      participantsLocked = Boolean(existing.fairnessLockedAt || existingSources.length || eligibilityCount || entryCount)
+      if (hash(currentConfig) === hash(config)) return config
+      assertTopicLotteryConfigUpdateAllowed(currentConfig, config, { participantsLocked, drawFrozen })
     }
-    if (config.enabled && (!config.drawAt || new Date(config.drawAt) <= now || new Date(config.eligibilityDeadline!) <= now)) fail('LOTTERY_CONFIG_DEADLINE_PASSED', '首次启用须在资格截止与开奖之前')
+    if (config.enabled && (!existing || !existing.enabled) && (!config.drawAt || new Date(config.drawAt) <= now || new Date(config.eligibilityDeadline!) <= now)) fail('LOTTERY_CONFIG_DEADLINE_PASSED', '首次启用须在资格截止与开奖之前')
     const entries = await tx.topicActivityRewardEntry.findMany({ where: { activityId, id: { in: config.sourceEntryIds } }, select: { id: true, config: true, enabled: true } })
     if (entries.length !== config.sourceEntryIds.length) fail('LOTTERY_SOURCE_INVALID', '资格入口不属于当前活动', 400)
     if (config.enabled && entries.some((entry) => !entry.enabled || typeof record(entry.config).maxImages !== 'number' || Number(record(entry.config).maxImages) < 1)) fail('LOTTERY_SOURCE_REQUIRES_SCREENSHOTS', '资格来源须是开放且允许提交截图的平台入口', 400)
@@ -126,17 +145,67 @@ export async function saveTopicLotteryConfig(activityId: string, actorId: string
       : await tx.lottery.create({ data: { activityId, createdById: actorId, title: config.title, description: config.description, pointsCost: 0, drawAt: config.drawAt ? new Date(config.drawAt) : null, status: config.enabled ? 'SCHEDULED' : 'DRAFT' } })
     const lottery = await tx.topicActivityLottery.upsert({ where: { activityId }, create: { activityId, lotteryId: base.id, enabled: config.enabled, config: json(config), drawAt: base.drawAt },
       update: { enabled: config.enabled, config: json(config), drawAt: base.drawAt } })
-    // No participants/results exist here. No awarded slot or winner is deleted.
-    await tx.topicActivityLotterySlot.deleteMany({ where: { Prize: { lotteryId: base.id } } })
-    await tx.lotteryPrize.deleteMany({ where: { lotteryId: base.id } })
+    const existingPrizes = await tx.lotteryPrize.findMany({
+      where: { lotteryId: base.id },
+      include: { TopicSlots: { orderBy: { slotNumber: 'asc' }, select: { id: true, slotNumber: true, Winner: { select: { id: true } } } } },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    })
+    const existingPrizesById = new Map(existingPrizes.map((prize) => [prize.id, prize]))
+    const configuredPrizeIds = new Set(config.prizes.map((prize) => prize.id))
+
+    if (participantsLocked) {
+      if (!existing) fail('LOTTERY_STOCK_INVALID', '抽奖配置记录丢失，已停止保存以保护参与记录')
+      const currentConfig = normalizeTopicLotteryConfigForRead(existing.config)
+      for (const previousPrize of currentConfig.prizes) {
+        const storedPrize = existingPrizesById.get(previousPrize.id)
+        if (!storedPrize || storedPrize.quantity !== previousPrize.quantity || storedPrize.remaining !== storedPrize.quantity
+          || storedPrize.TopicSlots.length !== storedPrize.quantity || storedPrize.TopicSlots.some((slot, index) => slot.slotNumber !== index || slot.Winner)) {
+          fail('LOTTERY_STOCK_INVALID', '现有奖品库存或名额记录不一致，已停止保存以保护参与记录')
+        }
+      }
+      for (const storedPrize of existingPrizes) {
+        if (!configuredPrizeIds.has(storedPrize.id)) fail('LOTTERY_STOCK_INVALID', '数据库奖品与配置不一致，已停止保存以保护参与记录')
+      }
+    } else {
+      for (const storedPrize of existingPrizes) {
+        if (configuredPrizeIds.has(storedPrize.id)) continue
+        const entryCount = await tx.lotteryEntry.count({ where: { lotteryId: base.id, prizeId: storedPrize.id } })
+        if (entryCount || storedPrize.TopicSlots.some((slot) => slot.Winner)) fail('LOTTERY_STOCK_INVALID', '该奖品已有中奖记录，不能移除')
+        await tx.topicActivityLotterySlot.deleteMany({ where: { prizeId: storedPrize.id } })
+        await tx.lotteryPrize.delete({ where: { id: storedPrize.id } })
+      }
+    }
+
     for (const prize of config.prizes) {
-      await tx.lotteryPrize.create({ data: { id: prize.id, lotteryId: base.id, name: prize.name, description: prize.description, imageUrl: prize.imageUrl,
-        type: 'PHYSICAL', prizeType: 'PHYSICAL', quantity: prize.quantity, remaining: prize.quantity, sortOrder: prize.sortOrder } })
-      await tx.topicActivityLotterySlot.createMany({ data: Array.from({ length: prize.quantity }, (_, slotNumber) => ({ prizeId: prize.id, slotNumber })) })
+      const storedPrize = existingPrizesById.get(prize.id)
+      if (!storedPrize) {
+        await tx.lotteryPrize.create({ data: { id: prize.id, lotteryId: base.id, name: prize.name, description: prize.description, imageUrl: prize.imageUrl,
+          type: 'PHYSICAL', prizeType: 'PHYSICAL', quantity: prize.quantity, remaining: prize.quantity, sortOrder: prize.sortOrder } })
+        await tx.topicActivityLotterySlot.createMany({ data: Array.from({ length: prize.quantity }, (_, slotNumber) => ({ prizeId: prize.id, slotNumber })) })
+        continue
+      }
+      if (participantsLocked) {
+        await tx.lotteryPrize.update({ where: { id: prize.id }, data: { name: prize.name, description: prize.description, imageUrl: prize.imageUrl } })
+        continue
+      }
+
+      if (storedPrize.remaining !== storedPrize.quantity || storedPrize.TopicSlots.length !== storedPrize.quantity
+        || storedPrize.TopicSlots.some((slot, index) => slot.slotNumber !== index || slot.Winner)) {
+        fail('LOTTERY_STOCK_INVALID', '现有奖品库存或名额记录不一致，已停止保存')
+      }
+      if (prize.quantity < storedPrize.quantity) {
+        await tx.topicActivityLotterySlot.deleteMany({ where: { prizeId: prize.id, slotNumber: { gte: prize.quantity } } })
+      } else if (prize.quantity > storedPrize.quantity) {
+        await tx.topicActivityLotterySlot.createMany({ data: Array.from({ length: prize.quantity - storedPrize.quantity }, (_, index) => ({ prizeId: prize.id, slotNumber: storedPrize.quantity + index })) })
+      }
+      await tx.lotteryPrize.update({ where: { id: prize.id }, data: { name: prize.name, description: prize.description, imageUrl: prize.imageUrl,
+        quantity: prize.quantity, remaining: prize.quantity, sortOrder: prize.sortOrder } })
     }
     await audit(tx, lottery, 'CONFIG_SAVED', actorId, { beforeHash: existing ? hash(existing.config) : null, afterHash: hash(config), prizeCount: config.prizes.length, quantity: config.prizes.reduce((sum, prize) => sum + prize.quantity, 0) })
-    const qualifying = await sources(tx, activity, config)
-    for (const user of new Set(qualifying.map((row) => row.userId))) await syncTopicLotteryEligibilityInTransaction(tx, activity, user, now)
+    if (!participantsLocked) {
+      const qualifying = await sources(tx, activity, config)
+      for (const user of new Set(qualifying.map((row) => row.userId))) await syncTopicLotteryEligibilityInTransaction(tx, activity, user, now)
+    }
     return config
   })
 }
@@ -278,9 +347,13 @@ export async function getTopicLotteryView(activityId: string, viewerId?: string 
 }
 export async function getAdminTopicLotteryView(activityId: string, now = new Date()) {
   const value = await viewData(activityId, now)
-  const winners = value.lottery ? await prisma.lotteryEntry.findMany({ where: { lotteryId: value.lottery.lotteryId }, include: { User: { select: { nickname: true, uid: true } }, LotteryPrize: { select: { name: true } },
-    TopicShipping: { select: { shippingStatus: true, addressDeadline: true, shippedAt: true, addressCiphertext: true } } }, take: 1000, orderBy: { id: 'asc' } }) : []
-  return { config: value.config, addressEncryptionReady: getTopicLotteryPiiConfigStatus().usable, configLocked: Boolean(value.lottery?.fairnessLockedAt || value.rows.length || value.batch), state: value.state,
+  const [winners, eligibilityCount, entryCount] = value.lottery ? await Promise.all([
+    prisma.lotteryEntry.findMany({ where: { lotteryId: value.lottery.lotteryId }, include: { User: { select: { nickname: true, uid: true } }, LotteryPrize: { select: { name: true } },
+      TopicShipping: { select: { shippingStatus: true, addressDeadline: true, shippedAt: true, addressCiphertext: true } } }, take: 1000, orderBy: { id: 'asc' } }),
+    prisma.topicActivityLotteryEligibility.count({ where: { activityId } }),
+    prisma.lotteryEntry.count({ where: { lotteryId: value.lottery.lotteryId } }),
+  ]) : [[], 0, 0]
+  return { config: value.config, addressEncryptionReady: getTopicLotteryPiiConfigStatus().usable, configLocked: Boolean(value.lottery?.fairnessLockedAt || value.rows.length || eligibilityCount || entryCount || value.batch), state: value.state,
     candidateCount: value.candidateCount, pendingSubmissionCount: value.pendingSubmissionCount,
     draw: value.batch ? { id: value.batch.id, frozenAt: value.batch.frozenAt, candidateCount: value.batch.candidateCount, winnerCount: value.batch.winnerCount, failedReason: value.batch.errorCode } : null,
     winners: winners.map((winner) => ({ id: winner.id, nickname: winner.User.nickname, uid: winner.User.uid, prizeName: winner.LotteryPrize?.name || '活动奖品', wonAt: winner.wonAt,

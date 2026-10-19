@@ -1,6 +1,7 @@
 import { parseActivityDateInput } from '@/lib/activity'
 import { publicImageUrl } from '@/lib/images'
 import { storedActivityImageUrl } from '@/lib/activity-image-url'
+import type { TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 
 export type TopicLotteryPrizeConfig = { id: string; name: string; description: string; imageUrl: string | null; quantity: number; sortOrder: number }
 export type TopicLotteryConfig = {
@@ -10,6 +11,30 @@ export type TopicLotteryConfig = {
 }
 export class TopicLotteryError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); this.name = 'TopicLotteryError' }
+}
+export function topicLotterySourceRulesLocked(input: Readonly<{
+  state: string
+  hasFairnessLock: boolean
+  hasSourceEvidence: boolean
+  hasEligibility: boolean
+  hasLotteryEntry: boolean
+  hasDrawSnapshot: boolean
+}>) {
+  return input.state === 'DRAWN' || input.hasFairnessLock || input.hasSourceEvidence
+    || input.hasEligibility || input.hasLotteryEntry || input.hasDrawSnapshot
+}
+export function assertTopicLotterySourceProgramRulesUnchanged(previous: TopicActivityV2Program, next: TopicActivityV2Program, sourceEntryIds: readonly string[]) {
+  const rules = (program: TopicActivityV2Program) => ({
+    enabled: program.enabled && program.platformRewards.enabled,
+    sources: sourceEntryIds.map((entryId) => {
+      const entry = program.entries.find((item) => item.id === entryId)
+      return entry ? { id: entry.id, platformKey: entry.platformKey, enabled: entry.enabled, minImages: entry.minImages,
+        maxImages: entry.maxImages, startsAt: entry.startsAt, endsAt: entry.endsAt, allowResubmit: entry.allowResubmit } : null
+    }),
+  })
+  if (JSON.stringify(rules(previous)) !== JSON.stringify(rules(next))) {
+    throw new TopicLotteryError('LOTTERY_SOURCE_RULES_LOCKED', '已有截图参与，不能更改抽奖来源、截图要求或关闭资格入口')
+  }
 }
 export const defaultTopicLotteryConfig = (): TopicLotteryConfig => ({ version: 1, enabled: false, title: '幸运抽奖', description: '', mode: 'MANUAL',
   drawAt: null, eligibilityDeadline: null, addressDeadline: null, publishWinners: false, retentionDays: 90, sourceEntryIds: [], prizes: [] })
@@ -107,4 +132,52 @@ export function normalizeTopicLotteryConfig(value: unknown): TopicLotteryConfig 
     if (config.eligibilityDeadline > config.drawAt || config.addressDeadline <= config.drawAt) invalid('资格截止不得晚于开奖，收件截止必须晚于开奖')
   }
   return config
+}
+
+/**
+ * Existing entrants lock eligibility and the stock of prizes already in the
+ * pool, but not their presentation or the addition of new prize slots.
+ * Once a draw snapshot exists, the complete config is immutable so winner
+ * views cannot drift from the persisted draw snapshot.
+ */
+export function assertTopicLotteryConfigUpdateAllowed(
+  current: TopicLotteryConfig,
+  next: TopicLotteryConfig,
+  locks: Readonly<{ participantsLocked: boolean; drawFrozen: boolean }>,
+) {
+  const reject = (code: string, message: string): never => { throw new TopicLotteryError(code, message) }
+  if (locks.drawFrozen) {
+    if (JSON.stringify(current) !== JSON.stringify(next)) reject('LOTTERY_DRAW_FROZEN', '开奖名单与奖品快照已冻结，不能再修改抽奖配置')
+    return
+  }
+  if (!locks.participantsLocked) return
+
+  const rules = (config: TopicLotteryConfig) => ({
+    enabled: config.enabled,
+    mode: config.mode,
+    drawAt: config.drawAt,
+    eligibilityDeadline: config.eligibilityDeadline,
+    addressDeadline: config.addressDeadline,
+    retentionDays: config.retentionDays,
+    sourceEntryIds: config.sourceEntryIds,
+  })
+  if (JSON.stringify(rules(current)) !== JSON.stringify(rules(next))) {
+    reject('LOTTERY_RULES_LOCKED', '已有参与资格，不能修改资格来源、开奖规则或个人资料保留期限')
+  }
+
+  const nextById = new Map(next.prizes.map((prize) => [prize.id, prize]))
+  const currentById = new Map(current.prizes.map((prize) => [prize.id, prize]))
+  const highestExistingSortOrder = current.prizes.reduce((highest, prize) => Math.max(highest, prize.sortOrder), -1)
+  for (const prize of current.prizes) {
+    const updated = nextById.get(prize.id)
+    if (!updated) throw new TopicLotteryError('LOTTERY_RULES_LOCKED', '已有参与资格后不能移除已在奖池中的奖品')
+    if (updated.quantity !== prize.quantity || updated.sortOrder !== prize.sortOrder) {
+      reject('LOTTERY_RULES_LOCKED', '已有奖品的数量与顺序已锁定；可编辑展示信息或增加新奖品')
+    }
+  }
+  for (const prize of next.prizes) {
+    if (!currentById.has(prize.id) && prize.sortOrder <= highestExistingSortOrder) {
+      reject('LOTTERY_RULES_LOCKED', '新增奖品必须排在现有奖品之后')
+    }
+  }
 }

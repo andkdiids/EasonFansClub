@@ -153,11 +153,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
   }
 
-  if (normalized.value.verificationMode === 'NONE' && !Object.prototype.hasOwnProperty.call(input, 'activityReward')) {
-    const existingReward = await prisma.activityReward.findUnique({ where: { activityId_type: { activityId, type: 'BADGE' } }, select: { id: true } })
-    if (existingReward) return NextResponse.json({ message: '该活动已配置隐藏奖励，请先清除奖励或选择核销方式' }, { status: 400 })
-  }
-
   const fields = [
     ...changedFields(editableActivity(current), normalized.value),
     ...(current.pinToPlaza !== topicConfig.value.pinToPlaza ? ['pinToPlaza'] : []),

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { defaultTopicLotteryConfig, normalizeTopicLotteryConfig, normalizeTopicLotteryConfigForRead, normalizeTopicLotteryPrizeImageReference, resolveTopicLotteryPrizeImageSrc } from '@/lib/topic-activity-v2-lottery-config'
+import { assertTopicLotteryConfigUpdateAllowed, assertTopicLotterySourceProgramRulesUnchanged, defaultTopicLotteryConfig, normalizeTopicLotteryConfig, normalizeTopicLotteryConfigForRead, normalizeTopicLotteryPrizeImageReference, resolveTopicLotteryPrizeImageSrc, topicLotterySourceRulesLocked } from '@/lib/topic-activity-v2-lottery-config'
+import { createDefaultTopicActivityV2Program, type TopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 import { getMediaPublicBaseUrl } from '@/lib/media-url'
 import { sampleTopicLotteryUsers } from '@/lib/topic-activity-v2-lottery-random'
 
@@ -47,6 +48,61 @@ test('legacy malformed or temporary prize image references are hidden safely on 
 test('retention is explicit bounded 1..365 days', () => {
   assert.equal(normalizeTopicLotteryConfig(valid()).retentionDays, 90)
   for (const retentionDays of [0, 366, 1.2]) assert.throws(() => normalizeTopicLotteryConfig({ ...valid(), retentionDays }), { code: 'LOTTERY_CONFIG_INVALID' })
+})
+test('participants lock eligibility and existing stock but allow presentation edits and new prize tiers', () => {
+  const current = normalizeTopicLotteryConfig(valid())
+  const next = normalizeTopicLotteryConfig({ ...current, title: '新标题', description: '更新说明', publishWinners: true,
+    prizes: [{ ...current.prizes[0], name: '新奖品名称', description: '新展示说明', imageUrl: '/images/new-gift.png' },
+      { id: 'gift-two', name: '新增奖品', description: '', imageUrl: null, quantity: 3, sortOrder: 1 }] })
+  assert.doesNotThrow(() => assertTopicLotteryConfigUpdateAllowed(current, next, { participantsLocked: true, drawFrozen: false }))
+  assert.throws(() => assertTopicLotteryConfigUpdateAllowed(current, normalizeTopicLotteryConfig({ ...current, sourceEntryIds: ['another-source'] }), { participantsLocked: true, drawFrozen: false }), { code: 'LOTTERY_RULES_LOCKED' })
+  assert.throws(() => assertTopicLotteryConfigUpdateAllowed(current, normalizeTopicLotteryConfig({ ...current, prizes: [{ ...current.prizes[0], quantity: 3 }] }), { participantsLocked: true, drawFrozen: false }), { code: 'LOTTERY_RULES_LOCKED' })
+  assert.throws(() => assertTopicLotteryConfigUpdateAllowed(current, normalizeTopicLotteryConfig({ ...current, prizes: [{ id: 'gift-two', name: '新增奖品', description: '', imageUrl: null, quantity: 1, sortOrder: 1 }] }), { participantsLocked: true, drawFrozen: false }), { code: 'LOTTERY_RULES_LOCKED' })
+})
+test('a frozen draw snapshot rejects every lottery config change', () => {
+  const current = normalizeTopicLotteryConfig(valid())
+  assert.doesNotThrow(() => assertTopicLotteryConfigUpdateAllowed(current, current, { participantsLocked: true, drawFrozen: true }))
+  assert.throws(() => assertTopicLotteryConfigUpdateAllowed(current, normalizeTopicLotteryConfig({ ...current, title: '赛后改名' }), { participantsLocked: true, drawFrozen: true }), { code: 'LOTTERY_DRAW_FROZEN' })
+})
+function sourceRuleProgram(): TopicActivityV2Program {
+  const program = createDefaultTopicActivityV2Program()
+  program.enabled = true
+  program.platformRewards.enabled = true
+  const entry = (id: string, sortOrder: number): TopicActivityV2Program['entries'][number] => ({ id, platformKey: `platform-${id}`, platformName: id,
+    title: '分享任务', instructions: '发布内容并上传截图', materialRequirement: '截图', minImages: 1, maxImages: 3, points: 96, enabled: true,
+    sortOrder, startsAt: null, endsAt: null, allowResubmit: true })
+  program.entries = [entry('source-one', 0), entry('unrelated-entry', 1)]
+  return program
+}
+test('DRAWN and persisted participation evidence keep source rules locked', () => {
+  const empty = { hasFairnessLock: false, hasSourceEvidence: false, hasEligibility: false, hasLotteryEntry: false, hasDrawSnapshot: false }
+  assert.equal(topicLotterySourceRulesLocked({ state: 'COLLECTING', ...empty }), false)
+  assert.equal(topicLotterySourceRulesLocked({ state: 'DRAWN', ...empty }), true)
+  for (const evidence of ['hasFairnessLock', 'hasSourceEvidence', 'hasEligibility', 'hasLotteryEntry', 'hasDrawSnapshot'] as const) {
+    assert.equal(topicLotterySourceRulesLocked({ state: 'COLLECTING', ...empty, [evidence]: true }), true)
+  }
+})
+test('only qualification-relevant configured source entry fields are immutable', () => {
+  const current = sourceRuleProgram(), sourceIds = ['source-one']
+  const mutations: Array<(program: TopicActivityV2Program) => void> = [
+    (program) => { program.entries[0].minImages = 0; program.entries[0].maxImages = 0 },
+    (program) => { program.entries[0].enabled = false },
+    (program) => { program.entries[0].allowResubmit = false },
+    (program) => { program.entries[0].startsAt = '2026-10-20T00:00:00.000Z' },
+    (program) => { program.entries[0].endsAt = '2026-10-21T00:00:00.000Z' },
+    (program) => { program.entries[0].platformKey = 'different-platform' },
+    (program) => { program.platformRewards.enabled = false },
+    (program) => { program.enabled = false },
+    (program) => { program.entries[0].id = 'replacement-source' },
+  ]
+  for (const mutate of mutations) {
+    const changed = structuredClone(current)
+    mutate(changed)
+    assert.throws(() => assertTopicLotterySourceProgramRulesUnchanged(current, changed, sourceIds), { code: 'LOTTERY_SOURCE_RULES_LOCKED' })
+  }
+  const unrelatedEdit = structuredClone(current)
+  unrelatedEdit.entries[1].maxImages = 5
+  assert.doesNotThrow(() => assertTopicLotterySourceProgramRulesUnchanged(current, unrelatedEdit, sourceIds))
 })
 test('uniform secure shuffle: all three-user RNG paths yield each permutation once', () => {
   const permutations = new Set<string>()
