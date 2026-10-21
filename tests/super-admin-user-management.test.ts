@@ -61,7 +61,8 @@ test('UID 修改检查唯一性且只更新 User.uid', () => {
 test('密码重置使用 bcrypt、设置安全标记并通知用户', () => {
   const route = source('app/api/admin/users/[userId]/password/route.ts')
   assert.match(route, /bcrypt\.hash\(body\.password, 12\)/)
-  assert.match(route, /data: \{ passwordHash, mustSetupSecurity: true \}/)
+  assert.match(route, /commitPasswordChange\(tx, \{[\s\S]*?passwordHash,[\s\S]*?mustSetupSecurity: true/)
+  assert.match(route, /action: 'PASSWORD_RESET_BY_ADMIN'/)
   assert.match(route, /upsertNotification\(/)
   assert.match(route, /safeNotificationWrite\(/)
   assert.match(route, /action: 'RESET_USER_PASSWORD'/)

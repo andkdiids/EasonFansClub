@@ -56,6 +56,7 @@ const passwordInvalidatingActions = [
   'PASSWORD_RESET_SUCCEEDED',
   'PASSWORD_RESET_WITH_SECURITY_QUESTION',
   'PASSWORD_CHANGED_WITH_CURRENT_PASSWORD',
+  'PASSWORD_RESET_BY_ADMIN',
 ] as const
 
 async function hasPasswordInvalidationAfterSessionIssue(sessionUser: SessionUser) {

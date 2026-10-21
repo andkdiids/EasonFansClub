@@ -9,6 +9,7 @@ import { getBearerToken, isMobileAuthConfigurationError, resolveMobileAccess } f
 import { resolveMobileBetaAccess } from '@/lib/mobile-beta'
 import { prisma } from '@/lib/prisma'
 import { sanitizeTextPreservingLength } from '@/lib/text'
+import { consumeRateLimitFailClosed as consumeAtomicRateLimit, type AtomicRateLimitStore } from '@/lib/fail-closed-rate-limit'
 
 export { getClientIp, normalizeIp } from '@/lib/client-ip'
 
@@ -305,6 +306,17 @@ export async function consumeRateLimit(key: string, action: string, limit = 30, 
   }
 
   return { limited: false }
+}
+
+/**
+ * Fail-closed limiter for account recovery and password mutation endpoints.
+ * The ordinary limiter remains fail-open for non-sensitive site traffic.
+ */
+export function consumeRateLimitFailClosed(key: string, action: string, limit = 30, windowSeconds = 60) {
+  const store: AtomicRateLimitStore = {
+    upsert: (input) => prisma.rateLimitLog.upsert(input),
+  }
+  return consumeAtomicRateLimit(store, key, action, limit, windowSeconds)
 }
 
 export async function rateLimit(key: string, action: string, limit = 30, windowSeconds = 60) {

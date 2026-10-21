@@ -2,8 +2,6 @@
 
 import { useState } from 'react'
 
-type Question = { question: string; sortOrder: number }
-type Method = 'security' | 'email'
 type ApiData = Record<string, unknown> & { message?: unknown; errors?: unknown }
 
 function readFieldErrors(value: unknown) {
@@ -11,13 +9,10 @@ function readFieldErrors(value: unknown) {
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
 }
 
-export function ForgotPasswordForm({ emailEnabled, securityEnabled }: { emailEnabled: boolean; securityEnabled: boolean }) {
-  const [method, setMethod] = useState<Method>(securityEnabled ? 'security' : 'email')
+export function ForgotPasswordForm({ securityEnabled }: { securityEnabled: boolean }) {
   const [identifier, setIdentifier] = useState('')
-  const [questions, setQuestions] = useState<Question[]>([])
   const [challenge, setChallenge] = useState('')
-  const [answers, setAnswers] = useState([''])
-  const [code, setCode] = useState('')
+  const [answer, setAnswer] = useState('')
   const [resetToken, setResetToken] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -32,14 +27,12 @@ export function ForgotPasswordForm({ emailEnabled, securityEnabled }: { emailEna
     setMessage('')
     setFieldErrors({})
     try {
-      const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload) })
+      const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', cache: 'no-store', body: JSON.stringify(payload) })
       const data = await response.json().catch(() => ({})) as ApiData
       if (!response.ok) {
         const nextFieldErrors = readFieldErrors(data.errors)
         setFieldErrors(nextFieldErrors)
-        if (Object.keys(nextFieldErrors).length === 0) {
-          setError(typeof data.message === 'string' ? data.message : '操作失败，请稍后再试')
-        }
+        if (Object.keys(nextFieldErrors).length === 0) setError(typeof data.message === 'string' ? data.message : '操作失败，请稍后再试')
         return null
       }
       setMessage(typeof data.message === 'string' ? data.message : '操作成功')
@@ -54,44 +47,48 @@ export function ForgotPasswordForm({ emailEnabled, securityEnabled }: { emailEna
 
   const fieldError = (field: string) => fieldErrors[field] ? <p className="mt-1 text-sm font-bold text-red-600">{fieldErrors[field]}</p> : null
 
-  async function loadQuestions() {
+  async function loadChallenge() {
     const data = await call('/api/auth/forgot-password/security/questions', { identifier })
-    if (!data || !Array.isArray(data.questions) || typeof data.challenge !== 'string') return
-    setQuestions(data.questions as Question[]); setChallenge(data.challenge)
-  }
-  async function verifyAnswers() {
-    const data = await call('/api/auth/forgot-password/security/verify', { challenge, answers: answers.map((answer) => ({ answer })) })
-    if (data && typeof data.resetToken === 'string') setResetToken(data.resetToken)
-  }
-  async function sendEmailCode() { await call('/api/auth/forgot-password/email/send', { identifier }) }
-  async function verifyEmailCode() {
-    const data = await call('/api/auth/forgot-password/email/verify', { identifier, code })
-    if (data && typeof data.resetToken === 'string') setResetToken(data.resetToken)
-  }
-  async function resetPassword() {
-    const data = await call('/api/auth/forgot-password/reset', { resetToken, password, confirmPassword })
-    if (data) { setPassword(''); setConfirmPassword('') }
+    if (data && typeof data.challenge === 'string') setChallenge(data.challenge)
   }
 
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-2 rounded-xl bg-sky-50 p-1">
-        <button type="button" disabled={!securityEnabled} onClick={() => setMethod('security')} className={`rounded-lg px-3 py-2 text-sm font-black disabled:opacity-40 ${method === 'security' ? 'bg-white text-brand-950 shadow-sm' : 'text-slate-500'}`}>密保问题</button>
-        <button type="button" disabled={!emailEnabled} onClick={() => setMethod('email')} className={`rounded-lg px-3 py-2 text-sm font-black disabled:opacity-40 ${method === 'email' ? 'bg-white text-brand-950 shadow-sm' : 'text-slate-500'}`}>邮箱验证码</button>
-      </div>
-      {!emailEnabled ? <p className="rounded-2xl bg-amber-50 px-4 py-2 text-sm font-black text-amber-800">邮箱重置功能暂未开放</p> : null}
-      {method === 'security' && message && questions.length === 0 ? (
-        <p className="rounded-2xl bg-sky-50 px-4 py-2 text-sm font-bold leading-6 text-sky-700">
-          {emailEnabled ? '如已绑定并验证邮箱，可以切换到邮箱验证码方式找回。' : '当前没有其他可用的自助恢复方式，请联系管理员。'}
-        </p>
-      ) : null}
-      {!resetToken ? <div><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} className="w-full rounded-xl border border-sky-100 px-4 py-2 font-bold outline-none focus:border-brand-500" placeholder="手机号、登录账号或邮箱" />{fieldError('identifier')}</div> : null}
-      {method === 'security' && !challenge ? <button disabled={busy || !identifier} onClick={loadQuestions} className="w-full rounded-xl bg-brand-700 px-4 py-2 font-black text-white disabled:opacity-50">{busy ? '查询中...' : '下一步'}</button> : null}
-      {method === 'security' && questions.length === 1 && !resetToken ? <div className="space-y-4">{questions.map((item, index) => <label key={item.sortOrder} className="block"><span className="text-sm font-black text-brand-950">{item.question}</span><input value={answers[index]} onChange={(event) => setAnswers((current) => current.map((answer, answerIndex) => answerIndex === index ? event.target.value : answer))} className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-2 font-bold" placeholder="答案" />{fieldError('answer')}</label>)}<button disabled={busy} onClick={verifyAnswers} className="w-full rounded-xl bg-brand-700 px-4 py-2 font-black text-white disabled:opacity-50">{busy ? '验证中...' : '验证密保答案'}</button></div> : null}
-      {method === 'email' && emailEnabled && !resetToken ? <div className="space-y-3"><button disabled={busy || !identifier} onClick={sendEmailCode} className="w-full rounded-xl bg-brand-700 px-4 py-2 font-black text-white disabled:opacity-50">{busy ? '处理中...' : '发送验证码'}</button><div><input value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" className="w-full rounded-xl border border-sky-100 px-4 py-2 font-bold" placeholder="6 位验证码" />{fieldError('code')}</div><button disabled={busy || code.length !== 6} onClick={verifyEmailCode} className="w-full rounded-xl bg-brand-950 px-4 py-2 font-black text-white disabled:opacity-50">{busy ? '验证中...' : '验证邮箱'}</button></div> : null}
-      {resetToken ? <div className="space-y-3">{fieldError('resetToken')}<div><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-xl border border-sky-100 px-4 py-2 font-bold" placeholder="新密码（至少 8 位）" />{fieldError('password')}</div><div><input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="w-full rounded-xl border border-sky-100 px-4 py-2 font-bold" placeholder="确认新密码" />{fieldError('confirmPassword')}</div><button disabled={busy || password.length < 8 || password !== confirmPassword} onClick={resetPassword} className="w-full rounded-xl bg-brand-950 px-4 py-2 font-black text-white disabled:opacity-50">{busy ? '重置中...' : '重置密码'}</button></div> : null}
-      {message ? <p className="rounded-xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">{message}</p> : null}
-      {error ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm font-black text-red-700">{error}</p> : null}
-    </div>
-  )
+  async function verifyAnswer() {
+    const data = await call('/api/auth/forgot-password/security/verify', { challenge, answers: [{ answer }] })
+    if (data && typeof data.resetToken === 'string') setResetToken(data.resetToken)
+  }
+
+  async function resetPassword() {
+    const data = await call('/api/auth/forgot-password/reset', { resetToken, password, confirmPassword })
+    if (data) {
+      setResetToken('')
+      setPassword('')
+      setConfirmPassword('')
+    }
+  }
+
+  if (!securityEnabled) return <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800" role="status">当前暂时无法使用自助密保找回。请联系管理员协助恢复账号。</p>
+
+  return <div className="space-y-5">
+    {!resetToken ? <div>
+      <label className="block text-sm font-black text-brand-950">账号<input value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username" className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-3 font-bold outline-none focus:border-brand-500" placeholder="手机号、登录账号或邮箱" /></label>
+      {fieldError('identifier')}
+    </div> : null}
+    {!challenge && !resetToken ? <button type="button" disabled={busy || !identifier.trim()} onClick={() => void loadChallenge()} className="w-full rounded-xl bg-brand-700 px-4 py-3 font-black text-white disabled:opacity-50">{busy ? '正在验证账号…' : '下一步'}</button> : null}
+    {challenge && !resetToken ? <div className="space-y-3">
+      <label className="block text-sm font-black text-brand-950">密保答案<input value={answer} onChange={(event) => setAnswer(event.target.value)} autoComplete="off" maxLength={200} className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-3 font-bold outline-none focus:border-brand-500" placeholder="请输入设置密保时保存的答案" /></label>
+      {fieldError('answer')}
+      <p className="text-xs font-bold leading-5 text-slate-500">为防止账号信息被枚举，页面不会显示具体密保问题；请输入你设置时保存的答案。</p>
+      <button type="button" disabled={busy || !answer.trim()} onClick={() => void verifyAnswer()} className="w-full rounded-xl bg-brand-700 px-4 py-3 font-black text-white disabled:opacity-50">{busy ? '验证中…' : '验证密保答案'}</button>
+    </div> : null}
+    {resetToken ? <div className="space-y-3">
+      {fieldError('resetToken')}
+      <label className="block text-sm font-black text-brand-950">新密码<input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-3 font-bold" placeholder="至少 8 位" /></label>
+      {fieldError('password')}
+      <label className="block text-sm font-black text-brand-950">确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-2 w-full rounded-xl border border-sky-100 px-4 py-3 font-bold" /></label>
+      {fieldError('confirmPassword')}
+      <button type="button" disabled={busy || password.length < 8 || password !== confirmPassword} onClick={() => void resetPassword()} className="w-full rounded-xl bg-brand-950 px-4 py-3 font-black text-white disabled:opacity-50">{busy ? '重置中…' : '重置密码'}</button>
+    </div> : null}
+    {message ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700" role="status">{message}</p> : null}
+    {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-black text-red-700" role="alert">{error}</p> : null}
+  </div>
 }

@@ -41,7 +41,6 @@ export default async function SecurityPage() {
 
   const questionsSet = Boolean(user.UserSecurityQuestion)
   const securityResetAvailable = settings.enableSecurityQuestionRecovery && questionsSet && user.securityQuestionRecoveryEnabled && !user.mustSetupSecurity
-  const emailResetConfigured = Boolean(settings.enableEmailPasswordReset && user.email && user.emailVerifiedAt)
   const recoveryReason = !settings.enableSecurityQuestionRecovery
     ? '系统功能已关闭'
     : !questionsSet
@@ -55,7 +54,6 @@ export default async function SecurityPage() {
     { label: '密保问题找回', detail: recoveryReason === '已启用' ? undefined : recoveryReason, value: recoveryReason === '已启用' ? '已启用' : '已停用', tone: recoveryReason === '已启用' ? 'green' : 'orange' },
     { label: '邮箱', value: user.email ? '已绑定' : '未绑定', tone: user.email ? 'green' : 'gray' },
     { label: '邮箱验证', value: user.emailVerifiedAt ? '已验证' : '未验证', tone: user.emailVerifiedAt ? 'green' : 'orange' },
-    { label: '邮箱重置功能', value: settings.enableEmailPasswordReset ? '已开放' : '暂未开放', tone: settings.enableEmailPasswordReset ? 'green' : 'blue' },
   ]
 
   return (
@@ -84,15 +82,11 @@ export default async function SecurityPage() {
             </Link>
           ) : null}
 
-          {!settings.enableEmailPasswordReset ? (
-            <p className="mt-5 rounded-2xl bg-sky-50 px-4 py-2 text-sm font-black text-sky-700">邮箱重置功能暂未开放。</p>
-          ) : null}
-
           <div className="mt-6 rounded-2xl border border-sky-100 bg-white px-4 py-4 text-sm font-bold leading-7 text-slate-600">
             <p>账号恢复方式由系统统一管理。</p>
             <p>如需调整密保找回方式，请联系管理员。</p>
           </div>
-          <PasswordManagement question={user.UserSecurityQuestion?.question || null} securityResetAvailable={securityResetAvailable} emailResetConfigured={emailResetConfigured} />
+          <PasswordManagement question={user.UserSecurityQuestion?.question || null} securityResetAvailable={securityResetAvailable} />
         </section>
       </main>
     </>

@@ -48,7 +48,7 @@ test('管理员手机号/邮箱修改在同一事务内处理冲突、验证状�
   assert.doesNotMatch(contact, /passwordHash\s*:/)
 })
 
-test('登录和找回密码都复用 User.phone 的标准化 lookup', () => {
+test('登录和启用的密保找回复用标准化 lookup，邮箱密码恢复入口明确停用', () => {
   const users = source('lib/users.ts')
   const login = source('app/api/auth/login/route.ts')
   const securityQuestions = source('app/api/auth/forgot-password/security/questions/route.ts')
@@ -64,7 +64,11 @@ test('登录和找回密码都复用 User.phone 的标准化 lookup', () => {
   assert.match(login, /createSessionToken\(sessionUser\)/)
   assert.doesNotMatch(login, /identifierType === 'phone' && !user\.phoneVerifiedAt/)
   assert.match(login, /identifierType === 'email' && !user\.emailVerifiedAt/)
-  for (const route of [securityQuestions, emailSend, emailVerify]) assert.match(route, /getLoginIdentifierWhere\(identifier\)/)
+  assert.match(securityQuestions, /getLoginIdentifierWhere\(identifier\)/)
+  for (const route of [emailSend, emailVerify]) {
+    assert.match(route, /status:\s*410/)
+    assert.match(route, /EMAIL_PASSWORD_RECOVERY_DISABLED/)
+  }
   assert.doesNotMatch(securityQuestions, /\{ phone: identifier \}/)
   assert.doesNotMatch(emailSend, /\{ phone: identifier \}/)
   assert.doesNotMatch(emailVerify, /\{ phone: identifier \}/)
