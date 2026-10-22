@@ -4,6 +4,15 @@ import { topicReviewFilter, type TopicReviewStatus } from '@/lib/topic-review-fi
 
 export type TopicActivityPlatformTab = { platformKey: string; platformName: string }
 
+export function canShowTopicActivityCommentReviewActions(input: {
+  canReview: boolean
+  isV2Activity: boolean
+  status: string
+  rewardEntryId?: string | null
+}) {
+  return input.canReview && input.status === 'PENDING' && (!input.isV2Activity || Boolean(input.rewardEntryId))
+}
+
 export function topicActivityPlatformTabs(topicProgram: unknown): TopicActivityPlatformTab[] {
   const program = readTopicActivityV2Program(topicProgram)
   if (!program?.enabled || !program.platformRewards.enabled) return []

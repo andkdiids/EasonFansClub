@@ -35,6 +35,7 @@ import { TopicActivityPlatformSubmissionCard } from '@/components/activities/Top
 import type { TopicActivityV2TaskAsset, TopicActivityV2TaskSubmission } from '@/components/activities/topic-activity-v2-types'
 import { SingleCommentConfirmDialog } from '@/components/activities/SingleCommentConfirmDialog'
 import { parseTopicCommentEligibility, topicCommentBlockMessage, type TopicCommentEligibility } from '@/lib/topic-comment-ui'
+import { canShowTopicActivityCommentReviewActions } from '@/lib/topic-activity-comment-platform'
 import { matchesTopicReviewFilter, topicReviewCountForFilter, type TopicReviewCounts } from '@/lib/topic-review-filter'
 import {
   clearPostReplyDrafts,
@@ -178,6 +179,7 @@ export function PostRepliesSection({
   hotReplyIds,
   commentsLoadError,
   topicActivityId,
+  topicActivityV2Enabled = false,
   canReviewTopicActivity = false,
   topicReviewFilter = 'ALL',
   initialTopicReviewCounts = null,
@@ -201,6 +203,7 @@ export function PostRepliesSection({
   hotReplyIds?: string[]
   commentsLoadError?: boolean
   topicActivityId?: string
+  topicActivityV2Enabled?: boolean
   canReviewTopicActivity?: boolean
   topicReviewFilter?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
   initialTopicReviewCounts?: TopicReviewCounts | null
@@ -941,7 +944,7 @@ export function PostRepliesSection({
             ) : null}
             {topicActivityId && reply.topicActivitySubmission ? (
               <>
-                {reply.topicActivitySubmission.status === 'PENDING' && canReviewTopicActivity ? <>
+                {canShowTopicActivityCommentReviewActions({ canReview: canReviewTopicActivity, isV2Activity: topicActivityV2Enabled, status: reply.topicActivitySubmission.status, rewardEntryId: reply.topicActivitySubmission.rewardEntryId }) ? <>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'APPROVED')} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 disabled:opacity-50">{reviewingSubmissionId === reply.topicActivitySubmission.id ? '处理中…' : '通过'}</button>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'REJECTED')} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 disabled:opacity-50">拒绝</button>
                 </> : <span className={`rounded-full px-3 py-1 text-xs font-black ${reply.topicActivitySubmission.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' : reply.topicActivitySubmission.status === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{reply.topicActivitySubmission.status === 'APPROVED' ? '已通过' : reply.topicActivitySubmission.status === 'REJECTED' ? '未通过' : reply.topicActivitySubmission.status === 'WITHDRAWN' ? '已撤回' : '待审核'}</span>}
