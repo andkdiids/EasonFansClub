@@ -51,8 +51,9 @@ test('数据库为登录账号和签到偏好提供约束与安全默认值', ()
 test('用户密码接口分离、bcrypt cost 12 且日志不含密码或答案', () => {
   const change = source('app/api/account/security/password/change/route.ts')
   const reset = source('app/api/account/security/password/security-question-reset/route.ts')
+  assert.match(change, /requireRequestUser\(request\)/)
+  assert.match(reset, /requireUser\(\)/)
   for (const route of [change, reset]) {
-    assert.match(route, /requireUser\(\)/)
     assert.match(route, /rejectInvalidRequestOrigin\(request\)/)
     assert.match(route, /commitPasswordChange/)
     assert.match(route, /expectedPasswordHash: user\.passwordHash/)
