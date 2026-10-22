@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import test from 'node:test'
 import { chromium, type Browser } from 'playwright'
 
@@ -19,11 +19,12 @@ test('V6.1.1 browser: modal over actual sheet, independent IMAGE and live review
     import {TopicActivityFormParticipation} from './components/activities/TopicActivityFormParticipation';
     import {TopicActivityFormDesigner} from './components/activities/TopicActivityFormDesigner';
     function Composer(){const [open,setOpen]=useState(true),[confirm,setConfirm]=useState(false),[draft,setDraft]=useState('');const decision=useRef(null);function before(){setConfirm(true);return new Promise(resolve=>decision.current=resolve)}function resolve(value){setConfirm(false);const done=decision.current;decision.current=null;done?.(value)}return <div style={{transform:'translateZ(0)',position:'relative',zIndex:1}}><PostReplyBottomSheet open={open} postId="post-fixture" onClose={()=>setOpen(false)} onReplyCreated={()=>{}} draftContent={draft} onDraftChange={setDraft} onDraftClear={()=>setDraft('')} beforeSubmit={before} confirmationOpen={confirm} onConfirmationCancel={()=>resolve(false)} allowImageAttachments={true} isTopicRootComment/><SingleCommentConfirmDialog open={confirm} onCancel={()=>resolve(false)} onConfirm={()=>resolve(true)}/></div>}
-    function Reviews(){const [view,setView]=useState(null);async function load(){const params=new URLSearchParams(location.search),filter=params.get('topicStatus')||'PENDING';const res=await fetch('/api/posts/post-fixture/replies?topicStatus='+filter+'&page='+(params.get('commentPage')||1));const data=await res.json();setView({filter,...data})}useEffect(()=>{load();window.addEventListener('fixture:navigate',load);return()=>window.removeEventListener('fixture:navigate',load)},[]);return view?<PostRepliesSection postId="post-fixture" initialReplies={view.replies} initialMyReplies={view.replies.filter(r=>r.author.id==='admin-1')} initialReplyCount={view.total} postAuthorId="admin-1" currentUserId="admin-1" canInteract={false} canManageReplies canReviewTopicActivity topicActivityId="activity-fixture" topicReviewFilter={view.filter} initialTopicReviewCounts={view.topicActivity.reviewCounts} sort="floor" direction="asc" pagination={{page:view.page,pageSize:20,total:view.total,totalPages:view.totalPages}}/>:null}
+    function Reviews(){const [view,setView]=useState(null);async function load(){const params=new URLSearchParams(location.search),filter=params.get('topicStatus')||'PENDING';const res=await fetch('/api/posts/post-fixture/replies?topicStatus='+filter+'&page='+(params.get('commentPage')||1));const data=await res.json();setView({filter,...data})}useEffect(()=>{load();window.addEventListener('fixture:navigate',load);return()=>window.removeEventListener('fixture:navigate',load)},[]);return view?<PostRepliesSection postId="post-fixture" initialReplies={view.replies} initialMyReplies={view.replies.filter(r=>r.author.id==='admin-1')} initialReplyCount={view.total} postAuthorId="admin-1" currentUserId="admin-1" canInteract={Boolean(view.canInteract)} canManageReplies canReviewTopicActivity topicActivityId="activity-fixture" topicActivityV2Enabled={Boolean(view.topicActivityV2Enabled)} topicPlatformTabs={view.topicPlatformTabs||[]} topicReviewFilter={view.filter} initialTopicReviewCounts={view.topicActivity.reviewCounts} sort="floor" direction="asc" pagination={{page:view.page,pageSize:20,total:view.total,totalPages:view.totalPages}}/>:null}
     function Images(){const [schema,setSchema]=useState({version:1,fields:[]});return <><TopicActivityFormDesigner schema={schema} allowImages={false} onSchemaChange={setSchema} onAllowImagesChange={()=>{}}/><TopicActivityFormParticipation activityId="activity-fixture" isAuthenticated/><PostReplyBottomSheet open postId="post-fixture" onClose={()=>{}} onReplyCreated={()=>{}} draftContent="" onDraftChange={()=>{}} onDraftClear={()=>{}} allowImageAttachments={false}/></>}
     createRoot(document.getElementById('root')).render(location.pathname==='/images'?<Images/>:location.search.includes('review')?<Reviews/>:<Composer/>);
   `
-  const built = await esbuild.build({ stdin: { contents: entry, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', alias: { '@': process.cwd() }, define: { 'process.env.NODE_ENV': '"development"' }, plugins: [{ name: 'navigation-fixture', setup(build: { onResolve: (o: { filter: RegExp }, f: (a: { path: string }) => { path: string; namespace: string }) => void; onLoad: (o: { filter: RegExp; namespace: string }, f: () => { contents: string; loader: string }) => void }) {
+  const nodePaths = process.env.ECFC_BROWSER_NODE_PATH?.split(delimiter).filter(Boolean)
+  const built = await esbuild.build({ stdin: { contents: entry, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', alias: { '@': process.cwd() }, nodePaths, define: { 'process.env.NODE_ENV': '"development"' }, plugins: [{ name: 'navigation-fixture', setup(build: { onResolve: (o: { filter: RegExp }, f: (a: { path: string }) => { path: string; namespace: string }) => void; onLoad: (o: { filter: RegExp; namespace: string }, f: () => { contents: string; loader: string }) => void }) {
     build.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: 'navigation', namespace: 'fixture' }))
     build.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: `export function usePathname(){return '/posts/post-fixture'}export function useSearchParams(){return new URLSearchParams(location.search)}export function useRouter(){return {refresh(){window.fixtureRefreshes=(window.fixtureRefreshes||0)+1},push(href){history.pushState({},'',href);window.dispatchEvent(new Event('fixture:navigate'))}}}`, loader: 'js' }))
   } }] })
@@ -34,8 +35,43 @@ test('V6.1.1 browser: modal over actual sheet, independent IMAGE and live review
   const css = (await postcss([tailwind({ ...tailwindConfig, content: [{ raw: bundle, extension: 'js' }] })]).process(readFileSync('app/globals.css', 'utf8'), { from: join(process.cwd(), 'app/globals.css') })).css
   const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1sAAAAASUVORK5CYII=', 'base64')
   let commentRequests = 0, uploads = 0, reviewRequests = 0, failComment = false, failReview = false
-  type Status = 'PENDING' | 'APPROVED' | 'REJECTED'
+  type Status = 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
   let statuses: Status[] = ['PENDING', 'PENDING']
+  let v2ReviewFixture = false
+  const v2Statuses: Status[] = ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN']
+  const platformNames: Record<string, string> = { weibo: '微博', xiaohongshu: '小红书', douyin: '抖音', instagram: 'Instagram' }
+  const v2ReviewRows = [
+    ...v2Statuses.map((status, index) => ({ id: 'discussion-' + status, status, rewardEntryId: null, platformName: null, index })),
+    ...Object.entries(platformNames).flatMap(([platformKey, platformName], platformIndex) => v2Statuses.map((status, statusIndex) => ({
+      id: platformKey + '-' + status,
+      status,
+      rewardEntryId: 'entry-' + platformKey,
+      platformName,
+      index: 10 + platformIndex * 4 + statusIndex,
+    }))),
+  ].map(item => ({
+    id: item.id,
+    content: item.platformName ? item.platformName + ' 分享内容 ' + item.status : '普通活动讨论 ' + item.status,
+    parentId: null,
+    floorNumber: item.index + 1,
+    likeCount: 0,
+    isPinned: false,
+    liked: false,
+    createdAt: '2026-10-09T00:00:00Z',
+    mentions: [],
+    topicActivitySubmission: {
+      id: 'submission-' + item.id,
+      status: item.status,
+      rejectReason: item.status === 'REJECTED' ? '合成拒绝理由' : null,
+      alreadyCounted: item.rewardEntryId === null && item.status === 'PENDING',
+      formSubmissionCount: 0,
+      rewardEntryId: item.rewardEntryId,
+      rewardSnapshotSafe: item.platformName ? { platformName: item.platformName, title: '合成测试内容' } : null,
+      taskAssets: [],
+    },
+    author: { id: 'user-' + item.id, uid: item.index + 100, nickname: '合成用户 ' + item.index, level: 1 },
+  }))
+  const v2ReviewCounts = () => Object.fromEntries([...v2Statuses, 'ALL'].map(status => [status, status === 'ALL' ? v2ReviewRows.length : v2ReviewRows.filter(item => item.topicActivitySubmission.status === status).length]))
   const formBodies: Array<Record<string, unknown>> = []
   const fields = [{ id: 'photo', label: '单张凭证', type: 'IMAGE', required: true, options: [], placeholder: null, multiple: false, maxImages: 1 }]
   const row = (index: number) => ({ id: 'comment-' + index, content: index === 0 ? '管理员自己的参与评论' : '其他用户的参与评论', parentId: null, floorNumber: index + 1, likeCount: 0, isPinned: false, liked: false, createdAt: '2026-10-09T00:00:00Z', mentions: [], topicActivitySubmission: { id: 'submission-' + index, status: statuses[index], alreadyCounted: false }, author: { id: index === 0 ? 'admin-1' : 'user-2', uid: index + 1, nickname: index === 0 ? '管理员本人' : '其他用户', level: 1 } })
@@ -54,10 +90,11 @@ test('V6.1.1 browser: modal over actual sheet, independent IMAGE and live review
     }
     if (req.method === 'GET' && url.pathname === '/api/posts/post-fixture/replies') {
       const filter = url.searchParams.get('topicStatus')
-      const roots = statuses.map((_, index) => row(index)).filter(r => !filter || filter === 'ALL' || r.topicActivitySubmission.status === filter)
+      const sourceRows = v2ReviewFixture ? v2ReviewRows : statuses.map((_, index) => row(index))
+      const roots = sourceRows.filter(r => !filter || filter === 'ALL' || r.topicActivitySubmission.status === filter)
       const totalPages = Math.max(1, Math.ceil(roots.length / 20))
       const page = Math.min(totalPages, Math.max(1, Number(url.searchParams.get('page')) || 1))
-      json({ replies: roots.slice((page - 1) * 20, page * 20), page, pageSize: 20, total: roots.length, totalPages, topicActivity: { reviewCounts: counts() } }); return
+      json({ replies: roots.slice((page - 1) * 20, page * 20), page, pageSize: 20, total: roots.length, totalPages, topicActivityV2Enabled: v2ReviewFixture, canInteract: v2ReviewFixture, topicPlatformTabs: Object.entries(platformNames).map(([platformKey, platformName]) => ({ platformKey, platformName })), topicActivity: { reviewCounts: v2ReviewFixture ? v2ReviewCounts() : counts() } }); return
     }
     if (req.method === 'PATCH' && url.pathname.startsWith('/api/admin/topic-activity-submissions/')) {
       reviewRequests++; let body = ''; for await (const chunk of req) body += chunk
@@ -206,6 +243,50 @@ test('V6.1.1 browser: modal over actual sheet, independent IMAGE and live review
       assert.equal(await page.evaluate(() => window.scrollY), scrollBeforeReview)
       assert.equal(reviewRequests, 1)
       await page.close()
+    })
+    await t.test('V2 discussion hides every review status while platform submissions retain status and pending actions', async () => {
+      v2ReviewFixture = true
+      const page = await browser!.newPage({ viewport: { width: 1200, height: 1000 } })
+      await page.goto(origin + '/posts/post-fixture?review=1&topicStatus=ALL')
+      const statuses: Status[] = ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN']
+      const forbiddenDiscussionLabels = ['待审核', '已通过', '未通过', '已拒绝', '已撤回', '通过', '拒绝', '拒绝原因']
+
+      for (const status of statuses) {
+        const discussion = page.locator('#reply-discussion-' + status)
+        await discussion.waitFor()
+        for (const label of forbiddenDiscussionLabels) assert.equal(await discussion.getByText(label, { exact: true }).count(), 0, 'ordinary V2 discussion ' + status + ' hides ' + label)
+        assert.equal(await discussion.getByRole('button', { name: '通过', exact: true }).count(), 0)
+        assert.equal(await discussion.getByRole('button', { name: '拒绝', exact: true }).count(), 0)
+      }
+
+      const pendingDiscussion = page.locator('#reply-discussion-PENDING')
+      await pendingDiscussion.getByText('已计入本活动', { exact: true }).waitFor()
+      await pendingDiscussion.getByText('尚未填写表单', { exact: true }).waitFor()
+      await pendingDiscussion.getByRole('button', { name: '点赞 0', exact: true }).waitFor()
+      await pendingDiscussion.getByRole('button', { name: '回复', exact: true }).waitFor()
+      await pendingDiscussion.getByRole('button', { name: '置顶', exact: true }).waitFor()
+      await pendingDiscussion.getByRole('button', { name: '删除', exact: true }).waitFor()
+
+      const platformStatusLabels: Record<Status, RegExp> = {
+        PENDING: /^待审核$/,
+        APPROVED: /已通过/,
+        REJECTED: /^未通过$/,
+        WITHDRAWN: /^已撤回$/,
+      }
+      for (const platformKey of Object.keys(platformNames)) {
+        for (const status of statuses) {
+          const platformCard = page.locator('#reply-' + platformKey + '-' + status)
+          await platformCard.waitFor()
+          await platformCard.getByText(platformStatusLabels[status]).waitFor()
+          if (status === 'REJECTED') await platformCard.getByText('拒绝原因：合成拒绝理由', { exact: true }).waitFor()
+          const approveCount = await platformCard.getByRole('button', { name: '通过', exact: true }).count()
+          const rejectCount = await platformCard.getByRole('button', { name: '拒绝', exact: true }).count()
+          assert.equal(approveCount, status === 'PENDING' ? 1 : 0, platformKey + ' ' + status + ' approve action')
+          assert.equal(rejectCount, status === 'PENDING' ? 1 : 0, platformKey + ' ' + status + ' reject action')
+        }
+      }
+      await page.close()
+      v2ReviewFixture = false
     })
   } finally { await browser?.close(); await new Promise<void>(resolve => server.close(() => resolve())) }
 })

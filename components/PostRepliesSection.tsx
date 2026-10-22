@@ -35,7 +35,7 @@ import { TopicActivityPlatformSubmissionCard } from '@/components/activities/Top
 import type { TopicActivityV2TaskAsset, TopicActivityV2TaskSubmission } from '@/components/activities/topic-activity-v2-types'
 import { SingleCommentConfirmDialog } from '@/components/activities/SingleCommentConfirmDialog'
 import { parseTopicCommentEligibility, topicCommentBlockMessage, type TopicCommentEligibility } from '@/lib/topic-comment-ui'
-import { canShowTopicActivityCommentReviewActions } from '@/lib/topic-activity-comment-platform'
+import { canShowTopicActivityCommentReviewActions, isReviewableTopicActivitySubmission } from '@/lib/topic-activity-comment-platform'
 import { matchesTopicReviewFilter, topicReviewCountForFilter, type TopicReviewCounts } from '@/lib/topic-review-filter'
 import {
   clearPostReplyDrafts,
@@ -893,6 +893,9 @@ export function PostRepliesSection({
     const visibleChildren = showAll ? children : children.slice(0, 3)
     const canDelete = currentUserId === reply.author.id || canManageReplies
     const replyBody = splitContentImages(reply.content)
+    const submission = reply.topicActivitySubmission
+    const reviewableSubmission = submission && isReviewableTopicActivitySubmission({ isV2Activity: topicActivityV2Enabled, rewardEntryId: submission.rewardEntryId }) ? submission : null
+    const canShowReviewActions = Boolean(submission && canShowTopicActivityCommentReviewActions({ canReview: canReviewTopicActivity, isV2Activity: topicActivityV2Enabled, status: submission.status, rewardEntryId: submission.rewardEntryId }))
 
     return (
       <article key={reply.id} id={`reply-${reply.id}`} className="scroll-mt-20">
@@ -944,13 +947,14 @@ export function PostRepliesSection({
             ) : null}
             {topicActivityId && reply.topicActivitySubmission ? (
               <>
-                {canShowTopicActivityCommentReviewActions({ canReview: canReviewTopicActivity, isV2Activity: topicActivityV2Enabled, status: reply.topicActivitySubmission.status, rewardEntryId: reply.topicActivitySubmission.rewardEntryId }) ? <>
+                {reviewableSubmission ? <span className={`rounded-full px-3 py-1 text-xs font-black ${reviewableSubmission.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' : reviewableSubmission.status === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{reviewableSubmission.status === 'APPROVED' ? '已通过' : reviewableSubmission.status === 'REJECTED' ? '未通过' : reviewableSubmission.status === 'WITHDRAWN' ? '已撤回' : '待审核'}</span> : null}
+                {canShowReviewActions ? <>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'APPROVED')} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 disabled:opacity-50">{reviewingSubmissionId === reply.topicActivitySubmission.id ? '处理中…' : '通过'}</button>
                   <button type="button" disabled={Boolean(reviewingSubmissionId)} onClick={() => openReviewDialog(reply, 'REJECTED')} className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 disabled:opacity-50">拒绝</button>
-                </> : <span className={`rounded-full px-3 py-1 text-xs font-black ${reply.topicActivitySubmission.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-700' : reply.topicActivitySubmission.status === 'REJECTED' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{reply.topicActivitySubmission.status === 'APPROVED' ? '已通过' : reply.topicActivitySubmission.status === 'REJECTED' ? '未通过' : reply.topicActivitySubmission.status === 'WITHDRAWN' ? '已撤回' : '待审核'}</span>}
+                </> : null}
                 {canReviewTopicActivity && reply.topicActivitySubmission.alreadyCounted && reply.topicActivitySubmission.status === 'PENDING' ? <span className="text-xs font-bold text-slate-500">已计入本活动</span> : null}
                 {canReviewTopicActivity && typeof reply.topicActivitySubmission.formSubmissionCount === 'number' ? reply.topicActivitySubmission.formSubmissionCount > 0 ? <a href={`/posts/${postId}?formUserId=${encodeURIComponent(reply.author.id)}#topic-activity-admin-forms-${topicActivityId}`} className="text-xs font-bold text-[var(--primary)]">已提交表单（{reply.topicActivitySubmission.formSubmissionCount}） · 查看资料</a> : <span className="text-xs text-[var(--foreground-muted)]">尚未填写表单</span> : null}
-                {reply.topicActivitySubmission.status === 'REJECTED' && reply.topicActivitySubmission.rejectReason ? <span className="basis-full text-xs text-rose-700">拒绝原因：{reply.topicActivitySubmission.rejectReason}</span> : null}
+                {reviewableSubmission?.status === 'REJECTED' && reviewableSubmission.rejectReason ? <span className="basis-full text-xs text-rose-700">拒绝原因：{reviewableSubmission.rejectReason}</span> : null}
               </>
             ) : null}
           </div>

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
-import { canShowTopicActivityCommentReviewActions, topicActivityPlatformReplyWhere, topicActivityPlatformTabs, topicActivityReviewReplyWhere, topicActivityReviewSubmissionScopeWhere } from '@/lib/topic-activity-comment-platform'
+import { canShowTopicActivityCommentReviewActions, isReviewableTopicActivitySubmission, topicActivityPlatformReplyWhere, topicActivityPlatformTabs, topicActivityReviewReplyWhere, topicActivityReviewSubmissionScopeWhere } from '@/lib/topic-activity-comment-platform'
 import { fixture, rewardEntry } from './fixtures/topic-v2-transaction'
 
 const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8')
@@ -62,12 +62,18 @@ test('V2 discussion comments never expose review actions while platform submissi
   const submissions = platforms.flatMap((platformKey) => statuses.map((status) => ({ status, rewardEntryId: `entry-${platformKey}`, platformKey })))
 
   for (const item of discussion) {
+    assert.equal(isReviewableTopicActivitySubmission({ isV2Activity: true, rewardEntryId: item.rewardEntryId }), false, `V2 discussion ${item.status} is not reviewable even when it has a TopicActivitySubmission row`)
     assert.equal(canShowTopicActivityCommentReviewActions({ canReview: true, isV2Activity: true, ...item }), false)
   }
   for (const item of submissions) {
+    assert.equal(isReviewableTopicActivitySubmission({ isV2Activity: true, rewardEntryId: item.rewardEntryId }), true, `${item.platformKey} ${item.status} remains a reviewable platform submission`)
     assert.equal(canShowTopicActivityCommentReviewActions({ canReview: true, isV2Activity: true, ...item }), item.status === 'PENDING')
   }
+  for (const platformKey of platforms) {
+    assert.equal(isReviewableTopicActivitySubmission({ isV2Activity: true, rewardEntryId: `entry-${platformKey}` }), true)
+  }
   assert.equal(canShowTopicActivityCommentReviewActions({ canReview: true, isV2Activity: false, status: 'PENDING', rewardEntryId: null }), true, 'legacy activity review remains unchanged')
+  assert.equal(isReviewableTopicActivitySubmission({ isV2Activity: false, rewardEntryId: null }), true, 'legacy status visibility remains unchanged')
   assert.equal(canShowTopicActivityCommentReviewActions({ canReview: false, isV2Activity: false, status: 'PENDING', rewardEntryId: 'entry-weibo' }), false)
 
   const replies = read('components/PostRepliesSection.tsx')
@@ -78,6 +84,12 @@ test('V2 discussion comments never expose review actions while platform submissi
   const legacyReviewRoute = read('app/api/admin/topic-activity-submissions/[submissionId]/route.ts')
   const v2ReviewRoute = read('app/api/admin/activities/[activityId]/v2/submissions/[submissionId]/route.ts')
   assert.match(replies, /canShowTopicActivityCommentReviewActions\(/u)
+  assert.match(replies, /isReviewableTopicActivitySubmission\(\{ isV2Activity: topicActivityV2Enabled, rewardEntryId: submission\.rewardEntryId \}\)/u)
+  assert.match(replies, /\{reviewableSubmission \? <span[\s\S]*?已通过[\s\S]*?未通过[\s\S]*?已撤回[\s\S]*?待审核[\s\S]*?: null\}/u)
+  assert.match(replies, /\{canShowReviewActions \? <>[\s\S]*?通过[\s\S]*?拒绝[\s\S]*?<\/>\s*: null\}/u)
+  assert.match(replies, /reviewableSubmission\?\.status === 'REJECTED'[\s\S]*?拒绝原因/u)
+  assert.match(replies, /已计入本活动/u)
+  assert.match(replies, /尚未填写表单/u)
   assert.match(replies, /reply\.topicActivitySubmission\?\.rewardEntryId\) return <TopicActivityPlatformSubmissionCard/u)
   assert.match(platformCard, /<TopicActivityV2TaskReview[^>]*canReview=\{canReview\}/u)
   assert.match(taskReview, /const isPending = submission\.status === 'PENDING'/u)

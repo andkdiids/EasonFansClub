@@ -4,13 +4,23 @@ import { topicReviewFilter, type TopicReviewStatus } from '@/lib/topic-review-fi
 
 export type TopicActivityPlatformTab = { platformKey: string; platformName: string }
 
+/** A V2 submission is reviewable only when it is attached to a configured platform reward entry. */
+export function isReviewableTopicActivitySubmission(input: {
+  isV2Activity: boolean
+  rewardEntryId?: string | null
+}) {
+  return !input.isV2Activity || Boolean(input.rewardEntryId)
+}
+
 export function canShowTopicActivityCommentReviewActions(input: {
   canReview: boolean
   isV2Activity: boolean
   status: string
   rewardEntryId?: string | null
 }) {
-  return input.canReview && input.status === 'PENDING' && (!input.isV2Activity || Boolean(input.rewardEntryId))
+  return input.canReview
+    && input.status === 'PENDING'
+    && isReviewableTopicActivitySubmission(input)
 }
 
 export function topicActivityPlatformTabs(topicProgram: unknown): TopicActivityPlatformTab[] {
