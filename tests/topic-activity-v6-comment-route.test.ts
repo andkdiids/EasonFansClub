@@ -6,6 +6,7 @@ import {
   resolveTopicActivityCommentPolicy,
   type TopicActivityCommentEligibility,
 } from '@/lib/topic-activity-comment-policy'
+import { createDefaultTopicActivityV2Program, type TopicRewardEntryConfig } from '@/lib/topic-activity-v2-config'
 
 type ActivityStatus = 'PUBLISHED' | 'DRAFT' | 'CANCELLED'
 type ParticipationMode = 'COMMENT' | 'FORM' | 'BOTH'
@@ -26,6 +27,7 @@ type FixtureSubmission = {
   commentId: string | null
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
   commentDeletedAt: Date | null
+  rewardEntryId: string | null
 }
 
 type FixtureActivity = {
@@ -38,6 +40,7 @@ type FixtureActivity = {
   endsAt: Date | null
   participationMode: ParticipationMode
   formSchema: Record<string, unknown>
+  topicProgram: unknown
   allowImageAttachments: boolean
 }
 
@@ -63,6 +66,7 @@ type FixtureState = {
   currentUser: { id: string; uid: number; nickname: string; role: UserRole }
   forms: FixtureForm[]
   submissions: FixtureSubmission[]
+  rewardEntries: Array<{ id: string; activityId: string; platformKey: string }>
   replies: FixtureReply[]
   adminAssets: Array<{ id: string; activityId: string; uploadedByUserId: string; storageKey: string; mimeType: string; width: number; height: number; size: number; replyId: string | null }>
   nextReplyId: number
@@ -87,6 +91,15 @@ function resetFixture(input: Partial<{
   endsAt: Date | null
   role: UserRole
 }> = {}) {
+  const topicProgram = createDefaultTopicActivityV2Program()
+  topicProgram.enabled = true
+  topicProgram.platformRewards.enabled = true
+  topicProgram.entries = [
+    ['weibo', '微博'], ['xiaohongshu', '小红书'], ['douyin', '抖音'], ['instagram', 'Instagram'], ['bilibili', '其他平台'],
+  ].map(([platformKey, platformName], index): TopicRewardEntryConfig => ({
+    id: `entry-${platformKey}`, platformKey, platformName, title: `${platformName}任务`, instructions: '测试任务', materialRequirement: '',
+    minImages: 0, maxImages: 0, points: 1, enabled: true, sortOrder: index, startsAt: null, endsAt: null, allowResubmit: true,
+  }))
   const form: FixtureForm = {
     id: 'form-1',
     activityId: 'activity-1',
@@ -104,6 +117,7 @@ function resetFixture(input: Partial<{
       startsAt: input.startsAt === undefined ? new Date(now().getTime() - 86_400_000) : input.startsAt,
       endsAt: input.endsAt === undefined ? new Date(now().getTime() + 86_400_000) : input.endsAt,
       participationMode: input.mode || 'BOTH',
+      topicProgram,
       allowImageAttachments: true,
       formSchema: {
         version: 1,
@@ -118,6 +132,7 @@ function resetFixture(input: Partial<{
     currentUser: participant(input.role),
     forms: [],
     submissions: [],
+    rewardEntries: topicProgram.entries.map((entry) => ({ id: entry.id, activityId: 'activity-1', platformKey: entry.platformKey })),
     replies: [],
     adminAssets: [],
     nextReplyId: 1,
@@ -141,7 +156,10 @@ function addForm(options: { replied?: boolean; imageReply?: boolean } = {}) {
   state.formSubmission = form
 }
 
-function addSubmission(input: Partial<FixtureSubmission> = {}) {
+function addSubmission(input: Partial<FixtureSubmission> & { platformKey?: string } = {}) {
+  const rewardEntryId = input.rewardEntryId === undefined
+    ? input.platformKey ? state.rewardEntries.find((entry) => entry.platformKey === input.platformKey)?.id || null : null
+    : input.rewardEntryId
   state.submissions.push({
     id: input.id || `submission-${state.submissions.length + 1}`,
     activityId: input.activityId || state.activity.id,
@@ -149,7 +167,13 @@ function addSubmission(input: Partial<FixtureSubmission> = {}) {
     commentId: input.commentId === undefined ? `comment-history-${state.submissions.length + 1}` : input.commentId,
     status: input.status || 'PENDING',
     commentDeletedAt: input.commentDeletedAt === undefined ? null : input.commentDeletedAt,
+    rewardEntryId,
   })
+}
+
+function addReviewRoot(id: string, status: FixtureSubmission['status'], platformKey: string) {
+  state.replies.push({ ...createdReply(id, state.post.id, state.currentUser.id, `${platformKey} ${status}`, null, state.replies.length + 1), createdAt: now(), updatedAt: now() })
+  addSubmission({ id: `submission-${id}`, commentId: id, status, platformKey })
 }
 
 function makeRequest(body: Record<string, unknown>, postId = 'post-1') {
@@ -287,13 +311,79 @@ const txStub = {
 }
 
 let transactionTail = Promise.resolve()
+function matchesSubmissionWhere(submission: FixtureSubmission, where: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(where)) {
+    if (key === 'AND' && Array.isArray(value)) {
+      if (!value.every((condition) => matchesSubmissionWhere(submission, condition as Record<string, unknown>))) return false
+      continue
+    }
+    if (key === 'OR' && Array.isArray(value)) {
+      if (!value.some((condition) => matchesSubmissionWhere(submission, condition as Record<string, unknown>))) return false
+      continue
+    }
+    if (key === 'RewardEntry') {
+      const relation = value as { is?: { platformKey?: string } | null }
+      if (relation.is === null) {
+        if (submission.rewardEntryId !== null) return false
+      } else {
+        const entry = state.rewardEntries.find((candidate) => candidate.id === submission.rewardEntryId && candidate.activityId === submission.activityId)
+        if (!entry || (relation.is?.platformKey && entry.platformKey !== relation.is.platformKey)) return false
+      }
+      continue
+    }
+    if (key === 'Comment') {
+      const comment = state.replies.find((reply) => reply.id === submission.commentId)
+      const relationWhere = (value as { is?: Record<string, unknown> }).is || {}
+      if (!comment || !matchesReplyFields(comment, relationWhere)) return false
+      continue
+    }
+    if (key === 'User') continue // every synthetic fixture user is active and has a profile
+    if (typeof value === 'object' && value !== null && 'in' in value) {
+      if (!(value.in as unknown[]).includes(Reflect.get(submission, key))) return false
+      continue
+    }
+    if (Reflect.get(submission, key) !== value) return false
+  }
+  return true
+}
+
+function matchesReplyFields(reply: FixtureReply, where: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(where)) {
+    if (key === 'User') continue // every synthetic fixture user is active and has a profile
+    if (key === 'postId' && reply.postId !== value) return false
+    if (key === 'parentId' && reply.parentId !== value) return false
+    if (key === 'isDeleted' && (reply.isDeleted === true) !== value) return false
+  }
+  return true
+}
+
+function matchesReplyWhere(reply: FixtureReply, where: Record<string, unknown>): boolean {
+  for (const [key, value] of Object.entries(where)) {
+    if (key === 'AND' && Array.isArray(value)) {
+      if (!value.every((condition) => matchesReplyWhere(reply, condition as Record<string, unknown>))) return false
+      continue
+    }
+    if (key === 'OR' && Array.isArray(value)) {
+      if (!value.some((condition) => matchesReplyWhere(reply, condition as Record<string, unknown>))) return false
+      continue
+    }
+    if (key === 'TopicActivitySubmission') {
+      const relation = value as { is?: Record<string, unknown> | null }
+      const submission = state.submissions.find((candidate) => candidate.commentId === reply.id)
+      if (relation.is === null) {
+        if (submission) return false
+      } else if (!submission || !relation.is || !matchesSubmissionWhere(submission, relation.is)) return false
+      continue
+    }
+    if (!matchesReplyFields(reply, { [key]: value })) return false
+    if (key === 'isPinned' && reply.isPinned !== value) return false
+  }
+  return true
+}
+
 function matchingReplies(where: Record<string, unknown>) {
   assert.equal(where.OR, undefined, 'own author must not bypass administrative status filtering')
-  const status = (where.TopicActivitySubmission as { is?: { status?: string } } | undefined)?.is?.status
-  return state.replies.filter((reply) => reply.postId === where.postId && !reply.isDeleted
-    && (where.parentId === null ? reply.parentId === null : true)
-    && (typeof where.isPinned === 'boolean' ? reply.isPinned === where.isPinned : true)
-    && (!status || state.submissions.some((submission) => submission.commentId === reply.id && submission.status === status)))
+  return state.replies.filter((reply) => matchesReplyWhere(reply, where))
 }
 const prismaStub = {
   activity: {
@@ -317,18 +407,18 @@ const prismaStub = {
   replyLike: { findMany: async () => [] },
   topicActivitySubmission: {
     findFirst: async () => state.submissions[0] || null,
-    findMany: async ({ where }: { where: { commentId: { in: string[] } } }) => state.submissions.filter((submission) => submission.commentId && where.commentId.in.includes(submission.commentId)),
-    groupBy: async ({ by }: { by: string[] }) => {
+    findMany: async ({ where }: { where: { commentId: { in: string[] } } }) => state.submissions.filter((submission) => submission.commentId && where.commentId.in.includes(submission.commentId)).map((submission) => ({ ...submission, TaskImageAssets: [] })),
+    groupBy: async ({ by, where = {} }: { by: string[]; where?: Record<string, unknown> }) => {
       const grouped = new Map<string, number>()
       for (const submission of state.submissions) {
-        if (!state.replies.some((reply) => reply.id === submission.commentId && !reply.isDeleted && !reply.parentId)) continue
-        if (by[0] === 'userId' && submission.status !== 'APPROVED') continue
+        if (!matchesSubmissionWhere(submission, where)) continue
         const key = by[0] === 'status' ? submission.status : submission.userId
         grouped.set(key, (grouped.get(key) || 0) + 1)
       }
       return [...grouped].map(([key, count]) => ({ [by[0]]: key, _count: { _all: count } }))
     },
   },
+  topicActivityRewardGrant: { findMany: async () => [] },
   topicActivityFormSubmission: {
     findMany: async () => state.forms.map((form) => ({ ...form, Replies: form.replies.map((reply) => ({ ...reply, ImageAssets: reply.imageIds.map((id) => ({ id })) })) })),
     groupBy: async () => [],
@@ -349,7 +439,7 @@ const topicActivityStub = {
   resolveTopicActivityCommentEligibilityInTransaction: async (_tx: typeof txStub, input: { activity: FixtureActivity; userId: string; now: Date }) => eligibilityFor(input.activity, input.userId),
   createTopicSubmissionForCommentInTransaction: async (_tx: typeof txStub, input: { postId: string; commentId: string; userId: string; now: Date }) => {
     if (state.activity.status !== 'PUBLISHED' || (state.activity.startsAt && state.activity.startsAt > input.now) || (state.activity.endsAt && state.activity.endsAt < input.now)) return null
-    const submission: FixtureSubmission = { id: `submission-${state.submissions.length + 1}`, activityId: state.activity.id, userId: input.userId, commentId: input.commentId, status: 'PENDING', commentDeletedAt: null }
+    const submission: FixtureSubmission = { id: `submission-${state.submissions.length + 1}`, activityId: state.activity.id, userId: input.userId, commentId: input.commentId, status: 'PENDING', commentDeletedAt: null, rewardEntryId: null }
     state.submissions.push(submission)
     return { id: submission.id, activityId: submission.activityId, status: submission.status }
   },
@@ -381,7 +471,7 @@ before(async () => {
     if (request === '@/lib/community-rewards') return { awardCommunityCommentRewards: async () => { state.sideEffects.communityRewards += 1; return { commenterRewardPoints: 0 } } }
     if (request === '@/lib/content-images') return { publicContentImageMarkers: (value: string) => value, appendContentImages: (value: string) => value, parseContentImageUrls: (value: unknown) => Array.isArray(value) ? value : [] }
     if (request === '@/lib/images') return { publicImageUrl: (value: string | null) => value }
-    if (request === '@/lib/post-replies') return { parsePostReplyDirection: () => 'asc', parsePostReplySort: () => 'floor', getPostReplyOrderBy: () => [], getPostReplyOffset: () => 0, getPostReplyTotalPages: (value: number) => Math.max(1, value), POST_REPLY_PAGE_SIZE: 20 }
+    if (request === '@/lib/post-replies') return { parsePostReplyDirection: () => 'asc', parsePostReplySort: () => 'floor', getPostReplyOrderBy: () => [], getPostReplyOffset: (page: number, pageSize: number) => (page - 1) * pageSize, getPostReplyTotalPages: (value: number, pageSize: number) => Math.max(1, Math.ceil(value / pageSize)), POST_REPLY_PAGE_SIZE: 20 }
     if (request === '@/lib/post-moderation') return { buildPublicPostWhere: () => ({ isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } }) }
     if (request === '@/lib/realtime') return { emitRealtimeMany: () => undefined }
     if (request === '@/lib/content-moderation') return { publicModerationText: (value: string) => value, BANNED_WORD_MESSAGE: 'blocked', CONTENT_CONTAINS_BANNED_WORD: 'CONTENT_CONTAINS_BANNED_WORD', checkBannedWords: async () => ({ blocked: false }) }
@@ -436,6 +526,65 @@ test('V6.1.1 real GET strictly filters admin own approved/rejected roots and exp
   const body = await response.json()
   assert.equal(body.replies.length, 5, 'ordinary viewers cannot activate private admin filtering')
   assert.equal(body.topicActivity.reviewCounts, undefined, 'private counts are admin-only')
+})
+
+test('review GET combines status and platform filters for every status and keeps scoped counts and pagination consistent', async () => {
+  resetFixture({ role: 'ADMIN', mode: 'COMMENT' })
+  const platforms = ['weibo', 'xiaohongshu', 'douyin', 'instagram'] as const
+  const statuses = ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'] as const
+  for (const platform of platforms) for (const status of statuses) addReviewRoot(`${platform}-${status}`, status, platform)
+  state.replies.push({ ...createdReply('ordinary-root', state.post.id, state.currentUser.id, '普通评论', null, 50), createdAt: now(), updatedAt: now() })
+
+  for (const platform of platforms) {
+    for (const status of statuses) {
+      const response = await repliesRoute.GET(new Request(`https://ecfc.invalid/api/posts/post-1/replies?topicStatus=${status}&topicPlatform=${platform}`), postContext())
+      assert.equal(response.status, 200, `${status} + ${platform}`)
+      const body = await response.json()
+      assert.deepEqual(body.replies.map((reply: { id: string; topicActivitySubmission: { status: string; rewardEntryId: string } }) => ({ id: reply.id, status: reply.topicActivitySubmission.status, rewardEntryId: reply.topicActivitySubmission.rewardEntryId })), [
+        { id: `${platform}-${status}`, status, rewardEntryId: `entry-${platform}` },
+      ], `${status} + ${platform} returns only the matching review row`)
+      assert.equal(body.total, 1)
+      assert.deepEqual(body.topicActivity.reviewCounts, { PENDING: 1, APPROVED: 1, REJECTED: 1, WITHDRAWN: 1, ALL: 4 })
+    }
+
+    const allStatuses = await repliesRoute.GET(new Request(`https://ecfc.invalid/api/posts/post-1/replies?topicPlatform=${platform}`), postContext())
+    const allStatusesBody = await allStatuses.json()
+    assert.equal(allStatusesBody.total, 4, `all statuses + ${platform}`)
+    assert.deepEqual(allStatusesBody.replies.map((reply: { topicActivitySubmission: { status: string } }) => reply.topicActivitySubmission.status).sort(), [...statuses].sort())
+    assert.deepEqual(allStatusesBody.topicActivity.reviewCounts, { PENDING: 1, APPROVED: 1, REJECTED: 1, WITHDRAWN: 1, ALL: 4 })
+  }
+
+  for (const status of statuses) {
+    const response = await repliesRoute.GET(new Request(`https://ecfc.invalid/api/posts/post-1/replies?topicStatus=${status}`), postContext())
+    const body = await response.json()
+    assert.equal(body.total, platforms.length, `all platforms + ${status}`)
+    assert.equal(body.replies.length, platforms.length)
+    assert.ok(body.replies.every((reply: { topicActivitySubmission: { status: string } }) => reply.topicActivitySubmission.status === status))
+    assert.deepEqual(body.topicActivity.reviewCounts, { PENDING: 4, APPROVED: 4, REJECTED: 4, WITHDRAWN: 4, ALL: 17 })
+  }
+
+  const firstPlatformPage = await repliesRoute.GET(new Request('https://ecfc.invalid/api/posts/post-1/replies?topicPlatform=weibo&page=1&pageSize=2'), postContext())
+  const firstPageBody = await firstPlatformPage.json()
+  assert.equal(firstPageBody.page, 1)
+  assert.equal(firstPageBody.total, 4)
+  assert.equal(firstPageBody.totalPages, 2)
+  assert.equal(firstPageBody.replies.length, 2)
+  const secondPlatformPage = await repliesRoute.GET(new Request('https://ecfc.invalid/api/posts/post-1/replies?topicPlatform=weibo&page=2&pageSize=2'), postContext())
+  const secondPageBody = await secondPlatformPage.json()
+  assert.equal(secondPageBody.page, 2)
+  assert.equal(secondPageBody.total, 4)
+  assert.equal(secondPageBody.totalPages, 2)
+  assert.equal(secondPageBody.replies.length, 2)
+
+  const noMatch = await repliesRoute.GET(new Request('https://ecfc.invalid/api/posts/post-1/replies?topicStatus=PENDING&topicPlatform=bilibili'), postContext())
+  const noMatchBody = await noMatch.json()
+  assert.equal(noMatchBody.total, 0)
+  assert.deepEqual(noMatchBody.replies, [])
+  assert.equal(noMatchBody.totalPages, 1)
+  assert.deepEqual(noMatchBody.topicActivity.reviewCounts, { PENDING: 0, APPROVED: 0, REJECTED: 0, WITHDRAWN: 0, ALL: 0 })
+
+  const invalidPlatform = await repliesRoute.GET(new Request('https://ecfc.invalid/api/posts/post-1/replies?topicPlatform=unknown-platform'), postContext())
+  assert.equal(invalidPlatform.status, 400, 'an unrecognized platform must not silently disable the platform filter')
 })
 
 test('direct POST gate matrix enforces form, admin reply, activity lifecycle, and admin participant rules', async () => {

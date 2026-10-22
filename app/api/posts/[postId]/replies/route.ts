@@ -21,7 +21,8 @@ import { getReplyLengthMetrics, replyMinimumContentError, replyTooLongPayload } 
 import { completeTask, resolveAndGrantWeeklyMilestonesInTransaction } from '@/lib/growth-tasks/service'
 import { getShanghaiDateKey } from '@/lib/checkin'
 import { hasAdminPermission } from '@/lib/admin-permissions'
-import { topicReviewFilter, topicReviewCountsFromGroups, topicVisibleReplyAuthor, type TopicReviewStatus } from '@/lib/topic-review-filter'
+import { topicReviewCountsFromGroups, topicVisibleReplyAuthor, type TopicReviewStatus } from '@/lib/topic-review-filter'
+import { topicActivityPlatformTabs, topicActivityReviewReplyWhere, topicActivityReviewSubmissionScopeWhere } from '@/lib/topic-activity-comment-platform'
 import { createTopicSubmissionForCommentInTransaction, isTopicActivityFormRequired, resolveTopicActivityCommentEligibilityInTransaction, topicActivityCommentGateErrorCode } from '@/lib/topic-activity'
 import { hasTopicActivityAdminReplyUnlock, resolveTopicActivityCommentEligibility, resolveTopicActivityCommentPolicy } from '@/lib/topic-activity-comment-policy'
 import { topicV2SafeRewardSnapshot } from '@/lib/topic-activity-v2-view'
@@ -125,12 +126,18 @@ export async function GET(request: Request, { params }: Params) {
 
   const topicActivity = await prisma.activity.findFirst({
     where: { activityPostId: postId, type: 'TOPIC_ACTIVITY' },
-    select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, participationRule: true, participationMode: true, formSchema: true, allowImageAttachments: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true },
+    select: { id: true, title: true, type: true, status: true, startsAt: true, endsAt: true, participationRule: true, participationMode: true, formSchema: true, topicProgram: true, allowImageAttachments: true, rewardGrantMode: true, rewardGrantAt: true, rewardPoints: true, rewardBadgeIds: true },
   })
   const canReviewTopicActivity = Boolean(topicActivity && viewer && await hasAdminPermission(viewer, 'activity_manage'))
   const requestedTopicStatus = searchParams.get('topicStatus')
   const topicStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN']
   if (requestedTopicStatus && (!topicActivity || !topicStatuses.includes(requestedTopicStatus))) return NextResponse.json({ message: '话题审核筛选状态不正确' }, { status: 400 })
+  const topicDiscussionOnly = searchParams.get('topicTab') === 'discussion'
+  const requestedTopicPlatform = topicDiscussionOnly ? null : searchParams.get('topicPlatform')?.slice(0, 64) || null
+  const topicPlatformTabs = topicActivity ? topicActivityPlatformTabs(topicActivity.topicProgram) : []
+  const configuredTopicPlatform = topicPlatformTabs.find((tab) => tab.platformKey === requestedTopicPlatform)
+  if (requestedTopicPlatform && !configuredTopicPlatform) return NextResponse.json({ message: '话题平台筛选不正确' }, { status: 400 })
+  const topicPlatformKey = configuredTopicPlatform?.platformKey || null
 
   const rootWhere: Prisma.ReplyWhereInput = {
     postId,
@@ -138,13 +145,14 @@ export async function GET(request: Request, { params }: Params) {
     isPinned: false,
     isDeleted: false,
     ...topicVisibleReplyAuthor,
-    ...topicReviewFilter(topicActivity?.id, canReviewTopicActivity ? requestedTopicStatus as TopicReviewStatus | null : null),
+    ...topicActivityReviewReplyWhere(topicActivity?.id, canReviewTopicActivity ? requestedTopicStatus as TopicReviewStatus | null : null, topicPlatformKey, topicDiscussionOnly),
   }
   const total = await prisma.reply.count({ where: rootWhere })
   const reviewGroups = canReviewTopicActivity && topicActivity
-    ? await prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: topicActivity.id, Comment: { is: { postId, parentId: null, isDeleted: false, ...topicVisibleReplyAuthor } } }, _count: { _all: true } })
+    ? await prisma.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: topicActivity.id, ...topicActivityReviewSubmissionScopeWhere(topicPlatformKey, topicDiscussionOnly), Comment: { is: { postId, parentId: null, isDeleted: false, ...topicVisibleReplyAuthor } } }, _count: { _all: true } })
     : null
-  const reviewCounts = reviewGroups ? topicReviewCountsFromGroups(reviewGroups, await prisma.reply.count({ where: { postId, parentId: null, isDeleted: false, ...topicVisibleReplyAuthor } })) : null
+  const reviewScopeWhere = topicActivityReviewReplyWhere(topicActivity?.id, null, topicPlatformKey, topicDiscussionOnly)
+  const reviewCounts = reviewGroups ? topicReviewCountsFromGroups(reviewGroups, await prisma.reply.count({ where: { postId, parentId: null, isDeleted: false, ...reviewScopeWhere, ...topicVisibleReplyAuthor } })) : null
   const totalPages = getPostReplyTotalPages(total, pageSize)
   const safePage = Math.min(page, totalPages)
   const [pinned, roots] = await Promise.all([

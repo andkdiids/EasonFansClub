@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
-import { topicActivityPlatformReplyWhere, topicActivityPlatformTabs } from '@/lib/topic-activity-comment-platform'
+import { topicActivityPlatformReplyWhere, topicActivityPlatformTabs, topicActivityReviewReplyWhere, topicActivityReviewSubmissionScopeWhere } from '@/lib/topic-activity-comment-platform'
 import { fixture, rewardEntry } from './fixtures/topic-v2-transaction'
 
 const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8')
@@ -41,6 +41,20 @@ test('platform and discussion views reuse the existing comment-submission relati
   assert.match(schema, /Comment\s+Reply\?\s+@relation[\s\S]*?RewardEntry\s+TopicActivityRewardEntry\?/u)
 })
 
+test('review status and platform predicates are composed with AND instead of overwriting the shared relation', () => {
+  assert.deepEqual(topicActivityReviewReplyWhere('activity-1', 'PENDING', 'weibo'), {
+    AND: [
+      { TopicActivitySubmission: { is: { activityId: 'activity-1', status: 'PENDING' } } },
+      { TopicActivitySubmission: { is: { activityId: 'activity-1', RewardEntry: { is: { platformKey: 'weibo' } } } } },
+    ],
+  })
+  assert.deepEqual(topicActivityReviewReplyWhere('activity-1', 'APPROVED', null), {
+    TopicActivitySubmission: { is: { activityId: 'activity-1', status: 'APPROVED' } },
+  })
+  assert.deepEqual(topicActivityReviewSubmissionScopeWhere('douyin'), { RewardEntry: { is: { platformKey: 'douyin' } } })
+  assert.deepEqual(topicActivityReviewSubmissionScopeWhere(null, true), { rewardEntryId: null })
+})
+
 test('post activity UI composes the existing form, V2 actions, one header, and shared comments', () => {
   const page = read('app/posts/[postId]/page.tsx')
   assert.match(page, /aria-label="话题活动信息"/u)
@@ -58,6 +72,13 @@ test('post activity UI composes the existing form, V2 actions, one header, and s
   assert.match(panel, /查看提交/u)
   assert.match(panel, /查看测试结果/u)
   assert.match(page, /<TopicActivityFormParticipation/u)
+})
+
+test('status and platform tab changes both return to page one, and empty state follows filtered server results', () => {
+  const replies = read('components/PostRepliesSection.tsx')
+  assert.match(replies, /function changeTopicReviewFilter[\s\S]*?params\.delete\('commentPage'\)/u)
+  assert.match(replies, /function changeTopicCommentTab[\s\S]*?params\.delete\('commentPage'\)/u)
+  assert.match(replies, /\{filteredRootReplies\.length === 0 \? \([\s\S]*?还没有回复/u)
 })
 
 test('existing activity API continues to expose only the current user result attempts used by the link', () => {

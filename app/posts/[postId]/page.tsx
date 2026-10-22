@@ -9,11 +9,11 @@ import { RichPostContent, type PostMusicReferenceDisplay } from '@/components/po
 import { PostMediaCarousel } from '@/components/PostMediaCarousel'
 import { LikeAvatars } from '@/components/LikeAvatars'
 import { PostRepliesSection } from '@/components/PostRepliesSection'
-import { topicReviewFilter, topicReviewCountsFromGroups, topicVisibleReplyAuthor, type TopicReviewCounts } from '@/lib/topic-review-filter'
+import { topicReviewCountsFromGroups, topicVisibleReplyAuthor, type TopicReviewCounts } from '@/lib/topic-review-filter'
 import { TopicActivityFormParticipation } from '@/components/activities/TopicActivityFormParticipation'
 import { TopicActivityFormSubmissionEntry } from '@/app/admin/activities/TopicActivityFormSubmissionManager'
 import { TopicActivityV2Panel } from '@/components/activities/TopicActivityV2Panel'
-import { topicActivityPlatformReplyWhere, topicActivityPlatformTabs } from '@/lib/topic-activity-comment-platform'
+import { topicActivityPlatformTabs, topicActivityReviewReplyWhere, topicActivityReviewSubmissionScopeWhere } from '@/lib/topic-activity-comment-platform'
 import { topicV2SafeRewardSnapshot } from '@/lib/topic-activity-v2-view'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
@@ -586,23 +586,23 @@ async function loadPostReplies(
   canReviewTopicActivity = false,
 ) {
   return prisma.$transaction(async (tx) => {
-    const topicSubmissionFilter = topicReviewFilter(topicActivityId, canReviewTopicActivity ? topicStatus : null)
-    const topicPlatformFilter = topicActivityPlatformReplyWhere(topicActivityId, topicPlatformKey, topicDiscussionOnly)
+    const topicReplyFilter = topicActivityReviewReplyWhere(topicActivityId, canReviewTopicActivity ? topicStatus : null, topicPlatformKey, topicDiscussionOnly)
+    const topicReplyScopeFilter = topicActivityReviewReplyWhere(topicActivityId, null, topicPlatformKey, topicDiscussionOnly)
     const topicAuthorFilter = topicActivityId ? topicVisibleReplyAuthor : {}
     const reviewGroups = canReviewTopicActivity && topicActivityId
-      ? await tx.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: topicActivityId, Comment: { is: { postId, parentId: null, isDeleted: false, ...topicAuthorFilter } } }, _count: { _all: true } })
+      ? await tx.topicActivitySubmission.groupBy({ by: ['status'], where: { activityId: topicActivityId, ...topicActivityReviewSubmissionScopeWhere(topicPlatformKey, topicDiscussionOnly), Comment: { is: { postId, parentId: null, isDeleted: false, ...topicAuthorFilter } } }, _count: { _all: true } })
       : null
-    const reviewCounts = reviewGroups ? topicReviewCountsFromGroups(reviewGroups, await tx.reply.count({ where: { postId, parentId: null, isDeleted: false, ...topicAuthorFilter } })) : null
+    const reviewCounts = reviewGroups ? topicReviewCountsFromGroups(reviewGroups, await tx.reply.count({ where: { postId, parentId: null, isDeleted: false, ...topicReplyScopeFilter, ...topicAuthorFilter } })) : null
     const [pinnedReply, normalTotal, myRootReplies] = await Promise.all([
       tx.reply.findFirst({
-        where: { postId, isDeleted: false, parentId: null, isPinned: true, ...topicSubmissionFilter, ...topicPlatformFilter, ...topicAuthorFilter },
+        where: { postId, isDeleted: false, parentId: null, isPinned: true, ...topicReplyFilter, ...topicAuthorFilter },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: replyDetailSelect,
       }),
-      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicPlatformFilter, ...topicAuthorFilter } }),
+      tx.reply.count({ where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicReplyFilter, ...topicAuthorFilter } }),
       viewerId
         ? tx.reply.findMany({
-            where: { postId, authorId: viewerId, isDeleted: false, parentId: null, ...topicPlatformFilter, ...topicAuthorFilter },
+            where: { postId, authorId: viewerId, isDeleted: false, parentId: null, ...topicReplyScopeFilter, ...topicAuthorFilter },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             select: replyDetailSelect,
           })
@@ -611,7 +611,7 @@ async function loadPostReplies(
     const totalPages = getPostReplyTotalPages(normalTotal)
     const page = clampPostReplyPage(requestedPage, totalPages)
     const normalRoots = await tx.reply.findMany({
-      where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicSubmissionFilter, ...topicPlatformFilter, ...topicAuthorFilter },
+      where: { postId, isDeleted: false, parentId: null, isPinned: false, ...topicReplyFilter, ...topicAuthorFilter },
       orderBy: getPostReplyOrderBy(sort, direction),
       skip: getPostReplyOffset(page),
       take: POST_REPLY_PAGE_SIZE,
