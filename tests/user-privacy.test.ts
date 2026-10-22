@@ -24,6 +24,7 @@ test('隐私默认值全部公开，历史用户无需批量创建设置记录',
     showBadgeHistory: true,
     showRatings: true,
     showSalon: true,
+    showFavorites: true,
   })
   assert.deepEqual(getVisibleProfileModules(DEFAULT_USER_PRIVACY_SETTINGS, false), PUBLIC_PROFILE_MODULE_KEYS)
   assert.deepEqual(getVisibleProfileModules({ ...DEFAULT_USER_PRIVACY_SETTINGS, showPosts: false }, true), PUBLIC_PROFILE_MODULE_KEYS)
@@ -78,7 +79,7 @@ test('隐私设置页面和接口只允许当前登录用户更新白名单字�
   assert.match(page, /隐私设置/)
   for (const label of ['显示挂号记录', '显示挂号留言', '显示发帖记录', '显示评论记录', '显示沙龙记录', '显示演唱会记录', '显示活动记录', '显示勋章记录', '显示评分与榜单']) assert.match(form, new RegExp(label))
   assert.match(route, /rejectInvalidRequestOrigin\(request\)/)
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /where: \{ userId: guard\.user\.id \}/)
   assert.match(route, /USER_PRIVACY_KEYS/)
   assert.doesNotMatch(route, /body\?\.(userId|targetUserId)/)
@@ -115,6 +116,7 @@ test('公开帖子、公开评论、活动报名和本人娱乐数据不因主�
 test('隐私设置迁移使用安全默认值并建立一对一用户关系', () => {
   const schema = source('prisma/schema.prisma')
   const migration = source('prisma/migrations/20260828090000_add_user_privacy_settings/migration.sql')
+  const mobileContractMigration = source('prisma/migrations/20261022090000_profile_mobile_contract/migration.sql')
   assert.match(schema, /UserPrivacySetting\s+UserPrivacySetting\?/) 
   assert.match(schema, /model UserPrivacySetting \{[\s\S]*?userId\s+String\s+@unique[\s\S]*?showRatings\s+Boolean\s+@default\(true\)[\s\S]*?showSalon\s+Boolean\s+@default\(true\)[\s\S]*?User\s+User\s+@relation\(/)
   assert.match(migration, /CREATE TABLE `UserPrivacySetting`/)
@@ -122,4 +124,10 @@ test('隐私设置迁移使用安全默认值并建立一对一用户关系', ()
   assert.match(migration, /`showRatings` BOOLEAN NOT NULL DEFAULT true/)
   assert.match(migration, /UNIQUE INDEX `UserPrivacySetting_userId_key`/)
   assert.match(migration, /ON DELETE CASCADE ON UPDATE CASCADE/)
+  assert.match(schema, /showFavorites\s+Boolean\s+@default\(true\)/)
+  assert.match(mobileContractMigration, /ADD COLUMN `showFavorites` BOOLEAN NOT NULL DEFAULT true/)
+  assert.match(mobileContractMigration, /CREATE TABLE `ProfilePostViewHistory`/)
+  assert.match(mobileContractMigration, /UNIQUE INDEX `ProfilePostViewHistory_userId_postId_key`/)
+  assert.match(mobileContractMigration, /ON DELETE CASCADE ON UPDATE CASCADE/)
+  assert.doesNotMatch(mobileContractMigration, /INSERT INTO|UPDATE `?User|UPDATE `?Post|DELETE FROM/i)
 })

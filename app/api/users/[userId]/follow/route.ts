@@ -2,15 +2,15 @@ import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
 
 type RouteContext = { params: Promise<{ userId: string }> }
 
-export async function POST(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function POST(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const { userId } = await context.params
@@ -54,8 +54,8 @@ export async function POST(_request: Request, context: RouteContext) {
   return NextResponse.json({ followed: true })
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function DELETE(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const { userId } = await context.params

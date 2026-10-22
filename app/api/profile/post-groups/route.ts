@@ -1,11 +1,11 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { MAX_PROFILE_POST_GROUPS, normalizeProfilePostGroupName } from '@/lib/profile-post-groups'
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null) as { name?: unknown } | null

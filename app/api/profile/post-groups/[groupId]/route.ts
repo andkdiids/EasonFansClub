@@ -1,13 +1,13 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { isProfilePostGroupDirection, normalizeProfilePostGroupName } from '@/lib/profile-post-groups'
 
 type RouteContext = { params: Promise<{ groupId: string }> }
 
 async function updateGroup(request: Request, context: RouteContext) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { groupId } = await context.params
   const body = await request.json().catch(() => null) as { name?: unknown; direction?: unknown } | null
@@ -57,8 +57,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   return updateGroup(request, context)
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function DELETE(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { groupId } = await context.params
   try {

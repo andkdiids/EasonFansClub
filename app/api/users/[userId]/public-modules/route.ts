@@ -7,6 +7,7 @@ import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { getProfileRecordPagination, loadProfileRecentMessagesPage, PROFILE_POST_PAGE_SIZE, PROFILE_RECORD_PAGE_SIZE } from '@/lib/profile-page'
 import { getProfileRecordPreferences } from '@/lib/profile-record-preferences'
+import { getProfilePostGroupPreviews } from '@/lib/profile-post-group-previews'
 import { prisma } from '@/lib/prisma'
 import { parseUidParam } from '@/lib/uid'
 import { hasAdminPermission } from '@/lib/admin-permissions'
@@ -56,7 +57,7 @@ export async function GET(request: Request, context: RouteContext) {
     typedModuleKey === 'posts' ? PROFILE_POST_PAGE_SIZE : PROFILE_RECORD_PAGE_SIZE,
   )
   if (!isProfileModuleVisible(visibility.settings, typedModuleKey, visibility.isSelf)) {
-    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' ? paginationFor(0, page) : undefined
+    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' || typedModuleKey === 'favorites' ? paginationFor(0, page) : undefined
     return NextResponse.json({ items: [], ...(pagination ? { pagination } : {}), visibility: { visible: false } })
   }
   let recordPreferences
@@ -67,22 +68,14 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ message: '个人记录暂时无法加载，请稍后重试' }, { status: 503, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } })
   }
   if (!visibility.isSelf && recordPreferences.find((preference) => preference.key === typedModuleKey)?.visible === false) {
-    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' || typedModuleKey === 'salon' ? paginationFor(0, page) : undefined
+    const pagination = typedModuleKey === 'posts' || typedModuleKey === 'recent-messages' || typedModuleKey === 'salon' || typedModuleKey === 'favorites' ? paginationFor(0, page) : undefined
     return NextResponse.json({ items: [], ...(pagination ? { pagination } : {}), visibility: { visible: false } })
   }
 
   if (typedModuleKey === 'posts') {
     const canViewPendingPosts = Boolean(viewer && (viewer.id === target.id || await hasAdminPermission(viewer, 'post_manage')))
     const requestedGroupId = searchParams.get('groupId')
-    const groups = await safeDb(
-      'userModules.postGroups',
-      prisma.userPostGroup.findMany({
-        where: { userId: target.id },
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-        select: { id: true, name: true, sortOrder: true },
-      }),
-      [],
-    )
+    const groups = await getProfilePostGroupPreviews(target.id, canViewPendingPosts)
     if (requestedGroupId && requestedGroupId !== PROFILE_POST_GROUP_UNGROUPED && !groups.some((group) => group.id === requestedGroupId)) {
       return NextResponse.json({ items: [], pagination: paginationFor(0, page), groups })
     }
@@ -226,16 +219,18 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   if (typedModuleKey === 'favorites') {
-    if (!viewer || viewer.id !== target.id) return NextResponse.json({ items: [] })
-    const favorites = await safeDb(
-      'userModules.favorites',
-      prisma.postFavorite.findMany({
-        where: {
-          userId: target.id,
-          Post: { AND: [publicPostWhere(), { User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } } }] },
-        },
+    const where = {
+      userId: target.id,
+      Post: { AND: [publicPostWhere(), { User: { status: 'ACTIVE' as const, isDeleted: false, Profile: { isNot: null } } }] },
+    }
+    try {
+      const total = await prisma.postFavorite.count({ where })
+      const pagination = paginationFor(total, page)
+      const favorites = await prisma.postFavorite.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
-        take: 20,
+        skip: (pagination.page - 1) * pagination.pageSize,
+        take: pagination.pageSize,
         select: {
           id: true,
           createdAt: true,
@@ -250,9 +245,7 @@ export async function GET(request: Request, context: RouteContext) {
             },
           },
         },
-      }),
-      [],
-    )
+      })
     const authorIds = favorites.map((item) => item.Post.User.id)
     const equippedBadges = await getEquippedBadgesForUsers(authorIds, new Date(), viewer?.id)
     return NextResponse.json({
@@ -277,7 +270,13 @@ export async function GET(request: Request, context: RouteContext) {
           }
         })(),
       })),
-    })
+      pagination,
+      visibility: { visible: true },
+    }, { headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
+    } catch (error) {
+      console.error('[userModules.favorites]', { userId: target.id, error })
+      return NextResponse.json({ message: '收藏记录暂时无法加载，请稍后重试' }, { status: 503, headers: { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' } })
+    }
   }
 
   return NextResponse.json({ message: '模块不存在' }, { status: 404 })

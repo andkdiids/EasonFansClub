@@ -3808,6 +3808,7 @@ model Post {
   ReviewedBy            User?                   @relation("PostReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   Board                 Board                   @relation(fields: [boardId], references: [id])
   PostFavorite          PostFavorite[]
+  ProfilePostViewHistory ProfilePostViewHistory[]
   PostMedia             PostMedia[]
   PostTopic             PostTopic[]
   PostTag               PostTag[]
@@ -4021,6 +4022,19 @@ model PostFavorite {
 
   @@unique([postId, userId])
   @@index([userId, createdAt])
+}
+
+model ProfilePostViewHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  viewedAt  DateTime @default(now())
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId, viewedAt])
+  @@index([postId])
 }
 
 model PostMedia {
@@ -4929,6 +4943,7 @@ model User {
   PostDraft                                              PostDraft?
   UserPostGroup                                          UserPostGroup[]
   PostFavorite                                           PostFavorite[]
+  ProfilePostViewHistory                                 ProfilePostViewHistory[]
   Profile                                                Profile?
   ProfileRecordPreference                                ProfileRecordPreference[]
   ProfileBackgroundLikesGiven                            ProfileBackgroundLike[]            @relation("ProfileBackgroundLikeLiker")
@@ -5016,6 +5031,7 @@ model UserPrivacySetting {
   showBadgeHistory    Boolean  @default(true)
   showRatings         Boolean  @default(true)
   showSalon           Boolean  @default(true)
+  showFavorites       Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   User                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
