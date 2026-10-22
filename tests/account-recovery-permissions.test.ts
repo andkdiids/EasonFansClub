@@ -45,12 +45,13 @@ test('忘记密码查询同时校验全局、用户和题目完整性', () => {
   assert.match(verifyRoute, /getAccountSecuritySettings/)
 })
 
-test('密保问题查询接口不选择或返回答案哈希', () => {
+test('密保问题查询接口只选择用于脱敏提示的问题，不选择或返回答案哈希', () => {
   const route = source('app/api/auth/forgot-password/security/questions/route.ts')
   assert.doesNotMatch(route, /answerHash/)
-  assert.match(route, /select:\s*\{\s*id:\s*true\s*\}/)
+  assert.match(route, /UserSecurityQuestion:\s*\{\s*select:\s*\{\s*question:\s*true\s*\}\s*\}/)
   assert.match(route, /genericQuestion/)
-  assert.doesNotMatch(route, /UserSecurityQuestion: \{ select: \{ question: true/)
+  assert.match(route, /buildSecurityQuestionChallengeResponse/)
+  assert.match(route, /INTENTIONAL_LIMITED_ENUMERATION_TRADEOFF/)
 })
 
 test('用户安全页面是只读状态且不含恢复开关按钮', () => {

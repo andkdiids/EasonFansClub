@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAccountSecuritySettings, getSecurityQuestionRecoveryAvailability, type AccountSecuritySettings } from '@/lib/account-security'
 import { logPasswordRecoveryError } from '@/lib/password-recovery-errors'
+import { buildSecurityQuestionChallengeResponse } from '@/lib/password-recovery-question'
 import { prisma } from '@/lib/prisma'
 import { consumeRateLimitFailClosed, getClientIp, rejectInvalidRequestOrigin } from '@/lib/security'
 import { createPlainToken, hashToken } from '@/lib/tokens'
@@ -11,12 +12,13 @@ const genericMessage = '如果账号可使用密保找回，请输入你设置�
 const genericQuestion = '请输入设置密保时保存的答案'
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
-function challengeResponse(challenge: string) {
-  return NextResponse.json({
-    message: genericMessage,
+function challengeResponse(challenge: string, question?: string | null) {
+  return NextResponse.json(buildSecurityQuestionChallengeResponse({
     challenge,
-    questions: [{ question: genericQuestion, sortOrder: 1 }],
-  }, { headers: noStoreHeaders })
+    message: genericMessage,
+    genericQuestion,
+    question,
+  }), { headers: noStoreHeaders })
 }
 
 export async function POST(request: Request) {
@@ -41,11 +43,11 @@ export async function POST(request: Request) {
   }
   const challenge = createPlainToken()
   if (!settings.enableSecurityQuestionRecovery) return challengeResponse(challenge)
-  let user: { id: string; securityQuestionRecoveryEnabled: boolean; UserSecurityQuestion: { id: string } | null } | null
+  let user: { id: string; securityQuestionRecoveryEnabled: boolean; UserSecurityQuestion: { question: string } | null } | null
   try {
     user = await prisma.user.findFirst({
       where: { isDeleted: false, status: 'ACTIVE', ...getLoginIdentifierWhere(identifier) },
-      select: { id: true, securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { id: true } } },
+      select: { id: true, securityQuestionRecoveryEnabled: true, UserSecurityQuestion: { select: { question: true } } },
     })
   } catch (error) {
     logPasswordRecoveryError('/api/auth/forgot-password/security/questions', error, { stage: 'user_lookup' })
@@ -66,5 +68,6 @@ export async function POST(request: Request) {
     logPasswordRecoveryError('/api/auth/forgot-password/security/questions', error, { stage: 'challenge_create' })
     return NextResponse.json({ code: 'PASSWORD_RECOVERY_UNAVAILABLE', message: '暂时无法开始密码找回，请稍后重试' }, { status: 503, headers: noStoreHeaders })
   }
-  return challengeResponse(challenge)
+  // INTENTIONAL_LIMITED_ENUMERATION_TRADEOFF: only an eligible account receives this hint; IP rate limiting remains fail-closed.
+  return challengeResponse(challenge, user.UserSecurityQuestion?.question)
 }
