@@ -13,6 +13,7 @@ export const USER_PRIVACY_SELECT = {
   showBadgeHistory: true,
   showRatings: true,
   showSalon: true,
+  showFavorites: true,
 } as const
 
 const HIDDEN_USER_PRIVACY_SETTINGS = {
@@ -25,6 +26,7 @@ const HIDDEN_USER_PRIVACY_SETTINGS = {
   showBadgeHistory: false,
   showRatings: false,
   showSalon: false,
+  showFavorites: false,
 }
 
 function isPrivacyTableMissing(error: unknown) {

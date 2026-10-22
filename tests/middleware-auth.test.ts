@@ -132,6 +132,43 @@ test('Ecenter 偏好 GET/PATCH 支持 Bearer 与 Web Cookie，匿名及其他受
   assert.equal(unrelated.status, 401, 'Bearer is not opened for unrelated protected routes')
 })
 
+test('Profile Mobile routes allow only their Bearer methods while preserving Cookie and anonymous guards', async () => {
+  const routes = [
+    { path: '/api/users/user-1/relationship', method: 'GET', file: 'app/api/users/[userId]/relationship/route.ts', handler: 'GET' },
+    { path: '/api/users/user-1/followers', method: 'GET', file: 'app/api/users/[userId]/followers/route.ts', handler: 'GET' },
+    { path: '/api/users/user-1/following', method: 'GET', file: 'app/api/users/[userId]/following/route.ts', handler: 'GET' },
+    { path: '/api/profile/view-history', method: 'GET', file: 'app/api/profile/view-history/route.ts', handler: 'GET' },
+    { path: '/api/profile/view-history', method: 'POST', file: 'app/api/profile/view-history/route.ts', handler: 'POST' },
+    { path: '/api/settings/privacy', method: 'GET', file: 'app/api/settings/privacy/route.ts', handler: 'GET' },
+    { path: '/api/settings/privacy', method: 'PATCH', file: 'app/api/settings/privacy/route.ts', handler: 'PATCH' },
+    { path: '/api/profile/post-groups', method: 'POST', file: 'app/api/profile/post-groups/route.ts', handler: 'POST' },
+    { path: '/api/profile/post-groups/group-1', method: 'PATCH', file: 'app/api/profile/post-groups/[groupId]/route.ts', handler: 'PATCH' },
+    { path: '/api/profile/post-groups/group-1', method: 'DELETE', file: 'app/api/profile/post-groups/[groupId]/route.ts', handler: 'DELETE' },
+    { path: '/api/posts/post-1/profile-group', method: 'PATCH', file: 'app/api/posts/[postId]/profile-group/route.ts', handler: 'PATCH' },
+    { path: '/api/uploads/profile-image', method: 'POST', file: 'app/api/uploads/profile-image/route.ts', handler: 'POST' },
+    { path: '/api/users/user-1/follow', method: 'POST', file: 'app/api/users/[userId]/follow/route.ts', handler: 'POST' },
+    { path: '/api/users/user-1/follow', method: 'DELETE', file: 'app/api/users/[userId]/follow/route.ts', handler: 'DELETE' },
+  ]
+
+  for (const route of routes) {
+    const bearer = await middleware(makeMutationRequest(route.path, route.method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${route.method} ${route.path} reaches the request-aware route guard`)
+
+    const cookie = await createToken()
+    const cookieResponse = await middleware(makeMutationRequest(route.path, route.method, { cookie }))
+    assert.equal(cookieResponse.status, 200, `${route.method} ${route.path} keeps Web Cookie auth`)
+
+    const anonymous = await middleware(makeMutationRequest(route.path, route.method))
+    assert.equal(anonymous.status, 401, `${route.method} ${route.path} still blocks anonymous requests`)
+
+    const source = readFileSync(route.file, 'utf8')
+    assert.match(source, new RegExp(`export async function ${route.handler}\\([\\s\\S]*?requireRequestUser\\(request\\)`), `${route.file} must use the request-aware auth guard`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/admin/users', 'DELETE', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'Profile additions do not widen unrelated protected routes')
+})
+
 test('话题活动表单 schema 可公开读取；表单提交、历史、附件与管理员操作保持 Bearer/Cookie 双认证', async () => {
   const publicSchema = '/api/activities/topic-test/form'
   assert.equal((await middleware(new NextRequest(`https://ecfc.fans${publicSchema}`))).status, 200)

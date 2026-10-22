@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import {
   DEFAULT_USER_PRIVACY_SETTINGS,
   USER_PRIVACY_KEYS,
@@ -11,7 +11,7 @@ import {
   type UserPrivacySettings,
 } from '@/lib/user-privacy'
 
-const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -21,8 +21,8 @@ function errorResponse(message: string) {
   return NextResponse.json({ message }, { status: 503, headers: PRIVATE_HEADERS })
 }
 
-export async function GET() {
-  const guard = await requireUser()
+export async function GET(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   try {
     return NextResponse.json({ privacy: await getUserPrivacySettings(guard.user.id), defaults: DEFAULT_USER_PRIVACY_SETTINGS }, { headers: PRIVATE_HEADERS })
@@ -35,7 +35,7 @@ export async function GET() {
 export async function PATCH(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null) as unknown

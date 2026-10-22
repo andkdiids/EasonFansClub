@@ -12,6 +12,7 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { publicProfileIpRegion } from '@/lib/ip-region'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 import { belongsToFriendGroup, buildFriendGroupIndex, UNGROUPED_FRIEND_GROUP_ID } from '@/lib/friend-grouping'
+import { parseUidParam } from '@/lib/uid'
 
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -187,7 +188,7 @@ export async function GET(request: Request) {
 }
 
 async function searchUsers(currentUserId: string, q: string) {
-  const numericUid = /^\d+$/.test(q) ? Number(q) : null
+  const numericUid = parseUidParam(q) ?? (/^\d{1,5}$/.test(q) ? Number(q) : null)
   const [nicknameUsers, matchingRemarks, growthLevels] = await Promise.all([
     prisma.user.findMany({
       where: {
@@ -354,7 +355,7 @@ const publicFriendSelect = {
   isOnline: true,
   lastActiveAt: true,
   createdAt: true,
-  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, backgroundUrl: true, bio: true, bioModerationStatus: true } },
 } as const
 
 function serializePublicUser(
@@ -373,7 +374,7 @@ function serializePublicUser(
     isOnline: boolean
     lastActiveAt: Date | null
     createdAt: Date
-    Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null; bio: string | null; bioModerationStatus?: string | null } | null
+    Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null; backgroundUrl: string | null; bio: string | null; bioModerationStatus?: string | null } | null
   },
   level: number,
   levelName: string,
@@ -403,6 +404,6 @@ function serializePublicUser(
     equippedBadge: equippedBadges[0] || null,
     // Profile.displayName is a public profile field.  Never replace it with a
     // viewer-owned friend remark.
-    profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl) } : friend.Profile,
+    profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl), backgroundUrl: publicImageUrl(friend.Profile.backgroundUrl) } : friend.Profile,
   }
 }

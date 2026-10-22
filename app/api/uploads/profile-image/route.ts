@@ -4,7 +4,7 @@ import { publicImageUrl } from '@/lib/images'
 import { toStoredMediaUrl } from '@/lib/media-url'
 import { uploadToCos, deleteFromCos } from '@/lib/tencent-cos'
 import { prisma } from '@/lib/prisma'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, requireRequestUser } from '@/lib/security'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { isDefaultAvatarUrl } from '@/lib/default-avatars'
 import { createAnimatedImageVariants, createImageVariants, ImageNormalizeError, isAnimatedImageInput } from '@/lib/image-webp'
@@ -44,7 +44,7 @@ function cosPathFromUrl(url?: string | null) {
 
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
 
   if (!guard.user) {
     return guard.response

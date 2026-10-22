@@ -10,6 +10,7 @@ export const USER_PRIVACY_KEYS = [
   'showBadgeHistory',
   'showRatings',
   'showSalon',
+  'showFavorites',
 ] as const
 
 export type UserPrivacyKey = typeof USER_PRIVACY_KEYS[number]
@@ -25,6 +26,7 @@ export const DEFAULT_USER_PRIVACY_SETTINGS: UserPrivacySettings = {
   showBadgeHistory: true,
   showRatings: true,
   showSalon: true,
+  showFavorites: true,
 }
 
 export type PublicProfileModuleKey = ProfileRecordSectionKey
@@ -38,7 +40,7 @@ const PROFILE_MODULE_PRIVACY_KEY: Record<PublicProfileModuleKey, UserPrivacyKey 
   achievements: 'showBadgeHistory',
   badges: 'showBadgeHistory',
   albums: null,
-  favorites: null,
+  favorites: 'showFavorites',
   salon: 'showSalon',
 }
 

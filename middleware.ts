@@ -212,6 +212,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/users\/[^/]+\/public-modules$/.test(pathname)
       || /^\/api\/users\/[^/]+\/badges$/.test(pathname)
       || /^\/api\/users\/[^/]+\/post-groups$/.test(pathname)
+      || /^\/api\/users\/[^/]+\/(?:relationship|followers|following)$/.test(pathname)
+      || pathname === '/api/profile/view-history'
+      || pathname === '/api/settings/privacy'
       || pathname === '/api/friends/list'
       || pathname === '/api/friends/requests/received'
       || pathname === '/api/friends/requests/sent'
@@ -243,6 +246,10 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/users/me/badge/equip'
       || pathname === '/api/posts'
       || pathname === '/api/uploads/content-image'
+      || pathname === '/api/uploads/profile-image'
+      || pathname === '/api/profile/post-groups'
+      || pathname === '/api/profile/view-history'
+      || /^\/api\/users\/[^/]+\/follow$/.test(pathname)
       || pathname === '/api/uploads/topic-activity-image'
       || /^\/api\/activities\/[^/]+\/form-submissions$/.test(pathname)
       || /^\/api\/admin\/topic-activity-form-submissions\/[^/]+\/replies$/.test(pathname)
@@ -266,6 +273,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
       || (request.method === 'PATCH' && pathname === '/api/users/me/e-center-preferences')
       || pathname === '/api/users/me'
+      || pathname === '/api/settings/privacy'
+      || /^\/api\/profile\/post-groups\/[^/]+$/.test(pathname)
+      || /^\/api\/posts\/[^/]+\/profile-group$/.test(pathname)
       || /^\/api\/friends\/requests\/[^/]+$/.test(pathname)
       || /^\/api\/friends\/[^/]+\/group$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
@@ -276,6 +286,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/users\/[^/]+\/follow$/.test(pathname)
+      || /^\/api\/profile\/post-groups\/[^/]+$/.test(pathname)
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
