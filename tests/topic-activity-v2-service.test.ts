@@ -91,6 +91,24 @@ test('submission/activity/post relation mismatch is rejected before review', asy
     await assert.rejects(reviewTopicActivityV2Submission({ activityId: 'other', submissionId: 'one', reviewerId: 'admin-one', status: 'APPROVED' }), { status: 404 })
   }); assert.equal(f.state.audits.length, 0)
 })
+test('direct V2 review rejects ordinary discussion submissions without mutating status, rewards, or audit records', async () => {
+  const f = fixture()
+  const submission = f.submission('discussion')
+  Object.assign(submission, { rewardEntryId: null, rewardSnapshot: null })
+  await f.run(async () => {
+    for (const status of ['APPROVED', 'REJECTED'] as const) {
+      await assert.rejects(reviewTopicActivityV2Submission({ submissionId: 'discussion', reviewerId: 'admin-one', status, now: instant }), {
+        code: 'TOPIC_V2_DISCUSSION_NOT_REVIEWABLE', status: 409,
+      })
+    }
+  })
+  assert.equal(submission.status, 'PENDING')
+  assert.equal(f.state.reviews.length, 0)
+  assert.equal(f.state.audits.length, 0)
+  assert.equal(f.state.grants.length, 0)
+  assert.equal(f.state.logs.length, 0)
+  assert.equal(f.state.points, 100)
+})
 test('fixed reward is independent, uses legacy business key, only once with atomic PointLog', async () => {
   const f = fixture(); f.program.fixedReward = { ...f.program.fixedReward, enabled: true, points: 74, condition: 'POLL', requiresReview: false }
   f.state.votes.push({ activityId: f.activity.id, pollId: f.program.poll.id, userId: 'user-one', createdAt: instant })

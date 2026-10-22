@@ -380,7 +380,10 @@ export async function reviewTopicActivitySubmission(input: {
     if (submission.Activity.activityPostId !== submission.Comment.postId || submission.activityId !== submission.Activity.id) throw new Error('TOPIC_SUBMISSION_RELATION_INVALID')
     // Release the legacy transaction before delegating. V2 reviews acquire
     // the same Activity lock and award only the reviewed entry, never a bundle.
-    if (readTopicActivityV2Program(submission.Activity.topicProgram)?.enabled) return { useV2: true as const }
+    if (readTopicActivityV2Program(submission.Activity.topicProgram)?.enabled) {
+      if (!submission.rewardEntryId) throw new Error('TOPIC_V2_DISCUSSION_NOT_REVIEWABLE')
+      return { useV2: true as const }
+    }
     if (submission.status === input.status) return { submission, participation: await tx.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId: submission.activityId, userId: submission.userId } } }), rewardIds: [] as string[], changed: false, firstParticipationCreated: false }
     if (submission.status === 'WITHDRAWN') throw new Error('TOPIC_SUBMISSION_WITHDRAWN')
     if (input.status === 'APPROVED' && submission.Activity.participationMode === 'FORM') {

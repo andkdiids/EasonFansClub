@@ -15,6 +15,7 @@ import { TopicActivityFormSubmissionEntry } from '@/app/admin/activities/TopicAc
 import { TopicActivityV2Panel } from '@/components/activities/TopicActivityV2Panel'
 import { topicActivityPlatformTabs, topicActivityReviewReplyWhere, topicActivityReviewSubmissionScopeWhere } from '@/lib/topic-activity-comment-platform'
 import { topicV2SafeRewardSnapshot } from '@/lib/topic-activity-v2-view'
+import { readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
 import { PostViewCounter } from '@/components/PostViewCounter'
 import { IpRegionLabel } from '@/components/IpRegionLabel'
 import { ForumDiscoveryActionBar } from '@/components/ForumDiscoveryActionBar'
@@ -943,6 +944,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
     ? { ...topicActivityBase, formSubmissionCount: viewerCanReviewTopicActivity ? topicActivityFormSubmissionCount : undefined }
     : null
   const topicActivityCommentTabs = topicActivityBase ? topicActivityPlatformTabs(topicActivityBase.topicProgram) : []
+  const topicActivityV2Enabled = Boolean(readTopicActivityV2Program(topicActivityBase?.topicProgram)?.enabled)
   const topicDiscussionFilter = query.topicTab === 'discussion'
   const requestedTopicPlatform = query.topicPlatform?.slice(0, 64) || null
   const topicPlatformFilter = topicDiscussionFilter
@@ -1434,6 +1436,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
             hotReplyIds={hotReplyIds}
             commentsLoadError={commentsLoadError}
             topicActivityId={postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' ? postCore.TopicActivity.id : undefined}
+            topicActivityV2Enabled={topicActivityV2Enabled}
             canReviewTopicActivity={viewerCanReviewTopicActivity}
             topicReviewFilter={topicStatus || 'ALL'}
             initialTopicReviewCounts={topicReviewCounts}

@@ -46,7 +46,7 @@ export function TopicActivityV2Comments({ postId, postAuthorId, activityId, curr
   return <div className="border-t border-[var(--border)] pt-4">{error ? <p role="alert">{error}<button type="button" onClick={() => void load()}>重试</button></p> : null}<PostRepliesSection key={version} postId={postId} postAuthorId={postAuthorId} initialReplies={replies} initialReplyCount={value.total}
     currentUserId={currentUserId} canInteract={allowDiscussion} canManageReplies={false} sort={sort} direction={direction}
     pagination={{ page: value.page, pageSize: value.pageSize, total: value.total, totalPages: value.totalPages }}
-    topicActivityId={activityId} canReviewTopicActivity={Boolean(value.topicActivity?.canReview)} initialTopicReviewCounts={value.topicActivity?.reviewCounts}
+    topicActivityId={activityId} topicActivityV2Enabled canReviewTopicActivity={Boolean(value.topicActivity?.canReview)} initialTopicReviewCounts={value.topicActivity?.reviewCounts}
     topicCommentTab={tab} topicPlatformFilter={platform} topicPlatformTabs={platformTabs}
     topicReviewFilter={status} topicAllowImageAttachments={value.topicActivity?.allowImageAttachments !== false} /></div>
 }

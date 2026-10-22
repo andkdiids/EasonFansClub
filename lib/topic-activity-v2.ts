@@ -334,6 +334,7 @@ export async function reviewTopicActivityV2Submission(input: { activityId?: stri
     const program = requireTopicV2Program(activity)
     const submission = await tx.topicActivitySubmission.findUnique({ where: { id: input.submissionId }, include: { Comment: { select: { postId: true, parentId: true, isDeleted: true } } } })
     if (!submission || !submission.Comment || submission.Comment.isDeleted || submission.commentDeletedAt || submission.Comment.parentId || submission.Comment.postId !== activity.activityPostId) fail('TOPIC_V2_SUBMISSION_UNAVAILABLE', '评论已删除、撤回或关联无效')
+    if (!submission.rewardEntryId) fail('TOPIC_V2_DISCUSSION_NOT_REVIEWABLE', '普通活动讨论不支持审核操作')
     requireReviewWindow(activity, submission.submittedAt)
     if (submission.status === 'WITHDRAWN') fail('TOPIC_V2_SUBMISSION_WITHDRAWN', '评论已撤回')
     const current = await tx.topicActivityParticipation.findUnique({ where: { activityId_userId: { activityId: activity.id, userId: submission.userId } } })
