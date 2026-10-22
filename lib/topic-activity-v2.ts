@@ -9,6 +9,7 @@ import { resolveTopicActivityCommentEligibilityInTransaction } from '@/lib/topic
 import { resolveTopicActivityCommentPolicy } from '@/lib/topic-activity-comment-policy'
 import { topicActivityTestDirty } from '@/lib/topic-activity-test-presentation'
 import { isTopicActivityOriginalObjectKey } from '@/lib/topic-activity-image-original'
+import { getTopicActivityV2Availability } from '@/lib/topic-activity-v2-availability'
 import { assertTopicLotterySourceRules, lockTopicLotteryRulesForSubmission, syncTopicLotteryEligibilityInTransaction } from '@/lib/topic-activity-v2-lottery'
 import { topicRewardReleaseDue } from '@/lib/topic-activity-reward-timing'
 import {
@@ -642,6 +643,12 @@ export async function getTopicActivityV2View(activityId: string, userId?: string
   const visible = isAdmin ? program || createDefaultTopicActivityV2Program() : program?.enabled ? program : null
   const entries = visible?.entries.filter((entry) => isAdmin || (visible.platformRewards.enabled && entry.enabled)).sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)) || []
   let myProgress: Record<string, unknown> | null = null
+  let availabilityProgress = {
+    submissions: [] as Array<{ rewardEntryId: string | null; status: string }>,
+    grants: [] as Array<{ rewardEntryId: string | null; rewardSnapshot: unknown; origin: string; kind: string; status: string }>,
+    pollVotes: [] as Array<{ pollId: string }>,
+    testAttempts: [] as Array<{ testId: string; configVersion: number }>,
+  }
   if (userId && visible) {
     const [submissions, grants, votes, attempts, submittedCount, approvedCount] = await Promise.all([
       prisma.topicActivitySubmission.findMany({ where: { activityId, userId }, orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }], take: 100, select: { id: true, rewardEntryId: true, rewardSnapshot: true, commentId: true, status: true, rejectReason: true, submittedAt: true, reviewedAt: true } }),
@@ -651,6 +658,7 @@ export async function getTopicActivityV2View(activityId: string, userId?: string
       prisma.topicActivitySubmission.count({ where: { activityId, userId } }),
       prisma.topicActivitySubmission.count({ where: { activityId, userId, status: 'APPROVED' } }),
     ])
+    availabilityProgress = { submissions, grants, pollVotes: votes, testAttempts: attempts }
     const paid = grants.filter((grant) => grant.status === 'GRANTED')
     const platforms = [...new Set(paid.filter((grant) => grant.rewardEntryId).map((grant) => platformKey(grant.rewardSnapshot)).filter(Boolean))]
     const platformPoints = paid.filter((grant) => grant.rewardEntryId && grant.kind === 'POINTS').reduce((total, grant) => total + (grant.points || 0), 0)
@@ -664,9 +672,15 @@ export async function getTopicActivityV2View(activityId: string, userId?: string
       remainingPlatforms: [...new Set(entries.map((entry) => entry.platformKey))].filter((key) => !platforms.includes(key)),
     }
   }
+  const availability = getTopicActivityV2Availability({
+    activity,
+    program: visible,
+    authenticated: Boolean(userId),
+    ...availabilityProgress,
+  })
   return { activity: { id: activity.id, title: activity.title, status: activity.status, startsAt: activity.startsAt, endsAt: activity.endsAt,
     allowImageAttachments: activity.allowImageAttachments, activityPostId: activity.activityPostId, postAuthorId: activity.ActivityPost?.authorId || null },
-    program: visible ? isAdmin ? visible : publicTopicActivityV2Program(visible) : null, entries, myProgress, canReview: isAdmin }
+    program: visible ? isAdmin ? visible : publicTopicActivityV2Program(visible) : null, entries, myProgress, availability, canReview: isAdmin }
 }
 
 export async function getTopicActivityV2Statistics(activityId: string) {

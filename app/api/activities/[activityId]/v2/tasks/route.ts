@@ -2,6 +2,7 @@ import { requireRequestUser, rejectInvalidRequestOrigin, enforceApiRateLimit } f
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { checkBannedWords, BANNED_WORD_MESSAGE } from '@/lib/content-moderation'
 import { getTopicActivityV2View, submitTopicActivityV2Task } from '@/lib/topic-activity-v2'
+import { serializeTopicActivityAsset } from '@/lib/topic-activity-assets'
 import { prisma } from '@/lib/prisma'
 import { createManyNotifications } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
@@ -22,10 +23,17 @@ export async function GET(request: Request, context: Context) {
       where: { activityId, rewardEntryId: { not: null }, ...(all ? {} : { userId: guard.user.id }) },
       orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }], take: 100,
       select: { id: true, userId: true, commentId: true, rewardEntryId: true, rewardSnapshot: true, status: true, submittedAt: true, reviewedAt: true, rejectReason: true,
-        User: { select: { nickname: true, uid: true } }, TaskImageAssets: { select: { id: true, width: true, height: true, size: true } } },
+        User: { select: { nickname: true, uid: true } }, TaskImageAssets: { select: { id: true, storageKey: true, mimeType: true, width: true, height: true, size: true } } },
     })
-    return topicV2Json({ submissions: submissions.map((item) => ({ ...item, assets: item.TaskImageAssets.map((asset) => ({ assetId: asset.id, width: asset.width, height: asset.height, size: asset.size,
-      previewAccessUrl: `/api/activities/${activityId}/assets/${asset.id}/preview`, originalDownloadUrl: `/api/activities/${activityId}/v2/submissions/${item.id}/assets/${asset.id}/original` })) })) })
+    return topicV2Json({ submissions: submissions.map((item) => {
+      const { TaskImageAssets, ...submission } = item
+      return { ...submission, assets: TaskImageAssets.map((asset) => ({
+        ...serializeTopicActivityAsset({ ...asset, activityId, purpose: 'FORM_ANSWER' }),
+        // The shared serializer's form download path is intentionally different;
+        // V2 task assets use their owner-scoped task route.
+        originalDownloadUrl: `/api/activities/${encodeURIComponent(activityId)}/v2/submissions/${encodeURIComponent(item.id)}/assets/${encodeURIComponent(asset.id)}/original`,
+      })) }
+    }) })
   } catch (error) { return topicV2ErrorResponse(error) }
 }
 
