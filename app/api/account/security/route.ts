@@ -29,7 +29,7 @@ export async function GET() {
     securityQuestionRecoveryEnabled: user.securityQuestionRecoveryEnabled,
     emailBound: Boolean(user.email),
     emailVerified: Boolean(user.emailVerifiedAt),
-    emailPasswordResetEnabled: settings.enableEmailPasswordReset,
+    emailPasswordResetEnabled: false,
     securityQuestionRecoveryAvailable: recoveryAvailability.available,
     securityQuestionRecoveryReason: recoveryAvailability.reason,
   }, { headers: { 'Cache-Control': 'no-store, max-age=0' } })

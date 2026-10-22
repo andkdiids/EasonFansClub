@@ -1,51 +1,39 @@
-function truncate(value: string, maxLength: number) {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value
+function safeErrorName(value: unknown) {
+  const allowed = new Set([
+    'Error',
+    'TypeError',
+    'PrismaClientKnownRequestError',
+    'PrismaClientValidationError',
+    'PrismaClientInitializationError',
+    'PrismaClientRustPanicError',
+    'RateLimitUnavailableError',
+    'PasswordChangeConflictError',
+  ])
+  return typeof value === 'string' && allowed.has(value) ? value : 'UnknownError'
 }
 
-function redactSensitiveText(value: string) {
-  return truncate(
-    value
-      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
-      .replace(/\b(password|passwd|token|secret|cookie|authorization)\b\s*[:=]\s*[^\s&,}]+/gi, '$1=[redacted]')
-      .replace(/\bBearer\s+[^\s]+/gi, 'Bearer [redacted]')
-      .replace(/[A-Fa-f0-9]{32,}/g, '[redacted-token]')
-      .replace(/(mysql|postgres(?:ql)?:\/\/)[^\s]+/gi, '$1[redacted]'),
-    1000,
-  )
-}
-
-function serializeMeta(value: unknown) {
-  if (value === undefined) return undefined
-  try {
-    return redactSensitiveText(JSON.stringify(value))
-  } catch {
-    return undefined
-  }
-}
-
-function extractMySqlCode(message: string) {
-  return message.match(/\b(?:ER_[A-Z0-9_]+|Code\s*[:=]\s*`?(\d{3,5})`?)\b/i)?.[0]
+function safeErrorCode(value: unknown) {
+  if (typeof value === 'number' && Number.isInteger(value)) return String(value)
+  if (typeof value !== 'string') return undefined
+  return /^(?:P\d{4}|ER_[A-Z0-9_]{1,60}|E[A-Z0-9_]{1,60})$/.test(value) ? value : undefined
 }
 
 export function describePasswordRecoveryError(error: unknown) {
-  if (!error || typeof error !== 'object') {
-    return { errorName: 'UnknownError', errorCode: undefined, mysqlCode: undefined, message: redactSensitiveText(String(error)) }
-  }
-
-  const value = error as { name?: unknown; message?: unknown; code?: unknown; meta?: unknown }
-  const message = redactSensitiveText(typeof value.message === 'string' ? value.message : String(error))
+  const value = error && typeof error === 'object'
+    ? error as { name?: unknown; code?: unknown }
+    : {}
+  const errorCode = safeErrorCode(value.code)
   return {
-    errorName: typeof value.name === 'string' ? value.name : 'UnknownError',
-    errorCode: typeof value.code === 'string' || typeof value.code === 'number' ? String(value.code) : undefined,
-    mysqlCode: extractMySqlCode(message),
-    prismaMeta: serializeMeta(value.meta),
-    message,
+    errorName: safeErrorName(value.name),
+    errorCode,
+    mysqlCode: errorCode?.startsWith('ER_') ? errorCode : undefined,
+    message: 'Password recovery operation failed',
   }
 }
 
 /**
- * Keep the provider/database diagnostic in server logs without ever logging
- * request credentials, reset tokens, or full email addresses.
+ * Log only whitelisted error classes/codes. Raw messages and Prisma metadata
+ * can contain query values, hashes, identifiers, or connection information.
  */
 export function logPasswordRecoveryError(route: string, error: unknown, context: Record<string, string | number | boolean | null | undefined> = {}) {
   console.error(`[${route}.error]`, {

@@ -54,14 +54,14 @@ test('用户密码接口分离、bcrypt cost 12 且日志不含密码或答案',
   for (const route of [change, reset]) {
     assert.match(route, /requireUser\(\)/)
     assert.match(route, /rejectInvalidRequestOrigin\(request\)/)
-    assert.match(route, /bcrypt\.hash\(body\.password, 12\)/)
-    assert.match(route, /accountSecurityLog\.create/)
-    const metadata = route.match(/metadata:\s*\{[^}]+\}/g)?.join('') || ''
-    assert.doesNotMatch(metadata, /body\.|passwordHash|answerHash/i)
+    assert.match(route, /commitPasswordChange/)
+    assert.match(route, /expectedPasswordHash: user\.passwordHash/)
   }
+  assert.match(change, /bcrypt\.hash\(password, 12\)/)
+  assert.match(reset, /bcrypt\.hash\(body\.password, 12\)/)
   assert.match(reset, /UserSecurityQuestion:\s*\{\s*select:\s*\{\s*sortOrder: true,\s*answerHash: true\s*\}\s*\}/)
   assert.match(reset, /questionCount:\s*user\.UserSecurityQuestion \? 1 : 0/)
-  assert.match(reset, /consumeRateLimit\(accountKey, wrongAnswerAction, 5, 30 \* 60\)/)
+  assert.match(reset, /consumeRateLimitFailClosed\(accountKey, wrongAnswerAction, 5, 30 \* 60\)/)
   assert.match(reset, /30 \* 60/)
 })
 
@@ -70,16 +70,26 @@ test('新密码规则拒绝不一致、过短和相同密码由服务端验证',
   assert.match(validateNewPassword('123', '123') || '', /至少需要 8 位/)
   assert.match(validateNewPassword('12345678', '87654321') || '', /不一致/)
   assert.match(source('app/api/account/security/password/change/route.ts'), /samePassword\.valid/)
+  assert.match(source('app/api/account/security/password/change/route.ts'), /body\?\.oldPassword/)
+  assert.match(source('app/api/account/security/password/change/route.ts'), /body\?\.newPassword/)
 })
 
-test('邮箱链接重置新增独立 API 并保留原有安全设置入口', () => {
+test('密码安全页面只展示原密码和密保方式，邮箱绑定资料仍保留', () => {
   const component = source('components/PasswordManagement.tsx')
-  assert.match(component, /暂未开放/)
-  assert.match(component, /type="button" disabled/)
-  assert.match(source('app/settings/security/page.tsx'), /enableEmailPasswordReset/)
-  assert.match(source('app/api/auth/password/request/route.ts'), /TENCENT_EMAIL_NOT_CONFIGURED/)
-  assert.match(source('app/api/auth/password/reset/route.ts'), /type: 'EMAIL_LINK'/)
-  assert.match(source('app/forgot-password/page.tsx'), /EmailPasswordLinkForm/)
+  const page = source('app/settings/security/page.tsx')
+  assert.doesNotMatch(component, /邮箱验证码重置|method === 'email'/)
+  assert.doesNotMatch(page, /enableEmailPasswordReset|邮箱重置功能/)
+  assert.match(source('app/admin/security-settings/SecuritySettingsForm.tsx'), /disabled=\{key === 'enableEmailPasswordReset'\}/)
+  assert.match(source('app/api/account/security/route.ts'), /emailPasswordResetEnabled: false/)
+  assert.match(page, /label: '邮箱'/)
+  assert.match(page, /label: '邮箱验证'/)
+  for (const path of [
+    'app/api/auth/password/request/route.ts',
+    'app/api/auth/password/reset/route.ts',
+    'app/api/auth/forgot-password/email/send/route.ts',
+    'app/api/auth/forgot-password/email/verify/route.ts',
+  ]) assert.match(source(path), /EMAIL_PASSWORD_RECOVERY_DISABLED/)
+  assert.match(source('app/api/auth/register/send-email-code/route.ts'), /sendRegistrationVerificationCode/)
 })
 
 test('签到偏好只能修改本人并由签到 API 依据数据库值判断 mood', () => {

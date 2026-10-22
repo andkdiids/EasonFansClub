@@ -83,19 +83,16 @@ test('密码重置发送 payload 使用已渲染的 Simple HTML，并传入同�
   }
 })
 
-test('密码重置链路传递生成的同一个 code，并保持原有 10 分钟与一次性规则', () => {
+test('邮箱密码找回 API 已关闭，注册邮箱验证码保持独立', () => {
   const sendRoute = source('app/api/auth/forgot-password/email/send/route.ts')
   const verifyRoute = source('app/api/auth/forgot-password/email/verify/route.ts')
   const resetRoute = source('app/api/auth/forgot-password/reset/route.ts')
   const mail = source('lib/mail.ts')
 
-  assert.match(sendRoute, /const code = String\(crypto\.randomInt\(0, 1_000_000\)\)\.padStart\(6, '0'\)/)
-  assert.match(sendRoute, /sendPasswordResetCode\(user\.email, code\)/)
-  assert.match(sendRoute, /10 \* 60 \* 1000/)
-  assert.match(verifyRoute, /type: 'EMAIL', stage: 'RESET_CODE'/)
-  assert.match(verifyRoute, /record\.codeHash !== hashToken\(`\$\{user\.id\}:\$\{code\}`\)/)
-  assert.match(verifyRoute, /consumedAt: new Date\(\)/)
-  assert.match(resetRoute, /type: \{ not: 'EMAIL_LINK' \}/)
+  assert.match(sendRoute, /EMAIL_PASSWORD_RECOVERY_DISABLED/)
+  assert.match(verifyRoute, /EMAIL_PASSWORD_RECOVERY_DISABLED/)
+  assert.doesNotMatch(sendRoute + verifyRoute, /prisma\.|sendPasswordResetCode/)
+  assert.match(resetRoute, /type: 'SECURITY_QUESTION'/)
   assert.match(mail, /renderPasswordResetEmail\(/)
   assert.match(mail, /Simple:/)
 })
