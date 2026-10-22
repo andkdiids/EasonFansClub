@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { readTopicActivityV2Program } from '@/lib/topic-activity-v2-config'
+import { topicReviewFilter, type TopicReviewStatus } from '@/lib/topic-review-filter'
 
 export type TopicActivityPlatformTab = { platformKey: string; platformName: string }
 
@@ -35,4 +36,33 @@ export function topicActivityPlatformReplyWhere(
       is: { activityId, RewardEntry: { is: { platformKey } } },
     },
   }
+}
+
+/**
+ * Compose the independent status and comment-tab predicates without object
+ * spread overwriting their shared TopicActivitySubmission relation key.
+ */
+export function topicActivityReviewReplyWhere(
+  activityId: string | null | undefined,
+  status: TopicReviewStatus | null | undefined,
+  platformKey: string | null | undefined,
+  discussionOnly = false,
+): Prisma.ReplyWhereInput {
+  const conditions = [
+    topicReviewFilter(activityId, status),
+    topicActivityPlatformReplyWhere(activityId, platformKey, discussionOnly),
+  ].filter((condition) => Object.keys(condition).length > 0)
+
+  if (conditions.length === 1) return conditions[0]!
+  return conditions.length > 1 ? { AND: conditions } : {}
+}
+
+/** Scope status-group counts to the currently selected comment tab. */
+export function topicActivityReviewSubmissionScopeWhere(
+  platformKey: string | null | undefined,
+  discussionOnly = false,
+): Prisma.TopicActivitySubmissionWhereInput {
+  if (discussionOnly) return { rewardEntryId: null }
+  if (!platformKey) return {}
+  return { RewardEntry: { is: { platformKey } } }
 }
