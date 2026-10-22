@@ -16,7 +16,7 @@ export async function GET(request: Request, context: RouteContext) {
   const page = Math.min(10_000, Math.max(1, Number.parseInt(params.get('page') || '1', 10) || 1))
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(params.get('pageSize') || '20', 10) || 20))
   try {
-    const result = await getProfileConnectionPage(target.id, 'followers', page, pageSize)
+    const result = await getProfileConnectionPage(target.id, guard.user.id, 'followers', page, pageSize)
     return NextResponse.json(result, { headers: PRIVATE_HEADERS })
   } catch (error) {
     console.error('[profile.followers]', { viewerId: guard.user.id, targetId: target.id, error })

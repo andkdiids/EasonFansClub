@@ -169,6 +169,36 @@ test('Profile Mobile routes allow only their Bearer methods while preserving Coo
   assert.equal(unrelated.status, 401, 'Profile additions do not widen unrelated protected routes')
 })
 
+test('Account Security Mobile methods pass Bearer to shared guards and preserve Web Cookie auth', async () => {
+  const routes = [
+    { path: '/api/account/security', method: 'GET', file: 'app/api/account/security/route.ts', handler: 'GET' },
+    { path: '/api/account/security', method: 'PATCH', file: 'app/api/account/security/route.ts', handler: 'PATCH' },
+    { path: '/api/account/security/questions', method: 'POST', file: 'app/api/account/security/questions/route.ts', handler: 'POST' },
+    { path: '/api/account/security/questions', method: 'PUT', file: 'app/api/account/security/questions/route.ts', handler: 'PUT' },
+    { path: '/api/account/security/password/change', method: 'POST', file: 'app/api/account/security/password/change/route.ts', handler: 'POST' },
+  ]
+
+  for (const route of routes) {
+    const bearer = await middleware(makeMutationRequest(route.path, route.method, { bearer: 'valid-mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${route.method} ${route.path} reaches the shared route guard`)
+
+    const cookie = await createToken()
+    const cookieResponse = await middleware(makeMutationRequest(route.path, route.method, { cookie }))
+    assert.equal(cookieResponse.status, 200, `${route.method} ${route.path} preserves Web Cookie auth`)
+
+    const anonymous = await middleware(makeMutationRequest(route.path, route.method))
+    assert.equal(anonymous.status, 401, `${route.method} ${route.path} still blocks anonymous requests`)
+
+    const source = readFileSync(route.file, 'utf8')
+    assert.match(source, new RegExp(`export async function ${route.handler}\\([\\s\\S]*?requireRequestUser\\(request\\)`))
+  }
+
+  const wrongMethod = await middleware(makeMutationRequest('/api/account/security/questions', 'DELETE', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(wrongMethod.status, 401, 'unsupported Account Security methods remain closed')
+  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'Account Security allowlist does not open unrelated admin routes')
+})
+
 test('话题活动表单 schema 可公开读取；表单提交、历史、附件与管理员操作保持 Bearer/Cookie 双认证', async () => {
   const publicSchema = '/api/activities/topic-test/form'
   assert.equal((await middleware(new NextRequest(`https://ecfc.fans${publicSchema}`))).status, 200)

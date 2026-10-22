@@ -212,7 +212,7 @@ test('找回流程不回显密保题目或答案并限制 challenge 尝试次数
 test('原密码入口拒绝未登录、忽略 body 用户 ID 并兼容旧字段名', () => {
   const route = source('app/api/account/security/password/change/route.ts')
   const legacy = source('app/api/auth/change-password/route.ts')
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /body\?\.currentPassword[\s\S]*body\?\.oldPassword/)
   assert.match(route, /body\?\.password[\s\S]*body\?\.newPassword/)
   assert.doesNotMatch(route, /body\?\.userId|body\?\.targetUserId/)

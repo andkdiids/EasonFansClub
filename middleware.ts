@@ -208,6 +208,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/search'
       || pathname === '/api/users/me'
       || pathname === '/api/users/me/e-center-preferences'
+      || pathname === '/api/account/security'
       || pathname === '/api/growth'
       || /^\/api\/users\/[^/]+\/public-modules$/.test(pathname)
       || /^\/api\/users\/[^/]+\/badges$/.test(pathname)
@@ -249,6 +250,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/uploads/profile-image'
       || pathname === '/api/profile/post-groups'
       || pathname === '/api/profile/view-history'
+      || pathname === '/api/account/security/questions'
+      || pathname === '/api/account/security/password/change'
       || /^\/api\/users\/[^/]+\/follow$/.test(pathname)
       || pathname === '/api/uploads/topic-activity-image'
       || /^\/api\/activities\/[^/]+\/form-submissions$/.test(pathname)
@@ -272,6 +275,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/posts/draft'
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
       || (request.method === 'PATCH' && pathname === '/api/users/me/e-center-preferences')
+      || (request.method === 'PATCH' && pathname === '/api/account/security')
+      || (request.method === 'PUT' && pathname === '/api/account/security/questions')
       || pathname === '/api/users/me'
       || pathname === '/api/settings/privacy'
       || /^\/api\/profile\/post-groups\/[^/]+$/.test(pathname)

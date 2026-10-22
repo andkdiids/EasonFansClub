@@ -186,5 +186,6 @@ test('existing activity API continues to expose only the current user result att
   assert.match(panel, /\(item as Record<string, unknown>\)\.configVersion\s*===\s*program\.test\.version/u)
   const runner = read('components/activities/TopicActivityV2Interactive.tsx')
   assert.match(runner, /requestedAttemptId\s*\?\s*attempts\.find/u)
-  assert.match(runner, /setAttempt\(selected\)/u)
+  assert.match(runner, /const visibleAttempt = selected \|\| latestForCurrentTest \|\| null/u)
+  assert.match(runner, /setAttempt\(visibleAttempt\)/u)
 })

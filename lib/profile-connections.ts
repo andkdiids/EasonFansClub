@@ -62,7 +62,15 @@ function paginatedUsers(users: ReturnType<typeof serializeProfileConnectionUser>
   }
 }
 
-export async function getProfileConnectionPage(userId: string, kind: 'followers' | 'following', page: number, pageSize: number) {
+export async function getProfileConnectionPage(userId: string, viewerId: string, kind: 'followers' | 'following', page: number, pageSize: number) {
+  if (viewerId !== userId) {
+    const block = await prisma.block.findFirst({
+      where: { OR: [{ blockerId: viewerId, blockedId: userId }, { blockerId: userId, blockedId: viewerId }] },
+      select: { id: true },
+    })
+    if (block) return paginatedUsers([], 0, page, pageSize)
+  }
+
   if (kind === 'followers') {
     const where = { followingId: userId, User_Follow_followerIdToUser: { is: activePublicUser } }
     const [total, rows] = await Promise.all([
