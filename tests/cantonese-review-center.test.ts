@@ -98,7 +98,9 @@ test('public course source filters teaching, questions, and audio to approved re
   const route = read('app/api/learning/cantonese/course/route.ts')
   assert.equal((route.match(/status: 'APPROVED'/g) || []).length, 4)
   assert.match(route, /assetStatus: 'READY'/)
-  assert.doesNotMatch(route, /correctAnswer: true/)
+  assert.match(route, /options: true, correctAnswer: true/)
+  assert.match(route, /correctAnswer: _correctAnswer/)
+  assert.match(route, /void _correctAnswer/)
   assert.doesNotMatch(route, /DRAFT|CONTENT_REVIEW_REQUIRED|REJECTED/)
 })
 

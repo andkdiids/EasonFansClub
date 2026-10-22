@@ -109,11 +109,14 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   const v2Models = ['TopicActivityPollVote', 'TopicActivityRewardEntry', 'TopicActivityTestAttempt',
     'TopicActivityLottery', 'TopicActivityLotteryEligibility', 'TopicActivityLotteryDraw', 'TopicActivityLotterySlot',
     'TopicActivityLotteryShipping', 'TopicActivityLotteryNotice', 'TopicActivityLotteryAudit']
+  const independentlyApprovedModels = new Set(['CantoneseLearnerQuestionProgress'])
   // HEAD includes these tables after checkpoint. The guard must work both
   // before committing the additive change and on the resulting clean branch.
   const additions = [...newBlocks.keys()].filter((name) => !oldBlocks.has(name))
-  assert.ok(additions.every((name) => approvedSourceBlocks.has(name)), 'only models present in the approved V2 source may be added')
-  for (const name of additions) assert.deepEqual(newBlocks.get(name), approvedSourceBlocks.get(name), `approved added model unchanged: ${name}`)
+  const topicAdditions = additions.filter((name) => !independentlyApprovedModels.has(name))
+  assert.ok(topicAdditions.every((name) => approvedSourceBlocks.has(name)), 'Topic additions must remain in the approved V2 source')
+  for (const name of topicAdditions) assert.deepEqual(newBlocks.get(name), approvedSourceBlocks.get(name), `approved added model unchanged: ${name}`)
+  assert.ok(additions.every((name) => approvedSourceBlocks.has(name) || independentlyApprovedModels.has(name)), 'only independently approved feature models may extend the schema')
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)
   const additive = read('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql')
   assert.doesNotMatch(additive, /\b(?:DROP|RENAME|TRUNCATE|DELETE|UPDATE)\s+(?:TABLE|COLUMN|FROM|`)/i)

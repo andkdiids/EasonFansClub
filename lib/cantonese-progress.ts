@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { resolveCantoneseCourseReadiness, type CantoneseCourseReadiness } from '@/lib/cantonese-course-readiness'
+import { gradeCantoneseAnswer } from '@/lib/cantonese-answer'
 
 export type CantoneseLessonState = 'NOT_RELEASED' | 'LOCKED' | 'AVAILABLE' | 'COMPLETED'
 export type CantoneseProgressAction = 'START' | 'TEACHING_COMPLETE' | 'QUESTIONS_COMPLETE' | 'COMPLETE'
@@ -40,6 +41,15 @@ export type CantoneseProgressContext = {
   definitions: { lessonId: string; lessonNumber: number; prerequisiteLessonId: string | null }[]
   readiness: CantoneseCourseReadiness[]
   progressRows: CantoneseLessonProgressRecord[]
+  questionRows?: {
+    questionId: string
+    attemptCount: number
+    correctCount: number
+    wrongCount: number
+    lastAnswerCorrect: boolean
+    mastery: string
+    lessonId: string
+  }[]
 }
 
 type ProgressDb = Pick<PrismaClient,
@@ -47,7 +57,8 @@ type ProgressDb = Pick<PrismaClient,
   'cantoneseLessonContent' |
   'cantoneseQuestion' |
   'cantoneseAudioAsset' |
-  'cantoneseLessonProgress'
+  'cantoneseLessonProgress' |
+  'cantoneseLearnerQuestionProgress'
 >
 
 const progressSelect = {
@@ -66,7 +77,7 @@ export async function loadCantoneseProgressContext(
   userId: string,
   db: ProgressDb = prisma,
 ): Promise<CantoneseProgressContext> {
-  const [definitions, teaching, questions, readyAudio, approvedContent, progressRows] = await Promise.all([
+  const [definitions, teaching, questions, readyAudio, approvedContent, progressRows, learnerQuestionRows] = await Promise.all([
     db.cantoneseCourseDefinition.findMany({
       where: { status: 'APPROVED' },
       orderBy: [{ sortOrder: 'asc' }, { lessonNumber: 'asc' }],
@@ -76,7 +87,8 @@ export async function loadCantoneseProgressContext(
       select: { externalId: true, lessonId: true, status: true, requiresAudio: true, requiresSpeaking: true, audioId: true },
     }),
     db.cantoneseQuestion.findMany({
-      select: { externalId: true, lessonId: true, status: true, questionType: true, prerequisiteContentIds: true, audioId: true, speakingReferenceId: true },
+      select: { externalId: true, lessonId: true, status: true, questionType: true, options: true, correctAnswer: true,
+        prerequisiteContentIds: true, audioId: true, speakingReferenceId: true },
     }),
     db.cantoneseAudioAsset.findMany({
       where: { status: 'APPROVED', assetStatus: 'READY', cosKey: { not: null }, checksum: { not: null }, fileSize: { not: null } },
@@ -87,6 +99,12 @@ export async function loadCantoneseProgressContext(
       select: { externalId: true, requiresAudio: true, requiresSpeaking: true, displayText: true, audioId: true },
     }),
     db.cantoneseLessonProgress.findMany({ where: { userId }, select: progressSelect }),
+    db.cantoneseLearnerQuestionProgress.findMany({
+      where: { userId },
+      select: { questionId: true, attemptCount: true, correctCount: true, wrongCount: true, mastery: true,
+        lastAnswerCorrect: true,
+        question: { select: { lessonId: true } } },
+    }),
   ])
 
   const readyAudioIds = new Set(readyAudio
@@ -100,7 +118,10 @@ export async function loadCantoneseProgressContext(
     Array.isArray(item.prerequisiteContentIds)
     && item.prerequisiteContentIds.every((id) => typeof id === 'string' && approvedContentIds.has(id))
     && (item.questionType !== 'LISTENING' || Boolean(item.audioId && readyAudioIds.has(item.audioId)))
-    && (item.questionType !== 'SPEAKING' || Boolean(item.speakingReferenceId && speakingContentIds.has(item.speakingReferenceId))),
+    && (item.questionType !== 'SPEAKING' || Boolean(item.speakingReferenceId && speakingContentIds.has(item.speakingReferenceId)))
+    && (!['SINGLE_SELECT', 'MULTI_SELECT', 'TRUE_FALSE', 'LISTENING'].includes(item.questionType)
+      || gradeCantoneseAnswer({ questionType: item.questionType, options: item.options,
+        selectedOptionIds: item.correctAnswer, correctAnswer: item.correctAnswer }) !== null),
   ).map((item) => item.externalId))
 
   const lessonIds = [...new Set([
@@ -117,7 +138,13 @@ export async function loadCantoneseProgressContext(
     visibleQuestionIds,
   })
 
-  return { definitions, readiness, progressRows }
+  const questionRows = learnerQuestionRows.map((row) => ({
+    questionId: row.questionId, attemptCount: row.attemptCount, correctCount: row.correctCount,
+    wrongCount: row.wrongCount, mastery: row.mastery,
+    lastAnswerCorrect: row.lastAnswerCorrect, lessonId: row.question.lessonId,
+  }))
+
+  return { definitions, readiness, progressRows, questionRows }
 }
 
 export function resolveCantoneseLessonState(input: {
@@ -137,9 +164,11 @@ export function resolveCantoneseLessonState(input: {
 }
 
 export function buildCantoneseProgressResponse(context: CantoneseProgressContext) {
+  const questionRows = context.questionRows ?? []
   const lessons = context.definitions.map((definition) => {
     const record = context.progressRows.find((row) => row.lessonId === definition.lessonId)
     const readiness = context.readiness.find((row) => row.lessonId === definition.lessonId)
+    const lessonQuestions = questionRows.filter((row) => row.lessonId === definition.lessonId)
     return {
       lessonId: definition.lessonId,
       lessonNumber: definition.lessonNumber,
@@ -154,6 +183,11 @@ export function buildCantoneseProgressResponse(context: CantoneseProgressContext
       teachingCompletedAt: record?.teachingCompletedAt?.toISOString() ?? null,
       questionsCompletedAt: record?.questionsCompletedAt?.toISOString() ?? null,
       completedAt: record?.completedAt?.toISOString() ?? null,
+      answeredQuestionIds: lessonQuestions.map((row) => row.questionId),
+      answeredQuestionCount: lessonQuestions.length,
+      correctAttemptCount: lessonQuestions.reduce((total, row) => total + row.correctCount, 0),
+      wrongQuestionCount: lessonQuestions.filter((row) => row.wrongCount > 0).length,
+      correctQuestionCount: lessonQuestions.filter((row) => row.lastAnswerCorrect).length,
     }
   })
   return { code: 'OK' as const, source: 'SERVER' as const, lessons }

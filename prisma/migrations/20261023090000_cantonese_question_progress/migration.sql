@@ -1,0 +1,23 @@
+CREATE TABLE `CantoneseLearnerQuestionProgress` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `questionId` VARCHAR(191) NOT NULL,
+    `attemptCount` INTEGER NOT NULL DEFAULT 0,
+    `correctCount` INTEGER NOT NULL DEFAULT 0,
+    `wrongCount` INTEGER NOT NULL DEFAULT 0,
+    `consecutiveCorrect` INTEGER NOT NULL DEFAULT 0,
+    `mastery` VARCHAR(16) NOT NULL DEFAULT 'NEW',
+    `lastWrongAt` DATETIME(3) NULL,
+    `lastCorrectAt` DATETIME(3) NULL,
+    `lastAnsweredAt` DATETIME(3) NULL,
+    `lastAnswerCorrect` BOOLEAN NOT NULL DEFAULT false,
+    `lastWrongAnswer` JSON NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+    UNIQUE INDEX `CantoneseLearnerQuestionProgress_userId_questionId_key` (`userId`, `questionId`),
+    INDEX `CantoneseLearnerQuestionProgress_userId_mastery_lastWrongAt_idx` (`userId`, `mastery`, `lastWrongAt`),
+    INDEX `CantoneseLearnerQuestionProgress_questionId_idx` (`questionId`),
+    PRIMARY KEY (`id`),
+    CONSTRAINT `CantoneseLearnerQuestionProgress_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT `CantoneseLearnerQuestionProgress_questionId_fkey` FOREIGN KEY (`questionId`) REFERENCES `CantoneseQuestion` (`externalId`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

@@ -169,6 +169,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/learning/cantonese/course'
       || pathname === '/api/learning/cantonese/speaking'
       || pathname === '/api/learning/cantonese/progress'
+      || pathname === '/api/learning/cantonese/review'
       || /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname)
       || /^\/api\/admin\/cantonese\/review\/audio\/[^/]+\/preview$/.test(pathname)
       || pathname === '/api/admin/review'
@@ -230,6 +231,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/admin/cantonese/audio'
       || /^\/api\/admin\/cantonese\/audio\/[^/]+\/generate$/.test(pathname)
       || pathname === '/api/learning/cantonese/speech/assess'
+      || /^\/api\/learning\/cantonese\/questions\/[A-Za-z0-9._:-]{1,191}\/answer$/.test(pathname)
       || /^\/api\/learning\/cantonese\/progress\/lesson-\d{2,3}$/.test(pathname)
       || pathname === '/api/admin/cantonese/review/batch'
       || pathname === '/api/admin/cantonese/review/import'

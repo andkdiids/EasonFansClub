@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { createHash } from 'node:crypto'
 import { resolveCantoneseCourseReadiness } from '@/lib/cantonese-course-readiness'
+import { gradeCantoneseAnswer } from '@/lib/cantonese-answer'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
       orderBy: [{ lessonId: 'asc' }, { sortOrder: 'asc' }, { stageId: 'asc' }, { externalId: 'asc' }],
       select: {
         externalId: true, lessonId: true, stageId: true, questionType: true, prompt: true,
-        options: true, explanation: true, prerequisiteContentIds: true,
+        options: true, correctAnswer: true, explanation: true, prerequisiteContentIds: true,
         audioId: true, speakingReferenceId: true, lyricPrescriptionId: true, sortOrder: true, updatedAt: true,
       },
     }),
@@ -57,7 +58,9 @@ export async function GET(request: Request) {
     Array.isArray(item.prerequisiteContentIds)
     && item.prerequisiteContentIds.every((id) => typeof id === 'string' && approvedContentIds.has(id))
     && (item.questionType !== 'LISTENING' || Boolean(item.audioId && readyAudioIds.has(item.audioId)))
-    && (item.questionType !== 'SPEAKING' || Boolean(item.speakingReferenceId && speakingContentIds.has(item.speakingReferenceId))))
+    && (item.questionType !== 'SPEAKING' || Boolean(item.speakingReferenceId && speakingContentIds.has(item.speakingReferenceId)))
+    && (!['SINGLE_SELECT', 'MULTI_SELECT', 'TRUE_FALSE', 'LISTENING'].includes(item.questionType)
+      || gradeCantoneseAnswer({ questionType: item.questionType, options: item.options, selectedOptionIds: item.correctAnswer, correctAnswer: item.correctAnswer }) !== null))
 
   const courseReadiness = resolveCantoneseCourseReadiness({
     lessonIds: [...new Set([...courseDefinitions.map((course) => course.lessonId), ...teachingInventory.map((item) => item.lessonId), ...questionInventory.map((item) => item.lessonId)])].sort(),
@@ -70,7 +73,10 @@ export async function GET(request: Request) {
   const publicContents = lessonContents.filter((item) => !lessonId || item.lessonId === lessonId)
     .map((item) => ({ ...item, audioId: item.audioId && readyAudioIds.has(item.audioId) ? item.audioId : null }))
   const publicQuestions = visibleQuestions.filter((item) => !lessonId || item.lessonId === lessonId)
-    .map((item) => ({ ...item, audioId: item.audioId && readyAudioIds.has(item.audioId) ? item.audioId : null }))
+    .map(({ correctAnswer: _correctAnswer, ...item }) => {
+      void _correctAnswer
+      return { ...item, audioId: item.audioId && readyAudioIds.has(item.audioId) ? item.audioId : null }
+    })
   const lessons = [...new Set([...courseDefinitions.map((course) => course.lessonId), ...publicContents.map((item) => item.lessonId), ...publicQuestions.map((item) => item.lessonId)])]
     .filter((id) => !lessonId || id === lessonId).sort().map((id) => {
     const lessonContentsForLesson = publicContents.filter((item) => item.lessonId === id)

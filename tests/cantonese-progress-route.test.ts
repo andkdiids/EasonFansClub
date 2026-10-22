@@ -14,6 +14,16 @@ type Action = 'START' | 'TEACHING_COMPLETE' | 'QUESTIONS_COMPLETE' | 'COMPLETE'
 const fields: Field[] = ['startedAt', 'teachingCompletedAt', 'questionsCompletedAt', 'completedAt']
 const actions: Action[] = ['START', 'TEACHING_COMPLETE', 'QUESTIONS_COMPLETE', 'COMPLETE']
 const rows = new Map<string, Row>()
+const questionProgressRows: Array<{
+  userId: string
+  questionId: string
+  attemptCount: number
+  correctCount: number
+  wrongCount: number
+  mastery: string
+  lastAnswerCorrect: boolean
+  question: { lessonId: string }
+}> = []
 const revokedUsers = new Set<string>()
 let webCookieUserId: string | null = null
 let transactionCalls = 0
@@ -76,11 +86,18 @@ const dbFixture = {
   cantoneseLessonContent: { findMany: async (input: { where?: { status: string } }) =>
     teachingRows().filter((item) => !input.where?.status || item.status === input.where.status),
   },
-  cantoneseQuestion: { findMany: async () => [
-    { externalId: 'lesson-01.question', lessonId: 'lesson-01', status: 'APPROVED', questionType: 'SINGLE_SELECT', prerequisiteContentIds: ['lesson-01.teaching'], audioId: null, speakingReferenceId: null },
+  cantoneseQuestion: { findMany: async (input: { where?: { status?: string } }) => [
+    { externalId: 'lesson-01.question', lessonId: 'lesson-01', status: 'APPROVED', questionType: 'SINGLE_SELECT',
+      options: [{ id: 'a', text: '早晨' }, { id: 'b', text: '晚安' }], correctAnswer: ['a'],
+      prerequisiteContentIds: ['lesson-01.teaching'], audioId: null, speakingReferenceId: null },
     { externalId: 'lesson-02.pending-question', lessonId: 'lesson-02', status: 'CONTENT_REVIEW_REQUIRED', questionType: 'LISTENING', prerequisiteContentIds: ['lesson-02.teaching'], audioId: 'unready-audio', speakingReferenceId: null },
-  ] },
+  ].filter((item) => !input.where?.status || item.status === input.where.status) },
   cantoneseAudioAsset: { findMany: async () => [] },
+  cantoneseLearnerQuestionProgress: {
+    findMany: async ({ where }: { where: { userId: string } }) => questionProgressRows.filter((row) => row.userId === where.userId),
+    count: async ({ where }: { where: { userId: string; questionId: { in: string[] }; attemptCount: { gt: number } } }) =>
+      questionProgressRows.filter((row) => row.userId === where.userId && where.questionId.in.includes(row.questionId) && row.attemptCount > where.attemptCount.gt).length,
+  },
   cantoneseLessonProgress: {
     findMany: async ({ where }: { where: { userId: string } }) => [...rows.values()]
       .filter((row) => row.userId === where.userId).map(cloneRow),
@@ -143,7 +160,7 @@ before(async () => {
   }
 })
 beforeEach(() => {
-  rows.clear(); revokedUsers.clear(); webCookieUserId = null
+  rows.clear(); questionProgressRows.length = 0; revokedUsers.clear(); webCookieUserId = null
   transactionCalls = 0; writes = 0; upsertConflicts = 0; injectedErrors = []
   lessonOneApproved = true; readFailure = false
 })
@@ -173,7 +190,15 @@ async function responseLesson(response: Response, lessonId: string) {
   return body.lessons.find((item: { lessonId: string }) => item.lessonId === lessonId)
 }
 async function finish(lessonId: string, headers: HeadersInit) {
-  for (const action of actions) assert.equal((await post(lessonId, action, headers)).status, 200)
+  assert.equal((await post(lessonId, 'START', headers)).status, 200)
+  assert.equal((await post(lessonId, 'TEACHING_COMPLETE', headers)).status, 200)
+  if (lessonId === 'lesson-01') recordQuestionAnswer('user-a')
+  for (const action of actions.slice(2)) assert.equal((await post(lessonId, action, headers)).status, 200)
+}
+
+function recordQuestionAnswer(userId: string) {
+  questionProgressRows.push({ userId, questionId: 'lesson-01.question', attemptCount: 1,
+    correctCount: 1, wrongCount: 0, mastery: 'NEW', lastAnswerCorrect: true, question: { lessonId: 'lesson-01' } })
 }
 
 test('actual GET/POST reject anonymous, invalid, expired and revoked Bearer without writes or cookie fallback', async () => {
@@ -219,6 +244,7 @@ test('Web Cookie request guard fixture supports progress GET and POST without Be
 
 test('all four route actions and duplicates are idempotent with stable first timestamps', async () => {
   const headers = await bearer('user-a')
+  recordQuestionAnswer('user-a')
   for (const action of actions) {
     assert.equal((await post('lesson-01', action, headers)).status, 200)
     const first = cloneRow(rows.get(key('user-a', 'lesson-01'))!)
@@ -238,6 +264,8 @@ test('COMPLETE validates start, teaching and released questions; no client compl
   assert.deepEqual(await (await post('lesson-01', 'QUESTIONS_COMPLETE', headers)).json(), { ok: false, code: 'TEACHING_NOT_COMPLETE' })
   await post('lesson-01', 'TEACHING_COMPLETE', headers)
   assert.deepEqual(await (await post('lesson-01', 'COMPLETE', headers, { score: 100 })).json(), { ok: false, code: 'LEARNING_PARTS_INCOMPLETE' })
+  assert.deepEqual(await (await post('lesson-01', 'QUESTIONS_COMPLETE', headers, { score: 0 })).json(), { ok: false, code: 'QUESTIONS_NOT_ANSWERED' })
+  recordQuestionAnswer('user-a')
   await post('lesson-01', 'QUESTIONS_COMPLETE', headers, { score: 0 })
   assert.equal((await responseLesson(await post('lesson-01', 'COMPLETE', headers), 'lesson-01')).state, 'COMPLETED')
 })
@@ -299,6 +327,7 @@ test('concurrent START retries the unique-key upsert race: two successes, one ro
 
 test('concurrent COMPLETE preserves one row and first completion timestamp without a 500', async () => {
   const headers = await bearer('user-a')
+  recordQuestionAnswer('user-a')
   for (const action of actions.slice(0, 3)) await post('lesson-01', action, headers)
   const responses = await Promise.all([post('lesson-01', 'COMPLETE', headers), post('lesson-01', 'COMPLETE', headers)])
   assert.deepEqual(responses.map((response) => response.status), [200, 200])
