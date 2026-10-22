@@ -1,16 +1,23 @@
-const TRAILING_QUESTION_PUNCTUATION = /[?？。！!]+$/u
+const TRAILING_PUNCTUATION = /\p{P}+$/u
 
 /**
- * Return a fixed-ellipsis prefix of a stored question. Trailing question
- * punctuation does not affect how much of an otherwise identical prompt is
- * shown. Array.from iterates Unicode code points, preserving emoji pairs.
+ * Return a fixed-ellipsis prefix of a stored question. Trailing punctuation is
+ * excluded when estimating the prompt's midpoint, while the minimum display
+ * rule uses the original code-point length. Array.from preserves surrogate
+ * pairs and counts Unicode code points rather than UTF-16 code units.
  */
 export function maskSecurityQuestion(question: string) {
-  const content = question.replace(TRAILING_QUESTION_PUNCTUATION, '')
-  const characters = Array.from(content)
-  const contentLength = characters.length
-  const prefixLength = contentLength <= 4 ? 1 : contentLength === 5 ? 2 : Math.ceil(contentLength / 2)
-  return `${characters.slice(0, Math.min(prefixLength, characters.length)).join('')}……`
+  const characters = Array.from(question)
+  const contentLength = Array.from(question.replace(TRAILING_PUNCTUATION, '')).length
+
+  // A one-code-point question cannot show one original character and also
+  // satisfy the strict-shorter-than-original safety invariant.
+  const requestedPrefixLength = characters.length <= 2
+    ? 1
+    : Math.max(2, contentLength <= 5 ? 2 : Math.ceil(contentLength / 2))
+  const prefixLength = Math.min(requestedPrefixLength, Math.max(0, characters.length - 1))
+
+  return `${characters.slice(0, prefixLength).join('')}……`
 }
 
 /**

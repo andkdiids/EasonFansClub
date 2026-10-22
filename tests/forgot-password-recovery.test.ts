@@ -75,31 +75,56 @@ test('实际密保重置表单有两个独立、可访问的密码显隐按钮',
   assert.match(form, /setResetToken\(''\)[\s\S]*setShowPassword\(false\)[\s\S]*setShowConfirmPassword\(false\)/)
 })
 
-test('密保问题提示由服务端按 Unicode code point 脱敏并使用固定省略号', () => {
+test('密保问题脱敏为短问题至少保留两个 code point，长问题约显示一半', () => {
   const cases = [
-    ['你小时候最好的朋友叫什么名字？', '你小时候最好的……'],
-    ['ABCDEFGHIJ', 'ABCDE……'],
-    ['ABCDEFG', 'ABCD……'],
-    ['猫狗鱼', '猫……'],
+    ['我', '……'], // One code point cannot be shown while keeping the prefix strictly shorter.
+    ['猫狗', '猫……'],
+    ['猫狗鱼', '猫狗……'],
+    ['ABCD', 'AB……'],
     ['ABCDE', 'AB……'],
-    ['你喜欢🍜吗？', '你喜……'],
+    ['ABCDEF', 'ABC……'],
+    ['ABCDEFG', 'ABCD……'],
+    ['你小时候最好的朋友叫什么名字？', '你小时候最好的……'],
     ['The best song?', 'The bes……'],
   ] as const
 
   for (const [question, expected] of cases) {
     const masked = maskSecurityQuestion(question)
+    const visiblePrefix = masked.slice(0, -2)
     assert.equal(masked, expected)
+    assert.ok(masked.endsWith('……'))
+    assert.ok(Array.from(visiblePrefix).length < Array.from(question).length)
     assert.notEqual(masked, question)
   }
+})
 
-  const emojiMasked = maskSecurityQuestion('A😀BCDEF')
+test('结尾标点不扭曲中点计算，Unicode code point 与 emoji 不被 UTF-16 截断', () => {
+  const punctuationCases = [
+    ['ABCD', 'AB……'],
+    ['ABCD？！', 'AB……'],
+    ['ABCDE', 'AB……'],
+    ['ABCDE。', 'AB……'],
+    ['ABCDEFG', 'ABCD……'],
+    ['ABCDEFG，', 'ABCD……'],
+    ['猫狗鱼？', '猫狗……'],
+  ] as const
+
+  for (const [question, expected] of punctuationCases) {
+    const masked = maskSecurityQuestion(question)
+    const visiblePrefix = masked.slice(0, -2)
+    assert.equal(masked, expected)
+    assert.ok(Array.from(visiblePrefix).length < Array.from(question).length)
+  }
+
+  const emojiQuestion = 'A😀BCDEF'
+  const emojiMasked = maskSecurityQuestion(emojiQuestion)
   assert.equal(emojiMasked, 'A😀BC……')
-  for (const character of Array.from(emojiMasked)) {
+  assert.ok(Array.from(emojiMasked.slice(0, -2)).length < Array.from(emojiQuestion).length)
+  for (const character of Array.from(emojiMasked.slice(0, -2))) {
     const codePoint = character.codePointAt(0) || 0
     assert.equal(codePoint >= 0xd800 && codePoint <= 0xdfff && character.length === 1, false)
   }
-  assert.equal(maskSecurityQuestion('ABCD?'), 'A……')
-  assert.equal(maskSecurityQuestion('ABCD'), 'A……')
+  assert.equal(maskSecurityQuestion('你🍜好吗？'), '你🍜……')
   assert.equal(maskSecurityQuestion('？'), '……')
 })
 
