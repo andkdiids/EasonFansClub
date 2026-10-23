@@ -28,21 +28,23 @@ export function buildV6CoursePack(
       stepId: `${definition.lessonId}.${item.key}`, title: item.title, body: item.explanation,
       displayText: item.contentType === 'CONCEPT' || item.contentType === 'SUMMARY' ? null : item.text,
       jyutping: item.jyutping || null, tone: null,
-      examples: item.contentType === 'CONCEPT' || item.contentType === 'SUMMARY'
-        ? [] : [{ text: item.text, ...(item.jyutping ? { jyutping: item.jyutping } : {}) }],
+      // `examples` must contain contextual examples, not a duplicate of the
+      // display text. No reviewed contextual examples are supplied in V2 yet.
+      examples: [],
       audioId: needsAudio ? audioId(item.key) : null,
       contentType: item.contentType, sortOrder: index,
       requiresAudio: needsAudio, requiresSpeaking: Boolean(item.requiresSpeaking),
       reviewStatus: V6_CANDIDATE_STATUS,
       translation: item.meaning, explanation: item.explanation, section: item.section,
       usageNote: item.usageNote || null, sourceReference: item.sourceReference || editorialSource,
-      jyutpingReviewStatus: needsAudio ? 'JYUTPING_REVIEW_REQUIRED' as const : 'NOT_REQUIRED' as const,
+      jyutpingReviewStatus: item.contentType === 'CONCEPT' || item.contentType === 'SUMMARY'
+        ? 'NOT_REQUIRED' as const : 'JYUTPING_REVIEW_REQUIRED' as const,
       dialogueId: item.dialogueId || null, speaker: item.speaker || null, version: 1 as const,
     }
   })
   const audio = content.filter((item) => item.requiresAudio || item.requiresSpeaking).map((item) => ({
     externalId: audioId(item.key), text: item.text, jyutping: item.jyutping || '',
-    stageId, contentId: contentId(item.key),
+    lessonId: definition.lessonId, stageId, contentId: contentId(item.key),
     jyutpingReviewStatus: 'JYUTPING_REVIEW_REQUIRED' as const,
     reviewStatus: V6_CANDIDATE_STATUS, assetStatus: 'NOT_GENERATED' as const, version: 1 as const,
   }))

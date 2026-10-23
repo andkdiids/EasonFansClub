@@ -1,16 +1,25 @@
 import { LESSON_05_GREETINGS } from './lesson05-greetings'
 import { LESSON_06_DIRECTIONS } from './lesson06-directions'
 import { LESSON_07_ORDERING } from './lesson07-ordering'
+import { LESSON_01_HELLO } from './lesson01-hello'
+import { LESSON_02_PRONOUNS } from './lesson02-pronouns'
+import { LESSON_03_MY_NAME } from './lesson03-my-name'
+import { LESSON_04_IS_OR_NOT } from './lesson04-is-or-not'
+import { applyJyutpingCandidates } from './jyutping-candidates'
 import type { V6CoursePack, V6CoursePackSeedPayload, V6LessonId } from './types'
 
-export { LESSON_05_GREETINGS, LESSON_06_DIRECTIONS, LESSON_07_ORDERING }
+export { LESSON_01_HELLO, LESSON_02_PRONOUNS, LESSON_03_MY_NAME, LESSON_04_IS_OR_NOT, LESSON_05_GREETINGS, LESSON_06_DIRECTIONS, LESSON_07_ORDERING }
 export type { V6CoursePack, V6CoursePackSeedPayload, V6LessonId } from './types'
 
 export const V6_COURSE_PACKS: readonly V6CoursePack[] = [
+  LESSON_01_HELLO,
+  LESSON_02_PRONOUNS,
+  LESSON_03_MY_NAME,
+  LESSON_04_IS_OR_NOT,
   LESSON_05_GREETINGS,
   LESSON_06_DIRECTIONS,
   LESSON_07_ORDERING,
-]
+].map(applyJyutpingCandidates)
 
 /** One explicit lesson at a time. Never ships content into an approved pool. */
 export function buildV6CoursePackSeedPayload(lessonId: V6LessonId): V6CoursePackSeedPayload {

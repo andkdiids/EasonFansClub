@@ -16,7 +16,7 @@ export type V6LessonDefinition = {
   subtitle: string
   description: string
   sortOrder: number
-  prerequisiteLessonId: string
+  prerequisiteLessonId: string | null
   status: typeof V6_CANDIDATE_STATUS
   reviewStatus: typeof V6_CANDIDATE_STATUS
 }
@@ -102,6 +102,7 @@ export type V6SeedAudio = {
   externalId: string
   text: string
   jyutping: string
+  lessonId: V6LessonId
   stageId: V6StageId
   contentId: string
   jyutpingReviewStatus: 'JYUTPING_REVIEW_REQUIRED'
