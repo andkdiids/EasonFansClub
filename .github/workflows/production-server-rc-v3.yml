@@ -777,9 +777,18 @@ jobs:
           const path = require('node:path')
           const crypto = require('node:crypto')
           const fail = code => { throw Object.assign(new Error(code), { safeCode: code }) }
+          const productionTreeReasons = new Set([
+            'PRODUCTION_MIGRATION_ROOT_MISSING', 'PRODUCTION_MIGRATION_ROOT_NOT_DIRECTORY',
+            'PRODUCTION_MIGRATION_ROOT_SYMLINK', 'PRODUCTION_MIGRATION_ROOT_READ_FAILED',
+            'PRODUCTION_MIGRATION_ENTRY_UNEXPECTED', 'PRODUCTION_MIGRATION_NAME_INVALID',
+            'PRODUCTION_MIGRATION_DIRECTORY_INVALID', 'PRODUCTION_MIGRATION_SQL_MISSING',
+            'PRODUCTION_MIGRATION_SQL_NOT_REGULAR_FILE', 'PRODUCTION_MIGRATION_SQL_SYMLINK',
+            'PRODUCTION_MIGRATION_SQL_TOO_LARGE', 'PRODUCTION_MIGRATION_SQL_READ_FAILED',
+            'PRODUCTION_MIGRATION_METADATA_INVALID',
+          ])
           const safeMigrationReasons = new Set([
             'CANDIDATE_MANIFEST_INVALID', 'APPROVED_MIGRATION_MISSING_FROM_RC',
-            'REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC', 'PRODUCTION_MIGRATION_TREE_UNAVAILABLE',
+            'REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC', ...productionTreeReasons,
             'MIGRATION_FILE_UNSAFE', 'MIGRATION_NAME_INVALID', 'MIGRATION_LEDGER_INVALID',
             'UNAPPROVED_MIGRATION_STATE', 'TOPIC_LOTTERY_MIGRATION_APPROVAL_REQUIRED_OR_DIVERGENCE',
           ])
@@ -858,22 +867,54 @@ jobs:
           ])
           const lottery = new Set(['20261013120000_add_topic_activity_v2_lottery','20261013121000_add_topic_lottery_winner_slot_column','20261013122000_add_topic_lottery_winner_slot_index','20261013123000_add_topic_lottery_winner_slot_fk'])
           function readTree(root) {
-            const rootStat = fs.lstatSync(root)
-            if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail('MIGRATION_FILE_UNSAFE')
-            const resolved = fs.realpathSync(root)
+            let rootStat
+            try { rootStat = fs.lstatSync(root) }
+            catch (error) {
+              if (error?.code === 'ENOENT') fail('PRODUCTION_MIGRATION_ROOT_MISSING')
+              if (error?.code === 'ENOTDIR') fail('PRODUCTION_MIGRATION_ROOT_NOT_DIRECTORY')
+              fail('PRODUCTION_MIGRATION_ROOT_READ_FAILED')
+            }
+            if (rootStat.isSymbolicLink()) fail('PRODUCTION_MIGRATION_ROOT_SYMLINK')
+            if (!rootStat.isDirectory()) fail('PRODUCTION_MIGRATION_ROOT_NOT_DIRECTORY')
+            let resolved
+            try { resolved = fs.realpathSync(root) }
+            catch { fail('PRODUCTION_MIGRATION_ROOT_READ_FAILED') }
+            let entries
+            try { entries = fs.readdirSync(resolved).sort() }
+            catch { fail('PRODUCTION_MIGRATION_ROOT_READ_FAILED') }
             const out = new Map()
-            for (const name of fs.readdirSync(resolved).sort()) {
-              if (name === 'migration_lock.toml') {
-                const lock = fs.lstatSync(path.join(resolved, name))
-                if (!lock.isFile() || lock.isSymbolicLink()) fail('MIGRATION_FILE_UNSAFE')
+            for (const name of entries) {
+              if (name === 'migration_lock.toml' || name === 'README.md') {
+                let metadata
+                try { metadata = fs.lstatSync(path.join(resolved, name)) }
+                catch { fail('PRODUCTION_MIGRATION_METADATA_INVALID') }
+                if (!metadata.isFile() || metadata.isSymbolicLink() || (name === 'README.md' && metadata.size > 64 * 1024)) {
+                  fail('PRODUCTION_MIGRATION_METADATA_INVALID')
+                }
                 continue
               }
-              if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) fail('MIGRATION_NAME_INVALID')
+              if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) {
+                fail(/^\d{14}_/.test(name) ? 'PRODUCTION_MIGRATION_NAME_INVALID' : 'PRODUCTION_MIGRATION_ENTRY_UNEXPECTED')
+              }
               const dir = path.join(resolved, name)
               const file = path.join(dir, 'migration.sql')
-              const ds = fs.lstatSync(dir), ss = fs.lstatSync(file)
-              if (!ds.isDirectory() || ds.isSymbolicLink() || !ss.isFile() || ss.isSymbolicLink() || ss.size > 2 * 1024 * 1024) fail('MIGRATION_FILE_UNSAFE')
-              out.set(name, crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'))
+              let directoryStat
+              try { directoryStat = fs.lstatSync(dir) }
+              catch { fail('PRODUCTION_MIGRATION_DIRECTORY_INVALID') }
+              if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) fail('PRODUCTION_MIGRATION_DIRECTORY_INVALID')
+              let sqlStat
+              try { sqlStat = fs.lstatSync(file) }
+              catch (error) {
+                if (error?.code === 'ENOENT') fail('PRODUCTION_MIGRATION_SQL_MISSING')
+                fail('PRODUCTION_MIGRATION_SQL_READ_FAILED')
+              }
+              if (sqlStat.isSymbolicLink()) fail('PRODUCTION_MIGRATION_SQL_SYMLINK')
+              if (!sqlStat.isFile()) fail('PRODUCTION_MIGRATION_SQL_NOT_REGULAR_FILE')
+              if (sqlStat.size > 2 * 1024 * 1024) fail('PRODUCTION_MIGRATION_SQL_TOO_LARGE')
+              let sqlBytes
+              try { sqlBytes = fs.readFileSync(file) }
+              catch { fail('PRODUCTION_MIGRATION_SQL_READ_FAILED') }
+              out.set(name, crypto.createHash('sha256').update(sqlBytes).digest('hex'))
             }
             return out
           }
@@ -892,7 +933,10 @@ jobs:
             } catch { fail('CANDIDATE_MANIFEST_INVALID') }
             let productionTree
             try { productionTree = readTree(path.join(process.env.CURRENT_RELEASE, 'prisma/migrations')) }
-            catch { fail('PRODUCTION_MIGRATION_TREE_UNAVAILABLE') }
+            catch (error) {
+              const reason = error?.safeCode
+              fail(productionTreeReasons.has(reason) ? reason : 'PRODUCTION_MIGRATION_METADATA_INVALID')
+            }
             const candidateTree = new Map(candidate.map(x => [x.name, x.checksum]))
             let databaseUrl
             let PrismaClient
