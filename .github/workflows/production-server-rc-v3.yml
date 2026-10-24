@@ -20,7 +20,7 @@ env:
   CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
   ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
   FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
-  AUDITED_WORKFLOW_PARENT_SHA: b064eae2a36bb4382e6d23d72f79e78a7aba72b7
+  AUDITED_WORKFLOW_PARENT_SHA: 5f24c5e6940cfc508ab2a0f5f2367569f538a55b
   DB_BACKUP_CONFIRMED: "YES"
   BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
@@ -90,7 +90,7 @@ jobs:
           const diagnosticWorkflowInstall = '78beb732382ede1e81aebe6b64e78031240a8589'
           const workerIdentityFix = 'b064eae2a36bb4382e6d23d72f79e78a7aba72b7'
           const auditedParent = process.env.AUDITED_WORKFLOW_PARENT_SHA
-          const expectedAuditedParent = 'b064eae2a36bb4382e6d23d72f79e78a7aba72b7'
+          const expectedAuditedParent = '5f24c5e6940cfc508ab2a0f5f2367569f538a55b'
           const workflowPath = '.github/workflows/production-server-rc-v3.yml'
           const diagnosticWorkflowPath = '.github/workflows/diagnose-production-instagram-worker.yml'
           const headers = {
