@@ -1,0 +1,1200 @@
+name: One-time Production Release — Mobile Server RC V3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# Serialize with production deployments; the server flock remains the final lock.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  APP_DIR: /home/apps/easonfansclub
+  APP_PORT: "3000"
+  PRODUCTION_DOMAIN: ecfc.fans
+  CANDIDATE_BRANCH: integration/mobile-server-rc-v3
+  CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
+  MAIN_INSTALL_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
+  DB_BACKUP_CONFIRMED: "YES"
+  BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
+
+jobs:
+  release:
+    name: Reconcile and release the exact Server RC V3
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    environment:
+      name: Production
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Require the one-time workflow-only main installation commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || { echo "::error::Manual dispatch only."; exit 1; }
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Dispatch from main only."; exit 1; }
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid workflow source SHA."; exit 1; }
+
+      - name: Require the owner-confirmed recoverable database backup
+        id: backup_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DB_BACKUP_CONFIRMED" == "YES" ]] || { echo "::error::Database backup prerequisite is not confirmed."; exit 1; }
+          [[ "$BACKUP_CONFIRMATION_SOURCE" == "MANUAL_OWNER_CONFIRMATION" ]] || { echo "::error::Database backup confirmation source is invalid."; exit 1; }
+          printf 'DB_BACKUP_CONFIRMED=%s\n' "$DB_BACKUP_CONFIRMED"
+          printf 'BACKUP_CONFIRMATION_SOURCE=%s\n' "$BACKUP_CONFIRMATION_SOURCE"
+          echo 'DB_BACKUP_GATE=PASS'
+
+      - name: Checkout the exact workflow source from main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified checkout v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify install commit, main ref, RC ref, and fixed candidate ancestry
+        id: refs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || { echo "::error::Workflow checkout SHA mismatch."; exit 1; }
+          parents="$(git show -s --format=%P "$GITHUB_SHA")"
+          [[ "$parents" == "$MAIN_INSTALL_BASE_SHA" ]] || { echo "::error::Workflow was not dispatched from its audited one-commit installation point."; exit 1; }
+          changed="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+          [[ "$changed" == .github/workflows/production-server-rc-v3.yml ]] || { echo "::error::The main installation commit contains unexpected files."; exit 1; }
+          [[ "$CANDIDATE_SHA" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || { echo "::error::Candidate SHA policy mismatch."; exit 1; }
+          [[ "$CANDIDATE_BRANCH" == integration/mobile-server-rc-v3 ]] || { echo "::error::Candidate branch policy mismatch."; exit 1; }
+          git merge-base --is-ancestor "$MAIN_INSTALL_BASE_SHA" "$CANDIDATE_SHA" || { echo "::error::Candidate does not contain the audited main base."; exit 1; }
+          node <<'NODE'
+          const api = process.env.GITHUB_API_URL
+          const repo = process.env.GITHUB_REPOSITORY
+          const token = process.env.GH_TOKEN
+          const expectedMain = process.env.GITHUB_SHA
+          const expectedCandidate = process.env.CANDIDATE_SHA
+          const branch = process.env.CANDIDATE_BRANCH
+          const headers = {
+            accept: 'application/vnd.github+json',
+            authorization: 'Bearer ' + token,
+            'x-github-api-version': '2022-11-28',
+          }
+          async function getRef(name) {
+            const response = await fetch(`${api}/repos/${repo}/git/ref/heads/${name.split('/').map(encodeURIComponent).join('/')}`, { headers })
+            if (!response.ok) throw new Error('ref check failed')
+            const data = await response.json()
+            if (!/^[0-9a-f]{40}$/.test(data.object?.sha || '')) throw new Error('ref shape failed')
+            return data.object.sha
+          }
+          async function main() {
+            if (await getRef('main') !== expectedMain) throw new Error('main moved after workflow dispatch')
+            if (await getRef(branch) !== expectedCandidate) throw new Error('approved RC branch head mismatch')
+            console.log('WORKFLOW_SOURCE=MAIN_INSTALL_COMMIT')
+            console.log('REMOTE_MAIN_SHA_MATCH=YES')
+            console.log('REMOTE_RC_HEAD_MATCH=YES')
+          }
+          main().catch(() => { console.error('::error::Remote branch identity could not be verified.'); process.exitCode = 1 })
+          NODE
+
+      - name: Checkout the immutable RC source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified checkout v4
+        with:
+          ref: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
+          path: candidate
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify candidate checkout and build a checksum-only migration manifest
+        id: migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C candidate rev-parse HEAD)" == "$CANDIDATE_SHA" ]] || { echo "::error::Candidate checkout SHA mismatch."; exit 1; }
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const crypto = require('node:crypto')
+          const root = path.resolve('candidate/prisma/migrations')
+          const out = process.env.GITHUB_OUTPUT
+          const approved = new Set([
+            '20261022090000_profile_mobile_contract',
+            '20261023090000_cantonese_question_progress',
+          ])
+          const requiredExisting = new Set([
+            '20261013100000_add_topic_activity_v2_web',
+            '20261013120000_add_topic_activity_v2_lottery',
+            '20261013121000_add_topic_lottery_winner_slot_column',
+            '20261013122000_add_topic_lottery_winner_slot_index',
+            '20261013123000_add_topic_lottery_winner_slot_fk',
+          ])
+          try {
+            if (!fs.lstatSync(root).isDirectory() || fs.lstatSync(root).isSymbolicLink()) throw new Error()
+            const entries = fs.readdirSync(root).sort()
+            if (!entries.length) throw new Error()
+            const migrations = []
+            for (const name of entries) {
+              if (name === 'migration_lock.toml') {
+                const lock = fs.lstatSync(path.join(root, name))
+                if (!lock.isFile() || lock.isSymbolicLink()) throw new Error()
+                continue
+              }
+              if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) throw new Error()
+              const directory = path.join(root, name)
+              const sql = path.join(directory, 'migration.sql')
+              const ds = fs.lstatSync(directory)
+              const ss = fs.lstatSync(sql)
+              if (!ds.isDirectory() || ds.isSymbolicLink() || !ss.isFile() || ss.isSymbolicLink() || ss.size > 2 * 1024 * 1024) throw new Error()
+              const bytes = fs.readFileSync(sql)
+              migrations.push({ name, checksum: crypto.createHash('sha256').update(bytes).digest('hex') })
+            }
+            for (const name of approved) if (!migrations.some(item => item.name === name)) throw new Error()
+            for (const name of requiredExisting) if (!migrations.some(item => item.name === name)) throw new Error()
+            const payload = Buffer.from(JSON.stringify(migrations)).toString('base64')
+            if (payload.length > 65536) throw new Error()
+            fs.appendFileSync(out, `candidate_migrations_b64=${payload}\n`)
+            fs.appendFileSync(out, `candidate_migration_count=${migrations.length}\n`)
+            console.log(`RC_SHA=${process.env.CANDIDATE_SHA}`)
+            console.log(`RC_MIGRATION_COUNT=${migrations.length}`)
+            console.log('APPROVED_MIGRATION_SET_PRESENT=YES')
+          } catch {
+            console.error('::error::Candidate migration tree is unsafe or incomplete.')
+            process.exitCode = 1
+          }
+          NODE
+
+      - name: Reject non-additive approved migration SQL before SSH
+        id: migration_sql_safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const root = path.resolve('candidate/prisma/migrations')
+          const specs = new Map([
+            ['20261022090000_profile_mobile_contract', ['ALTER_ADD_COLUMN', 'CREATE_TABLE']],
+            ['20261023090000_cantonese_question_progress', ['CREATE_TABLE']],
+          ])
+          function fail() { throw new Error('unsafe migration SQL') }
+          function word(token, value) { return token?.kind === 'word' && token.value === value }
+          function identifier(token) { return token?.kind === 'identifier' }
+          function lex(sql) {
+            if (/\b(?:PREPARE|EXECUTE)\b/i.test(sql)) fail()
+            const statements = []
+            let current = []
+            for (let i = 0; i < sql.length;) {
+              const ch = sql[i]
+              if (/\s/.test(ch)) { i++; continue }
+              if (sql.startsWith('/*', i)) {
+                if (sql.startsWith('/*!', i) || sql.startsWith('/*+', i)) fail()
+                const end = sql.indexOf('*/', i + 2)
+                if (end < 0) fail()
+                i = end + 2
+                continue
+              }
+              if (ch === '#' || (sql.startsWith('--', i) && (i + 2 === sql.length || /\s/.test(sql[i + 2])))) {
+                const end = sql.indexOf('\n', i)
+                i = end < 0 ? sql.length : end + 1
+                continue
+              }
+              if (ch === '`') {
+                let value = ''
+                i++
+                let closed = false
+                while (i < sql.length) {
+                  if (sql[i] === '`' && sql[i + 1] === '`') { value += '`'; i += 2; continue }
+                  if (sql[i] === '`') { i++; closed = true; break }
+                  if (sql[i] === '\n' || sql[i] === '\r') fail()
+                  value += sql[i++]
+                }
+                if (!closed || !value) fail()
+                current.push({ kind: 'identifier', value })
+                continue
+              }
+              if (ch === "'" || ch === '"') {
+                const quote = ch
+                i++
+                let closed = false
+                while (i < sql.length) {
+                  if (sql[i] === '\\') { i += 2; continue }
+                  if (sql[i] === quote && sql[i + 1] === quote) { i += 2; continue }
+                  if (sql[i] === quote) { i++; closed = true; break }
+                  i++
+                }
+                if (!closed) fail()
+                current.push({ kind: 'literal', value: '' })
+                continue
+              }
+              if (/[A-Za-z_]/.test(ch)) {
+                const start = i++
+                while (i < sql.length && /[A-Za-z0-9_$]/.test(sql[i])) i++
+                current.push({ kind: 'word', value: sql.slice(start, i).toUpperCase() })
+                continue
+              }
+              if (/[0-9]/.test(ch)) {
+                const start = i++
+                while (i < sql.length && /[0-9]/.test(sql[i])) i++
+                current.push({ kind: 'number', value: sql.slice(start, i) })
+                continue
+              }
+              if ('(),.'.includes(ch)) { current.push({ kind: 'symbol', value: ch }); i++; continue }
+              if (ch === ';') {
+                if (current.length) statements.push(current)
+                current = []
+                i++
+                continue
+              }
+              fail()
+            }
+            if (current.length) statements.push(current)
+            if (!statements.length) fail()
+            return statements
+          }
+          function group(tokens, start) {
+            if (tokens[start]?.kind !== 'symbol' || tokens[start].value !== '(') fail()
+            let depth = 0
+            for (let i = start; i < tokens.length; i++) {
+              if (tokens[i].kind === 'symbol' && tokens[i].value === '(') depth++
+              if (tokens[i].kind === 'symbol' && tokens[i].value === ')') {
+                depth--
+                if (depth === 0) return { body: tokens.slice(start + 1, i), end: i + 1 }
+              }
+            }
+            fail()
+          }
+          function splitDefinitions(tokens) {
+            const out = []
+            let start = 0, depth = 0
+            for (let i = 0; i < tokens.length; i++) {
+              const t = tokens[i]
+              if (t.kind === 'symbol' && t.value === '(') depth++
+              if (t.kind === 'symbol' && t.value === ')') depth--
+              if (depth < 0) fail()
+              if (depth === 0 && t.kind === 'symbol' && t.value === ',') {
+                out.push(tokens.slice(start, i)); start = i + 1
+              }
+            }
+            if (depth !== 0) fail()
+            out.push(tokens.slice(start))
+            if (out.some(x => !x.length)) fail()
+            return out
+          }
+          function identifierList(tokens, start) {
+            const g = group(tokens, start)
+            let expectIdentifier = true
+            for (const t of g.body) {
+              if (expectIdentifier && !identifier(t)) fail()
+              if (!expectIdentifier && !(t.kind === 'symbol' && t.value === ',')) fail()
+              expectIdentifier = !expectIdentifier
+            }
+            if (expectIdentifier || !g.body.length) fail()
+            return g.end
+          }
+          function parseColumn(tokens) {
+            if (!identifier(tokens[0]) || tokens[1]?.kind !== 'word') fail()
+            const type = tokens[1].value
+            if (!['VARCHAR', 'INTEGER', 'BOOLEAN', 'DATETIME', 'JSON'].includes(type)) fail()
+            let i = 2
+            if (type === 'VARCHAR' || type === 'DATETIME') {
+              const g = group(tokens, i)
+              if (g.body.length !== 1 || g.body[0].kind !== 'number') fail()
+              i = g.end
+            }
+            while (i < tokens.length) {
+              if (word(tokens[i], 'NOT') && word(tokens[i + 1], 'NULL')) { i += 2; continue }
+              if (word(tokens[i], 'NULL')) { i++; continue }
+              if (word(tokens[i], 'DEFAULT')) {
+                const value = tokens[i + 1]
+                if (value?.kind === 'literal' || value?.kind === 'number' || word(value, 'TRUE') || word(value, 'FALSE')) { i += 2; continue }
+                if (word(value, 'CURRENT_TIMESTAMP')) {
+                  i += 2
+                  if (tokens[i]?.kind === 'symbol' && tokens[i].value === '(') {
+                    const g = group(tokens, i)
+                    if (g.body.length !== 1 || g.body[0].kind !== 'number') fail()
+                    i = g.end
+                  }
+                  continue
+                }
+                fail()
+              }
+              fail()
+            }
+          }
+          function parseDefinition(tokens) {
+            if (word(tokens[0], 'PRIMARY') && word(tokens[1], 'KEY')) {
+              return identifierList(tokens, 2) === tokens.length ? 'PRIMARY_KEY' : fail()
+            }
+            if (word(tokens[0], 'UNIQUE')) {
+              if (!(word(tokens[1], 'INDEX') || word(tokens[1], 'KEY')) || !identifier(tokens[2])) fail()
+              return identifierList(tokens, 3) === tokens.length ? 'UNIQUE_INDEX' : fail()
+            }
+            if (word(tokens[0], 'INDEX') || word(tokens[0], 'KEY')) {
+              if (!identifier(tokens[1])) fail()
+              return identifierList(tokens, 2) === tokens.length ? 'INDEX' : fail()
+            }
+            if (word(tokens[0], 'CONSTRAINT')) {
+              if (!identifier(tokens[1]) || !word(tokens[2], 'FOREIGN') || !word(tokens[3], 'KEY')) fail()
+              let i = identifierList(tokens, 4)
+              if (!word(tokens[i], 'REFERENCES') || !identifier(tokens[i + 1])) fail()
+              i = identifierList(tokens, i + 2)
+              if (!word(tokens[i], 'ON') || !word(tokens[i + 1], 'DELETE') || !word(tokens[i + 2], 'CASCADE') || !word(tokens[i + 3], 'ON') || !word(tokens[i + 4], 'UPDATE') || !word(tokens[i + 5], 'CASCADE') || i + 6 !== tokens.length) fail()
+              return 'FOREIGN_KEY'
+            }
+            parseColumn(tokens)
+            return 'COLUMN'
+          }
+          function classify(tokens) {
+            if (word(tokens[0], 'ALTER')) {
+              if (!word(tokens[1], 'TABLE') || !identifier(tokens[2]) || !word(tokens[3], 'ADD') || !word(tokens[4], 'COLUMN') || !identifier(tokens[5]) || !word(tokens[6], 'BOOLEAN') || !word(tokens[7], 'NOT') || !word(tokens[8], 'NULL') || !word(tokens[9], 'DEFAULT') || !word(tokens[10], 'TRUE') || tokens.length !== 11) fail()
+              return 'ALTER_ADD_COLUMN'
+            }
+            if (!word(tokens[0], 'CREATE') || !word(tokens[1], 'TABLE') || !identifier(tokens[2])) fail()
+            const g = group(tokens, 3)
+            const suffix = tokens.slice(g.end)
+            const expectedSuffix = ['DEFAULT', 'CHARACTER', 'SET', 'UTF8MB4', 'COLLATE', 'UTF8MB4_UNICODE_CI']
+            if (suffix.length !== expectedSuffix.length || suffix.some((t, i) => !word(t, expectedSuffix[i]))) fail()
+            const definitions = splitDefinitions(g.body).map(parseDefinition)
+            if (!definitions.includes('PRIMARY_KEY') || !definitions.some(x => x === 'COLUMN')) fail()
+            return 'CREATE_TABLE'
+          }
+          try {
+            for (const [name, expected] of specs) {
+              const dir = path.join(root, name)
+              const file = path.join(dir, 'migration.sql')
+              const ds = fs.lstatSync(dir), fsInfo = fs.lstatSync(file)
+              if (!ds.isDirectory() || ds.isSymbolicLink() || !fsInfo.isFile() || fsInfo.isSymbolicLink() || fsInfo.size < 1 || fsInfo.size > 1024 * 1024) fail()
+              const bytes = fs.readFileSync(file)
+              const sql = bytes.toString('utf8')
+              if (!Buffer.from(sql, 'utf8').equals(bytes)) fail()
+              const actual = lex(sql).map(classify)
+              if (actual.length !== expected.length || actual.some((kind, i) => kind !== expected[i])) fail()
+            }
+            console.log('APPROVED_MIGRATION_SQL_COUNT=2')
+            console.log('DESTRUCTIVE_SQL_FOUND=NO')
+            console.log('MIGRATION_SQL_SAFETY=PASS')
+          } catch {
+            console.error('::error::Approved migration SQL is not proven additive and safe.')
+            process.exitCode = 1
+          }
+          NODE
+
+      - name: Verify production deployment script uses migrate deploy
+        id: deployment_command_safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const root = path.resolve('candidate')
+          function fail() { throw new Error('deployment command not proven safe') }
+          function stripComments(source) {
+            return source.split(/\r?\n/).map(line => {
+              let quote = '', escaped = false
+              for (let i = 0; i < line.length; i++) {
+                const ch = line[i]
+                if (escaped) { escaped = false; continue }
+                if (quote === '"' && ch === '\\') { escaped = true; continue }
+                if (quote && ch === quote) { quote = ''; continue }
+                if (!quote && (ch === '"' || ch === "'")) { quote = ch; continue }
+                if (!quote && ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i)
+              }
+              return line
+            }).join('\n')
+          }
+          try {
+            const files = ['scripts/deploy-safety.sh', 'scripts/deploy-production-git.sh', 'scripts/rollback-production-git.sh']
+            const sources = files.map(relative => {
+              const file = path.join(root, relative)
+              const info = fs.lstatSync(file)
+              const real = fs.realpathSync(file)
+              if (!info.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > 1024 * 1024 || !real.startsWith(root + path.sep)) fail()
+              const bytes = fs.readFileSync(file)
+              const text = bytes.toString('utf8')
+              if (!Buffer.from(text, 'utf8').equals(bytes)) fail()
+              return stripComments(text).replace(/\\\r?\n[ \t]*/g, ' ')
+            })
+            const deploy = sources[1]
+            const rollback = sources[2]
+            function functionBody(name) {
+              const start = deploy.indexOf(name + '() {')
+              if (start < 0) return ''
+              const end = deploy.indexOf('\n}', start)
+              return end < 0 ? '' : deploy.slice(start, end + 2)
+            }
+            const timeoutWrapper = functionBody('pnpm_with_timeout')
+            const runWrapper = functionBody('pnpm_run')
+            const wrappers = timeoutWrapper.includes('timeout ') && timeoutWrapper.includes('"${PNPM_CMD[@]}" "$@"') && runWrapper.includes('pnpm_with_timeout') && runWrapper.includes('"$@"') && runWrapper.includes('= prisma') && runWrapper.includes('= migrate') && runWrapper.includes('= deploy')
+            const pnpmAssignments = [...deploy.matchAll(/\bPNPM_CMD=\(([^)]*)\)/g)].map(x => x[1].trim()).sort()
+            const pnpmCommandPinned = pnpmAssignments.join('|') === ['', 'corepack pnpm', 'pnpm'].sort().join('|') && !/\bPNPM_CMD\s*\+=|\bPNPM_CMD\s*\[[^\]]+\]\s*=/.test(deploy)
+            const commandCount = (deploy.match(/\bpnpm_run\s+prisma\s+migrate\s+deploy\b/g) || []).length
+            const all = sources.join('\n')
+            const forbiddenDev = /\bprisma\s+migrate\s+dev\b/i.test(all)
+            const forbiddenPush = /\bprisma\s+db\s+push\b/i.test(all)
+            const forbiddenReset = /\bprisma\s+migrate\s+reset\b/i.test(all)
+            const migrationCommands = [...deploy.matchAll(/\b(?:pnpm_run|pnpm_with_timeout)\b[^\n]*?\bprisma\s+migrate\s+([A-Za-z]+)/g)].map(x => x[1].toLowerCase()).sort()
+            const rollbackHasDatabaseMutation = /\bprisma\b|_prisma_migrations|\bDATABASE_URL\b|\bDROP\s+(?:TABLE|DATABASE|SCHEMA|COLUMN)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b|\bREPLACE\s+INTO\b|\bRENAME\s+TABLE\b|\bALTER\s+TABLE\b|\bINSERT\s+INTO\b/i.test(rollback)
+            if (!wrappers || !pnpmCommandPinned || commandCount !== 1 || forbiddenDev || forbiddenPush || forbiddenReset || migrationCommands.join(',') !== 'deploy,status' || rollbackHasDatabaseMutation) fail()
+            console.log('PRODUCTION_MIGRATION_COMMAND=PRISMA_MIGRATE_DEPLOY')
+            console.log('MIGRATE_DEV_PRESENT=NO')
+            console.log('DB_PUSH_PRESENT=NO')
+            console.log('MIGRATE_RESET_PRESENT=NO')
+            console.log('APPLICATION_ROLLBACK_SCRIPT_DB_WRITES=NO')
+          } catch {
+            console.error('::error::Production migration command could not be proven to use migrate deploy safely.')
+            process.exitCode = 1
+          }
+          NODE
+
+      - name: Prepare pinned SSH credentials on runner only
+        id: ssh
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::SSH host format is unsupported."; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::SSH user format is unsupported."; exit 1; }
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::SSH port is invalid."; exit 1; }
+          (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || { echo "::error::SSH port is invalid."; exit 1; }
+          [[ -n "$SSH_KEY" && -n "$PINNED_HOSTS" && "$PINNED_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]] || { echo "::error::Pinned SSH settings are incomplete."; exit 1; }
+          key="$RUNNER_TEMP/ecfc-server-v3-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          hosts="$RUNNER_TEMP/ecfc-server-v3-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.hosts"
+          # Publish only the runner-temp paths before creating either file so
+          # the always() cleanup step can remove partial files after any later
+          # validation failure in this step.
+          printf 'key_file=%s\nhosts_file=%s\n' "$key" "$hosts" >> "$GITHUB_OUTPUT"
+          umask 077
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          chmod 600 "$key" "$hosts"
+          SSH_HOST="$SSH_HOST" SSH_PORT="$SSH_PORT" HOSTS_FILE="$hosts" node <<'NODE'
+          const fs = require('node:fs')
+          const lines = fs.readFileSync(process.env.HOSTS_FILE, 'utf8').trim().split(/\r?\n/)
+          const expectedHost = process.env.SSH_PORT === '22' ? process.env.SSH_HOST : `[${process.env.SSH_HOST}]:${process.env.SSH_PORT}`
+          const fields = lines.length === 1 ? lines[0].trim().split(/\s+/) : []
+          if (fields.length !== 3 || fields[0] !== expectedHost || !/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$/.test(fields[1]) || !/^[A-Za-z0-9+/]+={0,2}$/.test(fields[2])) process.exit(1)
+          NODE
+          actual="$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')"
+          [[ "$actual" == "$PINNED_FINGERPRINT" ]] || { echo "::error::SSH host key fingerprint mismatch."; exit 1; }
+          echo 'SSH_HOST_IDENTITY=PINNED_AND_VERIFIED'
+
+      - name: Reject active production operations before SSH
+        id: active_preflight
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const api = process.env.GITHUB_API_URL
+          const repo = process.env.GITHUB_REPOSITORY
+          const token = process.env.GH_TOKEN
+          const current = String(process.env.GITHUB_RUN_ID)
+          const protectedPaths = new Set([
+            '.github/workflows/configure-production-entry.yml',
+            '.github/workflows/deploy.yml',
+            '.github/workflows/production-migration-status.yml',
+            '.github/workflows/production-mysql-client-metadata.yml',
+            '.github/workflows/production-release-approved.yml',
+            '.github/workflows/production-strict-readonly-preflight.yml',
+            '.github/workflows/production-server-rc-v3.yml',
+          ])
+          const knownPaths = new Set([
+            ...protectedPaths,
+          ])
+          const headers = { accept: 'application/vnd.github+json', authorization: 'Bearer ' + token, 'x-github-api-version': '2022-11-28' }
+          async function page(status, pageNumber) {
+            const url = new URL(`${api}/repos/${repo}/actions/runs`)
+            url.searchParams.set('status', status)
+            url.searchParams.set('per_page', '100')
+            url.searchParams.set('page', String(pageNumber))
+            const response = await fetch(url, { headers })
+            if (!response.ok) throw new Error('API unavailable')
+            return response.json()
+          }
+          async function main() {
+            let conflictCount = 0
+            for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
+              const first = await page(status, 1)
+              if (!Number.isInteger(first.total_count) || !Array.isArray(first.workflow_runs)) throw new Error('shape invalid')
+              const total = first.total_count
+              const expectedPages = Math.max(1, Math.ceil(total / 100))
+              let count = 0
+              const seenIds = new Set()
+              for (let number = 1; number <= expectedPages; number++) {
+                const data = number === 1 ? first : await page(status, number)
+                if (data.total_count !== total || !Array.isArray(data.workflow_runs) || data.workflow_runs.length > 100) throw new Error('pagination changed')
+                count += data.workflow_runs.length
+                for (const run of data.workflow_runs) {
+                  if (!Number.isSafeInteger(run.id) || seenIds.has(String(run.id))) throw new Error('duplicate or invalid run id')
+                  seenIds.add(String(run.id))
+                  if (String(run.id) === current) continue
+                  const runPath = typeof run.path === 'string' ? run.path.split('@', 1)[0] : ''
+                  if (!runPath) throw new Error('active run cannot be classified')
+                  if (!knownPaths.has(runPath)) throw new Error('active run uses an unrecognized workflow')
+                  if (protectedPaths.has(runPath)) conflictCount++
+                }
+              }
+              if (count !== total) throw new Error('pagination incomplete')
+              console.log(`ACTIONS_${status.toUpperCase()}=${count}`)
+            }
+            if (conflictCount !== 0) throw new Error('conflicting production run exists')
+            console.log('CONCURRENT_PRODUCTION_RUNS=0')
+          }
+          main().catch(() => { console.error('::error::Actions state is incomplete or a conflicting production run exists.'); process.exitCode = 1 })
+          NODE
+
+      - name: Read production state and reconcile migration trees with the database ledger
+        id: production_preflight
+        shell: bash
+        timeout-minutes: 20
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          CANDIDATE_MIGRATIONS_B64: ${{ steps.migrations.outputs.candidate_migrations_b64 }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_MIGRATIONS_B64" =~ ^[A-Za-z0-9+/=]+$ && ${#CANDIDATE_MIGRATIONS_B64} -le 65536 ]] || { echo "::error::Migration manifest is invalid."; exit 1; }
+          remote="${SSH_USER}@${SSH_HOST}"
+          remote_command="bash -s -- '$APP_DIR' '$CANDIDATE_SHA' '$CANDIDATE_MIGRATIONS_B64'"
+          set +e
+          output="$(timeout --foreground --signal=TERM --kill-after=15s 110s ssh -T \
+            -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            "$remote" "$remote_command" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          candidate_sha="$2"
+          candidate_b64="$3"
+          fail() { printf 'PREFLIGHT=NOT_READY\nREASON=%s\n' "$1"; exit 1; }
+          [[ "$app_dir" == /home/apps/easonfansclub ]] || fail APP_PATH_MISMATCH
+          [[ "$candidate_sha" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || fail CANDIDATE_SHA_MISMATCH
+          [[ "$candidate_b64" =~ ^[A-Za-z0-9+/=]+$ && ${#candidate_b64} -le 65536 ]] || fail MIGRATION_MANIFEST_INVALID
+          export NVM_DIR="$HOME/.nvm"
+          if [[ -s "$NVM_DIR/nvm.sh" ]]; then . "$NVM_DIR/nvm.sh"; fi
+          for command_name in node pm2 flock timeout readlink systemctl; do command -v "$command_name" >/dev/null 2>&1 || fail "${command_name^^}_UNAVAILABLE"; done
+          [[ -f "$app_dir/.deploy.lock" && ! -L "$app_dir/.deploy.lock" ]] || fail DEPLOY_LOCK_UNAVAILABLE
+          exec 8< "$app_dir/.deploy.lock" || fail DEPLOY_LOCK_UNAVAILABLE
+          flock -s -n 8 || fail DEPLOYMENT_IN_PROGRESS
+          current_link="$app_dir/current"
+          [[ -L "$current_link" ]] || fail CURRENT_NOT_SYMLINK
+          current_target="$(readlink -f -- "$current_link" 2>/dev/null || true)"
+          [[ "$current_target" == "$app_dir"/releases/* && -d "$current_target" ]] || fail CURRENT_RELEASE_UNAVAILABLE
+          [[ -s "$current_target/.deployed-sha" ]] || fail CURRENT_SHA_MARKER_MISSING
+          production_sha="$(tr -d '[:space:]' < "$current_target/.deployed-sha")"
+          [[ "$production_sha" =~ ^[0-9a-f]{40}$ && "$production_sha" != "$candidate_sha" ]] || fail CURRENT_SHA_INVALID_OR_ALREADY_DEPLOYED
+          for required in package.json ecosystem.config.js .next/BUILD_ID .env; do [[ -r "$current_target/$required" && -s "$current_target/$required" ]] || fail ROLLBACK_RELEASE_INCOMPLETE; done
+          [[ -d "$current_target/node_modules" ]] || fail ROLLBACK_DEPENDENCIES_UNAVAILABLE
+          printf 'PRODUCTION_SHA=%s\nCURRENT_RELEASE=%s\nROLLBACK_SHA=%s\nROLLBACK_RELEASE=%s\n' "$production_sha" "$current_target" "$production_sha" "$current_target"
+          printf 'DEPLOY_LOCK=SHARED_READ_LOCK_ACQUIRED\n'
+          systemctl is-active --quiet nginx || fail NGINX_NOT_ACTIVE
+          printf 'NGINX=ACTIVE\n'
+
+          pm2_json="$(pm2 jlist 2>/dev/null)" || fail PM2_STATUS_UNAVAILABLE
+          pm2_snapshot() {
+            local name="$1"
+            printf '%s' "$pm2_json" | node -e '
+              let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{try{const rows=JSON.parse(raw).filter(x=>x.name===process.argv[1]);if(rows.length!==1)process.exit(2);const x=rows[0],e=x.pm2_env||{};process.stdout.write([e.status||"",String(Number(x.pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t"))}catch{process.exit(2)}})
+            ' "$name"
+          }
+          IFS=$'\t' read -r web_status web_pid web_cwd web_deploy_sha web_restarts < <(pm2_snapshot easonfansclub) || fail PM2_WEB_STATUS_UNKNOWN
+          [[ "$web_status" == online && "$web_pid" =~ ^[1-9][0-9]* && "$web_cwd" == "$current_link" ]] || fail PM2_WEB_NOT_ON_CURRENT
+          web_actual="$(readlink "/proc/$web_pid/cwd" 2>/dev/null || true)"
+          [[ "$web_actual" != *' (deleted)' && -d "$web_actual" && "$(readlink -f -- "$web_actual" 2>/dev/null || true)" == "$current_target" ]] || fail PM2_WEB_CWD_INVALID
+          [[ "$web_deploy_sha" == "$production_sha" ]] || fail PM2_WEB_SHA_MISMATCH
+          printf 'PM2_WEB=ONLINE\nPM2_WEB_PID=%s\n' "$web_pid"
+          IFS=$'\t' read -r worker_status worker_pid worker_cwd worker_deploy_sha worker_restarts < <(pm2_snapshot instagram-sync-worker) || fail PM2_WORKER_STATUS_UNKNOWN
+          [[ "$worker_status" == online && "$worker_pid" =~ ^[1-9][0-9]* && "$worker_cwd" == "$current_link" ]] || fail PM2_WORKER_NOT_ON_CONFIGURED_CURRENT
+          worker_actual="$(readlink "/proc/$worker_pid/cwd" 2>/dev/null || true)"
+          [[ "$worker_actual" != *' (deleted)' && -d "$worker_actual" ]] || fail PM2_WORKER_CWD_INVALID
+          worker_release="$(readlink -f -- "$worker_actual" 2>/dev/null || true)"
+          [[ "$worker_release" == "$app_dir"/releases/* && -s "$worker_release/.deployed-sha" ]] || fail PM2_WORKER_RELEASE_INVALID
+          worker_release_sha="$(tr -d '[:space:]' < "$worker_release/.deployed-sha")"
+          [[ "$worker_release_sha" =~ ^[0-9a-f]{40}$ && "$worker_deploy_sha" == "$worker_release_sha" && "$worker_restarts" =~ ^[0-9]+$ ]] || fail PM2_WORKER_SHA_INVALID
+          printf 'PM2_WORKER=ONLINE\nPM2_WORKER_PID=%s\nWORKER_RELEASE_SHA=%s\nWORKER_ACTUAL_RELEASE=%s\nWORKER_RESTARTS=%s\nWORKER_RELOAD=NO\nWORKER_ACTIVE_TASKS=UNKNOWN\n' "$worker_pid" "$worker_release_sha" "$worker_release" "$worker_restarts"
+
+          timeout --foreground --signal=TERM --kill-after=10s 75s \
+            env -i PATH="$PATH" HOME="$HOME" LANG=C APP_DIR="$app_dir" CURRENT_RELEASE="$current_target" CANDIDATE_MIGRATIONS_B64="$candidate_b64" \
+            /usr/bin/node --input-type=commonjs - <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const crypto = require('node:crypto')
+          const fail = code => { throw Object.assign(new Error(code), { safeCode: code }) }
+          const approvedPending = new Set(['20261022090000_profile_mobile_contract','20261023090000_cantonese_question_progress'])
+          const requiredExisting = new Set([
+            '20261013100000_add_topic_activity_v2_web','20261013120000_add_topic_activity_v2_lottery',
+            '20261013121000_add_topic_lottery_winner_slot_column','20261013122000_add_topic_lottery_winner_slot_index',
+            '20261013123000_add_topic_lottery_winner_slot_fk',
+          ])
+          const lottery = new Set(['20261013120000_add_topic_activity_v2_lottery','20261013121000_add_topic_lottery_winner_slot_column','20261013122000_add_topic_lottery_winner_slot_index','20261013123000_add_topic_lottery_winner_slot_fk'])
+          function readTree(root) {
+            const rootStat = fs.lstatSync(root)
+            if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail('MIGRATION_FILE_UNSAFE')
+            const resolved = fs.realpathSync(root)
+            const out = new Map()
+            for (const name of fs.readdirSync(resolved).sort()) {
+              if (name === 'migration_lock.toml') {
+                const lock = fs.lstatSync(path.join(resolved, name))
+                if (!lock.isFile() || lock.isSymbolicLink()) fail('MIGRATION_FILE_UNSAFE')
+                continue
+              }
+              if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) fail('MIGRATION_NAME_INVALID')
+              const dir = path.join(resolved, name)
+              const file = path.join(dir, 'migration.sql')
+              const ds = fs.lstatSync(dir), ss = fs.lstatSync(file)
+              if (!ds.isDirectory() || ds.isSymbolicLink() || !ss.isFile() || ss.isSymbolicLink() || ss.size > 2 * 1024 * 1024) fail('MIGRATION_FILE_UNSAFE')
+              out.set(name, crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'))
+            }
+            return out
+          }
+          async function main() {
+            let candidate
+            try {
+              candidate = JSON.parse(Buffer.from(process.env.CANDIDATE_MIGRATIONS_B64, 'base64').toString('utf8'))
+              if (!Array.isArray(candidate) || candidate.length < 2) fail('CANDIDATE_MANIFEST_INVALID')
+              const names = new Set()
+              for (const row of candidate) {
+                if (!row || !/^\d{14}_[A-Za-z0-9_]+$/.test(row.name) || !/^[0-9a-f]{64}$/.test(row.checksum) || names.has(row.name)) fail('CANDIDATE_MANIFEST_INVALID')
+                names.add(row.name)
+              }
+              for (const name of approvedPending) if (!names.has(name)) fail('APPROVED_MIGRATION_MISSING_FROM_RC')
+              for (const name of requiredExisting) if (!names.has(name)) fail('REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC')
+            } catch { fail('CANDIDATE_MANIFEST_INVALID') }
+            let productionTree
+            try { productionTree = readTree(path.join(process.env.CURRENT_RELEASE, 'prisma/migrations')) }
+            catch { fail('PRODUCTION_MIGRATION_TREE_UNAVAILABLE') }
+            const candidateTree = new Map(candidate.map(x => [x.name, x.checksum]))
+            let databaseUrl
+            let PrismaClient
+            try {
+              const release = process.env.CURRENT_RELEASE
+              const dotenv = require(path.join(release, 'node_modules/dotenv'))
+              const parsed = dotenv.parse(fs.readFileSync(path.join(release, '.env')))
+              databaseUrl = parsed.DATABASE_URL
+              if (!databaseUrl || new URL(databaseUrl).protocol !== 'mysql:') fail('DATABASE_CONFIGURATION_INVALID')
+              process.env.DATABASE_URL = databaseUrl
+              ;({ PrismaClient } = require(path.join(release, 'node_modules/@prisma/client')))
+            } catch { fail('DATABASE_CONFIGURATION_OR_PRISMA_UNAVAILABLE') }
+            const client = new PrismaClient({ log: [] })
+            try {
+              await client.$connect()
+              const rows = await client.$queryRawUnsafe('SELECT migration_name, checksum, started_at, finished_at, rolled_back_at FROM _prisma_migrations')
+              if (!Array.isArray(rows)) fail('MIGRATION_LEDGER_INVALID')
+              const byName = new Map()
+              for (const row of rows) {
+                if (typeof row.migration_name !== 'string' || !/^[0-9a-f]{64}$/.test(String(row.checksum || ''))) fail('MIGRATION_LEDGER_INVALID')
+                const list = byName.get(row.migration_name) || []
+                list.push(row)
+                byName.set(row.migration_name, list)
+              }
+              const all = new Set([...productionTree.keys(), ...candidateTree.keys(), ...byName.keys()])
+              let failed = 0, divergence = 0, pending = 0, unexpectedPending = 0, applied = 0
+              let lotteryApplied = 0
+              for (const name of [...all].sort()) {
+                const inProduction = productionTree.has(name)
+                const inRc = candidateTree.has(name)
+                const ledger = byName.get(name) || []
+                const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
+                const duplicate = ledger.length > 1
+                const succeeded = ledger.length === 1 && !!ledger[0].finished_at && !ledger[0].rolled_back_at
+                const dbChecksum = ledger.length === 1 ? String(ledger[0].checksum) : ''
+                const pHash = productionTree.get(name)
+                const rHash = candidateTree.get(name)
+                let status = 'UNKNOWN'
+                if (activeFailed) { status = 'FAILED'; failed++ }
+                else if (duplicate || ledger.some(row => !!row.rolled_back_at) || (inProduction && !inRc) || (!inProduction && !inRc && ledger.length > 0) || (inProduction && inRc && pHash !== rHash) || (ledger.length === 1 && ((pHash && dbChecksum !== pHash) || (rHash && dbChecksum !== rHash)))) { status = 'DIVERGENT'; divergence++ }
+                else if (succeeded && inRc && dbChecksum === rHash) { status = 'APPLIED'; applied++ }
+                else if (ledger.length === 0 && inRc) { status = 'PENDING'; pending++; if (!approvedPending.has(name)) unexpectedPending++ }
+                else { status = 'DIVERGENT'; divergence++ }
+                if (inRc && !approvedPending.has(name) && status === 'APPLIED' && !inProduction) {
+                  status = 'DIVERGENT'
+                  divergence++
+                  applied--
+                }
+                if (requiredExisting.has(name) && status === 'APPLIED' && !(inProduction && inRc && pHash === rHash && dbChecksum === pHash)) {
+                  status = 'DIVERGENT'
+                  divergence++
+                  applied--
+                }
+                if (lottery.has(name)) {
+                  if (inProduction && inRc && succeeded && dbChecksum === pHash && pHash === rHash) lotteryApplied++
+                }
+                if (status !== 'APPLIED' || !inProduction || !inRc) {
+                  console.log(`MIGRATION_DIFF=${name}|IN_PRODUCTION_RELEASE=${inProduction ? 'YES' : 'NO'}|IN_DATABASE_LEDGER=${succeeded ? 'YES' : (ledger.length ? 'NON_SUCCESS' : 'NO')}|IN_RC_V3=${inRc ? 'YES' : 'NO'}|STATUS=${status}`)
+                }
+              }
+              const lotteryOkay = lotteryApplied === lottery.size
+              const approvedSetOkay = failed === 0 && divergence === 0 && unexpectedPending === 0 && pending <= approvedPending.size
+              console.log(`PRODUCTION_RELEASE_MIGRATION_COUNT=${productionTree.size}`)
+              console.log(`DATABASE_LEDGER_ROW_COUNT=${rows.length}`)
+              console.log(`DATABASE_APPLIED_COUNT=${applied}`)
+              console.log(`RC_MIGRATION_COUNT=${candidateTree.size}`)
+              console.log(`PENDING_COUNT=${pending}`)
+              console.log(`FAILED_COUNT=${failed}`)
+              console.log(`DIVERGENCE=${divergence === 0 ? 'NO' : 'YES'}`)
+              console.log(`UNEXPECTED_PENDING_MIGRATIONS=${unexpectedPending}`)
+              console.log(`APPROVED_PENDING_ONLY=${approvedSetOkay ? 'YES' : 'NO'}`)
+              console.log(`TOPIC_LOTTERY_MIGRATION_STATUS=${lotteryOkay ? 'APPLIED_AND_IDENTICAL' : 'STOP_PENDING_OR_DIVERGENT'}`)
+              if (!approvedSetOkay) fail('UNAPPROVED_MIGRATION_STATE')
+              if (!lotteryOkay) fail('TOPIC_LOTTERY_MIGRATION_APPROVAL_REQUIRED_OR_DIVERGENCE')
+              console.log('MIGRATION_PREFLIGHT=PASS')
+            } catch (error) {
+              console.log('MIGRATION_PREFLIGHT=NOT_READY')
+              console.log('MIGRATION_REASON=' + (/^MIGRATION_[A-Z_]+$/.test(error?.safeCode || '') ? error.safeCode : 'DATABASE_READ_ONLY_CHECK_FAILED'))
+              process.exitCode = 1
+            } finally {
+              if (client) await client.$disconnect().catch(() => {})
+            }
+          }
+          main().catch(() => { console.log('MIGRATION_PREFLIGHT=NOT_READY\nMIGRATION_REASON=DATABASE_READ_ONLY_CHECK_FAILED'); process.exitCode = 1 })
+          NODE
+          printf 'PREFLIGHT=PASS\n'
+          REMOTE
+          )"
+          status=$?
+          set -e
+          if [[ -n "$output" ]]; then printf '%s\n' "$output"; fi
+          [[ "$status" -eq 0 ]] || { echo "::error::Production read-only preflight failed; deployment will not run."; exit "$status"; }
+          production_sha="$(printf '%s\n' "$output" | sed -n 's/^PRODUCTION_SHA=//p' | tail -n 1)"
+          rollback_sha="$(printf '%s\n' "$output" | sed -n 's/^ROLLBACK_SHA=//p' | tail -n 1)"
+          [[ "$production_sha" =~ ^[0-9a-f]{40}$ && "$rollback_sha" == "$production_sha" ]] || { echo "::error::Production or rollback SHA evidence is invalid."; exit 1; }
+          grep -qx 'MIGRATION_PREFLIGHT=PASS' <<<"$output" || { echo "::error::Migration reconciliation did not pass."; exit 1; }
+          grep -qx 'APPROVED_PENDING_ONLY=YES' <<<"$output" || { echo "::error::Only the two approved migrations may be pending."; exit 1; }
+          grep -qx 'FAILED_COUNT=0' <<<"$output" || { echo "::error::A failed migration exists."; exit 1; }
+          grep -qx 'DIVERGENCE=NO' <<<"$output" || { echo "::error::Migration trees or ledger diverge."; exit 1; }
+          grep -qx 'UNEXPECTED_PENDING_MIGRATIONS=0' <<<"$output" || { echo "::error::An unapproved migration is pending."; exit 1; }
+          grep -qx 'TOPIC_LOTTERY_MIGRATION_STATUS=APPLIED_AND_IDENTICAL' <<<"$output" || { echo "::error::Topic Activity lottery migrations are not proven applied and identical."; exit 1; }
+          worker_pid="$(printf '%s\n' "$output" | sed -n 's/^PM2_WORKER_PID=//p' | tail -n 1)"
+          worker_sha="$(printf '%s\n' "$output" | sed -n 's/^WORKER_RELEASE_SHA=//p' | tail -n 1)"
+          worker_release="$(printf '%s\n' "$output" | sed -n 's/^WORKER_ACTUAL_RELEASE=//p' | tail -n 1)"
+          worker_restarts="$(printf '%s\n' "$output" | sed -n 's/^WORKER_RESTARTS=//p' | tail -n 1)"
+          [[ "$worker_pid" =~ ^[1-9][0-9]* && "$worker_sha" =~ ^[0-9a-f]{40}$ && "$worker_release" =~ ^/home/apps/easonfansclub/releases/[^/]+$ && "$worker_restarts" =~ ^[0-9]+$ ]] || { echo "::error::Instagram Worker preservation evidence is invalid."; exit 1; }
+          printf 'production_sha=%s\nrollback_sha=%s\nworker_pid=%s\nworker_sha=%s\nworker_release=%s\nworker_restarts=%s\n' "$production_sha" "$rollback_sha" "$worker_pid" "$worker_sha" "$worker_release" "$worker_restarts" >> "$GITHUB_OUTPUT"
+
+      - name: Recheck main, exact RC head, and active production workflows immediately before deployment
+        id: last_moment_gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const api = process.env.GITHUB_API_URL
+          const repo = process.env.GITHUB_REPOSITORY
+          const token = process.env.GH_TOKEN
+          const expectedMain = process.env.GITHUB_SHA
+          const expectedRc = process.env.CANDIDATE_SHA
+          const branch = process.env.CANDIDATE_BRANCH
+          const current = String(process.env.GITHUB_RUN_ID)
+          const headers = { accept: 'application/vnd.github+json', authorization: 'Bearer ' + token, 'x-github-api-version': '2022-11-28' }
+          const protectedPaths = new Set([
+            '.github/workflows/configure-production-entry.yml', '.github/workflows/deploy.yml',
+            '.github/workflows/production-migration-status.yml', '.github/workflows/production-mysql-client-metadata.yml',
+            '.github/workflows/production-release-approved.yml', '.github/workflows/production-strict-readonly-preflight.yml',
+            '.github/workflows/production-server-rc-v3.yml',
+          ])
+          const knownPaths = new Set([...protectedPaths])
+          async function getRef(name) {
+            const suffix = name.split('/').map(encodeURIComponent).join('/')
+            const r = await fetch(`${api}/repos/${repo}/git/ref/heads/${suffix}`, { headers })
+            if (!r.ok) throw new Error()
+            const j = await r.json()
+            if (!/^[0-9a-f]{40}$/.test(j.object?.sha || '')) throw new Error()
+            return j.object.sha
+          }
+          async function list(status, page) {
+            const u = new URL(`${api}/repos/${repo}/actions/runs`)
+            u.searchParams.set('status', status); u.searchParams.set('per_page', '100'); u.searchParams.set('page', String(page))
+            const r = await fetch(u, { headers }); if (!r.ok) throw new Error()
+            return r.json()
+          }
+          async function main() {
+            if (await getRef('main') !== expectedMain || await getRef(branch) !== expectedRc) throw new Error()
+            let conflicts = 0
+            for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
+              const first = await list(status, 1)
+              if (!Number.isInteger(first.total_count) || !Array.isArray(first.workflow_runs)) throw new Error()
+              const total = first.total_count, pages = Math.max(1, Math.ceil(total / 100)); let seen = 0
+              const ids = new Set()
+              for (let p = 1; p <= pages; p++) {
+                const data = p === 1 ? first : await list(status, p)
+                if (data.total_count !== total || !Array.isArray(data.workflow_runs) || data.workflow_runs.length > 100) throw new Error()
+                seen += data.workflow_runs.length
+                for (const run of data.workflow_runs) {
+                  if (!Number.isSafeInteger(run.id) || ids.has(String(run.id))) throw new Error()
+                  ids.add(String(run.id))
+                  if (String(run.id) === current) continue
+                  const path = typeof run.path === 'string' ? run.path.split('@', 1)[0] : ''
+                  if (!path) throw new Error()
+                  if (!knownPaths.has(path)) throw new Error()
+                  if (protectedPaths.has(path)) conflicts++
+                }
+              }
+              if (seen !== total) throw new Error()
+              console.log(`LAST_GATE_${status.toUpperCase()}=${seen}`)
+            }
+            if (conflicts) throw new Error()
+            console.log('LAST_GATE_RC_HEAD=EXACT')
+            console.log('LAST_GATE_PRODUCTION_WORKFLOWS=NONE')
+          }
+          main().catch(() => { console.error('::error::Last-moment reference or Actions concurrency gate failed.'); process.exitCode = 1 })
+          NODE
+
+      - name: Deploy exact RC SHA through the audited locked server script
+        id: deploy
+        timeout-minutes: 50
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          EXPECTED_PRODUCTION_SHA: ${{ steps.production_preflight.outputs.production_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b && "$EXPECTED_PRODUCTION_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Deployment identity is invalid."; exit 1; }
+          remote="${SSH_USER}@${SSH_HOST}"
+          set +e
+          output="$(cat candidate/scripts/deploy-safety.sh candidate/scripts/deploy-production-git.sh \
+            | timeout --foreground --signal=TERM --kill-after=7m 35m ssh -T \
+              -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=30 -o ConnectionAttempts=3 \
+              -o ServerAliveInterval=15 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" "$remote" \
+              bash -s -- "$APP_DIR" "$APP_PORT" "$CANDIDATE_SHA" easonfansclub "$GITHUB_REPOSITORY" "$EXPECTED_PRODUCTION_SHA")"
+          deploy_status=$?
+          set -e
+          candidate_release="$(printf '%s\n' "$output" | sed -n 's/^DEPLOY_CANDIDATE_RELEASE=//p' | tail -n 1)"
+          if [[ "$candidate_release" =~ ^/home/apps/easonfansclub/releases/[^/]+$ ]]; then
+            printf 'candidate_release=%s\n' "$candidate_release" >> "$GITHUB_OUTPUT"
+          fi
+          # Do not print raw remote output: build or driver errors can contain
+          # operational details. Emit only fixed, non-secret evidence lines.
+          printf '%s\n' "$output" | while IFS= read -r line; do
+            case "$line" in
+              DEPLOY_CANDIDATE_RELEASE=/home/apps/easonfansclub/releases/*|SERVER_GIT_CACHE_HIT=YES|SERVER_GIT_FETCH=OK|"Deployment health check passed for $CANDIDATE_SHA."|"Current release: "*) printf '%s\n' "$line" ;;
+            esac
+          done
+          printf 'DEPLOY_SCRIPT_EXIT_CODE=%s\n' "$deploy_status"
+          exit "$deploy_status"
+
+      - name: Verify all RC migrations are applied and checksums match the database ledger
+        id: migration_postcheck
+        if: steps.deploy.outcome == 'success'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          CANDIDATE_MIGRATIONS_B64: ${{ steps.migrations.outputs.candidate_migrations_b64 }}
+          CANDIDATE_RELEASE: ${{ steps.deploy.outputs.candidate_release }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || { echo "::error::Migration postcheck candidate SHA is invalid."; exit 1; }
+          [[ "$CANDIDATE_RELEASE" =~ ^/home/apps/easonfansclub/releases/[^/]+$ ]] || { echo "::error::Candidate release path is invalid."; exit 1; }
+          [[ "$CANDIDATE_MIGRATIONS_B64" =~ ^[A-Za-z0-9+/=]+$ && ${#CANDIDATE_MIGRATIONS_B64} -le 65536 ]] || { echo "::error::Migration manifest is invalid."; exit 1; }
+          remote="${SSH_USER}@${SSH_HOST}"
+          remote_command="bash -s -- '$APP_DIR' '$CANDIDATE_SHA' '$CANDIDATE_RELEASE' '$CANDIDATE_MIGRATIONS_B64'"
+          set +e
+          output="$(timeout --foreground --signal=TERM --kill-after=20s 13m ssh -T \
+            -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            "$remote" "$remote_command" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"; candidate_sha="$2"; candidate_release="$3"; manifest_b64="$4"
+          fail() { printf 'POST_DEPLOY_MIGRATION_CHECK=FAIL\nREASON=%s\n' "$1"; exit 1; }
+          [[ "$app_dir" == /home/apps/easonfansclub && "$candidate_sha" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || fail RELEASE_IDENTITY_MISMATCH
+          [[ "$candidate_release" == "$app_dir"/releases/* && -d "$candidate_release" ]] || fail CANDIDATE_RELEASE_UNAVAILABLE
+          [[ "$manifest_b64" =~ ^[A-Za-z0-9+/=]+$ && ${#manifest_b64} -le 65536 ]] || fail MIGRATION_MANIFEST_INVALID
+          current_target="$(readlink -f -- "$app_dir/current" 2>/dev/null || true)"
+          candidate_target="$(readlink -f -- "$candidate_release" 2>/dev/null || true)"
+          [[ -L "$app_dir/current" && "$current_target" == "$candidate_target" && "$current_target" == "$app_dir"/releases/* ]] || fail CURRENT_RELEASE_MISMATCH
+          [[ "$(tr -d '[:space:]' < "$current_target/.deployed-sha" 2>/dev/null || true)" == "$candidate_sha" ]] || fail CURRENT_SHA_MISMATCH
+          export NVM_DIR="$HOME/.nvm"; if [[ -s "$NVM_DIR/nvm.sh" ]]; then . "$NVM_DIR/nvm.sh"; fi
+          command -v node >/dev/null 2>&1 || fail NODE_UNAVAILABLE
+          [[ -r "$current_target/.env" && -s "$current_target/.env" && -d "$current_target/node_modules" ]] || fail RELEASE_RUNTIME_INCOMPLETE
+          APP_RELEASE="$current_target" CANDIDATE_MIGRATIONS_B64="$manifest_b64" node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const approved = new Set([
+            '20261022090000_profile_mobile_contract',
+            '20261023090000_cantonese_question_progress',
+          ])
+          const safeErrors = new Set(['MIGRATION_MANIFEST_INVALID', 'APPROVED_MIGRATION_MISSING', 'DATABASE_CONFIGURATION_INVALID', 'MIGRATION_LEDGER_INVALID'])
+          function stop(code) { throw new Error(code) }
+          async function main() {
+            let client
+            try {
+              const release = process.env.APP_RELEASE
+              const manifest = JSON.parse(Buffer.from(process.env.CANDIDATE_MIGRATIONS_B64, 'base64').toString('utf8'))
+              if (!Array.isArray(manifest) || manifest.length < 1 || manifest.length > 1000) stop('MIGRATION_MANIFEST_INVALID')
+              const expected = new Map()
+              for (const item of manifest) {
+                if (!item || typeof item.name !== 'string' || !/^\d{14}_[A-Za-z0-9_]+$/.test(item.name) || typeof item.checksum !== 'string' || !/^[0-9a-f]{64}$/.test(item.checksum) || expected.has(item.name)) stop('MIGRATION_MANIFEST_INVALID')
+                expected.set(item.name, item.checksum)
+              }
+              for (const name of approved) if (!expected.has(name)) stop('APPROVED_MIGRATION_MISSING')
+              const dotenv = require(path.join(release, 'node_modules/dotenv'))
+              const parsed = dotenv.parse(fs.readFileSync(path.join(release, '.env')))
+              const databaseUrl = parsed.DATABASE_URL
+              if (!databaseUrl || new URL(databaseUrl).protocol !== 'mysql:') stop('DATABASE_CONFIGURATION_INVALID')
+              process.env.DATABASE_URL = databaseUrl
+              const { PrismaClient } = require(path.join(release, 'node_modules/@prisma/client'))
+              client = new PrismaClient({ log: [] })
+              await client.$connect()
+              const rows = await client.$queryRawUnsafe('SELECT migration_name, checksum, started_at, finished_at, rolled_back_at FROM _prisma_migrations')
+              if (!Array.isArray(rows)) stop('MIGRATION_LEDGER_INVALID')
+              const byName = new Map()
+              for (const row of rows) {
+                if (typeof row.migration_name !== 'string' || !/^[0-9a-f]{64}$/.test(String(row.checksum || ''))) stop('MIGRATION_LEDGER_INVALID')
+                const list = byName.get(row.migration_name) || []
+                list.push(row)
+                byName.set(row.migration_name, list)
+              }
+              let pending = 0, failed = 0, divergence = 0, unexpectedPending = 0
+              const applied = new Set()
+              for (const [name, checksum] of expected) {
+                const ledger = byName.get(name) || []
+                const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
+                if (activeFailed) failed++
+                if (ledger.length === 0) {
+                  pending++
+                  if (!approved.has(name)) unexpectedPending++
+                } else if (ledger.length !== 1 || ledger.some(row => !!row.rolled_back_at)) {
+                  divergence++
+                } else if (!ledger[0].finished_at) {
+                  if (!activeFailed) failed++
+                } else if (String(ledger[0].checksum) !== checksum) {
+                  divergence++
+                } else {
+                  applied.add(name)
+                }
+              }
+              for (const name of byName.keys()) if (!expected.has(name)) divergence++
+              const divergenceLabel = divergence === 0 ? 'NO' : 'YES'
+              const ok = pending === 0 && failed === 0 && divergence === 0 && unexpectedPending === 0 && [...approved].every(name => applied.has(name))
+              console.log(`PENDING_COUNT=${pending}`)
+              console.log(`FAILED_COUNT=${failed}`)
+              console.log(`DIVERGENCE=${divergenceLabel}`)
+              console.log(`UNEXPECTED_PENDING_MIGRATIONS=${unexpectedPending}`)
+              console.log(`APPROVED_MIGRATION_1=${applied.has('20261022090000_profile_mobile_contract') ? 'APPLIED' : 'NOT_APPLIED'}`)
+              console.log(`APPROVED_MIGRATION_2=${applied.has('20261023090000_cantonese_question_progress') ? 'APPLIED' : 'NOT_APPLIED'}`)
+              console.log(`POST_DEPLOY_MIGRATION_CHECK=${ok ? 'PASS' : 'FAIL'}`)
+              if (!ok) process.exitCode = 1
+            } catch (error) {
+              const code = safeErrors.has(error?.message) ? error.message : 'DATABASE_READ_ONLY_CHECK_FAILED'
+              console.error(`POST_DEPLOY_MIGRATION_CHECK=FAIL\nREASON=${code}`)
+              process.exitCode = 1
+            } finally {
+              if (client) await client.$disconnect().catch(() => {})
+            }
+          }
+          main().catch(() => { console.error('POST_DEPLOY_MIGRATION_CHECK=FAIL\nREASON=DATABASE_READ_ONLY_CHECK_FAILED'); process.exitCode = 1 })
+          NODE
+          REMOTE
+          )"
+          status=$?
+          set -e
+          [[ "$status" -eq 0 ]] || { printf '%s\n' "$output" | grep -E '^(PENDING_COUNT|FAILED_COUNT|DIVERGENCE|UNEXPECTED_PENDING_MIGRATIONS|APPROVED_MIGRATION_[12]|POST_DEPLOY_MIGRATION_CHECK|REASON)=' || true; echo "::error::Post-deploy migration ledger verification failed; no database rollback will be attempted."; exit "$status"; }
+          for expected_line in 'PENDING_COUNT=0' 'FAILED_COUNT=0' 'DIVERGENCE=NO' 'UNEXPECTED_PENDING_MIGRATIONS=0' 'APPROVED_MIGRATION_1=APPLIED' 'APPROVED_MIGRATION_2=APPLIED' 'POST_DEPLOY_MIGRATION_CHECK=PASS'; do
+            grep -qx "$expected_line" <<<"$output" || { echo "::error::Post-deploy migration evidence is incomplete."; exit 1; }
+          done
+          printf 'post_deploy_migration_check=PASS\npending_count=0\nfailed_count=0\ndivergence=NO\nunexpected_pending_migrations=0\napproved_migration_1=APPLIED\napproved_migration_2=APPLIED\n' >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$output" | grep -E '^(PENDING_COUNT|FAILED_COUNT|DIVERGENCE|UNEXPECTED_PENDING_MIGRATIONS|APPROVED_MIGRATION_[12]|POST_DEPLOY_MIGRATION_CHECK)='
+
+      - name: Verify the web release and prove Instagram Worker was untouched
+        id: runtime_postcheck
+        if: steps.deploy.outcome == 'success' && steps.migration_postcheck.outcome == 'success'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          EXPECTED_WORKER_PID: ${{ steps.production_preflight.outputs.worker_pid }}
+          EXPECTED_WORKER_SHA: ${{ steps.production_preflight.outputs.worker_sha }}
+          EXPECTED_WORKER_RELEASE: ${{ steps.production_preflight.outputs.worker_release }}
+          EXPECTED_WORKER_RESTARTS: ${{ steps.production_preflight.outputs.worker_restarts }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_WORKER_PID" =~ ^[1-9][0-9]* && "$EXPECTED_WORKER_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_WORKER_RELEASE" =~ ^/home/apps/easonfansclub/releases/[^/]+$ && "$EXPECTED_WORKER_RESTARTS" =~ ^[0-9]+$ ]] || { echo "::error::Worker baseline evidence is invalid."; exit 1; }
+          remote="${SSH_USER}@${SSH_HOST}"
+          remote_command="bash -s -- '$APP_DIR' '$CANDIDATE_SHA' '$EXPECTED_WORKER_PID' '$EXPECTED_WORKER_SHA' '$EXPECTED_WORKER_RELEASE' '$EXPECTED_WORKER_RESTARTS'"
+          runtime_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s ssh -T \
+            -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            "$remote" "$remote_command" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"; candidate_sha="$2"; expected_pid="$3"; expected_worker_sha="$4"; expected_worker_release="$5"; expected_restarts="$6"
+          fail() { printf 'RUNTIME_POSTCHECK=FAIL\nREASON=%s\n' "$1"; exit 1; }
+          [[ "$app_dir" == /home/apps/easonfansclub && "$candidate_sha" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || fail RELEASE_IDENTITY_MISMATCH
+          [[ "$expected_pid" =~ ^[1-9][0-9]* && "$expected_worker_sha" =~ ^[0-9a-f]{40}$ && "$expected_worker_release" == "$app_dir"/releases/* && "$expected_restarts" =~ ^[0-9]+$ ]] || fail WORKER_BASELINE_INVALID
+          export NVM_DIR="$HOME/.nvm"; if [[ -s "$NVM_DIR/nvm.sh" ]]; then . "$NVM_DIR/nvm.sh"; fi
+          command -v pm2 >/dev/null 2>&1 || fail PM2_UNAVAILABLE
+          current_link="$app_dir/current"; current_target="$(readlink -f -- "$current_link" 2>/dev/null || true)"
+          [[ -L "$current_link" && "$current_target" == "$app_dir"/releases/* && -d "$current_target" ]] || fail CURRENT_RELEASE_INVALID
+          [[ "$(tr -d '[:space:]' < "$current_target/.deployed-sha" 2>/dev/null || true)" == "$candidate_sha" ]] || fail CURRENT_SHA_MISMATCH
+          pm2_json="$(pm2 jlist 2>/dev/null)" || fail PM2_STATUS_UNAVAILABLE
+          snapshot() {
+            local name="$1"
+            printf '%s' "$pm2_json" | node -e 'let r="";process.stdin.on("data",c=>r+=c);process.stdin.on("end",()=>{try{const a=JSON.parse(r).filter(x=>x.name===process.argv[1]);if(a.length!==1)process.exit(2);const e=a[0].pm2_env||{};process.stdout.write([e.status||"",String(Number(a[0].pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t"))}catch{process.exit(2)}})' "$name"
+          }
+          IFS=$'\t' read -r web_status web_pid web_cwd web_sha web_restarts < <(snapshot easonfansclub) || fail PM2_WEB_UNKNOWN
+          [[ "$web_status" == online && "$web_pid" =~ ^[1-9][0-9]* && "$web_cwd" == "$current_link" && "$web_sha" == "$candidate_sha" ]] || fail PM2_WEB_NOT_ON_CANDIDATE
+          web_actual="$(readlink "/proc/$web_pid/cwd" 2>/dev/null || true)"
+          [[ "$web_actual" != *' (deleted)' && -d "$web_actual" && "$(readlink -f -- "$web_actual" 2>/dev/null || true)" == "$current_target" ]] || fail PM2_WEB_CWD_INVALID
+          IFS=$'\t' read -r worker_status worker_pid worker_cwd worker_sha worker_restarts < <(snapshot instagram-sync-worker) || fail PM2_WORKER_UNKNOWN
+          [[ "$worker_status" == online && "$worker_pid" == "$expected_pid" && "$worker_cwd" == "$current_link" && "$worker_sha" == "$expected_worker_sha" && "$worker_restarts" == "$expected_restarts" ]] || fail PM2_WORKER_CHANGED
+          worker_actual="$(readlink "/proc/$worker_pid/cwd" 2>/dev/null || true)"
+          [[ "$worker_actual" != *' (deleted)' && -d "$worker_actual" && "$(readlink -f -- "$worker_actual" 2>/dev/null || true)" == "$expected_worker_release" ]] || fail PM2_WORKER_RELEASE_CHANGED
+          [[ "$(tr -d '[:space:]' < "$expected_worker_release/.deployed-sha" 2>/dev/null || true)" == "$expected_worker_sha" ]] || fail PM2_WORKER_RELEASE_SHA_CHANGED
+          systemctl is-active --quiet nginx || fail NGINX_NOT_ACTIVE
+          printf 'RUNTIME_POSTCHECK=PASS\nCURRENT_SHA=%s\nPM2_WEB=ONLINE\nPM2_WORKER=UNCHANGED\nWORKER_RELOAD=NO\nNGINX=ACTIVE\n' "$candidate_sha"
+          REMOTE
+          )"
+          for expected_line in "RUNTIME_POSTCHECK=PASS" "CURRENT_SHA=$CANDIDATE_SHA" 'PM2_WEB=ONLINE' 'PM2_WORKER=UNCHANGED' 'WORKER_RELOAD=NO' 'NGINX=ACTIVE'; do
+            grep -qx "$expected_line" <<<"$runtime_output" || { echo "::error::Runtime postcheck evidence is incomplete."; exit 1; }
+          done
+          printf 'runtime_sha=%s\npm2_web=ONLINE\npm2_worker=UNCHANGED\nruntime_postcheck=PASS\n' "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$runtime_output" | grep -E '^(RUNTIME_POSTCHECK|CURRENT_SHA|PM2_WEB|PM2_WORKER|WORKER_RELOAD|NGINX)='
+
+      - name: Verify public HTTPS serves the exact RC SHA
+        id: public_health
+        if: steps.deploy.outcome == 'success' && steps.migration_postcheck.outcome == 'success' && steps.runtime_postcheck.outcome == 'success'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://${PRODUCTION_DOMAIN}/api/health/live"
+          for attempt in 1 2 3 4 5; do
+            response="$(curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error \
+              --connect-timeout 10 --max-time 20 "$url" 2>/dev/null || true)"
+            if printf '%s' "$response" | node -e '
+              let raw="";process.stdin.on("data",c=>{raw+=c;if(raw.length>16384)process.exit(1)});process.stdin.on("end",()=>{try{process.exit(JSON.parse(raw).release===process.argv[1]?0:1)}catch{process.exit(1)}})
+            ' "$CANDIDATE_SHA"; then
+              echo "PUBLIC_HEALTH_SHA=$CANDIDATE_SHA"
+              printf 'public_health_sha=%s\n' "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Public HTTPS did not serve the exact RC V3 SHA."
+          exit 1
+
+      - name: Guarded application-only rollback after deploy or postcheck failure
+        id: rollback
+        if: ${{ always() && steps.deploy.outcome != 'skipped' && steps.deploy.outputs.candidate_release != '' && (steps.deploy.outcome != 'success' || steps.migration_postcheck.outcome != 'success' || steps.runtime_postcheck.outcome != 'success' || steps.public_health.outcome != 'success') }}
+        timeout-minutes: 16
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          CANDIDATE_RELEASE: ${{ steps.deploy.outputs.candidate_release }}
+        run: |
+          set -euo pipefail
+          echo 'DATABASE_ROLLBACK=NO'
+          echo 'APPLICATION_ROLLBACK_ONLY=YES'
+          [[ "$CANDIDATE_RELEASE" =~ ^/home/apps/easonfansclub/releases/[^/]+$ ]] || { echo "::error::Candidate release path is invalid."; exit 1; }
+          remote="${SSH_USER}@${SSH_HOST}"
+          set +e
+          output="$(cat candidate/scripts/deploy-safety.sh candidate/scripts/rollback-production-git.sh \
+            | timeout --foreground --signal=TERM --kill-after=60s 14m ssh -T \
+              -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=30 \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" "$remote" \
+              bash -s -- "$APP_DIR" "$CANDIDATE_SHA" "$CANDIDATE_RELEASE" easonfansclub "$GITHUB_REPOSITORY" "$APP_PORT")"
+          rollback_status=$?
+          set -e
+          verified_sha="$(printf '%s\n' "$output" | sed -n 's/^ROLLBACK_VERIFIED_SHA=//p' | tail -n 1)"
+          rollback_result="$(printf '%s\n' "$output" | sed -n 's/^ROLLBACK_RESULT=//p' | tail -n 1)"
+          [[ "$verified_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Rollback did not return a verified active SHA."; exit 1; }
+          [[ "$rollback_status" -eq 0 ]] || { echo "::error::Guarded rollback command failed."; exit "$rollback_status"; }
+          [[ "$rollback_result" == RESTORED || "$rollback_result" == SKIPPED_CURRENT_CHANGED || "$rollback_result" == SKIPPED_CURRENT_SHA_CHANGED ]] || { echo "::error::Rollback result is unrecognized."; exit 1; }
+          printf 'verified_sha=%s\n' "$verified_sha" >> "$GITHUB_OUTPUT"
+          printf 'ROLLBACK_RESULT=%s\nROLLBACK_VERIFIED_SHA=%s\n' "$rollback_result" "$verified_sha"
+
+      - name: Verify public HTTPS serves the verified active SHA after rollback
+        if: ${{ always() && steps.rollback.outcome == 'success' }}
+        timeout-minutes: 5
+        shell: bash
+        env:
+          ACTIVE_SHA: ${{ steps.rollback.outputs.verified_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$ACTIVE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Active rollback SHA is invalid."; exit 1; }
+          url="https://${PRODUCTION_DOMAIN}/api/health/live"
+          for attempt in 1 2 3 4 5; do
+            response="$(curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error \
+              --connect-timeout 10 --max-time 20 "$url" 2>/dev/null || true)"
+            if printf '%s' "$response" | node -e '
+              let raw="";process.stdin.on("data",c=>{raw+=c;if(raw.length>16384)process.exit(1)});process.stdin.on("end",()=>{try{process.exit(JSON.parse(raw).release===process.argv[1]?0:1)}catch{process.exit(1)}})
+            ' "$ACTIVE_SHA"; then
+              echo "ROLLBACK_PUBLIC_HEALTH_SHA=$ACTIVE_SHA"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Public HTTPS does not serve the verified active SHA after rollback."
+          exit 1
+
+      - name: Remove temporary runner SSH credentials
+        id: cleanup_ssh
+        if: always()
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+        run: |
+          set -euo pipefail
+          for file in "$KEY_FILE" "$HOSTS_FILE"; do
+            case "$file" in "$RUNNER_TEMP"/ecfc-server-v3-*.key|"$RUNNER_TEMP"/ecfc-server-v3-*.hosts) rm -f -- "$file" ;; esac
+          done
+
+      - name: Require every post-deploy release gate before declaring success
+        id: final_release_gate
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ steps.deploy.outcome }}" == success ]] || { echo "::error::Deploy step did not succeed."; exit 1; }
+          [[ "${{ steps.migration_postcheck.outcome }}" == success && "${{ steps.migration_postcheck.outputs.post_deploy_migration_check }}" == PASS ]] || { echo "::error::Post-deploy migration gate did not succeed."; exit 1; }
+          [[ "${{ steps.migration_postcheck.outputs.pending_count }}" == 0 && "${{ steps.migration_postcheck.outputs.failed_count }}" == 0 && "${{ steps.migration_postcheck.outputs.divergence }}" == NO && "${{ steps.migration_postcheck.outputs.unexpected_pending_migrations }}" == 0 && "${{ steps.migration_postcheck.outputs.approved_migration_1 }}" == APPLIED && "${{ steps.migration_postcheck.outputs.approved_migration_2 }}" == APPLIED ]] || { echo "::error::Post-deploy migration evidence is incomplete."; exit 1; }
+          [[ "${{ steps.runtime_postcheck.outcome }}" == success && "${{ steps.runtime_postcheck.outputs.pm2_web }}" == ONLINE && "${{ steps.runtime_postcheck.outputs.pm2_worker }}" == UNCHANGED ]] || { echo "::error::Runtime preservation gate did not succeed."; exit 1; }
+          [[ "${{ steps.public_health.outcome }}" == success && "${{ steps.public_health.outputs.public_health_sha }}" == "$CANDIDATE_SHA" ]] || { echo "::error::Exact public health gate did not succeed."; exit 1; }
+          [[ "${{ steps.cleanup_ssh.outcome }}" == success ]] || { echo "::error::Temporary SSH credential cleanup did not succeed."; exit 1; }
+          echo "PUBLIC_HEALTH_SHA=$CANDIDATE_SHA"
+          echo 'POST_DEPLOY_MIGRATION_CHECK=PASS'
+          echo 'PENDING_COUNT=0'
+          echo 'FAILED_COUNT=0'
+          echo 'DIVERGENCE=NO'
+          echo 'UNEXPECTED_PENDING_MIGRATIONS=0'
+          echo 'APPROVED_MIGRATION_1=APPLIED'
+          echo 'APPROVED_MIGRATION_2=APPLIED'
+          echo 'PM2_WEB=ONLINE'
+          echo 'PM2_WORKER=UNCHANGED'
+          echo 'RELEASE_SUCCESS=YES'
