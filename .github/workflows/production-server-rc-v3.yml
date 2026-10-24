@@ -20,7 +20,7 @@ env:
   CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
   ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
   FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
-  AUDITED_WORKFLOW_PARENT_SHA: 483dfe0b55f7faeb3a3405fd1159a859a7cc0309
+  AUDITED_WORKFLOW_PARENT_SHA: e45e493a46824316ee81a856321bb1f826a672d5
   DB_BACKUP_CONFIRMED: "YES"
   BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
@@ -84,6 +84,7 @@ jobs:
           const branch = process.env.CANDIDATE_BRANCH
           const originalBase = process.env.ORIGINAL_MAIN_BASE_SHA
           const firstInstall = process.env.FIRST_WORKFLOW_INSTALL_SHA
+          const readmeMetadataFix = '483dfe0b55f7faeb3a3405fd1159a859a7cc0309'
           const auditedParent = process.env.AUDITED_WORKFLOW_PARENT_SHA
           const workflowPath = '.github/workflows/production-server-rc-v3.yml'
           const headers = {
@@ -103,14 +104,16 @@ jobs:
             if (changed.length !== 1 || changed[0] !== workflowPath) throw new Error('unexpected workflow chain path')
           }
           function verifyWorkflowChain() {
-            for (const sha of [expectedMain, originalBase, firstInstall, auditedParent]) {
+            for (const sha of [expectedMain, originalBase, firstInstall, readmeMetadataFix, auditedParent]) {
               if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('workflow chain SHA shape mismatch')
             }
             if (git(['rev-parse', 'HEAD']) !== expectedMain) throw new Error('workflow checkout SHA mismatch')
             requireSingleParent(firstInstall, originalBase)
             requireOnlyWorkflowChanged(`${originalBase}..${firstInstall}`)
-            requireSingleParent(auditedParent, firstInstall)
-            requireOnlyWorkflowChanged(`${firstInstall}..${auditedParent}`)
+            requireSingleParent(readmeMetadataFix, firstInstall)
+            requireOnlyWorkflowChanged(`${firstInstall}..${readmeMetadataFix}`)
+            requireSingleParent(auditedParent, readmeMetadataFix)
+            requireOnlyWorkflowChanged(`${readmeMetadataFix}..${auditedParent}`)
             requireSingleParent(expectedMain, auditedParent)
             requireOnlyWorkflowChanged(`${auditedParent}..${expectedMain}`)
             requireOnlyWorkflowChanged(`${originalBase}..${expectedMain}`)
@@ -645,7 +648,7 @@ jobs:
           pm2_snapshot() {
             local name="$1"
             printf '%s' "$pm2_json" | node -e '
-              let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{try{const rows=JSON.parse(raw).filter(x=>x.name===process.argv[1]);if(rows.length!==1)process.exit(2);const x=rows[0],e=x.pm2_env||{};process.stdout.write([e.status||"",String(Number(x.pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t"))}catch{process.exit(2)}})
+              let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{try{const rows=JSON.parse(raw).filter(x=>x.name===process.argv[1]);if(rows.length!==1)process.exit(2);const x=rows[0],e=x.pm2_env||{};process.stdout.write([e.status||"",String(Number(x.pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t")+"\n")}catch{process.exit(2)}})
             ' "$name"
           }
           IFS=$'\t' read -r web_status web_pid web_cwd web_deploy_sha web_restarts < <(pm2_snapshot easonfansclub) || fail PM2_WEB_STATUS_UNKNOWN
@@ -1093,7 +1096,7 @@ jobs:
           pm2_json="$(pm2 jlist 2>/dev/null)" || fail PM2_STATUS_UNAVAILABLE
           snapshot() {
             local name="$1"
-            printf '%s' "$pm2_json" | node -e 'let r="";process.stdin.on("data",c=>r+=c);process.stdin.on("end",()=>{try{const a=JSON.parse(r).filter(x=>x.name===process.argv[1]);if(a.length!==1)process.exit(2);const e=a[0].pm2_env||{};process.stdout.write([e.status||"",String(Number(a[0].pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t"))}catch{process.exit(2)}})' "$name"
+            printf '%s' "$pm2_json" | node -e 'let r="";process.stdin.on("data",c=>r+=c);process.stdin.on("end",()=>{try{const a=JSON.parse(r).filter(x=>x.name===process.argv[1]);if(a.length!==1)process.exit(2);const e=a[0].pm2_env||{};process.stdout.write([e.status||"",String(Number(a[0].pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t")+"\n")}catch{process.exit(2)}})' "$name"
           }
           IFS=$'\t' read -r web_status web_pid web_cwd web_sha web_restarts < <(snapshot easonfansclub) || fail PM2_WEB_UNKNOWN
           [[ "$web_status" == online && "$web_pid" =~ ^[1-9][0-9]* && "$web_cwd" == "$current_link" && "$web_sha" == "$candidate_sha" ]] || fail PM2_WEB_NOT_ON_CANDIDATE
