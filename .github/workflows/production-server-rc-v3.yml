@@ -18,7 +18,9 @@ env:
   PRODUCTION_DOMAIN: ecfc.fans
   CANDIDATE_BRANCH: integration/mobile-server-rc-v3
   CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
-  MAIN_INSTALL_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
+  ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
+  FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
+  AUDITED_WORKFLOW_PARENT_SHA: 483dfe0b55f7faeb3a3405fd1159a859a7cc0309
   DB_BACKUP_CONFIRMED: "YES"
   BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
@@ -35,7 +37,7 @@ jobs:
       actions: read
 
     steps:
-      - name: Require the one-time workflow-only main installation commit
+      - name: Require manual dispatch from main
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +63,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify install commit, main ref, RC ref, and fixed candidate ancestry
+      - name: Verify audited workflow chain, main ref, RC ref, and fixed candidate ancestry
         id: refs
         shell: bash
         env:
@@ -69,24 +71,49 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || { echo "::error::Workflow checkout SHA mismatch."; exit 1; }
-          parents="$(git show -s --format=%P "$GITHUB_SHA")"
-          [[ "$parents" == "$MAIN_INSTALL_BASE_SHA" ]] || { echo "::error::Workflow was not dispatched from its audited one-commit installation point."; exit 1; }
-          changed="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
-          [[ "$changed" == .github/workflows/production-server-rc-v3.yml ]] || { echo "::error::The main installation commit contains unexpected files."; exit 1; }
           [[ "$CANDIDATE_SHA" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || { echo "::error::Candidate SHA policy mismatch."; exit 1; }
           [[ "$CANDIDATE_BRANCH" == integration/mobile-server-rc-v3 ]] || { echo "::error::Candidate branch policy mismatch."; exit 1; }
-          git merge-base --is-ancestor "$MAIN_INSTALL_BASE_SHA" "$CANDIDATE_SHA" || { echo "::error::Candidate does not contain the audited main base."; exit 1; }
+          git merge-base --is-ancestor "$ORIGINAL_MAIN_BASE_SHA" "$CANDIDATE_SHA" || { echo "::error::Candidate does not contain the audited main base."; exit 1; }
           node <<'NODE'
+          const { execFileSync } = require('node:child_process')
           const api = process.env.GITHUB_API_URL
           const repo = process.env.GITHUB_REPOSITORY
           const token = process.env.GH_TOKEN
           const expectedMain = process.env.GITHUB_SHA
           const expectedCandidate = process.env.CANDIDATE_SHA
           const branch = process.env.CANDIDATE_BRANCH
+          const originalBase = process.env.ORIGINAL_MAIN_BASE_SHA
+          const firstInstall = process.env.FIRST_WORKFLOW_INSTALL_SHA
+          const auditedParent = process.env.AUDITED_WORKFLOW_PARENT_SHA
+          const workflowPath = '.github/workflows/production-server-rc-v3.yml'
           const headers = {
             accept: 'application/vnd.github+json',
             authorization: 'Bearer ' + token,
             'x-github-api-version': '2022-11-28',
+          }
+          function git(args) {
+            return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+          }
+          function requireSingleParent(commit, expectedParent) {
+            const parents = git(['show', '-s', '--format=%P', commit]).split(/\s+/).filter(Boolean)
+            if (parents.length !== 1 || parents[0] !== expectedParent) throw new Error('audited parent mismatch')
+          }
+          function requireOnlyWorkflowChanged(range) {
+            const changed = git(['diff', '--name-only', '--no-renames', range]).split(/\r?\n/).filter(Boolean).sort()
+            if (changed.length !== 1 || changed[0] !== workflowPath) throw new Error('unexpected workflow chain path')
+          }
+          function verifyWorkflowChain() {
+            for (const sha of [expectedMain, originalBase, firstInstall, auditedParent]) {
+              if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('workflow chain SHA shape mismatch')
+            }
+            if (git(['rev-parse', 'HEAD']) !== expectedMain) throw new Error('workflow checkout SHA mismatch')
+            requireSingleParent(firstInstall, originalBase)
+            requireOnlyWorkflowChanged(`${originalBase}..${firstInstall}`)
+            requireSingleParent(auditedParent, firstInstall)
+            requireOnlyWorkflowChanged(`${firstInstall}..${auditedParent}`)
+            requireSingleParent(expectedMain, auditedParent)
+            requireOnlyWorkflowChanged(`${auditedParent}..${expectedMain}`)
+            requireOnlyWorkflowChanged(`${originalBase}..${expectedMain}`)
           }
           async function getRef(name) {
             const response = await fetch(`${api}/repos/${repo}/git/ref/heads/${name.split('/').map(encodeURIComponent).join('/')}`, { headers })
@@ -96,13 +123,14 @@ jobs:
             return data.object.sha
           }
           async function main() {
+            verifyWorkflowChain()
             if (await getRef('main') !== expectedMain) throw new Error('main moved after workflow dispatch')
             if (await getRef(branch) !== expectedCandidate) throw new Error('approved RC branch head mismatch')
-            console.log('WORKFLOW_SOURCE=MAIN_INSTALL_COMMIT')
+            console.log('WORKFLOW_SOURCE=MAIN_AUDITED_WORKFLOW_CHAIN')
             console.log('REMOTE_MAIN_SHA_MATCH=YES')
             console.log('REMOTE_RC_HEAD_MATCH=YES')
           }
-          main().catch(() => { console.error('::error::Remote branch identity could not be verified.'); process.exitCode = 1 })
+          main().catch(() => { console.error('::error::Audited workflow chain or remote branch identity could not be verified.'); process.exitCode = 1 })
           NODE
 
       - name: Checkout the immutable RC source
