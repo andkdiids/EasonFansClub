@@ -147,6 +147,11 @@ jobs:
                 if (!lock.isFile() || lock.isSymbolicLink()) throw new Error()
                 continue
               }
+              if (name === 'README.md') {
+                const readme = fs.lstatSync(path.join(root, name))
+                if (!readme.isFile() || readme.isSymbolicLink() || readme.size > 64 * 1024) throw new Error()
+                continue
+              }
               if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) throw new Error()
               const directory = path.join(root, name)
               const sql = path.join(directory, 'migration.sql')
