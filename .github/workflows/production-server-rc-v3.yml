@@ -20,7 +20,7 @@ env:
   CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
   ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
   FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
-  AUDITED_WORKFLOW_PARENT_SHA: 78beb732382ede1e81aebe6b64e78031240a8589
+  AUDITED_WORKFLOW_PARENT_SHA: b064eae2a36bb4382e6d23d72f79e78a7aba72b7
   DB_BACKUP_CONFIRMED: "YES"
   BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
@@ -87,8 +87,10 @@ jobs:
           const readmeMetadataFix = '483dfe0b55f7faeb3a3405fd1159a859a7cc0309'
           const installationGateFix = 'e45e493a46824316ee81a856321bb1f826a672d5'
           const pm2SnapshotFix = '02c44f405c27dc1fc6f22cf59c485a569468b488'
+          const diagnosticWorkflowInstall = '78beb732382ede1e81aebe6b64e78031240a8589'
+          const workerIdentityFix = 'b064eae2a36bb4382e6d23d72f79e78a7aba72b7'
           const auditedParent = process.env.AUDITED_WORKFLOW_PARENT_SHA
-          const expectedAuditedParent = '78beb732382ede1e81aebe6b64e78031240a8589'
+          const expectedAuditedParent = 'b064eae2a36bb4382e6d23d72f79e78a7aba72b7'
           const workflowPath = '.github/workflows/production-server-rc-v3.yml'
           const diagnosticWorkflowPath = '.github/workflows/diagnose-production-instagram-worker.yml'
           const headers = {
@@ -114,7 +116,7 @@ jobs:
           }
           function verifyWorkflowChain() {
             if (auditedParent !== expectedAuditedParent) throw new Error('audited main parent mismatch')
-            for (const sha of [expectedMain, originalBase, firstInstall, readmeMetadataFix, installationGateFix, pm2SnapshotFix, auditedParent]) {
+            for (const sha of [expectedMain, originalBase, firstInstall, readmeMetadataFix, installationGateFix, pm2SnapshotFix, diagnosticWorkflowInstall, workerIdentityFix, auditedParent]) {
               if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('workflow chain SHA shape mismatch')
             }
             if (git(['rev-parse', 'HEAD']) !== expectedMain) throw new Error('workflow checkout SHA mismatch')
@@ -126,8 +128,10 @@ jobs:
             requireOnlyWorkflowChanged(`${readmeMetadataFix}..${installationGateFix}`)
             requireSingleParent(pm2SnapshotFix, installationGateFix)
             requireOnlyWorkflowChanged(`${installationGateFix}..${pm2SnapshotFix}`)
-            requireSingleParent(auditedParent, pm2SnapshotFix)
-            requireOnlyPathsChanged(`${pm2SnapshotFix}..${auditedParent}`, [diagnosticWorkflowPath])
+            requireSingleParent(diagnosticWorkflowInstall, pm2SnapshotFix)
+            requireOnlyPathsChanged(`${pm2SnapshotFix}..${diagnosticWorkflowInstall}`, [diagnosticWorkflowPath])
+            requireSingleParent(workerIdentityFix, diagnosticWorkflowInstall)
+            requireOnlyWorkflowChanged(`${diagnosticWorkflowInstall}..${workerIdentityFix}`)
             requireSingleParent(expectedMain, auditedParent)
             requireOnlyWorkflowChanged(`${auditedParent}..${expectedMain}`)
             requireOnlyPathsChanged(`${originalBase}..${expectedMain}`, [workflowPath, diagnosticWorkflowPath])
@@ -773,6 +777,79 @@ jobs:
           const path = require('node:path')
           const crypto = require('node:crypto')
           const fail = code => { throw Object.assign(new Error(code), { safeCode: code }) }
+          const safeMigrationReasons = new Set([
+            'CANDIDATE_MANIFEST_INVALID', 'APPROVED_MIGRATION_MISSING_FROM_RC',
+            'REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC', 'PRODUCTION_MIGRATION_TREE_UNAVAILABLE',
+            'MIGRATION_FILE_UNSAFE', 'MIGRATION_NAME_INVALID', 'MIGRATION_LEDGER_INVALID',
+            'UNAPPROVED_MIGRATION_STATE', 'TOPIC_LOTTERY_MIGRATION_APPROVAL_REQUIRED_OR_DIVERGENCE',
+          ])
+          const safeMigrationReason = error => safeMigrationReasons.has(error?.safeCode) ? error.safeCode : 'DATABASE_READ_ONLY_CHECK_FAILED'
+          const databaseDiagnostics = {
+            envSource: 'NOT_READ', hostPresent: 'UNKNOWN', portPresent: 'UNKNOWN',
+            namePresent: 'UNKNOWN', connectivity: 'NOT_ATTEMPTED',
+            migrationTablePresent: 'UNKNOWN', migrationLedgerRead: 'NOT_ATTEMPTED',
+            tlsConfig: 'UNKNOWN', tlsNegotiation: 'UNKNOWN',
+            failedAt: 'NOT_REACHED', errorClass: 'NOT_REACHED',
+          }
+          function parseDatabaseUrlMetadata(value) {
+            if (typeof value !== 'string' || value.length === 0) throw Object.assign(new Error(), { safeDatabaseClass: 'DATABASE_URL_MISSING' })
+            let url
+            try { url = new URL(value) } catch { throw Object.assign(new Error(), { safeDatabaseClass: 'DATABASE_URL_INVALID' }) }
+            if (url.protocol !== 'mysql:') throw Object.assign(new Error(), { safeDatabaseClass: 'DATABASE_URL_SCHEME_UNSUPPORTED' })
+            const sslaccept = url.searchParams.get('sslaccept')
+            let tlsConfig = 'EXPLICIT_UNRECOGNIZED'
+            if (sslaccept === null) tlsConfig = 'PRISMA_DEFAULT_ACCEPT_INVALID_CERTS'
+            else if (sslaccept === 'strict') tlsConfig = 'STRICT_CERT_VALIDATION_CONFIGURED'
+            else if (sslaccept === 'accept_invalid_certs') tlsConfig = 'CERT_VALIDATION_DISABLED'
+            return {
+              hostPresent: url.hostname ? 'YES' : 'NO',
+              portPresent: url.port ? 'YES' : 'NO',
+              namePresent: url.pathname.length > 1 ? 'YES' : 'NO',
+              tlsConfig,
+            }
+          }
+          function safeDatabaseErrorClass(error, phase) {
+            const allowedClasses = new Set(['DATABASE_URL_MISSING', 'DATABASE_URL_INVALID', 'DATABASE_URL_SCHEME_UNSUPPORTED'])
+            if (typeof error?.safeDatabaseClass === 'string' && allowedClasses.has(error.safeDatabaseClass)) return error.safeDatabaseClass
+            const codes = new Set()
+            const candidates = [
+              () => error?.code, () => error?.errno, () => error?.meta?.code,
+              () => error?.meta?.errno, () => error?.cause?.code,
+            ]
+            for (const read of candidates) {
+              try {
+                const value = read()
+                if ((typeof value === 'string' && /^[A-Za-z0-9_]+$/.test(value)) || (typeof value === 'number' && Number.isSafeInteger(value))) codes.add(String(value).toUpperCase())
+              } catch {}
+            }
+            if (codes.has('P1013')) return 'DATABASE_URL_INVALID'
+            if (['P1000', 'ER_ACCESS_DENIED_ERROR', '1045'].some(code => codes.has(code))) return 'DATABASE_AUTHENTICATION_FAILED'
+            if (['P1010', 'ER_DBACCESS_DENIED_ERROR', 'ER_TABLEACCESS_DENIED_ERROR', '1044', '1142', '1143', '1227'].some(code => codes.has(code))) return phase === 'ledger_read' ? 'MIGRATION_LEDGER_PERMISSION_DENIED' : 'DATABASE_PRIVILEGE_DENIED'
+            if (['P1011', 'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'ERR_TLS_CERT_ALTNAME_INVALID'].some(code => codes.has(code))) return 'DATABASE_TLS_FAILED'
+            if (['P1002', 'ETIMEDOUT', 'ESOCKETTIMEDOUT'].some(code => codes.has(code))) return 'DATABASE_CONNECTION_TIMEOUT'
+            if (['P1001', 'P1017', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EHOSTUNREACH', 'EAI_AGAIN'].some(code => codes.has(code))) return 'DATABASE_UNREACHABLE'
+            if (phase === 'ledger_read' && ['P2021', 'ER_NO_SUCH_TABLE', '1146'].some(code => codes.has(code))) return 'MIGRATION_TABLE_MISSING'
+            if (phase === 'ledger_read') return 'MIGRATION_LEDGER_QUERY_FAILED'
+            if (phase === 'connect') return 'DATABASE_CONNECTION_FAILED'
+            return 'UNKNOWN'
+          }
+          function emitDatabaseDiagnostics() {
+            console.log(`DATABASE_CHECK_FAILED_AT=${databaseDiagnostics.failedAt}`)
+            console.log(`DATABASE_ENV_SOURCE=${databaseDiagnostics.envSource}`)
+            console.log(`DATABASE_HOST_PRESENT=${databaseDiagnostics.hostPresent}`)
+            console.log(`DATABASE_PORT_PRESENT=${databaseDiagnostics.portPresent}`)
+            console.log(`DATABASE_NAME_PRESENT=${databaseDiagnostics.namePresent}`)
+            console.log(`DATABASE_CONNECTIVITY=${databaseDiagnostics.connectivity}`)
+            console.log(`DATABASE_TLS_CONFIG=${databaseDiagnostics.tlsConfig}`)
+            console.log(`DATABASE_TLS_NEGOTIATION=${databaseDiagnostics.tlsNegotiation}`)
+            console.log(`MIGRATION_TABLE_PRESENT=${databaseDiagnostics.migrationTablePresent}`)
+            console.log(`MIGRATION_LEDGER_READ=${databaseDiagnostics.migrationLedgerRead}`)
+            console.log(`DATABASE_ERROR_CLASS=${databaseDiagnostics.errorClass}`)
+          }
+          function failDatabase(errorClass) {
+            databaseDiagnostics.errorClass = errorClass
+            throw Object.assign(new Error('database preflight failed'), { safeCode: 'DATABASE_READ_ONLY_CHECK_FAILED' })
+          }
           const approvedPending = new Set(['20261022090000_profile_mobile_contract','20261023090000_cantonese_question_progress'])
           const requiredExisting = new Set([
             '20261013100000_add_topic_activity_v2_web','20261013120000_add_topic_activity_v2_lottery',
@@ -819,20 +896,59 @@ jobs:
             const candidateTree = new Map(candidate.map(x => [x.name, x.checksum]))
             let databaseUrl
             let PrismaClient
+            let client = null
+            databaseDiagnostics.envSource = 'current_release_dotenv'
+            databaseDiagnostics.failedAt = 'dotenv_load'
+            let dotenv
+            try { dotenv = require(path.join(process.env.CURRENT_RELEASE, 'node_modules/dotenv')) }
+            catch { failDatabase('DOTENV_MODULE_UNAVAILABLE') }
+            let parsed
             try {
-              const release = process.env.CURRENT_RELEASE
-              const dotenv = require(path.join(release, 'node_modules/dotenv'))
-              const parsed = dotenv.parse(fs.readFileSync(path.join(release, '.env')))
-              databaseUrl = parsed.DATABASE_URL
-              if (!databaseUrl || new URL(databaseUrl).protocol !== 'mysql:') fail('DATABASE_CONFIGURATION_INVALID')
-              process.env.DATABASE_URL = databaseUrl
-              ;({ PrismaClient } = require(path.join(release, 'node_modules/@prisma/client')))
-            } catch { fail('DATABASE_CONFIGURATION_OR_PRISMA_UNAVAILABLE') }
-            const client = new PrismaClient({ log: [] })
+              parsed = dotenv.parse(fs.readFileSync(path.join(process.env.CURRENT_RELEASE, '.env')))
+              if (!parsed || typeof parsed !== 'object') failDatabase('DATABASE_ENV_INVALID')
+            } catch (error) {
+              if (error?.safeCode === 'DATABASE_READ_ONLY_CHECK_FAILED') throw error
+              failDatabase('DATABASE_ENV_UNAVAILABLE')
+            }
+            databaseDiagnostics.failedAt = 'database_url_parse'
+            databaseUrl = parsed.DATABASE_URL
+            let target
+            try { target = parseDatabaseUrlMetadata(databaseUrl) }
+            catch (error) { failDatabase(error?.safeDatabaseClass || 'DATABASE_URL_INVALID') }
+            databaseDiagnostics.hostPresent = target.hostPresent
+            databaseDiagnostics.portPresent = target.portPresent
+            databaseDiagnostics.namePresent = target.namePresent
+            databaseDiagnostics.tlsConfig = target.tlsConfig
+            process.env.DATABASE_URL = databaseUrl
+            databaseDiagnostics.failedAt = 'prisma_client_load'
+            try { ({ PrismaClient } = require(path.join(process.env.CURRENT_RELEASE, 'node_modules/@prisma/client'))) }
+            catch { failDatabase('PRISMA_CLIENT_UNAVAILABLE') }
+            databaseDiagnostics.failedAt = 'prisma_client_init'
+            try { client = new PrismaClient({ log: [] }) }
+            catch { failDatabase('PRISMA_CLIENT_INITIALIZATION_FAILED') }
             try {
-              await client.$connect()
-              const rows = await client.$queryRawUnsafe('SELECT migration_name, checksum, started_at, finished_at, rolled_back_at FROM _prisma_migrations')
+              databaseDiagnostics.failedAt = 'database_connect'
+              try {
+                await client.$connect()
+                databaseDiagnostics.connectivity = 'PASS'
+              } catch (error) {
+                databaseDiagnostics.connectivity = 'FAIL'
+                failDatabase(safeDatabaseErrorClass(error, 'connect'))
+              }
+              databaseDiagnostics.failedAt = 'migration_ledger_select'
+              let rows
+              try {
+                rows = await client.$queryRawUnsafe('SELECT migration_name, checksum, started_at, finished_at, rolled_back_at FROM _prisma_migrations')
+                databaseDiagnostics.migrationTablePresent = 'YES'
+                databaseDiagnostics.migrationLedgerRead = 'PASS'
+              } catch (error) {
+                databaseDiagnostics.migrationLedgerRead = 'FAIL'
+                const errorClass = safeDatabaseErrorClass(error, 'ledger_read')
+                if (errorClass === 'MIGRATION_TABLE_MISSING') databaseDiagnostics.migrationTablePresent = 'NO'
+                failDatabase(errorClass)
+              }
               if (!Array.isArray(rows)) fail('MIGRATION_LEDGER_INVALID')
+              databaseDiagnostics.failedAt = 'migration_reconciliation'
               const byName = new Map()
               for (const row of rows) {
                 if (typeof row.migration_name !== 'string' || !/^[0-9a-f]{64}$/.test(String(row.checksum || ''))) fail('MIGRATION_LEDGER_INVALID')
@@ -890,16 +1006,31 @@ jobs:
               console.log(`TOPIC_LOTTERY_MIGRATION_STATUS=${lotteryOkay ? 'APPLIED_AND_IDENTICAL' : 'STOP_PENDING_OR_DIVERGENT'}`)
               if (!approvedSetOkay) fail('UNAPPROVED_MIGRATION_STATE')
               if (!lotteryOkay) fail('TOPIC_LOTTERY_MIGRATION_APPROVAL_REQUIRED_OR_DIVERGENCE')
+              databaseDiagnostics.failedAt = 'NONE'
+              databaseDiagnostics.errorClass = 'NONE'
+              emitDatabaseDiagnostics()
               console.log('MIGRATION_PREFLIGHT=PASS')
             } catch (error) {
               console.log('MIGRATION_PREFLIGHT=NOT_READY')
-              console.log('MIGRATION_REASON=' + (/^MIGRATION_[A-Z_]+$/.test(error?.safeCode || '') ? error.safeCode : 'DATABASE_READ_ONLY_CHECK_FAILED'))
+              const reason = safeMigrationReason(error)
+              console.log('MIGRATION_REASON=' + reason)
+              if (reason !== 'DATABASE_READ_ONLY_CHECK_FAILED') databaseDiagnostics.errorClass = reason === 'MIGRATION_LEDGER_INVALID' ? 'MIGRATION_LEDGER_INVALID' : (databaseDiagnostics.failedAt === 'migration_reconciliation' ? 'MIGRATION_RECONCILIATION_REJECTED' : 'MIGRATION_PREFLIGHT_REJECTED')
+              else if (databaseDiagnostics.errorClass === 'NOT_REACHED') databaseDiagnostics.errorClass = safeDatabaseErrorClass(error, databaseDiagnostics.failedAt)
+              emitDatabaseDiagnostics()
               process.exitCode = 1
             } finally {
               if (client) await client.$disconnect().catch(() => {})
             }
           }
-          main().catch(() => { console.log('MIGRATION_PREFLIGHT=NOT_READY\nMIGRATION_REASON=DATABASE_READ_ONLY_CHECK_FAILED'); process.exitCode = 1 })
+          main().catch(error => {
+            console.log('MIGRATION_PREFLIGHT=NOT_READY')
+            console.log('MIGRATION_REASON=' + safeMigrationReason(error))
+            const reason = safeMigrationReason(error)
+            if (reason !== 'DATABASE_READ_ONLY_CHECK_FAILED') databaseDiagnostics.errorClass = databaseDiagnostics.failedAt === 'migration_reconciliation' ? 'MIGRATION_RECONCILIATION_REJECTED' : 'MIGRATION_PREFLIGHT_REJECTED'
+            if (databaseDiagnostics.errorClass === 'NOT_REACHED') databaseDiagnostics.errorClass = safeDatabaseErrorClass(error, databaseDiagnostics.failedAt)
+            emitDatabaseDiagnostics()
+            process.exitCode = 1
+          })
           NODE
           printf 'PREFLIGHT=PASS\n'
           REMOTE
