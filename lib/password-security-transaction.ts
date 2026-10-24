@@ -24,11 +24,19 @@ export type PasswordChangeAuditInput = {
   mustSetupSecurity?: boolean
 }
 
+export type PasswordChangeStage =
+  | 'PASSWORD_UPDATE'
+  | 'RECOVERY_CREDENTIAL_REVOCATION'
+  | 'WEB_SESSION_REVOCATION'
+  | 'MOBILE_SESSION_REVOCATION'
+  | 'ACCOUNT_SECURITY_AUDIT'
+
 export async function commitPasswordChange(
   tx: PasswordSecurityTransaction,
-  input: PasswordChangeAuditInput,
+  input: PasswordChangeAuditInput & { onStage?: (stage: PasswordChangeStage) => void },
 ) {
   const now = input.now || new Date()
+  input.onStage?.('PASSWORD_UPDATE')
   const updated = await tx.user.updateMany({
     where: {
       id: input.userId,
@@ -43,15 +51,19 @@ export async function commitPasswordChange(
 
   // Password changes invalidate outstanding recovery credentials and every
   // persisted session in the same transaction as the password/audit update.
+  input.onStage?.('RECOVERY_CREDENTIAL_REVOCATION')
   await tx.passwordResetToken.updateMany({
     where: { userId: input.userId, consumedAt: null },
     data: { consumedAt: now },
   })
+  input.onStage?.('WEB_SESSION_REVOCATION')
   await tx.onlineSession.deleteMany({ where: { userId: input.userId } })
+  input.onStage?.('MOBILE_SESSION_REVOCATION')
   await tx.mobileAuthSession.updateMany({
     where: { userId: input.userId, revokedAt: null },
     data: { revokedAt: now },
   })
+  input.onStage?.('ACCOUNT_SECURITY_AUDIT')
   await tx.accountSecurityLog.create({
     data: {
       userId: input.userId,

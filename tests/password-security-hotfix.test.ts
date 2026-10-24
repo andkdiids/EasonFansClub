@@ -113,6 +113,40 @@ test('统一密码事务更新哈希、消费恢复凭证、撤销 Web 与 Mobil
   assert.doesNotMatch(JSON.stringify(audit), /old-hash|new-hash|passwordHash/i)
 })
 
+test('管理员重置只撤销目标用户会话并按事务阶段记录可诊断边界', async () => {
+  const { tx, calls } = transactionFixture()
+  const stages: string[] = []
+  const replacementHash = await hashPassword('replacement-passphrase')
+  await commitPasswordChange(tx, {
+    userId: 'target-user',
+    expectedPasswordHash: 'target-old-hash',
+    passwordHash: replacementHash,
+    mustSetupSecurity: true,
+    action: 'PASSWORD_RESET_BY_ADMIN',
+    method: 'ADMIN_RESET',
+    ipAddress: '127.0.0.1',
+    userAgent: 'test-agent',
+    onStage: (stage) => stages.push(stage),
+  })
+  assert.deepEqual(stages, [
+    'PASSWORD_UPDATE',
+    'RECOVERY_CREDENTIAL_REVOCATION',
+    'WEB_SESSION_REVOCATION',
+    'MOBILE_SESSION_REVOCATION',
+    'ACCOUNT_SECURITY_AUDIT',
+  ])
+  const webSessions = calls.find((call) => call.operation === 'onlineSession.deleteMany')
+  const mobileSessions = calls.find((call) => call.operation === 'mobileAuthSession.updateMany')
+  assert.deepEqual((webSessions?.input as { where: unknown }).where, { userId: 'target-user' })
+  assert.deepEqual((mobileSessions?.input as { where: unknown }).where, { userId: 'target-user', revokedAt: null })
+  assert.ok(!JSON.stringify(webSessions).includes('admin-user'))
+  assert.ok(!JSON.stringify(mobileSessions).includes('admin-user'))
+  const update = calls.find((call) => call.operation === 'user.updateMany')
+  assert.deepEqual((update?.input as { data: unknown }).data, { passwordHash: replacementHash, mustSetupSecurity: true })
+  const audit = calls.find((call) => call.operation === 'accountSecurityLog.create')
+  assert.deepEqual((audit?.input as { data: { metadata: unknown } }).data.metadata, { method: 'ADMIN_RESET' })
+})
+
 test('旧密码并发变更的 CAS 冲突会中止且不撤销会话或写审计', async () => {
   const { tx, calls } = transactionFixture({ passwordUpdateCount: 0 })
   await assert.rejects(commitPasswordChange(tx, {
@@ -191,7 +225,8 @@ test('当前密码/新密码哈希兼容现有登录验证器，旧密码在变�
   assert.equal((await verifyPassword('existing-passphrase', existingHash)).valid, true)
   assert.equal((await verifyPassword('not-the-password', existingHash)).valid, false)
 
-  const replacementHash = await bcrypt.hash('replacement-passphrase', 4)
+  const replacementHash = await hashPassword('replacement-passphrase')
+  assert.match(replacementHash, /^pbkdf2\$sha256\$/)
   assert.equal((await verifyPassword('replacement-passphrase', replacementHash)).valid, true)
   assert.equal((await verifyPassword('existing-passphrase', replacementHash)).valid, false)
 })
