@@ -20,7 +20,7 @@ env:
   CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
   ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
   FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
-  AUDITED_WORKFLOW_PARENT_SHA: e45e493a46824316ee81a856321bb1f826a672d5
+  AUDITED_WORKFLOW_PARENT_SHA: 78beb732382ede1e81aebe6b64e78031240a8589
   DB_BACKUP_CONFIRMED: "YES"
   BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
@@ -85,8 +85,12 @@ jobs:
           const originalBase = process.env.ORIGINAL_MAIN_BASE_SHA
           const firstInstall = process.env.FIRST_WORKFLOW_INSTALL_SHA
           const readmeMetadataFix = '483dfe0b55f7faeb3a3405fd1159a859a7cc0309'
+          const installationGateFix = 'e45e493a46824316ee81a856321bb1f826a672d5'
+          const pm2SnapshotFix = '02c44f405c27dc1fc6f22cf59c485a569468b488'
           const auditedParent = process.env.AUDITED_WORKFLOW_PARENT_SHA
+          const expectedAuditedParent = '78beb732382ede1e81aebe6b64e78031240a8589'
           const workflowPath = '.github/workflows/production-server-rc-v3.yml'
+          const diagnosticWorkflowPath = '.github/workflows/diagnose-production-instagram-worker.yml'
           const headers = {
             accept: 'application/vnd.github+json',
             authorization: 'Bearer ' + token,
@@ -103,8 +107,14 @@ jobs:
             const changed = git(['diff', '--name-only', '--no-renames', range]).split(/\r?\n/).filter(Boolean).sort()
             if (changed.length !== 1 || changed[0] !== workflowPath) throw new Error('unexpected workflow chain path')
           }
+          function requireOnlyPathsChanged(range, expectedPaths) {
+            const changed = git(['diff', '--name-only', '--no-renames', range]).split(/\r?\n/).filter(Boolean).sort()
+            const expected = [...expectedPaths].sort()
+            if (JSON.stringify(changed) !== JSON.stringify(expected)) throw new Error('unexpected audited chain paths')
+          }
           function verifyWorkflowChain() {
-            for (const sha of [expectedMain, originalBase, firstInstall, readmeMetadataFix, auditedParent]) {
+            if (auditedParent !== expectedAuditedParent) throw new Error('audited main parent mismatch')
+            for (const sha of [expectedMain, originalBase, firstInstall, readmeMetadataFix, installationGateFix, pm2SnapshotFix, auditedParent]) {
               if (!/^[0-9a-f]{40}$/.test(sha || '')) throw new Error('workflow chain SHA shape mismatch')
             }
             if (git(['rev-parse', 'HEAD']) !== expectedMain) throw new Error('workflow checkout SHA mismatch')
@@ -112,11 +122,15 @@ jobs:
             requireOnlyWorkflowChanged(`${originalBase}..${firstInstall}`)
             requireSingleParent(readmeMetadataFix, firstInstall)
             requireOnlyWorkflowChanged(`${firstInstall}..${readmeMetadataFix}`)
-            requireSingleParent(auditedParent, readmeMetadataFix)
-            requireOnlyWorkflowChanged(`${readmeMetadataFix}..${auditedParent}`)
+            requireSingleParent(installationGateFix, readmeMetadataFix)
+            requireOnlyWorkflowChanged(`${readmeMetadataFix}..${installationGateFix}`)
+            requireSingleParent(pm2SnapshotFix, installationGateFix)
+            requireOnlyWorkflowChanged(`${installationGateFix}..${pm2SnapshotFix}`)
+            requireSingleParent(auditedParent, pm2SnapshotFix)
+            requireOnlyPathsChanged(`${pm2SnapshotFix}..${auditedParent}`, [diagnosticWorkflowPath])
             requireSingleParent(expectedMain, auditedParent)
             requireOnlyWorkflowChanged(`${auditedParent}..${expectedMain}`)
-            requireOnlyWorkflowChanged(`${originalBase}..${expectedMain}`)
+            requireOnlyPathsChanged(`${originalBase}..${expectedMain}`, [workflowPath, diagnosticWorkflowPath])
           }
           async function getRef(name) {
             const response = await fetch(`${api}/repos/${repo}/git/ref/heads/${name.split('/').map(encodeURIComponent).join('/')}`, { headers })
@@ -648,24 +662,109 @@ jobs:
           pm2_snapshot() {
             local name="$1"
             printf '%s' "$pm2_json" | node -e '
-              let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{try{const rows=JSON.parse(raw).filter(x=>x.name===process.argv[1]);if(rows.length!==1)process.exit(2);const x=rows[0],e=x.pm2_env||{};process.stdout.write([e.status||"",String(Number(x.pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t")+"\n")}catch{process.exit(2)}})
+              let raw = ""
+              process.stdin.setEncoding("utf8")
+              process.stdin.on("data", chunk => { raw += chunk })
+              process.stdin.on("end", () => {
+                const emit = (key, value) => process.stdout.write(`${key}=${value}\n`)
+                try {
+                  const parsed = JSON.parse(raw)
+                  if (!Array.isArray(parsed)) throw new Error("invalid PM2 list")
+                  const rows = parsed.filter(row => row && row.name === process.argv[1])
+                  emit("MATCH_COUNT", String(rows.length))
+                  if (rows.length !== 1) {
+                    emit("STATUS", "")
+                    emit("PID", "")
+                    emit("PM_CWD", "")
+                    emit("DEPLOY_SHA_PRESENT", "NO")
+                    emit("DEPLOY_SHA", "")
+                    emit("RESTART_TIME_PRESENT", "NO")
+                    emit("RESTART_TIME", "")
+                    emit("RESTART_TIME_TYPE", "missing")
+                    return
+                  }
+                  const row = rows[0]
+                  const env = row.pm2_env && typeof row.pm2_env === "object" ? row.pm2_env : {}
+                  const safeText = value => typeof value === "string" && !/[\u0000-\u001f\u007f]/.test(value) ? value : "INVALID"
+                  const pidNumber = Number(row.pid || env.pid || 0)
+                  const pid = Number.isSafeInteger(pidNumber) && pidNumber > 0 ? String(pidNumber) : "INVALID"
+                  const status = env.status == null ? "" : safeText(env.status)
+                  const cwd = env.pm_cwd == null ? "" : safeText(env.pm_cwd)
+                  const hasDeploySha = Object.prototype.hasOwnProperty.call(env, "DEPLOY_SHA")
+                  const deployShaPresent = hasDeploySha && !(typeof env.DEPLOY_SHA === "string" && env.DEPLOY_SHA.length === 0)
+                  const deploySha = !deployShaPresent ? "" : (typeof env.DEPLOY_SHA === "string" && /^[0-9a-f]{40}$/.test(env.DEPLOY_SHA) ? env.DEPLOY_SHA : "INVALID")
+                  const hasRestartTime = Object.prototype.hasOwnProperty.call(env, "restart_time")
+                  const restartTime = env.restart_time
+                  const restartTimeValid = hasRestartTime && typeof restartTime === "number" && Number.isSafeInteger(restartTime) && restartTime >= 0
+                  emit("STATUS", status)
+                  emit("PID", pid)
+                  emit("PM_CWD", cwd)
+                  emit("DEPLOY_SHA_PRESENT", deployShaPresent ? "YES" : "NO")
+                  emit("DEPLOY_SHA", deploySha)
+                  emit("RESTART_TIME_PRESENT", hasRestartTime ? "YES" : "NO")
+                  emit("RESTART_TIME", restartTimeValid ? String(restartTime) : (hasRestartTime ? "INVALID" : ""))
+                  emit("RESTART_TIME_TYPE", hasRestartTime ? typeof restartTime : "missing")
+                } catch {
+                  process.exitCode = 2
+                }
+              })
             ' "$name"
           }
-          IFS=$'\t' read -r web_status web_pid web_cwd web_deploy_sha web_restarts < <(pm2_snapshot easonfansclub) || fail PM2_WEB_STATUS_UNKNOWN
+          parse_pm2_snapshot() {
+            local payload="$1" line key value
+            local seen_match=NO seen_status=NO seen_pid=NO seen_cwd=NO seen_deploy_present=NO seen_deploy=NO seen_restart_present=NO seen_restart=NO seen_restart_type=NO
+            snapshot_match_count='' snapshot_status='' snapshot_pid='' snapshot_cwd=''
+            snapshot_deploy_sha_present='' snapshot_deploy_sha=''
+            snapshot_restart_time_present='' snapshot_restart_time='' snapshot_restart_time_type=''
+            while IFS= read -r line; do
+              [[ "$line" == *=* ]] || return 1
+              key="${line%%=*}"
+              value="${line#*=}"
+              case "$key" in
+                MATCH_COUNT) [[ "$seen_match" == NO ]] || return 1; seen_match=YES; snapshot_match_count="$value" ;;
+                STATUS) [[ "$seen_status" == NO ]] || return 1; seen_status=YES; snapshot_status="$value" ;;
+                PID) [[ "$seen_pid" == NO ]] || return 1; seen_pid=YES; snapshot_pid="$value" ;;
+                PM_CWD) [[ "$seen_cwd" == NO ]] || return 1; seen_cwd=YES; snapshot_cwd="$value" ;;
+                DEPLOY_SHA_PRESENT) [[ "$seen_deploy_present" == NO ]] || return 1; seen_deploy_present=YES; snapshot_deploy_sha_present="$value" ;;
+                DEPLOY_SHA) [[ "$seen_deploy" == NO ]] || return 1; seen_deploy=YES; snapshot_deploy_sha="$value" ;;
+                RESTART_TIME_PRESENT) [[ "$seen_restart_present" == NO ]] || return 1; seen_restart_present=YES; snapshot_restart_time_present="$value" ;;
+                RESTART_TIME) [[ "$seen_restart" == NO ]] || return 1; seen_restart=YES; snapshot_restart_time="$value" ;;
+                RESTART_TIME_TYPE) [[ "$seen_restart_type" == NO ]] || return 1; seen_restart_type=YES; snapshot_restart_time_type="$value" ;;
+                *) return 1 ;;
+              esac
+            done <<< "$payload"
+            [[ "$seen_match" == YES && "$seen_status" == YES && "$seen_pid" == YES && "$seen_cwd" == YES && "$seen_deploy_present" == YES && "$seen_deploy" == YES && "$seen_restart_present" == YES && "$seen_restart" == YES && "$seen_restart_type" == YES ]]
+          }
+          web_snapshot="$(pm2_snapshot easonfansclub)" || fail PM2_WEB_STATUS_UNKNOWN
+          parse_pm2_snapshot "$web_snapshot" || fail PM2_WEB_STATUS_UNKNOWN
+          [[ "$snapshot_match_count" == 1 ]] || fail PM2_WEB_STATUS_UNKNOWN
+          web_status="$snapshot_status"; web_pid="$snapshot_pid"; web_cwd="$snapshot_cwd"; web_deploy_sha="$snapshot_deploy_sha"; web_restarts="$snapshot_restart_time"
           [[ "$web_status" == online && "$web_pid" =~ ^[1-9][0-9]* && "$web_cwd" == "$current_link" ]] || fail PM2_WEB_NOT_ON_CURRENT
           web_actual="$(readlink "/proc/$web_pid/cwd" 2>/dev/null || true)"
           [[ "$web_actual" != *' (deleted)' && -d "$web_actual" && "$(readlink -f -- "$web_actual" 2>/dev/null || true)" == "$current_target" ]] || fail PM2_WEB_CWD_INVALID
           [[ "$web_deploy_sha" == "$production_sha" ]] || fail PM2_WEB_SHA_MISMATCH
           printf 'PM2_WEB=ONLINE\nPM2_WEB_PID=%s\n' "$web_pid"
-          IFS=$'\t' read -r worker_status worker_pid worker_cwd worker_deploy_sha worker_restarts < <(pm2_snapshot instagram-sync-worker) || fail PM2_WORKER_STATUS_UNKNOWN
+          worker_snapshot="$(pm2_snapshot instagram-sync-worker)" || fail PM2_WORKER_STATUS_UNKNOWN
+          parse_pm2_snapshot "$worker_snapshot" || fail PM2_WORKER_STATUS_UNKNOWN
+          [[ "$snapshot_match_count" == 1 ]] || fail PM2_WORKER_STATUS_UNKNOWN
+          worker_status="$snapshot_status"; worker_pid="$snapshot_pid"; worker_cwd="$snapshot_cwd"
+          worker_deploy_sha_present="$snapshot_deploy_sha_present"; worker_deploy_sha="$snapshot_deploy_sha"
+          worker_restarts="$snapshot_restart_time"
           [[ "$worker_status" == online && "$worker_pid" =~ ^[1-9][0-9]* && "$worker_cwd" == "$current_link" ]] || fail PM2_WORKER_NOT_ON_CONFIGURED_CURRENT
           worker_actual="$(readlink "/proc/$worker_pid/cwd" 2>/dev/null || true)"
           [[ "$worker_actual" != *' (deleted)' && -d "$worker_actual" ]] || fail PM2_WORKER_CWD_INVALID
           worker_release="$(readlink -f -- "$worker_actual" 2>/dev/null || true)"
           [[ "$worker_release" == "$app_dir"/releases/* && -s "$worker_release/.deployed-sha" ]] || fail PM2_WORKER_RELEASE_INVALID
           worker_release_sha="$(tr -d '[:space:]' < "$worker_release/.deployed-sha")"
-          [[ "$worker_release_sha" =~ ^[0-9a-f]{40}$ && "$worker_deploy_sha" == "$worker_release_sha" && "$worker_restarts" =~ ^[0-9]+$ ]] || fail PM2_WORKER_SHA_INVALID
-          printf 'PM2_WORKER=ONLINE\nPM2_WORKER_PID=%s\nWORKER_RELEASE_SHA=%s\nWORKER_ACTUAL_RELEASE=%s\nWORKER_RESTARTS=%s\nWORKER_RELOAD=NO\nWORKER_ACTIVE_TASKS=UNKNOWN\n' "$worker_pid" "$worker_release_sha" "$worker_release" "$worker_restarts"
+          [[ "$worker_release_sha" =~ ^[0-9a-f]{40}$ ]] || fail PM2_WORKER_RELEASE_SHA_INVALID
+          if [[ "$worker_deploy_sha_present" == YES ]]; then
+            [[ "$worker_deploy_sha" =~ ^[0-9a-f]{40}$ ]] || fail PM2_WORKER_DEPLOY_SHA_INVALID
+            [[ "$worker_deploy_sha" == "$worker_release_sha" ]] || fail PM2_WORKER_DEPLOY_SHA_MISMATCH
+          else
+            [[ "$worker_deploy_sha_present" == NO && -z "$worker_deploy_sha" ]] || fail PM2_WORKER_DEPLOY_SHA_INVALID
+          fi
+          [[ "$snapshot_restart_time_present" == YES && "$snapshot_restart_time_type" == number && "$worker_restarts" =~ ^[0-9]+$ ]] || fail PM2_WORKER_RESTART_COUNT_INVALID
+          printf 'PM2_WORKER=ONLINE\nPM2_WORKER_PID=%s\nPM2_WORKER_DEPLOY_SHA_PRESENT=%s\nPM2_WORKER_DEPLOY_SHA=%s\nWORKER_RELEASE_SHA=%s\nWORKER_ACTUAL_RELEASE=%s\nWORKER_RESTARTS=%s\nWORKER_RELOAD=NO\nWORKER_ACTIVE_TASKS=UNKNOWN\n' "$worker_pid" "$worker_deploy_sha_present" "$worker_deploy_sha" "$worker_release_sha" "$worker_release" "$worker_restarts"
 
           timeout --foreground --signal=TERM --kill-after=10s 75s \
             env -i PATH="$PATH" HOME="$HOME" LANG=C APP_DIR="$app_dir" CURRENT_RELEASE="$current_target" CANDIDATE_MIGRATIONS_B64="$candidate_b64" \
@@ -819,11 +918,18 @@ jobs:
           grep -qx 'UNEXPECTED_PENDING_MIGRATIONS=0' <<<"$output" || { echo "::error::An unapproved migration is pending."; exit 1; }
           grep -qx 'TOPIC_LOTTERY_MIGRATION_STATUS=APPLIED_AND_IDENTICAL' <<<"$output" || { echo "::error::Topic Activity lottery migrations are not proven applied and identical."; exit 1; }
           worker_pid="$(printf '%s\n' "$output" | sed -n 's/^PM2_WORKER_PID=//p' | tail -n 1)"
+          worker_deploy_sha_present="$(printf '%s\n' "$output" | sed -n 's/^PM2_WORKER_DEPLOY_SHA_PRESENT=//p' | tail -n 1)"
+          worker_deploy_sha="$(printf '%s\n' "$output" | sed -n 's/^PM2_WORKER_DEPLOY_SHA=//p' | tail -n 1)"
           worker_sha="$(printf '%s\n' "$output" | sed -n 's/^WORKER_RELEASE_SHA=//p' | tail -n 1)"
           worker_release="$(printf '%s\n' "$output" | sed -n 's/^WORKER_ACTUAL_RELEASE=//p' | tail -n 1)"
           worker_restarts="$(printf '%s\n' "$output" | sed -n 's/^WORKER_RESTARTS=//p' | tail -n 1)"
-          [[ "$worker_pid" =~ ^[1-9][0-9]* && "$worker_sha" =~ ^[0-9a-f]{40}$ && "$worker_release" =~ ^/home/apps/easonfansclub/releases/[^/]+$ && "$worker_restarts" =~ ^[0-9]+$ ]] || { echo "::error::Instagram Worker preservation evidence is invalid."; exit 1; }
-          printf 'production_sha=%s\nrollback_sha=%s\nworker_pid=%s\nworker_sha=%s\nworker_release=%s\nworker_restarts=%s\n' "$production_sha" "$rollback_sha" "$worker_pid" "$worker_sha" "$worker_release" "$worker_restarts" >> "$GITHUB_OUTPUT"
+          [[ "$worker_pid" =~ ^[1-9][0-9]* && "$worker_sha" =~ ^[0-9a-f]{40}$ && "$worker_release" =~ ^/home/apps/easonfansclub/releases/[^/]+$ && "$worker_restarts" =~ ^[0-9]+$ && ( "$worker_deploy_sha_present" == YES || "$worker_deploy_sha_present" == NO ) ]] || { echo "::error::Instagram Worker preservation evidence is invalid."; exit 1; }
+          if [[ "$worker_deploy_sha_present" == YES ]]; then
+            [[ "$worker_deploy_sha" =~ ^[0-9a-f]{40}$ && "$worker_deploy_sha" == "$worker_sha" ]] || { echo "::error::Instagram Worker DEPLOY_SHA evidence is invalid."; exit 1; }
+          else
+            [[ -z "$worker_deploy_sha" ]] || { echo "::error::Absent Instagram Worker DEPLOY_SHA must remain empty."; exit 1; }
+          fi
+          printf 'production_sha=%s\nrollback_sha=%s\nworker_pid=%s\nworker_sha=%s\nworker_release=%s\nworker_restarts=%s\nworker_deploy_sha_present=%s\nworker_deploy_sha=%s\n' "$production_sha" "$rollback_sha" "$worker_pid" "$worker_sha" "$worker_release" "$worker_restarts" "$worker_deploy_sha_present" "$worker_deploy_sha" >> "$GITHUB_OUTPUT"
 
       - name: Recheck main, exact RC head, and active production workflows immediately before deployment
         id: last_moment_gate
@@ -1074,36 +1180,123 @@ jobs:
           EXPECTED_WORKER_SHA: ${{ steps.production_preflight.outputs.worker_sha }}
           EXPECTED_WORKER_RELEASE: ${{ steps.production_preflight.outputs.worker_release }}
           EXPECTED_WORKER_RESTARTS: ${{ steps.production_preflight.outputs.worker_restarts }}
+          EXPECTED_WORKER_DEPLOY_SHA_PRESENT: ${{ steps.production_preflight.outputs.worker_deploy_sha_present }}
+          EXPECTED_WORKER_DEPLOY_SHA: ${{ steps.production_preflight.outputs.worker_deploy_sha }}
         run: |
           set -euo pipefail
           [[ "$EXPECTED_WORKER_PID" =~ ^[1-9][0-9]* && "$EXPECTED_WORKER_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_WORKER_RELEASE" =~ ^/home/apps/easonfansclub/releases/[^/]+$ && "$EXPECTED_WORKER_RESTARTS" =~ ^[0-9]+$ ]] || { echo "::error::Worker baseline evidence is invalid."; exit 1; }
           remote="${SSH_USER}@${SSH_HOST}"
-          remote_command="bash -s -- '$APP_DIR' '$CANDIDATE_SHA' '$EXPECTED_WORKER_PID' '$EXPECTED_WORKER_SHA' '$EXPECTED_WORKER_RELEASE' '$EXPECTED_WORKER_RESTARTS'"
+          remote_command="bash -s -- '$APP_DIR' '$CANDIDATE_SHA' '$EXPECTED_WORKER_PID' '$EXPECTED_WORKER_SHA' '$EXPECTED_WORKER_RELEASE' '$EXPECTED_WORKER_RESTARTS' '$EXPECTED_WORKER_DEPLOY_SHA_PRESENT' '$EXPECTED_WORKER_DEPLOY_SHA'"
           runtime_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s ssh -T \
             -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
             "$remote" "$remote_command" <<'REMOTE'
           set -euo pipefail
-          app_dir="$1"; candidate_sha="$2"; expected_pid="$3"; expected_worker_sha="$4"; expected_worker_release="$5"; expected_restarts="$6"
+          app_dir="$1"; candidate_sha="$2"; expected_pid="$3"; expected_worker_sha="$4"; expected_worker_release="$5"; expected_restarts="$6"; expected_deploy_sha_present="$7"; expected_deploy_sha="$8"
           fail() { printf 'RUNTIME_POSTCHECK=FAIL\nREASON=%s\n' "$1"; exit 1; }
           [[ "$app_dir" == /home/apps/easonfansclub && "$candidate_sha" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || fail RELEASE_IDENTITY_MISMATCH
-          [[ "$expected_pid" =~ ^[1-9][0-9]* && "$expected_worker_sha" =~ ^[0-9a-f]{40}$ && "$expected_worker_release" == "$app_dir"/releases/* && "$expected_restarts" =~ ^[0-9]+$ ]] || fail WORKER_BASELINE_INVALID
+          [[ "$expected_pid" =~ ^[1-9][0-9]* && "$expected_worker_sha" =~ ^[0-9a-f]{40}$ && "$expected_worker_release" == "$app_dir"/releases/* && "$expected_restarts" =~ ^[0-9]+$ && ( "$expected_deploy_sha_present" == YES || "$expected_deploy_sha_present" == NO ) ]] || fail WORKER_BASELINE_INVALID
+          if [[ "$expected_deploy_sha_present" == YES ]]; then
+            [[ "$expected_deploy_sha" =~ ^[0-9a-f]{40}$ && "$expected_deploy_sha" == "$expected_worker_sha" ]] || fail WORKER_BASELINE_INVALID
+          else
+            [[ -z "$expected_deploy_sha" ]] || fail WORKER_BASELINE_INVALID
+          fi
           export NVM_DIR="$HOME/.nvm"; if [[ -s "$NVM_DIR/nvm.sh" ]]; then . "$NVM_DIR/nvm.sh"; fi
           command -v pm2 >/dev/null 2>&1 || fail PM2_UNAVAILABLE
           current_link="$app_dir/current"; current_target="$(readlink -f -- "$current_link" 2>/dev/null || true)"
           [[ -L "$current_link" && "$current_target" == "$app_dir"/releases/* && -d "$current_target" ]] || fail CURRENT_RELEASE_INVALID
           [[ "$(tr -d '[:space:]' < "$current_target/.deployed-sha" 2>/dev/null || true)" == "$candidate_sha" ]] || fail CURRENT_SHA_MISMATCH
           pm2_json="$(pm2 jlist 2>/dev/null)" || fail PM2_STATUS_UNAVAILABLE
-          snapshot() {
+          pm2_snapshot() {
             local name="$1"
-            printf '%s' "$pm2_json" | node -e 'let r="";process.stdin.on("data",c=>r+=c);process.stdin.on("end",()=>{try{const a=JSON.parse(r).filter(x=>x.name===process.argv[1]);if(a.length!==1)process.exit(2);const e=a[0].pm2_env||{};process.stdout.write([e.status||"",String(Number(a[0].pid||e.pid||0)),e.pm_cwd||"",e.DEPLOY_SHA||"",String(e.restart_time||0)].join("\t")+"\n")}catch{process.exit(2)}})' "$name"
+            printf '%s' "$pm2_json" | node -e '
+              let raw = ""
+              process.stdin.setEncoding("utf8")
+              process.stdin.on("data", chunk => { raw += chunk })
+              process.stdin.on("end", () => {
+                const emit = (key, value) => process.stdout.write(`${key}=${value}\n`)
+                try {
+                  const parsed = JSON.parse(raw)
+                  if (!Array.isArray(parsed)) throw new Error("invalid PM2 list")
+                  const rows = parsed.filter(row => row && row.name === process.argv[1])
+                  emit("MATCH_COUNT", String(rows.length))
+                  if (rows.length !== 1) {
+                    emit("STATUS", "")
+                    emit("PID", "")
+                    emit("PM_CWD", "")
+                    emit("DEPLOY_SHA_PRESENT", "NO")
+                    emit("DEPLOY_SHA", "")
+                    emit("RESTART_TIME_PRESENT", "NO")
+                    emit("RESTART_TIME", "")
+                    emit("RESTART_TIME_TYPE", "missing")
+                    return
+                  }
+                  const row = rows[0]
+                  const env = row.pm2_env && typeof row.pm2_env === "object" ? row.pm2_env : {}
+                  const safeText = value => typeof value === "string" && !/[\u0000-\u001f\u007f]/.test(value) ? value : "INVALID"
+                  const pidNumber = Number(row.pid || env.pid || 0)
+                  const pid = Number.isSafeInteger(pidNumber) && pidNumber > 0 ? String(pidNumber) : "INVALID"
+                  const status = env.status == null ? "" : safeText(env.status)
+                  const cwd = env.pm_cwd == null ? "" : safeText(env.pm_cwd)
+                  const hasDeploySha = Object.prototype.hasOwnProperty.call(env, "DEPLOY_SHA")
+                  const deployShaPresent = hasDeploySha && !(typeof env.DEPLOY_SHA === "string" && env.DEPLOY_SHA.length === 0)
+                  const deploySha = !deployShaPresent ? "" : (typeof env.DEPLOY_SHA === "string" && /^[0-9a-f]{40}$/.test(env.DEPLOY_SHA) ? env.DEPLOY_SHA : "INVALID")
+                  const hasRestartTime = Object.prototype.hasOwnProperty.call(env, "restart_time")
+                  const restartTime = env.restart_time
+                  const restartTimeValid = hasRestartTime && typeof restartTime === "number" && Number.isSafeInteger(restartTime) && restartTime >= 0
+                  emit("STATUS", status)
+                  emit("PID", pid)
+                  emit("PM_CWD", cwd)
+                  emit("DEPLOY_SHA_PRESENT", deployShaPresent ? "YES" : "NO")
+                  emit("DEPLOY_SHA", deploySha)
+                  emit("RESTART_TIME_PRESENT", hasRestartTime ? "YES" : "NO")
+                  emit("RESTART_TIME", restartTimeValid ? String(restartTime) : (hasRestartTime ? "INVALID" : ""))
+                  emit("RESTART_TIME_TYPE", hasRestartTime ? typeof restartTime : "missing")
+                } catch {
+                  process.exitCode = 2
+                }
+              })
+            ' "$name"
           }
-          IFS=$'\t' read -r web_status web_pid web_cwd web_sha web_restarts < <(snapshot easonfansclub) || fail PM2_WEB_UNKNOWN
+          parse_pm2_snapshot() {
+            local payload="$1" line key value
+            local seen_match=NO seen_status=NO seen_pid=NO seen_cwd=NO seen_deploy_present=NO seen_deploy=NO seen_restart_present=NO seen_restart=NO seen_restart_type=NO
+            snapshot_match_count='' snapshot_status='' snapshot_pid='' snapshot_cwd=''
+            snapshot_deploy_sha_present='' snapshot_deploy_sha=''
+            snapshot_restart_time_present='' snapshot_restart_time='' snapshot_restart_time_type=''
+            while IFS= read -r line; do
+              [[ "$line" == *=* ]] || return 1
+              key="${line%%=*}"
+              value="${line#*=}"
+              case "$key" in
+                MATCH_COUNT) [[ "$seen_match" == NO ]] || return 1; seen_match=YES; snapshot_match_count="$value" ;;
+                STATUS) [[ "$seen_status" == NO ]] || return 1; seen_status=YES; snapshot_status="$value" ;;
+                PID) [[ "$seen_pid" == NO ]] || return 1; seen_pid=YES; snapshot_pid="$value" ;;
+                PM_CWD) [[ "$seen_cwd" == NO ]] || return 1; seen_cwd=YES; snapshot_cwd="$value" ;;
+                DEPLOY_SHA_PRESENT) [[ "$seen_deploy_present" == NO ]] || return 1; seen_deploy_present=YES; snapshot_deploy_sha_present="$value" ;;
+                DEPLOY_SHA) [[ "$seen_deploy" == NO ]] || return 1; seen_deploy=YES; snapshot_deploy_sha="$value" ;;
+                RESTART_TIME_PRESENT) [[ "$seen_restart_present" == NO ]] || return 1; seen_restart_present=YES; snapshot_restart_time_present="$value" ;;
+                RESTART_TIME) [[ "$seen_restart" == NO ]] || return 1; seen_restart=YES; snapshot_restart_time="$value" ;;
+                RESTART_TIME_TYPE) [[ "$seen_restart_type" == NO ]] || return 1; seen_restart_type=YES; snapshot_restart_time_type="$value" ;;
+                *) return 1 ;;
+              esac
+            done <<< "$payload"
+            [[ "$seen_match" == YES && "$seen_status" == YES && "$seen_pid" == YES && "$seen_cwd" == YES && "$seen_deploy_present" == YES && "$seen_deploy" == YES && "$seen_restart_present" == YES && "$seen_restart" == YES && "$seen_restart_type" == YES ]]
+          }
+          web_snapshot="$(pm2_snapshot easonfansclub)" || fail PM2_WEB_UNKNOWN
+          parse_pm2_snapshot "$web_snapshot" || fail PM2_WEB_UNKNOWN
+          [[ "$snapshot_match_count" == 1 ]] || fail PM2_WEB_UNKNOWN
+          web_status="$snapshot_status"; web_pid="$snapshot_pid"; web_cwd="$snapshot_cwd"; web_sha="$snapshot_deploy_sha"; web_restarts="$snapshot_restart_time"
           [[ "$web_status" == online && "$web_pid" =~ ^[1-9][0-9]* && "$web_cwd" == "$current_link" && "$web_sha" == "$candidate_sha" ]] || fail PM2_WEB_NOT_ON_CANDIDATE
           web_actual="$(readlink "/proc/$web_pid/cwd" 2>/dev/null || true)"
           [[ "$web_actual" != *' (deleted)' && -d "$web_actual" && "$(readlink -f -- "$web_actual" 2>/dev/null || true)" == "$current_target" ]] || fail PM2_WEB_CWD_INVALID
-          IFS=$'\t' read -r worker_status worker_pid worker_cwd worker_sha worker_restarts < <(snapshot instagram-sync-worker) || fail PM2_WORKER_UNKNOWN
-          [[ "$worker_status" == online && "$worker_pid" == "$expected_pid" && "$worker_cwd" == "$current_link" && "$worker_sha" == "$expected_worker_sha" && "$worker_restarts" == "$expected_restarts" ]] || fail PM2_WORKER_CHANGED
+          worker_snapshot="$(pm2_snapshot instagram-sync-worker)" || fail PM2_WORKER_UNKNOWN
+          parse_pm2_snapshot "$worker_snapshot" || fail PM2_WORKER_UNKNOWN
+          [[ "$snapshot_match_count" == 1 ]] || fail PM2_WORKER_UNKNOWN
+          worker_status="$snapshot_status"; worker_pid="$snapshot_pid"; worker_cwd="$snapshot_cwd"
+          worker_deploy_sha_present="$snapshot_deploy_sha_present"; worker_deploy_sha="$snapshot_deploy_sha"
+          worker_restarts="$snapshot_restart_time"
+          [[ "$worker_status" == online && "$worker_pid" == "$expected_pid" && "$worker_cwd" == "$current_link" && "$snapshot_restart_time_present" == YES && "$snapshot_restart_time_type" == number && "$worker_restarts" == "$expected_restarts" && "$worker_deploy_sha_present" == "$expected_deploy_sha_present" && "$worker_deploy_sha" == "$expected_deploy_sha" ]] || fail PM2_WORKER_CHANGED
           worker_actual="$(readlink "/proc/$worker_pid/cwd" 2>/dev/null || true)"
           [[ "$worker_actual" != *' (deleted)' && -d "$worker_actual" && "$(readlink -f -- "$worker_actual" 2>/dev/null || true)" == "$expected_worker_release" ]] || fail PM2_WORKER_RELEASE_CHANGED
           [[ "$(tr -d '[:space:]' < "$expected_worker_release/.deployed-sha" 2>/dev/null || true)" == "$expected_worker_sha" ]] || fail PM2_WORKER_RELEASE_SHA_CHANGED
