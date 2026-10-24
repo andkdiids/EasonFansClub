@@ -170,13 +170,16 @@ test('有当前主题时也复用 User.points，执药与余药回收使用服�
   assert.doesNotMatch(client, /balance\s*[-+]\s*(?:drawCost|rewardAmount)/u)
 })
 
-test('Angel Gift GET 使用当前登录态、动态响应和 no-store，匿名不返回用户余额', () => {
+test('Angel Gift API 使用共享请求鉴权，页面 Cookie 流程与动态 no-store 响应保持', () => {
   const route = read('app/api/angel-gift/route.ts')
   const page = read('app/angel-gift/page.tsx')
   assert.match(route, /export const dynamic = 'force-dynamic'/u)
   assert.match(route, /Cache-Control.*private, no-store/u)
-  assert.match(route, /const user = await getCurrentUser\(\)/u)
-  assert.match(route, /getPharmacyPageData\(user\?\.id, campaignId\)/u)
+  assert.match(route, /const guard = await requireRequestUser\(request\)/u)
+  assert.match(route, /getPharmacyPageData\(guard\.user\.id, campaignId\)/u)
+  assert.doesNotMatch(route, /getCurrentUser\(|requireUser\(/u)
+  assert.match(route, /Vary: 'Cookie, Authorization'/u)
   assert.match(page, /export const dynamic = 'force-dynamic'/u)
+  assert.match(page, /getCurrentUser\(\)/u)
   assert.match(read('lib/pharmacy.ts'), /user: userId \?[\s\S]*: null/u)
 })

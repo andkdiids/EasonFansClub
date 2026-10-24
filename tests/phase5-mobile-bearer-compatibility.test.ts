@@ -161,11 +161,52 @@ test('Badge allowlist is exact and deferred Badge APIs remain excluded', () => {
   for (const approved of ['/api/users/me/badges', '/api/users/me/badge/equip', 'badge-series']) {
     assert.match(allowlist, new RegExp(approved.replaceAll('/', '\\/')), approved)
   }
-  for (const deferred of ['badge-showcase', 'badge-tasks', 'badges/recent', 'badge-year-review', 'share-card', '/api/angel-gift']) {
+  for (const deferred of ['badge-showcase', 'badge-tasks', 'badges/recent', 'badge-year-review', 'share-card']) {
     assert.doesNotMatch(allowlist, new RegExp(deferred.replaceAll('/', '\\/')), deferred)
   }
   assert.doesNotMatch(allowlist, /pathname\.startsWith\(['"]\/api\/users\/me\//)
   assert.doesNotMatch(allowlist, /pathname\.startsWith\(['"]\/api\/badge-/)
+})
+
+test('Angel Gift Bearer paths are allowlisted by exact method and endpoint', () => {
+  const middleware = source('middleware.ts')
+  const allowlist = middleware.slice(
+    middleware.indexOf('function isMobileBearerBusinessRequest'),
+    middleware.indexOf('\nfunction isApiPath'),
+  )
+  const getBlock = allowlist.slice(allowlist.indexOf("if (request.method === 'GET')"), allowlist.indexOf("if (request.method === 'POST')"))
+  const postBlock = allowlist.slice(allowlist.indexOf("if (request.method === 'POST')"))
+
+  for (const path of ['/api/angel-gift', '/api/angel-gift/history']) {
+    assert.ok(getBlock.includes(`pathname === '${path}'`), `GET ${path} must be explicitly allowed`)
+  }
+  for (const path of ['/api/angel-gift', '/api/angel-gift/recycle', '/api/angel-gift/recycle/all']) {
+    assert.ok(postBlock.includes(`pathname === '${path}'`), `POST ${path} must be explicitly allowed`)
+  }
+  assert.doesNotMatch(allowlist, /pathname\.startsWith\(['"]\/api\/angel-gift/u)
+  assert.doesNotMatch(getBlock, /\/api\/angel-gift\/recycle/u)
+  assert.doesNotMatch(postBlock, /\/api\/angel-gift\/history/u)
+})
+
+test('Angel Gift API handlers use shared request auth for Cookie and Bearer identity', () => {
+  const routes = [
+    'app/api/angel-gift/route.ts',
+    'app/api/angel-gift/history/route.ts',
+    'app/api/angel-gift/recycle/route.ts',
+    'app/api/angel-gift/recycle/all/route.ts',
+  ]
+  for (const file of routes) {
+    const route = withoutComments(source(file))
+    assert.match(route, /requireRequestUser\(request\)/, file)
+    assert.doesNotMatch(route, /requireUser\(|getCurrentUser\(/, file)
+    assert.doesNotMatch(route, /(?:userId|uid)\s*:\s*(?:body|params|query)/, file)
+  }
+  const security = source('lib/security.ts')
+  assert.match(security, /export async function requireRequestUser\(request: Request\)/)
+  assert.match(security, /export async function resolveRequestAuth\(request: Request\)/)
+  assert.match(security, /if \(request\.headers\.has\('authorization'\)\)/)
+  assert.match(security, /if \(!token\) return \{ user: null, response: unauthenticatedResponse\(\) \}/)
+  assert.match(security, /if \(!mobileAccess\) return \{ user: null, response: unauthenticatedResponse\(\) \}/)
 })
 
 test('existing public Badge routes retain request auth and privacy filtering', () => {

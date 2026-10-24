@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { getPharmacyPageData, PharmacyError, executePharmacyDraws } from '@/lib/pharmacy'
 import { parsePharmacyDrawCount } from '@/lib/pharmacy-pity'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
-const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' }
 
 function errorResponse(error: unknown, operation: string) {
   if (error instanceof PharmacyError) {
@@ -22,9 +21,10 @@ function inputObject(value: unknown) {
 
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser()
+    const guard = await requireRequestUser(request)
+    if (!guard.user) return guard.response
     const campaignId = new URL(request.url).searchParams.get('campaignId')
-    const data = await getPharmacyPageData(user?.id, campaignId)
+    const data = await getPharmacyPageData(guard.user.id, campaignId)
     return NextResponse.json({ ok: true, data }, { headers: noStoreHeaders })
   } catch (error) {
     return errorResponse(error, 'get')
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const body = inputObject(await request.json().catch(() => null))
