@@ -1,0 +1,290 @@
+name: Read-only Production Instagram Worker Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: none
+
+concurrency:
+  group: production-instagram-worker-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    environment:
+      name: Production
+    permissions:
+      contents: none
+    steps:
+      - name: Require manual dispatch from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || { echo "::error::Manual dispatch only."; exit 1; }
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Dispatch from main only."; exit 1; }
+
+      - name: Prepare pinned SSH credentials on runner only
+        id: ssh
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::SSH host format is unsupported."; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::SSH user format is unsupported."; exit 1; }
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::SSH port is invalid."; exit 1; }
+          (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || { echo "::error::SSH port is invalid."; exit 1; }
+          [[ -n "$SSH_KEY" && -n "$PINNED_HOSTS" && "$PINNED_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]] || { echo "::error::Pinned SSH settings are incomplete."; exit 1; }
+          key="$RUNNER_TEMP/ecfc-worker-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          hosts="$RUNNER_TEMP/ecfc-worker-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.hosts"
+          printf 'key_file=%s\nhosts_file=%s\n' "$key" "$hosts" >> "$GITHUB_OUTPUT"
+          umask 077
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          chmod 600 "$key" "$hosts"
+          SSH_HOST="$SSH_HOST" SSH_PORT="$SSH_PORT" HOSTS_FILE="$hosts" node <<'NODE'
+          const fs = require('node:fs')
+          const lines = fs.readFileSync(process.env.HOSTS_FILE, 'utf8').trim().split(/\r?\n/)
+          const expectedHost = process.env.SSH_PORT === '22' ? process.env.SSH_HOST : `[${process.env.SSH_HOST}]:${process.env.SSH_PORT}`
+          const fields = lines.length === 1 ? lines[0].trim().split(/\s+/) : []
+          if (fields.length !== 3 || fields[0] !== expectedHost || !/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$/.test(fields[1]) || !/^[A-Za-z0-9+/]+={0,2}$/.test(fields[2])) process.exit(1)
+          NODE
+          actual="$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')"
+          [[ "$actual" == "$PINNED_FINGERPRINT" ]] || { echo "::error::SSH host key fingerprint mismatch."; exit 1; }
+          echo 'SSH_HOST_IDENTITY=PINNED_AND_VERIFIED'
+
+      - name: Collect read-only Instagram Worker evidence
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+        run: |
+          set -euo pipefail
+          [[ -s "$KEY_FILE" && -s "$HOSTS_FILE" ]] || { echo "::error::Pinned SSH identity files are unavailable."; exit 1; }
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ && "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::SSH destination validation failed."; exit 1; }
+          (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || { echo "::error::SSH port is invalid."; exit 1; }
+          if output="$(timeout --foreground --signal=TERM --kill-after=10s 75s ssh -T \
+            -p "$SSH_PORT" \
+            -i "$KEY_FILE" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no \
+            -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOSTS_FILE" \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            -o ServerAliveInterval=5 \
+            -o ServerAliveCountMax=2 \
+            "$SSH_USER@$SSH_HOST" 'bash -s' 2>/dev/null <<'REMOTE'
+          set -u
+          app_dir=/home/apps/easonfansclub
+          current_link="$app_dir/current"
+          current_link_value=MISSING
+          current_release=MISSING
+          current_release_sha=MISSING
+          if current_link_value="$(readlink -- "$current_link" 2>/dev/null)"; then :; else current_link_value=MISSING; fi
+          if current_release="$(readlink -f -- "$current_link" 2>/dev/null)"; then :; else current_release=MISSING; fi
+          if [[ "$current_release" == "$app_dir"/releases/* && -s "$current_release/.deployed-sha" ]]; then
+            if current_release_sha="$(tr -d '[:space:]' < "$current_release/.deployed-sha" 2>/dev/null)"; then :; else current_release_sha=MISSING; fi
+          fi
+
+          pm2_home="${PM2_HOME:-${HOME:-}/.pm2}"
+          pm2_socket_present=NO
+          pm2_query_status=NOT_RUN_DAEMON_SOCKET_MISSING
+          pm2_json=
+          if [[ -S "$pm2_home/rpc.sock" ]]; then
+            pm2_socket_present=YES
+            if pm2_json="$(PM2_HOME="$pm2_home" pm2 jlist 2>/dev/null)"; then
+              pm2_query_status=PASS
+            else
+              pm2_query_status=FAIL
+              pm2_json=
+            fi
+          fi
+
+          worker_pid=
+          worker_proc_cwd=MISSING
+          worker_actual_cwd_valid=NO
+          worker_release=MISSING
+          worker_release_valid=NO
+          worker_release_sha=MISSING
+          if [[ "$pm2_query_status" == PASS ]]; then
+            if worker_pid="$(printf '%s' "$pm2_json" | node -e '
+          let raw = ""
+          process.stdin.on("data", chunk => { raw += chunk })
+          process.stdin.on("end", () => {
+            try {
+              const list = JSON.parse(raw)
+              if (!Array.isArray(list)) return
+              const rows = list.filter(item => item && item.name === "instagram-sync-worker")
+              if (rows.length !== 1) return
+              const env = rows[0].pm2_env || {}
+              const pid = Number(rows[0].pid || env.pid || 0)
+              if (Number.isSafeInteger(pid) && pid > 0) process.stdout.write(String(pid))
+            } catch {}
+          })
+          ' 2>/dev/null)" && [[ "$worker_pid" =~ ^[1-9][0-9]*$ ]]; then
+              if worker_proc_cwd="$(readlink -- "/proc/$worker_pid/cwd" 2>/dev/null)"; then
+                if [[ "$worker_proc_cwd" != *' (deleted)' && -d "$worker_proc_cwd" ]]; then worker_actual_cwd_valid=YES; fi
+                if worker_release="$(readlink -f -- "$worker_proc_cwd" 2>/dev/null)"; then
+                  if [[ "$worker_release" == "$app_dir"/releases/* && -s "$worker_release/.deployed-sha" ]]; then
+                    worker_release_valid=YES
+                    if worker_release_sha="$(tr -d '[:space:]' < "$worker_release/.deployed-sha" 2>/dev/null)"; then :; else worker_release_sha=MISSING; fi
+                  fi
+                else
+                  worker_release=MISSING
+                fi
+              else
+                worker_proc_cwd=MISSING
+              fi
+            else
+              worker_pid=
+            fi
+          fi
+
+          printf '%s' "$pm2_json" |
+          PM2_QUERY_STATUS="$pm2_query_status" PM2_SOCKET_PRESENT="$pm2_socket_present" \
+            CURRENT_LINK_PATH="$current_link" CURRENT_LINK_VALUE="$current_link_value" \
+            CURRENT_RELEASE_PATH="$current_release" CURRENT_RELEASE_SHA="$current_release_sha" \
+            WORKER_PID_FOR_PROC="$worker_pid" WORKER_PROC_CWD="$worker_proc_cwd" \
+            WORKER_ACTUAL_CWD_VALID="$worker_actual_cwd_valid" WORKER_RELEASE_PATH="$worker_release" \
+            WORKER_RELEASE_VALID="$worker_release_valid" WORKER_RELEASE_SHA="$worker_release_sha" \
+            node -e '
+          // WORKER_JSON_PARSER_BEGIN
+          let raw = ""
+          process.stdin.on("data", chunk => { raw += chunk })
+          process.stdin.on("end", () => {
+            const env = process.env
+            let list = null
+            let jsonValid = "UNKNOWN"
+            if (env.PM2_QUERY_STATUS === "PASS") {
+              try {
+                list = JSON.parse(raw)
+                if (!Array.isArray(list)) throw new Error("not-array")
+                jsonValid = "PASS"
+              } catch {
+                list = null
+                jsonValid = "FAIL"
+              }
+            }
+            const rows = list ? list.filter(item => item && item.name === "instagram-sync-worker") : null
+            const count = rows ? rows.length : null
+            const unique = count === 1
+            const unavailable = count === null ? "UNKNOWN" : count === 0 ? "MISSING" : "AMBIGUOUS"
+            const item = unique ? rows[0] : null
+            const pm2Env = item && item.pm2_env && typeof item.pm2_env === "object" ? item.pm2_env : {}
+            const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key)
+            const presence = present => count === null ? "UNKNOWN" : count === 0 ? "NO" : count === 1 ? (present ? "YES" : "NO") : "AMBIGUOUS"
+            const controlChars = /[\u0000-\u001f\u007f]/
+            const pathValue = value => {
+              if (typeof value !== "string" || value.length === 0) return "MISSING"
+              if (value.length > 4096 || controlChars.test(value)) return "INVALID_REDACTED"
+              return value
+            }
+            const shaValue = value => {
+              if (typeof value !== "string" || value.length === 0 || value === "MISSING") return "MISSING"
+              if (value === "UNKNOWN") return "UNKNOWN"
+              return /^[0-9a-f]{40}$/.test(value) ? value : "INVALID_REDACTED"
+            }
+            const statusValue = value => {
+              if (typeof value !== "string" || value.length === 0) return "MISSING"
+              return /^(online|stopped|errored|launching|waiting restart|one-launch-status)$/.test(value) ? value : "OTHER_REDACTED"
+            }
+            const pidRaw = item ? (item.pid || pm2Env.pid || 0) : undefined
+            const pidNumber = Number(pidRaw || 0)
+            const pidValid = unique && Number.isSafeInteger(pidNumber) && pidNumber > 0
+            const pidDisplay = item ? (Number.isSafeInteger(pidNumber) && pidNumber >= 0 ? String(pidNumber) : "INVALID_REDACTED") : unavailable
+            const cwdPresent = unique && typeof pm2Env.pm_cwd === "string" && pm2Env.pm_cwd.length > 0
+            const configuredCwdMatches = cwdPresent && pm2Env.pm_cwd === env.CURRENT_LINK_PATH
+            const deployRaw = unique ? pm2Env.DEPLOY_SHA : undefined
+            const deployPresent = typeof deployRaw === "string" && deployRaw.length > 0
+            const deployShaDisplay = deployPresent ? shaValue(deployRaw) : (unique ? "MISSING" : unavailable)
+            const restartPresent = unique && own(pm2Env, "restart_time")
+            const restartRaw = restartPresent ? pm2Env.restart_time : undefined
+            const restartType = unique ? (restartRaw === null ? "null" : typeof restartRaw) : unavailable
+            let restartDisplay = unique ? "MISSING" : unavailable
+            if (restartPresent) {
+              if (typeof restartRaw === "number" && Number.isFinite(restartRaw)) restartDisplay = String(restartRaw)
+              else if (typeof restartRaw === "string" && /^[0-9]{1,20}$/.test(restartRaw)) restartDisplay = restartRaw
+              else if (restartRaw === null) restartDisplay = "null"
+              else restartDisplay = "INVALID_REDACTED"
+            }
+            const releaseShaRaw = env.WORKER_RELEASE_SHA === "MISSING" ? "" : env.WORKER_RELEASE_SHA
+            const releaseShaValid = /^[0-9a-f]{40}$/.test(releaseShaRaw)
+            const restartValid = unique && restartPresent && typeof restartRaw === "number" && Number.isSafeInteger(restartRaw) && restartRaw >= 0
+            const status = unique ? statusValue(pm2Env.status) : (count === 0 ? "MISSING" : (count === null ? "UNKNOWN" : "AMBIGUOUS"))
+            const checks = {
+              WORKER_UNIQUE: unique,
+              WORKER_STATUS_ONLINE: unique && pm2Env.status === "online",
+              WORKER_PID_VALID: pidValid,
+              WORKER_CONFIGURED_CWD_MATCH: configuredCwdMatches,
+              WORKER_ACTUAL_CWD_VALID: unique && env.WORKER_ACTUAL_CWD_VALID === "YES",
+              WORKER_RELEASE_VALID: unique && env.WORKER_RELEASE_VALID === "YES",
+              WORKER_RELEASE_SHA_FORMAT: unique && releaseShaValid,
+              WORKER_DEPLOY_SHA_PRESENT: unique && deployPresent,
+              WORKER_DEPLOY_SHA_MATCH: unique && releaseShaValid && deployPresent && deployRaw === releaseShaRaw,
+              WORKER_RESTART_COUNT_VALID: restartValid,
+            }
+            const emit = (key, value) => process.stdout.write(`${key}=${value}\n`)
+            emit("PM2_DAEMON_SOCKET_PRESENT", env.PM2_SOCKET_PRESENT)
+            emit("PM2_JLIST_STATUS", env.PM2_QUERY_STATUS)
+            emit("PM2_JSON_VALID", jsonValid)
+            emit("PM2_WORKER_MATCH_COUNT", count === null ? "UNKNOWN" : String(count))
+            emit("PM2_WORKER_STATUS", status)
+            emit("PM2_WORKER_PID", pidDisplay)
+            emit("PM2_WORKER_PM_CWD_PRESENT", presence(cwdPresent))
+            emit("PM2_WORKER_PM_CWD", unique ? pathValue(pm2Env.pm_cwd) : unavailable)
+            emit("PM2_WORKER_DEPLOY_SHA_PRESENT", presence(deployPresent))
+            emit("PM2_WORKER_DEPLOY_SHA", deployShaDisplay)
+            emit("PM2_WORKER_RESTART_TIME_PRESENT", presence(restartPresent))
+            emit("PM2_WORKER_RESTART_TIME", restartDisplay)
+            emit("PM2_WORKER_RESTART_TIME_TYPE", restartType)
+            emit("CURRENT_LINK", pathValue(env.CURRENT_LINK_VALUE))
+            emit("CURRENT_RELEASE", pathValue(env.CURRENT_RELEASE_PATH))
+            emit("CURRENT_RELEASE_SHA", shaValue(env.CURRENT_RELEASE_SHA))
+            emit("WORKER_PROC_CWD", pathValue(env.WORKER_PROC_CWD))
+            emit("WORKER_RELEASE", pathValue(env.WORKER_RELEASE_PATH))
+            emit("WORKER_RELEASE_SHA_PRESENT", releaseShaRaw.length > 0 ? "YES" : "NO")
+            emit("WORKER_RELEASE_SHA", shaValue(releaseShaRaw))
+            for (const [key, value] of Object.entries(checks)) emit(key, value ? "PASS" : "FAIL")
+            emit("WORKER_DIAGNOSTIC", Object.values(checks).every(Boolean) ? "PASS" : "NOT_READY")
+          })
+          // WORKER_JSON_PARSER_END
+          '
+          REMOTE
+          )"; then
+            printf '%s\n' "$output"
+          else
+            echo "::error::Read-only SSH diagnostic did not complete; raw SSH output is suppressed."
+            exit 1
+          fi
+
+      - name: Remove temporary runner SSH credentials
+        if: ${{ always() }}
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+        run: |
+          set -euo pipefail
+          for file in "$KEY_FILE" "$HOSTS_FILE"; do
+            case "$file" in
+              "$RUNNER_TEMP"/ecfc-worker-diagnostic-*.key|"$RUNNER_TEMP"/ecfc-worker-diagnostic-*.hosts)
+                rm -f -- "$file"
+                ;;
+            esac
+          done
