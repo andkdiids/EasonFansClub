@@ -12,8 +12,14 @@ import {
   classifyMigration,
   checksumsEqual,
   compareSchema,
+  databaseIdentityMatches,
+  ledgerChecksumEvidence,
+  metadataVisibilityStatus,
+  parseDatabaseGrantScope,
+  parseDatabaseUrlTarget,
   parseMigrationSql,
   preserveLedgerRows,
+  readDatabaseContext,
   safeErrorClass,
   validateHostIdentity,
 } from './production-migration-ledger-diagnostic-v2.mjs'
@@ -108,6 +114,99 @@ test('historical rollback plus exactly one success is distinguished', () => {
   assert.equal(classifyMigration({ rows: [rolled, ledgerRow({ id: 'fixture-id-success' })], availableFields: requiredFields, productionSha: checksum, rcSha: checksum, schemaMatch: 'YES' }), 'HISTORICAL_ROLLED_BACK_PLUS_SUCCESS')
 })
 
+test('historical rollback checksum differences do not invalidate the matching current success', () => {
+  const rolled = ledgerRow({ id: 'fixture-id-rolled', checksum: 'b'.repeat(64), finished_at: null, rolled_back_at: rolledBack })
+  const successful = ledgerRow({ id: 'fixture-id-success', checksum })
+  assert.equal(classifyMigration({ rows: [rolled, successful], availableFields: requiredFields, productionSha: checksum, rcSha: checksum, schemaMatch: 'YES' }), 'HISTORICAL_ROLLED_BACK_PLUS_SUCCESS')
+  assert.deepEqual(ledgerChecksumEvidence([rolled, successful], checksum, checksum), [
+    { row: 1, type: 'ROLLED_BACK', productionMatch: 'NO', candidateMatch: 'NO' },
+    { row: 2, type: 'SUCCESS', productionMatch: 'YES', candidateMatch: 'YES' },
+  ])
+})
+
+test('a current successful ledger checksum mismatch remains a hard mismatch', () => {
+  assert.equal(classifyMigration({ rows: [ledgerRow({ checksum: 'b'.repeat(64) })], availableFields: requiredFields, productionSha: checksum, rcSha: checksum, schemaMatch: 'YES' }), 'CHECKSUM_MISMATCH')
+})
+
+test('database URL target parsing handles encoded credential punctuation without returning credentials', () => {
+  const target = parseDatabaseUrlTarget('mysql://qa-user:p%40ss%3Aword%23part@db.example.invalid:3307/ecfc%5Fprod?connection_limit=5')
+  assert.deepEqual(target, { hostPresent: true, portPresent: true, port: 3307, databaseName: 'ecfc_prod' })
+  assert.equal(Object.hasOwn(target, 'username'), false)
+  assert.equal(Object.hasOwn(target, 'password'), false)
+  assert.deepEqual(parseDatabaseUrlTarget('mysql://qa-user:secret@db.example.invalid/ecfc_prod'), {
+    hostPresent: true,
+    portPresent: false,
+    port: 3306,
+    databaseName: 'ecfc_prod',
+  })
+})
+
+test('database identity requires exact URL schema match and visible current schema', () => {
+  assert.equal(databaseIdentityMatches('ecfc_prod', 'ecfc_prod', true), true)
+  assert.equal(databaseIdentityMatches('ecfc_prod', 'other_db', true), false)
+  assert.equal(databaseIdentityMatches('ecfc_prod', 'ecfc_prod', false), false)
+  assert.equal(databaseIdentityMatches('ecfc_prod', null, true), false)
+})
+
+test('schema-wide grants establish metadata visibility while object-only grants do not', () => {
+  const broad = parseDatabaseGrantScope([
+    { grant: 'GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER ON `ecfc_prod`.* TO `app`@`%`' },
+    { grant: 'GRANT USAGE ON *.* TO `app`@`%`' },
+  ], 'ecfc_prod')
+  assert.deepEqual(broad, { readable: true, scope: 'SCHEMA_WIDE', schemaWide: true, roleAssignments: 'NO' })
+
+  const objectOnly = parseDatabaseGrantScope([
+    { grant: 'GRANT SELECT ON `ecfc_prod`.`_prisma_migrations` TO `app`@`%`' },
+  ], 'ecfc_prod')
+  assert.equal(objectOnly.scope, 'OBJECT_LEVEL')
+  assert.equal(objectOnly.schemaWide, false)
+  assert.equal(metadataVisibilityStatus({ schemaPresent: true, ledgerVisible: true, grantScope: objectOnly }), 'PARTIAL')
+  assert.equal(metadataVisibilityStatus({ schemaPresent: true, ledgerVisible: true, grantScope: broad }), 'VERIFIED')
+  assert.equal(metadataVisibilityStatus({ schemaPresent: true, ledgerVisible: false, grantScope: broad }), 'UNKNOWN')
+})
+
+test('partial revokes prevent a broad grant from being treated as complete visibility', () => {
+  const scope = parseDatabaseGrantScope([
+    { grant: 'GRANT SELECT ON *.* TO `app`@`%`' },
+    { grant: 'REVOKE SELECT ON `ecfc_prod`.* FROM `app`@`%`' },
+  ], 'ecfc_prod')
+  assert.equal(scope.scope, 'REVOKED_OR_PARTIAL')
+  assert.equal(scope.schemaWide, false)
+})
+
+test('routine-only schema grants do not prove table metadata visibility', () => {
+  const scope = parseDatabaseGrantScope([
+    { grant: 'GRANT EXECUTE, CREATE ROUTINE ON `ecfc_prod`.* TO `app`@`%`' },
+  ], 'ecfc_prod')
+  assert.equal(scope.scope, 'NON_TABLE_PRIVILEGE')
+  assert.equal(scope.schemaWide, false)
+  assert.equal(metadataVisibilityStatus({ schemaPresent: true, ledgerVisible: true, grantScope: scope }), 'UNKNOWN')
+})
+
+test('database context probe stays on the selected schema and uses only read-only statements', async () => {
+  const calls = []
+  const db = {
+    async $queryRawUnsafe(sql, ...values) {
+      calls.push({ sql, values })
+      if (sql === 'SELECT DATABASE() AS selectedDatabase') return [{ selectedDatabase: 'ecfc_prod' }]
+      if (sql.includes('INFORMATION_SCHEMA.SCHEMATA')) return [{ schemaName: 'ecfc_prod' }]
+      if (sql.includes('COUNT(*) AS tableCount')) return [{ tableCount: 249n }]
+      if (sql.includes('INFORMATION_SCHEMA.TABLES')) return [{ tableName: 'User' }, { tableName: '_prisma_migrations' }, { tableName: 'SongRating' }]
+      if (sql === 'SHOW GRANTS') return [{ grant: 'GRANT SELECT ON `ecfc_prod`.* TO `app`@`%`' }]
+      throw new Error('Unexpected test query')
+    },
+  }
+  const target = { hostPresent: true, portPresent: false, port: 3306, databaseName: 'ecfc_prod' }
+  const context = await readDatabaseContext(db, target, ['SongRating'])
+  assert.equal(context.identityVerified, true)
+  assert.equal(context.currentSchemaTableCount, 249)
+  assert.equal(context.ledgerTableVisible, true)
+  assert.deepEqual(context.currentNames, ['SongRating', 'User', '_prisma_migrations'])
+  assert.equal(context.grantScope.scope, 'SCHEMA_WIDE')
+  assert.ok(calls.every(({ sql }) => /^SELECT\b/i.test(sql) || sql === 'SHOW GRANTS'))
+  assert.ok(calls.filter(({ sql }) => sql.includes('INFORMATION_SCHEMA.TABLES')).every(({ sql }) => /TABLE_SCHEMA\s*=\s*DATABASE\(\)/i.test(sql)))
+})
+
 test('multiple successful ledger records classify as duplicate success', () => {
   assert.equal(classifyMigration({ rows: [ledgerRow(), ledgerRow({ id: 'fixture-id-2', started_at: '2026-08-15 09:01:00.000' })], availableFields: requiredFields, productionSha: checksum, rcSha: checksum, schemaMatch: 'YES' }), 'DUPLICATE_SUCCESS')
 })
@@ -158,6 +257,7 @@ test('schema comparison verifies table, column, index, foreign-key, and check de
   const mismatch = compareSchema(manifest, actual)
   assert.equal(mismatch.match, 'NO')
   assert.equal(mismatch.unexpected.length, 1)
+  assert.ok(mismatch.actual.some(item => item.kind === 'COLUMN' && item.nullable === 'YES'))
 })
 
 test('raw database error messages are reduced to safe error classes', () => {
@@ -192,6 +292,9 @@ test('diagnostic performs no database write API calls or migration command', () 
   assert.doesNotMatch(source, /console\.(?:log|error)\([^\n]*(?:databaseUrl|error\.message|error\.stack|parsed\.DATABASE_URL)/i)
   const queryCalls = [...source.matchAll(/\$queryRawUnsafe\(\s*`?['`]?\s*(SELECT)\b/gi)]
   assert.ok(queryCalls.length >= 6)
+  assert.match(source, /\$queryRawUnsafe\('SHOW GRANTS'\)/)
+  assert.doesNotMatch(source, /FROM INFORMATION_SCHEMA\.TABLES WHERE TABLE_NAME IN/i)
+  assert.doesNotMatch(source, /console\.log\([^\n]*(?:databaseUrl|selectedDatabase|currentUser|grantScope\.rows)/i)
 })
 
 test('workflow is manual-only, read-only, and does not invoke release workflow', () => {

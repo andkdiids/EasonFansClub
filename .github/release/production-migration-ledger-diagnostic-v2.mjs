@@ -449,6 +449,24 @@ export function checksumsEqual(left, right) {
   return isChecksum(left) && isChecksum(right) && left.toLowerCase() === right.toLowerCase()
 }
 
+export function ledgerChecksumEvidence(rows, productionSha, rcSha) {
+  return rows.map((row, index) => {
+    const rowType = row.finished_at !== null && row.rolled_back_at === null
+      ? 'SUCCESS'
+      : row.finished_at === null && row.rolled_back_at !== null
+        ? 'ROLLED_BACK'
+        : row.finished_at === null && row.rolled_back_at === null
+          ? 'ACTIVE_FAILED'
+          : 'AMBIGUOUS'
+    return {
+      row: index + 1,
+      type: rowType,
+      productionMatch: isChecksum(row.checksum) && isChecksum(productionSha) ? (checksumsEqual(row.checksum, productionSha) ? 'YES' : 'NO') : 'UNKNOWN',
+      candidateMatch: isChecksum(row.checksum) && isChecksum(rcSha) ? (checksumsEqual(row.checksum, rcSha) ? 'YES' : 'NO') : 'UNKNOWN',
+    }
+  })
+}
+
 export function classifyMigration({ rows, availableFields, productionSha, rcSha, schemaMatch }) {
   if (!Array.isArray(rows) || !availableFields?.has('migration_name') || !availableFields?.has('started_at') || !availableFields?.has('finished_at') || !availableFields?.has('rolled_back_at')) return 'UNKNOWN'
   if (rows.length === 0) return 'UNKNOWN'
@@ -461,10 +479,12 @@ export function classifyMigration({ rows, availableFields, productionSha, rcSha,
   const rollbacks = rows.filter(row => row.finished_at === null && row.rolled_back_at !== null)
   if (successes.length + rollbacks.length !== rows.length) return 'UNKNOWN'
   const checksumAvailable = availableFields.has('checksum')
-  const checksumMismatch = checksumAvailable && rows.some(row => !isChecksum(row.checksum) || !isChecksum(productionSha) || !isChecksum(rcSha) || row.checksum.toLowerCase() !== productionSha.toLowerCase() || row.checksum.toLowerCase() !== rcSha.toLowerCase()) ||
-    (isChecksum(productionSha) && isChecksum(rcSha) && productionSha.toLowerCase() !== rcSha.toLowerCase())
-  if (checksumMismatch) return 'CHECKSUM_MISMATCH'
   if (successes.length > 1) return 'DUPLICATE_SUCCESS'
+  const checksumMismatch = successes.length === 1 && checksumAvailable &&
+    (!isChecksum(successes[0].checksum) || !isChecksum(productionSha) || !isChecksum(rcSha) ||
+      !checksumsEqual(successes[0].checksum, productionSha) || !checksumsEqual(successes[0].checksum, rcSha)) ||
+    (successes.length === 1 && isChecksum(productionSha) && isChecksum(rcSha) && !checksumsEqual(productionSha, rcSha))
+  if (checksumMismatch) return 'CHECKSUM_MISMATCH'
   if (!checksumAvailable || !isChecksum(productionSha) || !isChecksum(rcSha)) return 'UNKNOWN'
   if (successes.length === 0 && rollbacks.length === rows.length) return 'ROLLED_BACK_ONLY'
   if (schemaMatch !== 'YES') return 'UNKNOWN'
@@ -535,16 +555,26 @@ function canonicalRule(value) {
 
 export function compareSchema(manifest, actual) {
   const expected = expectedEntries(manifest)
-  const actualObjects = []
+  const targetTables = new Set([
+    ...manifest.tables,
+    ...manifest.columns.map(item => item.table),
+    ...manifest.indexes.map(item => item.table),
+    ...manifest.foreignKeys.map(item => item.table),
+    ...manifest.checks.map(item => item.table),
+  ])
+  const actualObjects = [
+    ...actual.tables.filter(item => targetTables.has(item.name)).map(item => ({ kind: 'TABLE', table: item.name, name: item.name, type: item.type })),
+    ...actual.columns.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'COLUMN', ...item })),
+    ...actual.indexes.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'INDEX', ...item })),
+    ...actual.foreignKeys.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'FOREIGN_KEY', ...item })),
+    ...actual.checks.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'CHECK', ...item })),
+  ]
   const missing = []
   const unexpected = []
   for (const item of expected) {
     const found = actualForExpected(item, actual)
     if (!found) missing.push(item)
-    else {
-      actualObjects.push(found)
-      if (!matchesExpected(item, found)) unexpected.push({ expected: item, actual: found })
-    }
+    else if (!matchesExpected(item, found)) unexpected.push({ expected: item, actual: found })
   }
   return {
     expected: sortValues(expected),
@@ -558,6 +588,7 @@ export function compareSchema(manifest, actual) {
 export function safeErrorClass(error, phase) {
   if (error instanceof DiagnosticFailure) return error.code
   if (phase === 'database-connect') return 'DATABASE_CONNECTIVITY_FAILED'
+  if (phase === 'database-context') return 'DATABASE_CONTEXT_READ_FAILED'
   if (phase === 'ledger-query') return 'LEDGER_METADATA_READ_FAILED'
   if (phase === 'schema-query') return 'SCHEMA_METADATA_READ_FAILED'
   if (error?.code === 'ENOENT') return 'REQUIRED_FILE_MISSING'
@@ -627,6 +658,93 @@ function safeMigrationDirectory(release, name) {
   return { bytes, sql: bytes.toString('utf8'), sha256: sha256(bytes) }
 }
 
+export function parseDatabaseUrlTarget(value) {
+  requireThat(typeof value === 'string' && value.length > 0, 'DATABASE_URL_MISSING')
+  let url
+  try { url = new URL(value) } catch { throw new DiagnosticFailure('DATABASE_URL_INVALID') }
+  requireThat(url.protocol === 'mysql:' && url.hostname && url.pathname.length > 1, 'DATABASE_URL_TARGET_INVALID')
+  let databaseName
+  try { databaseName = decodeURIComponent(url.pathname.slice(1)) } catch { throw new DiagnosticFailure('DATABASE_URL_TARGET_INVALID') }
+  requireThat(databaseName.length > 0 && !/[\0/\\]/.test(databaseName), 'DATABASE_URL_TARGET_INVALID')
+  const port = url.port ? Number(url.port) : 3306
+  requireThat(Number.isInteger(port) && port >= 1 && port <= 65535, 'DATABASE_URL_TARGET_INVALID')
+  return {
+    hostPresent: Boolean(url.hostname),
+    portPresent: Boolean(url.port),
+    port,
+    databaseName,
+  }
+}
+
+function grantText(row) {
+  if (typeof row === 'string') return row
+  if (!row || typeof row !== 'object') return ''
+  return Object.values(row).find(value => typeof value === 'string') ?? ''
+}
+
+function grantIdentifier(token) {
+  return token === '*' ? '*' : token.slice(1, -1).replace(/``/g, '`')
+}
+
+export function parseDatabaseGrantScope(rows, databaseName) {
+  if (!Array.isArray(rows) || rows.length === 0 || typeof databaseName !== 'string' || !databaseName) {
+    return { readable: false, scope: 'UNKNOWN', schemaWide: false, roleAssignments: 'UNKNOWN' }
+  }
+  const grants = rows.map(grantText)
+  if (grants.some(value => !value)) return { readable: false, scope: 'UNKNOWN', schemaWide: false, roleAssignments: 'UNKNOWN' }
+
+  let schemaGrant = false
+  let globalGrant = false
+  let objectGrant = false
+  let nonTableSchemaGrant = false
+  let matchingRevoke = false
+  let roleAssignments = false
+  const tableMetadataPrivileges = new Set([
+    'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'REFERENCES', 'ALTER', 'INDEX',
+    'CREATE', 'DROP', 'TRIGGER', 'LOCK TABLES', 'ALL PRIVILEGES',
+  ])
+  for (const statement of grants) {
+    const verb = statement.match(/^\s*(GRANT|REVOKE)\s+([\s\S]+?)\s+ON\s+/i)
+    if (!verb) {
+      if (/^\s*GRANT\s+.+\s+TO\s+/i.test(statement)) roleAssignments = true
+      continue
+    }
+    const target = statement.match(/\bON\s+(\*|`(?:``|[^`])+`)\s*\.\s*(\*|`(?:``|[^`])+`)/i)
+    if (!target || /^USAGE$/i.test(verb[2].trim())) continue
+    const database = grantIdentifier(target[1])
+    const object = grantIdentifier(target[2])
+    if (verb[1].toUpperCase() === 'REVOKE' && (database === '*' || database === databaseName)) matchingRevoke = true
+    if (verb[1].toUpperCase() !== 'GRANT') continue
+    const privileges = verb[2].trim().toUpperCase().split(/\s*,\s*/)
+    const exposesTableMetadata = privileges.some(privilege => tableMetadataPrivileges.has(privilege))
+    if (database === '*' && object === '*' && exposesTableMetadata) globalGrant = true
+    else if (database === databaseName && object === '*' && exposesTableMetadata) schemaGrant = true
+    else if (database === databaseName && object !== '*' && exposesTableMetadata) objectGrant = true
+    else if (database === databaseName && object === '*') nonTableSchemaGrant = true
+  }
+
+  const schemaWide = !matchingRevoke && (schemaGrant || globalGrant)
+  return {
+    readable: true,
+    scope: schemaWide ? (schemaGrant ? 'SCHEMA_WIDE' : 'GLOBAL_WIDE') : objectGrant ? 'OBJECT_LEVEL' : roleAssignments ? 'ROLE_DEPENDENT' : matchingRevoke ? 'REVOKED_OR_PARTIAL' : nonTableSchemaGrant ? 'NON_TABLE_PRIVILEGE' : 'NO_SCHEMA_SCOPE',
+    schemaWide,
+    roleAssignments: roleAssignments ? 'YES' : 'NO',
+  }
+}
+
+export function databaseIdentityMatches(configuredDatabase, selectedDatabase, schemaPresent) {
+  return typeof configuredDatabase === 'string' && configuredDatabase.length > 0 &&
+    typeof selectedDatabase === 'string' && selectedDatabase.length > 0 &&
+    configuredDatabase === selectedDatabase && schemaPresent === true
+}
+
+export function metadataVisibilityStatus({ schemaPresent, ledgerVisible, grantScope }) {
+  if (schemaPresent !== true || ledgerVisible !== true || !grantScope?.readable) return 'UNKNOWN'
+  if (grantScope.schemaWide === true) return 'VERIFIED'
+  if (grantScope.scope === 'OBJECT_LEVEL' || grantScope.scope === 'ROLE_DEPENDENT' || grantScope.scope === 'REVOKED_OR_PARTIAL') return 'PARTIAL'
+  return 'UNKNOWN'
+}
+
 function readReleaseEnvironment(release) {
   const releaseEnv = path.join(release, '.env')
   const sharedEnv = path.join(APP_ROOT, 'shared', '.env')
@@ -639,10 +757,52 @@ function readReleaseEnvironment(release) {
   const dotenv = requireFromRelease('dotenv')
   const parsed = dotenv.parse(fs.readFileSync(sharedEnvReal, 'utf8'))
   requireThat(typeof parsed.DATABASE_URL === 'string' && parsed.DATABASE_URL.length > 0, 'DATABASE_URL_MISSING')
-  let databaseUrl
-  try { databaseUrl = new URL(parsed.DATABASE_URL) } catch { throw new DiagnosticFailure('DATABASE_URL_INVALID') }
-  requireThat(databaseUrl.protocol === 'mysql:' && databaseUrl.hostname && databaseUrl.pathname.length > 1, 'DATABASE_URL_TARGET_INVALID')
-  return parsed.DATABASE_URL
+  return { databaseUrl: parsed.DATABASE_URL, target: parseDatabaseUrlTarget(parsed.DATABASE_URL) }
+}
+
+export async function readDatabaseContext(db, target, tableNames) {
+  const identityRows = await db.$queryRawUnsafe('SELECT DATABASE() AS selectedDatabase')
+  const selectedDatabase = identityRows[0]?.selectedDatabase === null || identityRows[0]?.selectedDatabase === undefined
+    ? null
+    : String(identityRows[0].selectedDatabase)
+  const schemaRows = await db.$queryRawUnsafe(
+    'SELECT SCHEMA_NAME AS schemaName FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = DATABASE()',
+  )
+  const schemaPresent = schemaRows.length === 1 && String(schemaRows[0].schemaName) === selectedDatabase
+  const tableCountRows = await db.$queryRawUnsafe(
+    'SELECT COUNT(*) AS tableCount FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()',
+  )
+  const currentSchemaTableCount = Number(tableCountRows[0]?.tableCount ?? 0)
+  const probeNames = [...new Set([...tableNames, '_prisma_migrations', 'User'])].sort()
+  const tableRows = probeNames.length
+    ? await db.$queryRawUnsafe(
+      `SELECT TABLE_NAME AS tableName FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${placeholders(probeNames)})`,
+      ...probeNames,
+    )
+    : []
+  const currentNames = [...new Set(tableRows.map(row => String(row.tableName)))].sort()
+
+  let grantScope
+  try {
+    grantScope = parseDatabaseGrantScope(await db.$queryRawUnsafe('SHOW GRANTS'), target.databaseName)
+  } catch {
+    grantScope = { readable: false, scope: 'UNKNOWN', schemaWide: false, roleAssignments: 'UNKNOWN' }
+  }
+
+  return {
+    selectedDatabase,
+    schemaPresent,
+    databaseNameMatches: typeof selectedDatabase === 'string' && target.databaseName === selectedDatabase,
+    identityVerified: databaseIdentityMatches(target.databaseName, selectedDatabase, schemaPresent),
+    currentSchemaTableCount: Number.isSafeInteger(currentSchemaTableCount) && currentSchemaTableCount >= 0 ? currentSchemaTableCount : 'UNKNOWN',
+    currentNames,
+    userTableVisible: currentNames.includes('User'),
+    ledgerTableVisible: currentNames.includes('_prisma_migrations'),
+    grantScope,
+    hostPresent: target.hostPresent,
+    portPresent: target.portPresent,
+    databasePresent: target.databaseName.length > 0,
+  }
 }
 
 function selectList(present) {
@@ -775,6 +935,8 @@ function successSummary(rows, present) {
 function outputMigration(name, prod, rc, rows, present, schema, emit) {
   const safeRows = preparedRows(rows, present)
   const summary = successSummary(rows, present)
+  const successes = rows.filter(row => row.finished_at !== null && row.rolled_back_at === null)
+  const rollbacks = rows.filter(row => row.finished_at === null && row.rolled_back_at !== null)
   emit('MIGRATION_NAME', name)
   emit('LEDGER_ROW_COUNT', rows.length)
   emit('LEDGER_RECORDS', JSON.stringify(safeRows))
@@ -789,18 +951,24 @@ function outputMigration(name, prod, rc, rows, present, schema, emit) {
   emit('RC_SHA256', rcSha)
   const ledgerChecksums = safeRows.map(row => row.checksum)
   emit('LEDGER_CHECKSUMS', JSON.stringify(ledgerChecksums))
+  emit('LEDGER_CHECKSUM_EVIDENCE', JSON.stringify(ledgerChecksumEvidence(rows, prodSha, rcSha)))
   emit('PRODUCTION_EQ_RC', isChecksum(prodSha) && isChecksum(rcSha) ? (checksumsEqual(prodSha, rcSha) ? 'YES' : 'NO') : 'UNKNOWN')
   emit('PRODUCTION_EQ_LEDGER', safeRows.length && safeRows.every(row => isChecksum(prodSha) && isChecksum(row.checksum) && row.checksum.toLowerCase() === prodSha.toLowerCase()) ? 'YES' : safeRows.length ? 'NO' : 'UNKNOWN')
   emit('RC_EQ_LEDGER', safeRows.length && safeRows.every(row => isChecksum(rcSha) && isChecksum(row.checksum) && row.checksum.toLowerCase() === rcSha.toLowerCase()) ? 'YES' : safeRows.length ? 'NO' : 'UNKNOWN')
+  emit('PRODUCTION_EQ_SUCCESS_LEDGER', successes.length === 1 ? (checksumsEqual(successes[0].checksum, prodSha) ? 'YES' : 'NO') : successes.length ? 'MULTIPLE' : 'NO_SUCCESS')
+  emit('RC_EQ_SUCCESS_LEDGER', successes.length === 1 ? (checksumsEqual(successes[0].checksum, rcSha) ? 'YES' : 'NO') : successes.length ? 'MULTIPLE' : 'NO_SUCCESS')
+  emit('ROLLBACK_CHECKSUMS_MATCH_PRODUCTION', rollbacks.length ? (rollbacks.every(row => checksumsEqual(row.checksum, prodSha)) ? 'YES' : 'NO') : 'NOT_APPLICABLE')
   if (schema) {
     emit('EXPECTED_SCHEMA_OBJECTS', JSON.stringify(schema.expected))
     emit('ACTUAL_SCHEMA_OBJECTS', JSON.stringify(schema.actual))
-    emit('MISSING_SCHEMA_OBJECTS', JSON.stringify(schema.missing))
-    emit('UNEXPECTED_SCHEMA_OBJECTS', JSON.stringify(schema.unexpected))
+    emit('SCHEMA_RAW_COMPARISON', schema.rawMatch ?? schema.match)
+    emit('MISSING_SCHEMA_OBJECTS', schema.visibilityVerified ? JSON.stringify(schema.missing) : 'UNKNOWN_METADATA_VISIBILITY')
+    emit('UNEXPECTED_SCHEMA_OBJECTS', schema.visibilityVerified ? JSON.stringify(schema.unexpected) : 'UNKNOWN_METADATA_VISIBILITY')
     emit('SCHEMA_MATCH', schema.match)
   } else {
     emit('EXPECTED_SCHEMA_OBJECTS', 'UNKNOWN')
     emit('ACTUAL_SCHEMA_OBJECTS', 'UNKNOWN')
+    emit('SCHEMA_RAW_COMPARISON', 'UNKNOWN')
     emit('MISSING_SCHEMA_OBJECTS', 'UNKNOWN')
     emit('UNEXPECTED_SCHEMA_OBJECTS', 'UNKNOWN')
     emit('SCHEMA_MATCH', 'UNKNOWN')
@@ -823,7 +991,7 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
   const shaBytes = lstatRegular(shaFile, 'PRODUCTION_RELEASE_SHA_INVALID', 256)
   const productionSha = shaBytes.toString('utf8').trim()
   requireThat(/^[0-9a-f]{40}$/.test(productionSha) && productionSha === expectedProductionSha, 'PRODUCTION_RELEASE_SHA_MISMATCH')
-  const databaseUrl = readReleaseEnvironment(release)
+  const { databaseUrl, target } = readReleaseEnvironment(release)
   process.env.DATABASE_URL = databaseUrl
   const requireFromRelease = createRequire(path.join(release, 'package.json'))
   let PrismaClient
@@ -842,9 +1010,6 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
   try {
     await db.$connect()
     emit('DATABASE_CONNECTIVITY', 'PASS')
-    phase = 'ledger-query'
-    const ledger = await readLedger(db, emit)
-    phase = 'schema-query'
     const tableNames = [...new Set([...productionManifests.values(), ...validatedPackage.manifests.values()].flatMap(manifest => [
       ...manifest.tables,
       ...manifest.columns.map(item => item.table),
@@ -852,11 +1017,36 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
       ...manifest.foreignKeys.map(item => item.table),
       ...manifest.checks.map(item => item.table),
     ]))].sort()
+    phase = 'database-context'
+    const databaseContext = await readDatabaseContext(db, target, tableNames)
+    emit('DATABASE_ENV_SOURCE', 'verified_current_release_shared_dotenv')
+    emit('DATABASE_URL_HOST_PRESENT', databaseContext.hostPresent ? 'YES' : 'NO')
+    emit('DATABASE_URL_PORT_PRESENT', databaseContext.portPresent ? 'YES' : 'NO')
+    emit('DATABASE_URL_DATABASE_PRESENT', databaseContext.databasePresent ? 'YES' : 'NO')
+    emit('DATABASE_URL_DATABASE_MATCH', databaseContext.databaseNameMatches ? 'YES' : 'NO')
+    emit('DATABASE_DEFAULT_SCHEMA_PRESENT', databaseContext.schemaPresent ? 'YES' : 'NO')
+    emit('DATABASE_IDENTITY_VERIFIED', databaseContext.identityVerified ? 'YES' : 'NO')
+    emit('CURRENT_SCHEMA_TABLE_COUNT', databaseContext.currentSchemaTableCount)
+    emit('USER_TABLE_METADATA_VISIBLE', databaseContext.userTableVisible ? 'YES' : 'NO')
+    emit('MIGRATION_TABLE_METADATA_VISIBLE', databaseContext.ledgerTableVisible ? 'YES' : 'NO')
+    emit('TARGET_TABLES_VISIBLE_CURRENT_SCHEMA', JSON.stringify(databaseContext.currentNames.filter(name => tableNames.includes(name))))
+    requireThat(databaseContext.identityVerified, 'DATABASE_CONTEXT_MISMATCH')
+
+    phase = 'ledger-query'
+    const ledger = await readLedger(db, emit)
+    const metadataVisibility = metadataVisibilityStatus({
+      schemaPresent: databaseContext.schemaPresent,
+      ledgerVisible: databaseContext.ledgerTableVisible && ledger.present.has('migration_name'),
+      grantScope: databaseContext.grantScope,
+    })
+    emit('METADATA_GRANTS_READ', databaseContext.grantScope.readable ? 'PASS' : 'FAIL')
+    emit('METADATA_PRIVILEGE_SCOPE', databaseContext.grantScope.scope)
+    emit('METADATA_VISIBILITY', metadataVisibility)
+    phase = 'schema-query'
     const actual = await readActualSchema(db, tableNames)
     emit('SCHEMA_METADATA_READ', 'PASS')
     emit('PRODUCTION_RELEASE_SHA', productionSha)
     emit('CANDIDATE_SHA', candidateSha)
-    emit('DATABASE_ENV_SOURCE', 'verified_current_release_dotenv')
 
     for (const name of MIGRATIONS) {
       const production = productionFiles.get(name)
@@ -864,15 +1054,27 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
       const productionManifest = productionManifests.get(name)
       const rcManifest = validatedPackage.manifests.get(name)
       const schema = compareSchema(productionManifest, actual)
+      const schemaResult = {
+        ...schema,
+        rawMatch: schema.match,
+        match: metadataVisibility === 'VERIFIED' ? schema.match : 'UNKNOWN',
+        visibilityVerified: metadataVisibility === 'VERIFIED',
+      }
       const sameExpectedObjects = compareMigrationManifests(productionManifest, rcManifest)
-      const schemaResult = sameExpectedObjects ? schema : { ...schema, match: 'UNKNOWN' }
+      if (!sameExpectedObjects) schemaResult.match = 'UNKNOWN'
       outputMigration(name, production, { sha256: rcSha }, ledger.rows.get(name) ?? [], ledger.present, schemaResult, emit)
       emit('PRODUCTION_EQ_RC_SCHEMA_OBJECTS', sameExpectedObjects ? 'YES' : 'NO')
     }
     emit('DIAGNOSTIC_STATUS', 'COMPLETE')
     return 0
   } catch (error) {
-    emit(phase === 'database-connect' ? 'DATABASE_CONNECTIVITY' : phase === 'ledger-query' ? 'LEDGER_READ' : 'SCHEMA_METADATA_READ', 'FAIL')
+    const phaseKey = {
+      'database-connect': 'DATABASE_CONNECTIVITY',
+      'database-context': 'DATABASE_CONTEXT',
+      'ledger-query': 'LEDGER_READ',
+      'schema-query': 'SCHEMA_METADATA_READ',
+    }[phase] ?? 'DIAGNOSTIC_PHASE'
+    emit(phaseKey, 'FAIL')
     emit('DIAGNOSTIC_ERROR_CLASS', safeErrorClass(error, phase))
     for (const name of MIGRATIONS) emit('CLASSIFICATION', 'UNKNOWN')
     emit('DIAGNOSTIC_STATUS', 'PARTIAL')
