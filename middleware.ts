@@ -155,6 +155,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (['GET', 'POST', 'PATCH'].includes(request.method) && /^\/api\/(?:admin\/)?activities\/[^/]+\/v2(?:\/.*)?$/.test(pathname)) return true
   if (request.method === 'GET') {
     return pathname === '/api/admin/cantonese/review'
+      || pathname === '/api/angel-gift'
+      || pathname === '/api/angel-gift/history'
       || pathname === '/api/home'
       || pathname === '/api/activities'
       || /^\/api\/activities\/[^/]+$/.test(pathname)
@@ -220,6 +222,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   }
   if (request.method === 'POST') {
     return pathname === '/api/admin/cantonese/content'
+      || pathname === '/api/angel-gift'
+      || pathname === '/api/angel-gift/recycle'
+      || pathname === '/api/angel-gift/recycle/all'
       || pathname === '/api/admin/cantonese/assist'
       || pathname === '/api/admin/cantonese/review/import/preview'
       || pathname === '/api/admin/cantonese/questions'

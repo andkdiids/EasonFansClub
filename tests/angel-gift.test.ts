@@ -170,13 +170,26 @@ test('有当前主题时也复用 User.points，执药与余药回收使用服�
   assert.doesNotMatch(client, /balance\s*[-+]\s*(?:drawCost|rewardAmount)/u)
 })
 
-test('Angel Gift GET 使用当前登录态、动态响应和 no-store，匿名不返回用户余额', () => {
+test('Angel Gift API uses shared Cookie/Bearer auth and private no-store responses', () => {
   const route = read('app/api/angel-gift/route.ts')
+  const history = read('app/api/angel-gift/history/route.ts')
+  const recycle = read('app/api/angel-gift/recycle/route.ts')
+  const recycleAll = read('app/api/angel-gift/recycle/all/route.ts')
   const page = read('app/angel-gift/page.tsx')
   assert.match(route, /export const dynamic = 'force-dynamic'/u)
   assert.match(route, /Cache-Control.*private, no-store/u)
-  assert.match(route, /const user = await getCurrentUser\(\)/u)
-  assert.match(route, /getPharmacyPageData\(user\?\.id, campaignId\)/u)
+  for (const apiRoute of [route, history, recycle, recycleAll]) {
+    assert.match(apiRoute, /requireRequestUser\(request\)/u)
+    assert.match(apiRoute, /Vary: 'Cookie, Authorization'/u)
+    assert.doesNotMatch(apiRoute, /requireUser\(|getCurrentUser\(/u)
+  }
+  assert.match(route, /resolveRequestAuth\(request\)/u)
+  assert.match(route, /getPharmacyPageData\(auth\.user\?\.id, campaignId\)/u)
   assert.match(page, /export const dynamic = 'force-dynamic'/u)
+  assert.match(page, /getCurrentUser\(\)/u)
   assert.match(read('lib/pharmacy.ts'), /user: userId \?[\s\S]*: null/u)
+  const middleware = read('middleware.ts')
+  for (const path of ['/api/angel-gift', '/api/angel-gift/history', '/api/angel-gift/recycle', '/api/angel-gift/recycle/all']) {
+    assert.ok(middleware.includes(path), `Mobile Bearer path missing: ${path}`)
+  }
 })
