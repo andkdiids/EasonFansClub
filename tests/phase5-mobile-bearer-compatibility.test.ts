@@ -161,7 +161,7 @@ test('Badge allowlist is exact and deferred Badge APIs remain excluded', () => {
   for (const approved of ['/api/users/me/badges', '/api/users/me/badge/equip', 'badge-series']) {
     assert.match(allowlist, new RegExp(approved.replaceAll('/', '\\/')), approved)
   }
-  for (const deferred of ['badge-showcase', 'badge-tasks', 'badges/recent', 'badge-year-review', 'share-card', '/api/angel-gift']) {
+  for (const deferred of ['badge-showcase', 'badge-tasks', 'badges/recent', 'badge-year-review', 'share-card']) {
     assert.doesNotMatch(allowlist, new RegExp(deferred.replaceAll('/', '\\/')), deferred)
   }
   assert.doesNotMatch(allowlist, /pathname\.startsWith\(['"]\/api\/users\/me\//)

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { getPharmacyPageData, PharmacyError, recycleAllPharmacyDuplicates } from '@/lib/pharmacy'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
-const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' }
 
 function errorResponse(error: unknown) {
   if (error instanceof PharmacyError) return NextResponse.json({ ok: false, code: error.code, message: error.message, details: error.details }, { status: error.status, headers: noStoreHeaders })
@@ -15,7 +15,7 @@ function errorResponse(error: unknown) {
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null

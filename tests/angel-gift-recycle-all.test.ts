@@ -78,7 +78,7 @@ test('回收规则必须是正整数且数量与奖励溢出会被拒绝', () =>
 })
 
 test('API 只接收请求幂等键，active campaign 和金额由服务端计算', () => {
-  assert.match(route, /requireUser\(\)/u)
+  assert.match(route, /requireRequestUser\(request\)/u)
   assert.match(route, /recycleAllPharmacyDuplicates\(\{ userId: guard\.user\.id, idempotencyKey \}\)/u)
   assert.doesNotMatch(route, /campaignId|rewardAmount|recycledCount|badgeId/u)
 })
