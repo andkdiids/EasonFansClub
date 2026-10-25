@@ -146,6 +146,8 @@ test('database identity requires exact URL schema match and visible current sche
   assert.equal(databaseIdentityMatches('ecfc_prod', 'other_db', true), false)
   assert.equal(databaseIdentityMatches('ecfc_prod', 'ecfc_prod', false), false)
   assert.equal(databaseIdentityMatches('ecfc_prod', null, true), false)
+  assert.equal(databaseIdentityMatches('ECFC_PROD', 'ecfc_prod', true, 1), true)
+  assert.equal(databaseIdentityMatches('ECFC_PROD', 'ecfc_prod', true, 0), false)
 })
 
 test('schema-wide grants establish metadata visibility while object-only grants do not', () => {
@@ -163,6 +165,12 @@ test('schema-wide grants establish metadata visibility while object-only grants 
   assert.equal(metadataVisibilityStatus({ schemaPresent: true, ledgerVisible: true, grantScope: objectOnly }), 'PARTIAL')
   assert.equal(metadataVisibilityStatus({ schemaPresent: true, ledgerVisible: true, grantScope: broad }), 'VERIFIED')
   assert.equal(metadataVisibilityStatus({ schemaPresent: true, ledgerVisible: false, grantScope: broad }), 'UNKNOWN')
+  assert.equal(parseDatabaseGrantScope([
+    { grant: 'GRANT SELECT ON `ECFC_PROD`.* TO `app`@`%`' },
+  ], 'ecfc_prod', 1).schemaWide, true)
+  assert.equal(parseDatabaseGrantScope([
+    { grant: 'GRANT SELECT ON `ECFC_PROD`.* TO `app`@`%`' },
+  ], 'ecfc_prod', 0).schemaWide, false)
 })
 
 test('partial revokes prevent a broad grant from being treated as complete visibility', () => {
@@ -189,6 +197,7 @@ test('database context probe stays on the selected schema and uses only read-onl
     async $queryRawUnsafe(sql, ...values) {
       calls.push({ sql, values })
       if (sql === 'SELECT DATABASE() AS selectedDatabase') return [{ selectedDatabase: 'ecfc_prod' }]
+      if (sql === 'SELECT @@lower_case_table_names AS lowerCaseTableNames') return [{ lowerCaseTableNames: 0 }]
       if (sql.includes('INFORMATION_SCHEMA.SCHEMATA')) return [{ schemaName: 'ecfc_prod' }]
       if (sql.includes('COUNT(*) AS tableCount')) return [{ tableCount: 249n }]
       if (sql.includes('INFORMATION_SCHEMA.TABLES')) return [{ tableName: 'User' }, { tableName: '_prisma_migrations' }, { tableName: 'SongRating' }]
@@ -199,12 +208,17 @@ test('database context probe stays on the selected schema and uses only read-onl
   const target = { hostPresent: true, portPresent: false, port: 3306, databaseName: 'ecfc_prod' }
   const context = await readDatabaseContext(db, target, ['SongRating'])
   assert.equal(context.identityVerified, true)
+  assert.equal(context.lowerCaseTableNames, 0)
   assert.equal(context.currentSchemaTableCount, 249)
   assert.equal(context.ledgerTableVisible, true)
+  assert.equal(context.userTableVisible, true)
+  assert.equal(context.userTableNameMatchesExpected, true)
   assert.deepEqual(context.currentNames, ['SongRating', 'User', '_prisma_migrations'])
   assert.equal(context.grantScope.scope, 'SCHEMA_WIDE')
   assert.ok(calls.every(({ sql }) => /^SELECT\b/i.test(sql) || sql === 'SHOW GRANTS'))
-  assert.ok(calls.filter(({ sql }) => sql.includes('INFORMATION_SCHEMA.TABLES')).every(({ sql }) => /TABLE_SCHEMA\s*=\s*DATABASE\(\)/i.test(sql)))
+  const tableMetadataQueries = calls.filter(({ sql }) => sql.includes('INFORMATION_SCHEMA.TABLES'))
+  assert.ok(tableMetadataQueries.every(({ sql }) => /TABLE_SCHEMA\s*=\s*DATABASE\(\)/i.test(sql)))
+  assert.ok(tableMetadataQueries.some(({ sql }) => /LOWER\(TABLE_NAME\)/i.test(sql)))
 })
 
 test('multiple successful ledger records classify as duplicate success', () => {
@@ -260,6 +274,22 @@ test('schema comparison verifies table, column, index, foreign-key, and check de
   assert.ok(mismatch.actual.some(item => item.kind === 'COLUMN' && item.nullable === 'YES'))
 })
 
+test('schema comparison follows lower_case_table_names for table identifiers but preserves case-sensitive behavior at zero', () => {
+  const manifest = parseMigrationSql('CREATE TABLE `Probe` (`id` INT NOT NULL, PRIMARY KEY (`id`));')
+  const actual = {
+    tables: [{ name: 'probe', type: 'BASE TABLE' }],
+    columns: [{ table: 'probe', name: 'ID', dataType: 'int', columnType: 'int', nullable: 'NO', defaultValue: null }],
+    indexes: [{ table: 'probe', name: 'primary', unique: true, columns: ['ID'] }],
+    foreignKeys: [],
+    checks: [],
+  }
+  assert.equal(compareSchema(manifest, actual, { lowerCaseTableNames: 1 }).match, 'YES')
+  const caseSensitiveComparison = compareSchema(manifest, actual, { lowerCaseTableNames: 0 })
+  assert.equal(caseSensitiveComparison.match, 'NO')
+  assert.ok(caseSensitiveComparison.actual.some(item => item.kind === 'TABLE' && item.name === 'probe'))
+  assert.equal(caseSensitiveComparison.missing.some(item => item.kind === 'TABLE' && item.name === 'Probe'), true)
+})
+
 test('raw database error messages are reduced to safe error classes', () => {
   const secretCanary = 'mysql://synthetic-user:synthetic-secret@db.invalid/schema'
   assert.equal(safeErrorClass(new Error(secretCanary), 'database-connect'), 'DATABASE_CONNECTIVITY_FAILED')
@@ -294,6 +324,7 @@ test('diagnostic performs no database write API calls or migration command', () 
   assert.ok(queryCalls.length >= 6)
   assert.match(source, /\$queryRawUnsafe\('SHOW GRANTS'\)/)
   assert.doesNotMatch(source, /FROM INFORMATION_SCHEMA\.TABLES WHERE TABLE_NAME IN/i)
+  assert.match(source, /LOWER\(TABLE_NAME\) IN/)
   assert.doesNotMatch(source, /console\.log\([^\n]*(?:databaseUrl|selectedDatabase|currentUser|grantScope\.rows)/i)
 })
 

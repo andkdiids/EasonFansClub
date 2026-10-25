@@ -520,15 +520,17 @@ function expectedEntries(manifest) {
 }
 
 function actualForExpected(expected, actual) {
-  if (expected.kind === 'TABLE') return actual.tables.find(item => item.name === expected.name) ?? null
-  if (expected.kind === 'COLUMN') return actual.columns.find(item => item.table === expected.table && item.name === expected.name) ?? null
-  if (expected.kind === 'INDEX') return actual.indexes.find(item => item.table === expected.table && item.name === expected.name) ?? null
-  if (expected.kind === 'FOREIGN_KEY') return actual.foreignKeys.find(item => item.table === expected.table && item.name === expected.name) ?? null
-  if (expected.kind === 'CHECK') return actual.checks.find(item => item.table === expected.table && item.name === expected.name) ?? null
+  const lowerCaseTableNames = actual.lowerCaseTableNames ?? 0
+  if (expected.kind === 'TABLE') return actual.tables.find(item => tableIdentifierEqual(item.name, expected.name, lowerCaseTableNames)) ?? null
+  const sameTable = item => tableIdentifierEqual(item.table, expected.table, lowerCaseTableNames)
+  if (expected.kind === 'COLUMN') return actual.columns.find(item => sameTable(item) && identifierEqual(item.name, expected.name)) ?? null
+  if (expected.kind === 'INDEX') return actual.indexes.find(item => sameTable(item) && identifierEqual(item.name, expected.name)) ?? null
+  if (expected.kind === 'FOREIGN_KEY') return actual.foreignKeys.find(item => sameTable(item) && identifierEqual(item.name, expected.name)) ?? null
+  if (expected.kind === 'CHECK') return actual.checks.find(item => sameTable(item) && identifierEqual(item.name, expected.name)) ?? null
   return null
 }
 
-function matchesExpected(expected, found) {
+function matchesExpected(expected, found, lowerCaseTableNames = 0) {
   if (!found) return false
   if (expected.kind === 'TABLE') return found.type === 'BASE TABLE'
   if (expected.kind === 'COLUMN') {
@@ -536,12 +538,12 @@ function matchesExpected(expected, found) {
       found.nullable === expected.nullable && normalizedActualDefault(found.defaultValue) === expected.defaultValue
   }
   if (expected.kind === 'INDEX') {
-    return found.unique === expected.unique && JSON.stringify(found.columns) === JSON.stringify(expected.columns)
+    return found.unique === expected.unique && identifierListsEqual(found.columns, expected.columns)
   }
   if (expected.kind === 'FOREIGN_KEY') {
-    return JSON.stringify(found.columns) === JSON.stringify(expected.columns) &&
-      found.referencedTable === expected.referencedTable &&
-      JSON.stringify(found.referencedColumns) === JSON.stringify(expected.referencedColumns) &&
+    return identifierListsEqual(found.columns, expected.columns) &&
+      tableIdentifierEqual(found.referencedTable, expected.referencedTable, lowerCaseTableNames) &&
+      identifierListsEqual(found.referencedColumns, expected.referencedColumns) &&
       canonicalRule(found.onDelete) === canonicalRule(expected.onDelete) && canonicalRule(found.onUpdate) === canonicalRule(expected.onUpdate)
   }
   if (expected.kind === 'CHECK') return expressionForCheck(found.expression) === expected.expression
@@ -553,7 +555,22 @@ function canonicalRule(value) {
   return rule === 'NO ACTION' ? 'RESTRICT' : rule
 }
 
-export function compareSchema(manifest, actual) {
+function identifierEqual(left, right) {
+  return typeof left === 'string' && typeof right === 'string' && left.toLowerCase() === right.toLowerCase()
+}
+
+function identifierListsEqual(left, right) {
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+    left.every((value, index) => identifierEqual(String(value), String(right[index])))
+}
+
+function tableIdentifierEqual(left, right, lowerCaseTableNames = 0) {
+  if (Number(lowerCaseTableNames) > 0) return identifierEqual(String(left), String(right))
+  return String(left) === String(right)
+}
+
+export function compareSchema(manifest, actual, { lowerCaseTableNames = 0 } = {}) {
+  const comparisonActual = { ...actual, lowerCaseTableNames }
   const expected = expectedEntries(manifest)
   const targetTables = new Set([
     ...manifest.tables,
@@ -561,20 +578,21 @@ export function compareSchema(manifest, actual) {
     ...manifest.indexes.map(item => item.table),
     ...manifest.foreignKeys.map(item => item.table),
     ...manifest.checks.map(item => item.table),
-  ])
+  ].map(name => String(name).toLowerCase()))
+  const targetTable = name => targetTables.has(String(name).toLowerCase())
   const actualObjects = [
-    ...actual.tables.filter(item => targetTables.has(item.name)).map(item => ({ kind: 'TABLE', table: item.name, name: item.name, type: item.type })),
-    ...actual.columns.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'COLUMN', ...item })),
-    ...actual.indexes.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'INDEX', ...item })),
-    ...actual.foreignKeys.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'FOREIGN_KEY', ...item })),
-    ...actual.checks.filter(item => targetTables.has(item.table)).map(item => ({ kind: 'CHECK', ...item })),
+    ...actual.tables.filter(item => targetTable(item.name)).map(item => ({ kind: 'TABLE', table: item.name, name: item.name, type: item.type })),
+    ...actual.columns.filter(item => targetTable(item.table)).map(item => ({ kind: 'COLUMN', ...item })),
+    ...actual.indexes.filter(item => targetTable(item.table)).map(item => ({ kind: 'INDEX', ...item })),
+    ...actual.foreignKeys.filter(item => targetTable(item.table)).map(item => ({ kind: 'FOREIGN_KEY', ...item })),
+    ...actual.checks.filter(item => targetTable(item.table)).map(item => ({ kind: 'CHECK', ...item })),
   ]
   const missing = []
   const unexpected = []
   for (const item of expected) {
-    const found = actualForExpected(item, actual)
+    const found = actualForExpected(item, comparisonActual)
     if (!found) missing.push(item)
-    else if (!matchesExpected(item, found)) unexpected.push({ expected: item, actual: found })
+    else if (!matchesExpected(item, found, lowerCaseTableNames)) unexpected.push({ expected: item, actual: found })
   }
   return {
     expected: sortValues(expected),
@@ -676,6 +694,10 @@ export function parseDatabaseUrlTarget(value) {
   }
 }
 
+function schemaIdentifierEqual(left, right, lowerCaseTableNames = 0) {
+  return tableIdentifierEqual(left, right, lowerCaseTableNames)
+}
+
 function grantText(row) {
   if (typeof row === 'string') return row
   if (!row || typeof row !== 'object') return ''
@@ -686,7 +708,7 @@ function grantIdentifier(token) {
   return token === '*' ? '*' : token.slice(1, -1).replace(/``/g, '`')
 }
 
-export function parseDatabaseGrantScope(rows, databaseName) {
+export function parseDatabaseGrantScope(rows, databaseName, lowerCaseTableNames = 0) {
   if (!Array.isArray(rows) || rows.length === 0 || typeof databaseName !== 'string' || !databaseName) {
     return { readable: false, scope: 'UNKNOWN', schemaWide: false, roleAssignments: 'UNKNOWN' }
   }
@@ -713,14 +735,15 @@ export function parseDatabaseGrantScope(rows, databaseName) {
     if (!target || /^USAGE$/i.test(verb[2].trim())) continue
     const database = grantIdentifier(target[1])
     const object = grantIdentifier(target[2])
-    if (verb[1].toUpperCase() === 'REVOKE' && (database === '*' || database === databaseName)) matchingRevoke = true
+    const matchingDatabase = schemaIdentifierEqual(database, databaseName, lowerCaseTableNames)
+    if (verb[1].toUpperCase() === 'REVOKE' && (database === '*' || matchingDatabase)) matchingRevoke = true
     if (verb[1].toUpperCase() !== 'GRANT') continue
     const privileges = verb[2].trim().toUpperCase().split(/\s*,\s*/)
     const exposesTableMetadata = privileges.some(privilege => tableMetadataPrivileges.has(privilege))
     if (database === '*' && object === '*' && exposesTableMetadata) globalGrant = true
-    else if (database === databaseName && object === '*' && exposesTableMetadata) schemaGrant = true
-    else if (database === databaseName && object !== '*' && exposesTableMetadata) objectGrant = true
-    else if (database === databaseName && object === '*') nonTableSchemaGrant = true
+    else if (matchingDatabase && object === '*' && exposesTableMetadata) schemaGrant = true
+    else if (matchingDatabase && object !== '*' && exposesTableMetadata) objectGrant = true
+    else if (matchingDatabase && object === '*') nonTableSchemaGrant = true
   }
 
   const schemaWide = !matchingRevoke && (schemaGrant || globalGrant)
@@ -732,10 +755,10 @@ export function parseDatabaseGrantScope(rows, databaseName) {
   }
 }
 
-export function databaseIdentityMatches(configuredDatabase, selectedDatabase, schemaPresent) {
+export function databaseIdentityMatches(configuredDatabase, selectedDatabase, schemaPresent, lowerCaseTableNames = 0) {
   return typeof configuredDatabase === 'string' && configuredDatabase.length > 0 &&
     typeof selectedDatabase === 'string' && selectedDatabase.length > 0 &&
-    configuredDatabase === selectedDatabase && schemaPresent === true
+    schemaIdentifierEqual(configuredDatabase, selectedDatabase, lowerCaseTableNames) && schemaPresent === true
 }
 
 export function metadataVisibilityStatus({ schemaPresent, ledgerVisible, grantScope }) {
@@ -765,6 +788,11 @@ export async function readDatabaseContext(db, target, tableNames) {
   const selectedDatabase = identityRows[0]?.selectedDatabase === null || identityRows[0]?.selectedDatabase === undefined
     ? null
     : String(identityRows[0].selectedDatabase)
+  const caseRows = await db.$queryRawUnsafe('SELECT @@lower_case_table_names AS lowerCaseTableNames')
+  const parsedLowerCaseTableNames = Number(caseRows[0]?.lowerCaseTableNames)
+  const lowerCaseTableNames = Number.isInteger(parsedLowerCaseTableNames) && parsedLowerCaseTableNames >= 0 && parsedLowerCaseTableNames <= 2
+    ? parsedLowerCaseTableNames
+    : 'UNKNOWN'
   const schemaRows = await db.$queryRawUnsafe(
     'SELECT SCHEMA_NAME AS schemaName FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = DATABASE()',
   )
@@ -776,15 +804,23 @@ export async function readDatabaseContext(db, target, tableNames) {
   const probeNames = [...new Set([...tableNames, '_prisma_migrations', 'User'])].sort()
   const tableRows = probeNames.length
     ? await db.$queryRawUnsafe(
-      `SELECT TABLE_NAME AS tableName FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${placeholders(probeNames)})`,
+      `SELECT TABLE_NAME AS tableName FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) IN (${probeNames.map(() => 'LOWER(?)').join(', ')})`,
       ...probeNames,
     )
     : []
   const currentNames = [...new Set(tableRows.map(row => String(row.tableName)))].sort()
+  const expectedTargetNames = [...new Set(tableNames)]
+  const targetNamesVisible = currentNames.filter(name => expectedTargetNames.some(expected => identifierEqual(name, expected)))
+  const targetNameCaseMismatches = expectedTargetNames.flatMap(expected => {
+    const candidates = currentNames.filter(name => identifierEqual(name, expected))
+    return candidates.length > 0 && !candidates.some(name => tableIdentifierEqual(name, expected, lowerCaseTableNames))
+      ? [{ expected, actual: candidates }]
+      : []
+  })
 
   let grantScope
   try {
-    grantScope = parseDatabaseGrantScope(await db.$queryRawUnsafe('SHOW GRANTS'), target.databaseName)
+    grantScope = parseDatabaseGrantScope(await db.$queryRawUnsafe('SHOW GRANTS'), target.databaseName, lowerCaseTableNames)
   } catch {
     grantScope = { readable: false, scope: 'UNKNOWN', schemaWide: false, roleAssignments: 'UNKNOWN' }
   }
@@ -792,12 +828,16 @@ export async function readDatabaseContext(db, target, tableNames) {
   return {
     selectedDatabase,
     schemaPresent,
-    databaseNameMatches: typeof selectedDatabase === 'string' && target.databaseName === selectedDatabase,
-    identityVerified: databaseIdentityMatches(target.databaseName, selectedDatabase, schemaPresent),
+    databaseNameMatches: typeof selectedDatabase === 'string' && schemaIdentifierEqual(target.databaseName, selectedDatabase, lowerCaseTableNames),
+    identityVerified: databaseIdentityMatches(target.databaseName, selectedDatabase, schemaPresent, lowerCaseTableNames),
+    lowerCaseTableNames,
     currentSchemaTableCount: Number.isSafeInteger(currentSchemaTableCount) && currentSchemaTableCount >= 0 ? currentSchemaTableCount : 'UNKNOWN',
     currentNames,
-    userTableVisible: currentNames.includes('User'),
-    ledgerTableVisible: currentNames.includes('_prisma_migrations'),
+    userTableVisible: currentNames.some(name => identifierEqual(name, 'User')),
+    userTableNameMatchesExpected: currentNames.some(name => tableIdentifierEqual(name, 'User', lowerCaseTableNames)),
+    ledgerTableVisible: currentNames.some(name => tableIdentifierEqual(name, '_prisma_migrations', lowerCaseTableNames)),
+    targetNamesVisible,
+    targetNameCaseMismatches,
     grantScope,
     hostPresent: target.hostPresent,
     portPresent: target.portPresent,
@@ -845,15 +885,15 @@ async function readLedger(db, emit) {
 async function readActualSchema(db, tableNames) {
   const actual = { tables: [], columns: [], indexes: [], foreignKeys: [], checks: [] }
   if (!tableNames.length) return actual
-  const inTables = placeholders(tableNames)
+  const inTables = tableNames.map(() => 'LOWER(?)').join(', ')
   const tables = await db.$queryRawUnsafe(
-    `SELECT TABLE_NAME AS name, TABLE_TYPE AS type FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${inTables})`,
+    `SELECT TABLE_NAME AS name, TABLE_TYPE AS type FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) IN (${inTables})`,
     ...tableNames,
   )
   actual.tables = tables.map(row => ({ name: String(row.name), type: String(row.type).toUpperCase() }))
 
   const columns = await db.$queryRawUnsafe(
-    `SELECT TABLE_NAME AS tableName, COLUMN_NAME AS name, DATA_TYPE AS dataType, COLUMN_TYPE AS columnType, IS_NULLABLE AS nullable, COLUMN_DEFAULT AS defaultValue FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${inTables})`,
+    `SELECT TABLE_NAME AS tableName, COLUMN_NAME AS name, DATA_TYPE AS dataType, COLUMN_TYPE AS columnType, IS_NULLABLE AS nullable, COLUMN_DEFAULT AS defaultValue FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) IN (${inTables})`,
     ...tableNames,
   )
   actual.columns = columns.map(row => ({
@@ -863,7 +903,7 @@ async function readActualSchema(db, tableNames) {
   }))
 
   const stats = await db.$queryRawUnsafe(
-    `SELECT TABLE_NAME AS tableName, INDEX_NAME AS name, NON_UNIQUE AS nonUnique, SEQ_IN_INDEX AS sequence, COLUMN_NAME AS columnName FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${inTables}) ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`,
+    `SELECT TABLE_NAME AS tableName, INDEX_NAME AS name, NON_UNIQUE AS nonUnique, SEQ_IN_INDEX AS sequence, COLUMN_NAME AS columnName FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) IN (${inTables}) ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`,
     ...tableNames,
   )
   const indexGroups = new Map()
@@ -880,11 +920,11 @@ async function readActualSchema(db, tableNames) {
   })
 
   const fkRows = await db.$queryRawUnsafe(
-    `SELECT TABLE_NAME AS tableName, CONSTRAINT_NAME AS name, COLUMN_NAME AS columnName, ORDINAL_POSITION AS sequence, REFERENCED_TABLE_NAME AS referencedTable, REFERENCED_COLUMN_NAME AS referencedColumn FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${inTables}) AND REFERENCED_TABLE_NAME IS NOT NULL ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION`,
+    `SELECT TABLE_NAME AS tableName, CONSTRAINT_NAME AS name, COLUMN_NAME AS columnName, ORDINAL_POSITION AS sequence, REFERENCED_TABLE_NAME AS referencedTable, REFERENCED_COLUMN_NAME AS referencedColumn FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) IN (${inTables}) AND REFERENCED_TABLE_NAME IS NOT NULL ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION`,
     ...tableNames,
   )
   const rules = await db.$queryRawUnsafe(
-    `SELECT TABLE_NAME AS tableName, CONSTRAINT_NAME AS name, DELETE_RULE AS onDelete, UPDATE_RULE AS onUpdate FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME IN (${inTables})`,
+    `SELECT TABLE_NAME AS tableName, CONSTRAINT_NAME AS name, DELETE_RULE AS onDelete, UPDATE_RULE AS onUpdate FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) IN (${inTables})`,
     ...tableNames,
   )
   const ruleMap = new Map(rules.map(row => [objectKey(String(row.tableName), String(row.name)), row]))
@@ -910,7 +950,7 @@ async function readActualSchema(db, tableNames) {
   })
 
   const checks = await db.$queryRawUnsafe(
-    `SELECT tc.TABLE_NAME AS tableName, tc.CONSTRAINT_NAME AS name, cc.CHECK_CLAUSE AS expression FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc JOIN INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.TABLE_NAME IN (${inTables}) AND tc.CONSTRAINT_TYPE = 'CHECK'`,
+    `SELECT tc.TABLE_NAME AS tableName, tc.CONSTRAINT_NAME AS name, cc.CHECK_CLAUSE AS expression FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc JOIN INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME WHERE tc.CONSTRAINT_SCHEMA = DATABASE() AND LOWER(tc.TABLE_NAME) IN (${inTables}) AND tc.CONSTRAINT_TYPE = 'CHECK'`,
     ...tableNames,
   )
   actual.checks = checks.map(row => ({ table: String(row.tableName), name: String(row.name), expression: String(row.expression) }))
@@ -1026,10 +1066,13 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
     emit('DATABASE_URL_DATABASE_MATCH', databaseContext.databaseNameMatches ? 'YES' : 'NO')
     emit('DATABASE_DEFAULT_SCHEMA_PRESENT', databaseContext.schemaPresent ? 'YES' : 'NO')
     emit('DATABASE_IDENTITY_VERIFIED', databaseContext.identityVerified ? 'YES' : 'NO')
+    emit('LOWER_CASE_TABLE_NAMES', databaseContext.lowerCaseTableNames)
     emit('CURRENT_SCHEMA_TABLE_COUNT', databaseContext.currentSchemaTableCount)
     emit('USER_TABLE_METADATA_VISIBLE', databaseContext.userTableVisible ? 'YES' : 'NO')
+    emit('USER_TABLE_IDENTIFIER_MATCHES_SERVER_RULE', databaseContext.userTableNameMatchesExpected ? 'YES' : 'NO')
     emit('MIGRATION_TABLE_METADATA_VISIBLE', databaseContext.ledgerTableVisible ? 'YES' : 'NO')
-    emit('TARGET_TABLES_VISIBLE_CURRENT_SCHEMA', JSON.stringify(databaseContext.currentNames.filter(name => tableNames.includes(name))))
+    emit('TARGET_TABLES_VISIBLE_CURRENT_SCHEMA', JSON.stringify(databaseContext.targetNamesVisible))
+    emit('TARGET_TABLE_NAME_CASE_MISMATCHES', JSON.stringify(databaseContext.targetNameCaseMismatches))
     requireThat(databaseContext.identityVerified, 'DATABASE_CONTEXT_MISMATCH')
 
     phase = 'ledger-query'
@@ -1053,7 +1096,7 @@ async function collect({ packageRoot, appRoot, expectedProductionSha, candidateS
       const rcSha = validatedPackage.hashes.get(name)
       const productionManifest = productionManifests.get(name)
       const rcManifest = validatedPackage.manifests.get(name)
-      const schema = compareSchema(productionManifest, actual)
+      const schema = compareSchema(productionManifest, actual, { lowerCaseTableNames: databaseContext.lowerCaseTableNames })
       const schemaResult = {
         ...schema,
         rawMatch: schema.match,
