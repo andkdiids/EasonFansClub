@@ -11,6 +11,7 @@ import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { publicModerationUserName } from '@/lib/content-moderation'
 import { getClientIp, rateLimitResponse } from '@/lib/security'
+import { normalizeStoredUserAgent } from '@/lib/request-metadata'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 
@@ -20,7 +21,7 @@ async function recordLoginSecurityEvent(userId: string, request: Request, reason
       userId,
       action: 'LOGIN_FAILED',
       ipAddress: getClientIp(request),
-      userAgent: request.headers.get('user-agent')?.slice(0, 255) || null,
+      userAgent: normalizeStoredUserAgent(request.headers.get('user-agent')),
       metadata: { reason },
     },
   }).catch((error) => {

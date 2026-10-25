@@ -25,6 +25,14 @@ test('持久化 User-Agent 统一限制在 WantListen 数据库列长度内', ()
   assert.equal(normalizeStoredUserAgent(''), null)
 })
 
+test('User-Agent 长度按 Unicode code point 截断且不拆分 emoji', () => {
+  const value = '😀'.repeat(STORED_USER_AGENT_MAX_LENGTH + 1)
+  const normalized = normalizeStoredUserAgent(value)
+
+  assert.equal(Array.from(normalized || '').length, STORED_USER_AGENT_MAX_LENGTH)
+  assert.equal(normalized, '😀'.repeat(STORED_USER_AGENT_MAX_LENGTH))
+})
+
 test('长 Android / 桌面端微信 User-Agent 仍可安全写入反作弊日志', async () => {
   const created: Array<Record<string, unknown>> = []
   const database = {

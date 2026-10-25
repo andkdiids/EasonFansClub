@@ -10,6 +10,7 @@ import { resolveMobileBetaAccess } from '@/lib/mobile-beta'
 import { prisma } from '@/lib/prisma'
 import { sanitizeTextPreservingLength } from '@/lib/text'
 import { consumeRateLimitFailClosed as consumeAtomicRateLimit, type AtomicRateLimitStore } from '@/lib/fail-closed-rate-limit'
+import { normalizeStoredUserAgent } from '@/lib/request-metadata'
 
 export { getClientIp, normalizeIp } from '@/lib/client-ip'
 
@@ -377,7 +378,7 @@ export async function logSecurityAbuse(
   input: { endpoint: string; userId?: string | null; reason: string },
 ) {
   const ipAddress = getClientIp(request)
-  const userAgent = request.headers.get('user-agent')?.slice(0, 255) || null
+  const userAgent = normalizeStoredUserAgent(request.headers.get('user-agent'))
   const metadata = {
     endpoint: input.endpoint.slice(0, 120),
     method: request.method.toUpperCase(),
