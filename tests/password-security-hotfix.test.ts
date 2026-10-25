@@ -48,7 +48,10 @@ function transactionFixture(options: { passwordUpdateCount?: number; resetAvaila
       updateMany: async (input: unknown) => { calls.push({ operation: 'mobileAuthSession.updateMany', input }); return { count: 3 } },
     },
     accountSecurityLog: {
-      create: async (input: unknown) => { calls.push({ operation: 'accountSecurityLog.create', input }); return {} },
+      create: async (input: unknown) => {
+        calls.push({ operation: 'accountSecurityLog.create', input })
+        return {}
+      },
     },
   }
   return { tx: tx as never, calls }
@@ -111,6 +114,97 @@ test('统一密码事务更新哈希、消费恢复凭证、撤销 Web 与 Mobil
   const audit = calls[4].input as { data: { metadata: unknown } }
   assert.deepEqual(audit.data.metadata, { method: 'CURRENT_PASSWORD' })
   assert.doesNotMatch(JSON.stringify(audit), /old-hash|new-hash|passwordHash/i)
+})
+
+test('密码重置审计写入前将超长 User-Agent 限制到 VARCHAR(191)', async () => {
+  const { tx, calls } = transactionFixture()
+  const userAgent = 'A'.repeat(500)
+
+  await commitPasswordChange(tx, {
+    userId: 'user-a', passwordHash: 'new-hash', action: 'PASSWORD_RESET_SUCCEEDED',
+    method: 'SECURITY_QUESTION', ipAddress: '127.0.0.1', userAgent,
+  })
+
+  const audit = calls.at(-1)?.input as { data: { userAgent: string | null } }
+  assert.equal(audit.data.userAgent, userAgent.slice(0, 191))
+  assert.equal(audit.data.userAgent?.length, 191)
+  assert.deepEqual(calls.map((call) => call.operation), [
+    'user.updateMany',
+    'passwordResetToken.updateMany',
+    'onlineSession.deleteMany',
+    'mobileAuthSession.updateMany',
+    'accountSecurityLog.create',
+  ])
+})
+
+test('审计写入失败保持事务异常并回滚密码、凭证和全部会话状态', async () => {
+  const original = {
+    passwordHash: 'old-hash',
+    resetConsumed: false,
+    onlineSessionCount: 2,
+    mobileSessionRevoked: false,
+  }
+  let committedState = { ...original }
+  const calls: string[] = []
+  const auditFailure = new Error('synthetic audit write failure')
+
+  const makeTx = (pending: typeof original) => ({
+    user: {
+      updateMany: async () => {
+        calls.push('user.updateMany')
+        pending.passwordHash = 'new-hash'
+        return { count: 1 }
+      },
+    },
+    passwordResetToken: {
+      updateMany: async (input: { where?: { id?: string } }) => {
+        calls.push(input.where?.id ? 'passwordResetToken.claim' : 'passwordResetToken.consumeOutstanding')
+        pending.resetConsumed = true
+        return { count: 1 }
+      },
+    },
+    onlineSession: {
+      deleteMany: async () => {
+        calls.push('onlineSession.deleteMany')
+        pending.onlineSessionCount = 0
+        return { count: 2 }
+      },
+    },
+    mobileAuthSession: {
+      updateMany: async () => {
+        calls.push('mobileAuthSession.updateMany')
+        pending.mobileSessionRevoked = true
+        return { count: 3 }
+      },
+    },
+    accountSecurityLog: {
+      create: async () => {
+        calls.push('accountSecurityLog.create')
+        throw auditFailure
+      },
+    },
+  })
+  const mockTransaction = async <T>(action: (tx: never) => Promise<T>) => {
+    const pending = { ...committedState }
+    const result = await action(makeTx(pending) as never)
+    committedState = pending
+    return result
+  }
+
+  await assert.rejects(mockTransaction((tx) => consumeResetTokenAndChangePassword(tx, {
+    resetTokenId: 'token-a', resetTokenType: 'SECURITY_QUESTION', userId: 'user-a',
+    expectedPasswordHash: 'old-hash', passwordHash: 'new-hash', action: 'PASSWORD_RESET_SUCCEEDED',
+    method: 'SECURITY_QUESTION', ipAddress: '127.0.0.1', userAgent: 'A'.repeat(500),
+  })), auditFailure)
+  assert.deepEqual(calls, [
+    'passwordResetToken.claim',
+    'user.updateMany',
+    'passwordResetToken.consumeOutstanding',
+    'onlineSession.deleteMany',
+    'mobileAuthSession.updateMany',
+    'accountSecurityLog.create',
+  ])
+  assert.deepEqual(committedState, original)
 })
 
 test('旧密码并发变更的 CAS 冲突会中止且不撤销会话或写审计', async () => {
@@ -261,5 +355,28 @@ test('所有密码变更入口统一撤销 Mobile refresh 会话并触发 Web JW
   ]) {
     const route = source(path)
     assert.match(route, /commitPasswordChange|consumeResetTokenAndChangePassword/)
+  }
+})
+
+test('密码找回路由仍在同一 Prisma 事务中消费凭证并传播审计写入失败', () => {
+  const route = source('app/api/auth/forgot-password/reset/route.ts')
+  const transaction = source('lib/password-security-transaction.ts')
+
+  assert.match(route, /prisma\.\$transaction\(\(tx\) => consumeResetTokenAndChangePassword/)
+  assert.match(route, /logPasswordRecoveryError\('\/api\/auth\/forgot-password\/reset', error, \{ stage: 'commit' \}\)/)
+  assert.match(transaction, /await tx\.accountSecurityLog\.create/)
+  assert.doesNotMatch(transaction, /accountSecurityLog\.create[\s\S]{0,120}catch/)
+  assert.match(transaction, /userAgent: normalizeStoredUserAgent\(input\.userAgent\)/)
+})
+
+test('所有直接写入 AccountSecurityLog 的 User-Agent 入口共用字段长度归一化', () => {
+  for (const path of [
+    'app/api/auth/login/route.ts',
+    'lib/auth-credentials.ts',
+    'lib/security.ts',
+  ]) {
+    const writer = source(path)
+    assert.match(writer, /normalizeStoredUserAgent\(/, `${path} must normalize stored user-agent metadata`)
+    assert.doesNotMatch(writer, /userAgent: request\.headers\.get\('user-agent'\)\?\.slice\(0,\s*(255|500)\)/)
   }
 })

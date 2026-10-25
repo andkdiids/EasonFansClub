@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { normalizeStoredUserAgent } from './request-metadata'
 
 type PasswordSecurityTransaction = Pick<
   Prisma.TransactionClient,
@@ -57,7 +58,7 @@ export async function commitPasswordChange(
       userId: input.userId,
       action: input.action,
       ipAddress: input.ipAddress,
-      userAgent: input.userAgent,
+      userAgent: normalizeStoredUserAgent(input.userAgent),
       metadata: { method: input.method },
       createdAt: now,
     },

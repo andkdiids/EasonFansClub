@@ -6,6 +6,7 @@ import { consumeApiRateLimits, getClientIp, logSecurityAbuse, type RateLimitResu
 import { findCompleteUserByLoginIdentifier } from '@/lib/users'
 import { normalizeText } from '@/lib/validators'
 import { hashToken } from '@/lib/tokens'
+import { normalizeStoredUserAgent } from '@/lib/request-metadata'
 
 export const loginUserQueryTimeoutMs = 4500
 
@@ -92,7 +93,7 @@ export async function recordLoginSecurityEvent(userId: string, request: Request,
       userId,
       action: 'LOGIN_FAILED',
       ipAddress: getClientIp(request),
-      userAgent: request.headers.get('user-agent')?.slice(0, 255) || null,
+      userAgent: normalizeStoredUserAgent(request.headers.get('user-agent')),
       metadata: { reason },
     },
   }).catch((error) => {

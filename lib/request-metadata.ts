@@ -6,5 +6,5 @@ export const STORED_USER_AGENT_MAX_LENGTH = 191
 
 export function normalizeStoredUserAgent(value: string | null | undefined): string | null {
   if (!value) return null
-  return value.slice(0, STORED_USER_AGENT_MAX_LENGTH)
+  return Array.from(value).slice(0, STORED_USER_AGENT_MAX_LENGTH).join('')
 }
