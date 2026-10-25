@@ -1,0 +1,283 @@
+name: Production Migration Ledger Diagnostic V2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-migration-ledger-diagnostic-v2
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Read-only production migration ledger evidence
+    runs-on: ubuntu-22.04
+    environment: Production
+    timeout-minutes: 20
+    env:
+      EXPECTED_CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
+      EXPECTED_PRODUCTION_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
+      APP_DIR: /home/apps/easonfansclub
+    steps:
+      - name: Require manual dispatch from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || { echo "::error::Manual dispatch only."; exit 1; }
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Dispatch from main only."; exit 1; }
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Workflow source SHA is invalid."; exit 1; }
+
+      - name: Checkout exact workflow source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified checkout v4
+        with:
+          ref: ${{ github.sha }}
+          path: workflow-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify immutable candidate branch and commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_CANDIDATE_SHA: ${{ env.EXPECTED_CANDIDATE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$(git -C "$GITHUB_WORKSPACE/workflow-source" rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$EXPECTED_CANDIDATE_SHA" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]]
+          REPOSITORY="$GITHUB_REPOSITORY" API_URL="$GITHUB_API_URL" EXPECTED="$EXPECTED_CANDIDATE_SHA" node --input-type=module <<'NODE'
+          const repository = process.env.REPOSITORY
+          const api = process.env.API_URL
+          const token = process.env.GH_TOKEN
+          const expected = process.env.EXPECTED
+          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || '') || !/^https:\/\//.test(api || '') || !/^[0-9a-f]{40}$/.test(expected || '') || !token) process.exit(1)
+          const url = `${api}/repos/${repository}/git/ref/heads/integration/mobile-server-rc-v3`
+          const response = await fetch(url, { headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'x-github-api-version': '2022-11-28' } })
+          if (!response.ok) { console.log('CANDIDATE_REF_VERIFIED=NO'); process.exit(1) }
+          const body = await response.json()
+          if (body?.object?.sha !== expected) { console.log('CANDIDATE_REF_VERIFIED=NO'); process.exit(1) }
+          console.log('CANDIDATE_REF_VERIFIED=YES')
+          NODE
+
+      - name: Checkout exact immutable candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # verified checkout v4
+        with:
+          ref: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
+          path: candidate-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate six SQL files and prepare exact diagnostic package
+        id: package
+        shell: bash
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ env.EXPECTED_CANDIDATE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$(git -C "$GITHUB_WORKSPACE/candidate-source" rev-parse HEAD)" == "$EXPECTED_CANDIDATE_SHA" ]]
+          helper="$GITHUB_WORKSPACE/workflow-source/.github/release/production-migration-ledger-diagnostic-v2.mjs"
+          node "$helper" validate-candidate "$GITHUB_WORKSPACE/candidate-source" "$EXPECTED_CANDIDATE_SHA"
+          base="$RUNNER_TEMP/ecfc-migration-ledger-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          package_dir="$base/package"
+          archive="$base.tar.gz"
+          printf 'package_dir=%s\narchive=%s\n' "$package_dir" "$archive" >> "$GITHUB_OUTPUT"
+          mkdir -m 700 "$base"
+          mkdir -m 700 "$package_dir" "$package_dir/candidate" "$package_dir/candidate/migrations"
+          cp -- "$helper" "$package_dir/diagnostic-v2.mjs"
+          for name in \
+            20260815090000_add_song_ratings \
+            20260816120000_add_want_listen_game \
+            20260820140000_add_want_listen_session_exclusion \
+            20260821120000_add_rate_limit_log \
+            20260826100000_add_anywhere_door_social_posts \
+            20260827100000_add_anywhere_door_safety_state; do
+            mkdir -m 700 "$package_dir/candidate/migrations/$name"
+            cp -- "$GITHUB_WORKSPACE/candidate-source/prisma/migrations/$name/migration.sql" "$package_dir/candidate/migrations/$name/migration.sql"
+          done
+          tar -czf "$archive" -C "$package_dir" diagnostic-v2.mjs \
+            candidate/migrations/20260815090000_add_song_ratings/migration.sql \
+            candidate/migrations/20260816120000_add_want_listen_game/migration.sql \
+            candidate/migrations/20260820140000_add_want_listen_session_exclusion/migration.sql \
+            candidate/migrations/20260821120000_add_rate_limit_log/migration.sql \
+            candidate/migrations/20260826100000_add_anywhere_door_social_posts/migration.sql \
+            candidate/migrations/20260827100000_add_anywhere_door_safety_state/migration.sql
+          listing="$(tar -tzf "$archive")"
+          expected_listing="$(printf '%s\n' \
+            diagnostic-v2.mjs \
+            candidate/migrations/20260815090000_add_song_ratings/migration.sql \
+            candidate/migrations/20260816120000_add_want_listen_game/migration.sql \
+            candidate/migrations/20260820140000_add_want_listen_session_exclusion/migration.sql \
+            candidate/migrations/20260821120000_add_rate_limit_log/migration.sql \
+            candidate/migrations/20260826100000_add_anywhere_door_social_posts/migration.sql \
+            candidate/migrations/20260827100000_add_anywhere_door_safety_state/migration.sql)"
+          [[ "$listing" == "$expected_listing" ]] || { echo "::error::Diagnostic package contents are not exact."; exit 1; }
+
+      - name: Prepare and verify pinned production SSH identity
+        id: ssh
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/ecfc-migration-ledger-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          hosts="$RUNNER_TEMP/ecfc-migration-ledger-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.hosts"
+          printf 'key_file=%s\nhosts_file=%s\n' "$key" "$hosts" >> "$GITHUB_OUTPUT"
+          umask 077
+          SSH_HOST="$SSH_HOST" SSH_USER="$SSH_USER" SSH_PORT="$SSH_PORT" SSH_KEY="$SSH_KEY" PINNED_HOSTS="$PINNED_HOSTS" PINNED_FINGERPRINT="$PINNED_FINGERPRINT" \
+            node "$GITHUB_WORKSPACE/workflow-source/.github/release/production-migration-ledger-diagnostic-v2.mjs" validate-host
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          chmod 600 "$key" "$hosts"
+
+      - name: Create confined temporary production directory
+        id: remote
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+        run: |
+          set -euo pipefail
+          remote="$SSH_USER@$SSH_HOST"
+          remote_dir="$(ssh -q -T -i "$KEY_FILE" -p "$SSH_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 "$remote" \
+            'umask 077; mktemp -d /tmp/ecfc-migration-ledger-v2.XXXXXXXX' 2>/dev/null)" || {
+              echo "::error::Unable to create the confined temporary diagnostic directory."; exit 1;
+            }
+          [[ "$remote_dir" =~ ^/tmp/ecfc-migration-ledger-v2\.[A-Za-z0-9]{8}$ ]] || { echo "::error::Remote temporary path did not match the fixed allowlist."; exit 1; }
+          printf 'remote_dir=%s\n' "$remote_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Transfer only the reviewed diagnostic package
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_DIR" =~ ^/tmp/ecfc-migration-ledger-v2\.[A-Za-z0-9]{8}$ ]]
+          remote="$SSH_USER@$SSH_HOST"
+          scp -q -i "$KEY_FILE" -P "$SSH_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 \
+            "$ARCHIVE" "$remote:$REMOTE_DIR/diagnostic.tar.gz" 2>/dev/null || {
+              echo "::error::Unable to transfer the exact diagnostic package."; exit 1;
+            }
+
+      - name: Read only the six production ledger and schema records
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
+          EXPECTED_PRODUCTION_SHA: ${{ env.EXPECTED_PRODUCTION_SHA }}
+          EXPECTED_CANDIDATE_SHA: ${{ env.EXPECTED_CANDIDATE_SHA }}
+          APP_DIR: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_DIR" =~ ^/tmp/ecfc-migration-ledger-v2\.[A-Za-z0-9]{8}$ ]]
+          remote="$SSH_USER@$SSH_HOST"
+          ssh -q -T -i "$KEY_FILE" -p "$SSH_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 "$remote" \
+            "bash -s -- '$REMOTE_DIR' '$APP_DIR' '$EXPECTED_PRODUCTION_SHA' '$EXPECTED_CANDIDATE_SHA'" 2>/dev/null <<'REMOTE'
+          set -euo pipefail
+          tmp="${1:-}"
+          app_dir="${2:-}"
+          production_sha="${3:-}"
+          candidate_sha="${4:-}"
+          [[ "$tmp" =~ ^/tmp/ecfc-migration-ledger-v2\.[A-Za-z0-9]{8}$ ]] || exit 1
+          [[ "$app_dir" == /home/apps/easonfansclub ]] || exit 1
+          [[ "$production_sha" == 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063 ]]
+          [[ "$candidate_sha" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]]
+          trap 'rm -rf -- "$tmp"' EXIT
+          [[ -d "$tmp" && ! -L "$tmp" && -f "$tmp/diagnostic.tar.gz" && ! -L "$tmp/diagnostic.tar.gz" ]]
+          command -v tar >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v flock >/dev/null 2>&1 || exit 1
+          [[ -f "$app_dir/.deploy.lock" && ! -L "$app_dir/.deploy.lock" ]]
+          exec 9< "$app_dir/.deploy.lock"
+          flock -s -n 9 || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=DEPLOY_IN_PROGRESS\n'; exit 1; }
+          unpack="$tmp/unpacked"
+          mkdir -m 700 "$unpack"
+          listing="$tmp/archive.list"
+          tar -tzf "$tmp/diagnostic.tar.gz" > "$listing" 2>/dev/null || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_INVALID\n'; exit 1; }
+          expected="$(printf '%s\n' \
+            diagnostic-v2.mjs \
+            candidate/migrations/20260815090000_add_song_ratings/migration.sql \
+            candidate/migrations/20260816120000_add_want_listen_game/migration.sql \
+            candidate/migrations/20260820140000_add_want_listen_session_exclusion/migration.sql \
+            candidate/migrations/20260821120000_add_rate_limit_log/migration.sql \
+            candidate/migrations/20260826100000_add_anywhere_door_social_posts/migration.sql \
+            candidate/migrations/20260827100000_add_anywhere_door_safety_state/migration.sql)"
+          [[ "$(cat "$listing")" == "$expected" ]] || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_PATHS_INVALID\n'; exit 1; }
+          rm -f -- "$listing"
+          tar -xzf "$tmp/diagnostic.tar.gz" --no-same-owner --no-same-permissions -C "$unpack" 2>/dev/null || { printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=PACKAGE_INVALID\n'; exit 1; }
+          node "$unpack/diagnostic-v2.mjs" collect "$unpack" "$app_dir" "$production_sha" "$candidate_sha"
+          REMOTE
+
+      - name: Remove confined temporary production directory
+        if: always() && steps.remote.outputs.remote_dir != ''
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          REMOTE_DIR: ${{ steps.remote.outputs.remote_dir }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_DIR" =~ ^/tmp/ecfc-migration-ledger-v2\.[A-Za-z0-9]{8}$ ]]
+          remote="$SSH_USER@$SSH_HOST"
+          ssh -q -T -i "$KEY_FILE" -p "$SSH_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15 "$remote" \
+            "bash -s -- '$REMOTE_DIR'" 2>/dev/null <<'REMOTE_CLEANUP'
+          set -euo pipefail
+          path="${1:-}"
+          [[ "$path" =~ ^/tmp/ecfc-migration-ledger-v2\.[A-Za-z0-9]{8}$ ]] || exit 1
+          rm -rf -- "$path"
+          REMOTE_CLEANUP
+
+      - name: Remove runner temporary package and credentials
+        if: always()
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          PACKAGE_DIR: ${{ steps.package.outputs.package_dir }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/ecfc-migration-ledger-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ -z "$PACKAGE_DIR" || "$PACKAGE_DIR" == "$prefix/package" ]] || exit 1
+          [[ -z "$ARCHIVE" || "$ARCHIVE" == "$prefix.tar.gz" ]] || exit 1
+          [[ -z "$KEY_FILE" || "$KEY_FILE" == "$prefix.key" ]] || exit 1
+          [[ -z "$HOSTS_FILE" || "$HOSTS_FILE" == "$prefix.hosts" ]] || exit 1
+          [[ -z "$PACKAGE_DIR" ]] || rm -rf -- "$prefix"
+          [[ -z "$ARCHIVE" ]] || rm -f -- "$ARCHIVE"
+          [[ -z "$KEY_FILE" ]] || rm -f -- "$KEY_FILE"
+          [[ -z "$HOSTS_FILE" ]] || rm -f -- "$HOSTS_FILE"
