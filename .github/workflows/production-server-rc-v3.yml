@@ -20,7 +20,7 @@ env:
   CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
   ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
   FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
-  AUDITED_WORKFLOW_PARENT_SHA: 5f24c5e6940cfc508ab2a0f5f2367569f538a55b
+  AUDITED_WORKFLOW_PARENT_SHA: 2af3edd090e0aff9a5f65597af9a84c28b8a2ef4
   DB_BACKUP_CONFIRMED: "YES"
   BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
@@ -90,9 +90,12 @@ jobs:
           const diagnosticWorkflowInstall = '78beb732382ede1e81aebe6b64e78031240a8589'
           const workerIdentityFix = 'b064eae2a36bb4382e6d23d72f79e78a7aba72b7'
           const auditedParent = process.env.AUDITED_WORKFLOW_PARENT_SHA
-          const expectedAuditedParent = '5f24c5e6940cfc508ab2a0f5f2367569f538a55b'
+          const expectedAuditedParent = '2af3edd090e0aff9a5f65597af9a84c28b8a2ef4'
           const workflowPath = '.github/workflows/production-server-rc-v3.yml'
           const diagnosticWorkflowPath = '.github/workflows/diagnose-production-instagram-worker.yml'
+          const migrationDiagnosticHelperPath = '.github/release/production-migration-ledger-diagnostic-v2.mjs'
+          const migrationDiagnosticTestPath = '.github/release/test-production-migration-ledger-diagnostic-v2.mjs'
+          const migrationDiagnosticWorkflowPath = '.github/workflows/production-migration-ledger-diagnostic-v2.yml'
           const headers = {
             accept: 'application/vnd.github+json',
             authorization: 'Bearer ' + token,
@@ -134,7 +137,13 @@ jobs:
             requireOnlyWorkflowChanged(`${diagnosticWorkflowInstall}..${workerIdentityFix}`)
             requireSingleParent(expectedMain, auditedParent)
             requireOnlyWorkflowChanged(`${auditedParent}..${expectedMain}`)
-            requireOnlyPathsChanged(`${originalBase}..${expectedMain}`, [workflowPath, diagnosticWorkflowPath])
+            requireOnlyPathsChanged(`${originalBase}..${expectedMain}`, [
+              workflowPath,
+              diagnosticWorkflowPath,
+              migrationDiagnosticHelperPath,
+              migrationDiagnosticTestPath,
+              migrationDiagnosticWorkflowPath,
+            ])
           }
           async function getRef(name) {
             const response = await fetch(`${api}/repos/${repo}/git/ref/heads/${name.split('/').map(encodeURIComponent).join('/')}`, { headers })
@@ -1000,6 +1009,19 @@ jobs:
                 list.push(row)
                 byName.set(row.migration_name, list)
               }
+              // Prisma may retain rolled-back attempts beside one later successful application.
+              // Accept only that exact shape; checksum decisions use the unique successful row.
+              function classifyMigrationLedgerRows(ledger) {
+                const successfulRows = ledger.filter(row => Boolean(row.finished_at) && !row.rolled_back_at)
+                const rolledBackRows = ledger.filter(row => Boolean(row.rolled_back_at) && !row.finished_at)
+                const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
+                const validSuccessHistory = successfulRows.length === 1 && successfulRows.length + rolledBackRows.length === ledger.length
+                return {
+                  activeFailed,
+                  succeeded: validSuccessHistory,
+                  checksum: validSuccessHistory ? String(successfulRows[0].checksum) : '',
+                }
+              }
               const all = new Set([...productionTree.keys(), ...candidateTree.keys(), ...byName.keys()])
               let failed = 0, divergence = 0, pending = 0, unexpectedPending = 0, applied = 0
               let lotteryApplied = 0
@@ -1007,15 +1029,15 @@ jobs:
                 const inProduction = productionTree.has(name)
                 const inRc = candidateTree.has(name)
                 const ledger = byName.get(name) || []
-                const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
-                const duplicate = ledger.length > 1
-                const succeeded = ledger.length === 1 && !!ledger[0].finished_at && !ledger[0].rolled_back_at
-                const dbChecksum = ledger.length === 1 ? String(ledger[0].checksum) : ''
+                const ledgerState = classifyMigrationLedgerRows(ledger)
+                const activeFailed = ledgerState.activeFailed
+                const succeeded = ledgerState.succeeded
+                const dbChecksum = ledgerState.checksum
                 const pHash = productionTree.get(name)
                 const rHash = candidateTree.get(name)
                 let status = 'UNKNOWN'
                 if (activeFailed) { status = 'FAILED'; failed++ }
-                else if (duplicate || ledger.some(row => !!row.rolled_back_at) || (inProduction && !inRc) || (!inProduction && !inRc && ledger.length > 0) || (inProduction && inRc && pHash !== rHash) || (ledger.length === 1 && ((pHash && dbChecksum !== pHash) || (rHash && dbChecksum !== rHash)))) { status = 'DIVERGENT'; divergence++ }
+                else if ((ledger.length > 0 && !succeeded) || (inProduction && !inRc) || (!inProduction && !inRc && ledger.length > 0) || (inProduction && inRc && pHash !== rHash) || (succeeded && ((pHash && dbChecksum !== pHash) || (rHash && dbChecksum !== rHash)))) { status = 'DIVERGENT'; divergence++ }
                 else if (succeeded && inRc && dbChecksum === rHash) { status = 'APPLIED'; applied++ }
                 else if (ledger.length === 0 && inRc) { status = 'PENDING'; pending++; if (!approvedPending.has(name)) unexpectedPending++ }
                 else { status = 'DIVERGENT'; divergence++ }
@@ -1289,20 +1311,31 @@ jobs:
                 list.push(row)
                 byName.set(row.migration_name, list)
               }
+              // Keep postcheck semantics identical to preflight for Prisma retry history.
+              function classifyMigrationLedgerRows(ledger) {
+                const successfulRows = ledger.filter(row => Boolean(row.finished_at) && !row.rolled_back_at)
+                const rolledBackRows = ledger.filter(row => Boolean(row.rolled_back_at) && !row.finished_at)
+                const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
+                const validSuccessHistory = successfulRows.length === 1 && successfulRows.length + rolledBackRows.length === ledger.length
+                return {
+                  activeFailed,
+                  succeeded: validSuccessHistory,
+                  checksum: validSuccessHistory ? String(successfulRows[0].checksum) : '',
+                }
+              }
               let pending = 0, failed = 0, divergence = 0, unexpectedPending = 0
               const applied = new Set()
               for (const [name, checksum] of expected) {
                 const ledger = byName.get(name) || []
-                const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
+                const ledgerState = classifyMigrationLedgerRows(ledger)
+                const activeFailed = ledgerState.activeFailed
                 if (activeFailed) failed++
                 if (ledger.length === 0) {
                   pending++
                   if (!approved.has(name)) unexpectedPending++
-                } else if (ledger.length !== 1 || ledger.some(row => !!row.rolled_back_at)) {
+                } else if (!ledgerState.succeeded) {
                   divergence++
-                } else if (!ledger[0].finished_at) {
-                  if (!activeFailed) failed++
-                } else if (String(ledger[0].checksum) !== checksum) {
+                } else if (ledgerState.checksum !== checksum) {
                   divergence++
                 } else {
                   applied.add(name)
