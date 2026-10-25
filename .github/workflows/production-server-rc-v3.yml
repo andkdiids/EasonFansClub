@@ -980,7 +980,11 @@ jobs:
               for (const name of approvedPending) if (!names.has(name)) fail('APPROVED_MIGRATION_MISSING_FROM_RC')
               for (const name of requiredExisting) if (!names.has(name)) fail('REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC')
               if (!names.has(migration3HistoricalExceptionPolicy.name)) fail('M3_MANIFEST_HASH_MISMATCH')
-            } catch { fail('CANDIDATE_MANIFEST_INVALID') }
+            } catch (error) {
+              const reason = error?.safeCode
+              const safeManifestReasons = new Set(['APPROVED_MIGRATION_MISSING_FROM_RC', 'REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC', 'M3_MANIFEST_HASH_MISMATCH'])
+              fail(safeManifestReasons.has(reason) ? reason : 'CANDIDATE_MANIFEST_INVALID')
+            }
             let productionTree
             try { productionTree = readTree(path.join(process.env.CURRENT_RELEASE, 'prisma/migrations')) }
             catch (error) {

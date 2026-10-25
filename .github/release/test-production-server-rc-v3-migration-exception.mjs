@@ -95,6 +95,23 @@ test('preflight and postcheck expose the same checksum and history failure class
   assert.doesNotMatch(workflow, /MIGRATION_3_EXCEPTION_CONTEXT_INVALID|MIGRATION_3_SCHEMA_NOT_VERIFIED/)
 })
 
+test('preflight preserves specific migration-missing manifest failure codes', () => {
+  const start = workflow.indexOf('candidate = JSON.parse')
+  const end = workflow.indexOf('let productionTree', start)
+  assert.ok(start >= 0 && end > start, 'expected candidate manifest validation block')
+  const block = workflow.slice(start, end)
+  const catchMatch = block.match(/^[ \t]*} catch \(error\) \{\r?\n([\s\S]*?)^[ \t]*}[ \t]*$/m)
+  assert.ok(catchMatch, 'expected manifest validation error mapping')
+  const runCatch = vm.runInNewContext(`error => {${catchMatch[1]}}`, {
+    fail(code) { throw new Error(code) },
+  })
+  for (const code of ['APPROVED_MIGRATION_MISSING_FROM_RC', 'REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC', 'M3_MANIFEST_HASH_MISMATCH']) {
+    assert.throws(() => runCatch(Object.assign(new Error('internal detail'), { safeCode: code })), { message: code })
+  }
+  assert.throws(() => runCatch(new Error('parse detail')), { message: 'CANDIDATE_MANIFEST_INVALID' })
+  assert.throws(() => runCatch(Object.assign(new Error('unsafe detail'), { safeCode: 'UNEXPECTED_INTERNAL_ERROR' })), { message: 'CANDIDATE_MANIFEST_INVALID' })
+})
+
 test('schema mismatch and incomplete schema metadata fail closed', () => {
   const helper = loadHelper(helperBlocks[0])
   assert.equal(helper.isMigration3HistoricalChecksumException(makeInput({ schemaVerified: false })), false)
