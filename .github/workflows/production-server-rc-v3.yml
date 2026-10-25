@@ -20,7 +20,7 @@ env:
   CANDIDATE_SHA: 2b6d06b630dfed7e8ce6e518e10bda52b919af8b
   ORIGINAL_MAIN_BASE_SHA: 1a0c8b9d85c7aa61f5a70e37bcdee563b5bff063
   FIRST_WORKFLOW_INSTALL_SHA: 97c4fa066f32e02d0dbc0f5c47df53678c3d3ddc
-  AUDITED_WORKFLOW_PARENT_SHA: 061ccc26777de6697795be393d2afa2d0df6a5ca
+  AUDITED_WORKFLOW_PARENT_SHA: 382bc0e2359b97513e947ca4ee2da18e70dabb29
   DB_BACKUP_CONFIRMED: "YES"
   BACKUP_CONFIRMATION_SOURCE: "MANUAL_OWNER_CONFIRMATION"
 
@@ -90,7 +90,7 @@ jobs:
           const diagnosticWorkflowInstall = '78beb732382ede1e81aebe6b64e78031240a8589'
           const workerIdentityFix = 'b064eae2a36bb4382e6d23d72f79e78a7aba72b7'
           const auditedParent = process.env.AUDITED_WORKFLOW_PARENT_SHA
-          const expectedAuditedParent = '061ccc26777de6697795be393d2afa2d0df6a5ca'
+          const expectedAuditedParent = '382bc0e2359b97513e947ca4ee2da18e70dabb29'
           const workflowPath = '.github/workflows/production-server-rc-v3.yml'
           const diagnosticWorkflowPath = '.github/workflows/diagnose-production-instagram-worker.yml'
           const migrationDiagnosticHelperPath = '.github/release/production-migration-ledger-diagnostic-v2.mjs'
@@ -137,7 +137,7 @@ jobs:
             requireSingleParent(workerIdentityFix, diagnosticWorkflowInstall)
             requireOnlyWorkflowChanged(`${diagnosticWorkflowInstall}..${workerIdentityFix}`)
             requireSingleParent(expectedMain, auditedParent)
-            requireOnlyWorkflowChanged(`${auditedParent}..${expectedMain}`)
+            requireOnlyPathsChanged(`${auditedParent}..${expectedMain}`, [workflowPath, migration3ExceptionTestPath])
             requireOnlyPathsChanged(`${originalBase}..${expectedMain}`, [
               workflowPath,
               diagnosticWorkflowPath,
@@ -802,7 +802,9 @@ jobs:
             'REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC', ...productionTreeReasons,
             'MIGRATION_FILE_UNSAFE', 'MIGRATION_NAME_INVALID', 'MIGRATION_LEDGER_INVALID',
             'UNAPPROVED_MIGRATION_STATE', 'TOPIC_LOTTERY_MIGRATION_APPROVAL_REQUIRED_OR_DIVERGENCE',
-            'MIGRATION_3_SCHEMA_NOT_VERIFIED', 'MIGRATION_3_EXCEPTION_CONTEXT_INVALID',
+            'M3_PRODUCTION_HASH_MISMATCH', 'M3_CANDIDATE_HASH_MISMATCH',
+            'M3_MANIFEST_HASH_MISMATCH', 'M3_LEDGER_CHECKSUM_MISMATCH',
+            'M3_LEDGER_HISTORY_INVALID', 'M3_SCHEMA_MISMATCH', 'M3_SCHEMA_READ_FAILED',
           ])
           const safeMigrationReason = error => safeMigrationReasons.has(error?.safeCode) ? error.safeCode : 'DATABASE_READ_ONLY_CHECK_FAILED'
           const databaseDiagnostics = {
@@ -893,14 +895,24 @@ jobs:
             const expectedColumns = ['excludedFromLeaderboard', 'status', 'completedAt']
             return ordered.every((row, index) => row.INDEX_NAME === 'WantListenSession_excludedFromLeaderboard_status_completedAt_idx' && Number(row.NON_UNIQUE) === 1 && Number(row.SEQ_IN_INDEX) === index + 1 && row.COLUMN_NAME === expectedColumns[index])
           }
-          function isMigration3HistoricalChecksumException({ name, productionHash, candidateHash, ledger, schemaVerified }) {
+          function migration3HistoricalExceptionFailureCode({ name, productionHash, candidateHash, manifestHash, ledger, schemaVerified }) {
             const policy = migration3HistoricalExceptionPolicy
-            if (name !== policy.name || productionHash !== policy.productionSqlSha256 || candidateHash !== policy.candidateSqlSha256 || schemaVerified !== true || !Array.isArray(ledger)) return false
+            if (name !== policy.name) return 'M3_MANIFEST_HASH_MISMATCH'
+            if (productionHash !== policy.productionSqlSha256) return 'M3_PRODUCTION_HASH_MISMATCH'
+            if (candidateHash !== policy.candidateSqlSha256) return 'M3_CANDIDATE_HASH_MISMATCH'
+            if (manifestHash !== candidateHash) return 'M3_MANIFEST_HASH_MISMATCH'
+            if (!Array.isArray(ledger)) return 'M3_LEDGER_HISTORY_INVALID'
             const successfulRows = ledger.filter(row => Boolean(row.finished_at) && !row.rolled_back_at)
             const rolledBackRows = ledger.filter(row => Boolean(row.rolled_back_at) && !row.finished_at)
             const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
-            const validSuccessHistory = successfulRows.length === 1 && successfulRows.length + rolledBackRows.length === ledger.length
-            return !activeFailed && validSuccessHistory && String(successfulRows[0].checksum) === policy.successfulLedgerChecksum
+            const validSuccessHistory = ledger.every(row => Boolean(row.started_at)) && successfulRows.length === 1 && successfulRows.length + rolledBackRows.length === ledger.length
+            if (activeFailed || !validSuccessHistory) return 'M3_LEDGER_HISTORY_INVALID'
+            if (String(successfulRows[0].checksum) !== policy.successfulLedgerChecksum) return 'M3_LEDGER_CHECKSUM_MISMATCH'
+            if (schemaVerified !== true) return 'M3_SCHEMA_MISMATCH'
+            return null
+          }
+          function isMigration3HistoricalChecksumException({ name, productionHash, candidateHash, manifestHash, ledger, schemaVerified }) {
+            return migration3HistoricalExceptionFailureCode({ name, productionHash, candidateHash, manifestHash, ledger, schemaVerified }) === null
           }
           // END M3 historical checksum exception
           function readTree(root) {
@@ -967,6 +979,7 @@ jobs:
               }
               for (const name of approvedPending) if (!names.has(name)) fail('APPROVED_MIGRATION_MISSING_FROM_RC')
               for (const name of requiredExisting) if (!names.has(name)) fail('REQUIRED_EXISTING_MIGRATION_MISSING_FROM_RC')
+              if (!names.has(migration3HistoricalExceptionPolicy.name)) fail('M3_MANIFEST_HASH_MISMATCH')
             } catch { fail('CANDIDATE_MANIFEST_INVALID') }
             let productionTree
             try { productionTree = readTree(path.join(process.env.CURRENT_RELEASE, 'prisma/migrations')) }
@@ -1055,9 +1068,10 @@ jobs:
               const migration3ProductionHash = productionTree.get(migration3HistoricalExceptionPolicy.name)
               const migration3CandidateHash = candidateTree.get(migration3HistoricalExceptionPolicy.name)
               let migration3ExceptionApplied = false
-              const migration3SqlIdentityMatches = migration3ProductionHash === migration3HistoricalExceptionPolicy.productionSqlSha256 && migration3CandidateHash === migration3HistoricalExceptionPolicy.candidateSqlSha256
-              if (migration3LedgerState.succeeded && migration3LedgerState.checksum !== migration3HistoricalExceptionPolicy.successfulLedgerChecksum) fail('MIGRATION_3_EXCEPTION_CONTEXT_INVALID')
-              if (migration3SqlIdentityMatches && migration3LedgerState.succeeded && migration3LedgerState.checksum === migration3HistoricalExceptionPolicy.successfulLedgerChecksum) {
+              if (migration3Ledger.length > 0) {
+                if (migration3LedgerState.activeFailed || !migration3LedgerState.succeeded) fail('M3_LEDGER_HISTORY_INVALID')
+                const preSchemaFailure = migration3HistoricalExceptionFailureCode({ name: migration3HistoricalExceptionPolicy.name, productionHash: migration3ProductionHash, candidateHash: migration3CandidateHash, manifestHash: candidateTree.get(migration3HistoricalExceptionPolicy.name), ledger: migration3Ledger, schemaVerified: false })
+                if (preSchemaFailure && preSchemaFailure !== 'M3_SCHEMA_MISMATCH') fail(preSchemaFailure)
                 databaseDiagnostics.failedAt = 'migration_schema_verification'
                 let migration3Columns
                 let migration3Indexes
@@ -1065,12 +1079,12 @@ jobs:
                   migration3Columns = await client.$queryRawUnsafe("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'WantListenSession' AND COLUMN_NAME = 'excludedFromLeaderboard'")
                   migration3Indexes = await client.$queryRawUnsafe("SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'WantListenSession' AND INDEX_NAME = 'WantListenSession_excludedFromLeaderboard_status_completedAt_idx' ORDER BY SEQ_IN_INDEX")
                 } catch (error) {
-                  failDatabase(safeDatabaseErrorClass(error, 'schema_read'))
+                  fail('M3_SCHEMA_READ_FAILED')
                 }
                 const schemaVerified = migration3SchemaMatches(migration3Columns, migration3Indexes)
-                if (!schemaVerified) fail('MIGRATION_3_SCHEMA_NOT_VERIFIED')
-                migration3ExceptionApplied = isMigration3HistoricalChecksumException({ name: migration3HistoricalExceptionPolicy.name, productionHash: migration3ProductionHash, candidateHash: migration3CandidateHash, ledger: migration3Ledger, schemaVerified })
-                if (!migration3ExceptionApplied) fail('MIGRATION_3_EXCEPTION_CONTEXT_INVALID')
+                const schemaFailure = migration3HistoricalExceptionFailureCode({ name: migration3HistoricalExceptionPolicy.name, productionHash: migration3ProductionHash, candidateHash: migration3CandidateHash, manifestHash: candidateTree.get(migration3HistoricalExceptionPolicy.name), ledger: migration3Ledger, schemaVerified })
+                if (schemaFailure) fail(schemaFailure)
+                migration3ExceptionApplied = true
                 databaseDiagnostics.failedAt = 'migration_reconciliation'
               }
               const all = new Set([...productionTree.keys(), ...candidateTree.keys(), ...byName.keys()])
@@ -1315,7 +1329,9 @@ jobs:
           [[ "$CANDIDATE_RELEASE" =~ ^/home/apps/easonfansclub/releases/[^/]+$ ]] || { echo "::error::Candidate release path is invalid."; exit 1; }
           [[ "$CANDIDATE_MIGRATIONS_B64" =~ ^[A-Za-z0-9+/=]+$ && ${#CANDIDATE_MIGRATIONS_B64} -le 65536 ]] || { echo "::error::Migration manifest is invalid."; exit 1; }
           remote="${SSH_USER}@${SSH_HOST}"
-          remote_command="bash -s -- '$APP_DIR' '$CANDIDATE_SHA' '$CANDIDATE_RELEASE' '$CANDIDATE_MIGRATIONS_B64'"
+          [[ "$EXPECTED_MIGRATION_3_PRODUCTION_SQL_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo 'POST_DEPLOY_MIGRATION_CHECK=FAIL'; echo 'REASON=M3_PRODUCTION_HASH_MISMATCH'; exit 1; }
+          [[ "$EXPECTED_MIGRATION_3_CANDIDATE_SQL_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo 'POST_DEPLOY_MIGRATION_CHECK=FAIL'; echo 'REASON=M3_CANDIDATE_HASH_MISMATCH'; exit 1; }
+          remote_command="bash -s -- '$APP_DIR' '$CANDIDATE_SHA' '$CANDIDATE_RELEASE' '$CANDIDATE_MIGRATIONS_B64' '$EXPECTED_MIGRATION_3_PRODUCTION_SQL_SHA256' '$EXPECTED_MIGRATION_3_CANDIDATE_SQL_SHA256'"
           set +e
           output="$(timeout --foreground --signal=TERM --kill-after=20s 13m ssh -T \
             -i "$KEY_FILE" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20 \
@@ -1323,8 +1339,11 @@ jobs:
             "$remote" "$remote_command" <<'REMOTE'
           set -euo pipefail
           app_dir="$1"; candidate_sha="$2"; candidate_release="$3"; manifest_b64="$4"
+          migration3_production_sha256="$5"; migration3_candidate_sha256="$6"
           fail() { printf 'POST_DEPLOY_MIGRATION_CHECK=FAIL\nREASON=%s\n' "$1"; exit 1; }
           [[ "$app_dir" == /home/apps/easonfansclub && "$candidate_sha" == 2b6d06b630dfed7e8ce6e518e10bda52b919af8b ]] || fail RELEASE_IDENTITY_MISMATCH
+          [[ "$migration3_production_sha256" =~ ^[0-9a-f]{64}$ ]] || fail M3_PRODUCTION_HASH_MISMATCH
+          [[ "$migration3_candidate_sha256" =~ ^[0-9a-f]{64}$ ]] || fail M3_CANDIDATE_HASH_MISMATCH
           [[ "$candidate_release" == "$app_dir"/releases/* && -d "$candidate_release" ]] || fail CANDIDATE_RELEASE_UNAVAILABLE
           [[ "$manifest_b64" =~ ^[A-Za-z0-9+/=]+$ && ${#manifest_b64} -le 65536 ]] || fail MIGRATION_MANIFEST_INVALID
           current_target="$(readlink -f -- "$app_dir/current" 2>/dev/null || true)"
@@ -1334,6 +1353,8 @@ jobs:
           export NVM_DIR="$HOME/.nvm"; if [[ -s "$NVM_DIR/nvm.sh" ]]; then . "$NVM_DIR/nvm.sh"; fi
           command -v node >/dev/null 2>&1 || fail NODE_UNAVAILABLE
           [[ -r "$current_target/.env" && -s "$current_target/.env" && -d "$current_target/node_modules" ]] || fail RELEASE_RUNTIME_INCOMPLETE
+          export EXPECTED_MIGRATION_3_PRODUCTION_SQL_SHA256="$migration3_production_sha256"
+          export EXPECTED_MIGRATION_3_CANDIDATE_SQL_SHA256="$migration3_candidate_sha256"
           APP_RELEASE="$current_target" CANDIDATE_MIGRATIONS_B64="$manifest_b64" node <<'NODE'
           const fs = require('node:fs')
           const path = require('node:path')
@@ -1352,21 +1373,31 @@ jobs:
             const expectedColumns = ['excludedFromLeaderboard', 'status', 'completedAt']
             return ordered.every((row, index) => row.INDEX_NAME === 'WantListenSession_excludedFromLeaderboard_status_completedAt_idx' && Number(row.NON_UNIQUE) === 1 && Number(row.SEQ_IN_INDEX) === index + 1 && row.COLUMN_NAME === expectedColumns[index])
           }
-          function isMigration3HistoricalChecksumException({ name, productionHash, candidateHash, ledger, schemaVerified }) {
+          function migration3HistoricalExceptionFailureCode({ name, productionHash, candidateHash, manifestHash, ledger, schemaVerified }) {
             const policy = migration3HistoricalExceptionPolicy
-            if (name !== policy.name || productionHash !== policy.productionSqlSha256 || candidateHash !== policy.candidateSqlSha256 || schemaVerified !== true || !Array.isArray(ledger)) return false
+            if (name !== policy.name) return 'M3_MANIFEST_HASH_MISMATCH'
+            if (productionHash !== policy.productionSqlSha256) return 'M3_PRODUCTION_HASH_MISMATCH'
+            if (candidateHash !== policy.candidateSqlSha256) return 'M3_CANDIDATE_HASH_MISMATCH'
+            if (manifestHash !== candidateHash) return 'M3_MANIFEST_HASH_MISMATCH'
+            if (!Array.isArray(ledger)) return 'M3_LEDGER_HISTORY_INVALID'
             const successfulRows = ledger.filter(row => Boolean(row.finished_at) && !row.rolled_back_at)
             const rolledBackRows = ledger.filter(row => Boolean(row.rolled_back_at) && !row.finished_at)
             const activeFailed = ledger.some(row => !row.finished_at && !row.rolled_back_at)
-            const validSuccessHistory = successfulRows.length === 1 && successfulRows.length + rolledBackRows.length === ledger.length
-            return !activeFailed && validSuccessHistory && String(successfulRows[0].checksum) === policy.successfulLedgerChecksum
+            const validSuccessHistory = ledger.every(row => Boolean(row.started_at)) && successfulRows.length === 1 && successfulRows.length + rolledBackRows.length === ledger.length
+            if (activeFailed || !validSuccessHistory) return 'M3_LEDGER_HISTORY_INVALID'
+            if (String(successfulRows[0].checksum) !== policy.successfulLedgerChecksum) return 'M3_LEDGER_CHECKSUM_MISMATCH'
+            if (schemaVerified !== true) return 'M3_SCHEMA_MISMATCH'
+            return null
+          }
+          function isMigration3HistoricalChecksumException({ name, productionHash, candidateHash, manifestHash, ledger, schemaVerified }) {
+            return migration3HistoricalExceptionFailureCode({ name, productionHash, candidateHash, manifestHash, ledger, schemaVerified }) === null
           }
           // END M3 historical checksum exception
           const approved = new Set([
             '20261022090000_profile_mobile_contract',
             '20261023090000_cantonese_question_progress',
           ])
-          const safeErrors = new Set(['MIGRATION_MANIFEST_INVALID', 'APPROVED_MIGRATION_MISSING', 'DATABASE_CONFIGURATION_INVALID', 'MIGRATION_LEDGER_INVALID', 'MIGRATION_3_SCHEMA_NOT_VERIFIED', 'MIGRATION_3_EXCEPTION_CONTEXT_INVALID'])
+          const safeErrors = new Set(['MIGRATION_MANIFEST_INVALID', 'APPROVED_MIGRATION_MISSING', 'DATABASE_CONFIGURATION_INVALID', 'MIGRATION_LEDGER_INVALID', 'M3_PRODUCTION_HASH_MISMATCH', 'M3_CANDIDATE_HASH_MISMATCH', 'M3_MANIFEST_HASH_MISMATCH', 'M3_LEDGER_CHECKSUM_MISMATCH', 'M3_LEDGER_HISTORY_INVALID', 'M3_SCHEMA_MISMATCH', 'M3_SCHEMA_READ_FAILED'])
           function stop(code) { throw new Error(code) }
           async function main() {
             let client
@@ -1380,9 +1411,12 @@ jobs:
                 expected.set(item.name, item.checksum)
               }
               for (const name of approved) if (!expected.has(name)) stop('APPROVED_MIGRATION_MISSING')
+              const migration3ManifestHash = expected.get(migration3HistoricalExceptionPolicy.name)
               const migration3ProductionHash = process.env.EXPECTED_MIGRATION_3_PRODUCTION_SQL_SHA256
               const migration3CandidateHash = process.env.EXPECTED_MIGRATION_3_CANDIDATE_SQL_SHA256
-              if (migration3ProductionHash !== migration3HistoricalExceptionPolicy.productionSqlSha256 || migration3CandidateHash !== migration3HistoricalExceptionPolicy.candidateSqlSha256 || expected.get(migration3HistoricalExceptionPolicy.name) !== migration3CandidateHash) stop('MIGRATION_3_EXCEPTION_CONTEXT_INVALID')
+              if (migration3ProductionHash !== migration3HistoricalExceptionPolicy.productionSqlSha256) stop('M3_PRODUCTION_HASH_MISMATCH')
+              if (migration3CandidateHash !== migration3HistoricalExceptionPolicy.candidateSqlSha256) stop('M3_CANDIDATE_HASH_MISMATCH')
+              if (migration3ManifestHash !== migration3CandidateHash) stop('M3_MANIFEST_HASH_MISMATCH')
               const dotenv = require(path.join(release, 'node_modules/dotenv'))
               const parsed = dotenv.parse(fs.readFileSync(path.join(release, '.env')))
               const databaseUrl = parsed.DATABASE_URL
@@ -1415,20 +1449,23 @@ jobs:
               const migration3Ledger = byName.get(migration3HistoricalExceptionPolicy.name) || []
               const migration3LedgerState = classifyMigrationLedgerRows(migration3Ledger)
               let migration3ExceptionApplied = false
-              if (migration3LedgerState.succeeded && migration3LedgerState.checksum !== migration3HistoricalExceptionPolicy.successfulLedgerChecksum) stop('MIGRATION_3_EXCEPTION_CONTEXT_INVALID')
-              if (migration3LedgerState.succeeded && migration3LedgerState.checksum === migration3HistoricalExceptionPolicy.successfulLedgerChecksum) {
+              if (migration3LedgerState.activeFailed || !migration3LedgerState.succeeded) stop('M3_LEDGER_HISTORY_INVALID')
+              if (migration3LedgerState.checksum !== migration3HistoricalExceptionPolicy.successfulLedgerChecksum) stop('M3_LEDGER_CHECKSUM_MISMATCH')
+              {
+                const preSchemaFailure = migration3HistoricalExceptionFailureCode({ name: migration3HistoricalExceptionPolicy.name, productionHash: migration3ProductionHash, candidateHash: migration3CandidateHash, manifestHash: migration3ManifestHash, ledger: migration3Ledger, schemaVerified: false })
+                if (preSchemaFailure && preSchemaFailure !== 'M3_SCHEMA_MISMATCH') stop(preSchemaFailure)
                 let migration3Columns
                 let migration3Indexes
                 try {
                   migration3Columns = await client.$queryRawUnsafe("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'WantListenSession' AND COLUMN_NAME = 'excludedFromLeaderboard'")
                   migration3Indexes = await client.$queryRawUnsafe("SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'WantListenSession' AND INDEX_NAME = 'WantListenSession_excludedFromLeaderboard_status_completedAt_idx' ORDER BY SEQ_IN_INDEX")
                 } catch (error) {
-                  throw new Error('DATABASE_READ_ONLY_CHECK_FAILED')
+                  stop('M3_SCHEMA_READ_FAILED')
                 }
                 const schemaVerified = migration3SchemaMatches(migration3Columns, migration3Indexes)
-                if (!schemaVerified) stop('MIGRATION_3_SCHEMA_NOT_VERIFIED')
-                migration3ExceptionApplied = isMigration3HistoricalChecksumException({ name: migration3HistoricalExceptionPolicy.name, productionHash: migration3ProductionHash, candidateHash: migration3CandidateHash, ledger: migration3Ledger, schemaVerified })
-                if (!migration3ExceptionApplied) stop('MIGRATION_3_EXCEPTION_CONTEXT_INVALID')
+                const schemaFailure = migration3HistoricalExceptionFailureCode({ name: migration3HistoricalExceptionPolicy.name, productionHash: migration3ProductionHash, candidateHash: migration3CandidateHash, manifestHash: migration3ManifestHash, ledger: migration3Ledger, schemaVerified })
+                if (schemaFailure) stop(schemaFailure)
+                migration3ExceptionApplied = true
                 console.log('MIGRATION_3_HISTORICAL_CHECKSUM_EXCEPTION=APPLIED')
               }
               let pending = 0, failed = 0, divergence = 0, unexpectedPending = 0
