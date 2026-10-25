@@ -54,7 +54,9 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
   })
   const postcss = require('postcss'), tailwind = require('tailwindcss')
   const css = (await postcss([tailwind({ ...require('./tailwind.config.ts').default, content: [{ raw: build.outputFiles[0].text, extension: 'js' }] })]).process(readFileSync('app/globals.css', 'utf8'), { from: join(process.cwd(), 'app/globals.css') })).css
-  let votes: string[] = [], voteWrites = 0, testWrites = 0, reviewWrites = 0, configWrites = 0, taskWrites = 0, uploadRequests = 0, uploadShouldFail = true
+  let votes: string[] = [], voteWrites = 0, testWrites = 0, reviewWrites = 0, configWrites = 0, taskWrites = 0, withdrawWrites = 0, uploadRequests = 0, uploadShouldFail = true
+  let taskSubmission: { id: string; rewardEntryId: string; status: 'PENDING' | 'WITHDRAWN'; submittedAt: string; commentId: string } | null = null
+  const currentTaskSubmission = (): typeof taskSubmission => taskSubmission
   const attempts: Array<Record<string, unknown>> = []
   let personality = false, retakeAllowed = true
   const programForTest = () => {
@@ -78,10 +80,11 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
     if (url.pathname === '/fixture.css') { res.setHeader('Content-Type', 'text/css'); res.end(css); return }
     if (url.pathname === '/api/uploads/activity-image' && req.method === 'POST') { uploadRequests++; return uploadShouldFail ? send({ message: 'fixture upload failed' }, 502) : send({ url: 'https://media.ecfc.fans/media/activities/22222222-2222-4222-8222-222222222222/source.webp' }) }
     if (url.pathname === '/api/activities/activity-one/v2') return send({ program: publicTopicActivityV2Program(f.program), entries: f.program.entries,
-      myProgress: { totalGrantedPoints: 0, platformGrantedPoints: 0, fixedGrantedPoints: 0, remainingPlatformCount: null, medal: null, submissions: [], grants: [], submittedCount: 0, approvedCount: 0,
+      myProgress: { totalGrantedPoints: 0, platformGrantedPoints: 0, fixedGrantedPoints: 0, remainingPlatformCount: null, medal: null, submissions: taskSubmission ? [taskSubmission] : [], grants: [], submittedCount: taskWrites, approvedCount: 0,
         testAttempts: attempts.slice().reverse().map((item) => ({ id: item.id, testId: item.testId, configVersion: item.configVersion })) },
       activity: { status: 'PUBLISHED', startsAt: null, endsAt: null, activityPostId: null, allowImageAttachments: true } })
-    if (url.pathname.endsWith('/v2/tasks') && req.method === 'POST') { const input = await body(); assert.equal(input.rewardEntryId, 'weibo'); taskWrites++; return send({ submission: { status: 'PENDING' } }, 201) }
+    if (url.pathname.endsWith('/v2/tasks') && req.method === 'POST') { const input = await body(); assert.equal(input.rewardEntryId, 'weibo'); taskWrites++; taskSubmission = { id: `task-${taskWrites}`, rewardEntryId: 'weibo', status: 'PENDING', submittedAt: new Date().toISOString(), commentId: `reply-${taskWrites}` }; return send({ submission: { status: 'PENDING' } }, 201) }
+    if (url.pathname.endsWith('/v2/submissions/task-1/withdraw') && req.method === 'POST') { withdrawWrites++; if (taskSubmission?.id === 'task-1' && taskSubmission.status === 'PENDING') taskSubmission.status = 'WITHDRAWN'; else return send({ code: 'TOPIC_V2_SUBMISSION_NOT_PENDING', message: '提交状态已变化，请刷新后重试。' }, 409); return send({ ok: true, status: 'WITHDRAWN' }) }
     if (url.pathname.endsWith('/poster')) { res.setHeader('Content-Type', 'image/png'); res.end(png); return }
     if (url.pathname.endsWith('/v2/poll')) {
       if (req.method === 'POST') { votes = (await body()).choices; voteWrites++; return send({ changed: true }) }
@@ -119,7 +122,7 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
     browser = await chromium.launch({ headless: true, ...(existsSync(chrome) ? { executablePath: chrome } : existsSync(edge) ? { executablePath: edge } : {}) })
     for (const width of [1024, 360, 390, 430]) {
       f.program = structuredClone(initialProgram)
-      votes = []; voteWrites = 0; testWrites = 0; reviewWrites = 0; configWrites = 0; taskWrites = 0; uploadRequests = 0; uploadShouldFail = true; attempts.length = 0
+      votes = []; voteWrites = 0; testWrites = 0; reviewWrites = 0; configWrites = 0; taskWrites = 0; withdrawWrites = 0; taskSubmission = null; uploadRequests = 0; uploadShouldFail = true; attempts.length = 0
       personality = false; retakeAllowed = true
       const context = await browser.newContext({ viewport: { width, height: 844 }, ...(width < 500 ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 MicroMessenger/8.0' } : {}) })
       const page = await context.newPage(); const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
@@ -191,6 +194,16 @@ test('V2 actual Web components: vote/test/PNG/review/admin editing at desktop an
       await page.getByRole('button', { name: '提交审核', exact: true }).click()
       await page.getByRole('button', { name: '确认提交', exact: true }).evaluate((element) => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click() })
       await page.getByText('任务已提交，等待管理员审核。', { exact: true }).waitFor(); assert.equal(taskWrites, 1)
+      await page.getByRole('button', { name: /weibo.*待审核/u }).click()
+      await page.getByRole('button', { name: '撤回截图', exact: true }).click()
+      await page.getByRole('dialog', { name: '确认撤回这张截图？' }).waitFor()
+      await page.getByRole('button', { name: '确认撤回截图', exact: true }).click()
+      await page.locator('#platform-task-status').filter({ hasText: '已撤回，可重新提交' }).waitFor(); assert.equal(withdrawWrites, 1)
+      await page.getByRole('button', { name: '提交审核', exact: true }).waitFor()
+      await page.getByRole('button', { name: '提交审核', exact: true }).click()
+      await page.getByRole('button', { name: '确认提交', exact: true }).click()
+      await page.getByText('任务已提交，等待管理员审核。', { exact: true }).waitFor(); assert.equal(taskWrites, 2)
+      assert.equal(currentTaskSubmission()?.status, 'PENDING', 'withdrawal refresh reopens submission and creates a new pending attempt')
       const resultLink = page.getByRole('link', { name: '查看测试结果 / 再次测试' })
       const resultHref = await resultLink.getAttribute('href')
       assert.match(resultHref || '', /attemptId=attempt-two/u)

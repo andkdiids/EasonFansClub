@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fixture, instant, rewardEntry } from './fixtures/topic-v2-transaction'
-import { claimTopicActivityV2FixedReward, getTopicActivityV2View, getTopicActivityV2Statistics, grantTopicActivityV2MedalForEventInTransaction, reviewTopicActivityV2Submission, saveTopicActivityV2Program, submitTopicActivityV2Task, topicV2EntryGrantKey } from '@/lib/topic-activity-v2'
+import { claimTopicActivityV2FixedReward, getTopicActivityV2View, getTopicActivityV2Statistics, grantTopicActivityV2MedalForEventInTransaction, reviewTopicActivityV2Submission, saveTopicActivityV2Program, submitTopicActivityV2Task, topicV2EntryGrantKey, withdrawTopicActivityV2Submission } from '@/lib/topic-activity-v2'
 import { grantTopicActivityPointsInTransaction } from '@/lib/topic-activity-points'
 import { prisma } from '@/lib/prisma'
 import { withTopicV2Transaction } from '@/lib/topic-activity-v2'
+import { canSubmitTopicActivityV2Entry, normalizeTopicActivityV2Progress } from '@/components/activities/topic-activity-v2-types'
 const approve = (submissionId: string) => reviewTopicActivityV2Submission({ submissionId, reviewerId: 'admin-one', status: 'APPROVED', now: instant })
 
 test('raw MySQL lock conflicts retry after rollback, but unrelated raw query failures do not retry', async () => {
@@ -160,6 +161,142 @@ test('rejected task can resubmit and retains history; pending repeat denied', as
     assert.equal(result.commentId, 'reply-1'); assert.equal(f.state.submissions[0].status, 'REJECTED'); assert.equal(f.state.submissions[1].rewardSnapshot.points, 96)
     await assert.rejects(submitTopicActivityV2Task({ activityId: f.activity.id, userId: 'user-one', rewardEntryId: 'weibo', now: instant }), { code: 'TOPIC_V2_RESUBMISSION_NOT_ALLOWED' })
   })
+})
+test('only the owner can withdraw their pending platform task; history/assets stay and no reward is issued', async () => {
+  const f = fixture([rewardEntry('weibo', 'weibo'), rewardEntry('red', 'xiaohongshu')])
+  const target = f.submission('submission-weibo', f.program.entries[0])
+  const otherPlatform = f.submission('submission-red', f.program.entries[1])
+  f.state.assets.push({ id: 'private-image', taskSubmissionId: target.id, storageKey: 'retained-object-key' })
+  f.tx.activity.findUnique = async ({ where }: { where: { id: string } }) => where.id === f.activity.id ? f.activity : null
+  await f.run(async () => {
+    await assert.rejects(withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: target.id, userId: 'another-user', now: instant }), { code: 'TOPIC_V2_SUBMISSION_NOT_FOUND', status: 404 })
+    await assert.rejects(withdrawTopicActivityV2Submission({ activityId: 'another-activity', submissionId: target.id, userId: 'user-one', now: instant }), { code: 'TOPIC_V2_ACTIVITY_NOT_FOUND', status: 404 })
+    const result = await withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: target.id, userId: 'user-one', now: instant })
+    assert.deepEqual(result, { ok: true, submissionId: target.id, status: 'WITHDRAWN' })
+    assert.equal(f.state.submissions.find((row: { id: string }) => row.id === target.id)?.status, 'WITHDRAWN')
+    assert.equal(f.state.submissions.find((row: { id: string }) => row.id === target.id)?.commentDeletedAt, null)
+    assert.equal(f.state.submissions.find((row: { id: string }) => row.id === otherPlatform.id)?.status, 'PENDING')
+    assert.equal(f.state.reviews.length, 1)
+    assert.equal(f.state.reviews[0].fromStatus, 'PENDING')
+    assert.equal(f.state.reviews[0].toStatus, 'WITHDRAWN')
+    assert.equal(f.state.reviews[0].reviewedById, null)
+    assert.equal(f.state.assets[0].taskSubmissionId, target.id)
+    assert.equal(f.state.grants.length, 0)
+    assert.equal(f.state.logs.length, 0)
+    assert.equal(f.state.points, 100)
+  })
+})
+test('withdrawal cannot change approved, rejected or already withdrawn history', async () => {
+  for (const status of ['APPROVED', 'REJECTED', 'WITHDRAWN']) {
+    const f = fixture()
+    const submission = f.submission('one'); submission.status = status
+    await f.run(async () => {
+      await assert.rejects(withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: submission.id, userId: 'user-one', now: instant }), { code: 'TOPIC_V2_SUBMISSION_NOT_PENDING', status: 409 })
+    })
+    assert.equal(submission.status, status)
+    assert.equal(f.state.reviews.length, 0)
+    assert.equal(f.state.grants.length, 0)
+  }
+})
+test('withdrawal audit failure rolls back the status transition and retains its assets', async () => {
+  const f = fixture(); const submission = f.submission('one')
+  f.state.assets.push({ id: 'private-image', taskSubmissionId: submission.id, storageKey: 'retained-object-key' })
+  f.tx.topicActivityReviewLog.create = async () => { throw Object.assign(new Error('controlled audit write failure'), { code: 'FIXTURE_AUDIT_WRITE_FAILED' }) }
+  await f.run(async () => {
+    await assert.rejects(withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: submission.id, userId: 'user-one', now: instant }), { code: 'FIXTURE_AUDIT_WRITE_FAILED' })
+  })
+  assert.equal(f.state.submissions[0].status, 'PENDING')
+  assert.equal(f.state.reviews.length, 0)
+  assert.equal(f.state.assets[0].taskSubmissionId, submission.id)
+  assert.equal(f.state.grants.length, 0)
+})
+test('withdrawal and administrator review serialize: exactly one PENDING transition wins', async () => {
+  const f = fixture(); const submission = f.submission('one')
+  const outcomes = await f.run(() => Promise.allSettled([
+    withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: submission.id, userId: 'user-one', now: instant }),
+    approve('one'),
+  ]))
+  assert.equal(outcomes.filter((result) => result.status === 'fulfilled').length, 1)
+  assert.ok(['WITHDRAWN', 'APPROVED'].includes(submission.status))
+  assert.equal(f.state.reviews.length, 1)
+  if (submission.status === 'WITHDRAWN') {
+    assert.equal(f.state.reviews[0].toStatus, 'WITHDRAWN')
+    assert.equal(f.state.grants.length, 0)
+    await f.run(async () => { await assert.rejects(approve('one'), { code: 'TOPIC_V2_SUBMISSION_WITHDRAWN', status: 409 }) })
+  } else {
+    assert.equal(f.state.reviews[0].toStatus, 'APPROVED')
+    assert.equal(f.state.grants.length, 1)
+    await f.run(async () => { await assert.rejects(withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: submission.id, userId: 'user-one', now: instant }), { code: 'TOPIC_V2_SUBMISSION_NOT_PENDING', status: 409 }) })
+  }
+})
+test('when administrator review wins the race, a later withdrawal cannot revert approval or rewards', async () => {
+  const f = fixture(); const submission = f.submission('one')
+  let signalReviewApplied!: () => void
+  const reviewApplied = new Promise<void>((resolve) => { signalReviewApplied = resolve })
+  const updateMany = f.tx.topicActivitySubmission.updateMany
+  f.tx.topicActivitySubmission.updateMany = async (args: { data?: { status?: string }; where?: unknown }) => {
+    const result = await updateMany(args)
+    if (args.data?.status === 'APPROVED') signalReviewApplied()
+    return result
+  }
+  const outcomes = await f.run(async () => {
+    const review = approve('one')
+    await reviewApplied
+    const withdrawal = withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: submission.id, userId: 'user-one', now: instant })
+    return Promise.allSettled([review, withdrawal])
+  })
+  assert.equal(outcomes.filter((result) => result.status === 'fulfilled').length, 1)
+  assert.equal(f.state.submissions[0].status, 'APPROVED')
+  assert.equal(f.state.reviews.length, 1)
+  assert.equal(f.state.reviews[0].toStatus, 'APPROVED')
+  assert.equal(f.state.grants.length, 1)
+  assert.equal(f.state.points, 196)
+  assert.equal(f.state.assets.length, 0)
+})
+test('administrator review uses a conditional state transition and aborts rewards when another writer wins', async () => {
+  const f = fixture(); const submission = f.submission('one')
+  const updateMany = f.tx.topicActivitySubmission.updateMany
+  f.tx.topicActivitySubmission.updateMany = async (args: { data?: { status?: string }; where?: unknown }) => args.data?.status === 'APPROVED' ? { count: 0 } : updateMany(args)
+  await f.run(async () => {
+    await assert.rejects(approve('one'), { code: 'TOPIC_V2_SUBMISSION_STATE_CHANGED', status: 409 })
+  })
+  assert.equal(submission.status, 'PENDING')
+  assert.equal(f.state.reviews.length, 0)
+  assert.equal(f.state.audits.length, 0)
+  assert.equal(f.state.grants.length, 0)
+  assert.equal(f.state.logs.length, 0)
+  assert.equal(f.state.points, 100)
+})
+test('two concurrent withdrawal requests produce one audited transition, then withdrawn attempt can be resubmitted', async () => {
+  const entry = rewardEntry('weibo', 'weibo'); entry.allowResubmit = false
+  const f = fixture([entry]); const original = f.submission('old')
+  const outcomes = await f.run(() => Promise.allSettled([1, 2].map(() => withdrawTopicActivityV2Submission({ activityId: f.activity.id, submissionId: original.id, userId: 'user-one', now: instant }))))
+  assert.equal(outcomes.filter((result) => result.status === 'fulfilled').length, 1)
+  assert.equal(f.state.reviews.length, 1)
+  assert.equal(original.status, 'WITHDRAWN')
+  await f.run(async () => {
+    const next = await submitTopicActivityV2Task({ activityId: f.activity.id, userId: 'user-one', rewardEntryId: entry.id, now: instant })
+    assert.equal(next.submission.status, 'PENDING')
+  })
+  assert.equal(f.state.submissions.length, 2)
+  assert.deepEqual(f.state.submissions.map((row: { status: string }) => row.status), ['WITHDRAWN', 'PENDING'])
+  assert.equal(f.state.grants.length, 0)
+  assert.equal(f.state.points, 100)
+})
+test('withdrawn progress follows the newest non-approved attempt while prior approved progress remains durable', () => {
+  const withdrawn = normalizeTopicActivityV2Progress({ submissions: [
+    { id: 'new-withdrawn', rewardEntryId: 'weibo', status: 'WITHDRAWN', submittedAt: '2026-10-13T05:00:00.000Z' },
+    { id: 'old-pending', rewardEntryId: 'weibo', status: 'PENDING', submittedAt: '2026-10-13T04:00:00.000Z' },
+  ] })[0]
+  assert.equal(withdrawn.status, 'WITHDRAWN')
+  assert.equal(withdrawn.submissionId, 'new-withdrawn')
+  assert.equal(canSubmitTopicActivityV2Entry(withdrawn.status, false), true)
+  const approved = normalizeTopicActivityV2Progress({ submissions: [
+    { id: 'new-withdrawn', rewardEntryId: 'weibo', status: 'WITHDRAWN', submittedAt: '2026-10-13T05:00:00.000Z' },
+    { id: 'old-approved', rewardEntryId: 'weibo', status: 'APPROVED', submittedAt: '2026-10-13T04:00:00.000Z' },
+  ] })[0]
+  assert.equal(approved.status, 'APPROVED')
+  assert.equal(approved.submissionId, 'old-approved')
 })
 test('form gate cannot be bypassed by platform entry; duplicate/foreign screenshot rejected', async () => {
   const f = fixture(); f.activity.participationMode = 'FORM'

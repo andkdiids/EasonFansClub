@@ -6,6 +6,7 @@ import { TopicActivityImagePicker } from '@/components/activities/TopicActivityI
 import { TopicActivityV2PollPanel, TopicActivityV2TestRunner } from '@/components/activities/TopicActivityV2Interactive'
 import { TopicActivityV2Comments } from '@/components/activities/TopicActivityV2Comments'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { TopicActivityV2SubmissionWithdrawButton } from '@/components/activities/TopicActivityV2SubmissionWithdrawButton'
 import { canSubmitTopicActivityV2Entry, normalizeTopicActivityV2Entries, normalizeTopicActivityV2Progress } from '@/components/activities/topic-activity-v2-types'
 import type { TopicActivityUploadedAsset } from '@/lib/content-image-browser'
 import type { TopicActivityV2PublicProgram } from '@/lib/topic-activity-v2-config'
@@ -14,7 +15,7 @@ type Payload = { program: TopicActivityV2PublicProgram | null; entries: unknown;
   activity: { activityPostId: string | null; postAuthorId?: string | null; status: string; startsAt: string | null; endsAt: string | null; allowImageAttachments: boolean };
   myProgress: { totalGrantedPoints: number; platformGrantedPoints: number; fixedGrantedPoints: number; remainingPlatformCount: number | null; medal: unknown; submissions: unknown[]; grants: unknown[]; testAttempts?: unknown[]; submittedCount: number; approvedCount: number } | null }
 const button = 'min-h-10 rounded-sm border border-[var(--border)] px-4 text-sm font-bold disabled:opacity-40'
-function statusLabel(status: string) { return ({ PENDING: '待审核', APPROVED: '已通过', REJECTED: '未通过', GRANTED: '奖励已发放', NOT_STARTED: '尚未提交' } as Record<string, string>)[status] || '暂不可用' }
+function statusLabel(status: string) { return ({ PENDING: '待审核', APPROVED: '已通过', REJECTED: '未通过', WITHDRAWN: '已撤回，可重新提交', GRANTED: '奖励已发放', NOT_STARTED: '尚未提交' } as Record<string, string>)[status] || '暂不可用' }
 
 export function TopicActivityV2Panel({ activityId, isAuthenticated = false, currentUserId, mode = 'activity', showComments = true }: {
   activityId: string; isAuthenticated?: boolean; currentUserId?: string; mode?: 'activity' | 'test'; showComments?: boolean
@@ -120,6 +121,7 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
   const selectedProgress = progress.find((item) => item.rewardEntryId === activeEntry)
   const selectedState = selectedProgress?.status || 'NOT_STARTED'
   const selectedCanSubmit = Boolean(program.platformRewards.enabled && selected && isAuthenticated && active && canSubmitTopicActivityV2Entry(selectedState, selected.allowResubmit) && (!selected.startsAt || Date.now() >= Date.parse(selected.startsAt)) && (!selected.endsAt || Date.now() <= Date.parse(selected.endsAt)) && (selected.maxImages === 0 || payload.activity.allowImageAttachments))
+  const selectedCanWithdraw = Boolean(isAuthenticated && selectedState === 'PENDING' && selectedProgress?.submissionId)
   const selectedStatusLabel = selectedState === 'GRANTED' && selectedProgress?.grantedPoints !== null && selectedProgress?.grantedPoints !== undefined ? `已获得 ${selectedProgress.grantedPoints} 挂号费` : statusLabel(selectedState)
   return <section aria-label="活动参与与进度" className="space-y-5 border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6">
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">参与活动</h2><button type="button" onClick={() => void load()} className={button} disabled={pending}>刷新进度</button></div>
@@ -149,10 +151,11 @@ export function TopicActivityV2Panel({ activityId, isAuthenticated = false, curr
         <p className="text-xs text-[var(--foreground-muted)]">截图 {selected.minImages}—{selected.maxImages} 张{selected.startsAt ? ' · 开始：' + new Date(selected.startsAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''}{selected.endsAt ? ' · 截止：' + new Date(selected.endsAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''}</p>
         {selectedProgress?.commentId && payload.activity.activityPostId ? <Link href={'/posts/' + encodeURIComponent(payload.activity.activityPostId) + '?focus=' + encodeURIComponent(selectedProgress.commentId) + '#reply-' + encodeURIComponent(selectedProgress.commentId)} className="inline-block text-sm underline">查看提交</Link> : null}
         {selectedState === 'REJECTED' && selectedProgress?.rejectReason ? <p className="text-sm text-rose-700">拒绝原因：{selectedProgress.rejectReason}</p> : null}
+        {selectedCanWithdraw && selectedProgress?.submissionId ? <TopicActivityV2SubmissionWithdrawButton activityId={activityId} submissionId={selectedProgress.submissionId} /> : null}
         {selectedCanSubmit ? <form onSubmit={submitTask} className="space-y-3"><label className="block text-sm">备注<textarea className="mt-1 w-full border border-[var(--border)] bg-[var(--surface)] p-2" maxLength={2000} value={remark} disabled={pending || uploading} onChange={(event) => setRemark(event.target.value)} /></label>{selected.maxImages ? <TopicActivityImagePicker activityId={activityId} rewardEntryId={selected.id} purpose="FORM_ANSWER" assets={assets} onChange={setAssets} onUploadingChange={(value) => { uploadBusy.current = value; setUploading(value) }} maxImages={selected.maxImages} disabled={pending || confirmTask} /> : null}<button type="submit" className={button} disabled={pending || uploading || assets.length < selected.minImages}>{selectedState === 'REJECTED' ? '重新提交待审核' : '提交审核'}</button></form> : !isAuthenticated ? <Link href="/login" className="text-sm underline">登录后参与</Link> : !active ? <p className="text-xs">当前不在活动参与时间内。</p> : null}
         {error ? <p role="alert" className="text-red-600">{error}</p> : null}
       </div>
-      <ConfirmDialog open={confirmTask} title="确认提交这条参与评论？" description="提交会在活动主帖生成一级参与评论。如果活动只允许一次参与评论，删除或撤回不会恢复机会。审核通过后按此入口的历史奖励快照发放，同入口不会重复发奖。" confirmLabel="确认提交" loading={pending} error={error} onCancel={() => { if (!busy.current) setConfirmTask(false) }} onConfirm={() => { if (activeEntry && selectedCanSubmit && !uploading && assets.length >= selected.minImages) void write(base + '/tasks', { rewardEntryId: activeEntry, assetIds: assets.map((asset) => asset.assetId), remark }) }} />
+      <ConfirmDialog open={confirmTask} title="确认提交这条参与评论？" description="提交会在活动主帖生成一级参与评论。仅在管理员审核前撤回平台截图提交后，才可重新上传；已审核记录仍按原有重提与奖励规则处理。审核通过后按此入口的历史奖励快照发放，同入口不会重复发奖。" confirmLabel="确认提交" loading={pending} error={error} onCancel={() => { if (!busy.current) setConfirmTask(false) }} onConfirm={() => { if (activeEntry && selectedCanSubmit && !uploading && assets.length >= selected.minImages) void write(base + '/tasks', { rewardEntryId: activeEntry, assetIds: assets.map((asset) => asset.assetId), remark }) }} />
     </dialog> : null}
     {program.poll.enabled ? <TopicActivityV2PollPanel activityId={activityId} isAuthenticated={isAuthenticated} /> : null}
     {program.test.enabled ? (() => {

@@ -291,7 +291,10 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
     requireWindow(entry.startsAt, entry.endsAt, now)
     if (ids.length < entry.minImages || ids.length > entry.maxImages) fail('TOPIC_V2_SCREENSHOT_COUNT_INVALID', '截图数量不符合任务要求', 400)
     if (ids.length && !activity.allowImageAttachments) fail('TOPIC_V2_IMAGES_DISABLED', '活动未启用图片附件', 403)
-    const prior = await tx.topicActivitySubmission.findMany({ where: { activityId: activity.id, rewardEntryId: row.id, userId: input.userId }, select: { status: true } })
+    // A user's explicit withdrawal retires that attempt but preserves its audit
+    // history. It must not make a first submission impossible when the entry
+    // does not allow resubmission after an administrator rejection.
+    const prior = await tx.topicActivitySubmission.findMany({ where: { activityId: activity.id, rewardEntryId: row.id, userId: input.userId, status: { not: 'WITHDRAWN' } }, select: { status: true } })
     if (prior.length && (!entry.allowResubmit || prior.some((submission) => submission.status === 'PENDING'))) fail('TOPIC_V2_RESUBMISSION_NOT_ALLOWED', '该任务已提交，当前不能重新提交')
     const eligible = await resolveTopicActivityCommentEligibilityInTransaction(tx, { activity, userId: input.userId, now })
     if (!eligible.canComment) fail(eligible.blockReason || 'TOPIC_V2_COMMENT_BLOCKED', '请先完成活动参与条件')
@@ -319,6 +322,43 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
     await lockTopicLotteryRulesForSubmission(tx, activity, input.userId, now)
     await tx.post.update({ where: { id: post.id }, data: { replyCount: { increment: 1 } } })
     return { submission, commentId: comment.id, replyId: comment.id, postAuthorId: post.authorId }
+  })
+}
+
+/**
+ * Retire only the caller's pending platform-task submission. Activity is the
+ * serialization point shared with submit/review, and the conditional update is
+ * a second compare-and-set guard against any writer that does not use that
+ * lock. The original submission, comment, review history and private assets
+ * are deliberately retained; withdrawal never touches reward grants.
+ */
+export async function withdrawTopicActivityV2Submission(input: { activityId: string; submissionId: string; userId: string; now?: Date }) {
+  const now = input.now || new Date()
+  return withTopicV2Transaction(async (tx) => {
+    const activity = await lockTopicV2Activity(tx, input.activityId)
+    const submission = await tx.topicActivitySubmission.findFirst({
+      where: { id: input.submissionId, activityId: activity.id, userId: input.userId },
+      select: { id: true, activityId: true, userId: true, commentId: true, rewardEntryId: true, status: true, commentDeletedAt: true,
+        Comment: { select: { postId: true, parentId: true, isDeleted: true } } },
+    })
+    if (!submission) fail('TOPIC_V2_SUBMISSION_NOT_FOUND', '提交记录不存在', 404)
+    if (!submission.rewardEntryId) fail('TOPIC_V2_DISCUSSION_NOT_REVIEWABLE', '普通活动讨论不能撤回平台截图', 409)
+    if (submission.status !== 'PENDING') fail('TOPIC_V2_SUBMISSION_NOT_PENDING', '只有待审核的截图可以撤回', 409)
+    if (submission.commentDeletedAt || !submission.Comment || submission.Comment.isDeleted || submission.Comment.parentId || submission.Comment.postId !== activity.activityPostId) {
+      fail('TOPIC_V2_SUBMISSION_UNAVAILABLE', '提交记录当前不可撤回', 409)
+    }
+
+    const changed = await tx.topicActivitySubmission.updateMany({
+      where: { id: submission.id, activityId: activity.id, userId: input.userId, rewardEntryId: { not: null }, status: 'PENDING' },
+      data: { status: 'WITHDRAWN', reviewedAt: now, reviewedById: null, rejectReason: null },
+    })
+    if (changed.count !== 1) fail('TOPIC_V2_SUBMISSION_NOT_PENDING', '提交状态已变化，请刷新后重试', 409)
+    await tx.topicActivityReviewLog.create({ data: {
+      submissionId: submission.id, activityId: activity.id, userId: input.userId, commentId: submission.commentId,
+      fromStatus: 'PENDING', toStatus: 'WITHDRAWN', reviewedById: null, reviewedAt: now,
+      reason: '提交者撤回待审核的平台截图',
+    } })
+    return { ok: true as const, submissionId: submission.id, status: 'WITHDRAWN' as const }
   })
 }
 
@@ -358,7 +398,12 @@ export async function reviewTopicActivityV2Submission(input: { activityId?: stri
       if (!form) fail('FORM_REQUIRED_BEFORE_APPROVAL', '请先完成活动表单')
     }
     const reason = input.status === 'REJECTED' ? input.rejectReason?.trim().slice(0, 2000) || null : null
-    const updated = await tx.topicActivitySubmission.update({ where: { id: submission.id }, data: { status: input.status, reviewedById: input.reviewerId, reviewedAt: now, rejectReason: reason } })
+    const reviewChanged = await tx.topicActivitySubmission.updateMany({
+      where: { id: submission.id, status: submission.status },
+      data: { status: input.status, reviewedById: input.reviewerId, reviewedAt: now, rejectReason: reason },
+    })
+    if (reviewChanged.count !== 1) fail('TOPIC_V2_SUBMISSION_STATE_CHANGED', '提交状态已变化，请刷新后重试', 409)
+    const updated = { ...submission, status: input.status, reviewedById: input.reviewerId, reviewedAt: now, rejectReason: reason }
     await tx.topicActivityReviewLog.create({ data: { submissionId: submission.id, activityId: activity.id, userId: submission.userId, commentId: submission.commentId,
       fromStatus: submission.status, toStatus: input.status, reviewedById: input.reviewerId, reviewedAt: now, reason } })
     await tx.adminActionLog.create({ data: { adminId: input.reviewerId, targetUserId: submission.userId, action: 'TOPIC_ACTIVITY_V2_SUBMISSION_REVIEWED',
