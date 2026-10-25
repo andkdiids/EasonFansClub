@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { ImageViewer } from '@/components/ImageViewer'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { TopicActivityV2TaskReview } from '@/components/activities/TopicActivityV2TaskReview'
+import { TopicActivityV2SubmissionWithdrawButton } from '@/components/activities/TopicActivityV2SubmissionWithdrawButton'
 import { normalizeTopicActivityV2Entries, normalizeTopicActivityV2Progress, type TopicActivityV2TaskSubmission } from '@/components/activities/topic-activity-v2-types'
 import { profileImageUrl } from '@/lib/images'
 import { formatDate } from '@/lib/format'
@@ -22,6 +23,8 @@ export function TopicActivityPlatformSubmissionCard({ activityId, commentId, sub
   // The server removes private assets for other viewers. Never reconstruct an
   // asset URL from its ID or expose a URL when the explicit grant is false.
   const canViewPrivate = submission.canViewPrivate !== false && (isOwner || canReview)
+  const [withdrawn, setWithdrawn] = useState(false)
+  const effectiveStatus = withdrawn ? 'WITHDRAWN' : submission.status
   const [canResubmit, setCanResubmit] = useState(false)
   useEffect(() => {
     setCanResubmit(false)
@@ -58,7 +61,8 @@ export function TopicActivityPlatformSubmissionCard({ activityId, commentId, sub
       if (!src) return null
       return <ImageViewer key={asset.assetId} src={src} previewSrc={asset.previewAccessUrl || src} originalUrl={asset.originalDownloadUrl ? `${asset.originalDownloadUrl}?view=1` : null} downloadUrl={asset.originalDownloadUrl || undefined} alt={`${platformName}提交截图 ${index + 1}`} imageClassName="aspect-square w-full object-cover" />
     })}</div> : !canViewPrivate ? <p className="text-xs text-[var(--foreground-muted)]">截图仅提交者和审核人员可见</p> : null}
-    <TopicActivityV2TaskReview activityId={activityId} submission={canViewPrivate ? submission : { ...submission, rejectReason: null }} canReview={canReview} onReviewed={onReviewed} />
+    <TopicActivityV2TaskReview activityId={activityId} submission={canViewPrivate ? { ...submission, status: effectiveStatus } : { ...submission, status: effectiveStatus, rejectReason: null }} canReview={canReview} onReviewed={onReviewed} />
+    {isOwner && effectiveStatus === 'PENDING' && submission.rewardEntryId && !submission.granted ? <TopicActivityV2SubmissionWithdrawButton activityId={activityId} submissionId={submission.id} onWithdrawn={() => setWithdrawn(true)} /> : null}
     {isOwner && canResubmit ? <button type="button" className="border border-[var(--border)] px-3 py-1 text-xs font-bold" onClick={() => window.dispatchEvent(new CustomEvent('topic-activity-v2-open-task', { detail: { activityId, rewardEntryId: submission.rewardEntryId } }))}>重新提交</button> : null}
   </article>
 }

@@ -19,7 +19,7 @@ export type {
 }
 
 export type TopicActivityV2RewardEntry = TopicRewardEntryConfig
-export type TopicActivityV2EntryStatus = 'NOT_STARTED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'GRANTED' | 'UNAVAILABLE'
+export type TopicActivityV2EntryStatus = 'NOT_STARTED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'GRANTED' | 'UNAVAILABLE'
 
 export type TopicActivityV2EntryProgress = {
   rewardEntryId: string
@@ -118,12 +118,18 @@ export function normalizeTopicActivityV2Progress(value: unknown): TopicActivityV
     const rewardEntryId = typeof row.rewardEntryId === 'string' ? row.rewardEntryId : ''
     if (!rewardEntryId) continue
     const rawStatus = typeof row.status === 'string' ? row.status : 'NOT_STARTED'
-    const status: TopicActivityV2EntryStatus = ['NOT_STARTED', 'PENDING', 'APPROVED', 'REJECTED', 'GRANTED', 'UNAVAILABLE'].includes(rawStatus) ? rawStatus as TopicActivityV2EntryStatus : 'UNAVAILABLE'
-    const priority: Record<TopicActivityV2EntryStatus, number> = { GRANTED: 5, APPROVED: 4, PENDING: 3, REJECTED: 2, UNAVAILABLE: 1, NOT_STARTED: 0 }
+    const status: TopicActivityV2EntryStatus = ['NOT_STARTED', 'PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'GRANTED', 'UNAVAILABLE'].includes(rawStatus) ? rawStatus as TopicActivityV2EntryStatus : 'UNAVAILABLE'
     const current = latestByEntry.get(rewardEntryId)
-    // A newer rejected submission must never conceal an earlier approval/grant.
-    // Equal-state rows retain the server's newest-first ordering.
-    if (!current || priority[status] > priority[current.status]) latestByEntry.set(rewardEntryId, { rewardEntryId, status, submissionId: typeof row.id === 'string' ? row.id : null, commentId: typeof row.commentId === 'string' ? row.commentId : null, rejectReason: typeof row.rejectReason === 'string' ? row.rejectReason : null, submittedAt: typeof row.submittedAt === 'string' ? row.submittedAt : null, reviewedAt: typeof row.reviewedAt === 'string' ? row.reviewedAt : null, granted: status === 'GRANTED' })
+    const nextSubmittedAt = typeof row.submittedAt === 'string' ? Date.parse(row.submittedAt) : NaN
+    const currentSubmittedAt = current?.submittedAt ? Date.parse(current.submittedAt) : NaN
+    const currentDurable = current?.status === 'APPROVED' || current?.status === 'GRANTED'
+    const nextDurable = status === 'APPROVED' || status === 'GRANTED'
+    const nextIsNewer = Number.isFinite(nextSubmittedAt) && Number.isFinite(currentSubmittedAt) && nextSubmittedAt > currentSubmittedAt
+    // Successful review/grant history remains the effective progress state;
+    // otherwise the newest attempt wins (including a withdrawal).
+    if (!current || (nextDurable && !currentDurable) || (nextDurable === currentDurable && !currentDurable && nextIsNewer)) {
+      latestByEntry.set(rewardEntryId, { rewardEntryId, status, submissionId: typeof row.id === 'string' ? row.id : null, commentId: typeof row.commentId === 'string' ? row.commentId : null, rejectReason: typeof row.rejectReason === 'string' ? row.rejectReason : null, submittedAt: typeof row.submittedAt === 'string' ? row.submittedAt : null, reviewedAt: typeof row.reviewedAt === 'string' ? row.reviewedAt : null, granted: status === 'GRANTED' })
+    }
   }
   const grants = Array.isArray(source.grants) ? source.grants : []
   for (const item of grants) {
@@ -138,5 +144,5 @@ export function normalizeTopicActivityV2Progress(value: unknown): TopicActivityV
 }
 
 export function canSubmitTopicActivityV2Entry(status: TopicActivityV2EntryStatus, allowResubmit: boolean): boolean {
-  return status === 'NOT_STARTED' || (status === 'REJECTED' && allowResubmit)
+  return status === 'NOT_STARTED' || status === 'WITHDRAWN' || (status === 'REJECTED' && allowResubmit)
 }

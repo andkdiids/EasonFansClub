@@ -57,6 +57,12 @@ test('置顶状态由 Reply.isPinned 保存，删除整棵评论线程时清理�
   assert.ok(deleteRoute.includes('data: { isDeleted: true, isPinned: false, deletedAt: new Date() }'))
 })
 
+test('deleting a pending topic submission uses a conditional withdrawal so it cannot overwrite review', () => {
+  assert.match(deleteRoute, /where: \{ id: submission\.id, status: 'PENDING' \}[\s\S]*data: \{ status: 'WITHDRAWN'/)
+  assert.match(deleteRoute, /if \(withdrawn\.count === 1\)[\s\S]*fromStatus: 'PENDING', toStatus: 'WITHDRAWN'/)
+  assert.match(deleteRoute, /A concurrent administrator review may have won[\s\S]*never overwrite/)
+})
+
 test('楼层排序支持正序/倒序，最热使用点赞数和稳定次级排序', () => {
   assert.equal(parsePostReplySort(null), 'floor')
   assert.equal(parsePostReplySort('latest'), 'floor')
