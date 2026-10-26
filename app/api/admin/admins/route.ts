@@ -1,9 +1,73 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { invalidateCurrentUserCache } from '@/lib/auth'
 import { allAdminPermissionKeys, invalidateAdminPermissionCache, type AdminPermissionKey } from '@/lib/admin-permissions'
 import { prisma } from '@/lib/prisma'
 import { USER_REWARD_PERMISSION } from '@/lib/user-reward-constants'
-import { enforceApiRateLimit, requireAdmin } from '@/lib/security'
+import { enforceApiRateLimit, requireAdmin, sanitizeText } from '@/lib/security'
+
+export const dynamic = 'force-dynamic'
+
+const MAX_SEARCH_PAGE_SIZE = 30
+
+/**
+ * Native-safe administrator lookup. An empty query deliberately does not
+ * touch the database, and the response omits contact and credential fields.
+ */
+export async function GET(request: Request) {
+  const guard = await requireAdmin('admin_manage')
+  if (!guard.user) return guard.response
+
+  const params = new URL(request.url).searchParams
+  const query = sanitizeText(params.get('q'), 80).trim()
+  const rawPage = Number(params.get('page') || 1)
+  const rawPageSize = Number(params.get('pageSize') || 20)
+  const page = Number.isSafeInteger(rawPage) ? Math.min(10_000, Math.max(1, rawPage)) : 1
+  const pageSize = Number.isSafeInteger(rawPageSize) ? Math.min(MAX_SEARCH_PAGE_SIZE, Math.max(1, rawPageSize)) : 20
+
+  if (!query) return NextResponse.json({ admins: [], page, pageSize, hasMore: false, queryRequired: true }, { headers: { 'Cache-Control': 'private, no-store' } })
+
+  const limited = await enforceApiRateLimit(request, guard.user.id, {
+    endpoint: '/api/admin/admins:GET',
+    ip: { limit: 60, windowSeconds: 60 },
+    user: { limit: 30, windowSeconds: 60 },
+  })
+  if (limited) return limited
+
+  const numericUid = /^\d+$/.test(query) ? Number(query) : null
+  const where: Prisma.UserWhereInput = {
+    role: { in: ['ADMIN', 'SUPER_ADMIN'] },
+    isDeleted: false,
+    OR: [
+      ...(numericUid !== null && Number.isSafeInteger(numericUid) ? [{ uid: numericUid }] : []),
+      { username: { contains: query } },
+      { nickname: { contains: query } },
+      { Profile: { displayName: { contains: query } } },
+    ],
+  }
+  const [rows, total] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      orderBy: { uid: 'asc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize + 1,
+      select: {
+        id: true,
+        uid: true,
+        username: true,
+        nickname: true,
+        role: true,
+        status: true,
+        createdAt: true,
+        Profile: { select: { displayName: true } },
+      },
+    }),
+    prisma.user.count({ where }),
+  ])
+  const hasMore = rows.length > pageSize
+  const admins = hasMore ? rows.slice(0, pageSize) : rows
+  return NextResponse.json({ admins, page, pageSize, total, hasMore, queryRequired: false }, { headers: { 'Cache-Control': 'private, no-store' } })
+}
 
 export async function POST(request: Request) {
   const guard = await requireAdmin('admin_manage')

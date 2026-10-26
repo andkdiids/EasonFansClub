@@ -23,23 +23,33 @@ export async function GET(request: Request) {
 
   const searchParams = new URL(request.url).searchParams
   const query = searchParams.get('q')?.trim().slice(0, 80) || ''
+  const paged = searchParams.has('page') || searchParams.has('pageSize')
+  const pageValue = Number(searchParams.get('page') || 1)
+  const pageSizeValue = Number(searchParams.get('pageSize') || 20)
+  const page = Number.isSafeInteger(pageValue) ? Math.min(10_000, Math.max(1, pageValue)) : 1
+  const pageSize = paged && Number.isSafeInteger(pageSizeValue) ? Math.min(50, Math.max(1, pageSizeValue)) : 20
   const sort = searchParams.get('sort') === 'displayCount' ? 'displayCount' : 'createdAt'
   const order = searchParams.get('order') === 'asc' ? 'asc' : 'desc'
 
   try {
-    const lyrics = await prisma.lyricPrescription.findMany({
-      where: query
+    const where = query
         ? {
             OR: [
               { text: { contains: query } },
               { songTitle: { contains: query } },
             ],
           }
-        : undefined,
-      orderBy: { [sort]: order },
-      take: 500,
-    })
-    return NextResponse.json({ ok: true, data: { lyrics }, error: null })
+        : {}
+    if (!paged) {
+      const lyrics = await prisma.lyricPrescription.findMany({ where, orderBy: { [sort]: order }, take: 500 })
+      return NextResponse.json({ ok: true, data: { lyrics }, error: null })
+    }
+    const [rows, total] = await Promise.all([
+      prisma.lyricPrescription.findMany({ where, orderBy: { [sort]: order }, skip: (page - 1) * pageSize, take: pageSize + 1 }),
+      prisma.lyricPrescription.count({ where }),
+    ])
+    const hasMore = rows.length > pageSize
+    return NextResponse.json({ ok: true, data: { lyrics: hasMore ? rows.slice(0, pageSize) : rows, page, pageSize, total, hasMore }, error: null })
   } catch (error) {
     console.error('[admin.entertainment.lyrics.list]', error)
     return NextResponse.json({ ok: false, data: null, error: '歌词处方库加载失败' }, { status: 500 })
