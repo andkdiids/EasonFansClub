@@ -60,12 +60,16 @@ export async function GET(request: Request) {
         status: true,
         createdAt: true,
         Profile: { select: { displayName: true } },
+        AdminPermission: { where: { enabled: true }, select: { permissionKey: true } },
       },
     }),
     prisma.user.count({ where }),
   ])
   const hasMore = rows.length > pageSize
-  const admins = hasMore ? rows.slice(0, pageSize) : rows
+  const admins = (hasMore ? rows.slice(0, pageSize) : rows).map(({ AdminPermission, ...admin }) => ({
+    ...admin,
+    permissions: AdminPermission.map(({ permissionKey }) => permissionKey),
+  }))
   return NextResponse.json({ admins, page, pageSize, total, hasMore, queryRequired: false }, { headers: { 'Cache-Control': 'private, no-store' } })
 }
 
