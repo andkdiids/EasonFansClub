@@ -9,6 +9,7 @@ import { publicImageUrl } from '@/lib/images'
 import { getSiteAppearance } from '@/lib/site-config'
 import { prisma } from '@/lib/prisma'
 import { getPublicConcertEvent } from '@/lib/concert-events'
+import { loadWelcomeOptionalData } from '@/lib/welcome-optional-data'
 import { RecordingSessionsSpotlight } from '@/components/concerts/RecordingSessionsSpotlight'
 
 export const dynamic = 'force-dynamic'
@@ -20,7 +21,7 @@ function isPhoneRequest(userAgent: string, clientHint: string | null) {
 export default async function WelcomePage() {
   const [user, config, requestHeaders, featured] = await Promise.all([
     getCurrentUser(), getSiteAppearance(), headers(),
-    prisma.concertEvent.findFirst({ where: { homepageFeatured: true, status: { in: ['UPCOMING', 'REGISTRATION', 'WAITING_DRAW', 'SHOWING'] } }, orderBy: { updatedAt: 'desc' }, select: { slug: true } }).catch(() => null),
+    loadWelcomeOptionalData('featured-event-query', () => prisma.concertEvent.findFirst({ where: { homepageFeatured: true, status: { in: ['UPCOMING', 'REGISTRATION', 'WAITING_DRAW', 'SHOWING'] } }, orderBy: { updatedAt: 'desc' }, select: { slug: true } })),
   ])
   if (!user) redirect('/login?redirect=%2Fwelcome')
 
@@ -31,7 +32,9 @@ export default async function WelcomePage() {
   )
   const logoUrl = publicImageUrl(config.images.navLogoUrl || config.images.logoUrl)
   const positionMode = isPhoneRequest(requestHeaders.get('user-agent') || '', requestHeaders.get('sec-ch-ua-mobile')) ? 'mobile' : 'desktop'
-  const featuredEvent = featured ? await getPublicConcertEvent(featured.slug, user.id).catch(() => null) : null
+  const featuredEvent = featured
+    ? await loadWelcomeOptionalData('featured-event-load', () => getPublicConcertEvent(featured.slug, user.id))
+    : null
 
   return (
     <main className="welcome-page">
@@ -53,5 +56,3 @@ export default async function WelcomePage() {
     </main>
   )
 }
-
-undefined

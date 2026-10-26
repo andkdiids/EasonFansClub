@@ -1,3 +1,5 @@
+'use client'
+
 import Link from 'next/link'
 import type { EventView } from '@/components/concerts/concert-types'
 import { ConcertCountdown } from '@/components/concerts/ConcertCountdown'
