@@ -28,16 +28,19 @@ export async function GET(request: Request) {
   const sort = searchParams.get('sort') === 'uid_desc' ? 'desc' : 'asc'
   const rawPage = Number(searchParams.get('page') || 1)
   const rawLimit = Number(searchParams.get('limit') || DEFAULT_PAGE_SIZE)
+  const mobileDirectory = searchParams.get('client') === 'mobile'
   const page = Number.isSafeInteger(rawPage) ? Math.min(10_000, Math.max(rawPage, 1)) : 1
   const limit = Number.isSafeInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE
+  if (mobileDirectory && !keyword) {
+    return NextResponse.json({ users: [], page, limit, hasMore: false }, { headers: noStoreHeaders })
+  }
   const skip = (page - 1) * limit
   const searchFilters: Prisma.UserWhereInput[] = keyword
     ? [
         ...(Number.isFinite(uidKeyword) ? [{ uid: uidKeyword }] : []),
         { username: { contains: keyword } },
         { nickname: { contains: keyword } },
-        { email: { contains: keyword } },
-        { phone: { contains: keyword } },
+        ...(!mobileDirectory ? [{ email: { contains: keyword } }, { phone: { contains: keyword } }] : []),
         { Profile: { displayName: { contains: keyword } } },
       ]
     : []
@@ -117,10 +120,28 @@ export async function GET(request: Request) {
   return NextResponse.json({
     users: pageUsers.map(({ Profile, UserSecurityQuestion, AccountSecurityLog, ...user }) => {
       const failures = failureState.get(`account:${hashToken(user.id)}`)
-      return {
-        ...user,
+      const identity = {
         nickname: getPublicUserDisplayName(user),
         avatarUrl: publicImageUrl(Profile?.avatarUrl || user.avatarUrl),
+      }
+      if (mobileDirectory) {
+        return {
+          id: user.id,
+          uid: user.uid,
+          username: user.username,
+          ...identity,
+          role: user.role,
+          status: user.status,
+          level: user.level,
+          exp: user.exp,
+          points: user.points,
+          lastLoginAt: user.lastLoginAt,
+          createdAt: user.createdAt,
+        }
+      }
+      return {
+        ...user,
+        ...identity,
         securityQuestionsSet: Boolean(UserSecurityQuestion),
         lastPasswordResetAt: AccountSecurityLog[0]?.createdAt || null,
         securityQuestionFailureCount: failures?.count || 0,

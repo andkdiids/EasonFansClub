@@ -30,6 +30,11 @@ export async function GET(request: Request) {
   const guard = await requireAdmin('achievement_manage')
   if (!guard.user) return guard.response
   const { searchParams } = new URL(request.url)
+  const requestedPage = Number(searchParams.get('page'))
+  const requestedPageSize = Number(searchParams.get('pageSize'))
+  const paged = Number.isSafeInteger(requestedPage) && requestedPage > 0
+  const page = paged ? Math.min(10_000, requestedPage) : 1
+  const pageSize = Number.isSafeInteger(requestedPageSize) ? Math.min(30, Math.max(1, requestedPageSize)) : 20
   const enabledParam = searchParams.get('enabled')
   const badges = await listBadgesForAdmin({
     query: searchParams.get('q') || undefined,
@@ -41,9 +46,12 @@ export async function GET(request: Request) {
     tierGroupCode: searchParams.get('tierGroupCode') || undefined,
     availability: searchParams.get('availability') || undefined,
     order: ['sortOrder', 'ownerCount', 'rate', 'createdAt'].includes(searchParams.get('order') || '') ? searchParams.get('order') as 'sortOrder' | 'ownerCount' | 'rate' | 'createdAt' : undefined,
+    ...(paged ? { page, pageSize } : {}),
   })
-  const stats = await getBadgeOwnershipStats(badges.map((badge) => badge.id))
-  return NextResponse.json({ badges: badges.map((badge) => serializeBadge(badge as unknown as Record<string, unknown>, stats.get(badge.id))) }, { headers: { 'Cache-Control': 'no-store' } })
+  const hasMore = paged && badges.length > pageSize
+  const pageBadges = hasMore ? badges.slice(0, pageSize) : badges
+  const stats = await getBadgeOwnershipStats(pageBadges.map((badge) => badge.id))
+  return NextResponse.json({ badges: pageBadges.map((badge) => serializeBadge(badge as unknown as Record<string, unknown>, stats.get(badge.id))), ...(paged ? { page, pageSize, hasMore } : {}) }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 export async function POST(request: Request) {

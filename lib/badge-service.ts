@@ -1966,7 +1966,7 @@ export async function findBadgeForAdmin(badgeId: string) {
   return badge ? resolveAdminBadgeAcquisition(badge) : null
 }
 
-export async function listBadgesForAdmin({ query, enabled, visibility, grantType, rarity, seriesId, tierGroupCode, availability, order }: { query?: string; enabled?: boolean; visibility?: string; grantType?: string; rarity?: string; seriesId?: string; tierGroupCode?: string; availability?: string; order?: 'sortOrder' | 'ownerCount' | 'rate' | 'createdAt' } = {}) {
+export async function listBadgesForAdmin({ query, enabled, visibility, grantType, rarity, seriesId, tierGroupCode, availability, order, page, pageSize }: { query?: string; enabled?: boolean; visibility?: string; grantType?: string; rarity?: string; seriesId?: string; tierGroupCode?: string; availability?: string; order?: 'sortOrder' | 'ownerCount' | 'rate' | 'createdAt'; page?: number; pageSize?: number } = {}) {
   const where: Prisma.BadgeWhereInput = {}
   const normalizedQuery = query?.trim()
   if (normalizedQuery) where.OR = [{ name: { contains: normalizedQuery } }, { code: { contains: normalizedQuery } }, { slug: { contains: normalizedQuery } }]
@@ -1987,7 +1987,14 @@ export async function listBadgesForAdmin({ query, enabled, visibility, grantType
   ] }]
 
   const orderBy = order === 'createdAt' ? [{ createdAt: 'desc' as const }] : [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }]
-  const badges = await prisma.badge.findMany({ where, orderBy, select: badgeAdminDisplaySelect })
+  const boundedPage = Number.isSafeInteger(page) && page && page > 0 ? Math.min(10_000, page) : null
+  const boundedPageSize = Number.isSafeInteger(pageSize) && pageSize && pageSize > 0 ? Math.min(30, pageSize) : null
+  const badges = await prisma.badge.findMany({
+    where,
+    orderBy,
+    ...(boundedPage && boundedPageSize ? { skip: (boundedPage - 1) * boundedPageSize, take: boundedPageSize + 1 } : {}),
+    select: badgeAdminDisplaySelect,
+  })
   const resolvedBadges = badges.map(resolveAdminBadgeAcquisition)
   if (order !== 'ownerCount' && order !== 'rate') return resolvedBadges
   const stats = await getBadgeOwnershipStats(resolvedBadges.map((badge) => badge.id))

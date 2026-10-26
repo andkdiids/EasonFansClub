@@ -150,6 +150,10 @@ function isImmutablePublicPath(pathname: string) {
 
 function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (!/^Bearer\s+/i.test(request.headers.get('authorization') || '')) return false
+  // Admin handlers perform the same server-side role and permission checks
+  // through requireAdmin/requireSuperAdmin. This only lets authenticated
+  // native requests reach those handlers without a browser Cookie.
+  if (/^\/api\/admin(?:\/|$)/.test(pathname) && ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return true
   // V2 route handlers authenticate each user/admin action again; this only
   // lets the established Mobile bearer session reach the shared business API.
   if (['GET', 'POST', 'PATCH'].includes(request.method) && /^\/api\/(?:admin\/)?activities\/[^/]+\/v2(?:\/.*)?$/.test(pathname)) return true

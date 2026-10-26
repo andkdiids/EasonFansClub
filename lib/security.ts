@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
+import { headers } from 'next/headers'
 import type { UserRole } from '@prisma/client'
 import { type AdminPermissionKey, hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser, getCurrentUserById, isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
@@ -119,7 +120,21 @@ export async function requireRequestUser(request: Request): Promise<GuardResult>
   return result
 }
 
-export async function requireAdmin(permissionKey?: AdminPermissionKey): Promise<GuardResult> {
+async function authorizationRequest(request?: Request) {
+  if (request) return request.headers.has('authorization') ? request : null
+  try {
+    const requestHeaders = await headers()
+    if (!requestHeaders.has('authorization')) return null
+    return new Request('https://ecfc.fans/api/admin', { headers: requestHeaders })
+  } catch {
+    return null
+  }
+}
+
+export async function requireAdmin(permissionKey?: AdminPermissionKey, request?: Request): Promise<GuardResult> {
+  const bearerRequest = await authorizationRequest(request)
+  if (bearerRequest) return requireRequestAdmin(bearerRequest, permissionKey)
+
   const result = await requireUser()
   if (!result.user) return result
 
@@ -145,7 +160,15 @@ export async function requireRequestAdmin(request: Request, permissionKey?: Admi
   return result
 }
 
-export async function requireSuperAdmin(): Promise<GuardResult> {
+export async function requireSuperAdmin(request?: Request): Promise<GuardResult> {
+  const bearerRequest = await authorizationRequest(request)
+  if (bearerRequest) {
+    const result = await requireRequestUser(bearerRequest)
+    if (!result.user) return result
+    if (result.user.role !== 'SUPER_ADMIN') return { user: null, response: forbiddenResponse('只有超级管理员可以执行此操作') }
+    return result
+  }
+
   const result = await requireUser()
   if (!result.user) return result
 
