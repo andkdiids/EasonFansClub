@@ -95,6 +95,7 @@ export const adminModulePermissions: Record<string, AdminPermissionKey> = {
   '/admin/stickers': 'sticker_manage',
   '/admin/registration-messages': 'daily_message_manage',
   '/admin/activities': 'activity_manage',
+  '/admin/concerts': 'activity_manage',
   '/admin/material-redemptions': 'material_redemption_manage',
   '/admin/banned-words': 'banned_word_manage',
   '/admin/anywhere-door': 'social_manage',
