@@ -15,7 +15,7 @@ test('活动公共页面的中性文字使用主题 token，不把浅色文字�
   const lottery = read('components/activities/ActivityLotteryPanel.tsx')
   const entry = read('components/activities/ActivityLotteryEntry.tsx')
 
-  assert.match(page, /bg-white\/85 text-\[var\(--foreground\)\]/)
+  assert.match(page, /bg-\[var\(--surface\)\] text-\[var\(--foreground\)\]/)
   assert.match(page, /hasBanner \? '[^']*text-white\/80' : 'text-\[var\(--foreground-muted\)\]'/)
   assert.match(list, /text-\[var\(--foreground\)\]/)
   assert.match(list, /text-\[var\(--foreground-muted\)\]/)

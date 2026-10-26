@@ -139,6 +139,142 @@ model ActivityFavorite {
   @@unique([activityId, userId])
 }
 
+model ConcertEvent {
+  id                    String                        @id @default(cuid())
+  title                 String                        @db.VarChar(191)
+  subtitle              String?                       @db.VarChar(300)
+  slug                  String                        @unique @db.VarChar(191)
+  venue                 String?                       @db.VarChar(300)
+  startDate             DateTime?                     @db.Date
+  endDate               DateTime?                     @db.Date
+  description           String                        @db.Text
+  sourceNote            String?                       @db.Text
+  timezone              String                        @default("Asia/Hong_Kong") @db.VarChar(64)
+  registrationUrl       String?                       @db.Text
+  registrationEnabled   Boolean                       @default(false)
+  registrationLabel     String                        @default("登记入口") @db.VarChar(80)
+  homepageFeatured      Boolean                       @default(false)
+  activityCenterVisible Boolean                       @default(true)
+  allowMarking          Boolean                       @default(true)
+  allowDiscussion       Boolean                       @default(true)
+  status                ConcertEventStatus            @default(DRAFT)
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+  shows                 ConcertShow[]
+  timeline              ConcertTimelineEvent[]
+  tutorials             ConcertTutorial[]
+  marks                 ConcertShowMark[]
+  reminders             ConcertReminderSubscription[]
+
+  @@index([status, homepageFeatured])
+  @@index([status, activityCenterVisible])
+  @@index([startDate, endDate])
+}
+
+model ConcertShow {
+  id            String                        @id @default(cuid())
+  eventId       String
+  date          DateTime                      @db.Date
+  startTime     String?                       @db.VarChar(10)
+  title         String?                       @db.VarChar(191)
+  albumTitle    String                        @db.VarChar(300)
+  albumSubtitle String?                       @db.VarChar(300)
+  albumYear     Int?
+  songs         Json
+  note          String?                       @db.Text
+  sortOrder     Int                           @default(0)
+  status        ConcertShowStatus             @default(SCHEDULED)
+  createdAt     DateTime                      @default(now())
+  updatedAt     DateTime                      @updatedAt
+  event         ConcertEvent                  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  marks         ConcertShowMark[]
+  posts         Post[]
+  reminders     ConcertReminderSubscription[] @relation("ConcertShowReminders")
+
+  @@index([eventId, date, sortOrder])
+  @@index([eventId, status, date])
+}
+
+model ConcertTimelineEvent {
+  id                  String                        @id @default(cuid())
+  eventId             String
+  type                ConcertTimelineType
+  title               String                        @db.VarChar(191)
+  description         String?                       @db.Text
+  date                DateTime                      @db.Date
+  startsAt            DateTime?
+  endsAt              DateTime?
+  sortOrder           Int                           @default(0)
+  enabled             Boolean                       @default(true)
+  countdownEnabled    Boolean                       @default(false)
+  notificationEnabled Boolean                       @default(false)
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+  event               ConcertEvent                  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  reminders           ConcertReminderSubscription[] @relation("ConcertTimelineReminders")
+
+  @@index([eventId, enabled, sortOrder, date])
+  @@index([eventId, type])
+}
+
+model ConcertShowMark {
+  id        String       @id @default(cuid())
+  eventId   String
+  showId    String
+  userId    String
+  wantToGo  Boolean      @default(false)
+  hasTicket Boolean      @default(false)
+  isPublic  Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  event     ConcertEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  show      ConcertShow  @relation(fields: [showId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, showId])
+  @@index([eventId, showId, wantToGo, isPublic])
+  @@index([eventId, showId, hasTicket, isPublic])
+  @@index([userId, wantToGo, hasTicket])
+}
+
+model ConcertTutorial {
+  id        String                @id @default(cuid())
+  eventId   String
+  type      ConcertTutorialType
+  title     String                @db.VarChar(191)
+  summary   String?               @db.Text
+  steps     Json
+  status    ConcertTutorialStatus @default(DRAFT)
+  sortOrder Int                   @default(0)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  event     ConcertEvent          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, status, sortOrder])
+  @@index([eventId, type, status])
+}
+
+model ConcertReminderSubscription {
+  id              String                    @id @default(cuid())
+  eventId         String
+  userId          String
+  targetType      ConcertReminderTargetType
+  targetId        String                    @db.VarChar(191)
+  showId          String?
+  timelineEventId String?
+  createdAt       DateTime                  @default(now())
+  event           ConcertEvent              @relation(fields: [eventId], references: [id], onDelete: Cascade, map: "ConcertReminderSubscription_eventId_fkey")
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ConcertReminderSubscription_userId_fkey")
+  show            ConcertShow?              @relation("ConcertShowReminders", fields: [showId], references: [id], onDelete: Cascade, map: "ConcertReminderSubscription_showId_fkey")
+  timeline        ConcertTimelineEvent?     @relation("ConcertTimelineReminders", fields: [timelineEventId], references: [id], onDelete: Cascade, map: "ConcertReminderSubscription_timelineEventId_fkey")
+
+  @@unique([userId, eventId, targetType, targetId], map: "ConcertReminderSubscription_dedup_key")
+  @@index([eventId, targetType, targetId])
+  @@index([userId, eventId])
+  @@index([showId])
+  @@index([timelineEventId])
+}
+
 model ActivityRegistration {
   id                         String                             @id @default(cuid())
   note                       String?
@@ -3815,6 +3951,8 @@ model Post {
   Report                Report[]
   stickerId             String?
   sticker               Sticker?                @relation("PostSticker", fields: [stickerId], references: [id], onDelete: SetNull)
+  concertShowId         String?
+  ConcertShow           ConcertShow?            @relation(fields: [concertShowId], references: [id], onDelete: SetNull)
   TopicActivity         Activity?               @relation("ActivityPost")
 
   @@index([authorId, createdAt])
@@ -3837,6 +3975,7 @@ model Post {
   @@index([status])
   @@index([moderationStatus, createdAt])
   @@index([expiresAt, status, isDeleted, moderationStatus])
+  @@index([concertShowId, status, isDeleted, createdAt])
 }
 
 /**
@@ -4963,6 +5102,8 @@ model User {
   UserBadgeSourceGrantedBy                               UserBadgeSource[]                  @relation("UserBadgeSourceGrantedBy")
   UserSecurityQuestion                                   UserSecurityQuestion?
   UserMusicConcert                                       UserMusicConcert[]
+  ConcertShowMark                                        ConcertShowMark[]
+  ConcertReminderSubscription                            ConcertReminderSubscription[]
   MyLivePhoto                                            MyLivePhoto[]
   SalonPost                                              SalonPost[]                        @relation("SalonPostAuthor")
   SalonPostApproved                                      SalonPost[]                        @relation("SalonPostApprovedBy")
@@ -5678,6 +5819,49 @@ enum NotificationType {
   FEEDBACK
   REVIEW
   PROFILE_BACKGROUND_LIKE
+}
+
+enum ConcertEventStatus {
+  DRAFT
+  UPCOMING
+  REGISTRATION
+  WAITING_DRAW
+  SHOWING
+  ENDED
+  ARCHIVED
+}
+
+enum ConcertShowStatus {
+  SCHEDULED
+  CANCELLED
+  ARCHIVED
+}
+
+enum ConcertTimelineType {
+  REGISTRATION_OPEN
+  REGISTRATION_CLOSE
+  FIRST_DRAW_RESULT
+  FIRST_PAYMENT_DEADLINE
+  SECOND_DRAW_RESULT
+  SECOND_PAYMENT_DEADLINE
+  FIRST_SHOW
+  FINAL_SHOW
+  CUSTOM
+}
+
+enum ConcertTutorialType {
+  REGISTRATION
+  TICKETING
+}
+
+enum ConcertTutorialStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum ConcertReminderTargetType {
+  TIMELINE
+  SHOW
 }
 
 enum PageLayoutRevisionSource {

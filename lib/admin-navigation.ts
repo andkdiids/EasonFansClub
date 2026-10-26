@@ -48,6 +48,7 @@ export const adminNavigationGroups: readonly AdminNavigationGroup[] = [
       { href: '/admin/today', title: '今日内容管理', desc: '管理历史上的今天内容；审核入口进入统一审核中心。' },
       { href: '/admin/registration-messages', title: '挂号页留言管理', desc: '管理挂号页留言、公告和活动提醒。' },
       { href: '/admin/activities', title: '活动中心管理', desc: '创建、编辑、发布、取消和维护活动。' },
+      { href: '/admin/concerts', title: '演唱会管理', desc: '管理演唱会专题、场次、时间线、教程和登记入口。' },
       { href: '/admin/stickers', title: '表情包资料管理', desc: '维护官方表情、排序和排行；用户合集审核进入统一审核中心。' },
       { href: '/admin/birthdays', title: '生日管理', desc: '查看今日生日用户并保护隐私信息。' },
       { href: '/admin/birthday-messages', title: '生日祝福文案', desc: '维护生日纪念通知文案池。' },

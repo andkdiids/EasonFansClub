@@ -1530,6 +1530,9 @@ button, a, input { transition: background-color 170ms ease-out, border-color 170
  flex-direction:column;
  justify-content:center;
  align-items:flex-start;
+ overflow-y:auto;
+ overscroll-behavior:contain;
+ scrollbar-width:none;
  padding:80px clamp(26px,10vw,150px) 40px;
 }
 .hero-kicker,.community-hero-copy>p { margin:0 0 12px; font-size:12px; letter-spacing:.28em; }

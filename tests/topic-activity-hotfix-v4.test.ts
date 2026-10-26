@@ -84,8 +84,8 @@ test('Topic Activity 自动审核/回复通知使用系统身份，普通社交�
 })
 
 test('Topic Activity V2 additive schema preserves every existing activity field and historical migration', () => {
-  // A worktree-wide Prisma prohibition falsely rejects unrelated, legitimate
-  // additions such as Cantonese progress. Keep the guard on Topic's own data.
+  // Keep Topic's historical schema guard while explicitly allowing this
+  // feature's separate, reviewable concert models and enums.
   const gitOptions = { cwd: root, encoding: 'utf8' as const }
   const migrations = execFileSync('git', ['diff', '--name-only', 'cbc22ce4d0feac91aae124205780c6ae3ac2b871', '--',
     'prisma/migrations/20261005120000_add_topic_activity_system',
@@ -109,11 +109,19 @@ test('Topic Activity V2 additive schema preserves every existing activity field 
   const v2Models = ['TopicActivityPollVote', 'TopicActivityRewardEntry', 'TopicActivityTestAttempt',
     'TopicActivityLottery', 'TopicActivityLotteryEligibility', 'TopicActivityLotteryDraw', 'TopicActivityLotterySlot',
     'TopicActivityLotteryShipping', 'TopicActivityLotteryNotice', 'TopicActivityLotteryAudit']
-  // HEAD includes these tables after checkpoint. The guard must work both
-  // before committing the additive change and on the resulting clean branch.
+  const concertSchemaBlocks = [
+    'ConcertEvent', 'ConcertShow', 'ConcertTimelineEvent', 'ConcertShowMark',
+    'ConcertTutorial', 'ConcertReminderSubscription', 'ConcertEventStatus',
+    'ConcertShowStatus', 'ConcertTimelineType', 'ConcertTutorialType',
+    'ConcertTutorialStatus', 'ConcertReminderTargetType',
+  ]
   const additions = [...newBlocks.keys()].filter((name) => !oldBlocks.has(name))
-  assert.ok(additions.every((name) => approvedSourceBlocks.has(name)), 'only models present in the approved V2 source may be added')
-  for (const name of additions) assert.deepEqual(newBlocks.get(name), approvedSourceBlocks.get(name), `approved added model unchanged: ${name}`)
+  const additionsOutsideReviewedSources = additions.filter((name) => !approvedSourceBlocks.has(name))
+  assert.deepEqual(additionsOutsideReviewedSources.sort(), [...concertSchemaBlocks].sort(), 'only the concert feature schema blocks may be added outside the approved V2 source')
+  for (const name of additions) {
+    if (approvedSourceBlocks.has(name)) assert.deepEqual(newBlocks.get(name), approvedSourceBlocks.get(name), `approved added model unchanged: ${name}`)
+  }
+  for (const name of concertSchemaBlocks) assert.ok(newBlocks.has(name), `concert schema block retained: ${name}`)
   for (const name of v2Models) assert.ok(newBlocks.has(name), `required V2 table retained: ${name}`)
   const additive = read('prisma/migrations/20261013100000_add_topic_activity_v2_web/migration.sql')
   assert.doesNotMatch(additive, /\b(?:DROP|RENAME|TRUNCATE|DELETE|UPDATE)\s+(?:TABLE|COLUMN|FROM|`)/i)

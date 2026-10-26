@@ -6,6 +6,8 @@ import { activitySelect, serializeActivityRow } from '@/lib/activity-data'
 import { sortActivities } from '@/lib/activity'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getCurrentUser } from '@/lib/auth'
+import { getPublicConcertEvent } from '@/lib/concert-events'
+import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +19,8 @@ export default async function ActivitiesPage() {
   ])
   const activities = sortActivities(publishedActivities.map((activity) => serializeActivityRow(activity))).slice(0, 100)
   const canCheckIn = user ? await hasAdminPermission(user, 'activity_manage').catch(() => false) : false
+  const featuredConcert = await prisma.concertEvent.findFirst({ where: { activityCenterVisible: true, status: { in: ['UPCOMING', 'REGISTRATION', 'WAITING_DRAW', 'SHOWING'] } }, orderBy: { updatedAt: 'desc' }, select: { slug: true } }).catch(() => null)
+  const concert = featuredConcert ? await getPublicConcertEvent(featuredConcert.slug, user?.id).catch(() => null) : null
   // ActivityCard renders each detail link as href={`/activities/${item.id}`}.
   const banner = config.heroVisuals.activities
   const hasBanner = banner.enabled && Boolean(banner.mediaUrl || banner.imageUrl || banner.posterUrl || config.images.activityCoverUrl)
@@ -29,6 +33,7 @@ export default async function ActivitiesPage() {
           {hasBanner ? <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/35 to-black/10" /> : null}
           <div className="relative z-10 p-4 sm:px-6 sm:py-5"><h1 className="text-2xl font-black">活动中心</h1><p className={`mt-2 max-w-2xl text-sm leading-6 ${hasBanner ? 'text-white/80' : 'text-[var(--foreground-muted)]'}`}>演唱会、线下聚会、线上活动和粉丝福利。</p></div>
         </section>
+        {concert ? <section className="border border-[var(--border)] bg-[var(--surface)] p-4 sm:flex sm:items-center sm:justify-between sm:gap-5 sm:p-5"><div><p className="text-[10px] font-black uppercase tracking-[.22em] text-[var(--foreground-muted)]">限时演唱会专题</p><h2 className="mt-1 text-lg font-black text-[var(--foreground)]">{concert.title}</h2><p className="mt-1 text-sm text-[var(--foreground-muted)]">{concert.shows.length} 场 · {concert.totalWantToGo} 人想看 · {concert.totalHasTicket} 人有票</p></div><Link href={`/concerts/${concert.slug}`} className="mt-3 inline-flex min-h-10 items-center border border-[var(--primary)] px-4 text-sm font-black text-[var(--primary)] sm:mt-0">进入专题 →</Link></section> : null}
         <ActivitiesListClient initialActivities={activities} canCheckIn={canCheckIn} isAuthenticated={Boolean(user)} />
       </main>
     </>
