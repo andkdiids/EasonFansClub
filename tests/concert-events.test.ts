@@ -7,6 +7,7 @@ import { parseConcertDate, parseConcertEventInput, parseConcertShowInputs, parse
 import { parseHttpsRegistrationUrl } from '@/lib/concert-events'
 import { isConcertMarkVisible, publicConcertMarkUserWhere } from '@/lib/concert-privacy'
 import { getConcertReminderInstant, getConcertReminderNotificationContent } from '@/lib/concert-reminders'
+import { loadWelcomeOptionalData } from '@/lib/welcome-optional-data'
 import { concertDateKey, concertLocalDateKey, filterConcertShows, getConcertCalendarCells, getConcertTimelineState, isConcertWeekend } from '@/lib/concert-timeline'
 
 const source = (relativePath: string) => readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
@@ -245,6 +246,33 @@ test('public mark displays and registration buttons honor their configured eligi
   assert.match(eventPage, /event\.allowMarking && event\.status !== 'ENDED'/)
   assert.match(spotlight, /event\.registrationEnabled && event\.registrationUrl/)
   assert.match(spotlight, /target="_blank"\s+rel="noopener noreferrer"/)
+})
+
+test('welcome spotlight is a client component before invoking its client clock hook', () => {
+  const spotlight = source('../components/concerts/RecordingSessionsSpotlight.tsx')
+  assert.match(spotlight, /^['"]use client['"];?/)
+  assert.match(spotlight, /useServerClock\(/)
+})
+
+test('welcome optional event data returns normal and empty results unchanged', async () => {
+  assert.deepEqual(await loadWelcomeOptionalData('featured-event-query', async () => ({ slug: 'recording-sessions' })), { slug: 'recording-sessions' })
+  assert.equal(await loadWelcomeOptionalData('featured-event-query', async () => null), null)
+})
+
+test('welcome optional event dependency failures degrade with safe diagnostic metadata', async () => {
+  const logs: Array<{ event: string; details: unknown }> = []
+  const result = await loadWelcomeOptionalData('featured-event-load', async () => {
+    const error = new Error('sensitive query context must not be logged') as Error & { code: string }
+    error.code = 'P2021'
+    throw error
+  }, (event, details) => logs.push({ event, details }))
+
+  assert.equal(result, null)
+  assert.deepEqual(logs, [{
+    event: '[welcome.optional-data.unavailable]',
+    details: { feature: 'featured-concert', stage: 'featured-event-load', errorName: 'Error', errorCode: 'P2021' },
+  }])
+  assert.doesNotMatch(JSON.stringify(logs), /sensitive query context/)
 })
 
 test('migration contains first event, all 26 shows, timeline and tutorials without applying it', () => {
