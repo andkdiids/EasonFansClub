@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { resolveHomepageFeaturedConcert, type HomepageFeaturedConcertInput } from '../lib/homepage-featured-concert'
+import { createHomepageHeroCarouselSlides, getAdjacentHomepageHeroIndex, getHomepageHeroSwipeDirection } from '../lib/homepage-hero-carousel'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -67,27 +68,68 @@ test('社区首页查询复用 ConcertEvent 后台开关、允许状态、图片
   assert.match(optional, /return null/)
 })
 
-test('有效专题固定优先于轮播；无效或关闭时仍使用原 Hero slides', () => {
+test('有效专题作为新增 slide 追加到原有顺序，不替换或重排后台 Hero', () => {
+  const first = { title: '原首页图一', href: '/one', isVisible: true, sortOrder: 1 }
+  const second = { title: '原首页图二', href: '/two', isVisible: true, sortOrder: 2 }
+  const concert = resolveHomepageFeaturedConcert(featuredConcert({ subtitle: 'Recording Sessions with Mr. Eason Chan' }))
+  const withConcert = createHomepageHeroCarouselSlides([first, second], concert)
+  const withoutConcert = createHomepageHeroCarouselSlides([first, second], null)
+
+  assert.deepEqual(withConcert, [
+    { type: 'site', slide: first },
+    { type: 'site', slide: second },
+    { type: 'concert', concert },
+  ])
+  assert.deepEqual(withoutConcert, [
+    { type: 'site', slide: first },
+    { type: 'site', slide: second },
+  ])
+  assert.deepEqual(withConcert.slice(0, 2).map((slide) => slide.type === 'site' ? slide.slide.href : ''), ['/one', '/two'])
+  assert.equal(concert?.subtitle, 'Recording Sessions with Mr. Eason Chan')
+})
+
+test('轮播索引支持上一张、下一张、循环和空数据', () => {
+  assert.equal(getAdjacentHomepageHeroIndex(0, 3, -1), 2)
+  assert.equal(getAdjacentHomepageHeroIndex(2, 3, 1), 0)
+  assert.equal(getAdjacentHomepageHeroIndex(8, 0, 1), 0)
+  assert.equal(getHomepageHeroSwipeDirection(-50), 1)
+  assert.equal(getHomepageHeroSwipeDirection(50), -1)
+  assert.equal(getHomepageHeroSwipeDirection(20), null)
+})
+
+test('Recording Sessions 复用原 Hero 轮播、自动切换、按钮和分页指示器', () => {
   const hero = read('components/HomeHero.tsx')
   const surface = read('components/HomeLayoutSurface.tsx')
-  assert.match(hero, /if \(featuredConcert\) \{/)
+  assert.match(hero, /createHomepageHeroCarouselSlides\(visibleSlides, featuredConcert\)/)
+  assert.doesNotMatch(hero, /if \(featuredConcert\) \{/)
   assert.match(hero, /community-concert-hero-link/)
-  assert.match(hero, /href=\{featuredConcert\.href\}/)
-  assert.match(hero, /featuredConcert\.backgroundImageUrl/)
+  assert.match(hero, /href=\{activeConcert\.href\}/)
+  assert.match(hero, /activeConcert\.backgroundImageUrl/)
   assert.match(hero, /限时演唱会 · Recording Sessions/)
   assert.match(hero, /演出日期/)
   assert.match(hero, /进入专题/)
-  assert.match(hero, /aria-roledescription="carousel"/) // Existing carousel remains the null-event fallback.
+  assert.match(hero, /aria-roledescription="carousel"/)
+  assert.match(hero, /aria-current=\{slideIndex === index \? 'true' : 'false'\}/)
+  assert.match(hero, /getAdjacentHomepageHeroIndex\(current, carouselSlides\.length, 1\)/)
+  assert.match(hero, /getHomepageHeroSwipeDirection\(event\.clientX - startX\)/)
+  assert.match(hero, /swipedRef\.current = true/)
+  assert.match(hero, /event\.preventDefault\(\)/)
+  assert.match(hero, /onClick=\{\(\) => setIndex\(slideIndex\)\}/)
+  assert.match(hero, /\[carouselSlides\.length, index, isFocused, isHovered, isPageVisible, isPointerDragging\]/)
+  assert.match(hero, /activeSiteSlide\?\.href \|\| '#community-content'/)
+  assert.match(hero, /onError=\{\(\) => setFailedConcertImageUrl\(activeConcert\.backgroundImageUrl\)\}/)
   assert.match(surface, /slides=\{slides\}/)
   assert.match(surface, /featuredConcert=\{featuredConcert\}/)
 })
 
-test('专题 Hero 保留紧凑移动高度、完整 CTA 和移动端背景定位', () => {
+test('专题 slide 与原轮播共用固定高度，CTA 和移动端背景样式保留', () => {
   const css = read('app/globals.css')
-  assert.match(css, /\.community-concert-hero \{ height:clamp\(245px,72vw,310px\); \}/)
+  assert.match(css, /\.community-hero \{ position:relative; height:clamp\(360px,43vw,520px\);/)
+  assert.doesNotMatch(css, /\.community-concert-hero \{ height:/)
   assert.match(css, /\.community-concert-hero-image \{ object-position:center; \}/)
   assert.match(css, /\.community-concert-hero-cta \{ min-height:42px;/)
   assert.match(css, /\.community-concert-hero-title \{ max-width:100%;/)
+  assert.match(css, /\.homepage-hero-indicator\[aria-current="true"\]/)
 })
 
 test('活动中心继续使用独立展示开关，不随首页 Hero 状态改动', () => {

@@ -130,8 +130,6 @@ export function ConcertEventPage({ initialEvent, isAuthenticated }: Readonly<{ i
       </div>
     </section>
 
-    {event.allowDiscussion ? <ConcertDiscussion slug={event.slug} isAuthenticated={isAuthenticated} canComment={event.status !== 'ENDED'} /> : null}
-
     <details id="timeline" className="group border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-[var(--foreground)] [&::-webkit-details-marker]:hidden">
         <span>活动时间线 <span className="ml-1 font-normal text-[var(--foreground-muted)]">· {timelineState.phaseLabel} · {event.timeline.length} 个节点</span></span><span aria-hidden="true" className="text-lg text-[var(--primary)] transition-transform group-open:rotate-180">⌄</span>
@@ -147,7 +145,7 @@ export function ConcertEventPage({ initialEvent, isAuthenticated }: Readonly<{ i
       </div>
     </details>
 
-    <details className="group border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
+    <details id="calendar" className="group border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-[var(--foreground)] [&::-webkit-details-marker]:hidden">
         <span>{event.shows.length} 场演出日历 <span className="ml-1 font-normal text-[var(--foreground-muted)]">· {month.slice(0, 4)}年{monthIndex + 1}月 · 当前筛选 {monthShows.length} 场</span></span><span aria-hidden="true" className="text-lg text-[var(--primary)] transition-transform group-open:rotate-180">⌄</span>
       </summary>
@@ -165,7 +163,7 @@ export function ConcertEventPage({ initialEvent, isAuthenticated }: Readonly<{ i
       </div>
     </details>
 
-    <details className="group border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
+    <details id="shows" className="group border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-[var(--foreground)] [&::-webkit-details-marker]:hidden">
         <span>场次与歌单 <span className="ml-1 font-normal text-[var(--foreground-muted)]">· {listShows.length} 场{weekendsOnly ? '（周末筛选）' : ''}</span></span><span aria-hidden="true" className="text-lg text-[var(--primary)] transition-transform group-open:rotate-180">⌄</span>
       </summary>
@@ -186,5 +184,7 @@ export function ConcertEventPage({ initialEvent, isAuthenticated }: Readonly<{ i
       {notice ? <p role="status" aria-live="polite" className="mt-2 text-sm text-[var(--primary)]">{notice}</p> : null}
       {isAuthenticated ? <section className="mt-4 border-t border-[var(--border)] pt-3"><h3 className="font-black text-[var(--foreground)]">我的场次</h3>{event.shows.some((show) => show.viewerMark?.wantToGo || show.viewerMark?.hasTicket) ? <ul className="mt-2 flex flex-wrap gap-2">{event.shows.filter((show) => show.viewerMark?.wantToGo || show.viewerMark?.hasTicket).map((show) => <li key={show.id}><Link className="text-sm text-[var(--primary)]" href={`/concerts/${event.slug}/shows/${show.id}`}>{dateLabel(show.date)} · {show.albumTitle}（{[show.viewerMark?.wantToGo ? '想看' : '', show.viewerMark?.hasTicket ? '有票' : ''].filter(Boolean).join(' / ')}）</Link></li>)}</ul> : <p className="mt-1 text-sm text-[var(--foreground-muted)]">你还没有标记场次。</p>}</section> : <p className="mt-3 text-sm text-[var(--foreground-muted)]"><Link className="text-[var(--primary)]" href={`/login?redirect=${encodeURIComponent(`/concerts/${event.slug}`)}`}>登录</Link> 后标记想看或有票。</p>}
     </details>
+
+    {event.allowDiscussion ? <ConcertDiscussion slug={event.slug} isAuthenticated={isAuthenticated} canComment={event.status !== 'ENDED'} /> : null}
   </main>
 }
