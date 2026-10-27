@@ -149,6 +149,7 @@ model ConcertEvent {
   endDate               DateTime?                     @db.Date
   description           String                        @db.Text
   sourceNote            String?                       @db.Text
+  backgroundImageUrl    String?                       @db.Text
   timezone              String                        @default("Asia/Hong_Kong") @db.VarChar(64)
   registrationUrl       String?                       @db.Text
   registrationEnabled   Boolean                       @default(false)
@@ -165,6 +166,7 @@ model ConcertEvent {
   tutorials             ConcertTutorial[]
   marks                 ConcertShowMark[]
   reminders             ConcertReminderSubscription[]
+  discussions           ConcertDiscussionComment[]
 
   @@index([status, homepageFeatured])
   @@index([status, activityCenterVisible])
@@ -190,6 +192,7 @@ model ConcertShow {
   marks         ConcertShowMark[]
   posts         Post[]
   reminders     ConcertReminderSubscription[] @relation("ConcertShowReminders")
+  discussions   ConcertDiscussionComment[]
 
   @@index([eventId, date, sortOrder])
   @@index([eventId, status, date])
@@ -252,6 +255,42 @@ model ConcertTutorial {
 
   @@index([eventId, status, sortOrder])
   @@index([eventId, type, status])
+}
+
+/// Recording Sessions comments are stored separately from plaza posts so they
+/// can never enter the ordinary forum feed or reply pipelines.
+model ConcertDiscussionComment {
+  id               String                   @id @default(cuid())
+  eventId          String
+  showId           String?
+  authorId         String
+  requestId        String                   @db.VarChar(36)
+  content          String                   @db.Text
+  moderationStatus ContentModerationStatus  @default(NORMAL)
+  moderationReason String?                  @db.Text
+  isDeleted        Boolean                  @default(false)
+  deletedAt        DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  event            ConcertEvent             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  show             ConcertShow?             @relation(fields: [showId], references: [id], onDelete: Cascade)
+  author           User                     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  images           ConcertDiscussionImage[]
+
+  @@unique([authorId, requestId], map: "ConcertDiscussionComment_author_request_key")
+  @@index([eventId, showId, moderationStatus, isDeleted, createdAt], map: "ConcertDiscussionComment_scope_feed_idx")
+  @@index([authorId, createdAt], map: "ConcertDiscussionComment_author_created_idx")
+}
+
+model ConcertDiscussionImage {
+  id        String                   @id @default(cuid())
+  commentId String
+  url       String                   @db.Text
+  sortOrder Int                      @default(0)
+  createdAt DateTime                 @default(now())
+  comment   ConcertDiscussionComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([commentId, sortOrder], map: "ConcertDiscussionImage_comment_order_idx")
 }
 
 model ConcertReminderSubscription {
@@ -5104,6 +5143,7 @@ model User {
   UserMusicConcert                                       UserMusicConcert[]
   ConcertShowMark                                        ConcertShowMark[]
   ConcertReminderSubscription                            ConcertReminderSubscription[]
+  ConcertDiscussionComment                               ConcertDiscussionComment[]
   MyLivePhoto                                            MyLivePhoto[]
   SalonPost                                              SalonPost[]                        @relation("SalonPostAuthor")
   SalonPostApproved                                      SalonPost[]                        @relation("SalonPostApprovedBy")

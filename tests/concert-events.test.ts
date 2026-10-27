@@ -203,14 +203,14 @@ test('mark and reminder mutations derive user identity from request authenticati
   assert.doesNotMatch(reminderRoute, /input\.userId|input\.eventId/)
 })
 
-test('show discussions reuse the existing post and moderation flow', () => {
+test('show discussions are separated from plaza post creation', () => {
   const postsApi = source('../app/api/posts/route.ts')
-  const createPage = source('../app/posts/new/page.tsx')
-  const createForm = source('../components/PostCreateForm.tsx')
-  assert.match(postsApi, /concertShowId/)
-  assert.match(postsApi, /status:\s*'SCHEDULED'/)
-  assert.match(createPage, /concertShowId/)
-  assert.match(createForm, /concertShowId/)
+  const discussionApi = source('../app/api/concert-events/[slug]/discussion/route.ts')
+  const showPage = source('../app/concerts/[slug]/shows/[showId]/page.tsx')
+  assert.match(postsApi, /searchParams\.has\('concertShowId'\)[\s\S]*status:\s*410/)
+  assert.match(postsApi, /body\.concertShowId[\s\S]*status:\s*410/)
+  assert.match(discussionApi, /concertDiscussionScopeWhere\(scope\.eventId, scope\.showId\)/)
+  assert.match(showPage, /<ConcertDiscussion[^>]+showId=/)
 })
 
 test('admin event mutations require activity management and record an audit action', () => {

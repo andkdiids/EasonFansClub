@@ -1,0 +1,62 @@
+name: Recording Sessions V2 MySQL migration
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/**'
+      - 'tests/recording-sessions-v2-mysql.integration.ts'
+      - '.github/workflows/recording-sessions-v2-mysql.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  migration-integration:
+    name: Apply and verify the additive migration on isolated MySQL
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: recording-sessions-qa-only
+          MYSQL_DATABASE: recording_sessions_v2_qa
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -precording-sessions-qa-only"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - name: Checkout pull request source
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies and generate Prisma client
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm exec prisma generate
+
+      - name: Apply and verify the Recording Sessions V2 migration
+        env:
+          RECORDING_SESSIONS_TEST_DATABASE_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/recording_sessions_v2_qa
+        shell: bash
+        run: pnpm exec tsx tests/recording-sessions-v2-mysql.integration.ts
