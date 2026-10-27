@@ -1736,6 +1736,16 @@ body.image-editor-open .back-to-top-button { display:none !important; }
 .icp-record { display:block; margin-top:10px; color:var(--foreground-muted); font-size:8px; line-height:1.5; text-align:left; text-decoration:none; opacity:.78; }.icp-record:hover { color:var(--primary); opacity:1; }.icp-record-inverse { display:inline-block; margin-top:0; color:rgba(255,255,255,.7); font-size:12px; }.icp-record-inverse:hover { color:#fff; }
 .community-main { min-width:0; padding-bottom:24px; }
 .community-hero { position:relative; height:clamp(360px,43vw,520px); overflow:hidden; color:#fff; background:#07111b; }
+.community-concert-hero-link { position:absolute; inset:0; display:block; overflow:hidden; color:#fff; text-decoration:none; }
+.community-concert-hero-image { object-fit:cover; object-position:center 42%; }
+.community-concert-hero-overlay { position:absolute; inset:0; background:linear-gradient(90deg,rgba(1,7,13,.84),rgba(1,7,13,.58) 48%,rgba(1,7,13,.18)),linear-gradient(0deg,rgba(1,5,10,.55),transparent 72%); }
+.community-concert-hero-copy { position:absolute; z-index:2; right:clamp(24px,7vw,100px); bottom:clamp(28px,7%,56px); left:clamp(24px,7vw,100px); display:flex; flex-direction:column; align-items:flex-start; }
+.community-concert-hero-kicker { margin-bottom:12px; color:rgba(255,255,255,.82); font-size:12px; font-weight:800; letter-spacing:.22em; text-shadow:0 1px 8px rgba(0,0,0,.7); }
+.community-concert-hero-title { max-width:100%; color:#fff; font:500 clamp(38px,6vw,78px)/1.03 Georgia,'Times New Roman',serif; letter-spacing:-.035em; text-shadow:0 2px 18px rgba(0,0,0,.65); }
+.community-concert-hero-subtitle { max-width:min(720px,90%); margin-top:12px; color:rgba(255,255,255,.94); font-size:clamp(14px,1.5vw,18px); line-height:1.55; text-shadow:0 1px 10px rgba(0,0,0,.8); }
+.community-concert-hero-date { margin-top:12px; color:#fff; font-size:clamp(12px,1.3vw,15px); font-weight:700; letter-spacing:.04em; text-shadow:0 1px 8px rgba(0,0,0,.8); }
+.community-concert-hero-cta { min-height:46px; margin-top:18px; align-items:center; gap:24px; font-weight:800; }
+.community-concert-hero-link:focus-visible { outline:3px solid #fff; outline-offset:-5px; }
 .community-hero-image { object-fit:cover; object-position:68% center; }.community-hero-overlay { position:absolute; inset:0; background:linear-gradient(90deg,rgba(1,7,13,.78),rgba(1,7,13,.48) 43%,rgba(1,7,13,.04) 75%),linear-gradient(0deg,rgba(1,5,10,.45),transparent 46%); }
 .community-search { position:absolute; z-index:3; top:24px; left:50%; display:flex; width:min(360px,35vw); height:40px; align-items:center; gap:10px; transform:translateX(-50%); border:1px solid rgba(255,255,255,.16); border-radius:2px; padding:0 13px; background:rgba(2,8,14,.48); backdrop-filter:blur(12px); }.community-search svg { width:18px; }.community-search input { min-width:0; flex:1; border:0; outline:0; color:#fff; background:transparent; font-size:12px; }.community-search input::placeholder { color:rgba(255,255,255,.65); }
 .community-hero-actions { position:absolute; z-index:4; top:20px; right:24px; display:flex; gap:8px; }.community-hero-actions svg { width:19px; }.community-hero-actions>button:last-of-type { display:flex; width:auto; min-width:38px; gap:7px; padding:0 3px; border:0; background:transparent; }.community-hero-actions>button:last-of-type>svg { display:none; }.hero-notification { position:relative; }.hero-notification b,.mobile-notifications b { position:absolute; top:-4px; right:-4px; min-width:16px; border-radius:8px; padding:2px 4px; background:#1769df; color:white; font-size:9px; text-align:center; }.hero-user-menu { position:absolute; top:46px; right:0; display:flex; width:150px; flex-direction:column; border:1px solid var(--border); border-radius:2px; padding:5px; color:var(--foreground); background:var(--surface-elevated); }.hero-user-menu a,.hero-user-menu button { min-height:36px; border:0; padding:0 10px; color:inherit; background:transparent; font-size:12px; text-align:left; text-decoration:none; line-height:36px; }.hero-user-menu a:hover,.hero-user-menu button:hover { background:var(--surface-subtle); }
@@ -5298,6 +5308,15 @@ height:330px;
 
 /* Mobile home density adjustments; desktop home rules remain unchanged. */
 @media (max-width:767px) {
+  .community-concert-hero { height:clamp(245px,72vw,310px); }
+  .community-concert-hero-image { object-position:center; }
+  .community-concert-hero-overlay { background:linear-gradient(90deg,rgba(1,7,13,.78),rgba(1,7,13,.36)),linear-gradient(0deg,rgba(1,5,10,.68),rgba(1,5,10,.08)); }
+  .community-concert-hero-copy { right:18px; bottom:18px; left:18px; }
+  .community-concert-hero-kicker { margin-bottom:7px; font-size:9px; letter-spacing:.15em; }
+  .community-concert-hero-title { max-width:100%; font-size:clamp(29px,8.3vw,42px); line-height:1.05; }
+  .community-concert-hero-subtitle { max-width:100%; margin-top:6px; font-size:12px; line-height:1.4; }
+  .community-concert-hero-date { margin-top:7px; font-size:11px; }
+  .community-concert-hero-cta { min-height:42px; margin-top:10px; gap:14px; padding-inline:14px; font-size:12px; }
   .community-hero { height:clamp(220px,64vw,260px); }
   .community-hero-copy { right:16px; bottom:18px; left:18px; }
   .community-hero-copy>p { margin-bottom:5px; font-size:8px; }

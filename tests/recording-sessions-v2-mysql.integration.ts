@@ -4,7 +4,10 @@ import { PrismaClient } from '@prisma/client'
 import { fileURLToPath } from 'node:url'
 
 const EXPECTED_DATABASE = 'recording_sessions_v2_qa'
-const MIGRATION_PATH = fileURLToPath(new URL('../prisma/migrations/20261027130000_add_concert_discussions_v2/migration.sql', import.meta.url))
+const MIGRATION_PATHS = [
+  '../prisma/migrations/20261027130000_add_concert_discussions_v2/migration.sql',
+  '../prisma/migrations/20261027140000_add_concert_discussion_replies/migration.sql',
+].map((path) => fileURLToPath(new URL(path, import.meta.url)))
 
 function resolveTestUrl() {
   if (process.env.DATABASE_URL) throw new Error('TEST_DATABASE_FALLBACK_FORBIDDEN')
@@ -33,9 +36,9 @@ async function main() {
     await prisma.$executeRawUnsafe('CREATE TABLE `ConcertShow` (`id` VARCHAR(191) NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci')
     await prisma.$executeRawUnsafe('CREATE TABLE `User` (`id` VARCHAR(191) NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci')
 
-    const statements = readFileSync(MIGRATION_PATH, 'utf8').split(/;\s*(?:\r?\n|$)/).map((statement) => statement.trim()).filter(Boolean)
-    assert.equal(statements.length, 3, 'migration should contain the background column and two discussion tables')
-    for (const statement of statements) await prisma.$executeRawUnsafe(statement)
+    const migrationStatements = MIGRATION_PATHS.map((path) => readFileSync(path, 'utf8').split(/;\s*(?:\r?\n|$)/).map((statement) => statement.trim()).filter(Boolean))
+    assert.deepEqual(migrationStatements.map((statements) => statements.length), [3, 1], 'base and reply migrations should have expected statements')
+    for (const statements of migrationStatements) for (const statement of statements) await prisma.$executeRawUnsafe(statement)
 
     const tables = await prisma.$queryRaw<Array<{ table_name: string }>>`
       SELECT TABLE_NAME AS table_name FROM information_schema.tables
@@ -47,10 +50,11 @@ async function main() {
       SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type, IS_NULLABLE AS is_nullable
       FROM information_schema.columns WHERE TABLE_SCHEMA = DATABASE()
         AND ((TABLE_NAME = 'ConcertEvent' AND COLUMN_NAME = 'backgroundImageUrl')
-          OR (TABLE_NAME = 'ConcertDiscussionComment' AND COLUMN_NAME = 'showId'))
+          OR (TABLE_NAME = 'ConcertDiscussionComment' AND COLUMN_NAME IN ('showId', 'parentCommentId')))
     `
     assert.ok(columns.some((column) => column.column_name === 'backgroundImageUrl' && column.data_type === 'text' && column.is_nullable === 'YES'))
     assert.ok(columns.some((column) => column.column_name === 'showId' && column.data_type === 'varchar' && column.is_nullable === 'YES'))
+    assert.ok(columns.some((column) => column.column_name === 'parentCommentId' && column.data_type === 'varchar' && column.is_nullable === 'YES'))
 
     const indexes = await prisma.$queryRaw<Array<{ index_name: string }>>`
       SELECT DISTINCT INDEX_NAME AS index_name FROM information_schema.statistics
@@ -61,6 +65,7 @@ async function main() {
       'ConcertDiscussionComment_author_request_key',
       'ConcertDiscussionComment_scope_feed_idx',
       'ConcertDiscussionComment_author_created_idx',
+      'ConcertDiscussionComment_parent_feed_idx',
       'ConcertDiscussionImage_comment_order_idx',
     ]) assert.ok(indexNames.has(name), `missing expected index ${name}`)
 
@@ -73,21 +78,25 @@ async function main() {
       'ConcertDiscussionComment_eventId_fkey',
       'ConcertDiscussionComment_showId_fkey',
       'ConcertDiscussionComment_authorId_fkey',
+      'ConcertDiscussionComment_parentCommentId_fkey',
       'ConcertDiscussionImage_commentId_fkey',
     ]) assert.ok(constraintNames.has(name), `missing expected foreign key ${name}`)
 
     await prisma.$executeRawUnsafe("INSERT INTO `ConcertEvent` (`id`) VALUES ('event-1'), ('event-2')")
     await prisma.$executeRawUnsafe("INSERT INTO `ConcertShow` (`id`) VALUES ('show-1'), ('show-2')")
     await prisma.$executeRawUnsafe("INSERT INTO `User` (`id`) VALUES ('author-1')")
-    const insertComment = (id: string, eventId: string, showId: string | null, requestId: string) => prisma.$executeRawUnsafe(
-      'INSERT INTO `ConcertDiscussionComment` (`id`, `eventId`, `showId`, `authorId`, `requestId`, `content`, `createdAt`, `updatedAt`) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))',
-      id, eventId, showId, 'author-1', requestId, id,
+    const insertComment = (id: string, eventId: string, showId: string | null, requestId: string, parentCommentId: string | null = null) => prisma.$executeRawUnsafe(
+      'INSERT INTO `ConcertDiscussionComment` (`id`, `eventId`, `showId`, `parentCommentId`, `authorId`, `requestId`, `content`, `createdAt`, `updatedAt`) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))',
+      id, eventId, showId, parentCommentId, 'author-1', requestId, id,
     )
     await insertComment('comment-show-1', 'event-1', 'show-1', '10000000-0000-4000-8000-000000000001')
+    await insertComment('reply-show-1', 'event-1', 'show-1', '10000000-0000-4000-8000-000000000005', 'comment-show-1')
     await insertComment('comment-event', 'event-1', null, '10000000-0000-4000-8000-000000000002')
     await insertComment('comment-show-2', 'event-1', 'show-2', '10000000-0000-4000-8000-000000000003')
     await insertComment('comment-event-2', 'event-2', null, '10000000-0000-4000-8000-000000000004')
     await prisma.$executeRawUnsafe("INSERT INTO `ConcertDiscussionImage` (`id`, `commentId`, `url`) VALUES ('image-show-1', 'comment-show-1', 'https://media.example.test/source.webp'), ('image-event', 'comment-event', 'https://media.example.test/source.webp')")
+    const replyRelation = await prisma.$queryRaw<Array<{ parentCommentId: string | null }>>`SELECT parentCommentId FROM ConcertDiscussionComment WHERE id = 'reply-show-1'`
+    assert.equal(replyRelation[0]?.parentCommentId, 'comment-show-1', 'replies must retain an explicit parent relationship')
 
     let duplicateRejected = false
     try {

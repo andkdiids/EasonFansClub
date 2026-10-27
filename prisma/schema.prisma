@@ -260,26 +260,30 @@ model ConcertTutorial {
 /// Recording Sessions comments are stored separately from plaza posts so they
 /// can never enter the ordinary forum feed or reply pipelines.
 model ConcertDiscussionComment {
-  id               String                   @id @default(cuid())
+  id               String                     @id @default(cuid())
   eventId          String
   showId           String?
+  parentCommentId  String?                    @db.VarChar(191)
   authorId         String
-  requestId        String                   @db.VarChar(36)
-  content          String                   @db.Text
-  moderationStatus ContentModerationStatus  @default(NORMAL)
-  moderationReason String?                  @db.Text
-  isDeleted        Boolean                  @default(false)
+  requestId        String                     @db.VarChar(36)
+  content          String                     @db.Text
+  moderationStatus ContentModerationStatus    @default(NORMAL)
+  moderationReason String?                    @db.Text
+  isDeleted        Boolean                    @default(false)
   deletedAt        DateTime?
-  createdAt        DateTime                 @default(now())
-  updatedAt        DateTime                 @updatedAt
-  event            ConcertEvent             @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  show             ConcertShow?             @relation(fields: [showId], references: [id], onDelete: Cascade)
-  author           User                     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  event            ConcertEvent               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  show             ConcertShow?               @relation(fields: [showId], references: [id], onDelete: Cascade)
+  author           User                       @relation(fields: [authorId], references: [id], onDelete: Cascade)
   images           ConcertDiscussionImage[]
+  parentComment    ConcertDiscussionComment?  @relation("ConcertDiscussionReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies          ConcertDiscussionComment[] @relation("ConcertDiscussionReplies")
 
   @@unique([authorId, requestId], map: "ConcertDiscussionComment_author_request_key")
   @@index([eventId, showId, moderationStatus, isDeleted, createdAt], map: "ConcertDiscussionComment_scope_feed_idx")
   @@index([authorId, createdAt], map: "ConcertDiscussionComment_author_created_idx")
+  @@index([parentCommentId, moderationStatus, isDeleted, createdAt], map: "ConcertDiscussionComment_parent_feed_idx")
 }
 
 model ConcertDiscussionImage {

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { HeroBackground } from '@/components/HeroBackground'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
@@ -8,6 +9,7 @@ import { sortHeroSlides } from '@/lib/hero-order'
 import { hasHeroMediaAsset } from '@/lib/hero-visuals'
 import { resolveHeroSlideVisual, type SiteHeroSlide, type SiteHeroStyle } from '@/lib/site-config'
 import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
+import type { HomepageFeaturedConcert } from '@/lib/homepage-featured-concert'
 
 const defaultHeroTitle = '\u542c\u89c1 Eason\uff0c\u4e5f\u542c\u89c1\u81ea\u5df1'
 
@@ -51,6 +53,7 @@ export function HomeHero({
   visual,
   defaultTitle = defaultHeroTitle,
   defaultSubtitle = 'NOW IS THE ONLY REALITY.',
+  featuredConcert,
 }: {
   slides: SiteHeroSlide[]
   siteName: string
@@ -59,6 +62,7 @@ export function HomeHero({
   visual?: SiteHeroVisualConfig | null
   defaultTitle?: string
   defaultSubtitle?: string
+  featuredConcert?: HomepageFeaturedConcert | null
 }) {
   const visibleSlides = useMemo(
     () => sortHeroSlides(slides.filter((item) => item.isVisible)),
@@ -74,12 +78,12 @@ export function HomeHero({
   }, [visibleSlides.length])
 
   useEffect(() => {
-    if (visibleSlides.length <= 1 || !isPageVisible) return
+    if (featuredConcert || visibleSlides.length <= 1 || !isPageVisible) return
     const timer = window.setInterval(() => {
       setIndex((current) => (current + 1) % visibleSlides.length)
     }, 6000)
     return () => window.clearInterval(timer)
-  }, [isPageVisible, visibleSlides.length])
+  }, [featuredConcert, isPageVisible, visibleSlides.length])
 
   const { title, subtitle, buttonText, showTitle, showSubtitle, showButton } = resolveHomeHeroCopy(active, defaultTitle, defaultSubtitle)
 
@@ -111,6 +115,34 @@ export function HomeHero({
     (backgroundVisual?.enabled ?? true)
     && (hasHeroMediaAsset(backgroundVisual?.desktopHeroMedia) || hasHeroMediaAsset(backgroundVisual?.mobileHeroMedia)),
   )
+
+  if (featuredConcert) {
+    return (
+      <section className="community-hero community-concert-hero" aria-label="限时演唱会 Recording Sessions 首页专题">
+        <Link href={featuredConcert.href} className="community-concert-hero-link" aria-label={`进入限时演唱会：${featuredConcert.title}`}>
+          {featuredConcert.backgroundImageUrl ? <Image
+            src={featuredConcert.backgroundImageUrl}
+            alt=""
+            fill
+            sizes="100vw"
+            priority
+            unoptimized
+            className="community-concert-hero-image"
+          /> : null}
+          <span aria-hidden="true" className="community-concert-hero-overlay" />
+          <span className="community-concert-hero-copy">
+            <span className="community-concert-hero-kicker">限时演唱会 · Recording Sessions</span>
+            <span className="community-concert-hero-title">{featuredConcert.title}</span>
+            {featuredConcert.subtitle ? <span className="community-concert-hero-subtitle">{featuredConcert.subtitle}</span> : null}
+            <span className="community-concert-hero-date">演出日期　{featuredConcert.dateRangeLabel}</span>
+            <span className="hero-primary-button community-concert-hero-cta" style={{ backgroundColor: buttonColor }}>
+              进入专题 <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
+            </span>
+          </span>
+        </Link>
+      </section>
+    )
+  }
 
   return (
     <section

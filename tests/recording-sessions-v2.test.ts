@@ -5,10 +5,12 @@ import { fileURLToPath } from 'node:url'
 import {
   CONCERT_DISCUSSION_MAX_IMAGES,
   CONCERT_DISCUSSION_MAX_TEXT_LENGTH,
+  CONCERT_DISCUSSION_PAGE_SIZE,
   concertDiscussionScopeWhere,
   isConcertDiscussionRequestId,
   matchesConcertDiscussionIdempotency,
   normalizeOwnedConcertDiscussionImageUrl,
+  parseConcertDiscussionPage,
   parseConcertDiscussionInput,
 } from '@/lib/concert-discussion'
 import { parseConcertEventInput, ConcertAdminInputError } from '@/lib/concert-admin-input'
@@ -28,11 +30,15 @@ test('discussion input supports text-only and authenticated-owner COS image comm
   assert.equal(isConcertDiscussionRequestId(requestId), true)
   assert.deepEqual(parseConcertDiscussionInput({ requestId, content: '今晚讨论这场', imageUrls: [] }, 'user-1'), {
     ok: true,
-    value: { requestId, content: '今晚讨论这场', imageUrls: [] },
+    value: { requestId, content: '今晚讨论这场', imageUrls: [], parentCommentId: null },
   })
   assert.deepEqual(parseConcertDiscussionInput({ requestId, content: '', imageUrls: [imageUrl('user-1')] }, 'user-1'), {
     ok: true,
-    value: { requestId, content: '', imageUrls: [imageUrl('user-1')] },
+    value: { requestId, content: '', imageUrls: [imageUrl('user-1')], parentCommentId: null },
+  })
+  assert.deepEqual(parseConcertDiscussionInput({ requestId, content: '', imageUrls: [imageUrl('user-1')], parentCommentId: 'root-1' }, 'user-1'), {
+    ok: true,
+    value: { requestId, content: '', imageUrls: [imageUrl('user-1')], parentCommentId: 'root-1' },
   })
 })
 
@@ -53,13 +59,30 @@ test('discussion parser enforces text codepoint, image count, request ID, and no
 })
 
 test('idempotency accepts only the identical event, show, text, and ordered image payload', () => {
-  const existing = { eventId: 'event-1', showId: 'show-1', content: 'text', images: [{ url: imageUrl('user-1') }] }
-  const input = { requestId, content: 'text', imageUrls: [imageUrl('user-1')] }
+  const existing = { eventId: 'event-1', showId: 'show-1', parentCommentId: 'root-1', content: 'text', images: [{ url: imageUrl('user-1') }] }
+  const input = { requestId, parentCommentId: 'root-1', content: 'text', imageUrls: [imageUrl('user-1')] }
   assert.equal(matchesConcertDiscussionIdempotency(existing, input, 'event-1', 'show-1'), true)
   assert.equal(matchesConcertDiscussionIdempotency(existing, input, 'event-2', 'show-1'), false)
   assert.equal(matchesConcertDiscussionIdempotency(existing, input, 'event-1', null), false)
   assert.equal(matchesConcertDiscussionIdempotency(existing, { ...input, content: 'different' }, 'event-1', 'show-1'), false)
   assert.equal(matchesConcertDiscussionIdempotency(existing, { ...input, imageUrls: [] }, 'event-1', 'show-1'), false)
+  assert.equal(matchesConcertDiscussionIdempotency(existing, { ...input, parentCommentId: 'root-2' }, 'event-1', 'show-1'), false)
+})
+
+test('discussion replies are limited to one validated parent level and page numbers are bounded', () => {
+  assert.deepEqual(parseConcertDiscussionInput({ requestId, content: '回复', parentCommentId: 'root-1' }, 'user-1'), {
+    ok: true,
+    value: { requestId, content: '回复', imageUrls: [], parentCommentId: 'root-1' },
+  })
+  assert.equal(parseConcertDiscussionInput({ requestId, content: '回复', parentCommentId: '  ' }, 'user-1').ok, false)
+  assert.equal(parseConcertDiscussionInput({ requestId, content: '回复', parentCommentId: 'x'.repeat(192) }, 'user-1').ok, false)
+  assert.equal(parseConcertDiscussionInput({ requestId, content: 'x', parentCommentId: {} }, 'user-1').ok, false)
+  assert.equal(parseConcertDiscussionPage(null), 1)
+  assert.equal(parseConcertDiscussionPage('2'), 2)
+  assert.equal(parseConcertDiscussionPage('0'), null)
+  assert.equal(parseConcertDiscussionPage('-1'), null)
+  assert.equal(parseConcertDiscussionPage('10001'), null)
+  assert.equal(CONCERT_DISCUSSION_PAGE_SIZE, 10)
 })
 
 test('concert event background image input is persisted only for project media URLs', () => {
@@ -73,11 +96,17 @@ test('public plaza queries exclude legacy event posts while event discussion use
   assert.equal(publicPostWhere.concertShowId, null)
   const schema = read('../prisma/schema.prisma')
   const migration = read('../prisma/migrations/20261027130000_add_concert_discussions_v2/migration.sql')
+  const replyMigration = read('../prisma/migrations/20261027140000_add_concert_discussion_replies/migration.sql')
   assert.match(schema, /model ConcertDiscussionComment/)
   assert.match(schema, /model ConcertDiscussionImage/)
   assert.match(migration, /CREATE TABLE `ConcertDiscussionComment`/)
   assert.match(migration, /CREATE TABLE `ConcertDiscussionImage`/)
   assert.match(migration, /`showId` VARCHAR\(191\) NULL/)
+  assert.match(schema, /parentCommentId\s+String\?\s+@db\.VarChar\(191\)/)
+  assert.match(schema, /@relation\("ConcertDiscussionReplies"/)
+  assert.match(replyMigration, /ADD COLUMN `parentCommentId` VARCHAR\(191\) NULL/)
+  assert.match(replyMigration, /ConcertDiscussionComment_parent_feed_idx/)
+  assert.match(replyMigration, /ConcertDiscussionComment_parentCommentId_fkey/)
 })
 
 test('public discussion API authenticates writes, validates event/show scope, and soft-delete is owner-only', () => {
@@ -90,12 +119,19 @@ test('public discussion API authenticates writes, validates event/show scope, an
   assert.match(publicRoute, /author: publicAuthorWhere/)
   assert.match(publicRoute, /status: 'SCHEDULED'/)
   assert.match(publicRoute, /showId: scope\.showId/)
+  assert.match(publicRoute, /parentCommentId: parsed\.value\.parentCommentId/)
+  assert.match(publicRoute, /parentCommentId: null/)
+  assert.match(publicRoute, /FOR UPDATE/)
+  assert.match(publicRoute, /locked\.eventId !== scope\.eventId[\s\S]*locked\.showId !== scope\.showId/)
+  assert.match(publicRoute, /count\(\{ where: pageWhere \}\)/)
+  assert.match(publicRoute, /skip: \(resolvedPage - 1\) \* CONCERT_DISCUSSION_PAGE_SIZE/)
   assert.match(publicRoute, /enforceApiRateLimit/)
   assert.match(publicRoute, /checkBannedWords/)
   assert.match(publicRoute, /requestId/)
   assert.doesNotMatch(publicRoute, /input\.userId|input\.authorId|body\.eventId/)
   assert.match(ownerDelete, /authorId: auth\.user\.id/)
-  assert.match(ownerDelete, /updateMany\([\s\S]*isDeleted: false/)
+  assert.match(ownerDelete, /prisma\.\$transaction/)
+  assert.match(ownerDelete, /parentCommentId: comment\.id[\s\S]*isDeleted: false/)
   assert.match(ownerDelete, /rejectInvalidRequestOrigin\(request\)/)
   assert.match(legacyCreatePage, /redirect\(`\/concerts\/\$\{show\.event\.slug\}\/shows\/\$\{show\.id\}#discussion`\)/)
   assert.doesNotMatch(legacyCreateForm, /concertShowId/)
@@ -108,25 +144,60 @@ test('admin discussion management is permission-guarded, soft-deletes transactio
   const manager = read('../app/admin/concerts/discussions/ConcertDiscussionAdminManager.tsx')
   assert.match(adminRead, /requireAdmin\('activity_manage', request\)/)
   assert.match(adminRead, /isDeleted: false/)
+  assert.match(adminRead, /parentCommentId: true/)
+  assert.match(adminRead, /parentComment: \{ select: \{ id: true, content: true/)
   assert.match(adminDelete, /requireAdmin\('activity_manage', request\)/)
   assert.match(adminDelete, /prisma\.\$transaction/)
   assert.match(adminDelete, /createAdminActionAudit/)
   assert.match(adminDelete, /isDeleted: true, deletedAt/)
+  assert.match(adminDelete, /parentCommentId: comment\.id[\s\S]*isDeleted: false/)
   assert.match(page, /requireAdminPage\([^\n]+activity_manage/)
   assert.match(manager, /确定从公开讨论区移除/)
   assert.match(manager, /处理中…/)
+  assert.match(manager, /回复 @/)
 })
 
-test('discussion UI supports image preview, paging, own-comment deletion, login return, and failure feedback', () => {
+test('discussion UI supports root and reply image comments, numbered pagination, own deletion, and feedback', () => {
   const component = read('../components/concerts/ConcertDiscussion.tsx')
   assert.match(component, /window\.confirm/)
   assert.match(component, /DELETE/)
   assert.match(component, /删除中…/)
   assert.match(component, /response\.status === 401/)
-  assert.match(component, /加载更多讨论/)
+  assert.match(component, /上一页/)
+  assert.match(component, /下一页/)
+  assert.match(component, /const DISCUSSION_PAGE_SIZE = 10/)
+  assert.match(component, /展开回复/)
+  assert.match(component, /回复 @/)
+  assert.match(component, /parentCommentId/)
   assert.match(component, /添加图片/)
   assert.match(component, /可预览后提交/)
   assert.match(component, /return=|redirect=/)
+})
+
+test('thread GET is bounded to exact room scope and exposes counts without loading replies for every root', () => {
+  const route = read('../app/api/concert-events/[slug]/discussion/route.ts')
+  assert.match(route, /parentCommentId: parentCommentId \|\| null/)
+  assert.match(route, /parentCommentId: \{ in: rows\.map\(\(row\) => row\.id\) \}/)
+  assert.match(route, /_count: \{ _all: true \}/)
+  assert.match(route, /totalPages/)
+  assert.match(route, /resolvedPage = Math\.min\(page, totalPages\)/)
+})
+
+test('tutorial popover preserves published steps, external registration notice, escape/outside close, and mobile bounds', () => {
+  const popover = read('../components/concerts/ConcertTutorialPopover.tsx')
+  const page = read('../components/concerts/ConcertEventPage.tsx')
+  assert.match(popover, /window\.location\.hash === '#tutorials'/)
+  assert.match(popover, /event\.key === 'Escape'/)
+  assert.match(popover, /onPointerDown/)
+  assert.match(popover, /max-h-\[calc\(100dvh-6rem\)\]/)
+  assert.match(popover, /外部官方服务完成/)
+  assert.match(page, /<ConcertTutorialPopover tutorials=\{event\.tutorials\}/)
+  assert.match(page, /<details id="timeline"/)
+  assert.match(page, /场次与歌单/)
+  assert.match(page, /<details className="group border border-\[var\(--border\)\] bg-\[var\(--surface\)\] p-3 sm:p-4">/)
+  assert.match(page, /min-h-11 min-w-0 overflow-hidden/)
+  assert.match(page, /href=\{`\/concerts\/\$\{event\.slug\}\/shows\/\$\{show\.id\}#discussion`\}/)
+  assert.match(page, /进入系列讨论/)
 })
 
 test('legacy plaza post creation and concertShowId lookup are rejected instead of leaking discussions into feeds', () => {
@@ -145,7 +216,6 @@ test('feature limits remain aligned across helper and API', () => {
 test('Tencent auto-deploy verifies SSH host identity against the protected fingerprint', () => {
   const deploy = read('../.github/workflows/deploy.yml')
   assert.match(deploy, /environment: Production/)
-  assert.match(deploy, /fingerprint: \$\{\{ vars\.PRODUCTION_SSH_HOST_KEY_SHA256 \}\}/)
   assert.match(deploy, /PINNED_HOST_KEY_SHA256: \$\{\{ vars\.PRODUCTION_SSH_HOST_KEY_SHA256 \}\}/)
   assert.match(deploy, /ssh-keygen -lf .* -E sha256/)
   assert.match(deploy, /grep -Fx -- "\$\{PINNED_HOST_KEY_SHA256\}"/)

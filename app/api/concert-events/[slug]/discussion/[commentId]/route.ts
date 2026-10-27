@@ -26,15 +26,25 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ s
     if (!event) return NextResponse.json({ message: '评论不存在' }, { status: 404 })
     const comment = await prisma.concertDiscussionComment.findFirst({
       where: { id: commentId, eventId: event.id, authorId: auth.user.id, isDeleted: false },
-      select: { id: true, eventId: true, showId: true },
+      select: { id: true, eventId: true, showId: true, parentCommentId: true },
     })
     if (!comment) return NextResponse.json({ message: '评论不存在或已删除' }, { status: 404 })
 
-    const changed = await prisma.concertDiscussionComment.updateMany({
-      where: { id: comment.id, eventId: comment.eventId, showId: comment.showId, authorId: auth.user.id, isDeleted: false },
-      data: { isDeleted: true, deletedAt: new Date() },
+    const changed = await prisma.$transaction(async (tx) => {
+      const updated = await tx.concertDiscussionComment.updateMany({
+        where: { id: comment.id, eventId: comment.eventId, showId: comment.showId, authorId: auth.user!.id, isDeleted: false },
+        data: { isDeleted: true, deletedAt: new Date() },
+      })
+      if (updated.count !== 1) return 0
+      if (!comment.parentCommentId) {
+        await tx.concertDiscussionComment.updateMany({
+          where: { parentCommentId: comment.id, eventId: comment.eventId, showId: comment.showId, isDeleted: false },
+          data: { isDeleted: true, deletedAt: new Date() },
+        })
+      }
+      return updated.count
     })
-    if (changed.count !== 1) return NextResponse.json({ message: '评论状态已变化，请刷新后重试' }, { status: 409 })
+    if (changed !== 1) return NextResponse.json({ message: '评论状态已变化，请刷新后重试' }, { status: 409 })
 
     return NextResponse.json({ deleted: true }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
   } catch (error) {

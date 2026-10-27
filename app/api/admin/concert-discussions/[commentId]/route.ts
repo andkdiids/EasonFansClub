@@ -22,7 +22,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ c
   try {
     const comment = await prisma.concertDiscussionComment.findFirst({
       where: { id: commentId, isDeleted: false },
-      select: { id: true, eventId: true, showId: true, authorId: true },
+      select: { id: true, eventId: true, showId: true, authorId: true, parentCommentId: true },
     })
     if (!comment) return NextResponse.json({ message: '评论不存在或已删除' }, { status: 404 })
     const deleted = await prisma.$transaction(async (tx) => {
@@ -31,6 +31,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ c
         data: { isDeleted: true, deletedAt: new Date() },
       })
       if (changed.count !== 1) return false
+      if (!comment.parentCommentId) {
+        await tx.concertDiscussionComment.updateMany({
+          where: { parentCommentId: comment.id, eventId: comment.eventId, showId: comment.showId, isDeleted: false },
+          data: { isDeleted: true, deletedAt: new Date() },
+        })
+      }
       await createAdminActionAudit(tx, {
         operatorId: guard.user!.id,
         action: 'DELETE_REPLY',

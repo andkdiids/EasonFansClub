@@ -6,6 +6,8 @@ import { getHomeUpdate } from '@/lib/home-announcement'
 import { getSiteAppearance } from '@/lib/site-config'
 import { buildPageMetadata, SITE_DESCRIPTION, SITE_TITLE } from '@/lib/share-metadata'
 import { WECHAT_SHARE_IMAGE_PATH } from '@/lib/wechat-share-image'
+import { getHomepageFeaturedConcert } from '@/lib/homepage-featured-concert-query'
+import { loadWelcomeOptionalData } from '@/lib/welcome-optional-data'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -23,9 +25,10 @@ export default async function CommunityPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login?redirect=%2Fwelcome')
 
-  const [config, update] = await Promise.all([
+  const [config, update, featuredConcert] = await Promise.all([
     getSiteAppearance({ cache: 'no-store' }),
     getHomeUpdate(),
+    loadWelcomeOptionalData('featured-event-query', getHomepageFeaturedConcert),
   ])
-  return <HomeLayoutSurface siteConfig={config} slides={config.heroSlides} announcement={update} />
+  return <HomeLayoutSurface siteConfig={config} slides={config.heroSlides} announcement={update} featuredConcert={featuredConcert} />
 }
