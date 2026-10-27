@@ -48,11 +48,27 @@ test('round cards expose current selection and live participation details withou
   assert.match(client, /当前暂无进行中的抽奖主题/u)
   assert.match(client, /本期次数已用完/u)
   assert.match(client, /今日次数已用完/u)
+  assert.match(client, /onClick=\{\(\) => void selectCampaign\(option\.id\)\}/u)
+  assert.match(client, /angel-gift-campaign-card-image/u)
   assert.doesNotMatch(client, /<select[^>]*angel-gift-campaign/u)
-  assert.match(styles, /\.angel-gift-campaign-grid \{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/u)
+  assert.match(styles, /\.angel-gift-campaign-grid \{[^}]*grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,300px\),1fr\)\)/u)
   assert.match(styles, /\.angel-gift-campaign-card:focus-visible/u)
   assert.match(styles, /\.angel-gift-campaign-card\.is-selected/u)
   assert.match(styles, /\.angel-gift-campaign-grid \{ grid-template-columns:minmax\(0,1fr\);/u)
+})
+
+test('theme cards have white unselected state, dark selected state, and no duplicate current-theme panel', () => {
+  const client = read('components/AngelGiftClient.tsx')
+  const styles = read('app/globals.css')
+  assert.match(styles, /--angel-gift-card-bg:#fff/u)
+  assert.match(styles, /--angel-gift-card-border:#e5e7eb/u)
+  assert.match(styles, /\.angel-gift-campaign-card \{[^}]*background:var\(--angel-gift-card-bg\)/u)
+  assert.match(styles, /\.angel-gift-campaign-card\.is-selected \{[^}]*background:var\(--angel-gift-card-selected-bg\)/u)
+  assert.match(styles, /--angel-gift-card-selected-bg:linear-gradient\(132deg,var\(--angel-red-deep\)/u)
+  assert.match(client, /aria-pressed=\{selected\}/u)
+  assert.match(client, /className=\{`angel-gift-campaign-card\$\{selected \? ' is-selected' : ''\}/u)
+  assert.doesNotMatch(client, /aria-labelledby="angel-gift-theme-title"|<span className="angel-gift-label">本期主题<\/span>/u)
+  assert.match(client, /当前主题/u)
 })
 
 test('a switch applies only the last requested round, and expired selections refresh from the server', () => {

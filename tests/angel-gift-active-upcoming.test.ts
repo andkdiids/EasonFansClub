@@ -94,13 +94,17 @@ test('所选主题的药柜、collection、余药和执药上下文均绑定 cam
   assert.match(client, /angel-gift-upcoming-card/u)
 })
 
-test('药房顶部先展示下期预告，再展示本期主题，标签框保持直角描边并提升可读性', () => {
+test('当前主题信息由主题卡承载，移除重复面板并保留下期预告', () => {
   const client = read('components/AngelGiftClient.tsx')
   const styles = read('app/globals.css')
   const upcomingIndex = client.indexOf('{upcomingPreview}')
-  const currentIndex = client.indexOf('<section className="angel-gift-theme-card" aria-labelledby="angel-gift-theme-title">')
-  assert.ok(upcomingIndex >= 0 && currentIndex > upcomingIndex)
-  assert.match(styles, /\.angel-gift-theme-card \.angel-gift-label \{[^}]*border:1px solid var\(--angel-red\)[^}]*font-size:13px[^}]*font-weight:900[^}]*white-space:nowrap/u)
+  const selectorIndex = client.indexOf('<section className="angel-gift-campaign-selector"')
+  const drawAreaIndex = client.indexOf('<section className={`angel-gift-pharmacy-box')
+  assert.ok(selectorIndex >= 0 && upcomingIndex > selectorIndex && drawAreaIndex > upcomingIndex)
+  assert.doesNotMatch(client, /aria-labelledby="angel-gift-theme-title"|本期主题/u)
+  assert.match(client, /angel-gift-theme-card angel-gift-upcoming-card/u)
+  assert.match(styles, /\.angel-gift-theme-card \{/u)
+  assert.match(styles, /\.angel-gift-upcoming-card \{/u)
 })
 
 test('服务端按所选主题自身的时间与状态门禁拒绝未来主题，且不再要求全局唯一 active', () => {

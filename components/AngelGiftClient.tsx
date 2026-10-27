@@ -646,13 +646,16 @@ export function AngelGiftClient({ initialData }: Props) {
               aria-pressed={selected}
               aria-label={`${option.title}，${statusLabels[option.status] || option.status}，${availabilityLabels[option.availability] || '参与状态未知'}${selected ? '，当前主题' : '，切换主题'}`}
             >
-              {option.visualUrl ? <Image src={option.visualUrl} alt="" aria-hidden="true" fill sizes="(max-width: 767px) 100vw, 50vw" className="angel-gift-campaign-card-image" unoptimized /> : null}
-              <span className="angel-gift-campaign-card-shade" aria-hidden="true" />
               <span className="angel-gift-campaign-card-content">
                 <span className="angel-gift-campaign-card-topline"><span className="angel-gift-campaign-status"><span aria-hidden="true" />{statusLabels[option.status] || option.status}</span>{selected ? <span className="angel-gift-campaign-current">当前主题</span> : <span className="angel-gift-campaign-enter">切换主题</span>}</span>
-                <strong className="angel-gift-campaign-title">{option.title}</strong>
-                {option.subtitle ? <span className="angel-gift-campaign-subtitle">{option.subtitle}</span> : null}
-                {option.description ? <span className="angel-gift-campaign-description">{option.description}</span> : null}
+                <span className="angel-gift-campaign-card-main">
+                  <span className="angel-gift-campaign-card-copy">
+                    <strong className="angel-gift-campaign-title">{option.title}</strong>
+                    {option.subtitle ? <span className="angel-gift-campaign-subtitle">{option.subtitle}</span> : null}
+                    {option.description ? <span className="angel-gift-campaign-description">{option.description}</span> : null}
+                  </span>
+                  {option.visualUrl ? <Image src={option.visualUrl} alt="" aria-hidden="true" width={68} height={68} className="angel-gift-campaign-card-image" unoptimized /> : null}
+                </span>
                 <span className="angel-gift-campaign-card-bottom"><span>每次 {formatFee(option.drawCost)} 挂号费</span>{option.endsAt ? <time dateTime={option.endsAt}>至 {formatDate(option.endsAt, true)}</time> : null}</span>
                 <span className={`angel-gift-campaign-availability is-${option.availability.toLowerCase().replaceAll('_', '-')}`}>{availabilityLabels[option.availability] || '参与状态未知'}{option.remainingDraws !== null && option.availability === 'AVAILABLE' ? ` · 最多可抽 ${option.remainingDraws} 次` : ''}</span>
               </span>
@@ -664,12 +667,6 @@ export function AngelGiftClient({ initialData }: Props) {
 
       {campaign ? <>
         {upcomingPreview}
-
-        <section className="angel-gift-theme-card" aria-labelledby="angel-gift-theme-title">
-          {campaign.visualUrl ? <Image className="angel-gift-theme-visual" src={campaign.visualUrl} alt={`${campaign.title}主题视觉`} width={112} height={76} unoptimized /> : null}
-          <div><span className="angel-gift-label">本期主题</span><h2 id="angel-gift-theme-title">{campaign.title}</h2>{campaign.subtitle ? <p className="angel-gift-theme-subtitle">{campaign.subtitle}</p> : null}{campaign.description ? <p className="angel-gift-theme-description">{campaign.description}</p> : null}</div>
-          <div className={`angel-gift-status is-${status?.toLowerCase()}`}><span>{status ? statusLabels[status] : '—'}</span>{campaign.endsAt && status !== 'ENDED' ? <small>至 {formatDate(campaign.endsAt)}</small> : null}</div>
-        </section>
 
         <section className={`angel-gift-pharmacy-box ${campaignIsDrawing ? 'is-drawing' : ''}`} aria-label="E院药房">
           <div className="angel-gift-box-stamp">Rx</div><div className="angel-gift-box-mark">E院药房</div><div className="angel-gift-box-name">ANGEL&apos;S GIFT</div><div className="angel-gift-box-cn">天使的礼物</div><div className="angel-gift-box-line" />
