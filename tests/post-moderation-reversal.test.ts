@@ -84,6 +84,7 @@ test('审核中心展示全部/各状态列表，并为已通过和已拒绝帖�
 
 test('拒绝后的公开访问与互动 API 统一使用公开审核条件，作者和管理员保留私有查看', () => {
   assert.deepEqual(publicPostWhere, {
+    concertShowId: null,
     isDeleted: false,
     status: 'PUBLISHED',
     moderationStatus: { in: ['APPROVED', 'VIOLATION'] },

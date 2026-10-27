@@ -48,6 +48,23 @@ function enumValue<T extends readonly string[]>(value: unknown, values: T, fallb
   return typeof value === 'string' && values.includes(value) ? value as T[number] : fallback
 }
 
+function parseProjectMediaImage(value: unknown, label: string) {
+  const imageInput = text(value, label, 2048)
+  if (!imageInput) return null
+  const stored = toStoredMediaUrl(imageInput)
+  if (!stored || (!isPublicMediaProxyUrl(imageInput) && !imageInput.startsWith(`https://${PUBLIC_COS_HOST}/`))) {
+    throw new ConcertAdminInputError(`${label}必须使用项目公开媒体库中的图片地址`)
+  }
+  try {
+    const parsed = new URL(stored)
+    if (parsed.protocol !== 'https:' || parsed.hostname.toLowerCase() !== PUBLIC_COS_HOST
+      || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('invalid project media URL')
+    return `${parsed.origin}${parsed.pathname}`
+  } catch {
+    throw new ConcertAdminInputError(`${label}必须使用项目媒体库中的公开图片地址`)
+  }
+}
+
 export function parseConcertEventInput(value: unknown) {
   const input = object(value)
   const title = text(input.title, '专题名称', 191, true)!
@@ -58,6 +75,9 @@ export function parseConcertEventInput(value: unknown) {
   if (registrationUrlInput && !registrationUrl) throw new ConcertAdminInputError('登记入口必须是没有账号信息的 HTTPS 地址')
   const registrationEnabled = bool(input.registrationEnabled)
   if (registrationEnabled && !registrationUrl) throw new ConcertAdminInputError('启用登记入口前请填写有效 HTTPS 地址')
+  const backgroundImageUrl = input.backgroundImageUrl === undefined
+    ? undefined
+    : parseProjectMediaImage(input.backgroundImageUrl, '专题背景图')
   const timezone = text(input.timezone, '时区', 64) || 'Asia/Hong_Kong'
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }) } catch { throw new ConcertAdminInputError('时区无效') }
   return {
@@ -73,6 +93,7 @@ export function parseConcertEventInput(value: unknown) {
     registrationUrl,
     registrationEnabled,
     registrationLabel: text(input.registrationLabel, '登记按钮文案', 80) || '登记入口',
+    backgroundImageUrl,
     homepageFeatured: bool(input.homepageFeatured),
     activityCenterVisible: bool(input.activityCenterVisible, true),
     allowMarking: bool(input.allowMarking, true),

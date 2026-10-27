@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ConcertCountdown } from '@/components/concerts/ConcertCountdown'
+import { ConcertDiscussion } from '@/components/concerts/ConcertDiscussion'
 import type { EventView } from '@/components/concerts/concert-types'
 import { publicImageUrl } from '@/lib/images'
 import { concertDateKey, filterConcertShows, getConcertCalendarCells, getConcertTimelineState, isConcertWeekend } from '@/lib/concert-timeline'
@@ -40,6 +41,7 @@ export function ConcertEventPage({ initialEvent, isAuthenticated }: Readonly<{ i
   const registrationUrl = safeExternalUrl(event.registrationEnabled ? event.registrationUrl : null)
   const firstShow = event.shows[0]
   const lastShow = event.shows[event.shows.length - 1]
+  const backgroundImageUrl = publicImageUrl(event.backgroundImageUrl)
 
   async function saveMark(showId: string, previous: Mark, next: Mark) {
     if (!isAuthenticated) {
@@ -106,9 +108,11 @@ export function ConcertEventPage({ initialEvent, isAuthenticated }: Readonly<{ i
   }
 
   return <main className="site-page-main mx-auto max-w-7xl space-y-7 px-4 py-5 sm:px-5 sm:py-8">
-    <section className="relative overflow-hidden border border-[var(--border)] bg-slate-950 px-5 py-7 text-white sm:px-9 sm:py-10">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_10%,rgba(90,105,126,.35),transparent_45%)]" aria-hidden />
-      <div className="relative max-w-4xl">
+    <section className="relative isolate overflow-hidden border border-[var(--border)] bg-slate-950 px-5 py-7 text-white sm:px-9 sm:py-10">
+      {backgroundImageUrl ? <Image src={backgroundImageUrl} alt="" fill sizes="100vw" className="object-cover" unoptimized priority /> : null}
+      <div className="absolute inset-0 bg-slate-950/70" aria-hidden="true" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_10%,rgba(90,105,126,.3),transparent_45%)]" aria-hidden="true" />
+      <div className="relative z-10 max-w-4xl">
         <p className="text-xs font-bold uppercase tracking-[.3em] text-white/60">限时演唱会专题 · {timelineState.phaseLabel}</p>
         <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-5xl">{event.title}</h1>
         {event.subtitle ? <p className="mt-2 text-base text-white/80 sm:text-lg">{event.subtitle}</p> : null}
@@ -166,6 +170,6 @@ export function ConcertEventPage({ initialEvent, isAuthenticated }: Readonly<{ i
 
     <section id="tutorials" className="grid gap-3 md:grid-cols-2">{event.tutorials.map((tutorial) => <article key={tutorial.id} className="border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5"><h2 className="text-lg font-black text-[var(--foreground)]">{tutorial.title}</h2>{tutorial.summary ? <p className="mt-2 text-sm leading-6 text-[var(--foreground-muted)]">{tutorial.summary}</p> : null}<ol className="mt-3 list-decimal space-y-3 pl-5 text-sm leading-6 text-[var(--foreground)]">{Array.isArray(tutorial.steps) ? tutorial.steps.map((raw, index) => { const step = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as { title?: unknown; body?: unknown; imageUrl?: unknown; imageAlt?: unknown; caution?: unknown; linkUrl?: unknown; linkLabel?: unknown } : {}; const imageUrl = typeof step.imageUrl === 'string' ? publicImageUrl(step.imageUrl) : null; const linkUrl = typeof step.linkUrl === 'string' ? safeExternalUrl(step.linkUrl) : null; return <li key={index}><strong>{typeof step.title === 'string' ? step.title : '步骤'}</strong>{typeof step.body === 'string' ? <span>：{step.body}</span> : null}{imageUrl ? <figure className="mt-2"><a href={imageUrl} target="_blank" rel="noopener noreferrer" aria-label={`打开大图：${typeof step.imageAlt === 'string' ? step.imageAlt : step.title || '教程图片'}`}><Image src={imageUrl} alt={typeof step.imageAlt === 'string' ? step.imageAlt : typeof step.title === 'string' ? step.title : '教程图片'} width={1600} height={900} className="h-auto max-h-[32rem] w-full border border-[var(--border)] object-contain" unoptimized /></a><figcaption className="mt-1 text-xs text-[var(--foreground-muted)]">点击查看大图</figcaption></figure> : null}{typeof step.caution === 'string' && step.caution ? <p className="mt-2 border-l-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">注意：{step.caution}</p> : null}{linkUrl ? <a className="mt-2 inline-block text-sm font-bold text-[var(--primary)]" href={linkUrl} target="_blank" rel="noopener noreferrer">{typeof step.linkLabel === 'string' && step.linkLabel ? step.linkLabel : '打开相关链接'} ↗</a> : null}</li> }) : null}</ol>{tutorial.type === 'TICKETING' && registrationUrl ? <a className="mt-3 inline-block text-sm font-bold text-[var(--primary)]" href={registrationUrl} target="_blank" rel="noopener noreferrer">查看外部登记服务 ↗</a> : null}</article>)}</section>
 
-    <section className="border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[var(--foreground)]">场次讨论</h2><p className="mt-1 text-sm text-[var(--foreground-muted)]">沿用 E院论坛帖子、回复、点赞和现有审核规则。</p></div>{firstShow ? <Link className="inline-flex min-h-10 items-center border border-[var(--primary)] px-3 text-sm font-bold text-[var(--primary)]" href={`/concerts/${event.slug}/shows/${firstShow.id}`}>浏览场次讨论</Link> : null}</div></section>
+    {event.allowDiscussion ? <ConcertDiscussion slug={event.slug} isAuthenticated={isAuthenticated} canComment={event.status !== 'ENDED'} /> : null}
   </main>
 }

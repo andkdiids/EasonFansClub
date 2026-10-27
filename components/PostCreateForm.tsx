@@ -38,9 +38,7 @@ export function PostCreateForm({
   boards,
   initialBoardSlug,
   returnTo = null,
-  concertShowId,
-  concertShowLabel,
-}: Readonly<{ userId: string; boards: Board[]; initialBoardSlug?: string; returnTo?: string | null; concertShowId?: string; concertShowLabel?: string }>) {
+}: Readonly<{ userId: string; boards: Board[]; initialBoardSlug?: string; returnTo?: string | null }>) {
   const router = useRouter()
   const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const editorRef = useRef<RichTextEditorHandle>(null)
@@ -401,7 +399,7 @@ export function PostCreateForm({
       const response = await fetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boardId, title, content, richContent, imageUrls, stickerId: pendingSticker?.id || undefined, topicNames, expiryType: expiryType || null, ...(concertShowId ? { concertShowId } : {}) }),
+        body: JSON.stringify({ boardId, title, content, richContent, imageUrls, stickerId: pendingSticker?.id || undefined, topicNames, expiryType: expiryType || null }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -452,7 +450,6 @@ export function PostCreateForm({
 
   return (
     <form onSubmit={submitPost} className="space-y-5 rounded-xl border border-sky-100 bg-white/82 p-6 shadow-sm">
-      {concertShowId && concertShowLabel ? <p className="border-l-2 border-[var(--primary)] bg-[var(--background)] px-3 py-2 text-sm font-bold text-[var(--foreground)]">正在为该场次发起讨论：{concertShowLabel}</p> : null}
       {errors.form ? <p className="text-sm font-bold text-red-600">{errors.form}</p> : null}
       {draftStatus ? <p className="rounded-lg bg-sky-50 px-4 py-2 text-sm font-bold text-brand-700" role="status">{draftStatus}</p> : null}
       {draftConflict ? (

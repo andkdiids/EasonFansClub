@@ -9,6 +9,15 @@ import { prisma } from '@/lib/prisma'
 export const dynamic = 'force-dynamic'
 
 export default async function NewPostPage({ searchParams }: { searchParams: Promise<{ board?: string; returnTo?: string; concertShowId?: string }> }) {
+  const query = await searchParams
+  if (query.concertShowId) {
+    const show = await prisma.concertShow.findFirst({
+      where: { id: query.concertShowId, status: 'SCHEDULED', event: { allowDiscussion: true, status: { in: ['UPCOMING', 'REGISTRATION', 'WAITING_DRAW', 'SHOWING', 'ENDED'] } } },
+      select: { id: true, event: { select: { slug: true } } },
+    }).catch(() => null)
+    if (show) redirect(`/concerts/${show.event.slug}/shows/${show.id}#discussion`)
+    redirect('/concerts')
+  }
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
@@ -23,12 +32,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
     select: { id: true, name: true, slug: true },
   })
   const boards = mergeForumBoardOptions(boardRows)
-  const query = await searchParams
   const returnTo = normalizePostReturnTo(query.returnTo)
-  const concertShow = query.concertShowId ? await prisma.concertShow.findFirst({
-    where: { id: query.concertShowId, status: 'SCHEDULED', event: { allowDiscussion: true, status: { in: ['UPCOMING', 'REGISTRATION', 'WAITING_DRAW', 'SHOWING'] } } },
-    select: { id: true, date: true, albumTitle: true, event: { select: { title: true } } },
-  }).catch(() => null) : null
 
   return (
     <>
@@ -36,7 +40,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
         <div className="mb-6">
           <h1 className="mt-2 text-4xl font-black text-brand-950">发布帖子</h1>
         </div>
-        <PostCreateForm boards={normalizeForumBoards(boards)} userId={user.id} initialBoardSlug={query.board} returnTo={returnTo} concertShowId={concertShow?.id} concertShowLabel={concertShow ? `${concertShow.event.title} · ${concertShow.date.toISOString().slice(0, 10)} · ${concertShow.albumTitle}` : undefined} />
+        <PostCreateForm boards={normalizeForumBoards(boards)} userId={user.id} initialBoardSlug={query.board} returnTo={returnTo} />
       </main>
     </>
   )

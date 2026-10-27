@@ -135,7 +135,9 @@ export async function GET(request: Request) {
   if (limited) return limited
   const { searchParams } = new URL(request.url)
   const boardSlug = searchParams.get('board')
-  const concertShowId = searchParams.get('concertShowId')
+  if (searchParams.has('concertShowId')) {
+    return NextResponse.json({ message: '演唱会讨论已移至专题专属讨论区，请从专题进入' }, { status: 410 })
+  }
   const rawPage = Number(searchParams.get('page'))
   const rawTake = Number(searchParams.get('take'))
   const page = Math.min(10_000, Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1))
@@ -148,7 +150,6 @@ export async function GET(request: Request) {
         ...publicPostWhere(),
         User: { status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
         ...(boardSlug ? { Board: { slug: boardSlug } } : {}),
-        ...(concertShowId ? { concertShowId } : {}),
       },
       orderBy: [{ isPinned: 'desc' }, { activityPinned: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       skip,
@@ -333,11 +334,8 @@ export async function POST(request: Request) {
     content: rawContent,
     richContent,
   }
-  const rawConcertShowId = body.concertShowId === undefined || body.concertShowId === null || body.concertShowId === ''
-    ? null
-    : typeof body.concertShowId === 'string' && body.concertShowId.trim().length <= 191 ? body.concertShowId.trim() : null
-  if (body.concertShowId !== undefined && body.concertShowId !== null && body.concertShowId !== '' && !rawConcertShowId) {
-    return NextResponse.json({ message: '演唱会场次无效' }, { status: 400 })
+  if (body.concertShowId !== undefined && body.concertShowId !== null && body.concertShowId !== '') {
+    return NextResponse.json({ message: '演唱会讨论已移至专题专属讨论区，请从专题进入' }, { status: 410 })
   }
 
   let topicNames: string[]
@@ -416,13 +414,6 @@ export async function POST(request: Request) {
     if (!board || !board.isActive) {
       return NextResponse.json({ message: '\u677f\u5757\u4e0d\u5b58\u5728\u6216\u5df2\u7981\u7528', errors: { boardId: '\u8bf7\u9009\u62e9\u6709\u6548\u677f\u5757' } }, { status: 404 })
     }
-    if (rawConcertShowId) {
-      const concertShow = await prisma.concertShow.findFirst({
-        where: { id: rawConcertShowId, status: 'SCHEDULED', event: { status: { in: ['UPCOMING', 'REGISTRATION', 'WAITING_DRAW', 'SHOWING'] }, allowDiscussion: true } },
-        select: { id: true },
-      })
-      if (!concertShow) return NextResponse.json({ message: '当前演唱会场次不允许创建讨论' }, { status: 403 })
-    }
     if (board.slug === 'announcements' && !await hasAdminPermission(user, 'post_manage')) {
       return NextResponse.json(
         { message: '\u53ea\u6709\u7ba1\u7406\u5458\u53ef\u4ee5\u5728\u516c\u544a\u533a\u53d1\u5e03\u5185\u5bb9', errors: { boardId: '\u666e\u901a\u7528\u6237\u4e0d\u80fd\u9009\u62e9\u516c\u544a\u533a' } },
@@ -468,7 +459,6 @@ export async function POST(request: Request) {
           status: 'PUBLISHED',
           moderationStatus,
           stickerId: rawStickerId || undefined,
-          concertShowId: rawConcertShowId,
         },
         select: { id: true, status: true, moderationStatus: true, isDeleted: true },
       })

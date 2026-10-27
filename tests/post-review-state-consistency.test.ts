@@ -73,7 +73,7 @@ test('统一审核中心的状态按钮与服务端状态迁移保持一致', ()
 })
 
 test('帖子详情和公开查询使用同一审核访问规则', () => {
-  assert.deepEqual(publicPostWhere, { isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } })
+  assert.deepEqual(publicPostWhere, { concertShowId: null, isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } })
   assert.equal(getPostModerationAccess('APPROVED', false), 'VISIBLE')
   assert.equal(getPostModerationAccess('PENDING', false), 'PENDING')
   assert.equal(getPostModerationAccess('REJECTED', false), 'REJECTED')

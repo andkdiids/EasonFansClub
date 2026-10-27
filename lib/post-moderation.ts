@@ -12,6 +12,7 @@ export type PostModerationAccess = 'VISIBLE' | 'PENDING' | 'REJECTED'
 const publicPostModerationStatuses: PostModerationStatus[] = ['APPROVED', 'VIOLATION']
 
 type PublicPostWhere = {
+  concertShowId: null
   isDeleted: false
   status: 'PUBLISHED'
   moderationStatus: { in: PostModerationStatus[] }
@@ -85,6 +86,9 @@ export function getPostModerationAccess(
 
 /** Shared filter for every ordinary-user-facing post query. */
 export const publicPostWhere = {
+  // Legacy V1 concert discussions were stored as plaza Posts. Keep them out of
+  // every ordinary-user feed while V2 uses its own isolated discussion table.
+  concertShowId: null,
   isDeleted: false as const,
   status: 'PUBLISHED' as const,
   moderationStatus: { in: publicPostModerationStatuses },

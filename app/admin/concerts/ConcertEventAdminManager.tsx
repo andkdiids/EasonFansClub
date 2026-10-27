@@ -1,9 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { ActivityImageUploader, uploadActivityImage, type ActivityImageSelection, type ActivityImageUploadStatus } from '@/components/activities/ActivityImageUploader'
 
 type EventRecord = {
   id: string; title: string; subtitle: string | null; slug: string; venue: string | null; startDate: Date | string | null; endDate: Date | string | null
+  backgroundImageUrl?: string | null
   description: string; sourceNote: string | null; timezone: string; registrationUrl: string | null; registrationEnabled: boolean; registrationLabel: string
   homepageFeatured: boolean; activityCenterVisible: boolean; allowMarking: boolean; allowDiscussion: boolean; status: string
   shows: Array<Record<string, unknown> & { id: string; date: Date | string }>
@@ -17,7 +19,8 @@ function rowsJson(rows: Array<Record<string, unknown>>) {
   return JSON.stringify(rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, key === 'date' ? day(value as Date | string | null) : value instanceof Date ? value.toISOString() : value]))), null, 2)
 }
 
-const blankEvent = { title: '', subtitle: '', slug: '', venue: '', startDate: '', endDate: '', description: '', sourceNote: '', timezone: 'Asia/Hong_Kong', registrationUrl: '', registrationEnabled: false, registrationLabel: '登记入口', homepageFeatured: false, activityCenterVisible: true, allowMarking: true, allowDiscussion: true, status: 'DRAFT' }
+const blankEvent = { title: '', subtitle: '', slug: '', venue: '', startDate: '', endDate: '', description: '', sourceNote: '', backgroundImageUrl: null as string | null, timezone: 'Asia/Hong_Kong', registrationUrl: '', registrationEnabled: false, registrationLabel: '登记入口', homepageFeatured: false, activityCenterVisible: true, allowMarking: true, allowDiscussion: true, status: 'DRAFT' }
+const emptyImageSelection: ActivityImageSelection = { file: null, removed: false }
 
 export function ConcertEventAdminManager({ initialEvents }: Readonly<{ initialEvents: EventRecord[] }>) {
   const [events, setEvents] = useState(initialEvents)
@@ -27,20 +30,28 @@ export function ConcertEventAdminManager({ initialEvents }: Readonly<{ initialEv
   const [showsText, setShowsText] = useState('[]')
   const [timelineText, setTimelineText] = useState('[]')
   const [tutorialsText, setTutorialsText] = useState('[]')
+  const [backgroundSelection, setBackgroundSelection] = useState<ActivityImageSelection>(emptyImageSelection)
+  const [backgroundStatus, setBackgroundStatus] = useState<ActivityImageUploadStatus>('idle')
+  const [backgroundUploadError, setBackgroundUploadError] = useState('')
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [messageIsError, setMessageIsError] = useState(false)
 
   function choose(event: EventRecord | null) {
     setCreating(!event)
     setSelectedId(event?.id || '')
     setForm(event ? {
-      title: event.title, subtitle: event.subtitle || '', slug: event.slug, venue: event.venue || '', startDate: day(event.startDate), endDate: day(event.endDate), description: event.description, sourceNote: event.sourceNote || '', timezone: event.timezone, registrationUrl: event.registrationUrl || '', registrationEnabled: event.registrationEnabled, registrationLabel: event.registrationLabel, homepageFeatured: event.homepageFeatured, activityCenterVisible: event.activityCenterVisible, allowMarking: event.allowMarking, allowDiscussion: event.allowDiscussion, status: event.status,
+      title: event.title, subtitle: event.subtitle || '', slug: event.slug, venue: event.venue || '', startDate: day(event.startDate), endDate: day(event.endDate), description: event.description, sourceNote: event.sourceNote || '', backgroundImageUrl: event.backgroundImageUrl || null, timezone: event.timezone, registrationUrl: event.registrationUrl || '', registrationEnabled: event.registrationEnabled, registrationLabel: event.registrationLabel, homepageFeatured: event.homepageFeatured, activityCenterVisible: event.activityCenterVisible, allowMarking: event.allowMarking, allowDiscussion: event.allowDiscussion, status: event.status,
     } : { ...blankEvent })
     setShowsText(event ? rowsJson(event.shows) : '[]')
     setTimelineText(event ? rowsJson(event.timeline) : '[]')
     setTutorialsText(event ? rowsJson(event.tutorials) : '[]')
+    setBackgroundSelection(emptyImageSelection)
+    setBackgroundStatus('idle')
+    setBackgroundUploadError('')
     setMessage('')
+    setMessageIsError(false)
   }
 
   function field<K extends keyof typeof blankEvent>(key: K, value: (typeof blankEvent)[K]) { setForm((current) => ({ ...current, [key]: value })) }
@@ -48,9 +59,27 @@ export function ConcertEventAdminManager({ initialEvents }: Readonly<{ initialEv
   async function save(event: React.FormEvent) {
     event.preventDefault()
     setBusy(true); setMessage('')
+    setMessageIsError(false)
     try {
+      let backgroundImageUrl = form.backgroundImageUrl
+      if (backgroundSelection.removed) backgroundImageUrl = null
+      if (backgroundSelection.file) {
+        setBackgroundStatus('uploading')
+        setBackgroundUploadError('')
+        try {
+          backgroundImageUrl = await uploadActivityImage(backgroundSelection.file)
+          setForm((current) => ({ ...current, backgroundImageUrl }))
+          setBackgroundSelection(emptyImageSelection)
+          setBackgroundStatus('success')
+        } catch (error) {
+          const uploadError = error instanceof Error ? error.message : '背景图上传失败，请稍后重试'
+          setBackgroundStatus('error')
+          setBackgroundUploadError(uploadError)
+          throw error
+        }
+      }
       if (creating) {
-        const response = await fetch('/api/admin/concert-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+        const response = await fetch('/api/admin/concert-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, backgroundImageUrl }) })
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.message || '创建失败')
         const reload = await fetch('/api/admin/concert-events', { cache: 'no-store' })
@@ -64,7 +93,7 @@ export function ConcertEventAdminManager({ initialEvents }: Readonly<{ initialEv
       const shows = JSON.parse(showsText) as unknown
       const timeline = JSON.parse(timelineText) as unknown
       const tutorials = JSON.parse(tutorialsText) as unknown
-      const response = await fetch(`/api/admin/concert-events/${encodeURIComponent(selected.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event: form, shows, timeline, tutorials }) })
+      const response = await fetch(`/api/admin/concert-events/${encodeURIComponent(selected.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event: { ...form, backgroundImageUrl }, shows, timeline, tutorials }) })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.message || '保存失败')
       const reload = await fetch('/api/admin/concert-events', { cache: 'no-store' })
@@ -75,6 +104,7 @@ export function ConcertEventAdminManager({ initialEvents }: Readonly<{ initialEv
       setMessage('专题已保存')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '保存失败，请检查 JSON 格式')
+      setMessageIsError(true)
     } finally { setBusy(false) }
   }
 
@@ -86,9 +116,10 @@ export function ConcertEventAdminManager({ initialEvents }: Readonly<{ initialEv
       </div>
       <label className="block space-y-1 text-xs font-bold text-[var(--foreground-muted)]">专题说明<textarea required rows={4} value={form.description} onChange={(e) => field('description', e.target.value)} className="w-full border border-[var(--border)] bg-[var(--background)] p-3 text-sm text-[var(--foreground)]" /></label>
       <label className="block space-y-1 text-xs font-bold text-[var(--foreground-muted)]">资料来源与核验说明<textarea rows={3} value={form.sourceNote} onChange={(e) => field('sourceNote', e.target.value)} className="w-full border border-[var(--border)] bg-[var(--background)] p-3 text-sm text-[var(--foreground)]" /></label>
+      <ActivityImageUploader label="专题背景图" initialUrl={form.backgroundImageUrl} disabled={busy} status={backgroundStatus} errorMessage={backgroundUploadError} uploadLabel="上传背景图" replaceLabel="替换背景图" removeLabel="移除背景图" previewClassName="max-h-56 w-full rounded-lg object-cover" onSelectionChange={(selection) => { setBackgroundSelection(selection); setBackgroundStatus('idle'); setBackgroundUploadError('') }} />
       <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-[var(--foreground)]">{([['registrationEnabled','启用登记入口'],['homepageFeatured','首页展示'],['activityCenterVisible','活动中心展示'],['allowMarking','允许标记想看/有票'],['allowDiscussion','允许场次讨论']] as const).map(([key,label]) => <label key={key} className="inline-flex min-h-9 items-center gap-2"><input type="checkbox" checked={form[key]} onChange={(e) => field(key, e.target.checked as never)} />{label}</label>)}</div>
       {!creating ? <div className="space-y-4"><p className="text-xs leading-5 text-[var(--foreground-muted)]">场次、时间线和教程使用 JSON 列表维护。编辑现有条目保留其 ID；新增条目省略 id。教程步骤可选填 imageUrl（仅接受项目公开媒体库图片地址）、imageAlt、caution、linkUrl（仅 HTTPS）和 linkLabel。通过取消、归档、禁用或草稿状态保留历史，保存不会删除记录。</p>{([[showsText,setShowsText,'场次与歌单'],[timelineText,setTimelineText,'活动时间线'],[tutorialsText,setTutorialsText,'教程与步骤']] as const).map(([value,setter,label]) => <label key={label} className="block space-y-1 text-xs font-bold text-[var(--foreground-muted)]">{label}<textarea spellCheck={false} rows={label === '场次与歌单' ? 16 : 10} value={value} onChange={(e) => setter(e.target.value)} className="w-full border border-[var(--border)] bg-[var(--background)] p-3 font-mono text-xs text-[var(--foreground)]" /></label>)}</div> : <p className="text-sm text-[var(--foreground-muted)]">创建专题后，再添加场次、时间线和教程。你可以从已有演唱会专题中复制 JSON 并调整。</p>}
-      {message ? <p role="status" aria-live="polite" className="text-sm font-bold text-[var(--primary)]">{message}</p> : null}
+      {message ? <p role={messageIsError ? 'alert' : 'status'} aria-live="polite" className={`text-sm font-bold ${messageIsError ? 'text-red-600' : 'text-[var(--primary)]'}`}>{message}</p> : null}
       <button type="submit" disabled={busy} className="min-h-11 bg-[var(--primary)] px-5 text-sm font-black text-white disabled:opacity-50">{busy ? '正在保存…' : creating ? '创建专题' : '保存修改'}</button>
     </form>
   </div>
