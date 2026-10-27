@@ -19,14 +19,14 @@ export async function POST(request: Request) {
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
+  const campaignId = typeof body?.campaignId === 'string' ? body.campaignId : ''
   const idempotencyKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : ''
   try {
-    // The server resolves the active campaign and all amounts from its own data;
-    // the client can provide only a retry key.
-    const result = await recycleAllPharmacyDuplicates({ userId: guard.user.id, idempotencyKey })
+    // Bind new clients to the selected round; the service only infers a legacy request when unambiguous.
+    const result = await recycleAllPharmacyDuplicates({ userId: guard.user.id, campaignId, idempotencyKey })
     let page = null
     try {
-      page = await getPharmacyPageData(guard.user.id)
+      page = await getPharmacyPageData(guard.user.id, result.campaignId)
     } catch (error) {
       console.error('[angel-gift.recycle-all.refresh]', error)
     }

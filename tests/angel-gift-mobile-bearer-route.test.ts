@@ -46,7 +46,7 @@ const pageData = {
   moduleName: '天使的礼物',
   moduleSubtitle: '活动记录',
   isAuthenticated: true,
-  user: { balance: 127, todayCount: 1, totalCount: 4 },
+  user: { id: 'mobile-user-a', balance: 127, todayCount: 1, totalCount: 4 },
   campaign: {
     id: 'campaign-1', title: '本期主题', subtitle: null, description: null, status: 'ACTIVE',
     startsAt: null, endsAt: null, drawCost: 27, dailyDrawLimit: null, totalDrawLimit: null,
@@ -56,6 +56,7 @@ const pageData = {
       collectionComplete: false, hiddenRevealedCount: 0, collectionRewardRevealed: false,
     },
   },
+  campaignOptions: [{ id: 'campaign-1', title: '本期主题', status: 'ACTIVE', startsAt: null, endsAt: null, drawCost: 27, visualUrl: null }],
   upcomingCampaign: null,
   history: [],
   historyHasMore: false,
