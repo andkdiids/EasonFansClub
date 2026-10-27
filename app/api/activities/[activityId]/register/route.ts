@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
-import { requireUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
+import { requireRequestUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { invalidateHomeDataCache } from '@/lib/home-data'
@@ -29,7 +29,7 @@ import { completeTask } from '@/lib/growth-tasks/service'
 export const dynamic = 'force-dynamic'
 
 const activityIdPattern = /^[A-Za-z0-9_-]{8,128}$/
-const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' }
 
 function stateError(state: ActivityRegistrationState) {
   if (state === 'AVAILABLE') throw new Error('活动报名状态不一致')
@@ -44,7 +44,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   const invalidOrigin = rejectInvalidRequestOrigin(request)
   if (invalidOrigin) return invalidOrigin
 
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/activities/register',
