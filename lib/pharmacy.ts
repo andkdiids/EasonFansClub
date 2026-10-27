@@ -9,6 +9,7 @@ import { resolveBadgeAcquisitionDescription } from '@/lib/badge-acquisition'
 import { generateBadgeAcquisitionDescription, type SupportedBadgeRuleType } from '@/lib/badge-rules'
 import { getBeijingDateKey, formatBeijingMonthDayTime } from '@/lib/beijing-time'
 import { getShanghaiDayRange } from '@/lib/checkin'
+import { calculateAvailablePharmacyDraws } from '@/lib/pharmacy-draw-options'
 import { publicImageUrl } from '@/lib/images'
 import { isPublicMediaProxyUrl, PUBLIC_COS_HOST, toStoredMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
@@ -881,11 +882,15 @@ type PublicCampaignSelection = PharmacyCampaignSelection<PublicCampaignRow>
 export type PharmacyCampaignOption = {
   id: string
   title: string
+  subtitle: string | null
+  description: string | null
   status: PharmacyCampaignDisplayStatus
   startsAt: string | null
   endsAt: string | null
   drawCost: number
   visualUrl: string | null
+  remainingDraws: number | null
+  availability: 'AVAILABLE' | 'LOGIN_REQUIRED' | 'DAILY_LIMIT_REACHED' | 'TOTAL_LIMIT_REACHED' | 'INSUFFICIENT_POINTS'
 }
 
 export type PharmacyPageData = {
@@ -950,15 +955,68 @@ function serializeUpcomingCampaign(campaign: PublicCampaignRow | null): Pharmacy
   }
 }
 
-function serializeCampaignOption(campaign: PublicCampaignRow, now: Date): PharmacyCampaignOption {
+export type PharmacyPublicPrizePoolCheck = {
+  enabled: boolean
+  type: string
+  weight: number
+  rewardAmount: number | null
+  badgeUsable: boolean
+}
+
+export function isPharmacyPublicPrizePoolUsable(prizes: readonly PharmacyPublicPrizePoolCheck[]) {
+  const enabled = prizes.filter((prize) => prize.enabled)
+  if (!enabled.length) return false
+  if (enabled.some((prize) => prize.weight <= 0 || (prize.type === 'BADGE' ? !prize.badgeUsable : prize.type === 'POINTS' ? !prize.rewardAmount || prize.rewardAmount <= 0 : true))) return false
+  const totalWeight = enabled.reduce((total, prize) => total + prize.weight, 0)
+  return Number.isSafeInteger(totalWeight) && totalWeight > 0
+}
+
+function isCampaignPrizePoolUsable(prizes: readonly PrizeRow[]) {
+  return isPharmacyPublicPrizePoolUsable(prizes.map((prize) => ({
+    enabled: prize.enabled,
+    type: prize.type,
+    weight: prize.weight,
+    rewardAmount: prize.rewardAmount,
+    badgeUsable: prize.type === 'BADGE' && usableBadge(prize),
+  })))
+}
+
+function serializeCampaignOption(
+  campaign: PublicCampaignRow,
+  now: Date,
+  user: { balance: number; todayCount: number; totalCount: number } | null,
+): PharmacyCampaignOption {
+  let availability: PharmacyCampaignOption['availability'] = 'LOGIN_REQUIRED'
+  let remainingDraws: number | null = null
+  if (user) {
+    remainingDraws = calculateAvailablePharmacyDraws({
+      balance: user.balance,
+      cost: campaign.drawCost,
+      todayCount: user.todayCount,
+      dailyLimit: campaign.dailyDrawLimit,
+      totalCount: user.totalCount,
+      totalLimit: campaign.totalDrawLimit,
+    })
+    availability = campaign.dailyDrawLimit !== null && user.todayCount >= campaign.dailyDrawLimit
+      ? 'DAILY_LIMIT_REACHED'
+      : campaign.totalDrawLimit !== null && user.totalCount >= campaign.totalDrawLimit
+        ? 'TOTAL_LIMIT_REACHED'
+        : user.balance < campaign.drawCost
+          ? 'INSUFFICIENT_POINTS'
+          : 'AVAILABLE'
+  }
   return {
     id: campaign.id,
     title: campaign.title,
+    subtitle: campaign.subtitle,
+    description: campaign.description,
     status: effectivePharmacyCampaignStatus(campaign, now),
     startsAt: campaign.startsAt?.toISOString() || null,
     endsAt: campaign.endsAt?.toISOString() || null,
     drawCost: campaign.drawCost,
     visualUrl: publicImageUrl(campaign.visualUrl),
+    remainingDraws,
+    availability,
   }
 }
 
@@ -993,16 +1051,28 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
     findPublicCampaigns(now),
     userId ? prisma.user.findUnique({ where: { id: userId }, select: { points: true } }) : Promise.resolve(null),
   ])
-  const campaign = selectPharmacyCampaign(selection, campaignId)
+  const selectableCampaigns = selection.activeCampaigns.filter((candidate) => isCampaignPrizePoolUsable(candidate.PharmacyPrize))
+  const campaign = campaignId ? selectPharmacyCampaign(selection, campaignId) : selectableCampaigns[0] || null
   if (campaignId && !campaign) throw new PharmacyError('CAMPAIGN_NOT_FOUND', '主题不存在或当前不可查看', 404)
-  const campaignOptions = selection.campaigns.map((option) => serializeCampaignOption(option, now))
+  const selectableIds = selectableCampaigns.map((candidate) => candidate.id)
+  const dayRange = getShanghaiDayRange(now)
+  const [dailyCounts, totalCounts] = userId && selectableIds.length ? await Promise.all([
+    prisma.pharmacyDraw.groupBy({ by: ['campaignId'], where: { userId, campaignId: { in: selectableIds }, drawAt: { gte: dayRange.start, lt: dayRange.end } }, _count: { _all: true } }),
+    prisma.pharmacyDraw.groupBy({ by: ['campaignId'], where: { userId, campaignId: { in: selectableIds } }, _count: { _all: true } }),
+  ]) : [[], []]
+  const dailyCountByCampaign = new Map(dailyCounts.map((row) => [row.campaignId, row._count._all]))
+  const totalCountByCampaign = new Map(totalCounts.map((row) => [row.campaignId, row._count._all]))
+  const campaignOptions = selectableCampaigns.map((option) => serializeCampaignOption(option, now, userId ? {
+    balance: userRow?.points ?? 0,
+    todayCount: dailyCountByCampaign.get(option.id) || 0,
+    totalCount: totalCountByCampaign.get(option.id) || 0,
+  } : null))
   const upcomingCampaign = serializeUpcomingCampaign(selection.upcomingCampaign)
   if (!campaign) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { id: userId, balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, campaignOptions, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
   const effectiveStatus = effectivePharmacyCampaignStatus(campaign, now)
   const collection = await resolveVisibleAngelGiftCollection({ userId, campaignId: campaign.id, now })
   if (!collection) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { id: userId, balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, campaignOptions, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
-  const enabledPrizeRows = campaign.PharmacyPrize.filter((prize) => prize.enabled)
-  const prizePoolValid = enabledPrizeRows.length > 0 && enabledPrizeRows.every((prize) => prize.weight > 0 && (prize.type === 'BADGE' ? usableBadge(prize) : prize.type === 'POINTS' && Boolean(prize.rewardAmount && prize.rewardAmount > 0)))
+  const prizePoolValid = isCampaignPrizePoolUsable(campaign.PharmacyPrize)
   const [inventoryRows, history, todayCount, totalCount] = await Promise.all([
     userId ? prisma.pharmacyDuplicateInventory.findMany({ where: { userId, campaignId: campaign.id, quantity: { gt: 0 } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, sourceBadgeId: true, quantity: true, SourceBadge: { select: { id: true, name: true, iconUrl: true } } } }) : Promise.resolve([]),
     userId ? getPharmacyHistoryPage(userId, campaign.id) : Promise.resolve({ items: [] as PharmacyHistoryItem[], hasMore: false, page: 1, pageSize: PHARMACY_HISTORY_PAGE_SIZE }),

@@ -17,6 +17,14 @@ const statusLabels: Record<string, string> = {
   ENDED: '已结束',
 }
 
+const availabilityLabels: Record<string, string> = {
+  AVAILABLE: '可参与',
+  LOGIN_REQUIRED: '登录后参与',
+  DAILY_LIMIT_REACHED: '今日次数已用完',
+  TOTAL_LIMIT_REACHED: '本期次数已用完',
+  INSUFFICIENT_POINTS: '挂号费不足',
+}
+
 const rarityLabels: Record<string, string> = {
   LIMITED: '限定处方',
   LEGENDARY: '传说处方',
@@ -345,17 +353,51 @@ export function AngelGiftClient({ initialData }: Props) {
     setRecycleAllConfirm(false)
     setRecycleSuccess('')
     const requestId = ++selectionRequestRef.current
-    const cached = campaignDataCacheRef.current.get(campaignId)
-    if (cached) setData(cached)
     setCampaignLoading(true)
+    let selectedRoundExpired = false
     try {
       const response = await fetch(`/api/angel-gift?campaignId=${encodeURIComponent(campaignId)}`, { cache: 'no-store' })
-      const payload = await response.json().catch(() => null) as { ok?: boolean; data?: PharmacyPageData; message?: string }
-      if (!response.ok || !payload?.ok || !payload.data || payload.data.campaign?.id !== campaignId) throw new Error(errorMessage(payload, '所选主题暂时无法加载'))
+      const payload = await response.json().catch(() => null) as { ok?: boolean; code?: string; data?: PharmacyPageData; message?: string }
+      const selectedOption = payload?.data?.campaignOptions.find((option) => option.id === campaignId)
+      const selectedCampaign = payload?.data?.campaign
+      if ((response.status === 404 && payload?.code === 'CAMPAIGN_NOT_FOUND') || (response.ok && payload?.ok && payload.data && (!selectedOption || selectedOption.status !== 'ACTIVE' || selectedCampaign?.id !== campaignId || selectedCampaign.status !== 'ACTIVE' || !selectedCampaign.prizePoolValid))) {
+        selectedRoundExpired = true
+        const latestResponse = await fetch('/api/angel-gift', { cache: 'no-store' })
+        const latestPayload = await latestResponse.json().catch(() => null) as { ok?: boolean; data?: PharmacyPageData }
+        if (!latestResponse.ok || !latestPayload?.ok || !latestPayload.data) {
+          if (requestId === selectionRequestRef.current) {
+            selectedCampaignIdRef.current = ''
+            setSelectedCampaignId('')
+            setData((current) => ({ ...current, campaign: null, campaignOptions: [] }))
+            setError('该主题已结束或暂不可参与，可选主题刷新失败，请刷新页面后重试。')
+          }
+          return
+        }
+        if (requestId === selectionRequestRef.current) {
+          const fallbackId = latestPayload.data.campaign?.id || ''
+          selectedCampaignIdRef.current = fallbackId
+          setSelectedCampaignId(fallbackId)
+          setData(latestPayload.data)
+          setError('该主题已结束或暂不可参与，可选主题已更新。')
+        }
+        return
+      }
+      if (!response.ok || !payload?.ok || !payload.data || !selectedOption || selectedCampaign?.id !== campaignId) throw new Error(errorMessage(payload, '所选主题暂时无法加载'))
       campaignDataCacheRef.current.set(campaignId, payload.data)
       if (requestId === selectionRequestRef.current && selectedCampaignIdRef.current === campaignId) setData(payload.data)
     } catch (caught) {
-      if (requestId === selectionRequestRef.current) setError(caught instanceof Error ? caught.message : '所选主题暂时无法加载')
+      if (requestId === selectionRequestRef.current) {
+        if (selectedRoundExpired) {
+          selectedCampaignIdRef.current = ''
+          setSelectedCampaignId('')
+          setData((current) => ({ ...current, campaign: null, campaignOptions: [] }))
+        } else {
+          const previousCampaignId = data.campaign?.id || ''
+          selectedCampaignIdRef.current = previousCampaignId
+          setSelectedCampaignId(previousCampaignId)
+        }
+        setError(caught instanceof Error ? caught.message : '所选主题暂时无法加载')
+      }
     } finally {
       if (requestId === selectionRequestRef.current) setCampaignLoading(false)
     }
@@ -591,13 +633,33 @@ export function AngelGiftClient({ initialData }: Props) {
       </header>
 
       {!data.isAuthenticated ? <div className="angel-gift-login-note"><span>登录后才能执药、收藏勋章并保留余药。</span><Link href="/login?redirect=%2Fangel-gift">登录后进入药房 →</Link></div> : null}
-      {data.campaignOptions.length > 1 ? <div className="angel-gift-campaign-selector">
-        <label htmlFor="angel-gift-campaign-select">选择抽奖期</label>
-        <select id="angel-gift-campaign-select" value={selectedCampaignId} onChange={(event) => void selectCampaign(event.target.value)} aria-label="选择天使的礼物抽奖期">
-          {data.campaignOptions.map((option) => <option key={option.id} value={option.id}>{option.title} · {statusLabels[option.status] || option.status} · 每次 {formatFee(option.drawCost)} 挂号费{option.endsAt ? ` · 至 ${formatDate(option.endsAt, true)}` : ''}</option>)}
-        </select>
-        {campaignLoading ? <span role="status" aria-live="polite">正在读取本期药柜…</span> : null}
-      </div> : campaignLoading ? <p className="angel-gift-campaign-loading" role="status" aria-live="polite">正在读取所选主题…</p> : null}
+      <section className="angel-gift-campaign-selector" aria-labelledby="angel-gift-campaign-selector-title" aria-busy={campaignLoading}>
+        <div className="angel-gift-campaign-selector-heading"><div><span className="angel-gift-label">Current prescriptions</span><h2 id="angel-gift-campaign-selector-title">正在进行的主题</h2></div>{campaignLoading ? <span className="angel-gift-campaign-loading" role="status" aria-live="polite">正在读取所选主题…</span> : null}</div>
+        {data.campaignOptions.length ? <div className="angel-gift-campaign-grid">
+          {data.campaignOptions.map((option) => {
+            const selected = selectedCampaignId === option.id
+            return <button
+              key={option.id}
+              type="button"
+              className={`angel-gift-campaign-card${selected ? ' is-selected' : ''}${campaignLoading ? ' is-loading' : ''}`}
+              onClick={() => void selectCampaign(option.id)}
+              aria-pressed={selected}
+              aria-label={`${option.title}，${statusLabels[option.status] || option.status}，${availabilityLabels[option.availability] || '参与状态未知'}${selected ? '，当前主题' : '，切换主题'}`}
+            >
+              {option.visualUrl ? <Image src={option.visualUrl} alt="" aria-hidden="true" fill sizes="(max-width: 767px) 100vw, 50vw" className="angel-gift-campaign-card-image" unoptimized /> : null}
+              <span className="angel-gift-campaign-card-shade" aria-hidden="true" />
+              <span className="angel-gift-campaign-card-content">
+                <span className="angel-gift-campaign-card-topline"><span className="angel-gift-campaign-status"><span aria-hidden="true" />{statusLabels[option.status] || option.status}</span>{selected ? <span className="angel-gift-campaign-current">当前主题</span> : <span className="angel-gift-campaign-enter">切换主题</span>}</span>
+                <strong className="angel-gift-campaign-title">{option.title}</strong>
+                {option.subtitle ? <span className="angel-gift-campaign-subtitle">{option.subtitle}</span> : null}
+                {option.description ? <span className="angel-gift-campaign-description">{option.description}</span> : null}
+                <span className="angel-gift-campaign-card-bottom"><span>每次 {formatFee(option.drawCost)} 挂号费</span>{option.endsAt ? <time dateTime={option.endsAt}>至 {formatDate(option.endsAt, true)}</time> : null}</span>
+                <span className={`angel-gift-campaign-availability is-${option.availability.toLowerCase().replaceAll('_', '-')}`}>{availabilityLabels[option.availability] || '参与状态未知'}{option.remainingDraws !== null && option.availability === 'AVAILABLE' ? ` · 最多可抽 ${option.remainingDraws} 次` : ''}</span>
+              </span>
+            </button>
+          })}
+        </div> : <p className="angel-gift-campaign-empty" role="status">当前暂无进行中的抽奖主题。</p>}
+      </section>
       {error ? <div className="angel-gift-alert" role="alert">{error}</div> : null}
 
       {campaign ? <>
