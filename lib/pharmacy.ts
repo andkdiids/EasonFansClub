@@ -31,6 +31,7 @@ export type PharmacyErrorCode =
   | 'CAMPAIGN_NOT_STARTED'
   | 'CAMPAIGN_PAUSED'
   | 'CAMPAIGN_ENDED'
+  | 'CAMPAIGN_SELECTION_REQUIRED'
   | 'DAILY_LIMIT_REACHED'
   | 'TOTAL_LIMIT_REACHED'
   | 'INSUFFICIENT_POINTS'
@@ -163,27 +164,53 @@ export type PharmacyCampaignResolverInput = {
   createdAt?: Date
 }
 
+export type PharmacyCampaignSelection<T extends PharmacyCampaignResolverInput> = {
+  campaigns: T[]
+  activeCampaigns: T[]
+  upcomingCampaigns: T[]
+  pausedCampaigns: T[]
+  endedCampaigns: T[]
+  activeCampaign: T | null
+  upcomingCampaign: T | null
+}
+
 /**
  * PharmacyCampaign.status is the persisted publication gate: DRAFT is not
  * public, while the effective current/upcoming state is derived from time.
  * Keeping this resolver pure lets page reads and write transactions share the
  * exact same campaign selection rules.
  */
-export function resolvePharmacyCampaigns<T extends PharmacyCampaignResolverInput>(campaigns: readonly T[], now = new Date()) {
-  const published = campaigns.filter((campaign) => campaign.status !== 'DRAFT' && campaign.status !== 'ENDED')
-  const activeCandidates = published.filter((campaign) => {
-    const started = !campaign.startsAt || campaign.startsAt <= now
-    const notEnded = !campaign.endsAt || now < campaign.endsAt
-    return started && notEnded
-  })
-  const upcomingCandidates = published.filter((campaign) => Boolean(campaign.startsAt && campaign.startsAt > now && (!campaign.endsAt || now < campaign.endsAt)))
+export function resolvePharmacyCampaigns<T extends PharmacyCampaignResolverInput>(campaigns: readonly T[], now = new Date()): PharmacyCampaignSelection<T> {
+  const published = campaigns.filter((campaign) => campaign.status !== 'DRAFT')
+  const activeCandidates = published.filter((campaign) => effectivePharmacyCampaignStatus(campaign, now) === 'ACTIVE')
+  const upcomingCandidates = published.filter((campaign) => effectivePharmacyCampaignStatus(campaign, now) === 'SCHEDULED')
+  const pausedCandidates = published.filter((campaign) => effectivePharmacyCampaignStatus(campaign, now) === 'PAUSED')
+  const endedCandidates = published.filter((campaign) => effectivePharmacyCampaignStatus(campaign, now) === 'ENDED')
   const startTime = (campaign: T) => campaign.startsAt?.getTime() ?? Number.NEGATIVE_INFINITY
   const createdTime = (campaign: T) => campaign.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY
   const id = (campaign: T) => campaign.id || ''
 
-  const activeCampaign = [...activeCandidates].sort((left, right) => startTime(right) - startTime(left) || createdTime(right) - createdTime(left) || id(right).localeCompare(id(left)))[0] || null
-  const upcomingCampaign = [...upcomingCandidates].sort((left, right) => startTime(left) - startTime(right) || createdTime(left) - createdTime(right) || id(left).localeCompare(id(right)))[0] || null
-  return { activeCampaign, upcomingCampaign }
+  const activeCampaigns = [...activeCandidates].sort((left, right) => startTime(right) - startTime(left) || createdTime(right) - createdTime(left) || id(right).localeCompare(id(left)))
+  const upcomingCampaigns = [...upcomingCandidates].sort((left, right) => startTime(left) - startTime(right) || createdTime(left) - createdTime(right) || id(left).localeCompare(id(right)))
+  const pausedCampaigns = [...pausedCandidates].sort((left, right) => createdTime(right) - createdTime(left) || id(right).localeCompare(id(left)))
+  const endedCampaigns = [...endedCandidates].sort((left, right) => createdTime(right) - createdTime(left) || id(right).localeCompare(id(left)))
+  return {
+    campaigns: [...activeCampaigns, ...upcomingCampaigns, ...pausedCampaigns, ...endedCampaigns],
+    activeCampaigns,
+    upcomingCampaigns,
+    pausedCampaigns,
+    endedCampaigns,
+    activeCampaign: activeCampaigns[0] || null,
+    upcomingCampaign: upcomingCampaigns[0] || null,
+  }
+}
+
+export function selectPharmacyCampaign<T extends PharmacyCampaignResolverInput>(
+  selection: PharmacyCampaignSelection<T>,
+  requestedCampaignId?: string | null,
+): T | null {
+  if (requestedCampaignId) return selection.campaigns.find((campaign) => campaign.id === requestedCampaignId) || null
+  return selection.activeCampaigns[0] || selection.upcomingCampaigns[0] || selection.pausedCampaigns[0] || selection.endedCampaigns[0] || null
 }
 
 export function normalizePharmacyCampaignInput(
@@ -459,16 +486,14 @@ async function lockCampaign(db: Prisma.TransactionClient, campaignId: string) {
   `
 }
 
-async function findActivePharmacyCampaignId(db: Prisma.TransactionClient | typeof prisma, now: Date) {
-  const campaigns = await db.pharmacyCampaign.findMany({
+async function resolveLegacyRecycleCampaignId(db: Prisma.TransactionClient, now: Date) {
+  const rows = await db.pharmacyCampaign.findMany({
     where: { status: { in: ['SCHEDULED', 'ACTIVE', 'PAUSED'] } },
     select: { id: true, status: true, startsAt: true, endsAt: true, createdAt: true },
   })
-  return resolvePharmacyCampaigns(campaigns, now).activeCampaign?.id || null
-}
-
-function assertCampaignIsCurrent(campaignId: string, activeCampaignId: string | null) {
-  if (activeCampaignId !== campaignId) throw new PharmacyError('CAMPAIGN_NOT_ACTIVE', '只能执药当前进行中的主题', 409)
+  const activeCampaigns = resolvePharmacyCampaigns(rows, now).activeCampaigns
+  if (activeCampaigns.length > 1) throw new PharmacyError('CAMPAIGN_SELECTION_REQUIRED', '请选择要回收余药的主题', 409)
+  return activeCampaigns[0]?.id || null
 }
 
 function assertCampaignAllowsDraw(campaign: { status: PharmacyCampaignStatus; startsAt: Date | null; endsAt: Date | null }, now: Date) {
@@ -552,7 +577,6 @@ export async function executePharmacyDraws(input: { userId: string; campaignId: 
     const campaign = await tx.pharmacyCampaign.findUnique({ where: { id: campaignId } })
     if (!campaign) throw new PharmacyError('CAMPAIGN_NOT_FOUND', '主题不存在', 404)
     assertCampaignAllowsDraw(campaign, now)
-    assertCampaignIsCurrent(campaign.id, await findActivePharmacyCampaignId(tx, now))
     const pool = await getEnabledPrizePool(tx, campaign.id)
     const dateKey = getBeijingDateKey(now)
     const { start, end } = getShanghaiDayRange(now)
@@ -690,8 +714,6 @@ export async function recyclePharmacyDuplicates(input: { userId: string; campaig
     const campaign = await tx.pharmacyCampaign.findUnique({ where: { id: campaignId } })
     if (!campaign) throw new PharmacyError('CAMPAIGN_NOT_FOUND', '主题不存在', 404)
     assertCampaignAllowsRecycle(campaign, now)
-    const effectiveStatus = effectivePharmacyCampaignStatus(campaign, now)
-    if (effectiveStatus !== 'ENDED') assertCampaignIsCurrent(campaign.id, await findActivePharmacyCampaignId(tx, now))
     const requiredCount = campaign.duplicateRecycleRequired
     const rewardAmount = campaign.duplicateRecycleReward
     if (!requiredCount || !rewardAmount) throw new PharmacyError('RECYCLE_DISABLED', '当前主题未配置余药回收规则')
@@ -742,8 +764,9 @@ export type PharmacyRecycleAllResult = {
   duplicateTotal: number
 }
 
-/** Recycle every complete reward bundle available in the current campaign. */
-export async function recycleAllPharmacyDuplicates(input: { userId: string; idempotencyKey: string; now?: Date }): Promise<PharmacyRecycleAllResult> {
+/** Recycle all bundles for the selected round; legacy clients may omit it only when one round is active. */
+export async function recycleAllPharmacyDuplicates(input: { userId: string; campaignId?: string; idempotencyKey: string; now?: Date }): Promise<PharmacyRecycleAllResult> {
+  const requestedCampaignId = input.campaignId?.trim() || ''
   const rawIdempotencyKey = input.idempotencyKey.trim()
   const idempotencyKey = `all:${rawIdempotencyKey}`
   if (!rawIdempotencyKey || idempotencyKey.length > 191) throw new PharmacyError('IDEMPOTENCY_KEY_INVALID', '回收请求标识不正确')
@@ -755,6 +778,7 @@ export async function recycleAllPharmacyDuplicates(input: { userId: string; idem
     const lockedUser = await lockUser(tx, input.userId)
     const existing = await tx.pharmacyRecycleLog.findUnique({ where: { userId_idempotencyKey: { userId: input.userId, idempotencyKey } } })
     if (existing) {
+      if (requestedCampaignId && existing.campaignId !== requestedCampaignId) throw new PharmacyError('IDEMPOTENCY_KEY_INVALID', '该回收请求标识已经用于其他主题', 409)
       return {
         campaignId: existing.campaignId,
         duplicateRequest: true,
@@ -765,13 +789,12 @@ export async function recycleAllPharmacyDuplicates(input: { userId: string; idem
       }
     }
 
-    const activeCampaignId = await findActivePharmacyCampaignId(tx, now)
-    if (!activeCampaignId) throw new PharmacyError('CAMPAIGN_NOT_ACTIVE', '当前没有可回收的本期药柜', 409)
-    await lockCampaign(tx, activeCampaignId)
-    const campaign = await tx.pharmacyCampaign.findUnique({ where: { id: activeCampaignId } })
-    if (!campaign) throw new PharmacyError('CAMPAIGN_NOT_FOUND', '当前主题不存在', 404)
+    const campaignId = requestedCampaignId || await resolveLegacyRecycleCampaignId(tx, now)
+    if (!campaignId) throw new PharmacyError('CAMPAIGN_NOT_ACTIVE', '当前没有可回收的进行中主题', 409)
+    await lockCampaign(tx, campaignId)
+    const campaign = await tx.pharmacyCampaign.findUnique({ where: { id: campaignId } })
+    if (!campaign) throw new PharmacyError('CAMPAIGN_NOT_FOUND', '主题不存在', 404)
     assertCampaignAllowsRecycle(campaign, now)
-    assertCampaignIsCurrent(campaign.id, await findActivePharmacyCampaignId(tx, now))
 
     const requiredCount = campaign.duplicateRecycleRequired
     const rewardPerBatch = campaign.duplicateRecycleReward
@@ -853,16 +876,23 @@ export type PharmacyUpcomingCampaign = {
   visualUrl: string | null
 }
 
-type PublicCampaignSelection = {
-  activeCampaign: PublicCampaignRow | null
-  upcomingCampaign: PublicCampaignRow | null
+type PublicCampaignSelection = PharmacyCampaignSelection<PublicCampaignRow>
+
+export type PharmacyCampaignOption = {
+  id: string
+  title: string
+  status: PharmacyCampaignDisplayStatus
+  startsAt: string | null
+  endsAt: string | null
+  drawCost: number
+  visualUrl: string | null
 }
 
 export type PharmacyPageData = {
   moduleName: typeof ANGEL_GIFT_MODULE_NAME
   moduleSubtitle: typeof ANGEL_GIFT_SUBTITLE
   isAuthenticated: boolean
-  user: { balance: number; todayCount: number; totalCount: number } | null
+  user: { id: string; balance: number; todayCount: number; totalCount: number } | null
   campaign: {
     id: string; title: string; subtitle: string | null; description: string | null; status: PharmacyCampaignDisplayStatus; startsAt: string | null; endsAt: string | null; drawCost: number; duplicateRecycleEnabled: boolean; duplicateRecycleRequired: number | null; duplicateRecycleReward: number | null; recycleAfterEndEnabled: boolean; probabilityPublic: boolean; dailyDrawLimit: number | null; totalDrawLimit: number | null; visualUrl: string | null; prizePoolValid: boolean
     prizes: Array<{ id: string; type: PharmacyPrizeType; name: string; rewardAmount: number | null; probability: number | null; badge: { id: string; name: string; imageUrl: string | null; rarity: string; locked: boolean } | null }>
@@ -876,6 +906,7 @@ export type PharmacyPageData = {
       collectionRewardRevealed: boolean
     }
   } | null
+  campaignOptions: PharmacyCampaignOption[]
   upcomingCampaign: PharmacyUpcomingCampaign | null
   duplicate: { total: number; required: number | null; recyclableCount: number; recyclableReward: number; recyclableTypeCount: number; byBadge: Array<{ badgeId: string; badgeName: string; imageUrl: string | null; quantity: number }> }
   history: PharmacyHistoryItem[]
@@ -919,13 +950,25 @@ function serializeUpcomingCampaign(campaign: PublicCampaignRow | null): Pharmacy
   }
 }
 
-async function findPublicCampaigns(): Promise<PublicCampaignSelection> {
+function serializeCampaignOption(campaign: PublicCampaignRow, now: Date): PharmacyCampaignOption {
+  return {
+    id: campaign.id,
+    title: campaign.title,
+    status: effectivePharmacyCampaignStatus(campaign, now),
+    startsAt: campaign.startsAt?.toISOString() || null,
+    endsAt: campaign.endsAt?.toISOString() || null,
+    drawCost: campaign.drawCost,
+    visualUrl: publicImageUrl(campaign.visualUrl),
+  }
+}
+
+async function findPublicCampaigns(now: Date): Promise<PublicCampaignSelection> {
   const select = {
     id: true, title: true, subtitle: true, description: true, status: true, startsAt: true, endsAt: true, createdAt: true, drawCost: true, duplicateRecycleEnabled: true, duplicateRecycleRequired: true, duplicateRecycleReward: true, recycleAfterEndEnabled: true, probabilityPublic: true, dailyDrawLimit: true, totalDrawLimit: true, visualUrl: true,
     PharmacyPrize: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] as Prisma.PharmacyPrizeOrderByWithRelationInput[], select: prizeSelect },
   } as const
-  const campaigns = await prisma.pharmacyCampaign.findMany({ where: { status: { in: ['SCHEDULED', 'ACTIVE', 'PAUSED'] } }, select })
-  return resolvePharmacyCampaigns(campaigns, new Date())
+  const campaigns = await prisma.pharmacyCampaign.findMany({ where: { status: { not: 'DRAFT' } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select })
+  return resolvePharmacyCampaigns(campaigns, now)
 }
 
 export async function getPharmacyHistoryPage(userId: string, campaignId: string, options: { page?: number; pageSize?: number } = {}) {
@@ -945,19 +988,19 @@ export async function getPharmacyHistoryPage(userId: string, campaignId: string,
 }
 
 export async function getPharmacyPageData(userId?: string | null, campaignId?: string | null): Promise<PharmacyPageData> {
-  // Keep the query parameter for client compatibility, but never let it override the authoritative time resolver.
-  void campaignId
+  const now = new Date()
   const [selection, userRow] = await Promise.all([
-    findPublicCampaigns(),
+    findPublicCampaigns(now),
     userId ? prisma.user.findUnique({ where: { id: userId }, select: { points: true } }) : Promise.resolve(null),
   ])
-  const campaign = selection.activeCampaign
+  const campaign = selectPharmacyCampaign(selection, campaignId)
+  if (campaignId && !campaign) throw new PharmacyError('CAMPAIGN_NOT_FOUND', '主题不存在或当前不可查看', 404)
+  const campaignOptions = selection.campaigns.map((option) => serializeCampaignOption(option, now))
   const upcomingCampaign = serializeUpcomingCampaign(selection.upcomingCampaign)
-  if (!campaign) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
-  const now = new Date()
+  if (!campaign) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { id: userId, balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, campaignOptions, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
   const effectiveStatus = effectivePharmacyCampaignStatus(campaign, now)
   const collection = await resolveVisibleAngelGiftCollection({ userId, campaignId: campaign.id, now })
-  if (!collection) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
+  if (!collection) return { moduleName: ANGEL_GIFT_MODULE_NAME, moduleSubtitle: ANGEL_GIFT_SUBTITLE, isAuthenticated: Boolean(userId), user: userId ? { id: userId, balance: userRow?.points ?? 0, todayCount: 0, totalCount: 0 } : null, campaign: null, campaignOptions, upcomingCampaign, duplicate: { total: 0, required: null, recyclableCount: 0, recyclableReward: 0, recyclableTypeCount: 0, byBadge: [] }, history: [], historyHasMore: false }
   const enabledPrizeRows = campaign.PharmacyPrize.filter((prize) => prize.enabled)
   const prizePoolValid = enabledPrizeRows.length > 0 && enabledPrizeRows.every((prize) => prize.weight > 0 && (prize.type === 'BADGE' ? usableBadge(prize) : prize.type === 'POINTS' && Boolean(prize.rewardAmount && prize.rewardAmount > 0)))
   const [inventoryRows, history, todayCount, totalCount] = await Promise.all([
@@ -990,8 +1033,9 @@ export async function getPharmacyPageData(userId?: string | null, campaignId?: s
     moduleName: ANGEL_GIFT_MODULE_NAME,
     moduleSubtitle: ANGEL_GIFT_SUBTITLE,
     isAuthenticated: Boolean(userId),
-    user: userId ? { balance: userRow?.points ?? 0, todayCount, totalCount } : null,
+    user: userId ? { id: userId, balance: userRow?.points ?? 0, todayCount, totalCount } : null,
     campaign: { id: campaign.id, title: campaign.title, subtitle: campaign.subtitle, description: campaign.description, status: effectiveStatus, startsAt: campaign.startsAt?.toISOString() || null, endsAt: campaign.endsAt?.toISOString() || null, drawCost: campaign.drawCost, duplicateRecycleEnabled: campaign.duplicateRecycleEnabled, duplicateRecycleRequired: campaign.duplicateRecycleRequired, duplicateRecycleReward: campaign.duplicateRecycleReward, recycleAfterEndEnabled: campaign.recycleAfterEndEnabled, probabilityPublic: campaign.probabilityPublic, dailyDrawLimit: campaign.dailyDrawLimit, totalDrawLimit: campaign.totalDrawLimit, visualUrl: publicImageUrl(campaign.visualUrl), prizePoolValid, prizes, cabinet, collection: { visibleBadges: collection.visibleBadges, visibleOwnedCount: collection.visibleOwnedCount, visibleTotalCount: collection.visibleTotalCount, collectionComplete: collection.collectionComplete, hiddenRevealedCount: collection.hiddenRevealedCount, collectionRewardRevealed: collection.collectionRewardRevealed } },
+    campaignOptions,
     upcomingCampaign,
     duplicate: { total: duplicateTotal, required: campaign.duplicateRecycleEnabled ? campaign.duplicateRecycleRequired : null, recyclableCount: recyclePlan.recyclableCount, recyclableReward: recyclePlan.rewardAmount, recyclableTypeCount: recyclePlan.recyclableTypeCount, byBadge: inventoryRows.map((row) => ({ badgeId: row.sourceBadgeId, badgeName: row.SourceBadge.name, imageUrl: publicImageUrl(row.SourceBadge.iconUrl), quantity: row.quantity })) },
     history: history.items,

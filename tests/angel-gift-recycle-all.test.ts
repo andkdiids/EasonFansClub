@@ -77,19 +77,21 @@ test('回收规则必须是正整数且数量与奖励溢出会被拒绝', () =>
   assert.throws(() => planPharmacyRecycleAll(inventory([['badge-a', Number.MAX_SAFE_INTEGER]]), 1, 2), /PHARMACY_RECYCLE_TOTAL_OVERFLOW/u)
 })
 
-test('API 只接收请求幂等键，active campaign 和金额由服务端计算', () => {
+test('API 显式接收所选 campaignId 和幂等键，资格、库存和金额由服务端计算', () => {
   assert.match(route, /requireRequestUser\(request\)/u)
-  assert.match(route, /recycleAllPharmacyDuplicates\(\{ userId: guard\.user\.id, idempotencyKey \}\)/u)
-  assert.doesNotMatch(route, /campaignId|rewardAmount|recycledCount|badgeId/u)
+  assert.match(route, /const campaignId = typeof body\?\.campaignId === 'string' \? body\.campaignId : ''/u)
+  assert.match(route, /recycleAllPharmacyDuplicates\(\{ userId: guard\.user\.id, campaignId, idempotencyKey \}\)/u)
+  assert.doesNotMatch(route, /rewardAmount|recycledCount|badgeId/u)
 })
 
-test('批量回收在事务内解析并锁定当前 active campaign', () => {
+test('批量回收在事务内验证并锁定明确选择的 campaign', () => {
   const batchService = pharmacy.slice(pharmacy.indexOf('export async function recycleAllPharmacyDuplicates'), pharmacy.indexOf('type PublicCampaignRow'))
   assert.match(batchService, /prisma\.\$transaction\(async \(tx\)/u)
   assert.match(batchService, /lockUser\(tx, input\.userId\)/u)
-  assert.match(batchService, /findActivePharmacyCampaignId\(tx, now\)/u)
-  assert.match(batchService, /lockCampaign\(tx, activeCampaignId\)/u)
-  assert.match(batchService, /assertCampaignIsCurrent\(campaign\.id/u)
+  assert.match(batchService, /lockCampaign\(tx, campaignId\)/u)
+  assert.match(batchService, /assertCampaignAllowsRecycle\(campaign, now\)/u)
+  assert.match(batchService, /requestedCampaignId && existing\.campaignId !== requestedCampaignId/u)
+  assert.doesNotMatch(batchService, /findActivePharmacyCampaignId|assertCampaignIsCurrent/u)
 })
 
 test('单次回收和一键回收共用同一 FIFO 规则规划器', () => {
@@ -152,10 +154,11 @@ test('抽取次数按当前 userId + active campaignId 的 PharmacyDraw 真实�
   assert.match(client, /本期累计抽取 \{user\.totalCount\} 次/u)
 })
 
-test('无 active campaign 返回本期计数 0；历史/预告 campaign 不进入当前统计', () => {
+test('各期页面数据按请求 campaignId 返回独立统计', () => {
   const pageData = pharmacy.slice(pharmacy.indexOf('export async function getPharmacyPageData'), pharmacy.indexOf('export async function getAdminPharmacyCampaigns'))
-  assert.match(pageData, /const campaign = selection\.activeCampaign/u)
-  assert.match(pageData, /if \(!campaign\)[\s\S]*totalCount: 0/u)
+  assert.match(pageData, /const campaign = selectPharmacyCampaign\(selection, campaignId\)/u)
+  assert.match(pageData, /where: \{ userId, campaignId: campaign\.id \}/u)
+  assert.match(pageData, /campaignOptions/u)
   assert.match(pageData, /where: \{ userId, campaignId: campaign\.id \}/u)
 })
 
@@ -163,7 +166,7 @@ test('本期抽取计数不包含回收日志，并由现有 draw 刷新返回�
   const pageData = pharmacy.slice(pharmacy.indexOf('export async function getPharmacyPageData'), pharmacy.indexOf('export async function getAdminPharmacyCampaigns'))
   assert.match(pageData, /prisma\.pharmacyDraw\.count\(\{ where: \{ userId, campaignId: campaign\.id \} \}\)/u)
   assert.doesNotMatch(pageData, /pharmacyRecycleLog\.count/u)
-  assert.match(client, /if \(payload\.data\?\.page\) setData\(payload\.data\.page\)/u)
+  assert.match(client, /if \(payload\.data\?\.page\?\.campaign\?\.id === campaignId\) cacheAndApplyCampaignPage\(campaignId, payload\.data\.page\)/u)
 })
 
 test('UI 二次确认含余药数、勋章种类数和挂号费，并支持取消', () => {
@@ -176,7 +179,7 @@ test('UI 二次确认含余药数、勋章种类数和挂号费，并支持取�
 test('回收成功后使用服务端刷新页数据并提示真实到账数量', () => {
   assert.match(client, /fetch\('\/api\/angel-gift\/recycle\/all'/u)
   assert.match(client, /已回收 \$\{payload\.data\.recycledCount\} 枚余药，共获得/u)
-  assert.match(client, /if \(payload\.data\?\.page\) setData\(payload\.data\.page\)/u)
+  assert.match(client, /if \(payload\.data\?\.page\?\.campaign\?\.id === campaignId\) cacheAndApplyCampaignPage\(campaignId, payload\.data\.page\)/u)
 })
 
 test('Web only；无需 Prisma schema 或 migration 改动', () => {

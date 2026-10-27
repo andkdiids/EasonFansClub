@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 import type { PharmacyCampaignStatus } from '@prisma/client'
-import { effectivePharmacyCampaignStatus, resolvePharmacyCampaigns } from '@/lib/pharmacy'
+import { effectivePharmacyCampaignStatus, resolvePharmacyCampaigns, selectPharmacyCampaign } from '@/lib/pharmacy'
 
 const root = process.cwd()
 const read = (file: string) => readFileSync(join(root, file), 'utf8')
@@ -25,6 +25,16 @@ test('ACTIVE 优先按真实时间窗口选择，不会被未来已发布主题�
   const resolved = resolvePharmacyCampaigns([active, upcoming], now)
   assert.equal(resolved.activeCampaign?.id, 'campaign-a')
   assert.equal(resolved.upcomingCampaign?.id, 'campaign-z')
+})
+
+test('多期 ACTIVE 同时保留并按 campaignId 独立选择', () => {
+  const first = campaign({ id: 'campaign-august', status: 'ACTIVE', startsAt: '2026-08-01T00:00:00.000Z', endsAt: '2026-10-01T00:00:00.000Z' })
+  const second = campaign({ id: 'campaign-november', status: 'ACTIVE', startsAt: '2026-09-10T00:00:00.000Z', endsAt: '2026-12-01T00:00:00.000Z' })
+  const resolved = resolvePharmacyCampaigns([first, second], now)
+  assert.deepEqual(resolved.activeCampaigns.map(({ id }) => id), ['campaign-november', 'campaign-august'])
+  assert.equal(selectPharmacyCampaign(resolved, 'campaign-august')?.id, 'campaign-august')
+  assert.equal(selectPharmacyCampaign(resolved, 'campaign-november')?.id, 'campaign-november')
+  assert.equal(selectPharmacyCampaign(resolved)?.id, 'campaign-november')
 })
 
 test('创建时间更新、ID 更大或状态显示已发布都不改变 ACTIVE 选择', () => {
@@ -69,14 +79,16 @@ test('后台未来主题即使是 PAUSED 也显示待开始，与前台 resolver
   assert.equal(effectivePharmacyCampaignStatus({ status: 'PAUSED', startsAt: new Date('2026-10-01T00:00:00.000Z'), endsAt: new Date('2026-11-01T00:00:00.000Z') }, now), 'SCHEDULED')
 })
 
-test('本期药柜、collection、余药和执药上下文均绑定 active，不读取 upcoming 奖池', () => {
+test('所选主题的药柜、collection、余药和执药上下文均绑定 campaignId', () => {
   const pharmacy = read('lib/pharmacy.ts')
   const client = read('components/AngelGiftClient.tsx')
   assert.match(pharmacy, /resolveVisibleAngelGiftCollection\(\{ userId, campaignId: campaign\.id, now \}\)/u)
   assert.match(pharmacy, /pharmacyDuplicateInventory\.findMany\(\{ where: \{ userId, campaignId: campaign\.id/u)
   assert.match(pharmacy, /getPharmacyHistoryPage\(userId, campaign\.id\)/u)
-  assert.match(pharmacy, /const upcomingCampaign = serializeUpcomingCampaign\(selection\.upcomingCampaign\)/u)
+  assert.match(pharmacy, /const campaign = selectPharmacyCampaign\(selection, campaignId\)/u)
+  assert.match(pharmacy, /campaignOptions: PharmacyCampaignOption\[\]/u)
   assert.match(client, /const upcomingCampaign = data\.upcomingCampaign/u)
+  assert.match(client, /\?campaignId=\$\{encodeURIComponent\(campaignId\)\}/u)
   assert.match(client, /本期药柜/u)
   assert.match(client, /angel-gift-upcoming-card/u)
 })
@@ -90,16 +102,16 @@ test('药房顶部先展示下期预告，再展示本期主题，标签框保�
   assert.match(styles, /\.angel-gift-theme-card \.angel-gift-label \{[^}]*border:1px solid var\(--angel-red\)[^}]*font-size:13px[^}]*font-weight:900[^}]*white-space:nowrap/u)
 })
 
-test('未来主题的单抽、5 连抽、10 连抽都会在扣费和写入前拒绝', () => {
+test('服务端按所选主题自身的时间与状态门禁拒绝未来主题，且不再要求全局唯一 active', () => {
   const pharmacy = read('lib/pharmacy.ts')
   const drawStart = pharmacy.indexOf('export async function executePharmacyDraws')
   const drawEnd = pharmacy.indexOf('export async function executePharmacyDraw(', drawStart)
   const drawBody = pharmacy.slice(drawStart, drawEnd)
   assert.ok(drawStart >= 0 && drawEnd > drawStart)
-  assert.match(drawBody, /assertCampaignAllowsDraw\(campaign, now\)[\s\S]*assertCampaignIsCurrent\(campaign\.id, await findActivePharmacyCampaignId\(tx, now\)\)/u)
-  assert.ok(drawBody.indexOf('assertCampaignIsCurrent') < drawBody.indexOf('getEnabledPrizePool'))
-  assert.ok(drawBody.indexOf('assertCampaignIsCurrent') < drawBody.indexOf('consumeRegistrationFee'))
-  assert.ok(drawBody.indexOf('assertCampaignIsCurrent') < drawBody.indexOf('pharmacyDraw.create'))
+  assert.match(drawBody, /assertCampaignAllowsDraw\(campaign, now\)[\s\S]*getEnabledPrizePool\(tx, campaign\.id\)/u)
+  assert.doesNotMatch(drawBody, /findActivePharmacyCampaignId|assertCampaignIsCurrent/u)
+  assert.ok(drawBody.indexOf('assertCampaignAllowsDraw') < drawBody.indexOf('consumeRegistrationFee'))
+  assert.ok(drawBody.indexOf('assertCampaignAllowsDraw') < drawBody.indexOf('pharmacyDraw.create'))
   assert.match(pharmacy, /parsePharmacyDrawCount\(input\.drawCount\)/u)
   assert.match(pharmacy, /for \(let index = 0; index < drawCount; index \+= 1\)/u)
 })
