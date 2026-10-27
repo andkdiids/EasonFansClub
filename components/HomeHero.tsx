@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent as ReactMouseEvent, type PointerEvent } from 'react'
 import { HeroBackground } from '@/components/HeroBackground'
 import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { sortHeroSlides } from '@/lib/hero-order'
@@ -10,6 +10,7 @@ import { hasHeroMediaAsset } from '@/lib/hero-visuals'
 import { resolveHeroSlideVisual, type SiteHeroSlide, type SiteHeroStyle } from '@/lib/site-config'
 import type { SiteHeroVisualConfig } from '@/lib/hero-visuals'
 import type { HomepageFeaturedConcert } from '@/lib/homepage-featured-concert'
+import { createHomepageHeroCarouselSlides, getAdjacentHomepageHeroIndex, getHomepageHeroSwipeDirection } from '@/lib/homepage-hero-carousel'
 
 const defaultHeroTitle = '\u542c\u89c1 Eason\uff0c\u4e5f\u542c\u89c1\u81ea\u5df1'
 
@@ -68,120 +69,157 @@ export function HomeHero({
     () => sortHeroSlides(slides.filter((item) => item.isVisible)),
     [slides],
   )
+  const carouselSlides = useMemo(
+    () => createHomepageHeroCarouselSlides(visibleSlides, featuredConcert),
+    [featuredConcert, visibleSlides],
+  )
   const isPageVisible = usePageVisibility()
   const [index, setIndex] = useState(0)
+  const [isHovered, setIsHovered] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
+  const [isPointerDragging, setIsPointerDragging] = useState(false)
+  const [failedConcertImageUrl, setFailedConcertImageUrl] = useState<string | null>(null)
   const pointerStartX = useRef<number | null>(null)
-  const active = visibleSlides[index] || visibleSlides[0] || null
+  const swipedRef = useRef(false)
+  const active = carouselSlides[index] || carouselSlides[0] || null
+  const activeSiteSlide = active?.type === 'site' ? active.slide : null
+  const activeConcert = active?.type === 'concert' ? active.concert : null
 
   useEffect(() => {
-    setIndex((current) => Math.min(current, Math.max(visibleSlides.length - 1, 0)))
-  }, [visibleSlides.length])
+    setIndex((current) => Math.min(current, Math.max(carouselSlides.length - 1, 0)))
+  }, [carouselSlides.length])
 
   useEffect(() => {
-    if (featuredConcert || visibleSlides.length <= 1 || !isPageVisible) return
+    if (carouselSlides.length <= 1 || !isPageVisible || isHovered || isFocused || isPointerDragging) return
     const timer = window.setInterval(() => {
-      setIndex((current) => (current + 1) % visibleSlides.length)
+      setIndex((current) => getAdjacentHomepageHeroIndex(current, carouselSlides.length, 1))
     }, 6000)
     return () => window.clearInterval(timer)
-  }, [featuredConcert, isPageVisible, visibleSlides.length])
+  }, [carouselSlides.length, index, isFocused, isHovered, isPageVisible, isPointerDragging])
 
-  const { title, subtitle, buttonText, showTitle, showSubtitle, showButton } = resolveHomeHeroCopy(active, defaultTitle, defaultSubtitle)
+  const { title, subtitle, buttonText, showTitle, showSubtitle, showButton } = resolveHomeHeroCopy(activeSiteSlide, defaultTitle, defaultSubtitle)
 
   function previous() {
-    setIndex((current) => (current - 1 + visibleSlides.length) % visibleSlides.length)
+    setIndex((current) => getAdjacentHomepageHeroIndex(current, carouselSlides.length, -1))
   }
 
   function next() {
-    setIndex((current) => (current + 1) % visibleSlides.length)
+    setIndex((current) => getAdjacentHomepageHeroIndex(current, carouselSlides.length, 1))
   }
 
   function handlePointerDown(event: PointerEvent<HTMLElement>) {
+    if (event.target instanceof Element && event.target.closest('button')) return
     pointerStartX.current = event.clientX
+    setIsPointerDragging(true)
   }
 
   function handlePointerUp(event: PointerEvent<HTMLElement>) {
     const startX = pointerStartX.current
     pointerStartX.current = null
-    if (startX === null || visibleSlides.length <= 1) return
-    const distance = event.clientX - startX
-    if (Math.abs(distance) < 42) return
-    if (distance < 0) next()
-    else previous()
+    setIsPointerDragging(false)
+    if (startX === null || carouselSlides.length <= 1) return
+    const direction = getHomepageHeroSwipeDirection(event.clientX - startX)
+    if (direction === null) return
+    swipedRef.current = true
+    window.setTimeout(() => { swipedRef.current = false }, 0)
+    setIndex((current) => getAdjacentHomepageHeroIndex(current, carouselSlides.length, direction))
   }
 
-  const backgroundVisual = resolveHeroSlideVisual(visual, active)
+  function handleClickCapture(event: ReactMouseEvent<HTMLElement>) {
+    if (!swipedRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    swipedRef.current = false
+  }
+
+  function handleBlur(event: FocusEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsFocused(false)
+  }
+
+  const backgroundVisual = resolveHeroSlideVisual(visual, activeSiteSlide)
   const hasHeroCopy = showTitle || showSubtitle || showButton
-  const hasBackground = Boolean(
-    (backgroundVisual?.enabled ?? true)
-    && (hasHeroMediaAsset(backgroundVisual?.desktopHeroMedia) || hasHeroMediaAsset(backgroundVisual?.mobileHeroMedia)),
-  )
-
-  if (featuredConcert) {
-    return (
-      <section className="community-hero community-concert-hero" aria-label="限时演唱会 Recording Sessions 首页专题">
-        <Link href={featuredConcert.href} className="community-concert-hero-link" aria-label={`进入限时演唱会：${featuredConcert.title}`}>
-          {featuredConcert.backgroundImageUrl ? <Image
-            src={featuredConcert.backgroundImageUrl}
-            alt=""
-            fill
-            sizes="100vw"
-            priority
-            unoptimized
-            className="community-concert-hero-image"
-          /> : null}
-          <span aria-hidden="true" className="community-concert-hero-overlay" />
-          <span className="community-concert-hero-copy">
-            <span className="community-concert-hero-kicker">限时演唱会 · Recording Sessions</span>
-            <span className="community-concert-hero-title">{featuredConcert.title}</span>
-            {featuredConcert.subtitle ? <span className="community-concert-hero-subtitle">{featuredConcert.subtitle}</span> : null}
-            <span className="community-concert-hero-date">演出日期　{featuredConcert.dateRangeLabel}</span>
-            <span className="hero-primary-button community-concert-hero-cta" style={{ backgroundColor: buttonColor }}>
-              进入专题 <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
-            </span>
-          </span>
-        </Link>
-      </section>
-    )
-  }
+  const hasBackground = activeConcert
+    ? Boolean(activeConcert.backgroundImageUrl && failedConcertImageUrl !== activeConcert.backgroundImageUrl)
+    : Boolean((backgroundVisual?.enabled ?? true)
+      && (hasHeroMediaAsset(backgroundVisual?.desktopHeroMedia) || hasHeroMediaAsset(backgroundVisual?.mobileHeroMedia)))
 
   return (
     <section
       data-hero-height={styleConfig.height}
       data-hero-title-size={styleConfig.titleSize}
       aria-roledescription="carousel"
-      aria-label="Home Hero carousel"
+      aria-label="首页主视觉轮播"
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
-      onPointerCancel={() => { pointerStartX.current = null }}
+      onPointerCancel={() => { pointerStartX.current = null; swipedRef.current = false; setIsPointerDragging(false) }}
+      onClickCapture={handleClickCapture}
+      onPointerEnter={(event) => { if (event.pointerType === 'mouse') setIsHovered(true) }}
+      onPointerLeave={(event) => { if (event.pointerType === 'mouse') setIsHovered(false) }}
+      onFocusCapture={() => setIsFocused(true)}
+      onBlurCapture={handleBlur}
       className="community-hero"
       style={{ touchAction: 'pan-y' }}
     >
-      <HeroBackground visual={backgroundVisual} priority />
-      {!hasBackground ? <div className="community-hero-fallback" /> : null}
-      <div className="community-hero-overlay" />
-      {hasHeroCopy ? <div aria-live="polite" className="community-hero-copy">
-        {showTitle ? <>
-          <h1>{siteName}</h1>
-          <h2>{title}</h2>
-        </> : null}
-        {showSubtitle ? <>
-          <p className="hero-slogan">{subtitle}</p>
-          <em>C{String.fromCharCode(0x2019)}mon in~</em>
-        </> : null}
-        {showButton ? <div className="community-hero-copy-actions">
-          <Link
-            href={active?.href || '#community-content'}
-            className="hero-primary-button"
-            style={{ backgroundColor: buttonColor }}
-          >
-            {buttonText} <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
-          </Link>
+      {activeConcert ? <Link href={activeConcert.href} className="community-concert-hero-link" aria-label={`进入限时演唱会：${activeConcert.title}`}>
+        {activeConcert.backgroundImageUrl ? <Image
+          src={activeConcert.backgroundImageUrl}
+          alt=""
+          fill
+          sizes="100vw"
+          priority={index === 0}
+          unoptimized
+          className="community-concert-hero-image"
+          onError={() => setFailedConcertImageUrl(activeConcert.backgroundImageUrl)}
+        /> : null}
+        {!hasBackground ? <span aria-hidden="true" className="community-hero-fallback" /> : null}
+        <span aria-hidden="true" className="community-concert-hero-overlay" />
+        <span className="community-concert-hero-copy">
+          <span className="community-concert-hero-kicker">限时演唱会 · Recording Sessions</span>
+          <span className="community-concert-hero-title">{activeConcert.title}</span>
+          {activeConcert.subtitle ? <span className="community-concert-hero-subtitle">{activeConcert.subtitle}</span> : null}
+          <span className="community-concert-hero-date">演出日期　{activeConcert.dateRangeLabel}</span>
+          <span className="hero-primary-button community-concert-hero-cta" style={{ backgroundColor: buttonColor }}>
+            进入专题 <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
+          </span>
+        </span>
+      </Link> : <>
+        <HeroBackground visual={backgroundVisual} priority />
+        {!hasBackground ? <div className="community-hero-fallback" /> : null}
+        <div className="community-hero-overlay" />
+        {hasHeroCopy ? <div aria-live="polite" className="community-hero-copy">
+          {showTitle ? <>
+            <h1>{siteName}</h1>
+            <h2>{title}</h2>
+          </> : null}
+          {showSubtitle ? <>
+            <p className="hero-slogan">{subtitle}</p>
+            <em>C{String.fromCharCode(0x2019)}mon in~</em>
+          </> : null}
+          {showButton ? <div className="community-hero-copy-actions">
+            <Link
+              href={activeSiteSlide?.href || '#community-content'}
+              className="hero-primary-button"
+              style={{ backgroundColor: buttonColor }}
+            >
+              {buttonText} <span aria-hidden="true">{String.fromCharCode(0x203a)}</span>
+            </Link>
+          </div> : null}
         </div> : null}
-      </div> : null}
-      {visibleSlides.length > 1 ? (
-        <div className="absolute bottom-5 right-5 z-10 flex gap-2 sm:bottom-8 sm:right-8" aria-label="Hero controls">
-          <button type="button" aria-label="Previous Hero" onClick={previous} className="hero-icon-button">{String.fromCharCode(0x2039)}</button>
-          <button type="button" aria-label="Next Hero" onClick={next} className="hero-icon-button">{String.fromCharCode(0x203a)}</button>
+      </>}
+      {carouselSlides.length > 1 ? (
+        <div className="absolute bottom-5 right-5 z-10 flex items-center gap-2 sm:bottom-8 sm:right-8" aria-label="首页主视觉轮播控件">
+          <div className="flex items-center gap-1.5" aria-label="选择主视觉">
+            {carouselSlides.map((slide, slideIndex) => <button
+              key={slide.type === 'concert' ? 'recording-sessions' : `site-${slideIndex}`}
+              type="button"
+              aria-label={`转到第 ${slideIndex + 1} 张主视觉${slide.type === 'concert' ? '：Recording Sessions' : ''}`}
+              aria-current={slideIndex === index ? 'true' : 'false'}
+              onClick={() => setIndex(slideIndex)}
+              className="homepage-hero-indicator"
+            />)}
+          </div>
+          <button type="button" aria-label="上一张主视觉" onClick={previous} className="hero-icon-button">{String.fromCharCode(0x2039)}</button>
+          <button type="button" aria-label="下一张主视觉" onClick={next} className="hero-icon-button">{String.fromCharCode(0x203a)}</button>
         </div>
       ) : null}
     </section>
