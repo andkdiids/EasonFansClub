@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
+import { calculateAvailablePharmacyDraws } from '@/lib/pharmacy-draw-options'
 import {
   ANGEL_GIFT_MODULE_NAME,
   calculatePharmacyProbability,
   chooseWeightedPharmacyPrize,
   effectivePharmacyCampaignStatus,
+  isPharmacyPublicPrizePoolUsable,
   normalizePharmacyCampaignInput,
 } from '@/lib/pharmacy'
 
@@ -59,6 +61,25 @@ test('主题状态以后端时间判断', () => {
   assert.equal(effectivePharmacyCampaignStatus({ status: 'SCHEDULED', startsAt: start, endsAt: end }, new Date('2026-09-09T00:00:00.000Z')), 'SCHEDULED')
   assert.equal(effectivePharmacyCampaignStatus({ status: 'ACTIVE', startsAt: start, endsAt: end }, new Date('2026-09-15T00:00:00.000Z')), 'ACTIVE')
   assert.equal(effectivePharmacyCampaignStatus({ status: 'ACTIVE', startsAt: start, endsAt: end }, new Date('2026-09-21T00:00:00.000Z')), 'ENDED')
+})
+
+test('首页主题卡只认可活动中的有效奖池，结束边界和用户剩余次数使用服务端业务规则', () => {
+  const now = new Date('2026-10-28T00:00:00.000Z')
+  const current = { id: 'current', status: 'ACTIVE' as const, startsAt: new Date('2026-10-27T00:00:00.000Z'), endsAt: new Date('2026-10-29T00:00:00.000Z') }
+  const future = { id: 'future', status: 'SCHEDULED' as const, startsAt: new Date('2026-10-29T00:00:00.000Z'), endsAt: new Date('2026-10-30T00:00:00.000Z') }
+  const ended = { id: 'ended', status: 'ACTIVE' as const, startsAt: new Date('2026-10-01T00:00:00.000Z'), endsAt: new Date('2026-10-28T00:00:00.000Z') }
+  assert.equal(effectivePharmacyCampaignStatus(current, now), 'ACTIVE')
+  assert.equal(effectivePharmacyCampaignStatus(future, now), 'SCHEDULED')
+  assert.equal(effectivePharmacyCampaignStatus(ended, now), 'ENDED')
+  const validBadge = [{ enabled: true, type: 'BADGE', weight: 10, rewardAmount: null, badgeUsable: true }]
+  assert.equal(isPharmacyPublicPrizePoolUsable(validBadge), true)
+  assert.equal(isPharmacyPublicPrizePoolUsable([]), false)
+  assert.equal(isPharmacyPublicPrizePoolUsable([{ ...validBadge[0], weight: 0 }]), false)
+  assert.equal(isPharmacyPublicPrizePoolUsable([{ ...validBadge[0], badgeUsable: false }]), false)
+  assert.equal(isPharmacyPublicPrizePoolUsable([{ enabled: true, type: 'POINTS', weight: 1, rewardAmount: 0, badgeUsable: false }]), false)
+  assert.equal(isPharmacyPublicPrizePoolUsable([{ enabled: true, type: 'MYSTERY', weight: 1, rewardAmount: null, badgeUsable: false }]), false)
+  assert.equal(calculateAvailablePharmacyDraws({ balance: 100, cost: 10, todayCount: 2, dailyLimit: 2, totalCount: 2, totalLimit: 5 }), 0)
+  assert.equal(calculateAvailablePharmacyDraws({ balance: 100, cost: 10, todayCount: 1, dailyLimit: 3, totalCount: 4, totalLimit: 5 }), 1)
 })
 
 test('权重映射边界确定且不依赖前端开奖', () => {
@@ -154,7 +175,7 @@ test('无当前主题时仍从 User.points 返回登录用户真实余额', () =
   const source = read('lib/pharmacy.ts')
   assert.match(source, /const \[selection, userRow\] = await Promise\.all\(/u)
   assert.match(source, /userId \? prisma\.user\.findUnique\(\{ where: \{ id: userId \}, select: \{ points: true \} \}\)/u)
-  assert.match(source, /const campaign = selectPharmacyCampaign\(selection, campaignId\)/u)
+  assert.match(source, /const campaign = campaignId \? selectPharmacyCampaign\(selection, campaignId\) : selectableCampaigns\[0\] \|\| null/u)
   assert.match(source, /campaignOptions/u)
   assert.match(source, /if \(!campaign\)[\s\S]*userRow\?\.points \?\? 0/u)
   assert.doesNotMatch(source, /if \(!campaign\)[\s\S]*balance: 0/u)

@@ -156,7 +156,7 @@ test('抽取次数按当前 userId + active campaignId 的 PharmacyDraw 真实�
 
 test('各期页面数据按请求 campaignId 返回独立统计', () => {
   const pageData = pharmacy.slice(pharmacy.indexOf('export async function getPharmacyPageData'), pharmacy.indexOf('export async function getAdminPharmacyCampaigns'))
-  assert.match(pageData, /const campaign = selectPharmacyCampaign\(selection, campaignId\)/u)
+  assert.match(pageData, /const campaign = campaignId \? selectPharmacyCampaign\(selection, campaignId\) : selectableCampaigns\[0\] \|\| null/u)
   assert.match(pageData, /where: \{ userId, campaignId: campaign\.id \}/u)
   assert.match(pageData, /campaignOptions/u)
   assert.match(pageData, /where: \{ userId, campaignId: campaign\.id \}/u)

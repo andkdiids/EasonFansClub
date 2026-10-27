@@ -56,7 +56,7 @@ const pageData = {
       collectionComplete: false, hiddenRevealedCount: 0, collectionRewardRevealed: false,
     },
   },
-  campaignOptions: [{ id: 'campaign-1', title: '本期主题', status: 'ACTIVE', startsAt: null, endsAt: null, drawCost: 27, visualUrl: null }],
+  campaignOptions: [{ id: 'campaign-1', title: '本期主题', subtitle: null, description: null, status: 'ACTIVE', startsAt: null, endsAt: null, drawCost: 27, visualUrl: null, remainingDraws: null, availability: 'LOGIN_REQUIRED' }],
   upcomingCampaign: null,
   history: [],
   historyHasMore: false,

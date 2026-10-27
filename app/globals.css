@@ -8601,11 +8601,34 @@ body:has(.duel-page) .app-page-content {
 .angel-gift-login-note a { color:var(--primary); font-weight:950; text-decoration:none; }
 .angel-gift-login-note a:hover { text-decoration:underline; }
 .angel-gift-alert { border-left-color:var(--danger); color:var(--danger); background:var(--surface); }
-.angel-gift-campaign-selector { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; margin-top:16px; border:1px solid var(--border); padding:11px 13px; background:var(--surface-subtle); }
-.angel-gift-campaign-selector label { color:var(--foreground-muted); font-size:11px; font-weight:900; }
-.angel-gift-campaign-selector select { width:100%; min-width:0; border:1px solid var(--border); border-radius:0; padding:9px 10px; color:var(--foreground); background:var(--surface); font:inherit; font-size:12px; font-weight:850; }
-.angel-gift-campaign-selector span,.angel-gift-campaign-loading { color:var(--foreground-muted); font-size:11px; font-weight:800; }
-.angel-gift-campaign-loading { margin:16px 0 0; }
+.angel-gift-campaign-selector { margin-top:18px; }
+.angel-gift-campaign-selector-heading { display:flex; min-width:0; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.angel-gift-campaign-selector-heading h2 { margin:5px 0 0; color:var(--foreground); font-size:16px; font-weight:950; }
+.angel-gift-campaign-loading { color:var(--foreground-muted); font-size:11px; font-weight:800; }
+.angel-gift-campaign-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.angel-gift-campaign-card { position:relative; display:flex; min-width:0; min-height:184px; flex-direction:column; overflow:hidden; border:1px solid color-mix(in srgb,var(--angel-gold) 36%,var(--border)); border-radius:4px; padding:0; color:#f7eee0; background:linear-gradient(132deg,#641e20,#29191a 58%,#141619); text-align:left; cursor:pointer; isolation:isolate; transition:border-color 160ms ease,background-color 160ms ease,transform 160ms ease; }
+.angel-gift-campaign-card:hover { border-color:var(--angel-gold); transform:translateY(-1px); }
+.angel-gift-campaign-card:focus-visible { outline:3px solid color-mix(in srgb,var(--angel-gold) 72%,white); outline-offset:3px; }
+.angel-gift-campaign-card.is-selected { border:2px solid var(--angel-gold); }
+.angel-gift-campaign-card.is-loading { cursor:progress; }
+.angel-gift-campaign-card-image { z-index:-2; object-fit:cover; object-position:center; opacity:.55; transition:opacity 160ms ease; }
+.angel-gift-campaign-card:hover .angel-gift-campaign-card-image,.angel-gift-campaign-card.is-selected .angel-gift-campaign-card-image { opacity:.68; }
+.angel-gift-campaign-card-shade { position:absolute; z-index:-1; inset:0; background:linear-gradient(90deg,rgba(23,14,15,.96),rgba(31,17,18,.78) 58%,rgba(22,18,18,.44)),linear-gradient(0deg,rgba(15,16,18,.5),transparent 70%); pointer-events:none; }
+.angel-gift-campaign-card-content { display:flex; width:100%; min-height:inherit; flex:1; flex-direction:column; align-items:flex-start; padding:15px 17px 13px; }
+.angel-gift-campaign-card-topline { display:flex; width:100%; min-width:0; align-items:center; justify-content:space-between; gap:8px; }
+.angel-gift-campaign-status { display:inline-flex; align-items:center; gap:6px; color:#f1d5a5; font-size:10px; font-weight:900; letter-spacing:.04em; }
+.angel-gift-campaign-status>span { width:7px; height:7px; border-radius:50%; background:#9dc595; box-shadow:0 0 0 3px rgba(157,197,149,.14); }
+.angel-gift-campaign-current,.angel-gift-campaign-enter { flex:none; border:1px solid rgba(220,190,132,.58); padding:4px 8px; color:#f2dfbd; font-size:10px; font-weight:900; }
+.angel-gift-campaign-current { color:#f4d39a; background:rgba(181,138,80,.18); }
+.angel-gift-campaign-title { display:block; max-width:100%; margin-top:15px; overflow:hidden; color:#fff8ed; font-size:clamp(18px,2.4vw,25px); font-weight:950; letter-spacing:-.025em; text-overflow:ellipsis; white-space:nowrap; }
+.angel-gift-campaign-subtitle { display:block; max-width:100%; margin-top:4px; overflow:hidden; color:#e2cba7; font-size:12px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
+.angel-gift-campaign-description { display:-webkit-box; max-width:100%; margin-top:5px; overflow:hidden; color:rgba(249,239,221,.76); font-size:11px; line-height:1.5; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.angel-gift-campaign-card-bottom { display:flex; width:100%; min-width:0; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; margin-top:auto; padding-top:12px; color:#f3e4c8; font-size:10px; font-weight:850; }
+.angel-gift-campaign-card-bottom time { color:rgba(249,239,221,.76); font-variant-numeric:tabular-nums; }
+.angel-gift-campaign-availability { display:block; margin-top:5px; color:#d8c7ad; font-size:10px; font-weight:850; }
+.angel-gift-campaign-availability.is-available { color:#b9d4ae; }
+.angel-gift-campaign-availability.is-daily-limit-reached,.angel-gift-campaign-availability.is-total-limit-reached,.angel-gift-campaign-availability.is-insufficient-points { color:#e8bd91; }
+.angel-gift-campaign-empty { margin:0; border:1px dashed var(--border-strong); padding:16px; color:var(--foreground-muted); background:var(--surface-subtle); font-size:12px; font-weight:800; }
 .angel-gift-theme-card { display:flex; min-width:0; align-items:flex-start; justify-content:space-between; gap:20px; margin-top:20px; border:1px solid var(--border); padding:19px 20px; background:var(--surface); }
 .angel-gift-upcoming-card { margin-top:14px; border-style:dashed; background:var(--surface-subtle); }
 .angel-gift-theme-visual { width:112px; height:76px; flex:none; object-fit:cover; border:1px solid var(--border); filter:saturate(.72); }
@@ -8726,7 +8749,10 @@ body:has(.duel-page) .app-page-content {
   .angel-gift-balance { width:100%; border-top:1px solid var(--border); border-left:0; padding:11px 0 0; text-align:left; }
   .angel-gift-balance strong { font-size:24px; }
   .angel-gift-login-note,.angel-gift-theme-card,.angel-gift-controls { align-items:flex-start; flex-direction:column; }
-  .angel-gift-campaign-selector { grid-template-columns:minmax(0,1fr); gap:7px; }
+  .angel-gift-campaign-grid { grid-template-columns:minmax(0,1fr); gap:9px; }
+  .angel-gift-campaign-card { min-height:168px; }
+  .angel-gift-campaign-card-content { padding:13px 14px 12px; }
+  .angel-gift-campaign-selector-heading { align-items:flex-start; flex-direction:column; }
   .angel-gift-theme-card { gap:13px; padding:16px; }
   .angel-gift-theme-visual { width:100%; height:120px; order:2; }
   .angel-gift-status { align-items:flex-start; border-top:1px solid var(--border); border-left:0; padding:11px 0 0; }
