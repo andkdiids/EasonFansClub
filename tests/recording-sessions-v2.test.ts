@@ -152,6 +152,16 @@ test('Tencent auto-deploy verifies SSH host identity against the protected finge
   assert.doesNotMatch(deploy, /ssh-keyscan[\s\S]{0,180}>> "\$\{HOME\}\/\.ssh\/known_hosts"/)
 })
 
+test('MySQL migration integration test is loopback-only and never falls back to DATABASE_URL', () => {
+  const integration = read('../tests/recording-sessions-v2-mysql.integration.ts')
+  assert.match(integration, /RECORDING_SESSIONS_TEST_DATABASE_URL/)
+  assert.match(integration, /TEST_DATABASE_FALLBACK_FORBIDDEN/)
+  assert.match(integration, /\['127\.0\.0\.1', 'localhost', '\[::1\]'\]/)
+  assert.match(integration, /recording_sessions_v2_qa/)
+  assert.match(integration, /info(?:rmation)?_schema/i)
+  assert.match(integration, /duplicateRejected/)
+})
+
 test('homepage and activity center use the persisted featured event image and public activity eligibility', () => {
   const welcomePage = read('../app/welcome/page.tsx')
   const activitiesPage = read('../app/activities/page.tsx')
