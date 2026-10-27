@@ -163,8 +163,12 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/angel-gift/history'
       || pathname === '/api/home'
       || pathname === '/api/activities'
+      || pathname === '/api/activities/me/registrations'
       || /^\/api\/activities\/[^/]+$/.test(pathname)
       || /^\/api\/activities\/[^/]+\/(?:form|my-form-submissions)$/.test(pathname)
+      || pathname === '/api/stickers/store'
+      || /^\/api\/stickers\/store\/[^/]+$/.test(pathname)
+      || pathname === '/api/stickers/center'
       || pathname === '/api/activities/me/topic-participations'
       || /^\/api\/topic-activity-form-submissions\/[^/]+$/.test(pathname)
       || /^\/api\/activities\/[^/]+\/form-submissions\/[^/]+\/replies\/[^/]+\/assets\/[^/]+\/original$/.test(pathname)
@@ -229,6 +233,9 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/angel-gift'
       || pathname === '/api/angel-gift/recycle'
       || pathname === '/api/angel-gift/recycle/all'
+      || /^\/api\/activities\/[^/]+\/register$/.test(pathname)
+      || /^\/api\/activities\/[^/]+\/register\/cancel$/.test(pathname)
+      || /^\/api\/stickers\/store\/[^/]+\/add$/.test(pathname)
       || pathname === '/api/admin/cantonese/assist'
       || pathname === '/api/admin/cantonese/review/import/preview'
       || pathname === '/api/admin/cantonese/questions'
@@ -285,6 +292,7 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
       || pathname === '/api/users/me/badge/equip'
+      || /^\/api\/stickers\/store\/[^/]+\/add$/.test(pathname)
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)

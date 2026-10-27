@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth'
 import { getStorePacks, getStoreCategories } from '@/lib/sticker-center'
-import { unauthenticatedResponse } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
+const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' }
 
 /**
  * 表情商店：列出所有已上架的表情包（按下载量排序）。
  * 支持：sort=hot|new|official，category=xxx，分页。
  */
 export async function GET(request: Request) {
-  const user = await getCurrentUser()
-  if (!user) return unauthenticatedResponse()
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return guard.response
 
   const url = new URL(request.url)
   const sortRaw = url.searchParams.get('sort') || 'hot'
@@ -23,12 +23,12 @@ export async function GET(request: Request) {
 
   try {
     const [{ packs, total }, categories] = await Promise.all([
-      getStorePacks({ userId: user.id, page, pageSize, sort, category }),
+      getStorePacks({ userId: guard.user.id, page, pageSize, sort, category }),
       includeCategories ? getStoreCategories() : Promise.resolve([]),
     ])
-    return NextResponse.json({ success: true, packs, total, page, pageSize, sort, category, categories })
+    return NextResponse.json({ success: true, packs, total, page, pageSize, sort, category, categories }, { headers: privateHeaders })
   } catch (error) {
     console.error('[sticker.store]', error)
-    return NextResponse.json({ message: '加载失败' }, { status: 500 })
+    return NextResponse.json({ message: '加载失败' }, { status: 500, headers: privateHeaders })
   }
 }

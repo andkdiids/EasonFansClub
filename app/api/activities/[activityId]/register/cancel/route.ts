@@ -1,18 +1,18 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
-import { requireUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
+import { requireRequestUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
 import { invalidateHomeDataCache } from '@/lib/home-data'
 import { ActivityRegistrationError, cancelActivityRegistration } from '@/lib/activity-registration'
 
 export const dynamic = 'force-dynamic'
 
 const activityIdPattern = /^[A-Za-z0-9_-]{8,128}$/
-const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie' }
+const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Vary: 'Cookie, Authorization' }
 
 export async function POST(request: Request, { params }: { params: Promise<{ activityId: string }> }) {
   const invalidOrigin = rejectInvalidRequestOrigin(request)
   if (invalidOrigin) return invalidOrigin
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/activities/register/cancel',
