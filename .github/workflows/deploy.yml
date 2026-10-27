@@ -68,110 +68,6 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
-      - name: Check server connection and directory permissions
-        uses: appleboy/ssh-action@v1
-        env:
-          APP_DIR: ${{ env.APP_DIR }}
-          DEPLOY_SHA: ${{ github.sha }}
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          port: ${{ secrets.SERVER_PORT }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          fingerprint: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
-          envs: APP_DIR,DEPLOY_SHA
-          command_timeout: 10m
-          script: |
-            set -euo pipefail
-
-            test -d "${APP_DIR}"
-            test -w "${APP_DIR}"
-            if ! command -v flock >/dev/null 2>&1; then
-              echo 'flock is not installed on the deployment host.' >&2
-              exit 1
-            fi
-            if ! command -v timeout >/dev/null 2>&1; then
-              echo 'GNU timeout is not installed on the deployment host.' >&2
-              exit 1
-            fi
-            test -f "${APP_DIR}/.deploy.lock"
-            exec 9<>"${APP_DIR}/.deploy.lock"
-            if ! flock -n 9; then
-              echo 'Another production deployment is already in progress.' >&2
-              exit 1
-            fi
-
-            test -d "${APP_DIR}/releases"
-            test -w "${APP_DIR}/releases"
-            test -d "${APP_DIR}/shared"
-            test -w "${APP_DIR}/shared"
-
-            if [[ ! "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-              echo 'DEPLOY_SHA is not a 40-character hexadecimal Git SHA.' >&2
-              exit 1
-            fi
-
-            if ! command -v git >/dev/null 2>&1; then
-              echo 'SERVER_GIT_ACCESS=NOT_READY: git is not installed on the deployment host.' >&2
-              exit 1
-            fi
-            if [ ! -d "${APP_DIR}/repo" ]; then
-              echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository is not configured.' >&2
-              echo "Configure a read-only GitHub Deploy Key and clone the repository at ${APP_DIR}/repo before enabling this deployment path." >&2
-              exit 1
-            fi
-            if ! git -C "${APP_DIR}/repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-              echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository is not a usable non-bare Git checkout.' >&2
-              exit 1
-            fi
-            if ! git -C "${APP_DIR}/repo" remote get-url origin >/dev/null 2>&1; then
-              echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository has no origin remote.' >&2
-              exit 1
-            fi
-
-            if [ ! -e "${APP_DIR}/shared/.env" ] && [ ! -L "${APP_DIR}/shared/.env" ]; then
-              echo 'shared/.env is missing; refusing to copy or create production configuration during preflight.' >&2
-              exit 1
-            fi
-
-            if [ ! -L "${APP_DIR}/current" ]; then
-              echo 'Production current must already be a symlink into releases/; refusing pre-migration bootstrap.' >&2
-              echo 'Refusing to deploy into the legacy live directory.' >&2
-              exit 1
-            fi
-            current_target="$(readlink -f -- "${APP_DIR}/current")"
-            case "${current_target}" in
-              "${APP_DIR}/releases/"*) ;;
-              *)
-                echo "Production current target is outside releases/: ${current_target}" >&2
-                exit 1
-                ;;
-            esac
-            test -r "${APP_DIR}/shared/.env"
-            test -s "${APP_DIR}/shared/.env"
-            test -s "${current_target}/.deployed-sha"
-            if ! grep -Eq '^[0-9a-f]{40}$' "${current_target}/.deployed-sha"; then
-              echo 'Current release is missing a valid deployment SHA marker.' >&2
-              exit 1
-            fi
-
-            echo "Deploy user: $(id -un)"
-            echo "Application directory: ${APP_DIR}"
-            echo "Current release: ${current_target}"
-            stat -c "Owner: %U:%G, permissions: %A" "${APP_DIR}"
-            echo "Remote uptime:"
-            uptime
-            echo "Remote memory:"
-            if command -v free >/dev/null 2>&1; then
-              free -h
-            else
-              echo "free command is unavailable; continuing without memory summary."
-            fi
-            echo "Remote disk space:"
-            df -h "${APP_DIR}"
-            echo "Remote inode usage:"
-            df -i "${APP_DIR}"
-
       - name: Configure deployment SSH
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -214,6 +110,136 @@ jobs:
             | grep -Fx -- "${PINNED_HOST_KEY_SHA256}" >/dev/null
           install -m 600 "${verified_file}" "${HOME}/.ssh/known_hosts"
           chmod 600 "${HOME}/.ssh/known_hosts"
+
+      - name: Check server connection and directory permissions
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          APP_DIR: ${{ env.APP_DIR }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          [[ -s "${RUNNER_TEMP}/easonfansclub_deploy_key" && -s "${HOME}/.ssh/known_hosts" ]] || {
+            echo "::error::Strict deployment SSH credentials were not prepared."
+            exit 1
+          }
+          [[ "${SERVER_HOST}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Production SSH host format is invalid."; exit 1; }
+          [[ "${SERVER_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::Production SSH user format is invalid."; exit 1; }
+          [[ "${SERVER_PORT}" =~ ^[0-9]{1,5}$ ]] || { echo "::error::Production SSH port is invalid."; exit 1; }
+          (( 10#${SERVER_PORT} >= 1 && 10#${SERVER_PORT} <= 65535 )) || { echo "::error::Production SSH port is invalid."; exit 1; }
+
+          remote_host="${SERVER_USER}@${SERVER_HOST}"
+          printf -v remote_command 'APP_DIR=%q DEPLOY_SHA=%q bash -s' "${APP_DIR}" "${DEPLOY_SHA}"
+          ssh_options=(
+            -p "${SERVER_PORT}"
+            -i "${RUNNER_TEMP}/easonfansclub_deploy_key"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null
+            -o ConnectTimeout=10
+            -o ServerAliveInterval=5
+            -o ServerAliveCountMax=2
+          )
+
+          timeout --foreground --signal=TERM --kill-after=10s 60s \
+            ssh -T "${ssh_options[@]}" "${remote_host}" "${remote_command}" <<'REMOTE'
+          set -euo pipefail
+
+          test -d "${APP_DIR}"
+          test -w "${APP_DIR}"
+          if ! command -v flock >/dev/null 2>&1; then
+            echo 'flock is not installed on the deployment host.' >&2
+            exit 1
+          fi
+          if ! command -v timeout >/dev/null 2>&1; then
+            echo 'GNU timeout is not installed on the deployment host.' >&2
+            exit 1
+          fi
+          test -f "${APP_DIR}/.deploy.lock"
+          exec 9<>"${APP_DIR}/.deploy.lock"
+          if ! flock -n 9; then
+            echo 'Another production deployment is already in progress.' >&2
+            exit 1
+          fi
+
+          test -d "${APP_DIR}/releases"
+          test -w "${APP_DIR}/releases"
+          test -d "${APP_DIR}/shared"
+          test -w "${APP_DIR}/shared"
+
+          if [[ ! "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'DEPLOY_SHA is not a 40-character hexadecimal Git SHA.' >&2
+            exit 1
+          fi
+
+          if ! command -v git >/dev/null 2>&1; then
+            echo 'SERVER_GIT_ACCESS=NOT_READY: git is not installed on the deployment host.' >&2
+            exit 1
+          fi
+          if [ ! -d "${APP_DIR}/repo" ]; then
+            echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository is not configured.' >&2
+            echo "Configure a read-only GitHub Deploy Key and clone the repository at ${APP_DIR}/repo before enabling this deployment path." >&2
+            exit 1
+          fi
+          if ! git -C "${APP_DIR}/repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository is not a usable non-bare Git checkout.' >&2
+            exit 1
+          fi
+          if ! git -C "${APP_DIR}/repo" remote get-url origin >/dev/null 2>&1; then
+            echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository has no origin remote.' >&2
+            exit 1
+          fi
+
+          if [ ! -e "${APP_DIR}/shared/.env" ] && [ ! -L "${APP_DIR}/shared/.env" ]; then
+            echo 'shared/.env is missing; refusing to copy or create production configuration during preflight.' >&2
+            exit 1
+          fi
+
+          if [ ! -L "${APP_DIR}/current" ]; then
+            echo 'Production current must already be a symlink into releases/; refusing pre-migration bootstrap.' >&2
+            echo 'Refusing to deploy into the legacy live directory.' >&2
+            exit 1
+          fi
+          current_target="$(readlink -f -- "${APP_DIR}/current")"
+          case "${current_target}" in
+            "${APP_DIR}/releases/"*) ;;
+            *)
+              echo "Production current target is outside releases/: ${current_target}" >&2
+              exit 1
+              ;;
+          esac
+          test -r "${APP_DIR}/shared/.env"
+          test -s "${APP_DIR}/shared/.env"
+          test -s "${current_target}/.deployed-sha"
+          if ! grep -Eq '^[0-9a-f]{40}$' "${current_target}/.deployed-sha"; then
+            echo 'Current release is missing a valid deployment SHA marker.' >&2
+            exit 1
+          fi
+
+          echo "Deploy user: $(id -un)"
+          echo "Application directory: ${APP_DIR}"
+          echo "Current release: ${current_target}"
+          stat -c "Owner: %U:%G, permissions: %A" "${APP_DIR}"
+          echo "Remote uptime:"
+          uptime
+          echo "Remote memory:"
+          if command -v free >/dev/null 2>&1; then
+            free -h
+          else
+            echo "free command is unavailable; continuing without memory summary."
+          fi
+          echo "Remote disk space:"
+          df -h "${APP_DIR}"
+          echo "Remote inode usage:"
+          df -i "${APP_DIR}"
+          REMOTE
 
       - name: Deploy exact commit from server Git
         id: deploy
