@@ -10,6 +10,7 @@ import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/Music
 import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
 import type { HomeEntertainmentRanking, HomeEntertainmentRankingMode } from '@/lib/home-data'
 import type { HomeUpdate } from '@/lib/home-announcement'
+import type { HomepageFeaturedConcert } from '@/lib/homepage-featured-concert'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
 import { parseCalendarDate } from '@/lib/calendar-date'
 import { publicImageVariantUrl } from '@/lib/image-variants'
@@ -191,7 +192,7 @@ function HomeDailyMusicPreview({ music }: { music: DailyMusic }) {
   )
 }
 
-export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteConfig: SiteAppearanceConfig; slides: SiteHeroSlide[]; announcement: HomeUpdate | null }) {
+export function HomeLayoutSurface({ siteConfig, slides, announcement, featuredConcert }: { siteConfig: SiteAppearanceConfig; slides: SiteHeroSlide[]; announcement: HomeUpdate | null; featuredConcert?: HomepageFeaturedConcert | null }) {
   const device = useDevice()
   const [data, setData] = useState<Payload>({ activities: [], anywhereDoor: null, salonPosts: [], albums: [], stats: null, dailyMusic: null, siteStats: null, checkedInToday: false, todayCheckInCount: 0, todayEvents: [], dailyPrescriptionReward: null, entertainmentRanking: loadingEntertainmentRanking })
   const [failed, setFailed] = useState(false)
@@ -492,6 +493,7 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement }: { siteCo
         styleConfig={siteConfig.heroStyle}
         visual={siteConfig.heroVisuals.home}
         defaultTitle={siteConfig.text.homeSubtitle}
+        featuredConcert={featuredConcert}
       />
       <div id="community-content" className="community-content">
         {announcement ? <>

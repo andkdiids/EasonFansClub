@@ -6,6 +6,7 @@ import {
   CONCERT_DISCUSSION_PAGE_SIZE,
   concertDiscussionScopeWhere,
   matchesConcertDiscussionIdempotency,
+  parseConcertDiscussionPage,
   parseConcertDiscussionInput,
 } from '@/lib/concert-discussion'
 import { publicConcertEventStatuses, safeEventSlug } from '@/lib/concert-events'
@@ -24,6 +25,17 @@ const discussionAuthorSelect = {
   avatarUrl: true,
   Profile: { select: { avatarUrl: true } },
 } as const
+
+type DiscussionAuthor = {
+  id: string
+  status: string
+  isDeleted: boolean
+  nickname: string
+  nicknameModerationStatus: string
+  nicknameViolationDisplay: string | null
+  avatarUrl: string | null
+  Profile: { avatarUrl: string | null } | null
+}
 
 const publicAuthorWhere = { is: { status: 'ACTIVE' as const, isDeleted: false } }
 
@@ -50,7 +62,14 @@ function serializeComment(comment: {
   createdAt: Date
   images: Array<{ id: string; url: string; sortOrder: number }>
   author: { id: string; nickname: string; nicknameModerationStatus: string; nicknameViolationDisplay: string | null; avatarUrl: string | null; Profile: { avatarUrl: string | null } | null }
-}, viewerId: string | null = null) {
+}, viewerId: string | null = null, replyCount = 0, replyToAuthor?: {
+  id: string
+  nickname: string
+  nicknameModerationStatus: string
+  nicknameViolationDisplay: string | null
+  avatarUrl: string | null
+  Profile: { avatarUrl: string | null } | null
+} | null) {
   return {
     id: comment.id,
     content: comment.content,
@@ -60,6 +79,10 @@ function serializeComment(comment: {
       displayName: getPublicUserDisplayName(comment.author),
       avatarUrl: publicImageUrl(comment.author.Profile?.avatarUrl || comment.author.avatarUrl),
     },
+    replyCount,
+    replyTo: replyToAuthor && replyToAuthor.id !== comment.author.id
+      ? { displayName: getPublicUserDisplayName(replyToAuthor) }
+      : null,
     canDelete: Boolean(viewerId && comment.author.id === viewerId),
   }
 }
@@ -70,10 +93,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   const { slug } = await params
   const search = new URL(request.url).searchParams
   const showId = search.get('showId')
-  const cursor = search.get('cursor')
-  if (cursor && cursor.length > 191) return NextResponse.json({ message: '分页位置无效' }, { status: 400 })
-  const limitValue = Number(search.get('limit') || CONCERT_DISCUSSION_PAGE_SIZE)
-  const limit = Number.isInteger(limitValue) ? Math.max(1, Math.min(CONCERT_DISCUSSION_PAGE_SIZE, limitValue)) : CONCERT_DISCUSSION_PAGE_SIZE
+  const page = parseConcertDiscussionPage(search.get('page'))
+  const parentCommentId = search.get('parentCommentId')
+  if (page === null) return NextResponse.json({ message: '页码无效' }, { status: 400 })
+  if (parentCommentId !== null && (!parentCommentId.trim() || parentCommentId.length > 191)) {
+    return NextResponse.json({ message: '回复对象无效' }, { status: 400 })
+  }
 
   try {
     const scope = await resolveDiscussionScope(slug, showId, false)
@@ -84,26 +109,60 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
       moderationStatus: 'NORMAL' as const,
       author: publicAuthorWhere,
     }
-    if (cursor) {
-      const cursorRow = await prisma.concertDiscussionComment.findFirst({ where: { ...where, id: cursor }, select: { id: true } })
-      if (!cursorRow) return NextResponse.json({ message: '分页位置已失效，请刷新讨论区' }, { status: 400 })
+    let parentAuthor: DiscussionAuthor | null = null
+    if (parentCommentId) {
+      const parent = await prisma.concertDiscussionComment.findFirst({
+        where: { ...where, id: parentCommentId, parentCommentId: null },
+        select: { id: true, author: { select: discussionAuthorSelect } },
+      })
+      if (!parent) return NextResponse.json({ message: '回复所属的讨论不存在或已不可见' }, { status: 404 })
+      parentAuthor = parent.author
     }
+    const pageWhere = { ...where, parentCommentId: parentCommentId || null }
+    const total = await prisma.concertDiscussionComment.count({ where: pageWhere })
+    const totalPages = Math.max(1, Math.ceil(total / CONCERT_DISCUSSION_PAGE_SIZE))
+    const resolvedPage = Math.min(page, totalPages)
     const rows = await prisma.concertDiscussionComment.findMany({
-      where,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      where: pageWhere,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1,
+      skip: (resolvedPage - 1) * CONCERT_DISCUSSION_PAGE_SIZE,
+      take: CONCERT_DISCUSSION_PAGE_SIZE,
       select: {
         id: true,
         content: true,
         createdAt: true,
+        authorId: true,
+        parentCommentId: true,
         images: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, sortOrder: true } },
         author: { select: discussionAuthorSelect },
+        parentComment: { select: { id: true, author: { select: discussionAuthorSelect } } },
       },
     })
-    const hasMore = rows.length > limit
-    const page = rows.slice(0, limit)
-    return NextResponse.json({ comments: page.map((comment) => serializeComment(comment, auth.user?.id ?? null)), nextCursor: hasMore ? page.at(-1)?.id ?? null : null }, {
+    let replyCounts = new Map<string, number>()
+    if (!parentCommentId && rows.length) {
+      const grouped = await prisma.concertDiscussionComment.groupBy({
+        by: ['parentCommentId'],
+        where: {
+          ...where,
+          parentCommentId: { in: rows.map((row) => row.id) },
+        },
+        _count: { _all: true },
+      })
+      replyCounts = new Map(grouped.filter((row) => row.parentCommentId).map((row) => [row.parentCommentId as string, row._count._all]))
+    }
+    return NextResponse.json({
+      comments: rows.map((comment) => serializeComment(
+        comment,
+        auth.user?.id ?? null,
+        replyCounts.get(comment.id) || 0,
+        comment.parentComment?.author || parentAuthor,
+      )),
+      page: resolvedPage,
+      pageSize: CONCERT_DISCUSSION_PAGE_SIZE,
+      total,
+      totalPages,
+      parentCommentId,
+    }, {
       headers: { 'Cache-Control': 'private, no-store, max-age=0' },
     })
   } catch (error) {
@@ -145,24 +204,52 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     const data = {
       eventId: scope.eventId,
       showId: scope.showId,
+      parentCommentId: parsed.value.parentCommentId,
       authorId: auth.user.id,
       requestId: parsed.value.requestId,
       content: parsed.value.content,
       images: { create: parsed.value.imageUrls.map((url, sortOrder) => ({ url, sortOrder })) },
     }
     let comment
+    let replyToAuthor: DiscussionAuthor | null = null
     let duplicate = false
     try {
-      comment = await prisma.concertDiscussionComment.create({
-        data,
-        select: {
-          id: true,
-          content: true,
-          createdAt: true,
-          images: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, sortOrder: true } },
-          author: { select: discussionAuthorSelect },
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        if (parsed.value.parentCommentId) {
+          const lockedParents = await tx.$queryRaw<Array<{ id: string; eventId: string; showId: string | null; parentCommentId: string | null; isDeleted: boolean; moderationStatus: string }>>`
+            SELECT id, eventId, showId, parentCommentId, isDeleted, moderationStatus
+            FROM ConcertDiscussionComment
+            WHERE id = ${parsed.value.parentCommentId}
+            FOR UPDATE
+          `
+          const locked = lockedParents[0]
+          if (!locked || locked.eventId !== scope.eventId || locked.showId !== scope.showId
+            || locked.parentCommentId !== null || locked.isDeleted || locked.moderationStatus !== 'NORMAL') {
+            return null
+          }
+          const parent = await tx.concertDiscussionComment.findFirst({
+            where: { ...concertDiscussionScopeWhere(scope.eventId, scope.showId), id: locked.id, parentCommentId: null, isDeleted: false, moderationStatus: 'NORMAL', author: publicAuthorWhere },
+            select: { author: { select: discussionAuthorSelect } },
+          })
+          if (!parent) return null
+          replyToAuthor = parent.author
+        }
+        const created = await tx.concertDiscussionComment.create({
+          data,
+          select: {
+            id: true,
+            content: true,
+            createdAt: true,
+            authorId: true,
+            parentCommentId: true,
+            images: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, sortOrder: true } },
+            author: { select: discussionAuthorSelect },
+          },
+        })
+        return created
       })
+      if (!result) return NextResponse.json({ message: '回复所属的讨论已不可回复，请刷新后重试' }, { status: 409 })
+      comment = result
     } catch (error) {
       if (!(error && typeof error === 'object' && 'code' in error && error.code === 'P2002')) throw error
       const existing = await prisma.concertDiscussionComment.findUnique({
@@ -171,21 +258,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
           id: true,
           eventId: true,
           showId: true,
+          parentCommentId: true,
           content: true,
           createdAt: true,
           isDeleted: true,
           images: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, sortOrder: true } },
           author: { select: discussionAuthorSelect },
+          parentComment: { select: { isDeleted: true, moderationStatus: true, author: { select: discussionAuthorSelect } } },
         },
       })
       if (!existing || existing.isDeleted || !matchesConcertDiscussionIdempotency(existing, parsed.value, scope.eventId, scope.showId)) {
         return NextResponse.json({ message: '该提交编号已使用，请重新提交' }, { status: 409 })
       }
+      if (existing.parentCommentId && (!existing.parentComment || existing.parentComment.isDeleted || existing.parentComment.moderationStatus !== 'NORMAL')) {
+        return NextResponse.json({ message: '回复所属的讨论已不可见，请刷新后重试' }, { status: 409 })
+      }
+      replyToAuthor = existing.parentComment?.author || null
       comment = existing
       duplicate = true
     }
 
-    return NextResponse.json({ comment: serializeComment(comment, auth.user.id), duplicate }, {
+    return NextResponse.json({ comment: serializeComment(comment, auth.user.id, 0, replyToAuthor), duplicate }, {
       status: duplicate ? 200 : 201,
       headers: { 'Cache-Control': 'private, no-store, max-age=0' },
     })

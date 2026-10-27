@@ -8,6 +8,8 @@ type CommentRow = {
   content: string
   createdAt: string
   moderationStatus: 'NORMAL' | 'VIOLATION'
+  parentCommentId: string | null
+  parentComment: { id: string; content: string; authorDisplayName: string } | null
   event: { title: string; slug: string }
   show: { id: string; date: string; title: string | null; albumTitle: string } | null
   author: { displayName: string; avatarUrl: string | null }
@@ -78,6 +80,7 @@ export function ConcertDiscussionAdminManager() {
         <button type="button" onClick={() => void remove(row)} disabled={Boolean(busyId)} className="min-h-10 shrink-0 border border-red-300 px-3 text-sm font-bold text-red-700 disabled:opacity-50">{busyId === row.id ? '处理中…' : '从公开区移除'}</button>
       </header>
       {row.content ? <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground)]">{row.content}</p> : null}
+      {row.parentCommentId ? <p className="mt-2 border-l-2 border-[var(--primary)] pl-2 text-xs text-[var(--foreground-muted)]">回复 @{row.parentComment?.authorDisplayName || '原评论作者'}：{row.parentComment?.content || '原评论已删除'}</p> : null}
       {row.images.length ? <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{row.images.map((image, index) => <a key={image.id} href={image.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden border border-[var(--border)] p-1" aria-label={`打开评论图片 ${index + 1}`}>
         <Image src={image.url} alt={`评论图片 ${index + 1}`} width={640} height={480} loading="lazy" unoptimized className="max-h-56 w-full object-contain" />
       </a>)}</div> : null}

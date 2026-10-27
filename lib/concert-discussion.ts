@@ -1,7 +1,7 @@
 import { PUBLIC_COS_HOST, toStoredMediaUrl } from '@/lib/media-url'
 import { sanitizeTextPreservingLength } from '@/lib/text'
 
-export const CONCERT_DISCUSSION_PAGE_SIZE = 20
+export const CONCERT_DISCUSSION_PAGE_SIZE = 10
 export const CONCERT_DISCUSSION_MAX_TEXT_LENGTH = 3000
 export const CONCERT_DISCUSSION_MAX_IMAGES = 4
 
@@ -9,6 +9,7 @@ export type ConcertDiscussionInput = {
   content: string
   imageUrls: string[]
   requestId: string
+  parentCommentId: string | null
 }
 
 export type ConcertDiscussionInputResult =
@@ -49,6 +50,13 @@ export function parseConcertDiscussionInput(value: unknown, userId: string): Con
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, message: '评论内容格式无效' }
   const input = value as Record<string, unknown>
   if (!isConcertDiscussionRequestId(input.requestId)) return { ok: false, message: '提交编号无效，请重试' }
+  let parentCommentId: string | null = null
+  if (input.parentCommentId !== undefined && input.parentCommentId !== null) {
+    if (typeof input.parentCommentId !== 'string' || !input.parentCommentId.trim() || input.parentCommentId.length > 191) {
+      return { ok: false, message: '回复对象无效，请刷新后重试' }
+    }
+    parentCommentId = input.parentCommentId.trim()
+  }
   if (typeof input.content !== 'string') return { ok: false, message: '评论内容格式无效' }
   const content = sanitizeTextPreservingLength(input.content).trim()
   if ([...content].length > CONCERT_DISCUSSION_MAX_TEXT_LENGTH) return { ok: false, message: `评论不能超过 ${CONCERT_DISCUSSION_MAX_TEXT_LENGTH} 个字符` }
@@ -64,7 +72,14 @@ export function parseConcertDiscussionInput(value: unknown, userId: string): Con
   }
   if (!content && imageUrls.length === 0) return { ok: false, message: '请填写评论或上传图片' }
 
-  return { ok: true, value: { content, imageUrls, requestId: input.requestId } }
+  return { ok: true, value: { content, imageUrls, requestId: input.requestId, parentCommentId } }
+}
+
+export function parseConcertDiscussionPage(value: string | null): number | null {
+  if (value === null) return 1
+  if (!/^\d+$/.test(value)) return null
+  const page = Number(value)
+  return Number.isSafeInteger(page) && page >= 1 && page <= 10_000 ? page : null
 }
 
 /**
@@ -77,13 +92,14 @@ export function concertDiscussionScopeWhere(eventId: string, showId: string | nu
 }
 
 export function matchesConcertDiscussionIdempotency(
-  existing: { eventId: string; showId: string | null; content: string; images: Array<{ url: string }> },
+  existing: { eventId: string; showId: string | null; parentCommentId?: string | null; content: string; images: Array<{ url: string }> },
   input: ConcertDiscussionInput,
   eventId: string,
   showId: string | null,
 ) {
   return existing.eventId === eventId
     && existing.showId === showId
+    && (existing.parentCommentId ?? null) === input.parentCommentId
     && existing.content === input.content
     && existing.images.length === input.imageUrls.length
     && existing.images.every((image, index) => image.url === input.imageUrls[index])
