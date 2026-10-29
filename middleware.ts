@@ -27,6 +27,8 @@ const publicExactPaths = new Set([
   '/salon',
   '/activities',
   '/api/clinic',
+  '/api/app/version',
+  '/api/app/download/android',
   '/api/mobile/home-hero',
   '/api/mobile/config',
   '/api/salon/posts',
