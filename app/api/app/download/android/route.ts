@@ -1,6 +1,6 @@
 import { createAndroidApkDownloadResponse } from '@/lib/app-download'
 import { parseAppVersionConfig } from '@/lib/app-version'
-import { getSignedCosObjectUrl, headCosObject } from '@/lib/tencent-cos'
+import { headCosObject } from '@/lib/tencent-cos'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,6 +12,5 @@ export async function GET(request: Request) {
   }
   return createAndroidApkDownloadResponse(request, config, {
     objectExists: headCosObject,
-    signObjectUrl: (key) => getSignedCosObjectUrl(key, 180),
   })
 }

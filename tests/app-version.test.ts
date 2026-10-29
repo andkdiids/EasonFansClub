@@ -39,7 +39,7 @@ const validEnvironment = {
   TENCENT_COS_REGION: 'ap-shanghai',
 } as const
 
-const signedUrl = 'https://ecfc-test-1234567890.cos.ap-shanghai.myqcloud.com/android/releases/ECFC-1.0.0-beta.20.apk?q-signature=test-signature'
+const publicApkUrl = 'https://media.ecfc.fans/media/android/releases/ECFC-1.0.0-beta.20.apk'
 
 async function withVersionEnvironment(values: Readonly<Record<string, string | undefined>>, run: () => Promise<void>) {
   const previous = new Map(environmentNames.map((name) => [name, process.env[name]]))
@@ -117,47 +117,35 @@ test('version endpoint rejects non-Android platform before reading configuration
   assert.deepEqual(await response.json(), { code: 'APP_VERSION_PLATFORM_UNSUPPORTED', message: '暂不支持该平台' })
 })
 
-test('download endpoint redirects to a short-lived signed COS object after confirming the configured object', async () => {
+test('download endpoint redirects to the fixed public media origin after confirming the configured object', async () => {
   const config = parseAppVersionConfig(validEnvironment)
   assert.ok(config)
   const requestedKeys: string[] = []
   const response = await createAndroidApkDownloadResponse(new Request(ANDROID_APP_DOWNLOAD_URL), config, {
     objectExists: async (key) => { requestedKeys.push(key); return true },
-    signObjectUrl: (key) => { requestedKeys.push(key); return signedUrl },
   })
   assert.equal(response.status, 307)
-  assert.equal(response.headers.get('location'), signedUrl)
+  assert.equal(response.headers.get('location'), publicApkUrl)
   assert.equal(response.headers.get('cache-control'), 'no-store, no-cache, max-age=0')
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
-  assert.deepEqual(requestedKeys, [config.apkObjectKey, config.apkObjectKey])
+  assert.deepEqual(requestedKeys, [config.apkObjectKey])
   assert.equal(await response.text(), '')
 })
 
-test('download endpoint rejects query injection, missing COS objects, and unsafe signer output without leaking storage details', async () => {
+test('download endpoint rejects query injection and missing COS objects without leaking storage details', async () => {
   const config = parseAppVersionConfig(validEnvironment)
   assert.ok(config)
-  let signerCalls = 0
   const query = await createAndroidApkDownloadResponse(new Request(`${ANDROID_APP_DOWNLOAD_URL}?key=other.apk`), config, {
     objectExists: async () => true,
-    signObjectUrl: async () => { signerCalls += 1; return signedUrl },
   })
   assert.equal(query.status, 400)
-  assert.equal(signerCalls, 0)
 
   const missing = await createAndroidApkDownloadResponse(new Request(ANDROID_APP_DOWNLOAD_URL), config, {
     objectExists: async () => false,
-    signObjectUrl: async () => { signerCalls += 1; return signedUrl },
   })
   assert.equal(missing.status, 503)
-  assert.equal(signerCalls, 0)
-
-  const unsafe = await createAndroidApkDownloadResponse(new Request(ANDROID_APP_DOWNLOAD_URL), config, {
-    objectExists: async () => true,
-    signObjectUrl: async () => 'https://evil.example/app.apk?token=secret',
-  })
-  assert.equal(unsafe.status, 503)
-  const responseText = `${await missing.text()}${await unsafe.text()}`
-  assert.doesNotMatch(responseText, /secret|android\/releases|myqcloud/)
+  const responseText = await missing.text()
+  assert.doesNotMatch(responseText, /android\/releases|myqcloud/)
 })
 
 test('download endpoint requires GET and configured deployment state', async () => {
@@ -165,13 +153,11 @@ test('download endpoint requires GET and configured deployment state', async () 
   assert.ok(config)
   const method = await createAndroidApkDownloadResponse(new Request(ANDROID_APP_DOWNLOAD_URL, { method: 'POST' }), config, {
     objectExists: async () => true,
-    signObjectUrl: async () => signedUrl,
   })
   assert.equal(method.status, 405)
   assert.equal(method.headers.get('allow'), 'GET')
   const unavailable = await createAndroidApkDownloadResponse(new Request(ANDROID_APP_DOWNLOAD_URL), null, {
     objectExists: async () => { throw new Error('must not be called') },
-    signObjectUrl: async () => signedUrl,
   })
   assert.equal(unavailable.status, 503)
 })
@@ -181,17 +167,17 @@ test('download endpoint rejects Range requests instead of claiming resume suppor
   assert.ok(config)
   const response = await createAndroidApkDownloadResponse(new Request(ANDROID_APP_DOWNLOAD_URL, { headers: { Range: 'bytes=0-' } }), config, {
     objectExists: async () => { throw new Error('must not be called') },
-    signObjectUrl: async () => signedUrl,
   })
   assert.equal(response.status, 416)
   assert.equal(response.headers.get('accept-ranges'), 'none')
 })
 
-test('middleware keeps both bootstrap version and fixed APK download routes public; the route uses COS HEAD and signed URLs', () => {
+test('middleware keeps both bootstrap version and fixed APK download routes public; the route checks COS and uses the fixed media origin', () => {
   const middleware = readFileSync('middleware.ts', 'utf8')
   const route = readFileSync('app/api/app/download/android/route.ts', 'utf8')
   assert.match(middleware, /['"]\/api\/app\/version['"]/)
   assert.match(middleware, /['"]\/api\/app\/download\/android['"]/)
   assert.match(route, /headCosObject/)
-  assert.match(route, /getSignedCosObjectUrl/)
+  assert.match(route, /createAndroidApkDownloadResponse/)
+  assert.doesNotMatch(route, /getSignedCosObjectUrl/)
 })

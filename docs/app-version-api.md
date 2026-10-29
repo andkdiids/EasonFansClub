@@ -10,9 +10,10 @@ GET /api/app/download/android
 
 The version endpoint does not read the database. The APK download endpoint
 accepts no caller-selected key or query parameters. It checks that the
-server-configured object exists in Tencent COS and responds with a short-lived
-HTTPS redirect signed by the existing server-side COS client. The application
-server does not buffer the APK body.
+server-configured object exists in Tencent COS and responds with a fixed HTTPS
+redirect to `https://media.ecfc.fans/media/android/releases/<filename>.apk`.
+The media gateway serves the public-read COS object; the application server
+does not buffer the APK body or expose a COS hostname/signature to Mobile.
 
 ## Version manifest configuration
 
@@ -41,11 +42,13 @@ compatibility aliases. Session-token aliases remain supported by the existing
 COS client.
 
 The object key must be a fixed, validated path such as
-`android/releases/ECFC-1.0.0-beta.20.apk`. The download route checks the object
-with COS HEAD before signing a 180-second URL. A missing object, invalid
-configuration, COS failure, or invalid signer URL returns a generic `503` and
-does not expose the key or COS error details. Requests with query parameters
-are rejected. Responses use `no-store` and `no-referrer` headers.
+`android/releases/ECFC-1.0.0-beta.20.apk`. The configured COS bucket and the
+release object must allow anonymous read access because the Mobile client only
+accepts the exact `media.ecfc.fans` HTTPS host. The route checks the object with
+COS HEAD before redirecting and never redirects to a COS hostname or arbitrary
+host. A missing object, invalid configuration, or COS failure returns a generic
+`503` and does not expose the key or COS error details. Requests with query
+parameters are rejected. Responses use `no-store` and `no-referrer` headers.
 
 Range requests are intentionally not accepted by the ECFC endpoint (`416`,
 `Accept-Ranges: none`); an interrupted download restarts from the beginning.

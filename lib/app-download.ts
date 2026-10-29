@@ -2,8 +2,9 @@ import { ANDROID_APP_DOWNLOAD_PATH, type AppVersionConfig } from '@/lib/app-vers
 
 export type AndroidDownloadDependencies = {
   objectExists: (objectKey: string) => Promise<boolean>
-  signObjectUrl: (objectKey: string) => string | Promise<string>
 }
+
+const PUBLIC_APK_BASE_URL = 'https://media.ecfc.fans/media'
 
 const noStoreHeaders = {
   'Cache-Control': 'no-store, no-cache, max-age=0',
@@ -18,23 +19,27 @@ function unavailable() {
   )
 }
 
-function isCosSignedUrl(value: string) {
+function publicApkUrl(objectKey: string) {
   try {
-    const url = new URL(value)
+    const encodedKey = objectKey.split('/').map(encodeURIComponent).join('/')
+    const url = new URL(`${PUBLIC_APK_BASE_URL}/${encodedKey}`)
     return url.protocol === 'https:'
+      && url.hostname === 'media.ecfc.fans'
       && !url.username
       && !url.password
       && !url.port
       && !url.hash
-      && /^[a-z0-9][a-z0-9-]*\.cos\.[a-z0-9-]+\.myqcloud\.com$/i.test(url.hostname)
+      && !url.search
+      && url.pathname.startsWith('/media/android/releases/')
       && url.pathname.toLowerCase().endsWith('.apk')
-      && url.searchParams.has('q-signature')
+      ? url.toString()
+      : null
   } catch {
-    return false
+    return null
   }
 }
 
-/** Redirects only to the configured, existing APK object using a short-lived COS URL. */
+/** Redirects only to the configured, existing APK object through ECFC's public media origin. */
 export async function createAndroidApkDownloadResponse(
   request: Request,
   config: AppVersionConfig | null,
@@ -60,11 +65,11 @@ export async function createAndroidApkDownloadResponse(
 
   try {
     if (!await dependencies.objectExists(config.apkObjectKey)) return unavailable()
-    const signedUrl = await dependencies.signObjectUrl(config.apkObjectKey)
-    if (!isCosSignedUrl(signedUrl)) return unavailable()
+    const mediaUrl = publicApkUrl(config.apkObjectKey)
+    if (!mediaUrl) return unavailable()
     return new Response(null, {
       status: 307,
-      headers: { ...noStoreHeaders, Location: signedUrl },
+      headers: { ...noStoreHeaders, Location: mediaUrl },
     })
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'COS_UNAVAILABLE'
