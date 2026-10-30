@@ -257,7 +257,7 @@ jobs:
                 && Number(versionBody.minimumVersionCode) === 19
                 && versionBody.forceUpdate === false
                 && String(versionBody.size) === expectedSize
-                && versionBody.apkSha256 === expectedHash) {
+                && String(versionBody.apkSha256).toUpperCase() === expectedHash.toUpperCase()) {
                 process.stdout.write('PRODUCTION_HEALTH_SHA=' + healthBody.release + '\n');
                 process.stdout.write('PRODUCTION_VERSION_CODE=' + versionBody.versionCode + '\n');
                 process.stdout.write('WEB_PROCESS_RELOAD=PASS\n');
