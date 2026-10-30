@@ -1,5 +1,6 @@
 import { getGlobalPointsGrantWorkerBatchCandidates, processGlobalPointsGrantBatchChunk } from '@/lib/global-points-grant'
 import { GLOBAL_POINTS_GRANT_WORKER_INTERVAL_MS } from '@/lib/global-points-grant-constants'
+import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from '@/lib/deployment-db-maintenance-hold'
 
 const WORKER_BATCH_LIMIT = 4
 
@@ -40,10 +41,11 @@ export async function runGlobalPointsGrantWorkerOnce() {
   }
 }
 
-export function startGlobalPointsGrantWorker() {
+export function startGlobalPointsGrantWorker(isMaintenanceHeld = isDeploymentDbMaintenanceHeld) {
   let stopped = false
   const tick = () => {
     if (stopped) return
+    if (!isDbMaintenanceAllowed(isMaintenanceHeld)) return
     void runGlobalPointsGrantWorkerOnce().catch((error) => {
       console.error('[global-points-grant.worker.failed]', {
         errorName: error instanceof Error ? error.name : 'UNKNOWN',

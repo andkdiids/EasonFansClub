@@ -56,7 +56,7 @@ test('locked production SHA gate precedes every production-changing phase and ke
   for (const marker of ['prune_worktrees\nrecover_abandoned_releases', 'fetch_exact_deploy_commit || die', 'pnpm_run build', 'pnpm_run prisma migrate deploy', 'atomic_switch "${release_dir}"']) {
     assert.ok(deploy.indexOf(marker) > gateEnd, marker)
   }
-  assert.match(deploy, /\[ "\$#" -ne 6 \]/)
+  assert.match(deploy, /\[ "\$#" -lt 6 \] \|\| \[ "\$#" -gt 7 \]/)
   assert.match(deploy, /EXPECTED_PRODUCTION_SHA="\$6"/)
   assert.doesNotMatch(deploy.slice(lockStart), /flock -u|exec 9>&-/)
 })

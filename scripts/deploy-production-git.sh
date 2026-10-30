@@ -9,8 +9,12 @@ fi
 umask 027
 export GIT_TERMINAL_PROMPT=0
 
-if [ "$#" -ne 6 ]; then
-  echo "Usage: $0 APP_DIR APP_PORT DEPLOY_SHA PM2_APP_NAME GITHUB_REPOSITORY EXPECTED_PRODUCTION_SHA" >&2
+if [ "$#" -lt 6 ] || [ "$#" -gt 7 ]; then
+  echo "Usage: $0 APP_DIR APP_PORT DEPLOY_SHA PM2_APP_NAME GITHUB_REPOSITORY EXPECTED_PRODUCTION_SHA [--skip-db]" >&2
+  exit 2
+fi
+if ! db_mode="$(deploy_parse_db_mode_arg "${@:7}")"; then
+  echo "Usage: $0 APP_DIR APP_PORT DEPLOY_SHA PM2_APP_NAME GITHUB_REPOSITORY EXPECTED_PRODUCTION_SHA [--skip-db]" >&2
   exit 2
 fi
 
@@ -99,6 +103,8 @@ previous_sha=""
 rollback_target=""
 deployment_succeeded=false
 deploy_lock_acquired=false
+db_maintenance_hold_file="${shared_dir}/deploy-db-maintenance.hold"
+db_maintenance_hold_owned=false
 PNPM_CMD=()
 
 prune_worktrees() {
@@ -206,7 +212,7 @@ recover_abandoned_releases() {
 
 on_exit() {
   local status=$?
-  local active_target expected_target preserve_release=false
+  local active_target expected_target previous_normalized preserve_release=false
   trap - EXIT HUP INT TERM
   trap '' HUP INT TERM
 
@@ -227,6 +233,21 @@ on_exit() {
     fi
     if [ "$preserve_release" != true ]; then
       cleanup_failed_release || true
+    fi
+  fi
+
+  if [ "${db_mode}" = skip-db ] && [ "${db_maintenance_hold_owned}" = true ]; then
+    active_target="$(deploy_current_target "${current_link}")"
+    expected_target="$(deploy_normalize_path "${release_dir}")"
+    previous_normalized="$(deploy_normalize_path "${previous_target}")"
+    if [ "${deployment_succeeded}" = true ] || [ "${active_target}" = "${previous_normalized}" ]; then
+      if deploy_remove_db_maintenance_hold "${db_maintenance_hold_file}" "${DEPLOY_SHA}"; then
+        echo "Database-maintenance hold removed after the candidate was verified or safely rolled back."
+      else
+        echo "Unable to remove the owned database-maintenance hold; operator review is required." >&2
+      fi
+    else
+      echo "Candidate remains active after failed rollback; retaining the database-maintenance hold." >&2
     fi
   fi
   return "${status}"
@@ -335,6 +356,11 @@ echo "Previous release: ${previous_target}"
 
 log_step "2/8" "Fetch the exact GitHub commit into the server-side cache"
 fetch_exact_deploy_commit || die "Exact deployment commit fetch failed."
+if [ "${db_mode}" = skip-db ]; then
+  deploy_skip_db_schema_guard "${repo_dir}" "${previous_sha}" "${DEPLOY_SHA}" \
+    || die "The release is not eligible for --skip-db deployment."
+  echo "SKIP_DB_SCHEMA_GUARD=PASS"
+fi
 
 log_step "3/8" "Create an isolated release worktree"
 timeout --foreground --signal=TERM --kill-after=30s 2m \
@@ -443,25 +469,38 @@ test -d "${release_dir}/.next/static"
 test -d "${release_dir}/public"
 echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
-log_step "6/8" "Apply migrations and verify database state before current switch"
-pnpm_with_timeout 1m migration:check:mysql
-if ! lottery_migration_timeout_seconds="$(DEPLOY_SHA="${DEPLOY_SHA}" EXPECTED_PRODUCTION_SHA="${EXPECTED_PRODUCTION_SHA}" node scripts/check-topic-lottery-maintenance.mjs "${previous_target}" "${release_dir}")"; then
-  die "Lottery migration maintenance approval is missing/invalid; refusing ALL migration execution."
+if [ "${db_mode}" = skip-db ]; then
+  log_step "6/8" "Skip all database migration and maintenance phases"
+  echo "DATABASE MIGRATION: SKIPPED"
+  echo "DATABASE WRITE MAINTENANCE: SKIPPED"
+  echo "PRISMA_MIGRATE_DEPLOY_EXECUTED=NO"
+  echo "NOTIFICATION_INTEGRITY_EXECUTED=NO"
+  echo "OTHER_DB_MAINTENANCE_EXECUTED=NO"
+  echo "Skipped steps: migration:check:mysql (static check), check-topic-lottery-maintenance.mjs (file-only gate), prisma migrate deploy, notification:integrity (read-only), prisma migrate status (read-only)."
+  deploy_create_db_maintenance_hold "${db_maintenance_hold_file}" "${DEPLOY_SHA}" \
+    || die "Unable to pause automatic database maintenance for the new app process."
+  db_maintenance_hold_owned=true
+else
+  log_step "6/8" "Apply migrations and verify database state before current switch"
+  pnpm_with_timeout 1m migration:check:mysql
+  if ! lottery_migration_timeout_seconds="$(DEPLOY_SHA="${DEPLOY_SHA}" EXPECTED_PRODUCTION_SHA="${EXPECTED_PRODUCTION_SHA}" node scripts/check-topic-lottery-maintenance.mjs "${previous_target}" "${release_dir}")"; then
+    die "Lottery migration maintenance approval is missing/invalid; refusing ALL migration execution."
+  fi
+  [[ "${lottery_migration_timeout_seconds}" =~ ^[0-9]+$ ]] || die "Lottery migration timeout guard returned invalid output."
+  pnpm_run prisma migrate deploy
+  pnpm_run notification:integrity
+  if ! migration_status_output="$(pnpm_with_timeout 2m prisma migrate status 2>&1)"; then
+    printf '%s\n' "${migration_status_output}" \
+      | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
+    die "Read-only Prisma migration status failed after the bounded migration step."
+  fi
+  if ! deploy_migration_status_is_up_to_date "${migration_status_output}"; then
+    printf '%s\n' "${migration_status_output}" \
+      | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
+    die "Production migrations are not explicitly up to date after the migration step."
+  fi
+  echo "Prisma migration status is up to date."
 fi
-[[ "${lottery_migration_timeout_seconds}" =~ ^[0-9]+$ ]] || die "Lottery migration timeout guard returned invalid output."
-pnpm_run prisma migrate deploy
-pnpm_run notification:integrity
-if ! migration_status_output="$(pnpm_with_timeout 2m prisma migrate status 2>&1)"; then
-  printf '%s\n' "${migration_status_output}" \
-    | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
-  die "Read-only Prisma migration status failed after the bounded migration step."
-fi
-if ! deploy_migration_status_is_up_to_date "${migration_status_output}"; then
-  printf '%s\n' "${migration_status_output}" \
-    | sed -E 's#(mysql|postgresql|postgres)://[^[:space:]]+#\1://[REDACTED]#g' >&2
-  die "Production migrations are not explicitly up to date after the migration step."
-fi
-echo "Prisma migration status is up to date."
 
 atomic_switch() {
   deploy_atomic_switch "$1" "${current_link}" "${releases_dir}"
@@ -593,19 +632,26 @@ reload_pm2() {
   # Make the release identity explicit in the selected app's ecosystem env.
   # Do not rely on PM2 merging shell exports into an existing ecosystem app.
   pm2_config="$(mktemp "${current_link}/.pm2-release-env.XXXXXX.json")" || return 1
-  if ! node - "${app_name}" "${release_sha}" "${APP_PORT}" "${pm2_config}" <<'NODE'
+  if ! node - "${app_name}" "${release_sha}" "${APP_PORT}" "${pm2_config}" "${db_mode}" "${db_maintenance_hold_file}" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 try {
-  const [appName, releaseSha, port, output] = process.argv.slice(2);
+  const [appName, releaseSha, port, output, dbMode, maintenanceHoldFile] = process.argv.slice(2);
   if (!/^[0-9a-f]{40}$/.test(releaseSha) || !/^[0-9]+$/.test(port)) throw new Error();
+  if (dbMode !== 'full' && dbMode !== 'skip-db') throw new Error();
   const config = require(path.resolve('ecosystem.config.js'));
   const matches = Array.isArray(config.apps) ? config.apps.filter(app => app.name === appName) : [];
   if (matches.length !== 1) throw new Error();
   const app = matches[0];
   fs.writeFileSync(output, JSON.stringify({ apps: [{
     ...app,
-    env: { ...app.env, NODE_ENV: 'production', PORT: port, DEPLOY_SHA: releaseSha },
+    env: {
+      ...app.env,
+      NODE_ENV: 'production',
+      PORT: port,
+      DEPLOY_SHA: releaseSha,
+      DEPLOY_DB_MAINTENANCE_HOLD_FILE: dbMode === 'skip-db' ? maintenanceHoldFile : '',
+    },
   }] }), { mode: 0o600 });
 } catch {
   process.stderr.write('Unable to prepare selected PM2 app environment.\n');
