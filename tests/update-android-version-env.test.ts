@@ -11,19 +11,19 @@ import { parseAppVersionConfig } from '../lib/app-version'
 const expectedProductionSha = '38a0ea45dd2d5c208326cf7fe77ff63a1895f702'
 const metadata: AndroidReleaseMetadata = {
   ANDROID_VERSION_NAME: '1.0.0-beta.21',
-  ANDROID_VERSION_CODE: 22,
+  ANDROID_VERSION_CODE: 23,
   ANDROID_MINIMUM_VERSION_CODE: 19,
   ANDROID_FORCE_UPDATE: false,
-  ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc2-20261030-172352.apk',
-  ANDROID_APK_SHA256: '463E70B7A3652498EE6286D56F9B306A3222D30905C73C22B59EA61F3113282B',
-  ANDROID_APK_SIZE: 180836567,
+  ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc3-20261030-211051.apk',
+  ANDROID_APK_SHA256: '7ACE78E61C572FED43D1406765A54081C435E792138EA6DA4F70C1358773820D',
+  ANDROID_APK_SIZE: 183510163,
   ANDROID_RELEASE_NOTES: JSON.stringify([
-    '分享升级为图片卡片并加入二维码',
-    '帖子、勋章、个人主页、活动、话题活动与 Salon 支持图片分享',
-    '每日处方支持全屏查看、缩放、保存和分享',
-    '处方架分享入口调整至右上角',
-    '更新下载支持后台下载与进度恢复',
-    'Beta.21 RC2 内测版本',
+    '分享卡展示帖子原图、作者头像和正式品牌资源',
+    '图片分享同时提供说明文字与规范公开链接',
+    '二维码和分享文案使用同一公开网址',
+    '每日处方分享与更新下载体验改进',
+    'RC3 内测修复',
+    'Beta.21 RC3 内测版本',
   ]),
   ANDROID_PUBLISHED_AT: '2026-10-30T00:00:00.000Z',
 }
@@ -48,8 +48,8 @@ test('updates only allowlisted Android metadata and creates a protected verified
   const result = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, now: new Date('2026-10-30T00:00:00Z') })
   const after = readFileSync(envPath, 'utf8')
   assert.match(after, /DATABASE_URL=do-not-print-this/)
-  assert.match(after, /ANDROID_VERSION_CODE='22'/)
-  assert.match(after, /ANDROID_APK_SIZE='180836567'/)
+  assert.match(after, /ANDROID_VERSION_CODE='23'/)
+  assert.match(after, /ANDROID_APK_SIZE='183510163'/)
   assert.equal((after.match(/^ANDROID_[A-Z0-9_]+=/gm) ?? []).length, 9)
   assert.equal(result.changedKeys.length, 9)
   assert.equal(readFileSync(result.backupPath, 'utf8'), before)
@@ -68,7 +68,7 @@ test('dotenv round-trips JSON release notes with quotes, apostrophes, hashes, an
     '换行符安全编码',
     '普通中文说明',
     '附加说明',
-    'Beta.21 RC2 内测版本',
+    'Beta.21 RC3 内测版本',
   ]
   const result = configureAndroidVersionEnv({
     appDir,
@@ -110,7 +110,7 @@ test('duplicate metadata keys and invalid release size fail closed', (t) => {
   }), /INVALID_APK_SIZE/)
 })
 
-test('Beta.21 RC2 metadata is pinned to the verified candidate artifact', (t) => {
+test('Beta.21 RC3 metadata accepts only a versioned RC3 artifact', (t) => {
   const { appDir } = fixture(t)
   assert.throws(() => configureAndroidVersionEnv({
     appDir,
@@ -125,12 +125,17 @@ test('Beta.21 RC2 metadata is pinned to the verified candidate artifact', (t) =>
   assert.throws(() => configureAndroidVersionEnv({
     appDir,
     expectedProductionSha,
-    metadata: { ...metadata, ANDROID_APK_SIZE: metadata.ANDROID_APK_SIZE + 1 },
+    metadata: { ...metadata, ANDROID_APK_SIZE: 500_000_001 },
   }), /INVALID_APK_SIZE/)
   assert.throws(() => configureAndroidVersionEnv({
     appDir,
     expectedProductionSha,
-    metadata: { ...metadata, ANDROID_VERSION_CODE: 21 },
+    metadata: { ...metadata, ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc2-') },
+  }), /INVALID_APK_OBJECT_KEY/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...metadata, ANDROID_VERSION_CODE: 22 },
   }), /INVALID_VERSION_CODE/)
 })
 
@@ -157,14 +162,16 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /vars\.PRODUCTION_SSH_HOST_KEY_SHA256/)
   assert.ok(workflow.indexOf('Verify final APK stored in COS') < workflow.indexOf('Update only Android version variables'))
   assert.match(workflow, /node --input-type=module -/)
-  assert.match(workflow, /Beta\.21 RC2 Android metadata without database access/i)
+  assert.match(workflow, /Beta\.21 RC3 Android metadata without database access/i)
   assert.match(workflow, /1\.0\.0-beta\.21/)
-  assert.match(workflow, /EXPECTED_SIZE: "180836567"/)
-  assert.match(workflow, /463E70B7A3652498EE6286D56F9B306A3222D30905C73C22B59EA61F3113282B/)
-  assert.match(workflow, /--argjson code 22/)
+  assert.match(workflow, /inputs\.apk_object_key/)
+  assert.match(workflow, /inputs\.apk_sha256/)
+  assert.match(workflow, /inputs\.apk_size/)
+  assert.match(workflow, /release-beta21-rc3-/)
+  assert.match(workflow, /--argjson code 23/)
   assert.match(workflow, /--argjson minimum 19/)
   assert.match(workflow, /--argjson force false/)
-  assert.match(workflow, /Beta\.21 RC2 内测版本/)
+  assert.match(workflow, /Beta\.21 RC3 内测版本/)
   assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|notification:integrity|npm run seed/i)
   for (const file of [
     'lib/app-version.ts',
