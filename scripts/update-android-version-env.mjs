@@ -25,19 +25,20 @@ function validateMetadata(metadata) {
   const actualKeys = Object.keys(metadata).sort()
   requireThat(JSON.stringify(actualKeys) === JSON.stringify([...METADATA_KEYS].sort()), 'INVALID_METADATA_KEYS')
   requireThat(/^1\.0\.0-beta\.21$/.test(metadata.ANDROID_VERSION_NAME), 'INVALID_VERSION_NAME')
-  requireThat(metadata.ANDROID_VERSION_CODE === 21, 'INVALID_VERSION_CODE')
+  requireThat(metadata.ANDROID_VERSION_CODE === 22, 'INVALID_VERSION_CODE')
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')
   requireThat(typeof metadata.ANDROID_APK_COS_KEY === 'string'
-    && /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc1-20261030-133912\.apk$/.test(metadata.ANDROID_APK_COS_KEY), 'INVALID_APK_OBJECT_KEY')
+    && /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc2-20261030-172352\.apk$/.test(metadata.ANDROID_APK_COS_KEY), 'INVALID_APK_OBJECT_KEY')
   requireThat(typeof metadata.ANDROID_APK_SHA256 === 'string'
-    && metadata.ANDROID_APK_SHA256 === '0ED0920207C34A42DDBC4537FED476BB158D175AC5503B67F9A4054AF4B4ADF2', 'INVALID_APK_SHA256')
-  requireThat(metadata.ANDROID_APK_SIZE === 180295939, 'INVALID_APK_SIZE')
+    && metadata.ANDROID_APK_SHA256 === '463E70B7A3652498EE6286D56F9B306A3222D30905C73C22B59EA61F3113282B', 'INVALID_APK_SHA256')
+  requireThat(metadata.ANDROID_APK_SIZE === 180836567, 'INVALID_APK_SIZE')
   requireThat(typeof metadata.ANDROID_RELEASE_NOTES === 'string', 'INVALID_RELEASE_NOTES')
   let notes
   try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('INVALID_RELEASE_NOTES') }
-  requireThat(Array.isArray(notes) && notes.length === 4
+  requireThat(Array.isArray(notes) && notes.length === 6
     && notes.every((note) => typeof note === 'string' && note.length > 0 && note.length <= 500), 'INVALID_RELEASE_NOTES')
+  requireThat(notes[5] === 'Beta.21 RC2 内测版本', 'INVALID_RELEASE_NOTES')
   requireThat(typeof metadata.ANDROID_PUBLISHED_AT === 'string'
     && Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT)), 'INVALID_PUBLISHED_AT')
 }

@@ -11,17 +11,19 @@ import { parseAppVersionConfig } from '../lib/app-version'
 const expectedProductionSha = '38a0ea45dd2d5c208326cf7fe77ff63a1895f702'
 const metadata: AndroidReleaseMetadata = {
   ANDROID_VERSION_NAME: '1.0.0-beta.21',
-  ANDROID_VERSION_CODE: 21,
+  ANDROID_VERSION_CODE: 22,
   ANDROID_MINIMUM_VERSION_CODE: 19,
   ANDROID_FORCE_UPDATE: false,
-  ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc1-20261030-133912.apk',
-  ANDROID_APK_SHA256: '0ED0920207C34A42DDBC4537FED476BB158D175AC5503B67F9A4054AF4B4ADF2',
-  ANDROID_APK_SIZE: 180295939,
+  ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc2-20261030-172352.apk',
+  ANDROID_APK_SHA256: '463E70B7A3652498EE6286D56F9B306A3222D30905C73C22B59EA61F3113282B',
+  ANDROID_APK_SIZE: 180836567,
   ANDROID_RELEASE_NOTES: JSON.stringify([
-    '新增全局分享系统，支持帖子、勋章和个人主页分享',
-    '支持活动与话题活动分享',
-    '支持 Salon 和每日处方分享',
-    'Beta.21 RC1 内测版本',
+    '分享升级为图片卡片并加入二维码',
+    '帖子、勋章、个人主页、活动、话题活动与 Salon 支持图片分享',
+    '每日处方支持全屏查看、缩放、保存和分享',
+    '处方架分享入口调整至右上角',
+    '更新下载支持后台下载与进度恢复',
+    'Beta.21 RC2 内测版本',
   ]),
   ANDROID_PUBLISHED_AT: '2026-10-30T00:00:00.000Z',
 }
@@ -46,8 +48,8 @@ test('updates only allowlisted Android metadata and creates a protected verified
   const result = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, now: new Date('2026-10-30T00:00:00Z') })
   const after = readFileSync(envPath, 'utf8')
   assert.match(after, /DATABASE_URL=do-not-print-this/)
-  assert.match(after, /ANDROID_VERSION_CODE='21'/)
-  assert.match(after, /ANDROID_APK_SIZE='180295939'/)
+  assert.match(after, /ANDROID_VERSION_CODE='22'/)
+  assert.match(after, /ANDROID_APK_SIZE='180836567'/)
   assert.equal((after.match(/^ANDROID_[A-Z0-9_]+=/gm) ?? []).length, 9)
   assert.equal(result.changedKeys.length, 9)
   assert.equal(readFileSync(result.backupPath, 'utf8'), before)
@@ -65,6 +67,8 @@ test('dotenv round-trips JSON release notes with quotes, apostrophes, hashes, an
     '双引号 " 与反斜线 \\ 保留',
     '换行符安全编码',
     '普通中文说明',
+    '附加说明',
+    'Beta.21 RC2 内测版本',
   ]
   const result = configureAndroidVersionEnv({
     appDir,
@@ -106,7 +110,7 @@ test('duplicate metadata keys and invalid release size fail closed', (t) => {
   }), /INVALID_APK_SIZE/)
 })
 
-test('Beta.21 RC1 metadata is pinned to the verified candidate artifact', (t) => {
+test('Beta.21 RC2 metadata is pinned to the verified candidate artifact', (t) => {
   const { appDir } = fixture(t)
   assert.throws(() => configureAndroidVersionEnv({
     appDir,
@@ -123,6 +127,11 @@ test('Beta.21 RC1 metadata is pinned to the verified candidate artifact', (t) =>
     expectedProductionSha,
     metadata: { ...metadata, ANDROID_APK_SIZE: metadata.ANDROID_APK_SIZE + 1 },
   }), /INVALID_APK_SIZE/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...metadata, ANDROID_VERSION_CODE: 21 },
+  }), /INVALID_VERSION_CODE/)
 })
 
 test('the production CLI enforces the fixed production target and never echoes env values', () => {
@@ -146,13 +155,14 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /vars\.PRODUCTION_SSH_HOST_KEY_SHA256/)
   assert.ok(workflow.indexOf('Verify final APK stored in COS') < workflow.indexOf('Update only Android version variables'))
   assert.match(workflow, /node --input-type=module -/)
-  assert.match(workflow, /Beta\.21 RC1 Android metadata without database access/i)
+  assert.match(workflow, /Beta\.21 RC2 Android metadata without database access/i)
   assert.match(workflow, /1\.0\.0-beta\.21/)
-  assert.match(workflow, /EXPECTED_SIZE: "180295939"/)
-  assert.match(workflow, /0ED0920207C34A42DDBC4537FED476BB158D175AC5503B67F9A4054AF4B4ADF2/)
+  assert.match(workflow, /EXPECTED_SIZE: "180836567"/)
+  assert.match(workflow, /463E70B7A3652498EE6286D56F9B306A3222D30905C73C22B59EA61F3113282B/)
+  assert.match(workflow, /--argjson code 22/)
   assert.match(workflow, /--argjson minimum 19/)
   assert.match(workflow, /--argjson force false/)
-  assert.match(workflow, /支持活动、话题活动、Salon 与每日处方分享/)
+  assert.match(workflow, /Beta\.21 RC2 内测版本/)
   assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|notification:integrity|npm run seed/i)
   for (const file of [
     'lib/app-version.ts',
