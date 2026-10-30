@@ -69,7 +69,11 @@ function replaceMetadataLines(source, metadata) {
   }
   for (const [key, found] of positions) requireThat(found.length <= 1, `DUPLICATE_ENV_KEY:${key}`)
   for (const key of METADATA_KEYS) {
-    const encodedValue = JSON.stringify(String(metadata[key]))
+    // dotenv treats JSON.stringify's outer double quotes as an env quoting
+    // layer, leaving the JSON's escaped quotes behind after parsing. Store
+    // values in single quotes and encode apostrophes as JSON unicode escapes;
+    // this preserves the exact JSON value while keeping # and quotes safe.
+    const encodedValue = `'${String(metadata[key]).replaceAll("'", '\\u0027')}'`
     const found = positions.get(key)
     if (found.length === 1) {
       const index = found[0]
