@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
+import dotenv from 'dotenv'
 import { spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { configureAndroidVersionEnv, type AndroidReleaseMetadata } from '../scripts/update-android-version-env.mjs'
+import { parseAppVersionConfig } from '../lib/app-version'
 
 const expectedProductionSha = '38a0ea45dd2d5c208326cf7fe77ff63a1895f702'
 const metadata: AndroidReleaseMetadata = {
@@ -44,8 +46,8 @@ test('updates only allowlisted Android metadata and creates a protected verified
   const result = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, now: new Date('2026-10-30T00:00:00Z') })
   const after = readFileSync(envPath, 'utf8')
   assert.match(after, /DATABASE_URL=do-not-print-this/)
-  assert.match(after, /ANDROID_VERSION_CODE="20"/)
-  assert.match(after, /ANDROID_APK_SIZE="180259847"/)
+  assert.match(after, /ANDROID_VERSION_CODE='20'/)
+  assert.match(after, /ANDROID_APK_SIZE='180259847'/)
   assert.equal((after.match(/^ANDROID_[A-Z0-9_]+=/gm) ?? []).length, 9)
   assert.equal(result.changedKeys.length, 9)
   assert.equal(readFileSync(result.backupPath, 'utf8'), before)
@@ -54,6 +56,34 @@ test('updates only allowlisted Android metadata and creates a protected verified
     assert.equal(lstatSync(path.dirname(result.backupPath)).mode & 0o777, 0o700)
     assert.equal(lstatSync(result.backupPath).mode & 0o777, 0o600)
   }
+})
+
+test('dotenv round-trips JSON release notes with quotes, apostrophes, hashes, and preserves the public config', (t) => {
+  const { appDir, envPath } = fixture(t)
+  const specialNotes = [
+    "版本说明含 apostrophe's # tag",
+    '双引号 " 与反斜线 \\ 保留',
+    '换行符安全编码',
+    '普通中文说明',
+  ]
+  const result = configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...metadata, ANDROID_RELEASE_NOTES: JSON.stringify(specialNotes) },
+  })
+  const parsedEnv = dotenv.parse(readFileSync(envPath, 'utf8'))
+  const config = parseAppVersionConfig({
+    ...parsedEnv,
+    TENCENT_COS_SECRET_ID: 'test-id',
+    TENCENT_COS_SECRET_KEY: 'test-key',
+    TENCENT_COS_BUCKET: 'test-bucket',
+    TENCENT_COS_REGION: 'test-region',
+  })
+
+  assert.ok(config)
+  assert.deepEqual(config.releaseNotes, specialNotes)
+  assert.equal(config.size, metadata.ANDROID_APK_SIZE)
+  assert.equal(result.changedKeys.includes('ANDROID_RELEASE_NOTES'), true)
 })
 
 test('production SHA mismatch fails before creating a backup or changing env', (t) => {
