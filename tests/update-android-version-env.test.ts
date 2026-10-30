@@ -110,7 +110,7 @@ test('duplicate metadata keys and invalid release size fail closed', (t) => {
   }), /INVALID_APK_SIZE/)
 })
 
-test('Beta.21 RC3 metadata accepts only a versioned RC3 artifact', (t) => {
+test('Beta.21 metadata accepts only matching versioned RC3 or RC4 artifacts', (t) => {
   const { appDir } = fixture(t)
   assert.throws(() => configureAndroidVersionEnv({
     appDir,
@@ -139,6 +139,38 @@ test('Beta.21 RC3 metadata accepts only a versioned RC3 artifact', (t) => {
   }), /INVALID_VERSION_CODE/)
 })
 
+test('Beta.21 RC4 metadata accepts versionCode 24 only with an RC4 object and matching notes', (t) => {
+  const { appDir, envPath } = fixture(t)
+  const rc4Metadata: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 24,
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc4-'),
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '分享入口提供私信、图片和链接三种独立方式',
+      '好友分享复用站内通讯录和私信',
+      '图片分享仅在选择后生成带二维码卡片',
+      '链接分享直接提供规范 HTTPS 网页地址',
+      '每日处方分享导出改为按需生成',
+      'Beta.21 RC4 内测版本',
+    ]),
+  }
+  configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc4Metadata })
+  const parsed = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(parsed.ANDROID_VERSION_CODE, '24')
+  assert.equal(parsed.ANDROID_APK_COS_KEY, rc4Metadata.ANDROID_APK_COS_KEY)
+  assert.deepEqual(JSON.parse(parsed.ANDROID_RELEASE_NOTES), JSON.parse(rc4Metadata.ANDROID_RELEASE_NOTES))
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc4Metadata, ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY },
+  }), /INVALID_APK_OBJECT_KEY/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc4Metadata, ANDROID_RELEASE_NOTES: metadata.ANDROID_RELEASE_NOTES },
+  }), /INVALID_RELEASE_NOTES/)
+})
+
 test('the production CLI enforces the fixed production target and never echoes env values', () => {
   const envPath = path.resolve('scripts/update-android-version-env.mjs')
   const result = spawnSync(process.execPath, [envPath], {
@@ -162,16 +194,21 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /vars\.PRODUCTION_SSH_HOST_KEY_SHA256/)
   assert.ok(workflow.indexOf('Verify final APK stored in COS') < workflow.indexOf('Update only Android version variables'))
   assert.match(workflow, /node --input-type=module -/)
-  assert.match(workflow, /Beta\.21 RC3 Android metadata without database access/i)
+  assert.match(workflow, /Beta\.21 Android metadata without database access/i)
+  assert.match(workflow, /release_candidate:/)
+  assert.match(workflow, /inputs\.release_candidate/)
   assert.match(workflow, /1\.0\.0-beta\.21/)
   assert.match(workflow, /inputs\.apk_object_key/)
   assert.match(workflow, /inputs\.apk_sha256/)
   assert.match(workflow, /inputs\.apk_size/)
-  assert.match(workflow, /release-beta21-rc3-/)
-  assert.match(workflow, /--argjson code 23/)
+  assert.match(workflow, /release-beta21-\$\{RELEASE_CANDIDATE\}/)
+  assert.match(workflow, /rc3\)/)
+  assert.match(workflow, /rc4\)/)
+  assert.match(workflow, /--argjson code "\$\{version_code\}"/)
   assert.match(workflow, /--argjson minimum 19/)
   assert.match(workflow, /--argjson force false/)
   assert.match(workflow, /Beta\.21 RC3 内测版本/)
+  assert.match(workflow, /Beta\.21 RC4 内测版本/)
   assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|notification:integrity|npm run seed/i)
   for (const file of [
     'lib/app-version.ts',
