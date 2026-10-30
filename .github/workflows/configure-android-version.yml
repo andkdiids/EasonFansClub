@@ -21,7 +21,7 @@ jobs:
     name: Configure Beta.21 RC2 Android metadata without database access
     runs-on: ubuntu-22.04
     environment: Production
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - name: Checkout reviewed main
         uses: actions/checkout@v4
@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           apk_path="${RUNNER_TEMP}/ecfc-beta21-rc2.apk"
           headers_path="${RUNNER_TEMP}/ecfc-beta21-rc2-cos-headers.txt"
-          curl --fail --silent --show-error --location --max-time 180 \
+          curl --fail --silent --show-error --location --max-time 2400 \
             --dump-header "${headers_path}" --output "${apk_path}" "${APK_URL}"
           actual_size="$(stat -c '%s' "${apk_path}")"
           actual_sha256="$(sha256sum "${apk_path}" | awk '{print toupper($1)}')"
