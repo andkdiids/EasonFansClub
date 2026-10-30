@@ -9,6 +9,7 @@ export type AppVersionConfig = {
   forceUpdate: boolean
   downloadUrl: string
   apkSha256: string
+  size: number
   /** Private server-side storage key. Never serialize this value to clients. */
   apkObjectKey: string
   releaseNotes: string[]
@@ -82,6 +83,7 @@ export function parseAppVersionConfig(env: AppVersionEnvironment): AppVersionCon
   const forceUpdate = parseBoolean(trimmed(env, 'ANDROID_FORCE_UPDATE'))
   const apkObjectKey = parseApkObjectKey(trimmed(env, 'ANDROID_APK_COS_KEY'))
   const apkSha256 = parseSha256(trimmed(env, 'ANDROID_APK_SHA256'))
+  const apkSize = parsePositiveInteger(trimmed(env, 'ANDROID_APK_SIZE'))
   const releaseNotes = parseReleaseNotes(trimmed(env, 'ANDROID_RELEASE_NOTES'))
   const publishedAt = parsePublishedAt(trimmed(env, 'ANDROID_PUBLISHED_AT'))
   const cosConfigured = Boolean(
@@ -103,6 +105,7 @@ export function parseAppVersionConfig(env: AppVersionEnvironment): AppVersionCon
     || forceUpdate === null
     || apkObjectKey === null
     || apkSha256 === null
+    || apkSize === null
     || !cosConfigured
     || releaseNotes === null
     || publishedAt === null
@@ -116,6 +119,7 @@ export function parseAppVersionConfig(env: AppVersionEnvironment): AppVersionCon
     forceUpdate,
     downloadUrl: ANDROID_APP_DOWNLOAD_URL,
     apkSha256,
+    size: apkSize,
     apkObjectKey,
     releaseNotes,
     ...(publishedAt ? { publishedAt } : {}),
@@ -131,6 +135,7 @@ export function toPublicAppVersionManifest(config: AppVersionConfig): AppVersion
     forceUpdate: config.forceUpdate,
     downloadUrl: config.downloadUrl,
     apkSha256: config.apkSha256,
+    size: config.size,
     releaseNotes: config.releaseNotes,
     ...(config.publishedAt ? { publishedAt: config.publishedAt } : {}),
   }

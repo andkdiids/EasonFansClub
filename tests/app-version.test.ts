@@ -12,6 +12,7 @@ const environmentNames = [
   'ANDROID_FORCE_UPDATE',
   'ANDROID_APK_COS_KEY',
   'ANDROID_APK_SHA256',
+  'ANDROID_APK_SIZE',
   'ANDROID_RELEASE_NOTES',
   'ANDROID_PUBLISHED_AT',
   'TENCENT_COS_SECRET_ID',
@@ -31,6 +32,7 @@ const validEnvironment = {
   ANDROID_FORCE_UPDATE: 'false',
   ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.20.apk',
   ANDROID_APK_SHA256: 'ab'.repeat(32),
+  ANDROID_APK_SIZE: '180259847',
   ANDROID_RELEASE_NOTES: '["优化每日处方显示","修复已知问题"]',
   ANDROID_PUBLISHED_AT: '2026-10-29T08:00:00Z',
   TENCENT_COS_SECRET_ID: 'test-only-not-a-credential',
@@ -70,6 +72,7 @@ test('Android version config binds the digest to a fixed ECFC URL and keeps the 
     forceUpdate: false,
     downloadUrl: ANDROID_APP_DOWNLOAD_URL,
     apkSha256: 'ab'.repeat(32),
+    size: 180259847,
     apkObjectKey: 'android/releases/ECFC-1.0.0-beta.20.apk',
     releaseNotes: ['优化每日处方显示', '修复已知问题'],
     publishedAt: '2026-10-29T08:00:00.000Z',
@@ -80,6 +83,8 @@ test('missing or unsafe APK/COS deployment config fails closed', () => {
   assert.equal(parseAppVersionConfig({}), null)
   assert.equal(parseAppVersionConfig({ ...validEnvironment, ANDROID_VERSION_CODE: 'not-a-number' }), null)
   assert.equal(parseAppVersionConfig({ ...validEnvironment, ANDROID_APK_SHA256: 'abc' }), null)
+  assert.equal(parseAppVersionConfig({ ...validEnvironment, ANDROID_APK_SIZE: '0' }), null)
+  assert.equal(parseAppVersionConfig({ ...validEnvironment, ANDROID_APK_SIZE: '180259847.5' }), null)
   assert.equal(parseAppVersionConfig({ ...validEnvironment, ANDROID_APK_COS_KEY: '../private.apk' }), null)
   assert.equal(parseAppVersionConfig({ ...validEnvironment, ANDROID_APK_COS_KEY: 'android/releases/a/../b.apk' }), null)
   assert.equal(parseAppVersionConfig({ ...validEnvironment, ANDROID_APK_COS_KEY: 'android/releases//app.apk' }), null)
@@ -98,6 +103,7 @@ test('version endpoint returns only the public manifest and hides the private CO
     const body = await response.json() as Record<string, unknown>
     assert.equal(body.downloadUrl, ANDROID_APP_DOWNLOAD_URL)
     assert.equal(body.apkSha256, validEnvironment.ANDROID_APK_SHA256)
+    assert.equal(body.size, Number(validEnvironment.ANDROID_APK_SIZE))
     assert.equal('apkObjectKey' in body, false)
     assert.equal(response.headers.get('cache-control'), 'no-store, max-age=0')
   })
