@@ -18,7 +18,7 @@ concurrency:
 jobs:
   configure:
     if: github.ref == 'refs/heads/main'
-    name: Configure Beta.20 Android metadata without database access
+    name: Configure Beta.21 RC1 Android metadata without database access
     runs-on: ubuntu-22.04
     environment: Production
     timeout-minutes: 15
@@ -31,13 +31,13 @@ jobs:
 
       - name: Verify final APK stored in COS
         env:
-          APK_URL: https://media.ecfc.fans/media/android/releases/ECFC-1.0.0-beta.20-b4da126.apk
-          EXPECTED_SIZE: "180259847"
-          EXPECTED_SHA256: F5E17C2B41546AF42FB943EF6B6040A55DFB31C9E67EE5849EDCAB0B3102F030
+          APK_URL: https://media.ecfc.fans/media/android/releases/ECFC-1.0.0-beta.21-release-beta21-rc1-20261030-133912.apk
+          EXPECTED_SIZE: "180295939"
+          EXPECTED_SHA256: 0ED0920207C34A42DDBC4537FED476BB158D175AC5503B67F9A4054AF4B4ADF2
         run: |
           set -euo pipefail
-          apk_path="${RUNNER_TEMP}/ecfc-beta20-final.apk"
-          headers_path="${RUNNER_TEMP}/ecfc-beta20-cos-headers.txt"
+          apk_path="${RUNNER_TEMP}/ecfc-beta21-rc1.apk"
+          headers_path="${RUNNER_TEMP}/ecfc-beta21-rc1-cos-headers.txt"
           curl --fail --silent --show-error --location --max-time 180 \
             --dump-header "${headers_path}" --output "${apk_path}" "${APK_URL}"
           actual_size="$(stat -c '%s' "${apk_path}")"
@@ -97,12 +97,12 @@ jobs:
           EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
         run: |
           set -euo pipefail
-          apk_sha='F5E17C2B41546AF42FB943EF6B6040A55DFB31C9E67EE5849EDCAB0B3102F030'
-          notes='["新增 Android App 内检查更新功能","优化每日处方头像、昵称与 UID 布局","天使的礼物支持主题切换、五连抽/十连抽及勋章柜体验优化","稳定性优化"]'
+          apk_sha='0ED0920207C34A42DDBC4537FED476BB158D175AC5503B67F9A4054AF4B4ADF2'
+          notes='["新增全局分享系统","支持帖子、勋章和个人主页分享","支持活动、话题活动、Salon 与每日处方分享","Beta.21 RC1 内测版本"]'
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          config="$(jq -cn --arg name '1.0.0-beta.20' --argjson code 20 --argjson minimum 19 \
-            --argjson force false --arg key 'android/releases/ECFC-1.0.0-beta.20-b4da126.apk' \
-            --arg sha "${apk_sha}" --argjson size 180259847 --arg notes "${notes}" --arg published "${published_at}" \
+          config="$(jq -cn --arg name '1.0.0-beta.21' --argjson code 21 --argjson minimum 19 \
+            --argjson force false --arg key 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc1-20261030-133912.apk' \
+            --arg sha "${apk_sha}" --argjson size 180295939 --arg notes "${notes}" --arg published "${published_at}" \
             '{ANDROID_VERSION_NAME:$name,ANDROID_VERSION_CODE:$code,ANDROID_MINIMUM_VERSION_CODE:$minimum,ANDROID_FORCE_UPDATE:$force,ANDROID_APK_COS_KEY:$key,ANDROID_APK_SHA256:$sha,ANDROID_APK_SIZE:$size,ANDROID_RELEASE_NOTES:$notes,ANDROID_PUBLISHED_AT:$published}')"
           config_b64="$(printf '%s' "${config}" | base64 -w0)"
           [[ "${config_b64}" =~ ^[A-Za-z0-9+/]+=*$ ]] || { echo 'ANDROID_CONFIG_ENCODING_INVALID'; exit 1; }

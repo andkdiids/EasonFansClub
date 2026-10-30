@@ -10,18 +10,18 @@ import { parseAppVersionConfig } from '../lib/app-version'
 
 const expectedProductionSha = '38a0ea45dd2d5c208326cf7fe77ff63a1895f702'
 const metadata: AndroidReleaseMetadata = {
-  ANDROID_VERSION_NAME: '1.0.0-beta.20',
-  ANDROID_VERSION_CODE: 20,
+  ANDROID_VERSION_NAME: '1.0.0-beta.21',
+  ANDROID_VERSION_CODE: 21,
   ANDROID_MINIMUM_VERSION_CODE: 19,
   ANDROID_FORCE_UPDATE: false,
-  ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.20-b4da126.apk',
-  ANDROID_APK_SHA256: 'F5E17C2B41546AF42FB943EF6B6040A55DFB31C9E67EE5849EDCAB0B3102F030',
-  ANDROID_APK_SIZE: 180259847,
+  ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc1-20261030-133912.apk',
+  ANDROID_APK_SHA256: '0ED0920207C34A42DDBC4537FED476BB158D175AC5503B67F9A4054AF4B4ADF2',
+  ANDROID_APK_SIZE: 180295939,
   ANDROID_RELEASE_NOTES: JSON.stringify([
-    '新增 Android App 内检查更新功能',
-    '优化每日处方头像、昵称与 UID 布局',
-    '天使的礼物支持主题切换、五连抽/十连抽及勋章柜体验优化',
-    '稳定性优化',
+    '新增全局分享系统，支持帖子、勋章和个人主页分享',
+    '支持活动与话题活动分享',
+    '支持 Salon 和每日处方分享',
+    'Beta.21 RC1 内测版本',
   ]),
   ANDROID_PUBLISHED_AT: '2026-10-30T00:00:00.000Z',
 }
@@ -46,8 +46,8 @@ test('updates only allowlisted Android metadata and creates a protected verified
   const result = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, now: new Date('2026-10-30T00:00:00Z') })
   const after = readFileSync(envPath, 'utf8')
   assert.match(after, /DATABASE_URL=do-not-print-this/)
-  assert.match(after, /ANDROID_VERSION_CODE='20'/)
-  assert.match(after, /ANDROID_APK_SIZE='180259847'/)
+  assert.match(after, /ANDROID_VERSION_CODE='21'/)
+  assert.match(after, /ANDROID_APK_SIZE='180295939'/)
   assert.equal((after.match(/^ANDROID_[A-Z0-9_]+=/gm) ?? []).length, 9)
   assert.equal(result.changedKeys.length, 9)
   assert.equal(readFileSync(result.backupPath, 'utf8'), before)
@@ -106,6 +106,25 @@ test('duplicate metadata keys and invalid release size fail closed', (t) => {
   }), /INVALID_APK_SIZE/)
 })
 
+test('Beta.21 RC1 metadata is pinned to the verified candidate artifact', (t) => {
+  const { appDir } = fixture(t)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...metadata, ANDROID_VERSION_NAME: '1.0.0-beta.20' },
+  }), /INVALID_VERSION_NAME/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...metadata, ANDROID_APK_SHA256: 'ab'.repeat(32) },
+  }), /INVALID_APK_SHA256/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...metadata, ANDROID_APK_SIZE: metadata.ANDROID_APK_SIZE + 1 },
+  }), /INVALID_APK_SIZE/)
+})
+
 test('the production CLI enforces the fixed production target and never echoes env values', () => {
   const envPath = path.resolve('scripts/update-android-version-env.mjs')
   const result = spawnSync(process.execPath, [envPath], {
@@ -127,6 +146,13 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /vars\.PRODUCTION_SSH_HOST_KEY_SHA256/)
   assert.ok(workflow.indexOf('Verify final APK stored in COS') < workflow.indexOf('Update only Android version variables'))
   assert.match(workflow, /node --input-type=module -/)
+  assert.match(workflow, /Beta\.21 RC1 Android metadata without database access/i)
+  assert.match(workflow, /1\.0\.0-beta\.21/)
+  assert.match(workflow, /EXPECTED_SIZE: "180295939"/)
+  assert.match(workflow, /0ED0920207C34A42DDBC4537FED476BB158D175AC5503B67F9A4054AF4B4ADF2/)
+  assert.match(workflow, /--argjson minimum 19/)
+  assert.match(workflow, /--argjson force false/)
+  assert.match(workflow, /支持活动、话题活动、Salon 与每日处方分享/)
   assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|notification:integrity|npm run seed/i)
   for (const file of [
     'lib/app-version.ts',
