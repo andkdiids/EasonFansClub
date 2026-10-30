@@ -8,18 +8,19 @@ on:
         required: true
         type: string
       release_candidate:
-        description: Beta.21 RC3 or RC4 to publish for internal updates
+        description: Beta.21 RC3, RC4, or RC5 to publish for internal updates
         required: true
         type: choice
         options:
           - rc3
           - rc4
+          - rc5
       apk_object_key:
         description: Immutable versioned Beta.21 RC object key already uploaded to Tencent COS
         required: true
         type: string
       apk_sha256:
-        description: Uppercase SHA-256 of the signed Beta.21 RC3 APK
+        description: Uppercase SHA-256 of the signed Beta.21 RC APK
         required: true
         type: string
       apk_size:
@@ -56,15 +57,15 @@ jobs:
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
+          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
           key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
           [[ "${APK_OBJECT_KEY}" =~ ${key_regex} ]] || { echo 'APK_OBJECT_KEY_INVALID'; exit 1; }
           [[ "${EXPECTED_SIZE}" =~ ^[0-9]{8,9}$ ]] || { echo 'APK_SIZE_INVALID'; exit 1; }
           (( 10#${EXPECTED_SIZE} >= 10000000 && 10#${EXPECTED_SIZE} <= 500000000 )) || { echo 'APK_SIZE_OUT_OF_RANGE'; exit 1; }
           [[ "${EXPECTED_SHA256}" =~ ^[A-F0-9]{64}$ ]] || { echo 'APK_SHA256_INVALID'; exit 1; }
           apk_url="https://media.ecfc.fans/media/${APK_OBJECT_KEY}"
-          apk_path="${RUNNER_TEMP}/ecfc-beta21-rc3.apk"
-          headers_path="${RUNNER_TEMP}/ecfc-beta21-rc3-cos-headers.txt"
+          apk_path="${RUNNER_TEMP}/ecfc-beta21-${RELEASE_CANDIDATE}.apk"
+          headers_path="${RUNNER_TEMP}/ecfc-beta21-${RELEASE_CANDIDATE}-cos-headers.txt"
           curl --fail --silent --show-error --location --max-time 2400 \
             --dump-header "${headers_path}" --output "${apk_path}" "${apk_url}"
           actual_size="$(stat -c '%s' "${apk_path}")"
@@ -136,6 +137,10 @@ jobs:
             rc4)
               version_code=24
               notes='["分享入口提供私信、图片和链接三种独立方式","好友分享复用站内通讯录和私信","图片分享仅在选择后生成带二维码卡片","链接分享直接提供规范 HTTPS 网页地址","每日处方分享导出改为按需生成","Beta.21 RC4 内测版本"]'
+              ;;
+            rc5)
+              version_code=25
+              notes='["修复活跃症任务导航空路由","新增反馈与更新并接入现有反馈 API","App 启动时静默检查更新并复用现有更新器","个人主页扫码入口新增我的二维码和扫一扫","产品名称更新为番茄酱牛腩面不吃辣","Beta.21 RC5 内测版本"]'
               ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac

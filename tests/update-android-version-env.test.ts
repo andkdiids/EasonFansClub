@@ -171,6 +171,43 @@ test('Beta.21 RC4 metadata accepts versionCode 24 only with an RC4 object and ma
   }), /INVALID_RELEASE_NOTES/)
 })
 
+test('Beta.21 RC5 metadata accepts versionCode 25 only with an RC5 object and matching notes', (t) => {
+  const { appDir, envPath } = fixture(t)
+  const rc5Metadata: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 25,
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc5-'),
+    ANDROID_APK_SHA256: 'AB'.repeat(32),
+    ANDROID_APK_SIZE: 180_000_000,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '修复活跃症任务导航空路由',
+      '新增反馈与更新并接入现有反馈 API',
+      'App 启动时静默检查更新并复用现有更新器',
+      '个人主页扫码入口新增我的二维码和扫一扫',
+      '产品名称更新为番茄酱牛腩面不吃辣',
+      'Beta.21 RC5 内测版本',
+    ]),
+  }
+  configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc5Metadata })
+  const parsed = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(parsed.ANDROID_VERSION_NAME, '1.0.0-beta.21')
+  assert.equal(parsed.ANDROID_VERSION_CODE, '25')
+  assert.equal(parsed.ANDROID_MINIMUM_VERSION_CODE, '19')
+  assert.equal(parsed.ANDROID_FORCE_UPDATE, 'false')
+  assert.equal(parsed.ANDROID_APK_COS_KEY, rc5Metadata.ANDROID_APK_COS_KEY)
+  assert.deepEqual(JSON.parse(parsed.ANDROID_RELEASE_NOTES), JSON.parse(rc5Metadata.ANDROID_RELEASE_NOTES))
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc5Metadata, ANDROID_APK_COS_KEY: rc5Metadata.ANDROID_APK_COS_KEY.replace('rc5-', 'rc4-') },
+  }), /INVALID_APK_OBJECT_KEY/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc5Metadata, ANDROID_RELEASE_NOTES: metadata.ANDROID_RELEASE_NOTES },
+  }), /INVALID_RELEASE_NOTES/)
+})
+
 test('the production CLI enforces the fixed production target and never echoes env values', () => {
   const envPath = path.resolve('scripts/update-android-version-env.mjs')
   const result = spawnSync(process.execPath, [envPath], {
@@ -204,11 +241,14 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /release-beta21-\$\{RELEASE_CANDIDATE\}/)
   assert.match(workflow, /rc3\)/)
   assert.match(workflow, /rc4\)/)
+  assert.match(workflow, /rc5\)/)
+  assert.match(workflow, /version_code=25/)
   assert.match(workflow, /--argjson code "\$\{version_code\}"/)
   assert.match(workflow, /--argjson minimum 19/)
   assert.match(workflow, /--argjson force false/)
   assert.match(workflow, /Beta\.21 RC3 内测版本/)
   assert.match(workflow, /Beta\.21 RC4 内测版本/)
+  assert.match(workflow, /Beta\.21 RC5 内测版本/)
   assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|notification:integrity|npm run seed/i)
   for (const file of [
     'lib/app-version.ts',
