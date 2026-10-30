@@ -254,6 +254,7 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)
   assert.match(workflow, /PRODUCTION_ENV_LINK_MISMATCH/)
   assert.match(workflow, /PRODUCTION_METADATA_NOT_ACTIVE_AFTER_WEB_RELOAD/)
+  assert.match(workflow, /String\(versionBody\.apkSha256\)\.toUpperCase\(\) === expectedHash\.toUpperCase\(\)/)
   assert.doesNotMatch(workflow, /pm2 reload all|pm2 restart all/i)
   assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|notification:integrity|npm run seed/i)
   for (const file of [
