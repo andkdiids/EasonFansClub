@@ -22,6 +22,7 @@ const publicExactPaths = new Set([
   '/apple-icon.png',
   '/robots.txt',
   '/manifest.webmanifest',
+  '/app/android',
   '/d89ed4255676640e037130589550e237.txt',
   '/clinic',
   '/salon',
