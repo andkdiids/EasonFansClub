@@ -3,11 +3,14 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
-const deployScript = read('scripts/deploy-production-git.sh')
-const deployWorkflow = read('.github/workflows/deploy.yml')
+const deployScript = read('scripts/deploy-production-git.sh').replaceAll('\r\n', '\n')
+const deployWorkflow = read('.github/workflows/deploy.yml').replaceAll('\r\n', '\n')
 
-test('生产部署在切换 current 前强制执行 migration 和通知完整性门禁', () => {
+test('默认生产部署保留原有 migration、通知完整性及状态核验顺序', () => {
   const buildStart = deployScript.indexOf('pnpm_run build')
+  const skipStart = deployScript.indexOf('if [ "${db_mode}" = skip-db ]; then\n  log_step "6/8"')
+  const fullStart = deployScript.indexOf('\nelse\n  log_step "6/8" "Apply migrations and verify database state before current switch"', skipStart)
+  const fullEnd = deployScript.indexOf('\nfi\n\natomic_switch()', fullStart)
   const migrationStart = deployScript.indexOf('pnpm_run prisma migrate deploy')
   const integrityStart = deployScript.indexOf('pnpm_run notification:integrity')
   const switchStep = deployScript.indexOf('log_step "7/8" "Atomically switch current and reload PM2"')
@@ -17,18 +20,23 @@ test('生产部署在切换 current 前强制执行 migration 和通知完整性
   const deployedShaWrite = deployScript.indexOf('mv -Tf -- "${deployed_sha_tmp}" "${release_dir}/.deployed-sha"')
 
   assert.ok(buildStart >= 0)
-  assert.ok(migrationStart > buildStart)
+  assert.ok(skipStart > buildStart)
+  assert.ok(fullStart > skipStart)
+  assert.ok(fullEnd > fullStart)
+  assert.ok(migrationStart > fullStart)
   assert.ok(integrityStart > migrationStart)
-  assert.ok(switchStep > integrityStart)
+  assert.ok(switchStep > fullEnd)
   assert.ok(switchCall > switchStep)
   assert.ok(reloadCall > switchCall)
   assert.ok(healthStep > reloadCall)
   assert.ok(deployedShaWrite > healthStep)
   assert.match(deployScript, /set -Eeuo pipefail/)
-  assert.match(deployScript, /pnpm_run prisma migrate deploy\r?\n?pnpm_run notification:integrity/)
+  assert.match(deployScript, /pnpm_run prisma migrate deploy\r?\n[ \t]*pnpm_run notification:integrity/)
   assert.match(deployScript, /printf '%s\\n' "\$\{DEPLOY_SHA\}" > "\$\{deployed_sha_tmp\}"/)
   assert.doesNotMatch(deployScript.slice(0, switchStep), /printf '%s\\n' "\$\{DEPLOY_SHA\}" > "\$\{release_dir\}\/\.deployed-sha"/)
-  assert.doesNotMatch(deployScript, /PRODUCTION_MIGRATION_MODE/)
+  assert.match(deployScript.slice(skipStart, fullStart), /DATABASE MIGRATION: SKIPPED/)
+  assert.match(deployScript.slice(skipStart, fullStart), /NOTIFICATION_INTEGRITY_EXECUTED=NO/)
+  assert.match(deployScript, /deploy_skip_db_schema_guard "\$\{repo_dir\}" "\$\{previous_sha\}" "\$\{DEPLOY_SHA\}"/)
 })
 
 test('迁移失败时部署脚本不会在迁移前切换 current 或 reload PM2', () => {

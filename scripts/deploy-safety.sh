@@ -3,6 +3,92 @@
 # Shared, side-effect-small primitives for the production deploy and rollback
 # scripts. Keep these functions independently testable with temporary dirs.
 
+deploy_parse_db_mode_arg() {
+  case "$#" in
+    0) printf 'full\n' ;;
+    1)
+      [ "$1" = "--skip-db" ] || return 2
+      printf 'skip-db\n'
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+deploy_skip_db_schema_guard() {
+  local repo_dir="$1" baseline_sha="$2" target_sha="$3" diff_status
+  if ! git -C "${repo_dir}" cat-file -e "${baseline_sha}^{commit}" 2>/dev/null ||
+     ! git -C "${repo_dir}" cat-file -e "${target_sha}^{commit}" 2>/dev/null ||
+     ! git -C "${repo_dir}" merge-base --is-ancestor "${baseline_sha}" "${target_sha}" 2>/dev/null; then
+    echo "Cannot verify a safe production baseline for --skip-db; refusing deployment." >&2
+    return 1
+  fi
+
+  if git -C "${repo_dir}" diff --quiet "${baseline_sha}" "${target_sha}" -- \
+    ':(glob)**/schema.prisma' \
+    ':(glob)**/schema.*.prisma' \
+    ':(glob)**/migrations/**' \
+    ':(glob)**/migration_lock.toml' \
+    ':(glob)**/migration-history.json' \
+    ':(glob)**/prisma.config.*' \
+    ':(glob)**/*.sql'; then
+    return 0
+  else
+    diff_status=$?
+  fi
+
+  if [ "${diff_status}" -eq 1 ]; then
+    echo "Cannot use --skip-db because this release contains database schema/migration changes." >&2
+  else
+    echo "Unable to inspect schema/migration changes; refusing --skip-db." >&2
+  fi
+  return 1
+}
+
+deploy_create_db_maintenance_hold() {
+  local marker_file="$1" release_sha="$2" temporary_file
+  [[ "${release_sha}" =~ ^[0-9a-f]{40}$ ]] || return 1
+  if [ -e "${marker_file}" ] || [ -L "${marker_file}" ]; then
+    echo "Database-maintenance hold already exists; refusing to replace it." >&2
+    return 1
+  fi
+  temporary_file="${marker_file}.tmp.$$"
+  if ! (umask 077; set -o noclobber; printf '%s\n' "${release_sha}" > "${temporary_file}"); then
+    echo "Unable to create a private database-maintenance hold file." >&2
+    return 1
+  fi
+  chmod 600 -- "${temporary_file}" || { rm -f -- "${temporary_file}"; return 1; }
+  if ! ln -T -- "${temporary_file}" "${marker_file}"; then
+    rm -f -- "${temporary_file}"
+    echo "Unable to atomically create the database-maintenance hold file." >&2
+    return 1
+  fi
+  if ! rm -f -- "${temporary_file}"; then
+    deploy_remove_db_maintenance_hold "${marker_file}" "${release_sha}" || true
+    return 1
+  fi
+  if [ -f "${marker_file}" ] && [ ! -L "${marker_file}" ] &&
+     [ "$(cat -- "${marker_file}" 2>/dev/null || true)" = "${release_sha}" ]; then
+    return 0
+  fi
+  deploy_remove_db_maintenance_hold "${marker_file}" "${release_sha}" || true
+  return 1
+}
+
+deploy_remove_db_maintenance_hold() {
+  local marker_file="$1" release_sha="$2" marker_contents
+  if [ ! -e "${marker_file}" ] && [ ! -L "${marker_file}" ]; then return 0; fi
+  if [ -L "${marker_file}" ] || [ ! -f "${marker_file}" ]; then
+    echo "Refusing to remove an unexpected database-maintenance hold path." >&2
+    return 1
+  fi
+  marker_contents="$(cat -- "${marker_file}" 2>/dev/null || true)"
+  if [ "${marker_contents}" != "${release_sha}" ]; then
+    echo "Refusing to remove a database-maintenance hold owned by another release." >&2
+    return 1
+  fi
+  rm -- "${marker_file}"
+}
+
 deploy_normalize_path() {
   local value="${1:-}"
   value="${value% (deleted)}"

@@ -10,6 +10,15 @@ on:
     paths-ignore:
       - '.github/**'
   workflow_dispatch:
+    inputs:
+      db_mode:
+        description: Database phase for this reviewed main-branch deployment
+        required: true
+        type: choice
+        options:
+          - full
+          - skip-db
+        default: full
 
 permissions:
   contents: read
@@ -254,8 +263,15 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PM2_APP_NAME: easonfansclub
           TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE: ${{ vars.TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE }}
+          DEPLOY_DB_MODE: ${{ inputs.db_mode || 'full' }}
         run: |
           set -euo pipefail
+
+          deploy_db_mode="${DEPLOY_DB_MODE:-full}"
+          case "${deploy_db_mode}" in
+            full|skip-db) ;;
+            *) echo "::error::Unknown database deployment mode."; exit 2 ;;
+          esac
 
           # Only forward a server-side path; approval contents stay on the host.
           # Restrict shell metacharacters because SSH joins remote arguments.
@@ -288,11 +304,18 @@ jobs:
           expected_production_sha="$(timeout --foreground 60s ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
             'set -eu; target=$(readlink -f -- /home/apps/easonfansclub/current); cat -- "$target/.deployed-sha"')"
           [[ "$expected_production_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid current production SHA." >&2; exit 1; }
+          deploy_arguments=("${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}" "${expected_production_sha}")
+          if [[ "${deploy_db_mode}" == skip-db ]]; then
+            deploy_arguments+=(--skip-db)
+            echo "DATABASE_DEPLOYMENT_MODE=SKIP_DB"
+          else
+            echo "DATABASE_DEPLOYMENT_MODE=FULL"
+          fi
           set +e
           deploy_output="$(cat scripts/deploy-safety.sh scripts/deploy-production-git.sh \
             | timeout --foreground --signal=TERM --kill-after=7m 35m ssh "${SSH_OPTIONS[@]}" "${REMOTE_HOST}" \
               env "TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE=${TOPIC_LOTTERY_MIGRATION_APPROVAL_FILE}" \
-              bash -s -- "${APP_DIR}" "${APP_PORT}" "${DEPLOY_SHA}" "${PM2_APP_NAME}" "${GITHUB_REPOSITORY}" "$expected_production_sha")"
+              bash -s -- "${deploy_arguments[@]}")"
           deploy_status=$?
           set -e
           printf '%s\n' "${deploy_output}"

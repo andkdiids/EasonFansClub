@@ -8,6 +8,7 @@ import { getClientIpFromHeaders } from './lib/client-ip'
 import { hasValidRequestOrigin } from './lib/security'
 import { ensureRuntimeObservability } from './lib/runtime-observability'
 import { startGlobalPointsGrantWorker } from './lib/global-points-grant-worker'
+import { isDbMaintenanceAllowed, isDeploymentDbMaintenanceHeld } from './lib/deployment-db-maintenance-hold'
 import { realtimeHub, realtimePublisher } from './lib/realtime'
 import { duelRealtimeHub } from './lib/guess-song-duel-realtime'
 import { undercoverRealtimeHub } from './lib/undercover-star-realtime'
@@ -339,6 +340,7 @@ async function start() {
   // locked in its own transaction, so overlapping ticks and restarts are safe.
   let activityAutoCheckInRunning = false
   const runActivityAutoCheckIn = async () => {
+    if (!isDbMaintenanceAllowed()) return
     if (activityAutoCheckInRunning) return
     activityAutoCheckInRunning = true
     try {
@@ -407,6 +409,12 @@ async function start() {
     }
   }
   const activityAutoCheckInEnabled = process.env.NODE_ENV === 'production'
+  if (activityAutoCheckInEnabled && isDeploymentDbMaintenanceHeld()) {
+    console.info('[deployment.db-maintenance.held]', {
+      event: 'deployment.db_maintenance.held',
+      release: releaseSha(),
+    })
+  }
   const productionActivityAutoCheckInHeartbeat = activityAutoCheckInEnabled
     ? setInterval(() => { void runActivityAutoCheckIn() }, activityAutoCheckInIntervalMs)
     : null

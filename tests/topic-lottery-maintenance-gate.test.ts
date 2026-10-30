@@ -46,7 +46,7 @@ test('maintenance guard precedes all migration writes without replacing release 
   // Script SHAs are positional shell variables, not necessarily inherited env.
   assert.match(source,/DEPLOY_SHA="\$\{DEPLOY_SHA\}" EXPECTED_PRODUCTION_SHA="\$\{EXPECTED_PRODUCTION_SHA\}" node scripts\/check-topic-lottery-maintenance\.mjs/)
   assert.ok(source.indexOf('node scripts/check-topic-lottery-maintenance.mjs')<source.indexOf('pnpm_run prisma migrate deploy'))
-  assert.match(source,/pnpm_run prisma migrate deploy\r?\npnpm_run notification:integrity/)
+  assert.match(source,/pnpm_run prisma migrate deploy\r?\n[ \t]*pnpm_run notification:integrity/)
   assert.match(source,/pnpm_with_timeout "\$\{lottery_migration_timeout_seconds\}s"/)
   const gate=readFileSync('scripts/check-topic-lottery-maintenance.mjs','utf8')
   assert.doesNotMatch(gate,/import .*?(?:@prisma|mysql|child_process|node:net|node:http)/)
