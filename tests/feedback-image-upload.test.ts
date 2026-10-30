@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import sharp from 'sharp'
-import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE } from '../lib/feedback'
+import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_ATTACHMENTS, FEEDBACK_MAX_FILE_SIZE, isFeedbackSubmissionContentValid } from '../lib/feedback'
 import { normalizeImageToWebp } from '../lib/image-webp'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -30,12 +30,20 @@ test('反馈图片前端使用 file 字段并保留开发环境错误原因', ()
   assert.match(uploader, /HTTP \$\{response\.status\}/)
 })
 
-test('反馈图片仍共享 JPG/PNG/WebP 白名单、5 张与 10MB 限制', () => {
+test('反馈图片仍共享 JPG/PNG/WebP 白名单、9 张与 10MB 限制', () => {
   assert.ok(FEEDBACK_ALLOWED_IMAGE_TYPES.includes('image/jpeg'))
   assert.ok(FEEDBACK_ALLOWED_IMAGE_TYPES.includes('image/png'))
   assert.ok(FEEDBACK_ALLOWED_IMAGE_TYPES.includes('image/webp'))
-  assert.equal(FEEDBACK_MAX_ATTACHMENTS, 5)
+  assert.equal(FEEDBACK_MAX_ATTACHMENTS, 9)
   assert.equal(FEEDBACK_MAX_FILE_SIZE, 10 * 1024 * 1024)
+})
+
+test('反馈内容可由文字或已上传图片满足；空内容且无图片仍会拒绝', () => {
+  assert.equal(isFeedbackSubmissionContentValid('描述足够长的反馈内容', 0), true)
+  assert.equal(isFeedbackSubmissionContentValid('', 1), true)
+  assert.equal(isFeedbackSubmissionContentValid('短句', 1), true)
+  assert.equal(isFeedbackSubmissionContentValid('', 0), false)
+  assert.equal(isFeedbackSubmissionContentValid('短句', 0), false)
 })
 
 test('JPG、PNG、WebP 输入都能被服务端统一转换为 WebP', async () => {
