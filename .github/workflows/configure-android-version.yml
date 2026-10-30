@@ -8,18 +8,19 @@ on:
         required: true
         type: string
       release_candidate:
-        description: Beta.21 RC3 or RC4 to publish for internal updates
+        description: Beta.21 RC3, RC4, or RC5 to publish for internal updates
         required: true
         type: choice
         options:
           - rc3
           - rc4
+          - rc5
       apk_object_key:
         description: Immutable versioned Beta.21 RC object key already uploaded to Tencent COS
         required: true
         type: string
       apk_sha256:
-        description: Uppercase SHA-256 of the signed Beta.21 RC3 APK
+        description: Uppercase SHA-256 of the signed Beta.21 RC APK
         required: true
         type: string
       apk_size:
@@ -56,15 +57,15 @@ jobs:
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
+          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
           key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
           [[ "${APK_OBJECT_KEY}" =~ ${key_regex} ]] || { echo 'APK_OBJECT_KEY_INVALID'; exit 1; }
           [[ "${EXPECTED_SIZE}" =~ ^[0-9]{8,9}$ ]] || { echo 'APK_SIZE_INVALID'; exit 1; }
           (( 10#${EXPECTED_SIZE} >= 10000000 && 10#${EXPECTED_SIZE} <= 500000000 )) || { echo 'APK_SIZE_OUT_OF_RANGE'; exit 1; }
           [[ "${EXPECTED_SHA256}" =~ ^[A-F0-9]{64}$ ]] || { echo 'APK_SHA256_INVALID'; exit 1; }
           apk_url="https://media.ecfc.fans/media/${APK_OBJECT_KEY}"
-          apk_path="${RUNNER_TEMP}/ecfc-beta21-rc3.apk"
-          headers_path="${RUNNER_TEMP}/ecfc-beta21-rc3-cos-headers.txt"
+          apk_path="${RUNNER_TEMP}/ecfc-beta21-${RELEASE_CANDIDATE}.apk"
+          headers_path="${RUNNER_TEMP}/ecfc-beta21-${RELEASE_CANDIDATE}-cos-headers.txt"
           curl --fail --silent --show-error --location --max-time 2400 \
             --dump-header "${headers_path}" --output "${apk_path}" "${apk_url}"
           actual_size="$(stat -c '%s' "${apk_path}")"
@@ -137,6 +138,10 @@ jobs:
               version_code=24
               notes='["分享入口提供私信、图片和链接三种独立方式","好友分享复用站内通讯录和私信","图片分享仅在选择后生成带二维码卡片","链接分享直接提供规范 HTTPS 网页地址","每日处方分享导出改为按需生成","Beta.21 RC4 内测版本"]'
               ;;
+            rc5)
+              version_code=25
+              notes='["修复活跃症任务导航空路由","新增反馈与更新并接入现有反馈 API","App 启动时静默检查更新并复用现有更新器","个人主页扫码入口新增我的二维码和扫一扫","产品名称更新为番茄酱牛腩面不吃辣","Beta.21 RC5 内测版本"]'
+              ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -159,3 +164,112 @@ jobs:
           timeout --foreground --signal=TERM --kill-after=10s 90s \
             ssh "${ssh_options[@]}" "${remote_host}" "${remote_command}" \
             < scripts/update-android-version-env.mjs
+
+      - name: Reload only the web process and verify the active metadata
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOST_KEY_SHA256: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          APK_SHA256: ${{ inputs.apk_sha256 }}
+          APK_SIZE: ${{ inputs.apk_size }}
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+        run: |
+          set -euo pipefail
+          for name in SERVER_HOST SERVER_USER SERVER_PORT SERVER_SSH_KEY PINNED_HOST_KEY_SHA256 EXPECTED_PRODUCTION_SHA APK_SHA256 APK_SIZE RELEASE_CANDIDATE; do
+            [[ -n "${!name:-}" ]] || { echo "::error::Required protected setting ${name} is missing."; exit 1; }
+          done
+          [[ "${EXPECTED_PRODUCTION_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${APK_SHA256}" =~ ^[A-F0-9]{64}$ ]]
+          [[ "${APK_SIZE}" =~ ^[0-9]{8,9}$ ]]
+          case "${RELEASE_CANDIDATE}" in
+            rc3) expected_version_code=23 ;;
+            rc4) expected_version_code=24 ;;
+            rc5) expected_version_code=25 ;;
+            *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
+          esac
+          remote_host="${SERVER_USER}@${SERVER_HOST}"
+          printf -v remote_command 'flock -n %q bash -s -- %q %q %q %q %q' \
+            '/home/apps/easonfansclub/.deploy.lock' '/home/apps/easonfansclub' \
+            "${EXPECTED_PRODUCTION_SHA}" "${expected_version_code}" "${APK_SHA256}" "${APK_SIZE}"
+          ssh_options=(
+            -T -p "${SERVER_PORT}" -i "${RUNNER_TEMP}/easonfansclub_deploy_key"
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10
+          )
+          timeout --foreground --signal=TERM --kill-after=10s 180s \
+            ssh "${ssh_options[@]}" "${remote_host}" "${remote_command}" <<'REMOTE'
+          set -euo pipefail
+          APP_DIR="$1"
+          EXPECTED_SHA="$2"
+          EXPECTED_VERSION_CODE="$3"
+          EXPECTED_APK_SHA256="$4"
+          EXPECTED_APK_SIZE="$5"
+          [[ "${APP_DIR}" == /home/apps/easonfansclub ]]
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${EXPECTED_VERSION_CODE}" =~ ^(23|24|25)$ ]]
+          [[ "${EXPECTED_APK_SHA256}" =~ ^[A-F0-9]{64}$ ]]
+          [[ "${EXPECTED_APK_SIZE}" =~ ^[0-9]{8,9}$ ]]
+          current_link="${APP_DIR}/current"
+          [[ -L "${current_link}" ]] || { echo 'PRODUCTION_CURRENT_NOT_SYMLINK'; exit 1; }
+          current_target="$(readlink -f -- "${current_link}")"
+          case "${current_target}" in
+            "${APP_DIR}/releases/"*) ;;
+            *) echo 'PRODUCTION_CURRENT_OUTSIDE_RELEASES'; exit 1 ;;
+          esac
+          deployed_sha="$(cat "${current_target}/.deployed-sha")"
+          [[ "${deployed_sha}" == "${EXPECTED_SHA}" ]] || { echo 'PRODUCTION_SHA_MISMATCH'; exit 1; }
+          shared_env="$(readlink -f -- "${APP_DIR}/shared/.env")"
+          release_env="$(readlink -f -- "${current_target}/.env")"
+          [[ "${shared_env}" == "${release_env}" ]] || { echo 'PRODUCTION_ENV_LINK_MISMATCH'; exit 1; }
+          node - "${current_target}" <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const expectedCwd = fs.realpathSync(process.argv[2]);
+          const apps = JSON.parse(execFileSync('pm2', ['jlist'], { encoding: 'utf8' }))
+            .filter((app) => app.name === 'easonfansclub');
+          if (apps.length !== 1 || apps[0].pm2_env?.status !== 'online') {
+            throw new Error('WEB_PROCESS_NOT_UNIQUELY_ONLINE');
+          }
+          const actualCwd = fs.realpathSync(path.resolve(apps[0].pm2_env.pm_cwd));
+          if (actualCwd !== expectedCwd) throw new Error('WEB_PROCESS_RELEASE_MISMATCH');
+          process.stdout.write('WEB_PROCESS_PRECHECK=PASS\n');
+          NODE
+          timeout --foreground --signal=TERM --kill-after=10s 90s pm2 reload easonfansclub --update-env
+          node - "${EXPECTED_SHA}" "${EXPECTED_VERSION_CODE}" "${EXPECTED_APK_SHA256}" "${EXPECTED_APK_SIZE}" <<'NODE'
+          (async () => {
+          const [expectedSha, expectedCode, expectedHash, expectedSize] = process.argv.slice(2);
+          const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            try {
+              const health = await fetch('http://127.0.0.1:3000/api/health/live', { signal: AbortSignal.timeout(3000) });
+              const healthBody = await health.json();
+              const version = await fetch('http://127.0.0.1:3000/api/app/version?platform=android', { signal: AbortSignal.timeout(3000) });
+              const versionBody = await version.json();
+              if (health.ok && healthBody.release === expectedSha && version.ok
+                && versionBody.versionName === '1.0.0-beta.21'
+                && String(versionBody.versionCode) === expectedCode
+                && Number(versionBody.minimumVersionCode) === 19
+                && versionBody.forceUpdate === false
+                && String(versionBody.size) === expectedSize
+                && versionBody.apkSha256 === expectedHash) {
+                process.stdout.write('PRODUCTION_HEALTH_SHA=' + healthBody.release + '\n');
+                process.stdout.write('PRODUCTION_VERSION_CODE=' + versionBody.versionCode + '\n');
+                process.stdout.write('WEB_PROCESS_RELOAD=PASS\n');
+                return;
+              }
+            } catch {}
+            await pause(2000);
+          }
+          throw new Error('PRODUCTION_METADATA_NOT_ACTIVE_AFTER_WEB_RELOAD');
+          })().catch((error) => {
+            process.stderr.write('PRODUCTION_METADATA_VERIFY_FAILED=' + String(error?.message || error) + '\n');
+            process.exitCode = 1;
+          });
+          NODE
+          REMOTE

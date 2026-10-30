@@ -26,7 +26,8 @@ function validateMetadata(metadata) {
   requireThat(JSON.stringify(actualKeys) === JSON.stringify([...METADATA_KEYS].sort()), 'INVALID_METADATA_KEYS')
   requireThat(/^1\.0\.0-beta\.21$/.test(metadata.ANDROID_VERSION_NAME), 'INVALID_VERSION_NAME')
   const releaseCandidate = metadata.ANDROID_VERSION_CODE === 23 ? 'rc3'
-    : metadata.ANDROID_VERSION_CODE === 24 ? 'rc4' : null
+    : metadata.ANDROID_VERSION_CODE === 24 ? 'rc4'
+      : metadata.ANDROID_VERSION_CODE === 25 ? 'rc5' : null
   requireThat(releaseCandidate !== null, 'INVALID_VERSION_CODE')
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')
