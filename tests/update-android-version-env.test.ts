@@ -152,6 +152,8 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /workflow_dispatch:/)
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/)
   assert.match(workflow, /environment: Production/)
+  assert.match(workflow, /timeout-minutes: 45/)
+  assert.match(workflow, /--max-time 2400/)
   assert.match(workflow, /vars\.PRODUCTION_SSH_HOST_KEY_SHA256/)
   assert.ok(workflow.indexOf('Verify final APK stored in COS') < workflow.indexOf('Update only Android version variables'))
   assert.match(workflow, /node --input-type=module -/)
