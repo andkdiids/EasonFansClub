@@ -160,9 +160,9 @@ test('通知目标支持显式链接、好友、活动和无目标通知', () =>
   assert.equal(getNotificationTarget({ ...base, type: 'REPLY', link: '/posts/p1' }), '/posts/p1')
 })
 
-test('反馈前后端共享十字、五图与 10MB 限制', () => {
+test('反馈前后端共享十字、九图与 10MB 限制', () => {
   assert.equal(FEEDBACK_DESCRIPTION_MIN_LENGTH, 10)
-  assert.equal(FEEDBACK_MAX_ATTACHMENTS, 5)
+  assert.equal(FEEDBACK_MAX_ATTACHMENTS, 9)
   assert.equal(FEEDBACK_MAX_FILE_SIZE, 10 * 1024 * 1024)
 })
 

@@ -245,6 +245,43 @@ test('Beta.21 RC6 metadata accepts versionCode 26 only with an RC6 object and ma
   }), /INVALID_RELEASE_NOTES/)
 })
 
+test('Beta.21 RC7 metadata accepts versionCode 27 only with an RC7 object and matching notes', (t) => {
+  const { appDir, envPath } = fixture(t)
+  const rc7Metadata: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 27,
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc7-'),
+    ANDROID_APK_SHA256: 'EF'.repeat(32),
+    ANDROID_APK_SIZE: 184_500_000,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '支持意见反馈添加最多 9 张图片',
+      '修复活跃症任务导航并补充真实点击回归检查',
+      '补充活动中心核销二维码与管理员扫码入口',
+      '优化广场滑动切换和每日处方分享',
+      '统一普通页面提示并移除技术实现文案',
+      'Beta.21 RC7 内测版本',
+    ]),
+  }
+  configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc7Metadata })
+  const parsed = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(parsed.ANDROID_VERSION_NAME, '1.0.0-beta.21')
+  assert.equal(parsed.ANDROID_VERSION_CODE, '27')
+  assert.equal(parsed.ANDROID_MINIMUM_VERSION_CODE, '19')
+  assert.equal(parsed.ANDROID_FORCE_UPDATE, 'false')
+  assert.equal(parsed.ANDROID_APK_COS_KEY, rc7Metadata.ANDROID_APK_COS_KEY)
+  assert.deepEqual(JSON.parse(parsed.ANDROID_RELEASE_NOTES), JSON.parse(rc7Metadata.ANDROID_RELEASE_NOTES))
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc7Metadata, ANDROID_APK_COS_KEY: rc7Metadata.ANDROID_APK_COS_KEY.replace('rc7-', 'rc6-') },
+  }), /INVALID_APK_OBJECT_KEY/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc7Metadata, ANDROID_RELEASE_NOTES: metadata.ANDROID_RELEASE_NOTES },
+  }), /INVALID_RELEASE_NOTES/)
+})
+
 test('the production CLI enforces the fixed production target and never echoes env values', () => {
   const envPath = path.resolve('scripts/update-android-version-env.mjs')
   const result = spawnSync(process.execPath, [envPath], {
@@ -280,8 +317,10 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /rc4\)/)
   assert.match(workflow, /rc5\)/)
   assert.match(workflow, /rc6\)/)
+  assert.match(workflow, /rc7\)/)
   assert.match(workflow, /version_code=25/)
   assert.match(workflow, /version_code=26/)
+  assert.match(workflow, /version_code=27/)
   assert.match(workflow, /--argjson code "\$\{version_code\}"/)
   assert.match(workflow, /--argjson minimum 19/)
   assert.match(workflow, /--argjson force false/)
@@ -289,7 +328,8 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /Beta\.21 RC4 内测版本/)
   assert.match(workflow, /Beta\.21 RC5 内测版本/)
   assert.match(workflow, /Beta\.21 RC6 内测版本/)
-  assert.match(workflow, /\^\(23\|24\|25\|26\)\$/)
+  assert.match(workflow, /Beta\.21 RC7 内测版本/)
+  assert.match(workflow, /\^\(23\|24\|25\|26\|27\)\$/)
   assert.ok(workflow.indexOf('Update only Android version variables') < workflow.indexOf('Reload only the web process'))
   assert.match(workflow, /pm2 reload easonfansclub --update-env/)
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)

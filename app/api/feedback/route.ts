@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createHash } from 'node:crypto'
 import { Prisma } from '@prisma/client'
-import { FEEDBACK_DESCRIPTION_MAX_LENGTH, FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_DESCRIPTION_TOO_LONG_ERROR, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
+import { FEEDBACK_DESCRIPTION_MAX_LENGTH, FEEDBACK_DESCRIPTION_MIN_LENGTH, FEEDBACK_DESCRIPTION_TOO_LONG_ERROR, FEEDBACK_MAX_ATTACHMENTS, feedbackInclude, feedbackListSelect, isFeedbackSubmissionContentValid, parseFeedbackAttachments, parseFeedbackStatusFilter, parseFeedbackType, serializeFeedback, serializeFeedbackListItem } from '@/lib/feedback'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
 import { safeDb } from '@/lib/db-timeout'
@@ -62,13 +62,14 @@ export async function POST(request: Request) {
   const content = sanitizeText(rawContent, FEEDBACK_DESCRIPTION_MAX_LENGTH)
   const contact = sanitizeText(body?.contact, 120)
   const type = parseFeedbackType(body?.type ?? body?.category)
+  const rawAttachmentCount = Array.isArray(body?.attachments) ? body.attachments.length : 0
+  if (rawAttachmentCount > FEEDBACK_MAX_ATTACHMENTS) return NextResponse.json({ message: `最多只能上传 ${FEEDBACK_MAX_ATTACHMENTS} 张图片` }, { status: 400 })
   const attachments = parseFeedbackAttachments(body?.attachments)
   if ((await checkBannedWords(`${title}\n${content}`)).blocked) return NextResponse.json({ error: CONTENT_CONTAINS_BANNED_WORD, message: BANNED_WORD_MESSAGE }, { status: 400 })
 
   if (!title) return NextResponse.json({ message: '请填写反馈标题', errors: { title: '请填写反馈标题' } }, { status: 400 })
   if (!type) return NextResponse.json({ message: '请选择反馈分类', errors: { type: '请选择反馈分类' } }, { status: 400 })
-  if (!content || content.trim().length < FEEDBACK_DESCRIPTION_MIN_LENGTH) return NextResponse.json({ message: `反馈描述至少需要 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字`, errors: { description: `反馈描述至少需要 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字` } }, { status: 400 })
-  if (attachments.length > FEEDBACK_MAX_ATTACHMENTS) return NextResponse.json({ message: `最多只能上传 ${FEEDBACK_MAX_ATTACHMENTS} 张图片` }, { status: 400 })
+  if (!isFeedbackSubmissionContentValid(content, attachments.length)) return NextResponse.json({ message: `请填写至少 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字，或添加图片` , errors: { description: `请填写至少 ${FEEDBACK_DESCRIPTION_MIN_LENGTH} 个字，或添加图片` } }, { status: 400 })
 
   const now = new Date()
   let feedback
