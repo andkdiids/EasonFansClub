@@ -25,11 +25,14 @@ function validateMetadata(metadata) {
   const actualKeys = Object.keys(metadata).sort()
   requireThat(JSON.stringify(actualKeys) === JSON.stringify([...METADATA_KEYS].sort()), 'INVALID_METADATA_KEYS')
   requireThat(/^1\.0\.0-beta\.21$/.test(metadata.ANDROID_VERSION_NAME), 'INVALID_VERSION_NAME')
-  requireThat(metadata.ANDROID_VERSION_CODE === 23, 'INVALID_VERSION_CODE')
+  const releaseCandidate = metadata.ANDROID_VERSION_CODE === 23 ? 'rc3'
+    : metadata.ANDROID_VERSION_CODE === 24 ? 'rc4' : null
+  requireThat(releaseCandidate !== null, 'INVALID_VERSION_CODE')
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')
+  const objectKeyPattern = new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}\\.apk$`)
   requireThat(typeof metadata.ANDROID_APK_COS_KEY === 'string'
-    && /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc3-\d{8}-\d{6}\.apk$/.test(metadata.ANDROID_APK_COS_KEY), 'INVALID_APK_OBJECT_KEY')
+    && objectKeyPattern.test(metadata.ANDROID_APK_COS_KEY), 'INVALID_APK_OBJECT_KEY')
   requireThat(typeof metadata.ANDROID_APK_SHA256 === 'string'
     && /^[A-F0-9]{64}$/.test(metadata.ANDROID_APK_SHA256), 'INVALID_APK_SHA256')
   requireThat(Number.isSafeInteger(metadata.ANDROID_APK_SIZE)
@@ -40,7 +43,7 @@ function validateMetadata(metadata) {
   try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('INVALID_RELEASE_NOTES') }
   requireThat(Array.isArray(notes) && notes.length === 6
     && notes.every((note) => typeof note === 'string' && note.length > 0 && note.length <= 500), 'INVALID_RELEASE_NOTES')
-  requireThat(notes[5] === 'Beta.21 RC3 内测版本', 'INVALID_RELEASE_NOTES')
+  requireThat(notes[5] === `Beta.21 ${releaseCandidate.toUpperCase()} 内测版本`, 'INVALID_RELEASE_NOTES')
   requireThat(typeof metadata.ANDROID_PUBLISHED_AT === 'string'
     && Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT)), 'INVALID_PUBLISHED_AT')
 }

@@ -7,8 +7,15 @@ on:
         description: Exact currently deployed production SHA (required; prevents stale config writes)
         required: true
         type: string
+      release_candidate:
+        description: Beta.21 RC3 or RC4 to publish for internal updates
+        required: true
+        type: choice
+        options:
+          - rc3
+          - rc4
       apk_object_key:
-        description: Immutable Beta.21 RC3 object key already uploaded to Tencent COS
+        description: Immutable versioned Beta.21 RC object key already uploaded to Tencent COS
         required: true
         type: string
       apk_sha256:
@@ -30,7 +37,7 @@ concurrency:
 jobs:
   configure:
     if: github.ref == 'refs/heads/main'
-    name: Configure Beta.21 RC3 Android metadata without database access
+    name: Configure Beta.21 Android metadata without database access
     runs-on: ubuntu-22.04
     environment: Production
     timeout-minutes: 45
@@ -46,9 +53,12 @@ jobs:
           APK_OBJECT_KEY: ${{ inputs.apk_object_key }}
           EXPECTED_SIZE: ${{ inputs.apk_size }}
           EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          [[ "${APK_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.21-release-beta21-rc3-[0-9]{8}-[0-9]{6}\.apk$ ]] || { echo 'APK_OBJECT_KEY_INVALID'; exit 1; }
+          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
+          key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
+          [[ "${APK_OBJECT_KEY}" =~ ${key_regex} ]] || { echo 'APK_OBJECT_KEY_INVALID'; exit 1; }
           [[ "${EXPECTED_SIZE}" =~ ^[0-9]{8,9}$ ]] || { echo 'APK_SIZE_INVALID'; exit 1; }
           (( 10#${EXPECTED_SIZE} >= 10000000 && 10#${EXPECTED_SIZE} <= 500000000 )) || { echo 'APK_SIZE_OUT_OF_RANGE'; exit 1; }
           [[ "${EXPECTED_SHA256}" =~ ^[A-F0-9]{64}$ ]] || { echo 'APK_SHA256_INVALID'; exit 1; }
@@ -115,11 +125,22 @@ jobs:
           APK_OBJECT_KEY: ${{ inputs.apk_object_key }}
           EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
           EXPECTED_SIZE: ${{ inputs.apk_size }}
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          notes='["分享卡展示帖子原图、作者头像和正式品牌资源","图片分享同时提供说明文字与规范公开链接","二维码和分享文案使用同一公开网址","每日处方分享与更新下载体验改进","RC3 内测修复","Beta.21 RC3 内测版本"]'
+          case "${RELEASE_CANDIDATE}" in
+            rc3)
+              version_code=23
+              notes='["分享卡展示帖子原图、作者头像和正式品牌资源","图片分享同时提供说明文字与规范公开链接","二维码和分享文案使用同一公开网址","每日处方分享与更新下载体验改进","RC3 内测修复","Beta.21 RC3 内测版本"]'
+              ;;
+            rc4)
+              version_code=24
+              notes='["分享入口提供私信、图片和链接三种独立方式","好友分享复用站内通讯录和私信","图片分享仅在选择后生成带二维码卡片","链接分享直接提供规范 HTTPS 网页地址","每日处方分享导出改为按需生成","Beta.21 RC4 内测版本"]'
+              ;;
+            *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
+          esac
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          config="$(jq -cn --arg name '1.0.0-beta.21' --argjson code 23 --argjson minimum 19 \
+          config="$(jq -cn --arg name '1.0.0-beta.21' --argjson code "${version_code}" --argjson minimum 19 \
             --argjson force false --arg key "${APK_OBJECT_KEY}" \
             --arg sha "${EXPECTED_SHA256}" --argjson size "${EXPECTED_SIZE}" --arg notes "${notes}" --arg published "${published_at}" \
             '{ANDROID_VERSION_NAME:$name,ANDROID_VERSION_CODE:$code,ANDROID_MINIMUM_VERSION_CODE:$minimum,ANDROID_FORCE_UPDATE:$force,ANDROID_APK_COS_KEY:$key,ANDROID_APK_SHA256:$sha,ANDROID_APK_SIZE:$size,ANDROID_RELEASE_NOTES:$notes,ANDROID_PUBLISHED_AT:$published}')"
