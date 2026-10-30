@@ -25,6 +25,7 @@ does not buffer the APK body or expose a COS hostname/signature to Mobile.
 | `ANDROID_FORCE_UPDATE` | exactly `true` or `false`; defaults to `false` when absent | no |
 | `ANDROID_APK_COS_KEY` | server-side key under `android/releases/` ending in `.apk` | yes |
 | `ANDROID_APK_SHA256` | 64 hexadecimal SHA-256 characters | yes |
+| `ANDROID_APK_SIZE` | positive integer APK size in bytes | yes |
 | `ANDROID_RELEASE_NOTES` | JSON array of non-empty strings; max 50 notes and 500 characters per note | no |
 | `ANDROID_PUBLISHED_AT` | parseable date, returned as ISO 8601 | no |
 
@@ -58,6 +59,7 @@ object key. The mobile client verifies that SHA-256 and the package name,
 version code, and pinned release certificate before it opens Android's package
 installer. The client does not resume partial downloads; interrupted `.part`
 files are removed on startup and the download restarts from the beginning.
+The public version manifest also returns the configured APK `size` in bytes.
 
 Setting these variables in a deployment environment, uploading an APK, or
 deploying the route is a separate release operation. This change does not

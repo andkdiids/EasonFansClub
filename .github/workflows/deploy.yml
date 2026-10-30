@@ -9,6 +9,15 @@ on:
     # still runs because at least one changed path is not ignored.
     paths-ignore:
       - '.github/**'
+      # Android release metadata changes require an explicit app-only dispatch
+      # so the default push deployment cannot start database phases.
+      - 'app/api/app/version/route.ts'
+      - 'lib/app-version.ts'
+      - 'tests/app-version.test.ts'
+      - 'tests/update-android-version-env.test.ts'
+      - 'docs/app-version-api.md'
+      - 'scripts/update-android-version-env.mjs'
+      - 'scripts/update-android-version-env.d.mts'
   workflow_dispatch:
     inputs:
       db_mode:
