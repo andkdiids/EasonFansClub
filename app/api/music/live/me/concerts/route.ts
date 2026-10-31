@@ -4,12 +4,12 @@ import { parsePersonalPageSize, parsePositivePage, PERSONAL_LIVE_NO_STORE_HEADER
 import { resolveConcertPoster } from '@/lib/music-concert-poster'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { prisma } from '@/lib/prisma'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { requireRequestUser, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   const params = new URL(request.url).searchParams
   const page = parsePositivePage(params.get('page'))

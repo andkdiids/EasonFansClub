@@ -86,11 +86,11 @@ test('isPublic默认false', () => {
 })
 
 test('未登录不能读取我的现场', () => {
-  assert.match(read('app/api/music/live/me/route.ts'), /requireUser\(\)/)
+  assert.match(read('app/api/music/live/me/route.ts'), /requireRequestUser\(request\)/)
 })
 
 test('未登录不能标记我看过', () => {
-  assert.match(read('app/api/music/live/concerts/[concertId]/attendance/route.ts'), /export async function POST[\s\S]*requireUser\(\)/)
+  assert.match(read('app/api/music/live/concerts/[concertId]/attendance/route.ts'), /export async function POST[\s\S]*requireRequestUser\(request\)/)
 })
 
 test('用户不能修改其他用户记录', () => {

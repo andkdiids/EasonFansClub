@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { toggleRatingReviewLike, RatingServiceError } from '@/lib/rating-service'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
 type Context = { params: Promise<{ reviewId: string }> }
 
 export async function POST(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { reviewId } = await params
   try {

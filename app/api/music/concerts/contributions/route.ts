@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
-import { findPotentialDuplicateConcerts, parseContributionPayload, type ConcertContributionTypeValue, type SetlistContributionPayload, type ShowContributionPayload, validateContributionSongs } from '@/lib/music-contributions'
+import { findPotentialDuplicateConcerts, parseContributionPayload, type ConcertContributionTypeValue, type SetlistContributionPayload, type ShowContributionPayload } from '@/lib/music-contributions'
 import { prisma } from '@/lib/prisma'
-import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +37,7 @@ const contributionInclude = {
 } as const
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const params = new URL(request.url).searchParams
   const status = params.get('status')
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const type = typeValue(body?.type)

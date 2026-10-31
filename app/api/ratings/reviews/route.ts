@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createRatingReview, RatingServiceError } from '@/lib/rating-service'
-import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const target = body?.target === 'album' ? 'album' : 'song'

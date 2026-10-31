@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { deleteOwnMyLivePhoto, MyLivePhotoRequestError, reorderOwnMyLivePhotos } from '@/lib/my-live-photos'
 import { PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -17,10 +17,10 @@ function errorResponse(error: unknown) {
 }
 
 export async function DELETE(request: Request, { params }: Context) {
-  const guard = await requireUser()
-  if (!guard.user) return withPersonalNoStore(guard.response)
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return withPersonalNoStore(originError)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return withPersonalNoStore(guard.response)
   const { attendanceId, photoId } = await params
   try {
     await deleteOwnMyLivePhoto(guard.user.id, attendanceId, photoId)
@@ -31,10 +31,10 @@ export async function DELETE(request: Request, { params }: Context) {
 }
 
 export async function PATCH(request: Request, { params }: Context) {
-  const guard = await requireUser()
-  if (!guard.user) return withPersonalNoStore(guard.response)
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return withPersonalNoStore(originError)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return withPersonalNoStore(guard.response)
   const body = await request.json().catch(() => null)
   const direction = body && typeof body === 'object' && !Array.isArray(body) ? body.direction : undefined
   if (direction !== 'previous' && direction !== 'next') {

@@ -58,9 +58,9 @@ test('取消一场看过记录后，重新聚合立即减少具体场次统计',
   assert.equal(summarizePersonalLiveSummaryRows(rows.slice(0, 1)).attendedShowCount, 1)
 })
 
-test('聚合 API 只使用当前 Session 用户且未登录返回 401', () => {
+test('聚合 API 只使用当前请求认证用户且未登录返回 401', () => {
   const route = read('app/api/music/live/me/route.ts')
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(route, /getPersonalLiveOverview\(guard\.user\.id\)/)
   assert.match(route, /withPersonalNoStore\(guard\.response\)/)
   assert.doesNotMatch(route, /userId.*searchParams|searchParams.*userId/)

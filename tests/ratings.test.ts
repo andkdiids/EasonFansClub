@@ -114,7 +114,7 @@ test('公开 API 复用登录、来源校验和违禁词体系，后台使用歌
   const review = source('app/api/ratings/reviews/route.ts')
   const admin = source('app/api/admin/ratings/reviews/route.ts')
   assert.match(song, /rejectInvalidRequestOrigin/)
-  assert.match(song, /requireUser/)
+  assert.match(song, /requireRequestUser\(request\)/)
   assert.match(review, /checkBannedWords/)
   assert.match(admin, /requireAdmin\('rating_manage'\)/)
 })

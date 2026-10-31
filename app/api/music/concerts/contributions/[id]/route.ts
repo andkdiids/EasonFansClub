@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { findPotentialDuplicateConcerts, parseContributionPayload, type ConcertContributionTypeValue, type SetlistContributionPayload, type ShowContributionPayload } from '@/lib/music-contributions'
 import { prisma } from '@/lib/prisma'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -30,8 +30,8 @@ function serializeContribution(item: {
   return { ...item, reviewedAt: item.reviewedAt?.toISOString() || null, createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString(), targetShow: item.targetShow ? { ...item.targetShow, concertDate: item.targetShow.concertDate.toISOString() } : null }
 }
 
-export async function GET(_request: Request, { params }: Context) {
-  const guard = await requireUser()
+export async function GET(request: Request, { params }: Context) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { id } = await params
   const contribution = await prisma.concertContribution.findFirst({ where: { id, submitterId: guard.user.id }, include: contributionInclude })
@@ -42,7 +42,7 @@ export async function GET(_request: Request, { params }: Context) {
 export async function PATCH(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { id } = await params
   const current = await prisma.concertContribution.findFirst({ where: { id, submitterId: guard.user.id }, select: { id: true, type: true, status: true } })
@@ -74,7 +74,7 @@ export async function PATCH(request: Request, { params }: Context) {
 export async function DELETE(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { id } = await params
   const result = await prisma.concertContribution.updateMany({ where: { id, submitterId: guard.user.id, status: 'PENDING' }, data: { status: 'WITHDRAWN' } })

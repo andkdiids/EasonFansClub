@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { PersonalRankingError, removePersonalRankingItem, updatePersonalRankingNote } from '@/lib/personal-ranking'
-import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, sanitizeText } from '@/lib/security'
 
 type Context = { params: Promise<{ itemId: string }> }
 
@@ -14,7 +14,7 @@ function errorResponse(error: unknown) {
 export async function PATCH(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const note = sanitizeText(body?.note, 1000)
@@ -30,7 +30,7 @@ export async function PATCH(request: Request, { params }: Context) {
 export async function DELETE(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { itemId } = await params
   try {

@@ -230,6 +230,33 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/friends/requests/sent'
       || pathname === '/api/friend-groups'
       || pathname === '/api/learning/cantonese/speech/history'
+      || pathname === '/api/music/albums'
+      || pathname === '/api/music/cassette'
+      || /^\/api\/music\/albums\/[^/]+$/.test(pathname)
+      || /^\/api\/music\/songs\/[^/]+$/.test(pathname)
+      || /^\/api\/music\/songs\/[^/]+\/playback$/.test(pathname)
+      || pathname === '/api/music/search'
+      || pathname === '/api/music/live'
+      || pathname === '/api/music/live/categories'
+      || /^\/api\/music\/live\/(?:tours|concerts)\/[^/]+$/.test(pathname)
+      || pathname === '/api/music/live/me'
+      || pathname === '/api/music/live/me/concerts'
+      || pathname === '/api/music/live/me/songs'
+      || pathname === '/api/music/concerts/options'
+      || pathname === '/api/music/concerts/contributions'
+      || /^\/api\/music\/concerts\/contributions\/[^/]+$/.test(pathname)
+      || /^\/api\/music\/live\/attendance\/[^/]+\/photos$/.test(pathname)
+      || /^\/api\/music\/live\/concerts\/[^/]+\/attendance$/.test(pathname)
+      || pathname === '/api/music/reviews'
+      || /^\/api\/music\/reviews\/[^/]+$/.test(pathname)
+      || pathname === '/api/ratings/songs'
+      || /^\/api\/ratings\/songs\/[^/]+$/.test(pathname)
+      || pathname === '/api/ratings/albums'
+      || /^\/api\/ratings\/albums\/[^/]+$/.test(pathname)
+      || pathname === '/api/ratings/public-comments'
+      || pathname === '/api/ratings/me'
+      || pathname === '/api/ratings/personal-ranking'
+      || pathname === '/api/ratings/personal-ranking/options'
   }
   if (request.method === 'POST') {
     return pathname === '/api/admin/cantonese/content'
@@ -273,6 +300,16 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
       || pathname === '/api/notifications/read-all'
       || /^\/api\/notifications\/[^/]+\/read$/.test(pathname)
+      || /^\/api\/music\/(?:songs|albums)\/[^/]+\/like$/.test(pathname)
+      || pathname === '/api/ratings/reviews'
+      || /^\/api\/ratings\/reviews\/[^/]+\/like$/.test(pathname)
+      || /^\/api\/music\/reviews\/[^/]+\/interactions$/.test(pathname)
+      || /^\/api\/ratings\/(?:songs|albums)\/[^/]+$/.test(pathname)
+      || pathname === '/api/ratings/personal-ranking'
+      || pathname === '/api/ratings/personal-ranking/items'
+      || /^\/api\/music\/live\/concerts\/[^/]+\/attendance$/.test(pathname)
+      || pathname === '/api/music/concerts/contributions'
+      || /^\/api\/music\/live\/attendance\/[^/]+\/photos$/.test(pathname)
   }
   if (request.method === 'PUT' || request.method === 'PATCH') {
     return (request.method === 'PATCH' && pathname === '/api/admin/review')
@@ -291,6 +328,11 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/notifications'
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
+      || /^\/api\/ratings\/personal-ranking\/items\/[^/]+$/.test(pathname)
+      || pathname === '/api/ratings/personal-ranking/order'
+      || /^\/api\/music\/live\/concerts\/[^/]+\/attendance$/.test(pathname)
+      || /^\/api\/music\/concerts\/contributions\/[^/]+$/.test(pathname)
+      || /^\/api\/music\/live\/attendance\/[^/]+\/photos\/[^/]+$/.test(pathname)
   }
   if (request.method === 'DELETE') {
     return pathname === '/api/posts/draft'
@@ -299,6 +341,12 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/posts\/[^/]+\/like$/.test(pathname)
       || /^\/api\/friends\/[^/]+$/.test(pathname)
       || /^\/api\/friend-groups\/[^/]+$/.test(pathname)
+      || /^\/api\/ratings\/reviews\/[^/]+$/.test(pathname)
+      || /^\/api\/ratings\/personal-ranking\/items\/[^/]+$/.test(pathname)
+      || /^\/api\/music\/live\/concerts\/[^/]+\/attendance$/.test(pathname)
+      || /^\/api\/music\/(?:songs|albums)\/[^/]+\/like$/.test(pathname)
+      || /^\/api\/music\/concerts\/contributions\/[^/]+$/.test(pathname)
+      || /^\/api\/music\/live\/attendance\/[^/]+\/photos\/[^/]+$/.test(pathname)
   }
   if (request.method === 'HEAD') {
     return /^\/api\/entertainment\/guess-song\/sessions\/[^/]+\/audio$/.test(pathname)

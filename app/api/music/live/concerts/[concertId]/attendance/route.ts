@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { parseAttendanceInput, parseAttendanceVersion, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
 import { prisma } from '@/lib/prisma'
 import { evaluateConcertBadges } from '@/lib/concert-badge'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { completeTask } from '@/lib/growth-tasks/service'
 import { deleteFromCos, describeCosError } from '@/lib/tencent-cos'
 
@@ -18,8 +18,8 @@ async function findPublishedConcert(concertId: string) {
   })
 }
 
-export async function GET(_request: Request, { params }: Context) {
-  const guard = await requireUser()
+export async function GET(request: Request, { params }: Context) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   const { concertId } = await params
   const attendance = await prisma.userMusicConcert.findUnique({
@@ -30,7 +30,7 @@ export async function GET(_request: Request, { params }: Context) {
 }
 
 export async function POST(request: Request, { params }: Context) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return withPersonalNoStore(originError)
@@ -65,7 +65,7 @@ export async function POST(request: Request, { params }: Context) {
 }
 
 export async function PATCH(request: Request, { params }: Context) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return withPersonalNoStore(originError)
@@ -96,7 +96,7 @@ export async function PATCH(request: Request, { params }: Context) {
 }
 
 export async function DELETE(request: Request, { params }: Context) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return withPersonalNoStore(originError)

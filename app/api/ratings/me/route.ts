@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { getMyRatings } from '@/lib/rating-service'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const params = new URL(request.url).searchParams
   const rawTarget = params.get('target')

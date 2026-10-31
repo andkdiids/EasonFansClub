@@ -167,7 +167,15 @@ test('RSC/公共页面认证数据库异常不能被降级成匿名用户', () =
     assert.doesNotMatch(source(relativePath), /getCurrentUser\(\)\.catch\(\(\) => null\)/, relativePath)
   }
   assert.match(source('app/api/music/songs/[songId]/playback/audio/route.ts'), /AUTH_SERVICE_UNAVAILABLE/)
-  assert.match(source('app/api/music/songs/[songId]/playback/route.ts'), /AUTH_SERVICE_UNAVAILABLE/)
+  const playbackRoute = source('app/api/music/songs/[songId]/playback/route.ts')
+  if (/resolveRequestAuth\(request\)/.test(playbackRoute)) {
+    // Mobile Bearer and browser Cookie auth share this resolver. Its auth
+    // service outage response must stay fail-closed for the protected source.
+    assert.match(source('lib/security.ts'), /function authServiceUnavailableResponse[\s\S]*AUTH_SERVICE_UNAVAILABLE/)
+    assert.match(playbackRoute, /if \(auth\.response\) return auth\.response/)
+  } else {
+    assert.match(playbackRoute, /AUTH_SERVICE_UNAVAILABLE/)
+  }
 })
 
 test('middleware distinguishes JWT invalidation from an internal verification error', () => {

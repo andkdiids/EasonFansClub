@@ -107,14 +107,14 @@ test('排序未完成时的添加、删除和感想写入会先等待排序请�
   assert.match(ui, /async function saveNote[\s\S]*await waitForOrderIdle\(\)/)
 })
 
-test('榜单所有写接口从会话取用户并校验来源，不接收客户端 userId', () => {
+test('榜单所有写接口从请求认证取用户并校验来源，不接收客户端 userId', () => {
   const routes = [
     'app/api/ratings/personal-ranking/items/route.ts',
     'app/api/ratings/personal-ranking/items/[itemId]/route.ts',
     'app/api/ratings/personal-ranking/order/route.ts',
   ].map(source).join('\n')
   assert.match(routes, /rejectInvalidRequestOrigin/)
-  assert.match(routes, /requireUser/)
+  assert.match(routes, /requireRequestUser\(request\)/)
   assert.doesNotMatch(routes, /body\?\.userId|body\.userId/)
   assert.match(source('lib/personal-ranking.ts'), /item\.ranking\.userId !== userId[\s\S]*FORBIDDEN/)
 })

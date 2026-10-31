@@ -51,7 +51,7 @@ test('详情页按两个独立分类渲染并保留票根2张、现场6张、总
 
 test('上传和读接口要求登录，且上传只通过当前用户的 attendanceId', () => {
   const route = read('app/api/music/live/attendance/[attendanceId]/photos/route.ts')
-  assert.match(route, /export async function POST[\s\S]*requireUser\(\)/)
+  assert.match(route, /export async function POST[\s\S]*requireRequestUser\(request\)/)
   assert.match(route, /getOwnMyLivePhotos\(guard\.user\.id, attendanceId\)/)
   assert.match(route, /uploadMyLivePhotos\(\{ userId: guard\.user\.id, attendanceId/)
   assert.match(read('lib/my-live-photos.ts'), /WHERE id = \$\{attendanceId\} AND userId = \$\{userId\}/)
@@ -60,7 +60,7 @@ test('上传和读接口要求登录，且上传只通过当前用户的 attenda
 test('删除和排序都会校验当前用户归属，不能操作其他用户照片', () => {
   const route = read('app/api/music/live/attendance/[attendanceId]/photos/[photoId]/route.ts')
   const service = read('lib/my-live-photos.ts')
-  assert.match(route, /requireUser\(\)/)
+  assert.match(route, /requireRequestUser\(request\)/)
   assert.match(service, /photo\.userId !== userId \|\| photo\.attendanceId !== attendanceId/)
   assert.match(service, /delete\(\{ where: \{ id: photo\.id \} \}\)/)
   assert.match(service, /reorderOwnMyLivePhotos[\s\S]*lockAttendance/)

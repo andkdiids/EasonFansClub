@@ -13,7 +13,7 @@ import {
   uploadMyLivePhotos,
 } from '@/lib/my-live-photos'
 import { PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -37,8 +37,8 @@ function errorResponse(error: unknown) {
   return NextResponse.json({ message: '照片上传失败，请稍后重试' }, { status: 500, headers: PERSONAL_LIVE_NO_STORE_HEADERS })
 }
 
-export async function GET(_request: Request, { params }: Context) {
-  const guard = await requireUser()
+export async function GET(request: Request, { params }: Context) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   const { attendanceId } = await params
   try {
@@ -50,10 +50,10 @@ export async function GET(_request: Request, { params }: Context) {
 }
 
 export async function POST(request: Request, { params }: Context) {
-  const guard = await requireUser()
-  if (!guard.user) return withPersonalNoStore(guard.response)
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return withPersonalNoStore(originError)
+  const guard = await requireRequestUser(request)
+  if (!guard.user) return withPersonalNoStore(guard.response)
   const { attendanceId } = await params
   const contentLengthHeader = request.headers.get('content-length')
   const contentLength = contentLengthHeader ? Number(contentLengthHeader) : Number.NaN

@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
 import { toPublicMediaUrl } from '@/lib/media-url'
 import { canAnalyzeMusicPlaybackUrl, canPlayFullMusic, probeAudioUrl, type MusicPlaybackResponse } from '@/lib/music-playback'
 import { prisma } from '@/lib/prisma'
 import { guessSongObjectExists } from '@/lib/guess-song-storage'
+import { resolveRequestAuth } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,15 +27,9 @@ export async function GET(request: Request, context: RouteContext) {
 
   // Authentication failure must fail closed for the private source. Public
   // visitors still receive the existing 60-second preview when available.
-  let user: Awaited<ReturnType<typeof getCurrentUser>>
-  try {
-    user = await getCurrentUser()
-  } catch (error) {
-    if (isAuthServiceUnavailableError(error)) {
-      return NextResponse.json({ ok: false, code: 'AUTH_SERVICE_UNAVAILABLE', message: '登录服务暂时不可用，请稍后重试' }, { status: 503 })
-    }
-    throw error
-  }
+  const auth = await resolveRequestAuth(request)
+  if (auth.response) return auth.response
+  const user = auth.user
 
   const previewOnly = new URL(request.url).searchParams.get('preview') === '1'
   let location = song.previewUrl
@@ -94,7 +88,7 @@ export async function GET(request: Request, context: RouteContext) {
   return NextResponse.json(response, {
     headers: {
       'Cache-Control': 'private, no-store',
-      Vary: 'Cookie',
+      Vary: 'Cookie, Authorization',
     },
   })
 }

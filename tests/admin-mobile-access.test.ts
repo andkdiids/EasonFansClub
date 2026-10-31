@@ -12,6 +12,7 @@ test('Admin Mobile capability discovery is guarded by the shared server role and
   assert.match(route, /available: module\.apiAvailable/)
   assert.match(route, /scopes\.length \? \[\{ id: module\.id, label: module\.label, available: module\.apiAvailable, scopes \}\]/)
   assert.match(route, /'easmusic-dog'[\s\S]*apiAvailable: false/)
+  assert.match(route, /\{ id: 'activities', label: '活动核销', permissions: \['activity_manage'\], apiAvailable: true \}/)
 })
 
 test('Admin search never lists all administrators and caps each query page', () => {

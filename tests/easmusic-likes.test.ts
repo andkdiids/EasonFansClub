@@ -26,14 +26,14 @@ test('点赞写入使用事务、skipDuplicates 和关系表 count，重复 POST
   assert.match(service, /musicAlbumLike\.count\(\{ where: \{ albumId/)
 })
 
-test('Song/Album API 均使用统一登录校验、发布状态校验和 no-store 返回', () => {
+test('Song/Album API 使用请求级登录校验、发布状态校验和 no-store 返回', () => {
   for (const [kind, id, route] of [
     ['song', 'songId', 'app/api/music/songs/[songId]/like/route.ts'],
     ['album', 'albumId', 'app/api/music/albums/[albumId]/like/route.ts'],
   ] as const) {
     assert.equal(existsSync(route), true)
     const source = read(route)
-    assert.match(source, /requireUser\(\)/)
+    assert.match(source, /requireRequestUser\(request\)/)
     assert.match(source, /rejectInvalidRequestOrigin\(request\)/)
     assert.match(source, /export async function POST/)
     assert.match(source, /export async function DELETE/)

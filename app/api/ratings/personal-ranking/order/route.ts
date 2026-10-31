@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getPersonalRanking, parsePersonalRankingType, PersonalRankingError, reorderPersonalRanking } from '@/lib/personal-ranking'
-import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, sanitizeText } from '@/lib/security'
 
 export async function PATCH(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const type = parsePersonalRankingType(body?.type)
