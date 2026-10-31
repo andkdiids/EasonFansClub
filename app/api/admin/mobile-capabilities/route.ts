@@ -10,6 +10,7 @@ const MODULES = [
   { id: 'dashboard', label: '数据面板', permissions: ['stats_view'], apiAvailable: true },
   { id: 'content', label: '内容管理', permissions: ['post_manage', 'reply_manage', 'board_manage'], apiAvailable: true },
   { id: 'materials', label: '物料兑换', permissions: ['material_redemption_manage'], apiAvailable: true },
+  { id: 'activities', label: '活动核销', permissions: ['activity_manage'], apiAvailable: true },
   { id: 'entertainment', label: '娱乐天空管理', permissions: ['entertainment_manage'], apiAvailable: true },
   { id: 'badges', label: '成就管理', permissions: ['achievement_manage'], apiAvailable: true },
   { id: 'admins', label: '管理员管理', permissions: ['admin_manage'], apiAvailable: true },
