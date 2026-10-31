@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, sanitizeText } from '@/lib/security'
 
 type Context = { params: Promise<{ reviewId: string }> }
 
 export async function POST(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { reviewId } = await params
   const action = sanitizeText((await request.json().catch(() => null))?.action, 20)

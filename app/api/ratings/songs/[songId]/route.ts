@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
-import { getCurrentUser, isAuthServiceUnavailableError } from '@/lib/auth'
+import { isAuthServiceUnavailableError } from '@/lib/auth'
 import {
   createRatingWithOptionalReview,
   getSongRatingDetail,
@@ -8,7 +8,7 @@ import {
 } from '@/lib/rating-service'
 import { parseRatingReviewSort, parseRatingScore } from '@/lib/rating-types'
 import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, resolveRequestAuth } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 import { getReplyLengthMetrics, replyTooLongPayload } from '@/lib/reply-length'
 
@@ -25,7 +25,9 @@ function errorResponse(error: unknown) {
 export async function GET(request: Request, { params }: Context) {
   try {
     const { songId } = await params
-    const viewer = await getCurrentUser()
+    const auth = await resolveRequestAuth(request)
+    if (auth.response) return auth.response
+    const viewer = auth.user
     const detail = await getSongRatingDetail(songId, viewer?.id || null, parseRatingReviewSort(new URL(request.url).searchParams.get('sort')))
     if (!detail) return NextResponse.json({ message: '歌曲不存在或暂未公开' }, { status: 404 })
     return NextResponse.json(detail, { headers: { 'Cache-Control': viewer ? 'private, no-store' : 'public, max-age=15, s-maxage=30, stale-while-revalidate=60', Vary: 'Cookie' } })
@@ -37,7 +39,7 @@ export async function GET(request: Request, { params }: Context) {
 export async function POST(request: Request, { params }: Context) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { songId } = await params
   const body = await request.json().catch(() => null)

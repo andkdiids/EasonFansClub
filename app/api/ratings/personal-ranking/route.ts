@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getPersonalRanking, parsePersonalRankingType } from '@/lib/personal-ranking'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const type = parsePersonalRankingType(new URL(request.url).searchParams.get('type'))
   const ranking = await getPersonalRanking(guard.user.id, type)

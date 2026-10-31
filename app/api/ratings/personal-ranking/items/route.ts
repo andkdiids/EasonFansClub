@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { addPersonalRankingItem, parsePersonalRankingType, PersonalRankingError } from '@/lib/personal-ranking'
-import { rejectInvalidRequestOrigin, requireUser, sanitizeText } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser, sanitizeText } from '@/lib/security'
 
 function errorResponse(error: unknown) {
   if (error instanceof PersonalRankingError) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status })
@@ -13,7 +13,7 @@ function errorResponse(error: unknown) {
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const type = parsePersonalRankingType(body?.type)

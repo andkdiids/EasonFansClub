@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { buildPersonalSongAtlas, getPersonalLiveRows, parsePersonalPageSize, parsePositivePage, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
-import { requireUser, sanitizeText } from '@/lib/security'
+import { requireRequestUser, sanitizeText } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   const params = new URL(request.url).searchParams
   const page = parsePositivePage(params.get('page'))

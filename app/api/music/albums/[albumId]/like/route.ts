@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
+import { requireRequestUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
 import { writeEasMusicAlbumLike } from '@/lib/easmusic-likes'
 
 type Context = { params: Promise<{ albumId: string }> }
@@ -14,7 +14,7 @@ async function handle(request: Request, context: Context, liked: boolean) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
 
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const limited = await enforceApiRateLimit(request, guard.user.id, {

@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getPersonalLiveOverview, PERSONAL_LIVE_NO_STORE_HEADERS, withPersonalNoStore } from '@/lib/music-personal-live'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
-  const guard = await requireUser()
+export async function GET(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return withPersonalNoStore(guard.response)
   try {
     return NextResponse.json(await getPersonalLiveOverview(guard.user.id), { headers: PERSONAL_LIVE_NO_STORE_HEADERS })
