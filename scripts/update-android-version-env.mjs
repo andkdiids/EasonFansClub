@@ -29,7 +29,8 @@ function validateMetadata(metadata) {
     : metadata.ANDROID_VERSION_CODE === 24 ? 'rc4'
       : metadata.ANDROID_VERSION_CODE === 25 ? 'rc5'
       : metadata.ANDROID_VERSION_CODE === 26 ? 'rc6'
-        : metadata.ANDROID_VERSION_CODE === 27 ? 'rc7' : null
+        : metadata.ANDROID_VERSION_CODE === 27 ? 'rc7'
+          : metadata.ANDROID_VERSION_CODE === 28 ? 'rc8' : null
   requireThat(releaseCandidate !== null, 'INVALID_VERSION_CODE')
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')

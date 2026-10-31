@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       release_candidate:
-        description: Beta.21 RC3 through RC7 to publish for internal updates
+        description: Beta.21 RC3 through RC8 to publish for internal updates
         required: true
         type: choice
         options:
@@ -17,6 +17,7 @@ on:
           - rc5
           - rc6
           - rc7
+          - rc8
       apk_object_key:
         description: Immutable versioned Beta.21 RC object key already uploaded to Tencent COS
         required: true
@@ -59,7 +60,7 @@ jobs:
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
+          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
           key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
           [[ "${APK_OBJECT_KEY}" =~ ${key_regex} ]] || { echo 'APK_OBJECT_KEY_INVALID'; exit 1; }
           [[ "${EXPECTED_SIZE}" =~ ^[0-9]{8,9}$ ]] || { echo 'APK_SIZE_INVALID'; exit 1; }
@@ -152,6 +153,10 @@ jobs:
               version_code=27
               notes='["支持意见反馈添加最多 9 张图片","修复活跃症任务导航并补充真实点击回归检查","补充活动中心核销二维码与管理员扫码入口","优化广场滑动切换和每日处方分享","统一普通页面提示并移除技术实现文案","Beta.21 RC7 内测版本"]'
               ;;
+            rc8)
+              version_code=28
+              notes='["修复帖子点赞、分享和回复任务的页面跳转","补全活动核销状态、用户二维码及管理员扫码入口","修正普通用户发帖分类权限与默认分类","恢复广场好友、推荐、最新横向滑动切换","接入与网站数据一致的原生 EasMusic 功能","Beta.21 RC8 内测版本"]'
+              ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -200,6 +205,7 @@ jobs:
             rc5) expected_version_code=25 ;;
             rc6) expected_version_code=26 ;;
             rc7) expected_version_code=27 ;;
+            rc8) expected_version_code=28 ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
           remote_host="${SERVER_USER}@${SERVER_HOST}"
@@ -223,7 +229,7 @@ jobs:
           EXPECTED_APK_SIZE="$5"
           [[ "${APP_DIR}" == /home/apps/easonfansclub ]]
           [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          [[ "${EXPECTED_VERSION_CODE}" =~ ^(23|24|25|26|27)$ ]]
+          [[ "${EXPECTED_VERSION_CODE}" =~ ^(23|24|25|26|27|28)$ ]]
           [[ "${EXPECTED_APK_SHA256}" =~ ^[A-F0-9]{64}$ ]]
           [[ "${EXPECTED_APK_SIZE}" =~ ^[0-9]{8,9}$ ]]
           current_link="${APP_DIR}/current"
