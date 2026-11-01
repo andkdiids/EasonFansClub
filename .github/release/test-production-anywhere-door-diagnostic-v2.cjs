@@ -60,15 +60,76 @@ test('worker log parser returns status codes and timestamps without raw log cont
   assert.equal(helper.parseWorkerLogLine('fatal stack [instagram-sync-worker.fatal] private-marker-123'), null)
 })
 
-test('log buffer restricts entries to the seven-day window and caps output', () => {
+test('log buffer retains historical entries, marks the seven-day window, and caps output', () => {
   const now = new Date('2026-11-02T00:00:00Z')
   const buffer = Buffer.from([
     "2026-10-25T23:59:59.000Z: [instagram-sync-worker] { status: 'SUCCEEDED', errorCode: null }",
     "2026-10-26T00:00:00.000Z: [instagram-sync-worker] { status: 'NOT_DUE', errorCode: null }",
   ].join('\n'))
   assert.deepEqual(helper.parseWorkerLogBuffer(buffer, now), [
-    { at: '2026-10-26T00:00:00.000Z', status: 'NOT_DUE', errorCode: null },
+    { at: '2026-10-25T23:59:59.000Z', status: 'SUCCEEDED', errorCode: null, withinSevenDays: false },
+    { at: '2026-10-26T00:00:00.000Z', status: 'NOT_DUE', errorCode: null, withinSevenDays: true },
   ])
+})
+
+test('media failure log parser returns only bounded diagnostic fields', () => {
+  const raw = [
+    "2026-10-17T18:53:21.000Z: [instagram.media.failure] {",
+    "  postExternalId: 'private-source-id',",
+    "  mediaType: 'IMAGE',",
+    "  sortOrder: 0,",
+    "  stage: 'download',",
+    "  hostname: 'scontent.cdninstagram.com',",
+    "  status: 403,",
+    "  redirects: 2,",
+    "  errorCode: 'MEDIA_REQUEST_FAILED',",
+    "  errorName: 'TypeError',",
+    "  errorMessage: 'private-token-and-url-marker',",
+    "  causeCode: 'UND_ERR_CONNECT_TIMEOUT',",
+    "  proxyConfigured: false",
+    '}',
+  ].join('\n')
+  const parsed = helper.parseMediaFailureBlocks(Buffer.from(raw))
+  assert.deepEqual(parsed, [{
+    at: '2026-10-17T18:53:21.000Z',
+    mediaType: 'IMAGE',
+    stage: 'download',
+    hostname: 'scontent.cdninstagram.com',
+    status: 403,
+    redirects: 2,
+    errorCode: 'MEDIA_REQUEST_FAILED',
+    errorName: 'OTHER',
+    causeCode: 'UND_ERR_CONNECT_TIMEOUT',
+    proxyConfigured: false,
+  }])
+  const output = JSON.stringify(parsed)
+  assert.equal(output.includes('private-source-id'), false)
+  assert.equal(output.includes('private-token-and-url-marker'), false)
+})
+
+test('worker log reader confines both streams to PM2 logs and exposes no raw lines', () => {
+  const os = require('node:os')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ecfc-anywhere-log-test-'))
+  try {
+    const logsDir = path.join(root, 'logs')
+    fs.mkdirSync(logsDir)
+    const outLog = path.join(logsDir, 'worker-out.log')
+    const errLog = path.join(logsDir, 'worker-error.log')
+    fs.writeFileSync(outLog, "2026-11-01T07:45:00.000Z: [instagram-sync-worker] { status: 'FAILED', errorCode: 'MEDIA_REQUEST_FAILED' }\nraw-private-marker")
+    fs.writeFileSync(errLog, "2026-10-17T18:53:21.000Z: [instagram.media.failure] { mediaType: 'IMAGE', stage: 'download', hostname: 'cdn.example.com', status: 403, errorCode: 'MEDIA_REQUEST_FAILED', errorName: 'TypeError', errorMessage: 'private-error-marker', causeCode: null, proxyConfigured: false }\n")
+    const evidence = helper.readSafeWorkerLogs({ outLogPath: outLog, errLogPath: errLog }, root, new Date('2026-11-02T00:00:00Z'))
+    assert.equal(evidence.status, 'READ')
+    assert.equal(evidence.entries[0].status, 'FAILED')
+    assert.equal(evidence.entries[0].withinSevenDays, true)
+    assert.equal(evidence.mediaFailuresStatus, 'READ')
+    assert.equal(evidence.mediaFailures[0].status, 403)
+    assert.equal(JSON.stringify(evidence).includes('private-error-marker'), false)
+    assert.equal(JSON.stringify(evidence).includes('raw-private-marker'), false)
+    const escaped = helper.readSafeWorkerLogs({ outLogPath: path.join(root, 'outside.log'), errLogPath: errLog }, root, new Date())
+    assert.equal(escaped.status, 'UNAVAILABLE')
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('database evidence reports timestamps and source identifiers without captions or media URLs', () => {
