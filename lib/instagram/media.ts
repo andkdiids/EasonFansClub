@@ -279,7 +279,10 @@ function requestSignal(timeoutMs: number) {
   return AbortSignal.timeout(Math.max(1, timeoutMs))
 }
 
-const MEDIA_RETRY_DELAYS_MS = [500, 1_500] as const
+// A short, bounded exponential backoff gives transient Meta CDN/proxy resets
+// time to recover without turning one failed media item into a high-frequency
+// request loop. Worker-level backoff remains responsible for later attempts.
+export const MEDIA_RETRY_DELAYS_MS = [1_000, 3_000, 8_000] as const
 const MEDIA_MAX_ATTEMPTS = MEDIA_RETRY_DELAYS_MS.length + 1
 const RETRYABLE_MEDIA_CAUSE_CODES = new Set([
   'UND_ERR_CONNECT_TIMEOUT',

@@ -89,13 +89,17 @@ function normalizeMedia(value: unknown, index: number): InstagramMedia {
 
 export function normalizeInstagramPost(value: unknown): InstagramPost {
   const item = record(value)
-  const rawType = stringOrNull(item.mediaType ?? item.type)?.toUpperCase() || 'IMAGE'
+  const mediaValue = Array.isArray(item.media) ? item.media : []
+  const caption = stringOrNull(item.caption)
+  const rawType = stringOrNull(item.mediaType ?? item.type)?.toUpperCase() || (mediaValue.length ? 'IMAGE' : 'TEXT')
   if (!(INSTAGRAM_POST_TYPES as readonly string[]).includes(rawType)) {
     throw new InstagramProviderError('INVALID_DATA', 'Instagram 帖子类型无效')
   }
 
-  const mediaValue = Array.isArray(item.media) ? item.media : []
-  if (!mediaValue.length) throw new InstagramProviderError('INVALID_DATA', 'Instagram 帖子没有媒体项')
+  if (rawType === 'TEXT' && (mediaValue.length || !caption)) {
+    throw new InstagramProviderError('INVALID_DATA', '文字动态必须有正文且不能包含媒体项')
+  }
+  if (rawType !== 'TEXT' && !mediaValue.length) throw new InstagramProviderError('INVALID_DATA', 'Instagram 帖子没有媒体项')
   const media = mediaValue
     .map((entry, index) => ({ media: normalizeMedia(entry, index), inputOrder: index }))
     .sort((a, b) => a.media.sortOrder - b.media.sortOrder || a.inputOrder - b.inputOrder)
@@ -116,7 +120,7 @@ export function normalizeInstagramPost(value: unknown): InstagramPost {
       ?? item.profileImageUrl
       ?? item.avatarUrl,
     ),
-    caption: stringOrNull(item.caption),
+    caption,
     publishedAt: parsePublishedAt(item.publishedAt ?? item.timestamp ?? item.takenAt),
     permalink: safeInstagramPermalink(item.permalink ?? item.url),
     mediaType: rawType as InstagramPostType,

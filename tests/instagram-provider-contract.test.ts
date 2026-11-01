@@ -101,6 +101,29 @@ test('Mock Provider returns normalized latest posts with carousel children', asy
   assert.equal(provider.proxyUrl, 'http://127.0.0.1:7890')
 })
 
+test('Apify Provider accepts an explicitly text-only item without fabricating media', () => {
+  const text = normalizeApifyInstagramItem(rawImage('text-only', '2026-08-25T10:00:00.000Z', {
+    type: 'Text', displayUrl: null, caption: 'A real text-only source post',
+  }))
+  assert.equal(text.mediaType, 'TEXT')
+  assert.equal(text.media.length, 0)
+  assert.equal(text.caption, 'A real text-only source post')
+
+  const untyped = normalizeApifyInstagramItem(rawImage('untyped-text-only', '2026-08-25T10:00:00.000Z', {
+    type: undefined, displayUrl: null, caption: 'Text with no media-kind field',
+  }))
+  assert.equal(untyped.mediaType, 'TEXT')
+  assert.equal(untyped.media.length, 0)
+})
+
+test('Apify does not downgrade malformed declared media into a text-only post', () => {
+  for (const type of ['Image', 'Video']) {
+    assert.throws(() => normalizeApifyInstagramItem(rawImage(`missing-${type}`, '2026-08-25T10:00:00.000Z', {
+      type, displayUrl: null, videoUrl: null, caption: 'Caption must not hide missing media',
+    })), (error: unknown) => error instanceof InstagramProviderError && error.code === 'PROVIDER_CONTRACT_FAILED')
+  }
+})
+
 test('dedupe and publishedAt sorting handles pinned/out-of-order provider results', () => {
   const posts = dedupeAndSortInstagramPosts([
     MOCK_INSTAGRAM_POSTS[2]!,

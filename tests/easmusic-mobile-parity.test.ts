@@ -80,9 +80,24 @@ test('EasMusic mobile paths and methods are specifically allowlisted', () => {
   assert.doesNotMatch(block, /pathname\.startsWith\(['"]\/api\/music\//)
 })
 
-test('EasMusic parity stays schema-neutral and does not proxy or store third-party audio', () => {
-  const migrations = execSync('git diff --name-only -- prisma/schema.prisma prisma/migrations', { encoding: 'utf8' })
-  assert.equal(migrations.trim(), '')
+test('EasMusic parity stays schema-neutral outside the approved Instagram TEXT migration', () => {
+  const schemaDiff = execSync('git diff HEAD --unified=3 -- prisma/schema.prisma', { encoding: 'utf8' })
+  const schemaAdditions = schemaDiff.split(/\r?\n/).filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+  const schemaDeletions = schemaDiff.split(/\r?\n/).filter((line) => line.startsWith('-') && !line.startsWith('---'))
+  assert.deepEqual(schemaAdditions, schemaDiff ? ['+  TEXT'] : [])
+  assert.deepEqual(schemaDeletions, [])
+  if (schemaDiff) assert.match(schemaDiff, /enum SocialPostMediaType \{[\s\S]*\+  TEXT/)
+
+  const changedMigrations = execSync('git diff HEAD --name-only -- prisma/migrations', { encoding: 'utf8' })
+  const untrackedMigrations = execSync('git ls-files --others --exclude-standard -- prisma/migrations', { encoding: 'utf8' })
+  const migrationPaths = [...new Set(`${changedMigrations}\n${untrackedMigrations}`.split(/\r?\n/).filter(Boolean))].sort()
+  assert.deepEqual(migrationPaths, migrationPaths.length
+    ? ['prisma/migrations/20261102090000_add_social_post_text_media_type/migration.sql']
+    : [])
+  assert.equal(source('prisma/schema.prisma').match(/enum SocialPostMediaType \{([^}]*)\}/)?.[1]
+    ?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(','), 'IMAGE,VIDEO,CAROUSEL,REEL,TEXT')
+  assert.equal(source('prisma/migrations/20261102090000_add_social_post_text_media_type/migration.sql').trim(),
+    "ALTER TABLE `SocialPost`\nMODIFY `mediaType` ENUM('IMAGE', 'VIDEO', 'CAROUSEL', 'REEL', 'TEXT') NOT NULL;")
   const apiRoutes = [
     'app/api/music/albums/route.ts',
     'app/api/music/albums/[albumId]/route.ts',

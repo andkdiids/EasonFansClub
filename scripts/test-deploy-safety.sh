@@ -184,22 +184,27 @@ set -e
 [ "$pm2_match_status" -eq 1 ] || fail "unrelated PM2 service was not treated as a safe-to-remove reference"
 pass "unrelated PM2 cwd does not match or require an action"
 
-assert_eq "$(deploy_release_pm2_names easonfansclub | tr '\n' ',')" "easonfansclub," "PM2 reload allowlist"
-pass "automatic release reload is limited to the web process; Instagram worker is excluded"
+assert_eq "$(deploy_release_pm2_names easonfansclub | tr '\n' ',')" "easonfansclub,instagram-sync-worker," "PM2 reload allowlist"
+pass "automatic release actions are limited to the web process and the graceful Instagram worker"
 
-fake_worker_operation_called=false
-fake_worker_reload_failure() { fake_worker_operation_called=true; return 1; }
-fake_worker_reload_timeout() { fake_worker_operation_called=true; return 124; }
 set +e
-deploy_run_pm2_reload instagram-sync-worker 1s fake_worker_reload_failure >/dev/null 2>&1
-worker_failure_guard_status=$?
-deploy_run_pm2_reload instagram-sync-worker 1s fake_worker_reload_timeout >/dev/null 2>&1
-worker_timeout_guard_status=$?
+deploy_release_pm2_names unexpected-service >/dev/null 2>&1
+invalid_release_process_status=$?
 set -e
-[ "$worker_failure_guard_status" -eq 78 ] || fail "unsafe worker reload failure scenario was not denied"
-[ "$worker_timeout_guard_status" -eq 78 ] || fail "unsafe worker reload timeout scenario was not denied"
-[ "$fake_worker_operation_called" = false ] || fail "unsafe worker reload command was invoked"
-pass "worker reload failure/timeout scenarios are rejected before touching the unquiesced worker"
+[ "$invalid_release_process_status" -eq 78 ] || fail "unexpected PM2 process was added to the release allowlist"
+
+set +e
+deploy_run_pm2_reload instagram-sync-worker 1s bash -c 'exit 17' >/dev/null 2>&1
+worker_timeout_guard_status=$?
+deploy_run_pm2_reload instagram-sync-worker 8m bash -c 'exit 17' >/dev/null 2>&1
+worker_failure_status=$?
+deploy_run_pm2_reload instagram-sync-worker 8m bash -c 'exit 124' >/dev/null 2>&1
+worker_command_timeout_status=$?
+set -e
+[ "$worker_timeout_guard_status" -eq 78 ] || fail "worker reload accepted a timeout shorter than its graceful shutdown window"
+[ "$worker_failure_status" -eq 17 ] || fail "worker restart failure status was not preserved"
+[ "$worker_command_timeout_status" -eq 124 ] || fail "worker restart timeout status was not preserved"
+pass "worker restart is allowlisted only with a bounded timeout longer than its graceful shutdown"
 
 set +e
 deploy_run_pm2_reload easonfansclub 3s bash -c 'exit 17' >/dev/null 2>&1

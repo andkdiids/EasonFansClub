@@ -28,7 +28,7 @@ export type SocialPostView = {
   caption: string | null
   publishedAt: string
   permalink: string | null
-  mediaType: 'IMAGE' | 'VIDEO' | 'CAROUSEL' | 'REEL'
+  mediaType: 'IMAGE' | 'VIDEO' | 'CAROUSEL' | 'REEL' | 'TEXT'
   media: SocialPostMediaView[]
   likeCount: number
   commentCount: number
@@ -347,7 +347,35 @@ export async function getAdminSocialPosts(options: { status?: string | null; pag
     prisma.socialPost.count({ where }),
   ])
   const likedIds = new Set<string>()
-  return { items: rows.map((row) => ({ ...serializePost(row, likedIds), status: row.status })), total, page, pageSize: take }
+  const manualPostIds = rows.filter((row) => row.provider === 'manual').map((row) => row.id)
+  const auditRows = manualPostIds.length ? await prisma.adminAction.findMany({
+    where: {
+      operationType: { in: ['ANYWHERE_DOOR_MANUAL_POST_CREATED', 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED'] },
+      targetType: 'SOCIAL_POST',
+      targetId: { in: manualPostIds },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { targetId: true, adminId: true, operatorName: true, createdAt: true, operationType: true },
+  }) : []
+  const auditByPost = new Map<string, (typeof auditRows)[number]>()
+  for (const audit of auditRows) if (audit.targetId && !auditByPost.has(audit.targetId)) auditByPost.set(audit.targetId, audit)
+  return {
+    items: rows.map((row) => {
+      const audit = auditByPost.get(row.id)
+      return {
+        ...serializePost(row, likedIds),
+        status: row.status,
+        sourceMode: row.provider === 'manual' ? 'MANUAL' as const : 'AUTO' as const,
+        createdAt: row.createdAt.toISOString(),
+        manualAudit: audit ? {
+          operatorId: audit.adminId,
+          operatorName: audit.operatorName,
+          operatedAt: audit.createdAt.toISOString(),
+        } : null,
+      }
+    }),
+    total, page, pageSize: take,
+  }
 }
 
 export async function getRecentSocialSyncLogs(limit = 20) {

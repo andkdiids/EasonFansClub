@@ -38,9 +38,11 @@ export function AnywhereDoorDetail({ post, morePosts = [], showBackLink = true }
       {showBackLink ? <Link href="/anywhere-door" className="inline-flex text-sm font-black text-brand-700 hover:underline dark:text-sky-300">← 返回随意门</Link> : null}
       <div className="anywhere-door-detail-shell grid min-w-0 gap-3" data-anywhere-door-detail-shell>
         <article className="anywhere-door-main min-w-0 overflow-hidden shadow-none" data-anywhere-door-main>
-          <section className="anywhere-door-media min-w-0 border-b border-slate-800 bg-black dark:border-slate-800 dark:bg-black" data-anywhere-door-media>
-            <MediaCarousel media={post.media} title={post.authorUsername} priority className="anywhere-door-media-viewer h-full rounded-none bg-black dark:bg-black" />
-          </section>
+          {post.mediaType !== 'TEXT' ? (
+            <section className="anywhere-door-media min-w-0 border-b border-slate-800 bg-black dark:border-slate-800 dark:bg-black" data-anywhere-door-media>
+              <MediaCarousel media={post.media} title={post.authorUsername} priority className="anywhere-door-media-viewer h-full rounded-none bg-black dark:bg-black" />
+            </section>
+          ) : null}
           <section className="anywhere-door-info flex min-h-0 min-w-0 flex-col" data-anywhere-door-info>
             <header className="anywhere-door-info-header shrink-0 p-4 sm:p-5">
               <div className="anywhere-door-source-row flex flex-wrap items-center gap-3">

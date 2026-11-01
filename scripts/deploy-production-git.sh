@@ -605,11 +605,25 @@ pm2_is_current_release() {
 }
 
 reload_pm2() {
-  local app_name="$1" release_sha="$2" exists_status attempt pm2_action pm2_config pm2_exit
-  [ "${app_name}" = "${PM2_APP_NAME}" ] || {
-    echo "Refusing to reload ${app_name}; only the web process is eligible for automatic deployment." >&2
+  local app_name="$1" release_sha="$2" exists_status attempt pm2_action pm2_config pm2_exit pm2_timeout
+  case "${app_name}" in
+    "${PM2_APP_NAME}"|instagram-sync-worker) ;;
+    *)
+      echo "Refusing to operate on PM2 process ${app_name}; it is not in the release allowlist." >&2
+      return 78
+      ;;
+  esac
+  if [ "${app_name}" = "instagram-sync-worker" ] && ! node <<'NODE'
+const config = require('./ecosystem.config.js');
+const matches = Array.isArray(config.apps) ? config.apps.filter((app) => app.name === 'instagram-sync-worker') : [];
+if (matches.length !== 1 || matches[0].args !== 'scripts/instagram-sync-worker.ts' || Number(matches[0].kill_timeout) < 360_000) {
+  process.exit(1);
+}
+NODE
+  then
+    echo "Instagram worker graceful-shutdown configuration is missing or unsafe." >&2
     return 78
-  }
+  fi
   export NODE_ENV=production
   export DEPLOY_SHA="${release_sha}"
   export PORT="${APP_PORT}"
@@ -618,15 +632,20 @@ reload_pm2() {
   test -r .env
   test -s .env
   if pm2_app_exists "${app_name}"; then
-    echo "Reloading only PM2 app ${app_name} from the selected release configuration."
-    pm2_action=reload
+    if [ "${app_name}" = "instagram-sync-worker" ]; then
+      echo "Gracefully restarting only PM2 app ${app_name} from the selected release configuration."
+      pm2_action=restart
+    else
+      echo "Reloading only PM2 app ${app_name} from the selected release configuration."
+      pm2_action=reload
+    fi
   else
     exists_status=$?
-    if [ "${exists_status}" -ne 1 ] || [ "${app_name}" != "${PM2_APP_NAME}" ]; then
-      echo "PM2 process list is invalid; refusing to create a duplicate process." >&2
+    if [ "${exists_status}" -ne 1 ]; then
+      echo "PM2 process list is invalid; refusing to create or duplicate a process." >&2
       return 1
     fi
-    echo "Starting missing PM2 app ${app_name} from ecosystem.config.js."
+    echo "Starting missing allowlisted PM2 app ${app_name} from ecosystem.config.js."
     pm2_action=start
   fi
   # Make the release identity explicit in the selected app's ecosystem env.
@@ -648,7 +667,7 @@ try {
     env: {
       ...app.env,
       NODE_ENV: 'production',
-      PORT: port,
+      ...(appName === 'easonfansclub' ? { PORT: port } : {}),
       DEPLOY_SHA: releaseSha,
       DEPLOY_DB_MAINTENANCE_HOLD_FILE: dbMode === 'skip-db' ? maintenanceHoldFile : '',
     },
@@ -662,7 +681,9 @@ NODE
     rm -f -- "${pm2_config}"
     return 1
   fi
-  if deploy_run_pm2_reload "${app_name}" 2m pm2 "${pm2_action}" "${pm2_config}" --only "${app_name}" --update-env; then
+  pm2_timeout=2m
+  [ "${app_name}" != "instagram-sync-worker" ] || pm2_timeout=8m
+  if deploy_run_pm2_reload "${app_name}" "${pm2_timeout}" pm2 "${pm2_action}" "${pm2_config}" --only "${app_name}" --update-env; then
     pm2_exit=0
   else
     pm2_exit=$?
@@ -670,7 +691,10 @@ NODE
   rm -f -- "${pm2_config}" || return 1
   [ "${pm2_exit}" -eq 0 ] || return "${pm2_exit}"
   for attempt in $(seq 1 30); do
-    if read_pm2_snapshot "${app_name}" && pm2_is_current_release "${app_name}" "${release_sha}"; then return 0; fi
+    if read_pm2_snapshot "${app_name}" && pm2_is_current_release "${app_name}" "${release_sha}"; then
+      echo "PM2_RELEASE_SHA_MATCH app=${app_name} sha=${release_sha}"
+      return 0
+    fi
     sleep 1
   done
   echo "PM2 app ${app_name} did not become healthy on the selected release." >&2
@@ -729,6 +753,8 @@ check_health() {
          });
        ' "${expected_sha}" &&
        [ "${pm2_ready}" = true ]; then
+      echo "WEB_RELEASE_SHA=${expected_sha}"
+      echo "WORKER_RELEASE_SHA=${expected_sha}"
       return 0
     fi
     echo "Health attempt ${attempt}/10 did not confirm release ${expected_sha} (pm2_ready=${pm2_ready})."

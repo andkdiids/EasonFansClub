@@ -70,7 +70,10 @@ export async function runInstagramSyncWorkerOnce(input: {
   }
   const state = await getInstagramSyncState(target, db)
   if (!input.force && !shouldRunScheduledSync(state, now)) return { status: 'NOT_DUE' }
-  if (!state.baselineCompletedAt && !state.syncRequestedAt && !input.force) return { status: 'BASELINE_REQUIRED', errorCode: 'BASELINE_REQUIRED' }
+  const failedBaselineNeedsRecovery = !state.baselineCompletedAt && Boolean(state.lastErrorAt)
+  if (!state.baselineCompletedAt && !state.syncRequestedAt && !failedBaselineNeedsRecovery && !input.force) {
+    return { status: 'BASELINE_REQUIRED', errorCode: 'BASELINE_REQUIRED' }
+  }
 
   const runPermission = await canStartProviderRun(target, now, db)
   if (runPermission.runsToday >= runPermission.maxRunsPerDay) return { status: 'PROVIDER_DAILY_CAP', errorCode: 'PROVIDER_DAILY_CAP' }
@@ -83,10 +86,12 @@ export async function runInstagramSyncWorkerOnce(input: {
   const lease = await acquireInstagramSyncLease({ target, now, leaseMs: WORKER_TIMEOUT_MS, token: randomUUID(), db })
   if (!lease.acquired) return { status: 'SKIP_ALREADY_RUNNING', errorCode: 'SKIP_ALREADY_RUNNING' }
 
-  const latestState = await getInstagramSyncState(target, db)
-  const baseline = !latestState.baselineCompletedAt && Boolean(latestState.syncRequestedAt)
-  const limit = baseline ? 20 : latestState.syncRequestedAt ? 5 : 1
+  let latestState = state
   try {
+    latestState = await getInstagramSyncState(target, db)
+    const baseline = !latestState.baselineCompletedAt
+      && (Boolean(latestState.syncRequestedAt) || Boolean(latestState.lastErrorAt))
+    const limit = baseline ? 20 : latestState.syncRequestedAt ? 5 : 1
     const run = input.runSync || ((options) => syncInstagramPosts({
       providerName: 'apify',
       username: options.username,

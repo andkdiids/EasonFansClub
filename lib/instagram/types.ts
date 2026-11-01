@@ -4,7 +4,7 @@ export type InstagramProviderName = typeof INSTAGRAM_PROVIDER_NAMES[number]
 export const INSTAGRAM_MEDIA_TYPES = ['IMAGE', 'VIDEO'] as const
 export type InstagramMediaType = typeof INSTAGRAM_MEDIA_TYPES[number]
 
-export const INSTAGRAM_POST_TYPES = ['IMAGE', 'VIDEO', 'CAROUSEL', 'REEL'] as const
+export const INSTAGRAM_POST_TYPES = ['IMAGE', 'VIDEO', 'CAROUSEL', 'REEL', 'TEXT'] as const
 export type InstagramPostType = typeof INSTAGRAM_POST_TYPES[number]
 
 export type InstagramMedia = {

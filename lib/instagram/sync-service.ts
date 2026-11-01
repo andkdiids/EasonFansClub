@@ -7,6 +7,7 @@ import { InstagramMediaSafetyError, type InstagramMediaLocalizer, type Localized
 import { createInstagramMediaLocalizer, assertProductionMediaLocalizer } from '@/lib/instagram/localizer'
 import { dedupeAndSortInstagramPosts, normalizeInstagramPost } from '@/lib/instagram/normalize'
 import { InstagramProviderError, normalizeInstagramUsername, normalizeProviderLimit, type InstagramMedia, type InstagramPost, type InstagramProvider, type InstagramProviderDiagnostics, type InstagramProviderTrace } from '@/lib/instagram/types'
+import { buildInstagramPostIdentityFilters } from '@/lib/instagram/source-identity'
 
 const DEFAULT_TARGET = 'mreasonchan'
 const DEFAULT_LIMIT = 3
@@ -143,7 +144,7 @@ function traceData(trace: InstagramProviderTrace | null | undefined) {
 /**
  * A FAILED post has no trustworthy localized media set and must be retried in
  * place. READY/HIDDEN media can be reused only when the ordered media shape is
- * unchanged; the unique (platform, externalId) upsert prevents duplicates.
+ * unchanged; exact provider/source identities prevent duplicate rows.
  */
 export function canReuseInstagramMedia(
   existing: { status: string; media: readonly Pick<InstagramMedia, 'type' | 'sortOrder'>[] } | null | undefined,
@@ -184,32 +185,60 @@ async function notifyNewSocialPosts(postIds: string[], target: string) {
 }
 
 async function upsertPost(post: InstagramPost, providerName: string, localizer: InstagramMediaLocalizer) {
-  const existing = await prisma.socialPost.findUnique({
-    where: { platform_externalId: { platform: 'INSTAGRAM', externalId: post.externalId } },
-    select: { status: true, media: { orderBy: { sortOrder: 'asc' } } },
+  const matches = await prisma.socialPost.findMany({
+    where: {
+      platform: 'INSTAGRAM',
+      OR: buildInstagramPostIdentityFilters({
+        externalId: post.externalId,
+        shortcode: post.shortcode,
+        permalink: post.permalink,
+        authorUsername: post.username,
+      }),
+    },
+    take: 2,
+    select: { id: true, externalId: true, provider: true, status: true, media: { orderBy: { sortOrder: 'asc' } } },
   })
+  if (matches.length > 1) throw new InstagramProviderError('INVALID_DATA', '多个动态匹配同一来源标识，已停止自动合并')
+  const existing = matches[0] || null
+  // A manual import owns its content/media. A later crawler match is a
+  // successful dedupe hit and must never replace its COS object or caption.
+  if (existing?.provider === 'manual') {
+    return { id: existing.id, created: false, previousStatus: existing.status, mediaCount: existing.media.length }
+  }
   const canReuseMedia = canReuseInstagramMedia(existing, post)
   const localizedMedia: LocalizedInstagramMedia[] = []
+  let preparedPostId: string | null = null
 
   try {
     const prepared = await prisma.$transaction(async (tx) => {
-      const saved = await tx.socialPost.upsert({
-        where: { platform_externalId: { platform: 'INSTAGRAM', externalId: post.externalId } },
-        create: {
-          platform: 'INSTAGRAM', externalId: post.externalId, shortcode: post.shortcode,
-          authorUsername: post.username, caption: post.caption, publishedAt: post.publishedAt,
-          permalink: post.permalink, mediaType: post.mediaType, status: 'DISCOVERED', provider: providerName,
-          ...(post.authorAvatarUrl ? { authorAvatarUrl: post.authorAvatarUrl } : {}),
-        },
-        update: {
-          shortcode: post.shortcode, authorUsername: post.username, caption: post.caption,
-          publishedAt: post.publishedAt, permalink: post.permalink, mediaType: post.mediaType, provider: providerName,
-          status: existing?.status === 'HIDDEN' ? 'HIDDEN' : 'DOWNLOADING',
-          syncedAt: new Date(),
-          ...(post.authorAvatarUrl ? { authorAvatarUrl: post.authorAvatarUrl } : {}),
-        },
-        select: { id: true, status: true },
-      })
+      const data = {
+        platform: 'INSTAGRAM' as const,
+        shortcode: post.shortcode,
+        authorUsername: post.username,
+        caption: post.caption,
+        publishedAt: post.publishedAt,
+        permalink: post.permalink,
+        mediaType: post.mediaType,
+        provider: providerName,
+        status: existing?.status === 'HIDDEN' ? 'HIDDEN' as const : 'DOWNLOADING' as const,
+        syncedAt: new Date(),
+        ...(post.authorAvatarUrl ? { authorAvatarUrl: post.authorAvatarUrl } : {}),
+      }
+      const saved = existing
+        ? await tx.socialPost.update({
+          where: { id: existing.id },
+          data,
+          select: { id: true, status: true },
+        })
+        : await tx.socialPost.create({
+          data: {
+            ...data,
+            externalId: post.externalId,
+            status: 'DISCOVERED',
+          },
+          select: { id: true, status: true },
+        })
+      preparedPostId = saved.id
       if (saved.status !== 'HIDDEN') {
         await tx.socialPost.update({ where: { id: saved.id }, data: { status: 'DOWNLOADING' } })
       }
@@ -223,13 +252,15 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
     const row = await prisma.$transaction(async (tx) => {
       if (!canReuseMedia) {
         await tx.socialPostMedia.deleteMany({ where: { postId: prepared.id } })
-        await tx.socialPostMedia.createMany({
-          data: localizedMedia.map((media, index) => ({
-            postId: prepared.id, type: post.media[index]?.type === 'VIDEO' ? 'VIDEO' as const : 'IMAGE' as const,
-            storageUrl: media.storageUrl, thumbnailUrl: media.thumbnailUrl,
-            width: media.width, height: media.height, durationMs: media.durationMs, sortOrder: index,
-          })),
-        })
+        if (localizedMedia.length) {
+          await tx.socialPostMedia.createMany({
+            data: localizedMedia.map((media, index) => ({
+              postId: prepared.id, type: post.media[index]?.type === 'VIDEO' ? 'VIDEO' as const : 'IMAGE' as const,
+              storageUrl: media.storageUrl, thumbnailUrl: media.thumbnailUrl,
+              width: media.width, height: media.height, durationMs: media.durationMs, sortOrder: index,
+            })),
+          })
+        }
       }
       return tx.socialPost.update({
         where: { id: prepared.id },
@@ -241,7 +272,9 @@ async function upsertPost(post: InstagramPost, providerName: string, localizer: 
   } catch (error) {
     logMediaFailure(error)
     await prisma.socialPost.updateMany({
-      where: { platform: 'INSTAGRAM', externalId: post.externalId },
+      where: preparedPostId
+        ? { id: preparedPostId }
+        : { platform: 'INSTAGRAM', externalId: post.externalId },
       data: {
         status: existing?.status === 'READY' || existing?.status === 'HIDDEN' ? existing.status : 'FAILED',
         syncedAt: new Date(),

@@ -476,17 +476,35 @@ export function normalizeApifyInstagramItem(value: unknown): InstagramPost {
   }
 
   const childPosts = Array.isArray(item.childPosts) ? item.childPosts : []
-  const media = childPosts.length
-    ? childPosts.map((child, index) => {
+  const caption = stringValue(item.caption)
+  const rawType = (stringValue(item.type ?? item.mediaType) || '').toLowerCase()
+  const hasPrimaryMedia = isVideoItem(item) ? Boolean(videoUrl(item)) : Boolean(imageUrl(item))
+  // Missing media is a text post only when the provider explicitly marks it
+  // as text or omits a media kind entirely. A declared image/video with a
+  // broken URL must remain a contract failure rather than silently losing it.
+  const textOnly = childPosts.length === 0
+    && !hasPrimaryMedia
+    && Boolean(caption)
+    && (!rawType || rawType === 'text' || rawType === 'textpost')
+  const media = textOnly
+    ? []
+    : childPosts.length
+      ? childPosts.map((child, index) => {
       const childRecord = asRecord(child)
       if (!childRecord) throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', `Apify childPosts[${index}] 不是对象`)
       return rawMedia(childRecord, index)
     })
-    : [rawMedia(item, 0)]
+      : [rawMedia(item, 0)]
 
-  const mediaType = childPosts.length
+  const mediaType = textOnly
+    ? 'TEXT'
+    : childPosts.length
     ? 'CAROUSEL'
     : isVideoItem(item) ? (isReelItem(item) ? 'REEL' : 'VIDEO') : 'IMAGE'
+
+  if (!media.length && !textOnly) {
+    throw new InstagramProviderError('PROVIDER_CONTRACT_FAILED', 'Apify Dataset item 缺少正文与媒体')
+  }
 
   try {
     return normalizeInstagramPost({
@@ -494,7 +512,7 @@ export function normalizeApifyInstagramItem(value: unknown): InstagramPost {
       shortcode,
       username,
       authorAvatarUrl: authorAvatarUrl(item),
-      caption: stringValue(item.caption),
+      caption,
       publishedAt,
       permalink: permalinkFor(item, shortcode),
       mediaType,
