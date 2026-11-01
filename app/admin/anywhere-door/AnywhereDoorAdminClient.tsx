@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { ManualPostForm } from '@/app/admin/anywhere-door/ManualPostForm'
+import { ManualPostRecords } from '@/app/admin/anywhere-door/ManualPostRecords'
 
 type StatusPayload = {
   provider: string
@@ -36,6 +37,7 @@ export function AnywhereDoorAdminClient() {
   const [avatar, setAvatar] = useState<AvatarProfile | null>(null)
   const [busy, setBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
+  const [manualRecordsVersion, setManualRecordsVersion] = useState(0)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -149,7 +151,8 @@ export function AnywhereDoorAdminClient() {
         </div>
         <p className="mt-4 text-xs font-bold leading-5 text-slate-400">按钮只登记同步请求；Provider Run 由独立 Worker 在开关、锁、冷却和额度检查通过后执行。</p>
       </section>
-      <ManualPostForm onCreated={load} />
+      <ManualPostForm onCreated={async () => { setManualRecordsVersion((current) => current + 1); await load() }} />
+      <ManualPostRecords refreshVersion={manualRecordsVersion} onDeleted={load} />
       <section className="rounded-[28px] border border-sky-100 bg-white/90 p-5 shadow-sm sm:p-7" data-anywhere-door-account-profile>
         <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">账号资料</p><h2 className="mt-2 text-2xl font-black text-brand-950">随意门账号头像</h2><p className="mt-2 text-sm font-bold text-slate-500">{avatar?.account || '@mreasonchan'} 的前台来源头像</p></div><span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-brand-700">管理员优先</span></div>
         <div className="mt-5 flex flex-wrap items-center gap-5">

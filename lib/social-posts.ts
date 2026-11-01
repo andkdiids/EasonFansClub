@@ -99,7 +99,7 @@ export function decodeSocialCursor(value: string | null | undefined): SocialCurs
   }
 }
 
-function safePublicMediaUrl(value?: string | null) {
+export function safePublicMediaUrl(value?: string | null) {
   const url = toPublicMediaUrl(value)
   if (!url) return null
   if (isPublicMediaProxyUrl(url)) return url
@@ -350,7 +350,7 @@ export async function getAdminSocialPosts(options: { status?: string | null; pag
   const manualPostIds = rows.filter((row) => row.provider === 'manual').map((row) => row.id)
   const auditRows = manualPostIds.length ? await prisma.adminAction.findMany({
     where: {
-      operationType: { in: ['ANYWHERE_DOOR_MANUAL_POST_CREATED', 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED'] },
+      operationType: { in: ['ANYWHERE_DOOR_MANUAL_POST_CREATED', 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED', 'ANYWHERE_DOOR_MANUAL_POST_RECOVERED'] },
       targetType: 'SOCIAL_POST',
       targetId: { in: manualPostIds },
     },
