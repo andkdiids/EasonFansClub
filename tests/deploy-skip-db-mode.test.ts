@@ -62,4 +62,12 @@ test('skip-db 明确不执行部署阶段数据库命令，默认完整迁移顺
   assert.match(workflow, /db_mode:[\s\S]*?options:[\s\S]*?- full[\s\S]*?- skip-db[\s\S]*?default: full/)
   assert.match(workflow, /deploy_arguments\+=\(--skip-db\)/)
   assert.match(deploy, /deploy_parse_db_mode_arg "\$\{@:7\}"/)
+  const pushPathsIgnore = workflow.match(/on:[\s\S]*?push:[\s\S]*?paths-ignore:([\s\S]*?)workflow_dispatch:/)?.[1] ?? ''
+  for (const path of [
+    'middleware.ts',
+    'tests/middleware-auth.test.ts',
+    'tests/mobile-bearer-route-integration.test.ts',
+  ]) {
+    assert.ok(pushPathsIgnore.includes(`'${path}'`), `${path} merge must not trigger the default full-DB push deployment`)
+  }
 })
