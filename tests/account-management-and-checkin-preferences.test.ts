@@ -52,7 +52,7 @@ test('用户密码接口分离、bcrypt cost 12 且日志不含密码或答案',
   const change = source('app/api/account/security/password/change/route.ts')
   const reset = source('app/api/account/security/password/security-question-reset/route.ts')
   for (const route of [change, reset]) {
-    assert.match(route, /requireUser\(\)/)
+    assert.match(route, /const guard = await requireRequestUser\(request\)[\s\S]*guard\.user/)
     assert.match(route, /rejectInvalidRequestOrigin\(request\)/)
     assert.match(route, /commitPasswordChange/)
     assert.match(route, /expectedPasswordHash: user\.passwordHash/)

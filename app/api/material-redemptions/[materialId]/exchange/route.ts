@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
+import { requireRequestUser, enforceApiRateLimit, rejectInvalidRequestOrigin } from '@/lib/security'
 import { exchangeMaterialRedemption, MaterialRedemptionError } from '@/lib/material-redemptions'
 
 export const dynamic = 'force-dynamic'
@@ -15,7 +15,7 @@ function errorResponse(error: unknown) {
 export async function POST(request: Request, context: RouteContext) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/material-redemptions/exchange',

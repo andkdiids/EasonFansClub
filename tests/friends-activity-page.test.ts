@@ -37,6 +37,8 @@ test('好友申请合并为默认全部、收到和发出三个分类', () => {
 
 test('好友动态 API 只允许挂号和发帖并执行服务端分页', () => {
   const route = read('app/api/friends/activity/route.ts')
+  assert.match(route, /export async function GET\(request: Request\)[\s\S]*?requireRequestUser\(request\)/)
+  assert.doesNotMatch(route, /requireUser\(/)
   assert.match(route, /ALLOWED_TYPES = \['CHECKIN', 'POST', 'BADGE'\]/)
   assert.match(route, /page = positiveInteger/)
   assert.match(route, /limit = positiveInteger/)

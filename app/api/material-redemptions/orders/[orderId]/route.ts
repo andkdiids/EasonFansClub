@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getOwnMaterialRedemptionOrder } from '@/lib/material-redemptions'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
 type RouteContext = { params: Promise<{ orderId: string }> }
 
-export async function GET(_request: Request, context: RouteContext) {
-  const guard = await requireUser()
+export async function GET(request: Request, context: RouteContext) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { orderId } = await context.params
   const order = await getOwnMaterialRedemptionOrder(guard.user.id, orderId)

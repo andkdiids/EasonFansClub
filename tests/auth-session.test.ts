@@ -166,7 +166,8 @@ test('RSC/公共页面认证数据库异常不能被降级成匿名用户', () =
   for (const relativePath of authSensitiveSources) {
     assert.doesNotMatch(source(relativePath), /getCurrentUser\(\)\.catch\(\(\) => null\)/, relativePath)
   }
-  assert.match(source('app/api/music/songs/[songId]/playback/audio/route.ts'), /AUTH_SERVICE_UNAVAILABLE/)
+  assert.match(source('app/api/music/songs/[songId]/playback/audio/route.ts'), /resolveRequestAuth\(request\)/)
+  assert.match(source('app/api/music/songs/[songId]/playback/audio/route.ts'), /if \(auth\.response\) return auth\.response/)
   const playbackRoute = source('app/api/music/songs/[songId]/playback/route.ts')
   if (/resolveRequestAuth\(request\)/.test(playbackRoute)) {
     // Mobile Bearer and browser Cookie auth share this resolver. Its auth

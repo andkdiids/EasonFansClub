@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { getAccountSecuritySettings, getSecurityQuestionRecoveryAvailability } from '@/lib/account-security'
 import { prisma } from '@/lib/prisma'
-import { rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 
-export async function GET() {
-  const guard = await requireUser()
+export async function GET(request: Request) {
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const [user, settings] = await Promise.all([
     prisma.user.findUnique({
@@ -38,7 +38,7 @@ export async function GET() {
 export async function PATCH(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   return NextResponse.json({ message: '账号恢复方式由系统统一管理，请联系管理员调整' }, { status: 403 })
 }

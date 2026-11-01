@@ -27,6 +27,9 @@ test('private media routes authenticate and stream COS objects without exposing 
   const stream = read('lib/protected-audio.ts')
 
   assert.match(fullRoute, /canPlayFullMusic/)
+  assert.match(fullRoute, /resolveRequestAuth\(request\)/)
+  assert.match(fullRoute, /if \(auth\.response\) return auth\.response/)
+  assert.match(fullRoute, /if \(!user\) return NextResponse\.json[\s\S]*status: 401/)
   assert.match(fullRoute, /streamProtectedGuessSongAudio/)
   assert.match(guessRoute, /requireRequestUser\(request\)/)
   assert.match(guessRoute, /getGuessSongPlaybackSource/)

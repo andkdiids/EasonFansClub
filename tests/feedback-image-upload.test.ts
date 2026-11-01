@@ -44,6 +44,8 @@ test('反馈内容可由文字或已上传图片满足；空内容且无图片�
   assert.equal(isFeedbackSubmissionContentValid('短句', 1), true)
   assert.equal(isFeedbackSubmissionContentValid('', 0), false)
   assert.equal(isFeedbackSubmissionContentValid('短句', 0), false)
+  assert.equal(isFeedbackSubmissionContentValid('12345678😀', 0), true)
+  assert.equal(isFeedbackSubmissionContentValid('短句\n\n——\n客户端环境\nApp 版本：1', 0), false)
 })
 
 test('JPG、PNG、WebP 输入都能被服务端统一转换为 WebP', async () => {

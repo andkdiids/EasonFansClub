@@ -232,5 +232,12 @@ export function parseFeedbackAttachments(value: unknown) {
 }
 
 export function isFeedbackSubmissionContentValid(content: unknown, attachmentCount: number) {
-  return (typeof content === 'string' && content.trim().length >= FEEDBACK_DESCRIPTION_MIN_LENGTH) || attachmentCount > 0
+  if (attachmentCount > 0) return true
+  if (typeof content !== 'string') return false
+  // The Android app appends bounded device context after this marker. Count
+  // only what the user wrote so platform metadata cannot satisfy the minimum.
+  const mobileContextMarker = '\n\n——\n客户端环境\n'
+  const markerIndex = content.indexOf(mobileContextMarker)
+  const userContent = markerIndex >= 0 ? content.slice(0, markerIndex) : content
+  return userContent.trim().length >= FEEDBACK_DESCRIPTION_MIN_LENGTH
 }

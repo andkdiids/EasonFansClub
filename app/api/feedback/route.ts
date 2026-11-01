@@ -8,13 +8,13 @@ import { safeDb } from '@/lib/db-timeout'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createManyNotifications } from '@/lib/notification-write'
 import { formatBeijingMonthDayTime } from '@/lib/beijing-time'
-import { getClientIp, rateLimit, requireUser, sanitizeText } from '@/lib/security'
+import { getClientIp, rateLimit, rejectInvalidRequestOrigin, requireRequestUser, sanitizeText } from '@/lib/security'
 import { BANNED_WORD_MESSAGE, CONTENT_CONTAINS_BANNED_WORD, checkBannedWords } from '@/lib/content-moderation'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const { searchParams } = new URL(request.url)
   const statusFilter = parseFeedbackStatusFilter(searchParams.get('status'))
@@ -30,7 +30,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const invalidOrigin = rejectInvalidRequestOrigin(request)
+  if (invalidOrigin) return invalidOrigin
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
 
   const body = await request.json().catch(() => null)
