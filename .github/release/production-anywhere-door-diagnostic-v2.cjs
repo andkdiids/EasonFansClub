@@ -31,7 +31,7 @@ function safeRuntimeConfig(runtimeEnv, fileEnv) {
     syncEnabled: enabled('ANYWHERE_DOOR_SYNC_ENABLED'),
     featureEnabled: enabled('ANYWHERE_DOOR_ENABLED'),
     provider: value('IG_PROVIDER').trim().toLowerCase() === 'apify' ? 'apify' : value('IG_PROVIDER') ? 'OTHER' : 'MISSING',
-    target: value('IG_TARGET_USERNAME').trim().toLowerCase() === TARGET ? TARGET : value('IG_TARGET_USERNAME') ? 'OTHER' : 'MISSING',
+    target: value('IG_TARGET_USERNAME').trim().toLowerCase() === TARGET || !value('IG_TARGET_USERNAME').trim() ? TARGET : 'OTHER',
     apifyTokenPresent: Boolean(value('APIFY_API_TOKEN').trim()),
   }
 }
@@ -70,6 +70,7 @@ function parsePm2List(raw) {
       startedAt: Number.isFinite(uptime) && uptime > 0 ? new Date(uptime).toISOString() : null,
       runtimeConfig: safeRuntimeConfig(runtimeEnv, {}),
       outLogPath: typeof env.pm_out_log_path === 'string' ? env.pm_out_log_path : '',
+      errLogPath: typeof env.pm_err_log_path === 'string' ? env.pm_err_log_path : '',
   }
   Object.defineProperty(worker, 'runtimeEnv', { value: runtimeEnv, enumerable: false })
   Object.defineProperty(worker, 'pm2Args', { value: env.args, enumerable: false })
@@ -93,8 +94,99 @@ function parseWorkerLogBuffer(buffer, now = new Date()) {
   const cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000
   return buffer.toString('utf8').split(/\r?\n/)
     .map(parseWorkerLogLine)
-    .filter((entry) => entry && entry.at && Date.parse(entry.at) >= cutoff)
+    .filter((entry) => entry && entry.at && Number.isFinite(Date.parse(entry.at)))
+    .map((entry) => ({ ...entry, withinSevenDays: Date.parse(entry.at) >= cutoff }))
     .slice(-20)
+}
+
+function safeMediaFailureBlock(lines, at) {
+  const fields = new Map()
+  const joined = lines.join('\n')
+  const marker = joined.indexOf('[instagram.media.failure]')
+  const marked = marker >= 0 ? joined.slice(marker + '[instagram.media.failure]'.length) : joined
+  const opening = marked.indexOf('{')
+  const body = opening >= 0 ? marked.slice(opening + 1) : marked
+  let index = 0
+  while (index < body.length) {
+    while (/[\s,]/.test(body[index] || '') && index < body.length) index += 1
+    if (body[index] === '}' || index >= body.length) break
+    const keyMatch = body.slice(index).match(/^([A-Za-z][A-Za-z0-9]*):\s*/)
+    if (!keyMatch) { index += 1; continue }
+    const key = keyMatch[1]
+    index += keyMatch[0].length
+    const valueStart = index
+    const quote = body[index] === "'" || body[index] === '"' ? body[index] : null
+    if (quote) {
+      index += 1
+      while (index < body.length) {
+        if (body[index] === '\\') { index += 2; continue }
+        if (body[index] === quote) { index += 1; break }
+        index += 1
+      }
+    } else {
+      while (index < body.length && body[index] !== ',' && body[index] !== '}' && body[index] !== '\n') index += 1
+    }
+    if (['mediaType', 'stage', 'hostname', 'status', 'redirects', 'errorCode', 'errorName', 'causeCode', 'proxyConfigured'].includes(key) && !fields.has(key)) {
+      fields.set(key, body.slice(valueStart, index).trim())
+    }
+    while (/[\s,]/.test(body[index] || '') && index < body.length) index += 1
+  }
+  const literal = (key) => {
+    const raw = fields.get(key)
+    if (typeof raw !== 'string') return null
+    const single = raw.match(/^'([A-Za-z0-9_.-]{1,253})'$/)
+    const double = raw.match(/^"([A-Za-z0-9_.-]{1,253})"$/)
+    if (single) return single[1]
+    if (double) return double[1]
+    return null
+  }
+  const number = (key) => {
+    const raw = fields.get(key)
+    return typeof raw === 'string' && /^\d{1,3}$/.test(raw) ? Number(raw) : null
+  }
+  const mediaType = literal('mediaType')
+  const stage = literal('stage')
+  const rawHost = literal('hostname')
+  const host = rawHost && /^[a-z0-9.-]+$/i.test(rawHost) && rawHost.includes('.') ? rawHost.toLowerCase() : rawHost ? 'OTHER_HOST' : null
+  const status = number('status')
+  const redirects = number('redirects')
+  const errorCode = literal('errorCode')
+  const rawName = literal('errorName')
+  const rawCause = literal('causeCode')
+  const proxy = fields.get('proxyConfigured')
+  return {
+    at,
+    mediaType: ['IMAGE', 'VIDEO', 'CAROUSEL', 'REEL'].includes(mediaType) ? mediaType : 'UNKNOWN',
+    stage: stage && /^[A-Za-z_]{1,32}$/.test(stage) ? stage : 'UNKNOWN',
+    hostname: host,
+    status: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+    redirects: Number.isInteger(redirects) && redirects >= 0 && redirects <= 99 ? redirects : null,
+    errorCode: safeCode(errorCode),
+    errorName: rawName === 'InstagramMediaSafetyError' ? rawName : rawName ? 'OTHER' : null,
+    causeCode: safeCode(rawCause),
+    proxyConfigured: proxy === 'true' ? true : proxy === 'false' ? false : null,
+  }
+}
+
+function parseMediaFailureBlocks(buffer) {
+  const lines = buffer.toString('utf8').split(/\r?\n/)
+  const records = []
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].includes('[instagram.media.failure]')) continue
+    const at = lines[i].match(/\b(20\d{2}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z?)\b/)?.[1] || null
+    const block = [lines[i]]
+    let depth = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length
+    let bytes = Buffer.byteLength(lines[i])
+    while (depth > 0 && i + 1 < lines.length && block.length < 32 && bytes < 8192) {
+      const next = lines[++i]
+      if (/\[instagram\./.test(next)) { i -= 1; break }
+      block.push(next)
+      bytes += Buffer.byteLength(next)
+      depth += (next.match(/\{/g) || []).length - (next.match(/\}/g) || []).length
+    }
+    records.push(safeMediaFailureBlock(block, at))
+  }
+  return records.slice(-20)
 }
 
 function iso(value) {
@@ -220,25 +312,37 @@ function safeDatabaseError(error) {
   return allowed.has(code) ? code : 'DATABASE_QUERY_FAILED'
 }
 
-function readSafeWorkerLogs(worker, pm2Home, now) {
-  if (!worker || !worker.outLogPath) return { status: 'NOT_CONFIGURED', entries: [] }
+function readSafeLogBuffer(logPathInput, pm2Home) {
+  if (!logPathInput) return { status: 'NOT_CONFIGURED', buffer: null }
   try {
     const logsDir = fs.realpathSync(path.join(pm2Home, 'logs'))
-    const logPath = fs.realpathSync(worker.outLogPath)
-    if (!isPathWithin(logsDir, logPath)) return { status: 'PATH_REJECTED', entries: [] }
+    const logPath = fs.realpathSync(logPathInput)
+    if (!isPathWithin(logsDir, logPath)) return { status: 'PATH_REJECTED', buffer: null }
     const stat = fs.statSync(logPath)
-    if (!stat.isFile()) return { status: 'NOT_REGULAR_FILE', entries: [] }
+    if (!stat.isFile()) return { status: 'NOT_REGULAR_FILE', buffer: null }
     const fd = fs.openSync(logPath, 'r')
     try {
       const length = Math.min(stat.size, SAFE_LOG_BYTES)
       const buffer = Buffer.alloc(length)
       fs.readSync(fd, buffer, 0, length, Math.max(0, stat.size - length))
-      return { status: 'READ', entries: parseWorkerLogBuffer(buffer, now) }
+      return { status: 'READ', buffer }
     } finally {
       fs.closeSync(fd)
     }
   } catch {
-    return { status: 'UNAVAILABLE', entries: [] }
+    return { status: 'UNAVAILABLE', buffer: null }
+  }
+}
+
+function readSafeWorkerLogs(worker, pm2Home, now) {
+  if (!worker) return { status: 'NOT_CONFIGURED', entries: [], mediaFailuresStatus: 'NOT_CONFIGURED', mediaFailures: [] }
+  const stdout = readSafeLogBuffer(worker.outLogPath, pm2Home)
+  const stderr = readSafeLogBuffer(worker.errLogPath, pm2Home)
+  return {
+    status: stdout.status,
+    entries: stdout.buffer ? parseWorkerLogBuffer(stdout.buffer, now) : [],
+    mediaFailuresStatus: stderr.status,
+    mediaFailures: stderr.buffer ? parseMediaFailureBlocks(stderr.buffer) : [],
   }
 }
 
@@ -335,10 +439,12 @@ module.exports = {
   safeWorkerArgs,
   parseWorkerLogLine,
   parseWorkerLogBuffer,
+  parseMediaFailureBlocks,
   summarizeSocialEvidence,
   querySocialEvidence,
   safeDatabaseError,
   readSafeWorkerLogs,
+  readSafeLogBuffer,
 }
 
 if (process.env.ECFC_ANYWHERE_DIAGNOSTIC_RUN === '1') {
