@@ -5,6 +5,7 @@ import test from 'node:test'
 import { buildInstagramMediaStorageKey, ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
 import { buildManualPostMediaRecords, createManualPostMediaReceipt, verifyManualPostMediaReceipt } from '@/lib/anywhere-door/manual-media'
 import { isManualPostImageMimeType, MANUAL_POST_MAX_MEDIA, MANUAL_POST_MAX_VIDEO_BYTES } from '@/lib/anywhere-door/manual-media-policy'
+import { isRecoverableManualPostMatch, MANUAL_POST_CREATE_RATE_LIMIT_POLICY } from '@/lib/anywhere-door/manual-post-policy'
 import {
   buildInstagramPostIdentityFilters,
   buildManualSocialPostExternalId,
@@ -129,6 +130,8 @@ test('manual import is admin-only, rate-limited, leased, transactional, and audi
   assert.match(route, /rejectInvalidRequestOrigin\(request\)/)
   assert.match(route, /requireAdmin\('social_manage'\)/)
   assert.match(route, /enforceApiRateLimit\(/)
+  assert.equal((route.match(/enforceApiRateLimit\(/g) || []).length, 1)
+  assert.match(route, /\.\.\.MANUAL_POST_CREATE_RATE_LIMIT_POLICY/)
   assert.match(route, /acquireInstagramSyncLease\(/)
   assert.match(route, /releaseInstagramSyncLease\(/)
   assert.match(route, /prisma\.\$transaction\(async \(tx\)/)
@@ -154,20 +157,107 @@ test('manual import is admin-only, rate-limited, leased, transactional, and audi
   const serializeBody = posts.slice(posts.indexOf('function serializePost('), posts.indexOf('export async function getPublicSocialPostFeed('))
   assert.match(serializeBody, /authorUsername: row\.authorUsername/)
   assert.doesNotMatch(serializeBody, /provider:|operatorName:|adminId:/)
-  assert.match(posts, /operationType: \{ in: \['ANYWHERE_DOOR_MANUAL_POST_CREATED', 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED'\]/)
+  assert.match(posts, /operationType: \{ in: \['ANYWHERE_DOOR_MANUAL_POST_CREATED', 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED', 'ANYWHERE_DOOR_MANUAL_POST_RECOVERED'\]/)
 
   const form = read('app/admin/anywhere-door/ManualPostForm.tsx')
-  assert.match(form, /if \(busy\) return/)
+  assert.match(form, /if \(submitLockRef\.current\) return/)
   assert.match(form, /multiple onChange=\{addFiles\}/)
   assert.match(form, /图片 \/ 视频（可选）/)
   assert.match(form, /state: 'uploading'/)
   assert.match(form, /state: 'failed'/)
+  assert.match(form, /submitLockRef\.current = true/)
+  assert.match(form, /response\.status === 429/)
+  assert.match(form, /已上传文件和填写内容均已保留/)
   assert.match(form, /重试/)
   assert.match(form, /移除/)
   assert.match(form, /currentMedia\.map\(\(item\) => item\.receipt\)/)
   assert.ok(form.indexOf('if (!response.ok) throw') < form.indexOf('formRef.current?.reset()'))
   assert.match(form, /内容已保存，但列表刷新失败/)
   assert.match(form, /setError\(caught instanceof Error/)
+})
+
+test('admin manual creation has a dedicated generous bucket and media upload cannot spend its quota', () => {
+  assert.equal(MANUAL_POST_CREATE_RATE_LIMIT_POLICY.endpoint, '/api/admin/anywhere-door/posts/manual:POST')
+  assert.equal(MANUAL_POST_CREATE_RATE_LIMIT_POLICY.user.limit, 20)
+  assert.equal(MANUAL_POST_CREATE_RATE_LIMIT_POLICY.ip.limit, 30)
+  for (const requestCount of [5, 10]) {
+    assert.ok(requestCount <= MANUAL_POST_CREATE_RATE_LIMIT_POLICY.user.limit)
+    assert.ok(requestCount <= MANUAL_POST_CREATE_RATE_LIMIT_POLICY.ip.limit)
+  }
+  assert.ok(21 > MANUAL_POST_CREATE_RATE_LIMIT_POLICY.user.limit)
+  assert.ok(31 > MANUAL_POST_CREATE_RATE_LIMIT_POLICY.ip.limit)
+
+  const route = read('app/api/admin/anywhere-door/posts/manual/route.ts')
+  const upload = read('app/api/admin/anywhere-door/posts/manual/media/route.ts')
+  assert.equal((route.match(/enforceApiRateLimit\(/g) || []).length, 1)
+  assert.match(upload, /posts\/manual\/media:\$\{method\}/)
+  assert.match(upload, /user: \{ limit: 60, windowSeconds: 60 \* 60 \}/)
+  assert.match(upload, /ip: \{ limit: 120, windowSeconds: 60 \* 60 \}/)
+  assert.doesNotMatch(route, /for\s*\([^)]*receipt[^)]*\)[\s\S]{0,300}enforceApiRateLimit/)
+})
+
+test('only a failed post with no attached media can be recovered by exact-source manual fallback', () => {
+  assert.equal(isRecoverableManualPostMatch({ status: 'FAILED', mediaCount: 0 }), true)
+  assert.equal(isRecoverableManualPostMatch({ status: 'FAILED', mediaCount: 1 }), false)
+  assert.equal(isRecoverableManualPostMatch({ status: 'READY', mediaCount: 0 }), false)
+  assert.equal(isRecoverableManualPostMatch({ status: 'HIDDEN', mediaCount: 0 }), false)
+})
+
+test('failed-source recovery is guarded transactionally and preserves ordered media and audit history', () => {
+  const route = read('app/api/admin/anywhere-door/posts/manual/route.ts')
+  assert.match(route, /isRecoverableManualPostMatch\(\{ status: duplicate\.status, mediaCount: duplicate\._count\.media \}\)/)
+  assert.match(route, /tx\.socialPost\.updateMany\([\s\S]*?provider: duplicate\.provider[\s\S]*?status: 'FAILED'/)
+  assert.match(route, /if \(updated\.count !== 1\) throw new ManualPostRecoveryConflictError/)
+  assert.match(route, /tx\.socialPostMedia\.createMany\([\s\S]*?buildManualPostMediaRecords\(receipts, getCosUrl\)/)
+  assert.match(route, /ANYWHERE_DOOR_MANUAL_POST_RECOVERED/)
+  assert.match(route, /previousCreatedAt: duplicate\.createdAt\.toISOString\(\)/)
+  assert.match(route, /MANUAL_POST_RECOVERY_CONFLICT/)
+  assert.match(route, /existingStatus: duplicate\.status/)
+  assert.equal((route.match(/tx\.socialPost\.create\(/g) || []).length, 1)
+})
+
+test('recent manual records are admin-only, paged by current creation time, and exclude operator identity', () => {
+  const route = read('app/api/admin/anywhere-door/posts/manual/route.ts')
+  assert.match(route, /export async function GET\(request: Request\)/)
+  assert.match(route, /requireAdmin\('social_manage'\)/)
+  assert.match(route, /MANUAL_POST_RECORDS_PAGE_SIZE/)
+  assert.match(route, /orderBy: \[\{ createdAt: 'desc' \}, \{ id: 'desc' \}\]/)
+  assert.match(route, /provider: 'manual' as const/)
+  const response = route.slice(route.indexOf('return NextResponse.json({\n      items:'), route.indexOf("}, { headers: { 'Cache-Control': 'private, no-store"))
+  assert.doesNotMatch(response, /adminId|operatorName|operatorUsername|operatorUid/)
+  assert.match(route, /safePublicMediaUrl\(item\.storageUrl\)/)
+})
+
+test('manual-only deletion checks capability and provenance, confirms explicit ID, audits transactionally and preserves COS objects', () => {
+  const route = read('app/api/admin/anywhere-door/posts/manual/[postId]/route.ts')
+  assert.match(route, /rejectInvalidRequestOrigin\(request\)/)
+  assert.match(route, /requireAdmin\('social_manage'\)/)
+  assert.match(route, /provider: 'manual'/)
+  assert.match(route, /ANYWHERE_DOOR_MANUAL_POST_CREATED[\s\S]*ANYWHERE_DOOR_MANUAL_POST_RECOVERED/)
+  assert.match(route, /ANYWHERE_DOOR_MANUAL_POST_DELETED/)
+  assert.match(route, /await tx\.socialPostComment\.deleteMany/)
+  assert.match(route, /tx\.socialPost\.deleteMany\([\s\S]*?where: \{ id: post\.id,[\s\S]*?provider: 'manual'/)
+  assert.match(route, /revalidatePath\('\/anywhere-door'\)/)
+  assert.match(route, /cosObjectsPreserved: true/)
+  assert.doesNotMatch(route, /deleteFromCos|prefixDelete|deletePrefix/)
+})
+
+test('manual record UI separates upload completion from post creation and confirms single-record deletion', () => {
+  const form = read('app/admin/anywhere-door/ManualPostForm.tsx')
+  assert.match(form, /文件上传完成/)
+  assert.match(form, /补录成功/)
+  assert.match(form, /该来源内容已存在，没有创建新动态/)
+  assert.match(form, /正在补录…/)
+  assert.match(form, /已上传文件和填写内容均已保留/)
+  const records = read('app/admin/anywhere-door/ManualPostRecords.tsx')
+  assert.match(records, /手动补录记录/)
+  assert.match(records, /createdAt/)
+  assert.match(records, /useState\(20\)/)
+  assert.match(records, /确认删除这条手动补录内容？删除后前台将不再显示。/)
+  assert.match(records, /取消/)
+  assert.match(records, /确认删除/)
+  assert.match(records, /method: 'DELETE'/)
+  assert.match(read('app/admin/anywhere-door/AnywhereDoorAdminClient.tsx'), /<ManualPostRecords/)
 })
 
 test('manual media is written as one post with ordered IMAGE and VIDEO children and public carousel reads that order', () => {

@@ -4,10 +4,12 @@ import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
 import { ANYWHERE_DOOR_TARGET, getAnywhereDoorConfig, getAnywhereDoorStorageMode } from '@/lib/anywhere-door/config'
 import { buildManualPostMediaRecords, verifyManualPostMediaReceipt } from '@/lib/anywhere-door/manual-media'
 import { MANUAL_POST_MAX_MEDIA } from '@/lib/anywhere-door/manual-media-policy'
+import { isRecoverableManualPostMatch, MANUAL_POST_CREATE_RATE_LIMIT_POLICY, MANUAL_POST_RECORDS_PAGE_SIZE } from '@/lib/anywhere-door/manual-post-policy'
 import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease } from '@/lib/instagram/sync-state'
 import { buildInstagramPostIdentityFilters, buildManualSocialPostExternalId, canonicalizeInstagramSourceUrl, resolveManualSocialPostMediaType } from '@/lib/instagram/source-identity'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
+import { safePublicMediaUrl } from '@/lib/social-posts'
 import { deleteFromCos, getCosUrl } from '@/lib/tencent-cos'
 
 export const runtime = 'nodejs'
@@ -15,6 +17,12 @@ export const maxDuration = 60
 
 const MAX_REQUEST_BYTES = 64 * 1024
 const MAX_CAPTION_LENGTH = 10_000
+
+class ManualPostRecoveryConflictError extends Error {}
+
+function isUniqueConstraintError(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'P2002')
+}
 
 function parseReceipts(value: FormDataEntryValue | null, userId: string) {
   if (typeof value !== 'string') return null
@@ -53,9 +61,7 @@ export async function POST(request: Request) {
   const guard = await requireAdmin('social_manage')
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
-    endpoint: '/api/admin/anywhere-door/posts/manual:POST',
-    ip: { limit: 10, windowSeconds: 60 * 60 },
-    user: { limit: 5, windowSeconds: 60 * 60 },
+    ...MANUAL_POST_CREATE_RATE_LIMIT_POLICY,
   }, '手动补录操作过于频繁，请稍后再试')
   if (limited) return limited
 
@@ -113,7 +119,16 @@ export async function POST(request: Request) {
     const matches = await prisma.socialPost.findMany({
       where: { platform: 'INSTAGRAM', OR: identityFilters },
       take: 2,
-      select: { id: true, externalId: true, authorUsername: true, permalink: true },
+      select: {
+        id: true,
+        externalId: true,
+        authorUsername: true,
+        permalink: true,
+        provider: true,
+        status: true,
+        createdAt: true,
+        _count: { select: { media: true } },
+      },
     })
     const attachedMedia = await prisma.socialPostMedia.findMany({
       where: { storageUrl: { in: receipts.map((receipt) => getCosUrl(receipt.key)) } },
@@ -128,6 +143,62 @@ export async function POST(request: Request) {
     }
     const duplicate = matches[0]
     if (duplicate) {
+      if (isRecoverableManualPostMatch({ status: duplicate.status, mediaCount: duplicate._count.media })) {
+        creatingPost = true
+        const recoveredAt = new Date()
+        await prisma.$transaction(async (tx) => {
+          const updated = await tx.socialPost.updateMany({
+            where: {
+              id: duplicate.id,
+              platform: 'INSTAGRAM',
+              authorUsername: ANYWHERE_DOOR_TARGET,
+              provider: duplicate.provider,
+              status: 'FAILED',
+            },
+            data: {
+              externalId,
+              shortcode: source.shortcode,
+              caption: caption || null,
+              permalink: source.permalink,
+              publishedAt,
+              syncedAt: recoveredAt,
+              createdAt: recoveredAt,
+              mediaType,
+              status: 'READY',
+              provider: 'manual',
+            },
+          })
+          if (updated.count !== 1) throw new ManualPostRecoveryConflictError('MANUAL_POST_RECOVERY_CONFLICT')
+          if (receipts.length) {
+            await tx.socialPostMedia.createMany({
+              data: buildManualPostMediaRecords(receipts, getCosUrl).map((record) => ({ ...record, postId: duplicate.id })),
+            })
+          }
+          await createAdminActionAudit(tx, {
+            operatorId: guard.user!.id,
+            action: 'UPDATE_SETTING',
+            operationType: adminAuditOperations.ANYWHERE_DOOR_MANUAL_POST_RECOVERED,
+            targetType: 'SOCIAL_POST',
+            targetId: duplicate.id,
+            targetTitle: caption.slice(0, 160) || '随意门动态',
+            reason: '手动补录恢复了无媒体的失败来源记录',
+            metadata: {
+              sourceMode: 'MANUAL',
+              sourceUrl: source.permalink,
+              previousProvider: duplicate.provider,
+              previousStatus: duplicate.status,
+              previousCreatedAt: duplicate.createdAt.toISOString(),
+              publishedAt: publishedAt.toISOString(),
+              mediaType,
+              mediaCount: receipts.length,
+            },
+          })
+        })
+        return NextResponse.json({
+          result: { created: true, recovered: true, deduplicated: false, postId: duplicate.id },
+        }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
+      }
+
       invalidatedUploadIds = await cleanupUnreferencedReceipts(receipts)
       await prisma.$transaction(async (tx) => {
         await createAdminActionAudit(tx, {
@@ -141,7 +212,17 @@ export async function POST(request: Request) {
           metadata: { sourceMode: 'MANUAL', sourceUrl: source.permalink, dedupe: 'EXACT_SOURCE_IDENTITY' },
         })
       })
-      return NextResponse.json({ result: { created: false, deduplicated: true, postId: duplicate.id, invalidatedUploadIds } }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+      return NextResponse.json({
+        result: {
+          created: false,
+          deduplicated: true,
+          postId: duplicate.id,
+          existingStatus: duplicate.status,
+          existingProvider: duplicate.provider,
+          sourceUrl: duplicate.permalink,
+          invalidatedUploadIds,
+        },
+      }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
     }
 
     creatingPost = true
@@ -182,9 +263,95 @@ export async function POST(request: Request) {
     return NextResponse.json({ result: { created: true, deduplicated: false, postId: post.id } }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
     if (creatingPost) invalidatedUploadIds = await cleanupUnreferencedReceipts(receipts)
+    if (error instanceof ManualPostRecoveryConflictError) {
+      return NextResponse.json({
+        code: 'MANUAL_POST_RECOVERY_CONFLICT',
+        invalidatedUploadIds,
+        message: '这条来源记录状态刚刚发生变化，未覆盖现有数据；请刷新记录后再处理',
+      }, { status: 409 })
+    }
+    if (creatingPost && isUniqueConstraintError(error)) {
+      const concurrentlyCreated = await prisma.socialPost.findFirst({
+        where: { platform: 'INSTAGRAM', OR: identityFilters },
+        select: { id: true, status: true, provider: true, permalink: true },
+      }).catch(() => null)
+      if (concurrentlyCreated) {
+        await prisma.$transaction(async (tx) => createAdminActionAudit(tx, {
+          operatorId: guard.user!.id,
+          action: 'UPDATE_SETTING',
+          operationType: adminAuditOperations.ANYWHERE_DOOR_MANUAL_POST_DEDUPED,
+          targetType: 'SOCIAL_POST',
+          targetId: concurrentlyCreated.id,
+          targetTitle: caption.slice(0, 160) || '随意门动态',
+          reason: '并发补录命中同一来源，数据库唯一键阻止了重复动态',
+          metadata: { sourceMode: 'MANUAL', sourceUrl: source.permalink, dedupe: 'CONCURRENT_UNIQUE_KEY' },
+        }))
+        return NextResponse.json({
+          result: {
+            created: false,
+            deduplicated: true,
+            postId: concurrentlyCreated.id,
+            existingStatus: concurrentlyCreated.status,
+            existingProvider: concurrentlyCreated.provider,
+            sourceUrl: concurrentlyCreated.permalink,
+            invalidatedUploadIds,
+          },
+        }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+      }
+    }
     console.error('[admin.anywhere-door.manual.create]', { errorName: error instanceof Error ? error.name : 'unknown' })
     return NextResponse.json({ code: 'MANUAL_POST_CREATE_FAILED', invalidatedUploadIds, message: '随意门内容保存失败；表单内容仍可重试' }, { status: 503 })
   } finally {
     if (leaseToken) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken).catch(() => false)
+  }
+}
+
+export async function GET(request: Request) {
+  const guard = await requireAdmin('social_manage')
+  if (!guard.user) return guard.response
+  const url = new URL(request.url)
+  const parsedPage = Number(url.searchParams.get('page') || 1)
+  const page = Math.max(1, Number.isFinite(parsedPage) ? Math.floor(parsedPage) : 1)
+  const where = { platform: 'INSTAGRAM' as const, provider: 'manual' as const, authorUsername: ANYWHERE_DOOR_TARGET }
+  try {
+    const [rows, total] = await Promise.all([
+      prisma.socialPost.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * MANUAL_POST_RECORDS_PAGE_SIZE,
+        take: MANUAL_POST_RECORDS_PAGE_SIZE,
+        select: {
+          id: true,
+          caption: true,
+          mediaType: true,
+          status: true,
+          publishedAt: true,
+          createdAt: true,
+          permalink: true,
+          media: { orderBy: { sortOrder: 'asc' }, select: { id: true, type: true, storageUrl: true, thumbnailUrl: true, sortOrder: true } },
+        },
+      }),
+      prisma.socialPost.count({ where }),
+    ])
+    return NextResponse.json({
+      items: rows.map((row) => ({
+        ...row,
+        publishedAt: row.publishedAt.toISOString(),
+        createdAt: row.createdAt.toISOString(),
+        media: row.media.map((item) => ({
+          id: item.id,
+          type: item.type,
+          url: safePublicMediaUrl(item.storageUrl),
+          thumbnailUrl: safePublicMediaUrl(item.thumbnailUrl),
+          sortOrder: item.sortOrder,
+        })).filter((item) => item.url),
+      })),
+      total,
+      page,
+      pageSize: MANUAL_POST_RECORDS_PAGE_SIZE,
+    }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+  } catch (error) {
+    console.error('[admin.anywhere-door.manual.records]', { errorName: error instanceof Error ? error.name : 'unknown' })
+    return NextResponse.json({ message: '手动补录记录暂时无法加载' }, { status: 503 })
   }
 }

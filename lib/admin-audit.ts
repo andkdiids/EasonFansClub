@@ -46,6 +46,8 @@ export const adminAuditOperations = {
   BETA_ACTIVATION_REVOKE: 'BETA_ACTIVATION_REVOKE',
   ANYWHERE_DOOR_MANUAL_POST_CREATED: 'ANYWHERE_DOOR_MANUAL_POST_CREATED',
   ANYWHERE_DOOR_MANUAL_POST_DEDUPED: 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED',
+  ANYWHERE_DOOR_MANUAL_POST_RECOVERED: 'ANYWHERE_DOOR_MANUAL_POST_RECOVERED',
+  ANYWHERE_DOOR_MANUAL_POST_DELETED: 'ANYWHERE_DOOR_MANUAL_POST_DELETED',
 } as const
 
 export type AdminAuditOperation = typeof adminAuditOperations[keyof typeof adminAuditOperations]
@@ -94,6 +96,8 @@ export const adminAuditOperationLabels: Record<AdminAuditOperation, string> = {
   BETA_ACTIVATION_REVOKE: '撤销 Android 内测设备资格',
   ANYWHERE_DOOR_MANUAL_POST_CREATED: '手动补录随意门动态',
   ANYWHERE_DOOR_MANUAL_POST_DEDUPED: '随意门补录去重命中',
+  ANYWHERE_DOOR_MANUAL_POST_RECOVERED: '手动补录恢复失败随意门动态',
+  ANYWHERE_DOOR_MANUAL_POST_DELETED: '删除手动补录随意门动态',
 }
 
 type AuditDatabaseClient = Pick<Prisma.TransactionClient, 'user' | 'adminAction' | 'postModerationHistory'>

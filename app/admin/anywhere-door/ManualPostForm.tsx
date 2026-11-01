@@ -14,6 +14,7 @@ type ManualMediaItem = {
   receipt: string | null
   error: string | null
 }
+type ExistingManualMatch = { id: string; status: string; sourceUrl: string | null }
 
 function fileType(file: File): ManualMediaItem['type'] {
   const type = file.type.trim().toLowerCase()
@@ -24,7 +25,7 @@ function fileType(file: File): ManualMediaItem['type'] {
 
 function stateLabel(state: UploadState) {
   if (state === 'uploading') return '上传中'
-  if (state === 'success') return '成功'
+  if (state === 'success') return '文件上传完成'
   if (state === 'failed') return '失败'
   return '等待'
 }
@@ -32,9 +33,12 @@ function stateLabel(state: UploadState) {
 export function ManualPostForm({ onCreated }: Readonly<{ onCreated: () => Promise<void> }>) {
   const formRef = useRef<HTMLFormElement>(null)
   const mediaRef = useRef<ManualMediaItem[]>([])
+  const submitLockRef = useRef(false)
   const [media, setMedia] = useState<ManualMediaItem[]>([])
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [messageKind, setMessageKind] = useState<'success' | 'existing'>('success')
+  const [existingMatch, setExistingMatch] = useState<ExistingManualMatch | null>(null)
   const [error, setError] = useState('')
 
   function updateMedia(update: (previous: ManualMediaItem[]) => ManualMediaItem[]) {
@@ -126,14 +130,16 @@ export function ManualPostForm({ onCreated }: Readonly<{ onCreated: () => Promis
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (busy) return
+    if (submitLockRef.current) return
     const currentMedia = mediaRef.current
     if (currentMedia.some((item) => item.state !== 'success' || !item.receipt)) {
       setError('请等待媒体上传完成；失败文件可单独重试或移除')
       return
     }
+    submitLockRef.current = true
     setBusy(true)
     setMessage('')
+    setExistingMatch(null)
     setError('')
     try {
       const form = event.currentTarget
@@ -179,10 +185,27 @@ export function ManualPostForm({ onCreated }: Readonly<{ onCreated: () => Promis
         }
         for (const item of resetItems) void uploadItem(item)
       }
-      if (!response.ok) throw new Error(payload?.message || '内容补录失败，请保留表单后重试')
-      setMessage(payload?.result?.deduplicated
-        ? '已找到相同来源内容，没有创建重复动态。'
-        : '内容已补录，前台作者显示为 mreasonchan。')
+      if (!response.ok) {
+        const detail = payload?.message || '内容补录失败，请保留表单后重试'
+        throw new Error(response.status === 429
+          ? `${detail} 已上传文件和填写内容均已保留，请稍后重新提交。`
+          : detail)
+      }
+      const result = payload?.result
+      if (result?.deduplicated) {
+        setMessageKind('existing')
+        setExistingMatch({
+          id: String(result.postId || ''),
+          status: String(result.existingStatus || 'UNKNOWN'),
+          sourceUrl: typeof result.sourceUrl === 'string' ? result.sourceUrl : null,
+        })
+        setMessage('该来源内容已存在，没有创建新动态。')
+      } else {
+        setMessageKind('success')
+        setMessage(result?.recovered
+          ? `补录成功，已恢复原失败记录（${result.postId}）；公开时间线仍按原始发布时间排序。`
+          : `补录成功（${result?.postId || '记录编号暂不可用'}），前台作者显示为 mreasonchan。`)
+      }
       for (const item of mediaRef.current) URL.revokeObjectURL(item.previewUrl)
       mediaRef.current = []
       setMedia([])
@@ -195,6 +218,7 @@ export function ManualPostForm({ onCreated }: Readonly<{ onCreated: () => Promis
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '内容补录失败，请重试')
     } finally {
+      submitLockRef.current = false
       setBusy(false)
     }
   }
@@ -239,9 +263,12 @@ export function ManualPostForm({ onCreated }: Readonly<{ onCreated: () => Promis
             </div>
           </li>)}
         </ol> : null}
-        {message ? <p className="text-sm font-bold text-emerald-700" role="status">{message}</p> : null}
+        {message ? <div className={`rounded-xl px-3 py-2 text-sm font-bold ${messageKind === 'existing' ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`} role="status">
+          <p>{message}</p>
+          {existingMatch?.id ? <p className="mt-1 break-all text-xs">已有 SocialPost：{existingMatch.id} · 状态 {existingMatch.status}{existingMatch.sourceUrl ? <> · <a href={existingMatch.sourceUrl} target="_blank" rel="noreferrer" className="underline">打开原文</a></> : null}</p> : null}
+        </div> : null}
         {error ? <p className="text-sm font-bold text-red-600" role="alert">{error}</p> : null}
-        <div><button type="submit" disabled={busy || uploading || hasFailed} className="min-h-11 rounded-full bg-brand-950 px-5 text-sm font-black text-white disabled:cursor-wait disabled:opacity-50">{busy ? '正在保存…' : uploading ? '媒体上传中…' : '补录动态'}</button></div>
+        <div><button type="submit" disabled={busy || uploading || hasFailed} className="min-h-11 rounded-full bg-brand-950 px-5 text-sm font-black text-white disabled:cursor-wait disabled:opacity-50">{busy ? '正在补录…' : uploading ? '媒体上传中…' : '补录动态'}</button></div>
       </form>
     </section>
   )
