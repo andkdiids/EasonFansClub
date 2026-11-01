@@ -22,6 +22,7 @@ on:
       # paths must use an explicit skip-db dispatch instead of the default
       # full database deployment triggered by a push to main.
       - 'middleware.ts'
+      - 'tests/deploy-skip-db-mode.test.ts'
       - 'tests/middleware-auth.test.ts'
       - 'tests/mobile-bearer-route-integration.test.ts'
   workflow_dispatch:
