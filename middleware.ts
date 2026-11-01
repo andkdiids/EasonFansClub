@@ -214,6 +214,10 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || /^\/api\/replies\/[^/]+\/like$/.test(pathname)
       || pathname === '/api/notifications'
       || pathname === '/api/notifications/unread-count'
+      || pathname === '/api/feedback'
+      || pathname === '/api/material-redemptions/me'
+      || /^\/api\/material-redemptions\/orders\/[^/]+$/.test(pathname)
+      || pathname === '/api/account/security'
       || pathname === '/api/topics'
       || /^\/api\/topics\/[^/]+$/.test(pathname)
       || pathname === '/api/posts/draft'
@@ -263,6 +267,11 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/angel-gift'
       || pathname === '/api/angel-gift/recycle'
       || pathname === '/api/angel-gift/recycle/all'
+      || pathname === '/api/feedback'
+      || pathname === '/api/uploads/feedback-image'
+      || /^\/api\/material-redemptions\/[^/]+\/exchange$/.test(pathname)
+      || pathname === '/api/account/security/password/change'
+      || pathname === '/api/account/security/questions'
       || /^\/api\/activities\/[^/]+\/register$/.test(pathname)
       || /^\/api\/activities\/[^/]+\/register\/cancel$/.test(pathname)
       || /^\/api\/stickers\/store\/[^/]+\/add$/.test(pathname)
@@ -318,6 +327,8 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || (request.method === 'PATCH' && /^\/api\/admin\/topic-activity-form-submissions\/[^/]+\/review$/.test(pathname))
       || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/courses\/lesson-\d{2,3}$/.test(pathname))
       || (request.method === 'PATCH' && /^\/api\/admin\/cantonese\/review\/(?:teaching|question|audio)\/[^/]+$/.test(pathname))
+      || ((request.method === 'PUT' || request.method === 'PATCH') && pathname === '/api/account/security')
+      || ((request.method === 'PUT' || request.method === 'PATCH') && pathname === '/api/account/security/questions')
       || pathname === '/api/posts/draft'
       || (request.method === 'PUT' && pathname === '/api/users/me/badge/equip')
       || (request.method === 'PATCH' && pathname === '/api/users/me/e-center-preferences')

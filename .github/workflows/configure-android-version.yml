@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       release_candidate:
-        description: Beta.21 RC3 through RC9 to publish for internal updates
+        description: Beta.21 RC3 through RC10 to publish for internal updates
         required: true
         type: choice
         options:
@@ -19,6 +19,7 @@ on:
           - rc7
           - rc8
           - rc9
+          - rc10
       apk_object_key:
         description: Immutable versioned Beta.21 RC object key already uploaded to Tencent COS
         required: true
@@ -61,7 +62,7 @@ jobs:
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 || "${RELEASE_CANDIDATE}" == rc9 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
+          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 || "${RELEASE_CANDIDATE}" == rc9 || "${RELEASE_CANDIDATE}" == rc10 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
           key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
           [[ "${APK_OBJECT_KEY}" =~ ${key_regex} ]] || { echo 'APK_OBJECT_KEY_INVALID'; exit 1; }
           [[ "${EXPECTED_SIZE}" =~ ^[0-9]{8,9}$ ]] || { echo 'APK_SIZE_INVALID'; exit 1; }
@@ -162,6 +163,10 @@ jobs:
               version_code=29
               notes='["统一多账号会话并修复反馈、账号安全和物料入口状态","恢复授权用户公告发布权限并保持普通用户入口隐藏","修复演唱会详情崩溃并完善 EasMusic 导航","广场好友、推荐、最新支持跟手分页并保留各自状态","活动报名后自动兑换绑定物料并复用现有发放记录","Beta.21 RC9 内测版本"]'
               ;;
+            rc10)
+              version_code=30
+              notes='["修复反馈、多账号和账号安全的登录状态处理","恢复授权用户公告发布权限并保持普通用户入口隐藏","修复演唱会详情闪退并完善活跃症任务跳转","活动报名后自动发放绑定物料并复用现有兑换记录","完善设置退出登录及用户提示文案","Beta.21 RC10 内测版本"]'
+              ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -212,6 +217,7 @@ jobs:
             rc7) expected_version_code=27 ;;
             rc8) expected_version_code=28 ;;
             rc9) expected_version_code=29 ;;
+            rc10) expected_version_code=30 ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
           remote_host="${SERVER_USER}@${SERVER_HOST}"
@@ -235,7 +241,7 @@ jobs:
           EXPECTED_APK_SIZE="$5"
           [[ "${APP_DIR}" == /home/apps/easonfansclub ]]
           [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          [[ "${EXPECTED_VERSION_CODE}" =~ ^(23|24|25|26|27|28|29)$ ]]
+          [[ "${EXPECTED_VERSION_CODE}" =~ ^(23|24|25|26|27|28|29|30)$ ]]
           [[ "${EXPECTED_APK_SHA256}" =~ ^[A-F0-9]{64}$ ]]
           [[ "${EXPECTED_APK_SIZE}" =~ ^[0-9]{8,9}$ ]]
           current_link="${APP_DIR}/current"

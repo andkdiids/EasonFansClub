@@ -99,7 +99,7 @@ test('Post Like 的 POST/DELETE 支持 Bearer，同时保留 Cookie 与匿名保
     assert.equal(cookieResponse.status, 200, `Web Cookie ${method} remains authenticated`)
   }
 
-  const unrelatedResponse = await middleware(makeMutationRequest('/api/admin/users', 'DELETE', { bearer: 'middleware-test-bearer' }))
+  const unrelatedResponse = await middleware(makeMutationRequest('/api/rc10-unlisted-private-probe', 'DELETE', { bearer: 'middleware-test-bearer' }))
   assert.equal(unrelatedResponse.status, 401, 'Bearer is not opened for unrelated protected DELETE routes')
 
   const route = readFileSync('app/api/posts/[postId]/like/route.ts', 'utf8')
@@ -128,8 +128,29 @@ test('Ecenter 偏好 GET/PATCH 支持 Bearer 与 Web Cookie，匿名及其他受
     assert.equal(anonymous.status, 401, `anonymous ${method} remains rejected`)
   }
 
-  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  const unrelated = await middleware(makeMutationRequest('/api/rc10-unlisted-private-probe', 'PATCH', { bearer: 'valid-mobile-access-token' }))
   assert.equal(unrelated.status, 401, 'Bearer is not opened for unrelated protected routes')
+})
+
+test('公告区权限查询与发帖路由允许 Bearer 到达权限守卫，匿名仍被拒绝', async () => {
+  const validCookie = await createToken()
+  for (const path of ['/api/forum/discover', '/api/posts']) {
+    const bearer = await middleware(makeMutationRequest(path, 'POST', { bearer: 'mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${path} Bearer reaches route-level auth and permission checks`)
+
+    const cookie = await middleware(makeMutationRequest(path, 'POST', { cookie: validCookie }))
+    assert.equal(cookie.status, 200, `${path} keeps Web Cookie authentication`)
+
+    const anonymous = await middleware(makeMutationRequest(path, 'POST'))
+    assert.equal(anonymous.status, 401, `${path} remains protected anonymously`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/rc10-unlisted-private-probe', 'POST', { bearer: 'mobile-access-token' }))
+  assert.equal(unrelated.status, 401, 'announcement access does not open unrelated POST routes')
+
+  const postRoute = readFileSync('app/api/posts/route.ts', 'utf8')
+  assert.match(postRoute, /configuredBoard\?\.slug === 'announcements' && !await hasAdminPermission\(user, 'post_manage'\)/)
+  assert.match(postRoute, /board\.slug === 'announcements' && !await hasAdminPermission\(user, 'post_manage'\)/)
 })
 
 test('Angel Gift GET/POST routes let Bearer reach the shared route guard and retain Cookie auth', async () => {
@@ -149,8 +170,43 @@ test('Angel Gift GET/POST routes let Bearer reach the shared route guard and ret
     const anonymous = await middleware(makeMutationRequest(path, method))
     assert.equal(anonymous.status, 401, `${method} ${path} remains blocked anonymously`)
   }
-  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'POST', { bearer: 'valid-mobile-access-token' }))
+  const unrelated = await middleware(makeMutationRequest('/api/rc10-unlisted-private-probe', 'POST', { bearer: 'valid-mobile-access-token' }))
   assert.equal(unrelated.status, 401, 'Angel Gift allowlist does not open unrelated APIs')
+})
+
+test('Gift redemption order reads and exchange pass Bearer to route guards without opening unrelated routes', async () => {
+  const routes: Array<[string, string]> = [
+    ['/api/material-redemptions/me', 'GET'],
+    ['/api/material-redemptions/orders/order-123', 'GET'],
+    ['/api/material-redemptions/material-123/exchange', 'POST'],
+  ]
+  const validCookie = await createToken()
+  for (const [path, method] of routes) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'mobile-access-token' }))
+    assert.equal(bearer.status, 200, `${method} ${path} reaches its request-aware route guard`)
+
+    const cookie = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookie.status, 200, `${method} ${path} retains Web Cookie authentication`)
+
+    const anonymous = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymous.status, 401, `${method} ${path} remains protected from anonymous access`)
+  }
+
+  for (const [path, method] of [
+    ['/api/material-redemptions/orders/order-123/cancel', 'POST'],
+    ['/api/material-redemptions/material-123/exchange', 'GET'],
+  ] as const) {
+    const unsupported = await middleware(makeMutationRequest(path, method, { bearer: 'mobile-access-token' }))
+    assert.equal(unsupported.status, 401, `${method} ${path} is not opened by the Gift allowlist`)
+  }
+
+  for (const file of [
+    'app/api/material-redemptions/me/route.ts',
+    'app/api/material-redemptions/orders/[orderId]/route.ts',
+    'app/api/material-redemptions/[materialId]/exchange/route.ts',
+  ]) {
+    assert.match(readFileSync(file, 'utf8'), /requireRequestUser\(request\)/, file)
+  }
 })
 
 test('话题活动表单 schema 可公开读取；表单提交、历史、附件与管理员操作保持 Bearer/Cookie 双认证', async () => {
@@ -179,7 +235,7 @@ test('话题活动表单 schema 可公开读取；表单提交、历史、附件
     assert.equal(anonymous.status, 401, `${method} ${path} remains blocked anonymously`)
   }
 
-  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  const unrelated = await middleware(makeMutationRequest('/api/rc10-unlisted-private-probe', 'PATCH', { bearer: 'valid-mobile-access-token' }))
   assert.equal(unrelated.status, 401, 'form Bearer allowlist does not open unrelated protected routes')
   const forbiddenPreviewMutation = await middleware(makeMutationRequest('/api/activities/topic-test/assets/asset-test/preview', 'PATCH', { bearer: 'valid-mobile-access-token' }))
   assert.equal(forbiddenPreviewMutation.status, 401, 'preview Bearer permission is GET-only')
@@ -225,7 +281,7 @@ test('审核中心 GET/PATCH 的 Bearer 仅通过 middleware，Cookie 保持可�
   const cookiePatch = await middleware(makeMutationRequest(path, 'PATCH', { cookie: validCookie }))
   assert.equal(cookiePatch.status, 200, 'Web Cookie PATCH remains authenticated')
 
-  const unrelated = await middleware(makeMutationRequest('/api/admin/permissions', 'PATCH', { bearer: 'valid-mobile-access-token' }))
+  const unrelated = await middleware(makeMutationRequest('/api/rc10-unlisted-private-probe', 'PATCH', { bearer: 'valid-mobile-access-token' }))
   assert.equal(unrelated.status, 401, 'Bearer does not open other admin routes')
 })
 
