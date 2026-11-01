@@ -36,7 +36,8 @@ test('runtime flags fall back to the worker release env without exposing credent
     fileEnv,
   )
   assert.deepEqual(config, {
-    syncEnabled: 'false', featureEnabled: 'true', provider: 'apify', target: 'mreasonchan', apifyTokenPresent: true,
+    syncEnabled: 'false', featureEnabled: 'true', provider: 'apify', target: 'mreasonchan',
+    providerProxyConfigured: false, mediaProxyConfigured: false, apifyTokenPresent: true,
   })
   assert.equal(JSON.stringify(config).includes('sensitive-marker'), false)
 })
@@ -123,6 +124,8 @@ test('worker log reader confines both streams to PM2 logs and exposes no raw lin
     assert.equal(evidence.entries[0].withinSevenDays, true)
     assert.equal(evidence.mediaFailuresStatus, 'READ')
     assert.equal(evidence.mediaFailures[0].status, 403)
+    assert.equal(evidence.stderrSizeBytes > 0, true)
+    assert.equal(typeof evidence.stderrModifiedAt, 'string')
     assert.equal(JSON.stringify(evidence).includes('private-error-marker'), false)
     assert.equal(JSON.stringify(evidence).includes('raw-private-marker'), false)
     const escaped = helper.readSafeWorkerLogs({ outLogPath: path.join(root, 'outside.log'), errLogPath: errLog }, root, new Date())
@@ -137,7 +140,7 @@ test('database evidence reports timestamps and source identifiers without captio
     states: [{ lastCheckedAt: new Date('2026-11-01T10:00:00Z'), lastSuccessfulSyncAt: new Date('2026-11-01T10:00:00Z'), consecutiveFailures: 0 }],
     recentLogs: [{ startedAt: new Date('2026-11-01T10:00:00Z'), finishedAt: new Date('2026-11-01T10:01:00Z'), status: 'SUCCEEDED', foundCount: 4, createdCount: 1, updatedCount: 0, errorCode: null }],
     lastSuccess: null,
-    lastAttempt: { startedAt: new Date('2026-10-17T18:52:34Z'), status: 'FAILED', foundCount: 0, createdCount: 0, errorCode: 'PROVIDER_AUTH_ERROR' },
+    lastAttempt: { startedAt: new Date('2026-10-17T18:52:34Z'), status: 'FAILED', foundCount: 0, createdCount: 0, errorCode: 'PROVIDER_AUTH_ERROR', baselineImport: true },
     firstFailure: { startedAt: new Date('2026-10-17T18:49:00Z'), errorCode: 'PROVIDER_AUTH_ERROR' },
     posts: [{ externalId: 'short-code', shortcode: 'short-code', provider: 'apify', mediaType: 'VIDEO', status: 'READY', publishedAt: new Date('2026-11-01T09:00:00Z'), createdAt: new Date('2026-11-01T10:00:00Z'), caption: 'private content', mediaUrl: 'private-url' }],
     latestCreated: { createdAt: new Date('2026-11-01T10:00:00Z') },
@@ -145,6 +148,7 @@ test('database evidence reports timestamps and source identifiers without captio
   })
   assert.equal(result.lastSuccess.createdCount, 1)
   assert.equal(result.lastAttempt.errorCode, 'PROVIDER_AUTH_ERROR')
+  assert.equal(result.lastAttempt.baselineImport, true)
   assert.equal(result.firstFailure.startedAt, '2026-10-17T18:49:00.000Z')
   assert.equal(result.posts[0].sourceId, 'short-code')
   assert.equal(result.latestDbPublishedAt, '2026-11-01T09:00:00.000Z')

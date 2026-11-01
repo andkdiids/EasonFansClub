@@ -106,6 +106,7 @@ jobs:
           const safe = {
             CURRENT_RELEASE: data.currentRelease || 'UNKNOWN',
             CURRENT_SHA: data.currentSha || 'UNKNOWN',
+            CURRENT_RUNTIME_CONFIG: data.currentRuntimeConfig || null,
             PM2_STATUS: data.workerEvidence?.pm2Status || 'UNKNOWN',
             WORKER_COUNT: data.workerEvidence?.count ?? 'UNKNOWN',
             WORKER: data.workerEvidence?.worker ? {

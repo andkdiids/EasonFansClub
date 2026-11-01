@@ -32,6 +32,8 @@ function safeRuntimeConfig(runtimeEnv, fileEnv) {
     featureEnabled: enabled('ANYWHERE_DOOR_ENABLED'),
     provider: value('IG_PROVIDER').trim().toLowerCase() === 'apify' ? 'apify' : value('IG_PROVIDER') ? 'OTHER' : 'MISSING',
     target: value('IG_TARGET_USERNAME').trim().toLowerCase() === TARGET || !value('IG_TARGET_USERNAME').trim() ? TARGET : 'OTHER',
+    providerProxyConfigured: Boolean(value('APIFY_PROXY_URL').trim()),
+    mediaProxyConfigured: Boolean(value('IG_MEDIA_PROXY_URL').trim()),
     apifyTokenPresent: Boolean(value('APIFY_API_TOKEN').trim()),
   }
 }
@@ -212,6 +214,9 @@ function summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt,
       lastErrorCode: safeCode(state.lastErrorCode),
       consecutiveFailures: Number.isSafeInteger(state.consecutiveFailures) ? state.consecutiveFailures : null,
       syncRequestedAt: iso(state.syncRequestedAt),
+      baselineCompletedAt: iso(state.baselineCompletedAt),
+      nextAllowedSyncAt: iso(state.nextAllowedSyncAt),
+      lockUntil: iso(state.lockUntil),
     } : null,
     lastSuccess: latestSuccess ? {
       startedAt: iso(latestSuccess.startedAt),
@@ -220,6 +225,7 @@ function summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt,
       createdCount: latestSuccess.createdCount,
       updatedCount: latestSuccess.updatedCount,
       errorCode: safeCode(latestSuccess.errorCode),
+      baselineImport: latestSuccess.baselineImport === true,
     } : null,
     lastAttempt: attempt ? {
       startedAt: iso(attempt.startedAt),
@@ -228,6 +234,7 @@ function summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt,
       foundCount: attempt.foundCount,
       createdCount: attempt.createdCount,
       errorCode: safeCode(attempt.errorCode),
+      baselineImport: attempt.baselineImport === true,
     } : null,
     firstFailureInRecentWindow: failures[0] ? {
       startedAt: iso(failures[0].startedAt),
@@ -260,18 +267,18 @@ async function querySocialEvidence(prisma, now = new Date()) {
       where: { platform: PLATFORM, target: TARGET },
       orderBy: { updatedAt: 'desc' },
       take: 2,
-      select: { lastCheckedAt: true, lastSuccessfulSyncAt: true, lastChangedAt: true, lastErrorAt: true, lastErrorCode: true, consecutiveFailures: true, syncRequestedAt: true },
+      select: { lastCheckedAt: true, lastSuccessfulSyncAt: true, lastChangedAt: true, lastErrorAt: true, lastErrorCode: true, consecutiveFailures: true, syncRequestedAt: true, baselineCompletedAt: true, nextAllowedSyncAt: true, lockUntil: true },
     }),
     prisma.socialSyncLog.findMany({
       where: { target: TARGET, startedAt: { gte: since } },
       orderBy: { startedAt: 'desc' },
       take: 200,
-      select: { startedAt: true, finishedAt: true, status: true, foundCount: true, createdCount: true, updatedCount: true, errorCode: true },
+      select: { startedAt: true, finishedAt: true, status: true, foundCount: true, createdCount: true, updatedCount: true, errorCode: true, baselineImport: true },
     }),
     prisma.socialSyncLog.findFirst({
       where: { target: TARGET, status: 'SUCCEEDED' },
       orderBy: { startedAt: 'desc' },
-      select: { startedAt: true, finishedAt: true, status: true, foundCount: true, createdCount: true, updatedCount: true, errorCode: true },
+      select: { startedAt: true, finishedAt: true, status: true, foundCount: true, createdCount: true, updatedCount: true, errorCode: true, baselineImport: true },
     }),
     prisma.socialSyncLog.findFirst({
       where: { target: TARGET },
@@ -325,24 +332,28 @@ function readSafeLogBuffer(logPathInput, pm2Home) {
       const length = Math.min(stat.size, SAFE_LOG_BYTES)
       const buffer = Buffer.alloc(length)
       fs.readSync(fd, buffer, 0, length, Math.max(0, stat.size - length))
-      return { status: 'READ', buffer }
+      return { status: 'READ', buffer, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() }
     } finally {
       fs.closeSync(fd)
     }
   } catch {
-    return { status: 'UNAVAILABLE', buffer: null }
+    return { status: 'UNAVAILABLE', buffer: null, sizeBytes: null, modifiedAt: null }
   }
 }
 
 function readSafeWorkerLogs(worker, pm2Home, now) {
-  if (!worker) return { status: 'NOT_CONFIGURED', entries: [], mediaFailuresStatus: 'NOT_CONFIGURED', mediaFailures: [] }
+  if (!worker) return { status: 'NOT_CONFIGURED', entries: [], stdoutSizeBytes: null, stdoutModifiedAt: null, mediaFailuresStatus: 'NOT_CONFIGURED', mediaFailures: [], stderrSizeBytes: null, stderrModifiedAt: null }
   const stdout = readSafeLogBuffer(worker.outLogPath, pm2Home)
   const stderr = readSafeLogBuffer(worker.errLogPath, pm2Home)
   return {
     status: stdout.status,
     entries: stdout.buffer ? parseWorkerLogBuffer(stdout.buffer, now) : [],
+    stdoutSizeBytes: stdout.sizeBytes ?? null,
+    stdoutModifiedAt: stdout.modifiedAt ?? null,
     mediaFailuresStatus: stderr.status,
     mediaFailures: stderr.buffer ? parseMediaFailureBlocks(stderr.buffer) : [],
+    stderrSizeBytes: stderr.sizeBytes ?? null,
+    stderrModifiedAt: stderr.modifiedAt ?? null,
   }
 }
 
@@ -411,6 +422,7 @@ async function main() {
     const envPath = path.join(currentRelease, '.env')
     if (!fs.statSync(envPath).isFile()) throw new Error('ENV_FILE_NOT_REGULAR')
     const parsedEnv = dotenv.parse(fs.readFileSync(envPath))
+    result.currentRuntimeConfig = safeRuntimeConfig({}, parsedEnv)
     for (const [key, value] of Object.entries(parsedEnv)) {
       if (process.env[key] === undefined) process.env[key] = value
     }
