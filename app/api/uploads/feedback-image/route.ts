@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import sharp from 'sharp'
 import { publicImageUrl } from '@/lib/images'
-import { enforceApiRateLimit, requireUser } from '@/lib/security'
+import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { FEEDBACK_ALLOWED_IMAGE_TYPES, FEEDBACK_MAX_FILE_SIZE } from '@/lib/feedback'
 import { createAnimatedImageVariants, createImageVariants, isAnimatedImageInput } from '@/lib/image-webp'
 import { uploadImageVariantFamily } from '@/lib/image-variant-upload'
@@ -26,7 +26,9 @@ function imageContentType(format?: string | null) {
 }
 
 export async function POST(request: Request) {
-  const guard = await requireUser()
+  const invalidOrigin = rejectInvalidRequestOrigin(request)
+  if (invalidOrigin) return invalidOrigin
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const limited = await enforceApiRateLimit(request, guard.user.id, {
     endpoint: '/api/uploads/feedback-image',

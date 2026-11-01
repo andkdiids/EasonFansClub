@@ -7,13 +7,13 @@ import {
 } from '@/lib/account-security'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { getClientIp, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const body = await request.json().catch(() => null)
   const questions = parseSecurityQuestions(body?.securityQuestions)

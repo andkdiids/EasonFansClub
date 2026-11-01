@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/security'
+import { requireRequestUser } from '@/lib/security'
 import { getFriendIds } from '@/lib/friends'
 import { getFriendDisplayName, getPublicUserDisplayName, loadFriendRemarkMap } from '@/lib/friend-remarks'
 import { publicImageUrl } from '@/lib/images'
@@ -25,7 +25,7 @@ function parseDate(value: string | null, endOfDay = false) {
 }
 
 export async function GET(request: Request) {
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const viewer = guard.user
 

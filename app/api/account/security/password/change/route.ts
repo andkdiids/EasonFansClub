@@ -6,7 +6,7 @@ import { verifyPassword } from '@/lib/password'
 import { PasswordChangeConflictError, commitPasswordChange } from '@/lib/password-security-transaction'
 import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
-import { consumeRateLimitFailClosed, getClientIp, rejectInvalidRequestOrigin, requireUser } from '@/lib/security'
+import { consumeRateLimitFailClosed, getClientIp, rejectInvalidRequestOrigin, requireRequestUser } from '@/lib/security'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
 import { createNotification } from '@/lib/notification-write'
 import { hashToken } from '@/lib/tokens'
@@ -16,7 +16,7 @@ const noStoreHeaders = { 'Cache-Control': 'no-store, max-age=0' }
 export async function POST(request: Request) {
   const originError = rejectInvalidRequestOrigin(request)
   if (originError) return originError
-  const guard = await requireUser()
+  const guard = await requireRequestUser(request)
   if (!guard.user) return guard.response
   const ip = getClientIp(request)
   const limit = await consumeRateLimitFailClosed(`ip:${ip}`, 'account-password-change', 10, 15 * 60).catch(() => null)
