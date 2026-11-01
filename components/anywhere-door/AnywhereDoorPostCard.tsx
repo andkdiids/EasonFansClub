@@ -10,9 +10,9 @@ function formatDate(value: string) {
 export function AnywhereDoorPostCard({ post, priority = false, onLike }: Readonly<{ post: SocialPostView; priority?: boolean; onLike?: (postId: string) => void }>) {
   return (
     <article className="anywhere-door-post-card overflow-hidden shadow-sm sm:rounded-2xl" data-anywhere-door-feed-card>
-      <div className="p-0 sm:p-4">
+      {post.mediaType !== 'TEXT' ? <div className="p-0 sm:p-4">
         <MediaCarousel media={post.media} title={post.authorUsername} priority={priority} className="bg-black dark:bg-black" />
-      </div>
+      </div> : null}
       <div className="anywhere-door-post-content px-3 pb-4 pt-4 sm:px-6 sm:pb-6 sm:pt-0">
         <div className="anywhere-door-source-row flex flex-wrap items-center justify-between gap-2">
           <AnywhereDoorSourceIdentity username={post.authorUsername} avatarUrl={post.authorAvatarUrl} />

@@ -32,6 +32,10 @@ test('worker entrypoint keeps await inside main and has a fatal catch', () => {
   assert.equal(hasTopLevelAwait(source), false)
   assert.match(source, /async function main\(\)/)
   assert.match(source, /void main\(\)\.catch\(/)
+  assert.match(source, /process\.once\('SIGTERM', requestStop\)/)
+  assert.match(source, /wakeCurrentWait\?\.\(\)/)
+  assert.match(source, /if \(stopping\) return Promise\.resolve\(\)/)
+  assert.match(source, /finally\s*\{\s*await prisma\.\$disconnect\(\)/)
 })
 
 test('worker entrypoint loads through the tsx runtime with sync disabled', async () => {

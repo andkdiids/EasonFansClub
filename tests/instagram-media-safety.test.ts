@@ -348,7 +348,35 @@ test('proxy media request retries ECONNRESET once and then succeeds', async () =
   }
 })
 
-test('three proxy timeouts become MEDIA_REQUEST_FAILED with safe diagnostics', async () => {
+test('proxy media request uses bounded retries and succeeds after transient ECONNRESET failures', async () => {
+  const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
+  process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
+  let calls = 0
+  const delays: number[] = []
+  try {
+    const result = await inspectInstagramMediaUrl(
+      { sourceUrl: 'https://media.example.test/image.jpg', type: 'IMAGE' },
+      {
+        proxyUrl: 'http://127.0.0.1:7890',
+        lookupImpl: (async () => { throw new Error('proxy mode must not use local DNS') }) as unknown as typeof import('node:dns/promises').lookup,
+        fetchImpl: (async () => {
+          calls += 1
+          if (calls < 4) throw networkFailure('TypeError', 'ECONNRESET')
+          return new Response('jpeg', { status: 200, headers: { 'content-type': 'image/jpeg', 'content-length': '4' } })
+        }) as typeof fetch,
+        retrySleepImpl: async (milliseconds) => { delays.push(milliseconds) },
+      },
+    )
+    assert.equal(result.status, 200)
+    assert.equal(calls, 4)
+    assert.deepEqual(delays, [1_000, 3_000, 8_000])
+  } finally {
+    if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
+    else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist
+  }
+})
+
+test('four proxy timeouts become MEDIA_REQUEST_FAILED with safe diagnostics', async () => {
   const previousAllowlist = process.env.IG_ALLOWED_MEDIA_HOSTS
   process.env.IG_ALLOWED_MEDIA_HOSTS = '.example.test'
   let calls = 0
@@ -385,8 +413,8 @@ test('three proxy timeouts become MEDIA_REQUEST_FAILED with safe diagnostics', a
         return true
       },
     )
-    assert.equal(calls, 3)
-    assert.deepEqual(delays, [500, 1500])
+    assert.equal(calls, 4)
+    assert.deepEqual(delays, [1_000, 3_000, 8_000])
   } finally {
     if (previousAllowlist === undefined) delete process.env.IG_ALLOWED_MEDIA_HOSTS
     else process.env.IG_ALLOWED_MEDIA_HOSTS = previousAllowlist

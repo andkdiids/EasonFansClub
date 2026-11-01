@@ -7,6 +7,7 @@ on:
     paths:
       - 'prisma/schema.prisma'
       - 'prisma/migrations/**'
+      - 'tests/instagram-text-media-migration.mysql.integration.ts'
       - 'tests/recording-sessions-v2-mysql.integration.ts'
       - '.github/workflows/recording-sessions-v2-mysql.yml'
 
@@ -54,6 +55,12 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm exec prisma generate
+
+      - name: Apply and verify the Instagram TEXT enum migration on isolated MySQL
+        env:
+          INSTAGRAM_TEXT_TEST_ADMIN_URL: mysql://root:recording-sessions-qa-only@127.0.0.1:3306/recording_sessions_v2_qa
+        shell: bash
+        run: pnpm exec tsx tests/instagram-text-media-migration.mysql.integration.ts
 
       - name: Apply and verify the Recording Sessions V2 migration
         env:

@@ -151,20 +151,24 @@ deploy_require_expected_production_sha() {
 }
 
 deploy_release_pm2_names() {
-  # Instagram sync has no cancellation primitive for an in-flight provider
-  # request. Keep deployments scoped to the web process until the worker has a
-  # proven quiesce/drain protocol. PM2 reference detection still protects every
-  # live process' release from cleanup.
+  # These are the only ECFC release processes. The worker handles SIGTERM by
+  # finishing its bounded run and then exiting; never use a global PM2 action.
+  [ "$1" = "easonfansclub" ] || return 78
   printf '%s\n' "$1"
+  printf '%s\n' "instagram-sync-worker"
 }
 
 deploy_run_pm2_reload() {
   local app_name="$1" duration="$2"
   shift 2
-  [ "$app_name" = "easonfansclub" ] || {
-    echo "Refusing automatic PM2 reload for ${app_name}; its safe interruption is not proven." >&2
-    return 78
-  }
+  case "$app_name:$duration" in
+    easonfansclub:*) ;;
+    instagram-sync-worker:8m) ;;
+    *)
+      echo "Refusing automatic PM2 operation for ${app_name} with timeout ${duration}." >&2
+      return 78
+      ;;
+  esac
   timeout --foreground --signal=TERM --kill-after=30s "$duration" "$@"
 }
 

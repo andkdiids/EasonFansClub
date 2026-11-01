@@ -19,7 +19,7 @@ export function AnywhereDoorMorePosts({ posts, currentPostId }: Readonly<{ posts
                 {media ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={media.thumbnailUrl || media.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105" />
-                ) : <div className="grid h-full place-items-center text-[10px] font-bold text-slate-400">暂无媒体</div>}
+                ) : <div className="grid h-full place-items-center bg-gradient-to-br from-rose-50 to-white p-2 text-center text-[10px] font-bold text-rose-900">{post.mediaType === 'TEXT' ? post.caption?.slice(0, 70) || '文字动态' : '暂无媒体'}</div>}
                 {post.mediaType === 'CAROUSEL' || post.mediaType === 'VIDEO' || post.mediaType === 'REEL' ? <span className="absolute bottom-1 left-1 grid size-5 place-items-center bg-slate-950/65 text-[10px] font-black text-white" aria-label={post.mediaType === 'CAROUSEL' ? '轮播' : '视频'}>{post.mediaType === 'CAROUSEL' ? '▧' : '▶'}</span> : null}
               </div>
               <p className="anywhere-door-more-posts-title mt-1.5 truncate text-xs font-bold">{post.caption || `@${post.authorUsername}`}</p>

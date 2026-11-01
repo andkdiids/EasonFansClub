@@ -1,0 +1,2 @@
+ALTER TABLE `SocialPost`
+MODIFY `mediaType` ENUM('IMAGE', 'VIDEO', 'CAROUSEL', 'REEL', 'TEXT') NOT NULL;

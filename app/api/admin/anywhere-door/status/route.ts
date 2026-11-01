@@ -5,6 +5,7 @@ import { getRecentSocialSyncLogs } from '@/lib/social-posts'
 import { getAnywhereDoorConfig } from '@/lib/anywhere-door/config'
 import { findInstagramSyncState } from '@/lib/instagram/sync-state'
 import { runAnywhereDoorProductionPreflight } from '@/lib/instagram/production-preflight'
+import { safeSyncErrorCode, safeSyncErrorMessage } from '@/lib/instagram/safe-sync-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,12 +53,16 @@ export async function GET() {
         lastChangedAt: syncState.lastChangedAt?.toISOString() || null,
         nextAllowedSyncAt: syncState.nextAllowedSyncAt?.toISOString() || null,
         consecutiveFailures: syncState.consecutiveFailures,
-        lastErrorCode: syncState.lastErrorCode,
+        lastErrorCode: safeSyncErrorCode(syncState.lastErrorCode),
         baselineCompletedAt: syncState.baselineCompletedAt?.toISOString() || null,
       } : null,
       alerts: [...new Set(alerts)],
     }
-    return NextResponse.json({ status, logs: logs.map((log) => ({ ...log, errorMessage: log.errorMessage?.slice(0, 240) || null })) }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
+    return NextResponse.json({ status, logs: logs.map((log) => ({
+      ...log,
+      errorCode: safeSyncErrorCode(log.errorCode),
+      errorMessage: safeSyncErrorMessage(log.errorCode),
+    })) }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } })
   } catch (error) {
     console.error('[admin.anywhere-door.status]', { errorName: error instanceof Error ? error.name : 'unknown' })
     return NextResponse.json({ message: '随意门状态暂时无法加载' }, { status: 503 })

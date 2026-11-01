@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { runInstagramSyncWorkerOnce } from '@/lib/instagram/worker'
+import { prisma } from '@/lib/prisma'
 
 /**
  * Independent one-shot worker entrypoint. PM2 or a scheduler may invoke this
@@ -7,15 +8,39 @@ import { runInstagramSyncWorkerOnce } from '@/lib/instagram/worker'
  * request and is intentionally not started by the Phase 5.1 code gate.
  */
 let stopping = false
-process.once('SIGTERM', () => { stopping = true })
-process.once('SIGINT', () => { stopping = true })
+let wakeCurrentWait: (() => void) | null = null
+function requestStop() {
+  stopping = true
+  wakeCurrentWait?.()
+}
+process.once('SIGTERM', requestStop)
+process.once('SIGINT', requestStop)
+
+function waitOrStop(milliseconds: number) {
+  if (stopping) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      wakeCurrentWait = null
+      resolve()
+    }, milliseconds)
+    wakeCurrentWait = () => {
+      clearTimeout(timer)
+      wakeCurrentWait = null
+      resolve()
+    }
+  })
+}
 
 async function main() {
-  while (!stopping) {
-    const result = await runInstagramSyncWorkerOnce()
-    console.info('[instagram-sync-worker]', { status: result.status, errorCode: result.errorCode || null })
-    const waitMs = result.status === 'SYNC_DISABLED' ? 15 * 60 * 1000 : 60 * 1000
-    await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+  try {
+    while (!stopping) {
+      const result = await runInstagramSyncWorkerOnce()
+      console.info('[instagram-sync-worker]', { status: result.status, errorCode: result.errorCode || null })
+      const waitMs = result.status === 'SYNC_DISABLED' ? 15 * 60 * 1000 : 60 * 1000
+      await waitOrStop(waitMs)
+    }
+  } finally {
+    await prisma.$disconnect()
   }
 }
 
