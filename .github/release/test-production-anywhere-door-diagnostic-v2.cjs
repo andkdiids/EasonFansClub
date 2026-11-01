@@ -167,17 +167,19 @@ test('read-only query uses only Prisma find operations and bounded, allowlisted 
     socialSyncState: delegate('state', []),
     socialSyncLog: delegate('log', []),
     socialPost: delegate('post', []),
+    adminAction: delegate('audit', []),
   }
   await helper.querySocialEvidence(prisma, new Date('2026-11-02T00:00:00Z'))
   assert.deepEqual(calls.map((call) => `${call[0]}.${call[1]}`), [
-    'state.findMany', 'log.findMany', 'log.findFirst', 'log.findFirst', 'log.findFirst', 'post.findMany', 'post.findFirst',
+    'state.findMany', 'log.findMany', 'log.findFirst', 'log.findFirst', 'log.findFirst', 'post.findMany', 'post.findFirst', 'audit.findMany',
   ])
   assert.equal(calls.find((call) => call[0] === 'post')[2].take, 20)
+  assert.equal(calls.find((call) => call[0] === 'audit')[2].take, 20)
   for (const [, , args] of calls) assert.ok(args.select)
 })
 
 test('source has no Prisma write primitive or raw SQL execution', () => {
   const source = fs.readFileSync(path.join(__dirname, 'production-anywhere-door-diagnostic-v2.cjs'), 'utf8')
   assert.doesNotMatch(source, /\.\$(?:executeRaw|executeRawUnsafe|queryRawUnsafe|transaction)\s*\(/)
-  assert.doesNotMatch(source, /\.social(?:Post|SyncLog|SyncState)\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(/)
+  assert.doesNotMatch(source, /\.(?:socialPost|socialSyncLog|socialSyncState|adminAction)\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(/)
 })

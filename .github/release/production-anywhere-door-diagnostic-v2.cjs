@@ -9,6 +9,7 @@ const TARGET = 'mreasonchan'
 const PLATFORM = 'INSTAGRAM'
 const SAFE_LOG_BYTES = 2 * 1024 * 1024
 const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{0,63}$/
+const MANUAL_POST_OPERATIONS = ['ANYWHERE_DOOR_MANUAL_POST_CREATED', 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED']
 
 function safeCode(value) {
   return typeof value === 'string' && SAFE_ERROR_CODE.test(value) ? value : value ? 'OTHER' : null
@@ -262,7 +263,7 @@ function summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt,
 
 async function querySocialEvidence(prisma, now = new Date()) {
   const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-  const [states, recentLogs, lastSuccess, lastAttempt, firstFailure, posts, latestCreated] = await Promise.all([
+  const [states, recentLogs, lastSuccess, lastAttempt, firstFailure, posts, latestCreated, manualAudits] = await Promise.all([
     prisma.socialSyncState.findMany({
       where: { platform: PLATFORM, target: TARGET },
       orderBy: { updatedAt: 'desc' },
@@ -301,6 +302,16 @@ async function querySocialEvidence(prisma, now = new Date()) {
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true },
     }),
+    prisma.adminAction.findMany({
+      where: {
+        targetType: 'SOCIAL_POST',
+        operationType: { in: MANUAL_POST_OPERATIONS },
+        createdAt: { gte: since },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 20,
+      select: { id: true, operationType: true, targetId: true, createdAt: true, metadata: true },
+    }),
   ])
   let firstFailureAfterSuccess = null
   if (lastSuccess?.startedAt) {
@@ -310,7 +321,87 @@ async function querySocialEvidence(prisma, now = new Date()) {
       select: { startedAt: true, errorCode: true },
     })
   }
-  return summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt, firstFailure, firstFailureAfterSuccess, posts, latestCreated, now })
+  const manualPostIds = [...new Set(manualAudits.map((audit) => audit.targetId).filter((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,191}$/.test(id)))]
+  const manualPosts = manualPostIds.length ? await prisma.socialPost.findMany({
+    where: { id: { in: manualPostIds }, platform: PLATFORM, authorUsername: TARGET },
+    select: {
+      id: true,
+      shortcode: true,
+      permalink: true,
+      provider: true,
+      mediaType: true,
+      status: true,
+      publishedAt: true,
+      createdAt: true,
+      media: { orderBy: { sortOrder: 'asc' }, select: { type: true, sortOrder: true } },
+    },
+  }) : []
+  const manualPostById = new Map(manualPosts.map((post) => [post.id, post]))
+  const manualSubmissions = await Promise.all(manualAudits.map(async (audit) => {
+    const targetId = typeof audit.targetId === 'string' && /^[A-Za-z0-9_-]{1,191}$/.test(audit.targetId) ? audit.targetId : null
+    const post = targetId ? manualPostById.get(targetId) : undefined
+    const metadata = audit.metadata && typeof audit.metadata === 'object' && !Array.isArray(audit.metadata) ? audit.metadata : {}
+    let publicFeedPosition = null
+    if (post?.status === 'READY') {
+      publicFeedPosition = await prisma.socialPost.count({
+        where: {
+          status: 'READY',
+          OR: [
+            { publishedAt: { gt: post.publishedAt } },
+            { publishedAt: post.publishedAt, id: { gt: post.id } },
+          ],
+        },
+      }) + 1
+    }
+    const permalink = safeInstagramPermalink(post?.permalink) || safeInstagramPermalink(metadata.sourceUrl)
+    const metadataPublishedAt = typeof metadata.publishedAt === 'string' && Number.isFinite(Date.parse(metadata.publishedAt))
+      ? new Date(metadata.publishedAt).toISOString()
+      : null
+    const metadataMediaType = typeof metadata.mediaType === 'string' && ['IMAGE', 'VIDEO', 'CAROUSEL', 'REEL', 'TEXT'].includes(metadata.mediaType)
+      ? metadata.mediaType
+      : null
+    return {
+      operation: MANUAL_POST_OPERATIONS.includes(audit.operationType) ? audit.operationType : 'OTHER',
+      submittedAt: iso(audit.createdAt),
+      postId: targetId,
+      postExists: Boolean(post),
+      provider: post ? (post.provider === 'manual' ? 'MANUAL' : post.provider === 'apify' ? 'AUTO' : 'OTHER') : null,
+      sourceShortcode: typeof post?.shortcode === 'string' && /^[A-Za-z0-9_-]{1,191}$/.test(post.shortcode) ? post.shortcode : null,
+      sourceUrl: permalink,
+      publishedAt: iso(post?.publishedAt) || metadataPublishedAt,
+      createdAt: iso(post?.createdAt),
+      mediaType: post && ['IMAGE', 'VIDEO', 'CAROUSEL', 'REEL', 'TEXT'].includes(post.mediaType) ? post.mediaType : metadataMediaType,
+      status: post && ['DISCOVERED', 'DOWNLOADING', 'READY', 'FAILED', 'HIDDEN', 'SOURCE_DELETED'].includes(post.status) ? post.status : null,
+      media: post ? post.media.map((item) => ({ type: item.type === 'IMAGE' || item.type === 'VIDEO' ? item.type : 'OTHER', sortOrder: Number.isSafeInteger(item.sortOrder) ? item.sortOrder : null })) : [],
+      mediaCount: post ? post.media.length : Number.isSafeInteger(metadata.mediaCount) && metadata.mediaCount >= 0 && metadata.mediaCount <= 10 ? metadata.mediaCount : null,
+      publicFeedPosition,
+      publicFeedPage: publicFeedPosition === null ? null : Math.ceil(publicFeedPosition / 20),
+    }
+  }))
+  const result = summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt, firstFailure, firstFailureAfterSuccess, posts, latestCreated, now })
+  return {
+    ...result,
+    manualSubmissions: {
+      windowStart: since.toISOString(),
+      returnedCount: manualAudits.length,
+      createdCount: manualAudits.filter((audit) => audit.operationType === 'ANYWHERE_DOOR_MANUAL_POST_CREATED').length,
+      deduplicatedCount: manualAudits.filter((audit) => audit.operationType === 'ANYWHERE_DOOR_MANUAL_POST_DEDUPED').length,
+      uniqueExistingPostCount: new Set(manualSubmissions.filter((entry) => entry.postId).map((entry) => entry.postId)).size,
+      entries: manualSubmissions,
+    },
+  }
+}
+
+function safeInstagramPermalink(value) {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value)
+    const match = /^\/(p|reel|tv)\/([A-Za-z0-9_-]{1,191})\/?$/.exec(url.pathname)
+    if (url.protocol !== 'https:' || !['instagram.com', 'www.instagram.com', 'm.instagram.com'].includes(url.hostname.toLowerCase()) || url.username || url.password || !match) return null
+    return `https://www.instagram.com/${match[1]}/${match[2]}/`
+  } catch {
+    return null
+  }
 }
 
 function safeDatabaseError(error) {
@@ -453,6 +544,7 @@ module.exports = {
   parseWorkerLogBuffer,
   parseMediaFailureBlocks,
   summarizeSocialEvidence,
+  safeInstagramPermalink,
   querySocialEvidence,
   safeDatabaseError,
   readSafeWorkerLogs,
