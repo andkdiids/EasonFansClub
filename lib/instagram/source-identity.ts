@@ -2,9 +2,16 @@ import { createHash } from 'node:crypto'
 
 const INSTAGRAM_POST_PATH = /^\/(p|reel|tv)\/([A-Za-z0-9_-]{1,191})\/?$/
 
-export function resolveManualSocialPostMediaType(hasCaption: boolean, hasVideo: boolean): 'TEXT' | 'VIDEO' | null {
-  if (!hasCaption && !hasVideo) return null
-  return hasVideo ? 'VIDEO' : 'TEXT'
+export type ManualPostMediaKind = 'IMAGE' | 'VIDEO'
+
+export function resolveManualSocialPostMediaType(
+  hasCaption: boolean,
+  mediaTypes: readonly ManualPostMediaKind[],
+): 'TEXT' | 'IMAGE' | 'VIDEO' | 'CAROUSEL' | null {
+  if (!hasCaption && mediaTypes.length === 0) return null
+  if (mediaTypes.length === 0) return 'TEXT'
+  if (mediaTypes.length === 1) return mediaTypes[0]
+  return 'CAROUSEL'
 }
 
 export function canonicalizeInstagramSourceUrl(value: string | null | undefined) {
@@ -33,7 +40,7 @@ export function buildManualSocialPostExternalId(input: {
   shortcode: string | null
   caption: string
   publishedAt: Date
-  mediaType: 'TEXT' | 'VIDEO'
+  mediaType: 'TEXT' | 'IMAGE' | 'VIDEO' | 'CAROUSEL'
   mediaSha256: string | null
 }) {
   const stableSource = input.shortcode
