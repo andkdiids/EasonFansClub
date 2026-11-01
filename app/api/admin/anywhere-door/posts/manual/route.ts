@@ -1,21 +1,50 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { adminAuditOperations, createAdminActionAudit } from '@/lib/admin-audit'
-import { ANYWHERE_DOOR_TARGET, buildInstagramMediaStorageKey, getAnywhereDoorConfig, getAnywhereDoorStorageMode } from '@/lib/anywhere-door/config'
+import { ANYWHERE_DOOR_TARGET, getAnywhereDoorConfig, getAnywhereDoorStorageMode } from '@/lib/anywhere-door/config'
+import { buildManualPostMediaRecords, verifyManualPostMediaReceipt } from '@/lib/anywhere-door/manual-media'
+import { MANUAL_POST_MAX_MEDIA } from '@/lib/anywhere-door/manual-media-policy'
 import { acquireInstagramSyncLease, getInstagramSyncState, releaseInstagramSyncLease } from '@/lib/instagram/sync-state'
 import { buildInstagramPostIdentityFilters, buildManualSocialPostExternalId, canonicalizeInstagramSourceUrl, resolveManualSocialPostMediaType } from '@/lib/instagram/source-identity'
 import { prisma } from '@/lib/prisma'
 import { enforceApiRateLimit, rejectInvalidRequestOrigin, requireAdmin } from '@/lib/security'
-import { deleteFromCos, uploadToCos } from '@/lib/tencent-cos'
+import { deleteFromCos, getCosUrl } from '@/lib/tencent-cos'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024
+const MAX_REQUEST_BYTES = 64 * 1024
 const MAX_CAPTION_LENGTH = 10_000
 
-function isMp4(buffer: Buffer) {
-  return buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp'
+function parseReceipts(value: FormDataEntryValue | null, userId: string) {
+  if (typeof value !== 'string') return null
+  try {
+    const tokens: unknown = JSON.parse(value)
+    if (!Array.isArray(tokens) || tokens.length > MANUAL_POST_MAX_MEDIA || !tokens.every((token) => typeof token === 'string')) return null
+    const receipts = tokens.map((token) => verifyManualPostMediaReceipt(token, userId))
+    if (receipts.some((receipt) => !receipt)) return null
+    const verified = receipts.filter((receipt): receipt is NonNullable<typeof receipt> => Boolean(receipt))
+    if (new Set(verified.map((receipt) => receipt.uploadId)).size !== verified.length) return null
+    return verified
+  } catch {
+    return null
+  }
+}
+
+async function cleanupUnreferencedReceipts(receipts: NonNullable<ReturnType<typeof parseReceipts>>) {
+  const deletedUploadIds: string[] = []
+  for (const receipt of receipts) {
+    try {
+      const referenced = await prisma.socialPostMedia.findFirst({ where: { storageUrl: getCosUrl(receipt.key) }, select: { id: true } })
+      if (referenced) continue
+      await deleteFromCos(receipt.key)
+      deletedUploadIds.push(receipt.uploadId)
+    } catch (error) {
+      // Do not delete or claim cleanup when reference state cannot be proven.
+      console.error('[admin.anywhere-door.manual.cleanup]', { errorName: error instanceof Error ? error.name : 'unknown' })
+    }
+  }
+  return deletedUploadIds
 }
 
 export async function POST(request: Request) {
@@ -31,7 +60,7 @@ export async function POST(request: Request) {
   if (limited) return limited
 
   const length = Number(request.headers.get('content-length') || 0)
-  if (length > MAX_VIDEO_BYTES + 256 * 1024) return NextResponse.json({ code: 'VIDEO_TOO_LARGE', message: '视频不能超过 50MB' }, { status: 413 })
+  if (length > MAX_REQUEST_BYTES) return NextResponse.json({ code: 'REQUEST_TOO_LARGE', message: '补录信息过大，请重新选择媒体' }, { status: 413 })
   const form = await request.formData().catch(() => null)
   if (!form) return NextResponse.json({ message: '表单内容无效，请重试' }, { status: 400 })
 
@@ -44,33 +73,26 @@ export async function POST(request: Request) {
   const sourceInput = String(form.get('sourceUrl') || '').trim()
   const source = canonicalizeInstagramSourceUrl(sourceInput)
   if (sourceInput && !source.permalink) return NextResponse.json({ message: '原文链接必须是有效的 Instagram 帖子链接' }, { status: 400 })
-  const fileEntry = form.get('video')
-  const file = fileEntry instanceof File && fileEntry.size > 0 ? fileEntry : null
-  const mediaType = resolveManualSocialPostMediaType(Boolean(caption), Boolean(file))
-  if (!mediaType) return NextResponse.json({ message: '请填写正文或上传视频' }, { status: 400 })
-
-  let video: Buffer | null = null
-  let videoSha256: string | null = null
-  if (file) {
-    if (file.type.trim().toLowerCase() !== 'video/mp4') return NextResponse.json({ message: '目前仅支持 MP4 视频' }, { status: 400 })
-    if (file.size > MAX_VIDEO_BYTES) return NextResponse.json({ code: 'VIDEO_TOO_LARGE', message: '视频不能超过 50MB' }, { status: 413 })
-    video = Buffer.from(await file.arrayBuffer())
-    if (!isMp4(video)) return NextResponse.json({ message: '视频内容无效，请上传有效的 MP4 文件' }, { status: 400 })
-    videoSha256 = createHash('sha256').update(video).digest('hex')
-  }
+  const receipts = parseReceipts(form.get('mediaReceipts'), guard.user.id)
+  if (!receipts) return NextResponse.json({ code: 'MEDIA_RECEIPTS_INVALID', retryUploads: true, message: '媒体上传凭证无效或已过期，请重新上传后提交' }, { status: 400 })
+  const mediaType = resolveManualSocialPostMediaType(Boolean(caption), receipts.map((receipt) => receipt.type))
+  if (!mediaType) return NextResponse.json({ message: '请填写正文或上传图片 / 视频' }, { status: 400 })
 
   const config = getAnywhereDoorConfig()
   const storageMode = getAnywhereDoorStorageMode()
   if (!config.enabled) return NextResponse.json({ code: 'FEATURE_DISABLED', message: '随意门当前未启用' }, { status: 409 })
   if (storageMode !== 'production') return NextResponse.json({ code: 'STORAGE_NOT_READY', message: '正式媒体存储尚未就绪' }, { status: 503 })
 
+  const mediaSha256 = receipts.length
+    ? createHash('sha256').update(receipts.map((receipt) => `${receipt.type}:${receipt.sha256}`).join('\n')).digest('hex')
+    : null
   const externalId = buildManualSocialPostExternalId({
     permalink: source.permalink,
     shortcode: source.shortcode,
     caption,
     publishedAt,
     mediaType,
-    mediaSha256: videoSha256,
+    mediaSha256,
   })
   const identityFilters = buildInstagramPostIdentityFilters({
     externalId,
@@ -80,8 +102,8 @@ export async function POST(request: Request) {
   })
 
   let leaseToken: string | null = null
-  let uploadedKey: string | null = null
-  let uploadedUrl: string | null = null
+  let creatingPost = false
+  let invalidatedUploadIds: string[] = []
   try {
     await getInstagramSyncState(ANYWHERE_DOOR_TARGET)
     const lease = await acquireInstagramSyncLease({ target: ANYWHERE_DOOR_TARGET })
@@ -93,9 +115,20 @@ export async function POST(request: Request) {
       take: 2,
       select: { id: true, externalId: true, authorUsername: true, permalink: true },
     })
-    if (matches.length > 1) return NextResponse.json({ code: 'DUPLICATE_IDENTITY_AMBIGUOUS', message: '来源标识匹配到多条动态，请先检查已有记录' }, { status: 409 })
+    const attachedMedia = await prisma.socialPostMedia.findMany({
+      where: { storageUrl: { in: receipts.map((receipt) => getCosUrl(receipt.key)) } },
+      select: { storageUrl: true },
+    })
+    if (attachedMedia.length) {
+      return NextResponse.json({ code: 'MEDIA_ALREADY_ATTACHED', message: '所选媒体已关联其他动态，请重新选择文件' }, { status: 409 })
+    }
+    if (matches.length > 1) {
+      invalidatedUploadIds = await cleanupUnreferencedReceipts(receipts)
+      return NextResponse.json({ code: 'DUPLICATE_IDENTITY_AMBIGUOUS', invalidatedUploadIds, message: '来源标识匹配到多条动态，请先检查已有记录' }, { status: 409 })
+    }
     const duplicate = matches[0]
     if (duplicate) {
+      invalidatedUploadIds = await cleanupUnreferencedReceipts(receipts)
       await prisma.$transaction(async (tx) => {
         await createAdminActionAudit(tx, {
           operatorId: guard.user!.id,
@@ -108,21 +141,10 @@ export async function POST(request: Request) {
           metadata: { sourceMode: 'MANUAL', sourceUrl: source.permalink, dedupe: 'EXACT_SOURCE_IDENTITY' },
         })
       })
-      return NextResponse.json({ result: { created: false, deduplicated: true, postId: duplicate.id } }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
+      return NextResponse.json({ result: { created: false, deduplicated: true, postId: duplicate.id, invalidatedUploadIds } }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
     }
 
-    if (video) {
-      const uploadId = randomUUID()
-      uploadedKey = buildInstagramMediaStorageKey({
-        username: ANYWHERE_DOOR_TARGET,
-        mode: 'production',
-        externalId: `manual:${uploadId}`,
-        kind: 'video',
-        sortOrder: 0,
-      })
-      uploadedUrl = await uploadToCos({ key: uploadedKey, body: video, contentType: 'video/mp4' })
-    }
-
+    creatingPost = true
     const post = await prisma.$transaction(async (tx) => {
       const created = await tx.socialPost.create({
         data: {
@@ -136,9 +158,9 @@ export async function POST(request: Request) {
           mediaType,
           status: 'READY',
           provider: 'manual',
-          ...(uploadedUrl ? {
+          ...(receipts.length ? {
             media: {
-              create: [{ type: 'VIDEO', storageUrl: uploadedUrl, thumbnailUrl: null, sortOrder: 0 }],
+              create: buildManualPostMediaRecords(receipts, getCosUrl),
             },
           } : {}),
         },
@@ -152,32 +174,16 @@ export async function POST(request: Request) {
         targetId: created.id,
         targetTitle: caption.slice(0, 160) || '随意门动态',
         reason: '管理员手动补录 mreasonchan 动态',
-        metadata: { sourceMode: 'MANUAL', sourceUrl: source.permalink, publishedAt: publishedAt.toISOString(), mediaType },
+        metadata: { sourceMode: 'MANUAL', sourceUrl: source.permalink, publishedAt: publishedAt.toISOString(), mediaType, mediaCount: receipts.length },
       })
       return created
     })
 
     return NextResponse.json({ result: { created: true, deduplicated: false, postId: post.id } }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
-    if (uploadedKey) {
-      let referenced = false
-      if (uploadedUrl) {
-        try {
-          referenced = Boolean(await prisma.socialPostMedia.findFirst({ where: { storageUrl: uploadedUrl }, select: { id: true } }))
-        } catch {
-          // A commit outcome or reference check that cannot be established is
-          // not safe grounds to remove an object that may already be live.
-          referenced = true
-        }
-      }
-      if (!referenced) {
-        await deleteFromCos(uploadedKey).catch((cleanupError) => {
-          console.error('[admin.anywhere-door.manual.cleanup]', { errorName: cleanupError instanceof Error ? cleanupError.name : 'unknown' })
-        })
-      }
-    }
+    if (creatingPost) invalidatedUploadIds = await cleanupUnreferencedReceipts(receipts)
     console.error('[admin.anywhere-door.manual.create]', { errorName: error instanceof Error ? error.name : 'unknown' })
-    return NextResponse.json({ message: '随意门内容保存失败；表单内容仍可重试' }, { status: 503 })
+    return NextResponse.json({ code: 'MANUAL_POST_CREATE_FAILED', invalidatedUploadIds, message: '随意门内容保存失败；表单内容仍可重试' }, { status: 503 })
   } finally {
     if (leaseToken) await releaseInstagramSyncLease(ANYWHERE_DOOR_TARGET, leaseToken).catch(() => false)
   }
