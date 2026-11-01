@@ -24,6 +24,25 @@ function safeWorkerPath(value) {
   return 'OTHER_PATH'
 }
 
+function safeRuntimeConfig(runtimeEnv, fileEnv) {
+  const value = (key) => typeof runtimeEnv?.[key] === 'string' ? runtimeEnv[key] : typeof fileEnv?.[key] === 'string' ? fileEnv[key] : ''
+  const enabled = (key) => ['true', 'false'].includes(value(key).trim().toLowerCase()) ? value(key).trim().toLowerCase() : 'MISSING_OR_INVALID'
+  return {
+    syncEnabled: enabled('ANYWHERE_DOOR_SYNC_ENABLED'),
+    featureEnabled: enabled('ANYWHERE_DOOR_ENABLED'),
+    provider: value('IG_PROVIDER').trim().toLowerCase() === 'apify' ? 'apify' : value('IG_PROVIDER') ? 'OTHER' : 'MISSING',
+    target: value('IG_TARGET_USERNAME').trim().toLowerCase() === TARGET ? TARGET : value('IG_TARGET_USERNAME') ? 'OTHER' : 'MISSING',
+    apifyTokenPresent: Boolean(value('APIFY_API_TOKEN').trim()),
+  }
+}
+
+function safeWorkerArgs(pm2Args, processArgs = []) {
+  const values = Array.isArray(pm2Args) ? pm2Args : typeof pm2Args === 'string' ? [pm2Args] : []
+  return values.includes('scripts/instagram-sync-worker.ts') || processArgs.includes('scripts/instagram-sync-worker.ts')
+    ? 'scripts/instagram-sync-worker.ts'
+    : 'OTHER_ARGUMENTS'
+}
+
 function isPathWithin(parent, candidate) {
   const relative = path.relative(parent, candidate)
   return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
@@ -40,25 +59,21 @@ function parsePm2List(raw) {
   const pid = Number(row.pid || env.pid || 0)
   const restartCount = env.restart_time
   const uptime = Number(env.pm_uptime)
-  return {
-    count: 1,
-    worker: {
+  const worker = {
       name: 'instagram-sync-worker',
       status: typeof env.status === 'string' && /^[A-Za-z_]+$/.test(env.status) ? env.status : 'UNKNOWN',
       pid: Number.isSafeInteger(pid) && pid > 0 ? pid : null,
       configuredCwd: safeWorkerPath(env.pm_cwd),
       execPath: typeof env.pm_exec_path === 'string' && env.pm_exec_path.endsWith('/node_modules/tsx/dist/cli.mjs') ? 'tsx/dist/cli.mjs' : 'OTHER_ENTRYPOINT',
-      args: env.args === 'scripts/instagram-sync-worker.ts' ? env.args : 'OTHER_ARGUMENTS',
+      args: safeWorkerArgs(env.args),
       restartCount: Number.isSafeInteger(restartCount) && restartCount >= 0 ? restartCount : null,
       startedAt: Number.isFinite(uptime) && uptime > 0 ? new Date(uptime).toISOString() : null,
-      syncEnabled: ['true', 'false'].includes(String(runtimeEnv.ANYWHERE_DOOR_SYNC_ENABLED || '').toLowerCase()) ? String(runtimeEnv.ANYWHERE_DOOR_SYNC_ENABLED).toLowerCase() : 'MISSING_OR_INVALID',
-      featureEnabled: ['true', 'false'].includes(String(runtimeEnv.ANYWHERE_DOOR_ENABLED || '').toLowerCase()) ? String(runtimeEnv.ANYWHERE_DOOR_ENABLED).toLowerCase() : 'MISSING_OR_INVALID',
-      provider: runtimeEnv.IG_PROVIDER === 'apify' ? 'apify' : runtimeEnv.IG_PROVIDER ? 'OTHER' : 'MISSING',
-      target: String(runtimeEnv.IG_TARGET_USERNAME || '').toLowerCase() === TARGET ? TARGET : runtimeEnv.IG_TARGET_USERNAME ? 'OTHER' : 'MISSING',
-      apifyTokenPresent: typeof runtimeEnv.APIFY_API_TOKEN === 'string' && runtimeEnv.APIFY_API_TOKEN.length > 0,
+      runtimeConfig: safeRuntimeConfig(runtimeEnv, {}),
       outLogPath: typeof env.pm_out_log_path === 'string' ? env.pm_out_log_path : '',
-    },
   }
+  Object.defineProperty(worker, 'runtimeEnv', { value: runtimeEnv, enumerable: false })
+  Object.defineProperty(worker, 'pm2Args', { value: env.args, enumerable: false })
+  return { count: 1, worker }
 }
 
 function parseWorkerLogLine(line) {
@@ -86,11 +101,12 @@ function iso(value) {
   return value instanceof Date ? value.toISOString() : typeof value === 'string' ? value : null
 }
 
-function summarizeSocialEvidence({ states, recentLogs, lastSuccess, posts, latestCreated, now = new Date() }) {
+function summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt, firstFailure, firstFailureAfterSuccess, posts, latestCreated, now = new Date() }) {
   const state = Array.isArray(states) && states.length === 1 ? states[0] : null
   const logs = Array.isArray(recentLogs) ? recentLogs : []
   const failures = logs.filter((log) => log.status === 'FAILED').sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt))
-  const latestAttempt = logs.length ? logs.reduce((a, b) => new Date(a.startedAt) > new Date(b.startedAt) ? a : b) : null
+  const attempt = lastAttempt || (logs.length ? logs.reduce((a, b) => new Date(a.startedAt) > new Date(b.startedAt) ? a : b) : null)
+  const earliestFailure = firstFailureAfterSuccess || firstFailure || failures[0] || null
   const latestSuccess = lastSuccess || logs.find((log) => log.status === 'SUCCEEDED') || null
   const rows = Array.isArray(posts) ? posts : []
   const latestPost = rows[0] || null
@@ -113,17 +129,21 @@ function summarizeSocialEvidence({ states, recentLogs, lastSuccess, posts, lates
       updatedCount: latestSuccess.updatedCount,
       errorCode: safeCode(latestSuccess.errorCode),
     } : null,
-    lastAttempt: latestAttempt ? {
-      startedAt: iso(latestAttempt.startedAt),
-      finishedAt: iso(latestAttempt.finishedAt),
-      status: latestAttempt.status,
-      foundCount: latestAttempt.foundCount,
-      createdCount: latestAttempt.createdCount,
-      errorCode: safeCode(latestAttempt.errorCode),
+    lastAttempt: attempt ? {
+      startedAt: iso(attempt.startedAt),
+      finishedAt: iso(attempt.finishedAt),
+      status: attempt.status,
+      foundCount: attempt.foundCount,
+      createdCount: attempt.createdCount,
+      errorCode: safeCode(attempt.errorCode),
     } : null,
     firstFailureInRecentWindow: failures[0] ? {
       startedAt: iso(failures[0].startedAt),
       errorCode: safeCode(failures[0].errorCode),
+    } : null,
+    firstFailure: earliestFailure ? {
+      startedAt: iso(earliestFailure.startedAt),
+      errorCode: safeCode(earliestFailure.errorCode),
     } : null,
     recentLogCount: logs.length,
     posts: rows.map((row) => ({
@@ -143,7 +163,7 @@ function summarizeSocialEvidence({ states, recentLogs, lastSuccess, posts, lates
 
 async function querySocialEvidence(prisma, now = new Date()) {
   const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-  const [states, recentLogs, lastSuccess, posts, latestCreated] = await Promise.all([
+  const [states, recentLogs, lastSuccess, lastAttempt, firstFailure, posts, latestCreated] = await Promise.all([
     prisma.socialSyncState.findMany({
       where: { platform: PLATFORM, target: TARGET },
       orderBy: { updatedAt: 'desc' },
@@ -161,6 +181,16 @@ async function querySocialEvidence(prisma, now = new Date()) {
       orderBy: { startedAt: 'desc' },
       select: { startedAt: true, finishedAt: true, status: true, foundCount: true, createdCount: true, updatedCount: true, errorCode: true },
     }),
+    prisma.socialSyncLog.findFirst({
+      where: { target: TARGET },
+      orderBy: { startedAt: 'desc' },
+      select: { startedAt: true, finishedAt: true, status: true, foundCount: true, createdCount: true, updatedCount: true, errorCode: true },
+    }),
+    prisma.socialSyncLog.findFirst({
+      where: { target: TARGET, status: 'FAILED' },
+      orderBy: { startedAt: 'asc' },
+      select: { startedAt: true, errorCode: true },
+    }),
     prisma.socialPost.findMany({
       where: { platform: PLATFORM, authorUsername: TARGET },
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
@@ -173,7 +203,15 @@ async function querySocialEvidence(prisma, now = new Date()) {
       select: { createdAt: true },
     }),
   ])
-  return summarizeSocialEvidence({ states, recentLogs, lastSuccess, posts, latestCreated, now })
+  let firstFailureAfterSuccess = null
+  if (lastSuccess?.startedAt) {
+    firstFailureAfterSuccess = await prisma.socialSyncLog.findFirst({
+      where: { target: TARGET, status: 'FAILED', startedAt: { gt: lastSuccess.startedAt } },
+      orderBy: { startedAt: 'asc' },
+      select: { startedAt: true, errorCode: true },
+    })
+  }
+  return summarizeSocialEvidence({ states, recentLogs, lastSuccess, lastAttempt, firstFailure, firstFailureAfterSuccess, posts, latestCreated, now })
 }
 
 function safeDatabaseError(error) {
@@ -217,14 +255,23 @@ function runtimeSnapshot() {
   const worker = parsed.worker
   let actualCwd = null
   let releaseSha = null
-  let commandLine = null
   if (worker && worker.pid) {
     try { actualCwd = fs.readlinkSync(`/proc/${worker.pid}/cwd`) } catch {}
+    let processArgs = []
+    try { processArgs = fs.readFileSync(`/proc/${worker.pid}/cmdline`).toString('utf8').split('\0').filter(Boolean) } catch {}
+    worker.args = safeWorkerArgs(worker.pm2Args, processArgs)
     if (actualCwd && isPathWithin(path.join(APP_DIR, 'releases'), actualCwd)) {
       try {
         const marker = fs.readFileSync(path.join(actualCwd, '.deployed-sha'), 'utf8').trim()
         if (validSha(marker)) releaseSha = marker
       } catch {}
+      let fileEnv = {}
+      try {
+        const releaseRequire = require('node:module').createRequire(path.join(actualCwd, 'package.json'))
+        const dotenv = releaseRequire('dotenv')
+        fileEnv = dotenv.parse(fs.readFileSync(path.join(actualCwd, '.env')))
+      } catch {}
+      worker.runtimeConfig = safeRuntimeConfig(worker.runtimeEnv || {}, fileEnv)
     }
   }
   return {
@@ -284,6 +331,8 @@ async function main() {
 module.exports = {
   isPathWithin,
   parsePm2List,
+  safeRuntimeConfig,
+  safeWorkerArgs,
   parseWorkerLogLine,
   parseWorkerLogBuffer,
   summarizeSocialEvidence,
