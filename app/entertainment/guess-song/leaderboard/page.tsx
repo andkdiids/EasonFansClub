@@ -9,20 +9,20 @@ import { GuessSongLeaderboard } from './GuessSongLeaderboard'
 export const dynamic = 'force-dynamic'
 
 const ALLOWED_MODES = ['EASY', 'ADVANCED', 'HARD', 'EXPERT'] as const
-type PageProps = { searchParams?: Promise<{ period?: string; range?: string; date?: string; mode?: string }> }
+type PageProps = { searchParams?: Promise<{ period?: string; range?: string; date?: string; startDate?: string; endDate?: string; mode?: string }> }
 
-function resolveInitialRange(query: { period?: string; range?: string; date?: string }) {
+function resolveInitialRange(query: { period?: string; range?: string; date?: string; startDate?: string; endDate?: string }) {
   const requested = parseGameRankingRangeKey(query.range)
   if (requested) {
     try {
-      const resolved = resolveGameRankingRange({ range: requested, date: query.date, now: new Date() })
-      return { range: resolved.key, date: resolved.date }
+      const resolved = resolveGameRankingRange({ range: requested, date: query.date, startDate: query.startDate, endDate: query.endDate, now: new Date() })
+      return { range: resolved.key, startDate: resolved.startDate, endDate: resolved.endDate }
     } catch {
-      return { range: 'this-week' as const, date: null }
+      return { range: 'this-week' as const, startDate: null, endDate: null }
     }
   }
-  if (query.period === 'MONTH') return { range: 'this-month' as const, date: null }
-  return { range: 'this-week' as const, date: null }
+  if (query.period === 'MONTH') return { range: 'this-month' as const, startDate: null, endDate: null }
+  return { range: 'this-week' as const, startDate: null, endDate: null }
 }
 
 export default async function GuessSongLeaderboardPage({ searchParams }: PageProps) {
@@ -43,7 +43,8 @@ export default async function GuessSongLeaderboardPage({ searchParams }: PagePro
       userId: user.id,
       mode: initialMode,
       range: initialRange.range,
-      date: initialRange.date || undefined,
+      startDate: initialRange.startDate || undefined,
+      endDate: initialRange.endDate || undefined,
     })
   } catch {
     initialData = null
@@ -53,7 +54,8 @@ export default async function GuessSongLeaderboardPage({ searchParams }: PagePro
     <PageContainer className="guess-song-page">
       <GuessSongLeaderboard
         initialRange={initialRange.range as GameRankingRangeKey}
-        initialDate={initialRange.date}
+        initialStartDate={initialRange.startDate}
+        initialEndDate={initialRange.endDate}
         todayDate={todayDate}
         initialMode={initialMode}
         initialData={initialData}

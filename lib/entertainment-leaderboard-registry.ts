@@ -29,7 +29,7 @@ export type EntertainmentLeaderboardDefinition = {
   /** null means this game has no mode selector in the unified center. */
   modes: readonly EntertainmentLeaderboardMode[] | null
   periods: readonly EntertainmentLeaderboardPeriodDefinition[]
-  /** The four shared public date filters. Empty means no public leaderboard exists yet. */
+  /** Shared date filters; source determines whether a public leaderboard is implemented. */
   ranges: readonly GameRankingRangeOption[]
   defaultMode: string | null
   defaultPeriod: EntertainmentLeaderboardPeriod | null
@@ -132,7 +132,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/guess-song/duel',
     modes: DUEL_MODES,
     periods: [],
-    ranges: [],
+    ranges: GAME_RANKING_RANGE_OPTIONS,
     defaultMode: 'SCORE',
     defaultPeriod: null,
     source: null,
@@ -144,7 +144,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
     route: '/games/undercover-star',
     modes: null,
     periods: [],
-    ranges: [],
+    ranges: GAME_RANKING_RANGE_OPTIONS,
     defaultMode: null,
     defaultPeriod: null,
     source: null,
@@ -161,7 +161,7 @@ export const ENTERTAINMENT_LEADERBOARDS = [
 export function getRankableEntertainmentLeaderboardTargets(): EntertainmentLeaderboardTarget[] {
   const targets: EntertainmentLeaderboardTarget[] = []
   for (const definition of ENTERTAINMENT_LEADERBOARDS) {
-    if (!definition.ranges.length) continue
+    if (!definition.source || !definition.ranges.length) continue
     if (definition.modes?.length) {
       for (const mode of definition.modes) {
         targets.push({

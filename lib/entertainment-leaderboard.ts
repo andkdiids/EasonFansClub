@@ -168,7 +168,7 @@ function guessSongRows(rows: Awaited<ReturnType<typeof getGuessSongLeaderboard>>
   }))
 }
 
-function unavailableResult(definition: EntertainmentLeaderboardDefinition): EntertainmentLeaderboardResult {
+function unavailableResult(definition: EntertainmentLeaderboardDefinition, range: GameRankingRange | null = null): EntertainmentLeaderboardResult {
   return {
     status: 'unavailable',
     gameKey: definition.gameKey,
@@ -178,10 +178,10 @@ function unavailableResult(definition: EntertainmentLeaderboardDefinition): Ente
     period: null,
     periodLabel: null,
     periodKey: null,
-    rangeKey: null,
-    rangeDate: null,
-    rangeLabel: null,
-    cacheKey: null,
+    rangeKey: range?.key || null,
+    rangeDate: range?.date || null,
+    rangeLabel: range ? range.key === 'date' ? range.label : formatLeaderboardRange(range.startAt, range.endAt) : null,
+    cacheKey: range?.cacheKey || null,
     rows: [],
     unavailableReason: '该游戏暂未开放排行榜',
   }
@@ -198,6 +198,8 @@ export async function getEntertainmentLeaderboard(input: {
   period?: unknown
   range?: unknown
   date?: unknown
+  startDate?: unknown
+  endDate?: unknown
   userId: string
   limit?: number
   now?: Date
@@ -206,19 +208,24 @@ export async function getEntertainmentLeaderboard(input: {
   if (!definition) throw new EntertainmentLeaderboardError('请选择有效的娱乐天空游戏')
 
   const mode = resolveMode(definition, input.mode)
-  if (!definition.source || definition.ranges.length === 0) return unavailableResult(definition)
-
   const now = input.now || new Date()
   const hasUnifiedRange = input.range !== undefined && input.range !== null && input.range !== ''
   let unifiedRange: GameRankingRange | null = null
   if (hasUnifiedRange) {
     try {
-      unifiedRange = resolveGameRankingRange({ range: input.range, date: input.date, now })
+      unifiedRange = resolveGameRankingRange({
+        range: input.range,
+        date: input.date,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        now,
+      })
     } catch (error) {
       if (error instanceof GameRankingRangeError) throw new EntertainmentLeaderboardError(error.message, error.status, error.code)
       throw error
     }
   }
+  if (!definition.source || definition.ranges.length === 0) return unavailableResult(definition, unifiedRange)
   const period = unifiedRange
     ? null
     : resolvePeriod(definition, input.period)
@@ -237,6 +244,8 @@ export async function getEntertainmentLeaderboard(input: {
       period: unifiedRange ? undefined : period!.key,
       range: unifiedRange?.key,
       date: unifiedRange?.date || undefined,
+      startDate: unifiedRange?.startDate || undefined,
+      endDate: unifiedRange?.endDate || undefined,
       userId: input.userId,
       limit: input.limit || 10,
       now,
@@ -251,7 +260,7 @@ export async function getEntertainmentLeaderboard(input: {
       period: resultPeriod,
       periodLabel: resultPeriodLabel,
       periodKey: result.periodKey,
-      rangeLabel: formatLeaderboardRange(range.start, range.endExclusive),
+      rangeLabel: unifiedRange?.key === 'date' ? unifiedRange.label : formatLeaderboardRange(range.start, range.endExclusive),
       rangeKey: result.rangeKey,
       rangeDate: result.rangeDate,
       cacheKey: result.cacheKey,
@@ -265,6 +274,8 @@ export async function getEntertainmentLeaderboard(input: {
     mode: mode as 'EASY' | 'ADVANCED' | 'HARD' | 'EXPERT',
     range: unifiedRange?.key,
     date: unifiedRange?.date || undefined,
+    startDate: unifiedRange?.startDate || undefined,
+    endDate: unifiedRange?.endDate || undefined,
     now,
   })
   const rows = guessSongRows(result.rows)
@@ -277,7 +288,7 @@ export async function getEntertainmentLeaderboard(input: {
     period: resultPeriod,
     periodLabel: resultPeriodLabel,
     periodKey: result.periodKey,
-    rangeLabel: formatLeaderboardRange(range.start, range.endExclusive),
+    rangeLabel: unifiedRange?.key === 'date' ? unifiedRange.label : formatLeaderboardRange(range.start, range.endExclusive),
     rangeKey: result.rangeKey,
     rangeDate: result.rangeDate,
     cacheKey: result.cacheKey,

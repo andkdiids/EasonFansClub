@@ -664,6 +664,8 @@ export async function getGuessSongLeaderboard(input: {
   mode: GuessSongPublicMode
   range?: unknown
   date?: unknown
+  startDate?: unknown
+  endDate?: unknown
   resolvedRange?: GameRankingRange
   now?: Date
 }) {
@@ -672,7 +674,7 @@ export async function getGuessSongLeaderboard(input: {
   const hasUnifiedRange = input.range !== undefined && input.range !== null && input.range !== ''
 
   if (hasUnifiedRange) {
-    const range = input.resolvedRange || resolveGameRankingRange({ range: input.range, date: input.date, now })
+    const range = input.resolvedRange || resolveGameRankingRange({ range: input.range, date: input.date, startDate: input.startDate, endDate: input.endDate, now })
     if (range.key === 'date') {
       const excludedSessionIds = await getGuessSongDeletedSessionIds({ mode: input.mode })
       return getYearGuessSongLeaderboard({

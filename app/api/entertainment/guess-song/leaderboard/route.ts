@@ -26,6 +26,8 @@ export async function GET(request: Request) {
       mode,
       range: rawRange || undefined,
       date: params.get('date') || undefined,
+      startDate: params.get('startDate') || undefined,
+      endDate: params.get('endDate') || undefined,
     }))
   } catch (error) {
     return handleGuessSongError(error, 'leaderboard')

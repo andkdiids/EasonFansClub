@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { GameRankingRangeTabs } from '@/components/games/GameRankingRangeTabs'
 import { UserDisplayName } from '@/components/UserDisplayName'
-import { parseGameRankingRangeKey, type GameRankingRangeKey } from '@/lib/game-ranking-range'
+import { parseGameRankingRangeKey, readGameRankingRangeDates, writeGameRankingRangeDates, type GameRankingRangeKey } from '@/lib/game-ranking-range'
 import { WANT_LISTEN_MODE_LABELS, WANT_LISTEN_MODES, type WantListenMode } from '@/lib/want-listen-config'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 
@@ -46,17 +46,18 @@ function readUrlState(todayDate: string) {
   // Legacy URL alias kept for compatibility: ['MONTH', '本月'] maps to this-month.
   const range = parseGameRankingRangeKey(params.get('range'))
     || (params.get('period') === 'MONTH' ? 'this-month' : params.get('period') === 'TODAY' || params.get('period') === 'DAY' ? 'date' : 'this-week')
-  const date = range === 'date' ? params.get('date') || todayDate : null
+  const { startDate, endDate } = range === 'date'
+    ? readGameRankingRangeDates(params, todayDate)
+    : { startDate: null, endDate: null }
   const mode = isMode(params.get('mode')) ? params.get('mode') as WantListenMode : 'WANT_LISTEN'
-  return { range, date, mode }
+  return { range, startDate, endDate, mode }
 }
 
-function pushUrlState(range: GameRankingRangeKey, date: string | null, mode: WantListenMode) {
+function pushUrlState(range: GameRankingRangeKey, startDate: string | null, endDate: string | null, mode: WantListenMode) {
   const params = new URLSearchParams(window.location.search)
   params.set('range', range)
   params.set('mode', mode)
-  if (range === 'date' && date) params.set('date', date)
-  else params.delete('date')
+  writeGameRankingRangeDates(params, range, startDate, endDate)
   params.delete('period')
   const query = params.toString()
   window.history.pushState({}, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
@@ -64,16 +65,19 @@ function pushUrlState(range: GameRankingRangeKey, date: string | null, mode: Wan
 
 export function WantListenLeaderboard({
   initialRange,
-  initialDate,
+  initialStartDate,
+  initialEndDate,
   todayDate,
 }: Readonly<{
   initialRange: GameRankingRangeKey
-  initialDate: string | null
+  initialStartDate: string | null
+  initialEndDate: string | null
   todayDate: string
 }>) {
   const [mode, setMode] = useState<WantListenMode>('WANT_LISTEN')
   const [range, setRange] = useState<GameRankingRangeKey>(initialRange)
-  const [date, setDate] = useState<string | null>(initialRange === 'date' ? initialDate || todayDate : null)
+  const [startDate, setStartDate] = useState<string | null>(initialRange === 'date' ? initialStartDate || todayDate : null)
+  const [endDate, setEndDate] = useState<string | null>(initialRange === 'date' ? initialEndDate || initialStartDate || todayDate : null)
   const [board, setBoard] = useState<Board | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -83,7 +87,8 @@ export function WantListenLeaderboard({
     const handlePopState = () => {
       const next = readUrlState(todayDate)
       setRange(next.range)
-      setDate(next.range === 'date' ? next.date : null)
+      setStartDate(next.startDate)
+      setEndDate(next.endDate)
       setMode(next.mode)
     }
     window.addEventListener('popstate', handlePopState)
@@ -91,8 +96,9 @@ export function WantListenLeaderboard({
   }, [todayDate])
 
   useEffect(() => {
-    const selectedDate = range === 'date' ? date || todayDate : null
-    const key = `want-listen:${range}:${selectedDate || ''}:${mode}`
+    const selectedStart = range === 'date' ? startDate || '' : ''
+    const selectedEnd = range === 'date' ? endDate || '' : ''
+    const key = `want-listen:${range}:${selectedStart}:${selectedEnd}:${mode}`
     const cached = cache.current.get(key)
     if (cached) {
       setBoard(cached)
@@ -104,7 +110,11 @@ export function WantListenLeaderboard({
     setLoading(true)
     setError('')
     const params = new URLSearchParams({ mode, range })
-    if (range === 'date') params.set('date', selectedDate as string)
+    if (range === 'date') {
+      if (selectedStart) params.set('startDate', selectedStart)
+      if (selectedEnd) params.set('endDate', selectedEnd)
+      if (selectedStart && selectedStart === selectedEnd) params.set('date', selectedStart)
+    }
     request<Board>(`/api/entertainment/want-listen/leaderboard?${params.toString()}`)
       .then((data) => {
         if (!active) return
@@ -116,18 +126,20 @@ export function WantListenLeaderboard({
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [date, mode, range, todayDate])
+  }, [endDate, mode, range, startDate, todayDate])
 
-  function chooseRange(nextRange: GameRankingRangeKey, nextDate: string | null) {
-    const selectedDate = nextRange === 'date' ? nextDate || todayDate : null
+  function chooseRange(nextRange: GameRankingRangeKey, nextStartDate: string | null, nextEndDate: string | null) {
+    const selectedStart = nextRange === 'date' ? nextStartDate : null
+    const selectedEnd = nextRange === 'date' ? nextEndDate : null
     setRange(nextRange)
-    setDate(selectedDate)
-    pushUrlState(nextRange, selectedDate, mode)
+    setStartDate(selectedStart)
+    setEndDate(selectedEnd)
+    pushUrlState(nextRange, selectedStart, selectedEnd, mode)
   }
 
   function chooseMode(nextMode: WantListenMode) {
     setMode(nextMode)
-    pushUrlState(range, range === 'date' ? date || todayDate : null, nextMode)
+    pushUrlState(range, range === 'date' ? startDate : null, range === 'date' ? endDate : null, nextMode)
   }
 
   return (
@@ -142,7 +154,7 @@ export function WantListenLeaderboard({
           <div className="want-listen-mode-tabs" role="tablist" aria-label="想听模式">
             {WANT_LISTEN_MODES.map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => chooseMode(item)}>{WANT_LISTEN_MODE_LABELS[item]}</button>)}
           </div>
-          <GameRankingRangeTabs value={range} date={date} todayDate={todayDate} onChange={chooseRange} />
+          <GameRankingRangeTabs value={range} startDate={startDate} endDate={endDate} todayDate={todayDate} onChange={chooseRange} />
         </div>
         {error ? <p className="want-listen-error" role="alert">{error}</p> : null}
         {board?.rangeLabel ? <p className="want-listen-board-range">{board.rangeLabel}</p> : null}

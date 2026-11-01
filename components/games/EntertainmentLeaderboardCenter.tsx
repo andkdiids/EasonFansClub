@@ -10,7 +10,12 @@ import {
   getEntertainmentLeaderboardDefinition,
   type EntertainmentLeaderboardGameKey,
 } from '@/lib/entertainment-leaderboard-registry'
-import { parseGameRankingRangeKey, type GameRankingRangeKey } from '@/lib/game-ranking-range'
+import {
+  parseGameRankingRangeKey,
+  readGameRankingRangeDates,
+  writeGameRankingRangeDates,
+  type GameRankingRangeKey,
+} from '@/lib/game-ranking-range'
 
 type Row = {
   rank: number
@@ -45,15 +50,14 @@ type Board = {
   unavailableReason?: string
 }
 
-function pushUrlState(gameKey: EntertainmentLeaderboardGameKey, mode: string | null, range: GameRankingRangeKey | null, date: string | null) {
+function pushUrlState(gameKey: EntertainmentLeaderboardGameKey, mode: string | null, range: GameRankingRangeKey | null, startDate: string | null, endDate: string | null) {
   const params = new URLSearchParams(window.location.search)
   params.set('game', gameKey)
   if (mode) params.set('mode', mode)
   else params.delete('mode')
   if (range) params.set('range', range)
   else params.delete('range')
-  if (range === 'date' && date) params.set('date', date)
-  else params.delete('date')
+  writeGameRankingRangeDates(params, range, startDate, endDate)
   params.delete('period')
   const query = params.toString()
   window.history.pushState({}, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
@@ -65,7 +69,8 @@ export function EntertainmentLeaderboardCenter({ todayDate }: Readonly<{ todayDa
   const [gameKey, setGameKey] = useState<EntertainmentLeaderboardGameKey>(defaultGame.gameKey)
   const [mode, setMode] = useState<string | null>(defaultGame.defaultMode)
   const [range, setRange] = useState<GameRankingRangeKey>(defaultRange)
-  const [date, setDate] = useState<string | null>(null)
+  const [startDate, setStartDate] = useState<string | null>(null)
+  const [endDate, setEndDate] = useState<string | null>(null)
   const [board, setBoard] = useState<Board | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -84,7 +89,14 @@ export function EntertainmentLeaderboardCenter({ todayDate }: Readonly<{ todayDa
       setGameKey(nextGame.gameKey)
       setMode(nextGame.modes?.some((item) => item.key === params.get('mode')) ? params.get('mode') : nextGame.defaultMode)
       setRange(nextRange)
-      setDate(nextRange === 'date' ? params.get('date') || todayDate : null)
+      if (nextRange === 'date') {
+        const dates = readGameRankingRangeDates(params, todayDate)
+        setStartDate(dates.startDate)
+        setEndDate(dates.endDate)
+      } else {
+        setStartDate(null)
+        setEndDate(null)
+      }
     }
     readUrlState()
     window.addEventListener('popstate', readUrlState)
@@ -101,7 +113,13 @@ export function EntertainmentLeaderboardCenter({ todayDate }: Readonly<{ todayDa
     if (mode) params.set('mode', mode)
     if (selectedGame.ranges.some((item) => item.key === range)) {
       params.set('range', range)
-      if (range === 'date') params.set('date', date || todayDate)
+      if (range === 'date') {
+        const selectedStart = startDate || ''
+        const selectedEnd = endDate || ''
+        if (selectedStart) params.set('startDate', selectedStart)
+        if (selectedEnd) params.set('endDate', selectedEnd)
+        if (selectedStart && selectedStart === selectedEnd) params.set('date', selectedStart)
+      }
     }
     const controller = new AbortController()
     fetch(`/api/entertainment/leaderboard?${params.toString()}`, {
@@ -129,31 +147,35 @@ export function EntertainmentLeaderboardCenter({ todayDate }: Readonly<{ todayDa
       cancelled = true
       controller.abort()
     }
-  }, [date, gameKey, mode, range, reloadToken, selectedGame, todayDate])
+  }, [endDate, gameKey, mode, range, reloadToken, selectedGame, startDate, todayDate])
 
   function chooseGame(nextGameKey: EntertainmentLeaderboardGameKey) {
     const nextGame = getEntertainmentLeaderboardDefinition(nextGameKey)
     if (!nextGame) return
-    const nextRange = nextGame.ranges[0]?.key || 'this-week'
-    const nextDate = nextRange === 'date' ? todayDate : null
+    const nextRange = nextGame.ranges.some((item) => item.key === range) ? range : nextGame.ranges[0]?.key || 'this-week'
+    const nextStartDate = nextRange === 'date' ? startDate : null
+    const nextEndDate = nextRange === 'date' ? endDate : null
     setGameKey(nextGame.gameKey)
     setMode(nextGame.defaultMode)
     setRange(nextRange)
-    setDate(nextDate)
-    pushUrlState(nextGame.gameKey, nextGame.defaultMode, nextGame.ranges.length ? nextRange : null, nextDate)
+    setStartDate(nextStartDate)
+    setEndDate(nextEndDate)
+    pushUrlState(nextGame.gameKey, nextGame.defaultMode, nextGame.ranges.length ? nextRange : null, nextStartDate, nextEndDate)
   }
 
   function chooseMode(nextMode: string) {
     setMode(nextMode)
-    pushUrlState(gameKey, nextMode, selectedGame.ranges.length ? range : null, range === 'date' ? date || todayDate : null)
+    pushUrlState(gameKey, nextMode, selectedGame.ranges.length ? range : null, range === 'date' ? startDate : null, range === 'date' ? endDate : null)
   }
 
-  function chooseRange(nextRange: GameRankingRangeKey, nextDate: string | null) {
+  function chooseRange(nextRange: GameRankingRangeKey, nextStartDate: string | null, nextEndDate: string | null) {
     if (!selectedGame.ranges.some((item) => item.key === nextRange)) return
-    const selectedDate = nextRange === 'date' ? nextDate || todayDate : null
+    const selectedStart = nextRange === 'date' ? nextStartDate : null
+    const selectedEnd = nextRange === 'date' ? nextEndDate : null
     setRange(nextRange)
-    setDate(selectedDate)
-    pushUrlState(gameKey, mode, nextRange, selectedDate)
+    setStartDate(selectedStart)
+    setEndDate(selectedEnd)
+    pushUrlState(gameKey, mode, nextRange, selectedStart, selectedEnd)
   }
 
   const renderSkeleton = () => (
@@ -195,7 +217,7 @@ export function EntertainmentLeaderboardCenter({ todayDate }: Readonly<{ todayDa
       ) : null}
 
       {selectedGame.ranges.length ? (
-        <GameRankingRangeTabs value={range} date={date} todayDate={todayDate} onChange={chooseRange} ariaLabel={`${selectedGame.name}排行榜时间范围`} />
+        <GameRankingRangeTabs value={range} startDate={startDate} endDate={endDate} todayDate={todayDate} onChange={chooseRange} ariaLabel={`${selectedGame.name}排行榜时间范围`} />
       ) : null}
 
       {error ? (
