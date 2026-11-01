@@ -1,0 +1,148 @@
+name: Read-only Production Anywhere Door Diagnostic V2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Share the production release lock so a read-only inspection cannot overlap
+  # the current-release switch or process verification.
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    environment:
+      name: Production
+    permissions:
+      contents: read
+    steps:
+      - name: Require manual dispatch from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || { echo "::error::Manual dispatch only."; exit 1; }
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::Dispatch from main only."; exit 1; }
+
+      - name: Checkout the exact main revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare and verify pinned SSH identity
+        id: ssh
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOSTS: ${{ vars.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PINNED_FINGERPRINT: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::SSH host format is unsupported."; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "::error::SSH user format is unsupported."; exit 1; }
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || { echo "::error::SSH port is invalid."; exit 1; }
+          [[ -n "$SSH_KEY" && -n "$PINNED_HOSTS" && "$PINNED_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]] || { echo "::error::Pinned SSH settings are incomplete."; exit 1; }
+          key="$RUNNER_TEMP/ecfc-anywhere-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.key"
+          hosts="$RUNNER_TEMP/ecfc-anywhere-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.hosts"
+          output="$RUNNER_TEMP/ecfc-anywhere-diagnostic-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          printf 'key_file=%s\nhosts_file=%s\noutput_file=%s\n' "$key" "$hosts" "$output" >> "$GITHUB_OUTPUT"
+          umask 077
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > "$key"
+          printf '%s\n' "$PINNED_HOSTS" > "$hosts"
+          chmod 600 "$key" "$hosts"
+          SSH_HOST="$SSH_HOST" SSH_PORT="$SSH_PORT" HOSTS_FILE="$hosts" node <<'NODE'
+          const fs = require('node:fs')
+          const lines = fs.readFileSync(process.env.HOSTS_FILE, 'utf8').trim().split(/\r?\n/)
+          const expectedHost = process.env.SSH_PORT === '22' ? process.env.SSH_HOST : `[${process.env.SSH_HOST}]:${process.env.SSH_PORT}`
+          const fields = lines.length === 1 ? lines[0].trim().split(/\s+/) : []
+          if (fields.length !== 3 || fields[0] !== expectedHost || !/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$/.test(fields[1]) || !/^[A-Za-z0-9+/]+={0,2}$/.test(fields[2])) process.exit(1)
+          NODE
+          actual="$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')"
+          [[ "$actual" == "$PINNED_FINGERPRINT" ]] || { echo "::error::SSH host key fingerprint mismatch."; exit 1; }
+          echo 'SSH_HOST_IDENTITY=PINNED_AND_VERIFIED'
+
+      - name: Read Worker, sync ledger, and source post metadata
+        id: evidence
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          OUTPUT_FILE: ${{ steps.ssh.outputs.output_file }}
+        run: |
+          set -euo pipefail
+          [[ -s "$KEY_FILE" && -s "$HOSTS_FILE" ]] || { echo "::error::Pinned SSH identity files are unavailable."; exit 1; }
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9._-]+$ && "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || { echo "::error::SSH destination validation failed."; exit 1; }
+          (( 10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535 )) || { echo "::error::SSH port is invalid."; exit 1; }
+          if ! timeout --foreground --signal=TERM --kill-after=10s 75s env ECFC_ANYWHERE_DIAGNOSTIC_RUN=1 \
+            cat .github/release/production-anywhere-door-diagnostic-v2.cjs | timeout --foreground --signal=TERM --kill-after=10s 75s ssh -T \
+              -p "$SSH_PORT" -i "$KEY_FILE" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey \
+              -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOSTS_FILE" \
+              -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+              -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
+              "$SSH_USER@$SSH_HOST" 'cd /home/apps/easonfansclub/current && ECFC_ANYWHERE_DIAGNOSTIC_RUN=1 node -' \
+              > "$OUTPUT_FILE" 2>/dev/null; then
+            echo "::error::Read-only production diagnostic failed; no fallback or unpinned connection was attempted."
+            exit 1
+          fi
+          node - "$OUTPUT_FILE" <<'NODE'
+          const fs = require('node:fs')
+          let data
+          try { data = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) } catch { throw new Error('Diagnostic returned invalid JSON.') }
+          if (data.readOnly !== true) throw new Error('Diagnostic did not attest read-only mode.')
+          const safe = {
+            CURRENT_RELEASE: data.currentRelease || 'UNKNOWN',
+            CURRENT_SHA: data.currentSha || 'UNKNOWN',
+            PM2_STATUS: data.workerEvidence?.pm2Status || 'UNKNOWN',
+            WORKER_COUNT: data.workerEvidence?.count ?? 'UNKNOWN',
+            WORKER: data.workerEvidence?.worker ? {
+              name: data.workerEvidence.worker.name,
+              status: data.workerEvidence.worker.status,
+              pid: data.workerEvidence.worker.pid,
+              configuredCwd: data.workerEvidence.worker.configuredCwd,
+              actualCwd: data.workerEvidence.worker.actualCwd,
+              releaseSha: data.workerEvidence.worker.releaseSha,
+              execPath: data.workerEvidence.worker.execPath,
+              args: data.workerEvidence.worker.args,
+              startedAt: data.workerEvidence.worker.startedAt,
+              restartCount: data.workerEvidence.worker.restartCount,
+              syncEnabled: data.workerEvidence.worker.syncEnabled,
+              featureEnabled: data.workerEvidence.worker.featureEnabled,
+              provider: data.workerEvidence.worker.provider,
+              target: data.workerEvidence.worker.target,
+              apifyTokenPresent: data.workerEvidence.worker.apifyTokenPresent,
+            } : null,
+            WORKER_LOGS: data.workerEvidence?.workerLogs || { status: 'UNKNOWN', entries: [] },
+            DATABASE_READ_STATUS: data.databaseRead?.status || 'UNKNOWN',
+            DATABASE_ERROR_CLASS: data.databaseRead?.errorClass || null,
+            DATABASE_EVIDENCE: data.databaseRead?.evidence || null,
+          }
+          process.stdout.write(`${JSON.stringify(safe, null, 2)}\n`)
+          if (safe.DATABASE_READ_STATUS !== 'PASS') process.exitCode = 2
+          NODE
+
+      - name: Remove runner-only diagnostic credentials
+        if: always()
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          HOSTS_FILE: ${{ steps.ssh.outputs.hosts_file }}
+          OUTPUT_FILE: ${{ steps.ssh.outputs.output_file }}
+        run: |
+          set -euo pipefail
+          for file in "$KEY_FILE" "$HOSTS_FILE" "$OUTPUT_FILE"; do
+            [[ -z "$file" ]] || rm -f -- "$file"
+          done
