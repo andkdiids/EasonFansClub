@@ -7,6 +7,7 @@ on:
     paths:
       - 'prisma/schema.prisma'
       - 'prisma/migrations/**'
+      - 'tests/instagram-text-media-migration.mysql.integration.ts'
       - 'tests/recording-sessions-v2-mysql.integration.ts'
       - '.github/workflows/recording-sessions-v2-mysql.yml'
 
