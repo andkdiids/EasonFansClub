@@ -40,7 +40,7 @@ async function main() {
     stage = 'migration-shape-check'
     const statements = readFileSync(MIGRATION_PATH, 'utf8').split(/;\s*(?:\r?\n|$)/).map((statement) => statement.trim()).filter(Boolean)
     assert.equal(statements.length, 1, 'TEXT migration must contain one statement')
-    assert.match(statements[0], /^ALTER TABLE `SocialPost` MODIFY `mediaType` ENUM\('IMAGE', 'VIDEO', 'CAROUSEL', 'REEL', 'TEXT'\) NOT NULL$/)
+    assert.match(statements[0].replace(/\s+/g, ' '), /^ALTER TABLE `SocialPost` MODIFY `mediaType` ENUM\('IMAGE', 'VIDEO', 'CAROUSEL', 'REEL', 'TEXT'\) NOT NULL$/)
     stage = 'migration-apply'
     await testDb.$executeRawUnsafe(statements[0])
 
