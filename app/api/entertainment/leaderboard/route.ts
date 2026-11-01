@@ -31,6 +31,8 @@ export async function GET(request: Request) {
       period: params.get('range') ? undefined : params.get('period') || undefined,
       range: params.get('range') || undefined,
       date: params.get('date') || undefined,
+      startDate: params.get('startDate') || undefined,
+      endDate: params.get('endDate') || undefined,
       userId: guard.user.id,
       limit: 10,
     }))

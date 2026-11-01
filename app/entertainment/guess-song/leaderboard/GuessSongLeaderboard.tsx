@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { GameRankingRangeTabs } from '@/components/games/GameRankingRangeTabs'
 import { SafeAvatar } from '@/components/SafeAvatar'
 import { UserDisplayName } from '@/components/UserDisplayName'
-import { parseGameRankingRangeKey, type GameRankingRangeKey } from '@/lib/game-ranking-range'
+import { parseGameRankingRangeKey, readGameRankingRangeDates, writeGameRankingRangeDates, type GameRankingRangeKey } from '@/lib/game-ranking-range'
 import type { EquippedBadgeView } from '@/lib/badge-types'
 
 type Mode = 'EASY' | 'ADVANCED' | 'HARD' | 'EXPERT'
@@ -45,14 +45,16 @@ const modeLabels: Record<Mode, string> = {
 const modeOrder: Mode[] = ['EASY', 'ADVANCED', 'HARD', 'EXPERT']
 const rangeTitles: Record<Exclude<GameRankingRangeKey, 'date'>, string> = {
   'this-week': '本周听听挑战排名',
+  'last-week': '上周听听挑战排名',
   'this-month': '本月听听挑战排名',
   'last-month': '上月听听挑战排名',
 }
 const rangeNotes: Record<GameRankingRangeKey, string> = {
   'this-week': '按北京时间周一 00:00 开启新榜单',
+  'last-week': '按北京时间统计完整上一个自然周',
   'this-month': '按北京时间每月 1 日开启新榜单',
   'last-month': '完整自然月榜单，按北京时间计算',
-  date: '按北京时间自然日统计，结束边界不包含次日 00:00',
+  date: '按北京时间日期范围统计，包含结束日期全天',
 }
 // 排行榜展示字段：最高分 / 答对数 / 最高连击（来自最高分对应的那一局）
 const statLabels = ['最高分', '答对数', '最高连击']
@@ -64,17 +66,18 @@ function isMode(value: string | null): value is Mode {
 function readUrlState(todayDate: string) {
   const params = new URLSearchParams(window.location.search)
   const range = parseGameRankingRangeKey(params.get('range')) || (params.get('period') === 'MONTH' ? 'this-month' : 'this-week')
-  const date = range === 'date' ? params.get('date') || todayDate : null
+  const { startDate, endDate } = range === 'date'
+    ? readGameRankingRangeDates(params, todayDate)
+    : { startDate: null, endDate: null }
   const mode = isMode(params.get('mode')) ? params.get('mode') as Mode : 'EASY'
-  return { range, date, mode }
+  return { range, startDate, endDate, mode }
 }
 
-function pushUrlState(range: GameRankingRangeKey, date: string | null, mode: Mode) {
+function pushUrlState(range: GameRankingRangeKey, startDate: string | null, endDate: string | null, mode: Mode) {
   const params = new URLSearchParams(window.location.search)
   params.set('range', range)
   params.set('mode', mode)
-  if (range === 'date' && date) params.set('date', date)
-  else params.delete('date')
+  writeGameRankingRangeDates(params, range, startDate, endDate)
   params.delete('period')
   const query = params.toString()
   window.history.pushState({}, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
@@ -82,33 +85,37 @@ function pushUrlState(range: GameRankingRangeKey, date: string | null, mode: Mod
 
 export function GuessSongLeaderboard({
   initialRange,
-  initialDate,
+  initialStartDate,
+  initialEndDate,
   todayDate,
   initialMode,
   initialData,
 }: Readonly<{
   initialRange: GameRankingRangeKey
-  initialDate: string | null
+  initialStartDate: string | null
+  initialEndDate: string | null
   todayDate: string
   initialMode: string
   initialData: Data | null
 }>) {
   const [range, setRange] = useState<GameRankingRangeKey>(initialRange)
-  const [date, setDate] = useState<string | null>(initialRange === 'date' ? initialDate || todayDate : null)
+  const [startDate, setStartDate] = useState<string | null>(initialRange === 'date' ? initialStartDate || todayDate : null)
+  const [endDate, setEndDate] = useState<string | null>(initialRange === 'date' ? initialEndDate || initialStartDate || todayDate : null)
   const [mode, setMode] = useState<Mode>(isMode(initialMode) ? initialMode : 'EASY')
   // 始终保留「上一份数据」：切换筛选时先显示旧榜单，避免空列表 / 骨架闪烁
   const [data, setData] = useState<Data | null>(initialData)
   const [loading, setLoading] = useState<boolean>(!initialData)
   const [error, setError] = useState('')
-  // 已加载数据缓存：range:date:mode -> Data；日期也必须进入 key，避免历史日串榜
+  // Cache keys include both date boundaries to prevent different ranges sharing a result.
   const cache = useRef<Map<string, Data>>(new Map())
-  if (initialData) cache.current.set(`guess-song:${initialRange}:${initialDate || ''}:${initialMode}`, initialData)
+  if (initialData) cache.current.set(`guess-song:${initialRange}:${initialStartDate || ''}:${initialEndDate || ''}:${initialMode}`, initialData)
 
   useEffect(() => {
     const handlePopState = () => {
       const next = readUrlState(todayDate)
       setRange(next.range)
-      setDate(next.range === 'date' ? next.date : null)
+      setStartDate(next.startDate)
+      setEndDate(next.endDate)
       setMode(next.mode)
     }
     window.addEventListener('popstate', handlePopState)
@@ -116,8 +123,9 @@ export function GuessSongLeaderboard({
   }, [todayDate])
 
   useEffect(() => {
-    const selectedDate = range === 'date' ? date || todayDate : null
-    const key = `guess-song:${range}:${selectedDate || ''}:${mode}`
+    const selectedStart = range === 'date' ? startDate || '' : ''
+    const selectedEnd = range === 'date' ? endDate || '' : ''
+    const key = `guess-song:${range}:${selectedStart}:${selectedEnd}:${mode}`
     const cached = cache.current.get(key)
     if (cached) {
       setData(cached)
@@ -129,7 +137,11 @@ export function GuessSongLeaderboard({
     setLoading(true)
     setError('')
     const params = new URLSearchParams({ range, mode })
-    if (range === 'date') params.set('date', selectedDate as string)
+    if (range === 'date') {
+      if (selectedStart) params.set('startDate', selectedStart)
+      if (selectedEnd) params.set('endDate', selectedEnd)
+      if (selectedStart && selectedStart === selectedEnd) params.set('date', selectedStart)
+    }
     fetch(`/api/entertainment/guess-song/leaderboard?${params.toString()}`, { cache: 'no-store' })
       .then(async (response) => {
         const payload = await response.json() as { ok?: boolean; data?: Data; error?: string }
@@ -151,25 +163,29 @@ export function GuessSongLeaderboard({
     return () => {
       cancelled = true
     }
-  }, [date, mode, range, todayDate])
+  }, [endDate, mode, range, startDate, todayDate])
 
-  function chooseRange(nextRange: GameRankingRangeKey, nextDate: string | null) {
-    const selectedDate = nextRange === 'date' ? nextDate || todayDate : null
+  function chooseRange(nextRange: GameRankingRangeKey, nextStartDate: string | null, nextEndDate: string | null) {
+    const selectedStart = nextRange === 'date' ? nextStartDate : null
+    const selectedEnd = nextRange === 'date' ? nextEndDate : null
     setRange(nextRange)
-    setDate(selectedDate)
-    pushUrlState(nextRange, selectedDate, mode)
+    setStartDate(selectedStart)
+    setEndDate(selectedEnd)
+    pushUrlState(nextRange, selectedStart, selectedEnd, mode)
   }
 
   function chooseMode(nextMode: Mode) {
     setMode(nextMode)
-    pushUrlState(range, range === 'date' ? date || todayDate : null, nextMode)
+    pushUrlState(range, range === 'date' ? startDate : null, range === 'date' ? endDate : null, nextMode)
   }
 
   const firstLoad = !data && loading
   const ownRank = data && data.currentUser && data.currentUser.rank > 0 ? data.currentUser : null
   const ownRowBelow = !!ownRank && ownRank.rank > 10
   const ownNone = !!data && !ownRank && data.rows.length > 0
-  const headingTitle = range === 'date' ? `${date || todayDate}听听挑战排名` : rangeTitles[range]
+  const headingTitle = range === 'date'
+    ? `${startDate?.replaceAll('-', '/') || ''}${startDate === endDate ? '' : ` — ${endDate?.replaceAll('-', '/') || ''}`}听听挑战排名`
+    : rangeTitles[range]
 
   const renderPlayer = (row: Row, key: string, className?: string) => (
     <article key={key} className={className}>
@@ -217,7 +233,7 @@ export function GuessSongLeaderboard({
         <span>{rangeNotes[range]}</span>
       </header>
       <div className="guess-song-leaderboard-filters">
-        <GameRankingRangeTabs value={range} date={date} todayDate={todayDate} onChange={chooseRange} />
+        <GameRankingRangeTabs value={range} startDate={startDate} endDate={endDate} todayDate={todayDate} onChange={chooseRange} />
         <div className="guess-song-mode-tabs" role="tablist" aria-label="听听难度">
           {modeOrder.map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => chooseMode(item)}>{modeLabels[item]}</button>)}
         </div>
@@ -239,7 +255,7 @@ export function GuessSongLeaderboard({
         ) : firstLoad ? (
           renderSkeleton()
         ) : (
-          <p className="guess-song-empty">{range === 'date' ? `${date || todayDate}暂无榜单数据。` : '当前榜单暂无成绩，完成一局后即可参与排名。'}</p>
+          <p className="guess-song-empty">{range === 'date' ? `${startDate || ''}${startDate === endDate ? '' : ` — ${endDate || ''}`}暂无榜单数据。` : '当前榜单暂无成绩，完成一局后即可参与排名。'}</p>
         )}
       </div>
       <nav className="guess-song-back-links"><Link href="/games/guess-song">返回游戏详情</Link><Link href="/games">返回娱乐天空</Link></nav>

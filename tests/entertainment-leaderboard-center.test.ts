@@ -4,6 +4,7 @@ import test from 'node:test'
 import { getWantListenPeriod, parseWantListenLeaderboardPeriod } from '../lib/want-listen-period'
 import {
   ENTERTAINMENT_LEADERBOARDS,
+  getRankableEntertainmentLeaderboardTargets,
   getEntertainmentLeaderboardDefinition,
 } from '../lib/entertainment-leaderboard-registry'
 
@@ -93,6 +94,27 @@ test('正式游戏和无排行榜游戏都注册到统一中心', () => {
   const unavailable = ENTERTAINMENT_LEADERBOARDS.filter((item) => item.source === null)
   assert.deepEqual(unavailable.map((item) => item.name), ['听听 1v1', '卧底巨星'])
   assert.ok(unavailable.every((item) => item.periods.length === 0))
+  assert.ok(unavailable.every((item) => item.ranges.map((range) => range.key).join(',') === 'this-week,last-week,this-month,last-month,date'))
+  assert.ok(getRankableEntertainmentLeaderboardTargets().every((item) => item.gameKey !== 'LISTEN_DUEL' && item.gameKey !== 'UNDERCOVER_STAR'))
+})
+
+test('日期范围面板需完成两端后才提交，取消不更改已应用筛选', () => {
+  const rangeTabs = read('components/games/GameRankingRangeTabs.tsx')
+  assert.match(rangeTabs, /setDraftEndDate\(endDate \|\| \(startDate \? startDate : ''\)\)/)
+  assert.match(rangeTabs, /disabled=\{!validDraft\}/)
+  assert.match(rangeTabs, /onChange\('date', draftStartDate, draftEndDate\)/)
+  assert.match(rangeTabs, /取消/)
+  assert.match(rangeTabs, /type="date"/)
+  assert.match(rangeTabs, /max=\{todayDate\}/)
+  assert.match(rangeTabs, /min=\{draftStartDate \|\| undefined\}/)
+})
+
+test('统一中心切换游戏保留当前范围且每个 API 请求携带日期端点', () => {
+  const center = read('components/games/EntertainmentLeaderboardCenter.tsx')
+  assert.match(center, /nextGame\.ranges\.some\(\(item\) => item\.key === range\)/)
+  assert.match(center, /params\.set\('startDate', selectedStart\)/)
+  assert.match(center, /params\.set\('endDate', selectedEnd\)/)
+  assert.match(center, /params\.set\('game', gameKey\)/)
 })
 
 test('首页和游戏内部榜单都复用现有 leaderboard service，首页只请求当前选择项', () => {

@@ -368,6 +368,8 @@ export async function getWantListenLeaderboard(input: {
   period?: unknown
   range?: unknown
   date?: unknown
+  startDate?: unknown
+  endDate?: unknown
   userId?: string
   limit?: number
   now?: Date
@@ -379,7 +381,7 @@ export async function getWantListenLeaderboard(input: {
   let resolvedRange: GameRankingRange | null = null
 
   if (hasUnifiedRange) {
-    resolvedRange = resolveGameRankingRange({ range: input.range, date: input.date, now })
+    resolvedRange = resolveGameRankingRange({ range: input.range, date: input.date, startDate: input.startDate, endDate: input.endDate, now })
     periodType = resolvedRange.key === 'date' ? 'DAY' : resolvedRange.key === 'this-month' || resolvedRange.key === 'last-month' ? 'MONTH' : 'WEEK'
     period = {
       periodKey: resolvedRange.periodKey,
