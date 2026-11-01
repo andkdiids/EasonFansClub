@@ -249,7 +249,7 @@ async function main() {
     const currentRelease = fs.realpathSync(path.join(APP_DIR, 'current'))
     const releasesRoot = fs.realpathSync(path.join(APP_DIR, 'releases'))
     if (!isPathWithin(releasesRoot, currentRelease)) throw new Error('CURRENT_RELEASE_PATH_REJECTED')
-    result.currentRelease = currentRelease
+    result.currentRelease = safeWorkerPath(currentRelease)
     try {
       const marker = fs.readFileSync(path.join(currentRelease, '.deployed-sha'), 'utf8').trim()
       if (validSha(marker)) result.currentSha = marker
