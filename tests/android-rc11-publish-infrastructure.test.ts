@@ -47,6 +47,15 @@ test('RC11 and code30 SHA, size, package, version, and signing baselines are fix
   })
 })
 
+test('RC11 signer verifier-only changes do not trigger the default production deployment', () => {
+  const deployWorkflowText = read('.github/workflows/deploy.yml')
+  const pushTrigger = deployWorkflowText.match(/on:\s*\n\s*push:\s*\n([\s\S]*?)\n\s*workflow_dispatch:/)?.[1]
+  assert.ok(pushTrigger)
+  assert.match(pushTrigger, /paths-ignore:/)
+  assert.match(pushTrigger, /'scripts\/verify-android-apk-signature\.mjs'/)
+  assert.match(pushTrigger, /'scripts\/verify-android-apk-signature\.d\.mts'/)
+})
+
 const expectedSignerSha256 = '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
 
 function apksignerOutput({ signerCount = 1, fingerprints = [expectedSignerSha256] }: { signerCount?: number; fingerprints?: string[] } = {}) {
