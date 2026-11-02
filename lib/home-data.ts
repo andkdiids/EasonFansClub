@@ -20,6 +20,7 @@ import { getEquippedBadgesForUsers } from '@/lib/badge-service'
 import { getEasMusicAlbumLikeStates } from '@/lib/easmusic-likes'
 import { htmlToPlainText, summarizePlainText } from '@/lib/share-metadata'
 import { ANYWHERE_DOOR_TARGET } from '@/lib/anywhere-door/config'
+import { safePublicMediaUrl, type SocialPostMediaView } from '@/lib/social-posts'
 import { salonPublicBaseWhere, type SalonCategoryValue } from '@/lib/salon'
 import { getHomeActivityStatusLabel, sortHomeActivities } from '@/lib/home-activity'
 import type { Prisma } from '@prisma/client'
@@ -294,6 +295,8 @@ export type HomeAnywhereDoorPost = Readonly<{
   title: string
   publishedAt: string
   href: string
+  media: SocialPostMediaView[]
+  mediaCount: number
 }>
 
 export function createHomeAnywhereDoorTitle(caption: string | null | undefined) {
@@ -303,22 +306,52 @@ export function createHomeAnywhereDoorTitle(caption: string | null | undefined) 
 }
 
 export async function getHomeAnywhereDoorLatest(): Promise<HomeAnywhereDoorPost | null> {
-  return cachedHomeData('home.anywhereDoor.latest', () => safeDb(
+  return cachedHomeData('home.anywhereDoor.latest:v2', () => safeDb(
     'SocialPost.findFirst home.anywhereDoor.latest',
     prisma.socialPost.findFirst({
       where: { status: 'READY', authorUsername: ANYWHERE_DOOR_TARGET },
       orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, authorUsername: true, caption: true, publishedAt: true },
+      select: {
+        id: true,
+        authorUsername: true,
+        caption: true,
+        publishedAt: true,
+        media: {
+          orderBy: { sortOrder: 'asc' },
+          take: 4,
+          select: { id: true, type: true, storageUrl: true, thumbnailUrl: true, width: true, height: true, durationMs: true, sortOrder: true },
+        },
+        _count: { select: { media: true } },
+      },
     }),
     null,
     5000,
-  ).then((post) => post ? {
-    id: post.id,
-    authorUsername: post.authorUsername,
-    title: createHomeAnywhereDoorTitle(post.caption),
-    publishedAt: post.publishedAt.toISOString(),
-    href: `/anywhere-door/${post.id}`,
-  } : null))
+  ).then((post) => {
+    if (!post) return null
+    const media = post.media.flatMap((item) => {
+      const url = safePublicMediaUrl(item.storageUrl)
+      if (!url) return []
+      return [{
+        id: item.id,
+        type: item.type,
+        url,
+        thumbnailUrl: safePublicMediaUrl(item.thumbnailUrl),
+        width: item.width,
+        height: item.height,
+        durationMs: item.durationMs,
+        sortOrder: item.sortOrder,
+      }]
+    })
+    return {
+      id: post.id,
+      authorUsername: post.authorUsername,
+      title: createHomeAnywhereDoorTitle(post.caption),
+      publishedAt: post.publishedAt.toISOString(),
+      href: `/anywhere-door/${post.id}`,
+      media,
+      mediaCount: post._count.media,
+    }
+  }))
 }
 
 export type HomeSalonPost = Readonly<{
