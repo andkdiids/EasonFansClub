@@ -209,6 +209,32 @@ test('Gift redemption order reads and exchange pass Bearer to route guards witho
   }
 })
 
+test('Material list and Friends activity GET pass Bearer to route guards while keeping Cookie auth and anonymous protection', async () => {
+  const routes: Array<[string, string]> = [
+    ['/api/material-redemptions', 'GET'],
+    ['/api/friends/activity', 'GET'],
+  ]
+  const validCookie = await createToken()
+  for (const [path, method] of routes) {
+    const bearer = await middleware(makeMutationRequest(path, method, { bearer: 'route-guard-validates-this-token' }))
+    assert.equal(bearer.status, 200, `${method} ${path} allows the request-aware route guard to validate Bearer`)
+
+    const cookie = await middleware(makeMutationRequest(path, method, { cookie: validCookie }))
+    assert.equal(cookie.status, 200, `${method} ${path} preserves Web Cookie authentication`)
+
+    const anonymous = await middleware(makeMutationRequest(path, method))
+    assert.equal(anonymous.status, 401, `${method} ${path} remains protected from anonymous callers`)
+  }
+
+  for (const path of ['/api/material-redemptions', '/api/friends/activity']) {
+    const unsupportedMethod = await middleware(makeMutationRequest(path, 'POST', { bearer: 'route-guard-validates-this-token' }))
+    assert.equal(unsupportedMethod.status, 401, `POST ${path} is not opened by the GET-only Bearer allowlist`)
+  }
+
+  const unrelated = await middleware(makeMutationRequest('/api/rc11-unlisted-private-probe', 'GET', { bearer: 'route-guard-validates-this-token' }))
+  assert.equal(unrelated.status, 401, 'the two explicit GET routes do not widen the general Bearer allowlist')
+})
+
 test('话题活动表单 schema 可公开读取；表单提交、历史、附件与管理员操作保持 Bearer/Cookie 双认证', async () => {
   const publicSchema = '/api/activities/topic-test/form'
   assert.equal((await middleware(new NextRequest(`https://ecfc.fans${publicSchema}`))).status, 200)

@@ -18,9 +18,11 @@ on:
       - 'docs/app-version-api.md'
       - 'scripts/update-android-version-env.mjs'
       - 'scripts/update-android-version-env.d.mts'
-      # RC10 updates runtime bearer-auth middleware; merging these reviewed
-      # paths must use an explicit skip-db dispatch instead of the default
-      # full database deployment triggered by a push to main.
+      # RC11 adds request-authenticated routes and its release runbook; merging
+      # these reviewed paths must use an explicit skip-db dispatch instead of
+      # the default full database deployment triggered by a push to main.
+      - 'app/api/material-redemptions/route.ts'
+      - 'docs/android-beta21-rc11-release-runbook.md'
       - 'middleware.ts'
       - 'tests/deploy-skip-db-mode.test.ts'
       - 'tests/middleware-auth.test.ts'
@@ -88,10 +90,15 @@ jobs:
           fi
 
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
+
+      - name: Require protected current main before production deployment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
 
       - name: Configure deployment SSH
         env:

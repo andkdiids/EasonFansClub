@@ -66,11 +66,16 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout the workflow and release policy from main
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: true
+
+      - name: Require protected current main before release validation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
 
       - name: Require the Production environment to allow only the main branch
         shell: bash
@@ -195,14 +200,14 @@ jobs:
       url: https://ecfc.fans
     steps:
       - name: Checkout the approved release-control workflow and policy
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: true
 
       - name: Checkout the exact approved RC commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.validate.outputs.approved_sha }}
           path: candidate

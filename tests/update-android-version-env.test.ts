@@ -5,7 +5,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { configureAndroidVersionEnv, type AndroidReleaseMetadata } from '../scripts/update-android-version-env.mjs'
+import { configureAndroidVersionEnv, restoreAndroidVersionEnv, type AndroidReleaseMetadata } from '../scripts/update-android-version-env.mjs'
 import { parseAppVersionConfig } from '../lib/app-version'
 
 const expectedProductionSha = '38a0ea45dd2d5c208326cf7fe77ff63a1895f702'
@@ -40,6 +40,12 @@ function fixture(t: test.TestContext, envContents = '# retained settings\nDATABA
   if (process.platform !== 'win32') chmodSync(path.join(sharedDir, '.env'), 0o640)
   symlinkSync(releaseDir, path.join(appDir, 'current'), process.platform === 'win32' ? 'junction' : 'dir')
   return { appDir, envPath: path.join(sharedDir, '.env'), sharedDir }
+}
+
+function encodeEnvMetadata(metadata: Record<string, string | number | boolean>) {
+  return Object.entries(metadata)
+    .map(([key, value]) => `${key}='${String(value).replaceAll("'", '\\u0027')}'`)
+    .join('\n')
 }
 
 test('updates only allowlisted Android metadata and creates a protected verified backup', (t) => {
@@ -390,6 +396,168 @@ test('Beta.21 RC10 metadata accepts versionCode 30 only with an RC10 object and 
   }), /INVALID_RELEASE_NOTES/)
 })
 
+test('Beta.21 RC11 metadata is pinned to the verified code31 APK digest and size', (t) => {
+  const { appDir, envPath } = fixture(t)
+  const rc11Metadata: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 31,
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-'),
+    ANDROID_APK_SHA256: '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
+    ANDROID_APK_SIZE: 183802143,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '修复「还有什么可以送给你」页面的 Bearer 登录认证',
+      '修复反馈文字提交与图片上传的 Native Bearer 认证',
+      '修复 E院广场好友 Feed 的登录状态识别和失败重试',
+      '单接口认证失败不再未经确认清除全局登录状态',
+      '多账号请求继续使用当前 active account 的有效 token',
+      'Beta.21 RC11 内测版本',
+    ]),
+  }
+  configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc11Metadata })
+  assert.equal(dotenv.parse(readFileSync(envPath, 'utf8')).ANDROID_VERSION_CODE, '31')
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc11Metadata, ANDROID_APK_SHA256: 'A1'.repeat(32) },
+  }), /INVALID_RC11_APK_SHA256/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc11Metadata, ANDROID_APK_SIZE: 183802144 },
+  }), /INVALID_RC11_APK_SIZE/)
+})
+
+test('RC11 publish compares the captured code30 Version API baseline before changing the environment', (t) => {
+  const code30Notes = [
+    '修复反馈、多账号和账号安全的登录状态处理',
+    '恢复授权用户公告发布权限并保持普通用户入口隐藏',
+    '修复演唱会详情闪退并完善活跃症任务跳转',
+    '活动报名后自动发放绑定物料并复用现有兑换记录',
+    '完善设置退出登录及用户提示文案',
+    'Beta.21 RC10 内测版本',
+  ]
+  const code30Metadata = {
+    ANDROID_VERSION_NAME: '1.0.0-beta.21',
+    ANDROID_VERSION_CODE: 30,
+    ANDROID_MINIMUM_VERSION_CODE: 19,
+    ANDROID_FORCE_UPDATE: false,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc10-20261101-152136.apk',
+    ANDROID_APK_SHA256: 'D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF49324B440FC967',
+    ANDROID_APK_SIZE: 184246197,
+    ANDROID_RELEASE_NOTES: JSON.stringify(code30Notes),
+    ANDROID_PUBLISHED_AT: '2026-11-01T15:21:36.000Z',
+  }
+  const env = `# retained settings\nDATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code30Metadata)}\n`
+  const { appDir, envPath, sharedDir } = fixture(t, env)
+  const rc11Metadata: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 31,
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-'),
+    ANDROID_APK_SHA256: '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
+    ANDROID_APK_SIZE: 183802143,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '修复「还有什么可以送给你」页面的 Bearer 登录认证',
+      '修复反馈文字提交与图片上传的 Native Bearer 认证',
+      '修复 E院广场好友 Feed 的登录状态识别和失败重试',
+      '单接口认证失败不再未经确认清除全局登录状态',
+      '多账号请求继续使用当前 active account 的有效 token',
+      'Beta.21 RC11 内测版本',
+    ]),
+  }
+  const expectedCurrentMetadata = {
+    ANDROID_VERSION_NAME: code30Metadata.ANDROID_VERSION_NAME,
+    ANDROID_VERSION_CODE: code30Metadata.ANDROID_VERSION_CODE,
+    ANDROID_MINIMUM_VERSION_CODE: code30Metadata.ANDROID_MINIMUM_VERSION_CODE,
+    ANDROID_FORCE_UPDATE: code30Metadata.ANDROID_FORCE_UPDATE,
+    ANDROID_APK_SHA256: code30Metadata.ANDROID_APK_SHA256,
+    ANDROID_APK_SIZE: code30Metadata.ANDROID_APK_SIZE,
+    ANDROID_RELEASE_NOTES: code30Notes,
+    ANDROID_PUBLISHED_AT: code30Metadata.ANDROID_PUBLISHED_AT,
+  }
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: rc11Metadata,
+    expectedCurrentMetadata: { ...expectedCurrentMetadata, ANDROID_APK_SHA256: '0'.repeat(64) },
+  }), /ANDROID_BASELINE_MISMATCH:ANDROID_APK_SHA256/)
+  assert.equal(readFileSync(envPath, 'utf8'), env)
+  assert.equal(existsSync(path.join(sharedDir, '.env-backups')), false)
+
+  const result = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc11Metadata, expectedCurrentMetadata })
+  assert.equal(dotenv.parse(readFileSync(envPath, 'utf8')).ANDROID_VERSION_CODE, '31')
+  assert.equal(readFileSync(result.backupPath, 'utf8'), env)
+})
+
+test('RC11 rollback restores only Android metadata from the protected code30 baseline', (t) => {
+  const code30Notes = [
+    '修复反馈、多账号和账号安全的登录状态处理',
+    '恢复授权用户公告发布权限并保持普通用户入口隐藏',
+    '修复演唱会详情闪退并完善活跃症任务跳转',
+    '活动报名后自动发放绑定物料并复用现有兑换记录',
+    '完善设置退出登录及用户提示文案',
+    'Beta.21 RC10 内测版本',
+  ]
+  const code30Metadata = {
+    ANDROID_VERSION_NAME: '1.0.0-beta.21',
+    ANDROID_VERSION_CODE: 30,
+    ANDROID_MINIMUM_VERSION_CODE: 19,
+    ANDROID_FORCE_UPDATE: false,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc10-20261101-152136.apk',
+    ANDROID_APK_SHA256: 'D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF49324B440FC967',
+    ANDROID_APK_SIZE: 184246197,
+    ANDROID_RELEASE_NOTES: JSON.stringify(code30Notes),
+    ANDROID_PUBLISHED_AT: '2026-11-01T15:21:36.000Z',
+  }
+  const env = `# retained settings\nDATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code30Metadata)}\n`
+  const { appDir, envPath } = fixture(t, env)
+  const rc11Metadata: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 31,
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-'),
+    ANDROID_APK_SHA256: '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
+    ANDROID_APK_SIZE: 183802143,
+    ANDROID_RELEASE_NOTES: JSON.stringify([
+      '修复「还有什么可以送给你」页面的 Bearer 登录认证',
+      '修复反馈文字提交与图片上传的 Native Bearer 认证',
+      '修复 E院广场好友 Feed 的登录状态识别和失败重试',
+      '单接口认证失败不再未经确认清除全局登录状态',
+      '多账号请求继续使用当前 active account 的有效 token',
+      'Beta.21 RC11 内测版本',
+    ]),
+  }
+  const published = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc11Metadata })
+  const backupName = path.basename(published.backupPath)
+  const backupObjectKey = 'android/releases/ECFC-1.0.0-beta.21-code30-backup-20261102-090000.apk'
+  const validRc11Env = readFileSync(envPath, 'utf8')
+  writeFileSync(envPath, validRc11Env.replace(
+    '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
+    'A'.repeat(64),
+  ), { mode: 0o640 })
+  assert.throws(() => restoreAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    backupName,
+    code30BackupObjectKey: backupObjectKey,
+    now: new Date('2026-11-02T09:00:00Z'),
+  }), /ROLLBACK_CURRENT_APK_SHA256_MISMATCH/)
+  writeFileSync(envPath, validRc11Env, { mode: 0o640 })
+  const restored = restoreAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    backupName,
+    code30BackupObjectKey: backupObjectKey,
+    now: new Date('2026-11-02T09:00:00Z'),
+  })
+  const parsed = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(parsed.DATABASE_URL, 'do-not-print-this')
+  assert.equal(parsed.ANDROID_VERSION_CODE, '30')
+  assert.equal(parsed.ANDROID_APK_COS_KEY, backupObjectKey)
+  assert.equal(parsed.ANDROID_APK_SHA256, code30Metadata.ANDROID_APK_SHA256)
+  assert.equal(parsed.ANDROID_APK_SIZE, String(code30Metadata.ANDROID_APK_SIZE))
+  assert.deepEqual(JSON.parse(parsed.ANDROID_RELEASE_NOTES), code30Notes)
+  assert.equal(restored.changedKeys.length, 9)
+})
+
 test('the production CLI enforces the fixed production target and never echoes env values', () => {
   const envPath = path.resolve('scripts/update-android-version-env.mjs')
   const result = spawnSync(process.execPath, [envPath], {
@@ -429,12 +597,14 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /rc8\)/)
   assert.match(workflow, /rc9\)/)
   assert.match(workflow, /rc10\)/)
+  assert.match(workflow, /rc11\)/)
   assert.match(workflow, /version_code=25/)
   assert.match(workflow, /version_code=26/)
   assert.match(workflow, /version_code=27/)
   assert.match(workflow, /version_code=28/)
   assert.match(workflow, /version_code=29/)
   assert.match(workflow, /version_code=30/)
+  assert.match(workflow, /version_code=31/)
   assert.match(workflow, /--argjson code "\$\{version_code\}"/)
   assert.match(workflow, /--argjson minimum 19/)
   assert.match(workflow, /--argjson force false/)
@@ -446,7 +616,13 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /Beta\.21 RC8 内测版本/)
   assert.match(workflow, /Beta\.21 RC9 内测版本/)
   assert.match(workflow, /Beta\.21 RC10 内测版本/)
-  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\)\$/)
+  assert.match(workflow, /Beta\.21 RC11 内测版本/)
+  assert.match(workflow, /9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C/)
+  assert.match(workflow, /12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B/)
+  assert.match(workflow, /CODE30_BACKUP_VERIFIED=YES/)
+  assert.match(workflow, /VERSION_API_BASELINE_CHANGED/)
+  assert.match(workflow, /ANDROID_EXPECTED_CURRENT_B64/)
+  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\)\$/)
   assert.ok(workflow.indexOf('Update only Android version variables') < workflow.indexOf('Reload only the web process'))
   assert.match(workflow, /pm2 reload easonfansclub --update-env/)
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)
@@ -455,6 +631,18 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /String\(versionBody\.apkSha256\)\.toUpperCase\(\) === expectedHash\.toUpperCase\(\)/)
   assert.doesNotMatch(workflow, /pm2 reload all|pm2 restart all/i)
   assert.doesNotMatch(workflow, /prisma migrate|DATABASE_URL|notification:integrity|npm run seed/i)
+  const rollbackWorkflow = readFileSync(path.resolve('.github/workflows/rollback-android-version.yml'), 'utf8')
+  assert.match(workflow, /uses: actions\/checkout@11d5960a326750d5838078e36cf38b85af677262/)
+  assert.match(workflow, /uses: actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/)
+  assert.match(rollbackWorkflow, /workflow_dispatch:/)
+  assert.match(rollbackWorkflow, /uses: actions\/checkout@11d5960a326750d5838078e36cf38b85af677262/)
+  assert.match(rollbackWorkflow, /uses: actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/)
+  assert.match(rollbackWorkflow, /concurrency:/)
+  assert.match(rollbackWorkflow, /cancel-in-progress: false/)
+  assert.match(rollbackWorkflow, /ANDROID_RELEASE_OPERATION=rollback/)
+  assert.match(rollbackWorkflow, /code30-backup/)
+  assert.match(rollbackWorkflow, /D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF49324B440FC967/)
+  assert.match(rollbackWorkflow, /VERSION_API_CODE30_RESTORED=VERIFIED/)
   for (const file of [
     'lib/app-version.ts',
     'tests/app-version.test.ts',

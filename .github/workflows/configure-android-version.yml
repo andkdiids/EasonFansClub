@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       release_candidate:
-        description: Beta.21 RC3 through RC10 to publish for internal updates
+        description: Beta.21 RC3 through RC11 to publish for internal updates
         required: true
         type: choice
         options:
@@ -20,8 +20,9 @@ on:
           - rc8
           - rc9
           - rc10
+          - rc11
       apk_object_key:
-        description: Immutable versioned Beta.21 RC object key already uploaded to Tencent COS
+        description: Immutable versioned Beta.21 RC object key created by the guarded COS staging workflow
         required: true
         type: string
       apk_sha256:
@@ -31,6 +32,10 @@ on:
       apk_size:
         description: Exact APK size in bytes
         required: true
+        type: string
+      code30_backup_object_key:
+        description: Independent immutable code30 COS object created by the guarded RC11 staging workflow
+        required: false
         type: string
 
 permissions:
@@ -49,10 +54,15 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout reviewed main
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
+
+      - name: Require protected current main before production metadata changes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
 
       - name: Verify final APK stored in COS
         env:
@@ -62,12 +72,20 @@ jobs:
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           set -euo pipefail
-          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 || "${RELEASE_CANDIDATE}" == rc9 || "${RELEASE_CANDIDATE}" == rc10 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
-          key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
+          [[ "${RELEASE_CANDIDATE}" == rc3 || "${RELEASE_CANDIDATE}" == rc4 || "${RELEASE_CANDIDATE}" == rc5 || "${RELEASE_CANDIDATE}" == rc6 || "${RELEASE_CANDIDATE}" == rc7 || "${RELEASE_CANDIDATE}" == rc8 || "${RELEASE_CANDIDATE}" == rc9 || "${RELEASE_CANDIDATE}" == rc10 || "${RELEASE_CANDIDATE}" == rc11 ]] || { echo 'RELEASE_CANDIDATE_INVALID'; exit 1; }
+          if [[ "${RELEASE_CANDIDATE}" == rc11 ]]; then
+            key_regex='^android/releases/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-[0-9]{8}-[0-9]{6}-run[0-9]+-attempt[1-9][0-9]*\.apk$'
+          else
+            key_regex="^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${RELEASE_CANDIDATE}-[0-9]{8}-[0-9]{6}\\.apk$"
+          fi
           [[ "${APK_OBJECT_KEY}" =~ ${key_regex} ]] || { echo 'APK_OBJECT_KEY_INVALID'; exit 1; }
           [[ "${EXPECTED_SIZE}" =~ ^[0-9]{8,9}$ ]] || { echo 'APK_SIZE_INVALID'; exit 1; }
           (( 10#${EXPECTED_SIZE} >= 10000000 && 10#${EXPECTED_SIZE} <= 500000000 )) || { echo 'APK_SIZE_OUT_OF_RANGE'; exit 1; }
           [[ "${EXPECTED_SHA256}" =~ ^[A-F0-9]{64}$ ]] || { echo 'APK_SHA256_INVALID'; exit 1; }
+          if [[ "${RELEASE_CANDIDATE}" == rc11 ]]; then
+            [[ "${EXPECTED_SIZE}" == 183802143 ]] || { echo 'RC11_APK_SIZE_MISMATCH'; exit 1; }
+            [[ "${EXPECTED_SHA256}" == 9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C ]] || { echo 'RC11_APK_SHA256_MISMATCH'; exit 1; }
+          fi
           apk_url="https://media.ecfc.fans/media/${APK_OBJECT_KEY}"
           apk_path="${RUNNER_TEMP}/ecfc-beta21-${RELEASE_CANDIDATE}.apk"
           headers_path="${RUNNER_TEMP}/ecfc-beta21-${RELEASE_CANDIDATE}-cos-headers.txt"
@@ -83,6 +101,91 @@ jobs:
           echo "COS_APK_SIZE=${actual_size}"
           echo "COS_APK_SHA256=${actual_sha256}"
           echo 'COS_RANGE_206=YES'
+
+      - name: Validate RC11 signer and code30 rollback baseline
+        if: inputs.release_candidate == 'rc11'
+        id: rc11-baseline
+        env:
+          APK_OBJECT_KEY: ${{ inputs.apk_object_key }}
+          EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
+          EXPECTED_SIZE: ${{ inputs.apk_size }}
+          CODE30_BACKUP_OBJECT_KEY: ${{ inputs.code30_backup_object_key }}
+        run: |
+          set -euo pipefail
+          expected_signer='12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          expected_code30_sha='D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF49324B440FC967'
+          expected_code30_size='184246197'
+          [[ "${CODE30_BACKUP_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.21-code30-backup-[0-9]{8}-[0-9]{6}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'CODE30_BACKUP_OBJECT_KEY_INVALID'; exit 1; }
+          [[ "${CODE30_BACKUP_OBJECT_KEY}" != "${APK_OBJECT_KEY}" ]] || { echo 'CODE30_BACKUP_KEY_MUST_BE_INDEPENDENT'; exit 1; }
+
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          [[ -n "${sdk_root}" && -d "${sdk_root}/build-tools" ]] || { echo 'ANDROID_BUILD_TOOLS_NOT_AVAILABLE'; exit 1; }
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" && -x "${aapt}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+
+          verify_apk() {
+            local apk_path="$1" expected_code="$2" expected_sha="$3" expected_size="$4" label="$5"
+            local actual_sha actual_size signer badging
+            actual_sha="$(sha256sum "${apk_path}" | awk '{print toupper($1)}')"
+            actual_size="$(stat -c '%s' "${apk_path}")"
+            [[ "${actual_sha}" == "${expected_sha}" ]] || { echo "${label}_SHA256_MISMATCH"; exit 1; }
+            [[ "${actual_size}" == "${expected_size}" ]] || { echo "${label}_SIZE_MISMATCH"; exit 1; }
+            "${apksigner}" verify "${apk_path}" >/dev/null || { echo "${label}_SIGNATURE_INVALID"; exit 1; }
+            signer="$("${apksigner}" verify --print-certs "${apk_path}" | awk -F': ' '/certificate SHA-256 digest/ {gsub(/:/, "", $2); print toupper($2); exit}')"
+            [[ "${signer}" == "${expected_signer}" ]] || { echo "${label}_SIGNER_MISMATCH"; exit 1; }
+            badging="$("${aapt}" dump badging "${apk_path}" | head -n 3)"
+            [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='${expected_code}' versionName='1.0.0-beta.21'"* ]] || { echo "${label}_PACKAGE_VERSION_MISMATCH"; exit 1; }
+            [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo "${label}_SDK_METADATA_MISMATCH"; exit 1; }
+          }
+
+          rc11_apk="${RUNNER_TEMP}/ecfc-beta21-rc11.apk"
+          verify_apk "${rc11_apk}" 31 9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C 183802143 RC11
+          echo 'RC11_PACKAGE=fans.ecfc.app'
+          echo 'RC11_VERSION_CODE=31'
+          echo 'RC11_VERSION_NAME=1.0.0-beta.21'
+          echo 'RC11_SIGNATURE=VERIFIED'
+
+          api_json="${RUNNER_TEMP}/ecfc-version-api-before.json"
+          curl --fail --silent --show-error --location --max-time 30 \
+            'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          jq -e --arg sha "${expected_code30_sha}" --argjson size "${expected_code30_size}" '
+            .platform == "android" and .versionName == "1.0.0-beta.21" and .versionCode == 30
+            and .minimumVersionCode == 19 and .forceUpdate == false
+            and (.apkSha256 | ascii_upcase) == $sha and .size == $size
+            and .downloadUrl == "https://ecfc.fans/api/app/download/android"
+            and (.releaseNotes | type == "array" and length == 6)
+            and .publishedAt != null
+          ' "${api_json}" >/dev/null || { echo 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE30'; exit 1; }
+
+          code30_source="${RUNNER_TEMP}/ecfc-beta21-code30-source.apk"
+          source_url="$(jq -r '.downloadUrl' "${api_json}")"
+          curl --fail --silent --show-error --location --max-time 2400 \
+            --output "${code30_source}" "${source_url}"
+          verify_apk "${code30_source}" 30 "${expected_code30_sha}" "${expected_code30_size}" CODE30_SOURCE
+
+          code30_backup="${RUNNER_TEMP}/ecfc-beta21-code30-backup.apk"
+          backup_url="https://media.ecfc.fans/media/${CODE30_BACKUP_OBJECT_KEY}"
+          curl --fail --silent --show-error --location --max-time 2400 \
+            --output "${code30_backup}" "${backup_url}"
+          verify_apk "${code30_backup}" 30 "${expected_code30_sha}" "${expected_code30_size}" CODE30_BACKUP
+          [[ "$(realpath "${code30_backup}")" != "$(realpath "${rc11_apk}")" ]]
+
+          cp "${api_json}" "${RUNNER_TEMP}/android-version-api-before.json"
+          printf 'CODE30_BACKUP_OBJECT_KEY=%s\n' "${CODE30_BACKUP_OBJECT_KEY}" >> "${GITHUB_OUTPUT}"
+          printf 'VERSION_API_BASELINE_FILE=%s\n' "${api_json}" >> "${GITHUB_OUTPUT}"
+          echo 'CODE30_CURRENT_DOWNLOAD=VERIFIED'
+          echo 'CODE30_BACKUP_VERIFIED=YES'
+          echo 'RC11_PACKAGE_SIGNER_METADATA=VERIFIED'
+
+      - name: Preserve RC11 release baseline snapshot
+        if: inputs.release_candidate == 'rc11'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta21-rc11-release-baseline
+          path: ${{ runner.temp }}/android-version-api-before.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Validate pinned production SSH settings
         env:
@@ -132,6 +235,7 @@ jobs:
           EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
           EXPECTED_SIZE: ${{ inputs.apk_size }}
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+          CODE30_BACKUP_OBJECT_KEY: ${{ inputs.code30_backup_object_key }}
         run: |
           set -euo pipefail
           case "${RELEASE_CANDIDATE}" in
@@ -167,8 +271,27 @@ jobs:
               version_code=30
               notes='["修复反馈、多账号和账号安全的登录状态处理","恢复授权用户公告发布权限并保持普通用户入口隐藏","修复演唱会详情闪退并完善活跃症任务跳转","活动报名后自动发放绑定物料并复用现有兑换记录","完善设置退出登录及用户提示文案","Beta.21 RC10 内测版本"]'
               ;;
+            rc11)
+              version_code=31
+              notes='["修复「还有什么可以送给你」页面的 Bearer 登录认证","修复反馈文字提交与图片上传的 Native Bearer 认证","修复 E院广场好友 Feed 的登录状态识别和失败重试","单接口认证失败不再未经确认清除全局登录状态","多账号请求继续使用当前 active account 的有效 token","Beta.21 RC11 内测版本"]'
+              [[ "${CODE30_BACKUP_OBJECT_KEY}" =~ ^android/releases/ECFC-1\.0\.0-beta\.21-code30-backup-[0-9]{8}-[0-9]{6}-run[0-9]+-attempt[1-9][0-9]*\.apk$ ]] || { echo 'CODE30_BACKUP_REQUIRED_FOR_RC11'; exit 1; }
+              [[ "${EXPECTED_SHA256}" == 9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C && "${EXPECTED_SIZE}" == 183802143 ]] || { echo 'RC11_RELEASE_BASELINE_MISMATCH'; exit 1; }
+              ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
+          expected_current_b64=''
+          if [[ "${RELEASE_CANDIDATE}" == rc11 ]]; then
+            baseline_file="${RUNNER_TEMP}/android-version-api-before.json"
+            [[ -s "${baseline_file}" ]] || { echo 'VERSION_API_BASELINE_MISSING'; exit 1; }
+            current_file="${RUNNER_TEMP}/android-version-api-final-gate.json"
+            curl --fail --silent --show-error --location --max-time 30 \
+              'https://ecfc.fans/api/app/version?platform=android' --output "${current_file}"
+            diff -u <(jq -S . "${baseline_file}") <(jq -S . "${current_file}") >/dev/null || { echo 'VERSION_API_BASELINE_CHANGED'; exit 1; }
+            expected_current="$(jq -c '{ANDROID_VERSION_NAME:.versionName,ANDROID_VERSION_CODE:.versionCode,ANDROID_MINIMUM_VERSION_CODE:.minimumVersionCode,ANDROID_FORCE_UPDATE:.forceUpdate,ANDROID_APK_SHA256:(.apkSha256|ascii_upcase),ANDROID_APK_SIZE:.size,ANDROID_RELEASE_NOTES:.releaseNotes,ANDROID_PUBLISHED_AT:.publishedAt}' "${baseline_file}")"
+            expected_current_b64="$(printf '%s' "${expected_current}" | base64 -w0)"
+            [[ "${expected_current_b64}" =~ ^[A-Za-z0-9+/]+=*$ ]] || { echo 'ANDROID_BASELINE_ENCODING_INVALID'; exit 1; }
+            echo 'VERSION_API_CODE30_FINAL_GATE=PASS'
+          fi
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           config="$(jq -cn --arg name '1.0.0-beta.21' --argjson code "${version_code}" --argjson minimum 19 \
             --argjson force false --arg key "${APK_OBJECT_KEY}" \
@@ -177,8 +300,8 @@ jobs:
           config_b64="$(printf '%s' "${config}" | base64 -w0)"
           [[ "${config_b64}" =~ ^[A-Za-z0-9+/]+=*$ ]] || { echo 'ANDROID_CONFIG_ENCODING_INVALID'; exit 1; }
           remote_host="${SERVER_USER}@${SERVER_HOST}"
-          printf -v remote_command 'flock -n %q env APP_DIR=%q EXPECTED_PRODUCTION_SHA=%q ANDROID_RELEASE_METADATA_B64=%q node --input-type=module -' \
-            '/home/apps/easonfansclub/.deploy.lock' '/home/apps/easonfansclub' "${EXPECTED_PRODUCTION_SHA}" "${config_b64}"
+          printf -v remote_command 'flock -n %q env APP_DIR=%q EXPECTED_PRODUCTION_SHA=%q ANDROID_RELEASE_METADATA_B64=%q ANDROID_EXPECTED_CURRENT_B64=%q node --input-type=module -' \
+            '/home/apps/easonfansclub/.deploy.lock' '/home/apps/easonfansclub' "${EXPECTED_PRODUCTION_SHA}" "${config_b64}" "${expected_current_b64}"
           ssh_options=(
             -T -p "${SERVER_PORT}" -i "${RUNNER_TEMP}/easonfansclub_deploy_key"
             -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey
@@ -218,6 +341,7 @@ jobs:
             rc8) expected_version_code=28 ;;
             rc9) expected_version_code=29 ;;
             rc10) expected_version_code=30 ;;
+            rc11) expected_version_code=31 ;;
             *) echo 'RELEASE_CANDIDATE_INVALID'; exit 1 ;;
           esac
           remote_host="${SERVER_USER}@${SERVER_HOST}"
@@ -241,7 +365,7 @@ jobs:
           EXPECTED_APK_SIZE="$5"
           [[ "${APP_DIR}" == /home/apps/easonfansclub ]]
           [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          [[ "${EXPECTED_VERSION_CODE}" =~ ^(23|24|25|26|27|28|29|30)$ ]]
+          [[ "${EXPECTED_VERSION_CODE}" =~ ^(23|24|25|26|27|28|29|30|31)$ ]]
           [[ "${EXPECTED_APK_SHA256}" =~ ^[A-F0-9]{64}$ ]]
           [[ "${EXPECTED_APK_SIZE}" =~ ^[0-9]{8,9}$ ]]
           current_link="${APP_DIR}/current"
@@ -303,3 +427,61 @@ jobs:
           });
           NODE
           REMOTE
+
+      - name: Verify the live RC11 Version API and authenticated download chain
+        if: inputs.release_candidate == 'rc11'
+        env:
+          CODE30_BACKUP_OBJECT_KEY: ${{ inputs.code30_backup_object_key }}
+        run: |
+          set -euo pipefail
+          expected_sha='9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C'
+          expected_size='183802143'
+          expected_signer='12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+          api_json="${RUNNER_TEMP}/android-version-api-after.json"
+          curl --fail --silent --show-error --location --max-time 30 \
+            'https://ecfc.fans/api/app/version?platform=android' --output "${api_json}"
+          jq -e --arg sha "${expected_sha}" --argjson size "${expected_size}" '
+            .platform == "android" and .versionName == "1.0.0-beta.21" and .versionCode == 31
+            and .minimumVersionCode == 19 and .forceUpdate == false
+            and (.apkSha256 | ascii_upcase) == $sha and .size == $size
+            and .downloadUrl == "https://ecfc.fans/api/app/download/android"
+            and (.releaseNotes | type == "array" and length == 6)
+            and (.releaseNotes[5] == "Beta.21 RC11 内测版本")
+            and .publishedAt != null
+          ' "${api_json}" >/dev/null || { echo 'PRODUCTION_VERSION_API_RC11_MISMATCH'; exit 1; }
+
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" && -x "${aapt}" ]] || { echo 'ANDROID_APK_VALIDATION_TOOLS_NOT_AVAILABLE'; exit 1; }
+          live_apk="${RUNNER_TEMP}/ecfc-beta21-rc11-live-download.apk"
+          download_url="$(jq -r '.downloadUrl' "${api_json}")"
+          curl --fail --silent --show-error --location --max-time 2400 \
+            --output "${live_apk}" "${download_url}"
+          actual_size="$(stat -c '%s' "${live_apk}")"
+          actual_sha="$(sha256sum "${live_apk}" | awk '{print toupper($1)}')"
+          [[ "${actual_size}" == "${expected_size}" ]] || { echo 'LIVE_RC11_APK_SIZE_MISMATCH'; exit 1; }
+          [[ "${actual_sha}" == "${expected_sha}" ]] || { echo 'LIVE_RC11_APK_SHA256_MISMATCH'; exit 1; }
+          "${apksigner}" verify "${live_apk}" >/dev/null || { echo 'LIVE_RC11_APK_SIGNATURE_INVALID'; exit 1; }
+          signer="$("${apksigner}" verify --print-certs "${live_apk}" | awk -F': ' '/certificate SHA-256 digest/ {gsub(/:/, "", $2); print toupper($2); exit}')"
+          [[ "${signer}" == "${expected_signer}" ]] || { echo 'LIVE_RC11_APK_SIGNER_MISMATCH'; exit 1; }
+          badging="$("${aapt}" dump badging "${live_apk}" | head -n 3)"
+          [[ "${badging}" == *"package: name='fans.ecfc.app' versionCode='31' versionName='1.0.0-beta.21'"* ]] || { echo 'LIVE_RC11_APK_PACKAGE_VERSION_MISMATCH'; exit 1; }
+          [[ "${badging}" == *"sdkVersion:'24'"* && "${badging}" == *"targetSdkVersion:'36'"* ]] || { echo 'LIVE_RC11_APK_SDK_METADATA_MISMATCH'; exit 1; }
+          backup_status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' \
+            --range 0-0 --max-time 30 "https://media.ecfc.fans/media/${CODE30_BACKUP_OBJECT_KEY}")"
+          [[ "${backup_status}" == 206 ]] || { echo 'CODE30_BACKUP_NOT_AVAILABLE_AFTER_RELEASE'; exit 1; }
+          cp "${api_json}" "${RUNNER_TEMP}/android-version-api-after-release.json"
+          echo 'PRODUCTION_VERSION_API_CODE31=VERIFIED'
+          echo 'LIVE_DOWNLOAD_SHA256_MATCH=YES'
+          echo 'LIVE_DOWNLOAD_SIGNATURE_MATCH_CODE30=YES'
+          echo 'CODE30_BACKUP_STILL_AVAILABLE=YES'
+
+      - name: Preserve RC11 post-release snapshot
+        if: inputs.release_candidate == 'rc11'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta21-rc11-release-after
+          path: ${{ runner.temp }}/android-version-api-after-release.json
+          if-no-files-found: error
+          retention-days: 90
