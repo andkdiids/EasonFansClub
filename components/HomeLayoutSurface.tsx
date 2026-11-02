@@ -6,9 +6,10 @@ import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { HomeHero } from '@/components/HomeHero'
 import { HomeUpdateModal } from '@/components/HomeUpdateModal'
 import { SafeAvatar } from '@/components/SafeAvatar'
+import { HomeAnywhereDoorMediaPreview } from '@/components/HomeAnywhereDoorMediaPreview'
 import { useMusicPlayer, type MusicPreviewTrack } from '@/components/music/MusicPlayerProvider'
 import { EasMusicLikeButton } from '@/components/music/EasMusicLikeButton'
-import type { HomeEntertainmentRanking, HomeEntertainmentRankingMode } from '@/lib/home-data'
+import type { HomeAnywhereDoorPost, HomeEntertainmentRanking, HomeEntertainmentRankingMode } from '@/lib/home-data'
 import type { HomeUpdate } from '@/lib/home-announcement'
 import type { HomepageFeaturedConcert } from '@/lib/homepage-featured-concert'
 import type { SiteAppearanceConfig, SiteHeroSlide } from '@/lib/site-config'
@@ -89,7 +90,6 @@ type DailyMusic = { id: string; title: string; artist: string; releaseYear: numb
 type TodayEvent = { id: string; date: string; year: number; month: number; day: number; type: string; title: string; content: string; imageUrl: string | null; source: 'AUTO' | 'ADMIN'; reference: string | null; status: 'APPROVED'; href: string | null }
 type EntertainmentRanking = Omit<HomeEntertainmentRanking, 'status'> & { status: HomeEntertainmentRanking['status'] | 'loading' }
 type HomeActivity = { id: string; title: string; coverUrl: string | null; bannerUrl: string | null; locationName: string | null; startsAt: string | null; endsAt: string | null; registrationStartAt: string | null; registrationEndAt: string | null; signupLimit: number | null; signupCount: number; statusLabel: HomeActivityStatusLabel }
-type HomeAnywhereDoorPost = { id: string; authorUsername: string; title: string; publishedAt: string; href: string }
 type HomeSalonPost = { id: string; category: string; title: string | null; approvedAt: string; thumbnailUrl: string | null }
 type Payload = { activities: HomeActivity[]; anywhereDoor: HomeAnywhereDoorPost | null; salonPosts: HomeSalonPost[]; albums: Album[]; stats: Stats | null; dailyMusic: DailyMusic | null; siteStats: SiteStats | null; checkedInToday: boolean; todayCheckInCount: number; todayEvents: TodayEvent[]; dailyPrescriptionReward: number | null; entertainmentRanking: EntertainmentRanking | null }
 
@@ -458,6 +458,7 @@ export function HomeLayoutSurface({ siteConfig, slides, announcement, featuredCo
         {data.anywhereDoor ? <Link href={data.anywhereDoor.href} className="home-anywhere-door-item">
           <span className="home-anywhere-door-account">@{data.anywhereDoor.authorUsername}</span>
           <strong>{data.anywhereDoor.title}</strong>
+          <HomeAnywhereDoorMediaPreview media={data.anywhereDoor.media} mediaCount={data.anywhereDoor.mediaCount} title={data.anywhereDoor.title} />
           <time dateTime={data.anywhereDoor.publishedAt}>{shortDateTime(data.anywhereDoor.publishedAt)}</time>
         </Link> : <p className="community-empty home-first-row-empty">{homeText.anywhereDoorEmpty}</p>}
       </section>
