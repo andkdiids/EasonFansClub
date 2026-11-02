@@ -18,6 +18,7 @@ type FeedbackFixture = {
 }
 const principals = new Map<string, Principal>([
   ['user-a', { id: 'user-a', uid: 1001, nickname: '用户甲', role: 'USER' }],
+  ['cookie-user-b', { id: 'cookie-user-b', uid: 1003, nickname: 'Cookie 用户乙', role: 'USER' }],
   ['admin-a', { id: 'admin-a', uid: 1002, nickname: '管理员甲', role: 'ADMIN' }],
 ])
 const sessions = new Set(['session-user-a', 'session-admin-a'])
@@ -25,6 +26,9 @@ const writes: Array<{ userId: string; title: string; content: string }> = []
 const permissionChecks: string[] = []
 const exchanges: Array<{ userId: string; materialId: string; idempotencyKey: string; quantity: number }> = []
 const feedbackImageUploads: string[] = []
+const materialListUsers: string[] = []
+const friendFeedUsers: string[] = []
+let webCookieUserId: string | null = null
 let nextFeedbackId = 0
 
 type PrismaFixture = Record<string, unknown> & {
@@ -109,13 +113,15 @@ let feedbackImageRoute: typeof import('../app/api/uploads/feedback-image/route')
 let accountSecurityRoute: typeof import('../app/api/account/security/route')
 let redemptionListRoute: typeof import('../app/api/material-redemptions/me/route')
 let redemptionExchangeRoute: typeof import('../app/api/material-redemptions/[materialId]/exchange/route')
+let materialCatalogueRoute: typeof import('../app/api/material-redemptions/route')
+let friendsActivityRoute: typeof import('../app/api/friends/activity/route')
 let forumDiscoverRoute: typeof import('../app/api/forum/discover/route')
 
 before(async () => {
   (Module as unknown as { _load: typeof originalLoad })._load = function (request, parent, isMain) {
     if (request === '@/lib/prisma') return { prisma: prismaFixture }
     if (request === '@/lib/auth') return {
-      getCurrentUser: async () => null,
+      getCurrentUser: async () => webCookieUserId ? principalFor(webCookieUserId) : null,
       getCurrentUserById: async (id: string) => principalFor(id),
       isAuthServiceUnavailableError: () => false,
     }
@@ -124,12 +130,22 @@ before(async () => {
       getSecurityQuestionRecoveryAvailability: ({ globalEnabled, userEnabled, questionCount }: { globalEnabled: boolean; userEnabled: boolean; questionCount: number }) => ({ available: globalEnabled && userEnabled && questionCount > 0, reason: null }),
     }
     if (request === '@/lib/material-redemptions') return {
+      listPublicMaterialRedemptions: async () => {
+        materialListUsers.push('authenticated-route')
+        return [{ id: 'public-material-1', status: 'PUBLISHED' }]
+      },
       listOwnMaterialRedemptionOrders: async (userId: string) => [{ id: 'order-1', ownerId: userId }],
       exchangeMaterialRedemption: async (userId: string, materialId: string, input: { idempotencyKey: string; quantity: number }) => {
         exchanges.push({ userId, materialId, ...input })
         return { duplicate: false, order: { id: 'order-2', materialId } }
       },
       MaterialRedemptionError: class MaterialRedemptionError extends Error {},
+    }
+    if (request === '@/lib/friends') return {
+      getFriendIds: async (userId: string) => {
+        friendFeedUsers.push(userId)
+        return []
+      },
     }
     if (request === '@/lib/notification-transaction') return { safeNotificationWrite: async (operation: () => Promise<void>) => operation() }
     if (request === '@/lib/notification-write') return { createManyNotifications: async () => ({ count: 0 }) }
@@ -157,6 +173,8 @@ before(async () => {
     accountSecurityRoute = await import('../app/api/account/security/route')
     redemptionListRoute = await import('../app/api/material-redemptions/me/route')
     redemptionExchangeRoute = await import('../app/api/material-redemptions/[materialId]/exchange/route')
+    materialCatalogueRoute = await import('../app/api/material-redemptions/route')
+    friendsActivityRoute = await import('../app/api/friends/activity/route')
     forumDiscoverRoute = await import('../app/api/forum/discover/route')
   } finally {
     (Module as unknown as { _load: typeof originalLoad })._load = originalLoad
@@ -169,9 +187,12 @@ beforeEach(() => {
   feedbackImageUploads.length = 0
   permissionChecks.length = 0
   nextFeedbackId = 0
+  materialListUsers.length = 0
+  friendFeedUsers.length = 0
+  webCookieUserId = null
 })
 
-async function bearer(userId: string) {
+async function bearer(userId: string, lifetimeSeconds = 300) {
   const issuedAt = Math.floor(Date.now() / 1000)
   const token = await new SignJWT({ sid: `session-${userId}`, typ: 'mobile_access' })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
@@ -179,7 +200,7 @@ async function bearer(userId: string) {
     .setAudience('ecfc-mobile')
     .setSubject(userId)
     .setIssuedAt(issuedAt)
-    .setExpirationTime(issuedAt + 300)
+    .setExpirationTime(issuedAt + lifetimeSeconds)
     .sign(new TextEncoder().encode(process.env.MOBILE_ACCESS_TOKEN_SECRET))
   return { authorization: `Bearer ${token}` }
 }
@@ -273,6 +294,53 @@ test('account security and Gift redemption routes use the authenticated account 
   }), { params: Promise.resolve({ materialId: 'material-a' }) })
   assert.equal(exchange.status, 201)
   assert.deepEqual(exchanges, [{ userId: 'user-a', materialId: 'material-a', idempotencyKey: 'mobile-gift-exchange-key-1', quantity: 1 }])
+})
+
+test('material catalogue and Friends activity require a valid session and bind identity to Bearer or Web Cookie', async () => {
+  const routes = [
+    { path: '/api/material-redemptions?userId=cookie-user-b', get: materialCatalogueRoute.GET },
+    { path: '/api/friends/activity?userId=cookie-user-b', get: friendsActivityRoute.GET },
+  ]
+
+  for (const route of routes) {
+    const anonymous = await route.get(jsonRequest(route.path, 'GET'))
+    assert.equal(anonymous.status, 401, `${route.path} remains authenticated`)
+
+    const malformedBearer = await route.get(jsonRequest(route.path, 'GET', { authorization: 'Bearer invalid' }))
+    assert.equal(malformedBearer.status, 401, `${route.path} rejects invalid Bearer without fallback`)
+
+    webCookieUserId = 'cookie-user-b'
+    const invalidBearerWithCookie = await route.get(jsonRequest(route.path, 'GET', {
+      authorization: 'Bearer invalid',
+      cookie: 'eason_session=fixture-cookie-b',
+    }))
+    assert.equal(invalidBearerWithCookie.status, 401, `${route.path} does not fall back from invalid Bearer to Cookie`)
+
+    const expiredBearer = await route.get(jsonRequest(route.path, 'GET', await bearer('user-a', -60)))
+    assert.equal(expiredBearer.status, 401, `${route.path} rejects expired Bearer sessions`)
+
+    const authenticatedBearer = await route.get(jsonRequest(route.path, 'GET', {
+      ...(await bearer('user-a')),
+      cookie: 'eason_session=fixture-cookie-b',
+    }))
+    assert.equal(authenticatedBearer.status, 200, `${route.path} accepts the active Bearer session`)
+    if (route.path.startsWith('/api/material-redemptions')) {
+      assert.equal((await authenticatedBearer.json()).userId, 'user-a', 'query and Cookie identity cannot override Bearer identity')
+    } else {
+      assert.deepEqual(friendFeedUsers, ['user-a'], 'Friends feed queries use the Bearer account as viewer')
+    }
+
+    const cookieOnly = await route.get(jsonRequest(route.path, 'GET', { cookie: 'eason_session=fixture-cookie-b' }))
+    assert.equal(cookieOnly.status, 200, `${route.path} preserves Web Cookie authentication`)
+    if (route.path.startsWith('/api/material-redemptions')) {
+      assert.equal((await cookieOnly.json()).userId, 'cookie-user-b')
+    } else {
+      assert.deepEqual(friendFeedUsers.slice(-1), ['cookie-user-b'])
+    }
+    webCookieUserId = null
+  }
+
+  assert.equal(materialListUsers.length, 2, 'only the two authenticated material-list requests reach the public catalogue service')
 })
 
 test('announcement availability is derived from the authenticated user post_manage permission', async () => {

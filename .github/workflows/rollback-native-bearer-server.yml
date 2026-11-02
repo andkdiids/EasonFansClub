@@ -1,0 +1,169 @@
+name: Roll back the Native Bearer server release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_production_sha:
+        description: Exact current production SHA the rollback is allowed to replace
+        required: true
+        type: string
+      expected_rollback_sha:
+        description: Exact previous production SHA recorded for the current release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main'
+    name: Restore the verified previous Native Bearer server release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    environment:
+      name: Production
+      url: https://ecfc.fans
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Check out the current main workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require protected current main before contacting Production
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
+
+      - name: Validate the requested compare-and-swap rollback SHAs
+        shell: bash
+        env:
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          EXPECTED_ROLLBACK_SHA: ${{ inputs.expected_rollback_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]] || { echo 'ROLLBACK_REQUIRES_MAIN_WORKFLOW_DISPATCH'; exit 1; }
+          [[ "$EXPECTED_PRODUCTION_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'EXPECTED_PRODUCTION_SHA_INVALID'; exit 1; }
+          [[ "$EXPECTED_ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'EXPECTED_ROLLBACK_SHA_INVALID'; exit 1; }
+          [[ "$EXPECTED_PRODUCTION_SHA" != "$EXPECTED_ROLLBACK_SHA" ]] || { echo 'ROLLBACK_SHA_MUST_DIFFER_FROM_CURRENT'; exit 1; }
+
+      - name: Require public health to serve the exact expected current SHA
+        env:
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error \
+            --connect-timeout 10 --max-time 20 https://ecfc.fans/api/health/live)"
+          printf '%s' "$response" | node -e '
+            let raw = "";
+            process.stdin.on("data", chunk => raw += chunk);
+            process.stdin.on("end", () => {
+              try { process.exit(JSON.parse(raw).release === process.argv[1] ? 0 : 1); }
+              catch { process.exit(1); }
+            });
+          ' "$EXPECTED_PRODUCTION_SHA" || { echo 'PUBLIC_HEALTH_SHA_NOT_EXPECTED_CURRENT'; exit 1; }
+
+      - name: Validate production SSH settings and host fingerprint
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          PINNED_HOST_KEY_SHA256: ${{ vars.PRODUCTION_SSH_HOST_KEY_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in SERVER_HOST SERVER_USER SERVER_PORT SERVER_SSH_KEY PINNED_HOST_KEY_SHA256; do
+            [[ -n "${!name:-}" ]] || { echo "REQUIRED_PRODUCTION_SETTING_MISSING:${name}"; exit 1; }
+          done
+          [[ "$SERVER_HOST" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$SERVER_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+          [[ "$SERVER_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$SERVER_PORT >= 1 && 10#$SERVER_PORT <= 65535 ))
+          [[ "$PINNED_HOST_KEY_SHA256" =~ ^SHA256:[A-Za-z0-9+/]+=?$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" | tr -d '\r' > "$RUNNER_TEMP/ecfc-native-bearer-rollback.key"
+          chmod 600 "$RUNNER_TEMP/ecfc-native-bearer-rollback.key"
+          scan="$RUNNER_TEMP/ecfc-native-bearer-rollback.scan"
+          known="$RUNNER_TEMP/ecfc-native-bearer-rollback.known"
+          line="$RUNNER_TEMP/ecfc-native-bearer-rollback.line"
+          timeout 30s ssh-keyscan -T 15 -p "$SERVER_PORT" -H "$SERVER_HOST" > "$scan" 2>/dev/null
+          : > "$known"
+          while IFS= read -r entry; do
+            [[ -n "$entry" && "$entry" != \#* ]] || continue
+            printf '%s\n' "$entry" > "$line"
+            fingerprint="$(ssh-keygen -lf "$line" -E sha256 | awk 'NR == 1 {print $2}')"
+            [[ "$fingerprint" == "$PINNED_HOST_KEY_SHA256" ]] && printf '%s\n' "$entry" >> "$known"
+          done < "$scan"
+          [[ -s "$known" ]] || { echo 'PRODUCTION_SSH_HOST_FINGERPRINT_MISMATCH'; exit 1; }
+          ssh-keygen -lf "$known" -E sha256 | awk '{print $2}' | grep -Fx -- "$PINNED_HOST_KEY_SHA256" >/dev/null
+          install -m 600 "$known" "$HOME/.ssh/known_hosts"
+
+      - name: Roll back only after remote SHA and recorded old SHA match under the production deploy lock
+        id: rollback
+        timeout-minutes: 12
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          EXPECTED_ROLLBACK_SHA: ${{ inputs.expected_rollback_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="${SERVER_USER}@${SERVER_HOST}"
+          ssh_options=(
+            -T -p "$SERVER_PORT" -i "$RUNNER_TEMP/ecfc-native-bearer-rollback.key"
+            -o BatchMode=yes -o IdentitiesOnly=yes -o PreferredAuthentications=publickey
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15
+          )
+          output="$(cat scripts/deploy-safety.sh scripts/rollback-production-git.sh \
+            | timeout --foreground --signal=TERM --kill-after=15s 10m ssh "${ssh_options[@]}" "$remote" \
+              bash -s -- /home/apps/easonfansclub "$EXPECTED_PRODUCTION_SHA" current easonfansclub andkdiids/EasonFansClub 3000 "$EXPECTED_ROLLBACK_SHA")"
+          printf '%s\n' "$output"
+          result="$(printf '%s\n' "$output" | sed -n 's/^ROLLBACK_RESULT=//p' | tail -n 1)"
+          verified_sha="$(printf '%s\n' "$output" | sed -n 's/^ROLLBACK_VERIFIED_SHA=//p' | tail -n 1)"
+          [[ "$result" == RESTORED && "$verified_sha" == "$EXPECTED_ROLLBACK_SHA" ]] || {
+            echo 'MANUAL_NATIVE_BEARER_ROLLBACK_NOT_VERIFIED'
+            exit 1
+          }
+          printf 'verified_sha=%s\n' "$verified_sha" >> "$GITHUB_OUTPUT"
+          printf 'result=%s\n' "$result" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the public health endpoint serves the rollback SHA
+        env:
+          EXPECTED_PRODUCTION_SHA: ${{ inputs.expected_production_sha }}
+          EXPECTED_ROLLBACK_SHA: ${{ inputs.expected_rollback_sha }}
+          ROLLBACK_RESULT: ${{ steps.rollback.outputs.result }}
+          VERIFIED_ROLLBACK_SHA: ${{ steps.rollback.outputs.verified_sha }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            response="$(curl --fail --location --proto '=https' --proto-redir '=https' --silent --show-error \
+              --connect-timeout 10 --max-time 20 https://ecfc.fans/api/health/live 2>/dev/null || true)"
+            public_sha="$(printf '%s' "$response" | node -e '
+              let raw = "";
+              process.stdin.on("data", chunk => raw += chunk);
+              process.stdin.on("end", () => {
+                try { process.stdout.write(String(JSON.parse(raw).release || "")); }
+                catch { process.exit(1); }
+              });
+            ' || true)"
+            if [[ "$public_sha" == "$EXPECTED_ROLLBACK_SHA" ]]; then
+              PUBLIC_HEALTH_SHA="$public_sha" node scripts/assert-native-bearer-rollback-result.mjs
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'PUBLIC_HEALTH_ROLLBACK_SHA_NOT_VERIFIED'
+          exit 1

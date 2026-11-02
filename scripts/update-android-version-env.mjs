@@ -1,9 +1,14 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync, chownSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 
 const PRODUCTION_APP_DIR = '/home/apps/easonfansclub'
+const moduleRequire = process.argv[1] === '-' && process.env.APP_DIR === PRODUCTION_APP_DIR
+  ? createRequire(path.join(PRODUCTION_APP_DIR, 'current', 'package.json'))
+  : createRequire(import.meta.url)
+const dotenv = moduleRequire('dotenv')
 const METADATA_KEYS = Object.freeze([
   'ANDROID_VERSION_NAME',
   'ANDROID_VERSION_CODE',
@@ -15,6 +20,10 @@ const METADATA_KEYS = Object.freeze([
   'ANDROID_RELEASE_NOTES',
   'ANDROID_PUBLISHED_AT',
 ])
+const RC11_APK_SHA256 = '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C'
+const RC11_APK_SIZE = 183802143
+const CODE30_APK_SHA256 = 'D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF49324B440FC967'
+const CODE30_APK_SIZE = 184246197
 
 function requireThat(condition, code) {
   if (!condition) throw new Error(code)
@@ -32,11 +41,15 @@ function validateMetadata(metadata) {
         : metadata.ANDROID_VERSION_CODE === 27 ? 'rc7'
           : metadata.ANDROID_VERSION_CODE === 28 ? 'rc8'
             : metadata.ANDROID_VERSION_CODE === 29 ? 'rc9'
-              : metadata.ANDROID_VERSION_CODE === 30 ? 'rc10' : null
+              : metadata.ANDROID_VERSION_CODE === 30 ? 'rc10'
+                : metadata.ANDROID_VERSION_CODE === 31 ? 'rc11' : null
   requireThat(releaseCandidate !== null, 'INVALID_VERSION_CODE')
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')
-  const objectKeyPattern = new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}\\.apk$`)
+  const objectKeyPattern = releaseCandidate === 'rc11'
+    ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
+    : new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}\\.apk$`)
+
   requireThat(typeof metadata.ANDROID_APK_COS_KEY === 'string'
     && objectKeyPattern.test(metadata.ANDROID_APK_COS_KEY), 'INVALID_APK_OBJECT_KEY')
   requireThat(typeof metadata.ANDROID_APK_SHA256 === 'string'
@@ -52,6 +65,55 @@ function validateMetadata(metadata) {
   requireThat(notes[5] === `Beta.21 ${releaseCandidate.toUpperCase()} 内测版本`, 'INVALID_RELEASE_NOTES')
   requireThat(typeof metadata.ANDROID_PUBLISHED_AT === 'string'
     && Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT)), 'INVALID_PUBLISHED_AT')
+  if (releaseCandidate === 'rc11') {
+    requireThat(metadata.ANDROID_APK_SHA256 === RC11_APK_SHA256, 'INVALID_RC11_APK_SHA256')
+    requireThat(metadata.ANDROID_APK_SIZE === RC11_APK_SIZE, 'INVALID_RC11_APK_SIZE')
+  }
+}
+
+function validateExpectedCurrentMetadata(source, expectedCurrentMetadata) {
+  if (expectedCurrentMetadata === undefined || expectedCurrentMetadata === null) return
+  requireThat(expectedCurrentMetadata && typeof expectedCurrentMetadata === 'object' && !Array.isArray(expectedCurrentMetadata), 'INVALID_EXPECTED_ANDROID_METADATA')
+  const expectedKeys = Object.keys(expectedCurrentMetadata).sort()
+  const publicMetadataKeys = [
+    'ANDROID_VERSION_NAME',
+    'ANDROID_VERSION_CODE',
+    'ANDROID_MINIMUM_VERSION_CODE',
+    'ANDROID_FORCE_UPDATE',
+    'ANDROID_APK_SHA256',
+    'ANDROID_APK_SIZE',
+    'ANDROID_RELEASE_NOTES',
+    'ANDROID_PUBLISHED_AT',
+  ].sort()
+  requireThat(JSON.stringify(expectedKeys) === JSON.stringify(publicMetadataKeys), 'INVALID_EXPECTED_ANDROID_METADATA_KEYS')
+  const current = dotenv.parse(source)
+  for (const key of METADATA_KEYS) {
+    if (!(key in expectedCurrentMetadata)) continue
+    const expected = expectedCurrentMetadata[key]
+    requireThat(typeof expected === 'string' || typeof expected === 'number' || typeof expected === 'boolean' || (key === 'ANDROID_RELEASE_NOTES' && Array.isArray(expected)), 'INVALID_EXPECTED_ANDROID_METADATA_VALUE')
+    if (key === 'ANDROID_RELEASE_NOTES') {
+      let actualNotes
+      let expectedNotes
+      try {
+        actualNotes = JSON.parse(current[key] || '')
+        expectedNotes = Array.isArray(expected) ? expected : JSON.parse(String(expected))
+      } catch { throw new Error('ANDROID_BASELINE_MISMATCH:ANDROID_RELEASE_NOTES') }
+      if (Array.isArray(actualNotes)) actualNotes = actualNotes.map((note) => typeof note === 'string' ? note.trim() : note)
+      if (Array.isArray(expectedNotes)) expectedNotes = expectedNotes.map((note) => typeof note === 'string' ? note.trim() : note)
+      requireThat(JSON.stringify(actualNotes) === JSON.stringify(expectedNotes), 'ANDROID_BASELINE_MISMATCH:ANDROID_RELEASE_NOTES')
+      continue
+    }
+    if (key === 'ANDROID_PUBLISHED_AT') {
+      const actualTimestamp = Date.parse(current[key] || '')
+      const expectedTimestamp = Date.parse(String(expected))
+      requireThat(Number.isFinite(actualTimestamp) && actualTimestamp === expectedTimestamp, `ANDROID_BASELINE_MISMATCH:${key}`)
+      continue
+    }
+    requireThat(current[key] === String(expected), `ANDROID_BASELINE_MISMATCH:${key}`)
+  }
+  if (String(expectedCurrentMetadata.ANDROID_VERSION_CODE) === '30') {
+    requireThat(/^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc10-\d{8}-\d{6}\.apk$/.test(current.ANDROID_APK_COS_KEY || ''), 'ANDROID_BASELINE_MISMATCH:ANDROID_APK_COS_KEY')
+  }
 }
 
 function validateProductionRelease(appDir, expectedProductionSha) {
@@ -145,7 +207,7 @@ function createProtectedBackup(sharedDir, envPath, originalStat, originalContent
   return backupPath
 }
 
-export function configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, now = new Date() }) {
+export function configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata, expectedCurrentMetadata, now = new Date() }) {
   validateMetadata(metadata)
   validateProductionRelease(appDir, expectedProductionSha)
   const root = path.resolve(appDir)
@@ -156,6 +218,7 @@ export function configureAndroidVersionEnv({ appDir, expectedProductionSha, meta
   const envStat = lstatSync(envPath)
   requireThat(envStat.isFile() && !envStat.isSymbolicLink() && envStat.size > 0, 'UNSAFE_ENV_FILE')
   const original = readFileSync(envPath)
+  validateExpectedCurrentMetadata(original.toString('utf8'), expectedCurrentMetadata)
   const updated = replaceMetadataLines(original.toString('utf8'), metadata)
   const backupPath = createProtectedBackup(sharedDir, envPath, envStat, original, now)
   writeAtomically(envPath, updated, envStat)
@@ -164,17 +227,137 @@ export function configureAndroidVersionEnv({ appDir, expectedProductionSha, meta
   return { backupPath, changedKeys: [...METADATA_KEYS], envSha256: sha256(written) }
 }
 
+function parseEnvMetadata(source, code) {
+  const parsed = dotenv.parse(source)
+  const result = Object.fromEntries(METADATA_KEYS.map((key) => [key, parsed[key]]))
+  requireThat(METADATA_KEYS.every((key) => typeof result[key] === 'string'), code)
+  return result
+}
+
+function validateRollbackBaseline(metadata) {
+  requireThat(metadata.ANDROID_VERSION_NAME === '1.0.0-beta.21', 'ROLLBACK_SOURCE_VERSION_NAME_MISMATCH')
+  requireThat(metadata.ANDROID_VERSION_CODE === '30', 'ROLLBACK_SOURCE_VERSION_CODE_MISMATCH')
+  requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === '19', 'ROLLBACK_SOURCE_MINIMUM_VERSION_MISMATCH')
+  requireThat(metadata.ANDROID_FORCE_UPDATE === 'false', 'ROLLBACK_SOURCE_FORCE_UPDATE_MISMATCH')
+  requireThat(metadata.ANDROID_APK_SHA256?.toUpperCase() === CODE30_APK_SHA256, 'ROLLBACK_SOURCE_APK_SHA256_MISMATCH')
+  requireThat(metadata.ANDROID_APK_SIZE === String(CODE30_APK_SIZE), 'ROLLBACK_SOURCE_APK_SIZE_MISMATCH')
+  requireThat(/^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc10-\d{8}-\d{6}\.apk$/.test(metadata.ANDROID_APK_COS_KEY || ''), 'ROLLBACK_SOURCE_OBJECT_KEY_MISMATCH')
+  let notes
+  try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('ROLLBACK_SOURCE_RELEASE_NOTES_INVALID') }
+  requireThat(Array.isArray(notes) && notes.length === 6 && notes[5] === 'Beta.21 RC10 内测版本', 'ROLLBACK_SOURCE_RELEASE_NOTES_INVALID')
+  requireThat(Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT || '')), 'ROLLBACK_SOURCE_PUBLISHED_AT_INVALID')
+}
+
+function validateCurrentRc11(metadata) {
+  requireThat(metadata.ANDROID_VERSION_NAME === '1.0.0-beta.21', 'ROLLBACK_CURRENT_VERSION_NAME_MISMATCH')
+  requireThat(metadata.ANDROID_VERSION_CODE === '31', 'ROLLBACK_CURRENT_VERSION_CODE_MISMATCH')
+  requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === '19', 'ROLLBACK_CURRENT_MINIMUM_VERSION_MISMATCH')
+  requireThat(metadata.ANDROID_FORCE_UPDATE === 'false', 'ROLLBACK_CURRENT_FORCE_UPDATE_MISMATCH')
+  requireThat(metadata.ANDROID_APK_SHA256?.toUpperCase() === RC11_APK_SHA256, 'ROLLBACK_CURRENT_APK_SHA256_MISMATCH')
+  requireThat(metadata.ANDROID_APK_SIZE === String(RC11_APK_SIZE), 'ROLLBACK_CURRENT_APK_SIZE_MISMATCH')
+  requireThat(/^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/.test(metadata.ANDROID_APK_COS_KEY || ''), 'ROLLBACK_CURRENT_OBJECT_KEY_MISMATCH')
+  let notes
+  try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('ROLLBACK_CURRENT_RELEASE_NOTES_INVALID') }
+  requireThat(Array.isArray(notes) && notes.length === 6 && notes[5] === 'Beta.21 RC11 内测版本', 'ROLLBACK_CURRENT_RELEASE_NOTES_INVALID')
+  requireThat(Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT || '')), 'ROLLBACK_CURRENT_PUBLISHED_AT_INVALID')
+}
+
+export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, code30BackupObjectKey, now = new Date() }) {
+  validateProductionRelease(appDir, expectedProductionSha)
+  requireThat(typeof backupName === 'string'
+    && /^android-release-[A-Za-z0-9T.-]+-[0-9a-f-]{36}\.env$/.test(backupName)
+    && path.basename(backupName) === backupName, 'INVALID_ROLLBACK_BACKUP_NAME')
+  requireThat(typeof code30BackupObjectKey === 'string'
+     && /^android\/releases\/ECFC-1\.0\.0-beta\.21-code30-backup-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/.test(code30BackupObjectKey), 'INVALID_CODE30_BACKUP_OBJECT_KEY')
+
+  const root = path.resolve(appDir)
+  const sharedDir = path.join(root, 'shared')
+  const sharedStat = lstatSync(sharedDir)
+  requireThat(sharedStat.isDirectory() && !sharedStat.isSymbolicLink(), 'UNSAFE_SHARED_DIRECTORY')
+  const envPath = path.join(sharedDir, '.env')
+  const envStat = lstatSync(envPath)
+  requireThat(envStat.isFile() && !envStat.isSymbolicLink() && envStat.size > 0, 'UNSAFE_ENV_FILE')
+  const currentContents = readFileSync(envPath)
+  const currentMetadata = parseEnvMetadata(currentContents.toString('utf8'), 'ROLLBACK_CURRENT_METADATA_MISSING')
+  validateCurrentRc11(currentMetadata)
+
+  const backupDir = path.join(sharedDir, '.env-backups')
+  const backupDirStat = lstatSync(backupDir)
+  requireThat(backupDirStat.isDirectory() && !backupDirStat.isSymbolicLink(), 'UNSAFE_BACKUP_DIRECTORY')
+  const backupPath = path.join(backupDir, backupName)
+  const backupStat = lstatSync(backupPath)
+  requireThat(backupStat.isFile() && !backupStat.isSymbolicLink(), 'UNSAFE_ROLLBACK_BACKUP_FILE')
+  requireThat(realpathSync(backupPath).startsWith(`${realpathSync(backupDir)}${path.sep}`), 'ROLLBACK_BACKUP_OUTSIDE_DIRECTORY')
+  if (process.platform !== 'win32') {
+    requireThat((backupStat.mode & 0o777) === 0o600, 'UNPROTECTED_ROLLBACK_BACKUP')
+    requireThat(backupStat.uid === envStat.uid, 'ROLLBACK_BACKUP_OWNER_MISMATCH')
+  }
+  const originalMetadata = parseEnvMetadata(readFileSync(backupPath).toString('utf8'), 'ROLLBACK_SOURCE_METADATA_MISSING')
+  validateRollbackBaseline(originalMetadata)
+
+  const restoredMetadata = Object.fromEntries(METADATA_KEYS.map((key) => [key, originalMetadata[key]]))
+  restoredMetadata.ANDROID_VERSION_NAME = '1.0.0-beta.21'
+  restoredMetadata.ANDROID_VERSION_CODE = 30
+  restoredMetadata.ANDROID_MINIMUM_VERSION_CODE = 19
+  restoredMetadata.ANDROID_FORCE_UPDATE = false
+  restoredMetadata.ANDROID_APK_COS_KEY = code30BackupObjectKey
+  restoredMetadata.ANDROID_APK_SHA256 = CODE30_APK_SHA256
+  restoredMetadata.ANDROID_APK_SIZE = CODE30_APK_SIZE
+  restoredMetadata.ANDROID_RELEASE_NOTES = originalMetadata.ANDROID_RELEASE_NOTES
+  restoredMetadata.ANDROID_PUBLISHED_AT = originalMetadata.ANDROID_PUBLISHED_AT
+
+  const updated = replaceMetadataLines(currentContents.toString('utf8'), restoredMetadata)
+  const code31BackupPath = createProtectedBackup(sharedDir, envPath, envStat, currentContents, now)
+  writeAtomically(envPath, updated, envStat)
+  const written = readFileSync(envPath, 'utf8')
+  requireThat(written === updated, 'ROLLBACK_ENV_UPDATE_VERIFICATION_FAILED')
+  const writtenMetadata = parseEnvMetadata(written, 'ROLLBACK_RESULT_METADATA_MISSING')
+  requireThat(writtenMetadata.ANDROID_VERSION_CODE === '30'
+    && writtenMetadata.ANDROID_APK_COS_KEY === code30BackupObjectKey
+    && writtenMetadata.ANDROID_APK_SHA256 === CODE30_APK_SHA256
+    && writtenMetadata.ANDROID_APK_SIZE === String(CODE30_APK_SIZE)
+    && writtenMetadata.ANDROID_RELEASE_NOTES === originalMetadata.ANDROID_RELEASE_NOTES
+    && writtenMetadata.ANDROID_PUBLISHED_AT === originalMetadata.ANDROID_PUBLISHED_AT, 'ROLLBACK_RESULT_MISMATCH')
+  return { backupPath: code31BackupPath, changedKeys: [...METADATA_KEYS], envSha256: sha256(written) }
+}
+
 function main() {
   requireThat(process.env.APP_DIR === PRODUCTION_APP_DIR, 'UNEXPECTED_PRODUCTION_APP_DIR')
   const expectedProductionSha = process.env.EXPECTED_PRODUCTION_SHA ?? ''
+  const operation = process.env.ANDROID_RELEASE_OPERATION ?? 'publish'
+  if (operation === 'rollback') {
+    const rollbackEncoded = process.env.ANDROID_RELEASE_ROLLBACK_B64 ?? ''
+    requireThat(/^[A-Za-z0-9+/]+={0,2}$/.test(rollbackEncoded), 'INVALID_ROLLBACK_METADATA_ENCODING')
+    let rollback
+    try { rollback = JSON.parse(Buffer.from(rollbackEncoded, 'base64').toString('utf8')) } catch { throw new Error('INVALID_ROLLBACK_METADATA_ENCODING') }
+    const result = restoreAndroidVersionEnv({
+      appDir: PRODUCTION_APP_DIR,
+      expectedProductionSha,
+      backupName: rollback.backupName,
+      code30BackupObjectKey: rollback.code30BackupObjectKey,
+    })
+    console.log(`PRODUCTION_SHA_VERIFIED=${expectedProductionSha}`)
+    console.log(`ANDROID_METADATA_KEYS_RESTORED=${result.changedKeys.length}`)
+    console.log(`CODE31_ENV_BACKUP_CREATED=${path.basename(result.backupPath)}`)
+    console.log('ANDROID_METADATA_ROLLBACK_ATOMIC=YES')
+    return
+  }
+  requireThat(operation === 'publish', 'INVALID_ANDROID_RELEASE_OPERATION')
   const encoded = process.env.ANDROID_RELEASE_METADATA_B64 ?? ''
   requireThat(/^[A-Za-z0-9+/]+={0,2}$/.test(encoded), 'INVALID_METADATA_ENCODING')
+  const expectedCurrentEncoded = process.env.ANDROID_EXPECTED_CURRENT_B64 ?? ''
   let metadata
   try { metadata = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) } catch { throw new Error('INVALID_METADATA_ENCODING') }
+  let expectedCurrentMetadata
+  if (expectedCurrentEncoded) {
+    requireThat(/^[A-Za-z0-9+/]+={0,2}$/.test(expectedCurrentEncoded), 'INVALID_EXPECTED_ANDROID_METADATA_ENCODING')
+    try { expectedCurrentMetadata = JSON.parse(Buffer.from(expectedCurrentEncoded, 'base64').toString('utf8')) } catch { throw new Error('INVALID_EXPECTED_ANDROID_METADATA_ENCODING') }
+  }
   const result = configureAndroidVersionEnv({
     appDir: PRODUCTION_APP_DIR,
     expectedProductionSha,
     metadata,
+    expectedCurrentMetadata,
   })
   console.log(`PRODUCTION_SHA_VERIFIED=${expectedProductionSha}`)
   console.log(`ANDROID_METADATA_KEYS_UPDATED=${result.changedKeys.length}`)

@@ -6,8 +6,8 @@ if ! declare -F deploy_atomic_switch >/dev/null 2>&1; then
   source "${script_dir}/deploy-safety.sh"
 fi
 
-if [ "$#" -ne 6 ]; then
-  echo "Usage: $0 APP_DIR EXPECTED_CANDIDATE_SHA EXPECTED_CANDIDATE_RELEASE PM2_APP_NAME GITHUB_REPOSITORY APP_PORT" >&2
+if [ "$#" -lt 6 ] || [ "$#" -gt 7 ]; then
+  echo "Usage: $0 APP_DIR EXPECTED_CANDIDATE_SHA EXPECTED_CANDIDATE_RELEASE|current PM2_APP_NAME GITHUB_REPOSITORY APP_PORT [EXPECTED_ROLLBACK_SHA]" >&2
   exit 2
 fi
 
@@ -17,6 +17,7 @@ EXPECTED_CANDIDATE_RELEASE="$3"
 PM2_APP_NAME="$4"
 GITHUB_REPOSITORY="$5"
 APP_PORT="$6"
+EXPECTED_ROLLBACK_SHA="${7:-}"
 releases_dir="${APP_DIR}/releases"
 current_link="${APP_DIR}/current"
 shared_dir="${APP_DIR}/shared"
@@ -25,10 +26,15 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 [ "$APP_DIR" = "/home/apps/easonfansclub" ] || die "Unexpected production application directory."
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || die "Expected candidate SHA is invalid."
-case "$EXPECTED_CANDIDATE_RELEASE" in
-  "${releases_dir}/"*) ;;
-  *) die "Expected candidate release is outside the release root." ;;
-esac
+if [ "$EXPECTED_CANDIDATE_RELEASE" != current ]; then
+  case "$EXPECTED_CANDIDATE_RELEASE" in
+    "${releases_dir}/"*) ;;
+    *) die "Expected candidate release is outside the release root." ;;
+  esac
+fi
+if [ -n "$EXPECTED_ROLLBACK_SHA" ]; then
+  [[ "$EXPECTED_ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]] || die "Expected rollback SHA is invalid."
+fi
 [ "$PM2_APP_NAME" = "easonfansclub" ] || die "Unexpected primary PM2 application name."
 [[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Repository identifier is invalid."
 [[ "$APP_PORT" =~ ^[0-9]+$ ]] || die "Application port is invalid."
@@ -44,7 +50,11 @@ flock -w 360 9 || die "Timed out waiting for the deployment lock."
 
 active_target="$(deploy_current_target "$current_link")"
 deploy_is_release_child "$active_target" "$releases_dir" || die "Current target is not a valid release child."
-expected_candidate_target="$(deploy_normalize_path "$EXPECTED_CANDIDATE_RELEASE")"
+if [ "$EXPECTED_CANDIDATE_RELEASE" = current ]; then
+  expected_candidate_target="$active_target"
+else
+  expected_candidate_target="$(deploy_normalize_path "$EXPECTED_CANDIDATE_RELEASE")"
+fi
 if [ "$active_target" != "$expected_candidate_target" ]; then
   active_sha=""
   if [ -s "${active_target}/.deployed-sha" ]; then
@@ -57,7 +67,9 @@ if [ "$active_target" != "$expected_candidate_target" ]; then
   echo "ROLLBACK_VERIFIED_SHA=${active_sha:-UNKNOWN}"
   exit 0
 fi
-deploy_is_release_child "$EXPECTED_CANDIDATE_RELEASE" "$releases_dir" || die "Expected candidate release is invalid."
+if [ "$EXPECTED_CANDIDATE_RELEASE" != current ]; then
+  deploy_is_release_child "$EXPECTED_CANDIDATE_RELEASE" "$releases_dir" || die "Expected candidate release is invalid."
+fi
 origin_url="$(git -C "$active_target" remote get-url origin 2>/dev/null || true)"
 [ -n "$origin_url" ] || die "Current release has no verifiable Git origin."
 [[ "$origin_url" != https://*:*@* ]] || die "Refusing a Git origin with embedded credentials."
@@ -89,6 +101,9 @@ deploy_is_release_child "$rollback_target" "$releases_dir" || die "Recorded roll
 recorded_rollback_sha="$(tr -d '[:space:]' < "${rollback_target}/.deployed-sha")"
 [[ "$rollback_sha" =~ ^[0-9a-f]{40}$ ]] || die "Rollback SHA marker is invalid."
 [ "$recorded_rollback_sha" = "$rollback_sha" ] || die "Candidate rollback record does not match the rollback release SHA."
+if [ -n "$EXPECTED_ROLLBACK_SHA" ] && [ "$rollback_sha" != "$EXPECTED_ROLLBACK_SHA" ]; then
+  die "Recorded rollback target does not match the requested rollback SHA."
+fi
 
 pm2_app_snapshot() {
   local app_name="$1" raw

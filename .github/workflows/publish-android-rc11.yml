@@ -1,0 +1,281 @@
+name: Stage Android Beta21 RC11 APK in COS
+
+on:
+  workflow_dispatch:
+    inputs:
+      verify_oidc_only:
+        description: Verify GitHub OIDC and Tencent STS only. Uncheck only to run the guarded RC11 publication.
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify_oidc:
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == true
+    name: Verify GitHub OIDC to Tencent STS without publishing
+    runs-on: ubuntu-22.04
+    environment:
+      name: Production
+      url: https://ecfc.fans
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact main workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Verify OIDC claims and exchange for Tencent STS credentials only
+        env:
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs verify-oidc
+
+  ingress:
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
+    name: Verify and stage the fixed local RC11 APK
+    runs-on: [self-hosted, Windows, X64, rc11-artifact-ingress]
+    environment:
+      name: Production
+      url: https://ecfc.fans
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Require protected current main and the fixed RC11 source file
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+          EXPECTED_SHA256: 9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C
+          EXPECTED_SIZE: "183802143"
+          EXPECTED_WORKFLOW_REF: andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -ne 'workflow_dispatch' -or $env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'RC11_INGRESS_REQUIRES_MAIN_WORKFLOW_DISPATCH'
+          }
+          if ($env:GITHUB_WORKFLOW_REF -ne $env:EXPECTED_WORKFLOW_REF) {
+            throw 'RC11_INGRESS_WORKFLOW_REF_MISMATCH'
+          }
+          if ($env:GITHUB_SHA -ne $env:EXPECTED_MAIN_SHA) {
+            throw 'RC11_INGRESS_MAIN_SHA_MISMATCH'
+          }
+
+          $api = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/branches/main"
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          try { $branch = Invoke-RestMethod -Method Get -Uri $api -Headers $headers -TimeoutSec 15 }
+          catch { throw 'MAIN_BRANCH_PROTECTION_LOOKUP_FAILED' }
+          if ($branch.name -ne 'main' -or $branch.protected -ne $true) {
+            throw 'MAIN_BRANCH_PROTECTION_REQUIRED'
+          }
+          if ($branch.commit.sha -ne $env:EXPECTED_MAIN_SHA) { throw 'MAIN_BRANCH_MOVED_OR_SHA_INVALID' }
+
+          $sourcePath = 'E:\Eason\build-cache\ECFC-Release-Artifacts\Beta21-Auth-Blockers\ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
+          if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'RC11_APK_SOURCE_MISSING' }
+          $source = Get-Item -LiteralPath $sourcePath
+          if ($source.Length.ToString() -ne $env:EXPECTED_SIZE) { throw 'RC11_APK_SIZE_MISMATCH' }
+          $digest = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($digest -ne $env:EXPECTED_SHA256) { throw 'RC11_APK_SHA256_MISMATCH' }
+
+          $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { $env:ANDROID_HOME }
+          if (-not $sdkRoot -or -not (Test-Path -LiteralPath (Join-Path $sdkRoot 'build-tools') -PathType Container)) {
+            throw 'ANDROID_SDK_BUILD_TOOLS_UNAVAILABLE'
+          }
+          $buildTools = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'build-tools') -Directory | Sort-Object Name -Descending
+          $apksigner = $null
+          $aapt = $null
+          foreach ($toolDir in $buildTools) {
+            if (-not $apksigner) {
+              foreach ($name in @('apksigner.bat', 'apksigner.exe', 'apksigner')) {
+                $candidate = Join-Path $toolDir.FullName $name
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) { $apksigner = $candidate; break }
+              }
+            }
+            if (-not $aapt) {
+              foreach ($name in @('aapt.exe', 'aapt')) {
+                $candidate = Join-Path $toolDir.FullName $name
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) { $aapt = $candidate; break }
+              }
+            }
+          }
+          if (-not $apksigner -or -not $aapt) { throw 'ANDROID_APK_VALIDATION_TOOLS_UNAVAILABLE' }
+          $signatureOutput = & $apksigner verify --print-certs $sourcePath 2>&1
+          if ($LASTEXITCODE -ne 0) { throw 'RC11_APK_SIGNATURE_INVALID' }
+          $signerLine = $signatureOutput | Where-Object { $_ -match 'certificate SHA-256 digest:' } | Select-Object -First 1
+          if (-not $signerLine -or $signerLine -notmatch 'certificate SHA-256 digest:\s*([A-Fa-f0-9:]+)') { throw 'RC11_APK_SIGNER_UNAVAILABLE' }
+          $signer = $Matches[1].Replace(':', '').ToUpperInvariant()
+          if ($signer -ne '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B') { throw 'RC11_APK_SIGNER_MISMATCH' }
+          $badging = & $aapt dump badging $sourcePath 2>&1
+          if ($LASTEXITCODE -ne 0) { throw 'RC11_APK_METADATA_UNAVAILABLE' }
+          $badgingText = [string]::Join("`n", $badging)
+          $packageMatches = $badgingText -match "package: name='fans\.ecfc\.app' versionCode='31' versionName='1\.0\.0-beta\.21'"
+          $minSdkMatches = $badgingText -match "sdkVersion:'24'"
+          $targetSdkMatches = $badgingText -match "targetSdkVersion:'36'"
+          if (-not $packageMatches -or -not $minSdkMatches -or -not $targetSdkMatches) {
+            throw 'RC11_APK_METADATA_MISMATCH'
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "rc11-ingress-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          $stagedApk = Join-Path $stage 'ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
+          Copy-Item -LiteralPath $sourcePath -Destination $stagedApk
+          $stagedDigest = (Get-FileHash -LiteralPath $stagedApk -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($stagedDigest -ne $env:EXPECTED_SHA256 -or (Get-Item -LiteralPath $stagedApk).Length.ToString() -ne $env:EXPECTED_SIZE) {
+            throw 'RC11_STAGED_ARTIFACT_MISMATCH'
+          }
+
+          $manifest = [ordered]@{
+            source_file = [IO.Path]::GetFileName($sourcePath)
+            source_sha256 = $digest
+            sha256 = $stagedDigest
+            size = $source.Length
+            application_id = 'fans.ecfc.app'
+            version_code = 31
+            version_name = '1.0.0-beta.21'
+            signer_sha256 = $signer
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            ref = $env:GITHUB_REF
+            workflow_ref = $env:GITHUB_WORKFLOW_REF
+            workflow_sha = $env:GITHUB_SHA
+          }
+          $manifestPath = Join-Path $stage 'manifest.json'
+          [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+          Write-Output 'RC11_SOURCE_SHA256=VERIFIED'
+          Write-Output 'RC11_SOURCE_SIZE=VERIFIED'
+          Write-Output "RC11_INGRESS_DIRECTORY=$stage" >> $env:GITHUB_OUTPUT
+
+      - name: Store the verified bytes as a same-run, short-lived Actions artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rc11-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rc11-ingress-${{ github.run_id }}-${{ github.run_attempt }}/*
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+          retention-days: 1
+
+  cos:
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
+    name: Back up code30, then upload and verify RC11
+    needs: ingress
+    runs-on: ubuntu-22.04
+    environment:
+      name: Production
+      url: https://ecfc.fans
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    outputs:
+      code30_backup_object_key: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
+      rc11_object_key: ${{ steps.rc11.outputs.RC11_OBJECT_KEY }}
+      rc11_cdn_url: ${{ steps.rc11.outputs.RC11_CDN_URL }}
+    steps:
+      - name: Check out the exact protected-main workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require protected current main before any COS request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/assert-release-main.mjs
+
+      - name: Download this run's single RC11 ingress artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rc11-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rc11-ingress
+
+      - name: Set up the lockfile-pinned Node and pnpm versions
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install the locked COS SDK dependencies without lifecycle scripts
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Install locked production dependencies
+        run: pnpm install --prod --frozen-lockfile --ignore-scripts
+
+      - name: Upload an independent code30 backup and verify the public CDN bytes
+        id: backup
+        env:
+          RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs backup-code30
+
+      - name: Upload RC11 only after the independent code30 backup passed readback
+        id: rc11
+        env:
+          RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
+          CODE30_BACKUP_OBJECT_KEY: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs publish-rc11
+
+      - name: Preserve the verified code30 Version API baseline for the later CAS gate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rc11-version-api-code30-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-version-api-code30-baseline.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Summarize staged immutable object locations
+        env:
+          CODE30_BACKUP_OBJECT_KEY: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
+          RC11_OBJECT_KEY: ${{ steps.rc11.outputs.RC11_OBJECT_KEY }}
+          RC11_CDN_URL: ${{ steps.rc11.outputs.RC11_CDN_URL }}
+        run: |
+          {
+            echo '### Android Beta21 RC11 COS staging'
+            echo
+            echo '- code30 backup readback: verified before the RC11 upload'
+            echo "- code30 backup object: `${CODE30_BACKUP_OBJECT_KEY}`"
+            echo "- RC11 object: `${RC11_OBJECT_KEY}`"
+            echo "- verified public CDN URL: ${RC11_CDN_URL}"
+            echo '- Version API: unchanged by this workflow'
+          } >> "$GITHUB_STEP_SUMMARY"

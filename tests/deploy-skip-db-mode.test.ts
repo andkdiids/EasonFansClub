@@ -61,10 +61,26 @@ test('skip-db 明确不执行部署阶段数据库命令，默认完整迁移顺
   assert.doesNotMatch(skippedBranch, /pnpm_(?:run|with_timeout).*?(?:migrate|integrity)|node scripts\/check-topic-lottery-maintenance/)
   assert.match(workflow, /db_mode:[\s\S]*?options:[\s\S]*?- full[\s\S]*?- skip-db[\s\S]*?default: full/)
   assert.match(workflow, /deploy_arguments\+=\(--skip-db\)/)
+  assert.match(workflow, /uses: actions\/checkout@11d5960a326750d5838078e36cf38b85af677262/)
+  const approvedRelease = readFileSync('.github/workflows/production-release-approved.yml', 'utf8').replaceAll('\r\n', '\n')
+  assert.doesNotMatch(approvedRelease, /uses: actions\/checkout@v\d/)
+  assert.equal((approvedRelease.match(/uses: actions\/checkout@11d5960a326750d5838078e36cf38b85af677262/g) ?? []).length, 3)
   assert.match(deploy, /deploy_parse_db_mode_arg "\$\{@:7\}"/)
   const pushPathsIgnore = workflow.match(/on:[\s\S]*?push:[\s\S]*?paths-ignore:([\s\S]*?)workflow_dispatch:/)?.[1] ?? ''
+  assert.ok(pushPathsIgnore.includes("'.github/**'"), 'workflow-only changes must not trigger the default deployment')
   for (const path of [
+    'app/api/material-redemptions/route.ts',
+    'docs/android-beta21-rc11-release-runbook.md',
     'middleware.ts',
+    'scripts/android-rc11-cos-publish.d.mts',
+    'scripts/android-rc11-cos-publish.mjs',
+    'scripts/assert-native-bearer-rollback-result.d.mts',
+    'scripts/assert-native-bearer-rollback-result.mjs',
+    'scripts/assert-release-main.d.mts',
+    'scripts/assert-release-main.mjs',
+    'scripts/rollback-production-git.sh',
+    'tests/android-rc11-publish-infrastructure.test.ts',
+    'tests/deploy-skip-db-mode.test.ts',
     'tests/middleware-auth.test.ts',
     'tests/mobile-bearer-route-integration.test.ts',
   ]) {

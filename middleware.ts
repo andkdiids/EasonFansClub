@@ -215,8 +215,10 @@ function isMobileBearerBusinessRequest(request: NextRequest, pathname: string) {
       || pathname === '/api/notifications'
       || pathname === '/api/notifications/unread-count'
       || pathname === '/api/feedback'
+      || pathname === '/api/material-redemptions'
       || pathname === '/api/material-redemptions/me'
       || /^\/api\/material-redemptions\/orders\/[^/]+$/.test(pathname)
+      || pathname === '/api/friends/activity'
       || pathname === '/api/account/security'
       || pathname === '/api/topics'
       || /^\/api\/topics\/[^/]+$/.test(pathname)
