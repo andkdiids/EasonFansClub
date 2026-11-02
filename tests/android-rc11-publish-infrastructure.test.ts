@@ -20,6 +20,7 @@ import {
 } from '../scripts/android-rc11-cos-publish.mjs'
 import { assertReleaseMainBranch } from '../scripts/assert-release-main.mjs'
 import { assertNativeBearerRollbackResult } from '../scripts/assert-native-bearer-rollback-result.mjs'
+import { assertApksignerOutputMatches, parseApksignerOutput } from '../scripts/verify-android-apk-signature.mjs'
 
 const repoRoot = process.cwd()
 const read = (file: string) => readFileSync(path.join(repoRoot, file), 'utf8')
@@ -44,6 +45,39 @@ test('RC11 and code30 SHA, size, package, version, and signing baselines are fix
     sha256: 'D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF49324B440FC967',
     signerSha256: '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B',
   })
+})
+
+const expectedSignerSha256 = '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+
+function apksignerOutput({ signerCount = 1, fingerprints = [expectedSignerSha256] }: { signerCount?: number; fingerprints?: string[] } = {}) {
+  return [
+    'Verifies',
+    'Verified using v2 scheme (APK Signature Scheme v2): true',
+    `Number of signers: ${signerCount}`,
+    ...fingerprints.map((fingerprint, index) => `Signer #${index + 1} certificate SHA-256 digest: ${fingerprint}`),
+  ].join('\n')
+}
+
+test('apksigner parser accepts standard compact and colon-separated SHA-256 output', () => {
+  assert.deepEqual(parseApksignerOutput(apksignerOutput()), { signerCount: 1, sha256: expectedSignerSha256 })
+  const colonSeparated = expectedSignerSha256.match(/.{2}/g)!.join(':').toLowerCase()
+  assert.equal(parseApksignerOutput(apksignerOutput({ fingerprints: [colonSeparated] })).sha256, expectedSignerSha256)
+})
+
+test('apksigner parser tolerates CRLF and surrounding whitespace without weakening digest validation', () => {
+  const output = apksignerOutput({ fingerprints: [`  ${expectedSignerSha256.match(/.{2}/g)!.join(':')}  `] })
+    .replace(/\n/g, '\r\n')
+  assert.equal(assertApksignerOutputMatches(output, expectedSignerSha256).sha256, expectedSignerSha256)
+  assert.throws(() => parseApksignerOutput(apksignerOutput({ fingerprints: ['not-a-fingerprint'] })), /SIGNER_PARSE_FAILED/)
+  assert.throws(() => parseApksignerOutput(apksignerOutput({ fingerprints: [expectedSignerSha256.slice(1)] })), /SIGNER_PARSE_FAILED/)
+  assert.throws(() => parseApksignerOutput(apksignerOutput({ fingerprints: [`${expectedSignerSha256}A`] })), /SIGNER_PARSE_FAILED/)
+})
+
+test('apksigner parser distinguishes missing output, multiple signers, and a valid different signer', () => {
+  assert.throws(() => parseApksignerOutput(''), /SIGNER_PARSE_FAILED/)
+  assert.throws(() => parseApksignerOutput('Number of signers: 1'), /SIGNER_PARSE_FAILED/)
+  assert.throws(() => parseApksignerOutput(apksignerOutput({ signerCount: 2, fingerprints: [expectedSignerSha256, 'A'.repeat(64)] })), /SIGNER_COUNT_INVALID/)
+  assert.throws(() => assertApksignerOutputMatches(apksignerOutput({ fingerprints: ['A'.repeat(64)] }), expectedSignerSha256), /SIGNER_MISMATCH/)
 })
 
 test('the code30 API baseline must match the known public rollback release', () => {
@@ -208,7 +242,10 @@ test('workflow simulation binds ingress, backup-before-RC11 upload, Production, 
   assert.match(workflowText, /actions\/download-artifact@[0-9a-f]{40}/)
   assert.doesNotMatch(workflowText, /continue-on-error:\s*true|cos:DeleteObject|TENCENT_COS_SECRET_(?:ID|KEY)/)
   assert.match(workflowText, /RC11-20261102-152136\.apk/)
-  assert.match(workflowText, /apksigner verify --print-certs/)
+  assert.match(workflowText, /verify --print-certs/)
+  const configureWorkflowText = read('.github/workflows/configure-android-version.yml')
+  assert.equal((configureWorkflowText.match(/verify-android-apk-signature\.mjs/g) || []).length, 2)
+  assert.doesNotMatch(configureWorkflowText, /certificate SHA-256 digest.*awk/)
   assert.match(workflowText, /aapt dump badging/)
 })
 
