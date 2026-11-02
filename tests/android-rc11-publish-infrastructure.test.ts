@@ -447,7 +447,7 @@ test('OIDC endpoint validation accepts official endpoints and rejects unsafe URL
     event_name: 'workflow_dispatch',
     workflow_ref: testWorkflowRef,
   }
-  const jwt = \`e30.\${Buffer.from(JSON.stringify(claims)).toString('base64url')}.\test-signature\`
+  const jwt = `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.test-signature`
   const baseEnv = {
     TENCENT_CAM_OIDC_AUDIENCE: 'configured-test-audience',
     TENCENT_EXPECTED_OIDC_SUBJECT: EXPECTED_OIDC_SUBJECT,
