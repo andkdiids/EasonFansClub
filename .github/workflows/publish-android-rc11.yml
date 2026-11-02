@@ -2,6 +2,12 @@ name: Stage Android Beta21 RC11 APK in COS
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_oidc_only:
+        description: Verify GitHub OIDC and Tencent STS only. Uncheck only to run the guarded RC11 publication.
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -11,8 +17,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify_oidc:
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == true
+    name: Verify GitHub OIDC to Tencent STS without publishing
+    runs-on: ubuntu-22.04
+    environment:
+      name: Production
+      url: https://ecfc.fans
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact main workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Verify OIDC claims and exchange for Tencent STS credentials only
+        env:
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs verify-oidc
+
   ingress:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
     name: Verify and stage the fixed local RC11 APK
     runs-on: [self-hosted, Windows, X64, rc11-artifact-ingress]
     environment:
@@ -141,7 +180,7 @@ jobs:
           retention-days: 1
 
   cos:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
     name: Back up code30, then upload and verify RC11
     needs: ingress
     runs-on: ubuntu-22.04

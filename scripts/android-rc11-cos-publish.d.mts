@@ -17,6 +17,7 @@ export const CODE30_BASELINE: Readonly<{
 }>
 
 export const EXPECTED_OIDC_SUBJECT: string
+export const EXPECTED_OIDC_WORKFLOW_REF: string
 
 export function validateCode30VersionApi(body: Record<string, unknown>): Record<string, unknown>
 export function validateIngressManifest(manifest: Record<string, unknown>, context?: Record<string, string>): Record<string, unknown>
@@ -29,3 +30,5 @@ export function assertObjectAbsent(cos: { headObject(input: { Bucket: string; Re
 export function hashFile(filePath: string): Promise<{ size: number; sha256: string }>
 export function publishCode30Backup(input?: { env?: Record<string, string>; fetchImpl?: typeof fetch; date?: Date }): Promise<{ key: string; baselinePath: string }>
 export function publishRc11Artifact(input?: { env?: Record<string, string>; fetchImpl?: typeof fetch; date?: Date }): Promise<{ key: string; cdnUrl: string; backupKey: string }>
+
+export function verifyOidcSts(input?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch }): Promise<true>

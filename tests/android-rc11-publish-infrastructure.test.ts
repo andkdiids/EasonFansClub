@@ -15,6 +15,7 @@ import {
   validateObjectMetadata,
   validateOidcClaims,
   validateVersionedObjectKey,
+  verifyOidcSts,
 } from '../scripts/android-rc11-cos-publish.mjs'
 import { assertReleaseMainBranch } from '../scripts/assert-release-main.mjs'
 import { assertNativeBearerRollbackResult } from '../scripts/assert-native-bearer-rollback-result.mjs'
@@ -269,4 +270,120 @@ test('manual rollback execution simulation rejects stale current, wrong recorded
   assert.throws(() => assertNativeBearerRollbackResult({ ...success, rollbackResult: 'SKIPPED_CURRENT_SHA_CHANGED' }), /ROLLBACK_SERVER_SHA_NOT_VERIFIED/)
   assert.throws(() => assertNativeBearerRollbackResult({ ...success, verifiedRollbackSha: 'a'.repeat(40) }), /ROLLBACK_SERVER_SHA_NOT_VERIFIED/)
   assert.throws(() => assertNativeBearerRollbackResult({ ...success, publicHealthSha: 'a'.repeat(40) }), /ROLLBACK_PUBLIC_HEALTH_SHA_NOT_VERIFIED/)
+})
+
+
+test('OIDC-only dispatch defaults to verification and is mutually exclusive with release staging', () => {
+  const workflowText = read('.github/workflows/publish-android-rc11.yml')
+  const workflow = parse(workflowText) as {
+    on: { workflow_dispatch: { inputs: Record<string, { default?: boolean; required?: boolean; type?: string }> } }
+    jobs: Record<string, { if?: string; needs?: string | string[]; environment?: { name?: string } | string; permissions?: Record<string, string>; steps: Array<Record<string, unknown>> }>
+  }
+  const input = workflow.on.workflow_dispatch.inputs.verify_oidc_only
+  assert.equal(input.type, 'boolean')
+  assert.equal(input.required, true)
+  assert.equal(input.default, true)
+
+  const verify = workflow.jobs.verify_oidc
+  const ingress = workflow.jobs.ingress
+  const cos = workflow.jobs.cos
+  assert.match(verify.if ?? '', /inputs\.verify_oidc_only == true/)
+  assert.match(ingress.if ?? '', /inputs\.verify_oidc_only == false/)
+  assert.match(cos.if ?? '', /inputs\.verify_oidc_only == false/)
+  assert.equal(verify.needs, undefined)
+  assert.equal(typeof verify.environment === 'object' ? verify.environment?.name : verify.environment, 'Production')
+  assert.equal(verify.permissions?.['id-token'], 'write')
+  assert.equal(verify.permissions?.contents, 'read')
+  const verifySteps = JSON.stringify(verify.steps)
+  assert.match(verifySteps, /scripts\/android-rc11-cos-publish\.mjs verify-oidc/)
+  assert.doesNotMatch(verifySteps, /TENCENT_COS_(?:BUCKET|REGION)|putObject|publish-rc11|backup-code30|upload-artifact|rollback|version-api/i)
+})
+
+test('OIDC-only verifier reuses the STS exchange, validates trust, and never returns credentials', async () => {
+  const claims = {
+    iss: 'https://token.actions.githubusercontent.com',
+    aud: ['configured-test-audience'],
+    sub: EXPECTED_OIDC_SUBJECT,
+    environment: 'Production',
+    repository: 'andkdiids/EasonFansClub',
+    ref: 'refs/heads/main',
+    event_name: 'workflow_dispatch',
+    workflow_ref: testWorkflowRef,
+  }
+  const jwt = `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.test-signature`
+  const env = {
+    TENCENT_CAM_OIDC_AUDIENCE: 'configured-test-audience',
+    TENCENT_EXPECTED_OIDC_SUBJECT: EXPECTED_OIDC_SUBJECT,
+    TENCENT_CAM_PROVIDER_ID: 'configured-test-provider',
+    TENCENT_CAM_ROLE_ARN: 'qcs::cam::uin/123456789:roleName/test-role',
+    TENCENT_STS_REGION: 'ap-guangzhou',
+    GITHUB_WORKFLOW_REF: testWorkflowRef,
+    GITHUB_RUN_ID: testRun.runId,
+    GITHUB_RUN_ATTEMPT: testRun.runAttempt,
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://pipelines.actions.githubusercontent.com/request',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'test-request-credential',
+  }
+  const requests: Array<{ url: string; init?: RequestInit }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input)
+    requests.push({ url, init })
+    if (url.startsWith('https://pipelines.actions.githubusercontent.com/')) {
+      assert.equal(new URL(url).searchParams.get('audience'), env.TENCENT_CAM_OIDC_AUDIENCE)
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer test-request-credential')
+      return new Response(JSON.stringify({ value: jwt }), { status: 200 })
+    }
+    assert.equal(url, 'https://sts.tencentcloudapi.com')
+    assert.equal(init?.method, 'POST')
+    assert.equal(new Headers(init?.headers).get('x-tc-action'), 'AssumeRoleWithWebIdentity')
+    const body = JSON.parse(String(init?.body))
+    assert.equal(body.WebIdentityToken, jwt)
+    assert.equal(body.RoleSessionName, 'gha-123456789-2')
+    assert.equal(body.RoleArn, env.TENCENT_CAM_ROLE_ARN)
+    assert.equal(body.ProviderId, env.TENCENT_CAM_PROVIDER_ID)
+    return new Response(JSON.stringify({ Response: { Credentials: {
+      TmpSecretId: 'test-temporary-id', TmpSecretKey: 'test-temporary-key', Token: 'test-session-token', ExpiredTime: 1_900_000_000,
+    } } }), { status: 200 })
+  }
+
+  assert.equal(await verifyOidcSts({ env, fetchImpl }), true)
+  assert.equal(requests.length, 2)
+  assert.ok(requests[0].url.startsWith('https://pipelines.actions.githubusercontent.com/'))
+  assert.equal(requests[1].url, 'https://sts.tencentcloudapi.com')
+})
+
+test('OIDC-only STS errors are explicit and omit untrusted response details', async () => {
+  const claims = {
+    iss: 'https://token.actions.githubusercontent.com',
+    aud: ['configured-test-audience'],
+    sub: EXPECTED_OIDC_SUBJECT,
+    environment: 'Production',
+    repository: 'andkdiids/EasonFansClub',
+    ref: 'refs/heads/main',
+    event_name: 'workflow_dispatch',
+    workflow_ref: testWorkflowRef,
+  }
+  const jwt = `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.test-signature`
+  const env = {
+    TENCENT_CAM_OIDC_AUDIENCE: 'configured-test-audience',
+    TENCENT_EXPECTED_OIDC_SUBJECT: EXPECTED_OIDC_SUBJECT,
+    TENCENT_CAM_PROVIDER_ID: 'configured-test-provider',
+    TENCENT_CAM_ROLE_ARN: 'qcs::cam::uin/123456789:roleName/test-role',
+    TENCENT_STS_REGION: 'ap-guangzhou',
+    GITHUB_WORKFLOW_REF: testWorkflowRef,
+    GITHUB_RUN_ID: testRun.runId,
+    GITHUB_RUN_ATTEMPT: testRun.runAttempt,
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://pipelines.actions.githubusercontent.com/request',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'test-request-credential',
+  }
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).startsWith('https://pipelines.actions.githubusercontent.com/')) {
+      return new Response(JSON.stringify({ value: jwt }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ Response: { Error: { Code: 'InvalidIdentityToken', Message: 'sensitive-provider-detail' } } }), { status: 200 })
+  }
+  await assert.rejects(verifyOidcSts({ env, fetchImpl }), (error: Error) => {
+    assert.equal(error.message, 'TENCENT_STS_REJECTED_WEB_IDENTITY')
+    assert.doesNotMatch(error.message, /test-request-credential|sensitive-provider-detail/)
+    return true
+  })
 })

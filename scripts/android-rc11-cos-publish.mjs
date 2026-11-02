@@ -33,17 +33,17 @@ const API_VERSION_URL = 'https://ecfc.fans/api/app/version?platform=android'
 const CODE30_DOWNLOAD_URL = 'https://ecfc.fans/api/app/download/android'
 const CDN_BASE_URL = 'https://media.ecfc.fans/media/'
 const OIDC_ISSUER = 'https://token.actions.githubusercontent.com'
-export const EXPECTED_OIDC_SUBJECT = 'repo:andkdiids/EasonFansClub:environment:Production:workflow_ref:andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main'
+export const EXPECTED_OIDC_WORKFLOW_REF = 'andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main'
+export const EXPECTED_OIDC_SUBJECT = `repo:andkdiids/EasonFansClub:environment:Production:workflow_ref:${EXPECTED_OIDC_WORKFLOW_REF}`
 
-const requiredConfig = Object.freeze([
+const requiredStsConfig = Object.freeze([
   'TENCENT_CAM_OIDC_AUDIENCE',
   'TENCENT_EXPECTED_OIDC_SUBJECT',
   'TENCENT_CAM_PROVIDER_ID',
   'TENCENT_CAM_ROLE_ARN',
   'TENCENT_STS_REGION',
-  'TENCENT_COS_BUCKET',
-  'TENCENT_COS_REGION',
 ])
+const requiredCosConfig = Object.freeze(['TENCENT_COS_BUCKET', 'TENCENT_COS_REGION'])
 
 function assertSha(value, expected, code) {
   if (typeof value !== 'string' || value.toUpperCase() !== expected) throw new Error(code)
@@ -119,8 +119,8 @@ export function validateVersionedObjectKey(key, kind, { runId, runAttempt } = {}
   return key
 }
 
-export function validateCosConfig(env = process.env) {
-  for (const name of requiredConfig) {
+function validateStsConfig(env = process.env) {
+  for (const name of requiredStsConfig) {
     if (typeof env[name] !== 'string' || !env[name].trim()) throw new Error(`COS_OIDC_CONFIG_MISSING:${name}`)
   }
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(env.TENCENT_CAM_PROVIDER_ID)) throw new Error('COS_OIDC_PROVIDER_ID_INVALID')
@@ -129,8 +129,16 @@ export function validateCosConfig(env = process.env) {
   }
   if (!/^[A-Za-z0-9._:/-]{1,256}$/.test(env.TENCENT_CAM_OIDC_AUDIENCE)) throw new Error('COS_OIDC_AUDIENCE_INVALID')
   if (env.TENCENT_EXPECTED_OIDC_SUBJECT !== EXPECTED_OIDC_SUBJECT) throw new Error('COS_OIDC_SUBJECT_NOT_WORKFLOW_PINNED')
-  if (!/^[A-Za-z0-9-]{2,40}$/.test(env.TENCENT_STS_REGION)
-    || !/^[A-Za-z0-9-]{2,40}$/.test(env.TENCENT_COS_REGION)
+  if (!/^[A-Za-z0-9-]{2,40}$/.test(env.TENCENT_STS_REGION)) throw new Error('COS_REGION_OR_BUCKET_INVALID')
+  return env
+}
+
+export function validateCosConfig(env = process.env) {
+  validateStsConfig(env)
+  for (const name of requiredCosConfig) {
+    if (typeof env[name] !== 'string' || !env[name].trim()) throw new Error(`COS_OIDC_CONFIG_MISSING:${name}`)
+  }
+  if (!/^[A-Za-z0-9-]{2,40}$/.test(env.TENCENT_COS_REGION)
     || !/^[a-z0-9-]{1,63}-\d{5,}$/.test(env.TENCENT_COS_BUCKET)) {
     throw new Error('COS_REGION_OR_BUCKET_INVALID')
   }
@@ -284,7 +292,8 @@ async function exchangeForSts(env, fetchImpl) {
   const payload = await response.json().catch(() => null)
   const stsError = payload?.Response?.Error
   const credentials = payload?.Response?.Credentials
-  if (stsError || !credentials?.TmpSecretId || !credentials?.TmpSecretKey || !credentials?.Token) {
+  if (stsError) throw new Error('TENCENT_STS_REJECTED_WEB_IDENTITY')
+  if (!credentials?.TmpSecretId || !credentials?.TmpSecretKey || !credentials?.Token) {
     throw new Error('TENCENT_STS_CREDENTIALS_UNAVAILABLE')
   }
   return {
@@ -293,6 +302,16 @@ async function exchangeForSts(env, fetchImpl) {
     SecurityToken: credentials.Token,
     ExpiredTime: Number(payload.Response.ExpiredTime),
   }
+}
+
+export async function verifyOidcSts({ env = process.env, fetchImpl = fetch } = {}) {
+  validateStsConfig(env)
+  if (env.GITHUB_WORKFLOW_REF !== EXPECTED_OIDC_WORKFLOW_REF) throw new Error('GITHUB_OIDC_WORKFLOW_REF_MISMATCH')
+  if (!/^\d+$/.test(String(env.GITHUB_RUN_ID ?? '')) || !/^[1-9]\d*$/.test(String(env.GITHUB_RUN_ATTEMPT ?? ''))) {
+    throw new Error('GITHUB_OIDC_RUN_CONTEXT_INVALID')
+  }
+  await exchangeForSts(env, fetchImpl)
+  return true
 }
 
 function createCosClient(credentials) {
@@ -457,6 +476,11 @@ export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch
 
 async function main() {
   const command = process.argv[2]
+  if (command === 'verify-oidc') {
+    await verifyOidcSts()
+    console.log('GITHUB_OIDC_CLAIMS=VERIFIED\nTENCENT_STS_EXCHANGE=SUCCESS')
+    return
+  }
   if (command === 'backup-code30') {
     const result = await publishCode30Backup()
     console.log(`CODE30_BACKUP_VERIFIED=YES\nCODE30_BACKUP_OBJECT_KEY=${result.key}`)
