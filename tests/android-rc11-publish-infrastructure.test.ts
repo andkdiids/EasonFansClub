@@ -436,6 +436,87 @@ test('OIDC-only verifier reuses the STS exchange, validates trust, and never ret
   assert.equal(requests[1].url, 'https://sts.tencentcloudapi.com')
 })
 
+test('OIDC endpoint validation accepts official endpoints and rejects unsafe URL variants before any request', async () => {
+  const claims = {
+    iss: 'https://token.actions.githubusercontent.com',
+    aud: ['configured-test-audience'],
+    sub: EXPECTED_OIDC_SUBJECT,
+    environment: 'Production',
+    repository: 'andkdiids/EasonFansClub',
+    ref: 'refs/heads/main',
+    event_name: 'workflow_dispatch',
+    workflow_ref: testWorkflowRef,
+  }
+  const jwt = `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.test-signature`
+  const baseEnv = {
+    TENCENT_CAM_OIDC_AUDIENCE: 'configured-test-audience',
+    TENCENT_EXPECTED_OIDC_SUBJECT: EXPECTED_OIDC_SUBJECT,
+    TENCENT_CAM_PROVIDER_ID: 'configured-test-provider',
+    TENCENT_CAM_ROLE_ARN: 'qcs::cam::uin/123456789:roleName/test-role',
+    TENCENT_STS_REGION: 'ap-guangzhou',
+    GITHUB_WORKFLOW_REF: testWorkflowRef,
+    GITHUB_RUN_ID: testRun.runId,
+    GITHUB_RUN_ATTEMPT: testRun.runAttempt,
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'test-request-credential',
+  }
+  const fetchFor = (expectedOidcHostname: string, requests: string[]) => async (input: RequestInfo | URL) => {
+    const requestUrl = String(input)
+    requests.push(requestUrl.startsWith('https://sts.tencentcloudapi.com') ? 'sts' : 'github-oidc')
+    if (requestUrl.startsWith('https://sts.tencentcloudapi.com')) {
+      return new Response(JSON.stringify({ Response: { Credentials: {
+        TmpSecretId: 'test-temporary-id',
+        TmpSecretKey: 'test-temporary-key',
+        Token: 'test-session-token',
+        ExpiredTime: 1_900_000_000,
+      } } }), { status: 200 })
+    }
+    assert.equal(new URL(requestUrl).hostname, expectedOidcHostname)
+    return new Response(JSON.stringify({ value: jwt }), { status: 200 })
+  }
+
+  const allowedEndpoints = [
+    ['https://pipelines.actions.githubusercontent.com/request', 'pipelines.actions.githubusercontent.com'],
+    ['https://run-actions-2-azure-eastus.actions.githubusercontent.com/request', 'run-actions-2-azure-eastus.actions.githubusercontent.com'],
+  ] as const
+  for (const [endpoint, hostname] of allowedEndpoints) {
+    const requests: string[] = []
+    assert.equal(await verifyOidcSts({
+      env: { ...baseEnv, ACTIONS_ID_TOKEN_REQUEST_URL: endpoint },
+      fetchImpl: fetchFor(hostname, requests),
+    }), true)
+    assert.deepEqual(requests, ['github-oidc', 'sts'])
+  }
+
+  const rejectedEndpoints = [
+    'https://evilactions.githubusercontent.com/request',
+    'https://actions.githubusercontent.com.example.com/request',
+    'http://run-actions-2-azure-eastus.actions.githubusercontent.com/request',
+    'https://run-actions-2-azure-eastus.actions.githubusercontent.com:8443/request',
+    'https://diagnostic-user:diagnostic-password@run-actions-2-azure-eastus.actions.githubusercontent.com/request',
+  ]
+  for (const endpoint of rejectedEndpoints) {
+    const requests: string[] = []
+    await assert.rejects(
+      verifyOidcSts({
+        env: { ...baseEnv, ACTIONS_ID_TOKEN_REQUEST_URL: endpoint },
+        fetchImpl: fetchFor('unused.example.invalid', requests),
+      }),
+      (error: Error) => error.message === 'GITHUB_OIDC_ENDPOINT_INVALID',
+    )
+    assert.deepEqual(requests, [])
+  }
+
+  const requests: string[] = []
+  const missingUrlEnv = { ...baseEnv, ACTIONS_ID_TOKEN_REQUEST_URL: undefined }
+  await assert.rejects(
+    verifyOidcSts({
+      env: missingUrlEnv,
+      fetchImpl: fetchFor('unused.example.invalid', requests),
+    }),
+    (error: Error) => error.message === 'GITHUB_OIDC_ENDPOINT_UNAVAILABLE',
+  )
+  assert.deepEqual(requests, [])
+})
 test('OIDC-only STS errors are explicit and omit untrusted response details', async () => {
   const claims = {
     iss: 'https://token.actions.githubusercontent.com',

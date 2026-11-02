@@ -227,6 +227,19 @@ async function downloadToFile(url, filePath, { fetchImpl = fetch, expectedSize, 
   return { size, sha256, url: response.url }
 }
 
+const GITHUB_ACTIONS_RUNNER_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+actions\.githubusercontent\.com$/
+
+function isAllowedGithubOidcEndpoint(url) {
+  const hostname = url.hostname.toLowerCase()
+  const allowedHost = hostname === 'pipelines.actions.githubusercontent.com'
+    || GITHUB_ACTIONS_RUNNER_HOST.test(hostname)
+  return url.protocol === 'https:'
+    && url.port === ''
+    && url.username === ''
+    && url.password === ''
+    && allowedHost
+}
+
 async function getGithubOidcToken(env, fetchImpl) {
   const requestUrl = env.ACTIONS_ID_TOKEN_REQUEST_URL
   const requestToken = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
@@ -237,7 +250,7 @@ async function getGithubOidcToken(env, fetchImpl) {
   } catch {
     throw new Error('GITHUB_OIDC_ENDPOINT_INVALID')
   }
-  if (url.protocol !== 'https:' || url.hostname !== 'pipelines.actions.githubusercontent.com') {
+  if (!isAllowedGithubOidcEndpoint(url)) {
     throw new Error('GITHUB_OIDC_ENDPOINT_INVALID')
   }
   url.searchParams.set('audience', env.TENCENT_CAM_OIDC_AUDIENCE)
