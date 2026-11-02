@@ -53,21 +53,21 @@ jobs:
           let protocol = 'NONE'
           let hostname = 'NONE'
           let port = 'NONE'
+          let credentials = 'INVALID'
           if (urlPresent) {
             try {
               const endpoint = new URL(endpointValue)
               protocol = endpoint.protocol.replace(/:$/, '') || 'INVALID'
               hostname = endpoint.hostname || 'INVALID'
               port = endpoint.port || (endpoint.protocol === 'https:' ? '443' : endpoint.protocol === 'http:' ? '80' : 'NONE')
+              credentials = endpoint.username || endpoint.password ? 'YES' : 'NO'
             } catch {
               protocol = 'INVALID'
               hostname = 'INVALID'
               port = 'INVALID'
+              credentials = 'INVALID'
             }
           }
-          const credentials = urlPresent && tokenPresent
-            ? 'REQUEST_URL_AND_TOKEN_PRESENT'
-            : urlPresent ? 'REQUEST_URL_ONLY' : tokenPresent ? 'REQUEST_TOKEN_ONLY' : 'NONE'
           console.log('OIDC_URL_PRESENT=' + (urlPresent ? 'YES' : 'NO'))
           console.log('OIDC_TOKEN_PRESENT=' + (tokenPresent ? 'YES' : 'NO'))
           console.log('OIDC_URL_LENGTH=' + endpointValue.length)
