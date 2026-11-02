@@ -401,7 +401,7 @@ test('Beta.21 RC11 metadata is pinned to the verified code31 APK digest and size
   const rc11Metadata: AndroidReleaseMetadata = {
     ...metadata,
     ANDROID_VERSION_CODE: 31,
-    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-'),
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-').replace('.apk', '-run123456789-attempt2.apk'),
     ANDROID_APK_SHA256: '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
     ANDROID_APK_SIZE: 183802143,
     ANDROID_RELEASE_NOTES: JSON.stringify([
@@ -425,6 +425,11 @@ test('Beta.21 RC11 metadata is pinned to the verified code31 APK digest and size
     expectedProductionSha,
     metadata: { ...rc11Metadata, ANDROID_APK_SIZE: 183802144 },
   }), /INVALID_RC11_APK_SIZE/)
+  assert.throws(() => configureAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    metadata: { ...rc11Metadata, ANDROID_APK_COS_KEY: rc11Metadata.ANDROID_APK_COS_KEY.replace(/-run\d+-attempt\d+(?=\.apk$)/, '') },
+  }), /INVALID_APK_OBJECT_KEY/)
 })
 
 test('RC11 publish compares the captured code30 Version API baseline before changing the environment', (t) => {
@@ -452,7 +457,7 @@ test('RC11 publish compares the captured code30 Version API baseline before chan
   const rc11Metadata: AndroidReleaseMetadata = {
     ...metadata,
     ANDROID_VERSION_CODE: 31,
-    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-'),
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-').replace('.apk', '-run123456789-attempt2.apk'),
     ANDROID_APK_SHA256: '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
     ANDROID_APK_SIZE: 183802143,
     ANDROID_RELEASE_NOTES: JSON.stringify([
@@ -513,7 +518,7 @@ test('RC11 rollback restores only Android metadata from the protected code30 bas
   const rc11Metadata: AndroidReleaseMetadata = {
     ...metadata,
     ANDROID_VERSION_CODE: 31,
-    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-'),
+    ANDROID_APK_COS_KEY: metadata.ANDROID_APK_COS_KEY.replace('rc3-', 'rc11-').replace('.apk', '-run123456789-attempt2.apk'),
     ANDROID_APK_SHA256: '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
     ANDROID_APK_SIZE: 183802143,
     ANDROID_RELEASE_NOTES: JSON.stringify([
@@ -527,7 +532,7 @@ test('RC11 rollback restores only Android metadata from the protected code30 bas
   }
   const published = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc11Metadata })
   const backupName = path.basename(published.backupPath)
-  const backupObjectKey = 'android/releases/ECFC-1.0.0-beta.21-code30-backup-20261102-090000.apk'
+  const backupObjectKey = 'android/releases/ECFC-1.0.0-beta.21-code30-backup-20261102-090000-run123456789-attempt2.apk'
   const validRc11Env = readFileSync(envPath, 'utf8')
   writeFileSync(envPath, validRc11Env.replace(
     '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C',
@@ -541,6 +546,13 @@ test('RC11 rollback restores only Android metadata from the protected code30 bas
     now: new Date('2026-11-02T09:00:00Z'),
   }), /ROLLBACK_CURRENT_APK_SHA256_MISMATCH/)
   writeFileSync(envPath, validRc11Env, { mode: 0o640 })
+  assert.throws(() => restoreAndroidVersionEnv({
+    appDir,
+    expectedProductionSha,
+    backupName,
+    code30BackupObjectKey: backupObjectKey.replace(/-run\d+-attempt\d+(?=\.apk$)/, ''),
+    now: new Date('2026-11-02T09:00:00Z'),
+  }), /INVALID_CODE30_BACKUP_OBJECT_KEY/)
   const restored = restoreAndroidVersionEnv({
     appDir,
     expectedProductionSha,

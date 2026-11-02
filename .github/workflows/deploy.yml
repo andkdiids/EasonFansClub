@@ -18,11 +18,18 @@ on:
       - 'docs/app-version-api.md'
       - 'scripts/update-android-version-env.mjs'
       - 'scripts/update-android-version-env.d.mts'
-      # RC11 adds request-authenticated routes and its release runbook; merging
-      # these reviewed paths must use an explicit skip-db dispatch instead of
-      # the default full database deployment triggered by a push to main.
+      # RC11 Native Bearer runtime changes and release infrastructure require
+      # an explicit skip-db deployment; never start the default full-DB push.
       - 'app/api/material-redemptions/route.ts'
       - 'docs/android-beta21-rc11-release-runbook.md'
+      - 'scripts/android-rc11-cos-publish.d.mts'
+      - 'scripts/android-rc11-cos-publish.mjs'
+      - 'scripts/assert-native-bearer-rollback-result.d.mts'
+      - 'scripts/assert-native-bearer-rollback-result.mjs'
+      - 'scripts/assert-release-main.d.mts'
+      - 'scripts/assert-release-main.mjs'
+      - 'scripts/rollback-production-git.sh'
+      - 'tests/android-rc11-publish-infrastructure.test.ts'
       - 'middleware.ts'
       - 'tests/deploy-skip-db-mode.test.ts'
       - 'tests/middleware-auth.test.ts'

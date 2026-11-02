@@ -57,9 +57,13 @@ gate.
 
 `.github/workflows/publish-android-rc11.yml` is manual-dispatch only from
 `main`, uses the shared `production-deploy` concurrency group with
-`cancel-in-progress: false`, and separates ingress from the COS job. Only the
-COS job has `id-token: write`. No long-lived Tencent secret or static
-AccessKey is used.
+`cancel-in-progress: false`, and separates ingress, OIDC verification, and COS
+staging. The `verify_oidc` and `cos` jobs have `id-token: write`; ingress does
+not. The `verify_oidc_only` input defaults to true, so verification runs alone
+by default. Selecting false is required to run ingress and COS staging. The
+verification job requests the GitHub OIDC token, validates the pinned claims,
+and exchanges it with Tencent STS without reading COS settings or calling COS.
+No long-lived Tencent secret or static AccessKey is used.
 
 Before a COS run, configure these protected `Production` environment variables
 from verified Tencent/GitHub settings:
@@ -172,9 +176,11 @@ release identity. The workflow verifies the public `/api/health/live` release
 SHA afterward. Any mismatch stops before switching. The rollback changes
 server code only; it does not touch database state or migrations.
 
-## No production actions in this preparation
+## Current release status
 
-The workflows and scripts above were added or adjusted locally only. This
-worktree has not uploaded to COS, requested a Tencent STS token, changed the
-Version API, contacted production SSH, modified CAM/GitHub settings, rebuilt
-or re-signed the APK, or committed/pushed code.
+The code is in an open pull request. No workflow was dispatched from this PR;
+the OIDC/STS tests use simulated responses and do not verify the live Tencent
+trust configuration. No COS upload, Version API change, production SSH
+deployment, database modification, APK rebuild, or APK re-sign was performed
+as part of this preparation. After merge, run the OIDC-only mode from `main`;
+the Tencent trust policy pins `workflow_ref` to the main workflow.

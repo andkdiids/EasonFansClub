@@ -191,7 +191,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      deployments: write
       id-token: write
     outputs:
       code30_backup_object_key: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}

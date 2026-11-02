@@ -46,7 +46,10 @@ function validateMetadata(metadata) {
   requireThat(releaseCandidate !== null, 'INVALID_VERSION_CODE')
   requireThat(metadata.ANDROID_MINIMUM_VERSION_CODE === 19, 'INVALID_MINIMUM_VERSION_CODE')
   requireThat(metadata.ANDROID_FORCE_UPDATE === false, 'INVALID_FORCE_UPDATE')
-  const objectKeyPattern = new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}\\.apk$`)
+  const objectKeyPattern = releaseCandidate === 'rc11'
+    ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
+    : new RegExp(`^android/releases/ECFC-1\\.0\\.0-beta\\.21-release-beta21-${releaseCandidate}-\\d{8}-\\d{6}\\.apk$`)
+
   requireThat(typeof metadata.ANDROID_APK_COS_KEY === 'string'
     && objectKeyPattern.test(metadata.ANDROID_APK_COS_KEY), 'INVALID_APK_OBJECT_KEY')
   requireThat(typeof metadata.ANDROID_APK_SHA256 === 'string'
@@ -252,7 +255,7 @@ function validateCurrentRc11(metadata) {
   requireThat(metadata.ANDROID_FORCE_UPDATE === 'false', 'ROLLBACK_CURRENT_FORCE_UPDATE_MISMATCH')
   requireThat(metadata.ANDROID_APK_SHA256?.toUpperCase() === RC11_APK_SHA256, 'ROLLBACK_CURRENT_APK_SHA256_MISMATCH')
   requireThat(metadata.ANDROID_APK_SIZE === String(RC11_APK_SIZE), 'ROLLBACK_CURRENT_APK_SIZE_MISMATCH')
-  requireThat(/^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}\.apk$/.test(metadata.ANDROID_APK_COS_KEY || ''), 'ROLLBACK_CURRENT_OBJECT_KEY_MISMATCH')
+  requireThat(/^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/.test(metadata.ANDROID_APK_COS_KEY || ''), 'ROLLBACK_CURRENT_OBJECT_KEY_MISMATCH')
   let notes
   try { notes = JSON.parse(metadata.ANDROID_RELEASE_NOTES) } catch { throw new Error('ROLLBACK_CURRENT_RELEASE_NOTES_INVALID') }
   requireThat(Array.isArray(notes) && notes.length === 6 && notes[5] === 'Beta.21 RC11 内测版本', 'ROLLBACK_CURRENT_RELEASE_NOTES_INVALID')
@@ -265,7 +268,7 @@ export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backup
     && /^android-release-[A-Za-z0-9T.-]+-[0-9a-f-]{36}\.env$/.test(backupName)
     && path.basename(backupName) === backupName, 'INVALID_ROLLBACK_BACKUP_NAME')
   requireThat(typeof code30BackupObjectKey === 'string'
-    && /^android\/releases\/ECFC-1\.0\.0-beta\.21-code30-backup-\d{8}-\d{6}\.apk$/.test(code30BackupObjectKey), 'INVALID_CODE30_BACKUP_OBJECT_KEY')
+     && /^android\/releases\/ECFC-1\.0\.0-beta\.21-code30-backup-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/.test(code30BackupObjectKey), 'INVALID_CODE30_BACKUP_OBJECT_KEY')
 
   const root = path.resolve(appDir)
   const sharedDir = path.join(root, 'shared')

@@ -195,6 +195,7 @@ test('workflow simulation binds ingress, backup-before-RC11 upload, Production, 
   assert.equal(cos.environment && typeof cos.environment === 'object' ? cos.environment.name : cos.environment, 'Production')
   assert.deepEqual(cos.needs, 'ingress')
   assert.equal(cos.permissions?.['id-token'], 'write')
+  assert.equal(cos.permissions?.deployments, undefined)
   assert.equal(ingress.permissions?.['id-token'], undefined)
   const stepNames = cos.steps.map((step) => String(step.name))
   const backupIndex = stepNames.findIndex((name) => name.includes('independent code30 backup'))
