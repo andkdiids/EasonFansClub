@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
@@ -298,6 +299,89 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   const verifySteps = JSON.stringify(verify.steps)
   assert.match(verifySteps, /scripts\/android-rc11-cos-publish\.mjs verify-oidc/)
   assert.doesNotMatch(verifySteps, /TENCENT_COS_(?:BUCKET|REGION)|putObject|publish-rc11|backup-code30|upload-artifact|rollback|version-api/i)
+})
+
+test('OIDC endpoint diagnostic parses credentials and emits only the seven allowed fields', () => {
+  const workflow = parse(read('.github/workflows/publish-android-rc11.yml')) as {
+    jobs: Record<string, { steps: Array<{ id?: string; run?: string; env?: unknown }> }>
+  }
+  const steps = workflow.jobs.verify_oidc.steps
+  const diagnostic = steps.find((step) => step.id === 'diagnose_oidc_endpoint')
+  assert.ok(diagnostic)
+  const run = diagnostic.run ?? ''
+  assert.match(run, /process\.env\.ACTIONS_ID_TOKEN_REQUEST_URL/)
+  assert.match(run, /process\.env\.ACTIONS_ID_TOKEN_REQUEST_TOKEN/)
+  assert.doesNotMatch(
+    run,
+    /\bfetch\s*\(|\bcurl\b|https?\.request|core\.getIDToken|AssumeRoleWithWebIdentity|\bSTS\b|\bCOS\b|TENCENT_COS_|putObject|publish-rc11|backup-code30|upload-artifact|rollback|version-api|configure-android-version|\/api\/app\/version|verify-oidc/i
+  )
+  assert.equal(diagnostic.env, undefined)
+  assert.ok(steps.indexOf(diagnostic) < steps.findIndex((step) => (step.run ?? '').includes('verify-oidc')))
+  const js = run.match(/node <<'NODE'\n([\s\S]*?)\nNODE/)?.[1]
+  assert.ok(js)
+  const expectedFields = [
+    'OIDC_URL_PRESENT',
+    'OIDC_TOKEN_PRESENT',
+    'OIDC_URL_LENGTH',
+    'OIDC_PROTOCOL',
+    'OIDC_HOSTNAME',
+    'OIDC_PORT',
+    'OIDC_CREDENTIALS',
+  ]
+  const runDiagnostic = (endpoint: string, token: string) => {
+    const result = spawnSync(process.execPath, ['-e', js], {
+      encoding: 'utf8',
+      env: { ...process.env, ACTIONS_ID_TOKEN_REQUEST_URL: endpoint, ACTIONS_ID_TOKEN_REQUEST_TOKEN: token },
+    })
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(result.stderr, '')
+    const lines = result.stdout.trimEnd().split(/\r?\n/)
+    assert.deepEqual(lines.map((line) => line.slice(0, line.indexOf('='))), expectedFields)
+    const output = Object.fromEntries(lines.map((line) => {
+      const separator = line.indexOf('=')
+      return [line.slice(0, separator), line.slice(separator + 1)]
+    })) as Record<string, string>
+    return { lines, output }
+  }
+
+  const hidden = ['diagnostic-user', 'diagnostic-password', 'query-secret', 'dummy-request-token']
+  const credentialUrl = 'https://diagnostic-user:diagnostic-password@oidc.example.test:8443/request?key=query-secret'
+  const credentialResult = runDiagnostic(credentialUrl, 'dummy-request-token')
+  assert.equal(credentialResult.output.OIDC_CREDENTIALS, 'YES')
+  assert.equal(credentialResult.output.OIDC_HOSTNAME, 'oidc.example.test')
+  assert.equal(credentialResult.output.OIDC_PORT, '8443')
+  assert.ok(hidden.every((value) => !credentialResult.lines.join('\n').includes(value)))
+
+  const usernameOnlyUrl = 'https://diagnostic-user@oidc.example.test:8443/request?key=query-secret'
+  const usernameOnlyResult = runDiagnostic(usernameOnlyUrl, 'dummy-request-token')
+  assert.equal(usernameOnlyResult.output.OIDC_CREDENTIALS, 'YES')
+  assert.ok(hidden.every((value) => !usernameOnlyResult.lines.join('\n').includes(value)))
+  const passwordOnlyUrl = 'https://:diagnostic-password@oidc.example.test:8443/request?key=query-secret'
+  const passwordOnlyResult = runDiagnostic(passwordOnlyUrl, 'dummy-request-token')
+  assert.equal(passwordOnlyResult.output.OIDC_CREDENTIALS, 'YES')
+  assert.ok(hidden.every((value) => !passwordOnlyResult.lines.join('\n').includes(value)))
+
+  const publicUrl = 'https://oidc.example.test:443/request?key=query-secret'
+  const publicResult = runDiagnostic(publicUrl, 'dummy-request-token')
+  assert.equal(publicResult.output.OIDC_CREDENTIALS, 'NO')
+  assert.equal(publicResult.output.OIDC_PORT, '443')
+  assert.ok(hidden.every((value) => !publicResult.lines.join('\n').includes(value)))
+
+  const invalidResult = runDiagnostic('https://[invalid', 'dummy-request-token')
+  assert.equal(invalidResult.output.OIDC_CREDENTIALS, 'INVALID')
+  assert.equal(invalidResult.output.OIDC_PROTOCOL, 'INVALID')
+  assert.equal(invalidResult.output.OIDC_HOSTNAME, 'INVALID')
+  assert.equal(invalidResult.output.OIDC_PORT, 'INVALID')
+  assert.ok(hidden.every((value) => !invalidResult.lines.join('\n').includes(value)))
+
+  const missingResult = runDiagnostic('', '')
+  assert.equal(missingResult.output.OIDC_URL_PRESENT, 'NO')
+  assert.equal(missingResult.output.OIDC_TOKEN_PRESENT, 'NO')
+  assert.equal(missingResult.output.OIDC_URL_LENGTH, '0')
+  assert.equal(missingResult.output.OIDC_PROTOCOL, 'NONE')
+  assert.equal(missingResult.output.OIDC_HOSTNAME, 'NONE')
+  assert.equal(missingResult.output.OIDC_PORT, 'NONE')
+  assert.equal(missingResult.output.OIDC_CREDENTIALS, 'INVALID')
 })
 
 test('OIDC-only verifier reuses the STS exchange, validates trust, and never returns credentials', async () => {
