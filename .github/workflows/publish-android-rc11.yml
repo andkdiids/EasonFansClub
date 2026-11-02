@@ -41,6 +41,41 @@ jobs:
         with:
           node-version: 22
 
+      - name: Diagnose OIDC endpoint metadata without requesting a token
+        id: diagnose_oidc_endpoint
+        shell: bash
+        run: |
+          node <<'NODE'
+          const endpointValue = process.env.ACTIONS_ID_TOKEN_REQUEST_URL || ''
+          const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN || ''
+          const urlPresent = endpointValue.length > 0
+          const tokenPresent = requestToken.length > 0
+          let protocol = 'NONE'
+          let hostname = 'NONE'
+          let port = 'NONE'
+          if (urlPresent) {
+            try {
+              const endpoint = new URL(endpointValue)
+              protocol = endpoint.protocol.replace(/:$/, '') || 'INVALID'
+              hostname = endpoint.hostname || 'INVALID'
+              port = endpoint.port || (endpoint.protocol === 'https:' ? '443' : endpoint.protocol === 'http:' ? '80' : 'NONE')
+            } catch {
+              protocol = 'INVALID'
+              hostname = 'INVALID'
+              port = 'INVALID'
+            }
+          }
+          const credentials = urlPresent && tokenPresent
+            ? 'REQUEST_URL_AND_TOKEN_PRESENT'
+            : urlPresent ? 'REQUEST_URL_ONLY' : tokenPresent ? 'REQUEST_TOKEN_ONLY' : 'NONE'
+          console.log('OIDC_URL_PRESENT=' + (urlPresent ? 'YES' : 'NO'))
+          console.log('OIDC_TOKEN_PRESENT=' + (tokenPresent ? 'YES' : 'NO'))
+          console.log('OIDC_URL_LENGTH=' + endpointValue.length)
+          console.log('OIDC_PROTOCOL=' + protocol)
+          console.log('OIDC_HOSTNAME=' + hostname)
+          console.log('OIDC_PORT=' + port)
+          console.log('OIDC_CREDENTIALS=' + credentials)
+          NODE
       - name: Verify OIDC claims and exchange for Tencent STS credentials only
         env:
           TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}

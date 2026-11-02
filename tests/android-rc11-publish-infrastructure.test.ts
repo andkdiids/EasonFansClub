@@ -300,6 +300,41 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   assert.doesNotMatch(verifySteps, /TENCENT_COS_(?:BUCKET|REGION)|putObject|publish-rc11|backup-code30|upload-artifact|rollback|version-api/i)
 })
 
+test('OIDC endpoint diagnostic reports metadata only and never requests a token', () => {
+  const workflow = parse(read('.github/workflows/publish-android-rc11.yml')) as {
+    jobs: Record<string, { steps: Array<{ id?: string; run?: string; env?: unknown }> }>
+  }
+  const steps = workflow.jobs.verify_oidc.steps
+  const diagnostic = steps.find((step) => step.id === 'diagnose_oidc_endpoint')
+  assert.ok(diagnostic)
+  const run = diagnostic.run ?? ''
+  assert.match(run, /process\.env\.ACTIONS_ID_TOKEN_REQUEST_URL/)
+  assert.match(run, /process\.env\.ACTIONS_ID_TOKEN_REQUEST_TOKEN/)
+  const outputLines = run.split('\n').filter((line) => line.includes('console.log('))
+  const outputFields = outputLines.map((line) => line.match(/console\.log\('([^=]+)=/)?.[1] ?? null)
+  assert.deepEqual(outputFields, [
+    'OIDC_URL_PRESENT',
+    'OIDC_TOKEN_PRESENT',
+    'OIDC_URL_LENGTH',
+    'OIDC_PROTOCOL',
+    'OIDC_HOSTNAME',
+    'OIDC_PORT',
+    'OIDC_CREDENTIALS',
+  ])
+  assert.doesNotMatch(run, /\bfetch\s*\(|\bcurl\b|https?\.request|core\.getIDToken|AssumeRoleWithWebIdentity|verify-oidc/i)
+  assert.deepEqual(outputLines, [
+    "console.log('OIDC_URL_PRESENT=' + (urlPresent ? 'YES' : 'NO'))",
+    "console.log('OIDC_TOKEN_PRESENT=' + (tokenPresent ? 'YES' : 'NO'))",
+    "console.log('OIDC_URL_LENGTH=' + endpointValue.length)",
+    "console.log('OIDC_PROTOCOL=' + protocol)",
+    "console.log('OIDC_HOSTNAME=' + hostname)",
+    "console.log('OIDC_PORT=' + port)",
+    "console.log('OIDC_CREDENTIALS=' + credentials)",
+  ])
+  assert.equal(diagnostic.env, undefined)
+  assert.ok(steps.indexOf(diagnostic) < steps.findIndex((step) => (step.run ?? '').includes('verify-oidc')))
+})
+
 test('OIDC-only verifier reuses the STS exchange, validates trust, and never returns credentials', async () => {
   const claims = {
     iss: 'https://token.actions.githubusercontent.com',
