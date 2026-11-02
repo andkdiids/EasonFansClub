@@ -28,6 +28,9 @@ on:
       - 'scripts/assert-native-bearer-rollback-result.mjs'
       - 'scripts/assert-release-main.d.mts'
       - 'scripts/assert-release-main.mjs'
+      # RC11 signer verification is release infrastructure, not app runtime.
+      - 'scripts/verify-android-apk-signature.d.mts'
+      - 'scripts/verify-android-apk-signature.mjs'
       - 'scripts/rollback-production-git.sh'
       - 'tests/android-rc11-publish-infrastructure.test.ts'
       - 'middleware.ts'
