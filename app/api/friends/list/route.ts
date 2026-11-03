@@ -201,7 +201,7 @@ async function searchUsers(currentUserId: string, q: string) {
       },
       orderBy: [{ lastActiveAt: 'desc' }, { uid: 'asc' }],
       take: 20,
-      select: publicFriendSelect,
+      select: publicProfileLookupSelect,
     }),
     // FriendDock is an authenticated contact search. Include the viewer's
     // own aliases in its candidate set, but keep the alias itself viewer
@@ -220,7 +220,7 @@ async function searchUsers(currentUserId: string, q: string) {
     ? await prisma.user.findMany({
         where: { ...activeUserWhere, id: { in: remarkOnlyIds } },
         orderBy: [{ lastActiveAt: 'desc' }, { uid: 'asc' }],
-        select: publicFriendSelect,
+        select: publicProfileLookupSelect,
       })
     : []
   const remarkMatchedIds = new Set(matchingRemarks.map((item) => item.friendId))
@@ -357,6 +357,14 @@ const publicFriendSelect = {
   Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true } },
 } as const
 
+// Public profile lookup is also used to open another user's profile. Keep this
+// DTO limited to the existing public friend fields plus the background already
+// shown by the public profile page.
+const publicProfileLookupSelect = {
+  ...publicFriendSelect,
+  Profile: { select: { displayName: true, displayNameModerationStatus: true, avatarUrl: true, bio: true, bioModerationStatus: true, backgroundUrl: true } },
+} as const
+
 function serializePublicUser(
   friend: {
     id: string
@@ -373,7 +381,7 @@ function serializePublicUser(
     isOnline: boolean
     lastActiveAt: Date | null
     createdAt: Date
-    Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null; bio: string | null; bioModerationStatus?: string | null } | null
+    Profile: { displayName: string | null; displayNameModerationStatus?: string | null; avatarUrl: string | null; bio: string | null; bioModerationStatus?: string | null; backgroundUrl?: string | null } | null
   },
   level: number,
   levelName: string,
@@ -403,6 +411,10 @@ function serializePublicUser(
     equippedBadge: equippedBadges[0] || null,
     // Profile.displayName is a public profile field.  Never replace it with a
     // viewer-owned friend remark.
-    profile: friend.Profile ? { ...friend.Profile, avatarUrl: publicImageUrl(friend.Profile.avatarUrl) } : friend.Profile,
+    profile: friend.Profile ? {
+      ...friend.Profile,
+      avatarUrl: publicImageUrl(friend.Profile.avatarUrl),
+      ...(friend.Profile.backgroundUrl !== undefined ? { backgroundUrl: publicImageUrl(friend.Profile.backgroundUrl) } : {}),
+    } : friend.Profile,
   }
 }
