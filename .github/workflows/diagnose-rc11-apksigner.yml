@@ -8,7 +8,7 @@ on:
       - '.github/workflows/diagnose-rc11-apksigner.yml'
       - 'scripts/verify-android-apk-signature.mjs'
       - 'scripts/verify-android-apk-signature.d.mts'
-      - 'tests/android-rc11-publish-infrastructure.test.ts'
+      - 'tests/rc11-apksigner-diagnostics.test.mjs'
 
 permissions:
   contents: read
@@ -22,6 +22,9 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+
+      - name: Run focused signer parser tests
+        run: node --test tests/rc11-apksigner-diagnostics.test.mjs
 
       - name: Capture the public RC11 artifact signer output
         shell: bash
@@ -62,3 +65,4 @@ jobs:
           node scripts/verify-android-apk-signature.mjs \
             "${apksigner}" "${apk_path}" \
             '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
+
