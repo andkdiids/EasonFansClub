@@ -1,0 +1,64 @@
+name: Diagnose RC11 apksigner output
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/diagnose-rc11-apksigner.yml'
+      - 'scripts/verify-android-apk-signature.mjs'
+      - 'scripts/verify-android-apk-signature.d.mts'
+      - 'tests/android-rc11-publish-infrastructure.test.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Capture the public RC11 artifact signer output
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          apksigner="$(find "${sdk_root}/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          [[ -x "${apksigner}" ]] || { echo 'ANDROID_APKSIGNER_NOT_AVAILABLE'; exit 1; }
+          echo "APKSIGNER_VERSION_BEGIN"
+          "${apksigner}" version
+          echo "APKSIGNER_VERSION_END"
+
+          apk_path="${RUNNER_TEMP}/ecfc-beta21-rc11-diagnostic.apk"
+          stdout_path="${RUNNER_TEMP}/apksigner.stdout"
+          stderr_path="${RUNNER_TEMP}/apksigner.stderr"
+          curl --fail --silent --show-error --location --max-time 2400 \
+            --output "${apk_path}" \
+            'https://media.ecfc.fans/media/android/releases/ECFC-1.0.0-beta.21-release-beta21-rc11-20261102-205722-run41523510243-attempt1.apk'
+          actual_size="$(stat -c '%s' "${apk_path}")"
+          actual_sha="$(sha256sum "${apk_path}" | awk '{print toupper($1)}')"
+          [[ "${actual_size}" == 183802143 ]] || { echo 'RC11_DIAGNOSTIC_SIZE_MISMATCH'; exit 1; }
+          [[ "${actual_sha}" == 9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C ]] || { echo 'RC11_DIAGNOSTIC_SHA256_MISMATCH'; exit 1; }
+          echo "RC11_DIAGNOSTIC_APK_INTEGRITY=VERIFIED"
+
+          set +e
+          "${apksigner}" verify --verbose --print-certs "${apk_path}" >"${stdout_path}" 2>"${stderr_path}"
+          apksigner_status=$?
+          set -e
+          echo "APKSIGNER_EXIT_STATUS=${apksigner_status}"
+          echo 'APKSIGNER_STDOUT_BEGIN'
+          cat "${stdout_path}"
+          echo 'APKSIGNER_STDOUT_END'
+          echo 'APKSIGNER_STDERR_BEGIN'
+          cat "${stderr_path}"
+          echo 'APKSIGNER_STDERR_END'
+          [[ "${apksigner_status}" == 0 ]] || { echo 'APK_SIGNATURE_INVALID'; exit 1; }
+
+          node scripts/verify-android-apk-signature.mjs \
+            "${apksigner}" "${apk_path}" \
+            '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B'
