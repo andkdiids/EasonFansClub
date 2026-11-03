@@ -46,6 +46,16 @@ test('RC11 apksigner diagnostics are read-only and validate the fixed public art
   assert.doesNotMatch(workflowText, /\$\{\{\s*secrets\./)
 })
 
+test('signer diagnostic-only paths cannot trigger the default production deploy', () => {
+  const deployWorkflowText = read('.github/workflows/deploy.yml')
+  const pushTrigger = deployWorkflowText.match(/paths-ignore:\s*([\s\S]*?)\n\s+workflow_dispatch:/)?.[1]
+  assert.ok(pushTrigger)
+  assert.match(pushTrigger, /'\.github\/\*\*'/)
+  assert.match(pushTrigger, /'scripts\/verify-android-apk-signature\.mjs'/)
+  assert.match(pushTrigger, /'scripts\/verify-android-apk-signature\.d\.mts'/)
+  assert.match(pushTrigger, /'tests\/rc11-apksigner-diagnostics\.test\.mjs'/)
+})
+
 test('apksigner 0.9 runner fixture parses the scheme-prefixed single signer digest', () => {
   assert.deepEqual(parseApksignerOutput(runnerApksignerOutput), {
     signerCount: 1,
