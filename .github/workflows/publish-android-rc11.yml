@@ -233,7 +233,7 @@ jobs:
 
   cos:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
-    name: Back up the current release, then stage the selected candidate
+    name: Stage the candidate without copying the current release
     needs: ingress
     runs-on: ubuntu-22.04
     environment:
@@ -245,8 +245,6 @@ jobs:
       actions: read
       id-token: write
     outputs:
-      code30_backup_object_key: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
-      code31_backup_object_key: ${{ steps.backup31.outputs.CODE31_BACKUP_OBJECT_KEY }}
       rc11_object_key: ${{ steps.rc11.outputs.RC11_OBJECT_KEY }}
       rc11_cdn_url: ${{ steps.rc11.outputs.RC11_CDN_URL }}
       rc12_object_key: ${{ steps.rc12.outputs.RC12_OBJECT_KEY }}
@@ -284,39 +282,16 @@ jobs:
       - name: Install locked production dependencies
         run: pnpm install --prod --frozen-lockfile --ignore-scripts
 
-      - name: Upload an independent code30 backup and verify the public CDN bytes
-        if: inputs.release_candidate == 'rc11'
-        id: backup
+      - name: Capture the current Android Version API baseline without modifying it
         env:
-          RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
-          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
-          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
-          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
-          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
-          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
-          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
-          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
-        run: node scripts/android-rc11-cos-publish.mjs backup-code30
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+        run: node scripts/android-rc11-cos-publish.mjs verify-version-baseline
 
-      - name: Upload an independent code31 backup and verify public CDN bytes
-        if: inputs.release_candidate == 'rc12'
-        id: backup31
-        env:
-          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
-          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
-          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
-          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
-          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
-          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
-          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
-        run: node scripts/android-rc11-cos-publish.mjs backup-code31
-
-      - name: Upload RC11 only after the independent code30 backup passed readback
+      - name: Upload the immutable RC11 candidate and verify CDN readback
         if: inputs.release_candidate == 'rc11'
         id: rc11
         env:
           RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
-          CODE30_BACKUP_OBJECT_KEY: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
           TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
           TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
           TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
@@ -326,12 +301,11 @@ jobs:
           TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
         run: node scripts/android-rc11-cos-publish.mjs publish-rc11
 
-      - name: Upload RC12 only after the independent code31 backup passed readback
+      - name: Upload the immutable RC12 candidate and verify CDN readback
         if: inputs.release_candidate == 'rc12'
         id: rc12
         env:
           RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
-          CODE31_BACKUP_OBJECT_KEY: ${{ steps.backup31.outputs.CODE31_BACKUP_OBJECT_KEY }}
           TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
           TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
           TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
@@ -361,34 +335,31 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Summarize staged immutable object locations
+      - name: Summarize RC12 and its existing immutable rollback source
         if: inputs.release_candidate == 'rc12'
         env:
-          CODE31_BACKUP_OBJECT_KEY: ${{ steps.backup31.outputs.CODE31_BACKUP_OBJECT_KEY }}
           RC12_OBJECT_KEY: ${{ steps.rc12.outputs.RC12_OBJECT_KEY }}
           RC12_CDN_URL: ${{ steps.rc12.outputs.RC12_CDN_URL }}
         run: |
           {
             echo '### Android Beta21 RC12 COS staging'
             echo
-            echo "- code31 backup object: $CODE31_BACKUP_OBJECT_KEY"
+            echo '- code31 rollback source: the existing immutable RC11 object; no duplicate APK upload'
             echo "- RC12 object: $RC12_OBJECT_KEY"
             echo "- verified public CDN URL: $RC12_CDN_URL"
             echo '- Version API: unchanged by this workflow'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Summarize staged immutable object locations
+      - name: Summarize RC11 and its existing immutable rollback source
         if: inputs.release_candidate == 'rc11'
         env:
-          CODE30_BACKUP_OBJECT_KEY: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
           RC11_OBJECT_KEY: ${{ steps.rc11.outputs.RC11_OBJECT_KEY }}
           RC11_CDN_URL: ${{ steps.rc11.outputs.RC11_CDN_URL }}
         run: |
           {
             echo '### Android Beta21 RC11 COS staging'
             echo
-            echo '- code30 backup readback: verified before the RC11 upload'
-            echo "- code30 backup object: `${CODE30_BACKUP_OBJECT_KEY}`"
+            echo '- code30 rollback source: the existing immutable code30 object; no duplicate APK upload'
             echo "- RC11 object: `${RC11_OBJECT_KEY}`"
             echo "- verified public CDN URL: ${RC11_CDN_URL}"
             echo '- Version API: unchanged by this workflow'

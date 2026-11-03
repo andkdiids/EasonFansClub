@@ -29,6 +29,8 @@ export const CODE30_BASELINE = Object.freeze({
 export const CODE31_BASELINE = Object.freeze({
   ...RC11_BASELINE,
 })
+export const CODE30_ROLLBACK_OBJECT_KEY = 'android/releases/ECFC-1.0.0-beta.21-code30-backup-20261102-205634-run41523510243-attempt1.apk'
+export const CODE31_ROLLBACK_OBJECT_KEY = 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc11-20261102-205722-run41523510243-attempt1.apk'
 export const RC12_BASELINE = Object.freeze({
   applicationId: 'fans.ecfc.app',
   versionCode: 32,
@@ -123,29 +125,23 @@ export function validateIngressManifest(manifest, {
 }
 
 export function createVersionedObjectKey(kind, { date = new Date(), runId, runAttempt } = {}) {
-  if (!['code30-backup', 'code31-backup', 'rc11', 'rc12'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
+  if (!['rc11', 'rc12'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
   if (!/^\d+$/.test(String(runId ?? '')) || !/^[1-9]\d*$/.test(String(runAttempt ?? ''))) {
     throw new Error('GITHUB_RUN_ID_INVALID')
   }
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) throw new Error('OBJECT_TIMESTAMP_INVALID')
   const timestamp = date.toISOString().replace(/[-:]/g, '').replace('T', '-').replace(/\.\d{3}Z$/, '')
-  const filename = kind.endsWith('-backup')
-    ? 'ECFC-1.0.0-beta.21-' + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
-    : 'ECFC-1.0.0-beta.21-release-beta21-' + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
+  const filename = 'ECFC-1.0.0-beta.21-release-beta21-' + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
   return 'android/releases/' + filename
 }
 
 export function validateVersionedObjectKey(key, kind, { runId, runAttempt } = {}) {
   if (typeof key !== 'string' || !key.startsWith('android/releases/')) throw new Error('COS_OBJECT_KEY_INVALID')
-  const pattern = kind === 'code30-backup'
-    ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-code30-backup-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
-    : kind === 'code31-backup'
-      ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-code31-backup-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
-      : kind === 'rc11'
-        ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
-        : kind === 'rc12'
-          ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc12-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
-          : null
+  const pattern = kind === 'rc11'
+    ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
+    : kind === 'rc12'
+      ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc12-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
+      : null
   if (!pattern || !pattern.test(key)) throw new Error('COS_OBJECT_KEY_INVALID')
   if (runId !== undefined && !key.includes('-run' + runId + '-attempt' + runAttempt + '.apk')) {
     throw new Error('COS_OBJECT_KEY_RUN_MISMATCH')
@@ -247,6 +243,57 @@ async function runReleaseStage(stage, operation, logImpl = console.log) {
     logReleaseProgress(stage, 'FAILED', `duration_ms=${Date.now() - startedAt}`, logImpl)
     throw error
   }
+}
+
+async function verifyRollbackSourceRange(candidate, fetchImpl) {
+  const source = candidate === 'rc11'
+    ? { key: CODE30_ROLLBACK_OBJECT_KEY, size: CODE30_BASELINE.size, code: 30 }
+    : { key: CODE31_ROLLBACK_OBJECT_KEY, size: CODE31_BASELINE.size, code: 31 }
+  const url = new URL(source.key, CDN_BASE_URL).toString()
+  let response
+  try {
+    response = await fetchImpl(url, {
+      headers: { Range: 'bytes=0-0' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch {
+    throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`)
+  }
+  if (!response.ok || response.status !== 206 || response.url !== url
+    || response.headers.get('content-range') !== `bytes 0-0/${source.size}`) {
+    throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`)
+  }
+  let bytes
+  try { bytes = await response.arrayBuffer() } catch { throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`) }
+  if (bytes.byteLength !== 1) throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`)
+  return source
+}
+
+export async function captureVersionApiBaseline({ candidate = process.env.RELEASE_CANDIDATE, env = process.env, fetchImpl = fetch } = {}) {
+  const expectedVersionCode = candidate === 'rc11' ? 30 : candidate === 'rc12' ? 31 : null
+  if (expectedVersionCode === null) throw new Error('RELEASE_CANDIDATE_INVALID')
+  const body = await runReleaseStage(`PRODUCTION_VERSION_API_CODE${expectedVersionCode}`, async () => {
+    let response
+    try {
+      response = await fetchImpl(API_VERSION_URL, { redirect: 'error', signal: AbortSignal.timeout(30_000) })
+    } catch {
+      throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
+    }
+    if (!response.ok) throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
+    let body
+    try { body = await response.json() } catch { throw new Error('PRODUCTION_VERSION_API_INVALID') }
+    return expectedVersionCode === 30 ? validateCode30VersionApi(body) : validateCode31VersionApi(body)
+  })
+  const rollbackSource = await verifyRollbackSourceRange(candidate, fetchImpl)
+  const fileName = expectedVersionCode === 30
+    ? 'android-version-api-code30-baseline.json'
+    : 'android-version-api-code31-baseline.json'
+  const baselinePath = path.join(env.RUNNER_TEMP || os.tmpdir(), fileName)
+  await writeFile(baselinePath, `${JSON.stringify(body, null, 2)}\n`, { flag: 'wx' })
+  console.log(`VERSION_API_CODE${expectedVersionCode}_READ_ONLY_BASELINE=VERIFIED`)
+  console.log(`CODE${rollbackSource.code}_ROLLBACK_SOURCE_RANGE=VERIFIED`)
+  return { body, baselinePath, rollbackSource }
 }
 
 export async function downloadToFile(url, filePath, {
@@ -481,25 +528,6 @@ function writeOutput(name, value, env = process.env) {
   return writeFile(env.GITHUB_OUTPUT, `${name}=${value}\n`, { flag: 'a' })
 }
 
-async function fetchVersionApi(expectedVersionCode = 30, fetchImpl = fetch) {
-  return runReleaseStage(`PRODUCTION_VERSION_API_CODE${expectedVersionCode}`, async () => {
-    let response
-    try {
-      response = await fetchImpl(API_VERSION_URL, { redirect: 'error', signal: AbortSignal.timeout(30_000) })
-    } catch {
-      throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
-    }
-    if (!response.ok) throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
-    let body
-    try {
-      body = await response.json()
-    } catch {
-      throw new Error('PRODUCTION_VERSION_API_INVALID')
-    }
-    return expectedVersionCode === 30 ? validateCode30VersionApi(body) : validateCode31VersionApi(body)
-  })
-}
-
 async function readIngressArtifact(env, candidate = env.RELEASE_CANDIDATE || 'rc11') {
   const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : null
   const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : null
@@ -539,55 +567,8 @@ function runIdentifiers(env) {
   return { runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT }
 }
 
-export async function publishCode30Backup({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
-  runIdentifiers(env)
-  const apiBody = await fetchVersionApi(30, fetchImpl)
-  const baselinePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'android-version-api-code30-baseline.json')
-  await writeFile(baselinePath, `${JSON.stringify(apiBody, null, 2)}\n`, { flag: 'wx' })
-  const sourcePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'ecfc-beta21-code30-source.apk')
-  await downloadToFile(apiBody.downloadUrl, sourcePath, {
-    fetchImpl,
-    expectedSize: CODE30_BASELINE.size,
-    expectedSha256: CODE30_BASELINE.sha256,
-    stage: 'CODE30_BACKUP_SOURCE_DOWNLOAD',
-  })
-  const cos = await getCos(env, fetchImpl)
-  const key = createVersionedObjectKey('code30-backup', { ...runIdentifiers(env), date })
-  await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE30_BASELINE, stage: 'CODE30_BACKUP' })
-  await writeOutput('CODE30_BACKUP_OBJECT_KEY', key, env)
-  await writeOutput('CODE30_BACKUP_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
-  return { key, baselinePath }
-}
-
-export async function publishCode31Backup({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
-  runIdentifiers(env)
-  const apiBody = await fetchVersionApi(31, fetchImpl)
-  const baselinePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'android-version-api-code31-baseline.json')
-  await writeFile(baselinePath, JSON.stringify(apiBody, null, 2) + '\n', { flag: 'wx' })
-  const sourcePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'ecfc-beta21-code31-source.apk')
-  await downloadToFile(apiBody.downloadUrl, sourcePath, {
-    fetchImpl,
-    expectedSize: CODE31_BASELINE.size,
-    expectedSha256: CODE31_BASELINE.sha256,
-    stage: 'CODE31_BACKUP_SOURCE_DOWNLOAD',
-  })
-  const cos = await getCos(env, fetchImpl)
-  const key = createVersionedObjectKey('code31-backup', { ...runIdentifiers(env), date })
-  await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE31_BASELINE, stage: 'CODE31_BACKUP' })
-  await writeOutput('CODE31_BACKUP_OBJECT_KEY', key, env)
-  await writeOutput('CODE31_BACKUP_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
-  return { key, baselinePath }
-}
-
 export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
   const ids = runIdentifiers(env)
-  const backupKey = validateVersionedObjectKey(env.CODE30_BACKUP_OBJECT_KEY, 'code30-backup', ids)
-  await downloadToFile(new URL(backupKey, CDN_BASE_URL).toString(), path.join(env.RUNNER_TEMP || os.tmpdir(), 'ecfc-beta21-code30-backup-readback.apk'), {
-    fetchImpl,
-    expectedSize: CODE30_BASELINE.size,
-    expectedSha256: CODE30_BASELINE.sha256,
-    stage: 'CODE30_BACKUP_PREUPLOAD_READBACK',
-  })
   const { apkPath } = await readIngressArtifact(env)
   const cos = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('rc11', { ...ids, date })
@@ -596,18 +577,11 @@ export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch
   await writeOutput('RC11_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   await writeOutput('RC11_SHA256', RC11_BASELINE.sha256, env)
   await writeOutput('RC11_SIZE', RC11_BASELINE.size, env)
-  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString(), backupKey }
+  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString() }
 }
 
 export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
   const ids = runIdentifiers(env)
-  const backupKey = validateVersionedObjectKey(env.CODE31_BACKUP_OBJECT_KEY, 'code31-backup', ids)
-  await downloadToFile(new URL(backupKey, CDN_BASE_URL).toString(), path.join(env.RUNNER_TEMP || os.tmpdir(), 'ecfc-beta21-code31-backup-readback.apk'), {
-    fetchImpl,
-    expectedSize: CODE31_BASELINE.size,
-    expectedSha256: CODE31_BASELINE.sha256,
-    stage: 'CODE31_BACKUP_PREUPLOAD_READBACK',
-  })
   const { apkPath } = await readIngressArtifact(env, 'rc12')
   const cos = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('rc12', { ...ids, date })
@@ -616,7 +590,7 @@ export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch
   await writeOutput('RC12_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   await writeOutput('RC12_SHA256', RC12_BASELINE.sha256, env)
   await writeOutput('RC12_SIZE', RC12_BASELINE.size, env)
-  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString(), backupKey }
+  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString() }
 }
 
 async function main() {
@@ -626,14 +600,9 @@ async function main() {
     console.log('GITHUB_OIDC_CLAIMS=VERIFIED\nTENCENT_STS_EXCHANGE=SUCCESS')
     return
   }
-  if (command === 'backup-code30') {
-    const result = await publishCode30Backup()
-    console.log(`CODE30_BACKUP_VERIFIED=YES\nCODE30_BACKUP_OBJECT_KEY=${result.key}`)
-    return
-  }
-  if (command === 'backup-code31') {
-    const result = await publishCode31Backup()
-    console.log('CODE31_BACKUP_VERIFIED=YES\nCODE31_BACKUP_OBJECT_KEY=' + result.key)
+  if (command === 'verify-version-baseline') {
+    const result = await captureVersionApiBaseline()
+    console.log(`VERSION_API_BASELINE_FILE=${result.baselinePath}`)
     return
   }
   if (command === 'publish-rc11') {
