@@ -239,7 +239,7 @@ jobs:
     environment:
       name: Production
       url: https://ecfc.fans
-    timeout-minutes: 90
+    timeout-minutes: 360
     permissions:
       contents: read
       actions: read
