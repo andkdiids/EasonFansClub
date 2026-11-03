@@ -4,10 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       verify_oidc_only:
-        description: Verify GitHub OIDC and Tencent STS only. Uncheck only to run the guarded RC11 publication.
+        description: Verify GitHub OIDC and Tencent STS only. Uncheck only to stage the selected guarded release candidate.
         required: true
         type: boolean
         default: true
+      release_candidate:
+        description: Candidate to stage. RC12 is the next immutable code32 release.
+        required: true
+        type: choice
+        options:
+          - rc11
+          - rc12
+        default: rc11
 
 permissions:
   contents: read
@@ -87,7 +95,7 @@ jobs:
 
   ingress:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
-    name: Verify and stage the fixed local RC11 APK
+    name: Verify and stage the fixed local Android release APK
     runs-on: [self-hosted, Windows, X64, rc11-artifact-ingress]
     environment:
       name: Production
@@ -101,8 +109,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: ${{ github.sha }}
-          EXPECTED_SHA256: 9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C
-          EXPECTED_SIZE: "183802143"
+          EXPECTED_SHA256: ${{ inputs.release_candidate == 'rc11' && '9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C' || '50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271' }}
+          EXPECTED_SIZE: ${{ inputs.release_candidate == 'rc11' && '183802143' || '180263015' }}
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
           EXPECTED_WORKFLOW_REF: andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main
         run: |
           $ErrorActionPreference = 'Stop'
@@ -129,7 +138,14 @@ jobs:
           }
           if ($branch.commit.sha -ne $env:EXPECTED_MAIN_SHA) { throw 'MAIN_BRANCH_MOVED_OR_SHA_INVALID' }
 
-          $sourcePath = 'E:\Eason\build-cache\ECFC-Release-Artifacts\Beta21-Auth-Blockers\ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
+          $releaseCandidate = $env:RELEASE_CANDIDATE
+          if ($releaseCandidate -eq 'rc11') {
+            $sourcePath = 'E:\Eason\build-cache\ECFC-Release-Artifacts\Beta21-Auth-Blockers\ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
+            $expectedCode = '31'
+          } elseif ($releaseCandidate -eq 'rc12') {
+            $sourcePath = 'E:\Eason\build-cache\ECFC-Release-Artifacts\Beta21-RC12\ECFC-1.0.0-beta.21-release-RC12-code32.apk'
+            $expectedCode = '32'
+          } else { throw 'RELEASE_CANDIDATE_INVALID' }
           if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'RC11_APK_SOURCE_MISSING' }
           $source = Get-Item -LiteralPath $sourcePath
           if ($source.Length.ToString() -ne $env:EXPECTED_SIZE) { throw 'RC11_APK_SIZE_MISMATCH' }
@@ -167,7 +183,7 @@ jobs:
           $badging = & $aapt dump badging $sourcePath 2>&1
           if ($LASTEXITCODE -ne 0) { throw 'RC11_APK_METADATA_UNAVAILABLE' }
           $badgingText = [string]::Join("`n", $badging)
-          $packageMatches = $badgingText -match "package: name='fans\.ecfc\.app' versionCode='31' versionName='1\.0\.0-beta\.21'"
+          $packageMatches = $badgingText -match "package: name='fans\.ecfc\.app' versionCode='$expectedCode' versionName='1\.0\.0-beta\.21'"
           $minSdkMatches = $badgingText -match "sdkVersion:'24'"
           $targetSdkMatches = $badgingText -match "targetSdkVersion:'36'"
           if (-not $packageMatches -or -not $minSdkMatches -or -not $targetSdkMatches) {
@@ -176,7 +192,7 @@ jobs:
 
           $stage = Join-Path $env:RUNNER_TEMP "rc11-ingress-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          $stagedApk = Join-Path $stage 'ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
+          $stagedApk = Join-Path $stage ([IO.Path]::GetFileName($sourcePath))
           Copy-Item -LiteralPath $sourcePath -Destination $stagedApk
           $stagedDigest = (Get-FileHash -LiteralPath $stagedApk -Algorithm SHA256).Hash.ToUpperInvariant()
           if ($stagedDigest -ne $env:EXPECTED_SHA256 -or (Get-Item -LiteralPath $stagedApk).Length.ToString() -ne $env:EXPECTED_SIZE) {
@@ -184,12 +200,13 @@ jobs:
           }
 
           $manifest = [ordered]@{
+            release_candidate = $releaseCandidate
             source_file = [IO.Path]::GetFileName($sourcePath)
             source_sha256 = $digest
             sha256 = $stagedDigest
             size = $source.Length
             application_id = 'fans.ecfc.app'
-            version_code = 31
+            version_code = [int]$expectedCode
             version_name = '1.0.0-beta.21'
             signer_sha256 = $signer
             run_id = $env:GITHUB_RUN_ID
@@ -200,14 +217,14 @@ jobs:
           }
           $manifestPath = Join-Path $stage 'manifest.json'
           [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
-          Write-Output 'RC11_SOURCE_SHA256=VERIFIED'
-          Write-Output 'RC11_SOURCE_SIZE=VERIFIED'
+          Write-Output "$($releaseCandidate)_SOURCE_SHA256=VERIFIED"
+          Write-Output "$($releaseCandidate)_SOURCE_SIZE=VERIFIED"
           Write-Output "RC11_INGRESS_DIRECTORY=$stage" >> $env:GITHUB_OUTPUT
 
       - name: Store the verified bytes as a same-run, short-lived Actions artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: rc11-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          name: android-${{ inputs.release_candidate }}-apk-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rc11-ingress-${{ github.run_id }}-${{ github.run_attempt }}/*
           if-no-files-found: error
           compression-level: 0
@@ -216,7 +233,7 @@ jobs:
 
   cos:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
-    name: Back up code30, then upload and verify RC11
+    name: Back up the current release, then stage the selected candidate
     needs: ingress
     runs-on: ubuntu-22.04
     environment:
@@ -229,8 +246,11 @@ jobs:
       id-token: write
     outputs:
       code30_backup_object_key: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
+      code31_backup_object_key: ${{ steps.backup31.outputs.CODE31_BACKUP_OBJECT_KEY }}
       rc11_object_key: ${{ steps.rc11.outputs.RC11_OBJECT_KEY }}
       rc11_cdn_url: ${{ steps.rc11.outputs.RC11_CDN_URL }}
+      rc12_object_key: ${{ steps.rc12.outputs.RC12_OBJECT_KEY }}
+      rc12_cdn_url: ${{ steps.rc12.outputs.RC12_CDN_URL }}
     steps:
       - name: Check out the exact protected-main workflow revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -244,10 +264,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/assert-release-main.mjs
 
-      - name: Download this run's single RC11 ingress artifact
+      - name: Download this run's single Android release ingress artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: rc11-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          name: android-${{ inputs.release_candidate }}-apk-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rc11-ingress
 
       - name: Set up the lockfile-pinned Node and pnpm versions
@@ -265,6 +285,7 @@ jobs:
         run: pnpm install --prod --frozen-lockfile --ignore-scripts
 
       - name: Upload an independent code30 backup and verify the public CDN bytes
+        if: inputs.release_candidate == 'rc11'
         id: backup
         env:
           RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
@@ -277,7 +298,21 @@ jobs:
           TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
         run: node scripts/android-rc11-cos-publish.mjs backup-code30
 
+      - name: Upload an independent code31 backup and verify public CDN bytes
+        if: inputs.release_candidate == 'rc12'
+        id: backup31
+        env:
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs backup-code31
+
       - name: Upload RC11 only after the independent code30 backup passed readback
+        if: inputs.release_candidate == 'rc11'
         id: rc11
         env:
           RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
@@ -291,7 +326,23 @@ jobs:
           TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
         run: node scripts/android-rc11-cos-publish.mjs publish-rc11
 
+      - name: Upload RC12 only after the independent code31 backup passed readback
+        if: inputs.release_candidate == 'rc12'
+        id: rc12
+        env:
+          RC11_INGRESS_DIRECTORY: ${{ runner.temp }}/rc11-ingress
+          CODE31_BACKUP_OBJECT_KEY: ${{ steps.backup31.outputs.CODE31_BACKUP_OBJECT_KEY }}
+          TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
+          TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
+          TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
+          TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
+          TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs publish-rc12
+
       - name: Preserve the verified code30 Version API baseline for the later CAS gate
+        if: inputs.release_candidate == 'rc11'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rc11-version-api-code30-${{ github.run_id }}-${{ github.run_attempt }}
@@ -299,7 +350,35 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+
+
+      - name: Preserve the verified code31 Version API baseline for the later CAS gate
+        if: inputs.release_candidate == 'rc12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-beta21-rc12-version-api-code31-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-version-api-code31-baseline.json
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Summarize staged immutable object locations
+        if: inputs.release_candidate == 'rc12'
+        env:
+          CODE31_BACKUP_OBJECT_KEY: ${{ steps.backup31.outputs.CODE31_BACKUP_OBJECT_KEY }}
+          RC12_OBJECT_KEY: ${{ steps.rc12.outputs.RC12_OBJECT_KEY }}
+          RC12_CDN_URL: ${{ steps.rc12.outputs.RC12_CDN_URL }}
+        run: |
+          {
+            echo '### Android Beta21 RC12 COS staging'
+            echo
+            echo "- code31 backup object: $CODE31_BACKUP_OBJECT_KEY"
+            echo "- RC12 object: $RC12_OBJECT_KEY"
+            echo "- verified public CDN URL: $RC12_CDN_URL"
+            echo '- Version API: unchanged by this workflow'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize staged immutable object locations
+        if: inputs.release_candidate == 'rc11'
         env:
           CODE30_BACKUP_OBJECT_KEY: ${{ steps.backup.outputs.CODE30_BACKUP_OBJECT_KEY }}
           RC11_OBJECT_KEY: ${{ steps.rc11.outputs.RC11_OBJECT_KEY }}
