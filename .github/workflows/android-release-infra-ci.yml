@@ -1,0 +1,78 @@
+name: Android release infrastructure CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/configure-android-version.yml'
+      - '.github/workflows/publish-android-rc11.yml'
+      - '.github/workflows/rollback-android-version-to-code31.yml'
+      - '.github/workflows/android-release-infra-ci.yml'
+      - 'scripts/android-rc11-cos-publish.*'
+      - 'scripts/update-android-version-env.*'
+      - 'tests/android-rc11-publish-infrastructure.test.ts'
+      - 'tests/update-android-version-env.test.ts'
+      - 'tests/app-version.test.ts'
+      - 'docs/android-beta21-rc11-release-runbook.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-infra-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  release-infrastructure:
+    name: Android release and rollback checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the pull request revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Set up the lockfile-pinned pnpm version
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check scripts/android-rc11-cos-publish.mjs
+          node --check scripts/update-android-version-env.mjs
+
+      - name: Run Android release, rollback, and Version API regression tests
+        run: pnpm exec tsx --test tests/android-rc11-publish-infrastructure.test.ts tests/update-android-version-env.test.ts tests/app-version.test.ts
+
+      - name: Type-check release scripts and regression tests
+        run: >-
+          pnpm exec tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler
+          --skipLibCheck --types node --typeRoots node_modules/@types --baseUrl node_modules
+          scripts/android-rc11-cos-publish.d.mts scripts/update-android-version-env.d.mts
+          tests/android-rc11-publish-infrastructure.test.ts tests/update-android-version-env.test.ts
+
+      - name: Lint changed release scripts and tests
+        run: >-
+          pnpm exec eslint scripts/android-rc11-cos-publish.mjs scripts/update-android-version-env.mjs
+          scripts/android-rc11-cos-publish.d.mts scripts/update-android-version-env.d.mts
+          tests/android-rc11-publish-infrastructure.test.ts tests/update-android-version-env.test.ts
+
+      - name: Check patch whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git diff --check "${BASE_SHA}...${HEAD_SHA}"

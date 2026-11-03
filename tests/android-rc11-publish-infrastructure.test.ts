@@ -514,6 +514,27 @@ test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC lea
   assert.match(workflowText, /aapt dump badging/)
 })
 
+test('Android release infrastructure CI is pull-request-only and does not access production', () => {
+  const workflowText = read('.github/workflows/android-release-infra-ci.yml')
+  const workflow = parse(workflowText) as {
+    on: { pull_request: { branches: string[]; paths: string[] } }
+    permissions: Record<string, string>
+    jobs: Record<string, { environment?: unknown; permissions?: Record<string, string>; steps: Array<Record<string, unknown>> }>
+  }
+  assert.deepEqual(Object.keys(workflow.on), ['pull_request'])
+  assert.deepEqual(workflow.on.pull_request.branches, ['main'])
+  assert.ok(workflow.on.pull_request.paths.includes('.github/workflows/android-release-infra-ci.yml'))
+  assert.deepEqual(workflow.permissions, { contents: 'read' })
+  const job = workflow.jobs['release-infrastructure']
+  assert.equal(job.environment, undefined)
+  assert.equal(job.permissions, undefined)
+  const commands = job.steps.map((step) => String(step.run || '')).join('\n')
+  assert.match(commands, /tsx --test tests\/android-rc11-publish-infrastructure\.test\.ts/)
+  assert.match(commands, /tsc --noEmit/)
+  assert.match(commands, /eslint scripts\/android-rc11-cos-publish\.mjs/)
+  assert.match(commands, /git diff --check/)
+  assert.doesNotMatch(workflowText, /workflow_dispatch:|id-token:\s*write|environment:\s*Production|TENCENT_|SERVER_SSH_KEY|cos-nodejs-sdk-v5/)
+})
 test('COS publish simulation uploads only the new immutable candidate and verifies its complete CDN bytes', () => {
   const publisher = read('scripts/android-rc11-cos-publish.mjs')
   const releaseStart = publisher.indexOf('export async function publishRc11Artifact')
