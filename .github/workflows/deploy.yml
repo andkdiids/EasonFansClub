@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 5158)
-Total output lines: 462
-
 name: Deploy to Tencent Cloud
 
 on:
@@ -235,7 +232,21 @@ jobs:
             exit 1
           fi
           if ! git -C "${APP_DIR}/repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            echo 'SERVER_GIT_ACCESS=NO…158 tokens truncated…      echo 'Production current must already be a symlink into releases/; refusing pre-migration bootstrap.' >&2
+            echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository is not a usable non-bare Git checkout.' >&2
+            exit 1
+          fi
+          if ! git -C "${APP_DIR}/repo" remote get-url origin >/dev/null 2>&1; then
+            echo 'SERVER_GIT_ACCESS=NOT_READY: the cached repository has no origin remote.' >&2
+            exit 1
+          fi
+
+          if [ ! -e "${APP_DIR}/shared/.env" ] && [ ! -L "${APP_DIR}/shared/.env" ]; then
+            echo 'shared/.env is missing; refusing to copy or create production configuration during preflight.' >&2
+            exit 1
+          fi
+
+          if [ ! -L "${APP_DIR}/current" ]; then
+            echo 'Production current must already be a symlink into releases/; refusing pre-migration bootstrap.' >&2
             echo 'Refusing to deploy into the legacy live directory.' >&2
             exit 1
           fi
@@ -448,4 +459,3 @@ jobs:
           done
           echo "::error::Public endpoint does not serve rollback SHA ${DEPLOY_SHA}."
           exit 1
-
