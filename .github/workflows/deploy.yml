@@ -21,6 +21,7 @@ on:
       # RC11 Native Bearer runtime changes and release infrastructure require
       # an explicit skip-db deployment; never start the default full-DB push.
       - 'app/api/material-redemptions/route.ts'
+      - 'app/api/friends/list/route.ts'
       - 'docs/android-beta21-rc11-release-runbook.md'
       - 'scripts/android-rc11-cos-publish.d.mts'
       - 'scripts/android-rc11-cos-publish.mjs'
@@ -38,6 +39,7 @@ on:
       - 'tests/deploy-skip-db-mode.test.ts'
       - 'tests/middleware-auth.test.ts'
       - 'tests/mobile-bearer-route-integration.test.ts'
+      - 'tests/profile-background-mobile-lookup.test.ts'
   workflow_dispatch:
     inputs:
       db_mode:
