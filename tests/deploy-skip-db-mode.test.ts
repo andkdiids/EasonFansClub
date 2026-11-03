@@ -70,6 +70,7 @@ test('skip-db 明确不执行部署阶段数据库命令，默认完整迁移顺
   assert.ok(pushPathsIgnore.includes("'.github/**'"), 'workflow-only changes must not trigger the default deployment')
   for (const path of [
     'app/api/material-redemptions/route.ts',
+    'app/api/friends/list/route.ts',
     'docs/android-beta21-rc11-release-runbook.md',
     'middleware.ts',
     'scripts/android-rc11-cos-publish.d.mts',
@@ -83,6 +84,7 @@ test('skip-db 明确不执行部署阶段数据库命令，默认完整迁移顺
     'tests/deploy-skip-db-mode.test.ts',
     'tests/middleware-auth.test.ts',
     'tests/mobile-bearer-route-integration.test.ts',
+    'tests/profile-background-mobile-lookup.test.ts',
   ]) {
     assert.ok(pushPathsIgnore.includes(`'${path}'`), `${path} merge must not trigger the default full-DB push deployment`)
   }
