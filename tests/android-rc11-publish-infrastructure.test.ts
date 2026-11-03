@@ -14,12 +14,15 @@ const wranglerRequire = createRequire(createRequire(import.meta.url).resolve('wr
 const { parse } = wranglerRequire('yaml') as { parse: (source: string) => unknown }
 import {
   CODE30_BASELINE,
+  CODE30_ROLLBACK_OBJECT_KEY,
   CODE31_BASELINE,
+  CODE31_ROLLBACK_OBJECT_KEY,
   RC11_BASELINE,
   RC12_BASELINE,
   APK_DOWNLOAD_TIMEOUT_MS,
   COS_REQUEST_TIMEOUT_MS,
   EXPECTED_OIDC_SUBJECT,
+  captureVersionApiBaseline,
   assertObjectAbsent,
   createCosClient,
   createVersionedObjectKey,
@@ -95,6 +98,62 @@ test('the code31 Version API baseline matches the current RC11 release', () => {
   assert.throws(() => validateCode31VersionApi({ ...baseline, versionCode: 30 }), /PRODUCTION_VERSION_API_NOT_EXPECTED_CODE31/)
 })
 
+test('staging captures the expected current Version API baseline read-only before the new upload', async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'ecfc-version-baseline-test-'))
+  t.after(async () => rm(tempDir, { recursive: true, force: true }))
+  const baseline = {
+    platform: 'android',
+    versionName: CODE31_BASELINE.versionName,
+    versionCode: CODE31_BASELINE.versionCode,
+    size: CODE31_BASELINE.size,
+    apkSha256: CODE31_BASELINE.sha256.toLowerCase(),
+    minimumVersionCode: 19,
+    forceUpdate: false,
+    downloadUrl: 'https://ecfc.fans/api/app/download/android',
+    releaseNotes: ['a', 'b', 'c', 'd', 'e', 'f'],
+    publishedAt: '2026-11-03T00:00:00Z',
+  }
+  let requestUrl = ''
+  let rangeRequestUrl = ''
+  const result = await captureVersionApiBaseline({
+    candidate: 'rc12',
+    env: { RUNNER_TEMP: tempDir },
+    fetchImpl: async (input, init) => {
+      const url = String(input)
+      if (url === 'https://ecfc.fans/api/app/version?platform=android') {
+        requestUrl = url
+        assert.equal(init?.redirect, 'error')
+        return new Response(JSON.stringify(baseline), { status: 200 })
+      }
+      rangeRequestUrl = url
+      assert.equal((init?.headers as Record<string, string>)?.Range, 'bytes=0-0')
+      const response = new Response(new Uint8Array([1]), {
+        status: 206,
+        headers: { 'content-range': `bytes 0-0/${CODE31_BASELINE.size}` },
+      })
+      Object.defineProperty(response, 'url', { value: url })
+      return response
+    },
+  })
+  assert.equal(requestUrl, 'https://ecfc.fans/api/app/version?platform=android')
+  assert.equal(rangeRequestUrl, `https://media.ecfc.fans/media/${CODE31_ROLLBACK_OBJECT_KEY}`)
+  assert.deepEqual(result.body, baseline)
+  assert.equal(result.rollbackSource.key, CODE31_ROLLBACK_OBJECT_KEY)
+  assert.equal(JSON.parse(await readFile(result.baselinePath, 'utf8')).versionCode, 31)
+  await assert.rejects(() => captureVersionApiBaseline({
+    candidate: 'rc12',
+    env: { RUNNER_TEMP: tempDir },
+    fetchImpl: async () => new Response(JSON.stringify({ ...baseline, versionCode: 30 }), { status: 200 }),
+  }), /PRODUCTION_VERSION_API_NOT_EXPECTED_CODE31/)
+  await assert.rejects(() => captureVersionApiBaseline({
+    candidate: 'rc12',
+    env: { RUNNER_TEMP: tempDir },
+    fetchImpl: async (input) => String(input).includes('/api/app/version?')
+      ? new Response(JSON.stringify(baseline), { status: 200 })
+      : new Response(null, { status: 404 }),
+  }), /CODE31_ROLLBACK_SOURCE_UNAVAILABLE/)
+})
+
 test('RC12 ingress manifest and unique COS objects bind code32 to this main workflow run', () => {
   const manifest = {
     release_candidate: 'rc12',
@@ -115,13 +174,11 @@ test('RC12 ingress manifest and unique COS objects bind code32 to this main work
   const context = { ...testRun, ref: 'refs/heads/main', workflowRef: testWorkflowRef, workflowSha: testWorkflowSha }
   assert.equal(validateIngressManifest(manifest, { ...context, candidate: 'rc12' }), manifest)
   assert.throws(() => validateIngressManifest({ ...manifest, release_candidate: 'rc11' }, { ...context, candidate: 'rc12' }), /RC12_INGRESS_PROVENANCE_INVALID/)
-  const backup = createVersionedObjectKey('code31-backup', { ...testRun, date: new Date('2026-11-03T12:00:00Z') })
   const release = createVersionedObjectKey('rc12', { ...testRun, date: new Date('2026-11-03T12:00:00Z') })
-  assert.match(backup, /code31-backup-20261103-120000-run123456789-attempt2\.apk$/)
   assert.match(release, /release-beta21-rc12-20261103-120000-run123456789-attempt2\.apk$/)
-  assert.equal(validateVersionedObjectKey(backup, 'code31-backup', testRun), backup)
   assert.equal(validateVersionedObjectKey(release, 'rc12', testRun), release)
-  assert.notEqual(backup, release)
+  assert.equal(CODE31_ROLLBACK_OBJECT_KEY, 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc11-20261102-205722-run41523510243-attempt1.apk')
+  assert.throws(() => createVersionedObjectKey('code31-backup' as 'rc11', testRun), /COS_OBJECT_KIND_INVALID/)
 })
 
 test('RC11 signer verifier-only changes do not trigger the default production deployment', () => {
@@ -209,20 +266,19 @@ test('ingress artifact provenance binds exact bytes to this main-branch workflow
   assert.throws(() => validateIngressManifest(manifest, { ...context, ref: 'refs/heads/feature' }), /RC11_INGRESS_PROVENANCE_INVALID/)
 })
 
-test('versioned COS keys are unique per workflow attempt and keep code30 apart from RC11', () => {
+test('new release object keys are unique; existing code30 and code31 rollback sources are fixed and immutable', () => {
   const date = new Date('2026-11-02T15:21:36.000Z')
-  const backup = createVersionedObjectKey('code30-backup', { ...testRun, date })
   const release = createVersionedObjectKey('rc11', { ...testRun, date })
-  assert.match(backup, /code30-backup-20261102-152136-run123456789-attempt2\.apk$/)
   assert.match(release, /release-beta21-rc11-20261102-152136-run123456789-attempt2\.apk$/)
-  assert.notEqual(backup, release)
   assert.notEqual(release, createVersionedObjectKey('rc11', { runId: '123456789', runAttempt: '3', date }))
-  assert.equal(validateVersionedObjectKey(backup, 'code30-backup', testRun), backup)
   assert.equal(validateVersionedObjectKey(release, 'rc11', testRun), release)
+  assert.equal(CODE30_ROLLBACK_OBJECT_KEY, 'android/releases/ECFC-1.0.0-beta.21-code30-backup-20261102-205634-run41523510243-attempt1.apk')
+  assert.equal(CODE31_ROLLBACK_OBJECT_KEY, 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc11-20261102-205722-run41523510243-attempt1.apk')
+  assert.throws(() => createVersionedObjectKey('code30-backup' as 'rc11', { ...testRun, date }), /COS_OBJECT_KIND_INVALID/)
   assert.throws(() => validateVersionedObjectKey(release, 'rc11', { runId: '123456789', runAttempt: '1' }), /COS_OBJECT_KEY_RUN_MISMATCH/)
 })
 
-test('RC12 publication pins code32, preserves code31, and has a protected code31 rollback', () => {
+test('RC12 publication pins code32 and reuses the original immutable code31 rollback source', () => {
   const stageText = read('.github/workflows/publish-android-rc11.yml')
   const stage = parse(stageText) as {
     concurrency: { group: string; 'cancel-in-progress': boolean }
@@ -235,10 +291,11 @@ test('RC12 publication pins code32, preserves code31, and has a protected code31
   assert.equal(stage.concurrency['cancel-in-progress'], false)
   const cos = stage.jobs.cos
   assert.equal(typeof cos.environment === 'object' ? cos.environment?.name : cos.environment, 'Production')
-  const backupIndex = cos.steps.findIndex((step) => step.name?.includes('independent code31 backup'))
-  const uploadIndex = cos.steps.findIndex((step) => step.name?.includes('Upload RC12 only after'))
-  assert.ok(backupIndex >= 0 && uploadIndex > backupIndex)
-  assert.match(cos.steps[backupIndex].if ?? '', /release_candidate == 'rc12'/)
+  const backupStep = cos.steps.find((step) => step.name?.toLowerCase().includes('backup'))
+  assert.equal(backupStep, undefined)
+  const baselineIndex = cos.steps.findIndex((step) => step.name?.includes('Capture the current Android Version API baseline'))
+  const uploadIndex = cos.steps.findIndex((step) => step.name?.includes('Upload the immutable RC12 candidate'))
+  assert.ok(baselineIndex >= 0 && uploadIndex > baselineIndex)
   assert.match(cos.steps[uploadIndex].if ?? '', /release_candidate == 'rc12'/)
   assert.match(cos.steps[uploadIndex].run ?? '', /publish-rc12/)
   for (const [key, variable] of [
@@ -252,11 +309,13 @@ test('RC12 publication pins code32, preserves code31, and has a protected code31
   ]) assert.match(cos.steps[uploadIndex].env?.[key] ?? '', new RegExp(`vars\\.${variable}`))
   assert.match(stageText, /50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271/)
   assert.match(stageText, /180263015/)
+  assert.doesNotMatch(stageText, /backup-code30|backup-code31|CODE30_BACKUP_OBJECT_KEY|CODE31_BACKUP_OBJECT_KEY/)
   assert.doesNotMatch(stageText, /PLACEHOLDER|__[A-Z0-9_]+__/)
 
   const configureText = read('.github/workflows/configure-android-version.yml')
   assert.match(configureText, /RELEASE_CANDIDATE.*rc12/)
-  assert.match(configureText, /CODE31_BACKUP_OBJECT_KEY/)
+  assert.match(configureText, /CODE31_ROLLBACK_OBJECT_KEY/)
+  assert.doesNotMatch(configureText, /code(?:30|31)_backup_object_key|CODE(?:30|31)_BACKUP_OBJECT_KEY|CODE31_BACKUP_REQUIRED/)
   assert.match(configureText, /RC12_RELEASE_BASELINE_MISMATCH/)
   assert.match(configureText, /PRODUCTION_VERSION_API_CODE32=VERIFIED/)
   assert.match(configureText, /LIVE_DOWNLOAD_SIGNATURE_MATCH_CODE32=YES/)
@@ -272,6 +331,8 @@ test('RC12 publication pins code32, preserves code31, and has a protected code31
   assert.equal(rollback.concurrency['cancel-in-progress'], false)
   assert.equal(typeof rollback.jobs.rollback.environment === 'object' ? rollback.jobs.rollback.environment?.name : rollback.jobs.rollback.environment, 'Production')
   assert.match(rollbackText, /ANDROID_RELEASE_OPERATION=rollback-code31/)
+  assert.match(rollbackText, /CODE31_ROLLBACK_OBJECT_KEY/)
+  assert.doesNotMatch(rollbackText, /code31_backup_object_key|CODE31_BACKUP_OBJECT_KEY/)
   assert.match(rollbackText, /50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271/)
   assert.match(rollbackText, /9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C/)
   assert.match(rollbackText, /VERSION_API_CODE31_RESTORED=VERIFIED/)
@@ -419,7 +480,7 @@ test('production branch checks fail closed for unprotected, moved, or non-main r
   assert.throws(() => assertReleaseMainBranch({ branch, expectedSha: testWorkflowSha, ref: 'refs/heads/feature' }), /RELEASE_WORKFLOW_REQUIRES_MAIN/)
 })
 
-test('workflow simulation binds ingress, backup-before-RC11 upload, Production, OIDC least privilege, and concurrency', () => {
+test('workflow simulation binds ingress, no-old-APK-upload, Production, OIDC least privilege, and concurrency', () => {
   const workflowText = read('.github/workflows/publish-android-rc11.yml')
   const workflow = parse(workflowText) as {
     concurrency: { group: string; 'cancel-in-progress': boolean }
@@ -436,11 +497,12 @@ test('workflow simulation binds ingress, backup-before-RC11 upload, Production, 
   assert.equal(cos.permissions?.deployments, undefined)
   assert.equal(ingress.permissions?.['id-token'], undefined)
   const stepNames = cos.steps.map((step) => String(step.name))
-  const backupIndex = stepNames.findIndex((name) => name.includes('independent code30 backup'))
-  const rc11Index = stepNames.findIndex((name) => name.includes('Upload RC11 only after'))
-  assert.ok(backupIndex >= 0 && rc11Index > backupIndex)
+  assert.equal(stepNames.some((name) => name.toLowerCase().includes('backup')), false)
+  const baselineIndex = stepNames.findIndex((name) => name.includes('Capture the current Android Version API baseline'))
+  const rc11Index = stepNames.findIndex((name) => name.includes('Upload the immutable RC11 candidate'))
+  assert.ok(baselineIndex >= 0 && rc11Index > baselineIndex)
   assert.match(String(cos.steps[rc11Index].run), /publish-rc11/)
-  assert.match(workflowText, /CODE30_BACKUP_OBJECT_KEY: \$\{\{ steps\.backup\.outputs\.CODE30_BACKUP_OBJECT_KEY \}\}/)
+  assert.doesNotMatch(workflowText, /backup-code30|backup-code31|CODE30_BACKUP_OBJECT_KEY|CODE31_BACKUP_OBJECT_KEY/)
   assert.match(workflowText, /actions\/upload-artifact@[0-9a-f]{40}/)
   assert.match(workflowText, /actions\/download-artifact@[0-9a-f]{40}/)
   assert.doesNotMatch(workflowText, /continue-on-error:\s*true|cos:DeleteObject|TENCENT_COS_SECRET_(?:ID|KEY)/)
@@ -452,16 +514,16 @@ test('workflow simulation binds ingress, backup-before-RC11 upload, Production, 
   assert.match(workflowText, /aapt dump badging/)
 })
 
-test('COS publish simulation verifies absence, uploads code30 first, reads metadata, then checks complete CDN bytes', () => {
+test('COS publish simulation uploads only the new immutable candidate and verifies its complete CDN bytes', () => {
   const publisher = read('scripts/android-rc11-cos-publish.mjs')
-  const backupStart = publisher.indexOf('export async function publishCode30Backup')
   const releaseStart = publisher.indexOf('export async function publishRc11Artifact')
   const uploadStart = publisher.indexOf('async function uploadImmutableObject')
-  const backupSection = publisher.slice(backupStart, releaseStart)
   const releaseSection = publisher.slice(releaseStart, publisher.indexOf('async function main'))
   const uploadSection = publisher.slice(uploadStart, publisher.indexOf('function writeOutput'))
-  assert.ok(backupSection.indexOf('await downloadToFile(apiBody.downloadUrl') < backupSection.indexOf('await uploadImmutableObject'))
-  assert.ok(releaseSection.indexOf('await downloadToFile(new URL(backupKey') < releaseSection.indexOf('await uploadImmutableObject'))
+  assert.doesNotMatch(publisher, /publishCode30Backup|publishCode31Backup|backup-code30|backup-code31|CODE30_BACKUP_OBJECT_KEY|CODE31_BACKUP_OBJECT_KEY/)
+  assert.doesNotMatch(releaseSection, /BACKUP|ROLLBACK/)
+  assert.match(releaseSection, /await readIngressArtifact/)
+  assert.match(releaseSection, /await uploadImmutableObject/)
   assert.ok(uploadSection.indexOf('await assertObjectAbsent') < uploadSection.indexOf('await cos.putObject'))
   assert.match(publisher, /Timeout: COS_REQUEST_TIMEOUT_MS/)
   assert.match(publisher, /AbortSignal\.timeout\(APK_DOWNLOAD_TIMEOUT_MS\)/)

@@ -599,35 +599,34 @@ test('RC12 rollback restores only Android metadata from the protected code31 bas
   }
   const published = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: rc12Metadata })
   const backupName = path.basename(published.backupPath)
-  const backupKey = 'android/releases/ECFC-1.0.0-beta.21-code31-backup-20261103-210000-run123456789-attempt2.apk'
   const code32Env = readFileSync(envPath, 'utf8')
   writeFileSync(envPath, code32Env.replace(rc12Metadata.ANDROID_APK_SHA256, 'A'.repeat(64)), { mode: 0o640 })
-  assert.throws(() => restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, code31BackupObjectKey: backupKey }), /ROLLBACK_CURRENT_APK_SHA256_MISMATCH/)
+  assert.throws(() => restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode: 31 }), /ROLLBACK_CURRENT_APK_SHA256_MISMATCH/)
   writeFileSync(envPath, code32Env, { mode: 0o640 })
-  assert.throws(() => restoreAndroidVersionEnv({
-    appDir,
-    expectedProductionSha,
-    backupName,
-    code31BackupObjectKey: backupKey.replace(/-run\d+-attempt\d+(?=\.apk$)/, ''),
-  }), /INVALID_CODE31_BACKUP_OBJECT_KEY/)
   assert.throws(() => restoreAndroidVersionEnv(({
     appDir,
     expectedProductionSha,
     backupName,
-    code30BackupObjectKey: 'android/releases/ECFC-1.0.0-beta.21-code30-backup-20261103-210000-run123456789-attempt2.apk',
-    code31BackupObjectKey: backupKey,
+    targetVersionCode: 31,
+    code30BackupObjectKey: 'android/releases/ECFC-1.0.0-beta.21-code30-backup-20261102-205634-run41523510243-attempt1.apk',
+  }) as unknown as Parameters<typeof restoreAndroidVersionEnv>[0]), /INVALID_ROLLBACK_TARGET/)
+  assert.throws(() => restoreAndroidVersionEnv(({
+    appDir,
+    expectedProductionSha,
+    backupName,
+    targetVersionCode: 29,
   }) as unknown as Parameters<typeof restoreAndroidVersionEnv>[0]), /INVALID_ROLLBACK_TARGET/)
   const restored = restoreAndroidVersionEnv({
     appDir,
     expectedProductionSha,
     backupName,
-    code31BackupObjectKey: backupKey,
+    targetVersionCode: 31,
     now: new Date('2026-11-03T21:00:00Z'),
   })
   const parsed = dotenv.parse(readFileSync(envPath, 'utf8'))
   assert.equal(parsed.DATABASE_URL, 'do-not-print-this')
   assert.equal(parsed.ANDROID_VERSION_CODE, '31')
-  assert.equal(parsed.ANDROID_APK_COS_KEY, backupKey)
+  assert.equal(parsed.ANDROID_APK_COS_KEY, code31Metadata.ANDROID_APK_COS_KEY)
   assert.equal(parsed.ANDROID_APK_SHA256, code31Metadata.ANDROID_APK_SHA256)
   assert.equal(parsed.ANDROID_APK_SIZE, String(code31Metadata.ANDROID_APK_SIZE))
   assert.deepEqual(JSON.parse(parsed.ANDROID_RELEASE_NOTES), code31Notes)
@@ -682,6 +681,7 @@ test('RC11 rollback restores only Android metadata from the protected code30 bas
     appDir,
     expectedProductionSha,
     backupName,
+    targetVersionCode: 30,
     code30BackupObjectKey: backupObjectKey,
     now: new Date('2026-11-02T09:00:00Z'),
   }), /ROLLBACK_CURRENT_APK_SHA256_MISMATCH/)
@@ -690,6 +690,7 @@ test('RC11 rollback restores only Android metadata from the protected code30 bas
     appDir,
     expectedProductionSha,
     backupName,
+    targetVersionCode: 30,
     code30BackupObjectKey: backupObjectKey.replace(/-run\d+-attempt\d+(?=\.apk$)/, ''),
     now: new Date('2026-11-02T09:00:00Z'),
   }), /INVALID_CODE30_BACKUP_OBJECT_KEY/)
@@ -697,6 +698,7 @@ test('RC11 rollback restores only Android metadata from the protected code30 bas
     appDir,
     expectedProductionSha,
     backupName,
+    targetVersionCode: 30,
     code30BackupObjectKey: backupObjectKey,
     now: new Date('2026-11-02T09:00:00Z'),
   })
@@ -774,7 +776,9 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(workflow, /Beta\.21 RC12 内测版本/)
   assert.match(workflow, /9E620936CCBA72ACF81D811AA907800AD142873885D9E63C335E3465D39ADD6C/)
   assert.match(workflow, /12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B/)
-  assert.match(workflow, /CODE30_BACKUP_VERIFIED=YES/)
+  assert.match(workflow, /CODE30_ROLLBACK_SOURCE_VERIFIED=YES/)
+  assert.match(workflow, /CODE31_ROLLBACK_SOURCE_VERIFIED=YES/)
+  assert.doesNotMatch(workflow, /code(?:30|31)_backup_object_key|CODE(?:30|31)_BACKUP_OBJECT_KEY/)
   assert.match(workflow, /VERSION_API_BASELINE_CHANGED/)
   assert.match(workflow, /ANDROID_EXPECTED_CURRENT_B64/)
   assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\)\$/)
@@ -801,6 +805,8 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.match(rollbackWorkflow, /VERSION_API_CODE30_RESTORED=VERIFIED/)
   assert.match(rollbackCode31Workflow, /environment: Production/)
   assert.match(rollbackCode31Workflow, /ANDROID_RELEASE_OPERATION=rollback-code31/)
+  assert.match(rollbackCode31Workflow, /CODE31_ROLLBACK_OBJECT_KEY/)
+  assert.doesNotMatch(rollbackCode31Workflow, /code31_backup_object_key|CODE31_BACKUP_OBJECT_KEY/)
   assert.match(rollbackCode31Workflow, /50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271/)
   assert.match(rollbackCode31Workflow, /VERSION_API_CODE31_RESTORED=VERIFIED/)
   for (const file of [

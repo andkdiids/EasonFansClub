@@ -100,22 +100,24 @@ Tencent documents `oidc:sub` as a role use condition
 GitHub documents the `id-token: write` job permission, token claims, and custom
 subject templates ([GitHub Actions OIDC reference](https://docs.github.com/en/actions/reference/security/oidc)).
 
-The order is enforced in separate workflow steps:
+The staging workflow reads and validates the current Version API baseline,
+then uploads only the new immutable candidate. It does not create a second COS
+copy of the APK already in production. This removes repeated large old-APK
+uploads while retaining the old release as the rollback source.
 
-1. Read the live Version API and require the exact code30 baseline.
-2. Download code30 through its published `downloadUrl`; verify the fixed
-   184246197-byte size and SHA-256.
-3. Upload code30 to a unique `run_id`/`run_attempt` object key with
-   `x-cos-forbid-overwrite: true`; read back and check COS metadata and then
-   download the complete object through `https://media.ecfc.fans/media/` to
-   verify the public CDN bytes.
-4. Only if that step succeeds, verify the code30 backup again through the
-   public CDN, validate the same-run RC11 artifact, upload RC11 to a separate
-   unique key, check its metadata and verify the complete CDN download.
-5. Save the code30 Version API response as a 90-day Actions artifact. The
-   Version API remains unchanged.
+1. Read the live Version API and require the exact old-version baseline.
+2. Validate the rollback APK against its fixed SHA-256, size, signature and
+   package/version before any metadata change. For a code32 release, the
+   rollback source is the original immutable RC11 object already used by the
+   code31 release; it is not copied to another COS key.
+3. Validate the same-run new APK ingress, upload it to a unique
+   `run_id`/`run_attempt` object key with `x-cos-forbid-overwrite: true`, check
+   COS metadata, then download the complete new object through
+   `https://media.ecfc.fans/media/` and verify its SHA-256.
+4. Save the current Version API response as a 90-day Actions artifact. The
+   Version API remains unchanged during staging.
 
-Both COS objects use `Content-Type: application/vnd.android.package-archive`,
+New candidate COS objects use `Content-Type: application/vnd.android.package-archive`,
 `Cache-Control: public, max-age=31536000, immutable`, and a custom SHA-256
 metadata header. The SDK request includes `x-cos-forbid-overwrite: true`; run
 and attempt IDs make keys unique even if COS bucket versioning changes the
@@ -134,20 +136,19 @@ workflow's preflight remain mandatory regardless.
 
 ## Configure Android Version API after COS staging
 
-After the COS workflow succeeds, copy its `RC11_OBJECT_KEY` and
-`CODE30_BACKUP_OBJECT_KEY` outputs into
-`.github/workflows/configure-android-version.yml` inputs. Use the fixed RC11
-SHA-256 and size above. The workflow retains the RC3–RC10 timestamp-key format;
-RC11 requires the additional run ID and attempt suffix.
+After the COS workflow succeeds, use its `RC11_OBJECT_KEY` or `RC12_OBJECT_KEY`
+output with the configure workflow. There is no old-APK backup-key input.
+Existing code30 and code31 rollback sources are pinned by the workflow and
+checked read-only. RC3–RC10 keep their historical timestamp-key format; RC11
+and RC12 require run ID and attempt suffixes.
 
-The configure workflow re-downloads the code30 source and independent backup,
-validates their hashes/signatures/metadata, validates RC11 signature and APK
-metadata from the public CDN, checks the live Version API is still code30,
-and compares the full before-state again immediately before changing only the
-Android variables under the production deploy lock. It uses the existing
-Production environment and saves pre/post API responses. It must not be
-dispatched until the branch, environment, runner, and OIDC blockers above are
-resolved and the COS staging output is reviewed.
+The configure workflow validates the live prior-version API baseline and
+rollback source, validates the new APK signature and metadata from the public
+CDN, and compares the complete Version API before-state again immediately
+before changing only Android variables under the production deploy lock. A
+code32 rollback verifies the original code31 RC11 object before mutation and
+restores the exact COS key from the protected pre-release `.env` snapshot. It
+uses the existing Production environment and saves pre/post API responses.
 
 ## Android Version API rollback to code30
 
