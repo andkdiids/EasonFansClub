@@ -33,6 +33,7 @@ on:
       - 'scripts/verify-android-apk-signature.mjs'
       - 'scripts/rollback-production-git.sh'
       - 'tests/android-rc11-publish-infrastructure.test.ts'
+      - 'tests/rc11-apksigner-diagnostics.test.mjs'
       - 'middleware.ts'
       - 'tests/deploy-skip-db-mode.test.ts'
       - 'tests/middleware-auth.test.ts'

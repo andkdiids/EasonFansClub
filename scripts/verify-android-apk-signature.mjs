@@ -11,25 +11,32 @@ export function parseApksignerOutput(output) {
 
   const lines = output.replace(/^\uFEFF/, '').split(/\r?\n/)
   const countLines = lines.filter((line) => /^\s*Number of signers\s*:/i.test(line))
-  if (countLines.length !== 1) signerError('SIGNER_PARSE_FAILED')
+  if (countLines.length === 0) signerError('SIGNER_PARSE_FAILED')
+  if (countLines.length !== 1) signerError('SIGNER_COUNT_INVALID')
 
   const countMatch = countLines[0].match(/^\s*Number of signers\s*:\s*(\d+)\s*$/i)
   if (!countMatch) signerError('SIGNER_PARSE_FAILED')
   const signerCount = Number(countMatch[1])
-  if (!Number.isSafeInteger(signerCount) || signerCount < 1) signerError('SIGNER_PARSE_FAILED')
+  if (!Number.isSafeInteger(signerCount) || signerCount < 1) signerError('SIGNER_COUNT_INVALID')
+  if (signerCount !== 1) signerError('SIGNER_COUNT_INVALID')
 
   const digestLines = lines.filter((line) => /certificate SHA-256 digest/i.test(line))
-  if (signerCount !== 1) signerError('SIGNER_COUNT_INVALID')
   if (digestLines.length === 0) signerError('SIGNER_PARSE_FAILED')
-  if (digestLines.length !== signerCount) signerError('SIGNER_COUNT_INVALID')
 
-  const digestMatch = digestLines[0].match(/^\s*Signer\s+#(\d+)\s+certificate SHA-256 digest\s*:\s*(.*?)\s*$/i)
-  if (!digestMatch) signerError('SIGNER_PARSE_FAILED')
-  if (Number(digestMatch[1]) !== 1) signerError('SIGNER_COUNT_INVALID')
+  const digests = digestLines.map((line) => {
+    const digestMatch = line.match(/^\s*(?:Signer\s+#(\d+)\s+|V\d+(?:\.\d+)?\s+Signer(?:\s+#(\d+))?\s*:\s*)certificate SHA-256 digest\s*:\s*(.*?)\s*$/i)
+    if (!digestMatch) signerError('SIGNER_PARSE_FAILED')
 
-  const sha256 = digestMatch[2].replace(/[\s:]/g, '').toUpperCase()
-  if (!/^[A-F0-9]{64}$/.test(sha256)) signerError('SIGNER_PARSE_FAILED')
-  return { signerCount, sha256 }
+    const signerIndex = digestMatch[1] ?? digestMatch[2]
+    if (signerIndex !== undefined && Number(signerIndex) !== 1) signerError('SIGNER_COUNT_INVALID')
+
+    const sha256 = digestMatch[3].replace(/[\s:]/g, '').toUpperCase()
+    if (!/^[A-F0-9]{64}$/.test(sha256)) signerError('SIGNER_PARSE_FAILED')
+    return sha256
+  })
+  const uniqueDigests = [...new Set(digests)]
+  if (uniqueDigests.length !== signerCount) signerError('SIGNER_COUNT_INVALID')
+  return { signerCount, sha256: uniqueDigests[0] }
 }
 
 export function assertApksignerOutputMatches(output, expectedSha256) {
@@ -41,6 +48,18 @@ export function assertApksignerOutputMatches(output, expectedSha256) {
   return parsed
 }
 
+export function verifyApksignerResult(result, expectedSha256) {
+  if (!result || result.error || !Number.isInteger(result.status)) {
+    signerError('APKSIGNER_EXECUTION_FAILED')
+  }
+  if (result.status !== 0) signerError('APK_SIGNATURE_INVALID')
+
+  const output = [result.stdout, result.stderr]
+    .filter((stream) => typeof stream === 'string' && stream.length > 0)
+    .join('\n')
+  return assertApksignerOutputMatches(output, expectedSha256)
+}
+
 function main() {
   const [apksignerPath, apkPath, expectedSha256] = process.argv.slice(2)
   if (!apksignerPath || !apkPath || !expectedSha256) signerError('SIGNER_ARGUMENTS_INVALID')
@@ -50,11 +69,7 @@ function main() {
     maxBuffer: 1024 * 1024,
     timeout: 120_000,
   })
-  if (result.error) signerError('APKSIGNER_EXECUTION_FAILED')
-  if (result.status !== 0) signerError('APK_SIGNATURE_INVALID')
-
-  const output = [result.stdout, result.stderr].filter(Boolean).join('\n')
-  const parsed = assertApksignerOutputMatches(output, expectedSha256)
+  const parsed = verifyApksignerResult(result, expectedSha256)
   process.stdout.write(`APK_SIGNER_COUNT=${parsed.signerCount}\n`)
   process.stdout.write(`APK_SIGNER_SHA256=${parsed.sha256}\n`)
   process.stdout.write('APK_SIGNATURE_VALID=YES\n')
@@ -69,3 +84,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     process.exitCode = 1
   }
 }
+
