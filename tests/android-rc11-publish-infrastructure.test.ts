@@ -523,7 +523,7 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   const workflowText = read('.github/workflows/publish-android-rc11.yml')
   const workflow = parse(workflowText) as {
     on: { workflow_dispatch: { inputs: Record<string, { default?: boolean; required?: boolean; type?: string }> } }
-    jobs: Record<string, { if?: string; needs?: string | string[]; environment?: { name?: string } | string; permissions?: Record<string, string>; steps: Array<Record<string, unknown>> }>
+    jobs: Record<string, { if?: string; needs?: string | string[]; environment?: { name?: string } | string; 'timeout-minutes'?: number; permissions?: Record<string, string>; steps: Array<Record<string, unknown>> }>
   }
   const input = workflow.on.workflow_dispatch.inputs.verify_oidc_only
   assert.equal(input.type, 'boolean')
@@ -533,6 +533,9 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   const verify = workflow.jobs.verify_oidc
   const ingress = workflow.jobs.ingress
   const cos = workflow.jobs.cos
+  assert.equal(verify['timeout-minutes'], 10)
+  assert.equal(ingress['timeout-minutes'], 20)
+  assert.equal(cos['timeout-minutes'], 360)
   assert.match(verify.if ?? '', /inputs\.verify_oidc_only == true/)
   assert.match(ingress.if ?? '', /inputs\.verify_oidc_only == false/)
   assert.match(cos.if ?? '', /inputs\.verify_oidc_only == false/)
