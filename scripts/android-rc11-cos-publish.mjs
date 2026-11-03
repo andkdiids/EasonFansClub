@@ -41,6 +41,9 @@ const RC12_INGRESS_FILENAME = 'ECFC-1.0.0-beta.21-release-RC12-code32.apk'
 
 const APK_CONTENT_TYPE = 'application/vnd.android.package-archive'
 const APK_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+export const APK_DOWNLOAD_TIMEOUT_MS = 20 * 60 * 1000
+export const COS_REQUEST_TIMEOUT_MS = 10 * 60 * 1000
+const DOWNLOAD_PROGRESS_INTERVAL_BYTES = 25 * 1024 * 1024
 const API_VERSION_URL = 'https://ecfc.fans/api/app/version?platform=android'
 const CODE30_DOWNLOAD_URL = 'https://ecfc.fans/api/app/download/android'
 const CDN_BASE_URL = 'https://media.ecfc.fans/media/'
@@ -228,34 +231,66 @@ export async function hashFile(filePath) {
   return { size, sha256: hash.digest('hex').toUpperCase() }
 }
 
-async function downloadToFile(url, filePath, { fetchImpl = fetch, expectedSize, expectedSha256 } = {}) {
-  let response
-  try {
-    response = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(2_400_000) })
-  } catch {
-    throw new Error('APK_DOWNLOAD_FAILED')
-  }
-  if (!response.ok || !response.body || !response.url.startsWith('https://')) throw new Error('APK_DOWNLOAD_FAILED')
+function logReleaseProgress(stage, event, details = '', logImpl = console.log) {
+  if (!/^[A-Z0-9_]+$/.test(stage) || !/^[A-Z]+$/.test(event)) throw new Error('RELEASE_PROGRESS_LABEL_INVALID')
+  logImpl(`RELEASE_PROGRESS=${stage}_${event}${details ? ` ${details}` : ''}`)
+}
 
-  await mkdir(path.dirname(filePath), { recursive: true })
-  const hash = createHash('sha256')
-  let size = 0
-  const counter = new Transform({
-    transform(chunk, _encoding, callback) {
-      size += chunk.length
-      hash.update(chunk)
-      callback(null, chunk)
-    },
-  })
+async function runReleaseStage(stage, operation, logImpl = console.log) {
+  const startedAt = Date.now()
+  logReleaseProgress(stage, 'START', '', logImpl)
   try {
-    await pipeline(Readable.fromWeb(response.body), counter, createWriteStream(filePath, { flags: 'wx' }))
-  } catch {
-    throw new Error('APK_DOWNLOAD_WRITE_FAILED')
+    const result = await operation()
+    logReleaseProgress(stage, 'COMPLETE', `duration_ms=${Date.now() - startedAt}`, logImpl)
+    return result
+  } catch (error) {
+    logReleaseProgress(stage, 'FAILED', `duration_ms=${Date.now() - startedAt}`, logImpl)
+    throw error
   }
-  const sha256 = hash.digest('hex').toUpperCase()
-  assertSize(size, expectedSize, 'APK_SIZE_MISMATCH')
-  assertSha(sha256, expectedSha256, 'APK_SHA256_MISMATCH')
-  return { size, sha256, url: response.url }
+}
+
+export async function downloadToFile(url, filePath, {
+  fetchImpl = fetch,
+  expectedSize,
+  expectedSha256,
+  stage = 'APK_DOWNLOAD',
+  logImpl = console.log,
+} = {}) {
+  return runReleaseStage(stage, async () => {
+    let response
+    try {
+      response = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(APK_DOWNLOAD_TIMEOUT_MS) })
+    } catch {
+      throw new Error('APK_DOWNLOAD_FAILED')
+    }
+    logReleaseProgress(stage, 'RESPONSE', `status=${response.status}`, logImpl)
+    if (!response.ok || !response.body || !response.url.startsWith('https://')) throw new Error('APK_DOWNLOAD_FAILED')
+
+    await mkdir(path.dirname(filePath), { recursive: true })
+    const hash = createHash('sha256')
+    let size = 0
+    let nextProgressBytes = DOWNLOAD_PROGRESS_INTERVAL_BYTES
+    const counter = new Transform({
+      transform(chunk, _encoding, callback) {
+        size += chunk.length
+        hash.update(chunk)
+        if (size >= nextProgressBytes) {
+          logReleaseProgress(stage, 'PROGRESS', `bytes=${size}`, logImpl)
+          nextProgressBytes = size + DOWNLOAD_PROGRESS_INTERVAL_BYTES
+        }
+        callback(null, chunk)
+      },
+    })
+    try {
+      await pipeline(Readable.fromWeb(response.body), counter, createWriteStream(filePath, { flags: 'wx' }))
+    } catch {
+      throw new Error('APK_DOWNLOAD_WRITE_FAILED')
+    }
+    const sha256 = hash.digest('hex').toUpperCase()
+    assertSize(size, expectedSize, 'APK_SIZE_MISMATCH')
+    assertSha(sha256, expectedSha256, 'APK_SHA256_MISMATCH')
+    return { size, sha256, url: response.url }
+  }, logImpl)
 }
 
 const GITHUB_ACTIONS_RUNNER_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+actions\.githubusercontent\.com$/
@@ -358,8 +393,7 @@ export async function verifyOidcSts({ env = process.env, fetchImpl = fetch } = {
   return true
 }
 
-function createCosClient(credentials) {
-  const COS = require('cos-nodejs-sdk-v5')
+export function createCosClient(credentials, COS = require('cos-nodejs-sdk-v5')) {
   return new COS({
     SecretId: credentials.SecretId,
     SecretKey: credentials.SecretKey,
@@ -368,6 +402,7 @@ function createCosClient(credentials) {
     UseAccelerate: false,
     FileParallelLimit: 1,
     ChunkParallelLimit: 1,
+    Timeout: COS_REQUEST_TIMEOUT_MS,
   })
 }
 
@@ -387,37 +422,55 @@ export async function assertObjectAbsent(cos, bucket, region, key) {
   }
 }
 
-async function uploadImmutableObject({ cos, env, key, filePath, expected }) {
-  await assertObjectAbsent(cos, env.TENCENT_COS_BUCKET, env.TENCENT_COS_REGION, key)
-  try {
-    await cos.putObject({
-      Bucket: env.TENCENT_COS_BUCKET,
-      Region: env.TENCENT_COS_REGION,
-      Key: key,
-      Body: createReadStream(filePath),
-      ContentLength: expected.size,
-      ContentType: APK_CONTENT_TYPE,
-      CacheControl: APK_CACHE_CONTROL,
-      'x-cos-meta-sha256': expected.sha256,
-      Headers: { 'x-cos-forbid-overwrite': 'true' },
-    })
-  } catch {
-    throw new Error('COS_UPLOAD_FAILED')
+function createCosUploadProgressLogger(stage) {
+  let lastPercent = 0
+  return ({ loaded, total, percent }) => {
+    if (!Number.isFinite(percent) || !Number.isFinite(loaded) || !Number.isFinite(total)) return
+    const currentPercent = Math.max(0, Math.min(100, Math.floor(percent * 100)))
+    if (currentPercent < lastPercent + 10 && currentPercent !== 100) return
+    lastPercent = currentPercent
+    logReleaseProgress(stage, 'PROGRESS', `percent=${currentPercent} bytes=${loaded} total=${total}`)
   }
+}
 
-  let metadata
-  try {
-    metadata = await cos.headObject({ Bucket: env.TENCENT_COS_BUCKET, Region: env.TENCENT_COS_REGION, Key: key })
-  } catch {
-    throw new Error('COS_OBJECT_METADATA_UNAVAILABLE')
-  }
-  validateObjectMetadata(metadata, expected)
+async function uploadImmutableObject({ cos, env, key, filePath, expected, stage }) {
+  await runReleaseStage(`${stage}_COS_PREFLIGHT`, async () => {
+    await assertObjectAbsent(cos, env.TENCENT_COS_BUCKET, env.TENCENT_COS_REGION, key)
+  })
+  await runReleaseStage(`${stage}_COS_PUT`, async () => {
+    try {
+      await cos.putObject({
+        Bucket: env.TENCENT_COS_BUCKET,
+        Region: env.TENCENT_COS_REGION,
+        Key: key,
+        Body: createReadStream(filePath),
+        ContentLength: expected.size,
+        ContentType: APK_CONTENT_TYPE,
+        CacheControl: APK_CACHE_CONTROL,
+        'x-cos-meta-sha256': expected.sha256,
+        Headers: { 'x-cos-forbid-overwrite': 'true' },
+        onProgress: createCosUploadProgressLogger(`${stage}_COS_PUT`),
+      })
+    } catch {
+      throw new Error('COS_UPLOAD_FAILED')
+    }
+  })
+
+  const metadata = await runReleaseStage(`${stage}_COS_METADATA`, async () => {
+    try {
+      return await cos.headObject({ Bucket: env.TENCENT_COS_BUCKET, Region: env.TENCENT_COS_REGION, Key: key })
+    } catch {
+      throw new Error('COS_OBJECT_METADATA_UNAVAILABLE')
+    }
+  })
+  await runReleaseStage(`${stage}_COS_METADATA_VALIDATE`, () => validateObjectMetadata(metadata, expected))
 
   const cdnUrl = new URL(key, CDN_BASE_URL).toString()
   const readbackPath = path.join(os.tmpdir(), `ecfc-${expected.sha256}.apk`)
   await downloadToFile(cdnUrl, readbackPath, {
     expectedSize: expected.size,
     expectedSha256: expected.sha256,
+    stage: `${stage}_CDN_READBACK`,
   })
   return { key, cdnUrl, metadata }
 }
@@ -429,20 +482,22 @@ function writeOutput(name, value, env = process.env) {
 }
 
 async function fetchVersionApi(expectedVersionCode = 30, fetchImpl = fetch) {
-  let response
-  try {
-    response = await fetchImpl(API_VERSION_URL, { redirect: 'error', signal: AbortSignal.timeout(30_000) })
-  } catch {
-    throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
-  }
-  if (!response.ok) throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
-  let body
-  try {
-    body = await response.json()
-  } catch {
-    throw new Error('PRODUCTION_VERSION_API_INVALID')
-  }
-  return expectedVersionCode === 30 ? validateCode30VersionApi(body) : validateCode31VersionApi(body)
+  return runReleaseStage(`PRODUCTION_VERSION_API_CODE${expectedVersionCode}`, async () => {
+    let response
+    try {
+      response = await fetchImpl(API_VERSION_URL, { redirect: 'error', signal: AbortSignal.timeout(30_000) })
+    } catch {
+      throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
+    }
+    if (!response.ok) throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
+    let body
+    try {
+      body = await response.json()
+    } catch {
+      throw new Error('PRODUCTION_VERSION_API_INVALID')
+    }
+    return expectedVersionCode === 30 ? validateCode30VersionApi(body) : validateCode31VersionApi(body)
+  })
 }
 
 async function readIngressArtifact(env, candidate = env.RELEASE_CANDIDATE || 'rc11') {
@@ -468,7 +523,7 @@ async function readIngressArtifact(env, candidate = env.RELEASE_CANDIDATE || 'rc
 
 async function getCos(env, fetchImpl = fetch) {
   validateCosConfig(env)
-  const credentials = await exchangeForSts(env, fetchImpl)
+  const credentials = await runReleaseStage('TENCENT_STS_EXCHANGE', () => exchangeForSts(env, fetchImpl))
   if (credentials.ExpiredTime && credentials.ExpiredTime * 1000 <= Date.now() + 60_000) {
     throw new Error('TENCENT_STS_CREDENTIALS_NEAR_EXPIRY')
   }
@@ -494,10 +549,11 @@ export async function publishCode30Backup({ env = process.env, fetchImpl = fetch
     fetchImpl,
     expectedSize: CODE30_BASELINE.size,
     expectedSha256: CODE30_BASELINE.sha256,
+    stage: 'CODE30_BACKUP_SOURCE_DOWNLOAD',
   })
   const cos = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('code30-backup', { ...runIdentifiers(env), date })
-  await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE30_BASELINE })
+  await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE30_BASELINE, stage: 'CODE30_BACKUP' })
   await writeOutput('CODE30_BACKUP_OBJECT_KEY', key, env)
   await writeOutput('CODE30_BACKUP_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   return { key, baselinePath }
@@ -513,10 +569,11 @@ export async function publishCode31Backup({ env = process.env, fetchImpl = fetch
     fetchImpl,
     expectedSize: CODE31_BASELINE.size,
     expectedSha256: CODE31_BASELINE.sha256,
+    stage: 'CODE31_BACKUP_SOURCE_DOWNLOAD',
   })
   const cos = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('code31-backup', { ...runIdentifiers(env), date })
-  await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE31_BASELINE })
+  await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE31_BASELINE, stage: 'CODE31_BACKUP' })
   await writeOutput('CODE31_BACKUP_OBJECT_KEY', key, env)
   await writeOutput('CODE31_BACKUP_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   return { key, baselinePath }
@@ -529,11 +586,12 @@ export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch
     fetchImpl,
     expectedSize: CODE30_BASELINE.size,
     expectedSha256: CODE30_BASELINE.sha256,
+    stage: 'CODE30_BACKUP_PREUPLOAD_READBACK',
   })
   const { apkPath } = await readIngressArtifact(env)
   const cos = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('rc11', { ...ids, date })
-  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC11_BASELINE })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC11_BASELINE, stage: 'RC11_RELEASE' })
   await writeOutput('RC11_OBJECT_KEY', key, env)
   await writeOutput('RC11_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   await writeOutput('RC11_SHA256', RC11_BASELINE.sha256, env)
@@ -548,11 +606,12 @@ export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch
     fetchImpl,
     expectedSize: CODE31_BASELINE.size,
     expectedSha256: CODE31_BASELINE.sha256,
+    stage: 'CODE31_BACKUP_PREUPLOAD_READBACK',
   })
   const { apkPath } = await readIngressArtifact(env, 'rc12')
   const cos = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('rc12', { ...ids, date })
-  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC12_BASELINE })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC12_BASELINE, stage: 'RC12_RELEASE' })
   await writeOutput('RC12_OBJECT_KEY', key, env)
   await writeOutput('RC12_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   await writeOutput('RC12_SHA256', RC12_BASELINE.sha256, env)

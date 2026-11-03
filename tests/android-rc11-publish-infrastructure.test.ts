@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
 import { createRequire } from 'node:module'
+import os from 'node:os'
 
 // Wrangler is already a pinned dev dependency and directly carries this YAML parser.
 // Resolve it from Wrangler so infra-only test changes do not touch app manifests or trigger deploy.
@@ -14,9 +17,13 @@ import {
   CODE31_BASELINE,
   RC11_BASELINE,
   RC12_BASELINE,
+  APK_DOWNLOAD_TIMEOUT_MS,
+  COS_REQUEST_TIMEOUT_MS,
   EXPECTED_OIDC_SUBJECT,
   assertObjectAbsent,
+  createCosClient,
   createVersionedObjectKey,
+  downloadToFile,
   validateCode30VersionApi,
   validateCode31VersionApi,
   validateCosConfig,
@@ -340,6 +347,67 @@ test('COS object preflight permits only a verified 404 and rejects existing or u
   await assert.rejects(() => assertObjectAbsent({ headObject: async () => { throw new Error('network') } }, 'bucket', 'region', 'key'), /COS_OBJECT_EXISTENCE_UNVERIFIED/)
 })
 
+test('COS requests and APK downloads have bounded timeouts that fit inside the staging job', () => {
+  assert.equal(APK_DOWNLOAD_TIMEOUT_MS, 20 * 60 * 1000)
+  assert.equal(COS_REQUEST_TIMEOUT_MS, 10 * 60 * 1000)
+  assert.ok(2 * APK_DOWNLOAD_TIMEOUT_MS + 3 * COS_REQUEST_TIMEOUT_MS + 120_000 < 90 * 60 * 1000)
+
+  let clientOptions: Record<string, unknown> | undefined
+  class FakeCos {
+    constructor(options: Record<string, unknown>) {
+      clientOptions = options
+    }
+  }
+  createCosClient({ SecretId: 'test-id', SecretKey: 'test-key', SecurityToken: 'test-session' }, FakeCos)
+  assert.equal(clientOptions?.Timeout, COS_REQUEST_TIMEOUT_MS)
+  assert.equal(clientOptions?.Protocol, 'https:')
+})
+
+test('APK downloader records safe stage progress and verifies bytes', async () => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'ecfc-download-stage-test-'))
+  const apkPath = path.join(temporaryDirectory, 'fixture.apk')
+  const bytes = new TextEncoder().encode('small signed apk fixture')
+  const expectedSha256 = createHash('sha256').update(bytes).digest('hex').toUpperCase()
+  const logLines: string[] = []
+  let requestSignal: AbortSignal | null | undefined
+  const response = {
+    ok: true,
+    status: 200,
+    url: 'https://cdn.example.test/apk',
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes)
+        controller.close()
+      },
+    }),
+  } as Response
+
+  try {
+    const downloaded = await downloadToFile('https://cdn.example.test/apk?token=must-not-appear-in-logs', apkPath, {
+      fetchImpl: async (_input, init) => {
+        requestSignal = init?.signal
+        return response
+      },
+      expectedSize: bytes.length,
+      expectedSha256,
+      stage: 'TEST_APK_DOWNLOAD',
+      logImpl: (line) => logLines.push(line),
+    })
+
+    assert.equal(requestSignal instanceof AbortSignal, true)
+    assert.equal(requestSignal?.aborted, false)
+    assert.equal(downloaded.size, bytes.length)
+    assert.equal(downloaded.sha256, expectedSha256)
+    assert.deepEqual(await readFile(apkPath), Buffer.from(bytes))
+    assert.ok(logLines.some((line) => line.startsWith('RELEASE_PROGRESS=TEST_APK_DOWNLOAD_START')))
+    assert.ok(logLines.some((line) => line.startsWith('RELEASE_PROGRESS=TEST_APK_DOWNLOAD_RESPONSE status=200')))
+    assert.ok(logLines.some((line) => line.startsWith('RELEASE_PROGRESS=TEST_APK_DOWNLOAD_COMPLETE')))
+    assert.doesNotMatch(logLines.join('\n'), /cdn\.example|token=|must-not-appear/)
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true })
+  }
+})
+
 test('production branch checks fail closed for unprotected, moved, or non-main revisions', () => {
   const branch = { name: 'main', protected: true, commit: { sha: testWorkflowSha } }
   assert.deepEqual(assertReleaseMainBranch({ branch, expectedSha: testWorkflowSha, ref: 'refs/heads/main' }), {
@@ -395,6 +463,9 @@ test('COS publish simulation verifies absence, uploads code30 first, reads metad
   assert.ok(backupSection.indexOf('await downloadToFile(apiBody.downloadUrl') < backupSection.indexOf('await uploadImmutableObject'))
   assert.ok(releaseSection.indexOf('await downloadToFile(new URL(backupKey') < releaseSection.indexOf('await uploadImmutableObject'))
   assert.ok(uploadSection.indexOf('await assertObjectAbsent') < uploadSection.indexOf('await cos.putObject'))
+  assert.match(publisher, /Timeout: COS_REQUEST_TIMEOUT_MS/)
+  assert.match(publisher, /AbortSignal\.timeout\(APK_DOWNLOAD_TIMEOUT_MS\)/)
+  assert.match(uploadSection, /onProgress: createCosUploadProgressLogger/)
   assert.ok(uploadSection.indexOf('await cos.putObject') < uploadSection.indexOf('await cos.headObject'))
   assert.ok(uploadSection.indexOf('await cos.headObject') < uploadSection.indexOf('await downloadToFile(cdnUrl'))
   assert.match(uploadSection, /Headers: \{ 'x-cos-forbid-overwrite': 'true' \}/)
