@@ -26,6 +26,18 @@ export const CODE30_BASELINE = Object.freeze({
   sha256: 'D2CA0817E23431EFAB87E992BA544C4B213981E3E8651D67AF49324B440FC967',
   signerSha256: '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B',
 })
+export const CODE31_BASELINE = Object.freeze({
+  ...RC11_BASELINE,
+})
+export const RC12_BASELINE = Object.freeze({
+  applicationId: 'fans.ecfc.app',
+  versionCode: 32,
+  versionName: '1.0.0-beta.21',
+  size: 180263015,
+  sha256: '50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271',
+  signerSha256: '12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B',
+})
+const RC12_INGRESS_FILENAME = 'ECFC-1.0.0-beta.21-release-RC12-code32.apk'
 
 const APK_CONTENT_TYPE = 'application/vnd.android.package-archive'
 const APK_CACHE_CONTROL = 'public, max-age=31536000, immutable'
@@ -53,28 +65,41 @@ function assertSize(value, expected, code) {
   if (Number(value) !== expected) throw new Error(code)
 }
 
-export function validateCode30VersionApi(body) {
-  if (!body || body.platform !== 'android' || body.versionName !== CODE30_BASELINE.versionName
-    || Number(body.versionCode) !== CODE30_BASELINE.versionCode
-    || Number(body.size) !== CODE30_BASELINE.size
-    || String(body.apkSha256).toUpperCase() !== CODE30_BASELINE.sha256
+function validateVersionApiBaseline(body, baseline, code) {
+  if (!body || body.platform !== 'android' || body.versionName !== baseline.versionName
+    || Number(body.versionCode) !== baseline.versionCode
+    || Number(body.size) !== baseline.size
+    || String(body.apkSha256).toUpperCase() !== baseline.sha256
     || Number(body.minimumVersionCode) !== 19 || body.forceUpdate !== false
     || body.downloadUrl !== CODE30_DOWNLOAD_URL
     || !Array.isArray(body.releaseNotes) || body.releaseNotes.length !== 6
     || typeof body.publishedAt !== 'string' || !body.publishedAt) {
-    throw new Error('PRODUCTION_VERSION_API_NOT_EXPECTED_CODE30')
+    throw new Error(code)
   }
   return body
 }
 
+export function validateCode30VersionApi(body) {
+  return validateVersionApiBaseline(body, CODE30_BASELINE, 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE30')
+}
+
+export function validateCode31VersionApi(body) {
+  return validateVersionApiBaseline(body, CODE31_BASELINE, 'PRODUCTION_VERSION_API_NOT_EXPECTED_CODE31')
+}
+
 export function validateIngressManifest(manifest, {
+  candidate = 'rc11',
   runId = process.env.GITHUB_RUN_ID,
   runAttempt = process.env.GITHUB_RUN_ATTEMPT,
   ref = process.env.GITHUB_REF,
   workflowRef = process.env.GITHUB_WORKFLOW_REF,
   workflowSha = process.env.GITHUB_SHA,
 } = {}) {
-  if (!manifest || manifest.source_file !== INGRESS_FILENAME
+  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : null
+  const sourceFile = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : null
+  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : null
+  if (!baseline || !sourceFile || !prefix) throw new Error('RELEASE_CANDIDATE_INVALID')
+  if (!manifest || manifest.release_candidate !== candidate || manifest.source_file !== sourceFile
     || String(manifest.run_id) !== String(runId)
     || String(manifest.run_attempt) !== String(runAttempt)
     || manifest.ref !== 'refs/heads/main' || ref !== 'refs/heads/main'
@@ -82,38 +107,44 @@ export function validateIngressManifest(manifest, {
     || !workflowRef.endsWith('/.github/workflows/publish-android-rc11.yml@refs/heads/main')
     || manifest.workflow_ref !== workflowRef
     || manifest.workflow_sha !== workflowSha
-    || manifest.application_id !== RC11_BASELINE.applicationId
-    || Number(manifest.version_code) !== RC11_BASELINE.versionCode
-    || manifest.version_name !== RC11_BASELINE.versionName
-    || String(manifest.size) !== String(RC11_BASELINE.size)) {
-    throw new Error('RC11_INGRESS_PROVENANCE_INVALID')
+    || manifest.application_id !== baseline.applicationId
+    || Number(manifest.version_code) !== baseline.versionCode
+    || manifest.version_name !== baseline.versionName
+    || String(manifest.size) !== String(baseline.size)) {
+    throw new Error(prefix + '_INGRESS_PROVENANCE_INVALID')
   }
-  assertSha(manifest.source_sha256, RC11_BASELINE.sha256, 'RC11_INGRESS_SOURCE_SHA256_MISMATCH')
-  assertSha(manifest.sha256, RC11_BASELINE.sha256, 'RC11_INGRESS_SHA256_MISMATCH')
-  assertSha(manifest.signer_sha256, RC11_BASELINE.signerSha256, 'RC11_INGRESS_SIGNER_MISMATCH')
+  assertSha(manifest.source_sha256, baseline.sha256, prefix + '_INGRESS_SOURCE_SHA256_MISMATCH')
+  assertSha(manifest.sha256, baseline.sha256, prefix + '_INGRESS_SHA256_MISMATCH')
+  assertSha(manifest.signer_sha256, baseline.signerSha256, prefix + '_INGRESS_SIGNER_MISMATCH')
   return manifest
 }
 
 export function createVersionedObjectKey(kind, { date = new Date(), runId, runAttempt } = {}) {
-  if (!['code30-backup', 'rc11'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
+  if (!['code30-backup', 'code31-backup', 'rc11', 'rc12'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
   if (!/^\d+$/.test(String(runId ?? '')) || !/^[1-9]\d*$/.test(String(runAttempt ?? ''))) {
     throw new Error('GITHUB_RUN_ID_INVALID')
   }
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) throw new Error('OBJECT_TIMESTAMP_INVALID')
   const timestamp = date.toISOString().replace(/[-:]/g, '').replace('T', '-').replace(/\.\d{3}Z$/, '')
-  const filename = kind === 'code30-backup'
-    ? `ECFC-1.0.0-beta.21-code30-backup-${timestamp}-run${runId}-attempt${runAttempt}.apk`
-    : `ECFC-1.0.0-beta.21-release-beta21-rc11-${timestamp}-run${runId}-attempt${runAttempt}.apk`
-  return `android/releases/${filename}`
+  const filename = kind.endsWith('-backup')
+    ? 'ECFC-1.0.0-beta.21-' + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
+    : 'ECFC-1.0.0-beta.21-release-beta21-' + kind + '-' + timestamp + '-run' + runId + '-attempt' + runAttempt + '.apk'
+  return 'android/releases/' + filename
 }
 
 export function validateVersionedObjectKey(key, kind, { runId, runAttempt } = {}) {
   if (typeof key !== 'string' || !key.startsWith('android/releases/')) throw new Error('COS_OBJECT_KEY_INVALID')
   const pattern = kind === 'code30-backup'
     ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-code30-backup-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
-    : /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
-  if (!pattern.test(key)) throw new Error('COS_OBJECT_KEY_INVALID')
-  if (runId !== undefined && !key.includes(`-run${runId}-attempt${runAttempt}.apk`)) {
+    : kind === 'code31-backup'
+      ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-code31-backup-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
+      : kind === 'rc11'
+        ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
+        : kind === 'rc12'
+          ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc12-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
+          : null
+  if (!pattern || !pattern.test(key)) throw new Error('COS_OBJECT_KEY_INVALID')
+  if (runId !== undefined && !key.includes('-run' + runId + '-attempt' + runAttempt + '.apk')) {
     throw new Error('COS_OBJECT_KEY_RUN_MISMATCH')
   }
   return key
@@ -397,7 +428,7 @@ function writeOutput(name, value, env = process.env) {
   return writeFile(env.GITHUB_OUTPUT, `${name}=${value}\n`, { flag: 'a' })
 }
 
-async function fetchVersionApi(fetchImpl = fetch) {
+async function fetchVersionApi(expectedVersionCode = 30, fetchImpl = fetch) {
   let response
   try {
     response = await fetchImpl(API_VERSION_URL, { redirect: 'error', signal: AbortSignal.timeout(30_000) })
@@ -411,23 +442,27 @@ async function fetchVersionApi(fetchImpl = fetch) {
   } catch {
     throw new Error('PRODUCTION_VERSION_API_INVALID')
   }
-  return validateCode30VersionApi(body)
+  return expectedVersionCode === 30 ? validateCode30VersionApi(body) : validateCode31VersionApi(body)
 }
 
-async function readIngressArtifact(env) {
+async function readIngressArtifact(env, candidate = env.RELEASE_CANDIDATE || 'rc11') {
+  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : null
+  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : null
+  const fileName = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : null
+  if (!baseline || !prefix || !fileName) throw new Error('RELEASE_CANDIDATE_INVALID')
   const ingressDir = env.RC11_INGRESS_DIRECTORY
-  if (!ingressDir) throw new Error('RC11_INGRESS_DIRECTORY_MISSING')
-  const apkPath = path.join(ingressDir, INGRESS_FILENAME)
+  if (!ingressDir) throw new Error(prefix + '_INGRESS_DIRECTORY_MISSING')
+  const apkPath = path.join(ingressDir, fileName)
   let manifest
   try {
     manifest = JSON.parse(await readFile(path.join(ingressDir, 'manifest.json'), 'utf8'))
   } catch {
-    throw new Error('RC11_INGRESS_MANIFEST_INVALID')
+    throw new Error(prefix + '_INGRESS_MANIFEST_INVALID')
   }
-  validateIngressManifest(manifest)
+  validateIngressManifest(manifest, { candidate })
   const actual = await hashFile(apkPath)
-  assertSize(actual.size, RC11_BASELINE.size, 'RC11_APK_SIZE_MISMATCH')
-  assertSha(actual.sha256, RC11_BASELINE.sha256, 'RC11_APK_SHA256_MISMATCH')
+  assertSize(actual.size, baseline.size, prefix + '_APK_SIZE_MISMATCH')
+  assertSha(actual.sha256, baseline.sha256, prefix + '_APK_SHA256_MISMATCH')
   return { apkPath, manifest }
 }
 
@@ -451,7 +486,7 @@ function runIdentifiers(env) {
 
 export async function publishCode30Backup({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
   runIdentifiers(env)
-  const apiBody = await fetchVersionApi(fetchImpl)
+  const apiBody = await fetchVersionApi(30, fetchImpl)
   const baselinePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'android-version-api-code30-baseline.json')
   await writeFile(baselinePath, `${JSON.stringify(apiBody, null, 2)}\n`, { flag: 'wx' })
   const sourcePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'ecfc-beta21-code30-source.apk')
@@ -465,6 +500,25 @@ export async function publishCode30Backup({ env = process.env, fetchImpl = fetch
   await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE30_BASELINE })
   await writeOutput('CODE30_BACKUP_OBJECT_KEY', key, env)
   await writeOutput('CODE30_BACKUP_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
+  return { key, baselinePath }
+}
+
+export async function publishCode31Backup({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
+  runIdentifiers(env)
+  const apiBody = await fetchVersionApi(31, fetchImpl)
+  const baselinePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'android-version-api-code31-baseline.json')
+  await writeFile(baselinePath, JSON.stringify(apiBody, null, 2) + '\n', { flag: 'wx' })
+  const sourcePath = path.join(env.RUNNER_TEMP || os.tmpdir(), 'ecfc-beta21-code31-source.apk')
+  await downloadToFile(apiBody.downloadUrl, sourcePath, {
+    fetchImpl,
+    expectedSize: CODE31_BASELINE.size,
+    expectedSha256: CODE31_BASELINE.sha256,
+  })
+  const cos = await getCos(env, fetchImpl)
+  const key = createVersionedObjectKey('code31-backup', { ...runIdentifiers(env), date })
+  await uploadImmutableObject({ cos, env, key, filePath: sourcePath, expected: CODE31_BASELINE })
+  await writeOutput('CODE31_BACKUP_OBJECT_KEY', key, env)
+  await writeOutput('CODE31_BACKUP_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   return { key, baselinePath }
 }
 
@@ -487,6 +541,25 @@ export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch
   return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString(), backupKey }
 }
 
+export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
+  const ids = runIdentifiers(env)
+  const backupKey = validateVersionedObjectKey(env.CODE31_BACKUP_OBJECT_KEY, 'code31-backup', ids)
+  await downloadToFile(new URL(backupKey, CDN_BASE_URL).toString(), path.join(env.RUNNER_TEMP || os.tmpdir(), 'ecfc-beta21-code31-backup-readback.apk'), {
+    fetchImpl,
+    expectedSize: CODE31_BASELINE.size,
+    expectedSha256: CODE31_BASELINE.sha256,
+  })
+  const { apkPath } = await readIngressArtifact(env, 'rc12')
+  const cos = await getCos(env, fetchImpl)
+  const key = createVersionedObjectKey('rc12', { ...ids, date })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC12_BASELINE })
+  await writeOutput('RC12_OBJECT_KEY', key, env)
+  await writeOutput('RC12_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
+  await writeOutput('RC12_SHA256', RC12_BASELINE.sha256, env)
+  await writeOutput('RC12_SIZE', RC12_BASELINE.size, env)
+  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString(), backupKey }
+}
+
 async function main() {
   const command = process.argv[2]
   if (command === 'verify-oidc') {
@@ -499,9 +572,19 @@ async function main() {
     console.log(`CODE30_BACKUP_VERIFIED=YES\nCODE30_BACKUP_OBJECT_KEY=${result.key}`)
     return
   }
+  if (command === 'backup-code31') {
+    const result = await publishCode31Backup()
+    console.log('CODE31_BACKUP_VERIFIED=YES\nCODE31_BACKUP_OBJECT_KEY=' + result.key)
+    return
+  }
   if (command === 'publish-rc11') {
     const result = await publishRc11Artifact()
     console.log(`RC11_CDN_VERIFIED=YES\nRC11_OBJECT_KEY=${result.key}`)
+    return
+  }
+  if (command === 'publish-rc12') {
+    const result = await publishRc12Artifact()
+    console.log('RC12_CDN_VERIFIED=YES\nRC12_OBJECT_KEY=' + result.key)
     return
   }
   throw new Error('COS_PUBLISH_COMMAND_INVALID')

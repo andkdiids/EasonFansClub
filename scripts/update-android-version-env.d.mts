@@ -29,10 +29,14 @@ export function configureAndroidVersionEnv(input: {
   now?: Date
 }): { backupPath: string; changedKeys: string[]; envSha256: string }
 
-export function restoreAndroidVersionEnv(input: {
+export type AndroidVersionRollbackInput = {
   appDir: string
   expectedProductionSha: string
   backupName: string
-  code30BackupObjectKey: string
   now?: Date
-}): { backupPath: string; changedKeys: string[]; envSha256: string }
+} & (
+  { code30BackupObjectKey: string; code31BackupObjectKey?: never }
+  | { code31BackupObjectKey: string; code30BackupObjectKey?: never }
+)
+
+export function restoreAndroidVersionEnv(input: AndroidVersionRollbackInput): { backupPath: string; changedKeys: string[]; envSha256: string }
