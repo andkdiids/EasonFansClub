@@ -639,6 +639,7 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   assert.deepEqual(verifyPnpmSetup, cosPnpmSetup)
   assert.ok(verifyProductionInstallIndex > verifyPnpmSetupIndex)
   assert.ok(verifyResolveIndex > verifyProductionInstallIndex)
+  assert.match(read('.github/workflows/android-release-infra-ci.yml'), /require\.resolve\('cos-nodejs-sdk-v5'\)/)
   assert.equal(verify['timeout-minutes'], 10)
   assert.equal(ingress['timeout-minutes'], 20)
   assert.equal(cos['timeout-minutes'], 60)
