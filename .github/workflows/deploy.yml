@@ -471,4 +471,3 @@ jobs:
           done
           echo "::error::Public endpoint does not serve rollback SHA ${DEPLOY_SHA}."
           exit 1
-
