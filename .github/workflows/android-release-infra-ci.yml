@@ -60,6 +60,9 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify installed COS SDK dependency
+        run: node -e "console.log(require.resolve('cos-nodejs-sdk-v5'))"
+
       - name: Check JavaScript syntax
         run: |
           node --check scripts/android-rc11-cos-publish.mjs
