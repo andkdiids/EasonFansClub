@@ -908,15 +908,25 @@ test('read-only COS gate fails closed for enabled, suspended, and unknown versio
     [{ Unexpected: 'value' }, /COS_BUCKET_VERSIONING_UNKNOWN/],
   ] as const) {
     let objectReads = 0
+    const rangeUrl = 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY
     await assert.rejects(verifyCosReadOnlyAccess({
       cos: {
         getBucketVersioning: async () => ({ VersioningConfiguration: configuration }),
         headObject: async () => { objectReads++; return { statusCode: 200, headers: { 'content-length': String(RC12_BASELINE.size) } } },
-        getObject: async () => { objectReads++; return { statusCode: 206, Body: Buffer.from([0]) } },
       },
       bucket: 'ecfc-1306412725',
       region: 'ap-guangzhou',
       log: () => {},
+      fetchImpl: async (input, init) => {
+        objectReads++
+        assert.equal(String(input), rangeUrl)
+        assert.equal(init?.method, 'GET')
+        assert.equal(init?.redirect, 'error')
+        return responseWithUrl(rangeUrl, 206, {
+          'content-length': '1',
+          'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
+        }, Buffer.from([0]))
+      },
     }), error)
     assert.equal(objectReads, 0)
   }
