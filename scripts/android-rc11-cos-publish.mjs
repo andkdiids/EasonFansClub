@@ -614,7 +614,7 @@ export async function uploadImmutableObject({ cos, env, key, filePath, expected,
     })
   } catch (error) {
     if (error?.message !== 'COS_COMPLETE_UNCERTAIN') throw error
-    // Only HEAD plus complete CDN SHA readback below can resolve an ambiguous response.
+    // Only HEAD plus complete custom-domain SHA readback can resolve an ambiguous response.
     logReleaseProgress(`${stage}_COS_PUT`, 'REVALIDATE')
   }
 
@@ -628,27 +628,19 @@ export async function uploadImmutableObject({ cos, env, key, filePath, expected,
   await runReleaseStage(`${stage}_COS_METADATA_VALIDATE`, () => validateObjectMetadata(metadata, expected))
 
   const cdnUrl = createCdnObjectUrl(key).toString()
-  const customDomainReadbackPath = path.join(os.tmpdir(), `ecfc-cos-${expected.sha256}.apk`)
+  const readbackPath = path.join(os.tmpdir(), `ecfc-${expected.sha256}.apk`)
+  // COS default-domain APK reads are forbidden. Read exactly once through the existing
+  // HTTPS custom domain; downloadToFile verifies every byte, size, and SHA-256.
   await downloadCos({
     cos,
     bucket: env.TENCENT_COS_BUCKET,
     region: env.TENCENT_COS_REGION,
     key,
-    filePath: customDomainReadbackPath,
+    filePath: readbackPath,
     expected,
     downloadFile,
     fetchImpl,
-    stage: `${stage}_CUSTOM_DOMAIN_READBACK`,
-  })
-
-  const readbackPath = path.join(os.tmpdir(), `ecfc-${expected.sha256}.apk`)
-  await downloadFile(cdnUrl, readbackPath, {
-    fetchImpl,
-    expectedSize: expected.size,
-    expectedSha256: expected.sha256,
     stage: `${stage}_CDN_READBACK`,
-    redirect: 'error',
-    expectedHostname: CDN_HOSTNAME,
   })
   return { key, cdnUrl, metadata }
 }
