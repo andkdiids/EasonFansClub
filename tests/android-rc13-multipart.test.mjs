@@ -150,7 +150,7 @@ test('read-only gate exchanges OIDC for a two-hour STS lease and never logs cred
     return {
       getBucketVersioning: async () => ({ VersioningConfiguration: {} }),
       headObject: async () => ({ statusCode: 200, headers: { 'Content-Length': '180263015' } }),
-      getObject: async ({ Range }) => Range === 'bytes=0-0' ? { statusCode: 206, Body: Buffer.from([0]) } : { statusCode: 200, Body: Buffer.alloc(0) },
+      getObject: async ({ Headers }) => Headers?.Range === 'bytes=0-0' ? { statusCode: 206, Body: Buffer.from([0]) } : { statusCode: 200, Body: Buffer.alloc(0) },
     }
   }
   const result = await verifyCosReadOnly({ env, fetchImpl, cosFactory, log: (line) => logs.push(line), now: () => 1_800_000_000_000 })
