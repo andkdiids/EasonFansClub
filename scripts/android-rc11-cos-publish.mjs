@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { Readable, Transform } from 'node:stream'
@@ -53,6 +53,7 @@ const DOWNLOAD_PROGRESS_INTERVAL_BYTES = 25 * 1024 * 1024
 const API_VERSION_URL = 'https://ecfc.fans/api/app/version?platform=android'
 const CODE30_DOWNLOAD_URL = 'https://ecfc.fans/api/app/download/android'
 const CDN_BASE_URL = 'https://media.ecfc.fans/media/'
+const CDN_HOSTNAME = new URL(CDN_BASE_URL).hostname
 const OIDC_ISSUER = 'https://token.actions.githubusercontent.com'
 export const EXPECTED_OIDC_WORKFLOW_REF = 'andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main'
 export const EXPECTED_OIDC_SUBJECT = `repo:andkdiids/EasonFansClub:environment:Production:workflow_ref:${EXPECTED_OIDC_WORKFLOW_REF}`
@@ -74,6 +75,63 @@ function assertSha(value, expected, code) {
 
 function assertSize(value, expected, code) {
   if (Number(value) !== expected) throw new Error(code)
+}
+
+function createCdnObjectUrl(key) {
+  if (typeof key !== 'string'
+    || !/^android\\/releases\\/[A-Za-z0-9][A-Za-z0-9._/-]{0,220}\\.apk$/.test(key)
+    || key.includes('\\\\')
+    || key.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error('COS_CUSTOM_DOMAIN_OBJECT_KEY_INVALID')
+  }
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+  const url = new URL(encodedKey, CDN_BASE_URL)
+  if (url.protocol !== 'https:' || url.hostname !== CDN_HOSTNAME
+    || url.username || url.password || url.port || url.search || url.hash
+    || !url.pathname.startsWith('/media/android/releases/')
+    || url.pathname !== '/media/' + encodedKey) {
+    throw new Error('COS_CUSTOM_DOMAIN_URL_INVALID')
+  }
+  return url
+}
+
+function safeResponseHeader(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/=_:.-]{1,160}$/.test(value)) return 'NONE'
+  return value
+}
+
+function getSafeResponseDiagnostics(response) {
+  const contentRange = safeResponseHeader(response.headers.get('content-range') ?? '')
+  const contentLength = safeResponseHeader(response.headers.get('content-length') ?? '')
+  const requestId = safeResponseHeader(
+    response.headers.get('x-cos-request-id')
+      ?? response.headers.get('x-request-id')
+      ?? response.headers.get('x-amz-request-id')
+      ?? '',
+  )
+  return `http_status=${response.status} content_range=${contentRange} content_length=${contentLength} request_id=${requestId}`
+}
+
+async function responseContainsExactlyOneByte(response) {
+  if (!response.body) return false
+  const reader = response.body.getReader()
+  try {
+    const first = await reader.read()
+    if (first.done || !first.value || first.value.byteLength !== 1) return false
+    const second = await reader.read()
+    return second.done === true
+  } catch {
+    return false
+  } finally {
+    try { await reader.cancel() } catch {}
+    try { reader.releaseLock() } catch {}
+  }
+}
+
+function safeFetchErrorClass(error) {
+  return error instanceof Error && ['AbortError', 'TimeoutError', 'TypeError'].includes(error.name)
+    ? error.name
+    : 'NETWORK_ERROR'
 }
 
 function validateVersionApiBaseline(body, baseline, code) {
@@ -262,24 +320,22 @@ async function verifyRollbackSourceRange(candidate, fetchImpl) {
     : candidate === 'rc12' ? { key: CODE31_ROLLBACK_OBJECT_KEY, size: CODE31_BASELINE.size, code: 31 }
       : candidate === 'rc13' ? { key: CODE32_ROLLBACK_OBJECT_KEY, size: CODE32_BASELINE.size, code: 32 } : null
   if (!source) throw new Error('RELEASE_CANDIDATE_INVALID')
-  const url = new URL(source.key, CDN_BASE_URL).toString()
+  const url = createCdnObjectUrl(source.key).toString()
   let response
   try {
     response = await fetchImpl(url, {
       headers: { Range: 'bytes=0-0' },
-      redirect: 'follow',
+      redirect: 'error',
       signal: AbortSignal.timeout(30_000),
     })
   } catch {
     throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`)
   }
   if (!response.ok || response.status !== 206 || response.url !== url
-    || response.headers.get('content-range') !== `bytes 0-0/${source.size}`) {
+    || response.headers.get('content-range') !== `bytes 0-0/${source.size}`
+    || !await responseContainsExactlyOneByte(response)) {
     throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`)
   }
-  let bytes
-  try { bytes = await response.arrayBuffer() } catch { throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`) }
-  if (bytes.byteLength !== 1) throw new Error(`CODE${source.code}_ROLLBACK_SOURCE_UNAVAILABLE`)
   return source
 }
 
@@ -314,16 +370,36 @@ export async function downloadToFile(url, filePath, {
   expectedSha256,
   stage = 'APK_DOWNLOAD',
   logImpl = console.log,
+  redirect = 'follow',
+  expectedHostname,
 } = {}) {
   return runReleaseStage(stage, async () => {
+    let requestedUrl
+    try {
+      requestedUrl = new URL(url)
+    } catch {
+      throw new Error('APK_DOWNLOAD_URL_INVALID')
+    }
+    if (requestedUrl.protocol !== 'https:' || requestedUrl.username || requestedUrl.password
+      || (expectedHostname && (requestedUrl.hostname !== expectedHostname
+        || requestedUrl.port || requestedUrl.search || requestedUrl.hash))) {
+      throw new Error('APK_DOWNLOAD_URL_INVALID')
+    }
+
     let response
     try {
-      response = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(APK_DOWNLOAD_TIMEOUT_MS) })
+      response = await fetchImpl(url, { redirect, signal: AbortSignal.timeout(APK_DOWNLOAD_TIMEOUT_MS) })
     } catch {
       throw new Error('APK_DOWNLOAD_FAILED')
     }
     logReleaseProgress(stage, 'RESPONSE', `status=${response.status}`, logImpl)
-    if (!response.ok || !response.body || !response.url.startsWith('https://')) throw new Error('APK_DOWNLOAD_FAILED')
+    let finalUrl
+    try { finalUrl = new URL(response.url) } catch { throw new Error('APK_DOWNLOAD_FAILED') }
+    if (!response.ok || !response.body || finalUrl.protocol !== 'https:'
+      || finalUrl.username || finalUrl.password
+      || (expectedHostname && (finalUrl.hostname !== expectedHostname || response.url !== requestedUrl.toString()))) {
+      throw new Error('APK_DOWNLOAD_FAILED')
+    }
 
     await mkdir(path.dirname(filePath), { recursive: true })
     const hash = createHash('sha256')
@@ -508,18 +584,26 @@ export async function assertObjectAbsent(cos, bucket, region, key) {
   }
 }
 
-export async function downloadCosObject({ cos, bucket, region, key, filePath, expected }) {
-  try {
-    await cos.getObject({ Bucket: bucket, Region: region, Key: key, Output: createWriteStream(filePath, { flags: 'wx' }) })
-  } catch {
-    throw new Error('COS_READBACK_FAILED')
-  }
-  const actual = await hashFile(filePath)
-  assertSize(actual.size, expected.size, 'COS_READBACK_SIZE_MISMATCH')
-  assertSha(actual.sha256, expected.sha256, 'COS_READBACK_SHA256_MISMATCH')
+export async function downloadCosObject({
+  key,
+  filePath,
+  expected,
+  downloadFile = downloadToFile,
+  fetchImpl = fetch,
+  stage = 'COS_CUSTOM_DOMAIN_READBACK',
+}) {
+  const url = createCdnObjectUrl(key)
+  return downloadFile(url.toString(), filePath, {
+    fetchImpl,
+    expectedSize: expected.size,
+    expectedSha256: expected.sha256,
+    stage,
+    redirect: 'error',
+    expectedHostname: CDN_HOSTNAME,
+  })
 }
 
-export async function uploadImmutableObject({ cos, env, key, filePath, expected, stage, credentialsExpiredTime, downloadFile = downloadToFile, downloadCos = downloadCosObject }) {
+export async function uploadImmutableObject({ cos, env, key, filePath, expected, stage, credentialsExpiredTime, downloadFile = downloadToFile, downloadCos = downloadCosObject, fetchImpl = fetch }) {
   await runReleaseStage(`${stage}_COS_PREFLIGHT`, async () => {
     await assertObjectAbsent(cos, env.TENCENT_COS_BUCKET, env.TENCENT_COS_REGION, key)
   })
@@ -542,14 +626,28 @@ export async function uploadImmutableObject({ cos, env, key, filePath, expected,
   })
   await runReleaseStage(`${stage}_COS_METADATA_VALIDATE`, () => validateObjectMetadata(metadata, expected))
 
-  await runReleaseStage(`${stage}_COS_READBACK`, () => downloadCos({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, key, filePath: path.join(os.tmpdir(), `ecfc-cos-${expected.sha256}.apk`), expected }))
+  const cdnUrl = createCdnObjectUrl(key).toString()
+  const customDomainReadbackPath = path.join(os.tmpdir(), `ecfc-cos-${expected.sha256}.apk`)
+  await downloadCos({
+    cos,
+    bucket: env.TENCENT_COS_BUCKET,
+    region: env.TENCENT_COS_REGION,
+    key,
+    filePath: customDomainReadbackPath,
+    expected,
+    downloadFile,
+    fetchImpl,
+    stage: `${stage}_CUSTOM_DOMAIN_READBACK`,
+  })
 
-  const cdnUrl = new URL(key, CDN_BASE_URL).toString()
   const readbackPath = path.join(os.tmpdir(), `ecfc-${expected.sha256}.apk`)
   await downloadFile(cdnUrl, readbackPath, {
+    fetchImpl,
     expectedSize: expected.size,
     expectedSha256: expected.sha256,
     stage: `${stage}_CDN_READBACK`,
+    redirect: 'error',
+    expectedHostname: CDN_HOSTNAME,
   })
   return { key, cdnUrl, metadata }
 }
@@ -592,7 +690,7 @@ async function getCos(env, fetchImpl = fetch, { cosFactory = createCosClient, lo
   return { cos: cosFactory(credentials), credentialsExpiredTime: expiry.expiredTime, expiry }
 }
 
-export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = console.log }) {
+export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = console.log, fetchImpl = fetch }) {
   const base = { Bucket: bucket, Region: region }
   let versioning
   try {
@@ -624,18 +722,28 @@ export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = conso
   const contentLength = Number(responseHeaders['content-length'] ?? head?.ContentLength ?? head?.contentLength)
   if (Number(head?.statusCode) !== 200 || contentLength !== CODE32_BASELINE.size) throw new Error('COS_CODE32_HEAD_MISMATCH')
 
+  const rangeUrl = createCdnObjectUrl(CODE32_ROLLBACK_OBJECT_KEY).toString()
   let rangeRead
   try {
-    rangeRead = await cos.getObject({ ...object, Headers: { Range: 'bytes=0-0' } })
+    rangeRead = await fetchImpl(rangeUrl, {
+      headers: { Range: 'bytes=0-0' },
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    })
   } catch (error) {
-    log(`COS_GET_OBJECT_FAILED ${safeCosError(error, { requestType: 'GetObject', method: 'GET' })}`)
-    throw new Error('COS_GET_OBJECT_FAILED')
+    log(`COS_CUSTOM_DOMAIN_RANGE_GET_FAILED error_class=${safeFetchErrorClass(error)}`)
+    throw new Error('COS_CUSTOM_DOMAIN_RANGE_GET_FAILED')
   }
-  if (Number(rangeRead?.statusCode) !== 206 || !Buffer.isBuffer(rangeRead?.Body) || rangeRead.Body.length !== 1) {
-    throw new Error('COS_GET_OBJECT_RANGE_INVALID')
+  const contentRange = rangeRead.headers.get('content-range')
+  const validRange = rangeRead.ok && rangeRead.status === 206 && rangeRead.url === rangeUrl
+    && contentRange === `bytes 0-0/${CODE32_BASELINE.size}`
+    && (!rangeRead.headers.get('content-length') || rangeRead.headers.get('content-length') === '1')
+  if (!validRange || !await responseContainsExactlyOneByte(rangeRead)) {
+    log(`COS_CUSTOM_DOMAIN_RANGE_GET_FAILED ${getSafeResponseDiagnostics(rangeRead)}`)
+    throw new Error('COS_CUSTOM_DOMAIN_RANGE_GET_FAILED')
   }
-  log('COS_READ_ONLY_PERMISSIONS=PASS GetBucketVersioning=PASS HeadObject=PASS GetObject=PASS')
-  return { versioning: 'DISABLED', headObject: 'PASS', getObject: 'PASS', objectKey: CODE32_ROLLBACK_OBJECT_KEY }
+  log('COS_READ_ONLY_PREFLIGHT=PASS GetBucketVersioning=PASS HeadObject=PASS CustomDomainRangeGet=PASS')
+  return { versioning: 'DISABLED', headObject: 'PASS', customDomainRangeGet: 'PASS', objectKey: CODE32_ROLLBACK_OBJECT_KEY }
 }
 
 export async function verifyCosReadOnly({ env = process.env, fetchImpl = fetch, cosFactory = createCosClient, log = console.log, now = Date.now } = {}) {
@@ -660,10 +768,10 @@ export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch
   const key = createVersionedObjectKey('rc11', { ...ids, date })
   await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC11_BASELINE, stage: 'RC11_RELEASE', credentialsExpiredTime })
   await writeOutput('RC11_OBJECT_KEY', key, env)
-  await writeOutput('RC11_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
+  await writeOutput('RC11_CDN_URL', createCdnObjectUrl(key).toString(), env)
   await writeOutput('RC11_SHA256', RC11_BASELINE.sha256, env)
   await writeOutput('RC11_SIZE', RC11_BASELINE.size, env)
-  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString() }
+  return { key, cdnUrl: createCdnObjectUrl(key).toString() }
 }
 
 export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
@@ -673,10 +781,10 @@ export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch
   const key = createVersionedObjectKey('rc12', { ...ids, date })
   await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC12_BASELINE, stage: 'RC12_RELEASE', credentialsExpiredTime })
   await writeOutput('RC12_OBJECT_KEY', key, env)
-  await writeOutput('RC12_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
+  await writeOutput('RC12_CDN_URL', createCdnObjectUrl(key).toString(), env)
   await writeOutput('RC12_SHA256', RC12_BASELINE.sha256, env)
   await writeOutput('RC12_SIZE', RC12_BASELINE.size, env)
-  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString() }
+  return { key, cdnUrl: createCdnObjectUrl(key).toString() }
 }
 
 export async function publishRc13Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
@@ -688,10 +796,10 @@ export async function publishRc13Artifact({ env = process.env, fetchImpl = fetch
   const key = createVersionedObjectKey('rc13', { ...ids, date })
   await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: baseline, stage: 'RC13_RELEASE', credentialsExpiredTime })
   await writeOutput('RC13_OBJECT_KEY', key, env)
-  await writeOutput('RC13_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
+  await writeOutput('RC13_CDN_URL', createCdnObjectUrl(key).toString(), env)
   await writeOutput('RC13_SHA256', baseline.sha256, env)
   await writeOutput('RC13_SIZE', baseline.size, env)
-  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString() }
+  return { key, cdnUrl: createCdnObjectUrl(key).toString() }
 }
 
 async function main() {
