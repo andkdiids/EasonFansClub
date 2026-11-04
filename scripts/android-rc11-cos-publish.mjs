@@ -94,8 +94,9 @@ function createCdnObjectUrl(key) {
   }
   return url
 }
+
 function safeResponseHeader(value) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9+/=_:.-]{1,160}$/.test(value)) return 'NONE'
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/=_: .-]{1,160}$/.test(value)) return 'NONE'
   return value
 }
 
@@ -323,6 +324,7 @@ export async function verifyRollbackSourceRange(candidate, fetchImpl) {
   let response
   try {
     response = await fetchImpl(url, {
+      method: 'GET',
       headers: { Range: 'bytes=0-0' },
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
@@ -725,6 +727,7 @@ export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = conso
   let rangeRead
   try {
     rangeRead = await fetchImpl(rangeUrl, {
+      method: 'GET',
       headers: { Range: 'bytes=0-0' },
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
