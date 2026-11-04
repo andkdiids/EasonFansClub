@@ -14,6 +14,11 @@ on:
       - 'tests/android-rc11-publish-infrastructure.test.ts'
       - 'tests/update-android-version-env.test.ts'
       - 'tests/app-version.test.ts'
+      - 'app/api/notifications/route.ts'
+      - 'app/notifications/NotificationsClient.tsx'
+      - 'lib/notifications.ts'
+      - 'lib/moderation-notification-identity.ts'
+      - 'tests/moderation-notification-identity.test.ts'
       - 'docs/android-beta21-rc11-release-runbook.md'
 
 permissions:
@@ -57,6 +62,9 @@ jobs:
 
       - name: Run Android release, rollback, and Version API regression tests
         run: pnpm exec tsx --test tests/android-rc11-publish-infrastructure.test.ts tests/update-android-version-env.test.ts tests/app-version.test.ts
+
+      - name: Run moderation notification identity regression tests
+        run: pnpm exec tsx --test tests/moderation-notification-identity.test.ts tests/post-review-notification.test.ts tests/notification-center-stability.test.ts tests/notification-checkin-and-actor-card.test.ts tests/notification-type-guard.test.ts tests/activity-targeted-notification.test.ts
 
       - name: Type-check release scripts and regression tests
         run: >-

@@ -25,6 +25,10 @@ on:
       - 'docs/android-beta21-rc11-release-runbook.md'
       - 'scripts/android-rc11-cos-publish.d.mts'
       - 'scripts/android-rc11-cos-publish.mjs'
+      # RC13 release-control changes must use explicit app-only dispatch.
+      - 'scripts/android-rc13-release.mjs'
+      - 'scripts/android-rc13-release.json'
+      - 'tests/android-rc13-release.test.mjs'
       - 'scripts/assert-native-bearer-rollback-result.d.mts'
       - 'scripts/assert-native-bearer-rollback-result.mjs'
       - 'scripts/assert-release-main.d.mts'
@@ -40,6 +44,12 @@ on:
       - 'tests/middleware-auth.test.ts'
       - 'tests/mobile-bearer-route-integration.test.ts'
       - 'tests/profile-background-mobile-lookup.test.ts'
+      # Moderation identity changes require an explicit skip-db deployment.
+      - 'app/api/notifications/route.ts'
+      - 'app/notifications/NotificationsClient.tsx'
+      - 'lib/notifications.ts'
+      - 'lib/moderation-notification-identity.ts'
+      - 'tests/moderation-notification-identity.test.ts'
   workflow_dispatch:
     inputs:
       db_mode:

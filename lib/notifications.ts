@@ -16,6 +16,7 @@ import type { EquippedBadgeView } from '@/lib/badge-types'
 import type { FriendDockUser } from '@/lib/friend-types'
 import { calculateGrowthSummary, defaultGrowthLevels, listGrowthLevels } from '@/lib/growth'
 import { notificationCategoryValues, parseNotificationCategory, type NotificationCategory } from '@/lib/notification-categories'
+import { isModerationResultNotification, SYSTEM_REVIEW_SENDER_NAME, SYSTEM_REVIEW_SENDER_ROLE } from '@/lib/moderation-notification-identity'
 // Friend-request identity keys live in the browser-safe `@/lib/notification-keys`
 // module. Re-exported below so existing importers keep working, but anything
 // client-reachable must import them from there instead of from this module,
@@ -316,6 +317,8 @@ export type UnifiedNotification = {
   link: string | null
   targetUrl: string | null
   actorName: string | null
+  /** Official system sender label for user-facing moderation results. */
+  actorRole?: string | null
   actorUid: number | null
   actorAvatarUrl: string | null
   actorBadges: EquippedBadgeView[]
@@ -966,7 +969,9 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
   const personal = personalResult.value
   const system = systemResult.value
 
-  const actorIds = personal.flatMap((item) => item.User_Notification_actorIdToUser ? [item.User_Notification_actorIdToUser.id] : [])
+  const actorIds = personal.flatMap((item) => isModerationResultNotification(item)
+    ? []
+    : item.User_Notification_actorIdToUser ? [item.User_Notification_actorIdToUser.id] : [])
   const likeTargets = personal.flatMap((item) => {
     if (item.type !== 'LIKE') return []
     const target = parseLikeNotificationTarget({ type: item.type, key: item.key, link: item.link })
@@ -1048,7 +1053,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       const item = personalById.get(row.id)
       if (!item) return []
       const link = normalizeStoredInternalPath(item.link)
-      const actor = item.User_Notification_actorIdToUser
+      const moderationResult = isModerationResultNotification({ type: item.type, link, key: item.key })
+      const actor = moderationResult ? null : item.User_Notification_actorIdToUser
       const actorNickname = actor ? getPublicUserDisplayName(actor) : null
       const actorRemark = actor ? (remarkMap.get(actor.id) || null) : null
       const actorDisplayName = actor
@@ -1058,7 +1064,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
             isFriendContext: actorFriendIds.has(actor.id),
           })
         : null
-      const actorName = actorDisplayName
+      const actorName = moderationResult ? SYSTEM_REVIEW_SENDER_NAME : actorDisplayName
       const actorRequest = actor
         ? actorRequestRows.find((request) => request.senderId === actor.id || request.receiverId === actor.id)
         : null
@@ -1127,7 +1133,8 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
         key: item.key,
         link,
         targetUrl: link,
-        actorName: actorDisplayName,
+        actorName,
+        actorRole: moderationResult ? SYSTEM_REVIEW_SENDER_ROLE : null,
         actorUid: actor?.uid || null,
         actorAvatarUrl: publicImageUrl(actor?.Profile?.avatarUrl || actor?.avatarUrl),
         actorBadges: actor ? actorBadgeMap.get(actor.id) || [] : [],
@@ -1171,6 +1178,7 @@ export async function listUnifiedNotificationsPage(userId: string, options: {
       link: targetUrl,
       targetUrl,
       actorName: null,
+      actorRole: null,
       actorUid: null,
       actorAvatarUrl: null,
       actorBadges: [],
@@ -1434,6 +1442,7 @@ export async function listPopupSystemNotifications(userId: string, limit = 5) {
       link: targetUrl,
       targetUrl,
       actorName: null,
+      actorRole: null,
       actorUid: null,
       actorAvatarUrl: null,
       actorBadges: [],
