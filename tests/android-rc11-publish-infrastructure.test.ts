@@ -446,7 +446,7 @@ test('COS SDK 3.0.0 sends and signs Range and attaches STS credentials on GetObj
     observed.push({
       range: request.headers.range,
       authorization: request.headers.authorization,
-      securityToken: request.headers['x-cos-security-token'],
+      securityToken: request.headers['x-cos-security-token'] as string | undefined,
     })
     response.writeHead(206, {
       'Content-Length': '1',
