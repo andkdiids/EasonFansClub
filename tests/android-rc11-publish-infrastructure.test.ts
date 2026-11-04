@@ -629,10 +629,11 @@ test('COS publish simulation uploads only the new immutable candidate and verifi
   assert.match(publisher, /Timeout: COS_REQUEST_TIMEOUT_MS/)
   assert.match(publisher, /AbortSignal\.timeout\(APK_DOWNLOAD_TIMEOUT_MS\)/)
   assert.ok(uploadSection.indexOf('await multipartUpload') < uploadSection.indexOf('await cos.headObject'))
-  assert.ok(uploadSection.indexOf('await cos.headObject') < uploadSection.indexOf('await downloadFile(cdnUrl'))
+  assert.ok(uploadSection.indexOf('await cos.headObject') < uploadSection.indexOf('await downloadCos({'))
+  assert.match(uploadSection, /stage: `\$\{stage\}_CDN_READBACK`/)
   assert.match(read('scripts/android-rc13-multipart.mjs'), /'x-cos-forbid-overwrite': 'true'/)
   assert.match(publisher, /COS_CUSTOM_DOMAIN_READBACK/)
-  assert.doesNotMatch(publisher, /cos\\.getObject/)
+  assert.equal(publisher.includes('cos.getObject'), false)
   assert.doesNotMatch(publisher, /TENCENT_COS_SECRET_(?:ID|KEY)|DeleteObject|putBucketPolicy|deleteObject/)
 })
 
