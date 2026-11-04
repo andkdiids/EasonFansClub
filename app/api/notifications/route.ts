@@ -6,6 +6,8 @@ import { prisma } from '@/lib/prisma'
 import { emitRealtime } from '@/lib/realtime'
 import { effectiveSystemNotificationWhere } from '@/lib/system-notifications'
 import { logNotificationError } from '@/lib/notification-errors'
+import { getSiteAppearance } from '@/lib/site-config'
+import { publicImageUrl } from '@/lib/images'
 
 const NOTIFICATION_ID_BATCH_LIMIT = 100
 const NOTIFICATION_PAGE_SIZE = 20
@@ -58,9 +60,19 @@ export async function GET(request: Request) {
       }, { status: 503, headers: privateHeaders })
     }
 
+    const hasModerationResults = result.items.some((item) => item.actorRole === '系统审核通知')
+    let reviewAvatarUrl: string | null = null
+    if (hasModerationResults) {
+      const appearance = await getSiteAppearance().catch(() => null)
+      reviewAvatarUrl = appearance ? publicImageUrl(appearance.images.navLogoUrl || appearance.images.logoUrl) : null
+    }
+    const notifications = result.items.map((item) => item.actorRole === '系统审核通知'
+      ? { ...item, actorAvatarUrl: reviewAvatarUrl }
+      : item)
+
     return NextResponse.json({
-      notifications: result.items,
-      items: result.items,
+      notifications,
+      items: notifications,
       unreadCount: result.unreadCount,
       page: result.page,
       pageSize: result.pageSize,

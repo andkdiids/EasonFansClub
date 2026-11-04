@@ -1034,6 +1034,7 @@ export function NotificationsClient({
               {hasDisplayLabel ? <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-brand-700 ring-1 ring-sky-100">{displayLabel}</span> : null}
               {unreadLabel ? <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-black text-white">{unreadLabel}</span> : null}
             </div>
+            {item.actorRole ? <p className="flex items-center gap-2 text-xs text-slate-500"><strong>{item.actorName || '私家E院'}</strong><span>{item.actorRole}</span></p> : null}
             <h2 className={`notification-title mt-0.5 break-words text-sm sm:text-base ${titleClass}`}>{item.title}</h2>
             {isReplyNotification && displayReplyPreview ? (
               <p className="notification-reply-preview mt-0.5 break-words text-xs font-bold leading-4 text-slate-600">
