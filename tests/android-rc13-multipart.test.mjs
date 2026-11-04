@@ -317,7 +317,7 @@ test('ambiguous completion cannot pass when CDN SHA verification fails', async (
       return { statusCode: 200, headers: { 'content-length': '1024', 'content-type': 'application/vnd.android.package-archive', 'cache-control': 'public, max-age=31536000, immutable', 'x-cos-meta-sha256': sha256 } }
     },
   })
-  await assert.rejects(uploadImmutableObject({ cos, env: { TENCENT_COS_BUCKET: 'bucket', TENCENT_COS_REGION: 'region' }, key: 'unique', filePath, expected: { size: 1024, sha256 }, key: CODE32_ROLLBACK_OBJECT_KEY, stage: 'TEST', downloadCos: async () => {}, downloadFile: async (url, dest, expected) => { reads++; assert.equal(expected.expectedSha256, sha256); throw new Error('APK_SHA256_MISMATCH') } }), /APK_SHA256_MISMATCH/)
+  await assert.rejects(uploadImmutableObject({ cos, env: { TENCENT_COS_BUCKET: 'bucket', TENCENT_COS_REGION: 'region' }, key: 'unique', filePath, expected: { size: 1024, sha256 }, key: CODE32_ROLLBACK_OBJECT_KEY, stage: 'TEST', downloadFile: async (url, dest, expected) => { reads++; assert.equal(expected.expectedSha256, sha256); throw new Error('APK_SHA256_MISMATCH') } }), /APK_SHA256_MISMATCH/)
   assert.equal(reads, 1)
 }))
 
