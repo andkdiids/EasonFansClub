@@ -8,6 +8,7 @@ import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { completeOnce, multipartUpload, safeCosError } from '../scripts/android-rc13-multipart.mjs'
 import { downloadCosObject, downloadToFile, uploadImmutableObject, verifyCosReadOnly, verifyCosReadOnlyAccess } from '../scripts/android-rc11-cos-publish.mjs'
+import { CODE32_ROLLBACK_OBJECT_KEY } from '../scripts/android-rc13-release.mjs'
 
 async function fixture(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'rc13-multipart-'))
@@ -29,21 +30,42 @@ function mockCos(overrides = {}) {
 
 const args = (cos, filePath) => ({ cos, bucket: 'bucket', region: 'region', key: 'unique', filePath, size: 1024, sha256: 'A'.repeat(64), log: () => {} })
 
-test('read-only COS gate verifies empty versioning, authenticated HEAD, and a one-byte GET without mutations', async () => {
+test('read-only COS gate verifies bucket versioning and authenticated HEAD, then reads the rollback object via the HTTPS custom domain', async () => {
   const calls = []
   const logs = []
+  const rangeUrl = 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY
+  let rangeInit
   const cos = {
     getBucketVersioning: async (options) => { calls.push(['versioning', options]); return { VersioningConfiguration: {} } },
     headObject: async (options) => { calls.push(['head', options]); return { statusCode: 200, headers: { 'content-length': '180263015' } } },
-    getObject: async (options) => { calls.push(['get', options]); return { statusCode: 206, Body: Buffer.from([0]) } },
   }
-  const result = await verifyCosReadOnlyAccess({ cos, bucket: 'ecfc-1306412725', region: 'ap-guangzhou', log: (line) => logs.push(line) })
-  assert.deepEqual(calls.map(([method]) => method), ['versioning', 'head', 'get'])
-  assert.equal(calls[1][1].Key, 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc12-20261103-185753-run41698377689-attempt1.apk')
-  assert.equal(calls[2][1].Headers.Range, 'bytes=0-0')
-  assert.equal(calls[2][1].Range, undefined)
+  const fetchImpl = async (input, init) => {
+    assert.equal(String(input), rangeUrl)
+    rangeInit = init
+    const response = new Response(Uint8Array.of(0), {
+      status: 206,
+      headers: { 'content-length': '1', 'content-range': 'bytes 0-0/180263015' },
+    })
+    Object.defineProperty(response, 'url', { value: rangeUrl })
+    return response
+  }
+  const result = await verifyCosReadOnlyAccess({
+    cos,
+    bucket: 'ecfc-1306412725',
+    region: 'ap-guangzhou',
+    log: (line) => logs.push(line),
+    fetchImpl,
+  })
+  assert.deepEqual(calls.map(([method]) => method), ['versioning', 'head'])
+  assert.equal(calls[1][1].Key, CODE32_ROLLBACK_OBJECT_KEY)
+  assert.equal(rangeInit.method, 'GET')
+  assert.deepEqual(rangeInit.headers, { Range: 'bytes=0-0' })
+  assert.equal(rangeInit.redirect, 'error')
+  assert.equal(new Headers(rangeInit.headers).has('authorization'), false)
   assert.equal(result.versioning, 'DISABLED')
+  assert.equal(result.customDomainRangeGet, 'PASS')
   assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
+  assert.match(logs.join('\n'), /CustomDomainRangeGet=PASS/)
 })
 
 test('read-only COS gate fails closed and reports a safe error category on denied versioning access', async () => {
