@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
@@ -434,6 +435,63 @@ test('COS requests and APK downloads have bounded timeouts that fit inside the s
   createCosClient({ SecretId: 'test-id', SecretKey: 'test-key', SecurityToken: 'test-session' }, FakeCos)
   assert.equal(clientOptions?.Timeout, COS_REQUEST_TIMEOUT_MS)
   assert.equal(clientOptions?.Protocol, 'https:')
+  assert.equal(clientOptions?.SecretId, 'test-id')
+  assert.equal(clientOptions?.SecretKey, 'test-key')
+  assert.equal(clientOptions?.SecurityToken, 'test-session')
+})
+
+test('COS SDK 3.0.0 sends and signs Range and attaches STS credentials on GetObject', async () => {
+  const observed: Array<{ range?: string; authorization?: string; securityToken?: string }> = []
+  const server = createServer((request, response) => {
+    observed.push({
+      range: request.headers.range,
+      authorization: request.headers.authorization,
+      securityToken: request.headers['x-cos-security-token'],
+    })
+    response.writeHead(206, {
+      'Content-Length': '1',
+      'Content-Range': 'bytes 0-0/100',
+      ETag: '"fixture"',
+    })
+    response.end(Buffer.from([0]))
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  try {
+    const address = server.address()
+    assert.ok(address && typeof address !== 'string')
+    const COS = createRequire(import.meta.url)('cos-nodejs-sdk-v5') as new (options: Record<string, unknown>) => {
+      getObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { statusCode?: number; Body?: Buffer }) => void): void
+    }
+    const cos = new COS({
+      SecretId: 'AKIDTEST01234567890123456789012345',
+      SecretKey: 'unit-test-secret-key',
+      SecurityToken: 'unit-test-session-token',
+      Protocol: 'http:',
+      Ip: `127.0.0.1:${address.port}`,
+      Timeout: 5_000,
+      FollowRedirect: false,
+    })
+    const result = await new Promise<{ statusCode?: number; Body?: Buffer }>((resolve, reject) => {
+      cos.getObject({
+        Bucket: 'ecfc-1306412725',
+        Region: 'ap-guangzhou',
+        Key: 'fixture.apk',
+        Headers: { Range: 'bytes=0-0' },
+      }, (error, data) => error ? reject(error) : resolve(data ?? {}))
+    })
+    assert.equal(result.statusCode, 206)
+    assert.equal(result.Body?.length, 1)
+    assert.equal(observed.length, 1)
+    assert.equal(observed[0].range, 'bytes=0-0')
+    assert.equal(observed[0].securityToken, 'unit-test-session-token')
+    const signedHeaders = observed[0].authorization?.match(/q-header-list=([^&]*)/)?.[1] ?? ''
+    assert.match(decodeURIComponent(signedHeaders).toLowerCase(), /(?:^|;)range(?:;|$)/)
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
 
 test('APK downloader records safe stage progress and verifies bytes', async () => {
@@ -707,7 +765,8 @@ test('read-only COS gate checks unversioned bucket, code32 HEAD, and a one-byte 
   assert.equal(calls[0].options.Bucket, 'ecfc-1306412725')
   assert.equal(calls[0].options.Region, 'ap-guangzhou')
   assert.equal(calls[1].options.Key, CODE32_ROLLBACK_OBJECT_KEY)
-  assert.equal((calls[2].options as { Range?: string }).Range, 'bytes=0-0')
+  assert.equal((calls[2].options as { Headers?: { Range?: string } }).Headers?.Range, 'bytes=0-0')
+  assert.equal((calls[2].options as { Range?: string }).Range, undefined)
   assert.equal(result.versioning, 'DISABLED')
   assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
   assert.match(logs.join('\n'), /GetBucketVersioning=PASS HeadObject=PASS GetObject=PASS/)
