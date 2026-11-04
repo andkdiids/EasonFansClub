@@ -481,4 +481,3 @@ test('error diagnostics do not expose messages or credentials', () => {
   const output = safeCosError({ code: secret, message: secret, headers: { authorization: secret } })
   assert.doesNotMatch(output, /private-secret-token/)
 })
-

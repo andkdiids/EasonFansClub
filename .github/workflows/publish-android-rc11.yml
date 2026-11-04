@@ -417,4 +417,3 @@ jobs:
             echo "- verified public CDN URL: ${RC11_CDN_URL}"
             echo '- Version API: unchanged by this workflow'
           } >> "$GITHUB_STEP_SUMMARY"
-

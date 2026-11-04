@@ -180,4 +180,3 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
     if (file) await file.close()
   }
 }
-

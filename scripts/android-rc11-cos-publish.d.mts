@@ -72,4 +72,3 @@ export function verifyCosReadOnly(input?: {
   log?: (line: string) => void
   now?: () => number
 }): Promise<{ versioning: 'DISABLED'; headObject: 'PASS'; getObject: 'PASS'; objectKey: string }>
-

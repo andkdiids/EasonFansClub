@@ -978,4 +978,3 @@ test('OIDC-only STS errors are explicit and omit untrusted response details', as
     return true
   })
 })
-
