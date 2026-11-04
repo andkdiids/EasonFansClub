@@ -7,7 +7,7 @@ import http from 'node:http'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { completeOnce, multipartUpload, safeCosError } from '../scripts/android-rc13-multipart.mjs'
-import { downloadCosObject, downloadToFile, uploadImmutableObject } from '../scripts/android-rc11-cos-publish.mjs'
+import { downloadCosObject, downloadToFile, uploadImmutableObject, verifyCosReadOnly, verifyCosReadOnlyAccess } from '../scripts/android-rc11-cos-publish.mjs'
 
 async function fixture(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'rc13-multipart-'))
@@ -29,12 +29,165 @@ function mockCos(overrides = {}) {
 
 const args = (cos, filePath) => ({ cos, bucket: 'bucket', region: 'region', key: 'unique', filePath, size: 1024, sha256: 'A'.repeat(64), log: () => {} })
 
+test('read-only COS gate verifies empty versioning, authenticated HEAD, and a one-byte GET without mutations', async () => {
+  const calls = []
+  const logs = []
+  const cos = {
+    getBucketVersioning: async (options) => { calls.push(['versioning', options]); return { VersioningConfiguration: {} } },
+    headObject: async (options) => { calls.push(['head', options]); return { statusCode: 200, headers: { 'content-length': '180263015' } } },
+    getObject: async (options) => { calls.push(['get', options]); return { statusCode: 206, Body: Buffer.from([0]) } },
+  }
+  const result = await verifyCosReadOnlyAccess({ cos, bucket: 'ecfc-1306412725', region: 'ap-guangzhou', log: (line) => logs.push(line) })
+  assert.deepEqual(calls.map(([method]) => method), ['versioning', 'head', 'get'])
+  assert.equal(calls[1][1].Key, 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc12-20261103-185753-run41698377689-attempt1.apk')
+  assert.equal(calls[2][1].Range, 'bytes=0-0')
+  assert.equal(result.versioning, 'DISABLED')
+  assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
+})
+
+test('read-only COS gate fails closed and reports a safe error category on denied versioning access', async () => {
+  const logs = []
+  let objectCalls = 0
+  const error = Object.assign(new Error('secret and provider data must not escape'), {
+    code: 'AccessDenied', statusCode: 403, headers: { 'x-cos-request-id': 'NWQ1NTRhMWRfODhjMjJhMDlfMWNkOF8xZTRmYWJjZA==' },
+  })
+  await assert.rejects(verifyCosReadOnlyAccess({
+    cos: {
+      getBucketVersioning: async () => { throw error },
+      headObject: async () => { objectCalls++; return {} },
+      getObject: async () => { objectCalls++; return {} },
+    },
+    bucket: 'ecfc-1306412725',
+    region: 'ap-guangzhou',
+    log: (line) => logs.push(line),
+  }), /COS_GET_BUCKET_VERSIONING_FAILED/)
+  assert.equal(objectCalls, 0)
+  assert.match(logs.join('\n'), /code=AccessDenied status=403 request_id=/)
+  assert.doesNotMatch(logs.join('\n'), /secret and provider data/)
+})
+
+test('read-only COS gate rejects a HEAD or Range GET response with an unexpected HTTP status', async () => {
+  let getCalls = 0
+  await assert.rejects(verifyCosReadOnlyAccess({
+    cos: {
+      getBucketVersioning: async () => ({ VersioningConfiguration: {} }),
+      headObject: async () => ({ statusCode: 206, headers: { 'content-length': '180263015' } }),
+      getObject: async () => { getCalls++; return { statusCode: 206, Body: Buffer.from([0]) } },
+    },
+    bucket: 'ecfc-1306412725',
+    region: 'ap-guangzhou',
+    log: () => {},
+  }), /COS_CODE32_HEAD_MISMATCH/)
+  assert.equal(getCalls, 0)
+})
+
+test('read-only gate exchanges OIDC for a two-hour STS lease and never logs credentials', async () => {
+  const claims = {
+    iss: 'https://token.actions.githubusercontent.com',
+    aud: ['sts.tencentcloudapi.com'],
+    sub: 'repo:andkdiids/EasonFansClub:environment:Production:workflow_ref:andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main',
+    environment: 'Production',
+    repository: 'andkdiids/EasonFansClub',
+    ref: 'refs/heads/main',
+    event_name: 'workflow_dispatch',
+    workflow_ref: 'andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main',
+  }
+  const jwt = `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`
+  const env = {
+    TENCENT_CAM_OIDC_AUDIENCE: 'sts.tencentcloudapi.com',
+    TENCENT_EXPECTED_OIDC_SUBJECT: claims.sub,
+    TENCENT_CAM_PROVIDER_ID: 'configured-provider',
+    TENCENT_CAM_ROLE_ARN: 'qcs::cam::uin/1306412725:roleName/rc13-release',
+    TENCENT_STS_REGION: 'ap-guangzhou',
+    TENCENT_COS_BUCKET: 'ecfc-1306412725',
+    TENCENT_COS_REGION: 'ap-guangzhou',
+    GITHUB_WORKFLOW_REF: claims.workflow_ref,
+    GITHUB_RUN_ID: '987654321',
+    GITHUB_RUN_ATTEMPT: '1',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://pipelines.actions.githubusercontent.com/request',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'request-token-secret',
+  }
+  const calls = []
+  const logs = []
+  const expiry = 1_900_000_000
+  const fetchImpl = async (input, init) => {
+    const url = String(input)
+    calls.push(url)
+    if (url.startsWith('https://pipelines.actions.githubusercontent.com/')) return new Response(JSON.stringify({ value: jwt }), { status: 200 })
+    assert.equal(url, 'https://sts.tencentcloudapi.com')
+    assert.equal(JSON.parse(String(init.body)).DurationSeconds, 7200)
+    return new Response(JSON.stringify({ Response: {
+      Credentials: { TmpSecretId: 'temporary-id-secret', TmpSecretKey: 'temporary-key-secret', Token: 'session-token-secret' },
+      ExpiredTime: expiry,
+    } }), { status: 200 })
+  }
+  const cosFactory = (credentials) => {
+    assert.equal(credentials.ExpiredTime, expiry)
+    assert.equal(credentials.SecretId, 'temporary-id-secret')
+    return {
+      getBucketVersioning: async () => ({ VersioningConfiguration: {} }),
+      headObject: async () => ({ statusCode: 200, headers: { 'Content-Length': '180263015' } }),
+      getObject: async ({ Range }) => Range === 'bytes=0-0' ? { statusCode: 206, Body: Buffer.from([0]) } : { statusCode: 200, Body: Buffer.alloc(0) },
+    }
+  }
+  const result = await verifyCosReadOnly({ env, fetchImpl, cosFactory, log: (line) => logs.push(line), now: () => 1_800_000_000_000 })
+  assert.equal(result.versioning, 'DISABLED')
+  assert.equal(calls.length, 2)
+  assert.ok(calls[0].startsWith('https://pipelines.actions.githubusercontent.com/request?audience=sts.tencentcloudapi.com'))
+  assert.equal(calls[1], 'https://sts.tencentcloudapi.com')
+  assert.match(logs.join('\n'), /TENCENT_STS_EXPIRED_TIME=2030-03-17T17:46:40\.000Z/)
+  assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
+  assert.match(logs.join('\n'), /CAM_ROLE=ASSUMED COS_BUCKET=ecfc-1306412725 COS_REGION=ap-guangzhou/)
+  assert.doesNotMatch(logs.join('\n'), /temporary-id-secret|temporary-key-secret|session-token-secret|request-token-secret/)
+})
+
 test('both multipart boundaries receive the forbid-overwrite condition', async () => fixture(async (filePath) => {
   const observed = []
   const cos = mockCos({ request: async (p) => { observed.push(p.Headers); return p.Action === 'uploads' ? { InitiateMultipartUploadResult: { UploadId: 'owned-id' } } : { CompleteMultipartUploadResult: { ETag: 'abc123' } } } })
   await multipartUpload(args(cos, filePath))
   assert.equal(observed.length, 2)
   for (const headers of observed) assert.equal(headers['x-cos-forbid-overwrite'], 'true')
+}))
+
+test('multipart upload refuses to initiate with less than fifteen minutes of STS lifetime', async () => fixture(async (filePath) => {
+  let calls = 0
+  const cos = mockCos({
+    getBucketVersioning: async () => { calls++; return { VersioningConfiguration: {} } },
+    request: async () => { calls++; return { InitiateMultipartUploadResult: { UploadId: 'owned-id' } } },
+  })
+  const expiresAtSeconds = Math.floor((Date.now() + 14 * 60 * 1000) / 1000)
+  await assert.rejects(multipartUpload({ ...args(cos, filePath), credentialsExpiredTime: expiresAtSeconds }), /TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME/)
+  assert.equal(calls, 0)
+}))
+
+test('multipart upload never completes after STS expiry and aborts only its current UploadId', async () => fixture(async (filePath) => {
+  const start = Date.now()
+  const expiresAtSeconds = Math.floor((start + 30 * 60 * 1000) / 1000)
+  let now = start
+  let versioningCalls = 0
+  let completes = 0
+  const aborted = []
+  const clock = { now: () => now, setInterval: () => 1, clearInterval: () => {} }
+  const cos = mockCos({
+    getBucketVersioning: async () => {
+      versioningCalls++
+      if (versioningCalls === 2) now = expiresAtSeconds * 1000 + 1
+      return { VersioningConfiguration: {} }
+    },
+    request: async (p) => {
+      if (p.Action === 'uploads') return { InitiateMultipartUploadResult: { UploadId: 'task-owned-id' } }
+      completes++
+      return { CompleteMultipartUploadResult: { ETag: 'abc123' } }
+    },
+    multipartAbort: async (p) => { aborted.push(p.UploadId) },
+  })
+  await assert.rejects(multipartUpload({
+    ...args(cos, filePath),
+    credentialsExpiredTime: expiresAtSeconds,
+    clock,
+  }), /TENCENT_STS_CREDENTIALS_EXPIRED_BEFORE_COMPLETE/)
+  assert.equal(completes, 0)
+  assert.deepEqual(aborted, ['task-owned-id'])
 }))
 
 test('failed parts retry and abort only the owned upload', async () => fixture(async (filePath) => {
@@ -328,3 +481,4 @@ test('error diagnostics do not expose messages or credentials', () => {
   const output = safeCosError({ code: secret, message: secret, headers: { authorization: secret } })
   assert.doesNotMatch(output, /private-secret-token/)
 })
+

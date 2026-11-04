@@ -21,6 +21,11 @@ import {
   RC12_BASELINE,
   APK_DOWNLOAD_TIMEOUT_MS,
   COS_REQUEST_TIMEOUT_MS,
+  COS_STS_DURATION_SECONDS,
+  COS_STS_MINIMUM_UPLOAD_REMAINING_SECONDS,
+  EXPECTED_COS_BUCKET,
+  EXPECTED_COS_REGION,
+  assertStsCredentialLifetime,
   EXPECTED_OIDC_SUBJECT,
   captureVersionApiBaseline,
   assertObjectAbsent,
@@ -34,6 +39,8 @@ import {
   validateObjectMetadata,
   validateOidcClaims,
   validateVersionedObjectKey,
+  getStsExpiryInfo,
+  verifyCosReadOnlyAccess,
   verifyOidcSts,
 } from '../scripts/android-rc11-cos-publish.mjs'
 import { assertReleaseMainBranch } from '../scripts/assert-release-main.mjs'
@@ -349,10 +356,14 @@ test('COS trust settings require explicit configured identifiers and never use a
     TENCENT_COS_REGION: 'ap-guangzhou',
   }
   assert.equal(validateCosConfig(env), env)
+  assert.equal(EXPECTED_COS_BUCKET, 'ecfc-1306412725')
+  assert.equal(EXPECTED_COS_REGION, 'ap-guangzhou')
   assert.match(EXPECTED_OIDC_SUBJECT, /workflow_ref:andkdiids\/EasonFansClub\/\.github\/workflows\/publish-android-rc11\.yml@refs\/heads\/main$/)
   assert.throws(() => validateCosConfig({ ...env, TENCENT_CAM_OIDC_AUDIENCE: '' }), /COS_OIDC_CONFIG_MISSING/)
   assert.throws(() => validateCosConfig({ ...env, TENCENT_CAM_ROLE_ARN: 'not-an-arn' }), /COS_OIDC_ROLE_ARN_INVALID/)
   assert.throws(() => validateCosConfig({ ...env, TENCENT_EXPECTED_OIDC_SUBJECT: 'repo:andkdiids/EasonFansClub:environment:Production' }), /COS_OIDC_SUBJECT_NOT_WORKFLOW_PINNED/)
+  assert.throws(() => validateCosConfig({ ...env, TENCENT_COS_BUCKET: 'other-1306412725' }), /COS_RELEASE_TARGET_MISMATCH/)
+  assert.throws(() => validateCosConfig({ ...env, TENCENT_COS_REGION: 'ap-shanghai' }), /COS_RELEASE_TARGET_MISMATCH/)
 })
 
 test('OIDC claim simulation accepts only the exact issuer, audience, subject, Production environment, main run, and workflow', () => {
@@ -617,7 +628,7 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   const cos = workflow.jobs.cos
   assert.equal(verify['timeout-minutes'], 10)
   assert.equal(ingress['timeout-minutes'], 20)
-  assert.equal(cos['timeout-minutes'], 360)
+  assert.equal(cos['timeout-minutes'], 60)
   assert.match(verify.if ?? '', /inputs\.verify_oidc_only == true/)
   assert.match(ingress.if ?? '', /inputs\.verify_oidc_only == false/)
   assert.match(cos.if ?? '', /inputs\.verify_oidc_only == false/)
@@ -626,8 +637,85 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   assert.equal(verify.permissions?.['id-token'], 'write')
   assert.equal(verify.permissions?.contents, 'read')
   const verifySteps = JSON.stringify(verify.steps)
-  assert.match(verifySteps, /scripts\/android-rc11-cos-publish\.mjs verify-oidc/)
-  assert.doesNotMatch(verifySteps, /TENCENT_COS_(?:BUCKET|REGION)|putObject|publish-rc11|backup-code30|upload-artifact|rollback|version-api/i)
+  assert.match(verifySteps, /scripts\/android-rc11-cos-publish\.mjs verify-cos-readonly/)
+  assert.match(verifySteps, /TENCENT_COS_BUCKET/)
+  assert.match(verifySteps, /TENCENT_COS_REGION/)
+  assert.doesNotMatch(verifySteps, /putObject|multipartUpload|multipartAbort|uploadFile|publish-rc13|backup-code30|upload-artifact|rollback|version-api/i)
+  const verifyStep = verify.steps.find((step) => String(step.run ?? '').includes('verify-cos-readonly')) as { env: Record<string, string> }
+  const rc13PublishStep = cos.steps.find((step) => String(step.run ?? '').includes('publish-rc13')) as { env: Record<string, string> }
+  assert.ok(verifyStep)
+  assert.ok(rc13PublishStep)
+  for (const name of [
+    'TENCENT_CAM_OIDC_AUDIENCE',
+    'TENCENT_EXPECTED_OIDC_SUBJECT',
+    'TENCENT_CAM_PROVIDER_ID',
+    'TENCENT_CAM_ROLE_ARN',
+    'TENCENT_STS_REGION',
+    'TENCENT_COS_BUCKET',
+    'TENCENT_COS_REGION',
+  ]) assert.equal(verifyStep.env[name], rc13PublishStep.env[name], `verify/staging env mismatch: ${name}`)
+})
+
+test('STS lease requests two hours and logs expiry without credential values', () => {
+  assert.equal(COS_STS_DURATION_SECONDS, 7200)
+  assert.equal(COS_STS_MINIMUM_UPLOAD_REMAINING_SECONDS, 900)
+  const info = getStsExpiryInfo({ ExpiredTime: 1_900_000_000 }, 1_800_000_000_000)
+  assert.equal(info.expiredAt, '2030-03-17T17:46:40.000Z')
+  assert.equal(info.remainingSeconds, 100_000_000)
+  assert.throws(
+    () => assertStsCredentialLifetime({ ExpiredTime: Math.floor((1_800_000_000_000 + 899_000) / 1000) }, 900, 1_800_000_000_000),
+    /TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME/,
+  )
+  assert.equal(assertStsCredentialLifetime({ ExpiredTime: Math.floor((1_800_000_000_000 + 900_000) / 1000) }, 900, 1_800_000_000_000).remainingSeconds, 900)
+})
+
+test('read-only COS gate checks unversioned bucket, code32 HEAD, and a one-byte authenticated GET', async () => {
+  const calls: Array<{ method: string; options: Record<string, unknown> }> = []
+  const logs: string[] = []
+  const cos = {
+    getBucketVersioning: async (options: Record<string, unknown>) => {
+      calls.push({ method: 'GetBucketVersioning', options })
+      return { VersioningConfiguration: {} }
+    },
+    headObject: async (options: Record<string, unknown>) => {
+      calls.push({ method: 'HeadObject', options })
+      return { statusCode: 200, headers: { 'content-length': String(RC12_BASELINE.size) } }
+    },
+    getObject: async (options: Record<string, unknown>) => {
+      calls.push({ method: 'GetObject', options })
+      return { statusCode: 206, Body: Buffer.from([0]) }
+    },
+  }
+  const result = await verifyCosReadOnlyAccess({ cos, bucket: 'ecfc-1306412725', region: 'ap-guangzhou', log: (line) => logs.push(line) })
+  assert.deepEqual(calls.map((call) => call.method), ['GetBucketVersioning', 'HeadObject', 'GetObject'])
+  assert.equal(calls[0].options.Bucket, 'ecfc-1306412725')
+  assert.equal(calls[0].options.Region, 'ap-guangzhou')
+  assert.equal(calls[1].options.Key, CODE32_ROLLBACK_OBJECT_KEY)
+  assert.equal((calls[2].options as { Range?: string }).Range, 'bytes=0-0')
+  assert.equal(result.versioning, 'DISABLED')
+  assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
+  assert.match(logs.join('\n'), /GetBucketVersioning=PASS HeadObject=PASS GetObject=PASS/)
+})
+
+test('read-only COS gate fails closed for enabled, suspended, and unknown versioning states', async () => {
+  for (const [configuration, error] of [
+    [{ Status: 'Enabled' }, /COS_BUCKET_VERSIONING_ENABLED/],
+    [{ Status: 'Suspended' }, /COS_BUCKET_VERSIONING_SUSPENDED/],
+    [{ Unexpected: 'value' }, /COS_BUCKET_VERSIONING_UNKNOWN/],
+  ] as const) {
+    let objectReads = 0
+    await assert.rejects(verifyCosReadOnlyAccess({
+      cos: {
+        getBucketVersioning: async () => ({ VersioningConfiguration: configuration }),
+        headObject: async () => { objectReads++; return { statusCode: 200, headers: { 'content-length': String(RC12_BASELINE.size) } } },
+        getObject: async () => { objectReads++; return { statusCode: 206, Body: Buffer.from([0]) } },
+      },
+      bucket: 'ecfc-1306412725',
+      region: 'ap-guangzhou',
+      log: () => {},
+    }), error)
+    assert.equal(objectReads, 0)
+  }
 })
 
 test('OIDC endpoint diagnostic parses credentials and emits only the seven allowed fields', () => {
@@ -645,7 +733,7 @@ test('OIDC endpoint diagnostic parses credentials and emits only the seven allow
     /\bfetch\s*\(|\bcurl\b|https?\.request|core\.getIDToken|AssumeRoleWithWebIdentity|\bSTS\b|\bCOS\b|TENCENT_COS_|putObject|publish-rc11|backup-code30|upload-artifact|rollback|version-api|configure-android-version|\/api\/app\/version|verify-oidc/i
   )
   assert.equal(diagnostic.env, undefined)
-  assert.ok(steps.indexOf(diagnostic) < steps.findIndex((step) => (step.run ?? '').includes('verify-oidc')))
+  assert.ok(steps.indexOf(diagnostic) < steps.findIndex((step) => (step.run ?? '').includes('verify-cos-readonly')))
   const js = run.match(/node <<'NODE'\n([\s\S]*?)\nNODE/)?.[1]
   assert.ok(js)
   const expectedFields = [
@@ -750,19 +838,24 @@ test('OIDC-only verifier reuses the STS exchange, validates trust, and never ret
     assert.equal(init?.method, 'POST')
     assert.equal(new Headers(init?.headers).get('x-tc-action'), 'AssumeRoleWithWebIdentity')
     const body = JSON.parse(String(init?.body))
+    assert.equal(body.DurationSeconds, 7200)
     assert.equal(body.WebIdentityToken, jwt)
     assert.equal(body.RoleSessionName, 'gha-123456789-2')
     assert.equal(body.RoleArn, env.TENCENT_CAM_ROLE_ARN)
     assert.equal(body.ProviderId, env.TENCENT_CAM_PROVIDER_ID)
-    return new Response(JSON.stringify({ Response: { Credentials: {
-      TmpSecretId: 'test-temporary-id', TmpSecretKey: 'test-temporary-key', Token: 'test-session-token', ExpiredTime: 1_900_000_000,
-    } } }), { status: 200 })
+    return new Response(JSON.stringify({ Response: {
+      Credentials: { TmpSecretId: 'test-temporary-id', TmpSecretKey: 'test-temporary-key', Token: 'test-session-token' },
+      ExpiredTime: 1_900_000_000,
+    } }), { status: 200 })
   }
 
-  assert.equal(await verifyOidcSts({ env, fetchImpl }), true)
+  const stsLogs: string[] = []
+  assert.equal(await verifyOidcSts({ env, fetchImpl, now: () => 1_800_000_000_000, log: (line) => stsLogs.push(line) }), true)
   assert.equal(requests.length, 2)
   assert.ok(requests[0].url.startsWith('https://pipelines.actions.githubusercontent.com/'))
   assert.equal(requests[1].url, 'https://sts.tencentcloudapi.com')
+  assert.match(stsLogs.join('\n'), /TENCENT_STS_EXPIRED_TIME=2030-03-17T17:46:40\.000Z TENCENT_STS_REMAINING_SECONDS=100000000/)
+  assert.doesNotMatch(stsLogs.join('\n'), /test-temporary-id|test-temporary-key|test-session-token|test-request-credential/)
 })
 
 test('OIDC endpoint validation accepts official endpoints and rejects unsafe URL variants before any request', async () => {
@@ -792,12 +885,14 @@ test('OIDC endpoint validation accepts official endpoints and rejects unsafe URL
     const requestUrl = String(input)
     requests.push(requestUrl.startsWith('https://sts.tencentcloudapi.com') ? 'sts' : 'github-oidc')
     if (requestUrl.startsWith('https://sts.tencentcloudapi.com')) {
-      return new Response(JSON.stringify({ Response: { Credentials: {
-        TmpSecretId: 'test-temporary-id',
-        TmpSecretKey: 'test-temporary-key',
-        Token: 'test-session-token',
+      return new Response(JSON.stringify({ Response: {
+        Credentials: {
+          TmpSecretId: 'test-temporary-id',
+          TmpSecretKey: 'test-temporary-key',
+          Token: 'test-session-token',
+        },
         ExpiredTime: 1_900_000_000,
-      } } }), { status: 200 })
+      } }), { status: 200 })
     }
     assert.equal(new URL(requestUrl).hostname, expectedOidcHostname)
     return new Response(JSON.stringify({ value: jwt }), { status: 200 })
@@ -882,3 +977,4 @@ test('OIDC-only STS errors are explicit and omit untrusted response details', as
     return true
   })
 })
+

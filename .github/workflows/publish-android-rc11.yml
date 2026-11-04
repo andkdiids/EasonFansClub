@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       verify_oidc_only:
-        description: Verify GitHub OIDC and Tencent STS only. Uncheck only to stage the selected guarded release candidate.
+        description: Verify GitHub OIDC, Tencent STS, and read-only COS access only. Uncheck only to stage the selected guarded release candidate.
         required: true
         type: boolean
         default: true
@@ -28,7 +28,7 @@ concurrency:
 jobs:
   verify_oidc:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == true
-    name: Verify GitHub OIDC to Tencent STS without publishing
+    name: Verify GitHub OIDC, Tencent STS, and read-only COS access without publishing
     runs-on: ubuntu-22.04
     environment:
       name: Production
@@ -85,14 +85,16 @@ jobs:
           console.log('OIDC_PORT=' + port)
           console.log('OIDC_CREDENTIALS=' + credentials)
           NODE
-      - name: Verify OIDC claims and exchange for Tencent STS credentials only
+      - name: Verify OIDC, STS lifetime, and read-only COS access
         env:
           TENCENT_CAM_OIDC_AUDIENCE: ${{ vars.TENCENT_CAM_OIDC_AUDIENCE }}
           TENCENT_EXPECTED_OIDC_SUBJECT: ${{ vars.TENCENT_EXPECTED_OIDC_SUBJECT }}
           TENCENT_CAM_PROVIDER_ID: ${{ vars.TENCENT_CAM_PROVIDER_ID }}
           TENCENT_CAM_ROLE_ARN: ${{ vars.TENCENT_CAM_ROLE_ARN }}
           TENCENT_STS_REGION: ${{ vars.TENCENT_STS_REGION }}
-        run: node scripts/android-rc11-cos-publish.mjs verify-oidc
+          TENCENT_COS_BUCKET: ${{ vars.TENCENT_COS_BUCKET }}
+          TENCENT_COS_REGION: ${{ vars.TENCENT_COS_REGION }}
+        run: node scripts/android-rc11-cos-publish.mjs verify-cos-readonly
 
   ingress:
     if: github.ref == 'refs/heads/main' && inputs.verify_oidc_only == false
@@ -265,7 +267,7 @@ jobs:
     environment:
       name: Production
       url: https://ecfc.fans
-    timeout-minutes: 360
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read
@@ -415,3 +417,4 @@ jobs:
             echo "- verified public CDN URL: ${RC11_CDN_URL}"
             echo '- Version API: unchanged by this workflow'
           } >> "$GITHUB_STEP_SUMMARY"
+
