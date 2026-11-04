@@ -19,13 +19,13 @@ function getHeaderValue(headers, name) {
 function sanitizeCosResponseMessage(value) {
   if (typeof value !== 'string' || value.length === 0) return 'NO_COS_ERROR_MESSAGE'
   const sanitized = value
-    .replace(/https?:\\/\\/[^\\s"'<>]+/gi, '[REDACTED_URL]')
-    .replace(/\\b(authorization|secret[-_ ]?(?:id|key)|security[-_ ]?token|session[-_ ]?token|access[-_ ]?token|bearer|q-signature|x-cos-security-token)\\b\\s*[:=]\\s*(?:bearer\\s+)?(?:"[^"]*"|'[^']*'|[^\\s,;&<>]+)/gi, '$1=[REDACTED]')
-    .replace(/\\b(?:AKID|TMP)[A-Za-z0-9_/-]{8,}\\b/gi, '[REDACTED_CREDENTIAL]')
-    .replace(/\\b[A-Za-z0-9+/=_-]{32,}\\b/g, '[REDACTED_VALUE]')
-    .replace(/[\\r\\n\\t]/g, ' ')
-    .replace(/[^\\x20-\\x7E]/g, ' ')
-    .replace(/\\s+/g, ' ')
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[REDACTED_URL]')
+    .replace(/\b(authorization|secret[-_ ]?(?:id|key)|security[-_ ]?token|session[-_ ]?token|access[-_ ]?token|bearer|q-signature|x-cos-security-token)\b\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;&<>]+)/gi, '$1=[REDACTED]')
+    .replace(/\b(?:AKID|TMP)[A-Za-z0-9_/-]{8,}\b/gi, '[REDACTED_CREDENTIAL]')
+    .replace(/\b[A-Za-z0-9+/=_-]{32,}\b/g, '[REDACTED_VALUE]')
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 180)
   return sanitized || 'NO_COS_ERROR_MESSAGE'
@@ -42,7 +42,7 @@ export function safeCosError(error, { requestType = 'Unknown', method = 'UNKNOWN
   const cosCodeCandidate = rawCosCode || (SAFE_COS_CODES.has(sdkCode) ? sdkCode : '')
   const cosCode = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(cosCodeCandidate) ? cosCodeCandidate : 'UNKNOWN'
   const safeSdkCode = SAFE_TRANSPORT_CODES.has(sdkCode) ? sdkCode
-    : /^\\d{3}$/.test(sdkCode) ? `HTTP_${sdkCode}`
+    : /^\d{3}$/.test(sdkCode) ? `HTTP_${sdkCode}`
       : 'UNKNOWN'
   const statusValue = Number(error?.statusCode ?? error?.status)
   const status = Number.isInteger(statusValue) && statusValue >= 100 && statusValue <= 599 ? statusValue : 0
