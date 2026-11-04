@@ -44,6 +44,7 @@ import {
   verifyOidcSts,
 } from '../scripts/android-rc11-cos-publish.mjs'
 import { assertReleaseMainBranch } from '../scripts/assert-release-main.mjs'
+import { CODE32_ROLLBACK_OBJECT_KEY } from '../scripts/android-rc13-release.mjs'
 import { assertNativeBearerRollbackResult } from '../scripts/assert-native-bearer-rollback-result.mjs'
 import { assertApksignerOutputMatches, parseApksignerOutput } from '../scripts/verify-android-apk-signature.mjs'
 
