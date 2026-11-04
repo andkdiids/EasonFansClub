@@ -25,6 +25,10 @@ on:
       - 'docs/android-beta21-rc11-release-runbook.md'
       - 'scripts/android-rc11-cos-publish.d.mts'
       - 'scripts/android-rc11-cos-publish.mjs'
+      # RC13 release-control changes must use explicit app-only dispatch.
+      - 'scripts/android-rc13-release.mjs'
+      - 'scripts/android-rc13-release.json'
+      - 'tests/android-rc13-release.test.mjs'
       - 'scripts/assert-native-bearer-rollback-result.d.mts'
       - 'scripts/assert-native-bearer-rollback-result.mjs'
       - 'scripts/assert-release-main.d.mts'
@@ -467,3 +471,4 @@ jobs:
           done
           echo "::error::Public endpoint does not serve rollback SHA ${DEPLOY_SHA}."
           exit 1
+
