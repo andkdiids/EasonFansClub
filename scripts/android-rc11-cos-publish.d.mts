@@ -50,25 +50,28 @@ export function validateObjectMetadata(result: { statusCode?: number; headers?: 
 export function assertObjectAbsent(cos: { headObject(input: { Bucket: string; Region: string; Key: string }): Promise<{ statusCode?: number }> }, bucket: string, region: string, key: string): Promise<void>
 export function hashFile(filePath: string): Promise<{ size: number; sha256: string }>
 export function createCosClient(credentials: { SecretId: string; SecretKey: string; SecurityToken: string }, COS?: new (options: Record<string, unknown>) => unknown): unknown
-export function downloadToFile(url: string, filePath: string, options: { fetchImpl?: typeof fetch; expectedSize: number; expectedSha256: string; stage?: string; logImpl?: (line: string) => void }): Promise<{ size: number; sha256: string; url: string }>
+export function downloadToFile(url: string, filePath: string, options?: { fetchImpl?: typeof fetch; expectedSize?: number; expectedSha256?: string; stage?: string; logImpl?: (line: string) => void; redirect?: RequestRedirect; expectedHostname?: string }): Promise<{ size: number; sha256: string; url: string }>
+export function downloadCosObject(input: { key: string; filePath: string; expected: { size: number; sha256: string }; downloadFile?: typeof downloadToFile; fetchImpl?: typeof fetch; stage?: string }): Promise<{ size: number; sha256: string; url: string }>
+export function uploadImmutableObject(input: { cos: unknown; env: Record<string, string | undefined>; key: string; filePath: string; expected: { size: number; sha256: string }; stage: string; credentialsExpiredTime?: number; downloadFile?: typeof downloadToFile; downloadCos?: typeof downloadCosObject; fetchImpl?: typeof fetch }): Promise<{ key: string; cdnUrl: string; metadata: unknown }>
 export function publishRc11Artifact(input?: { env?: Record<string, string>; fetchImpl?: typeof fetch; date?: Date }): Promise<{ key: string; cdnUrl: string }>
 export function publishRc12Artifact(input?: { env?: Record<string, string>; fetchImpl?: typeof fetch; date?: Date }): Promise<{ key: string; cdnUrl: string }>
 
 export function verifyOidcSts(input?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch; log?: (line: string) => void; now?: () => number }): Promise<true>
+export function verifyRollbackSourceRange(candidate: 'rc11' | 'rc12' | 'rc13', fetchImpl?: typeof fetch): Promise<{ key: string; size: number; code: 30 | 31 | 32 }>
 export function verifyCosReadOnlyAccess(input: {
   cos: {
     getBucketVersioning(input: { Bucket: string; Region: string }): Promise<{ VersioningConfiguration: Record<string, unknown> }>
     headObject(input: { Bucket: string; Region: string; Key: string }): Promise<{ statusCode?: number; headers?: Record<string, string>; ContentLength?: number; contentLength?: number }>
-    getObject(input: { Bucket: string; Region: string; Key: string; Range: string }): Promise<{ statusCode?: number; Body?: Buffer }>
   }
   bucket: string
   region: string
   log?: (line: string) => void
-}): Promise<{ versioning: 'DISABLED'; headObject: 'PASS'; getObject: 'PASS'; objectKey: string }>
+  fetchImpl?: typeof fetch
+}): Promise<{ versioning: 'DISABLED'; headObject: 'PASS'; customDomainRangeGet: 'PASS'; objectKey: string }>
 export function verifyCosReadOnly(input?: {
   env?: Record<string, string | undefined>
   fetchImpl?: typeof fetch
   cosFactory?: (credentials: { SecretId: string; SecretKey: string; SecurityToken: string }) => unknown
   log?: (line: string) => void
   now?: () => number
-}): Promise<{ versioning: 'DISABLED'; headObject: 'PASS'; getObject: 'PASS'; objectKey: string }>
+}): Promise<{ versioning: 'DISABLED'; headObject: 'PASS'; customDomainRangeGet: 'PASS'; objectKey: string }>

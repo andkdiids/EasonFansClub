@@ -32,6 +32,7 @@ import {
   assertObjectAbsent,
   createCosClient,
   createVersionedObjectKey,
+  downloadCosObject,
   downloadToFile,
   validateCode30VersionApi,
   validateCode31VersionApi,
@@ -42,6 +43,7 @@ import {
   validateVersionedObjectKey,
   getStsExpiryInfo,
   verifyCosReadOnlyAccess,
+  verifyRollbackSourceRange,
   verifyOidcSts,
 } from '../scripts/android-rc11-cos-publish.mjs'
 import { assertReleaseMainBranch } from '../scripts/assert-release-main.mjs'
@@ -54,6 +56,12 @@ const read = (file: string) => readFileSync(path.join(repoRoot, file), 'utf8')
 const testWorkflowRef = 'andkdiids/EasonFansClub/.github/workflows/publish-android-rc11.yml@refs/heads/main'
 const testRun = { runId: '123456789', runAttempt: '2' }
 const testWorkflowSha = 'a'.repeat(40)
+
+function responseWithUrl(url: string, status: number, headers: Record<string, string>, body: Buffer) {
+  const response = new Response(Uint8Array.from(body).buffer, { status, headers })
+  Object.defineProperty(response, 'url', { value: url })
+  return response
+}
 
 test('RC11 and code30 SHA, size, package, version, and signing baselines are fixed', () => {
   assert.deepEqual(RC11_BASELINE, {
@@ -621,8 +629,11 @@ test('COS publish simulation uploads only the new immutable candidate and verifi
   assert.match(publisher, /Timeout: COS_REQUEST_TIMEOUT_MS/)
   assert.match(publisher, /AbortSignal\.timeout\(APK_DOWNLOAD_TIMEOUT_MS\)/)
   assert.ok(uploadSection.indexOf('await multipartUpload') < uploadSection.indexOf('await cos.headObject'))
-  assert.ok(uploadSection.indexOf('await cos.headObject') < uploadSection.indexOf('await downloadFile(cdnUrl'))
+  assert.ok(uploadSection.indexOf('await cos.headObject') < uploadSection.indexOf('await downloadCos({'))
+  assert.match(uploadSection, /stage: `\$\{stage\}_CDN_READBACK`/)
   assert.match(read('scripts/android-rc13-multipart.mjs'), /'x-cos-forbid-overwrite': 'true'/)
+  assert.match(publisher, /COS_CUSTOM_DOMAIN_READBACK/)
+  assert.equal(publisher.includes('cos.getObject'), false)
   assert.doesNotMatch(publisher, /TENCENT_COS_SECRET_(?:ID|KEY)|DeleteObject|putBucketPolicy|deleteObject/)
 })
 
@@ -743,9 +754,12 @@ test('STS lease requests two hours and logs expiry without credential values', (
   assert.equal(assertStsCredentialLifetime({ ExpiredTime: Math.floor((1_800_000_000_000 + 900_000) / 1000) }, 900, 1_800_000_000_000).remainingSeconds, 900)
 })
 
-test('read-only COS gate checks unversioned bucket, code32 HEAD, and a one-byte authenticated GET', async () => {
+test('read-only COS gate checks bucket versioning and signed HEAD, then range-reads the existing HTTPS custom domain', async () => {
   const calls: Array<{ method: string; options: Record<string, unknown> }> = []
   const logs: string[] = []
+  const rangeUrl = 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY
+  let requestUrl = ''
+  let requestInit: RequestInit | undefined
   const cos = {
     getBucketVersioning: async (options: Record<string, unknown>) => {
       calls.push({ method: 'GetBucketVersioning', options })
@@ -755,21 +769,136 @@ test('read-only COS gate checks unversioned bucket, code32 HEAD, and a one-byte 
       calls.push({ method: 'HeadObject', options })
       return { statusCode: 200, headers: { 'content-length': String(RC12_BASELINE.size) } }
     },
-    getObject: async (options: Record<string, unknown>) => {
-      calls.push({ method: 'GetObject', options })
-      return { statusCode: 206, Body: Buffer.from([0]) }
-    },
   }
-  const result = await verifyCosReadOnlyAccess({ cos, bucket: 'ecfc-1306412725', region: 'ap-guangzhou', log: (line) => logs.push(line) })
-  assert.deepEqual(calls.map((call) => call.method), ['GetBucketVersioning', 'HeadObject', 'GetObject'])
+  const result = await verifyCosReadOnlyAccess({
+    cos,
+    bucket: 'ecfc-1306412725',
+    region: 'ap-guangzhou',
+    log: (line) => logs.push(line),
+    fetchImpl: async (input, init) => {
+      requestUrl = String(input)
+      requestInit = init
+      return responseWithUrl(rangeUrl, 206, {
+        'content-length': '1',
+        'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
+      }, Buffer.from([0]))
+    },
+  })
+  assert.deepEqual(calls.map((call) => call.method), ['GetBucketVersioning', 'HeadObject'])
   assert.equal(calls[0].options.Bucket, 'ecfc-1306412725')
   assert.equal(calls[0].options.Region, 'ap-guangzhou')
   assert.equal(calls[1].options.Key, CODE32_ROLLBACK_OBJECT_KEY)
-  assert.equal((calls[2].options as { Headers?: { Range?: string } }).Headers?.Range, 'bytes=0-0')
-  assert.equal((calls[2].options as { Range?: string }).Range, undefined)
+  assert.equal(requestUrl, rangeUrl)
+  assert.equal(requestInit?.method, 'GET')
+  assert.deepEqual(requestInit?.headers, { Range: 'bytes=0-0' })
+  assert.equal(requestInit?.redirect, 'error')
+  assert.ok(requestInit?.signal instanceof AbortSignal)
+  assert.equal(new Headers(requestInit?.headers).has('authorization'), false)
   assert.equal(result.versioning, 'DISABLED')
+  assert.equal(result.headObject, 'PASS')
+  assert.equal(result.customDomainRangeGet, 'PASS')
   assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
-  assert.match(logs.join('\n'), /GetBucketVersioning=PASS HeadObject=PASS GetObject=PASS/)
+  assert.match(logs.join('\n'), /HeadObject=PASS CustomDomainRangeGet=PASS/)
+  assert.doesNotMatch(logs.join('\n'), /media\.ecfc|Authorization|SecurityToken|SecretKey/)
+})
+
+test('read-only COS gate fails closed on custom-domain 403 or invalid Range responses with safe diagnostics', async () => {
+  for (const [response, expectedError] of [
+    [responseWithUrl('https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY, 403, {
+      'content-length': '32',
+      'x-request-id': 'range-read-request-123',
+    }, Buffer.from('DownloadForbidden')), /COS_CUSTOM_DOMAIN_RANGE_GET_FAILED/],
+    [responseWithUrl('https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY, 200, {
+      'content-length': String(RC12_BASELINE.size),
+    }, Buffer.from([0])), /COS_CUSTOM_DOMAIN_RANGE_GET_FAILED/],
+  ] as const) {
+    const logs: string[] = []
+    let objectHeadCalls = 0
+    await assert.rejects(verifyCosReadOnlyAccess({
+      cos: {
+        getBucketVersioning: async () => ({ VersioningConfiguration: {} }),
+        headObject: async () => {
+          objectHeadCalls++
+          return { statusCode: 200, headers: { 'content-length': String(RC12_BASELINE.size) } }
+        },
+      },
+      bucket: 'ecfc-1306412725',
+      region: 'ap-guangzhou',
+      log: (line) => logs.push(line),
+      fetchImpl: async (input, init) => {
+        assert.equal(String(input), 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY)
+        assert.equal(init?.method, 'GET')
+        assert.equal(init?.redirect, 'error')
+        assert.equal(new Headers(init?.headers).has('authorization'), false)
+        return response
+      },
+    }), expectedError)
+    assert.equal(objectHeadCalls, 1)
+    assert.match(logs.join('\n'), /COS_CUSTOM_DOMAIN_RANGE_GET_FAILED/)
+    if ((response as Response).status === 403) assert.match(logs.join('\n'), /http_status=403 .*request_id=range-read-request-123/)
+    assert.doesNotMatch(logs.join('\n'), /media\.ecfc|DownloadForbidden|Authorization|SecurityToken|SecretKey/)
+  }
+})
+
+test('uploaded object readback downloads full bytes through the configured HTTPS custom domain and verifies SHA-256', async (t) => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'ecfc-custom-domain-readback-'))
+  t.after(async () => rm(temporaryDirectory, { recursive: true, force: true }))
+  const body = Buffer.from('fixed APK readback fixture')
+  const expectedSha256 = createHash('sha256').update(body).digest('hex').toUpperCase()
+  const filePath = path.join(temporaryDirectory, 'code32.apk')
+  const expectedUrl = 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY
+  let requestInit: RequestInit | undefined
+  const result = await downloadCosObject({
+    key: CODE32_ROLLBACK_OBJECT_KEY,
+    filePath,
+    expected: { size: body.length, sha256: expectedSha256 },
+    fetchImpl: async (input, init) => {
+      assert.equal(String(input), expectedUrl)
+      requestInit = init
+      return responseWithUrl(expectedUrl, 200, { 'content-length': String(body.length) }, body)
+    },
+  })
+  assert.equal(result.size, body.length)
+  assert.equal(result.sha256, expectedSha256)
+  assert.equal(result.url, expectedUrl)
+  assert.equal(requestInit?.redirect, 'error')
+  assert.equal(new Headers(requestInit?.headers).has('authorization'), false)
+  assert.deepEqual(await readFile(filePath), body)
+})
+
+test('code32 rollback source validation uses the HTTPS custom domain and rejects forbidden or redirected downloads', async () => {
+  const expectedUrl = 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY
+  let requestInit: RequestInit | undefined
+  const source = await verifyRollbackSourceRange('rc13', async (input, init) => {
+    assert.equal(String(input), expectedUrl)
+    requestInit = init
+    return responseWithUrl(expectedUrl, 206, {
+      'content-length': '1',
+      'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
+    }, Buffer.from([0]))
+  })
+  assert.equal(source.code, 32)
+  assert.equal(source.key, CODE32_ROLLBACK_OBJECT_KEY)
+  assert.equal(requestInit?.redirect, 'error')
+  assert.deepEqual(requestInit?.headers, { Range: 'bytes=0-0' })
+
+  await assert.rejects(verifyRollbackSourceRange('rc13', async () => responseWithUrl(
+    expectedUrl, 403, { 'x-request-id': 'forbidden' }, Buffer.from('denied'),
+  )), /CODE32_ROLLBACK_SOURCE_UNAVAILABLE/)
+  await assert.rejects(verifyRollbackSourceRange('rc13', async () => responseWithUrl(
+    'https://elsewhere.example/apk', 206, {
+      'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
+    }, Buffer.from([0]),
+  )), /CODE32_ROLLBACK_SOURCE_UNAVAILABLE/)
+})
+
+test('existing app download route and release preflight share the configured HTTPS custom domain', () => {
+  const route = read('lib/app-download.ts')
+  const publisher = read('scripts/android-rc11-cos-publish.mjs')
+  assert.match(route, /PUBLIC_APK_BASE_URL = 'https:\/\/media\.ecfc\.fans\/media'/)
+  assert.match(publisher, /CDN_BASE_URL = 'https:\/\/media\.ecfc\.fans\/media\/'/)
+  assert.match(route, /url\.hostname === 'media\.ecfc\.fans'/)
+  assert.match(route, /url\.protocol === 'https:'/)
 })
 
 test('read-only COS gate fails closed for enabled, suspended, and unknown versioning states', async () => {
@@ -779,15 +908,25 @@ test('read-only COS gate fails closed for enabled, suspended, and unknown versio
     [{ Unexpected: 'value' }, /COS_BUCKET_VERSIONING_UNKNOWN/],
   ] as const) {
     let objectReads = 0
+    const rangeUrl = 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY
     await assert.rejects(verifyCosReadOnlyAccess({
       cos: {
         getBucketVersioning: async () => ({ VersioningConfiguration: configuration }),
         headObject: async () => { objectReads++; return { statusCode: 200, headers: { 'content-length': String(RC12_BASELINE.size) } } },
-        getObject: async () => { objectReads++; return { statusCode: 206, Body: Buffer.from([0]) } },
       },
       bucket: 'ecfc-1306412725',
       region: 'ap-guangzhou',
       log: () => {},
+      fetchImpl: async (input, init) => {
+        objectReads++
+        assert.equal(String(input), rangeUrl)
+        assert.equal(init?.method, 'GET')
+        assert.equal(init?.redirect, 'error')
+        return responseWithUrl(rangeUrl, 206, {
+          'content-length': '1',
+          'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
+        }, Buffer.from([0]))
+      },
     }), error)
     assert.equal(objectReads, 0)
   }
