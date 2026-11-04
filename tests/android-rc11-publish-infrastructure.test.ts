@@ -545,7 +545,9 @@ test('Android release infrastructure CI is pull-request-only and does not access
   assert.match(commands, /tsc --noEmit/)
   assert.match(commands, /eslint scripts\/android-rc11-cos-publish\.mjs/)
   assert.match(commands, /git diff --check/)
-  assert.doesNotMatch(workflowText, /workflow_dispatch:|id-token:\s*write|environment:\s*Production|TENCENT_|SERVER_SSH_KEY|cos-nodejs-sdk-v5/)
+  assert.doesNotMatch(workflowText, /workflow_dispatch:|id-token:\s*write|environment:\s*Production|TENCENT_|SERVER_SSH_KEY/)
+  assert.match(workflowText, /run: node -e "console\\.log\\(require\\.resolve\\('cos-nodejs-sdk-v5'\\)\\)"/)
+  assert.equal((workflowText.match(/cos-nodejs-sdk-v5/g) ?? []).length, 1)
 })
 test('COS publish simulation uploads only the new immutable candidate and verifies its complete CDN bytes', () => {
   const publisher = read('scripts/android-rc11-cos-publish.mjs')
