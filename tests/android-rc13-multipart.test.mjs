@@ -241,7 +241,7 @@ test('multipart upload never completes after STS expiry and aborts only its curr
 test('failed parts retry and abort only the owned upload', async () => fixture(async (filePath) => {
   let attempts = 0
   const aborted = []
-  const cos = mockCos({ multipartUpload: async () => { attempts++; throw new Error('interrupted') }, multipartAbort: async (p) => { aborted.push(p.UploadId) } })
+  const cos = mockCos({ multipartUpload: async () => { attempts++; throw Object.assign(new Error('interrupted'), { code: 'ECONNRESET' }) }, multipartAbort: async (p) => { aborted.push(p.UploadId) } })
   await assert.rejects(multipartUpload(args(cos, filePath)), /COS_MULTIPART_UPLOAD_FAILED/)
   assert.equal(attempts, 3)
   assert.deepEqual(aborted, ['owned-id'])
@@ -271,6 +271,20 @@ test('large files use three bounded concurrent 8 MiB parts', async () => fixture
   assert.deepEqual(lengths.sort((a, b) => b - a), [8 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024])
 }))
 
+test('configured concurrency one keeps only one 8 MiB part in flight', async () => fixture(async (filePath) => {
+  const size = 17 * 1024 * 1024
+  await writeFile(filePath, Buffer.alloc(size))
+  let active = 0; let peak = 0; const lengths = []
+  const cos = mockCos({ multipartUpload: async (part) => {
+    active++; peak = Math.max(peak, active); lengths.push(part.ContentLength)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    active--; return { ETag: 'abc123' }
+  } })
+  await multipartUpload({ ...args(cos, filePath), size, concurrency: 1 })
+  assert.equal(peak, 1)
+  assert.deepEqual(lengths, [8 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024])
+}))
+
 test('concurrent failures abort only their own UploadId', async () => fixture(async (filePath) => {
   const aborted = []
   const cos = mockCos({ request: async (p) => ({ InitiateMultipartUploadResult: { UploadId: `id-${p.Key}` } }), multipartUpload: async () => { throw new Error('interrupted') }, multipartAbort: async (p) => { aborted.push([p.Key, p.UploadId]) } })
@@ -279,24 +293,173 @@ test('concurrent failures abort only their own UploadId', async () => fixture(as
   assert.deepEqual(aborted.sort(), [['one', 'id-one'], ['two', 'id-two']])
 }))
 
-test('stalled upload warns at 60 seconds, aborts promptly, and cleans again after active parts settle', async () => fixture(async (filePath) => {
-  let now = 0; let tick; let rejectPart; let started
+test('stalled upload warns at 60 seconds, cancels requests, then aborts after active parts settle', async () => fixture(async (filePath) => {
+  let now = 0; let tick; let rejectPart; let started; const activeTaskIds = new Set()
   const logs = []; const aborted = []; const events = []
   const ready = new Promise((resolve) => { started = resolve })
   const clock = { now: () => now, setInterval: (fn) => { tick = fn; return 1 }, clearInterval: () => {} }
-  const cos = mockCos({ multipartUpload: async () => { started(); return new Promise((resolve, reject) => { rejectPart = reject }) }, multipartAbort: async (p) => { events.push(`abort-${aborted.length + 1}`); aborted.push(p.UploadId) } })
+  const cos = mockCos({
+    options: {},
+    _isRunningTask: (id) => activeTaskIds.has(id),
+    emit: (event, info) => {
+      if (event === 'inner-kill-task') { events.push(`cancel-${info.TaskId}`); rejectPart(Object.assign(new Error('request canceled'), { code: 'ECONNRESET' })) }
+    },
+    multipartUpload: async (part) => {
+      activeTaskIds.add(part.TaskId)
+      part.Body.resume()
+      started()
+      return new Promise((resolve, reject) => { rejectPart = reject }).finally(() => events.push('part-settled'))
+    },
+    multipartAbort: async (p) => { events.push(`abort-${aborted.length + 1}`); aborted.push(p.UploadId) },
+  })
   const upload = multipartUpload({ ...args(cos, filePath), clock, log: (line) => logs.push(line) })
   await ready
+  await new Promise((resolve) => setImmediate(resolve))
   now = 60000; tick()
   assert.ok(logs.some((line) => line.includes('STALLED=YES')))
+  assert.ok(logs.some((line) => line.includes('progress_source=SDK_SOCKET_CALLBACK') && line.includes('body_stream_emitted_bytes=1024') && line.includes('cos_acknowledged_part_bytes=0')))
   now = 300000; tick()
-  assert.ok(logs.some((line) => line.includes('COS_UPLOAD_STALLED_ABORT=START')))
+  assert.ok(logs.some((line) => line.includes('COS_UPLOAD_STALLED_CANCEL=START')))
+  assert.equal(aborted.length, 0)
+  await assert.rejects(upload, /COS_MULTIPART_UPLOAD_STALLED/)
   assert.deepEqual(aborted, ['owned-id'])
-  events.push('part-settled')
-  rejectPart(Object.assign(new Error('request timed out'), { code: 'ETIMEDOUT', statusCode: 504 }))
-  await assert.rejects(upload, /COS_MULTIPART_UPLOAD_FAILED/)
-  assert.deepEqual(aborted, ['owned-id', 'owned-id'])
-  assert.deepEqual(events, ['abort-1', 'part-settled', 'abort-2'])
+  assert.equal(events.length, 3)
+  assert.match(events[0], /^cancel-rc13-part-/)
+  assert.deepEqual(events.slice(1), ['part-settled', 'abort-1'])
+}))
+
+test('UserNetworkTooSlow is terminal and does not retry a part', async () => fixture(async (filePath) => {
+  const require = createRequire(import.meta.url)
+  const COS = require('cos-nodejs-sdk-v5')
+  let partRequests = 0; let aborts = 0
+  const logs = []
+  const server = http.createServer((req, res) => {
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/xml')
+      if (req.url.includes('versioning')) return res.end('<VersioningConfiguration/>')
+      if (req.url.includes('uploads')) return res.end('<InitiateMultipartUploadResult><UploadId>network-slow-id</UploadId></InitiateMultipartUploadResult>')
+      if (req.method === 'PUT') {
+        partRequests++
+        assert.equal(Buffer.concat(chunks).length, 1024)
+        res.statusCode = 400
+        return res.end('<Error><Code>UserNetworkTooSlow</Code><Message>slow</Message></Error>')
+      }
+      if (req.method === 'DELETE') { aborts++; res.statusCode = 204; return res.end() }
+      res.statusCode = 404; res.end('<Error><Code>NoSuchKey</Code></Error>')
+    })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 2000 })
+    await assert.rejects(multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou', log: (line) => logs.push(line) }), /COS_MULTIPART_PART_NON_RETRYABLE_UserNetworkTooSlow/)
+    assert.equal(partRequests, 1)
+    assert.equal(aborts, 1)
+    assert.match(logs.join('\n'), /retry_class=NON_RETRYABLE cos_code=UserNetworkTooSlow/)
+  } finally { await new Promise((resolve) => server.close(resolve)) }
+}))
+
+test('multipart failure diagnostics allowlist internal codes and suppress arbitrary uppercase messages', async () => fixture(async (filePath) => {
+  const logs = []
+  const secret = 'TMP_SECRET_ABCDEFGHIJKLMNOPQRSTUVWX'
+  const cos = mockCos({ multipartUpload: async () => { throw Object.assign(new Error(secret), { code: 'UserNetworkTooSlow' }) } })
+  await assert.rejects(multipartUpload({ ...args(cos, filePath), log: (line) => logs.push(line) }), /COS_MULTIPART_PART_NON_RETRYABLE_UserNetworkTooSlow/)
+  assert.match(logs.join('\n'), /COS_MULTIPART_FAILURE reason=UNKNOWN/)
+  assert.doesNotMatch(logs.join('\n'), new RegExp(secret))
+}))
+
+test('slow HTTP body consumption can finish with exact Content-Length', async () => fixture(async (filePath) => {
+  const require = createRequire(import.meta.url)
+  const COS = require('cos-nodejs-sdk-v5')
+  let received = 0; const logs = []
+  const server = http.createServer((req, res) => {
+    if (req.url.includes('versioning')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<VersioningConfiguration/>') }); return }
+    if (req.url.includes('uploads')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<InitiateMultipartUploadResult><UploadId>slow-id</UploadId></InitiateMultipartUploadResult>') }); return }
+    if (req.method === 'PUT') {
+      assert.equal(req.headers['content-length'], '1024')
+      req.pause()
+      setTimeout(() => req.resume(), 30)
+      req.on('data', (chunk) => { received += chunk.length })
+      req.on('end', () => { res.setHeader('ETag', '"abc123"'); res.end('') })
+      return
+    }
+    req.resume()
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/xml')
+      if (req.method === 'POST' && req.url.includes('uploadId')) return res.end('<CompleteMultipartUploadResult><ETag>"abc123"</ETag></CompleteMultipartUploadResult>')
+      if (req.method === 'DELETE') { res.statusCode = 204; return res.end() }
+      res.statusCode = 404; res.end('<Error><Code>NoSuchKey</Code></Error>')
+    })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 2000 })
+    try { await multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou', log: (line) => logs.push(line) }) }
+    catch (error) { throw new Error(`${error.message}; ${logs.join(' | ')}`) }
+    assert.equal(received, 1024)
+  } finally { await new Promise((resolve) => server.close(resolve)) }
+}))
+
+test('COS SDK sends exact signed lengths for full 8 MiB parts and final tail', async () => fixture(async (filePath) => {
+  const require = createRequire(import.meta.url)
+  const COS = require('cos-nodejs-sdk-v5')
+  const size = 17 * 1024 * 1024
+  await writeFile(filePath, Buffer.alloc(size))
+  const partsSeen = []
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://localhost')
+    if (url.searchParams.has('versioning')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<VersioningConfiguration/>') }); return }
+    if (url.searchParams.has('uploads')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<InitiateMultipartUploadResult><UploadId>length-check-id</UploadId></InitiateMultipartUploadResult>') }); return }
+    if (req.method === 'PUT') {
+      const hash = createHash('sha256'); let bodyBytes = 0
+      req.on('data', (chunk) => { bodyBytes += chunk.length; hash.update(chunk) })
+      req.on('end', () => {
+        partsSeen.push({ partNumber: Number(url.searchParams.get('partNumber')), contentLength: req.headers['content-length'], transferEncoding: req.headers['transfer-encoding'], bodyBytes, bodySha256: hash.digest('hex'), signedHeaders: /q-header-list=([^&]+)/.exec(req.headers.authorization || '')?.[1] || '' })
+        res.setHeader('ETag', '"abc123"'); res.end('')
+      })
+      return
+    }
+    req.resume()
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/xml')
+      if (req.method === 'POST' && url.searchParams.has('uploadId')) return res.end('<CompleteMultipartUploadResult><ETag>"abc123"</ETag></CompleteMultipartUploadResult>')
+      if (req.method === 'DELETE') { res.statusCode = 204; return res.end() }
+      res.statusCode = 404; res.end('<Error><Code>NoSuchKey</Code></Error>')
+    })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 5000 })
+    await multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou', size, sha256: 'A'.repeat(64), log: () => {} })
+    assert.deepEqual(partsSeen.map((part) => part.bodyBytes).sort((a, b) => b - a), [8 * 1024 * 1024, 8 * 1024 * 1024, 1024 * 1024])
+    for (const part of partsSeen) {
+      assert.equal(Number(part.contentLength), part.bodyBytes)
+      assert.equal(part.transferEncoding, undefined)
+      assert.match(part.signedHeaders, /(^|;)content-length($|;)/)
+      assert.equal(part.bodySha256, createHash('sha256').update(Buffer.alloc(part.bodyBytes)).digest('hex'))
+    }
+  } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)) }
+}))
+
+test('SDK socket timeout is bounded, retries only the owned part, and aborts the UploadId', async () => fixture(async (filePath) => {
+  const require = createRequire(import.meta.url)
+  const COS = require('cos-nodejs-sdk-v5')
+  let partRequests = 0; let aborts = 0
+  const server = http.createServer((req, res) => {
+    if (req.url.includes('versioning')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<VersioningConfiguration/>') }); return }
+    if (req.url.includes('uploads')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<InitiateMultipartUploadResult><UploadId>timeout-id</UploadId></InitiateMultipartUploadResult>') }); return }
+    if (req.method === 'PUT') { partRequests++; req.resume(); req.on('end', () => {}) ; return }
+    if (req.method === 'DELETE') { aborts++; req.resume(); req.on('end', () => { res.statusCode = 204; res.end() }); return }
+    req.resume(); req.on('end', () => { res.statusCode = 404; res.end('<Error><Code>NoSuchKey</Code></Error>') })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 100 })
+    await assert.rejects(multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou' }), /COS_MULTIPART_UPLOAD_FAILED/)
+    assert.equal(partRequests, 3)
+    assert.equal(aborts, 1)
+  } finally { await new Promise((resolve) => server.close(resolve)) }
 }))
 
 test('ambiguous completion is checked and never blindly retried or aborted', async () => fixture(async (filePath) => {
@@ -415,9 +578,11 @@ test('SDK sends signed forbid-overwrite headers over HTTP for init and complete'
   const COS = require('cos-nodejs-sdk-v5')
   const seen = []
   const server = http.createServer((req, res) => {
-    seen.push({ method: req.method, url: req.url, headers: req.headers })
-    req.resume()
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
     req.on('end', () => {
+      const body = Buffer.concat(chunks)
+      seen.push({ method: req.method, url: req.url, headers: { ...req.headers }, bodyBytes: body.length, bodySha256: createHash('sha256').update(body).digest('hex') })
       res.setHeader('Content-Type', 'application/xml')
       if (req.url.includes('versioning')) return res.end('<VersioningConfiguration/>')
       if (req.url.includes('uploads')) return res.end('<InitiateMultipartUploadResult><UploadId>own123</UploadId></InitiateMultipartUploadResult>')
@@ -432,6 +597,7 @@ test('SDK sends signed forbid-overwrite headers over HTTP for init and complete'
     await multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou' })
     const init = seen.find((x) => x.url.includes('uploads'))
     const complete = seen.find((x) => x.method === 'POST' && x.url.includes('uploadId'))
+    const part = seen.find((x) => x.method === 'PUT' && x.url.includes('partNumber'))
     assert.equal(init.headers['x-cos-forbid-overwrite'], 'true')
     assert.equal(complete.headers['x-cos-forbid-overwrite'], 'true')
     assert.equal(init.headers['x-cos-meta-sha256'], 'A'.repeat(64))
@@ -441,8 +607,107 @@ test('SDK sends signed forbid-overwrite headers over HTTP for init and complete'
     assert.ok(complete.headers.authorization)
     assert.match(init.headers.authorization, /x-cos-forbid-overwrite/)
     assert.match(complete.headers.authorization, /x-cos-forbid-overwrite/)
-    assert.ok(seen.some((x) => x.method === 'PUT' && x.url.includes('partNumber')))
+    assert.ok(part)
+    assert.equal(part.headers['content-length'], '1024')
+    assert.equal(part.headers['transfer-encoding'], undefined)
+    assert.equal(part.bodyBytes, 1024)
+    assert.equal(part.bodySha256, createHash('sha256').update(Buffer.alloc(1024)).digest('hex'))
+    assert.match(part.headers.authorization, /q-header-list=[^&]*content-length/)
+    assert.ok(init.headers.authorization.includes('q-header-list='))
+    assert.ok(complete.headers.authorization.includes('q-header-list='))
   } finally { await new Promise((resolve) => server.close(resolve)) }
+}))
+
+test('stall cancellation closes an actual COS SDK part request before aborting its UploadId', async () => fixture(async (filePath) => {
+  const require = createRequire(import.meta.url)
+  const COS = require('cos-nodejs-sdk-v5')
+  let tick; let now = 0; let partStartedResolve; let partSocketClosedResolve
+  let partSocketClosed = false; const abortedUploadIds = []; const logs = []; const requestsSeen = []
+  const partStarted = new Promise((resolve) => { partStartedResolve = resolve })
+  const partSocketClosedPromise = new Promise((resolve) => { partSocketClosedResolve = resolve })
+  const clock = { now: () => now, setInterval: (fn) => { tick = fn; return 1 }, clearInterval: () => {} }
+  const server = http.createServer((req, res) => {
+    requestsSeen.push(`${req.method} ${req.url}`)
+    if (req.url.includes('versioning')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<VersioningConfiguration/>') }); return }
+    if (req.url.includes('uploads')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<InitiateMultipartUploadResult><UploadId>stall-owned-id</UploadId></InitiateMultipartUploadResult>') }); return }
+    if (req.method === 'PUT') {
+      req.pause()
+      req.socket.once('close', () => { partSocketClosed = true; partSocketClosedResolve() })
+      partStartedResolve()
+      return
+    }
+    if (req.method === 'DELETE') {
+      abortedUploadIds.push(new URL(req.url, 'http://localhost').searchParams.get('uploadId'))
+      req.resume(); req.on('end', () => { res.statusCode = 204; res.end() })
+      return
+    }
+    req.resume(); req.on('end', () => { res.statusCode = 404; res.end('<Error><Code>NoSuchKey</Code></Error>') })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 60_000 })
+    const upload = multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou', clock, log: (line) => logs.push(line) })
+    await Promise.race([partStarted, new Promise((_, reject) => setTimeout(() => reject(new Error(`COS_PART_NOT_STARTED requests=${requestsSeen.join('|')} logs=${logs.join('|')}`)), 1500))])
+    now = 60_000; tick()
+    assert.ok(logs.some((line) => line.includes('STALLED=YES')))
+    now = 300_000; tick()
+    await Promise.race([assert.rejects(upload, /COS_MULTIPART_UPLOAD_STALLED/), new Promise((_, reject) => setTimeout(() => reject(new Error(`COS_PART_CANCEL_NOT_SETTLED requests=${requestsSeen.join('|')} logs=${logs.join('|')}`)), 1500))])
+    await Promise.race([partSocketClosedPromise, new Promise((_, reject) => setTimeout(() => reject(new Error('COS_PART_SOCKET_NOT_CLOSED')), 1000))])
+    assert.equal(partSocketClosed, true)
+    assert.deepEqual(abortedUploadIds, ['stall-owned-id'])
+    assert.ok(logs.some((line) => line.includes('COS_PART_CANCEL_REQUESTED part=1 reason=stall')))
+  } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)) }
+}))
+
+test('canceling one SDK part request does not cancel another task on the same client', async () => fixture(async (filePath) => {
+  const require = createRequire(import.meta.url)
+  const COS = require('cos-nodejs-sdk-v5')
+  const logs = []; const abortedUploadIds = []; const partRequests = new Map(); const closedParts = new Set()
+  let readyResolve; let readyCount = 0; let nowOne = 0; let tickOne
+  const bothPartsReady = new Promise((resolve) => { readyResolve = resolve })
+  const clockOne = { now: () => nowOne, setInterval: (fn) => { tickOne = fn; return 1 }, clearInterval: () => {} }
+  const clockTwo = { now: () => 0, setInterval: () => 1, clearInterval: () => {} }
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://localhost')
+    const key = url.pathname.slice(1)
+    if (url.searchParams.has('versioning')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<VersioningConfiguration/>') }); return }
+    if (url.searchParams.has('uploads')) { req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end(`<InitiateMultipartUploadResult><UploadId>id-${key}</UploadId></InitiateMultipartUploadResult>`) }); return }
+    if (req.method === 'PUT') {
+      req.pause()
+      req.socket.once('close', () => closedParts.add(key))
+      partRequests.set(key, { req, res })
+      readyCount++
+      if (readyCount === 2) readyResolve()
+      req.on('end', () => { res.setHeader('ETag', '"abc123"'); res.end('') })
+      return
+    }
+    if (req.method === 'DELETE') {
+      abortedUploadIds.push(url.searchParams.get('uploadId'))
+      req.resume(); req.on('end', () => { res.statusCode = 204; res.end() })
+      return
+    }
+    if (req.method === 'POST' && url.searchParams.has('uploadId')) {
+      req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/xml'); res.end('<CompleteMultipartUploadResult><ETag>"complete123"</ETag></CompleteMultipartUploadResult>') })
+      return
+    }
+    req.resume(); req.on('end', () => { res.statusCode = 404; res.end('<Error><Code>NoSuchKey</Code></Error>') })
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 60_000 })
+    const first = multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou', key: 'one', clock: clockOne, log: (line) => logs.push(line) })
+    const second = multipartUpload({ ...args(cos, filePath), bucket: 'example-1234567890', region: 'ap-guangzhou', key: 'two', clock: clockTwo, log: (line) => logs.push(line) })
+    await Promise.race([bothPartsReady, new Promise((_, reject) => setTimeout(() => reject(new Error('COS_CONCURRENT_PARTS_NOT_READY')), 1500))])
+    nowOne = 300_000; tickOne()
+    await assert.rejects(first, /COS_MULTIPART_UPLOAD_STALLED/)
+    assert.ok(closedParts.has('one'))
+    assert.equal(closedParts.has('two'), false)
+    assert.deepEqual(abortedUploadIds, ['id-one'])
+    partRequests.get('two').req.resume()
+    await second
+    assert.deepEqual(abortedUploadIds, ['id-one'])
+    assert.ok(partRequests.has('one') && partRequests.has('two'))
+  } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)) }
 }))
 
 test('concurrent complete requests cannot replace an existing object', async () => {

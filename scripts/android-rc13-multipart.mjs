@@ -1,19 +1,56 @@
 import { open } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 
 const PART_SIZE = 8 * 1024 * 1024
+const PART_STREAM_CHUNK_SIZE = 64 * 1024
 const MIN_INITIAL_CREDENTIAL_REMAINING_MS = 15 * 60 * 1000
 const COMPLETE_CREDENTIAL_SAFETY_MS = 60 * 1000
 const SAFE_HEADER = Object.freeze({ 'x-cos-forbid-overwrite': 'true' })
-const SAFE_COS_CODES = new Set(['FileAlreadyExists', 'NoSuchUpload', 'AccessDenied', 'ECONNRESET', 'ETIMEDOUT', 'SlowDown', 'InternalError', 'ServiceUnavailable'])
-const SAFE_TRANSPORT_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE'])
+const SAFE_COS_CODES = new Set(['FileAlreadyExists', 'NoSuchUpload', 'AccessDenied', 'UserNetworkTooSlow', 'ECONNRESET', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'SlowDown', 'InternalError', 'ServiceUnavailable'])
+const SAFE_TRANSPORT_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE'])
+const RETRYABLE_COS_CODES = new Set(['InternalError', 'SlowDown', 'ServiceUnavailable'])
+const SAFE_INTERNAL_ERROR_CODES = new Set([
+  'COS_MULTIPART_CANCELLATION_UNAVAILABLE',
+  'COS_PART_ETAG_INVALID',
+  'COS_COMPLETE_RESPONSE_INVALID',
+  'COS_CONCURRENCY_INVALID',
+  'COS_SOURCE_METADATA_INVALID',
+  'TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME',
+  'COS_BUCKET_VERSIONING_UNVERIFIED',
+  'COS_BUCKET_VERSIONING_UNSUPPORTED',
+  'COS_UPLOAD_STALLED',
+  'COS_SOURCE_READ_INCOMPLETE',
+  'COS_PART_ETAG_MISSING',
+  'COS_PART_ATTEMPTS_EXHAUSTED',
+  'TENCENT_STS_CREDENTIALS_EXPIRED_BEFORE_COMPLETE',
+  'COS_OBJECT_KEY_ALREADY_EXISTS',
+  'COS_MULTIPART_INIT_UNCERTAIN',
+  'COS_COMPLETE_UNCERTAIN',
+  'COS_MULTIPART_UPLOAD_STALLED',
+  'COS_MULTIPART_PART_NON_RETRYABLE_UserNetworkTooSlow',
+  'COS_MULTIPART_PART_NON_RETRYABLE_AccessDenied',
+  'COS_MULTIPART_PART_NON_RETRYABLE_FileAlreadyExists',
+  'COS_MULTIPART_PART_NON_RETRYABLE_NoSuchUpload',
+  'COS_MULTIPART_PART_NON_RETRYABLE_INVALID_ARGUMENT',
+  'COS_MULTIPART_UPLOAD_FAILED',
+])
+const COS_TASK_REGISTRIES = new WeakMap()
+const MAX_PART_ATTEMPTS = 3
+const STALL_WARNING_MS = 60_000
+const STALL_ABORT_MS = 300_000
 
 function getHeaderValue(headers, name) {
   if (!headers || typeof headers !== 'object') return ''
   const target = name.toLowerCase()
   const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === target)
   return entry ? String(entry[1] ?? '') : ''
+}
+
+function* splitBuffer(buffer) {
+  for (let offset = 0; offset < buffer.length; offset += PART_STREAM_CHUNK_SIZE) {
+    yield buffer.subarray(offset, Math.min(buffer.length, offset + PART_STREAM_CHUNK_SIZE))
+  }
 }
 
 function sanitizeCosResponseMessage(value) {
@@ -56,6 +93,60 @@ export function safeCosError(error, { requestType = 'Unknown', method = 'UNKNOWN
     : SAFE_HTTP_MESSAGES.has(String(error?.message || '')) ? String(error.message)
       : 'NO_COS_ERROR_XML'
   return `request_type=${safeRequestType} method=${safeMethod} http_status=${status || 'UNKNOWN'} cos_code=${cosCode} sdk_code=${safeSdkCode} request_id=${safeRequestId} response=${responseMessage}`
+}
+
+function getCosErrorCode(error) {
+  return String(error?.error?.Code || error?.error?.code || error?.code || '')
+}
+
+function safeInternalErrorCode(error) {
+  const message = String(error?.message || '')
+  return SAFE_INTERNAL_ERROR_CODES.has(message) ? message : 'UNKNOWN'
+}
+
+function isRetryablePartError(error) {
+  const code = getCosErrorCode(error)
+  if (code === 'UserNetworkTooSlow') return false
+  if (SAFE_TRANSPORT_CODES.has(code) || RETRYABLE_COS_CODES.has(code)) return true
+  const status = Number(error?.statusCode ?? error?.status)
+  if (status >= 400 && status < 500) return false
+  return status >= 500 && status <= 599
+}
+
+// COS SDK 3.0.0's low-level multipartUpload only registers an abort listener
+// when TaskId is provided. It does not expose a public per-request handle for
+// this API, so this scoped registry uses the internal event implemented by the
+// pinned SDK v3.0.0 to abort only the active part request. The HTTP integration
+// test guards this behavior against the exact locked SDK.
+function registerCancelablePartRequest(cos) {
+  if (typeof cos?._isRunningTask !== 'function' || typeof cos?.emit !== 'function') return undefined
+  let registry = COS_TASK_REGISTRIES.get(cos)
+  if (!registry) {
+    const active = new Set()
+    const originalIsRunningTask = cos._isRunningTask.bind(cos)
+    const patchedIsRunningTask = (taskId) => active.has(taskId) || originalIsRunningTask(taskId)
+    cos._isRunningTask = patchedIsRunningTask
+    if (cos._isRunningTask !== patchedIsRunningTask) throw new Error('COS_MULTIPART_CANCELLATION_UNAVAILABLE')
+    registry = { active }
+    COS_TASK_REGISTRIES.set(cos, registry)
+  }
+  const taskId = `rc13-part-${randomUUID()}`
+  registry.active.add(taskId)
+  let cancelled = false
+  let rejectCancelled
+  const cancelledRequest = new Promise((_, reject) => { rejectCancelled = reject })
+  return {
+    taskId,
+    cancelledRequest,
+    cancel() {
+      if (cancelled || !registry.active.has(taskId)) return false
+      cancelled = true
+      cos.emit('inner-kill-task', { TaskId: taskId, toState: 'canceled' })
+      rejectCancelled(new Error('COS_PART_REQUEST_CANCELLED'))
+      return true
+    },
+    release() { registry.active.delete(taskId) },
+  }
 }
 
 export async function completeOnce(cos, base, uploadId, parts, onRequest = () => {}) {
@@ -105,23 +196,32 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
   let timer
   let failed
   let abortPromise
-  let abortAttempts = 0
   let previousBytes = 0
   let previousTime = started
   let retries = 0
-  const abortOwned = async ({ afterWorkersSettle = false } = {}) => {
-    if (abortPromise) await abortPromise
-    if (abortAttempts > 0 && !afterWorkersSettle) return
-    abortAttempts++
+  let terminalPartError
+  const activePartRequests = new Map()
+  const cancelActivePartRequests = (reason) => {
+    let cancelled = 0
+    for (const [partNumber, request] of activePartRequests) {
+      if (request.task?.cancel()) {
+        cancelled++
+        log(`COS_PART_CANCEL_REQUESTED part=${partNumber} reason=${reason}`)
+      }
+    }
+    return cancelled
+  }
+  const abortOwned = async () => {
+    if (abortPromise) return abortPromise
     abortPromise = cos.multipartAbort({ ...base, UploadId: uploadId }).then(
-      () => log(`COS_MULTIPART_ABORT=COMPLETE attempt=${abortAttempts}`),
+      () => log('COS_MULTIPART_ABORT=COMPLETE'),
       (error) => {
         const code = String(error?.code || error?.error?.Code || '')
-        if (code === 'NoSuchUpload') log(`COS_MULTIPART_ABORT=ALREADY_ABSENT attempt=${abortAttempts}`)
-        else log(`COS_MULTIPART_ABORT=FAILED attempt=${abortAttempts} ${safeCosError(error)}`)
+        if (code === 'NoSuchUpload') log('COS_MULTIPART_ABORT=ALREADY_ABSENT')
+        else log(`COS_MULTIPART_ABORT=FAILED ${safeCosError(error)}`)
       },
-    ).finally(() => { abortPromise = undefined })
-    await abortPromise
+    )
+    return abortPromise
   }
   try {
     file = await open(filePath, 'r')
@@ -136,51 +236,85 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
     log(`COS_MULTIPART_INIT ${safeCosError(init)}`)
     const count = Math.ceil(size / PART_SIZE)
     const parts = new Array(count)
+    const bodyStreamEmitted = new Array(count).fill(0)
     let next = 0
     const inFlight = new Array(count).fill(0)
     timer = clock.setInterval(() => {
       const elapsed = Math.max(1, clock.now() - started)
-      const current = Math.min(size, uploaded + inFlight.reduce((sum, value) => sum + value, 0))
+      const sdkCallbackInFlightBytes = inFlight.reduce((sum, value) => sum + value, 0)
+      const bodyStreamBytes = bodyStreamEmitted.reduce((sum, value) => sum + value, 0)
+      const current = Math.min(size, uploaded + sdkCallbackInFlightBytes)
       const recentBps = Math.max(0, Math.floor((current - previousBytes) * 1000 / Math.max(1, clock.now() - previousTime)))
-      log(`COS_UPLOAD_PROGRESS bytes=${current} total=${size} remaining=${size - current} percent=${Math.floor(current * 100 / size)} elapsed_ms=${elapsed} average_bps=${Math.floor(current * 1000 / elapsed)} recent_bps=${recentBps} completed_parts=${parts.filter(Boolean).length} total_parts=${count} retries=${retries}${clock.now() - lastProgress >= 60000 ? ' STALLED=YES' : ''}`)
+      log(`COS_UPLOAD_PROGRESS progress_source=SDK_SOCKET_CALLBACK reported_bytes=${current} sdk_callback_inflight_bytes=${sdkCallbackInFlightBytes} body_stream_emitted_bytes=${bodyStreamBytes} cos_acknowledged_part_bytes=${uploaded} total=${size} remaining_bytes=${size - current} percent=${Math.floor(current * 100 / size)} elapsed_ms=${elapsed} average_bps=${Math.floor(current * 1000 / elapsed)} recent_bps=${recentBps} completed_parts=${parts.filter(Boolean).length} total_parts=${count} retries=${retries}${clock.now() - lastProgress >= STALL_WARNING_MS ? ' STALLED=YES' : ''}`)
       previousBytes = current
       previousTime = clock.now()
-      if (!failed && clock.now() - lastProgress >= 300000) {
+      if (!failed && clock.now() - lastProgress >= STALL_ABORT_MS) {
         failed = new Error('COS_UPLOAD_STALLED')
-        // Cancel the upload promptly, then repeat cleanup after every active
-        // part request settles so a late part cannot leave an MPU behind.
-        log('COS_UPLOAD_STALLED_ABORT=START')
-        void abortOwned()
+        // Terminate active SDK HTTP requests first. Abort the owned MPU only
+        // after all request callbacks settle, so late parts cannot race cleanup.
+        log(`COS_UPLOAD_STALLED_CANCEL=START active_parts=${activePartRequests.size}`)
+        cancelActivePartRequests('stall')
       }
     }, 5000)
     const worker = async () => {
-      while (!failed) {
-        const index = next++
-        if (index >= count) return
-        const length = Math.min(PART_SIZE, size - index * PART_SIZE)
-        const buffer = Buffer.alloc(length)
-        const { bytesRead } = await file.read(buffer, 0, length, index * PART_SIZE)
-        if (bytesRead !== length) { failed = new Error('COS_SOURCE_READ_INCOMPLETE'); return }
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            const result = await cos.multipartUpload({ ...base, UploadId: uploadId, PartNumber: index + 1, Body: Readable.from(buffer), ContentLength: length, onProgress: ({ loaded }) => {
-              if (Number.isFinite(loaded) && loaded > inFlight[index]) lastProgress = clock.now()
-              if (Number.isFinite(loaded)) inFlight[index] = Math.max(0, Math.min(length, loaded))
-            } })
-            if (!result?.ETag) throw new Error('COS_PART_ETAG_MISSING')
-            parts[index] = { PartNumber: index + 1, ETag: result.ETag }
-            inFlight[index] = 0
-            uploaded += length
-            lastProgress = clock.now()
-            break
-          } catch (error) {
-            inFlight[index] = 0
-            log(`COS_PART_FAILURE part=${index + 1} attempt=${attempt} ${safeCosError(error)}`)
-            if (failed) return
-            if (attempt < 3) retries++
-            if (attempt === 3) failed = error
+      try {
+        while (!failed) {
+          const index = next++
+          if (index >= count) return
+          const length = Math.min(PART_SIZE, size - index * PART_SIZE)
+          const buffer = Buffer.alloc(length)
+          const { bytesRead } = await file.read(buffer, 0, length, index * PART_SIZE)
+          if (bytesRead !== length) throw new Error('COS_SOURCE_READ_INCOMPLETE')
+          let partCompleted = false
+          for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS && !failed; attempt++) {
+            const body = Readable.from(splitBuffer(buffer), { objectMode: false })
+            body.on('data', (chunk) => { bodyStreamEmitted[index] += chunk.length })
+            const task = registerCancelablePartRequest(cos)
+            if (cos?.options && typeof cos?.multipartUpload === 'function' && !task) throw new Error('COS_MULTIPART_CANCELLATION_UNAVAILABLE')
+            activePartRequests.set(index + 1, { task, body })
+            try {
+              const partRequest = cos.multipartUpload({ ...base, UploadId: uploadId, PartNumber: index + 1, Body: body, ContentLength: length, Headers: { 'Content-Length': String(length) }, TaskId: task?.taskId, onProgress: ({ loaded }) => {
+                const callbackBytes = Number.isFinite(loaded) ? Math.max(0, Math.min(length, loaded)) : 0
+                if (callbackBytes > inFlight[index]) lastProgress = clock.now()
+                inFlight[index] = callbackBytes
+              } })
+              const result = task ? await Promise.race([partRequest, task.cancelledRequest]) : await partRequest
+              if (!result?.ETag) throw new Error('COS_PART_ETAG_MISSING')
+              parts[index] = { PartNumber: index + 1, ETag: result.ETag }
+              inFlight[index] = 0
+              uploaded += length
+              lastProgress = clock.now()
+              partCompleted = true
+              break
+            } catch (error) {
+              inFlight[index] = 0
+              const retryable = isRetryablePartError(error)
+              const cosCode = getCosErrorCode(error)
+              log(`COS_PART_FAILURE part=${index + 1} attempt=${attempt} retry_class=${retryable ? 'RETRYABLE' : 'NON_RETRYABLE'} cos_code=${/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(cosCode) ? cosCode : 'UNKNOWN'} ${safeCosError(error)}`)
+              if (failed) return
+              if (!retryable) {
+                failed = error
+                terminalPartError = error
+                cancelActivePartRequests(cosCode || 'terminal-part-error')
+                return
+              }
+              if (attempt < MAX_PART_ATTEMPTS) retries++
+              else {
+                failed = error
+                cancelActivePartRequests('retry-limit')
+              }
+            } finally {
+              activePartRequests.delete(index + 1)
+              task?.release()
+              body.destroy()
+            }
           }
+          if (failed) return
+          if (!partCompleted) throw new Error('COS_PART_ATTEMPTS_EXHAUSTED')
         }
+      } catch (error) {
+        if (!failed) failed = error
+        cancelActivePartRequests('worker-failure')
       }
     }
     const results = await Promise.allSettled(Array.from({ length: Math.min(concurrency, count) }, worker))
@@ -195,13 +329,11 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
     completed = true
     log(`COS_MULTIPART_COMPLETE elapsed_ms=${clock.now() - started} bytes=${uploaded} ${safeCosError(result)}`)
   } catch (error) {
-    log(`COS_MULTIPART_FAILURE ${safeCosError(error)} complete_attempted=${completeAttempted}`)
+    log(`COS_MULTIPART_FAILURE reason=${safeInternalErrorCode(error)} ${safeCosError(error)} complete_attempted=${completeAttempted}`)
     const statusCode = Number(error?.statusCode)
     const conflict = (completeAttempted || (initAttempted && !uploadId)) && (statusCode === 409 || error?.code === 'FileAlreadyExists' || error?.error?.Code === 'FileAlreadyExists')
     const completeRejected = completeAttempted && (error?.cosResponseError === true || (statusCode >= 400 && statusCode < 500))
-    if (uploadId && !completed && (!completeAttempted || conflict || completeRejected)) {
-      await abortOwned({ afterWorkersSettle: error?.message === 'COS_UPLOAD_STALLED' })
-    }
+    if (uploadId && !completed && (!completeAttempted || conflict || completeRejected)) await abortOwned()
     if (conflict) throw new Error('COS_OBJECT_KEY_ALREADY_EXISTS')
     if (initAttempted && !uploadId) {
       log('COS_INIT_UNCERTAIN=UPLOAD_ID_UNKNOWN')
@@ -211,6 +343,12 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
       // A failed response does not establish whether COS committed the object.
       try { const head = await cos.headObject(base); log(`COS_COMPLETE_UNCERTAIN head_status=${Number(head?.statusCode) || 0}`) } catch (headError) { log(`COS_COMPLETE_UNCERTAIN ${safeCosError(headError)}`) }
       throw new Error('COS_COMPLETE_UNCERTAIN')
+    }
+    if (error?.message === 'COS_UPLOAD_STALLED') throw new Error('COS_MULTIPART_UPLOAD_STALLED')
+    if (terminalPartError) {
+      const code = getCosErrorCode(terminalPartError)
+      const safeCode = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(code) ? `_${code}` : ''
+      throw new Error(`COS_MULTIPART_PART_NON_RETRYABLE${safeCode}`)
     }
     if (error?.message === 'TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME'
       || error?.message === 'TENCENT_STS_CREDENTIALS_EXPIRED_BEFORE_COMPLETE') throw error
