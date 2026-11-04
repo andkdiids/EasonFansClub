@@ -87,6 +87,9 @@ test('COS failure diagnostics include request and response fields without leakin
   assert.match(output, new RegExp(`request_id=${requestId}`))
   assert.match(output, /response=Access denied: \[REDACTED_URL\] Authorization=\[REDACTED\]/)
   assert.doesNotMatch(output, /fake-authorization-secret|fake-session-token|opaque-signature|cos\.example\.test|sign=opaque/)
+  const longCredentialCode = safeCosError({ error: { Code: 'private-session-secret-value-that-must-not-appear' } })
+  assert.match(longCredentialCode, /cos_code=UNKNOWN/)
+  assert.doesNotMatch(longCredentialCode, /private-session-secret/)
 })
 
 test('read-only COS gate rejects a HEAD or Range GET response with an unexpected HTTP status', async () => {
