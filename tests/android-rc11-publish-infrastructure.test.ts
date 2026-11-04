@@ -545,7 +545,9 @@ test('Android release infrastructure CI is pull-request-only and does not access
   assert.match(commands, /tsc --noEmit/)
   assert.match(commands, /eslint scripts\/android-rc11-cos-publish\.mjs/)
   assert.match(commands, /git diff --check/)
-  assert.doesNotMatch(workflowText, /workflow_dispatch:|id-token:\s*write|environment:\s*Production|TENCENT_|SERVER_SSH_KEY|cos-nodejs-sdk-v5/)
+  assert.doesNotMatch(workflowText, /workflow_dispatch:|id-token:\s*write|environment:\s*Production|TENCENT_|SERVER_SSH_KEY/)
+  assert.ok(workflowText.includes("run: node -e \"console.log(require.resolve('cos-nodejs-sdk-v5'))\""))
+  assert.equal((workflowText.match(/cos-nodejs-sdk-v5/g) ?? []).length, 1)
 })
 test('COS publish simulation uploads only the new immutable candidate and verifies its complete CDN bytes', () => {
   const publisher = read('scripts/android-rc11-cos-publish.mjs')
@@ -627,6 +629,19 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   const verify = workflow.jobs.verify_oidc
   const ingress = workflow.jobs.ingress
   const cos = workflow.jobs.cos
+  const verifyNodeSetupIndex = verify.steps.findIndex((step) => String(step.uses ?? '').startsWith('actions/setup-node@'))
+  const verifyPnpmSetupIndex = verify.steps.findIndex((step) => String(step.uses ?? '').startsWith('pnpm/action-setup@'))
+  const cosPnpmSetup = cos.steps.find((step) => String(step.uses ?? '').startsWith('pnpm/action-setup@'))
+  const verifyPnpmSetup = verify.steps[verifyPnpmSetupIndex]
+  const verifyProductionInstallIndex = verify.steps.findIndex((step) => String(step.run ?? '').trim() === 'pnpm install --prod --frozen-lockfile --ignore-scripts')
+  const verifyResolveIndex = verify.steps.findIndex((step) => String(step.run ?? '').includes("require.resolve('cos-nodejs-sdk-v5')"))
+  assert.ok(verifyNodeSetupIndex >= 0)
+  assert.ok(verifyPnpmSetupIndex > verifyNodeSetupIndex)
+  assert.ok(cosPnpmSetup)
+  assert.deepEqual(verifyPnpmSetup, cosPnpmSetup)
+  assert.ok(verifyProductionInstallIndex > verifyPnpmSetupIndex)
+  assert.ok(verifyResolveIndex > verifyProductionInstallIndex)
+  assert.match(read('.github/workflows/android-release-infra-ci.yml'), /require\.resolve\('cos-nodejs-sdk-v5'\)/)
   assert.equal(verify['timeout-minutes'], 10)
   assert.equal(ingress['timeout-minutes'], 20)
   assert.equal(cos['timeout-minutes'], 60)
