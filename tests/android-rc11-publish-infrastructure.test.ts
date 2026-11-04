@@ -756,7 +756,7 @@ test('STS lease requests two hours and logs expiry without credential values', (
 test('read-only COS gate checks bucket versioning and signed HEAD, then range-reads the existing HTTPS custom domain', async () => {
   const calls: Array<{ method: string; options: Record<string, unknown> }> = []
   const logs: string[] = []
-  const rangeUrl = \`https://media.ecfc.fans/media/\${CODE32_ROLLBACK_OBJECT_KEY}\`
+  const rangeUrl = 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY
   let requestUrl = ''
   let requestInit: RequestInit | undefined
   const cos = {
@@ -779,7 +779,7 @@ test('read-only COS gate checks bucket versioning and signed HEAD, then range-re
       requestInit = init
       return responseWithUrl(rangeUrl, 206, {
         'content-length': '1',
-        'content-range': \`bytes 0-0/\${RC12_BASELINE.size}\`,
+        'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
       }, Buffer.from([0]))
     },
   })
@@ -796,9 +796,9 @@ test('read-only COS gate checks bucket versioning and signed HEAD, then range-re
   assert.equal(result.versioning, 'DISABLED')
   assert.equal(result.headObject, 'PASS')
   assert.equal(result.customDomainRangeGet, 'PASS')
-  assert.match(logs.join('\\n'), /COS_BUCKET_VERSIONING_RESPONSE=\\{"VersioningConfiguration":\\{\\}\\}/)
-  assert.match(logs.join('\\n'), /HeadObject=PASS CustomDomainRangeGet=PASS/)
-  assert.doesNotMatch(logs.join('\\n'), /media\\.ecfc|Authorization|SecurityToken|SecretKey/)
+  assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
+  assert.match(logs.join('\n'), /HeadObject=PASS CustomDomainRangeGet=PASS/)
+  assert.doesNotMatch(logs.join('\n'), /media\.ecfc|Authorization|SecurityToken|SecretKey/)
 })
 
 test('read-only COS gate fails closed on custom-domain 403 or invalid Range responses with safe diagnostics', async () => {
@@ -826,15 +826,16 @@ test('read-only COS gate fails closed on custom-domain 403 or invalid Range resp
       log: (line) => logs.push(line),
       fetchImpl: async (input, init) => {
         assert.equal(String(input), 'https://media.ecfc.fans/media/' + CODE32_ROLLBACK_OBJECT_KEY)
+        assert.equal(init?.method, 'GET')
         assert.equal(init?.redirect, 'error')
         assert.equal(new Headers(init?.headers).has('authorization'), false)
         return response
       },
     }), expectedError)
     assert.equal(objectHeadCalls, 1)
-    assert.match(logs.join('\\n'), /COS_CUSTOM_DOMAIN_RANGE_GET_FAILED/)
-    if ((response as Response).status === 403) assert.match(logs.join('\\n'), /http_status=403 .*request_id=range-read-request-123/)
-    assert.doesNotMatch(logs.join('\\n'), /media\\.ecfc|DownloadForbidden|Authorization|SecurityToken|SecretKey/)
+    assert.match(logs.join('\n'), /COS_CUSTOM_DOMAIN_RANGE_GET_FAILED/)
+    if ((response as Response).status === 403) assert.match(logs.join('\n'), /http_status=403 .*request_id=range-read-request-123/)
+    assert.doesNotMatch(logs.join('\n'), /media\.ecfc|DownloadForbidden|Authorization|SecurityToken|SecretKey/)
   }
 })
 
@@ -872,7 +873,7 @@ test('code32 rollback source validation uses the HTTPS custom domain and rejects
     requestInit = init
     return responseWithUrl(expectedUrl, 206, {
       'content-length': '1',
-      'content-range': \`bytes 0-0/\${RC12_BASELINE.size}\`,
+      'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
     }, Buffer.from([0]))
   })
   assert.equal(source.code, 32)
@@ -885,7 +886,7 @@ test('code32 rollback source validation uses the HTTPS custom domain and rejects
   )), /CODE32_ROLLBACK_SOURCE_UNAVAILABLE/)
   await assert.rejects(verifyRollbackSourceRange('rc13', async () => responseWithUrl(
     'https://elsewhere.example/apk', 206, {
-      'content-range': \`bytes 0-0/\${RC12_BASELINE.size}\`,
+      'content-range': 'bytes 0-0/' + RC12_BASELINE.size,
     }, Buffer.from([0]),
   )), /CODE32_ROLLBACK_SOURCE_UNAVAILABLE/)
 })
@@ -893,10 +894,10 @@ test('code32 rollback source validation uses the HTTPS custom domain and rejects
 test('existing app download route and release preflight share the configured HTTPS custom domain', () => {
   const route = read('lib/app-download.ts')
   const publisher = read('scripts/android-rc11-cos-publish.mjs')
-  assert.match(route, /PUBLIC_APK_BASE_URL = 'https:\\/\\/media\\.ecfc\\.fans\\/media'/)
-  assert.match(publisher, /CDN_BASE_URL = 'https:\\/\\/media\\.ecfc\\.fans\\/media\\/'/)
-  assert.match(route, /url\\.hostname === 'media\\.ecfc\\.fans'/)
-  assert.match(route, /url\\.protocol === 'https:'/)
+  assert.match(route, /PUBLIC_APK_BASE_URL = 'https:\/\/media\.ecfc\.fans\/media'/)
+  assert.match(publisher, /CDN_BASE_URL = 'https:\/\/media\.ecfc\.fans\/media\/'/)
+  assert.match(route, /url\.hostname === 'media\.ecfc\.fans'/)
+  assert.match(route, /url\.protocol === 'https:'/)
 })
 
 test('read-only COS gate fails closed for enabled, suspended, and unknown versioning states', async () => {
