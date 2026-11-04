@@ -317,7 +317,7 @@ test('ambiguous completion cannot pass when CDN SHA verification fails', async (
       return { statusCode: 200, headers: { 'content-length': '1024', 'content-type': 'application/vnd.android.package-archive', 'cache-control': 'public, max-age=31536000, immutable', 'x-cos-meta-sha256': sha256 } }
     },
   })
-  await assert.rejects(uploadImmutableObject({ cos, env: { TENCENT_COS_BUCKET: 'bucket', TENCENT_COS_REGION: 'region' }, key: 'unique', filePath, expected: { size: 1024, sha256 }, stage: 'TEST', downloadCos: async () => {}, downloadFile: async (url, dest, expected) => { reads++; assert.equal(expected.expectedSha256, sha256); throw new Error('APK_SHA256_MISMATCH') } }), /APK_SHA256_MISMATCH/)
+  await assert.rejects(uploadImmutableObject({ cos, env: { TENCENT_COS_BUCKET: 'bucket', TENCENT_COS_REGION: 'region' }, key: 'unique', filePath, expected: { size: 1024, sha256 }, key: CODE32_ROLLBACK_OBJECT_KEY, stage: 'TEST', downloadCos: async () => {}, downloadFile: async (url, dest, expected) => { reads++; assert.equal(expected.expectedSha256, sha256); throw new Error('APK_SHA256_MISMATCH') } }), /APK_SHA256_MISMATCH/)
   assert.equal(reads, 1)
 }))
 
@@ -360,26 +360,47 @@ test('CDN readback rejects an APK with incorrect SHA-256', async () => fixture(a
   await assert.rejects(downloadToFile('https://cdn.example.test/file', `${filePath}.readback`, { expectedSize: 1024, expectedSha256: 'A'.repeat(64), logImpl: () => {}, fetchImpl: async () => ({ ok: true, status: 200, url: 'https://cdn.example.test/file', body }) }), /APK_SHA256_MISMATCH/)
 }))
 
-test('COS origin readback hashes complete bytes and rejects a mismatch', async () => fixture(async (filePath) => {
-  const data = Buffer.from('cos-origin')
+test('custom-domain readback hashes complete bytes and rejects a mismatch', async () => fixture(async (filePath) => {
+  const data = Buffer.from('custom-domain')
   const sha256 = createHash('sha256').update(data).digest('hex').toUpperCase()
-  const cos = { getObject: async ({ Output }) => new Promise((resolve, reject) => { Output.on('finish', resolve); Output.on('error', reject); Output.end(data) }) }
-  const base = { cos, bucket: 'bucket', region: 'region', key: 'key' }
-  await downloadCosObject({ ...base, filePath: `${filePath}.origin`, expected: { size: data.length, sha256 } })
-  await assert.rejects(downloadCosObject({ ...base, filePath: `${filePath}.bad`, expected: { size: data.length, sha256: 'A'.repeat(64) } }), /COS_READBACK_SHA256_MISMATCH/)
+  const key = CODE32_ROLLBACK_OBJECT_KEY
+  const url = 'https://media.ecfc.fans/media/' + key
+  let calls = 0
+  const fetchImpl = async (input) => {
+    calls++
+    assert.equal(String(input), url)
+    const response = new Response(data, { status: 200, headers: { 'content-length': String(data.length) } })
+    Object.defineProperty(response, 'url', { value: url })
+    return response
+  }
+  await downloadCosObject({ key, filePath: `${filePath}.readback`, expected: { size: data.length, sha256 }, fetchImpl })
+  await assert.rejects(downloadCosObject({
+    key,
+    filePath: `${filePath}.bad`,
+    expected: { size: data.length, sha256: 'A'.repeat(64) },
+    fetchImpl,
+  }), /APK_SHA256_MISMATCH/)
+  assert.equal(calls, 2)
 }))
 
-test('SDK downloads and hashes full COS-origin response over HTTP', async () => fixture(async (filePath) => {
-  const require = createRequire(import.meta.url)
-  const COS = require('cos-nodejs-sdk-v5')
-  const data = Buffer.from('actual-sdk-cos-response')
-  const sha256 = createHash('sha256').update(data).digest('hex').toUpperCase()
-  const server = http.createServer((req, res) => { res.setHeader('Content-Length', data.length); res.end(data) })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  try {
-    const cos = new COS({ SecretId: 'test-id', SecretKey: 'test-key', Domain: `127.0.0.1:${server.address().port}`, Protocol: 'http:', Timeout: 5000 })
-    await downloadCosObject({ cos, bucket: 'example-1234567890', region: 'ap-guangzhou', key: 'key', filePath: `${filePath}.real-origin`, expected: { size: data.length, sha256 } })
-  } finally { await new Promise((resolve) => server.close(resolve)) }
+test('custom-domain readback rejects a forbidden download response', async () => fixture(async (filePath) => {
+  const key = CODE32_ROLLBACK_OBJECT_KEY
+  const url = 'https://media.ecfc.fans/media/' + key
+  let requestInit
+  await assert.rejects(downloadCosObject({
+    key,
+    filePath: `${filePath}.forbidden`,
+    expected: { size: 1024, sha256: 'A'.repeat(64) },
+    fetchImpl: async (input, init) => {
+      assert.equal(String(input), url)
+      requestInit = init
+      const response = new Response('DownloadForbidden', { status: 403 })
+      Object.defineProperty(response, 'url', { value: url })
+      return response
+    },
+  }), /APK_DOWNLOAD_FAILED/)
+  assert.equal(requestInit.redirect, 'error')
+  assert.equal(new Headers(requestInit.headers).has('authorization'), false)
 }))
 
 test('versioned or unknown buckets are rejected before initiation', async () => fixture(async (filePath) => {
