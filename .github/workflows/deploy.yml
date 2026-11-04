@@ -40,6 +40,12 @@ on:
       - 'tests/middleware-auth.test.ts'
       - 'tests/mobile-bearer-route-integration.test.ts'
       - 'tests/profile-background-mobile-lookup.test.ts'
+      # Moderation identity changes require an explicit skip-db deployment.
+      - 'app/api/notifications/route.ts'
+      - 'app/notifications/NotificationsClient.tsx'
+      - 'lib/notifications.ts'
+      - 'lib/moderation-notification-identity.ts'
+      - 'tests/moderation-notification-identity.test.ts'
   workflow_dispatch:
     inputs:
       db_mode:

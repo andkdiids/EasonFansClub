@@ -9,6 +9,15 @@ import {
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
+test('moderation identity changes require explicit skip-db deployment', () => {
+  const trigger = read('.github/workflows/deploy.yml').match(/paths-ignore:\s*([\s\S]*?)\n\s+workflow_dispatch:/)?.[1]
+  assert.ok(trigger)
+  for (const file of ['app/api/notifications/route.ts', 'app/notifications/NotificationsClient.tsx',
+    'lib/notifications.ts', 'lib/moderation-notification-identity.ts', 'tests/moderation-notification-identity.test.ts']) {
+    assert.ok(trigger.includes(`'${file}'`), `missing deployment exclusion: ${file}`)
+  }
+})
+
 test('approval and rejection notices from every public moderation surface use the official identity', () => {
   const cases = [
     { type: 'ADMIN', key: 'post-review-result:post-1:APPROVED:1', link: '/posts/post-1' },
