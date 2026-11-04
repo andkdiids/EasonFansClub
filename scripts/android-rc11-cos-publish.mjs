@@ -79,8 +79,8 @@ function assertSize(value, expected, code) {
 
 function createCdnObjectUrl(key) {
   if (typeof key !== 'string'
-    || !/^android\\/releases\\/[A-Za-z0-9][A-Za-z0-9._/-]{0,220}\\.apk$/.test(key)
-    || key.includes('\\\\')
+    || !/^android\/releases\/[A-Za-z0-9][A-Za-z0-9._/-]{0,220}\.apk$/.test(key)
+    || key.includes('\\')
     || key.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
     throw new Error('COS_CUSTOM_DOMAIN_OBJECT_KEY_INVALID')
   }
@@ -94,7 +94,6 @@ function createCdnObjectUrl(key) {
   }
   return url
 }
-
 function safeResponseHeader(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9+/=_:.-]{1,160}$/.test(value)) return 'NONE'
   return value
@@ -314,7 +313,7 @@ async function runReleaseStage(stage, operation, logImpl = console.log) {
   }
 }
 
-async function verifyRollbackSourceRange(candidate, fetchImpl) {
+export async function verifyRollbackSourceRange(candidate, fetchImpl) {
   const source = candidate === 'rc11'
     ? { key: CODE30_ROLLBACK_OBJECT_KEY, size: CODE30_BASELINE.size, code: 30 }
     : candidate === 'rc12' ? { key: CODE31_ROLLBACK_OBJECT_KEY, size: CODE31_BASELINE.size, code: 31 }
