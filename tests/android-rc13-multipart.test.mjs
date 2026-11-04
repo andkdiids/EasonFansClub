@@ -204,8 +204,17 @@ test('large files use three bounded concurrent 8 MiB parts', async () => fixture
   await writeFile(filePath, Buffer.alloc(size))
   let active = 0; let peak = 0
   const lengths = []
+  let releaseAllParts
+  let timeout
+  const allPartsStarted = new Promise((resolve) => { releaseAllParts = resolve })
+  const allPartsGate = Promise.race([
+    allPartsStarted,
+    new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('COS_PART_CONCURRENCY_NOT_REACHED')), 1000) }),
+  ]).finally(() => clearTimeout(timeout))
   const cos = mockCos({ multipartUpload: async (part) => {
     active++; peak = Math.max(peak, active); lengths.push(part.ContentLength)
+    if (active === 3) releaseAllParts()
+    await allPartsGate
     await new Promise((resolve) => setTimeout(resolve, 20))
     active--; return { ETag: 'abc123' }
   } })
