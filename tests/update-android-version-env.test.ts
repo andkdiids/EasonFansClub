@@ -589,10 +589,12 @@ test('RC13 rollback checks the live code33 CAS baseline and restores only the ve
   const backupName = path.basename(published.backupPath)
   const before = readFileSync(envPath, 'utf8')
   assert.throws(() => restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode: 32,
-    expectedCurrentMetadata: { ...expected33, ANDROID_APK_SHA256: 'B'.repeat(64) }, rc13Pin: pin }), /ANDROID_BASELINE_MISMATCH/)
+    expectedCurrentMetadata: { ...expected33, ANDROID_APK_SHA256: 'B'.repeat(64) }, expectedCurrentObjectKey: code33Key, rc13Pin: pin }), /ANDROID_BASELINE_MISMATCH/)
+  assert.throws(() => restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode: 32,
+    expectedCurrentMetadata: expected33, expectedCurrentObjectKey: code33Key.replace('run123', 'run124'), rc13Pin: pin }), /ANDROID_BASELINE_MISMATCH:ANDROID_APK_COS_KEY/)
   assert.equal(readFileSync(envPath, 'utf8'), before)
   const result = restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode: 32,
-    expectedCurrentMetadata: expected33, rc13Pin: pin })
+    expectedCurrentMetadata: expected33, expectedCurrentObjectKey: code33Key, rc13Pin: pin })
   const restored = dotenv.parse(readFileSync(envPath, 'utf8'))
   assert.equal(restored.DATABASE_URL, 'do-not-print-this')
   assert.equal(restored.ANDROID_VERSION_CODE, '32')

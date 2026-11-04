@@ -48,6 +48,7 @@ test('code32 rollback requires protected main, exact code33 CAS, verified source
   for (const required of [/workflow_dispatch:/, /group:\s*production-deploy/, /cancel-in-progress:\s*false/,
     /environment:\s*Production/, /assert-release-main\.mjs/, /node scripts\/android-rc13-release\.mjs validate/,
     /\.versionCode == 33/, /VERSION_API_CHANGED_BEFORE_ROLLBACK/, /expectedCurrentMetadata:/,
+    /expected_rc13_object_key/, /RC13_LIVE_OBJECT_MISMATCH/, /expectedCurrentObjectKey:/,
     /ANDROID_RELEASE_OPERATION=rollback-code32/, /verify-android-apk-signature\.mjs/,
     /CODE32_ROLLBACK_SOURCE_SHA256_MISMATCH/, /PRODUCTION_HEALTH_MISMATCH/,
     /PUBLIC_CODE32_APK_SHA256_MISMATCH/, /actions\/upload-artifact@/]) assert.match(text, required)

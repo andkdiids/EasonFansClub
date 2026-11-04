@@ -320,7 +320,7 @@ function validateCurrentRc12(metadata) {
   requireThat(Number.isFinite(Date.parse(metadata.ANDROID_PUBLISHED_AT || '')), 'ROLLBACK_CURRENT_PUBLISHED_AT_INVALID')
 }
 
-export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode, code30BackupObjectKey, expectedCurrentMetadata, rc13Pin, now = new Date() }) {
+export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode, code30BackupObjectKey, expectedCurrentMetadata, expectedCurrentObjectKey, rc13Pin, now = new Date() }) {
   const rollbackVersionCode = targetVersionCode
   requireThat(rollbackVersionCode === 30 || rollbackVersionCode === 31 || rollbackVersionCode === 32, 'INVALID_ROLLBACK_TARGET')
   requireThat(rollbackVersionCode === 30
@@ -348,7 +348,10 @@ export function restoreAndroidVersionEnv({ appDir, expectedProductionSha, backup
   const currentMetadata = parseEnvMetadata(currentContents.toString('utf8'), 'ROLLBACK_CURRENT_METADATA_MISSING')
   if (rollbackVersionCode === 32) {
     requireThat(expectedCurrentMetadata && expectedCurrentMetadata.ANDROID_VERSION_CODE === 33, 'RC13_ROLLBACK_CAS_BASELINE_REQUIRED')
+    requireThat(typeof expectedCurrentObjectKey === 'string'
+      && /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc13-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/.test(expectedCurrentObjectKey), 'RC13_ROLLBACK_OBJECT_KEY_INVALID')
     validateExpectedCurrentMetadata(currentContents.toString('utf8'), expectedCurrentMetadata)
+    requireThat(currentMetadata.ANDROID_APK_COS_KEY === expectedCurrentObjectKey, 'ANDROID_BASELINE_MISMATCH:ANDROID_APK_COS_KEY')
     const candidate = {
       ...currentMetadata,
       ANDROID_VERSION_CODE: Number(currentMetadata.ANDROID_VERSION_CODE),
@@ -416,7 +419,7 @@ function main() {
     try { rollback = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) } catch { throw new Error('INVALID_ROLLBACK_METADATA_ENCODING') }
     const result = restoreAndroidVersionEnv({ appDir: PRODUCTION_APP_DIR, expectedProductionSha,
       backupName: rollback.backupName, targetVersionCode: 32,
-      expectedCurrentMetadata: rollback.expectedCurrentMetadata, rc13Pin: rollback.rc13Pin })
+      expectedCurrentMetadata: rollback.expectedCurrentMetadata, expectedCurrentObjectKey: rollback.expectedCurrentObjectKey, rc13Pin: rollback.rc13Pin })
     console.log('PRODUCTION_SHA_VERIFIED=' + expectedProductionSha)
     console.log('ANDROID_METADATA_KEYS_RESTORED=' + result.changedKeys.length)
     console.log('CODE33_ENV_BACKUP_CREATED=' + path.basename(result.backupPath))

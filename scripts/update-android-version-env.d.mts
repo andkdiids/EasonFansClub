@@ -40,7 +40,7 @@ export type AndroidVersionRollbackInput = {
 } & (
   { targetVersionCode: 30; code30BackupObjectKey: string }
   | { targetVersionCode: 31; code30BackupObjectKey?: never }
-  | { targetVersionCode: 32; code30BackupObjectKey?: never; expectedCurrentMetadata: AndroidVersionApiBaseline; rc13Pin: AndroidArtifactPin }
+  | { targetVersionCode: 32; code30BackupObjectKey?: never; expectedCurrentMetadata: AndroidVersionApiBaseline; expectedCurrentObjectKey: string; rc13Pin: AndroidArtifactPin }
 )
 
 export function restoreAndroidVersionEnv(input: AndroidVersionRollbackInput): { backupPath: string; changedKeys: string[]; envSha256: string }
