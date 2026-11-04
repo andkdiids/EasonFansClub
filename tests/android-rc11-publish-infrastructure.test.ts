@@ -58,7 +58,7 @@ const testRun = { runId: '123456789', runAttempt: '2' }
 const testWorkflowSha = 'a'.repeat(40)
 
 function responseWithUrl(url: string, status: number, headers: Record<string, string>, body: Buffer) {
-  const response = new Response(body, { status, headers })
+  const response = new Response(Uint8Array.from(body).buffer, { status, headers })
   Object.defineProperty(response, 'url', { value: url })
   return response
 }
@@ -631,6 +631,8 @@ test('COS publish simulation uploads only the new immutable candidate and verifi
   assert.ok(uploadSection.indexOf('await multipartUpload') < uploadSection.indexOf('await cos.headObject'))
   assert.ok(uploadSection.indexOf('await cos.headObject') < uploadSection.indexOf('await downloadFile(cdnUrl'))
   assert.match(read('scripts/android-rc13-multipart.mjs'), /'x-cos-forbid-overwrite': 'true'/)
+  assert.match(publisher, /COS_CUSTOM_DOMAIN_READBACK/)
+  assert.doesNotMatch(publisher, /cos\\.getObject/)
   assert.doesNotMatch(publisher, /TENCENT_COS_SECRET_(?:ID|KEY)|DeleteObject|putBucketPolicy|deleteObject/)
 })
 
