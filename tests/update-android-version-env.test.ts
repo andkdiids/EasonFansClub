@@ -560,6 +560,50 @@ test('Beta.21 RC12 metadata accepts only the fixed code32 artifact on the code31
   assert.equal(readFileSync(result.backupPath, 'utf8'), before)
 })
 
+test('RC13 rollback checks the live code33 CAS baseline and restores only the verified code32 metadata', (t) => {
+  const code32: AndroidReleaseMetadata = {
+    ...metadata,
+    ANDROID_VERSION_CODE: 32,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc12-20261103-185753-run41698377689-attempt1.apk',
+    ANDROID_APK_SHA256: '50726672C4137610122DDFFC8650D3073D72B0F9E89CD0738B7CFDF85CA13271',
+    ANDROID_APK_SIZE: 180263015,
+    ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.21 RC12 内测版本']),
+    ANDROID_PUBLISHED_AT: '2026-11-03T19:04:22.000Z',
+  }
+  const pin = { sha256: 'A'.repeat(64), size: 181000000 }
+  const code33: AndroidReleaseMetadata = {
+    ...code32,
+    ANDROID_VERSION_CODE: 33,
+    ANDROID_APK_COS_KEY: 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc13-20261104-120000-run123-attempt1.apk',
+    ANDROID_APK_SHA256: pin.sha256,
+    ANDROID_APK_SIZE: pin.size,
+    ANDROID_RELEASE_NOTES: JSON.stringify(['a', 'b', 'c', 'd', 'e', 'Beta.21 RC13 内测版本']),
+    ANDROID_PUBLISHED_AT: '2026-11-04T04:00:00.000Z',
+  }
+  const { ANDROID_APK_COS_KEY: code32Key, ...expected32 } = code32
+  const { ANDROID_APK_COS_KEY: code33Key, ...expected33 } = code33
+  assert.match(code32Key, /rc12/)
+  assert.match(code33Key, /rc13/)
+  const { appDir, envPath } = fixture(t, `# retained settings\nDATABASE_URL=do-not-print-this\n${encodeEnvMetadata(code32)}\n`)
+  const published = configureAndroidVersionEnv({ appDir, expectedProductionSha, metadata: code33, expectedCurrentMetadata: expected32, rc13Pin: pin })
+  const backupName = path.basename(published.backupPath)
+  const before = readFileSync(envPath, 'utf8')
+  assert.throws(() => restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode: 32,
+    expectedCurrentMetadata: { ...expected33, ANDROID_APK_SHA256: 'B'.repeat(64) }, expectedCurrentObjectKey: code33Key, rc13Pin: pin }), /ANDROID_BASELINE_MISMATCH/)
+  assert.throws(() => restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode: 32,
+    expectedCurrentMetadata: expected33, expectedCurrentObjectKey: code33Key.replace('run123', 'run124'), rc13Pin: pin }), /ANDROID_BASELINE_MISMATCH:ANDROID_APK_COS_KEY/)
+  assert.equal(readFileSync(envPath, 'utf8'), before)
+  const result = restoreAndroidVersionEnv({ appDir, expectedProductionSha, backupName, targetVersionCode: 32,
+    expectedCurrentMetadata: expected33, expectedCurrentObjectKey: code33Key, rc13Pin: pin })
+  const restored = dotenv.parse(readFileSync(envPath, 'utf8'))
+  assert.equal(restored.DATABASE_URL, 'do-not-print-this')
+  assert.equal(restored.ANDROID_VERSION_CODE, '32')
+  assert.equal(restored.ANDROID_APK_COS_KEY, code32Key)
+  assert.equal(restored.ANDROID_APK_SHA256, code32.ANDROID_APK_SHA256)
+  assert.equal(restored.ANDROID_APK_SIZE, String(code32.ANDROID_APK_SIZE))
+  assert.equal(result.changedKeys.length, 9)
+})
+
 test('RC12 rollback restores only Android metadata from the protected code31 baseline', (t) => {
   const code31Notes = [
     '修复「还有什么可以送给你」页面的 Bearer 登录认证',
@@ -781,7 +825,7 @@ test('the production metadata workflow is manual, host-pinned, app-config-only, 
   assert.doesNotMatch(workflow, /code(?:30|31)_backup_object_key|CODE(?:30|31)_BACKUP_OBJECT_KEY/)
   assert.match(workflow, /VERSION_API_BASELINE_CHANGED/)
   assert.match(workflow, /ANDROID_EXPECTED_CURRENT_B64/)
-  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\)\$/)
+  assert.match(workflow, /\^\(23\|24\|25\|26\|27\|28\|29\|30\|31\|32\|33\)\$/)
   assert.ok(workflow.indexOf('Update only Android version variables') < workflow.indexOf('Reload only the web process'))
   assert.match(workflow, /pm2 reload easonfansclub --update-env/)
   assert.match(workflow, /PRODUCTION_SHA_MISMATCH/)

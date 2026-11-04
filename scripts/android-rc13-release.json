@@ -1,0 +1,18 @@
+{
+  "applicationId": "fans.ecfc.app",
+  "versionCode": 33,
+  "versionName": "1.0.0-beta.21",
+  "signerSha256": "12954323F60A594D2AB69DCB93112E8EB0A63344B11C03DAB5FCCA51A3FCD52B",
+  "sha256": "5D39F4CD071D2D4B78EA82DFEFEE7D2069A8E9D6425D223D0D3F11A1F50F7BF7",
+  "size": 183811739,
+  "sourceFile": "ECFC-1.0.0-beta.21-release-RC13-code33-candidate-20261104-151534.apk",
+  "sourcePath": "E:\\Eason\\build-cache\\ECFC-Release-Artifacts\\Beta21-RC13\\ECFC-1.0.0-beta.21-release-RC13-code33-candidate-20261104-151534.apk",
+  "releaseNotes": [
+    "基于 RC11 候选源码恢复 Beta21 原有移动端功能",
+    "恢复广场、好友动态、活动及处方相关入口与交互",
+    "恢复 EasMUSIC、「还有什么可以送给你」及勋章展览馆体验",
+    "改进被访问用户主页背景显示与勋章展览馆交互",
+    "保留 Native Bearer、多账号隔离及反馈上传认证修复",
+    "Beta.21 RC13 内测版本"
+  ]
+}
