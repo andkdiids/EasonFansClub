@@ -4,26 +4,36 @@ import { Readable } from 'node:stream'
 
 const PART_SIZE = 8 * 1024 * 1024
 const SAFE_HEADER = Object.freeze({ 'x-cos-forbid-overwrite': 'true' })
+const SAFE_COS_CODES = new Set(['FileAlreadyExists', 'NoSuchUpload', 'AccessDenied', 'ECONNRESET', 'ETIMEDOUT', 'SlowDown', 'InternalError', 'ServiceUnavailable'])
 
 // Only expose protocol error fields; messages and headers may contain credentials.
 export function safeCosError(error) {
-  const allowedCodes = new Set(['FileAlreadyExists', 'NoSuchUpload', 'AccessDenied', 'ECONNRESET', 'ETIMEDOUT', 'SlowDown', 'InternalError', 'ServiceUnavailable'])
   const candidate = String(error?.code || error?.error?.Code || '')
-  const code = allowedCodes.has(candidate) ? candidate : 'UNKNOWN'
+  const code = SAFE_COS_CODES.has(candidate) ? candidate : 'UNKNOWN'
   const status = Number(error?.statusCode) || 0
   const requestId = String(error?.headers?.['x-cos-request-id'] || '')
   const safeRequestId = /^[A-Za-z0-9+/=_-]{24,128}$/.test(requestId) && !/^(AKID|TMP)/i.test(requestId) ? requestId : 'UNKNOWN'
   return `code=${code} status=${status} request_id=${safeRequestId}`
 }
 
-export async function completeOnce(cos, base, uploadId, parts) {
+export async function completeOnce(cos, base, uploadId, parts, onRequest = () => {}) {
   const xmlParts = parts.map(({ PartNumber, ETag }) => {
     if (!Number.isInteger(PartNumber) || !/^"?[a-fA-F0-9-]+"?$/.test(ETag)) throw new Error('COS_PART_ETAG_INVALID')
     return `<Part><PartNumber>${PartNumber}</PartNumber><ETag>"${ETag.replaceAll('"', '')}"</ETag></Part>`
   }).join('')
   const body = Buffer.from(`<CompleteMultipartUpload>${xmlParts}</CompleteMultipartUpload>`)
+  onRequest()
   const result = await cos.request({ ...base, Method: 'POST', Query: { uploadId }, Headers: { ...SAFE_HEADER, 'Content-Type': 'application/xml', 'Content-Length': body.length, 'Content-MD5': createHash('md5').update(body).digest('base64') }, Body: Readable.from(body) })
-  if (result?.Error || !result?.CompleteMultipartUploadResult?.ETag) throw new Error('COS_COMPLETE_RESPONSE_INVALID')
+  if (result?.Error) {
+    const responseError = new Error('COS_COMPLETE_RESPONSE_INVALID')
+    const responseCode = String(result.Error?.Code || result.Error?.code || '')
+    if (SAFE_COS_CODES.has(responseCode)) responseError.code = responseCode
+    if (Number.isFinite(Number(result.statusCode))) responseError.statusCode = Number(result.statusCode)
+    if (result.headers && typeof result.headers === 'object') responseError.headers = result.headers
+    responseError.cosResponseError = true
+    throw responseError
+  }
+  if (!result?.CompleteMultipartUploadResult?.ETag) throw new Error('COS_COMPLETE_RESPONSE_INVALID')
   return result
 }
 
@@ -49,12 +59,23 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
   let timer
   let failed
   let abortPromise
+  let abortAttempts = 0
   let previousBytes = 0
   let previousTime = started
   let retries = 0
-  const abortOwned = () => {
-    if (!abortPromise) abortPromise = cos.multipartAbort({ ...base, UploadId: uploadId }).then(() => log('COS_MULTIPART_ABORT=COMPLETE'), (error) => log(`COS_MULTIPART_ABORT=FAILED ${safeCosError(error)}`))
-    return abortPromise
+  const abortOwned = async ({ afterWorkersSettle = false } = {}) => {
+    if (abortPromise) await abortPromise
+    if (abortAttempts > 0 && !afterWorkersSettle) return
+    abortAttempts++
+    abortPromise = cos.multipartAbort({ ...base, UploadId: uploadId }).then(
+      () => log(`COS_MULTIPART_ABORT=COMPLETE attempt=${abortAttempts}`),
+      (error) => {
+        const code = String(error?.code || error?.error?.Code || '')
+        if (code === 'NoSuchUpload') log(`COS_MULTIPART_ABORT=ALREADY_ABSENT attempt=${abortAttempts}`)
+        else log(`COS_MULTIPART_ABORT=FAILED attempt=${abortAttempts} ${safeCosError(error)}`)
+      },
+    ).finally(() => { abortPromise = undefined })
+    await abortPromise
   }
   try {
     file = await open(filePath, 'r')
@@ -77,6 +98,8 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
       previousTime = clock.now()
       if (!failed && clock.now() - lastProgress >= 300000) {
         failed = new Error('COS_UPLOAD_STALLED')
+        // Cancel the upload promptly, then repeat cleanup after every active
+        // part request settles so a late part cannot leave an MPU behind.
         log('COS_UPLOAD_STALLED_ABORT=START')
         void abortOwned()
       }
@@ -116,15 +139,16 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
     if (failed) throw failed
     const finalVersioning = await cos.getBucketVersioning({ Bucket: bucket, Region: region })
     if (!finalVersioning?.VersioningConfiguration || finalVersioning.VersioningConfiguration.Status) throw new Error('COS_BUCKET_VERSIONING_UNSUPPORTED')
-    completeAttempted = true
-    const result = await completeOnce(cos, base, uploadId, parts)
+    const result = await completeOnce(cos, base, uploadId, parts, () => { completeAttempted = true })
     completed = true
     log(`COS_MULTIPART_COMPLETE elapsed_ms=${clock.now() - started} bytes=${uploaded} ${safeCosError(result)}`)
   } catch (error) {
     log(`COS_MULTIPART_FAILURE ${safeCosError(error)} complete_attempted=${completeAttempted}`)
-    const conflict = (completeAttempted || (initAttempted && !uploadId)) && (Number(error?.statusCode) === 409 || error?.code === 'FileAlreadyExists' || error?.error?.Code === 'FileAlreadyExists')
-    if (uploadId && !completed && (!completeAttempted || conflict)) {
-      await abortOwned()
+    const statusCode = Number(error?.statusCode)
+    const conflict = (completeAttempted || (initAttempted && !uploadId)) && (statusCode === 409 || error?.code === 'FileAlreadyExists' || error?.error?.Code === 'FileAlreadyExists')
+    const completeRejected = completeAttempted && (error?.cosResponseError === true || (statusCode >= 400 && statusCode < 500))
+    if (uploadId && !completed && (!completeAttempted || conflict || completeRejected)) {
+      await abortOwned({ afterWorkersSettle: error?.message === 'COS_UPLOAD_STALLED' })
     }
     if (conflict) throw new Error('COS_OBJECT_KEY_ALREADY_EXISTS')
     if (initAttempted && !uploadId) {

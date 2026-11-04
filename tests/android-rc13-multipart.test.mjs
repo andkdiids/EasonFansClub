@@ -69,19 +69,24 @@ test('concurrent failures abort only their own UploadId', async () => fixture(as
   assert.deepEqual(aborted.sort(), [['one', 'id-one'], ['two', 'id-two']])
 }))
 
-test('stalled upload warns at 60 seconds and aborts its own task at five minutes', async () => fixture(async (filePath) => {
+test('stalled upload warns at 60 seconds, aborts promptly, and cleans again after active parts settle', async () => fixture(async (filePath) => {
   let now = 0; let tick; let rejectPart; let started
-  const logs = []; const aborted = []
+  const logs = []; const aborted = []; const events = []
   const ready = new Promise((resolve) => { started = resolve })
   const clock = { now: () => now, setInterval: (fn) => { tick = fn; return 1 }, clearInterval: () => {} }
-  const cos = mockCos({ multipartUpload: async () => { started(); return new Promise((resolve, reject) => { rejectPart = reject }) }, multipartAbort: async (p) => { aborted.push(p.UploadId); rejectPart(new Error('aborted')) } })
+  const cos = mockCos({ multipartUpload: async () => { started(); return new Promise((resolve, reject) => { rejectPart = reject }) }, multipartAbort: async (p) => { events.push(`abort-${aborted.length + 1}`); aborted.push(p.UploadId) } })
   const upload = multipartUpload({ ...args(cos, filePath), clock, log: (line) => logs.push(line) })
   await ready
   now = 60000; tick()
   assert.ok(logs.some((line) => line.includes('STALLED=YES')))
   now = 300000; tick()
-  await assert.rejects(upload, /COS_MULTIPART_UPLOAD_FAILED/)
+  assert.ok(logs.some((line) => line.includes('COS_UPLOAD_STALLED_ABORT=START')))
   assert.deepEqual(aborted, ['owned-id'])
+  events.push('part-settled')
+  rejectPart(Object.assign(new Error('request timed out'), { code: 'ETIMEDOUT', statusCode: 504 }))
+  await assert.rejects(upload, /COS_MULTIPART_UPLOAD_FAILED/)
+  assert.deepEqual(aborted, ['owned-id', 'owned-id'])
+  assert.deepEqual(events, ['abort-1', 'part-settled', 'abort-2'])
 }))
 
 test('ambiguous completion is checked and never blindly retried or aborted', async () => fixture(async (filePath) => {
@@ -112,6 +117,32 @@ test('completion conflict aborts only its own upload and never accepts the exist
   await assert.rejects(multipartUpload(args(cos, filePath)), /COS_OBJECT_KEY_ALREADY_EXISTS/)
   assert.deepEqual(aborted, ['owned-id'])
   assert.equal(reads, 0)
+}))
+
+test('a COS complete error envelope preserves the conflict code and aborts only its UploadId', async () => fixture(async (filePath) => {
+  const aborted = []; let reads = 0
+  const cos = mockCos({
+    request: async (p) => p.Action === 'uploads'
+      ? { InitiateMultipartUploadResult: { UploadId: 'owned-id' } }
+      : { Error: { Code: 'FileAlreadyExists' }, statusCode: 200, headers: { 'x-cos-request-id': 'request-id-test-123456789012' } },
+    multipartAbort: async (p) => { aborted.push(p.UploadId) },
+    headObject: async () => { reads++; return { statusCode: 200 } },
+  })
+  await assert.rejects(multipartUpload(args(cos, filePath)), /COS_OBJECT_KEY_ALREADY_EXISTS/)
+  assert.deepEqual(aborted, ['owned-id'])
+  assert.equal(reads, 0)
+}))
+
+test('local Complete XML validation failure aborts the owned UploadId without treating it as ambiguous', async () => fixture(async (filePath) => {
+  let requestCount = 0; const aborted = []
+  const cos = mockCos({
+    request: async () => { requestCount++; return { InitiateMultipartUploadResult: { UploadId: 'owned-id' } } },
+    multipartUpload: async () => ({ ETag: 'invalid*etag' }),
+    multipartAbort: async (p) => { aborted.push(p.UploadId) },
+  })
+  await assert.rejects(multipartUpload(args(cos, filePath)), /COS_MULTIPART_UPLOAD_FAILED/)
+  assert.equal(requestCount, 1)
+  assert.deepEqual(aborted, ['owned-id'])
 }))
 
 test('CDN readback rejects an APK with incorrect SHA-256', async () => fixture(async (filePath) => {
@@ -186,16 +217,20 @@ test('SDK sends signed forbid-overwrite headers over HTTP for init and complete'
 test('concurrent complete requests cannot replace an existing object', async () => {
   const require = createRequire(import.meta.url)
   const COS = require('cos-nodejs-sdk-v5')
-  const object = 'original'
+  let object = Buffer.from('original')
   let requests = 0
   const server = http.createServer((req, res) => {
     requests++
-    req.resume()
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
     req.on('end', () => {
-      assert.equal(req.headers['x-cos-forbid-overwrite'], 'true')
-      res.statusCode = 409
       res.setHeader('Content-Type', 'application/xml')
-      res.end('<Error><Code>FileAlreadyExists</Code><Message>conflict</Message></Error>')
+      if (req.headers['x-cos-forbid-overwrite'] === 'true' && object) {
+        res.statusCode = 409
+        return res.end('<Error><Code>FileAlreadyExists</Code><Message>conflict</Message></Error>')
+      }
+      object = Buffer.concat(chunks)
+      res.end('<CompleteMultipartUploadResult><ETag>"new-object"</ETag></CompleteMultipartUploadResult>')
     })
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -205,7 +240,7 @@ test('concurrent complete requests cannot replace an existing object', async () 
     const results = await Promise.allSettled(['own-1', 'own-2'].map((id) => completeOnce(cos, base, id, [{ PartNumber: 1, ETag: 'abc123' }])))
     assert.ok(results.every((result) => result.status === 'rejected'))
     assert.equal(requests, 2)
-    assert.equal(object, 'original')
+    assert.equal(object.toString(), 'original')
   } finally { await new Promise((resolve) => server.close(resolve)) }
 })
 
