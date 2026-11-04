@@ -31,6 +31,12 @@ export const EXPECTED_OIDC_SUBJECT: string
 export const EXPECTED_OIDC_WORKFLOW_REF: string
 export const APK_DOWNLOAD_TIMEOUT_MS: number
 export const COS_REQUEST_TIMEOUT_MS: number
+export const COS_STS_DURATION_SECONDS: 7200
+export const COS_STS_MINIMUM_UPLOAD_REMAINING_SECONDS: 900
+export const EXPECTED_COS_BUCKET: 'ecfc-1306412725'
+export const EXPECTED_COS_REGION: 'ap-guangzhou'
+export function getStsExpiryInfo(credentials: { ExpiredTime: number | string }, now?: number): { expiredTime: number; expiredAt: string; remainingSeconds: number }
+export function assertStsCredentialLifetime(credentials: { ExpiredTime: number | string }, minimumRemainingSeconds: number, now?: number): { expiredTime: number; expiredAt: string; remainingSeconds: number }
 export function captureVersionApiBaseline(input?: { candidate?: 'rc11' | 'rc12'; env?: Record<string, string>; fetchImpl?: typeof fetch }): Promise<{ body: Record<string, unknown>; baselinePath: string; rollbackSource: { key: string; size: number; code: 30 | 31 } }>
 
 export function validateCode30VersionApi(body: Record<string, unknown>): Record<string, unknown>
@@ -48,4 +54,21 @@ export function downloadToFile(url: string, filePath: string, options: { fetchIm
 export function publishRc11Artifact(input?: { env?: Record<string, string>; fetchImpl?: typeof fetch; date?: Date }): Promise<{ key: string; cdnUrl: string }>
 export function publishRc12Artifact(input?: { env?: Record<string, string>; fetchImpl?: typeof fetch; date?: Date }): Promise<{ key: string; cdnUrl: string }>
 
-export function verifyOidcSts(input?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch }): Promise<true>
+export function verifyOidcSts(input?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch; log?: (line: string) => void; now?: () => number }): Promise<true>
+export function verifyCosReadOnlyAccess(input: {
+  cos: {
+    getBucketVersioning(input: { Bucket: string; Region: string }): Promise<{ VersioningConfiguration: Record<string, unknown> }>
+    headObject(input: { Bucket: string; Region: string; Key: string }): Promise<{ statusCode?: number; headers?: Record<string, string>; ContentLength?: number; contentLength?: number }>
+    getObject(input: { Bucket: string; Region: string; Key: string; Range: string }): Promise<{ statusCode?: number; Body?: Buffer }>
+  }
+  bucket: string
+  region: string
+  log?: (line: string) => void
+}): Promise<{ versioning: 'DISABLED'; headObject: 'PASS'; getObject: 'PASS'; objectKey: string }>
+export function verifyCosReadOnly(input?: {
+  env?: Record<string, string | undefined>
+  fetchImpl?: typeof fetch
+  cosFactory?: (credentials: { SecretId: string; SecretKey: string; SecurityToken: string }) => unknown
+  log?: (line: string) => void
+  now?: () => number
+}): Promise<{ versioning: 'DISABLED'; headObject: 'PASS'; getObject: 'PASS'; objectKey: string }>

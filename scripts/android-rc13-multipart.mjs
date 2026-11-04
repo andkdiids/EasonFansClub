@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { Readable } from 'node:stream'
 
 const PART_SIZE = 8 * 1024 * 1024
+const MIN_INITIAL_CREDENTIAL_REMAINING_MS = 15 * 60 * 1000
+const COMPLETE_CREDENTIAL_SAFETY_MS = 60 * 1000
 const SAFE_HEADER = Object.freeze({ 'x-cos-forbid-overwrite': 'true' })
 const SAFE_COS_CODES = new Set(['FileAlreadyExists', 'NoSuchUpload', 'AccessDenied', 'ECONNRESET', 'ETIMEDOUT', 'SlowDown', 'InternalError', 'ServiceUnavailable'])
 
@@ -37,10 +39,14 @@ export async function completeOnce(cos, base, uploadId, parts, onRequest = () =>
   return result
 }
 
-export async function multipartUpload({ cos, bucket, region, key, filePath, size, sha256, concurrency = 3, log = console.log, clock = { now: Date.now, setInterval, clearInterval } }) {
+export async function multipartUpload({ cos, bucket, region, key, filePath, size, sha256, concurrency = 3, credentialsExpiredTime, log = console.log, clock = { now: Date.now, setInterval, clearInterval } }) {
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('COS_CONCURRENCY_INVALID')
   if (!Number.isSafeInteger(size) || size <= 0 || !/^[a-fA-F0-9]{64}$/.test(sha256)) throw new Error('COS_SOURCE_METADATA_INVALID')
   const base = { Bucket: bucket, Region: region, Key: key }
+  const expiresAtMs = credentialsExpiredTime === undefined ? undefined : Number(credentialsExpiredTime) * 1000
+  if (expiresAtMs !== undefined && (!Number.isFinite(expiresAtMs) || expiresAtMs - clock.now() < MIN_INITIAL_CREDENTIAL_REMAINING_MS)) {
+    throw new Error('TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME')
+  }
   // The COS forbid-overwrite header is ineffective with bucket versioning enabled.
   let versioning
   try { versioning = await cos.getBucketVersioning({ Bucket: bucket, Region: region }) } catch (error) {
@@ -80,6 +86,9 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
   try {
     file = await open(filePath, 'r')
     // A stream disables the SDK's automatic replay if initialization loses its response.
+    if (expiresAtMs !== undefined && expiresAtMs - clock.now() < MIN_INITIAL_CREDENTIAL_REMAINING_MS) {
+      throw new Error('TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME')
+    }
     initAttempted = true
     const init = await cos.request({ ...base, Method: 'POST', Action: 'uploads', Headers: { ...SAFE_HEADER, 'Content-Length': 0, 'Content-Type': 'application/vnd.android.package-archive', 'Cache-Control': 'public, max-age=31536000, immutable', 'x-cos-meta-sha256': sha256 }, Body: Readable.from(Buffer.alloc(0)) })
     uploadId = init?.InitiateMultipartUploadResult?.UploadId
@@ -139,6 +148,9 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
     if (failed) throw failed
     const finalVersioning = await cos.getBucketVersioning({ Bucket: bucket, Region: region })
     if (!finalVersioning?.VersioningConfiguration || finalVersioning.VersioningConfiguration.Status) throw new Error('COS_BUCKET_VERSIONING_UNSUPPORTED')
+    if (expiresAtMs !== undefined && expiresAtMs - clock.now() <= COMPLETE_CREDENTIAL_SAFETY_MS) {
+      throw new Error('TENCENT_STS_CREDENTIALS_EXPIRED_BEFORE_COMPLETE')
+    }
     const result = await completeOnce(cos, base, uploadId, parts, () => { completeAttempted = true })
     completed = true
     log(`COS_MULTIPART_COMPLETE elapsed_ms=${clock.now() - started} bytes=${uploaded} ${safeCosError(result)}`)
@@ -160,6 +172,8 @@ export async function multipartUpload({ cos, bucket, region, key, filePath, size
       try { const head = await cos.headObject(base); log(`COS_COMPLETE_UNCERTAIN head_status=${Number(head?.statusCode) || 0}`) } catch (headError) { log(`COS_COMPLETE_UNCERTAIN ${safeCosError(headError)}`) }
       throw new Error('COS_COMPLETE_UNCERTAIN')
     }
+    if (error?.message === 'TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME'
+      || error?.message === 'TENCENT_STS_CREDENTIALS_EXPIRED_BEFORE_COMPLETE') throw error
     throw new Error('COS_MULTIPART_UPLOAD_FAILED')
   } finally {
     if (timer) clock.clearInterval(timer)

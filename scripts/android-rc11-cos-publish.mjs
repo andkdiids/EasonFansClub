@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 import { CODE32_BASELINE, CODE32_ROLLBACK_OBJECT_KEY, loadRc13Pin, validateCode32VersionApi } from './android-rc13-release.mjs'
-import { multipartUpload } from './android-rc13-multipart.mjs'
+import { multipartUpload, safeCosError } from './android-rc13-multipart.mjs'
 
 const require = createRequire(import.meta.url)
 const INGRESS_FILENAME = 'ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
@@ -47,6 +47,8 @@ const APK_CONTENT_TYPE = 'application/vnd.android.package-archive'
 const APK_CACHE_CONTROL = 'public, max-age=31536000, immutable'
 export const APK_DOWNLOAD_TIMEOUT_MS = 20 * 60 * 1000
 export const COS_REQUEST_TIMEOUT_MS = 10 * 60 * 1000
+export const COS_STS_DURATION_SECONDS = 7200
+export const COS_STS_MINIMUM_UPLOAD_REMAINING_SECONDS = 900
 const DOWNLOAD_PROGRESS_INTERVAL_BYTES = 25 * 1024 * 1024
 const API_VERSION_URL = 'https://ecfc.fans/api/app/version?platform=android'
 const CODE30_DOWNLOAD_URL = 'https://ecfc.fans/api/app/download/android'
@@ -63,6 +65,8 @@ const requiredStsConfig = Object.freeze([
   'TENCENT_STS_REGION',
 ])
 const requiredCosConfig = Object.freeze(['TENCENT_COS_BUCKET', 'TENCENT_COS_REGION'])
+export const EXPECTED_COS_BUCKET = 'ecfc-1306412725'
+export const EXPECTED_COS_REGION = 'ap-guangzhou'
 
 function assertSha(value, expected, code) {
   if (typeof value !== 'string' || value.toUpperCase() !== expected) throw new Error(code)
@@ -175,6 +179,9 @@ export function validateCosConfig(env = process.env) {
   if (!/^[A-Za-z0-9-]{2,40}$/.test(env.TENCENT_COS_REGION)
     || !/^[a-z0-9-]{1,63}-\d{5,}$/.test(env.TENCENT_COS_BUCKET)) {
     throw new Error('COS_REGION_OR_BUCKET_INVALID')
+  }
+  if (env.TENCENT_COS_BUCKET !== EXPECTED_COS_BUCKET || env.TENCENT_COS_REGION !== EXPECTED_COS_REGION) {
+    throw new Error('COS_RELEASE_TARGET_MISMATCH')
   }
   return env
 }
@@ -408,7 +415,7 @@ async function exchangeForSts(env, fetchImpl) {
         'x-tc-version': '2018-08-13',
       },
       body: JSON.stringify({
-        DurationSeconds: 1800,
+        DurationSeconds: COS_STS_DURATION_SECONDS,
         RoleSessionName: `gha-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`,
         WebIdentityToken: webIdentityToken,
         RoleArn: env.TENCENT_CAM_ROLE_ARN,
@@ -435,13 +442,40 @@ async function exchangeForSts(env, fetchImpl) {
   }
 }
 
-export async function verifyOidcSts({ env = process.env, fetchImpl = fetch } = {}) {
+export function getStsExpiryInfo(credentials, now = Date.now()) {
+  const expiredTime = Number(credentials?.ExpiredTime)
+  if (!Number.isFinite(expiredTime) || expiredTime <= 0 || !Number.isFinite(now)) {
+    throw new Error('TENCENT_STS_EXPIRY_INVALID')
+  }
+  const expiredAtMs = expiredTime * 1000
+  const expiredAt = new Date(expiredAtMs)
+  if (!Number.isFinite(expiredAt.getTime())) throw new Error('TENCENT_STS_EXPIRY_INVALID')
+  return { expiredTime, expiredAt: expiredAt.toISOString(), remainingSeconds: Math.floor((expiredAtMs - now) / 1000) }
+}
+
+export function assertStsCredentialLifetime(credentials, minimumRemainingSeconds, now = Date.now()) {
+  const info = getStsExpiryInfo(credentials, now)
+  if (!Number.isFinite(minimumRemainingSeconds) || minimumRemainingSeconds < 0
+    || info.remainingSeconds < minimumRemainingSeconds) {
+    throw new Error('TENCENT_STS_CREDENTIALS_INSUFFICIENT_LIFETIME')
+  }
+  return info
+}
+
+function logAndRequireStsLifetime(credentials, { minimumRemainingSeconds, now = Date.now(), log = console.log }) {
+  const info = getStsExpiryInfo(credentials, now)
+  log(`TENCENT_STS_EXPIRED_TIME=${info.expiredAt} TENCENT_STS_REMAINING_SECONDS=${info.remainingSeconds}`)
+  return assertStsCredentialLifetime(credentials, minimumRemainingSeconds, now)
+}
+
+export async function verifyOidcSts({ env = process.env, fetchImpl = fetch, log = console.log, now = Date.now } = {}) {
   validateStsConfig(env)
   if (env.GITHUB_WORKFLOW_REF !== EXPECTED_OIDC_WORKFLOW_REF) throw new Error('GITHUB_OIDC_WORKFLOW_REF_MISMATCH')
   if (!/^\d+$/.test(String(env.GITHUB_RUN_ID ?? '')) || !/^[1-9]\d*$/.test(String(env.GITHUB_RUN_ATTEMPT ?? ''))) {
     throw new Error('GITHUB_OIDC_RUN_CONTEXT_INVALID')
   }
-  await exchangeForSts(env, fetchImpl)
+  const credentials = await exchangeForSts(env, fetchImpl)
+  logAndRequireStsLifetime(credentials, { minimumRemainingSeconds: COS_STS_MINIMUM_UPLOAD_REMAINING_SECONDS, log, now: now() })
   return true
 }
 
@@ -485,13 +519,13 @@ export async function downloadCosObject({ cos, bucket, region, key, filePath, ex
   assertSha(actual.sha256, expected.sha256, 'COS_READBACK_SHA256_MISMATCH')
 }
 
-export async function uploadImmutableObject({ cos, env, key, filePath, expected, stage, downloadFile = downloadToFile, downloadCos = downloadCosObject }) {
+export async function uploadImmutableObject({ cos, env, key, filePath, expected, stage, credentialsExpiredTime, downloadFile = downloadToFile, downloadCos = downloadCosObject }) {
   await runReleaseStage(`${stage}_COS_PREFLIGHT`, async () => {
     await assertObjectAbsent(cos, env.TENCENT_COS_BUCKET, env.TENCENT_COS_REGION, key)
   })
   try {
     await runReleaseStage(`${stage}_COS_PUT`, async () => {
-      await multipartUpload({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, key, filePath, size: expected.size, sha256: expected.sha256, concurrency: Number(env.COS_MULTIPART_CONCURRENCY || 3) })
+      await multipartUpload({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, key, filePath, size: expected.size, sha256: expected.sha256, concurrency: Number(env.COS_MULTIPART_CONCURRENCY || 3), credentialsExpiredTime })
     })
   } catch (error) {
     if (error?.message !== 'COS_COMPLETE_UNCERTAIN') throw error
@@ -547,13 +581,67 @@ async function readIngressArtifact(env, candidate = env.RELEASE_CANDIDATE || 'rc
   return { apkPath, manifest }
 }
 
-async function getCos(env, fetchImpl = fetch) {
+async function getCos(env, fetchImpl = fetch, { cosFactory = createCosClient, log = console.log, now = Date.now } = {}) {
   validateCosConfig(env)
   const credentials = await runReleaseStage('TENCENT_STS_EXCHANGE', () => exchangeForSts(env, fetchImpl))
-  if (credentials.ExpiredTime && credentials.ExpiredTime * 1000 <= Date.now() + 60_000) {
-    throw new Error('TENCENT_STS_CREDENTIALS_NEAR_EXPIRY')
+  const expiry = logAndRequireStsLifetime(credentials, {
+    minimumRemainingSeconds: COS_STS_MINIMUM_UPLOAD_REMAINING_SECONDS,
+    log,
+    now: now(),
+  })
+  return { cos: cosFactory(credentials), credentialsExpiredTime: expiry.expiredTime, expiry }
+}
+
+export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = console.log }) {
+  const base = { Bucket: bucket, Region: region }
+  let versioning
+  try {
+    versioning = await cos.getBucketVersioning(base)
+  } catch (error) {
+    log(`COS_GET_BUCKET_VERSIONING_FAILED ${safeCosError(error)}`)
+    throw new Error('COS_GET_BUCKET_VERSIONING_FAILED')
   }
-  return createCosClient(credentials)
+  const configuration = versioning?.VersioningConfiguration
+  if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration)) {
+    throw new Error('COS_BUCKET_VERSIONING_RESPONSE_INVALID')
+  }
+  log(`COS_BUCKET_VERSIONING_RESPONSE=${JSON.stringify(versioning)}`)
+  if (Object.keys(configuration).length !== 0) {
+    const state = configuration.Status === 'Enabled' ? 'ENABLED'
+      : configuration.Status === 'Suspended' ? 'SUSPENDED' : 'UNKNOWN'
+    throw new Error(`COS_BUCKET_VERSIONING_${state}`)
+  }
+
+  const object = { ...base, Key: CODE32_ROLLBACK_OBJECT_KEY }
+  let head
+  try {
+    head = await cos.headObject(object)
+  } catch (error) {
+    log(`COS_HEAD_OBJECT_FAILED ${safeCosError(error)}`)
+    throw new Error('COS_HEAD_OBJECT_FAILED')
+  }
+  const responseHeaders = Object.fromEntries(Object.entries(head?.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]))
+  const contentLength = Number(responseHeaders['content-length'] ?? head?.ContentLength ?? head?.contentLength)
+  if (Number(head?.statusCode) !== 200 || contentLength !== CODE32_BASELINE.size) throw new Error('COS_CODE32_HEAD_MISMATCH')
+
+  let rangeRead
+  try {
+    rangeRead = await cos.getObject({ ...object, Range: 'bytes=0-0' })
+  } catch (error) {
+    log(`COS_GET_OBJECT_FAILED ${safeCosError(error)}`)
+    throw new Error('COS_GET_OBJECT_FAILED')
+  }
+  if (Number(rangeRead?.statusCode) !== 206 || !Buffer.isBuffer(rangeRead?.Body) || rangeRead.Body.length !== 1) {
+    throw new Error('COS_GET_OBJECT_RANGE_INVALID')
+  }
+  log('COS_READ_ONLY_PERMISSIONS=PASS GetBucketVersioning=PASS HeadObject=PASS GetObject=PASS')
+  return { versioning: 'DISABLED', headObject: 'PASS', getObject: 'PASS', objectKey: CODE32_ROLLBACK_OBJECT_KEY }
+}
+
+export async function verifyCosReadOnly({ env = process.env, fetchImpl = fetch, cosFactory = createCosClient, log = console.log, now = Date.now } = {}) {
+  const { cos } = await getCos(env, fetchImpl, { cosFactory, log, now })
+  log(`CAM_ROLE=ASSUMED COS_BUCKET=${env.TENCENT_COS_BUCKET} COS_REGION=${env.TENCENT_COS_REGION}`)
+  return verifyCosReadOnlyAccess({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, log })
 }
 
 function runIdentifiers(env) {
@@ -568,9 +656,9 @@ function runIdentifiers(env) {
 export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
   const ids = runIdentifiers(env)
   const { apkPath } = await readIngressArtifact(env)
-  const cos = await getCos(env, fetchImpl)
+  const { cos, credentialsExpiredTime } = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('rc11', { ...ids, date })
-  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC11_BASELINE, stage: 'RC11_RELEASE' })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC11_BASELINE, stage: 'RC11_RELEASE', credentialsExpiredTime })
   await writeOutput('RC11_OBJECT_KEY', key, env)
   await writeOutput('RC11_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   await writeOutput('RC11_SHA256', RC11_BASELINE.sha256, env)
@@ -581,9 +669,9 @@ export async function publishRc11Artifact({ env = process.env, fetchImpl = fetch
 export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
   const ids = runIdentifiers(env)
   const { apkPath } = await readIngressArtifact(env, 'rc12')
-  const cos = await getCos(env, fetchImpl)
+  const { cos, credentialsExpiredTime } = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('rc12', { ...ids, date })
-  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC12_BASELINE, stage: 'RC12_RELEASE' })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: RC12_BASELINE, stage: 'RC12_RELEASE', credentialsExpiredTime })
   await writeOutput('RC12_OBJECT_KEY', key, env)
   await writeOutput('RC12_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   await writeOutput('RC12_SHA256', RC12_BASELINE.sha256, env)
@@ -596,9 +684,9 @@ export async function publishRc13Artifact({ env = process.env, fetchImpl = fetch
   const baseline = loadRc13Pin()
   const ids = runIdentifiers(env)
   const { apkPath } = await readIngressArtifact(env, 'rc13')
-  const cos = await getCos(env, fetchImpl)
+  const { cos, credentialsExpiredTime } = await getCos(env, fetchImpl)
   const key = createVersionedObjectKey('rc13', { ...ids, date })
-  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: baseline, stage: 'RC13_RELEASE' })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: baseline, stage: 'RC13_RELEASE', credentialsExpiredTime })
   await writeOutput('RC13_OBJECT_KEY', key, env)
   await writeOutput('RC13_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
   await writeOutput('RC13_SHA256', baseline.sha256, env)
@@ -611,6 +699,11 @@ async function main() {
   if (command === 'verify-oidc') {
     await verifyOidcSts()
     console.log('GITHUB_OIDC_CLAIMS=VERIFIED\nTENCENT_STS_EXCHANGE=SUCCESS')
+    return
+  }
+  if (command === 'verify-cos-readonly') {
+    const result = await verifyCosReadOnly()
+    console.log(`COS_READ_ONLY_VERIFICATION=PASS\nCOS_BUCKET_VERSIONING=${result.versioning}\nCOS_CODE32_HEAD=${result.headObject}\nCOS_CODE32_RANGE_GET=${result.getObject}`)
     return
   }
   if (command === 'verify-version-baseline') {
