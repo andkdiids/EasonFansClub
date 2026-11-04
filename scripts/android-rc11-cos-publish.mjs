@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 import { CODE32_BASELINE, CODE32_ROLLBACK_OBJECT_KEY, loadRc13Pin, validateCode32VersionApi } from './android-rc13-release.mjs'
+import { multipartUpload } from './android-rc13-multipart.mjs'
 
 const require = createRequire(import.meta.url)
 const INGRESS_FILENAME = 'ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
@@ -473,39 +474,30 @@ export async function assertObjectAbsent(cos, bucket, region, key) {
   }
 }
 
-function createCosUploadProgressLogger(stage) {
-  let lastPercent = 0
-  return ({ loaded, total, percent }) => {
-    if (!Number.isFinite(percent) || !Number.isFinite(loaded) || !Number.isFinite(total)) return
-    const currentPercent = Math.max(0, Math.min(100, Math.floor(percent * 100)))
-    if (currentPercent < lastPercent + 10 && currentPercent !== 100) return
-    lastPercent = currentPercent
-    logReleaseProgress(stage, 'PROGRESS', `percent=${currentPercent} bytes=${loaded} total=${total}`)
+export async function downloadCosObject({ cos, bucket, region, key, filePath, expected }) {
+  try {
+    await cos.getObject({ Bucket: bucket, Region: region, Key: key, Output: createWriteStream(filePath, { flags: 'wx' }) })
+  } catch {
+    throw new Error('COS_READBACK_FAILED')
   }
+  const actual = await hashFile(filePath)
+  assertSize(actual.size, expected.size, 'COS_READBACK_SIZE_MISMATCH')
+  assertSha(actual.sha256, expected.sha256, 'COS_READBACK_SHA256_MISMATCH')
 }
 
-async function uploadImmutableObject({ cos, env, key, filePath, expected, stage }) {
+export async function uploadImmutableObject({ cos, env, key, filePath, expected, stage, downloadFile = downloadToFile, downloadCos = downloadCosObject }) {
   await runReleaseStage(`${stage}_COS_PREFLIGHT`, async () => {
     await assertObjectAbsent(cos, env.TENCENT_COS_BUCKET, env.TENCENT_COS_REGION, key)
   })
-  await runReleaseStage(`${stage}_COS_PUT`, async () => {
-    try {
-      await cos.putObject({
-        Bucket: env.TENCENT_COS_BUCKET,
-        Region: env.TENCENT_COS_REGION,
-        Key: key,
-        Body: createReadStream(filePath),
-        ContentLength: expected.size,
-        ContentType: APK_CONTENT_TYPE,
-        CacheControl: APK_CACHE_CONTROL,
-        'x-cos-meta-sha256': expected.sha256,
-        Headers: { 'x-cos-forbid-overwrite': 'true' },
-        onProgress: createCosUploadProgressLogger(`${stage}_COS_PUT`),
-      })
-    } catch {
-      throw new Error('COS_UPLOAD_FAILED')
-    }
-  })
+  try {
+    await runReleaseStage(`${stage}_COS_PUT`, async () => {
+      await multipartUpload({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, key, filePath, size: expected.size, sha256: expected.sha256, concurrency: Number(env.COS_MULTIPART_CONCURRENCY || 3) })
+    })
+  } catch (error) {
+    if (error?.message !== 'COS_COMPLETE_UNCERTAIN') throw error
+    // Only HEAD plus complete CDN SHA readback below can resolve an ambiguous response.
+    logReleaseProgress(`${stage}_COS_PUT`, 'REVALIDATE')
+  }
 
   const metadata = await runReleaseStage(`${stage}_COS_METADATA`, async () => {
     try {
@@ -516,9 +508,11 @@ async function uploadImmutableObject({ cos, env, key, filePath, expected, stage 
   })
   await runReleaseStage(`${stage}_COS_METADATA_VALIDATE`, () => validateObjectMetadata(metadata, expected))
 
+  await runReleaseStage(`${stage}_COS_READBACK`, () => downloadCos({ cos, bucket: env.TENCENT_COS_BUCKET, region: env.TENCENT_COS_REGION, key, filePath: path.join(os.tmpdir(), `ecfc-cos-${expected.sha256}.apk`), expected }))
+
   const cdnUrl = new URL(key, CDN_BASE_URL).toString()
   const readbackPath = path.join(os.tmpdir(), `ecfc-${expected.sha256}.apk`)
-  await downloadToFile(cdnUrl, readbackPath, {
+  await downloadFile(cdnUrl, readbackPath, {
     expectedSize: expected.size,
     expectedSha256: expected.sha256,
     stage: `${stage}_CDN_READBACK`,

@@ -27,8 +27,10 @@ on:
       - 'scripts/android-rc11-cos-publish.mjs'
       # RC13 release-control changes must use explicit app-only dispatch.
       - 'scripts/android-rc13-release.mjs'
+      - 'scripts/android-rc13-multipart.mjs'
       - 'scripts/android-rc13-release.json'
       - 'tests/android-rc13-release.test.mjs'
+      - 'tests/android-rc13-multipart.test.mjs'
       - 'scripts/assert-native-bearer-rollback-result.d.mts'
       - 'scripts/assert-native-bearer-rollback-result.mjs'
       - 'scripts/assert-release-main.d.mts'

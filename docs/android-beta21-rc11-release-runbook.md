@@ -120,13 +120,17 @@ uploads while retaining the old release as the rollback source.
 New candidate COS objects use `Content-Type: application/vnd.android.package-archive`,
 `Cache-Control: public, max-age=31536000, immutable`, and a custom SHA-256
 metadata header. The SDK request includes `x-cos-forbid-overwrite: true`; run
-and attempt IDs make keys unique even if COS bucket versioning changes the
-header behavior. Existing objects are checked first and cause a hard failure.
+and attempt IDs make keys unique. Multipart staging fails closed if bucket
+versioning is enabled or its state cannot be verified because COS ignores the
+no-overwrite header on versioned buckets. Existing objects cause a hard failure.
 No ACL, bucket-policy, delete, or database permissions are used.
 
-The upload role needs only `cos:PutObject` and `cos:HeadObject` scoped to the
-Android release prefix. The API download and public CDN readback do not need
-CAM `GetObject`. Do not grant `DeleteObject`, ACL management, bucket-policy
+The multipart upload role needs `cos:InitiateMultipartUpload`, `cos:UploadPart`,
+`cos:CompleteMultipartUpload`, `cos:AbortMultipartUpload`, `cos:GetObject` and `cos:HeadObject`
+scoped to the Android release prefix, plus read-only `cos:GetBucketVersioning`
+on the target bucket. Existing `cos:PutObject` permission may be retained for
+other release workflows. Authenticated COS origin readback verifies the complete
+file before the independent public CDN readback. Do not grant `DeleteObject`, ACL management, bucket-policy
 management, or permissions outside the required release prefix. COS object
 action-to-permission mapping is documented by Tencent
 ([COS CAM action mapping](https://intl.cloud.tencent.com/ind/document/product/436/30580)).
