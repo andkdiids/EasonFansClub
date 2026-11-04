@@ -40,7 +40,7 @@ export function safeCosError(error, { requestType = 'Unknown', method = 'UNKNOWN
   const rawCosCode = String(responseError?.Code || responseError?.code || '')
   const sdkCode = String(error?.code || '')
   const cosCodeCandidate = rawCosCode || (SAFE_COS_CODES.has(sdkCode) ? sdkCode : '')
-  const cosCode = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(cosCodeCandidate) ? cosCodeCandidate : 'UNKNOWN'
+  const cosCode = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(cosCodeCandidate) ? cosCodeCandidate : 'UNKNOWN'
   const safeSdkCode = SAFE_TRANSPORT_CODES.has(sdkCode) ? sdkCode
     : /^\d{3}$/.test(sdkCode) ? `HTTP_${sdkCode}`
       : 'UNKNOWN'
