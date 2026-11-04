@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
+import { CODE32_BASELINE, CODE32_ROLLBACK_OBJECT_KEY, loadRc13Pin, validateCode32VersionApi } from './android-rc13-release.mjs'
 
 const require = createRequire(import.meta.url)
 const INGRESS_FILENAME = 'ECFC-1.0.0-beta.21-release-RC11-20261102-152136.apk'
@@ -100,9 +101,9 @@ export function validateIngressManifest(manifest, {
   workflowRef = process.env.GITHUB_WORKFLOW_REF,
   workflowSha = process.env.GITHUB_SHA,
 } = {}) {
-  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : null
-  const sourceFile = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : null
-  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : null
+  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : candidate === 'rc13' ? loadRc13Pin() : null
+  const sourceFile = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : candidate === 'rc13' ? baseline.sourceFile : null
+  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : candidate === 'rc13' ? 'RC13' : null
   if (!baseline || !sourceFile || !prefix) throw new Error('RELEASE_CANDIDATE_INVALID')
   if (!manifest || manifest.release_candidate !== candidate || manifest.source_file !== sourceFile
     || String(manifest.run_id) !== String(runId)
@@ -125,7 +126,7 @@ export function validateIngressManifest(manifest, {
 }
 
 export function createVersionedObjectKey(kind, { date = new Date(), runId, runAttempt } = {}) {
-  if (!['rc11', 'rc12'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
+  if (!['rc11', 'rc12', 'rc13'].includes(kind)) throw new Error('COS_OBJECT_KIND_INVALID')
   if (!/^\d+$/.test(String(runId ?? '')) || !/^[1-9]\d*$/.test(String(runAttempt ?? ''))) {
     throw new Error('GITHUB_RUN_ID_INVALID')
   }
@@ -141,6 +142,8 @@ export function validateVersionedObjectKey(key, kind, { runId, runAttempt } = {}
     ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc11-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
     : kind === 'rc12'
       ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc12-\d{8}-\d{6}-run\d+-attempt\d+\.apk$/
+      : kind === 'rc13'
+        ? /^android\/releases\/ECFC-1\.0\.0-beta\.21-release-beta21-rc13-\d{8}-\d{6}-run\d+-attempt[1-9]\d*\.apk$/
       : null
   if (!pattern || !pattern.test(key)) throw new Error('COS_OBJECT_KEY_INVALID')
   if (runId !== undefined && !key.includes('-run' + runId + '-attempt' + runAttempt + '.apk')) {
@@ -248,7 +251,9 @@ async function runReleaseStage(stage, operation, logImpl = console.log) {
 async function verifyRollbackSourceRange(candidate, fetchImpl) {
   const source = candidate === 'rc11'
     ? { key: CODE30_ROLLBACK_OBJECT_KEY, size: CODE30_BASELINE.size, code: 30 }
-    : { key: CODE31_ROLLBACK_OBJECT_KEY, size: CODE31_BASELINE.size, code: 31 }
+    : candidate === 'rc12' ? { key: CODE31_ROLLBACK_OBJECT_KEY, size: CODE31_BASELINE.size, code: 31 }
+      : candidate === 'rc13' ? { key: CODE32_ROLLBACK_OBJECT_KEY, size: CODE32_BASELINE.size, code: 32 } : null
+  if (!source) throw new Error('RELEASE_CANDIDATE_INVALID')
   const url = new URL(source.key, CDN_BASE_URL).toString()
   let response
   try {
@@ -271,7 +276,8 @@ async function verifyRollbackSourceRange(candidate, fetchImpl) {
 }
 
 export async function captureVersionApiBaseline({ candidate = process.env.RELEASE_CANDIDATE, env = process.env, fetchImpl = fetch } = {}) {
-  const expectedVersionCode = candidate === 'rc11' ? 30 : candidate === 'rc12' ? 31 : null
+  if (candidate === 'rc13') loadRc13Pin()
+  const expectedVersionCode = candidate === 'rc11' ? 30 : candidate === 'rc12' ? 31 : candidate === 'rc13' ? 32 : null
   if (expectedVersionCode === null) throw new Error('RELEASE_CANDIDATE_INVALID')
   const body = await runReleaseStage(`PRODUCTION_VERSION_API_CODE${expectedVersionCode}`, async () => {
     let response
@@ -283,12 +289,10 @@ export async function captureVersionApiBaseline({ candidate = process.env.RELEAS
     if (!response.ok) throw new Error('PRODUCTION_VERSION_API_UNAVAILABLE')
     let body
     try { body = await response.json() } catch { throw new Error('PRODUCTION_VERSION_API_INVALID') }
-    return expectedVersionCode === 30 ? validateCode30VersionApi(body) : validateCode31VersionApi(body)
+    return expectedVersionCode === 30 ? validateCode30VersionApi(body) : expectedVersionCode === 31 ? validateCode31VersionApi(body) : validateCode32VersionApi(body)
   })
   const rollbackSource = await verifyRollbackSourceRange(candidate, fetchImpl)
-  const fileName = expectedVersionCode === 30
-    ? 'android-version-api-code30-baseline.json'
-    : 'android-version-api-code31-baseline.json'
+  const fileName = `android-version-api-code${expectedVersionCode}-baseline.json`
   const baselinePath = path.join(env.RUNNER_TEMP || os.tmpdir(), fileName)
   await writeFile(baselinePath, `${JSON.stringify(body, null, 2)}\n`, { flag: 'wx' })
   console.log(`VERSION_API_CODE${expectedVersionCode}_READ_ONLY_BASELINE=VERIFIED`)
@@ -529,9 +533,9 @@ function writeOutput(name, value, env = process.env) {
 }
 
 async function readIngressArtifact(env, candidate = env.RELEASE_CANDIDATE || 'rc11') {
-  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : null
-  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : null
-  const fileName = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : null
+  const baseline = candidate === 'rc11' ? RC11_BASELINE : candidate === 'rc12' ? RC12_BASELINE : candidate === 'rc13' ? loadRc13Pin() : null
+  const prefix = candidate === 'rc11' ? 'RC11' : candidate === 'rc12' ? 'RC12' : candidate === 'rc13' ? 'RC13' : null
+  const fileName = candidate === 'rc11' ? INGRESS_FILENAME : candidate === 'rc12' ? RC12_INGRESS_FILENAME : candidate === 'rc13' ? baseline.sourceFile : null
   if (!baseline || !prefix || !fileName) throw new Error('RELEASE_CANDIDATE_INVALID')
   const ingressDir = env.RC11_INGRESS_DIRECTORY
   if (!ingressDir) throw new Error(prefix + '_INGRESS_DIRECTORY_MISSING')
@@ -593,6 +597,21 @@ export async function publishRc12Artifact({ env = process.env, fetchImpl = fetch
   return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString() }
 }
 
+export async function publishRc13Artifact({ env = process.env, fetchImpl = fetch, date = new Date() } = {}) {
+  // Validate the reviewed pin and same-run ingress before requesting STS.
+  const baseline = loadRc13Pin()
+  const ids = runIdentifiers(env)
+  const { apkPath } = await readIngressArtifact(env, 'rc13')
+  const cos = await getCos(env, fetchImpl)
+  const key = createVersionedObjectKey('rc13', { ...ids, date })
+  await uploadImmutableObject({ cos, env, key, filePath: apkPath, expected: baseline, stage: 'RC13_RELEASE' })
+  await writeOutput('RC13_OBJECT_KEY', key, env)
+  await writeOutput('RC13_CDN_URL', new URL(key, CDN_BASE_URL).toString(), env)
+  await writeOutput('RC13_SHA256', baseline.sha256, env)
+  await writeOutput('RC13_SIZE', baseline.size, env)
+  return { key, cdnUrl: new URL(key, CDN_BASE_URL).toString() }
+}
+
 async function main() {
   const command = process.argv[2]
   if (command === 'verify-oidc') {
@@ -613,6 +632,11 @@ async function main() {
   if (command === 'publish-rc12') {
     const result = await publishRc12Artifact()
     console.log('RC12_CDN_VERIFIED=YES\nRC12_OBJECT_KEY=' + result.key)
+    return
+  }
+  if (command === 'publish-rc13') {
+    const result = await publishRc13Artifact()
+    console.log('RC13_CDN_VERIFIED=YES\nRC13_OBJECT_KEY=' + result.key)
     return
   }
   throw new Error('COS_PUBLISH_COMMAND_INVALID')

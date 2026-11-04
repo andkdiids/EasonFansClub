@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -63,6 +64,16 @@ export function verifyApksignerResult(result, expectedSha256) {
 function main() {
   const [apksignerPath, apkPath, expectedSha256] = process.argv.slice(2)
   if (!apksignerPath || !apkPath || !expectedSha256) signerError('SIGNER_ARGUMENTS_INVALID')
+
+  // Windows runners invoke apksigner.bat in PowerShell (spawn cannot execute a
+  // .bat directly), then pass its complete verbose output to the same parser.
+  if (apksignerPath === '--parse-output-file') {
+    let output
+    try { output = readFileSync(apkPath, 'utf8') } catch { signerError('APKSIGNER_EXECUTION_FAILED') }
+    const parsed = assertApksignerOutputMatches(output, expectedSha256)
+    process.stdout.write(`APK_SIGNER_COUNT=${parsed.signerCount}\nAPK_SIGNER_SHA256=${parsed.sha256}\nAPK_SIGNATURE_VALID=YES\n`)
+    return
+  }
 
   const result = spawnSync(apksignerPath, ['verify', '--verbose', '--print-certs', apkPath], {
     encoding: 'utf8',
