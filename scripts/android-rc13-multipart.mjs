@@ -7,15 +7,55 @@ const MIN_INITIAL_CREDENTIAL_REMAINING_MS = 15 * 60 * 1000
 const COMPLETE_CREDENTIAL_SAFETY_MS = 60 * 1000
 const SAFE_HEADER = Object.freeze({ 'x-cos-forbid-overwrite': 'true' })
 const SAFE_COS_CODES = new Set(['FileAlreadyExists', 'NoSuchUpload', 'AccessDenied', 'ECONNRESET', 'ETIMEDOUT', 'SlowDown', 'InternalError', 'ServiceUnavailable'])
+const SAFE_TRANSPORT_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE'])
 
-// Only expose protocol error fields; messages and headers may contain credentials.
-export function safeCosError(error) {
-  const candidate = String(error?.code || error?.error?.Code || '')
-  const code = SAFE_COS_CODES.has(candidate) ? candidate : 'UNKNOWN'
-  const status = Number(error?.statusCode) || 0
-  const requestId = String(error?.headers?.['x-cos-request-id'] || '')
+function getHeaderValue(headers, name) {
+  if (!headers || typeof headers !== 'object') return ''
+  const target = name.toLowerCase()
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === target)
+  return entry ? String(entry[1] ?? '') : ''
+}
+
+function sanitizeCosResponseMessage(value) {
+  if (typeof value !== 'string' || value.length === 0) return 'NO_COS_ERROR_MESSAGE'
+  const sanitized = value
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[REDACTED_URL]')
+    .replace(/\b(authorization|secret[-_ ]?(?:id|key)|security[-_ ]?token|session[-_ ]?token|access[-_ ]?token|bearer|q-signature|x-cos-security-token)\b\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;&<>]+)/gi, '$1=[REDACTED]')
+    .replace(/\b(?:AKID|TMP)[A-Za-z0-9_/-]{8,}\b/gi, '[REDACTED_CREDENTIAL]')
+    .replace(/\b[A-Za-z0-9+/=_-]{32,}\b/g, '[REDACTED_VALUE]')
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180)
+  return sanitized || 'NO_COS_ERROR_MESSAGE'
+}
+
+const SAFE_HTTP_MESSAGES = new Set(['Forbidden', 'Bad Request', 'Unauthorized', 'Not Found', 'Request Timeout', 'Conflict', 'Too Many Requests', 'Internal Server Error', 'Bad Gateway', 'Service Unavailable', 'Gateway Timeout'])
+
+// COS SDK errors may include an XML Error object, transport details, and response headers.
+// Emit only bounded protocol fields; never serialize a raw error, URL, authorization header, or credential.
+export function safeCosError(error, { requestType = 'Unknown', method = 'UNKNOWN' } = {}) {
+  const responseError = error?.error && typeof error.error === 'object' ? error.error : null
+  const rawCosCode = String(responseError?.Code || responseError?.code || '')
+  const sdkCode = String(error?.code || '')
+  const cosCodeCandidate = rawCosCode || (SAFE_COS_CODES.has(sdkCode) ? sdkCode : '')
+  const cosCode = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(cosCodeCandidate) ? cosCodeCandidate : 'UNKNOWN'
+  const safeSdkCode = SAFE_TRANSPORT_CODES.has(sdkCode) ? sdkCode
+    : /^\d{3}$/.test(sdkCode) ? `HTTP_${sdkCode}`
+      : 'UNKNOWN'
+  const statusValue = Number(error?.statusCode ?? error?.status)
+  const status = Number.isInteger(statusValue) && statusValue >= 100 && statusValue <= 599 ? statusValue : 0
+  const requestId = getHeaderValue(error?.headers, 'x-cos-request-id')
+    || String(responseError?.RequestId || error?.RequestId || '')
   const safeRequestId = /^[A-Za-z0-9+/=_-]{24,128}$/.test(requestId) && !/^(AKID|TMP)/i.test(requestId) ? requestId : 'UNKNOWN'
-  return `code=${code} status=${status} request_id=${safeRequestId}`
+  const safeRequestType = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/.test(requestType) ? requestType : 'UNKNOWN'
+  const safeMethod = ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'].includes(String(method).toUpperCase()) ? String(method).toUpperCase() : 'UNKNOWN'
+  const responseMessage = typeof responseError?.Message === 'string'
+    ? sanitizeCosResponseMessage(responseError.Message)
+    : SAFE_HTTP_MESSAGES.has(String(error?.message || '')) ? String(error.message)
+      : 'NO_COS_ERROR_XML'
+  return `request_type=${safeRequestType} method=${safeMethod} http_status=${status || 'UNKNOWN'} cos_code=${cosCode} sdk_code=${safeSdkCode} request_id=${safeRequestId} response=${responseMessage}`
 }
 
 export async function completeOnce(cos, base, uploadId, parts, onRequest = () => {}) {

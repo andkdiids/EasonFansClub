@@ -598,7 +598,7 @@ export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = conso
   try {
     versioning = await cos.getBucketVersioning(base)
   } catch (error) {
-    log(`COS_GET_BUCKET_VERSIONING_FAILED ${safeCosError(error)}`)
+    log(`COS_GET_BUCKET_VERSIONING_FAILED ${safeCosError(error, { requestType: 'GetBucketVersioning', method: 'GET' })}`)
     throw new Error('COS_GET_BUCKET_VERSIONING_FAILED')
   }
   const configuration = versioning?.VersioningConfiguration
@@ -617,7 +617,7 @@ export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = conso
   try {
     head = await cos.headObject(object)
   } catch (error) {
-    log(`COS_HEAD_OBJECT_FAILED ${safeCosError(error)}`)
+    log(`COS_HEAD_OBJECT_FAILED ${safeCosError(error, { requestType: 'HeadObject', method: 'HEAD' })}`)
     throw new Error('COS_HEAD_OBJECT_FAILED')
   }
   const responseHeaders = Object.fromEntries(Object.entries(head?.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]))
@@ -626,9 +626,9 @@ export async function verifyCosReadOnlyAccess({ cos, bucket, region, log = conso
 
   let rangeRead
   try {
-    rangeRead = await cos.getObject({ ...object, Range: 'bytes=0-0' })
+    rangeRead = await cos.getObject({ ...object, Headers: { Range: 'bytes=0-0' } })
   } catch (error) {
-    log(`COS_GET_OBJECT_FAILED ${safeCosError(error)}`)
+    log(`COS_GET_OBJECT_FAILED ${safeCosError(error, { requestType: 'GetObject', method: 'GET' })}`)
     throw new Error('COS_GET_OBJECT_FAILED')
   }
   if (Number(rangeRead?.statusCode) !== 206 || !Buffer.isBuffer(rangeRead?.Body) || rangeRead.Body.length !== 1) {

@@ -40,7 +40,8 @@ test('read-only COS gate verifies empty versioning, authenticated HEAD, and a on
   const result = await verifyCosReadOnlyAccess({ cos, bucket: 'ecfc-1306412725', region: 'ap-guangzhou', log: (line) => logs.push(line) })
   assert.deepEqual(calls.map(([method]) => method), ['versioning', 'head', 'get'])
   assert.equal(calls[1][1].Key, 'android/releases/ECFC-1.0.0-beta.21-release-beta21-rc12-20261103-185753-run41698377689-attempt1.apk')
-  assert.equal(calls[2][1].Range, 'bytes=0-0')
+  assert.equal(calls[2][1].Headers.Range, 'bytes=0-0')
+  assert.equal(calls[2][1].Range, undefined)
   assert.equal(result.versioning, 'DISABLED')
   assert.match(logs.join('\n'), /COS_BUCKET_VERSIONING_RESPONSE=\{"VersioningConfiguration":\{\}\}/)
 })
@@ -62,8 +63,33 @@ test('read-only COS gate fails closed and reports a safe error category on denie
     log: (line) => logs.push(line),
   }), /COS_GET_BUCKET_VERSIONING_FAILED/)
   assert.equal(objectCalls, 0)
-  assert.match(logs.join('\n'), /code=AccessDenied status=403 request_id=/)
+  assert.match(logs.join('\n'), /request_type=GetBucketVersioning method=GET http_status=403 cos_code=AccessDenied/)
+  assert.match(logs.join('\n'), /request_id=NWQ1NTRhMWRfODhjMjJhMDlfMWNkOF8xZTRmYWJjZA==/)
   assert.doesNotMatch(logs.join('\n'), /secret and provider data/)
+})
+
+test('COS failure diagnostics include request and response fields without leaking secrets', () => {
+  const requestId = 'NmFlYjQyNjVfOGU1NTdiMGJfZWQ4MV83MTJhNGJh'
+  const error = Object.assign(new Error('authorization must not be logged'), {
+    code: '403',
+    statusCode: 403,
+    headers: {
+      'X-COS-Request-ID': requestId,
+      Authorization: 'Bearer fake-authorization-secret',
+    },
+    error: {
+      Code: 'AccessDenied',
+      Message: 'Access denied: https://cos.example.test/object?sign=opaque Authorization: Bearer fake-session-token q-signature=opaque-signature',
+    },
+  })
+  const output = safeCosError(error, { requestType: 'GetObject', method: 'GET' })
+  assert.match(output, /request_type=GetObject method=GET http_status=403 cos_code=AccessDenied/)
+  assert.match(output, new RegExp(`request_id=${requestId}`))
+  assert.match(output, /response=Access denied: \[REDACTED_URL\] Authorization=\[REDACTED\]/)
+  assert.doesNotMatch(output, /fake-authorization-secret|fake-session-token|opaque-signature|cos\.example\.test|sign=opaque/)
+  const longCredentialCode = safeCosError({ error: { Code: 'private-session-secret-value-that-must-not-appear' } })
+  assert.match(longCredentialCode, /cos_code=UNKNOWN/)
+  assert.doesNotMatch(longCredentialCode, /private-session-secret/)
 })
 
 test('read-only COS gate rejects a HEAD or Range GET response with an unexpected HTTP status', async () => {
@@ -127,7 +153,7 @@ test('read-only gate exchanges OIDC for a two-hour STS lease and never logs cred
     return {
       getBucketVersioning: async () => ({ VersioningConfiguration: {} }),
       headObject: async () => ({ statusCode: 200, headers: { 'Content-Length': '180263015' } }),
-      getObject: async ({ Range }) => Range === 'bytes=0-0' ? { statusCode: 206, Body: Buffer.from([0]) } : { statusCode: 200, Body: Buffer.alloc(0) },
+      getObject: async ({ Headers }) => Headers?.Range === 'bytes=0-0' ? { statusCode: 206, Body: Buffer.from([0]) } : { statusCode: 200, Body: Buffer.alloc(0) },
     }
   }
   const result = await verifyCosReadOnly({ env, fetchImpl, cosFactory, log: (line) => logs.push(line), now: () => 1_800_000_000_000 })
