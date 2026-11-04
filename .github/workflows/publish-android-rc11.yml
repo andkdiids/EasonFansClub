@@ -50,6 +50,18 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install the locked COS SDK dependencies without lifecycle scripts
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Install locked production dependencies
+        run: pnpm install --prod --frozen-lockfile --ignore-scripts
+
+      - name: Verify COS SDK dependency resolution
+        run: node -e "console.log(require.resolve('cos-nodejs-sdk-v5'))"
+
       - name: Diagnose OIDC endpoint metadata without requesting a token
         id: diagnose_oidc_endpoint
         shell: bash

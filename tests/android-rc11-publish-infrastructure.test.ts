@@ -627,6 +627,18 @@ test('OIDC-only dispatch defaults to verification and is mutually exclusive with
   const verify = workflow.jobs.verify_oidc
   const ingress = workflow.jobs.ingress
   const cos = workflow.jobs.cos
+  const verifyNodeSetupIndex = verify.steps.findIndex((step) => String(step.uses ?? '').startsWith('actions/setup-node@'))
+  const verifyPnpmSetupIndex = verify.steps.findIndex((step) => String(step.uses ?? '').startsWith('pnpm/action-setup@'))
+  const cosPnpmSetup = cos.steps.find((step) => String(step.uses ?? '').startsWith('pnpm/action-setup@'))
+  const verifyPnpmSetup = verify.steps[verifyPnpmSetupIndex]
+  const verifyProductionInstallIndex = verify.steps.findIndex((step) => String(step.run ?? '').trim() === 'pnpm install --prod --frozen-lockfile --ignore-scripts')
+  const verifyResolveIndex = verify.steps.findIndex((step) => String(step.run ?? '').includes("require.resolve('cos-nodejs-sdk-v5')"))
+  assert.ok(verifyNodeSetupIndex >= 0)
+  assert.ok(verifyPnpmSetupIndex > verifyNodeSetupIndex)
+  assert.ok(cosPnpmSetup)
+  assert.deepEqual(verifyPnpmSetup, cosPnpmSetup)
+  assert.ok(verifyProductionInstallIndex > verifyPnpmSetupIndex)
+  assert.ok(verifyResolveIndex > verifyProductionInstallIndex)
   assert.equal(verify['timeout-minutes'], 10)
   assert.equal(ingress['timeout-minutes'], 20)
   assert.equal(cos['timeout-minutes'], 60)
