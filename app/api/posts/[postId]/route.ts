@@ -65,6 +65,8 @@ const postDetailSelect = {
   isLocked: true,
   isRecommended: true,
   publishedAt: true,
+  publicationStatus: true,
+  scheduledPublishAt: true,
   readUserCount: true,
   shareCount: true,
   status: true,
@@ -311,10 +313,14 @@ export async function GET(request: Request, { params }: Params) {
     where: {
       id: postId,
       isDeleted: false,
-      status: 'PUBLISHED',
-       ...(viewerCanManagePosts ? {} : {
+      ...(viewerCanManagePosts ? {} : {
         OR: [
-          { moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const } },
+          {
+            status: 'PUBLISHED',
+            publicationStatus: 'PUBLISHED',
+            publishedAt: { not: null },
+            moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const },
+          },
           ...(viewer ? [{ authorId: viewer.id }] : []),
         ],
       }),
@@ -555,7 +561,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
     if (data.isDeleted !== undefined && lockedExisting.isDeleted !== data.isDeleted) {
       const postCount = await tx.post.count({
-        where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+        where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
       })
       await tx.board.update({
         where: { id: lockedExisting.boardId },
@@ -946,7 +952,7 @@ async function handleEditPost(
       const affectedBoardIds = [...new Set([lockedExisting.boardId, nextBoardId])]
       for (const affectedBoardId of affectedBoardIds) {
         const postCount = await tx.post.count({
-          where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+          where: { boardId: affectedBoardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
         })
         await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
       }
@@ -954,7 +960,7 @@ async function handleEditPost(
     if (canManagePosts && lockedExisting.boardId !== nextBoardId && lockedExisting.moderationStatus === 'APPROVED') {
       for (const affectedBoardId of [lockedExisting.boardId, nextBoardId]) {
         const postCount = await tx.post.count({
-          where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+          where: { boardId: affectedBoardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
         })
         await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
       }

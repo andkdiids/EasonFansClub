@@ -76,7 +76,7 @@ export async function deletePost({ postId, actor, canManagePosts, reason }: Dele
       select: { id: true, isDeleted: true, deletedAt: true },
     })
     const postCount = await tx.post.count({
-      where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+      where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
     })
     await tx.board.update({ where: { id: lockedExisting.boardId }, data: { postCount } })
 

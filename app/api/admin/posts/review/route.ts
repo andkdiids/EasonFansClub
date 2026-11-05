@@ -10,11 +10,12 @@ import { postContentPlainText } from '@/lib/share-metadata'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeMany } from '@/lib/realtime'
 import { requireAdmin, requireRequestAdmin, sanitizeText } from '@/lib/security'
-import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { createNotification } from '@/lib/notification-write'
 import { HOME_FEATURED_POSTS_CACHE_TAG } from '@/lib/home-data'
-import { recordQualifiedPublishedPostGrowth, reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
+import { reverseGrowthRewardForEvent } from '@/lib/growth-tasks/service'
 import { calculatePostExpiresAt } from '@/lib/post-lifecycle'
+import { formatScheduledPostTime, shouldPublishPostOnApproval } from '@/lib/post-scheduling'
+import { processPostPublicationEventForPost } from '@/lib/post-publication'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +30,9 @@ const reviewSelect = {
   expiresAt: true,
   createdAt: true,
   moderationStatus: true,
+  publicationStatus: true,
+  scheduledPublishAt: true,
+  publishedAt: true,
   reviewedAt: true,
   rejectionReason: true,
   isPinned: true,
@@ -194,6 +198,8 @@ async function writeReviewNotification(input: {
   boardChanged?: boolean
   originalBoardName?: string | null
   finalBoardName?: string | null
+  scheduledPublishAt?: Date | null
+  waitingForSchedule?: boolean
 }) {
   try {
     await prisma.notification.updateMany({
@@ -213,7 +219,9 @@ async function writeReviewNotification(input: {
   }
 
   const approvedContent = input.status === 'APPROVED'
-    ? input.boardChanged && input.originalBoardName && input.finalBoardName
+    ? input.waitingForSchedule
+      ? `你的帖子《${input.title}》已通过审核，等待定时发布。计划发布时间：${formatScheduledPostTime(input.scheduledPublishAt || '')}（北京时间）。`
+      : input.boardChanged && input.originalBoardName && input.finalBoardName
       ? `你的帖子《${input.title}》已通过审核。\n为了更符合内容分类，我们已将帖子从「${input.originalBoardName}」调整至「${input.finalBoardName}」。\n帖子现已发布至「${input.finalBoardName}」。`
       : `你的帖子《${input.title}》已通过审核，并发布至「${input.finalBoardName || 'E院广场'}」。`
     : input.rejectionReason
@@ -243,25 +251,11 @@ async function writeReviewNotification(input: {
 async function refreshReviewBoardCount(boardId: string, postId: string, action: ReviewAction) {
   try {
     const postCount = await prisma.post.count({
-      where: { boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+      where: { boardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
     })
     await prisma.board.update({ where: { id: boardId }, data: { postCount } })
   } catch (error) {
     logReviewError('board-count', postId, action, error)
-  }
-}
-
-async function writeApprovalFriendActivity(input: { postId: string; authorId: string; title: string; action: ReviewAction }) {
-  try {
-    const targetUrl = `/posts/${input.postId}`
-    // This activity is a derived public feed entry. Re-approval must not
-    // create a second entry for the same post.
-    await prisma.friendActivity.deleteMany({ where: { type: 'POST', targetUrl } })
-    await prisma.friendActivity.create({
-      data: { actorId: input.authorId, type: 'POST', content: input.title, targetUrl },
-    })
-  } catch (error) {
-    logReviewError('friend-activity', input.postId, input.action, error)
   }
 }
 
@@ -282,6 +276,8 @@ function serializePost(post: ReviewPostRow, history: PostModerationHistoryRow[])
     summary: post.summary ? postContentPlainText(post.summary) : post.summary,
     createdAt: post.createdAt.toISOString(),
     reviewedAt: post.reviewedAt?.toISOString() || null,
+    scheduledPublishAt: post.scheduledPublishAt?.toISOString() || null,
+    publishedAt: post.publishedAt?.toISOString() || null,
     User: { ...post.User, Profile: post.User.Profile ? { ...post.User.Profile, avatarUrl: profileImageUrl(post.User.Profile.avatarUrl) } : null },
     ReviewedBy: post.ReviewedBy
       ? { id: post.ReviewedBy.id, uid: post.ReviewedBy.uid, name: userSnapshotName(post.ReviewedBy) }
@@ -382,9 +378,9 @@ export async function PATCH(request: Request) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const reviewedAt = new Date()
       // Serialize concurrent reviews of the same Post row before reading its state.
       await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${postId} FOR UPDATE`
+      const reviewedAt = new Date()
       const current = await tx.post.findFirst({
         where: { id: postId, isDeleted: false },
         select: {
@@ -395,6 +391,9 @@ export async function PATCH(request: Request) {
           status: true,
           isDeleted: true,
           moderationStatus: true,
+          publicationStatus: true,
+          scheduledPublishAt: true,
+          publishedAt: true,
           reviewedAt: true,
           rejectionReason: true,
           expiryType: true,
@@ -417,30 +416,65 @@ export async function PATCH(request: Request) {
       const finalBoardId = boardTarget?.id || current.boardId
       const boardChanged = status === 'APPROVED' && finalBoardId !== current.boardId
       const finalBoardName = boardTarget?.name || current.Board?.name || null
+      const publishesNow = status === 'APPROVED' && shouldPublishPostOnApproval({
+        publicationStatus: current.publicationStatus,
+        scheduledPublishAt: current.scheduledPublishAt,
+        now: reviewedAt,
+      })
+      const waitingForSchedule = status === 'APPROVED' && !publishesNow
       const updateData: Prisma.PostUpdateManyMutationInput = {
         ...buildPostReviewUpdate({ status, reviewedAt, reviewedById: guard.user.id, rejectionReason }),
         ...(boardChanged ? { boardId: finalBoardId } : {}),
-        ...(status === 'APPROVED' && current.expiresAt === null
-          ? { expiresAt: calculatePostExpiresAt(current.expiryType, reviewedAt) }
-          : {}),
+        ...(status === 'APPROVED' && publishesNow ? {
+          status: 'PUBLISHED',
+          publicationStatus: 'PUBLISHED',
+          publishedAt: reviewedAt,
+          expiresAt: calculatePostExpiresAt(current.expiryType, reviewedAt),
+        } : waitingForSchedule ? {
+          status: 'DRAFT',
+          publicationStatus: 'SCHEDULED',
+          publishedAt: null,
+          expiresAt: null,
+        } : {}),
       }
       const updateResult = await tx.post.updateMany({
         where: { id: postId, isDeleted: false, moderationStatus: current.moderationStatus },
         data: updateData,
       })
       if (updateResult.count !== 1) throw new Error('POST_ALREADY_REVIEWED')
+      if (status === 'APPROVED') {
+        const publicationEvent = await tx.postPublicationEvent.findUnique({ where: { postId }, select: { id: true, status: true } })
+        if (!publicationEvent) {
+          // Pre-feature pending submissions have no outbox row. Create their
+          // first event atomically with approval so legacy reviews still run
+          // the same post-publication effects exactly once.
+          await tx.postPublicationEvent.create({
+            data: {
+              postId,
+              triggerType: 'POST_APPROVED',
+              status: publishesNow ? 'PENDING' : 'WAITING',
+              availableAt: reviewedAt,
+            },
+          })
+        } else if (publishesNow && publicationEvent.status === 'WAITING') {
+          await tx.postPublicationEvent.update({
+            where: { id: publicationEvent.id },
+            data: { status: 'PENDING', availableAt: reviewedAt, lastError: null },
+          })
+        } else if (waitingForSchedule && publicationEvent.status !== 'WAITING') {
+          throw new Error('POST_PUBLICATION_EVENT_INVALID_STATE')
+        }
+      } else if (status === 'REJECTED') {
+        await tx.postPublicationEvent.updateMany({
+          where: { postId, status: 'WAITING' },
+          data: { status: 'CANCELLED', completedAt: reviewedAt, lockedAt: null, lockToken: null },
+        })
+      }
       const updated = await tx.post.findUniqueOrThrow({
         where: { id: postId },
-        select: { id: true, status: true, isDeleted: true, moderationStatus: true, reviewedAt: true, rejectionReason: true, boardId: true },
+        select: { id: true, status: true, isDeleted: true, moderationStatus: true, publicationStatus: true, scheduledPublishAt: true, publishedAt: true, reviewedAt: true, rejectionReason: true, boardId: true },
       })
-      if (status === 'APPROVED') {
-        await recordQualifiedPublishedPostGrowth(tx, {
-          userId: current.authorId,
-          postId: current.id,
-          post: updated,
-          now: reviewedAt,
-        })
-      } else if (current.moderationStatus === 'APPROVED') {
+      if (status === 'REJECTED' && current.moderationStatus === 'APPROVED') {
         // The passive publish reward belongs to the currently public state;
         // reverse only that existing ledger entry when a later rejection wins.
         // One-time FIRST_POST completion remains a separate manual claim.
@@ -463,6 +497,8 @@ export async function PATCH(request: Request) {
         finalBoardId,
         finalBoardName,
         originalBoardName: current.Board?.name || null,
+        waitingForSchedule,
+        publishesNow,
       }
     })
     const current = result.current
@@ -504,19 +540,21 @@ export async function PATCH(request: Request) {
       boardChanged: Boolean(result.boardChanged),
       originalBoardName: result.originalBoardName,
       finalBoardName: result.finalBoardName,
+      waitingForSchedule: result.waitingForSchedule,
+      scheduledPublishAt: result.current.scheduledPublishAt,
     })
     await refreshReviewBoardCount(current.boardId, postId, action)
     if (result.boardChanged) {
       await refreshReviewBoardCount(result.finalBoardId, postId, action)
     }
-    if (reviewStatus === 'APPROVED') {
-      await writeApprovalFriendActivity({ postId, authorId: current.authorId, title: current.title, action })
-      // Re-approval must not re-run one-time approval side effects. The badge
-      // grant itself is idempotent, while the first pending review remains the
-      // existing trigger point for this evaluation.
-      if (String(result.previousStatus) === 'PENDING') triggerBadgeEvaluation(current.authorId, 'POST_APPROVED', postId)
+    if (reviewStatus === 'APPROVED' && result.publishesNow) {
+      try {
+        await processPostPublicationEventForPost(postId, result.reviewedAt)
+      } catch (error) {
+        logReviewError('publication-event', postId, action, error)
+      }
     } else {
-      await clearApprovalFriendActivity({ postId, action })
+      if (reviewStatus === 'REJECTED') await clearApprovalFriendActivity({ postId, action })
     }
 
     try {
@@ -539,7 +577,7 @@ export async function PATCH(request: Request) {
     } catch (error) {
       logReviewError('cache', postId, action, error)
     }
-    return NextResponse.json({ post: result.post, previousStatus: result.previousStatus })
+    return NextResponse.json({ post: result.post, previousStatus: result.previousStatus, waitingForSchedule: result.waitingForSchedule, publishesNow: result.publishesNow })
   } catch (error) {
     logReviewError('core', postId, action, error)
     if (error instanceof Error && error.message === 'REVIEW_CONFLICT_REJECT_WINS') {

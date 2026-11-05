@@ -5,6 +5,7 @@ import { ImageViewer } from '@/components/ImageViewer'
 import { PostFeatureConfirmDialog } from '@/components/PostFeatureConfirmDialog'
 import { notifyForumDiscoveryFeedChanged } from '@/lib/forum-discovery-session'
 import { postModerationStatuses, type PostModerationStatus } from '@/lib/post-moderation'
+import { formatScheduledPostTime, getPostPublicationLabel } from '@/lib/post-scheduling'
 
 export type ReviewPost = {
   id: string
@@ -13,6 +14,9 @@ export type ReviewPost = {
   content: string
   createdAt: string
   moderationStatus: PostModerationStatus
+  publicationStatus: 'WAITING_REVIEW' | 'SCHEDULED' | 'PUBLISHED' | 'CANCELLED'
+  scheduledPublishAt: string | null
+  publishedAt: string | null
   reviewedAt: string | null
   rejectionReason: string | null
   isPinned: boolean
@@ -146,6 +150,9 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
           ? {
               ...post,
               moderationStatus: status,
+              publicationStatus: data?.post?.publicationStatus || post.publicationStatus,
+              scheduledPublishAt: data?.post?.scheduledPublishAt || post.scheduledPublishAt,
+              publishedAt: data?.post?.publishedAt || post.publishedAt,
               reviewedAt: typeof data?.post?.reviewedAt === 'string' ? data.post.reviewedAt : post.reviewedAt,
               rejectionReason: status === 'REJECTED' ? (data?.post?.rejectionReason || reason) : null,
               ...(boardChanged && publishBoardId && nextBoardName ? { boardId: publishBoardId, Board: { name: nextBoardName } } : {}),
@@ -265,6 +272,7 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
               <span>UID {post.User.uid}</span>
               {isPrivilegedAuthorRole(post.User?.role) ? <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">管理员帖</span> : null}
               <time>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.createdAt))}</time>
+              <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-800">{getPostPublicationLabel(post)}</span>
               {post.reviewedAt ? <time>审核时间：{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(post.reviewedAt))}</time> : null}
               {post.reviewedAt ? <span>审核人：{post.ReviewedBy ? `${post.ReviewedBy.name} · UID ${post.ReviewedBy.uid}` : '原管理员账号已不存在'}</span> : null}
             </div>
@@ -301,6 +309,7 @@ export function PostReviewManager({ initialPosts, initialHasMore, boards, curren
               </div>
             })()}
             <h3 className="mt-3 text-xl font-black text-brand-950">{post.title}</h3>
+            {post.scheduledPublishAt ? <p className="mt-2 text-xs font-black text-violet-700">计划发布时间：{formatScheduledPostTime(post.scheduledPublishAt)}（北京时间）</p> : null}
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{post.content}</p>
             {post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">拒绝原因：{post.rejectionReason}</p> : null}
             {post.PostModerationHistory.length ? <details className="mt-4 rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-2"><summary className="cursor-pointer text-xs font-black text-brand-700">查看审核历史（{post.PostModerationHistory.length}）</summary><div className="mt-3 space-y-2">{post.PostModerationHistory.map((item) => <div key={item.id} className="border-t border-sky-100 pt-2 text-xs font-bold text-slate-600"><p>{item.action} · {item.status} · {item.actorName || '原账号已不存在'}{item.actorUid ? ` · UID ${item.actorUid}` : ''}</p><p className="mt-1 text-slate-500">{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.createdAt))}{item.rejectionReason ? ` · ${item.rejectionReason}` : ''}</p></div>)}</div></details> : null}

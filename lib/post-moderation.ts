@@ -15,17 +15,13 @@ type PublicPostWhere = {
   concertShowId: null
   isDeleted: false
   status: 'PUBLISHED'
+  publicationStatus: 'PUBLISHED'
+  publishedAt: { not: null }
   moderationStatus: { in: PostModerationStatus[] }
   OR: Prisma.PostWhereInput[]
 }
 
-type ProfilePostWhere = {
-  isDeleted: false
-  status: 'PUBLISHED'
-  authorId: string
-  moderationStatus: { in: PostModerationStatus[] }
-  OR?: Prisma.PostWhereInput[]
-}
+type ProfilePostWhere = Prisma.PostWhereInput
 
 /**
  * The moderation state is deliberately separate from Post.status.
@@ -91,6 +87,8 @@ export const publicPostWhere = {
   concertShowId: null,
   isDeleted: false as const,
   status: 'PUBLISHED' as const,
+  publicationStatus: 'PUBLISHED' as const,
+  publishedAt: { not: null },
   moderationStatus: { in: publicPostModerationStatuses },
 }
 
@@ -110,8 +108,14 @@ export function isQualifiedPublishedPost(post: {
   status: unknown
   moderationStatus: unknown
   isDeleted: unknown
+  publicationStatus?: unknown
+  publishedAt?: unknown
 }) {
-  return post.isDeleted === false && post.status === 'PUBLISHED' && post.moderationStatus === 'APPROVED'
+  return post.isDeleted === false
+    && post.status === 'PUBLISHED'
+    && post.moderationStatus === 'APPROVED'
+    && (post.publicationStatus === undefined || post.publicationStatus === 'PUBLISHED')
+    && (post.publishedAt === undefined || post.publishedAt !== null)
 }
 
 /**
@@ -121,11 +125,26 @@ export function isQualifiedPublishedPost(post: {
  * rejected posts; the caller only enables this branch for that trusted viewer.
  */
 export function buildProfilePostWhere(authorId: string, includePending = false, now = new Date()): ProfilePostWhere {
+  if (!includePending) return { ...buildPublicPostWhere(now), authorId }
+
   return {
-    ...(includePending ? publicPostWhere : buildPublicPostWhere(now)),
+    concertShowId: null,
+    isDeleted: false,
     authorId,
-    ...(includePending
-      ? { moderationStatus: { in: ['PENDING', 'REJECTED', ...publicPostModerationStatuses] as PostModerationStatus[] } }
-      : {}),
+    OR: [
+      {
+        status: 'PUBLISHED',
+        moderationStatus: { in: ['PENDING', 'REJECTED', ...publicPostModerationStatuses] },
+        OR: [
+          { publicationStatus: 'PUBLISHED' },
+          { publicationStatus: 'WAITING_REVIEW' },
+        ],
+      },
+      {
+        status: 'DRAFT',
+        publicationStatus: { in: ['SCHEDULED', 'CANCELLED'] },
+        moderationStatus: { in: ['PENDING', 'REJECTED', 'APPROVED'] },
+      },
+    ],
   }
 }
