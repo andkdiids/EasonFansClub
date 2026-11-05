@@ -35,7 +35,7 @@ function toBeijingIso(value: string) {
 }
 
 function formatDate(value: string | null) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未设置'
+  return value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未设置'
 }
 
 function totalSlots(lottery: Pick<ActivityLotteryAdminView, 'prizes'>) {
@@ -85,6 +85,10 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
   const [badgesLoading, setBadgesLoading] = useState(false)
   const [badgesRequested, setBadgesRequested] = useState(false)
   const [retryingWinnerId, setRetryingWinnerId] = useState<string | null>(null)
+  const [recordsOpen, setRecordsOpen] = useState(false)
+  const [recordBatchFilter, setRecordBatchFilter] = useState('ALL')
+  const [recordPrizeFilter, setRecordPrizeFilter] = useState('ALL')
+  const [recordUserFilter, setRecordUserFilter] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -143,6 +147,23 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
     const slots = data?.lotteries.reduce((sum, lottery) => sum + totalSlots(lottery), 0) || 0
     return { slots, currentRate: calculateLotteryWinRate(slots, currentParticipants), fullRate: capacity ? calculateLotteryWinRate(slots, capacity) : 0 }
   }, [capacity, currentParticipants, data?.lotteries])
+  const recordBatchOptions = useMemo(() => (data?.lotteries || []).filter((lottery) => lottery.status === 'DRAWN' || lottery.drawnAt || lottery.winners.length), [data?.lotteries])
+  const recordPrizeOptions = useMemo(() => (data?.lotteries || []).flatMap((lottery) => lottery.prizes.map((prize) => ({ id: prize.id, label: `${lottery.title} · ${prize.tierName || '中奖奖项'} · ${prize.name}` }))), [data?.lotteries])
+  const filteredRecordLotteries = useMemo(() => {
+    const query = recordUserFilter.trim().toLocaleLowerCase()
+    return recordBatchOptions
+      .filter((lottery) => recordBatchFilter === 'ALL' || lottery.id === recordBatchFilter)
+      .map((lottery) => ({
+        ...lottery,
+        prizes: lottery.prizes.filter((prize) => recordPrizeFilter === 'ALL' || prize.id === recordPrizeFilter),
+        winners: lottery.winners.filter((winner) => {
+          const matchesPrize = recordPrizeFilter === 'ALL' || winner.prizeId === recordPrizeFilter
+          const matchesUser = !query || winner.userId.toLocaleLowerCase().includes(query) || String(winner.uid).includes(query) || winner.nickname.toLocaleLowerCase().includes(query)
+          return matchesPrize && matchesUser
+        }),
+      }))
+      .filter((lottery) => (!query || lottery.winners.length > 0) && (recordPrizeFilter === 'ALL' || lottery.prizes.length > 0))
+  }, [recordBatchFilter, recordBatchOptions, recordPrizeFilter, recordUserFilter])
 
   const prizeUploadInProgress = uploadingPrizeIndex !== null
 
@@ -386,7 +407,10 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
           <h3 className="mt-1 text-xl font-black text-brand-950 dark:text-slate-100">{activityTitle}</h3>
           <p className="mt-1 text-xs font-bold leading-5 text-slate-600 dark:text-slate-300">抽奖资格自动继承有效活动报名，不单独配置参与上限。活动结束：{formatDate(activityEndAt)}</p>
         </div>
-        <button type="button" onClick={() => setExpanded((value) => !value)} disabled={activityCancelled || (!activityEndAt && !editingId) || prizeUploadInProgress || saving} className="min-h-10 rounded-full bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{activityCancelled ? '活动已取消' : expanded ? '收起设置' : '+ 添加抽奖'}</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setRecordsOpen(true)} className="min-h-10 rounded-full border border-violet-300 bg-white px-4 py-2 text-sm font-black text-violet-800">开奖记录</button>
+          <button type="button" onClick={() => setExpanded((value) => !value)} disabled={activityCancelled || (!activityEndAt && !editingId) || prizeUploadInProgress || saving} className="min-h-10 rounded-full bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{activityCancelled ? '活动已取消' : expanded ? '收起设置' : '+ 添加抽奖'}</button>
+        </div>
       </div>
       {!activityEndAt ? <p role="alert" className="mt-3 rounded-lg bg-amber-100 px-3 py-2 text-xs font-black leading-5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">请先设置活动结束时间，再添加自动抽奖。</p> : null}
       <div className="mt-4 grid gap-2 rounded-xl border border-violet-200 bg-white/70 p-3 text-xs font-bold text-slate-600 dark:border-violet-900 dark:bg-slate-900/70 dark:text-slate-300 sm:grid-cols-3">
@@ -467,6 +491,71 @@ export function ActivityLotteryManager({ activityId, activityTitle, activityEndA
         })}
         {!loading && data && !data.lotteries.length ? <p className="py-4 text-center text-sm font-bold text-slate-500">暂无抽奖活动。</p> : null}
       </div>
+      {recordsOpen && data ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby={`activity-lottery-records-title-${activityId}`}>
+          <section className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-950">
+            <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:p-5">
+              <div>
+                <p className="text-xs font-black tracking-[0.16em] text-violet-700 dark:text-violet-300">活动开奖记录</p>
+                <h3 id={`activity-lottery-records-title-${activityId}`} className="mt-1 text-lg font-black text-brand-950 dark:text-slate-100">{data.activity.title}</h3>
+                <p className="mt-1 break-all text-xs font-bold text-slate-500">活动 ID：{data.activity.id} · 当前批次记录 {recordBatchOptions.length} 批</p>
+              </div>
+              <button type="button" onClick={() => setRecordsOpen(false)} className="min-h-9 rounded-lg border border-slate-200 px-3 text-sm font-black text-slate-700 dark:border-slate-700 dark:text-slate-200">关闭</button>
+            </header>
+            <div className="grid gap-2 border-b border-slate-200 p-4 dark:border-slate-800 sm:grid-cols-3">
+              <label className="grid gap-1 text-xs font-black text-slate-600 dark:text-slate-300">开奖批次
+                <select value={recordBatchFilter} onChange={(event) => setRecordBatchFilter(event.target.value)} className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900">
+                  <option value="ALL">全部开奖批次</option>
+                  {recordBatchOptions.map((lottery) => <option key={lottery.id} value={lottery.id}>{lottery.title} · {lottery.id}</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-black text-slate-600 dark:text-slate-300">奖品
+                <select value={recordPrizeFilter} onChange={(event) => setRecordPrizeFilter(event.target.value)} className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900">
+                  <option value="ALL">全部奖品</option>
+                  {recordPrizeOptions.map((prize) => <option key={prize.id} value={prize.id}>{prize.label}</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-black text-slate-600 dark:text-slate-300">中奖用户
+                <input value={recordUserFilter} onChange={(event) => setRecordUserFilter(event.target.value)} placeholder="用户 ID、E院 ID 或昵称" className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm dark:border-slate-700 dark:bg-slate-900" />
+              </label>
+            </div>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+              {filteredRecordLotteries.map((lottery) => (
+                <article key={lottery.id} className="rounded-xl border border-violet-200 p-4 dark:border-violet-900">
+                  <header className="grid gap-2 text-sm sm:grid-cols-2">
+                    <div><h4 className="font-black text-brand-950 dark:text-slate-100">{lottery.title}</h4><p className="mt-1 break-all text-xs font-bold text-slate-500">活动：{data.activity.title} · 活动 ID：{data.activity.id}</p></div>
+                    <div className="text-xs font-bold text-slate-600 dark:text-slate-300"><p>开奖批次 ID：<span className="break-all">{lottery.id}</span></p><p className="mt-1">开奖时间：{formatDate(lottery.drawnAt)} · 来源：{lottery.drawSource === 'ADMIN_MANUAL' ? '管理员手动开奖' : lottery.drawSource === 'SCHEDULED' ? '定时自动开奖' : '历史未记录'}</p><p className="mt-1">中奖人数：记录 {lottery.winners.length} / 批次声明 {lottery.winnerCount ?? '未记录'}</p></div>
+                  </header>
+                  {lottery.recordIntegrityIssues.length ? <ul role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-xs font-black text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{lottery.recordIntegrityIssues.map((issue) => <li key={issue}>开奖记录不完整：{issue}</li>)}</ul> : null}
+                  <div className="mt-3 space-y-3">
+                    {lottery.prizes.map((prize) => {
+                      const prizeWinners = lottery.winners.filter((winner) => winner.prizeId === prize.id)
+                      return (
+                        <section key={prize.id} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+                          <div className="flex flex-wrap items-start justify-between gap-2 text-sm">
+                            <div><h5 className="font-black text-slate-900 dark:text-slate-100">{prize.tierName || '中奖奖项'} · {prize.name}</h5><p className="mt-1 text-xs font-bold text-slate-500">{prize.prizeType === 'VIRTUAL' ? `虚拟奖励：${prize.virtualPrizeType === 'BADGE' ? prize.badge?.name || '勋章' : `挂号费 ${prize.registrationFeeAmount ?? 0}`}` : '实物奖品'} · 设定名额 {prize.quantity} · 本奖中奖人数 {prize.winnerCount}</p>{prize.description ? <p className="mt-1 whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300">{prize.description}</p> : null}</div>
+                          </div>
+                          {prizeWinners.length ? <ul className="mt-3 divide-y divide-slate-200 dark:divide-slate-800">{prizeWinners.map((winner) => <li key={winner.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+                            <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-violet-100 text-xs font-black text-violet-800 dark:bg-violet-950 dark:text-violet-200">{winner.avatarUrl ? <img src={winner.avatarUrl} alt="" className="size-full object-cover" loading="lazy" /> : winner.nickname.slice(0, 1)}</div>
+                            <div className="min-w-0 flex-1 text-xs font-bold text-slate-700 dark:text-slate-200">
+                              <p className="break-words text-sm font-black">{winner.nickname} · 用户 ID：<span className="break-all">{winner.userId}</span> · E院 ID：{winner.uid}</p>
+                              <p className="mt-1">中奖资格：已确认 · 记录创建：{formatDate(winner.createdAt)} · 中奖时间：{formatDate(winner.wonAt)}</p>
+                              <p className="mt-1">奖励发放状态：{winner.prizeType === 'VIRTUAL' ? fulfillmentLabel(winner) : `${winnerStateLabel(winner.redemptionState)}（${winner.redemptionStatus === 'REDEEMED' ? '已兑奖' : '待兑奖'}）`} · 奖励发放 / 兑奖时间：{formatDate(winner.fulfilledAt || winner.redeemedAt)}</p>
+                              {winner.fulfillmentError ? <p className="mt-1 break-words font-black text-rose-700 dark:text-rose-300">发放失败原因：{winner.fulfillmentError}</p> : null}
+                            </div>
+                            {winner.prizeType === 'VIRTUAL' && (winner.fulfillmentStatus === 'FAILED' || winner.fulfillmentStatus === 'PENDING') ? <button type="button" disabled={retryingWinnerId !== null} onClick={() => void retryWinnerFulfillment(lottery, winner.id)} className="min-h-8 rounded-full border border-violet-300 px-3 text-xs font-black text-violet-700 disabled:opacity-50">{retryingWinnerId === winner.id ? '发放中…' : '重新发放'}</button> : null}
+                          </li>)}</ul> : <p className="mt-2 text-xs font-bold text-slate-500">此奖品没有已保存的中奖用户记录。</p>}
+                        </section>
+                      )
+                    })}
+                  </div>
+                </article>
+              ))}
+              {!filteredRecordLotteries.length ? <p className="py-8 text-center text-sm font-bold text-slate-500">没有符合当前筛选条件的已开奖记录。</p> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
       {drawConfirmation ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby={`draw-dialog-title-${drawConfirmation.id}`}>
           <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900">

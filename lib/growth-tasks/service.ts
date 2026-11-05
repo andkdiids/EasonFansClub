@@ -271,7 +271,7 @@ export async function recordQualifiedPublishedPostGrowth(
   input: {
     userId: string
     postId: string
-    post: { status: unknown; moderationStatus: unknown; isDeleted: unknown }
+    post: { status: unknown; moderationStatus: unknown; isDeleted: unknown; publicationStatus: unknown; publishedAt: unknown }
     now?: Date
   },
 ) {

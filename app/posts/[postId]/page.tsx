@@ -1153,7 +1153,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canManagePost = viewerIsAdmin
   const canManageReplies = Boolean(user && await loadPostAdminPermission(user, 'reply_manage', postId))
   const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
-  const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
+  const canEditPost = Boolean(user && (canManagePost || (user.id === post.User.id && post.publicationStatus !== 'CANCELLED')))
   const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
   const detailFallbackHref = postBoardFallbackHref(post.Board?.slug)
   const publicRichContent = richResult?.valid ? richResult.value : null

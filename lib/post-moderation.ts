@@ -108,14 +108,14 @@ export function isQualifiedPublishedPost(post: {
   status: unknown
   moderationStatus: unknown
   isDeleted: unknown
-  publicationStatus?: unknown
-  publishedAt?: unknown
+  publicationStatus: unknown
+  publishedAt: unknown
 }) {
   return post.isDeleted === false
     && post.status === 'PUBLISHED'
     && post.moderationStatus === 'APPROVED'
-    && (post.publicationStatus === undefined || post.publicationStatus === 'PUBLISHED')
-    && (post.publishedAt === undefined || post.publishedAt !== null)
+    && post.publicationStatus === 'PUBLISHED'
+    && post.publishedAt != null
 }
 
 /**

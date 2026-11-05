@@ -20,6 +20,17 @@ function winnerStatusLabel(winner: NonNullable<ActivityLotteryPublicView['winner
   return '待核销后兑奖'
 }
 
+function publicRewardStatusLabel(status: ActivityLotteryPublicView['prizes'][number]['winners'][number]['rewardStatus']) {
+  if (status === 'FULFILLED') return '已发放'
+  if (status === 'FAILED') return '发放失败，请联系管理员'
+  if (status === 'PENDING') return '奖励待发放'
+  if (status === 'REDEEMABLE') return '可兑奖'
+  if (status === 'WAITING_FOR_CHECK_IN') return '待现场核销后兑奖'
+  if (status === 'EXPIRED') return '已失效'
+  if (status === 'REDEEMED') return '已兑奖'
+  return '无需自动发放'
+}
+
 export function ActivityLotteryPanel({ lotteries, isRegistered, embedded = false }: Readonly<{ lotteries: ActivityLotteryPublicView[]; isRegistered: boolean; embedded?: boolean }>) {
   if (!lotteries.length) return null
   const shellClass = embedded
@@ -42,7 +53,7 @@ export function ActivityLotteryPanel({ lotteries, isRegistered, embedded = false
                 <h4 className="break-words font-black text-[var(--foreground)]">{lottery.title}</h4>
                 {lottery.description ? <p className="mt-1 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-[var(--foreground-muted)]">{lottery.description}</p> : null}
               </div>
-              <p className="shrink-0 text-xs font-bold text-[var(--foreground-muted)]">{lottery.status === 'DRAWN' ? `已开奖${lottery.drawnAt ? ` · ${activityDateLabel(lottery.drawnAt)}` : ''}` : `开奖时间：${lottery.drawAt ? activityDateLabel(lottery.drawAt) : '待定'}`}</p>
+              <p className="shrink-0 text-xs font-bold text-[var(--foreground-muted)]">{lottery.status === 'DRAWN' ? `已开奖${lottery.drawnAt ? ` · ${activityDateLabel(lottery.drawnAt)}` : ''}` : lottery.status === 'RESULTS_UNAVAILABLE' ? '开奖记录暂不可用' : `尚未开奖${lottery.drawAt ? ` · 计划 ${activityDateLabel(lottery.drawAt)}` : ''}`}</p>
             </div>
             <ul className="mt-3 space-y-2 border-t border-[var(--border)] pt-3">
               {lottery.prizes.map((prize) => (
@@ -54,6 +65,34 @@ export function ActivityLotteryPanel({ lotteries, isRegistered, embedded = false
                 </li>
               ))}
             </ul>
+            {lottery.status === 'RESULTS_UNAVAILABLE' ? <p role="status" className="mt-3 text-xs font-bold text-[var(--foreground-muted)]">该批次存在已开奖标记，但中奖记录不完整，暂不公开，管理员可在完整开奖记录中核查。</p> : null}
+            {lottery.status === 'DRAWN' ? (
+              <section className="mt-4 border-t border-[var(--border)] pt-3" aria-label="中奖名单">
+                <h5 className="text-sm font-black text-[var(--foreground)]">中奖名单</h5>
+                {lottery.prizes.some((prize) => prize.winners.length) ? (
+                  <div className="mt-3 space-y-3">
+                    {lottery.prizes.filter((prize) => prize.winners.length).map((prize) => (
+                      <div key={prize.id} className="rounded-lg bg-[var(--surface-subtle)] p-3">
+                        <h6 className="text-xs font-black text-[var(--foreground)]">{prize.tierName || '中奖奖项'} · {prize.name}</h6>
+                        <ul className="mt-2 space-y-2">
+                          {prize.winners.map((winner, index) => (
+                            <li key={`${prize.id}:${winner.wonAt}:${index}`} className="flex items-center gap-3">
+                              <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--navigation-active)] text-xs font-black text-[var(--primary)]">
+                                {winner.avatarUrl ? <img src={winner.avatarUrl} alt="" className="size-full object-cover" loading="lazy" /> : winner.nickname.slice(0, 1)}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="break-words text-sm font-black text-[var(--foreground)]">{winner.nickname} · {winner.prizeName}</p>
+                                <p className="mt-0.5 text-xs font-bold text-[var(--foreground-muted)]">开奖时间：{activityDateLabel(lottery.drawnAt || winner.wonAt)} · {publicRewardStatusLabel(winner.rewardStatus)}{winner.rewardAt ? ` · ${activityDateLabel(winner.rewardAt)}` : ''}</p>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="mt-2 text-xs font-bold text-[var(--foreground-muted)]">当前没有可公开的中奖记录。</p>}
+              </section>
+            ) : null}
             {lottery.status === 'DRAWN' ? <p className="mt-3 text-xs font-bold text-[var(--foreground-muted)]">本次有效报名 {lottery.eligibleCount ?? 0} 人，实际中奖 {lottery.winnerCount ?? 0} 人。</p> : null}
             {lottery.winner ? <div className="mt-3 rounded-lg bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] px-3 py-2 text-sm font-black text-[var(--success)]">恭喜中奖：{lottery.winner.tierName} · {lottery.winner.prizeName} · {winnerStatusLabel(lottery.winner)}{lottery.winner.redeemedAt ? ` · ${activityDateLabel(lottery.winner.redeemedAt)}` : ''}</div> : lottery.status === 'DRAWN' && isRegistered ? <p className="mt-3 text-xs font-bold text-[var(--foreground-muted)]">本次未中奖。</p> : null}
           </article>

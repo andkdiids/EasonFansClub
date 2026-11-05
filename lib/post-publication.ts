@@ -12,6 +12,7 @@ import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
 import { isApprovedScheduledPostDue } from '@/lib/post-scheduling'
 
 const PUBLICATION_EVENT_LEASE_MS = 5 * 60 * 1000
+const PUBLICATION_EVENT_HEARTBEAT_MS = Math.floor(PUBLICATION_EVENT_LEASE_MS / 3)
 const MAX_PUBLICATION_BATCH_SIZE = 100
 const MAX_RETRY_DELAY_MS = 60 * 60 * 1000
 
@@ -109,6 +110,7 @@ async function applyPublicationDatabaseEffects(eventId: string, lockToken: strin
         isDeleted: true,
         moderationStatus: true,
         publicationStatus: true,
+        publishedAt: true,
       },
     })
 
@@ -233,9 +235,39 @@ async function failPublicationEvent(eventId: string, lockToken: string, attempts
   }
 }
 
+function startPublicationEventLeaseHeartbeat(eventId: string, lockToken: string) {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout>
+  const renew = async () => {
+    try {
+      const result = await prisma.postPublicationEvent.updateMany({
+        where: { id: eventId, status: 'PROCESSING', lockToken },
+        data: { lockedAt: new Date() },
+      })
+      if (result.count !== 1) stopped = true
+    } catch (error) {
+      console.error('[post-publication.lease-renew.failed]', { eventId, error: safePublicationError(error) })
+    } finally {
+      if (!stopped) {
+        timer = setTimeout(() => void renew(), PUBLICATION_EVENT_HEARTBEAT_MS)
+        timer.unref?.()
+      }
+    }
+  }
+  timer = setTimeout(() => void renew(), PUBLICATION_EVENT_HEARTBEAT_MS)
+  timer.unref?.()
+  return () => {
+    stopped = true
+    clearTimeout(timer)
+  }
+}
+
 async function processPublicationEvent(eventId: string, now: Date) {
   const lockToken = randomUUID()
-  const leaseBefore = new Date(now.getTime() - PUBLICATION_EVENT_LEASE_MS)
+  // `now` is the job's publication-time snapshot; a large batch can take
+  // minutes. Lease time must be based on this event's actual claim moment.
+  const claimedAt = new Date()
+  const leaseBefore = new Date(claimedAt.getTime() - PUBLICATION_EVENT_LEASE_MS)
   const claim = await prisma.postPublicationEvent.updateMany({
     where: {
       id: eventId,
@@ -245,13 +277,14 @@ async function processPublicationEvent(eventId: string, now: Date) {
         { status: 'PROCESSING', lockedAt: { lt: leaseBefore } },
       ],
     },
-    data: { status: 'PROCESSING', lockedAt: now, lockToken, lastError: null, attempts: { increment: 1 } },
+    data: { status: 'PROCESSING', lockedAt: claimedAt, lockToken, lastError: null, attempts: { increment: 1 } },
   })
   if (claim.count !== 1) return 'SKIPPED' as const
 
   const claimed = await prisma.postPublicationEvent.findFirst({ where: { id: eventId, lockToken }, select: { attempts: true } })
   if (!claimed) return 'SKIPPED' as const
 
+  const stopHeartbeat = startPublicationEventLeaseHeartbeat(eventId, lockToken)
   try {
     const post = await applyPublicationDatabaseEffects(eventId, lockToken, now)
     if (!post) return 'SKIPPED' as const
@@ -281,8 +314,10 @@ async function processPublicationEvent(eventId: string, now: Date) {
     if (completed.count !== 1) return 'SKIPPED' as const
     return 'PROCESSED' as const
   } catch (error) {
-    await failPublicationEvent(eventId, lockToken, claimed.attempts, now, error)
+    await failPublicationEvent(eventId, lockToken, claimed.attempts, new Date(), error)
     return 'FAILED' as const
+  } finally {
+    stopHeartbeat()
   }
 }
 

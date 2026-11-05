@@ -25,7 +25,13 @@ import {
 } from '@/lib/post-draft'
 import { type RichTextContent } from '@/lib/rich-text'
 import { POST_EXPIRY_OPTIONS, type PostExpiryType } from '@/lib/post-lifecycle'
-import { formatDateTimeLocalInZone, isScheduledPostTimeValid, parseDateTimeLocalInZone, POST_SCHEDULE_MINIMUM_LEAD_TIME_MS } from '@/lib/post-scheduling'
+import {
+  getMinimumScheduledPostLocal,
+  getScheduledPostDateBounds,
+  getScheduledPostValidationError,
+  getScheduledPostValidationMessage,
+  parseDateTimeLocalInZone,
+} from '@/lib/post-scheduling'
 
 type Board = { id: string; name: string; slug: string }
 
@@ -37,9 +43,11 @@ type DraftConflict = {
 export function PostCreateForm({
   userId,
   boards,
+  canScheduleNextDay,
+  initialScheduleNow,
   initialBoardSlug,
   returnTo = null,
-}: Readonly<{ userId: string; boards: Board[]; initialBoardSlug?: string; returnTo?: string | null }>) {
+}: Readonly<{ userId: string; boards: Board[]; canScheduleNextDay: boolean; initialScheduleNow: string; initialBoardSlug?: string; returnTo?: string | null }>) {
   const router = useRouter()
   const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const editorRef = useRef<RichTextEditorHandle>(null)
@@ -52,6 +60,7 @@ export function PostCreateForm({
   const [expiryType, setExpiryType] = useState<PostExpiryType | ''>('')
   const [publishMode, setPublishMode] = useState<'IMMEDIATE' | 'SCHEDULED'>('IMMEDIATE')
   const [scheduledPublishLocal, setScheduledPublishLocal] = useState('')
+  const [scheduleNow, setScheduleNow] = useState(() => new Date(initialScheduleNow))
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -85,6 +94,21 @@ export function PostCreateForm({
   const conflictStorageKey = postDraftConflictStorageKey(userId)
   const validBoardIds = useMemo(() => boards.map((board) => board.id), [boards])
   const validBoardIdsKey = validBoardIds.join('|')
+  const scheduleDateBounds = getScheduledPostDateBounds(scheduleNow, canScheduleNextDay)
+  const minimumScheduledLocal = getMinimumScheduledPostLocal(scheduleNow)
+  const maximumScheduledLocal = `${scheduleDateBounds.maxDate}T23:59`
+  const scheduleWindowAvailable = minimumScheduledLocal <= maximumScheduledLocal
+  const liveScheduleValidationError = scheduledPublishLocal
+    ? (() => {
+        const scheduledAt = parseDateTimeLocalInZone(scheduledPublishLocal)
+        return scheduledAt ? getScheduledPostValidationError(scheduledAt, canScheduleNextDay, scheduleNow) : 'SCHEDULE_INVALID'
+      })()
+    : null
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setScheduleNow(new Date()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const currentPayload = useCallback((): PostDraftPayload => {
     return {
@@ -404,8 +428,9 @@ export function PostCreateForm({
         setErrors({ scheduledPublishAt: '请选择有效的计划发布时间' })
         return
       }
-      if (!isScheduledPostTimeValid(scheduledPublishAt)) {
-        setErrors({ scheduledPublishAt: '计划发布时间至少需要在 30 分钟后' })
+      const validationError = getScheduledPostValidationError(scheduledPublishAt, canScheduleNextDay, new Date())
+      if (validationError) {
+        setErrors({ scheduledPublishAt: getScheduledPostValidationMessage(validationError) })
         return
       }
     }
@@ -551,13 +576,26 @@ export function PostCreateForm({
             <input
               type="datetime-local"
               step={60}
-              min={formatDateTimeLocalInZone(new Date(Math.ceil((Date.now() + POST_SCHEDULE_MINIMUM_LEAD_TIME_MS) / 60_000) * 60_000))}
+              min={minimumScheduledLocal}
+              max={maximumScheduledLocal}
               value={scheduledPublishLocal}
-              onChange={(event) => setScheduledPublishLocal(event.target.value)}
+              onChange={(event) => {
+                setScheduledPublishLocal(event.target.value)
+                setErrors((current) => {
+                  const next = { ...current }
+                  delete next.scheduledPublishAt
+                  return next
+                })
+              }}
               className="mt-2 w-full border border-sky-100 px-3 py-2"
+              disabled={!scheduleWindowAvailable}
               required
             />
-            <span className="mt-1 block text-xs font-bold text-slate-400">审核通过后，在计划时间自动公开；计划时间至少在 30 分钟后。</span>
+            <span className="mt-1 block text-xs font-bold text-slate-400">
+              审核通过后，在计划时间自动公开；至少提前 30 分钟。{canScheduleNextDay ? '管理员可预约北京时间当天或第二天。' : '普通用户只能预约北京时间当天。'}
+            </span>
+            {!scheduleWindowAvailable ? <span className="mt-2 block text-sm font-bold text-red-600" role="alert">当天剩余时间不足 30 分钟，当前没有符合条件的可预约时间。</span> : null}
+            {liveScheduleValidationError ? <span className="mt-2 block text-sm font-bold text-red-600" role="alert">{getScheduledPostValidationMessage(liveScheduleValidationError)}</span> : null}
             {errors.scheduledPublishAt ? <span className="mt-2 block text-sm font-bold text-red-600">{errors.scheduledPublishAt}</span> : null}
           </label>
         ) : null}

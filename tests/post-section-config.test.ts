@@ -60,7 +60,9 @@ test('发布 API 将配置选项解析成真实 Board，并保留公告区权限
   assert.match(route, /prisma\.board\.upsert\(/)
   assert.match(route, /boardId: board\.id/)
   assert.match(route, /board\.slug === 'announcements' && !await hasAdminPermission\(user, 'post_manage'\)/)
-  assert.match(route, /runPostCreateSideEffect\('board-counter'[\s\S]*?where: \{ id: board\.id \}/)
+  assert.match(route, /await tx\.postPublicationEvent\.create/)
+  assert.doesNotMatch(route, /runPostCreateSideEffect\('board-counter'/)
+  assert.match(read('lib/post-publication.ts'), /const publicPostCount = await tx\.post\.count\([\s\S]*await tx\.board\.update\(\{ where: \{ id: post\.boardId \}, data: \{ postCount: publicPostCount \} \}\)/)
 })
 
 test('编辑 API 支持两个方向切换且始终把真实 Board ID 写入帖子', () => {

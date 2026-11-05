@@ -3,6 +3,12 @@ export const POST_SCHEDULE_MINIMUM_LEAD_TIME_MS = 30 * 60 * 1000
 
 export type PostPublicationStatus = 'WAITING_REVIEW' | 'SCHEDULED' | 'PUBLISHED' | 'CANCELLED'
 export type PostPublishMode = 'IMMEDIATE' | 'SCHEDULED'
+export type ScheduledPostValidationError =
+  | 'SCHEDULE_INVALID'
+  | 'SCHEDULE_DATE_PASSED'
+  | 'SCHEDULE_NEXT_DAY_FORBIDDEN'
+  | 'SCHEDULE_DATE_TOO_FAR'
+  | 'SCHEDULE_TOO_SOON'
 
 type DateTimeParts = {
   year: number
@@ -76,6 +82,58 @@ export function formatDateTimeLocalInZone(date: Date, timeZone = POST_SCHEDULE_T
   const parts = dateTimePartsInZone(date, timeZone)
   const two = (value: number) => String(value).padStart(2, '0')
   return `${String(parts.year).padStart(4, '0')}-${two(parts.month)}-${two(parts.day)}T${two(parts.hour)}:${two(parts.minute)}`
+}
+
+function dateOnlyInZone(date: Date, timeZone = POST_SCHEDULE_TIME_ZONE) {
+  return formatDateTimeLocalInZone(date, timeZone).slice(0, 10)
+}
+
+function addCalendarDays(dateOnly: string, days: number) {
+  const [year, month, day] = dateOnly.split('-').map(Number)
+  const next = new Date(Date.UTC(year, month - 1, day + days))
+  return `${String(next.getUTCFullYear()).padStart(4, '0')}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`
+}
+
+/** Calendar selection bounds are product-zone dates, independent of host/browser timezone. */
+export function getScheduledPostDateBounds(now = new Date(), canScheduleNextDay = false) {
+  const today = dateOnlyInZone(now)
+  return {
+    today,
+    maxDate: canScheduleNextDay ? addCalendarDays(today, 1) : today,
+  }
+}
+
+/** Keep the datetime-local minimum at minute precision while honoring the full 30-minute lead. */
+export function getMinimumScheduledPostLocal(now = new Date()) {
+  const minimumEpoch = Math.ceil((now.getTime() + POST_SCHEDULE_MINIMUM_LEAD_TIME_MS) / 60_000) * 60_000
+  return formatDateTimeLocalInZone(new Date(minimumEpoch))
+}
+
+/** Validate a requested instant against the caller's server-derived calendar-date allowance. */
+export function getScheduledPostValidationError(
+  scheduledAt: Date,
+  canScheduleNextDay: boolean,
+  now = new Date(),
+): ScheduledPostValidationError | null {
+  if (!Number.isFinite(scheduledAt.getTime())) return 'SCHEDULE_INVALID'
+
+  const { today, maxDate } = getScheduledPostDateBounds(now, canScheduleNextDay)
+  const scheduledDate = dateOnlyInZone(scheduledAt)
+  if (scheduledDate < today) return 'SCHEDULE_DATE_PASSED'
+  if (scheduledDate > today && !canScheduleNextDay) return 'SCHEDULE_NEXT_DAY_FORBIDDEN'
+  if (scheduledDate > maxDate) return 'SCHEDULE_DATE_TOO_FAR'
+  if (!isScheduledPostTimeValid(scheduledAt, now)) return 'SCHEDULE_TOO_SOON'
+  return null
+}
+
+export function getScheduledPostValidationMessage(error: ScheduledPostValidationError) {
+  switch (error) {
+    case 'SCHEDULE_INVALID': return '请选择有效的计划发布时间'
+    case 'SCHEDULE_DATE_PASSED': return '计划发布时间必须是北京时间当天或允许预约的次日'
+    case 'SCHEDULE_NEXT_DAY_FORBIDDEN': return '普通用户只能预约北京时间当天'
+    case 'SCHEDULE_DATE_TOO_FAR': return '管理员最多只能预约北京时间第二天'
+    case 'SCHEDULE_TOO_SOON': return '计划发布时间至少需要在 30 分钟后'
+  }
 }
 
 /** Format user-visible schedule times in the site's Shanghai time zone. */

@@ -62,7 +62,7 @@ test('编辑服务端记录阶段和 Prisma 错误，并返回可识别的业务
 
 test('编辑不触发发帖奖励、频率限制或重复创建帖子', () => {
   assert.doesNotMatch(editHandler, /createPost\(/)
-  assert.doesNotMatch(editHandler, /registerFee|registrationFee|reward|awardExperience|dailyPostLimit|rateLimit/i)
+  assert.doesNotMatch(editHandler, /registerFee|registrationFee|awardExperience|recordQualifiedPublishedPostGrowth|dailyPostLimit|rateLimit/i)
   assert.match(editHandler, /tx\.post\.update\(/)
   assert.doesNotMatch(editHandler, /tx\.post\.create\(/)
 })
@@ -73,7 +73,7 @@ test('桌面端遗留操作区为作者/管理员提供编辑入口，且与移�
   assert.match(detail, /post-detail-legacy-actions/)
   assert.match(detail, /canEditPost \? \([\s\S]*?Link href=\{postEditHref\(post\.id, returnTo\)\}/)
   // 编辑权限统一：作者本人或拥有 post_manage 权限的管理员，不依赖旧管理员字段。
-  assert.match(detail, /const canEditPost = Boolean\(user && \(user\.id === post\.User\.id \|\| canManagePost\)\)/)
+  assert.match(detail, /const canEditPost = Boolean\(user && \(canManagePost \|\| \(user\.id === post\.User\.id && post\.publicationStatus !== 'CANCELLED'\)\)\)/)
   assert.match(detail, /const viewerIsAdmin = Boolean\(user && await loadPostAdminPermission\(user, 'post_manage', postId\)\)/)
   assert.match(detail, /const canManagePost = viewerIsAdmin/)
 })

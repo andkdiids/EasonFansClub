@@ -177,7 +177,13 @@ test('发布帖子只认统一公开资格，普通待审不会奖励，免审�
   const postRoute = read('app/api/posts/route.ts')
   const reviewRoute = read('app/api/admin/posts/review/route.ts')
   const publish = getGrowthTask('PUBLISH_POST_ACTIVE')
-  const post = (status: string, moderationStatus: string, isDeleted = false) => ({ status, moderationStatus, isDeleted })
+  const post = (
+    status: string,
+    moderationStatus: string,
+    isDeleted = false,
+    publicationStatus = status === 'PUBLISHED' ? 'PUBLISHED' : 'WAITING_REVIEW',
+    publishedAt: Date | null = status === 'PUBLISHED' ? new Date('2026-11-05T00:00:00.000Z') : null,
+  ) => ({ status, moderationStatus, isDeleted, publicationStatus, publishedAt })
   assert.equal(publish?.reward, 2)
   assert.equal(publish?.dailyCap, 1)
   assert.equal(publish?.weeklyCap, 7)
@@ -186,10 +192,15 @@ test('发布帖子只认统一公开资格，普通待审不会奖励，免审�
   assert.equal(isQualifiedPublishedPost(post('PUBLISHED', 'PENDING')), false)
   assert.equal(isQualifiedPublishedPost(post('PUBLISHED', 'REJECTED')), false)
   assert.equal(isQualifiedPublishedPost(post('PUBLISHED', 'APPROVED', true)), false)
-  assert.match(helper, /isDeleted === false && post\.status === 'PUBLISHED' && post\.moderationStatus === 'APPROVED'/)
+  assert.equal(isQualifiedPublishedPost(post('DRAFT', 'APPROVED', false, 'SCHEDULED', null)), false)
+  assert.equal(isQualifiedPublishedPost(post('PUBLISHED', 'APPROVED', false, 'PUBLISHED', null)), false)
+  assert.equal(isQualifiedPublishedPost({ ...post('PUBLISHED', 'APPROVED'), publishedAt: undefined }), false)
+  assert.match(helper, /post\.moderationStatus === 'APPROVED'[\s\S]*post\.publicationStatus === 'PUBLISHED'[\s\S]*post\.publishedAt != null/)
   assert.match(service, /stableBusinessKey\(\['published-post', input\.userId, input\.postId\]\)/)
   assert.match(service, /capWindows/)
-  assert.match(postRoute, /moderationStatus === 'APPROVED'[\s\S]*recordQualifiedPublishedPostGrowth/)
-  assert.match(reviewRoute, /status === 'APPROVED'[\s\S]*recordQualifiedPublishedPostGrowth/)
+  assert.doesNotMatch(postRoute, /recordQualifiedPublishedPostGrowth/)
+  assert.match(postRoute, /await tx\.postPublicationEvent\.create/)
+  assert.match(reviewRoute, /result\.publishesNow[\s\S]*processPostPublicationEventForPost\(postId, result\.reviewedAt\)/)
+  assert.match(read('lib/post-publication.ts'), /recordQualifiedPublishedPostGrowth\(tx/)
   assert.doesNotMatch(service, /role === ['"]ADMIN['"]|approvedById|ReviewLog/)
 })

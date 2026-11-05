@@ -2600,6 +2600,7 @@ model Lottery {
   drawnAt            DateTime?
   cancelledAt        DateTime?
   algorithmVersion   String?
+  drawSource         String?                            @db.VarChar(32)
   createdById        String?
   Activity           Activity?                          @relation(fields: [activityId], references: [id])
   CreatedBy          User?                              @relation("LotteryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)

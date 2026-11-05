@@ -4,7 +4,11 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   formatDateTimeLocalInZone,
+  getMinimumScheduledPostLocal,
   getPostPublicationLabel,
+  getScheduledPostDateBounds,
+  getScheduledPostValidationError,
+  getScheduledPostValidationMessage,
   isApprovedScheduledPostDue,
   isCancellableApprovedSchedule,
   isScheduledPostTimeValid,
@@ -23,6 +27,54 @@ test('minimum schedule lead time accepts the exact 30 minute boundary only', () 
   assert.equal(isScheduledPostTimeValid(new Date(now.getTime() + POST_SCHEDULE_MINIMUM_LEAD_TIME_MS - 1), now), false)
 })
 
+test('schedule calendar-date permissions allow ordinary users today and admins through tomorrow only', () => {
+  const now = new Date('2026-11-05T12:00:00.000Z')
+  const sameDay = parseDateTimeLocalInZone('2026-11-05T21:00')!
+  const nextDay = parseDateTimeLocalInZone('2026-11-06T00:30')!
+  const thirdDay = parseDateTimeLocalInZone('2026-11-07T12:00')!
+
+  assert.equal(getScheduledPostValidationError(sameDay, false, now), null)
+  assert.equal(getScheduledPostValidationError(nextDay, false, now), 'SCHEDULE_NEXT_DAY_FORBIDDEN')
+  assert.equal(getScheduledPostValidationMessage('SCHEDULE_NEXT_DAY_FORBIDDEN'), '普通用户只能预约北京时间当天')
+  assert.equal(getScheduledPostValidationError(sameDay, true, now), null)
+  assert.equal(getScheduledPostValidationError(nextDay, true, now), null)
+  assert.equal(getScheduledPostValidationError(thirdDay, true, now), 'SCHEDULE_DATE_TOO_FAR')
+  assert.deepEqual(getScheduledPostDateBounds(now, false), { today: '2026-11-05', maxDate: '2026-11-05' })
+  assert.deepEqual(getScheduledPostDateBounds(now, true), { today: '2026-11-05', maxDate: '2026-11-06' })
+})
+
+test('23:29, 23:30, and 23:31 scheduling honors minute precision, next-day permission, and the lead time', () => {
+  const at2329 = parseDateTimeLocalInZone('2026-11-05T23:29')!
+  const at2330 = parseDateTimeLocalInZone('2026-11-05T23:30')!
+  const at2331 = parseDateTimeLocalInZone('2026-11-05T23:31')!
+  const today2359 = parseDateTimeLocalInZone('2026-11-05T23:59')!
+  const tomorrow0000 = parseDateTimeLocalInZone('2026-11-06T00:00')!
+  const tomorrow0001 = parseDateTimeLocalInZone('2026-11-06T00:01')!
+
+  assert.equal(getScheduledPostValidationError(today2359, false, at2329), null)
+  assert.equal(getScheduledPostValidationError(today2359, false, at2330), 'SCHEDULE_TOO_SOON')
+  assert.equal(getScheduledPostValidationError(today2359, false, at2331), 'SCHEDULE_TOO_SOON')
+  assert.equal(getScheduledPostValidationError(tomorrow0000, false, at2329), 'SCHEDULE_NEXT_DAY_FORBIDDEN')
+  assert.equal(getScheduledPostValidationError(tomorrow0000, true, at2329), null)
+  assert.equal(getScheduledPostValidationError(tomorrow0000, true, at2330), null)
+  assert.equal(getScheduledPostValidationError(tomorrow0000, true, at2331), 'SCHEDULE_TOO_SOON')
+  assert.equal(getScheduledPostValidationError(tomorrow0001, true, at2331), null)
+  assert.equal(getMinimumScheduledPostLocal(at2330), '2026-11-06T00:00')
+})
+
+test('Shanghai date bounds roll over at Beijing midnight and UTC serialization preserves the authorized wall date', () => {
+  const beforeMidnight = new Date('2026-11-05T15:59:59.000Z')
+  const afterMidnight = new Date('2026-11-05T16:00:00.000Z')
+  assert.deepEqual(getScheduledPostDateBounds(beforeMidnight, false), { today: '2026-11-05', maxDate: '2026-11-05' })
+  assert.deepEqual(getScheduledPostDateBounds(afterMidnight, false), { today: '2026-11-06', maxDate: '2026-11-06' })
+
+  const tomorrowLocal = parseDateTimeLocalInZone('2026-11-06T00:30')!
+  assert.equal(tomorrowLocal.toISOString(), '2026-11-05T16:30:00.000Z')
+  const apiValue = parseScheduledPublishAt(tomorrowLocal.toISOString())!
+  assert.equal(getScheduledPostValidationError(apiValue, false, beforeMidnight), 'SCHEDULE_NEXT_DAY_FORBIDDEN')
+  assert.equal(getScheduledPostValidationError(apiValue, true, beforeMidnight), null)
+})
+
 test('Shanghai datetime-local values preserve arbitrary minutes and map to UTC', () => {
   const local = '2026-11-05T14:37'
   const parsed = parseDateTimeLocalInZone(local)
@@ -30,6 +82,14 @@ test('Shanghai datetime-local values preserve arbitrary minutes and map to UTC',
   assert.equal(parsed.toISOString(), '2026-11-05T06:37:00.000Z')
   assert.equal(formatDateTimeLocalInZone(parsed), local)
   assert.equal(parseDateTimeLocalInZone('2026-02-30T14:37'), null)
+})
+
+test('zoned datetime parsing handles daylight-saving gaps and repeated minutes deterministically', () => {
+  assert.equal(parseDateTimeLocalInZone('2026-03-08T02:30', 'America/New_York'), null)
+  const repeated = parseDateTimeLocalInZone('2026-11-01T01:30', 'America/New_York')
+  assert.ok(repeated)
+  assert.equal(repeated.toISOString(), '2026-11-01T05:30:00.000Z')
+  assert.equal(formatDateTimeLocalInZone(repeated, 'America/New_York'), '2026-11-01T01:30')
 })
 
 test('API schedule timestamps require explicit, valid UTC offsets', () => {
@@ -121,4 +181,38 @@ test('publication side effects are tied to the unique durable event', () => {
   assert.match(publisher, /const notificationKey = `post-published:\$\{post\.id\}`/)
   assert.match(publisher, /where: \{ id: eventId, status: 'PROCESSING', lockToken \}/)
   assert.match(publisher, /status: 'COMPLETED'/)
+})
+
+test('publication event claims use fresh lease time and renew without overlapping heartbeat requests', () => {
+  const publisher = read('lib/post-publication.ts')
+  assert.match(publisher, /const claimedAt = new Date\(\)/)
+  assert.match(publisher, /lockedAt: claimedAt/)
+  assert.match(publisher, /const renew = async \(\) => \{[\s\S]*await prisma\.postPublicationEvent\.updateMany\([\s\S]*lockedAt: new Date\(\)/)
+  assert.match(publisher, /timer = setTimeout\(\(\) => void renew\(\), PUBLICATION_EVENT_HEARTBEAT_MS\)/)
+  assert.match(publisher, /finally \{[\s\S]*stopHeartbeat\(\)/)
+})
+
+test('owner edits requeue publication effects for re-review and cannot reopen a cancelled schedule', () => {
+  const editRoute = read('app/api/posts/[postId]/route.ts')
+  const postDetail = read('app/posts/[postId]/page.tsx')
+  const reviewRoute = read('app/api/admin/posts/review/route.ts')
+  assert.match(editRoute, /lockedExisting\.publicationStatus === 'CANCELLED'/)
+  assert.match(editRoute, /tx\.postPublicationEvent\.updateMany\([\s\S]*status: \{ not: 'WAITING' \}[\s\S]*status: 'WAITING'[\s\S]*lockToken: null[\s\S]*completedAt: null/)
+  assert.match(editRoute, /POST_SCHEDULE_CANCELLED/)
+  assert.match(postDetail, /post\.publicationStatus !== 'CANCELLED'/)
+  assert.match(reviewRoute, /publicationEvent\.status === 'WAITING'/)
+})
+
+test('the server derives next-day access from post_manage and the form refreshes Shanghai date limits', () => {
+  const postApi = read('app/api/posts/route.ts')
+  const createPage = read('app/posts/new/page.tsx')
+  const createForm = read('components/PostCreateForm.tsx')
+  assert.match(postApi, /publishMode === 'SCHEDULED' && await hasAdminPermission\(user, 'post_manage'\)/)
+  assert.match(postApi, /getScheduledPostValidationError\(requestedSchedule, canScheduleNextDay, createdAt\)/)
+  assert.match(postApi, /status: scheduleError === 'SCHEDULE_NEXT_DAY_FORBIDDEN' \? 403 : 400/)
+  assert.doesNotMatch(postApi, /body\.(?:isAdmin|role|canScheduleNextDay)/)
+  assert.match(createPage, /canScheduleNextDay=\{canPostAnnouncement\}/)
+  assert.match(createForm, /max=\{maximumScheduledLocal\}/)
+  assert.match(createForm, /setInterval\(\(\) => setScheduleNow\(new Date\(\)\), 15_000\)/)
+  assert.match(createForm, /getScheduledPostValidationError\(scheduledPublishAt, canScheduleNextDay, new Date\(\)\)/)
 })

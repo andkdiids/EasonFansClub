@@ -83,7 +83,7 @@ test('活动取消只处理未核销报名，但会让活动二维码和抽奖�
   assert.match(redemption, /if \(current\.Activity\.status === 'CANCELLED'\).*ACTIVITY_CANCELLED/)
   assert.match(button, /const isActivityCancelled = activity\.status === 'CANCELLED'/)
   assert.match(button, /const currentLabel = isRegistered && registration\?\.verifiedAt[\s\S]*?已核销/)
-  assert.match(detail, /activity\.status !== 'CANCELLED' && lotteries\.length/)
+  assert.match(detail, /activity\.status !== 'CANCELLED' \|\| lotteries\.some\(\(lottery\) => lottery\.status === 'DRAWN'\)/)
   assert.doesNotMatch(service, /activityRegistration\.delete|tx\.activityRegistration\.delete/)
 })
 

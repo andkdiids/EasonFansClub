@@ -37,7 +37,7 @@ import { calculatePostExpiresAt, parsePostExpiryType } from '@/lib/post-lifecycl
 import { collectPostTopicNames, PostTopicInputError, syncPostTopics } from '@/lib/post-topics'
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { expireTopicActivityPins } from '@/lib/topic-activity'
-import { isScheduledPostTimeValid, parseScheduledPublishAt, type PostPublishMode } from '@/lib/post-scheduling'
+import { getScheduledPostValidationError, getScheduledPostValidationMessage, parseScheduledPublishAt, type PostPublishMode, type ScheduledPostValidationError } from '@/lib/post-scheduling'
 import { processPostPublicationEventForPost } from '@/lib/post-publication'
 
 function stripUnsafeHtml(value: string) {
@@ -54,7 +54,7 @@ function createSummary(content: string, length = 180) {
 }
 
 class PostCreateBusinessError extends Error {
-  constructor(readonly reason: 'AUTH_SESSION_EXPIRED' | 'SCHEDULE_TOO_SOON') {
+  constructor(readonly reason: 'AUTH_SESSION_EXPIRED' | ScheduledPostValidationError) {
     super(reason)
     this.name = 'PostCreateBusinessError'
   }
@@ -363,8 +363,13 @@ export async function POST(request: Request) {
   if (publishMode === 'IMMEDIATE' && body.scheduledPublishAt !== undefined && body.scheduledPublishAt !== null && body.scheduledPublishAt !== '') {
     return NextResponse.json({ message: '立即发布不能包含计划发布时间' }, { status: 400 })
   }
-  if (requestedSchedule && !isScheduledPostTimeValid(requestedSchedule)) {
-    return NextResponse.json({ message: '计划发布时间至少需要在 30 分钟后', errors: { scheduledPublishAt: '计划发布时间至少需要在 30 分钟后' } }, { status: 400 })
+  const canScheduleNextDay = publishMode === 'SCHEDULED' && await hasAdminPermission(user, 'post_manage')
+  if (requestedSchedule) {
+    const scheduleError = getScheduledPostValidationError(requestedSchedule, canScheduleNextDay)
+    if (scheduleError) {
+      const message = getScheduledPostValidationMessage(scheduleError)
+      return NextResponse.json({ code: scheduleError, message, errors: { scheduledPublishAt: message } }, { status: scheduleError === 'SCHEDULE_NEXT_DAY_FORBIDDEN' ? 403 : 400 })
+    }
   }
 
   try {
@@ -456,8 +461,9 @@ export async function POST(request: Request) {
       const createdAt = new Date()
       // Repeat the server-clock boundary check immediately before persistence
       // so lengthy moderation/reference checks cannot consume the lead time.
-      if (requestedSchedule && !isScheduledPostTimeValid(requestedSchedule, createdAt)) {
-        throw new PostCreateBusinessError('SCHEDULE_TOO_SOON')
+      if (requestedSchedule) {
+        const scheduleError = getScheduledPostValidationError(requestedSchedule, canScheduleNextDay, createdAt)
+        if (scheduleError) throw new PostCreateBusinessError(scheduleError)
       }
       phase = 'post-transaction.user-state'
       const activeUser = await tx.user.findFirst({
@@ -572,8 +578,9 @@ export async function POST(request: Request) {
     if (error instanceof PostCreateBusinessError && error.reason === 'AUTH_SESSION_EXPIRED') {
       return unauthenticatedResponse('登录状态已失效，请重新登录')
     }
-    if (error instanceof PostCreateBusinessError && error.reason === 'SCHEDULE_TOO_SOON') {
-      return NextResponse.json({ message: '计划发布时间至少需要在 30 分钟后', errors: { scheduledPublishAt: '计划发布时间至少需要在 30 分钟后' } }, { status: 400 })
+    if (error instanceof PostCreateBusinessError && error.reason !== 'AUTH_SESSION_EXPIRED') {
+      const message = getScheduledPostValidationMessage(error.reason)
+      return NextResponse.json({ code: error.reason, message, errors: { scheduledPublishAt: message } }, { status: error.reason === 'SCHEDULE_NEXT_DAY_FORBIDDEN' ? 403 : 400 })
     }
     const code = prismaErrorCode(error)
     if (code === 'P2002') {
