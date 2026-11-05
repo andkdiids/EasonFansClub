@@ -120,6 +120,9 @@ export type ReviewItem = {
   authorId: string | null
   createdAt: string
   status: ReviewStatus
+  publicationStatus?: 'WAITING_REVIEW' | 'SCHEDULED' | 'PUBLISHED' | 'CANCELLED'
+  scheduledPublishAt?: string | null
+  publishedAt?: string | null
   cover: string | null
   summary: string
   body?: string

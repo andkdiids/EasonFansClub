@@ -17,6 +17,7 @@ const postActions = read('components/PostActions.tsx')
 const publicModulesRoute = read('app/api/users/[userId]/public-modules/route.ts')
 const discoveryHome = read('components/ForumDiscoveryHome.tsx')
 const notifications = read('lib/notifications.ts')
+const publicationService = read('lib/post-publication.ts')
 
 test('审核状态只写入 Post.moderationStatus，并清理互斥审核元数据', () => {
   const reviewedAt = new Date('2026-08-10T10:00:00.000Z')
@@ -54,7 +55,9 @@ test('审核 API 具备四种状态迁移、幂等守卫和并发锁', () => {
   assert.match(reviewRoute, /canTransitionPostModerationStatus\(current\.moderationStatus, status\)/)
   assert.match(reviewRoute, /moderationStatus: current\.moderationStatus/)
   assert.match(reviewRoute, /reviewStatus === 'APPROVED'/)
-  assert.match(reviewRoute, /writeApprovalFriendActivity/)
+  assert.match(reviewRoute, /processPostPublicationEventForPost/)
+  assert.match(publicationService, /friendActivity\.create/)
+  assert.match(publicationService, /postPublicationEvent\.updateMany/)
   assert.doesNotMatch(reviewRoute, /tx\.notification\.create/)
   assert.match(reviewRoute, /previousStatus: result\.previousStatus/)
   assert.match(reviewRoute, /POST_REVIEW_ALREADY_REVIEWED/)
@@ -73,7 +76,14 @@ test('统一审核中心的状态按钮与服务端状态迁移保持一致', ()
 })
 
 test('帖子详情和公开查询使用同一审核访问规则', () => {
-  assert.deepEqual(publicPostWhere, { concertShowId: null, isDeleted: false, status: 'PUBLISHED', moderationStatus: { in: ['APPROVED', 'VIOLATION'] } })
+  assert.deepEqual(publicPostWhere, {
+    concertShowId: null,
+    isDeleted: false,
+    status: 'PUBLISHED',
+    publicationStatus: 'PUBLISHED',
+    publishedAt: { not: null },
+    moderationStatus: { in: ['APPROVED', 'VIOLATION'] },
+  })
   assert.equal(getPostModerationAccess('APPROVED', false), 'VISIBLE')
   assert.equal(getPostModerationAccess('PENDING', false), 'PENDING')
   assert.equal(getPostModerationAccess('REJECTED', false), 'REJECTED')

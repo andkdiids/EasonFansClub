@@ -1,0 +1,8 @@
+# Install after the app migration and release have been reviewed and deployed.
+# The env file must be root-readable only and export DAILY_JOB_SECRET. The job
+# uses the same shared secret as the existing protected daily-job endpoints.
+# Alert on daemon.err messages with the easonfansclub-scheduled-post-publication
+# syslog tag, and monitor the dedicated log below.
+CRON_TZ=Asia/Shanghai
+
+* * * * * appuser . /etc/eason-fans-club/birthday-job.env && /bin/sh /home/apps/easonfansclub/current/scripts/run-scheduled-post-publication-job.sh >> /var/log/eason-fans-club/scheduled-post-publication.log 2>&1
