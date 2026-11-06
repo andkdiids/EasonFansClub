@@ -1,0 +1,330 @@
+name: Unified release CI
+
+# Full, unweakened gate suite for the unified scheduled-post-publication +
+# activity-lottery-records release. Every gate is an independent job so that
+# each one reports its own real exit code even when another gate fails.
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      checkout_ref:
+        description: 'Optional ref to check out (used for an identical Linux main-baseline comparison). Leave empty for the dispatched ref.'
+        required: false
+        default: ''
+
+# Least privilege: this workflow only reads the repository. It never pushes,
+# never writes to a production database and never reads production secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: unified-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  CI: '1'
+  # Schema-only placeholder. These gates do not connect to any real database.
+  # No production DATABASE_URL and no production credentials are used here.
+  DATABASE_URL: mysql://schema_validate_only:placeholder@127.0.0.1:3306/schema_validate_only
+
+jobs:
+  prisma:
+    name: Prisma validate + generate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prisma validate
+      - name: Prisma generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prisma generate
+
+  typecheck:
+    name: TypeScript (tsc --noEmit)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate (required by generated client types)
+        shell: bash
+        run: pnpm exec prisma generate
+      - name: TypeScript check
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec tsc --noEmit
+
+  eslint:
+    name: ESLint (full repository)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: ESLint
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm lint
+
+  # The single-process `pnpm test` run deterministically hung after subtest
+  # 2372: tests/instagram-sync-worker-entrypoint.test.ts left tsx/esbuild
+  # grandchildren holding the stdio pipes open. That teardown is fixed, and the
+  # full, unfiltered suite is now split into four deterministic round-robin
+  # shards. Each shard reports its own REAL exit code, exact file manifest,
+  # complete TAP log and failed subtest names. Nothing is skipped, filtered,
+  # retried or marked continue-on-error.
+  tests:
+    name: Full test suite (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        shell: bash
+        run: pnpm exec prisma generate
+      # A workflow_dispatch main-baseline run checks out main, which does not
+      # contain the shard runner yet (it is introduced by this PR). Materialize
+      # the runner from this SAME workflow ref so the baseline uses identical
+      # tooling, while every test file still comes from the baseline checkout.
+      # This never runs for pull_request events.
+      - name: Materialize workflow-owned shard runner for baseline comparisons
+        if: ${{ github.event.inputs.checkout_ref != '' && hashFiles('scripts/test-shard.mjs') == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REF: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scripts
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${{ github.repository }}/contents/scripts/test-shard.mjs?ref=${WORKFLOW_REF}" \
+            > scripts/test-shard.mjs
+          [[ -s scripts/test-shard.mjs ]] || {
+            echo "::error::Unable to materialize the shard runner for the baseline checkout."
+            exit 1
+          }
+          echo "SHARD_RUNNER_SOURCE=WORKFLOW_REF:${WORKFLOW_REF}"
+      - name: Run unfiltered test shard ${{ matrix.shard }}/4
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-shard-results
+          node scripts/test-shard.mjs --cli run \
+            --count 4 \
+            --index "${{ matrix.shard }}" \
+            --root "$GITHUB_WORKSPACE" \
+            --out "$GITHUB_WORKSPACE/test-shard-results" \
+            --timeout-ms 120000 \
+            --max-wall-ms 2400000
+      - name: Upload shard evidence (also on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-shard-${{ matrix.shard }}
+          path: |
+            test-shard-results/shard-${{ matrix.shard }}.files.json
+            test-shard-results/shard-${{ matrix.shard }}.result.json
+            test-shard-results/shard-${{ matrix.shard }}.tap.log
+          if-no-files-found: error
+          retention-days: 14
+
+  # Aggregation gate: re-computes the plan from this exact checkout and fails
+  # on any missing/duplicated/extra test file, any non-zero shard exit code,
+  # any signal, any wall timeout, or any missing artifact. A cancelled or
+  # timed-out shard can therefore never be reported as a pass.
+  tests-gate:
+    name: Full test suite (coverage + exit-code gate)
+    needs: [tests]
+    if: always()
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download all shard evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-shard-*
+          merge-multiple: true
+          path: test-shard-results
+      # See the equivalent step in `tests`: baseline checkouts need the runner
+      # too, but the canonical test file list is still read from the baseline.
+      - name: Materialize workflow-owned shard runner for baseline comparisons
+        if: ${{ github.event.inputs.checkout_ref != '' && hashFiles('scripts/test-shard.mjs') == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REF: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scripts
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${{ github.repository }}/contents/scripts/test-shard.mjs?ref=${WORKFLOW_REF}" \
+            > scripts/test-shard.mjs
+          [[ -s scripts/test-shard.mjs ]] || {
+            echo "::error::Unable to materialize the shard runner for the baseline checkout."
+            exit 1
+          }
+          echo "SHARD_RUNNER_SOURCE=WORKFLOW_REF:${WORKFLOW_REF}"
+      - name: Verify coverage and real shard exit codes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/test-shard.mjs --cli verify \
+            --count 4 \
+            --root "$GITHUB_WORKSPACE" \
+            --results "$GITHUB_WORKSPACE/test-shard-results"
+
+  production-build:
+    name: Next.js production build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        shell: bash
+        run: pnpm exec prisma generate
+      - name: Cache Next.js compiler output
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            next-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+      - name: Next.js production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm build
+
+  whitespace:
+    name: git diff --check (PR range)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whitespace errors across the whole PR diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          BASE="$(git merge-base origin/main HEAD)"
+          echo "PR_MERGE_BASE=$BASE"
+          git diff --check "$BASE" HEAD

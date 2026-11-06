@@ -194,10 +194,15 @@ jobs:
             printf 'DIAGNOSTIC_STATUS=UNAVAILABLE\nREASON=%s\n' "$1"
             exit 1
           }
+          # These are environment/lock preconditions, not a live-vs-candidate
+          # comparison result. They must not emit a misleading mismatch line.
           fail_live() {
-            printf 'LIVE_RELEASE_MATCH=NO\n'
             fail "$1"
           }
+
+          printf 'DIAGNOSTIC_SCOPE=CANDIDATE_MIGRATION_TREE_VS_LIVE_DATABASE\n'
+          printf 'READONLY_MODE=YES\n'
+          printf 'CANDIDATE_SHA=%s\n' "$status_sha"
 
           if [[ ! "$status_tmp" =~ ^/tmp/ecfc-migration-diagnostic\.[A-Za-z0-9]{8}$ ]]; then
             fail "TEMPORARY_PATH_INVALID"
@@ -220,18 +225,32 @@ jobs:
 
           current_release="$(readlink -f -- "$app_dir/current" 2>/dev/null || true)"
           [[ "$current_release" == "$app_dir"/releases/* && -d "$current_release" ]] || {
-            printf 'LIVE_RELEASE_MATCH=NO\n'
+            printf 'LIVE_RELEASE_SHA=UNKNOWN\n'
             fail "CURRENT_RELEASE_UNAVAILABLE"
           }
           deployed_sha=''
           if [[ -r "$current_release/.deployed-sha" ]]; then
             deployed_sha="$(tr -d '[:space:]' < "$current_release/.deployed-sha")"
           fi
+
+          # A pre-deployment diagnostic legitimately compares a candidate
+          # migration tree that is NOT deployed yet with the live production
+          # database. Record both SHAs separately and NEVER treat a mismatch as
+          # a reason to skip the ledger/diagnostic read. The Prisma tree used
+          # below comes from the candidate SHA; the PrismaClient and env used to
+          # read the production ledger come from the live release.
+          if [[ "$deployed_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            printf 'LIVE_RELEASE_SHA=%s\n' "${deployed_sha,,}"
+          else
+            printf 'LIVE_RELEASE_SHA=UNKNOWN\n'
+          fi
           if [[ "$deployed_sha" =~ ^[0-9a-fA-F]{40}$ && "${deployed_sha,,}" == "${status_sha,,}" ]]; then
             printf 'LIVE_RELEASE_MATCH=YES\n'
+            printf 'CANDIDATE_DEPLOYED=YES\n'
           else
             printf 'LIVE_RELEASE_MATCH=NO\n'
-            fail "LIVE_RELEASE_MISMATCH"
+            printf 'CANDIDATE_DEPLOYED=NO\n'
+            printf 'NOTE=CANDIDATE_NOT_DEPLOYED_IS_EXPECTED_FOR_PREDEPLOY_DIAGNOSTIC\n'
           fi
 
           shared_env_real="$(readlink -f -- "$app_dir/shared/.env" 2>/dev/null || true)"
@@ -416,6 +435,7 @@ jobs:
               emit('MIGRATION_FAILED', failed.length ? 'YES' : 'NO')
               emit('MIGRATION_FAILED_NAMES', failed.length ? failed.join(',') : 'NONE')
               emit('MIGRATION_DIVERGENCE', divergence.length ? 'YES' : 'NO')
+              emit('MIGRATION_DIVERGENCE_COUNT', String(divergence.length))
               emit('MIGRATION_DIVERGENCE_NAMES', divergence.length ? divergence.join(',') : 'NONE')
             } catch {
               unknown('MIGRATION_REPO_COUNT')
@@ -429,7 +449,12 @@ jobs:
               unknown('MIGRATION_DIVERGENCE_NAMES')
             }
 
+            // The cloud-console backup/PITR state is NOT observable from this
+            // host-only read. Never present UNKNOWN as a verified backup.
             emit('BACKUP_PITR', 'UNKNOWN')
+            emit('BACKUP_PITR_VERIFIED', 'NO')
+            emit('RESTORE_DRILL_VERIFIED', 'NO')
+            emit('BACKUP_VERIFICATION_REQUIRED', 'CONSOLE_ATTESTATION_BEFORE_DEPLOY')
             emit('ALTER_CAUTION', 'METADATA_LOCK_POSSIBLE;TABLE_REBUILD_DEPENDS_ON_ENGINE_VERSION_AND_SIZE')
             emit('DATABASE_DIAGNOSTIC', complete ? 'COMPLETE' : 'PARTIAL')
             await db.$disconnect().catch(() => {})

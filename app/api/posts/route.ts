@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server'
-import { syncUserAchievements } from '@/lib/achievements'
 import { Prisma } from '@prisma/client'
 import { getConfiguredForumBoardBySelectionId, withForumBoardDisplayName } from '@/lib/boards'
 import { createPostModerationHistory } from '@/lib/admin-audit'
 import { isAuthServiceUnavailableError, type SessionUser } from '@/lib/auth'
 import { hasAdminPermission } from '@/lib/admin-permissions'
 import { getEquippedBadgesForUsers } from '@/lib/badge-service'
-import { triggerBadgeEvaluation } from '@/lib/badge-rule-engine'
 import { getPublicUserDisplayName } from '@/lib/friend-remarks'
 import { prisma } from '@/lib/prisma'
 import { emitRealtimeToAdmins } from '@/lib/realtime'
@@ -16,7 +14,6 @@ import { publicImageUrl } from '@/lib/images'
 import { publicImageVariantUrl } from '@/lib/image-variants'
 import { splitContentImages } from '@/lib/content-images'
 import { isStickerVisible, recordStickerUsage } from '@/lib/sticker-center'
-import { recordQualifiedPublishedPostGrowth } from '@/lib/growth-tasks/service'
 import { resolveIpLocation } from '@/lib/ip-region'
 import { CONTENT_CONTAINS_BANNED_WORD, checkPostForbiddenWords, formatPostForbiddenWordFieldErrors, formatPostForbiddenWordMessage, publicModerationText, shouldBypassForbiddenWords } from '@/lib/content-moderation'
 import { createManyNotifications } from '@/lib/notification-write'
@@ -40,6 +37,8 @@ import { calculatePostExpiresAt, parsePostExpiryType } from '@/lib/post-lifecycl
 import { collectPostTopicNames, PostTopicInputError, syncPostTopics } from '@/lib/post-topics'
 import { buildPublicPostWhere as publicPostWhere } from '@/lib/post-moderation'
 import { expireTopicActivityPins } from '@/lib/topic-activity'
+import { getScheduledPostValidationError, getScheduledPostValidationMessage, parseScheduledPublishAt, type PostPublishMode, type ScheduledPostValidationError } from '@/lib/post-scheduling'
+import { processPostPublicationEventForPost } from '@/lib/post-publication'
 
 function stripUnsafeHtml(value: string) {
   return value
@@ -55,7 +54,7 @@ function createSummary(content: string, length = 180) {
 }
 
 class PostCreateBusinessError extends Error {
-  constructor(readonly reason: 'AUTH_SESSION_EXPIRED') {
+  constructor(readonly reason: 'AUTH_SESSION_EXPIRED' | ScheduledPostValidationError) {
     super(reason)
     this.name = 'PostCreateBusinessError'
   }
@@ -351,6 +350,27 @@ export async function POST(request: Request) {
   if (body.expiryType !== undefined && body.expiryType !== null && body.expiryType !== '' && !expiryType) {
     return NextResponse.json({ message: '限时发布选项无效', errors: { expiryType: '请选择有效的限时发布时长' } }, { status: 400 })
   }
+  const publishMode: PostPublishMode = body.publishMode === undefined ? 'IMMEDIATE' : body.publishMode as PostPublishMode
+  if (publishMode !== 'IMMEDIATE' && publishMode !== 'SCHEDULED') {
+    return NextResponse.json({ message: '发布时间选项无效' }, { status: 400 })
+  }
+  const requestedSchedule = body.scheduledPublishAt === undefined || body.scheduledPublishAt === null || body.scheduledPublishAt === ''
+    ? null
+    : parseScheduledPublishAt(body.scheduledPublishAt)
+  if (publishMode === 'SCHEDULED' && !requestedSchedule) {
+    return NextResponse.json({ message: '请选择有效的计划发布时间', errors: { scheduledPublishAt: '请选择有效的计划发布时间' } }, { status: 400 })
+  }
+  if (publishMode === 'IMMEDIATE' && body.scheduledPublishAt !== undefined && body.scheduledPublishAt !== null && body.scheduledPublishAt !== '') {
+    return NextResponse.json({ message: '立即发布不能包含计划发布时间' }, { status: 400 })
+  }
+  const canScheduleNextDay = publishMode === 'SCHEDULED' && await hasAdminPermission(user, 'post_manage')
+  if (requestedSchedule) {
+    const scheduleError = getScheduledPostValidationError(requestedSchedule, canScheduleNextDay)
+    if (scheduleError) {
+      const message = getScheduledPostValidationMessage(scheduleError)
+      return NextResponse.json({ code: scheduleError, message, errors: { scheduledPublishAt: message } }, { status: scheduleError === 'SCHEDULE_NEXT_DAY_FORBIDDEN' ? 403 : 400 })
+    }
+  }
 
   try {
     phase = 'content-moderation'
@@ -423,6 +443,7 @@ export async function POST(request: Request) {
 
     const canPublishImmediately = isAdmin
     const moderationStatus = canPublishImmediately ? 'APPROVED' as const : 'PENDING' as const
+    const isScheduled = publishMode === 'SCHEDULED'
 
     // IP metadata is optional. A provider, proxy header, or parser failure must
     // never prevent the primary post transaction from running.
@@ -437,6 +458,13 @@ export async function POST(request: Request) {
 
     phase = 'post-transaction'
     const result = await prisma.$transaction(async (tx) => {
+      const createdAt = new Date()
+      // Repeat the server-clock boundary check immediately before persistence
+      // so lengthy moderation/reference checks cannot consume the lead time.
+      if (requestedSchedule) {
+        const scheduleError = getScheduledPostValidationError(requestedSchedule, canScheduleNextDay, createdAt)
+        if (scheduleError) throw new PostCreateBusinessError(scheduleError)
+      }
       phase = 'post-transaction.user-state'
       const activeUser = await tx.user.findFirst({
         where: { id: user.id, status: 'ACTIVE', isDeleted: false, Profile: { isNot: null } },
@@ -455,12 +483,23 @@ export async function POST(request: Request) {
           ipRegion,
           summary: createSummary(input.content),
           expiryType,
-          expiresAt: canPublishImmediately ? calculatePostExpiresAt(expiryType, new Date()) : null,
-          status: 'PUBLISHED',
+          expiresAt: canPublishImmediately && !isScheduled ? calculatePostExpiresAt(expiryType, createdAt) : null,
+          status: isScheduled ? 'DRAFT' : 'PUBLISHED',
           moderationStatus,
+          publicationStatus: isScheduled ? 'SCHEDULED' : canPublishImmediately ? 'PUBLISHED' : 'WAITING_REVIEW',
+          scheduledPublishAt: requestedSchedule,
+          publishedAt: canPublishImmediately && !isScheduled ? createdAt : null,
           stickerId: rawStickerId || undefined,
         },
-        select: { id: true, status: true, moderationStatus: true, isDeleted: true },
+        select: { id: true, status: true, moderationStatus: true, publicationStatus: true, scheduledPublishAt: true, publishedAt: true, isDeleted: true },
+      })
+      await tx.postPublicationEvent.create({
+        data: {
+          postId: post.id,
+          triggerType: canPublishImmediately ? 'POST_CREATED' : 'POST_APPROVED',
+          status: canPublishImmediately && !isScheduled ? 'PENDING' : 'WAITING',
+          availableAt: createdAt,
+        },
       })
       await syncPostTopics(tx, post.id, topicNames, user.id)
       if (imageUrls.length) {
@@ -484,9 +523,8 @@ export async function POST(request: Request) {
         status: moderationStatus,
         titleSnapshot: input.title,
       }), user.id, board.id),
-      moderationStatus === 'APPROVED'
-        ? runPostCreateSideEffect('friend-activity', () => prisma.friendActivity.create({ data: { actorId: user.id, type: 'POST', content: input.title, targetUrl: `/posts/${result.post.id}` } }), user.id, board.id)
-        : runPostCreateSideEffect('moderation-notification', async () => {
+      moderationStatus !== 'APPROVED'
+        ? runPostCreateSideEffect('moderation-notification', async () => {
           const admins = await prisma.user.findMany({
             where: {
               role: { in: ['ADMIN', 'SUPER_ADMIN'] },
@@ -511,16 +549,7 @@ export async function POST(request: Request) {
             })),
             skipDuplicates: true,
           })
-        }, user.id, board.id),
-      moderationStatus === 'APPROVED'
-        ? runPostCreateSideEffect('growth-published-post', () => prisma.$transaction((tx) => recordQualifiedPublishedPostGrowth(tx, {
-          userId: user.id,
-          postId: result.post.id,
-          post: result.post,
-        })), user.id, board.id)
-        : Promise.resolve(),
-      moderationStatus === 'APPROVED'
-        ? runPostCreateSideEffect('board-counter', () => prisma.board.update({ where: { id: board.id }, data: { postCount: { increment: 1 } } }), user.id, board.id)
+        }, user.id, board.id)
         : Promise.resolve(),
       rawStickerId
         ? runPostCreateSideEffect('sticker-usage', () => recordStickerUsage(user.id, rawStickerId), user.id, board.id)
@@ -528,21 +557,30 @@ export async function POST(request: Request) {
       moderationStatus === 'PENDING'
         ? runPostCreateSideEffect('admin-realtime', () => emitRealtimeToAdmins('notification'), user.id, board.id)
         : Promise.resolve(),
-      runPostCreateSideEffect('achievement-sync', () => syncUserAchievements(user.id, ['POST']), user.id, board.id),
     ])
 
-    if (moderationStatus === 'APPROVED') triggerBadgeEvaluation(user.id, 'POST_CREATED', result.post.id)
+    if (moderationStatus === 'APPROVED' && !isScheduled) {
+      await runPostCreateSideEffect('publication-event', () => processPostPublicationEventForPost(result.post.id), user.id, board.id)
+    }
 
     return NextResponse.json({
       post: { ...result.post, detailUrl },
       detailUrl,
       moderationStatus,
-      message: moderationStatus === 'PENDING' ? '\u5e16\u5b50\u5df2\u63d0\u4ea4\uff0c\u5f85\u5ba1\u6838\u540e\u5c06\u516c\u5f00' : '\u5e16\u5b50\u53d1\u5e03\u6210\u529f',
+      publicationStatus: result.post.publicationStatus,
+      scheduledPublishAt: result.post.scheduledPublishAt?.toISOString() || null,
+      message: isScheduled
+        ? moderationStatus === 'PENDING' ? '帖子已提交，待审核' : '帖子已通过审核，等待定时发布'
+        : moderationStatus === 'PENDING' ? '帖子已提交，待审核后将公开' : '帖子发布成功',
     }, { status: 201 })
   } catch (error) {
     logPostCreateError(phase, error, user.id, input.boardId)
     if (error instanceof PostCreateBusinessError && error.reason === 'AUTH_SESSION_EXPIRED') {
       return unauthenticatedResponse('登录状态已失效，请重新登录')
+    }
+    if (error instanceof PostCreateBusinessError && error.reason !== 'AUTH_SESSION_EXPIRED') {
+      const message = getScheduledPostValidationMessage(error.reason)
+      return NextResponse.json({ code: error.reason, message, errors: { scheduledPublishAt: message } }, { status: error.reason === 'SCHEDULE_NEXT_DAY_FORBIDDEN' ? 403 : 400 })
     }
     const code = prismaErrorCode(error)
     if (code === 'P2002') {

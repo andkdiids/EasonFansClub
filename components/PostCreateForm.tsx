@@ -25,6 +25,13 @@ import {
 } from '@/lib/post-draft'
 import { type RichTextContent } from '@/lib/rich-text'
 import { POST_EXPIRY_OPTIONS, type PostExpiryType } from '@/lib/post-lifecycle'
+import {
+  getMinimumScheduledPostLocal,
+  getScheduledPostDateBounds,
+  getScheduledPostValidationError,
+  getScheduledPostValidationMessage,
+  parseDateTimeLocalInZone,
+} from '@/lib/post-scheduling'
 
 type Board = { id: string; name: string; slug: string }
 
@@ -36,9 +43,11 @@ type DraftConflict = {
 export function PostCreateForm({
   userId,
   boards,
+  canScheduleNextDay,
+  initialScheduleNow,
   initialBoardSlug,
   returnTo = null,
-}: Readonly<{ userId: string; boards: Board[]; initialBoardSlug?: string; returnTo?: string | null }>) {
+}: Readonly<{ userId: string; boards: Board[]; canScheduleNextDay: boolean; initialScheduleNow: string; initialBoardSlug?: string; returnTo?: string | null }>) {
   const router = useRouter()
   const imagesUploaderRef = useRef<ContentImageUploaderHandle>(null)
   const editorRef = useRef<RichTextEditorHandle>(null)
@@ -49,6 +58,9 @@ export function PostCreateForm({
   const [richContent, setRichContent] = useState<RichTextContent | null>(null)
   const [topicNames, setTopicNames] = useState<string[]>([])
   const [expiryType, setExpiryType] = useState<PostExpiryType | ''>('')
+  const [publishMode, setPublishMode] = useState<'IMMEDIATE' | 'SCHEDULED'>('IMMEDIATE')
+  const [scheduledPublishLocal, setScheduledPublishLocal] = useState('')
+  const [scheduleNow, setScheduleNow] = useState(() => new Date(initialScheduleNow))
   const [imageUrls, setImageUrls] = useState<string[]>([])
   const [pendingSticker, setPendingSticker] = useState<PickerSticker | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -82,6 +94,21 @@ export function PostCreateForm({
   const conflictStorageKey = postDraftConflictStorageKey(userId)
   const validBoardIds = useMemo(() => boards.map((board) => board.id), [boards])
   const validBoardIdsKey = validBoardIds.join('|')
+  const scheduleDateBounds = getScheduledPostDateBounds(scheduleNow, canScheduleNextDay)
+  const minimumScheduledLocal = getMinimumScheduledPostLocal(scheduleNow)
+  const maximumScheduledLocal = `${scheduleDateBounds.maxDate}T23:59`
+  const scheduleWindowAvailable = minimumScheduledLocal <= maximumScheduledLocal
+  const liveScheduleValidationError = scheduledPublishLocal
+    ? (() => {
+        const scheduledAt = parseDateTimeLocalInZone(scheduledPublishLocal)
+        return scheduledAt ? getScheduledPostValidationError(scheduledAt, canScheduleNextDay, scheduleNow) : 'SCHEDULE_INVALID'
+      })()
+    : null
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setScheduleNow(new Date()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const currentPayload = useCallback((): PostDraftPayload => {
     return {
@@ -394,12 +421,36 @@ export function PostCreateForm({
       return
     }
     setErrors({})
+    let scheduledPublishAt: Date | null = null
+    if (publishMode === 'SCHEDULED') {
+      scheduledPublishAt = parseDateTimeLocalInZone(scheduledPublishLocal)
+      if (!scheduledPublishAt) {
+        setErrors({ scheduledPublishAt: '请选择有效的计划发布时间' })
+        return
+      }
+      const validationError = getScheduledPostValidationError(scheduledPublishAt, canScheduleNextDay, new Date())
+      if (validationError) {
+        setErrors({ scheduledPublishAt: getScheduledPostValidationMessage(validationError) })
+        return
+      }
+    }
     setIsSubmitting(true)
     try {
       const response = await fetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boardId, title, content, richContent, imageUrls, stickerId: pendingSticker?.id || undefined, topicNames, expiryType: expiryType || null }),
+        body: JSON.stringify({
+          boardId,
+          title,
+          content,
+          richContent,
+          imageUrls,
+          stickerId: pendingSticker?.id || undefined,
+          topicNames,
+          expiryType: expiryType || null,
+          publishMode,
+          ...(scheduledPublishAt ? { scheduledPublishAt: scheduledPublishAt.toISOString() } : {}),
+        }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -408,6 +459,7 @@ export function PostCreateForm({
       }
       const postId = typeof data?.post?.id === 'string' ? data.post.id : ''
       const isPending = data?.moderationStatus === 'PENDING' || data?.post?.moderationStatus === 'PENDING'
+      const isScheduled = data?.publicationStatus === 'SCHEDULED'
       if (!postId) {
         console.error('[post:create:invalid-response]', { hasPost: Boolean(data?.post), status: data?.moderationStatus })
         setErrors({ form: '帖子已提交，但跳转地址异常，请刷新帖子列表查看。' })
@@ -427,11 +479,12 @@ export function PostCreateForm({
       draftPublishedRef.current = true
       if (draftCleared) removeLocalDrafts()
 
-      if (isPending) {
+      if (isPending || isScheduled) {
         const submittedParams = new URLSearchParams({
           postId,
           status: typeof data?.moderationStatus === 'string' ? data.moderationStatus : 'PENDING',
         })
+        if (typeof data?.scheduledPublishAt === 'string') submittedParams.set('scheduledPublishAt', data.scheduledPublishAt)
         if (returnTo) submittedParams.set('returnTo', returnTo)
         router.replace(`/post/submitted?${submittedParams.toString()}`)
       } else {
@@ -505,6 +558,48 @@ export function PostCreateForm({
         </select>
         <span className="mt-1 block text-xs font-bold text-slate-400">普通用户帖子从审核通过公开时开始计算；编辑不能延长时限。</span>
       </label>
+      <fieldset className="space-y-3 border border-sky-100 p-4">
+        <legend className="px-1 text-sm font-black text-slate-700">发布时间</legend>
+        <div className="flex flex-wrap gap-5">
+          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
+            <input type="radio" name="publishMode" value="IMMEDIATE" checked={publishMode === 'IMMEDIATE'} onChange={() => setPublishMode('IMMEDIATE')} />
+            立即发布
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
+            <input type="radio" name="publishMode" value="SCHEDULED" checked={publishMode === 'SCHEDULED'} onChange={() => setPublishMode('SCHEDULED')} />
+            定时发布
+          </label>
+        </div>
+        {publishMode === 'SCHEDULED' ? (
+          <label className="block max-w-sm">
+            <span className="text-sm font-bold text-slate-700">计划发布时间（北京时间）</span>
+            <input
+              type="datetime-local"
+              step={60}
+              min={minimumScheduledLocal}
+              max={maximumScheduledLocal}
+              value={scheduledPublishLocal}
+              onChange={(event) => {
+                setScheduledPublishLocal(event.target.value)
+                setErrors((current) => {
+                  const next = { ...current }
+                  delete next.scheduledPublishAt
+                  return next
+                })
+              }}
+              className="mt-2 w-full border border-sky-100 px-3 py-2"
+              disabled={!scheduleWindowAvailable}
+              required
+            />
+            <span className="mt-1 block text-xs font-bold text-slate-400">
+              审核通过后，在计划时间自动公开；至少提前 30 分钟。{canScheduleNextDay ? '管理员可预约北京时间当天或第二天。' : '普通用户只能预约北京时间当天。'}
+            </span>
+            {!scheduleWindowAvailable ? <span className="mt-2 block text-sm font-bold text-red-600" role="alert">当天剩余时间不足 30 分钟，当前没有符合条件的可预约时间。</span> : null}
+            {liveScheduleValidationError ? <span className="mt-2 block text-sm font-bold text-red-600" role="alert">{getScheduledPostValidationMessage(liveScheduleValidationError)}</span> : null}
+            {errors.scheduledPublishAt ? <span className="mt-2 block text-sm font-bold text-red-600">{errors.scheduledPublishAt}</span> : null}
+          </label>
+        ) : null}
+      </fieldset>
       {pendingSticker ? (
         <div className="mb-3 flex items-center gap-3 rounded-xl border border-brand-100 bg-sky-50 px-3 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -530,7 +625,7 @@ export function PostCreateForm({
           </button>
         </div>
         <button disabled={isSubmitting || imagesUploading} className="rounded-lg bg-brand-700 px-5 py-3 font-black text-white disabled:opacity-60">
-          {isSubmitting ? '发布中...' : imagesUploading ? '图片处理中...' : '发布帖子'}
+          {isSubmitting ? '提交中...' : imagesUploading ? '图片处理中...' : publishMode === 'SCHEDULED' ? '提交定时发布' : '发布帖子'}
         </button>
         <StickerPicker
           open={pickerOpen}

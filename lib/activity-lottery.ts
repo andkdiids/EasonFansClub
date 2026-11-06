@@ -8,7 +8,10 @@ import { activeUserBadgeWhere } from '@/lib/badge-validity'
 import { storedActivityImageUrl } from '@/lib/activity-image-url'
 import { createManyNotificationsWithDb } from '@/lib/notification-write'
 import { safeNotificationWrite } from '@/lib/notification-transaction'
-import { publicImageUrl } from '@/lib/images'
+import { profileImageUrl, publicImageUrl } from '@/lib/images'
+import { publicImageVariantUrl } from '@/lib/image-variants'
+import { getPublicUserDisplayName } from '@/lib/friend-display'
+import { getActivityLotteryRecordIntegrityIssues, groupActivityLotteryWinnersByPrize, hasCompleteActivityLotteryPublicRecords, isActivityLotteryPubliclyComplete, type PublicLotteryWinnerRecord } from '@/lib/activity-lottery-records'
 import { prisma } from '@/lib/prisma'
 import { sanitizeText } from '@/lib/security'
 import { hasValidActivityParticipation, type ActivityParticipationCheckInSnapshot } from '@/lib/activity-participation'
@@ -265,6 +268,7 @@ const adminLotterySelect = {
   drawnAt: true,
   cancelledAt: true,
   algorithmVersion: true,
+  drawSource: true,
   createdAt: true,
   updatedAt: true,
   _count: { select: { CandidateSnapshots: true } },
@@ -294,7 +298,9 @@ const adminLotterySelect = {
     select: {
       id: true,
       userId: true,
+      prizeId: true,
       registrationId: true,
+      createdAt: true,
       redemptionStatus: true,
       wonAt: true,
       redeemedAt: true,
@@ -303,7 +309,7 @@ const adminLotterySelect = {
       fulfillmentError: true,
       LotteryPrize: { select: { id: true, tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true } },
       Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
-      User: { select: { uid: true, nickname: true, id: true } },
+      User: { select: { id: true, uid: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
     },
   },
 } satisfies Prisma.LotterySelect
@@ -321,6 +327,8 @@ export type ActivityLotteryAdminView = {
   drawnAt: string | null
   cancelledAt: string | null
   algorithmVersion: string | null
+  drawSource: 'SCHEDULED' | 'ADMIN_MANUAL' | null
+  recordIntegrityIssues: string[]
   createdAt: string
   updatedAt: string
   candidateSnapshotCount: number
@@ -342,8 +350,11 @@ export type ActivityLotteryAdminView = {
   }>
   winners: Array<{
     id: string
+    prizeId: string | null
+    userId: string
     uid: number
     nickname: string
+    avatarUrl: string | null
     tierName: string
      prizeName: string
      prizeType: ActivityLotteryPrizeType
@@ -354,6 +365,7 @@ export type ActivityLotteryAdminView = {
      fulfillmentStatus: 'NOT_REQUIRED' | 'PENDING' | 'FULFILLED' | 'FAILED'
      fulfilledAt: string | null
      fulfillmentError: string | null
+    createdAt: string
      wonAt: string
      redeemedAt: string | null
      risk: ActivityRiskAlert | null
@@ -386,6 +398,8 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date(), riskByUse
     drawnAt: iso(row.drawnAt),
     cancelledAt: iso(row.cancelledAt),
     algorithmVersion: row.algorithmVersion,
+    drawSource: row.drawSource === 'SCHEDULED' || row.drawSource === 'ADMIN_MANUAL' ? row.drawSource : null,
+    recordIntegrityIssues: getActivityLotteryRecordIntegrityIssues({ status: row.status, drawnAt: row.drawnAt, winnerCount: row.winnerCount, entries: row.LotteryEntry.map((entry) => ({ prizeId: entry.prizeId, hasPrize: Boolean(entry.LotteryPrize) })) }),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     candidateSnapshotCount: row._count.CandidateSnapshots,
@@ -407,8 +421,11 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date(), riskByUse
     })),
     winners: row.LotteryEntry.map((entry) => ({
       id: entry.id,
+      prizeId: entry.prizeId,
+      userId: entry.User.id,
       uid: entry.User.uid,
-      nickname: entry.User.nickname,
+      nickname: getPublicUserDisplayName(entry.User),
+      avatarUrl: publicImageVariantUrl(profileImageUrl(entry.User.Profile?.avatarUrl || entry.User.avatarUrl), 'avatar-sm'),
       tierName: entry.LotteryPrize?.tierName || '中奖奖项',
       prizeName: entry.LotteryPrize?.name || '奖品',
       prizeType: entry.LotteryPrize?.prizeType || 'PHYSICAL',
@@ -419,6 +436,7 @@ function serializeAdminLottery(row: AdminLotteryRow, now = new Date(), riskByUse
       fulfillmentStatus: entry.fulfillmentStatus,
       fulfilledAt: iso(entry.fulfilledAt),
       fulfillmentError: entry.fulfillmentError,
+      createdAt: entry.createdAt.toISOString(),
       wonAt: entry.wonAt.toISOString(),
       redeemedAt: iso(entry.redeemedAt),
       risk: riskByUserId.get(entry.userId) || null,
@@ -462,7 +480,7 @@ export type ActivityLotteryPublicView = {
   title: string
   description: string | null
   drawAt: string | null
-  status: 'SCHEDULED' | 'DRAWN'
+  status: 'SCHEDULED' | 'DRAWN' | 'RESULTS_UNAVAILABLE'
   eligibleCount: number | null
   winnerCount: number | null
   drawnAt: string | null
@@ -477,6 +495,7 @@ export type ActivityLotteryPublicView = {
     virtualPrizeType: ActivityLotteryVirtualPrizeType | null
     badge: { id: string; name: string; imageUrl: string | null } | null
     registrationFeeAmount: number | null
+    winners: PublicLotteryWinnerRecord[]
   }>
   winner: {
     tierName: string
@@ -508,8 +527,8 @@ export type ActivityLotteryPublicView = {
 }
 
 export async function getPublicActivityLotteries(activityId: string, viewerId?: string | null): Promise<ActivityLotteryPublicView[]> {
-  const lotteries = await prisma.lottery.findMany({
-    where: { activityId, TopicLottery: { is: null }, status: { in: ['SCHEDULED', 'DRAWN'] }, Activity: { status: 'PUBLISHED' } },
+  const storedLotteries = await prisma.lottery.findMany({
+    where: { activityId, TopicLottery: { is: null }, status: { in: ['SCHEDULED', 'DRAWN', 'CANCELLED'] }, Activity: { status: { in: ['PUBLISHED', 'CANCELLED'] } } },
     orderBy: [{ drawAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
@@ -539,22 +558,34 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       },
     },
   })
-  const winnerRows = viewerId && lotteries.length
+  const lotteries = storedLotteries.filter((lottery) => (lottery.status === 'SCHEDULED' && lottery.Activity?.status === 'PUBLISHED') || isActivityLotteryPubliclyComplete(lottery))
+  const completedLotteryIds = lotteries.filter(isActivityLotteryPubliclyComplete).map((lottery) => lottery.id)
+  const winnerRows = completedLotteryIds.length
     ? await prisma.lotteryEntry.findMany({
-        where: { userId: viewerId, lotteryId: { in: lotteries.map((lottery) => lottery.id) } },
+        where: { lotteryId: { in: completedLotteryIds } },
+        orderBy: [{ wonAt: 'asc' }, { id: 'asc' }],
         select: {
+          id: true,
           lotteryId: true,
+          userId: true,
+          prizeId: true,
+          createdAt: true,
+          wonAt: true,
           redemptionStatus: true,
           redeemedAt: true,
           registrationId: true,
           fulfillmentStatus: true,
           fulfilledAt: true,
           Registration: { select: { id: true, status: true, verifiedAt: true, checkedInAt: true, checkInSource: true } },
-          LotteryPrize: { select: { tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true, Badge: { select: { id: true, name: true, iconUrl: true, visibility: true } } } },
+          LotteryPrize: { select: { id: true, tierName: true, name: true, prizeType: true, virtualPrizeType: true, registrationFeeAmount: true, Badge: { select: { id: true, name: true, iconUrl: true, visibility: true } } } },
+          User: { select: { id: true, nickname: true, nicknameModerationStatus: true, nicknameViolationDisplay: true, avatarUrl: true, Profile: { select: { avatarUrl: true } } } },
         },
       })
     : []
-  const badgeIds = [...new Set(lotteries.flatMap((lottery) => lottery.LotteryPrize.flatMap((prize) => prize.Badge ? [prize.Badge.id] : [])))]
+  const badgeIds = [...new Set([
+    ...lotteries.flatMap((lottery) => lottery.LotteryPrize.flatMap((prize) => prize.Badge ? [prize.Badge.id] : [])),
+    ...winnerRows.flatMap((winner) => winner.LotteryPrize?.Badge ? [winner.LotteryPrize.Badge.id] : []),
+  ])]
   const ownerRows = viewerId && badgeIds.length
     ? await prisma.userBadge.findMany({
         where: { userId: viewerId, badgeId: { in: badgeIds }, ...activeUserBadgeWhere() },
@@ -562,45 +593,82 @@ export async function getPublicActivityLotteries(activityId: string, viewerId?: 
       })
     : []
   const ownerByBadgeId = new Map(ownerRows.map((row) => [row.badgeId, row]))
-  const winners = new Map(winnerRows.map((winner) => [winner.lotteryId, winner]))
-  return lotteries.filter((lottery): lottery is typeof lottery & { status: 'SCHEDULED' | 'DRAWN' } => lottery.status === 'SCHEDULED' || lottery.status === 'DRAWN').map((lottery) => {
-    const winner = winners.get(lottery.id)
+  const winnersByLottery = new Map<string, typeof winnerRows>()
+  for (const winner of winnerRows) {
+    const rows = winnersByLottery.get(winner.lotteryId) || []
+    rows.push(winner)
+    winnersByLottery.set(winner.lotteryId, rows)
+  }
+  return lotteries.map((lottery) => {
+    const candidateWinners = winnersByLottery.get(lottery.id) || []
+    const publiclyComplete = hasCompleteActivityLotteryPublicRecords(lottery, candidateWinners.map((entry) => ({ prizeId: entry.prizeId, hasPrize: Boolean(entry.LotteryPrize), hasUser: Boolean(entry.User) })))
+    const lotteryWinners = publiclyComplete ? candidateWinners : []
+    const resultsUnavailable = isActivityLotteryPubliclyComplete(lottery) && !publiclyComplete
+    const winner = viewerId ? lotteryWinners.find((row) => row.userId === viewerId) : undefined
     const winnerBadge = winner?.LotteryPrize?.Badge
     const winnerBadgeDecision = winnerBadge
       ? resolveBadgeVisibility({ viewerId, ownerId: viewerId, badge: winnerBadge, userBadge: ownerByBadgeId.get(winnerBadge.id), context: 'ACTIVITY' })
       : null
     const winnerBadgeVisible = Boolean(winnerBadge && winnerBadgeDecision?.renderMode === 'FULL' && winnerBadgeDecision.canSeeMetadata)
     const redemptionState = winner && winner.LotteryPrize?.prizeType !== 'VIRTUAL'
-      ? getActivityLotteryWinnerRedemptionState({ redemptionStatus: winner.redemptionStatus, registration: winner.Registration, activityEndAt: lottery.Activity?.endsAt })
+      ? getActivityLotteryWinnerRedemptionState({ redemptionStatus: winner.redemptionStatus, registration: winner.Registration, activityEndAt: lottery.Activity?.endsAt, activityCancelled: lottery.Activity?.status === 'CANCELLED' })
       : null
+    const prizeViews = lottery.LotteryPrize.map((prize) => {
+      const badgeDecision = prize.Badge
+        ? resolveBadgeVisibility({ viewerId, ownerId: viewerId, badge: prize.Badge, userBadge: ownerByBadgeId.get(prize.Badge.id), context: 'ACTIVITY' })
+        : null
+      const badgeVisible = Boolean(prize.Badge && badgeDecision?.renderMode === 'FULL' && badgeDecision.canSeeMetadata)
+      const badgeHidden = Boolean(prize.Badge && !badgeVisible)
+      return {
+        id: prize.id,
+        tierName: prize.tierName,
+        name: badgeHidden ? '神秘勋章' : prize.name,
+        imageUrl: badgeHidden ? null : publicPrizeImageUrl(prize.imageUrl, prize.metadata),
+        description: badgeHidden ? null : prize.description,
+        quantity: prize.quantity,
+        prizeType: prize.prizeType,
+        virtualPrizeType: prize.virtualPrizeType,
+        badge: badgeHidden || !prize.Badge ? null : { id: prize.Badge.id, name: prize.Badge.name, imageUrl: publicImageUrl(prize.Badge.iconUrl) },
+        registrationFeeAmount: prize.registrationFeeAmount,
+        winners: [] as PublicLotteryWinnerRecord[],
+      }
+    })
+    const publicWinners = lotteryWinners.flatMap((entry) => {
+      const prize = entry.LotteryPrize
+      if (!entry.prizeId || !prize) return []
+      const publicPrize = prizeViews.find((item) => item.id === entry.prizeId)
+      if (!publicPrize) return []
+      const badge = prize.Badge
+      const badgeDecision = badge
+        ? resolveBadgeVisibility({ viewerId, ownerId: viewerId, badge, userBadge: ownerByBadgeId.get(badge.id), context: 'ACTIVITY' })
+        : null
+      const badgeVisible = Boolean(badge && badgeDecision?.renderMode === 'FULL' && badgeDecision.canSeeMetadata)
+      const rewardStatus = prize.prizeType === 'VIRTUAL'
+        ? entry.fulfillmentStatus
+        : getActivityLotteryWinnerRedemptionState({ redemptionStatus: entry.redemptionStatus, registration: entry.Registration, activityEndAt: lottery.Activity?.endsAt, activityCancelled: lottery.Activity?.status === 'CANCELLED' })
+      return [{
+        prizeId: entry.prizeId,
+        nickname: getPublicUserDisplayName(entry.User),
+        avatarUrl: publicImageVariantUrl(profileImageUrl(entry.User.Profile?.avatarUrl || entry.User.avatarUrl), 'avatar-sm'),
+        tierName: prize.tierName || '中奖奖项',
+        prizeName: prize.prizeType === 'VIRTUAL' && badge && !badgeVisible ? '神秘勋章' : prize.name,
+        createdAt: entry.createdAt.toISOString(),
+        wonAt: entry.wonAt.toISOString(),
+        rewardStatus,
+        rewardAt: prize.prizeType === 'VIRTUAL' ? iso(entry.fulfilledAt) : iso(entry.redeemedAt),
+      }]
+    })
+    const prizes = groupActivityLotteryWinnersByPrize(prizeViews, publicWinners, publiclyComplete)
     return {
       id: lottery.id,
       title: lottery.title,
       description: lottery.description,
       drawAt: iso(lottery.drawAt),
-      status: lottery.status,
-      eligibleCount: lottery.eligibleCount,
-      winnerCount: lottery.winnerCount,
-      drawnAt: iso(lottery.drawnAt),
-      prizes: lottery.LotteryPrize.map((prize) => {
-        const badgeDecision = prize.Badge
-          ? resolveBadgeVisibility({ viewerId, ownerId: viewerId, badge: prize.Badge, userBadge: ownerByBadgeId.get(prize.Badge.id), context: 'ACTIVITY' })
-          : null
-        const badgeVisible = Boolean(prize.Badge && badgeDecision?.renderMode === 'FULL' && badgeDecision.canSeeMetadata)
-        const badgeHidden = Boolean(prize.Badge && !badgeVisible)
-        return {
-          id: prize.id,
-          tierName: prize.tierName,
-          name: badgeHidden ? '神秘勋章' : prize.name,
-          imageUrl: badgeHidden ? null : publicPrizeImageUrl(prize.imageUrl, prize.metadata),
-          description: badgeHidden ? null : prize.description,
-          quantity: prize.quantity,
-          prizeType: prize.prizeType,
-          virtualPrizeType: prize.virtualPrizeType,
-          badge: badgeHidden || !prize.Badge ? null : { id: prize.Badge.id, name: prize.Badge.name, imageUrl: publicImageUrl(prize.Badge.iconUrl) },
-          registrationFeeAmount: prize.registrationFeeAmount,
-        }
-      }),
+      status: publiclyComplete ? 'DRAWN' as const : resultsUnavailable ? 'RESULTS_UNAVAILABLE' as const : 'SCHEDULED' as const,
+      eligibleCount: publiclyComplete ? lottery.eligibleCount : null,
+      winnerCount: publiclyComplete ? lottery.winnerCount : null,
+      drawnAt: publiclyComplete ? iso(lottery.drawnAt) : null,
+      prizes,
       winner: winner && winner.LotteryPrize
         ? winner.LotteryPrize.prizeType === 'VIRTUAL'
           ? {
@@ -948,7 +1016,7 @@ export async function drawActivityLotteryInTransaction(tx: Prisma.TransactionCli
     () => createManyNotificationsWithDb(tx, { data: resultNotifications, skipDuplicates: true }, { operation: 'activity-lottery-result-notifications' }),
     { operation: 'activity-lottery-result-notifications', targetId: lottery.id, notificationType: 'ACTIVITY' },
   )
-  await tx.lottery.update({ where: { id: lottery.id }, data: { status: 'DRAWN', eligibleCount: registrations.length, winnerCount: winnerRows.length, drawnAt, algorithmVersion: ACTIVITY_LOTTERY_ALGORITHM_VERSION }, select: { id: true } })
+  await tx.lottery.update({ where: { id: lottery.id }, data: { status: 'DRAWN', eligibleCount: registrations.length, winnerCount: winnerRows.length, drawnAt, algorithmVersion: ACTIVITY_LOTTERY_ALGORITHM_VERSION, drawSource: options.trigger }, select: { id: true } })
   if (options.actorId) {
     await createAdminActionAudit(tx, {
       operatorId: options.actorId,

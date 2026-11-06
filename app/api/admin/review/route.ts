@@ -195,7 +195,7 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
         take,
         select: {
           id: true, boardId: true, title: true, content: true, richContent: true, summary: true, createdAt: true,
-          moderationStatus: true, reviewedAt: true, rejectionReason: true,
+          moderationStatus: true, publicationStatus: true, scheduledPublishAt: true, publishedAt: true, reviewedAt: true, rejectionReason: true,
           User: { select: { id: true, uid: true, nickname: true, Profile: { select: { displayName: true, avatarUrl: true } } } },
           ReviewedBy: { select: { id: true, uid: true, nickname: true } },
           Board: { select: { name: true, slug: true } },
@@ -217,6 +217,9 @@ async function loadTypeItems(type: ReviewSourceType, status: ReviewStatus | 'ALL
       id: row.id, sourceType: 'POST', sourceId: row.id, title: row.title,
       author: author({ id: row.User.id, uid: row.User.uid, nickname: row.User.nickname, displayName: row.User.Profile?.displayName, avatarUrl: row.User.Profile?.avatarUrl }), authorId: row.User.id,
       createdAt: row.createdAt.toISOString(), status: row.moderationStatus as ReviewStatus,
+      publicationStatus: row.publicationStatus,
+      scheduledPublishAt: asIso(row.scheduledPublishAt),
+      publishedAt: asIso(row.publishedAt),
       cover: publicImageUrl(row.PostMedia[0]?.thumbnail || row.PostMedia[0]?.url),
       media: row.PostMedia.flatMap((media, index) => {
         const src = publicImageUrl(media.url)

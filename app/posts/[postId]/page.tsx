@@ -35,6 +35,8 @@ import { buildPublicPostWhere as publicPostWhere, getPostModerationAccess, isPub
 import { isPostExpired, formatPostExpiry } from '@/lib/post-lifecycle'
 import { prisma } from '@/lib/prisma'
 import { formatUid } from '@/lib/uid'
+import { formatScheduledPostTime } from '@/lib/post-scheduling'
+import { PostScheduleCancelButton } from '@/components/PostScheduleCancelButton'
 import { isRetryableDatabaseConnectionError } from '@/lib/db-timeout'
 import { MarkModerationReadOnMount } from '@/components/MarkModerationReadOnMount'
 import { markPersonalNotificationsForTargetRead } from '@/lib/notifications'
@@ -190,7 +192,7 @@ function ModerationFallbackActions({ postId, canEdit, returnTo }: Readonly<{ pos
   )
 }
 
-function ModerationPendingFallback({ postId, canEdit, returnTo }: Readonly<{ postId: string; canEdit: boolean; returnTo?: string | null }>) {
+function ModerationPendingFallback({ postId, canEdit, returnTo, scheduledPublishAt }: Readonly<{ postId: string; canEdit: boolean; returnTo?: string | null; scheduledPublishAt?: Date | null }>) {
   return (
     <main className="site-page-main flat-page mx-auto max-w-7xl px-5 py-8">
       <section className="rounded-2xl border border-sky-100 bg-white/85 p-8 text-center shadow-sm">
@@ -199,6 +201,7 @@ function ModerationPendingFallback({ postId, canEdit, returnTo }: Readonly<{ pos
         <p className="mt-3 text-sm font-bold leading-7 text-slate-500">
           该帖子正在等待审核，审核通过后即可正常查看。
         </p>
+        {scheduledPublishAt ? <p className="mt-2 text-sm font-black text-violet-700">计划发布时间：{formatScheduledPostTime(scheduledPublishAt)}（北京时间）</p> : null}
         <ModerationFallbackActions postId={postId} canEdit={canEdit} returnTo={returnTo} />
         <Link href={postBackHref(returnTo)} className="mt-6 inline-flex min-h-11 items-center rounded-full bg-brand-700 px-5 text-sm font-black text-white">
           返回 E院广场
@@ -245,6 +248,9 @@ const postCoreSelect = {
   boardId: true,
   favoriteCount: true,
   status: true,
+  publicationStatus: true,
+  scheduledPublishAt: true,
+  publishedAt: true,
   moderationStatus: true,
   expiryType: true,
   expiresAt: true,
@@ -892,7 +898,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const viewerIsAdmin = Boolean(user && await loadPostAdminPermission(user, 'post_manage', postId))
   const viewerCanReviewTopicActivity = Boolean(postCore.TopicActivity?.type === 'TOPIC_ACTIVITY' && user && await loadPostAdminPermission(user, 'activity_manage', postId))
   const viewerIsAuthor = Boolean(user && user.id === postCore.authorId)
-  if (postCore.isDeleted || postCore.status !== 'PUBLISHED') {
+  const isPublishedPost = postCore.status === 'PUBLISHED'
+    && postCore.publicationStatus === 'PUBLISHED'
+    && postCore.publishedAt !== null
+  if (postCore.isDeleted || (!isPublishedPost && !viewerIsAuthor && !viewerIsAdmin)) {
     return <PostUnavailableFallback reason="POST" returnTo={returnTo} />
   }
   if (!viewerIsAdmin && !viewerIsAuthor && isPostExpired(postCore.expiresAt)) {
@@ -904,7 +913,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   // 管理员和作者保留项目原有的私有查看能力。
   const moderationAccess = getPostModerationAccess(postCore.moderationStatus, viewerIsAdmin, viewerIsAuthor)
   if (moderationAccess === 'PENDING') {
-    return <ModerationPendingFallback postId={postId} canEdit={viewerIsAuthor} returnTo={returnTo} />
+    return <ModerationPendingFallback postId={postId} canEdit={viewerIsAuthor} returnTo={returnTo} scheduledPublishAt={postCore.scheduledPublishAt} />
   }
   if (moderationAccess === 'REJECTED') {
     return <ModerationRejectedFallback postId={postId} canEdit={viewerIsAuthor} rejectionReason={viewerIsAuthor || viewerIsAdmin ? postCore.rejectionReason : null} returnTo={returnTo} />
@@ -957,7 +966,10 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
       || publicImageUrl(post.PostMedia[0]?.url || null)
     : null
   const authorLoadFailed = support.authorLoadFailed
-  const canInteractWithPost = isPublicPostModerationStatus(post.moderationStatus) && !isPostExpired(post.expiresAt)
+  const canInteractWithPost = post.publicationStatus === 'PUBLISHED'
+    && post.publishedAt !== null
+    && isPublicPostModerationStatus(post.moderationStatus)
+    && !isPostExpired(post.expiresAt)
 
   if (!authorLoadFailed && (support.authorMissing || post.User.isDeleted || post.User.status !== 'ACTIVE' || !post.User.Profile)) {
     console.warn('[post:detail:unavailable]', {
@@ -1141,7 +1153,7 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
   const canManagePost = viewerIsAdmin
   const canManageReplies = Boolean(user && await loadPostAdminPermission(user, 'reply_manage', postId))
   const canDeletePost = Boolean(user && (user.id === post.User.id || canManagePost))
-  const canEditPost = Boolean(user && (user.id === post.User.id || canManagePost))
+  const canEditPost = Boolean(user && (canManagePost || (user.id === post.User.id && post.publicationStatus !== 'CANCELLED')))
   const richResult = post.moderationStatus === 'VIOLATION' ? null : validateRichPostContent(post.richContent)
   const detailFallbackHref = postBoardFallbackHref(post.Board?.slug)
   const publicRichContent = richResult?.valid ? richResult.value : null
@@ -1271,6 +1283,15 @@ export default async function PostDetailPage({ params, searchParams }: Readonly<
           <div className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black leading-6 text-amber-800">
             修改已保存，正在等待审核，审核通过后会重新展示。当前内容仅你可见。
           </div>
+        ) : null}
+        {viewerIsAuthor && post.moderationStatus === 'APPROVED' && post.publicationStatus === 'SCHEDULED' ? (
+          <div className="border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-black leading-6 text-violet-900">
+            审核通过，等待定时发布。计划发布时间：{post.scheduledPublishAt ? formatScheduledPostTime(post.scheduledPublishAt) : '待定'}（北京时间）。
+            <PostScheduleCancelButton postId={post.id} />
+          </div>
+        ) : null}
+        {viewerIsAuthor && post.publicationStatus === 'CANCELLED' ? (
+          <div className="border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black leading-6 text-slate-700">定时发布已取消。</div>
         ) : null}
         {viewerIsAuthor && post.moderationStatus === 'REJECTED' ? (
           <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm font-black leading-6 text-red-800">

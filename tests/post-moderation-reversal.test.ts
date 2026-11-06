@@ -16,6 +16,7 @@ const postDetail = read('app/posts/[postId]/page.tsx')
 const postApi = read('app/api/posts/[postId]/route.ts')
 const editPage = read('app/posts/[postId]/edit/page.tsx')
 const editRoute = read('app/api/posts/[postId]/route.ts')
+const publicationService = read('lib/post-publication.ts')
 const publicModules = read('app/api/users/[userId]/public-modules/route.ts')
 const likeRoute = read('app/api/posts/[postId]/like/route.ts')
 const favoriteRoute = read('app/api/posts/[postId]/favorite/route.ts')
@@ -87,6 +88,8 @@ test('拒绝后的公开访问与互动 API 统一使用公开审核条件，作
     concertShowId: null,
     isDeleted: false,
     status: 'PUBLISHED',
+    publicationStatus: 'PUBLISHED',
+    publishedAt: { not: null },
     moderationStatus: { in: ['APPROVED', 'VIOLATION'] },
   })
   assert.equal(isPublicPostModerationStatus('APPROVED'), true)
@@ -99,7 +102,7 @@ test('拒绝后的公开访问与互动 API 统一使用公开审核条件，作
   assert.match(postDetail, /if \(moderationAccess === 'REJECTED'\)/)
   assert.match(postDetail, /viewerIsAuthor \|\| viewerIsAdmin \? postCore\.rejectionReason : null/)
   assert.match(postApi, /moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\]/)
-  assert.match(postApi, /status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED'/)
+  assert.match(postApi, /status: 'PUBLISHED',\s*publicationStatus: 'PUBLISHED',\s*publishedAt: \{ not: null \},\s*moderationStatus: \{ in: \['APPROVED', 'VIOLATION'\]/)
   assert.match(postApi, /\.\.\.\(viewer \? \[\{ authorId: viewer\.id \}\] : \[\]\)/)
   assert.match(publicModules, /buildProfilePostWhere\(target\.id, canViewPendingPosts\)/)
   assert.match(editPage, /where: \{ id: postId, isDeleted: false \}/)
@@ -126,7 +129,8 @@ test('审核日志、通知、缓存和一次性奖励分别处理每次状态�
   assert.match(reviewRoute, /revalidatePath\(`\/posts\/\$\{postId\}`\)/)
   assert.match(reviewRoute, /revalidateTag\('trending-posts'\)/)
   assert.match(reviewRoute, /revalidateTag\(HOME_FEATURED_POSTS_CACHE_TAG\)/)
-  assert.match(reviewRoute, /if \(String\(result\.previousStatus\) === 'PENDING'\) triggerBadgeEvaluation\(current\.authorId, 'POST_APPROVED', postId\)/)
+  assert.match(reviewRoute, /processPostPublicationEventForPost\(postId, result\.reviewedAt\)/)
+  assert.match(publicationService, /triggerBadgeEvaluation\(post\.userId, badgeEvent, post\.postId\)/)
   assert.match(reviewRoute, /clearApprovalFriendActivity\(/)
   assert.match(editRoute, /reviewNotificationKey = canManagePosts \? null : `post-review:/)
 })

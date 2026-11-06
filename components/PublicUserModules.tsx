@@ -26,6 +26,7 @@ import { SalonLikeButton } from '@/components/salon/SalonLikeButton'
 import { UiIcon } from '@/components/UiIcon'
 import { postDetailHref } from '@/lib/post-navigation'
 import { formatPostExpiry, isPostExpired } from '@/lib/post-lifecycle'
+import { formatScheduledPostTime, getPostPublicationLabel } from '@/lib/post-scheduling'
 
 type ModuleKey = PublicProfileModuleKey
 const ALL_MODULE_KEYS: ModuleKey[] = PROFILE_RECORD_SECTIONS.map((section) => section.key) as ModuleKey[]
@@ -34,6 +35,9 @@ type PostItem = {
   title: string
   content: string
   moderationStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'VIOLATION'
+  publicationStatus: 'WAITING_REVIEW' | 'SCHEDULED' | 'PUBLISHED' | 'CANCELLED'
+  scheduledPublishAt: string | Date | null
+  publishedAt: string | Date | null
   rejectionReason: string | null
   ipRegion: string | null
   replyCount: number
@@ -118,6 +122,9 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
   const [bulkDeleteNotice, setBulkDeleteNotice] = useState('')
   const [bulkDeleteError, setBulkDeleteError] = useState('')
+  const [scheduleNotice, setScheduleNotice] = useState('')
+  const [scheduleError, setScheduleError] = useState('')
+  const [cancellingScheduleId, setCancellingScheduleId] = useState<string | null>(null)
   // #5 返回时 best-effort 恢复滚动位置所用的 sessionStorage key。
   const scrollRestoreKey = `profile-scroll:${uid}`
   const modulesSectionRef = useRef<HTMLElement>(null)
@@ -286,6 +293,27 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
     void loadModule('posts', 1)
     if (currentPostsPage > 1) void loadModule('posts', currentPostsPage, false, postGroupFilter)
   }, [loadModule, modulePages.posts, postGroupFilter])
+
+  async function cancelScheduledPost(postId: string) {
+    if (cancellingScheduleId) return
+    setCancellingScheduleId(postId)
+    setScheduleNotice('')
+    setScheduleError('')
+    try {
+      const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/schedule`, { method: 'DELETE' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        setScheduleError(data?.message || '取消定时发布失败')
+        return
+      }
+      setScheduleNotice('定时发布已取消')
+      await loadModule('posts', modulePages.posts, false, postGroupFilter)
+    } catch {
+      setScheduleError('网络连接失败，取消定时发布未完成')
+    } finally {
+      setCancellingScheduleId(null)
+    }
+  }
 
   const removeRecentMessageFromCache = useCallback((messageId: string) => {
     setCache((current) => {
@@ -546,6 +574,8 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
             )}
             {bulkDeleteNotice ? <p role="status" className="w-full text-sm font-black text-emerald-700">{bulkDeleteNotice}</p> : null}
             {bulkDeleteError ? <p role="alert" className="w-full text-sm font-black text-red-600">{bulkDeleteError}</p> : null}
+            {scheduleNotice ? <p role="status" className="w-full text-sm font-black text-emerald-700">{scheduleNotice}</p> : null}
+            {scheduleError ? <p role="alert" className="w-full text-sm font-black text-red-600">{scheduleError}</p> : null}
           </div>
         ) : null}
         {visibleTabs.length > 0 && state && !state.loading && !state.failed ? (
@@ -568,6 +598,8 @@ export function PublicUserModules({ uid, isSelf, visibleModules, recordPreferenc
             onPostNavigate={handlePostNavigate}
             postReturnTo={profileReturnTo}
             onProfilePostDeleted={handleProfilePostDeleted}
+            onCancelScheduledPost={cancelScheduledPost}
+            cancellingScheduleId={cancellingScheduleId}
             expandedRecentMessages={expandedRecentMessages}
             onToggleRecentMessage={(messageId) => setExpandedRecentMessages((current) => ({ ...current, [messageId]: !current[messageId] }))}
             onRequestEditRecentMessage={isSelf ? startEditRecentMessage : undefined}
@@ -638,6 +670,8 @@ function ModuleContent({
   onPostNavigate,
   postReturnTo,
   onProfilePostDeleted,
+  onCancelScheduledPost,
+  cancellingScheduleId,
   expandedRecentMessages,
   onToggleRecentMessage,
   onRequestEditRecentMessage,
@@ -669,6 +703,8 @@ function ModuleContent({
   onPostNavigate: () => void
   postReturnTo: string
   onProfilePostDeleted: () => void
+  onCancelScheduledPost: (postId: string) => void
+  cancellingScheduleId: string | null
   expandedRecentMessages: Record<string, boolean>
   onToggleRecentMessage: (messageId: string) => void
   onRequestEditRecentMessage?: (message: ProfileRecentMessage) => void
@@ -728,10 +764,12 @@ function ModuleContent({
                     <h3 className="text-lg font-black text-brand-950">{post.title}</h3>
                     {isSelf && post.moderationStatus === 'PENDING' ? <span className="rounded-sm bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">审核中</span> : null}
                     {isSelf && post.moderationStatus === 'REJECTED' ? <span className="rounded-sm bg-red-50 px-2 py-1 text-xs font-black text-red-700">审核未通过</span> : null}
+                    {isSelf && post.moderationStatus !== 'PENDING' && post.moderationStatus !== 'REJECTED' && post.publicationStatus !== 'PUBLISHED' ? <span className="rounded-sm bg-violet-50 px-2 py-1 text-xs font-black text-violet-700">{getPostPublicationLabel(post)}</span> : null}
                     {isSelf && post.expiresAt && isPostExpired(post.expiresAt) ? <span className="rounded-sm bg-slate-100 px-2 py-1 text-xs font-black text-slate-600">已过期</span> : null}
                   </div>
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{post.content}</p>
                   {isSelf && post.expiresAt && !isPostExpired(post.expiresAt) ? <p className="mt-2 text-xs font-bold text-amber-700">限时 · {formatPostExpiry(post.expiresAt)}</p> : null}
+                  {isSelf && post.scheduledPublishAt ? <p className="mt-2 text-xs font-bold text-violet-700">计划发布时间：{formatScheduledPostTime(post.scheduledPublishAt)}（北京时间）</p> : null}
                   {isSelf && post.moderationStatus === 'REJECTED' && post.rejectionReason ? <p className="mt-2 text-xs font-bold text-red-700">{post.rejectionReason}</p> : null}
                   <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold text-slate-500">
                     <span>回复 {post.replyCount} · 赞 {post.likeCount} · 浏览 {post.viewCount}</span>
@@ -745,6 +783,11 @@ function ModuleContent({
                       groups={postGroups}
                       onChanged={onPostGroupsChanged}
                     />
+                    {post.publicationStatus === 'SCHEDULED' && post.moderationStatus === 'APPROVED' ? (
+                      <button type="button" disabled={Boolean(cancellingScheduleId)} onClick={() => onCancelScheduledPost(post.id)} className="rounded-sm border border-violet-200 bg-white px-2 py-1 text-xs font-black text-violet-700 disabled:opacity-50">
+                        {cancellingScheduleId === post.id ? '取消中…' : '取消定时发布'}
+                      </button>
+                    ) : null}
                     <PersonalPostPinMenu
                       postId={post.id}
                       initialIsPinned={post.isProfilePinned}

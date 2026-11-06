@@ -5,6 +5,8 @@ import { BADGE_RULE_REGISTRY, type SupportedBadgeRuleType } from '@/lib/badge-ru
 
 export const VALID_POST_WHERE = {
   status: 'PUBLISHED' as const,
+  publicationStatus: 'PUBLISHED' as const,
+  publishedAt: { not: null },
   isDeleted: false,
   moderationStatus: 'APPROVED' as const,
 }

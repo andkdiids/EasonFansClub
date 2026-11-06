@@ -299,7 +299,7 @@ export async function submitTopicActivityV2Task(input: { activityId: string; use
     const eligible = await resolveTopicActivityCommentEligibilityInTransaction(tx, { activity, userId: input.userId, now })
     if (!eligible.canComment) fail(eligible.blockReason || 'TOPIC_V2_COMMENT_BLOCKED', '请先完成活动参与条件')
     await tx.$queryRawUnsafe('SELECT id FROM Post WHERE id = ? FOR UPDATE', activity.activityPostId)
-    const post = await tx.post.findFirst({ where: { id: activity.activityPostId, isDeleted: false, isLocked: false, status: 'PUBLISHED', Board: { isActive: true } }, select: { id: true, authorId: true } })
+    const post = await tx.post.findFirst({ where: { id: activity.activityPostId, isDeleted: false, isLocked: false, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, moderationStatus: 'APPROVED', Board: { isActive: true } }, select: { id: true, authorId: true } })
     if (!post) fail('TOPIC_V2_POST_UNAVAILABLE', '活动主帖当前不可回复')
     await requireActiveUser(tx, input.userId)
     const assets = ids.length ? await tx.topicActivityImageAsset.findMany({ where: {

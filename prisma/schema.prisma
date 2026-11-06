@@ -2600,6 +2600,7 @@ model Lottery {
   drawnAt            DateTime?
   cancelledAt        DateTime?
   algorithmVersion   String?
+  drawSource         String?                            @db.VarChar(32)
   createdById        String?
   Activity           Activity?                          @relation(fields: [activityId], references: [id])
   CreatedBy          User?                              @relation("LotteryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -3965,10 +3966,12 @@ model Post {
   favoriteCount         Int                     @default(0)
   isLocked              Boolean                 @default(false)
   isRecommended         Boolean                 @default(false)
-  publishedAt           DateTime                @default(now())
+  publishedAt           DateTime?               @default(now())
   readUserCount         Int                     @default(0)
   shareCount            Int                     @default(0)
   status                PostStatus              @default(PUBLISHED)
+  publicationStatus     PostPublicationStatus   @default(PUBLISHED)
+  scheduledPublishAt    DateTime?
   moderationStatus      PostModerationStatus    @default(APPROVED)
   moderationReason      String?
   matchedBannedWords    String?                 @db.Text
@@ -3997,6 +4000,7 @@ model Post {
   concertShowId         String?
   ConcertShow           ConcertShow?            @relation(fields: [concertShowId], references: [id], onDelete: SetNull)
   TopicActivity         Activity?               @relation("ActivityPost")
+  PublicationEvent      PostPublicationEvent?
 
   @@index([authorId, createdAt])
   @@index([authorId, userPostGroupId, createdAt])
@@ -4018,7 +4022,27 @@ model Post {
   @@index([status])
   @@index([moderationStatus, createdAt])
   @@index([expiresAt, status, isDeleted, moderationStatus])
+  @@index([publicationStatus, moderationStatus, scheduledPublishAt], map: "Post_scheduled_publish_idx")
   @@index([concertShowId, status, isDeleted, createdAt])
+}
+
+/// Durable, idempotent side-effect record created alongside a post's first
+/// publication transition. WAITING rows become PENDING only after publication.
+model PostPublicationEvent {
+  id          String                     @id @default(cuid())
+  postId      String                     @unique
+  triggerType PostPublicationTrigger
+  status      PostPublicationEventStatus @default(WAITING)
+  attempts    Int                        @default(0)
+  availableAt DateTime                   @default(now())
+  lockedAt    DateTime?
+  lockToken   String?                    @db.VarChar(64)
+  lastError   String?                    @db.Text
+  createdAt   DateTime                   @default(now())
+  completedAt DateTime?
+  Post        Post                       @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt, lockedAt], map: "PostPublicationEvent_retry_idx")
 }
 
 /**
@@ -6085,6 +6109,27 @@ enum PostStatus {
   PUBLISHED
   LOCKED
   DELETED
+}
+
+enum PostPublicationStatus {
+  WAITING_REVIEW
+  SCHEDULED
+  PUBLISHED
+  CANCELLED
+}
+
+enum PostPublicationEventStatus {
+  WAITING
+  PENDING
+  PROCESSING
+  FAILED
+  COMPLETED
+  CANCELLED
+}
+
+enum PostPublicationTrigger {
+  POST_CREATED
+  POST_APPROVED
 }
 
 enum ClinicCategory {

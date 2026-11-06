@@ -65,6 +65,8 @@ const postDetailSelect = {
   isLocked: true,
   isRecommended: true,
   publishedAt: true,
+  publicationStatus: true,
+  scheduledPublishAt: true,
   readUserCount: true,
   shareCount: true,
   status: true,
@@ -222,6 +224,9 @@ function postEditErrorResponse(error: unknown, postId: string, userId: string, p
   if (errorMessage === 'POST_NOT_FOUND' || errorMessage === 'POST_ALREADY_DELETED' || prismaCode === 'P2025') {
     return NextResponse.json({ ok: false, code: 'POST_NOT_FOUND', message: '帖子不存在或已经被删除' }, { status: 404 })
   }
+  if (errorMessage === 'POST_SCHEDULE_CANCELLED') {
+    return NextResponse.json({ ok: false, code: errorMessage, message: '该定时发布已取消，不能继续编辑并重新提交；如需发布请新建帖子' }, { status: 409 })
+  }
   if (prismaCode === 'P2003') {
     return NextResponse.json({ ok: false, code: isFeatureOperation ? 'POST_FEATURE_REFERENCE_INVALID' : 'POST_EDIT_REFERENCE_INVALID', message: isFeatureOperation ? '设置精华所需的帖子或作者关联已失效，请刷新后重试' : '帖子关联的板块或用户已失效，请刷新后重试' }, { status: 409 })
   }
@@ -311,10 +316,14 @@ export async function GET(request: Request, { params }: Params) {
     where: {
       id: postId,
       isDeleted: false,
-      status: 'PUBLISHED',
-       ...(viewerCanManagePosts ? {} : {
+      ...(viewerCanManagePosts ? {} : {
         OR: [
-          { moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const } },
+          {
+            status: 'PUBLISHED',
+            publicationStatus: 'PUBLISHED',
+            publishedAt: { not: null },
+            moderationStatus: { in: ['APPROVED', 'VIOLATION'] as const },
+          },
           ...(viewer ? [{ authorId: viewer.id }] : []),
         ],
       }),
@@ -446,6 +455,7 @@ export async function PATCH(request: Request, { params }: Params) {
         richContent: true,
         stickerId: true,
         moderationStatus: true,
+        publicationStatus: true,
         User: { select: { role: true } },
       },
     })
@@ -555,7 +565,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
     if (data.isDeleted !== undefined && lockedExisting.isDeleted !== data.isDeleted) {
       const postCount = await tx.post.count({
-        where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+        where: { boardId: lockedExisting.boardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
       })
       await tx.board.update({
         where: { id: lockedExisting.boardId },
@@ -660,6 +670,7 @@ type EditContext = {
     richContent: unknown | null
     stickerId: string | null
     moderationStatus: string
+    publicationStatus: string
   }
   user: Pick<SessionUser, 'id' | 'role'>
   canManagePosts: boolean
@@ -677,6 +688,9 @@ async function handleEditPost(
   setPhase('edit-authorize')
   if (!isOwner && !canManagePosts) {
     return NextResponse.json({ message: '只能编辑自己发布的帖子' }, { status: 403 })
+  }
+  if (!canManagePosts && existing.publicationStatus === 'CANCELLED') {
+    return NextResponse.json({ ok: false, code: 'POST_SCHEDULE_CANCELLED', message: '该定时发布已取消，不能继续编辑并重新提交；如需发布请新建帖子' }, { status: 409 })
   }
 
   const rawTitle = sanitizeText(typeof body.title === 'string' ? body.title : existing.title, 120)
@@ -881,11 +895,17 @@ async function handleEditPost(
         boardId: true,
         title: true,
         moderationStatus: true,
+        publicationStatus: true,
         rejectionReason: true,
         User: { select: { uid: true, nickname: true, Profile: { select: { displayName: true } } } },
       },
     })
     if (!lockedExisting) throw new Error('POST_NOT_FOUND')
+    // Recheck under the Post lock because a schedule cancellation may have
+    // won after the initial read/permission phase.
+    if (!canManagePosts && lockedExisting.publicationStatus === 'CANCELLED') {
+      throw new Error('POST_SCHEDULE_CANCELLED')
+    }
 
     const updatedPost = await tx.post.update({
       where: { id: postId },
@@ -907,6 +927,24 @@ async function handleEditPost(
       },
       select: { id: true, title: true, content: true, richContent: true, moderationStatus: true, updatedAt: true },
     })
+
+    if (!canManagePosts) {
+      // Editing opens a new moderation cycle. Park any prior publication
+      // event, including an in-flight worker, until approval of the new copy.
+      // Stable reward and notification keys make publication replay idempotent.
+      await tx.postPublicationEvent.updateMany({
+        where: { postId, status: { not: 'WAITING' } },
+        data: {
+          status: 'WAITING',
+          attempts: 0,
+          availableAt: new Date(),
+          lockedAt: null,
+          lockToken: null,
+          lastError: null,
+          completedAt: null,
+        },
+      })
+    }
 
     // 删除被移除的图片（keepMediaIds 显式排除的）。
     if (removedCount > 0) {
@@ -946,7 +984,7 @@ async function handleEditPost(
       const affectedBoardIds = [...new Set([lockedExisting.boardId, nextBoardId])]
       for (const affectedBoardId of affectedBoardIds) {
         const postCount = await tx.post.count({
-          where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+          where: { boardId: affectedBoardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
         })
         await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
       }
@@ -954,7 +992,7 @@ async function handleEditPost(
     if (canManagePosts && lockedExisting.boardId !== nextBoardId && lockedExisting.moderationStatus === 'APPROVED') {
       for (const affectedBoardId of [lockedExisting.boardId, nextBoardId]) {
         const postCount = await tx.post.count({
-          where: { boardId: affectedBoardId, status: 'PUBLISHED', isDeleted: false, moderationStatus: 'APPROVED' },
+          where: { boardId: affectedBoardId, status: 'PUBLISHED', publicationStatus: 'PUBLISHED', publishedAt: { not: null }, isDeleted: false, moderationStatus: 'APPROVED' },
         })
         await tx.board.update({ where: { id: affectedBoardId }, data: { postCount } })
       }

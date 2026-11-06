@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { normalizePostReturnTo, postDetailHref } from '@/lib/post-navigation'
+import { formatScheduledPostTime } from '@/lib/post-scheduling'
 
 function SubmittedContent() {
   const router = useRouter()
@@ -10,10 +11,12 @@ function SubmittedContent() {
   const postId = params.get('postId') || ''
   const status = params.get('status') || ''
   const returnTo = normalizePostReturnTo(params.get('returnTo'))
+  const scheduledPublishAt = params.get('scheduledPublishAt')
   const [count, setCount] = useState(5)
+  const isScheduled = Boolean(scheduledPublishAt)
 
   // 审核通过（已公开）且存在 postId → 返回帖子详情；否则回到原始来源或 E院广场。
-  const target = status === 'APPROVED' && postId ? postDetailHref(postId, returnTo) : returnTo || '/forum'
+  const target = (status === 'APPROVED' || isScheduled) && postId ? postDetailHref(postId, returnTo) : returnTo || '/forum'
 
   useEffect(() => {
     if (count <= 0) {
@@ -32,11 +35,13 @@ function SubmittedContent() {
     <main className="site-page-main flat-page mx-auto max-w-2xl space-y-6 px-4 py-10 sm:px-5 sm:py-14">
       <section className="rounded-[30px] border border-sky-100 bg-white/90 p-8 text-center shadow-sm sm:p-10">
         <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-50 text-3xl">✓</div>
-        <h1 className="mt-5 text-3xl font-black text-brand-950 sm:text-4xl">帖子已提交审核</h1>
+        <h1 className="mt-5 text-3xl font-black text-brand-950 sm:text-4xl">{isScheduled && status === 'APPROVED' ? '审核通过，等待定时发布' : '帖子已提交审核'}</h1>
         <p className="mt-4 text-base font-bold leading-7 text-slate-600">
-          您的帖子已经提交审核。<br />
-          审核通过后，帖子将在 E院广场 正常显示。<br />
-          感谢您的分享。
+          {isScheduled && status === 'APPROVED'
+            ? <>审核已通过，帖子会在计划时间公开。<br />计划发布时间：{formatScheduledPostTime(scheduledPublishAt!)}（北京时间）。</>
+            : isScheduled
+              ? <>您的定时帖子已提交，当前状态：待审核。<br />计划发布时间：{formatScheduledPostTime(scheduledPublishAt!)}（北京时间）。审核通过后会在该时间公开。</>
+              : <>您的帖子已经提交审核。<br />审核通过后，帖子将在 E院广场 正常显示。<br />感谢您的分享。</>}
         </p>
         <div className="mt-7 flex flex-col items-center gap-4">
           <button

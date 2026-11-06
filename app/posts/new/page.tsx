@@ -22,6 +22,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
   if (!user) redirect('/login')
 
   const canPostAnnouncement = await hasAdminPermission(user, 'post_manage')
+  const initialScheduleNow = new Date().toISOString()
   const boardRows = await prisma.board.findMany({
     where: {
       isActive: true,
@@ -40,7 +41,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
         <div className="mb-6">
           <h1 className="mt-2 text-4xl font-black text-brand-950">发布帖子</h1>
         </div>
-        <PostCreateForm boards={normalizeForumBoards(boards)} userId={user.id} initialBoardSlug={query.board} returnTo={returnTo} />
+        <PostCreateForm boards={normalizeForumBoards(boards)} userId={user.id} canScheduleNextDay={canPostAnnouncement} initialScheduleNow={initialScheduleNow} initialBoardSlug={query.board} returnTo={returnTo} />
       </main>
     </>
   )
