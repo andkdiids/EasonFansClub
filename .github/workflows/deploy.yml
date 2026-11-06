@@ -62,6 +62,18 @@ on:
           - full
           - skip-db
         default: full
+      restore_drill_waiver:
+        description: >-
+          Explicit, written, one-off approval that waives ONLY the restore-drill
+          requirement (schemaVersion=2). Defaults to 'none' so a push event can
+          never take the waiver path. Requires a signed, exact-SHA, short-lived
+          host attestation; all automatic-backup/PITR checks remain strict.
+        required: false
+        type: choice
+        options:
+          - none
+          - approved
+        default: none
 
 permissions:
   contents: read
@@ -299,11 +311,18 @@ jobs:
           REMOTE
 
       # HARD GATE: no production migration and no atomic switch may start
-      # unless a human has verified, on the Tencent Cloud CynosDB console, that
-      # a recent automatic backup exists, PITR is enabled and a real restore
-      # drill succeeded for THIS exact release SHA. The host-side attestation
-      # is strictly read-only and contains no credentials. This step runs for
-      # BOTH `full` and `skip-db` modes: skip-db is not an escape hatch.
+      # unless a human has verified, on the Tencent Cloud CynosDB console,
+      # that a recent automatic backup exists and PITR is enabled for THIS exact
+      # release SHA. schemaVersion=1 ALSO requires a real restore drill.
+      # schemaVersion=2 waives ONLY that drill, and is accepted only when this
+      # workflow is explicitly re-triggered with restore_drill_waiver=approved
+      # AND the host attestation carries a named, recent, written approval
+      # bound to the exact deployed SHA. Push events always fall back to the
+      # strict path, so the first automatic deployment after a merge is
+      # safely blocked until the attestation is ready.
+      # The host-side attestation is strictly read-only and contains no
+      # credentials. This step runs for BOTH `full` and `skip-db` modes:
+      # skip-db is not an escape hatch.
       - name: Require a verified recoverable production database backup
         id: backup_gate
         timeout-minutes: 10
@@ -313,6 +332,7 @@ jobs:
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           BACKUP_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
           DEPLOY_SHA: ${{ github.sha }}
+          RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
         run: |
           set -euo pipefail
 
@@ -334,11 +354,16 @@ jobs:
             echo "::error::Invalid deploy SHA for the backup gate."
             exit 1
           }
+          case "${RESTORE_DRILL_WAIVER_MODE}" in
+            none) echo "RESTORE_DRILL_WAIVER_MODE=NONE (strict restore-drill requirement)" ;;
+            approved) echo "RESTORE_DRILL_WAIVER_MODE=APPROVED (one-off, exact-SHA written approval required)" ;;
+            *) echo "::error::Invalid restore drill waiver mode."; exit 1 ;;
+          esac
 
           remote_host="${SERVER_USER}@${SERVER_HOST}"
           printf -v remote_command \
-            'node --input-type=module - --cli verify --attestation %q --deploy-sha %q' \
-            "$gate_file" "$DEPLOY_SHA"
+            'node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q' \
+            "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE"
 
           set +e
           gate_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s \
@@ -366,6 +391,14 @@ jobs:
           if ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_GATE=VERIFIED'; then
             echo "::error::Backup gate did not emit an explicit VERIFIED result."
             exit 1
+          fi
+          if [[ "${RESTORE_DRILL_WAIVER_MODE}" == approved ]]; then
+            # A waiver must never be misreported as a verified restore drill.
+            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'RESTORE_DRILL_WAIVED=YES' ||
+               ! printf '%s\n' "${gate_output}" | grep -Fxq 'RESTORE_DRILL_VERIFIED=NO'; then
+              echo "::error::An approved waiver must explicitly report that the restore drill was NOT verified."
+              exit 1
+            fi
           fi
           echo "BACKUP_GATE_STEP=PASS"
           echo "verified_sha=${DEPLOY_SHA}" >> "${GITHUB_OUTPUT}"

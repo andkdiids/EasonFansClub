@@ -52,6 +52,20 @@ test('backup attestation gate precedes migration, atomic switch and skip-db', ()
   assert.match(gate, /BACKUP_PITR_VERIFIED=NO/)
   assert.match(gate, /RESTORE_DRILL_VERIFIED=NO/)
   assert.match(gate, /RESTORE_DRILL_NOT_VERIFIED/)
+
+  // The one-off drill waiver is OPT-IN: a push event always stays on the
+  // strict schemaVersion=1 path, and an explicitly approved dispatch must
+  // still report that the drill was NOT verified.
+  assert.match(workflow, /inputs\.restore_drill_waiver \|\| 'none'/)
+  assert.match(gateBlock, /RESTORE_DRILL_WAIVER_MODE/)
+  assert.match(gateBlock, /--waiver-mode %q/)
+  assert.match(gateBlock, /RESTORE_DRILL_WAIVED=YES/)
+  assert.match(gateBlock, /RESTORE_DRILL_VERIFIED=NO/)
+  assert.match(gate, /RESTORE_DRILL_WAIVED=YES/)
+  assert.match(gate, /WAIVER_NOT_ENABLED/)
+  assert.match(gate, /WAIVER_RELEASE_ID_MISMATCH/)
+  assert.match(gate, /RESTORE_DRILL_RECORD_FORBIDDEN_IN_WAIVER/)
+  assert.doesNotMatch(workflow, /restore_drill_waiver:[\s\S]{0,300}?default: approved/)
 })
 
 test('the read-only diagnostic never blocks on a not-yet-deployed candidate SHA', () => {
