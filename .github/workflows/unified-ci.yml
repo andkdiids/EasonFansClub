@@ -171,6 +171,28 @@ jobs:
       - name: Prisma generate
         shell: bash
         run: pnpm exec prisma generate
+      # A workflow_dispatch main-baseline run checks out main, which does not
+      # contain the shard runner yet (it is introduced by this PR). Materialize
+      # the runner from this SAME workflow ref so the baseline uses identical
+      # tooling, while every test file still comes from the baseline checkout.
+      # This never runs for pull_request events.
+      - name: Materialize workflow-owned shard runner for baseline comparisons
+        if: ${{ github.event.inputs.checkout_ref != '' && hashFiles('scripts/test-shard.mjs') == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REF: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scripts
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${{ github.repository }}/contents/scripts/test-shard.mjs?ref=${WORKFLOW_REF}" \
+            > scripts/test-shard.mjs
+          [[ -s scripts/test-shard.mjs ]] || {
+            echo "::error::Unable to materialize the shard runner for the baseline checkout."
+            exit 1
+          }
+          echo "SHARD_RUNNER_SOURCE=WORKFLOW_REF:${WORKFLOW_REF}"
       - name: Run unfiltered test shard ${{ matrix.shard }}/4
         shell: bash
         run: |
@@ -218,6 +240,25 @@ jobs:
           pattern: test-shard-*
           merge-multiple: true
           path: test-shard-results
+      # See the equivalent step in `tests`: baseline checkouts need the runner
+      # too, but the canonical test file list is still read from the baseline.
+      - name: Materialize workflow-owned shard runner for baseline comparisons
+        if: ${{ github.event.inputs.checkout_ref != '' && hashFiles('scripts/test-shard.mjs') == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REF: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scripts
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${{ github.repository }}/contents/scripts/test-shard.mjs?ref=${WORKFLOW_REF}" \
+            > scripts/test-shard.mjs
+          [[ -s scripts/test-shard.mjs ]] || {
+            echo "::error::Unable to materialize the shard runner for the baseline checkout."
+            exit 1
+          }
+          echo "SHARD_RUNNER_SOURCE=WORKFLOW_REF:${WORKFLOW_REF}"
       - name: Verify coverage and real shard exit codes
         shell: bash
         run: |
