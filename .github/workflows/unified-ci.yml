@@ -132,14 +132,21 @@ jobs:
           set -euo pipefail
           pnpm lint
 
+  # The single-process `pnpm test` run deterministically hung after subtest
+  # 2372: tests/instagram-sync-worker-entrypoint.test.ts left tsx/esbuild
+  # grandchildren holding the stdio pipes open. That teardown is fixed, and the
+  # full, unfiltered suite is now split into four deterministic round-robin
+  # shards. Each shard reports its own REAL exit code, exact file manifest,
+  # complete TAP log and failed subtest names. Nothing is skipped, filtered,
+  # retried or marked continue-on-error.
   tests:
-    name: Full test suite
+    name: Full test suite (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-22.04
-    # 546 test files / 4563 subtests on a 2-vCPU runner need ~80 minutes.
-    # A 40-minute budget cancelled both the PR and main-baseline runs at
-    # subtest 2372. Raise the budget only; the suite is still run in full,
-    # unfiltered, with its real exit code.
-    timeout-minutes: 120
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout reviewed source
         uses: actions/checkout@v4
@@ -164,11 +171,61 @@ jobs:
       - name: Prisma generate
         shell: bash
         run: pnpm exec prisma generate
-      - name: Full test suite (no filtering)
+      - name: Run unfiltered test shard ${{ matrix.shard }}/4
         shell: bash
         run: |
           set -euo pipefail
-          pnpm test
+          mkdir -p test-shard-results
+          node scripts/test-shard.mjs --cli run \
+            --count 4 \
+            --index "${{ matrix.shard }}" \
+            --root "$GITHUB_WORKSPACE" \
+            --out "$GITHUB_WORKSPACE/test-shard-results" \
+            --timeout-ms 120000 \
+            --max-wall-ms 2400000
+      - name: Upload shard evidence (also on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-shard-${{ matrix.shard }}
+          path: |
+            test-shard-results/shard-${{ matrix.shard }}.files.json
+            test-shard-results/shard-${{ matrix.shard }}.result.json
+            test-shard-results/shard-${{ matrix.shard }}.tap.log
+          if-no-files-found: error
+          retention-days: 14
+
+  # Aggregation gate: re-computes the plan from this exact checkout and fails
+  # on any missing/duplicated/extra test file, any non-zero shard exit code,
+  # any signal, any wall timeout, or any missing artifact. A cancelled or
+  # timed-out shard can therefore never be reported as a pass.
+  tests-gate:
+    name: Full test suite (coverage + exit-code gate)
+    needs: [tests]
+    if: always()
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download all shard evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-shard-*
+          merge-multiple: true
+          path: test-shard-results
+      - name: Verify coverage and real shard exit codes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/test-shard.mjs --cli verify \
+            --count 4 \
+            --root "$GITHUB_WORKSPACE" \
+            --results "$GITHUB_WORKSPACE/test-shard-results"
 
   production-build:
     name: Next.js production build

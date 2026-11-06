@@ -469,6 +469,15 @@ test -d "${release_dir}/.next/static"
 test -d "${release_dir}/public"
 echo "Build completed successfully in $(( $(date +%s) - build_started ))s."
 
+# Defence in depth: deploy.yml must have passed the read-only, host-side backup
+# attestation gate for THIS exact SHA before this script may migrate or switch.
+# This check is unconditional: --skip-db is not an escape hatch, and invoking
+# this deployment script directly (without the workflow) is also refused.
+if [ "${BACKUP_GATE_VERIFIED_SHA:-}" != "${DEPLOY_SHA}" ]; then
+  die "Backup verification gate did not approve ${DEPLOY_SHA}; refusing ALL database migration and deployment."
+fi
+echo "BACKUP_GATE_VERIFIED_SHA_CHECK=PASS"
+
 if [ "${db_mode}" = skip-db ]; then
   log_step "6/8" "Skip all database migration and maintenance phases"
   echo "DATABASE MIGRATION: SKIPPED"
