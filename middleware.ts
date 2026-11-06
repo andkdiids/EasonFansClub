@@ -124,6 +124,8 @@ function normalizeHost(value: string) {
 function isPublicPath(pathname: string) {
   if (publicExactPaths.has(pathname)) return true
   if (pathname === '/api/auth') return true
+  // The scheduled publication endpoint authenticates its non-browser caller with DAILY_JOB_SECRET.
+  if (pathname === '/api/internal/daily-jobs/scheduled-post-publication') return true
   // The published activity's form schema contains no user submissions or
   // private data, so anonymous visitors may render the login-gated form UI.
   if (/^\/api\/activities\/[^/]+\/form$/.test(pathname)) return true

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { before, test } from 'node:test'
+import { POST as runScheduledPostPublicationJob } from '../app/api/internal/daily-jobs/scheduled-post-publication/route'
 import { SignJWT } from 'jose'
 import { NextRequest } from 'next/server'
 import { authCookieName } from '../lib/auth-cookie'
@@ -400,4 +401,25 @@ test('管理员 JWT 可以通过 middleware 进入 admin 路由，登录 next �
   assert.equal(normalizeStoredInternalPath('//evil.example/admin'), null)
   assert.equal(normalizeStoredInternalPath('https://evil.example/admin'), null)
   assert.equal(normalizeStoredInternalPath('https://localhost:3000/admin'), '/admin')
+})
+test('定时发布内部 API 只绕过浏览器会话层，仍要求专用任务密钥', async () => {
+  const path = '/api/internal/daily-jobs/scheduled-post-publication'
+  const reachable = await middleware(makeMutationRequest(path, 'POST'))
+  assert.equal(reachable.status, 200, 'cron can reach the route-level DAILY_JOB_SECRET check without a browser cookie')
+
+  const unrelated = await middleware(makeMutationRequest('/api/internal/daily-jobs/activity-auto-checkin', 'POST'))
+  assert.equal(unrelated.status, 401, 'other internal job routes remain protected by the normal session middleware')
+
+  const previousSecret = process.env.DAILY_JOB_SECRET
+  try {
+    delete process.env.DAILY_JOB_SECRET
+    const unconfigured = await runScheduledPostPublicationJob(new Request('https://ecfc.fans' + path, { method: 'POST' }))
+    assert.equal(unconfigured.status, 503)
+    process.env.DAILY_JOB_SECRET = 'middleware-test-job-secret'
+    const unauthorized = await runScheduledPostPublicationJob(new Request('https://ecfc.fans' + path, { method: 'POST', headers: { 'x-daily-job-secret': 'wrong-secret' } }))
+    assert.equal(unauthorized.status, 403)
+  } finally {
+    if (previousSecret === undefined) delete process.env.DAILY_JOB_SECRET
+    else process.env.DAILY_JOB_SECRET = previousSecret
+  }
 })

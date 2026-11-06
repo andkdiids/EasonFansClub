@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { mapWithConcurrency } from '@/lib/bounded-concurrency'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import type { BadgeEvaluationEvent } from '@/lib/badge-rule-engine'
 import { syncUserAchievements } from '@/lib/achievements'
@@ -14,6 +15,8 @@ import { isApprovedScheduledPostDue } from '@/lib/post-scheduling'
 const PUBLICATION_EVENT_LEASE_MS = 5 * 60 * 1000
 const PUBLICATION_EVENT_HEARTBEAT_MS = Math.floor(PUBLICATION_EVENT_LEASE_MS / 3)
 const MAX_PUBLICATION_BATCH_SIZE = 100
+const MAX_PUBLICATION_BATCH_CONCURRENCY = 6
+const MAX_PUBLICATION_JOB_WORK_MS = 35_000
 const MAX_RETRY_DELAY_MS = 60 * 60 * 1000
 
 type PublicationJobResult = {
@@ -22,6 +25,7 @@ type PublicationJobResult = {
   eventsProcessed: number
   eventsSkipped: number
   eventsFailed: number
+  eventsDeferred: number
 }
 
 function retryDelayMs(attempts: number) {
@@ -82,7 +86,7 @@ async function promoteOneDuePost(postId: string, now: Date) {
 }
 
 async function applyPublicationDatabaseEffects(eventId: string, lockToken: string, now: Date) {
-  // All post lifecycle transactions lock Post before PostPublicationEvent.
+  // All lifecycle transactions lock Post before PostPublicationEvent and User.
   // Keep that order here too so an approval/cancellation racing the worker
   // cannot form a Post <-> outbox deadlock.
   const eventSnapshot = await prisma.postPublicationEvent.findUnique({
@@ -92,8 +96,14 @@ async function applyPublicationDatabaseEffects(eventId: string, lockToken: strin
   if (!eventSnapshot) return null
 
   return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT \`id\` FROM \`Post\` WHERE \`id\` = ${eventSnapshot.postId} FOR UPDATE`
+    // Lock Post -> outbox -> User before the first consistent read. Under MySQL
+    // REPEATABLE READ, taking the author lock after a snapshot can leave a
+    // waiting transaction with stale one-time growth rows.
+    const lockedPosts = await tx.$queryRaw<Array<{ id: string; authorId: string }>>`SELECT \`id\`, \`authorId\` FROM \`Post\` WHERE \`id\` = ${eventSnapshot.postId} FOR UPDATE`
+    const lockedPost = lockedPosts[0]
+    if (!lockedPost) return null
     await tx.$queryRaw`SELECT \`id\` FROM \`PostPublicationEvent\` WHERE \`id\` = ${eventId} FOR UPDATE`
+    await tx.$queryRaw`SELECT \`id\` FROM \`User\` WHERE \`id\` = ${lockedPost.authorId} FOR UPDATE`
     const event = await tx.postPublicationEvent.findFirst({
       where: { id: eventId, status: 'PROCESSING', lockToken },
       select: { id: true, postId: true, triggerType: true, attempts: true },
@@ -331,6 +341,7 @@ export async function processPostPublicationEventForPost(postId: string, now = n
 }
 
 export async function runScheduledPostPublicationJob(now = new Date()): Promise<PublicationJobResult> {
+  const jobStartedAt = Date.now()
   const candidates = await prisma.post.findMany({
     where: {
       isDeleted: false,
@@ -346,14 +357,14 @@ export async function runScheduledPostPublicationJob(now = new Date()): Promise<
 
   let postsPublished = 0
   let promotionFailures = 0
-  for (const candidate of candidates) {
+  await mapWithConcurrency(candidates, MAX_PUBLICATION_BATCH_CONCURRENCY, async (candidate) => {
     try {
       if (await promoteOneDuePost(candidate.id, now)) postsPublished += 1
     } catch (error) {
       promotionFailures += 1
       console.error('[post-publication.promote.failed]', { postId: candidate.id, error: safePublicationError(error) })
     }
-  }
+  })
 
   const pendingEvents = await prisma.postPublicationEvent.findMany({
     where: {
@@ -371,18 +382,38 @@ export async function runScheduledPostPublicationJob(now = new Date()): Promise<
     },
     orderBy: [{ availableAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     take: MAX_PUBLICATION_BATCH_SIZE,
-    select: { id: true },
+    select: { id: true, Post: { select: { authorId: true } } },
   })
 
   let eventsProcessed = 0
   let eventsSkipped = 0
   let eventsFailed = 0
+  let eventsDeferred = 0
+  const eventsByAuthor = new Map<string, typeof pendingEvents>()
   for (const event of pendingEvents) {
-    const outcome = await processPublicationEvent(event.id, now)
-    if (outcome === 'PROCESSED') eventsProcessed += 1
-    else if (outcome === 'FAILED') eventsFailed += 1
-    else eventsSkipped += 1
+    const authorId = event.Post.authorId
+    const batch = eventsByAuthor.get(authorId) || []
+    batch.push(event)
+    eventsByAuthor.set(authorId, batch)
   }
+
+  // Avoid making one author compete with itself for the User row lock inside
+  // the reward transaction. Different authors remain parallel across workers.
+  // Keep a 15s margin for in-flight effects and request shutdown under the
+  // production cron's 50s HTTP timeout; deferred rows remain retryable next run.
+  const eventDeadline = jobStartedAt + MAX_PUBLICATION_JOB_WORK_MS
+  await mapWithConcurrency([...eventsByAuthor.values()], MAX_PUBLICATION_BATCH_CONCURRENCY, async (authorEvents) => {
+    for (let index = 0; index < authorEvents.length; index += 1) {
+      if (Date.now() >= eventDeadline) {
+        eventsDeferred += authorEvents.length - index
+        return
+      }
+      const outcome = await processPublicationEvent(authorEvents[index].id, now)
+      if (outcome === 'PROCESSED') eventsProcessed += 1
+      else if (outcome === 'FAILED') eventsFailed += 1
+      else eventsSkipped += 1
+    }
+  })
 
   return {
     duePostsFound: candidates.length,
@@ -390,5 +421,6 @@ export async function runScheduledPostPublicationJob(now = new Date()): Promise<
     eventsProcessed,
     eventsSkipped,
     eventsFailed: eventsFailed + promotionFailures,
+    eventsDeferred,
   }
 }
