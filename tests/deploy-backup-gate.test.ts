@@ -68,6 +68,36 @@ test('backup attestation gate precedes migration, atomic switch and skip-db', ()
   assert.doesNotMatch(workflow, /restore_drill_waiver:[\s\S]{0,300}?default: approved/)
 })
 
+test('risk acceptance (schemaVersion=3) is opt-in, asserts nothing verified, and cannot fabricate a backup', () => {
+  const workflow = read('.github/workflows/deploy.yml')
+  const gate = read('scripts/production-backup-gate.mjs')
+  const gateStep = workflow.indexOf('- name: Require a verified recoverable production database backup')
+  const deployStep = workflow.indexOf('- name: Deploy exact commit from server Git')
+  const gateBlock = workflow.slice(gateStep, deployStep)
+
+  // Opt-in only: a push event must stay on the strict path.
+  assert.match(workflow, /inputs\.risk_acceptance \|\| 'none'/)
+  assert.match(workflow, /RISK_ACCEPTANCE_MODE=/)
+  assert.match(gateBlock, /--risk-acceptance-mode %q/)
+  assert.doesNotMatch(workflow, /risk_acceptance:[\s\S]{0,300}?default: approved/)
+
+  // When approved, the gate must report that nothing was verified and must not
+  // carry a backup id (anti-fabrication).
+  const riskBlock = workflow.slice(
+    workflow.indexOf('RISK_ACCEPTANCE_MODE=APPROVED'),
+    workflow.indexOf('BACKUP_GATE_STEP=PASS'),
+  )
+  assert.match(riskBlock, /RISK_ACCEPTED=YES/)
+  assert.match(riskBlock, /BACKUP_VERIFIED=NO/)
+  assert.match(riskBlock, /BACKUP_PITR_VERIFIED=NO/)
+  assert.match(riskBlock, /must not assert a backup id/)
+
+  // The gate itself rejects any fabricated backup/PITR/drill fact in v3.
+  assert.match(gate, /RISK_ACCEPTANCE_MUST_NOT_ASSERT_BACKUP/)
+  assert.match(gate, /RISK_ACCEPTANCE_NOT_ENABLED/)
+  assert.match(gate, /RISK_ACCEPTANCE_RELEASE_ID_MISMATCH/)
+})
+
 test('the read-only diagnostic never blocks on a not-yet-deployed candidate SHA', () => {
   const diagnostic = read('.github/workflows/production-migration-status.yml')
 

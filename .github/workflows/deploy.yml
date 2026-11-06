@@ -74,6 +74,22 @@ on:
           - none
           - approved
         default: none
+      risk_acceptance:
+        description: >-
+          Explicit, written, one-off RISK ACCEPTANCE (schemaVersion=3) for a
+          release whose owner accepts, in writing, that NO independent CynosDB
+          backup/PITR verification and NO restore drill were performed. Defaults
+          to 'none' so a push event can never take this path. The attestation
+          MUST NOT assert any backup/PITR/drill fact (fabrication is rejected);
+          the gate prints BACKUP_VERIFIED=NO / BACKUP_PITR_VERIFIED=NO. Strict
+          schemaVersion 1 (and drill-only v2) paths are unchanged. This is not a
+          permanent bypass; it is a single-SHA, short-lived, audited waiver.
+        required: false
+        type: choice
+        options:
+          - none
+          - approved
+        default: none
 
 permissions:
   contents: read
@@ -317,9 +333,13 @@ jobs:
       # schemaVersion=2 waives ONLY that drill, and is accepted only when this
       # workflow is explicitly re-triggered with restore_drill_waiver=approved
       # AND the host attestation carries a named, recent, written approval
-      # bound to the exact deployed SHA. Push events always fall back to the
-      # strict path, so the first automatic deployment after a merge is
-      # safely blocked until the attestation is ready.
+      # bound to the exact deployed SHA. schemaVersion=3 is the narrowest door:
+      # an explicit, one-off, exact-SHA risk acceptance for a release whose owner
+      # accepts that NO independent backup/PITR verification and NO restore drill
+      # were performed (the attestation must NOT assert any backup/PITR fact).
+      # All three paths are reachable ONLY via an explicit workflow_dispatch;
+      # push events always fall back to the strict path, so the first automatic
+      # deployment after a merge is safely blocked until the attestation is ready.
       # The host-side attestation is strictly read-only and contains no
       # credentials. This step runs for BOTH `full` and `skip-db` modes:
       # skip-db is not an escape hatch.
@@ -333,6 +353,7 @@ jobs:
           BACKUP_ATTESTATION_FILE: ${{ vars.PRODUCTION_BACKUP_ATTESTATION_FILE }}
           DEPLOY_SHA: ${{ github.sha }}
           RESTORE_DRILL_WAIVER_MODE: ${{ inputs.restore_drill_waiver || 'none' }}
+          RISK_ACCEPTANCE_MODE: ${{ inputs.risk_acceptance || 'none' }}
         run: |
           set -euo pipefail
 
@@ -359,11 +380,16 @@ jobs:
             approved) echo "RESTORE_DRILL_WAIVER_MODE=APPROVED (one-off, exact-SHA written approval required)" ;;
             *) echo "::error::Invalid restore drill waiver mode."; exit 1 ;;
           esac
+          case "${RISK_ACCEPTANCE_MODE}" in
+            none) echo "RISK_ACCEPTANCE_MODE=NONE (no backup/PITR/drill verification required to be waived)" ;;
+            approved) echo "RISK_ACCEPTANCE_MODE=APPROVED (one-off, exact-SHA written risk acceptance required)" ;;
+            *) echo "::error::Invalid risk acceptance mode."; exit 1 ;;
+          esac
 
           remote_host="${SERVER_USER}@${SERVER_HOST}"
           printf -v remote_command \
-            'node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q' \
-            "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE"
+            'node --input-type=module - --cli verify --attestation %q --deploy-sha %q --waiver-mode %q --risk-acceptance-mode %q' \
+            "$gate_file" "$DEPLOY_SHA" "$RESTORE_DRILL_WAIVER_MODE" "$RISK_ACCEPTANCE_MODE"
 
           set +e
           gate_output="$(timeout --foreground --signal=TERM --kill-after=10s 90s \
@@ -393,10 +419,24 @@ jobs:
             exit 1
           fi
           if [[ "${RESTORE_DRILL_WAIVER_MODE}" == approved ]]; then
-            # A waiver must never be misreported as a verified restore drill.
+            # A drill waiver must never be misreported as a verified restore drill.
             if ! printf '%s\n' "${gate_output}" | grep -Fxq 'RESTORE_DRILL_WAIVED=YES' ||
                ! printf '%s\n' "${gate_output}" | grep -Fxq 'RESTORE_DRILL_VERIFIED=NO'; then
-              echo "::error::An approved waiver must explicitly report that the restore drill was NOT verified."
+              echo "::error::An approved drill waiver must explicitly report that the restore drill was NOT verified."
+              exit 1
+            fi
+          fi
+          if [[ "${RISK_ACCEPTANCE_MODE}" == approved ]]; then
+            # Explicit risk acceptance must be unambiguous: no backup/PITR is
+            # claimed verified, and no fabricated backup id may appear.
+            if ! printf '%s\n' "${gate_output}" | grep -Fxq 'RISK_ACCEPTED=YES' ||
+               ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_VERIFIED=NO' ||
+               ! printf '%s\n' "${gate_output}" | grep -Fxq 'BACKUP_PITR_VERIFIED=NO'; then
+              echo "::error::An approved risk acceptance must explicitly report that no backup/PITR was verified."
+              exit 1
+            fi
+            if printf '%s\n' "${gate_output}" | grep -Eq '^BACKUP_ID='; then
+              echo "::error::Risk acceptance must not assert a backup id; fabrication is rejected."
               exit 1
             fi
           fi

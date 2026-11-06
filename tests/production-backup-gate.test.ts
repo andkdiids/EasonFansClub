@@ -58,10 +58,39 @@ function validWaiver(): Record<string, unknown> {
   }
 }
 
+/**
+ * schemaVersion 3: explicit, one-off, exact-SHA risk acceptance for a release
+ * whose owner accepts that NO independent backup/PITR verification and NO restore
+ * drill were performed. It asserts NO backup/PITR/drill fact (those would be
+ * fabrications). Local test artefact only; never used as a production
+ * attestation.
+ */
+function validRiskAcceptance(): Record<string, unknown> {
+  return {
+    schemaVersion: 3,
+    targetReleaseSha: DEPLOY_SHA,
+    expiresAt: '2026-11-07T00:00:00+08:00',
+    riskAcceptance: {
+      approvedBy: 'Eason-release-authority',
+      approvedAt: '2026-11-06T17:45:00+08:00',
+      riskStatement: 'No independent CynosDB backup/PITR verification and no restore drill. Risk accepted for this release only.',
+      releaseId: DEPLOY_SHA,
+      noIndependentBackupVerification: true,
+      noRestoreDrill: true,
+    },
+  }
+}
+
 interface WaiverOptions {
   deploySha?: string
   now?: number
   allowRestoreDrillWaiver?: boolean
+}
+
+interface RiskOptions {
+  deploySha?: string
+  now?: number
+  allowRiskAcceptance?: boolean
 }
 
 function verify(data: unknown) {
@@ -73,6 +102,14 @@ function verifyWaiver(data: unknown, options: WaiverOptions = {}) {
     deploySha: options.deploySha ?? DEPLOY_SHA,
     now: options.now ?? NOW,
     allowRestoreDrillWaiver: options.allowRestoreDrillWaiver ?? true,
+  })
+}
+
+function verifyRisk(data: unknown, options: RiskOptions = {}) {
+  return verifyBackupAttestation(JSON.stringify(data), {
+    deploySha: options.deploySha ?? DEPLOY_SHA,
+    now: options.now ?? NOW,
+    allowRiskAcceptance: options.allowRiskAcceptance ?? true,
   })
 }
 
@@ -159,7 +196,7 @@ test('restore drill must happen after the backup it verifies', () => {
 
 test('malformed identifiers, types and unsupported schema versions are rejected', () => {
   const badVersion = validAttestation() as Record<string, unknown>
-  badVersion.schemaVersion = 3
+  badVersion.schemaVersion = 99
   assert.equal(verify(badVersion).reason, 'SCHEMA_VERSION_UNSUPPORTED')
 
   const badType = validAttestation()
@@ -400,6 +437,163 @@ test('CLI: the default (push-event) mode refuses a v2 attestation', () => {
     assert.equal(run.status, 1)
     assert.match(run.stdout, /^BACKUP_GATE=REJECTED$/m)
     assert.match(run.stdout, /^BACKUP_GATE_REASON=WAIVER_NOT_ENABLED$/m)
+    assert.match(run.stdout, /^BACKUP_GATE_ACTION=REFUSING_MIGRATION_AND_DEPLOYMENT$/m)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// schemaVersion 3 (one-off, explicit risk acceptance: NO backup/PITR verification
+// and NO restore drill were performed; nothing is asserted as verified).
+// ---------------------------------------------------------------------------
+
+test('POSITIVE: an explicit, exact-SHA risk acceptance passes with nothing claimed verified', () => {
+  const result = verifyRisk(validRiskAcceptance())
+  assert.equal(result.ok, true)
+  assert.equal(result.reason, null)
+  assert.equal(result.evidence?.schemaVersion, 3)
+  assert.equal(result.evidence?.backupVerified, false)
+  assert.equal(result.evidence?.pitrVerified, false)
+  assert.equal(result.evidence?.restoreDrillVerified, false)
+  assert.equal(result.evidence?.restoreDrillWaived, true)
+  assert.equal(result.evidence?.riskAccepted, true)
+  assert.equal(result.evidence?.riskAcceptance?.approvedBy, 'Eason-release-authority')
+  assert.equal(result.evidence?.riskAcceptance?.releaseId, DEPLOY_SHA)
+  assert.equal(result.evidence?.targetReleaseSha, DEPLOY_SHA)
+})
+
+test('NEGATIVE: the risk-acceptance path is unreachable without an explicit workflow approval', () => {
+  assert.equal(verifyRisk(validRiskAcceptance(), { allowRiskAcceptance: false }).reason, 'RISK_ACCEPTANCE_NOT_ENABLED')
+  assert.equal(
+    verifyBackupAttestation(JSON.stringify(validRiskAcceptance()), { deploySha: DEPLOY_SHA, now: NOW }).reason,
+    'RISK_ACCEPTANCE_NOT_ENABLED',
+  )
+})
+
+test('NEGATIVE: fabricating any backup/PITR/drill fact inside a risk acceptance is rejected', () => {
+  const withBackupId = validRiskAcceptance()
+  withBackupId.backupId = 'cynos-auto-20261106-170000'
+  assert.equal(verifyRisk(withBackupId).reason, 'RISK_ACCEPTANCE_MUST_NOT_ASSERT_BACKUP')
+
+  const withPitr = validRiskAcceptance()
+  withPitr.pitrAvailable = true
+  assert.equal(verifyRisk(withPitr).reason, 'RISK_ACCEPTANCE_MUST_NOT_ASSERT_BACKUP')
+
+  const withRetention = validRiskAcceptance()
+  withRetention.pitrRetentionDays = 7
+  assert.equal(verifyRisk(withRetention).reason, 'RISK_ACCEPTANCE_MUST_NOT_ASSERT_BACKUP')
+
+  const withDrillTime = validRiskAcceptance()
+  withDrillTime.restoreDrillAt = '2026-11-06T17:30:00+08:00'
+  assert.equal(verifyRisk(withDrillTime).reason, 'RISK_ACCEPTANCE_MUST_NOT_ASSERT_BACKUP')
+
+  const withVerifiedBy = validRiskAcceptance()
+  withVerifiedBy.verifiedBy = 'release-operator'
+  assert.equal(verifyRisk(withVerifiedBy).reason, 'RISK_ACCEPTANCE_MUST_NOT_ASSERT_BACKUP')
+})
+
+test('NEGATIVE: missing/!true acknowledgement flags, block or required fields are rejected', () => {
+  const noBlock = validRiskAcceptance()
+  delete noBlock.riskAcceptance
+  assert.equal(verifyRisk(noBlock).reason, 'RISK_ACCEPTANCE_BLOCK_MISSING')
+
+  const arrayBlock = validRiskAcceptance()
+  arrayBlock.riskAcceptance = []
+  assert.equal(verifyRisk(arrayBlock).reason, 'RISK_ACCEPTANCE_BLOCK_MISSING')
+
+  for (const field of ['approvedBy', 'approvedAt', 'riskStatement', 'releaseId']) {
+    const data = validRiskAcceptance()
+    const risk = data.riskAcceptance as Record<string, unknown>
+    delete risk[field]
+    assert.equal(verifyRisk(data).reason, 'RISK_ACCEPTANCE_FIELD_MISSING', `missing ${field}`)
+  }
+
+  const noBackupFlag = validRiskAcceptance()
+  ;(noBackupFlag.riskAcceptance as Record<string, unknown>).noIndependentBackupVerification = false
+  assert.equal(verifyRisk(noBackupFlag).reason, 'RISK_ACCEPTANCE_BACKUP_FLAG_INVALID')
+
+  const noDrillFlag = validRiskAcceptance()
+  ;(noDrillFlag.riskAcceptance as Record<string, unknown>).noRestoreDrill = false
+  assert.equal(verifyRisk(noDrillFlag).reason, 'RISK_ACCEPTANCE_DRILL_FLAG_INVALID')
+
+  const badApprover = validRiskAcceptance()
+  ;(badApprover.riskAcceptance as Record<string, unknown>).approvedBy = '../../root'
+  assert.equal(verifyRisk(badApprover).reason, 'RISK_ACCEPTANCE_APPROVED_BY_INVALID')
+})
+
+test('EXPIRED / SHA MISMATCH: risk acceptance is SHA-bound, short-lived and approval-age-bounded', () => {
+  const expired = validRiskAcceptance()
+  expired.expiresAt = '2026-11-06T17:00:00+08:00'
+  assert.equal(verifyRisk(expired).reason, 'ATTESTATION_EXPIRED')
+
+  const longLived = validRiskAcceptance()
+  longLived.expiresAt = '2026-12-06T18:00:00+08:00'
+  assert.equal(verifyRisk(longLived).reason, 'ATTESTATION_TTL_TOO_LONG')
+
+  const wrongTarget = validRiskAcceptance()
+  wrongTarget.targetReleaseSha = OTHER_SHA
+  assert.equal(verifyRisk(wrongTarget).reason, 'TARGET_RELEASE_SHA_MISMATCH')
+
+  const wrongReleaseId = validRiskAcceptance()
+  ;(wrongReleaseId.riskAcceptance as Record<string, unknown>).releaseId = OTHER_SHA
+  assert.equal(verifyRisk(wrongReleaseId).reason, 'RISK_ACCEPTANCE_RELEASE_ID_MISMATCH')
+
+  const otherDeploySha = verifyRisk(validRiskAcceptance(), { deploySha: OTHER_SHA })
+  assert.equal(otherDeploySha.reason, 'TARGET_RELEASE_SHA_MISMATCH')
+
+  const staleApproval = validRiskAcceptance()
+  ;(staleApproval.riskAcceptance as Record<string, unknown>).approvedAt = '2026-11-06T09:00:00+08:00'
+  assert.equal(verifyRisk(staleApproval).reason, 'RISK_ACCEPTANCE_APPROVAL_EXPIRED')
+
+  const futureApproval = validRiskAcceptance()
+  ;(futureApproval.riskAcceptance as Record<string, unknown>).approvedAt = '2026-11-06T19:00:00+08:00'
+  assert.equal(verifyRisk(futureApproval).reason, 'RISK_ACCEPTANCE_APPROVED_AT_IN_FUTURE')
+})
+
+test('CLI: an approved risk acceptance prints BACKUP_VERIFIED=NO and RISK_ACCEPTED=YES, never a backup id', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-backup-gate-'))
+  const file = path.join(dir, '.backup-verification.test-fixture.json')
+  try {
+    writeFileSync(file, JSON.stringify(validRiskAcceptance()))
+    chmodSync(file, 0o600)
+    const run = spawnSync(process.execPath, [
+      GATE_PATH, '--cli', 'verify',
+      '--attestation', file,
+      '--deploy-sha', DEPLOY_SHA,
+      '--risk-acceptance-mode', 'approved',
+      '--now', NOW_ISO,
+    ], { encoding: 'utf8' })
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`)
+    assert.match(run.stdout, /^BACKUP_GATE=VERIFIED$/m)
+    assert.match(run.stdout, /^BACKUP_GATE_SCHEMA_VERSION=3$/m)
+    assert.match(run.stdout, /^BACKUP_VERIFIED=NO$/m)
+    assert.match(run.stdout, /^BACKUP_PITR_VERIFIED=NO$/m)
+    assert.match(run.stdout, /^RESTORE_DRILL_VERIFIED=NO$/m)
+    assert.match(run.stdout, /^RISK_ACCEPTED=YES$/m)
+    assert.match(run.stdout, /^RISK_ACCEPTANCE_RELEASE_ID=a{40}$/m)
+    assert.doesNotMatch(run.stdout, /^BACKUP_ID=/m)
+    assert.doesNotMatch(run.stdout, /BACKUP_PITR_VERIFIED=YES/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('CLI: the default (push-event) mode refuses a v3 attestation', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ecfc-backup-gate-'))
+  const file = path.join(dir, '.backup-verification.test-fixture.json')
+  try {
+    writeFileSync(file, JSON.stringify(validRiskAcceptance()))
+    chmodSync(file, 0o600)
+    const run = spawnSync(process.execPath, [
+      GATE_PATH, '--cli', 'verify',
+      '--attestation', file,
+      '--deploy-sha', DEPLOY_SHA,
+      '--now', NOW_ISO,
+    ], { encoding: 'utf8' })
+    assert.equal(run.status, 1)
+    assert.match(run.stdout, /^BACKUP_GATE=REJECTED$/m)
+    assert.match(run.stdout, /^BACKUP_GATE_REASON=RISK_ACCEPTANCE_NOT_ENABLED$/m)
     assert.match(run.stdout, /^BACKUP_GATE_ACTION=REFUSING_MIGRATION_AND_DEPLOYMENT$/m)
   } finally {
     rmSync(dir, { recursive: true, force: true })

@@ -74,6 +74,35 @@
  * waiver requires a NEW written approval.
  *
  * ---------------------------------------------------------------------------
+ * schemaVersion 3 (ONE-OFF, EXPLICIT RISK ACCEPTANCE — the narrowest door).
+ *
+ *   {
+ *     "schemaVersion": 3,
+ *     "targetReleaseSha": "<exact 40-char deployed main SHA>",
+ *     "expiresAt": "<short expiry, <=24h from now>",
+ *     "riskAcceptance": {
+ *       "approvedBy": "<named human approver>",
+ *       "approvedAt": "<ISO timestamp of the written approval>",
+ *       "riskStatement": "No independent CynosDB backup/PITR verification was
+ *                         obtained and no restore drill was performed. The
+ *                         database has no automatic down migration; failures
+ *                         require forward repair. Risk accepted for this
+ *                         release only.",
+ *       "releaseId": "<exact 40-char deployed main SHA>",
+ *       "noIndependentBackupVerification": true,
+ *       "noRestoreDrill": true
+ *     }
+ *   }
+ *
+ * This path asserts NOTHING about backups/PITR/drills — it records the risk as
+ * explicitly unverified. Any `backupId`/`pitrAvailable`/`restoreDrill*` field
+ * inside the attestation is rejected (fabrication). The gate prints
+ * `BACKUP_VERIFIED=NO`, `BACKUP_PITR_VERIFIED=NO`, `RESTORE_DRILL_VERIFIED=NO`,
+ * `RESTORE_DRILL_WAIVED=YES`, `RISK_ACCEPTED=YES`. It is reachable ONLY when the
+ * workflow is explicitly re-triggered with `risk_acceptance=approved`; a push
+ * event never takes it. The strict v1/v2 paths are unchanged.
+ *
+ * ---------------------------------------------------------------------------
  * MINIMUM HUMAN PROCEDURE before any production deployment:
  *   1. In the Tencent Cloud CynosDB console, confirm automatic backup is
  *      enabled, note the retention period, and identify the most recent
@@ -118,6 +147,22 @@ export const WAIVER_MODE_NONE = 'none'
 export const WAIVER_MODE_APPROVED = 'approved'
 export const SUPPORTED_WAIVER_MODES = [WAIVER_MODE_NONE, WAIVER_MODE_APPROVED]
 
+/**
+ * schemaVersion 3 (ONE-OFF, EXPLICIT RISK ACCEPTANCE for a release whose owner
+ * has accepted, in writing, that NO independent verification of the CynosDB
+ * automatic backup or PITR was obtained and that a real restore drill was NOT
+ * performed). This is the narrowest possible door: it does NOT assert any
+ * backup/PITR/restore-drill fact (those would be fabrications), it binds to the
+ * exact deployed SHA, expires quickly, and is opt-in only via an explicit
+ * `workflow_dispatch` with `risk_acceptance=approved`. The strict schemaVersion
+ * 1 path (and the drill-only schemaVersion 2 path) are completely unchanged.
+ */
+export const RISK_ACCEPTANCE_SCHEMA_VERSION = 3
+export const RISK_ACCEPTANCE_MODE_NONE = 'none'
+export const RISK_ACCEPTANCE_MODE_APPROVED = 'approved'
+export const SUPPORTED_RISK_ACCEPTANCE_MODES = [RISK_ACCEPTANCE_MODE_NONE, RISK_ACCEPTANCE_MODE_APPROVED]
+export const RISK_ACCEPTANCE_REQUIRED_FIELDS = ['approvedBy', 'approvedAt', 'riskStatement', 'releaseId']
+
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/
 const SAFE_NAME = /^[A-Za-z0-9._@-]{1,64}$/
 const SHA40 = /^[0-9a-f]{40}$/
@@ -131,6 +176,24 @@ const FORBIDDEN_DRILL_KEYS = [
   'restoreDrillReport',
   'restoreDrillEvidence',
   'restoreDrillResult',
+]
+
+// schemaVersion 3 must NEVER assert a backup/PITR/restore-drill fact that was not
+// independently verified. Any such key is a fabricated verification and is rejected.
+const RISK_ACCEPTANCE_FORBIDDEN_KEYS = [
+  'backupId',
+  'backupType',
+  'backupCompletedAt',
+  'pitrAvailable',
+  'pitrRetentionDays',
+  'verifiedBy',
+  'restoreDrillVerified',
+  'restoreDrillAt',
+  'restoreDrillId',
+  'restoreDrillReport',
+  'restoreDrillEvidence',
+  'restoreDrillResult',
+  ...FORBIDDEN_DRILL_KEYS,
 ]
 
 function parseTime(value) {
@@ -271,6 +334,78 @@ function verifyWaiverAttestation(data, { deploySha, now, maxBackupAgeHours, reje
 }
 
 /**
+ * schemaVersion 3: EXPLICIT RISK ACCEPTANCE. The release owner has accepted, in
+ * writing, that no independent verification of the CynosDB automatic backup or
+ * PITR was obtained and that no restore drill was performed. This path therefore
+ * asserts NOTHING about backups: it records the risk as explicitly unverified.
+ * It is opt-in via `allowRiskAcceptance`, SHA-bound, short-lived and audited.
+ * Fabricating any backup/PITR/drill field inside the attestation is rejected.
+ */
+function verifyRiskAcceptanceAttestation(data, { deploySha, now, reject }) {
+  // Anti-fabrication: a risk-acceptance attestation must not claim any backup,
+  // PITR or restore-drill fact that was never independently verified.
+  for (const key of RISK_ACCEPTANCE_FORBIDDEN_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      return reject('RISK_ACCEPTANCE_MUST_NOT_ASSERT_BACKUP')
+    }
+  }
+  if (data.targetReleaseSha !== deploySha) return reject('TARGET_RELEASE_SHA_MISMATCH')
+
+  const expiresAt = parseTime(data.expiresAt)
+  if (expiresAt === null) return reject('EXPIRES_AT_INVALID')
+  if (expiresAt <= now) return reject('ATTESTATION_EXPIRED')
+  if (expiresAt - now > MAX_ATTESTATION_TTL_HOURS * HOUR_MS) return reject('ATTESTATION_TTL_TOO_LONG')
+
+  const risk = data.riskAcceptance
+  if (!risk || typeof risk !== 'object' || Array.isArray(risk)) return reject('RISK_ACCEPTANCE_BLOCK_MISSING')
+  for (const field of RISK_ACCEPTANCE_REQUIRED_FIELDS) {
+    if (typeof risk[field] !== 'string' || risk[field].trim().length === 0) {
+      return reject('RISK_ACCEPTANCE_FIELD_MISSING')
+    }
+  }
+  if (!SAFE_NAME.test(risk.approvedBy)) return reject('RISK_ACCEPTANCE_APPROVED_BY_INVALID')
+  if (risk.riskStatement.trim().length < 8 || risk.riskStatement.length > 1024) {
+    return reject('RISK_ACCEPTANCE_RISK_STATEMENT_INVALID')
+  }
+  // One-off: bound to the exact deploy SHA; cannot be replayed for any other
+  // commit, including a later re-run of the same PR.
+  if (risk.releaseId !== deploySha) return reject('RISK_ACCEPTANCE_RELEASE_ID_MISMATCH')
+  // Explicit acknowledgements must be present and true; a missing/!==true flag
+  // is rejected so a silent "partial verification" can never be implied.
+  if (risk.noIndependentBackupVerification !== true) return reject('RISK_ACCEPTANCE_BACKUP_FLAG_INVALID')
+  if (risk.noRestoreDrill !== true) return reject('RISK_ACCEPTANCE_DRILL_FLAG_INVALID')
+
+  const approvedAt = parseTime(risk.approvedAt)
+  if (approvedAt === null) return reject('RISK_ACCEPTANCE_APPROVED_AT_INVALID')
+  if (approvedAt > now) return reject('RISK_ACCEPTANCE_APPROVED_AT_IN_FUTURE')
+  if (now - approvedAt > MAX_WAIVER_AGE_HOURS * HOUR_MS) return reject('RISK_ACCEPTANCE_APPROVAL_EXPIRED')
+  if (approvedAt >= expiresAt) return reject('RISK_ACCEPTANCE_APPROVAL_AFTER_EXPIRY')
+
+  return {
+    ok: true,
+    reason: null,
+    evidence: {
+      schemaVersion: RISK_ACCEPTANCE_SCHEMA_VERSION,
+      backupVerified: false,
+      pitrVerified: false,
+      restoreDrillVerified: false,
+      restoreDrillWaived: true,
+      riskAccepted: true,
+      riskAcceptance: {
+        approvedBy: risk.approvedBy,
+        approvedAt: risk.approvedAt,
+        riskStatement: risk.riskStatement,
+        releaseId: risk.releaseId,
+        noIndependentBackupVerification: true,
+        noRestoreDrill: true,
+      },
+      targetReleaseSha: data.targetReleaseSha,
+      expiresAt: data.expiresAt,
+    },
+  }
+}
+
+/**
  * Pure, unit-testable verification. `context` carries the release identity,
  * an injectable clock and the explicit workflow-level waiver switch.
  */
@@ -281,6 +416,7 @@ export function verifyBackupAttestation(rawText, context) {
     now = Date.now(),
     maxBackupAgeHours = DEFAULT_MAX_BACKUP_AGE_HOURS,
     allowRestoreDrillWaiver = false,
+    allowRiskAcceptance = false,
   } = context
 
   if (!SHA40.test(String(deploySha ?? ''))) return reject('DEPLOY_SHA_INVALID')
@@ -305,6 +441,13 @@ export function verifyBackupAttestation(rawText, context) {
     // reviewed deployment workflow must explicitly opt in for this release.
     if (allowRestoreDrillWaiver !== true) return reject('WAIVER_NOT_ENABLED')
     return verifyWaiverAttestation(data, shared)
+  }
+  if (data.schemaVersion === RISK_ACCEPTANCE_SCHEMA_VERSION) {
+    // The narrowest door: the release owner explicitly accepts, in writing, that
+    // no independent backup/PITR verification and no restore drill were done. It
+    // can only be taken when the reviewed workflow opts in for this release.
+    if (allowRiskAcceptance !== true) return reject('RISK_ACCEPTANCE_NOT_ENABLED')
+    return verifyRiskAcceptanceAttestation(data, shared)
   }
   return reject('SCHEMA_VERSION_UNSUPPORTED')
 }
@@ -369,8 +512,10 @@ function verifyOnHost(options) {
   const nowOption = options.now
   const maxBackupAgeHours = Number(options['max-backup-age-hours'] ?? DEFAULT_MAX_BACKUP_AGE_HOURS)
   const waiverMode = String(options['waiver-mode'] ?? WAIVER_MODE_NONE)
+  const riskMode = String(options['risk-acceptance-mode'] ?? RISK_ACCEPTANCE_MODE_NONE)
 
   if (!SUPPORTED_WAIVER_MODES.includes(waiverMode)) return emitRejected('WAIVER_MODE_INVALID')
+  if (!SUPPORTED_RISK_ACCEPTANCE_MODES.includes(riskMode)) return emitRejected('RISK_ACCEPTANCE_MODE_INVALID')
 
   // Production is POSIX. Windows-style absolute paths are accepted only so the
   // gate can be smoke-tested on a developer machine; relative paths and any
@@ -396,6 +541,7 @@ function verifyOnHost(options) {
       ? maxBackupAgeHours
       : DEFAULT_MAX_BACKUP_AGE_HOURS,
     allowRestoreDrillWaiver: waiverMode === WAIVER_MODE_APPROVED,
+    allowRiskAcceptance: riskMode === RISK_ACCEPTANCE_MODE_APPROVED,
   })
 
   if (!result.ok) return emitRejected(result.reason)
@@ -403,13 +549,29 @@ function verifyOnHost(options) {
   const evidence = result.evidence
   console.log('BACKUP_GATE=VERIFIED')
   console.log(`BACKUP_GATE_SCHEMA_VERSION=${evidence.schemaVersion}`)
-  console.log(`BACKUP_ID=${evidence.backupId}`)
-  console.log(`BACKUP_TYPE=${evidence.backupType}`)
-  console.log(`BACKUP_COMPLETED_AT=${evidence.backupCompletedAt}`)
-  console.log(`BACKUP_AGE_MINUTES=${evidence.backupAgeMinutes}`)
-  console.log('BACKUP_PITR_VERIFIED=YES')
-  console.log(`BACKUP_PITR_RETENTION_DAYS=${evidence.pitrRetentionDays}`)
-  if (evidence.schemaVersion === WAIVER_SCHEMA_VERSION) {
+  if (evidence.schemaVersion === RISK_ACCEPTANCE_SCHEMA_VERSION) {
+    // Explicit, audited risk acceptance: NO backup/PITR was independently
+    // verified and no restore drill was performed. This is printed so nobody
+    // can mistake the release for a verified-recoverable deployment.
+    console.log('BACKUP_VERIFIED=NO')
+    console.log('BACKUP_PITR_VERIFIED=NO')
+    console.log('RESTORE_DRILL_VERIFIED=NO')
+    console.log('RESTORE_DRILL_WAIVED=YES')
+    console.log('RISK_ACCEPTED=YES')
+    console.log(`RISK_ACCEPTANCE_APPROVED_BY=${evidence.riskAcceptance.approvedBy}`)
+    console.log(`RISK_ACCEPTANCE_APPROVED_AT=${evidence.riskAcceptance.approvedAt}`)
+    console.log(`RISK_ACCEPTANCE_RELEASE_ID=${evidence.riskAcceptance.releaseId}`)
+    console.log('RISK_ACCEPTANCE_NO_INDEPENDENT_BACKUP_VERIFICATION=YES')
+    console.log('RISK_ACCEPTANCE_NO_RESTORE_DRILL=YES')
+    console.log(`BACKUP_ATTESTATION_TARGET_SHA=${evidence.targetReleaseSha}`)
+    console.log(`BACKUP_ATTESTATION_EXPIRES_AT=${evidence.expiresAt}`)
+  } else if (evidence.schemaVersion === WAIVER_SCHEMA_VERSION) {
+    console.log(`BACKUP_ID=${evidence.backupId}`)
+    console.log(`BACKUP_TYPE=${evidence.backupType}`)
+    console.log(`BACKUP_COMPLETED_AT=${evidence.backupCompletedAt}`)
+    console.log(`BACKUP_AGE_MINUTES=${evidence.backupAgeMinutes}`)
+    console.log('BACKUP_PITR_VERIFIED=YES')
+    console.log(`BACKUP_PITR_RETENTION_DAYS=${evidence.pitrRetentionDays}`)
     // Never ambiguous: "waived" is printed as NOT verified.
     console.log('RESTORE_DRILL_VERIFIED=NO')
     console.log('RESTORE_DRILL_WAIVED=YES')
@@ -417,14 +579,23 @@ function verifyOnHost(options) {
     console.log(`RESTORE_DRILL_WAIVER_APPROVED_AT=${evidence.waiver.approvedAt}`)
     console.log(`RESTORE_DRILL_WAIVER_RELEASE_ID=${evidence.waiver.releaseId}`)
     console.log('RESTORE_DRILL_WAIVER_RISK_ACCEPTED=YES')
+    console.log(`BACKUP_VERIFIED_BY=${evidence.verifiedBy}`)
+    console.log(`BACKUP_ATTESTATION_TARGET_SHA=${evidence.targetReleaseSha}`)
+    console.log(`BACKUP_ATTESTATION_EXPIRES_AT=${evidence.expiresAt}`)
   } else {
+    console.log(`BACKUP_ID=${evidence.backupId}`)
+    console.log(`BACKUP_TYPE=${evidence.backupType}`)
+    console.log(`BACKUP_COMPLETED_AT=${evidence.backupCompletedAt}`)
+    console.log(`BACKUP_AGE_MINUTES=${evidence.backupAgeMinutes}`)
+    console.log('BACKUP_PITR_VERIFIED=YES')
+    console.log(`BACKUP_PITR_RETENTION_DAYS=${evidence.pitrRetentionDays}`)
     console.log('RESTORE_DRILL_VERIFIED=YES')
     console.log('RESTORE_DRILL_WAIVED=NO')
     console.log(`RESTORE_DRILL_AT=${evidence.restoreDrillAt}`)
+    console.log(`BACKUP_VERIFIED_BY=${evidence.verifiedBy}`)
+    console.log(`BACKUP_ATTESTATION_TARGET_SHA=${evidence.targetReleaseSha}`)
+    console.log(`BACKUP_ATTESTATION_EXPIRES_AT=${evidence.expiresAt}`)
   }
-  console.log(`BACKUP_VERIFIED_BY=${evidence.verifiedBy}`)
-  console.log(`BACKUP_ATTESTATION_TARGET_SHA=${evidence.targetReleaseSha}`)
-  console.log(`BACKUP_ATTESTATION_EXPIRES_AT=${evidence.expiresAt}`)
   return 0
 }
 
