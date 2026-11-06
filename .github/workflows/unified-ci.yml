@@ -1,0 +1,228 @@
+name: Unified release CI
+
+# Full, unweakened gate suite for the unified scheduled-post-publication +
+# activity-lottery-records release. Every gate is an independent job so that
+# each one reports its own real exit code even when another gate fails.
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      checkout_ref:
+        description: 'Optional ref to check out (used for an identical Linux main-baseline comparison). Leave empty for the dispatched ref.'
+        required: false
+        default: ''
+
+# Least privilege: this workflow only reads the repository. It never pushes,
+# never writes to a production database and never reads production secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: unified-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  CI: '1'
+  # Schema-only placeholder. These gates do not connect to any real database.
+  # No production DATABASE_URL and no production credentials are used here.
+  DATABASE_URL: mysql://schema_validate_only:placeholder@127.0.0.1:3306/schema_validate_only
+
+jobs:
+  prisma:
+    name: Prisma validate + generate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prisma validate
+      - name: Prisma generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec prisma generate
+
+  typecheck:
+    name: TypeScript (tsc --noEmit)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate (required by generated client types)
+        shell: bash
+        run: pnpm exec prisma generate
+      - name: TypeScript check
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec tsc --noEmit
+
+  eslint:
+    name: ESLint (full repository)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: ESLint
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm lint
+
+  tests:
+    name: Full test suite
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        shell: bash
+        run: pnpm exec prisma generate
+      - name: Full test suite (no filtering)
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm test
+
+  production-build:
+    name: Next.js production build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pnpm (repository-declared version)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - name: Set up Node.js with dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install locked dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        shell: bash
+        run: pnpm exec prisma generate
+      - name: Cache Next.js compiler output
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            next-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+      - name: Next.js production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm build
+
+  whitespace:
+    name: git diff --check (PR range)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check whitespace errors across the whole PR diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          BASE="$(git merge-base origin/main HEAD)"
+          echo "PR_MERGE_BASE=$BASE"
+          git diff --check "$BASE" HEAD
