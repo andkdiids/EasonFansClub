@@ -135,7 +135,11 @@ jobs:
   tests:
     name: Full test suite
     runs-on: ubuntu-22.04
-    timeout-minutes: 40
+    # 546 test files / 4563 subtests on a 2-vCPU runner need ~80 minutes.
+    # A 40-minute budget cancelled both the PR and main-baseline runs at
+    # subtest 2372. Raise the budget only; the suite is still run in full,
+    # unfiltered, with its real exit code.
+    timeout-minutes: 120
     steps:
       - name: Checkout reviewed source
         uses: actions/checkout@v4
