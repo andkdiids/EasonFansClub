@@ -5,7 +5,8 @@ import { topicV2IdPattern, topicV2Json } from '@/lib/topic-activity-v2-http'
 
 export const dynamic = 'force-dynamic'
 
-const publicViewFields = ['enabled', 'config', 'state', 'candidateCount', 'myStatus', 'myEligibility', 'myWinner', 'winners'] as const
+const publicViewFields = ['enabled', 'config', 'state', 'candidateCount', 'myStatus', 'myEligibility', 'myWinner', 'winners', 'draw'] as const
+const publicDrawFields = ['id', 'state', 'frozenAt', 'drawnAt', 'candidateCount', 'winnerCount', 'errorCode'] as const
 const publicWinnerFields = ['nickname', 'uid', 'prizeName'] as const
 const publicWinnerSummaryFields = ['id', 'prize', 'wonAt', 'addressDeadline', 'shippingStatus', 'addressSaved', 'claimUrl'] as const
 const publicPrizeFields = ['name', 'imageUrl', 'description'] as const
@@ -39,6 +40,7 @@ function publicView(value: unknown) {
     ...(Object.prototype.hasOwnProperty.call(input, 'myEligibility') ? { myEligibility: pickRecord(input.myEligibility, ['count']) } : {}),
     ...(Object.prototype.hasOwnProperty.call(input, 'myWinner') ? { myWinner: safeWinner } : {}),
     ...(Array.isArray(input.winners) ? { winners: input.winners.map((winner) => pickRecord(winner, publicWinnerFields)) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(input, 'draw') ? { draw: pickRecord(input.draw, publicDrawFields) } : {}),
   }
 }
 

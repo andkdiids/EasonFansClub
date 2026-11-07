@@ -32,6 +32,16 @@ function readPayload(value: unknown): TopicLotteryPublicPayload | null {
       return [{ nickname: stringOr(item.nickname, '匿名用户'), uid: stringOr(item.uid, '—'), prizeName: stringOr(item.prizeName, '中奖奖品') }]
     })
     : []
+  const drawValue = isRecord(value.draw) ? value.draw : null
+  const draw = drawValue ? {
+    id: stringOr(drawValue.id),
+    state: stringOr(drawValue.state, 'DRAWN'),
+    frozenAt: typeof drawValue.frozenAt === 'string' ? drawValue.frozenAt : null,
+    drawnAt: typeof drawValue.drawnAt === 'string' ? drawValue.drawnAt : null,
+    candidateCount: numberOr(drawValue.candidateCount),
+    winnerCount: numberOr(drawValue.winnerCount),
+    errorCode: typeof drawValue.errorCode === 'string' ? drawValue.errorCode : null,
+  } : null
   return {
     enabled: booleanOr(value.enabled),
     config: value.config,
@@ -59,6 +69,7 @@ function readPayload(value: unknown): TopicLotteryPublicPayload | null {
       }
       : null,
     winners,
+    draw,
   }
 }
 
@@ -159,6 +170,7 @@ export function TopicActivityV2LotteryPublic({ activityId, isAuthenticated = fal
         {winner ? <div className="mt-3 border border-[color-mix(in_srgb,var(--success)_40%,var(--border))] bg-[color-mix(in_srgb,var(--success)_12%,var(--surface))] p-3"><div className="flex min-w-0 items-start gap-3">{winner.prize.imageUrl ? <img src={winner.prize.imageUrl} alt="" className="size-16 shrink-0 object-cover" /> : null}<div className="min-w-0"><p className="font-black">恭喜中奖：{winner.prize.name}</p><p className="mt-1 text-xs">中奖时间：{dateLabel(winner.wonAt)}</p>{winner.prize.description ? <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5">{winner.prize.description}</p> : null}</div></div>{winnerClaimUrl && !['SHIPPED', 'COMPLETED', 'DELIVERED'].includes(winner.shippingStatus) ? <Link href={winnerClaimUrl} className="mt-3 inline-flex min-h-10 items-center border border-[var(--border)] px-3 text-sm font-bold">{winner.addressSaved ? '查看 / 修改收货信息' : '提交收货信息'}</Link> : ['SHIPPED', 'COMPLETED', 'DELIVERED'].includes(winner.shippingStatus) ? <p className="mt-3 text-sm font-bold">奖品已完成配送或发货，收货信息已锁定。</p> : null}</div> : null}
       </>}
     </div>
+    {payload.draw ? <div className="border-t border-[var(--border)] pt-4"><h3 className="font-bold">开奖记录</h3><dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-xs text-[var(--foreground-muted)]">开奖时间</dt><dd>{dateLabel(payload.draw.drawnAt || payload.draw.frozenAt)}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">开奖批次</dt><dd className="break-all">{payload.draw.id}</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">候选 / 中奖人数</dt><dd>{payload.draw.candidateCount} 人 / {payload.draw.winnerCount} 人</dd></div><div><dt className="text-xs text-[var(--foreground-muted)]">名单公开</dt><dd>{config.publishWinners ? '已公开（仅昵称、E院ID与奖品）' : '未公开，中奖结果仅本人可见'}</dd></div></dl><p className="mt-2 text-xs text-[var(--foreground-muted)]">领取状态仅展示允许公开的信息；收货信息不会在此公开。</p></div> : null}
     {showWinners ? <div className="border-t border-[var(--border)] pt-4"><h3 className="font-bold">中奖名单</h3><ul className="mt-2 grid gap-2 text-sm sm:grid-cols-2">{payload.winners.map((item, index) => <li key={`${item.uid}-${item.prizeName}-${index}`} className="min-w-0 border border-[var(--border)] px-3 py-2"><span className="break-words">{item.nickname}（{item.uid}）</span><span className="ml-2 text-[var(--foreground-muted)]">{item.prizeName}</span></li>)}</ul></div> : null}
     {error ? <p role="alert" className="text-sm text-[var(--danger)]">{error}</p> : null}
   </section>
